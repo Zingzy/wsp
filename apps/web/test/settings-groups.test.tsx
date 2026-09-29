@@ -10,7 +10,7 @@ import type { BundleOutcome, DesktopBridge, DeviceView, PlaceView, ProjectView, 
 import { DAEMON_VERSION, DEFAULT_PREFERENCES, DEVICES_TICKET_REFUSAL, HOST_NO_RESTART_LINE, UP_RESTART_LINE, fmtBytes, projectInUseRefusal } from "@wsp/protocol";
 import { DisconnectedError, RequestError, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
-import { ABOUT_WORDS, ACCOUNT_WORDS, AWAKE_WORDS, DEVICES_WORDS, FONT_WORDS, GENERAL_WORDS, KEYBINDINGS_WORDS, NOTIFY_WORDS, PRIVACY_WORDS, PROJECTS_WORDS, WHERE_WORDS } from "../src/settings/format.js";
+import { ABOUT_WORDS, ACCOUNT_WORDS, AWAKE_WORDS, DEVICES_WORDS, FONT_WORDS, GENERAL_WORDS, KEYBINDINGS_WORDS, NOTIFY_WORDS, PRIVACY_WORDS, PROJECTS_WORDS, TRANSPARENCY_WORDS, WHERE_WORDS } from "../src/settings/format.js";
 import { builtWhen } from "../src/settings/image.js";
 import { chordsOf, keybindingCards } from "../src/settings/keybindings.js";
 import { CHORD_WORDS, JUMP_WORD, KEYBINDING_WORDS } from "../src/settings/keybindingWords.js";
@@ -278,7 +278,7 @@ describe("Account", () => {
 });
 
 describe("General", () => {
-  it("offers the editors installed where the host runs, the pick first and the first installed without one, and a pick writes the preference", async () => {
+  it("offers the editors installed where the host runs, each with its mark, the pick first and the first installed without one, and a pick writes the preference", async () => {
     const editors = [{ id: "cursor", name: "Cursor" }, { id: "zed", name: "Zed" }, { id: "finder", name: "Finder" }];
     const { api, sets } = settingsApi({ editorList: async () => editors } as Partial<Api>);
     mountSettings({ api, at: { kind: "group", group: "general" } });
@@ -287,8 +287,16 @@ describe("General", () => {
     expect(descriptionOf("editor")).toBe(GENERAL_WORDS.editorDescription);
     const select = document.querySelector<HTMLElement>("[data-settings-page] [data-k=editor]")!;
     expect(select.textContent).toBe("Cursor");
-    await pickOption(select, "Zed");
+    // Every editor wears its mark, in the pick and in the list, the same marks the Open menu draws.
+    expect(select.querySelector("[data-editor-mark=cursor]")).not.toBeNull();
+    fireEvent.click(select);
+    const options = await screen.findAllByRole("option");
+    expect(options.map(option => option.querySelector("[data-editor-mark]")?.getAttribute("data-editor-mark"))).toEqual(["cursor", "zed", "finder"]);
+    await act(async () => void (await new Promise(r => setTimeout(r, 0))));
+    fireEvent.keyDown(options[1]!, { key: "Enter" });
+    fireEvent.click(options[1]!);
     await waitFor(() => expect(sets).toEqual([{ editor: "zed" }]));
+    await waitFor(() => expect(select.querySelector("[data-editor-mark=zed]")).not.toBeNull());
     // The pick's popup is a portal; unmounted before the page's own teardown empties the body under it.
     cleanup();
   });
@@ -306,7 +314,7 @@ describe("Appearance", () => {
     const { api, sets } = settingsApi();
     mountSettings({ api, at: { kind: "group", group: "appearance" } });
     await settle();
-    expect(rowTitles()).toEqual([FONT_WORDS.app, FONT_WORDS.code, NOTIFY_WORDS.sound]);
+    expect(rowTitles()).toEqual([TRANSPARENCY_WORDS.title, FONT_WORDS.app, FONT_WORDS.code, NOTIFY_WORDS.sound]);
     expect(descriptionOf("notify-sound")).toBe(NOTIFY_WORDS.soundDescription);
     const toggle = (): HTMLElement => document.querySelector<HTMLElement>("[data-k=notify-sound]")!;
     expect(toggle().getAttribute("aria-checked")).toBe("true");
@@ -317,6 +325,28 @@ describe("Appearance", () => {
     fireEvent.click(document.querySelector<HTMLElement>("[data-k=restore-defaults]")!);
     await settle();
     expect(sets.at(-1)).toMatchObject({ notifySound: true });
+    expect(toggle().getAttribute("aria-checked")).toBe("true");
+  });
+});
+
+describe("Transparency", () => {
+  it("is one switch on Appearance, on by default, that writes the record, and restores to on", async () => {
+    const { api, sets } = settingsApi();
+    mountSettings({ api, at: { kind: "group", group: "appearance" } });
+    await settle();
+    // The switch is the theme's, under the picker in the Theme card, never a font's.
+    const row = document.querySelector("[data-settings-page] [data-settings-row=transparency]")!;
+    expect(row.closest("[data-settings-card]")?.getAttribute("data-settings-card")).toBe("theme");
+    expect(document.querySelector("[data-settings-card=theme] [data-settings-head]")?.compareDocumentPosition(row)! & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(descriptionOf("transparency")).toBe(TRANSPARENCY_WORDS.description);
+    const toggle = (): HTMLElement => document.querySelector<HTMLElement>("[data-k=transparency]")!;
+    expect(toggle().getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(toggle());
+    await settle();
+    expect(sets).toEqual([{ transparency: false }]);
+    fireEvent.click(document.querySelector<HTMLElement>("[data-k=restore-defaults]")!);
+    await settle();
+    expect(sets.at(-1)).toMatchObject({ transparency: true });
     expect(toggle().getAttribute("aria-checked")).toBe("true");
   });
 });

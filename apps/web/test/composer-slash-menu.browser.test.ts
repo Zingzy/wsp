@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The composer's slash menu and its one-line slot in a real Chromium, both
-// themes, on a thread whose init announced the CLI's own screens beside the
-// commands that run: the menu lists the ones that run and none of the screens,
-// and Enter on a typed screen command starts nothing, the draft stays, and the
-// slot holds one muted mono sentence naming wsp's own control for it. Both
-// states are photographed. Runs only when asked for (WSP_RENDER=1) and skips
+// The composer's slash menu and the flyout a screen command raises, in a real
+// Chromium, both themes, on a thread whose init announced the CLI's own screens
+// beside the commands that run: the menu lists the ones that run and none of
+// the screens, and Enter on a typed screen command starts nothing, the draft
+// stays, and a flyout names wsp's own control for it, with nothing above the
+// box. Both states are photographed. Runs only when asked for (WSP_RENDER=1) and skips
 // without Playwright's Chromium.
 import { mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -27,7 +27,7 @@ const LOGIN_LINE = screenCommandLine({ name: "login", control: "sign-in" }, { la
 
 if (renderSkipped !== undefined) console.info(`composer slash menu render test skipped: ${renderSkipped}`);
 
-describe.skipIf(renderSkipped !== undefined)("the composer's slash menu and its line laid out in Chromium", () => {
+describe.skipIf(renderSkipped !== undefined)("the composer's slash menu and its flyout laid out in Chromium", () => {
   let vite: ViteChild | undefined;
   let browser: Browser | undefined;
   let page: Page | undefined;
@@ -37,9 +37,7 @@ describe.skipIf(renderSkipped !== undefined)("the composer's slash menu and its 
     vite = await startVite(WEB_DIR, "/test/shell/index.html");
     base = `${vite.base}/test/shell/index.html`;
     browser = await launchRender();
-    // The centre column at the composer's full width, where the slot is as wide as it gets and a line is read whole; at
-    // the narrowest centre the shell hands it (364px at a 1200px viewport with the panel open) every line in the slot
-    // is cut and carries itself as its title, this one no more than the rest.
+    // The centre column at the composer's full width.
     page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
     await page.addInitScript(() => window.localStorage.clear());
     mkdirSync(SHOTS, { recursive: true });
@@ -48,9 +46,9 @@ describe.skipIf(renderSkipped !== undefined)("the composer's slash menu and its 
 
   const EDITOR = "[data-testid=composer-editor]";
   const ITEM = "[data-composer-command-drawer] [data-composer-item-id]";
-  const LINE = "[data-composer-refusal] [role=status]";
+  const NOTICE = "[data-notice]";
 
-  it.each(["dark", "light"] as const)("in the %s theme the menu lists what runs and no screen, and a typed screen command leaves one line and no turn", async theme => {
+  it.each(["dark", "light"] as const)("in the %s theme the menu lists what runs and no screen, and a typed screen command raises a flyout and starts no turn", async theme => {
     await page!.goto(`${base}?theme=${theme}&ws=ws_a&chat=1`);
     await page!.waitForSelector(".chat-markdown");
     await page!.locator(EDITOR).click();
@@ -68,29 +66,19 @@ describe.skipIf(renderSkipped !== undefined)("the composer's slash menu and its 
     await page!.waitForSelector(ITEM, { state: "detached" });
     const turns = await page!.locator(".chat-markdown").count();
     await page!.keyboard.press("Enter");
-    await page!.waitForSelector(LINE);
-    expect(await page!.locator(LINE).textContent()).toBe(LOGIN_LINE);
-    // Nothing went: the transcript holds what it held, the draft is still in the box, and the menu's empty state is gone.
+    // A flyout names the road, and nothing stands above the box.
+    await page!.waitForSelector(NOTICE);
+    expect(await page!.locator(`${NOTICE} [data-notice-title]`).first().textContent()).toBe(LOGIN_LINE);
+    expect(await page!.locator("[data-composer-refusal]").count()).toBe(0);
+    // Nothing went: the transcript holds what it held, the draft is still in the box, and the menu is gone.
     expect(await page!.locator(".chat-markdown").count()).toBe(turns);
     expect((await page!.locator(EDITOR).textContent()) ?? "").toBe("/login");
     expect(await page!.locator("[data-composer-command-drawer]").count()).toBe(0);
-    // The slot's grammar: one muted mono sentence, no panel, no icon, whole on its line.
-    const look = await page!.locator(LINE).evaluate(el => {
-      const cs = getComputedStyle(el);
-      const slot = el.closest("[data-composer-refusal]")!.getBoundingClientRect();
-      return { font: cs.fontFamily.toLowerCase(), size: cs.fontSize, lines: Math.round(el.getBoundingClientRect().height / parseFloat(cs.lineHeight)), cut: el.scrollWidth > el.clientWidth, text: el.scrollWidth, room: el.clientWidth, slot: slot.width, icons: el.querySelectorAll("svg").length };
-    });
-    console.info(`${theme}: the line needs ${look.text}px of the ${look.room}px it has in a ${look.slot}px slot`);
     const lineShot = join(SHOTS, `composer-screen-command-${theme}.png`);
-    await page!.locator("[data-chat-composer]").screenshot({ path: lineShot });
+    await page!.screenshot({ path: lineShot });
     console.info(`composer screen command screenshot: ${lineShot}`);
-    expect(look.font).toMatch(/mono/);
-    expect(look.lines).toBe(1);
-    expect(look.cut, `the line is cut at the slot's width in ${theme}`).toBe(false);
-    expect(look.icons).toBe(0);
-    const [ratio] = await textContrast(page!, LINE);
-    console.info(`${theme}: the line reads at ${ratio} to 1 in ${look.font} ${look.size}`);
-    // Muted text, held to AA for the body size it is drawn at rather than the large-text floor.
-    expect(ratio!, `the line reads at ${ratio} in ${theme}`).toBeGreaterThanOrEqual(4.5);
+    const [ratio] = await textContrast(page!, `${NOTICE} [data-notice-title]`);
+    console.info(`${theme}: the flyout reads at ${ratio} to 1`);
+    expect(ratio!, `the flyout reads at ${ratio} in ${theme}`).toBeGreaterThanOrEqual(4.5);
   }, 60_000);
 });

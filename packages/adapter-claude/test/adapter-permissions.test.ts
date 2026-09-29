@@ -376,11 +376,11 @@ describe("a running turn moved to another access mode", () => {
     io.push(initLine);
     io.push(askLine);
     await settle();
-    const moved = session.setAccess("plan");
+    const moved = session.setAccess("manual");
     await settle();
     io.push(answered(io.stdin[1]!));
     expect(await moved).toBe("set");
-    // Nothing was answered for the person: plan says nothing about the write in front of them.
+    // Nothing was answered for the person: manual says nothing about the write in front of them.
     expect(io.stdin).toHaveLength(2);
     expect(closes(events)).toHaveLength(0);
     expect(await session.answer(ASK, { optionId: PERMISSION_ALLOW, outcome: "allowed", denyMessage: "unused" })).toBe("answered");
@@ -392,12 +392,12 @@ describe("a running turn moved to another access mode", () => {
 
   it("a turn that has not announced itself, and one whose channel is shut, take nothing and write nothing", async () => {
     const { session, io } = start();
-    expect(await session.setAccess("plan")).toBe("gone");
+    expect(await session.setAccess("manual")).toBe("gone");
     expect(io.stdin).toHaveLength(1);
     io.push(initLine);
     await settle();
     io.gone();
-    expect(await session.setAccess("plan")).toBe("gone");
+    expect(await session.setAccess("manual")).toBe("gone");
     expect(io.stdin).toHaveLength(1);
     io.end(null as unknown as number);
     await session.finished.catch(() => {});
@@ -407,7 +407,7 @@ describe("a running turn moved to another access mode", () => {
     const { session, io } = start();
     io.push(initLine);
     await settle();
-    const moved = session.setAccess("plan");
+    const moved = session.setAccess("manual");
     await settle();
     expect(io.stdin).toHaveLength(2);
     // The result closes the channel, so nothing can answer this any more; the caller hears at once rather than
@@ -422,7 +422,7 @@ describe("a running turn moved to another access mode", () => {
     const { session, io } = start();
     io.push(initLine);
     await settle();
-    const moved = session.setAccess("plan");
+    const moved = session.setAccess("manual");
     await settle();
     expect(io.stdin).toHaveLength(2);
     io.end(null as unknown as number);

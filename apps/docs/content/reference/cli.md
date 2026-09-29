@@ -494,10 +494,10 @@ usage: wsp run [<workspace>] [--agent <id>] [--model, --effort, --access <word>]
   --effort    how hard the agent thinks, by its own word (low, medium, high,
               xhigh, max); its default without it
   --access    how far the agent may go without asking, by the agent's own word
-              (plan, acceptEdits, bypassPermissions); without it, what a thread
-              on that workspace starts at: every action without asking on this
-              computer and on a machine wsp forked, asking about each one on a
-              computer you own
+              (Claude Code's acceptEdits or bypassPermissions, Codex's read-only
+              or workspace-write); without it, what a thread on that workspace
+              starts at: every action without asking on this computer and on a
+              machine wsp forked, asking about each one on a computer you own
   --fast      run the turn in the agent's fast mode, on a model that offers one;
               refused naming the model otherwise
   --cwd       the folder on the machine to work in; the project's folder without
@@ -785,10 +785,11 @@ usage: wsp fork <workspace> [--name <n>] [--size <cpu>x<memGb>]
   --effort          how hard the agent thinks, by its own word (low, medium,
                     high, xhigh, max); its default without it
   --access          how far the agent may go without asking, by the agent's own
-                    word (plan, acceptEdits, bypassPermissions); without it,
-                    what a thread on that workspace starts at: every action
-                    without asking on this computer and on a machine wsp forked,
-                    asking about each one on a computer you own
+                    word (Claude Code's acceptEdits or bypassPermissions,
+                    Codex's read-only or workspace-write); without it, what a
+                    thread on that workspace starts at: every action without
+                    asking on this computer and on a machine wsp forked, asking
+                    about each one on a computer you own
   --cwd             the folder on the machine to work in; the project's folder
                     without it
   --notify          where each turn's end is sent, a thread's id or me; repeats

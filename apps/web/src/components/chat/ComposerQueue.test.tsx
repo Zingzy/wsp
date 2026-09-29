@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { ComposerQueue, STEER_NOTICE } from "./ComposerQueue";
+import { ComposerQueue } from "./ComposerQueue";
 
 const rows = [
   { id: "a", prompt: "what model are you?" },
@@ -9,76 +9,54 @@ const rows = [
 ];
 
 function mount(over: Partial<Parameters<typeof ComposerQueue>[0]> = {}) {
-  const handlers = { onEdit: vi.fn(), onRemove: vi.fn(), onSteer: vi.fn() };
-  const view = render(<ComposerQueue rows={rows} steering={null} steer="stop" {...handlers} {...over} />);
+  const handlers = { onEdit: vi.fn(), onRemove: vi.fn() };
+  const view = render(<ComposerQueue rows={rows} files={{}} next={null} waiting={null} {...handlers} {...over} />);
   return { ...handlers, view };
 }
 
+const cards = () => [...document.querySelectorAll<HTMLElement>("[data-queued-id]")];
+
 describe("ComposerQueue", () => {
   it("renders nothing for an empty queue", () => {
-    const { container } = render(<ComposerQueue rows={[]} steering={null} steer="stop" onEdit={() => {}} onRemove={() => {}} onSteer={() => {}} />);
+    const { container } = render(<ComposerQueue rows={[]} files={{}} next={null} waiting={null} onEdit={() => {}} onRemove={() => {}} />);
     expect(container.innerHTML).toBe("");
   });
 
-  it("lists the rows in order, each editable, marked queued, with a labelled remove and send-now button", () => {
-    const { onEdit, onRemove, onSteer } = mount();
-    const inputs = screen.getAllByRole("textbox", { name: "Queued message" }) as HTMLTextAreaElement[];
-    expect(inputs.map(i => i.value)).toEqual(["what model are you?", "and the context window?"]);
-    expect(screen.getAllByText("queued")).toHaveLength(2);
-    expect(screen.queryByText(/\d/)).toBeNull();
-    fireEvent.change(inputs[1]!, { target: { value: "and the context window, in tokens?" } });
-    expect(onEdit).toHaveBeenCalledWith("b", "and the context window, in tokens?");
+  it("lists one card per message in order, its words as text, marked queued, with an edit and a remove", () => {
+    const { onEdit, onRemove } = mount();
+    expect(cards().map(card => card.querySelector("[data-queued-text]")?.textContent)).toEqual(["what model are you?", "and the context window?"]);
+    expect(screen.queryAllByRole("textbox")).toHaveLength(0);
+    expect(screen.getAllByText("Queued")).toHaveLength(2);
+    fireEvent.click(screen.getAllByRole("button", { name: "Edit queued message" })[1]!);
+    expect(onEdit).toHaveBeenCalledWith("b");
     fireEvent.click(screen.getAllByRole("button", { name: "Remove queued message" })[0]!);
     expect(onRemove).toHaveBeenCalledWith("a");
-    fireEvent.click(screen.getAllByRole("button", { name: "Stop the turn and send now" })[1]!);
-    expect(onSteer).toHaveBeenCalledWith("b");
   });
 
-  it("removes a row blurred while emptied, keeps one with text", () => {
-    const { onRemove } = mount({ rows: [{ id: "a", prompt: "   " }, rows[1]!] });
-    const [blank, kept] = screen.getAllByRole("textbox", { name: "Queued message" });
-    fireEvent.blur(kept!);
-    expect(onRemove).not.toHaveBeenCalled();
-    fireEvent.blur(blank!);
-    expect(onRemove).toHaveBeenCalledWith("a");
-  });
-
-  it("keeps the send-now button in place while nothing can go, disabled, so the row does not shift", () => {
-    const { onSteer, view } = mount({ steer: null });
-    const buttons = screen.getAllByRole("button", { name: "Send now" }) as HTMLButtonElement[];
-    expect(buttons).toHaveLength(2);
-    expect(buttons.every(b => b.disabled)).toBe(true);
-    fireEvent.click(buttons[0]!);
-    expect(onSteer).not.toHaveBeenCalled();
-    const shape = [...view.container.querySelectorAll("li")].map(li => li.children.length);
-    view.rerender(<ComposerQueue rows={rows} steering={null} steer="now" onEdit={() => {}} onRemove={() => {}} onSteer={onSteer} />);
-    const now = screen.getAllByRole("button", { name: "Send now" }) as HTMLButtonElement[];
-    expect(now.every(b => !b.disabled)).toBe(true);
-    fireEvent.click(now[1]!);
-    expect(onSteer).toHaveBeenCalledWith("b");
-    expect([...view.container.querySelectorAll("li")].map(li => li.children.length)).toEqual(shape);
-    view.rerender(<ComposerQueue rows={rows} steering={null} steer="stop" onEdit={() => {}} onRemove={() => {}} onSteer={onSteer} />);
-    expect(screen.getAllByRole("button", { name: "Stop the turn and send now" })).toHaveLength(2);
-    expect([...view.container.querySelectorAll("li")].map(li => li.children.length)).toEqual(shape);
-  });
-
-  it("marks the promoted row as next, disables its send-now and shows the one-line notice while the stop is in flight", () => {
-    mount({ steering: "b" });
-    expect(screen.getByText("next")).toBeDefined();
-    expect(screen.getAllByText("queued")).toHaveLength(1);
-    expect((screen.getAllByRole("button", { name: "Stop the turn and send now" })[1] as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByRole("status").textContent).toBe(STEER_NOTICE);
-  });
-
-  it("drops the notice once the promoted row has left the queue", () => {
-    mount({ steering: "gone" });
+  it("offers no send-now control on a card: Ctrl+Enter in the box is the one road to send now", () => {
+    mount();
+    expect(screen.queryByRole("button", { name: /send now/i })).toBeNull();
     expect(screen.queryByRole("status")).toBeNull();
   });
 
-  it("with a harness that steers, the promoted row reads next and its button waits, but no stop notice shows: nothing is being stopped", () => {
-    mount({ steering: "b", steer: "now" });
-    expect(screen.getByText("next")).toBeDefined();
-    expect((screen.getAllByRole("button", { name: "Send now" })[1] as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.queryByRole("status")).toBeNull();
+  it("shows each card's files by name, an image by its thumbnail", () => {
+    mount({
+      files: {
+        b: [
+          { id: "f1", name: "notes.md", mediaType: "text/markdown", bytes: "", size: 7 },
+          { id: "f2", name: "shot.png", mediaType: "image/png", bytes: "", size: 9, url: "blob:shot" },
+        ],
+      },
+    });
+    const [first, second] = cards();
+    expect(first!.querySelector("[data-queued-file]")).toBeNull();
+    expect(second!.querySelector('[data-queued-file="notes.md"]')?.textContent).toContain("notes.md");
+    expect(second!.querySelector<HTMLImageElement>('[data-queued-file="shot.png"] img')?.getAttribute("src")).toBe("blob:shot");
+  });
+
+  it("marks the card going next while a send-now is out, and leaves the rest queued", () => {
+    mount({ next: "b" });
+    expect(cards()[1]!.textContent).toContain("Next");
+    expect(screen.getAllByText("Queued")).toHaveLength(1);
   });
 });

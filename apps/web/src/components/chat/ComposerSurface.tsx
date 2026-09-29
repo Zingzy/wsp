@@ -15,8 +15,9 @@ function Shell({
       data-slot="composer-shell"
       className={cn(
         "group/composer-surface relative isolate mx-auto w-full max-w-3xl",
-        "[--chat-composer-drawer-inset:1.375rem] [--chat-composer-glass-surface:var(--card)] [--chat-composer-glass-opacity:72%] [--chat-composer-outline:rgb(0_0_0/8%)]",
-        "dark:[--chat-composer-glass-surface:var(--surface-raised)] dark:[--chat-composer-glass-opacity:56%] dark:[--chat-composer-highlight:rgb(255_255_255/3%)] dark:[--chat-composer-outline:color-mix(in_srgb,var(--color-white)_5%,transparent)]",
+        // Glass the page shows through: a faint tint of the ink over the blur, never a slab of the card, and a hairline.
+        "[--chat-composer-drawer-inset:1.375rem] [--chat-composer-glass-surface:var(--card)] [--chat-composer-glass-opacity:55%] [--chat-composer-outline:rgb(0_0_0/10%)]",
+        "dark:[--chat-composer-glass-surface:var(--foreground)] dark:[--chat-composer-glass-opacity:5%] dark:[--chat-composer-highlight:rgb(255_255_255/4%)] dark:[--chat-composer-outline:color-mix(in_srgb,var(--color-white)_9%,transparent)]",
         "before:pointer-events-none before:absolute before:inset-0 before:z-0 before:rounded-[22px] before:bg-[color-mix(in_srgb,var(--chat-composer-glass-surface)_var(--chat-composer-glass-opacity),transparent)] before:glass-backdrop before:transition-[background-color] before:duration-200 before:ease-out motion-reduce:before:transition-none",
         "not-supports-[(backdrop-filter:blur(1px))_or_(-webkit-backdrop-filter:blur(1px))]:before:bg-(--chat-composer-glass-surface)",
         "has-data-[composer-banner-surface=attached]:before:hidden",

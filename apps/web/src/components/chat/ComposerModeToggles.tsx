@@ -1,14 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Fast and plan, beside the pickers in the composer's footer: two quiet toggles
-// that read as pressed while on. Fast is offered only on a model whose agent
-// runs one; plan only where the agent lists a plan access, and it moves the
-// thread's access, which stays until it is turned off.
-import { ListChecksIcon, ZapIcon } from "lucide-react";
+// Fast, beside the pickers in the composer's footer: a quiet toggle that reads
+// as pressed while on, offered only on a model whose agent runs one.
+import { ZapIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { cn } from "../../lib/utils";
 
 export const FAST_TITLE = "Fast mode: the same model answering sooner, billed at its fast rate. Stays on for this thread until turned off.";
-export const PLAN_TITLE = "Plan mode: the agent reads and plans, and changes nothing. Stays on for this thread until turned off.";
 
 function Toggle({ on, label, title, icon, onClick, mode, tight, held }: { on: boolean; label: string; title: string; icon: ReactNode; onClick: () => void; mode: string; tight: boolean; held: boolean }) {
   return (
@@ -34,16 +31,15 @@ function Toggle({ on, label, title, icon, onClick, mode, tight, held }: { on: bo
   );
 }
 
-/** `tight` is the strip under the one-line composer, where a phone's width keeps the marks and drops the words. */
-/** `held` draws the toggles in their place and takes no press, for a composer whose thread does not exist yet. */
-export function ComposerModeToggles(props: { fast: { on: boolean; toggle: () => void } | null; plan: { on: boolean; toggle: () => void } | null; tight?: boolean; held?: boolean }) {
+/** `tight` is the strip under the one-line composer, where a phone's width keeps the marks and drops the words;
+ * `held` draws the toggles in their place and takes no press, for a composer whose thread does not exist yet. */
+export function ComposerModeToggles(props: { fast: { on: boolean; toggle: () => void } | null; tight?: boolean; held?: boolean }) {
   const tight = props.tight === true;
   const held = props.held === true;
-  if (props.fast === null && props.plan === null) return null;
+  if (props.fast === null) return null;
   return (
     <span className="flex shrink-0 items-center gap-0.5" data-composer-modes="true">
-      {props.fast !== null ? <Toggle mode="fast" tight={tight} held={held} on={props.fast.on} label="Fast" title={FAST_TITLE} icon={<ZapIcon aria-hidden />} onClick={props.fast.toggle} /> : null}
-      {props.plan !== null ? <Toggle mode="plan" tight={tight} held={held} on={props.plan.on} label="Plan" title={PLAN_TITLE} icon={<ListChecksIcon aria-hidden />} onClick={props.plan.toggle} /> : null}
+      <Toggle mode="fast" tight={tight} held={held} on={props.fast.on} label="Fast" title={FAST_TITLE} icon={<ZapIcon aria-hidden />} onClick={props.fast.toggle} />
     </span>
   );
 }

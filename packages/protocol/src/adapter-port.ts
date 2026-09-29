@@ -294,6 +294,21 @@ export interface TitleTurn {
  */
 export type SessionTitleMaker = (turn: TitleTurn, exec: (command: string) => Promise<string>) => Promise<string | null>;
 
+/** What a commit message is drafted from: the file on the machine holding the question protocol's draftPrompt wrote,
+ * which rides the CLI's stdin since a diff is longer than any command line may be, and the model the question runs
+ * on, the cheapest the harness's catalog lists; absent leaves the CLI's own. */
+export interface DraftAsk {
+  promptFile: string;
+  model?: string;
+}
+
+/**
+ * Asks the harness itself, on the machine, for a commit message: one shell line to `exec` running the harness's own
+ * CLI with no thread and no tool on the question in the file, and its stdout parsed back to a message. Null when the
+ * CLI refused or answered nothing. Absent on an adapter whose CLI cannot answer a question without a thread.
+ */
+export type CommitDrafter = (ask: DraftAsk, exec: (command: string) => Promise<string>) => Promise<string | null>;
+
 /** A question asked beside a thread: the harness's own session it is asked of, as that harness keys it, the words,
  * and the folder and model the thread's latest turn ran at, where the row knows them. */
 export interface AsideQuestion {

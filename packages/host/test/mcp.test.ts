@@ -161,7 +161,7 @@ describe("the MCP server over the host", () => {
   it.runIf(CLOUD_ON)("offers the verbs as tools, each described", async () => {
     const c = await connect();
     const { tools } = await c.listTools();
-    expect(tools.map(t => t.name).sort()).toEqual(["agents", "agents_addtools", "bring_back", "computers", "delete", "exec", "export", "folders", "forget", "fork", "image", "image_build", "image_move", "image_remove", "new", "pause", "projects", "projects_add", "projects_remove", "rebuild", "recipe", "recipe_scan", "rename", "restart", "run", "send", "servers", "servers_add", "servers_disable", "servers_enable", "servers_remove", "servers_tools", "setup", "skills", "skills_add", "skills_disable", "skills_enable", "skills_remove", "skills_search", "skills_show", "snapshot", "stop", "terminal_config", "thread_allow", "thread_deny", "thread_forget", "thread_read", "thread_rename", "threads", "threads_wait", "wake", "workspaces", "workspaces_agents"]);
+    expect(tools.map(t => t.name).sort()).toEqual(["agents", "agents_addtools", "bring_back", "commit", "computers", "delete", "discard", "exec", "export", "folders", "forget", "fork", "image", "image_build", "image_move", "image_remove", "new", "pause", "projects", "projects_add", "projects_remove", "rebuild", "recipe", "recipe_scan", "rename", "restart", "run", "send", "servers", "servers_add", "servers_disable", "servers_enable", "servers_remove", "servers_tools", "setup", "skills", "skills_add", "skills_disable", "skills_enable", "skills_remove", "skills_search", "skills_show", "snapshot", "stop", "terminal_config", "thread_allow", "thread_deny", "thread_forget", "thread_read", "thread_rename", "threads", "threads_wait", "wake", "workspaces", "workspaces_agents"]);
     for (const name of ["agents", "skills", "servers"]) expect(Object.keys((tools.find(t => t.name === name)!.inputSchema as { properties: Record<string, unknown> }).properties).sort(), name).toEqual(["on", "workspace"]);
     expect(Object.keys((tools.find(t => t.name === "servers_tools")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["agent", "name", "on", "project", "refresh", "workspace"]);
     expect(Object.keys((tools.find(t => t.name === "folders")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["folder", "hidden", "on", "repos"]);
@@ -371,8 +371,11 @@ describe("the MCP server over the host", () => {
     expect((await call("run", { workspace: "mac", task: "write the notes" })).isError).toBe(false);
     // The same answer the command line runs: the tools hold no default of their own, they read the workspace's.
     expect(claude.starts.at(-1)!.permissionMode).toBe("bypassPermissions");
-    expect((await call("run", { workspace: "mac", task: "read the notes", access: "plan" })).isError).toBe(false);
-    expect(claude.starts.at(-1)!.permissionMode).toBe("plan");
+    expect((await call("run", { workspace: "mac", task: "edit the notes", access: "acceptEdits" })).isError).toBe(false);
+    expect(claude.starts.at(-1)!.permissionMode).toBe("acceptEdits");
+    const plan = await call("run", { workspace: "mac", task: "read the notes", access: "plan" });
+    expect(plan.isError).toBe(true);
+    expect(plan.text).toMatch(/^access mode "plan" is not one claude takes; one of: Default \(default\), Accept edits \(acceptEdits\), Bypass on this computer \(bypassPermissions\), Auto \(auto\), /);
     const refused = await call("run", { workspace: "mac", task: "go", access: "yolo" });
     expect(refused.isError).toBe(true);
     expect(refused.text).toMatch(/^access mode "yolo" is not one claude takes/);
@@ -675,9 +678,9 @@ describe("the MCP server over the host", () => {
 
   it.runIf(CLOUD_ON)("run and fork take model, effort and access, send the first two; a new thread without a model runs the catalog's default and an unlisted value is refused with the list", async () => {
     await call("new", { name: "alpha" });
-    const picked = await call("run", { workspace: "alpha", task: "review it", model: "claude-sonnet-5", effort: "low", access: "plan" });
+    const picked = await call("run", { workspace: "alpha", task: "review it", model: "claude-sonnet-5", effort: "low", access: "acceptEdits" });
     expect(picked.isError).toBe(false);
-    expect(claude.starts.map(s => [s.model, s.effort, s.permissionMode])).toEqual([["claude-sonnet-5", "low", "plan"]]);
+    expect(claude.starts.map(s => [s.model, s.effort, s.permissionMode])).toEqual([["claude-sonnet-5", "low", "acceptEdits"]]);
     const bare = await call("run", { workspace: "alpha", task: "hello" });
     expect(bare.isError).toBe(false);
     // The model and the effort the composer shows for it, since a tool that names neither runs what the app would.
@@ -692,7 +695,7 @@ describe("the MCP server over the host", () => {
     expect(claude.starts.at(-1)!.model).toBeUndefined();
     // The send tool takes no access, so one named here is not read and the turn runs at the thread's own.
     const own = claude.starts.at(-1)!.permissionMode;
-    const named = await call("send", { thread: threadId, message: "and now", access: "plan" });
+    const named = await call("send", { thread: threadId, message: "and now", access: "acceptEdits" });
     expect(named.isError).toBe(false);
     expect(claude.starts.at(-1)!.permissionMode).toBe(own);
     const forked = await call("fork", { workspace: "alpha", name: "worker", task: "build it", model: "claude-sonnet-5", access: "bypassPermissions" });

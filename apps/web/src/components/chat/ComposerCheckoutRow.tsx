@@ -18,13 +18,13 @@
 // not switched: the daemon has no checkout op.
 import { ArrowLeftIcon, ChevronDownIcon, CheckIcon, FolderGitIcon, FolderIcon, FolderSearchIcon, GitBranchIcon, LoaderCircleIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
-import { hiddenFolder, isMacMachine, type FolderMachine } from "@wsp/protocol";
+import { checkoutCounts, hiddenFolder, isMacMachine, type FolderMachine } from "@wsp/protocol";
 import { baseName } from "../../files/entries";
 import { FOLDER_GHOST_WITH_WALK, FolderPathField, folderPathRefusal, useFolderPick, type FolderRefusal } from "../../files/FolderPathField";
 import { useWorkspaceListing } from "../../files/listing";
 import { parentWithin, rootOf, useRoots, useRootStore, useThreadFolder } from "../../files/root";
 import { useDaemonRoot, useDaemonWire } from "../../files/wire";
-import { useStatus } from "../../protocol/store";
+import { useStatus, useStore } from "../../protocol/store";
 import { useBranch, useLinkWord } from "../../terminal/paneWords";
 import { desktopBridge } from "../../lib/desktopShell";
 import { cn } from "../../lib/utils";
@@ -275,6 +275,14 @@ export function ComposerCheckoutRow({
   const folder = pickable ? startFolder : (cwd ?? startFolder);
   const canPick = wire !== null && roots.length > 0 && folder !== null;
   const branch = useBranch(wire, folder, true, linkWord, { running, moved: thread.view.entries.length });
+  // The counts the host read for the copy's own checkout, beside the branch only where this folder is that checkout
+  // on that branch: a folder of the thread's may be another repository altogether.
+  const fact = useStatus(workspaceId)?.checkout;
+  const checkoutPath = useStore(s => {
+    const held = s.workspaces.find(w => w.id === workspaceId);
+    return held?.copy?.path ?? held?.project.path;
+  });
+  const counts = fact !== undefined && branch.kind === "repo" && folder === checkoutPath && fact.branch === branch.head ? checkoutCounts(fact) : [];
 
   useEffect(() => {
     if (cwd !== null) follow(workspaceId, cwd);
@@ -309,6 +317,13 @@ export function ComposerCheckoutRow({
           <TooltipTrigger render={<span className={branchSlotClass} tabIndex={0} data-composer-branch={branch.head} />}>
             <GitBranchIcon className="size-3 shrink-0" />
             <span className="truncate">{branch.head}</span>
+            {counts.length === 0 ? null : (
+              <span data-composer-counts className="ms-2 flex shrink-0 gap-3">
+                {counts.map(count => (
+                  <span key={count}>{count}</span>
+                ))}
+              </span>
+            )}
           </TooltipTrigger>
           <TooltipPopup side="top" align="end" className="max-w-80">
             {BRANCH_NOTE}

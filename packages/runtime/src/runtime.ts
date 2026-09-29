@@ -227,13 +227,13 @@ import type {
 } from "@wsp/protocol";
 import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding } from "./project-landing.js";
 import { projectRemote, projectSource } from "./project-sources.js";
-import { vaultUnlistedRefusal, ThreadPlacement, ThreadScope, WorkspaceOrigin, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, agentsFrom, foldThreads, runningOn as runningOnPlace, phaseHoldsSlot, placeAtLimitLine, placeSpendLimit, spendCapRefusal, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadKeyOf, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, SCOPED_MCP_ARG, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
-import { ASIDE_NO_SESSION_LINE, BLANK_ASIDE_LINE, asideUnsupportedLine, REWIND_LATEST_LINE, REWIND_NO_CHECKPOINT_LINE, REWIND_NO_UNDO_LINE, REWIND_OWN_FOLDER_LINE, REWIND_WORKING_LINE, rewindBesideLine, rewindChildrenLine, rewindNoAnchorLine, PLACE_WORKSPACE_PATH, THIS_COMPUTER, COPY_BUILD_FIX, copyAsksSignIns, refusal, copyFirstLine, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildOf, copyIsCurrent, type CopyBuild, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, serverIconsLeftLine, homeShortened, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, threadRunsOnLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, GONE_UNCHECKED, goneUnconfirmedLine, type GoneSeenBy, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, cloneFailedLine, cloneIntoNeeded, cloneIntoTakenLine, cloneUrlRefusal, intoIsHereLine, INTO_TAKES_A_REPO_LINE, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeBlocked, placeDaemonBehind, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeDaemonPaths, placeDialBackLine, placeWentAwayLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, workspaceLands, copyPathFor, folderSlug, type ProjectCopy, attachmentRecord, filesBlocked, isImage, sendFilesDir, filePathIn, landFilesLine, filesNotLandedLine, attachedFilesPrompt, dropFilesLine } from "@wsp/protocol";
+import { vaultUnlistedRefusal, ThreadPlacement, ThreadScope, WorkspaceOrigin, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, GitCommitReply, GitDiscardReply, GitDiffReply, GitStatusReply, DRAFT_NOTES, cleanCheckoutLine, commitMessage, cutDiff, draftPrompt, type Checkout, type CheckoutReply, type CommitDraft, type CommitDrafter, type ViewedMarks, agentsFrom, foldThreads, runningOn as runningOnPlace, phaseHoldsSlot, placeAtLimitLine, placeSpendLimit, spendCapRefusal, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadKeyOf, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, SCOPED_MCP_ARG, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
+import { ASIDE_NO_SESSION_LINE, BLANK_ASIDE_LINE, asideUnsupportedLine, PLACE_WORKSPACE_PATH, THIS_COMPUTER, COPY_BUILD_FIX, copyAsksSignIns, refusal, copyFirstLine, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildOf, copyIsCurrent, type CopyBuild, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, serverIconsLeftLine, homeShortened, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, threadRunsOnLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, GONE_UNCHECKED, goneUnconfirmedLine, type GoneSeenBy, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, cloneFailedLine, cloneIntoNeeded, cloneIntoTakenLine, cloneUrlRefusal, intoIsHereLine, INTO_TAKES_A_REPO_LINE, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeBlocked, placeDaemonBehind, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeDaemonPaths, placeDialBackLine, placeWentAwayLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, workspaceLands, copyPathFor, folderSlug, type ProjectCopy, REWIND_LATEST_LINE, REWIND_NO_CHECKPOINT_LINE, REWIND_NO_UNDO_LINE, REWIND_OWN_FOLDER_LINE, REWIND_WORKING_LINE, rewindBesideLine, rewindChildrenLine, rewindNoAnchorLine, attachmentRecord, filesBlocked, isImage, sendFilesDir, filePathIn, landFilesLine, filesNotLandedLine, attachedFilesPrompt, dropFilesLine } from "@wsp/protocol";
 import { agentsReads, type AgentsActs, type AgentsReader, type CallbackForwards, type ServerIcons, type ServersActs, type SignInAsk, type SkillAsk, type SkillsActs } from "./agents-read.js";
 import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from "./daemon-channel.js";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
-import { isNoProvider, isPlaceAbsent, projectStateKey, type Copier } from "@wsp/engine";
+import { isNoProvider, isPlaceAbsent, projectStateKey, putFiles, type Copier } from "@wsp/engine";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
 import { assertTokenShape, daemonTokenFor, daemonTokenPathOf, rotateDaemonToken } from "./daemon-token.js";
@@ -243,7 +243,7 @@ import { connectDaemon, type DaemonReach } from "./reach.js";
 import { POLL_INTERVAL_MS, createStatusTracker, machineStateOf, phaseLeavingGone, providerSaid, type StatusApi, type StatusListOptions, type StatusWatchOptions } from "./status.js";
 import { makeDevices, type DeviceDoor, type ScopedRoad } from "./devices.js";
 import { makePlaceDoor, PlaceForksNowhereError, PlaceProvisioningError, type PlaceDoor, type PlaceRecord, type PlaceWiring } from "./places.js";
-import type { Store } from "./store.js";
+import type { BlobMark, Store } from "./store.js";
 import { HARNESS_CATALOGS, catalogFromProbe, harnessCatalog, smallestModel } from "./harness-catalog.js";
 
 // --- adapter port -------------------------------------------------------------
@@ -395,6 +395,9 @@ export interface HarnessAdapter {
   /** Asks the harness itself for a name for a thread it has just replied in; absent on a harness that cannot answer a
    * question of its own. */
   titleFor?: SessionTitleMaker;
+  /** Asks the harness itself for a commit message with no thread and no tool; absent on a harness that cannot answer
+   * a question of its own, and the commit box opens empty with the line saying so. */
+  draftFor?: CommitDrafter;
   /** Answers a question beside a thread on a copy of its session that nothing keeps; absent on a harness that cannot
    * copy a session, and the composer offers no side question for it. */
   aside?: SessionAsker;
@@ -433,6 +436,10 @@ const CATALOG_PROBE_TIMEOUT_MS = 25_000;
 /** How long a harness's title for a session stands before its store is read again on a refresh. Clients reload the
  * index on every session event, and a person renaming a session in the harness waits at most this long to see it. */
 export const SESSION_TITLE_TTL_MS = 10_000;
+
+/** How long a copy's checkout, once read, answers a tile or a pane asking again without asking git: every tile reads
+ * it as it mounts, and a sidebar of twenty is one read, not twenty. */
+export const CHECKOUT_TTL_MS = 10_000;
 /** A grep of one session file or a row out of one sqlite; a guest slower than this keeps the title it last gave. */
 const SESSION_TITLE_TIMEOUT_MS = 15_000;
 /** How many of a workspace's harness sessions one refresh asks about, newest first: a store read is an exec on the
@@ -729,6 +736,10 @@ interface LiveWorkspace {
   wakeAsk?: { ask: number; of: number };
   /** Set from the fork until the create is ready: the sweep knows the machine, nothing else can reach it yet. */
   creating?: true;
+  /** The copy's checkout as git last answered it, carried on every status built for the workspace. */
+  checkout?: Checkout;
+  /** The checkout read in flight, which a second asker joins. */
+  checkoutReading?: Promise<Checkout | undefined>;
 }
 
 /** Reports one create stage as it is reached; the runtime stamps id, name and elapsed time. A notice is a second
@@ -1379,6 +1390,20 @@ export interface Runtime {
      * workspace as a branch of its own. A machine with no signed-in command line for the git host still pushes,
      * and says why the pull request waits as the result's note. */
     bringBack(o: { workspaceId: string; title?: string; body?: string }, origin?: Caller): Promise<BringBackResult>;
+    /** The copy's checkout as the host holds it, read again through the copy's daemon unless it was read within
+     * CHECKOUT_TTL_MS; a machine that is not running and whose computer does not answer for it keeps its last fact. */
+    checkout(id: string, origin?: Caller): Promise<CheckoutReply>;
+    /** Puts one changed file of the copy back as HEAD has it, then reads the checkout again. */
+    discard(o: { workspaceId: string; path: string }, origin?: Caller): Promise<GitDiscardReply>;
+    /** Commits the files named in the copy with the message given, then reads the checkout again; no paths is every
+     * changed file. A thread commits under the same guard a bring back passes. */
+    commit(o: { workspaceId: string; message: string; paths?: string[] }, origin?: Caller): Promise<GitCommitReply>;
+    /** A commit message for the files named, or every changed file, from their diff against HEAD and the task the
+     * workspace's newest thread was opened with, drafted by that thread's agent with no thread and no tool; none with
+     * the line saying why. */
+    commitDraft(o: { workspaceId: string; paths?: string[] }, origin?: Caller): Promise<CommitDraft>;
+    /** The workspace's viewed marks; with a path, the mark on that file set against the blob or taken off at null. */
+    viewed(o: { workspaceId: string; path?: string; blob?: string | null }, origin?: Caller): Promise<ViewedMarks>;
     /** How a browser dials this workspace's daemon; throws on backends without preview URLs. */
     daemonReach(id: string, origin?: Caller): Promise<DaemonReachView>;
     /** One channel to the daemon answering for this workspace, frame by frame, with every event that daemon
@@ -1717,6 +1742,8 @@ const TRANSCRIPTS = "transcripts";
 /** The events of a transcript an older build kept inside the state file that fell outside the byte cap as it moved to
  * a file of its own: written at the move and never trimmed, so no event the person had is lost. */
 const TRANSCRIPT_HEADS = "transcript-heads";
+/** Each transcript's index, beside it: what the host keeps of a transcript it does not hold. */
+const TRANSCRIPT_INDEX = "transcript-index";
 /** One document per workspace: the turns sessions.list serves, read back at boot so the rows outlive the process. */
 const SESSIONS = "sessions";
 /** The name a person gave a workspace, keyed by its id, which its machines carry as a label across every rebuild:
@@ -1776,31 +1803,112 @@ export const TRANSCRIPT_BYTES = 4 * 1024 * 1024;
 /** The characters of one tool result a transcript keeps. Every reader of a kept result reads its first line (the
  * app's row, the terminal's line, a subagent's answer), and the live stream still carries it whole. */
 export const TOOL_RESULT_KEPT = 16 * 1024;
+/** The transcripts held whole after they were opened, the newest kept: reopening one of them reads no file. Every
+ * other transcript is its index and the events written since its last flush. */
+export const TRANSCRIPTS_HELD = 4;
+/** The bytes of events written since a transcript's last flush past which it flushes without waiting for a turn
+ * boundary, so a turn that streams for an hour holds no more of itself than a flushed transcript would. */
+const PENDING_FLUSH_BYTES = 1024 * 1024;
 /** setTimeout's longest wait; a longer one fires at once. */
 const MAX_TIMER_MS = 2 ** 31 - 1;
 
-/** Each thread's words in one transcript, by thread id, with the moment the thread last said anything: the person's
- * messages and its own agent's replies, a reply's pieces joined back into the one message they are. A subagent's lines are the subagent's, and a row stamped no thread names none a hit could
- * open. */
-function threadWords(events: readonly SessionEvent[], reaches: (threadId: string) => boolean): Map<string, { lines: string[]; last: number }> {
-  const words = new Map<string, { lines: string[]; open: string | undefined; last: number }>();
-  for (const e of events) {
-    if (e.threadId === undefined || !reaches(e.threadId)) continue;
-    const held = words.get(e.threadId) ?? { lines: [], open: undefined, last: 0 };
-    words.set(e.threadId, held);
-    held.last = Math.max(held.last, e.at ?? 0);
-    if ((e.type === "session.start" && e.prompt !== undefined) || e.type === "session.steer") {
-      held.lines.push(e.prompt!);
-      held.open = undefined;
-    } else if (e.type === "session.delta" && e.kind === "text" && e.parentToolUseId === undefined) {
-      const message = `${e.turnId ?? e.sessionId}:${e.messageId ?? ""}`;
-      if (held.open === message) held.lines[held.lines.length - 1] += e.text;
-      else held.lines.push(e.text);
-      held.open = message;
-    }
-  }
-  return new Map([...words].filter(([, held]) => held.lines.length > 0).map(([threadId, held]) => [threadId, { lines: held.lines, last: held.last }]));
+/** One thread's words as search reads them: its messages, the message still open, and when it last said anything. */
+interface ThreadWords {
+  lines: string[];
+  open: string | undefined;
+  last: number;
 }
+
+/** What the host keeps of a transcript it does not hold: each thread's words for search, and the facts a send reads
+ * off the transcript. Folded one event at a time in the order they were written, so it answers what a walk of the
+ * whole transcript would. */
+interface TranscriptIndex {
+  words: Map<string, ThreadWords>;
+  /** The harness session each thread's newest start announced. */
+  starts: Map<string, string>;
+  /** Whether each thread's newest end came with no exit code and no result. */
+  cut: Map<string, boolean>;
+  /** The folder, access and model each session's newest start that named one named. */
+  facts: Map<string, SessionFacts>;
+}
+
+/** A transcript file that is there and did not read. Nothing is written over it, since what it holds is still in it. */
+const transcriptUnreadLine = (workspaceId: string, why: string): string => `the transcript of ${workspaceId} does not read (${why})`;
+
+/** What a resumed session's turns carry, read off its newest start that named each. */
+const SESSION_FACTS = ["cwd", "permissionMode", "model"] as const;
+type SessionFacts = Partial<Record<(typeof SESSION_FACTS)[number], string>>;
+
+const emptyIndex = (): TranscriptIndex => ({ words: new Map(), starts: new Map(), cut: new Map(), facts: new Map() });
+
+/** One event into an index: the person's messages and its own agent's replies by thread, a reply's pieces joined back
+ * into the one message they are, and the newest start and end of each thread and session. A subagent's lines are the
+ * subagent's, and a row stamped no thread names none a hit could open. */
+function foldEvent(index: TranscriptIndex, e: SessionEvent): void {
+  if (e.type === "session.start") {
+    if (e.threadId !== undefined) index.starts.set(e.threadId, e.sessionId);
+    const facts = index.facts.get(e.sessionId) ?? {};
+    for (const fact of SESSION_FACTS) if (e[fact] !== undefined) facts[fact] = e[fact];
+    index.facts.set(e.sessionId, facts);
+  } else if (e.type === "session.end" && e.threadId !== undefined) index.cut.set(e.threadId, e.exitCode === null && !e.sawResult);
+  if (e.threadId === undefined) return;
+  const held = index.words.get(e.threadId) ?? { lines: [], open: undefined, last: 0 };
+  index.words.set(e.threadId, held);
+  held.last = Math.max(held.last, e.at ?? 0);
+  if ((e.type === "session.start" && e.prompt !== undefined) || e.type === "session.steer") {
+    held.lines.push(e.prompt!);
+    held.open = undefined;
+  } else if (e.type === "session.delta" && e.kind === "text" && e.parentToolUseId === undefined) {
+    const message = `${e.turnId ?? e.sessionId}:${e.messageId ?? ""}`;
+    if (held.open === message) held.lines[held.lines.length - 1] += e.text;
+    else held.lines.push(e.text);
+    held.open = message;
+  }
+}
+
+const indexOf = (events: readonly SessionEvent[]): TranscriptIndex => {
+  const index = emptyIndex();
+  for (const e of events) foldEvent(index, e);
+  return index;
+};
+/** How much of itself a turn has written, read off its workspace's transcript, where a live turn's rows are at the
+ * tail. Only these are kept, since a turn holding the transcript would hold it whole for as long as it runs. */
+interface TurnWritten {
+  lines: number;
+  reply?: TurnResult["status"];
+  started: boolean;
+}
+const turnWritten = (events: readonly SessionEvent[], turnId: string): TurnWritten => {
+  const lastOf = <T extends SessionEvent["type"]>(type: T): Extract<SessionEvent, { type: T }> | undefined => {
+    for (let i = events.length - 1; i >= 0; i--) {
+      const e = events[i]!;
+      if (e.type === type && e.turnId === turnId) return e as Extract<SessionEvent, { type: T }>;
+    }
+    return undefined;
+  };
+  // From the stamp the last surviving line carries rather than from how many survive: the transcript is capped per
+  // workspace and drops its oldest rows, so counting them would read a turn whose head has been evicted as shorter
+  // than it was and write its tail a second time.
+  const lines = lastOf("session.delta")?.line ?? 0;
+  const reply = lastOf("session.done")?.result.status;
+  // A turn with a line or a reply already written had its start written too, whether or not the cap still holds it:
+  // a second start row at the tail of the transcript would sit after the work it opened.
+  return { lines, ...(reply !== undefined ? { reply } : {}), started: lines > 0 || reply !== undefined || lastOf("session.start") !== undefined };
+};
+
+/** An index as its file holds it, with the mark of the transcript file it was read off: an index whose transcript
+ * has been written since (a crash between the two writes, a failed index write) is one boot reads again, and so is
+ * one that does not parse. */
+const indexBytes = (index: TranscriptIndex, of: BlobMark | undefined): Buffer =>
+  Buffer.from(JSON.stringify({ of, words: [...index.words], starts: [...index.starts], cut: [...index.cut], facts: [...index.facts] }));
+const indexRead = (bytes: Buffer): { index: TranscriptIndex; of?: BlobMark } | undefined => {
+  try {
+    const held = JSON.parse(bytes.toString("utf8")) as { of?: BlobMark; words: [string, ThreadWords][]; starts: [string, string][]; cut: [string, boolean][]; facts: [string, SessionFacts][] };
+    return { index: { words: new Map(held.words), starts: new Map(held.starts), cut: new Map(held.cut), facts: new Map(held.facts) }, ...(held.of !== undefined ? { of: held.of } : {}) };
+  } catch {
+    return undefined;
+  }
+};
 
 /** The words around a hit, on one line: a little before it and more after, an ellipsis where the text goes on. */
 function snippetAround(text: string, at: number, length: number): string {
@@ -1884,6 +1992,8 @@ interface ThreadRecord {
 
 interface SessionIndexRecord {
   workspaceId: string;
+  /** The files a person marked viewed, by path, against the blob id each had then. */
+  viewed?: Record<string, string>;
   /** reply is the held status of a turn whose result landed while its process still ran, on a row still running;
    * run is where that turn is on its machine, so a host that comes back re-opens it rather than failing it, and
    * turnToken is what that surviving process still has in its environment, so the host that re-opens it can answer
@@ -2991,31 +3101,73 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** Every exec stream still running, so the machine going away ends it the way it ends a session. */
   const execs = new Set<{ workspaceId: string; end: (reason: string) => void }>();
   const indexFlushes = new Map<string, Promise<void>>();
+  /** The transcripts held whole, the one opened last at the end: at most TRANSCRIPTS_HELD, read again from their files
+   * once they fall out. */
   const transcripts = new Map<string, SessionEvent[]>();
-  /** The bytes each transcript's events come to as JSON, kept beside it so a new event is not a walk of all of them. */
+  /** Each workspace's events written since its transcript's last flush, which its file does not have yet. */
+  const pendingEvents = new Map<string, SessionEvent[]>();
+  const pendingBytes = new Map<string, number>();
+  /** Every transcript's index, held whether or not the transcript is. */
+  const transcriptIndex = new Map<string, TranscriptIndex>();
+  const indexFor = (workspaceId: string): TranscriptIndex => {
+    const held = transcriptIndex.get(workspaceId) ?? emptyIndex();
+    transcriptIndex.set(workspaceId, held);
+    return held;
+  };
+  /** The bytes each held transcript's events come to as JSON, kept beside it so a new event is not a walk of all of them. */
   const transcriptBytes = new Map<string, number>();
   const eventBytes = (e: SessionEvent): number => JSON.stringify(e).length;
-  /** Drops a transcript's oldest events until it is inside both caps, in place, since a live turn holds the array. */
-  const trimTranscript = (workspaceId: string, events: SessionEvent[]): void => {
-    let bytes = transcriptBytes.get(workspaceId) ?? events.reduce((n, e) => n + eventBytes(e), 0);
+  /** Drops the oldest events until the rest are inside both caps, in place, and answers the bytes left. */
+  const dropOldest = (events: SessionEvent[], bytes: number = events.reduce((n, e) => n + eventBytes(e), 0)): number => {
     let drop = 0;
     while (drop < events.length - 1 && (events.length - drop > TRANSCRIPT_CAP || bytes > TRANSCRIPT_BYTES)) bytes -= eventBytes(events[drop++]!);
     if (drop > 0) events.splice(0, drop);
-    transcriptBytes.set(workspaceId, bytes);
+    return bytes;
+  };
+  const trimTranscript = (workspaceId: string, events: SessionEvent[]): void => void transcriptBytes.set(workspaceId, dropOldest(events, transcriptBytes.get(workspaceId)));
+  /** A transcript held as the one opened last, the oldest of the others let go past the cap. */
+  const holdTranscript = (workspaceId: string, events: SessionEvent[]): void => {
+    transcripts.delete(workspaceId);
+    transcripts.set(workspaceId, events);
+    for (const id of transcripts.keys()) {
+      if (transcripts.size <= TRANSCRIPTS_HELD) break;
+      transcripts.delete(id);
+      transcriptBytes.delete(id);
+    }
   };
   /** A workspace's transcript, from its own file beside the state file: kept inside the state file, every turn's
    * flush rewrote every workspace's transcript with it, and a host whose file had grown to hundreds of megabytes
    * spent its loop on that for minutes. */
   const transcriptBlob = (record: TranscriptRecord): Buffer => Buffer.from(JSON.stringify(record));
+  /** A transcript file's events, nothing where there is no file, and a refusal where there is a file that did not
+   * read: a caller that took the two for one wrote what it held over everything the file had. A file that reads and
+   * does not parse never will, and refusing it would keep every later event unwritten, so its bytes are moved aside
+   * under a name of their own and it counts as no file. */
   const readTranscript = async (workspaceId: string, collection: string = TRANSCRIPTS): Promise<SessionEvent[] | undefined> => {
-    const bytes = await store.getBlob(collection, workspaceId);
-    if (bytes === undefined) return undefined;
+    let bytes: Buffer | undefined;
     try {
-      return (JSON.parse(bytes.toString("utf8")) as TranscriptRecord).events;
+      bytes = await store.getBlob(collection, workspaceId);
+      if (bytes === undefined && (await store.statBlob(collection, workspaceId)) === undefined) return undefined;
     } catch (e) {
-      console.warn(`the transcript of ${workspaceId} does not read and is left out: ${e instanceof Error ? e.message : String(e)}`);
+      throw new Error(transcriptUnreadLine(workspaceId, e instanceof Error ? e.message : String(e)));
+    }
+    if (bytes === undefined) throw new Error(transcriptUnreadLine(workspaceId, "the file is there and could not be read"));
+    try {
+      const events = (JSON.parse(bytes.toString("utf8")) as Partial<TranscriptRecord>).events;
+      if (!Array.isArray(events)) throw new Error("it holds no events");
+      return events;
+    } catch (e) {
+      const aside = `${workspaceId}.${Date.now()}`;
+      await store.putBlob(`${collection}-unparsed`, aside, bytes);
+      await store.deleteBlob(collection, workspaceId);
+      console.warn(`the transcript of ${workspaceId} does not parse (${e instanceof Error ? e.message : String(e)}), so its bytes are kept as ${collection}-unparsed/${aside} and it starts again empty`);
       return undefined;
     }
+  };
+  /** The index written beside a transcript, marked with the transcript file as it stands now. */
+  const writeIndex = async (workspaceId: string, index: TranscriptIndex): Promise<void> => {
+    const bytes = indexBytes(index, await store.statBlob(TRANSCRIPTS, workspaceId));
+    await store.putBlob(TRANSCRIPT_INDEX, workspaceId, bytes);
   };
   /** A transcript an older build kept inside the state file, merged into what its files already hold: an older build
    * run on this state after this one writes its new events there again, and a move cut short by a crash leaves both
@@ -3033,16 +3185,99 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     }
     all.sort((a, b) => (a.at ?? 0) - (b.at ?? 0));
     const held = [...all];
-    transcriptBytes.delete(id);
-    trimTranscript(id, held);
+    dropOldest(held);
     const head = all.slice(0, all.length - held.length);
     if (head.length > 0) await store.putBlob(TRANSCRIPT_HEADS, id, transcriptBlob({ workspaceId: id, events: head }));
     await store.putBlob(TRANSCRIPTS, id, transcriptBlob({ workspaceId: id, events: held }));
-    transcripts.set(id, held);
+    const index = indexOf(held);
+    transcriptIndex.set(id, index);
+    await writeIndex(id, index);
   };
-  // Puts are chained per workspace so the later snapshot always lands last,
-  // whatever order the store finishes in.
-  const transcriptFlushes = new Map<string, Promise<void>>();
+  /** The index a workspace's transcript left beside it where it was read off the file as it stands, else one read off
+   * the transcript itself: an index older than its file answers search and a send from before the last turn. */
+  const loadIndex = async (workspaceId: string): Promise<void> => {
+    try {
+      const mark = await store.statBlob(TRANSCRIPTS, workspaceId).catch((e: unknown) => {
+        throw new Error(transcriptUnreadLine(workspaceId, e instanceof Error ? e.message : String(e)));
+      });
+      if (mark === undefined) return;
+      const bytes = await store.getBlob(TRANSCRIPT_INDEX, workspaceId);
+      const kept = bytes === undefined ? undefined : indexRead(bytes);
+      if (kept?.of !== undefined && kept.of.bytes === mark.bytes && kept.of.at === mark.at) {
+        transcriptIndex.set(workspaceId, kept.index);
+        return;
+      }
+      const index = indexOf((await readTranscript(workspaceId)) ?? []);
+      transcriptIndex.set(workspaceId, index);
+      await writeIndex(workspaceId, index).catch((e: unknown) => console.warn(`the transcript index of ${workspaceId} was not written: ${e instanceof Error ? e.message : String(e)}`));
+    } catch (e) {
+      console.warn(`${e instanceof Error ? e.message : String(e)}, so search and a send leave it out until it reads`);
+    }
+  };
+  // Every read and write of one workspace's transcript file takes its turn here, so the later snapshot always lands
+  // last whatever order the store finishes in, and a read never lands between a flush's write and the moment the
+  // events it wrote stop counting as unwritten.
+  const transcriptQueue = new Map<string, Promise<void>>();
+  const onTranscriptQueue = <T>(workspaceId: string, step: () => Promise<T>): Promise<T> => {
+    const run = (transcriptQueue.get(workspaceId) ?? Promise.resolve()).then(step);
+    transcriptQueue.set(workspaceId, run.then(() => {}, () => {}));
+    return run;
+  };
+  /** A workspace's transcript whole: held already, or its file and what was written since, read on demand. The copy
+   * this answers is the one to use: another open can let it go from the held ones at any await, so a caller never
+   * looks it up again. */
+  const openTranscript = (workspaceId: string): Promise<SessionEvent[]> => {
+    const held = transcripts.get(workspaceId);
+    if (held !== undefined) {
+      holdTranscript(workspaceId, held);
+      return Promise.resolve(held);
+    }
+    return onTranscriptQueue(workspaceId, () => openInQueue(workspaceId));
+  };
+  /** The open itself, run inside the queue. A transcript that exists is held as the one opened last; one with no file
+   * and nothing written, or of a workspace deleted meanwhile, is answered and not held. */
+  const openInQueue = async (workspaceId: string): Promise<SessionEvent[]> => {
+    const landed = transcripts.get(workspaceId);
+    if (landed !== undefined) return landed;
+    const read = await readTranscript(workspaceId);
+    const events = [...(read ?? []), ...(pendingEvents.get(workspaceId) ?? [])];
+    const bytes = dropOldest(events);
+    if (events.length > 0 && transcriptIndex.has(workspaceId)) {
+      holdTranscript(workspaceId, events);
+      transcriptBytes.set(workspaceId, bytes);
+    }
+    return events;
+  };
+  /** Inside the queue: `events` written as the transcript, the first `took` events written since the last flush
+   * cleared the moment the file has them, and the index made again off what was written. */
+  const writeTranscript = async (workspaceId: string, events: SessionEvent[], took: number): Promise<void> => {
+    await store.putBlob(TRANSCRIPTS, workspaceId, transcriptBlob({ workspaceId, events }));
+    // Before the index is written, so an index write that fails cannot leave these to be written a second time.
+    const pending = pendingEvents.get(workspaceId);
+    pending?.splice(0, took);
+    if (pending !== undefined && pending.length === 0) {
+      pendingEvents.delete(workspaceId);
+      pendingBytes.delete(workspaceId);
+    } else if (pending !== undefined) pendingBytes.set(workspaceId, pending.reduce((n, e) => n + eventBytes(e), 0));
+    const index = indexOf(events);
+    // An index that did not land keeps its old mark, and boot reads that transcript again.
+    await writeIndex(workspaceId, index).catch((e: unknown) => console.warn(`the transcript index of ${workspaceId} was not written: ${e instanceof Error ? e.message : String(e)}`));
+    // What arrived during the writes is folded on after them, as record folded it on the index this replaces.
+    for (const e of pendingEvents.get(workspaceId) ?? []) foldEvent(index, e);
+    if (transcriptIndex.has(workspaceId)) transcriptIndex.set(workspaceId, index);
+  };
+  /** Takes the events `drops` names out of a transcript, the file and what was written since alike, and writes it: one
+   * turn of the queue on the copy the open answered, so nothing can let that copy go between the change and the
+   * write, and no flush runs between them. */
+  const dropFromTranscript = (workspaceId: string, drops: (e: SessionEvent) => boolean): Promise<void> =>
+    onTranscriptQueue(workspaceId, async () => {
+      const events = await openInQueue(workspaceId);
+      for (let i = events.length - 1; i >= 0; i--) if (drops(events[i]!)) events.splice(i, 1);
+      transcriptBytes.delete(workspaceId);
+      const pending = pendingEvents.get(workspaceId) ?? [];
+      for (let i = pending.length - 1; i >= 0; i--) if (drops(pending[i]!)) pending.splice(i, 1);
+      await writeTranscript(workspaceId, [...events], pending.length);
+    });
   const transcriptTimers = new Map<string, () => void>();
   // One token per machine, written to a guest the first time a client asks to reach its daemon; the file the
   // guest carried before (the golden's, or an earlier run's) stops working then. Per machine and not per process:
@@ -3074,18 +3309,42 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     transcriptTimers.delete(workspaceId);
   };
 
-  // The copy is taken here, not per event: a store may serialise after it
-  // returns, and the live array keeps moving under it.
+  /** The flushes queued and not yet begun, so a burst of asks is one write. */
+  const flushesQueued = new Map<string, Promise<void>>();
+  /** The transcripts whose file did not read at their last flush, so the refusal is said once. */
+  const unreadSaid = new Set<string>();
+  // The copy is taken when the flush's turn comes, not per event: a store may serialise after it returns, and the
+  // events keep arriving under it. A transcript not held is its file with what was written since appended.
   const flushTranscript = (workspaceId: string): Promise<void> => {
     cancelFlush(workspaceId);
-    const events = transcripts.get(workspaceId);
-    if (!events) return transcriptFlushes.get(workspaceId) ?? Promise.resolve();
-    const snapshot: TranscriptRecord = { workspaceId, events: [...events] };
-    const queued = (transcriptFlushes.get(workspaceId) ?? Promise.resolve())
-      .then(() => store.putBlob(TRANSCRIPTS, workspaceId, transcriptBlob(snapshot)))
-      .catch(() => {});
-    transcriptFlushes.set(workspaceId, queued);
-    return queued;
+    const queued = flushesQueued.get(workspaceId);
+    if (queued !== undefined) return queued;
+    const flush = onTranscriptQueue(workspaceId, async () => {
+      flushesQueued.delete(workspaceId);
+      const held = transcripts.get(workspaceId);
+      if (held === undefined && !pendingEvents.has(workspaceId)) return;
+      let events: SessionEvent[];
+      if (held !== undefined) events = [...held];
+      else {
+        let read: SessionEvent[] | undefined;
+        try {
+          read = await readTranscript(workspaceId);
+        } catch (e) {
+          // What was written since stays unwritten for the next flush, and the file keeps what it has. Said once
+          // until a flush lands, since every event past the threshold asks again.
+          if (!unreadSaid.has(workspaceId)) console.warn(`${e instanceof Error ? e.message : String(e)}, so nothing is written over it and its newest events wait for the next flush`);
+          unreadSaid.add(workspaceId);
+          return;
+        }
+        events = [...(read ?? []), ...(pendingEvents.get(workspaceId) ?? [])];
+        dropOldest(events);
+      }
+      unreadSaid.delete(workspaceId);
+      await writeTranscript(workspaceId, events, pendingEvents.get(workspaceId)?.length ?? 0);
+    });
+    const settled = flush.catch(() => {});
+    flushesQueued.set(workspaceId, settled);
+    return settled;
   };
 
   const capSessions = (workspaceId: string): void => {
@@ -3098,6 +3357,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   // Rows are copied at queue time, like the transcript: the store may serialise after it returns. A harness that
   // settles after its workspace was deleted must not write the document back.
+  /** Every workspace's viewed marks, by path against the blob id each file had when it was marked; kept on the session
+   * index so they outlive the host and go with the workspace. */
+  const viewedMarks = new Map<string, Record<string, string>>();
+
   const persistSessions = (workspaceId: string): Promise<void> => {
     if (!live.has(workspaceId)) return Promise.resolve();
     capSessions(workspaceId);
@@ -3118,7 +3381,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       }));
     const threads: Record<string, ThreadRecord> = {};
     for (const [threadId, { workspaceId: on, ...held }] of threadRecords) if (on === workspaceId) threads[threadId] = held;
-    const snapshot: SessionIndexRecord = { workspaceId, sessions: rows, threads };
+    const marks = viewedMarks.get(workspaceId);
+    const snapshot: SessionIndexRecord = { workspaceId, sessions: rows, threads, ...(marks !== undefined && Object.keys(marks).length > 0 ? { viewed: marks } : {}) };
     const queued = (indexFlushes.get(workspaceId) ?? Promise.resolve())
       .then(() => store.put(SESSIONS, workspaceId, snapshot))
       .catch(() => {});
@@ -3132,17 +3396,23 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   // for the debounce.
   const record = (unstamped: SessionEvent): void => {
     const event: SessionEvent = { ...unstamped, at: Date.now() };
-    let events = transcripts.get(event.workspaceId);
-    if (!events) {
-      events = [];
-      transcripts.set(event.workspaceId, events);
-    }
+    const id = event.workspaceId;
     const kept = event.type === "session.delta" && event.kind === "tool_result" && event.text.length > TOOL_RESULT_KEPT ? { ...event, text: event.text.slice(0, TOOL_RESULT_KEPT) } : event;
-    events.push(kept);
-    const had = transcriptBytes.get(event.workspaceId);
-    if (had !== undefined) transcriptBytes.set(event.workspaceId, had + eventBytes(kept));
-    trimTranscript(event.workspaceId, events);
-    if (event.type === "session.end") void flushTranscript(event.workspaceId);
+    const size = eventBytes(kept);
+    const held = transcripts.get(id);
+    if (held !== undefined) {
+      held.push(kept);
+      const had = transcriptBytes.get(id);
+      if (had !== undefined) transcriptBytes.set(id, had + size);
+      trimTranscript(id, held);
+    }
+    const pending = pendingEvents.get(id) ?? [];
+    pending.push(kept);
+    pendingEvents.set(id, pending);
+    const unwritten = (pendingBytes.get(id) ?? 0) + size;
+    pendingBytes.set(id, unwritten);
+    foldEvent(indexFor(id), kept);
+    if (event.type === "session.end" || unwritten > PENDING_FLUSH_BYTES) void flushTranscript(event.workspaceId);
     else if (event.type !== "session.delta" && !transcriptTimers.has(event.workspaceId)) {
       transcriptTimers.set(event.workspaceId, clock.schedule(() => void flushTranscript(event.workspaceId), TRANSCRIPT_FLUSH_MS));
     }
@@ -3151,25 +3421,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   /** The harness session a thread's newest start in the transcript announced: what a send resumes once the thread's
    * rows have fallen off the index cap. */
-  const startedAs = (workspaceId: string, threadId: string): string | undefined => {
-    const events = transcripts.get(workspaceId) ?? [];
-    for (let i = events.length - 1; i >= 0; i--) {
-      const e = events[i]!;
-      if (e.type === "session.start" && e.threadId === threadId) return e.sessionId;
-    }
-    return undefined;
-  };
+  const startedAs = (workspaceId: string, threadId: string): string | undefined => transcriptIndex.get(workspaceId)?.starts.get(threadId);
 
   /** Whether the thread's last turn ended with no exit code and no result: the runtime or its transport ended the
    * process (a deadline, a host restart, a nap), so the harness resumes a transcript it never finished writing. */
-  const cutBefore = (workspaceId: string, threadId: string): boolean => {
-    const events = transcripts.get(workspaceId) ?? [];
-    for (let i = events.length - 1; i >= 0; i--) {
-      const e = events[i]!;
-      if (e.type === "session.end" && e.threadId === threadId) return e.exitCode === null && !e.sawResult;
-    }
-    return false;
-  };
+  const cutBefore = (workspaceId: string, threadId: string): boolean => transcriptIndex.get(workspaceId)?.cut.get(threadId) ?? false;
 
   /** What a resumed session's turns carry, read the one way for every such fact: its own rows newest first, then,
    * past the session index cap, the newest start event of that session. The index keeps SESSION_INDEX_CAP rows per
@@ -3182,12 +3438,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const view = rows[i]!.view;
       if (view.workspaceId === workspaceId && view.claudeSessionId === resume && view[fact] !== undefined) return view[fact];
     }
-    const events = transcripts.get(workspaceId) ?? [];
-    for (let i = events.length - 1; i >= 0; i--) {
-      const e = events[i]!;
-      if (e.type === "session.start" && e.sessionId === resume && e[fact] !== undefined) return e[fact];
-    }
-    return undefined;
+    return transcriptIndex.get(workspaceId)?.facts.get(resume)?.[fact];
   };
 
   /** The folder a resumed session's harness ran in. The CLI keys a session to that folder, so a resume anywhere
@@ -3357,7 +3608,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** The whole of what a client's channel into a served workspace carries, for the reason DEVICE_OPS is a list: that
    * computer's daemon runs every other op on the computer itself, so a deny list would let an op added later reach it.
    * Each of these names the workspace it is for, and the daemon answers it inside that workspace. */
-  const WORKSPACE_FRAMES = ["pty.create", "pty.attach", "pty.detach", "pty.write", "pty.resize", "pty.kill", "pty.list", "fs.list", "fs.files", "fs.read", "fs.search", "git.status", "git.diff", "git.push", "git.pr", "git.prState", "git.prList", "ping"];
+  const WORKSPACE_FRAMES = ["pty.create", "pty.attach", "pty.detach", "pty.write", "pty.resize", "pty.kill", "pty.list", "fs.list", "fs.files", "fs.read", "fs.write", "fs.search", "git.status", "git.diff", "git.push", "git.pr", "git.prState", "git.prList", "ping"];
   /** And the host's own guest road, which answers the sessions that computer relays by the id it gave them. */
   const GUEST_ROAD_FRAMES = [...WORKSPACE_FRAMES, "guest.watch", "guest.reply", "guest.close"];
 
@@ -3737,6 +3988,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         ...(reason !== undefined ? { reason } : {}),
         ...(entry.wakeAsk !== undefined ? { wakeAsk: entry.wakeAsk } : {}),
         ...(idleAt !== undefined ? { idleAt } : {}),
+        ...(entry.checkout !== undefined ? { checkout: entry.checkout } : {}),
       },
     });
   };
@@ -3846,6 +4098,39 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const pushStatus = async (entry: LiveWorkspace): Promise<void> => {
     if (entry.record.phase !== "running") return;
     await emitStatus(entry, reachOf(entry));
+  };
+
+  /** The copy's checkout read through its own daemon, kept on the entry and pushed on its status: at a turn's end, on
+   * view and after a write, and never on a timer. Within CHECKOUT_TTL_MS the fact held answers unless the caller
+   * forces a read. A machine that is not running is asked nothing unless its computer answers for it, which reads a
+   * stopped copy off its files; one that cannot answer keeps its last fact and the time git gave it. */
+  const readCheckout = (entry: LiveWorkspace, force: boolean): Promise<Checkout | undefined> => {
+    const held = entry.checkout;
+    if (!force && held !== undefined && clock.now() - held.readAt < CHECKOUT_TTL_MS) return Promise.resolve(held);
+    if (entry.record.phase !== "running" && servedByItsComputer(entry) === undefined) return Promise.resolve(held);
+    if (entry.checkoutReading !== undefined) return entry.checkoutReading;
+    const reading = (async (): Promise<Checkout | undefined> => {
+      try {
+        const said = GitStatusReply.parse(await withDaemon(entry, ask => ask({ op: "git.status", cwd: checkoutOf(entry.record) })));
+        entry.checkout = {
+          branch: said.branch.head,
+          ahead: said.branch.ahead,
+          behind: said.branch.behind,
+          changed: said.entries.filter(e => e.xy !== "!!").length,
+          ...(said.editsUnread === true ? { editsUnread: true } : {}),
+          ...(said.countsUnknown === true ? { countsUnknown: true } : {}),
+          readAt: clock.now(),
+        };
+        await emitStatus(entry, entry.record.phase === "running" ? reachOf(entry) : "napping");
+      } catch {
+        // A copy git could not read keeps the last fact it gave; the time on it says how old it is.
+      }
+      return entry.checkout;
+    })().finally(() => {
+      delete entry.checkoutReading;
+    });
+    entry.checkoutReading = reading;
+    return reading;
   };
 
   /** The line the machine's row carries while the runtime is doing something to its daemon; undefined clears it. */
@@ -4498,17 +4783,22 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     napRefusals.delete(id);
     transcripts.delete(id);
     transcriptBytes.delete(id);
+    pendingEvents.delete(id);
+    pendingBytes.delete(id);
+    transcriptIndex.delete(id);
     daemonNotes.delete(id);
     for (const [handleId, s] of sessions) if (s.view.workspaceId === id) sessions.delete(handleId);
     for (const [threadId, held] of threadRecords) if (held.workspaceId === id) threadRecords.delete(threadId);
+    viewedMarks.delete(id);
     cancelFlush(id);
-    await transcriptFlushes.get(id);
-    transcriptFlushes.delete(id);
+    await transcriptQueue.get(id);
+    transcriptQueue.delete(id);
     await indexFlushes.get(id);
     indexFlushes.delete(id);
     await store.delete(WORKSPACES, id);
     await store.deleteBlob(TRANSCRIPTS, id);
     await store.deleteBlob(TRANSCRIPT_HEADS, id);
+    await store.deleteBlob(TRANSCRIPT_INDEX, id);
     await store.delete(WORKSPACE_NAMES, id);
     await store.delete(SESSIONS, id);
     await store.delete(CREATES, `workspace/${id}`);
@@ -5007,19 +5297,24 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // A state file an older build wrote holds the transcripts inside it: each is written to its files whole, and
       // only then is the state file written once without them.
       const inside = (await store.list(TRANSCRIPTS)) as TranscriptRecord[];
-      for (const t of inside) await moveTranscript(t);
-      await Promise.all(inside.map(t => store.delete(TRANSCRIPTS, t.workspaceId)));
-      for (const id of await store.keys(WORKSPACES)) {
-        if (transcripts.has(id)) continue;
-        const events = await readTranscript(id);
-        if (events === undefined) continue;
-        transcripts.set(id, events);
-        trimTranscript(id, events);
+      // One whose files did not read stays in the state file, whole, for the next boot to move.
+      const moved: string[] = [];
+      for (const t of inside) {
+        try {
+          await moveTranscript(t);
+          moved.push(t.workspaceId);
+        } catch (e) {
+          console.warn(`${e instanceof Error ? e.message : String(e)}, so it stays in the state file for the next boot to move`);
+        }
       }
+      await Promise.all(moved.map(id => store.delete(TRANSCRIPTS, id)));
+      for (const id of await store.keys(WORKSPACES)) if (!transcriptIndex.has(id)) await loadIndex(id);
       const left: { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnLive?: TurnLive; run?: string; turnToken?: string; scopeDeviceId?: string }[] = [];
       for (const raw of await store.list(SESSIONS)) {
         const index = raw as SessionIndexRecord;
         if (!live.has(index.workspaceId)) continue;
+        const marks = Object.entries(index.viewed ?? {}).filter((pair): pair is [string, string] => typeof pair[1] === "string");
+        if (marks.length > 0) viewedMarks.set(index.workspaceId, Object.fromEntries(marks));
         for (const [threadId, held] of Object.entries(index.threads ?? {})) {
           if (typeof held?.harness !== "string") continue;
           const placed = ThreadPlacement.safeParse(held.section);
@@ -6047,6 +6342,84 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       });
     },
 
+    async checkout(id, origin) {
+      const entry = await entryOf(id, origin);
+      const checkout = await readCheckout(entry, false);
+      return checkout === undefined ? {} : { checkout };
+    },
+
+    async discard({ workspaceId, path }, origin) {
+      const entry = await entryOf(workspaceId, origin);
+      await copyBlocked(entry);
+      const put = GitDiscardReply.parse(await withDaemon(entry, ask => ask({ op: "git.discard", cwd: checkoutOf(entry.record), path })));
+      await readCheckout(entry, true);
+      return put;
+    },
+
+    async commit({ workspaceId, message, paths }, origin) {
+      spawnGuard("commit", origin);
+      const entry = await entryOf(workspaceId, origin);
+      await copyBlocked(entry);
+      const cwd = checkoutOf(entry.record);
+      const made = GitCommitReply.parse(
+        await withDaemon(entry, async ask => {
+          // Every changed file, each untracked one on its own, as the Changes pane lists them.
+          const named = paths ?? GitDiffReply.parse(await ask({ op: "git.diff", cwd, scope: "head" })).files.map(f => f.path);
+          if (paths === undefined && named.length === 0) throw new Error(cleanCheckoutLine(entry.record.name));
+          return ask({ op: "git.commit", cwd, message, paths: named });
+        }),
+      );
+      await readCheckout(entry, true);
+      return made;
+    },
+
+    async commitDraft({ workspaceId, paths }, origin) {
+      spawnGuard("commit", origin);
+      if (paths !== undefined && paths.length === 0) return { message: null, note: DRAFT_NOTES.nothing };
+      const entry = await entryOf(workspaceId, origin);
+      await copyBlocked(entry);
+      // The workspace's newest thread drafts, on its own agent and from the task it was opened with; a workspace
+      // with no thread yet drafts on the default agent from the diff alone.
+      const rows = [...sessions.values()].map(s => s.view).filter(v => v.workspaceId === workspaceId).sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0));
+      const newest = rows.at(-1);
+      const opening = newest?.threadId === undefined ? undefined : rows.find(v => v.threadId === newest.threadId)?.prompt;
+      const named = newest?.harness ?? DEFAULT_AGENT.id;
+      if (adapters[named] === undefined) return { message: null, note: DRAFT_NOTES.noAgent };
+      const { harness, adapter } = adapterFor(entry, named);
+      if (adapter.draftFor === undefined) return { message: null, note: DRAFT_NOTES.noAgent };
+      const diff = GitDiffReply.parse(await withDaemon(entry, ask => ask({ op: "git.diff", cwd: checkoutOf(entry.record), scope: "head", ...(paths !== undefined ? { paths } : {}) })));
+      const table = harnessCatalog(harness);
+      const model = smallestModel(table === undefined ? undefined : await catalogOn(table, entry, adapter));
+      // The question rides a file on the machine, since a diff is longer than one exec may carry, and only the
+      // login that wrote it may read it; it goes once the answer is in, whatever the answer was.
+      const promptFile = `/tmp/wsp-draft-${randomBytes(6).toString("hex")}.txt`;
+      const question = draftPrompt(cutDiff(diff.files.map(f => f.patch).join("\n")), opening);
+      const put = await putFiles(entry.machine, [{ path: promptFile, text: question }], { before: ["umask 077"] });
+      if (put.exitCode !== 0) return { message: null, note: DRAFT_NOTES.noAnswer };
+      try {
+        const answer = await adapter.draftFor(
+          { promptFile, ...(model !== undefined ? { model } : {}) },
+          command => entry.machine.exec(command, { timeoutMs: TITLE_MAKE_TIMEOUT_MS }).then(res => res.stdout),
+        );
+        const message = answer === null ? null : commitMessage(answer);
+        return message === null ? { message: null, note: DRAFT_NOTES.noAnswer } : { message };
+      } finally {
+        await entry.machine.exec(`rm -f ${shellQuote(promptFile)}`).catch(() => undefined);
+      }
+    },
+
+    async viewed({ workspaceId, path, blob }, origin) {
+      await entryOf(workspaceId, origin);
+      const marks = { ...(viewedMarks.get(workspaceId) ?? {}) };
+      if (path === undefined) return { viewed: marks };
+      if (typeof blob === "string") marks[path] = blob;
+      else delete marks[path];
+      viewedMarks.set(workspaceId, marks);
+      await persistSessions(workspaceId);
+      bus.emit({ type: "workspace.viewed", workspaceId, viewed: marks });
+      return { viewed: marks };
+    },
+
     async daemonReach(id, origin) {
       const entry = await entryOf(id, origin);
       return moduleOf(entry.record.kind).daemonRoad(entry);
@@ -6688,6 +7061,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const runTurn = (t: {
     entry: LiveWorkspace;
     view: SessionView;
+    /** How much of itself a turn re-opened after a restart has written. A new turn has written nothing. */
+    written?: TurnWritten;
     /** The thread this turn runs on, which every row the runtime writes carries. */
     threadId: string;
     turnId: string;
@@ -6726,26 +7101,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   }): SessionHandle => {
     const { entry, view, threadId, turnId, opening, outcome, notify, notifyBy, notifyRoad, turnToken, scopeDeviceId } = t;
     const workspaceId = entry.record.id;
-    const written = transcripts.get(workspaceId) ?? [];
-    /** The last row this turn wrote of a kind: the transcript holds every workspace's rows in the order they were
-     * written, so a live turn's are at its tail. */
-    const lastOf = <T extends SessionEvent["type"]>(type: T): Extract<SessionEvent, { type: T }> | undefined => {
-      for (let i = written.length - 1; i >= 0; i--) {
-        const e = written[i]!;
-        if (e.type === type && e.turnId === turnId) return e as Extract<SessionEvent, { type: T }>;
-      }
-      return undefined;
-    };
-    // How many of this turn's lines are written, from the stamp the last surviving one carries rather than from how
-    // many survive: the transcript is capped per workspace and drops its oldest rows, so counting them would read a
-    // turn whose head has been evicted as shorter than it was and write its tail a second time.
-    const deltasWritten = lastOf("session.delta")?.line ?? 0;
+    const { lines: deltasWritten, reply: recordedReply, started: startWritten } = t.written ?? { lines: 0, started: false };
     // The reply and its line to the parent go together, so one gate stands for both.
-    const recordedReply = lastOf("session.done")?.result.status;
     let replyRecorded = recordedReply !== undefined;
-    // A turn with a line or a reply already written had its start written too, whether or not the cap still holds it:
-    // a second start row at the tail of the transcript would sit after the work it opened.
-    let startRecorded = deltasWritten > 0 || replyRecorded || lastOf("session.start") !== undefined;
+    let startRecorded = startWritten;
     let deltas = deltasWritten;
     let replaying = deltasWritten;
     let ended = false;
@@ -7108,6 +7467,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // and the harness's own store for it goes with the machine, so the read would reach a machine that is being
       // taken down and say so in the log for every thread on it.
       if (!ended) void refreshTitle(view, true);
+      // The turn may have moved the branch or the files, so the tile's line is read again now rather than on a timer.
+      if (!ended) void readCheckout(entry, true);
       if (t.imagesDir !== undefined) dropImages(entry, t.imagesDir);
     };
     // The reload a client runs on session.end shares that read rather than starting a second.
@@ -7194,10 +7555,20 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       return "unreached";
     }
     if (opened === "gone") return "gone";
+    // The turn reads how much of itself is written off the transcript it is handed, the copy this open answers. A file
+    // that did not read says nothing about the run, so the row is left running as it was.
+    let written: SessionEvent[];
+    try {
+      written = await openTranscript(view.workspaceId);
+    } catch (e: unknown) {
+      console.warn(`thread ${threadId.slice(0, 8)} on ${view.workspaceId} was left running: ${e instanceof Error ? e.message : String(e)}`);
+      return "unreached";
+    }
     try {
       runTurn({
         entry,
         view,
+        written: turnWritten(written, s.turnId),
         threadId,
         turnId: s.turnId,
         ...(s.notify !== undefined ? { notify: s.notify } : {}),
@@ -7609,7 +7980,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // A thread reads the transcript of a workspace its tree stands on, its lead's included, and of its own tree's
       // workspaces; any other it names reads as every workspace verb reads it, so it learns nothing by asking.
       if (!treeStandsOn(workspaceId, origin)) await entryOf(workspaceId, origin);
-      return (transcripts.get(workspaceId) ?? []).filter(e => drivesThread(e.threadId, origin)).map(e => ({ ...e }));
+      return (await openTranscript(workspaceId)).filter(e => drivesThread(e.threadId, origin)).map(e => ({ ...e }));
     },
 
     async interrupt(sessionId, origin) {
@@ -7761,10 +8132,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const words = query.trim().toLowerCase();
       if (words === "") return { hits: [] };
       const found: { hit: SessionSearchResult["hits"][number]; last: number }[] = [];
-      for (const [workspaceId, events] of transcripts) {
+      for (const [workspaceId, index] of transcriptIndex) {
         // The workspaces a caller reads the transcript of, by the rule history reads them by.
         if (!treeStandsOn(workspaceId, origin) && !(await entryOf(workspaceId, origin).then(() => true, () => false))) continue;
-        for (const [threadId, { lines, last }] of threadWords(events, id => drivesThread(id, origin))) {
+        for (const [threadId, { lines, last }] of index.words) {
+          if (lines.length === 0 || !drivesThread(threadId, origin)) continue;
           // The snippet stays inside the one message that holds the words, so it never runs one message into the next.
           const text = lines.find(line => line.toLowerCase().includes(words));
           if (text !== undefined) found.push({ hit: { workspaceId, threadId, snippet: snippetAround(text, text.toLowerCase().indexOf(words), words.length) }, last });
@@ -7834,7 +8206,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         return { turns: 0, files: Number(back["files"] ?? 0) };
       }
 
-      const events = transcripts.get(workspaceId) ?? [];
+      // A copy, read for the turns and their checkpoints alone: the cut below takes its own copy inside the queue.
+      const events = [...(await openTranscript(workspaceId))];
       const order: string[] = [];
       for (const e of events) if (e.threadId === threadId && e.turnId !== undefined && !order.includes(e.turnId)) order.push(e.turnId);
       const at = opts.turnId === undefined ? -1 : order.indexOf(opts.turnId);
@@ -7877,10 +8250,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       threadRecords.set(threadId, record);
       if (adapter.resumesAt === true) record.resumeAt = kept!.anchor!;
       if (before !== undefined) record.rewound = { before, at: clock.now() };
-      if (cutsConversation) {
-        // Spliced rather than replaced, as forget does: a turn of another thread on this workspace holds the array.
-        for (let i = events.length - 1; i >= 0; i--) if (events[i]!.threadId === threadId && cut.includes(events[i]!.turnId ?? "")) events.splice(i, 1);
-      }
+      if (cutsConversation) await dropFromTranscript(workspaceId, e => e.threadId === threadId && cut.includes(e.turnId ?? ""));
       await done();
       return { turns: cutsConversation ? cut.length : 0, ...(moved !== undefined ? { files: Number(moved["files"] ?? 0) } : {}) };
     },
@@ -7898,17 +8268,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // A record is written once a turn was handed over, so a thread with a record and no row left is one whose
       // turns ran and fell off the index cap; the rows alone would read it as a thread that never ran.
       if (threadRan(held.map(([, s]) => s.view)) || (held.length === 0 && record !== undefined)) throw Object.assign(new Error(threadForgetRefusal(threadId)), { kind: "conflict" });
+      // A transcript that does not read refuses here, before anything is changed.
+      await openTranscript(workspaceId);
       // A launch that never got going can still have landed the files its send carried.
       await dropThreadFiles(entry, [threadId]);
       for (const [id] of held) sessions.delete(id);
       threadRecords.delete(threadId);
-      // Spliced rather than replaced: a turn of another thread on this workspace holds the array itself, and its
-      // rows would go to a copy nothing reads.
-      const events = transcripts.get(workspaceId) ?? [];
-      for (let i = events.length - 1; i >= 0; i--) if (events[i]!.threadId === threadId) events.splice(i, 1);
-      transcriptBytes.delete(workspaceId);
+      await dropFromTranscript(workspaceId, e => e.threadId === threadId);
       await persistSessions(workspaceId);
-      await flushTranscript(workspaceId);
     },
   };
 
@@ -9515,6 +9882,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         // A pause the provider refused stays on the row as long as it stands, for the same reason.
         ...(deleteLine(e) ?? e.wakeSaid ?? e.record.wakeRefused ?? napRefusedReason(e)) !== undefined ? { reason: (deleteLine(e) ?? e.wakeSaid ?? e.record.wakeRefused ?? napRefusedReason(e))! } : {},
         ...(e.wakeAsk !== undefined ? { wakeAsk: e.wakeAsk } : {}),
+        ...(e.checkout !== undefined ? { checkout: e.checkout } : {}),
         ...(e.record.phase === "running" && idle.idleAt(e.record.id) !== undefined ? { idleAt: idle.idleAt(e.record.id)! } : {}),
         ...(awayLine(e.record) !== undefined ? { away: awayLine(e.record)! } : {}),
         ...(unreachedOf(e) !== undefined ? { unreached: unreachedOf(e)! } : {}),
@@ -9845,8 +10213,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         delete b.record.heldBy;
         await store.put(BUILDERS, b.record.id, b.record);
       }
-      for (const id of [...transcriptTimers.keys()]) void flushTranscript(id);
-      await Promise.all([...transcriptFlushes.values(), ...indexFlushes.values()]);
+      for (const id of new Set([...transcriptTimers.keys(), ...pendingEvents.keys()])) void flushTranscript(id);
+      await Promise.all([...transcriptQueue.values(), ...indexFlushes.values()]);
     },
   };
 }

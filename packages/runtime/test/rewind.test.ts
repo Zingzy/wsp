@@ -154,7 +154,7 @@ describe("a checkpoint at every turn's end", () => {
     await run.finished;
     await settle();
     const threadId = run.view().threadId!;
-    expect(daemon.frames).toEqual([{ op: "git.checkpoint", cwd: daemon.checkout(), thread: threadId, turn: run.turnId }]);
+    expect(daemon.frames.filter(f => f["op"] === "git.checkpoint")).toEqual([{ op: "git.checkpoint", cwd: daemon.checkout(), thread: threadId, turn: run.turnId }]);
     const kept = (await rt!.sessions.history(ws.id)).filter(e => e.type === "session.checkpoint");
     expect(kept).toMatchObject([{ type: "session.checkpoint", turnId: run.turnId, threadId, ref: `refs/wsp/checkpoints/stub-1/${threadId}/${run.turnId}`, anchor: "a1" }]);
   });

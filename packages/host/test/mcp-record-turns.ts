@@ -323,7 +323,7 @@ const CLAUDE = {
   ],
   contextWindows: [],
   permissionModes: [
-    { value: "plan", label: "Plan" },
+    { value: "acceptEdits", label: "Accept edits" },
     { value: "bypassPermissions", label: "Bypass \u0085", isDefault: true },
   ],
   steers: true,

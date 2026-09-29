@@ -22,9 +22,9 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { chromium } from "playwright";
-import { fixtureCloud, fixtureFleet, fixtureFolders, fixtureRepos, fixtureState, HERE_AGENTS, HERE_HOST_ITEMS, HERE_PROJECT_FILES } from "./fixture-state.mjs";
+import { fixtureChanges, fixtureCloud, fixtureFleet, fixtureFolders, fixtureRepos, fixtureState, HERE_AGENTS, HERE_HOST_ITEMS, HERE_PROJECT_FILES } from "./fixture-state.mjs";
 import { BROWSER_ARGS, freePort, REPO, startHost, stopHost, WEB_DIR, whatIsNotBuilt } from "./host.mjs";
-import { writeStandIn, writeWorkFolder } from "./lab-home.mjs";
+import { leaveMidWork, writeStandIn, writeWorkFolder } from "./lab-home.mjs";
 import { indexMarkdown, readSurfaces, shotPlan } from "./plan.mjs";
 import { APP_UP, failuresToCheck, STILL_LOADING } from "./ready.mjs";
 
@@ -176,6 +176,11 @@ async function shoot(context, shot, base, out, token) {
     else if (step.focus !== undefined) await page.locator(step.focus).first().focus({ timeout: 15_000 });
     else if (step.menu !== undefined) await page.locator(step.menu).first().click({ button: "right", timeout: 15_000 });
     else if (step.hover !== undefined) await page.locator(step.hover).first().hover({ timeout: 15_000 });
+    else if (step.file !== undefined) {
+      await page.locator('[data-composer-file-input="true"]').first().setInputFiles({ name: step.file.name, mimeType: "application/octet-stream", buffer: Buffer.alloc(step.file.bytes, 0x61) });
+      // The composer reads a file before it holds it, so the next step waits for the file to stand in the box.
+      await page.locator(`[data-composer-files] [data-chat-file="${step.file.name}"], [data-composer-refused-file="${step.file.name}"]`).first().waitFor({ state: "visible", timeout: 15_000 });
+    }
     else await page.locator(step.click).first().click({ timeout: 15_000 });
   }
   if (shot.wait !== undefined) await page.locator(shot.wait).first().waitFor({ state: "visible", timeout: 15_000 });
@@ -202,8 +207,13 @@ function fixtureOn(home, fixture = "mac-in-use") {
       mkdirSync(dirname(join(project.path, file)), { recursive: true });
       writeFileSync(join(project.path, file), "");
     }
+    // The project's own files, committed, so the checkout starts clean: the Changes pane lists every untracked file.
+    const as = ["-c", "user.name=notes", "-c", "user.email=notes@example.com", "-c", "commit.gpgsign=false"];
+    execFileSync("git", [...as, "add", "-A"], { cwd: project.path, stdio: "ignore" });
+    execFileSync("git", [...as, "commit", "-q", "-m", "the project's files"], { cwd: project.path, stdio: "ignore" });
     execFileSync("git", ["remote", "add", "origin", project.remote], { cwd: project.path, stdio: "ignore" });
   }
+  for (const dest of fixtureChanges(fixture, state)) leaveMidWork(dest);
   return state;
 }
 

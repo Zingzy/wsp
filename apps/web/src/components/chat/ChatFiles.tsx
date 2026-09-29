@@ -6,11 +6,12 @@
 // image bytes this tab does not hold, a transcript replayed after a reload or
 // one another client sent, has the runtime's record instead of pixels and
 // draws the same muted mono line the command line prints.
-import { FileTextIcon, XIcon } from "lucide-react";
+import { FileTextIcon, FileXIcon, XIcon } from "lucide-react";
 import { attachmentLine, fmtBytes, isImage, type AttachmentRecord } from "@wsp/protocol";
 import { Button } from "../ui/button";
 import { Dialog, DialogPopup, DialogTitle, DialogTrigger } from "../ui/dialog";
 import type { ComposerFile } from "./composerFiles";
+import { COMPOSER_WORDS } from "./composerWords";
 
 function RemoveButton({ label, title, onRemove }: { label: string; title: string; onRemove: () => void }) {
   return (
@@ -102,5 +103,22 @@ export function ChatFileRow({ records, files }: { records: ReadonlyArray<Attachm
         </div>
       ) : null}
     </>
+  );
+}
+
+/** A file the composer turned away: its name and the word Refused in the refusal's ink, the sentence why on its hover,
+ * and its own remove. It is never sent. */
+export function ChatRefusedFile({ name, why, onRemove }: { name: string; why: string; onRemove: () => void }) {
+  return (
+    <div className="group/thumb relative" data-composer-refused-file={name} title={why}>
+      <div className="flex h-14 max-w-48 items-center gap-2 rounded-lg border border-border/60 ps-2.5 pe-3">
+        <FileXIcon aria-hidden className="size-4 shrink-0 text-error-foreground" />
+        <div className="flex min-w-0 flex-col">
+          <span className="truncate text-[13px] leading-5 text-muted-foreground">{name}</span>
+          <span className="text-[11px] leading-4 text-error-foreground">{COMPOSER_WORDS.fileRefused}</span>
+        </div>
+      </div>
+      <RemoveButton label={`Remove ${name}`} title={`Remove ${name}`} onRemove={onRemove} />
+    </div>
   );
 }

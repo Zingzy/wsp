@@ -142,7 +142,7 @@ describe("buildCommand", () => {
   });
 
   it("every mode that can prompt routes its prompts here", () => {
-    for (const mode of ["acceptEdits", "plan", "manual", "dontAsk", "auto"]) {
+    for (const mode of ["acceptEdits", "manual", "dontAsk", "auto"]) {
       expect(buildCommand({ sessionId, permissionMode: mode })).toContain("--permission-prompt-tool stdio");
     }
   });
@@ -173,7 +173,7 @@ describe("buildCommand", () => {
   it("rejects a picked value that is not a plain slug", () => {
     expect(() => buildCommand({ sessionId, model: "opus; rm -rf /" })).toThrow(/model/);
     expect(() => buildCommand({ sessionId, effort: "" })).toThrow(/effort/);
-    expect(() => buildCommand({ sessionId, permissionMode: "plan mode" })).toThrow(/permissionMode/);
+    expect(() => buildCommand({ sessionId, permissionMode: "accept edits" })).toThrow(/permissionMode/);
     expect(buildCommand({ sessionId, model: "claude-opus-5[1m]" })).toContain("--model 'claude-opus-5[1m]'");
   });
 

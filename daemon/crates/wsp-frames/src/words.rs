@@ -194,6 +194,32 @@ pub fn nothing_ahead(branch: &str, base: &str) -> String {
     format!("{branch} has no commits that {base} lacks, so there is nothing to bring back")
 }
 
+/// What a commit or a discard is refused with while another git in the same copy holds its index, after waiting once.
+pub const COPY_BUSY: &str = "the copy is busy: its agent's git holds the index; try again in a moment";
+
+/// What a commit is refused with where git knows no author: wsp sets no identity anywhere, so the fix is the copy's.
+pub fn no_git_identity(name: &str) -> String {
+    format!("no git identity in {name}: run `git config --global user.name` and `user.email` in it")
+}
+
+/// What a discard or a commit naming a file git sees no change in is refused with.
+pub fn no_change(path: &str) -> String {
+    format!("{path} has no change")
+}
+
+/// What a pane's save of more than the write cap is refused with.
+pub fn too_large_to_write(cap: u64) -> String {
+    format!("that is more than {} MB, the most a pane saves", cap / (1024 * 1024))
+}
+
+/// What a commit naming no file is refused with.
+pub const NOTHING_TO_COMMIT: &str = "nothing to commit: no file was named";
+
+/// What a commit git refused is refused with: git's own last line, which is a hook's when a hook said no.
+pub fn commit_refused(said: &str) -> String {
+    format!("the commit was refused: {said}")
+}
+
 /// What a bring back in a checkout with nowhere to push is refused with.
 pub const NO_REMOTE: &str = "this project has no remote to push to";
 

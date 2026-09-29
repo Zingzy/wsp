@@ -50,7 +50,7 @@ describe("daemon-fs wrapper over a wire", () => {
     const diff = await gitDiff(w, "repo", "staged");
     expect(diff.files).toEqual([]);
     expect(w.calls[5]).toEqual(["git.diff", { cwd: "repo", scope: "staged" }]);
-    await gitDiff(w, "repo", "branch", "src");
+    await gitDiff(w, "repo", "branch", { path: "src" });
     expect(w.calls[6]).toEqual(["git.diff", { cwd: "repo", scope: "branch", path: "src" }]);
   });
 

@@ -264,12 +264,10 @@ export function terminalInputRefusal(pane: TerminalPaneState): string | null {
   }
 }
 
-/** The one line the screen carries under the composer while this workspace's link is not open, so the box never
- * sits there looking live over a link nobody can reach. It is the pane's own title, not a second sentence: the
- * states that belong to the machine (paused, waking, gone, a computer that is not answering) are left out, since
- * the row's state word and the composer's held send already carry those, and so is a link still inside its
- * first-answer bound, which is not down. It is drawn beside the workspace it is about and nowhere else: the same
- * sentence in the sidebar's corner slot read as a line about nothing, naming no workspace. */
+/** The sentence a resting tile's hover carries while its workspace's link is not open. It is the pane's own title,
+ * not a second sentence: the states that belong to the machine (paused, waking, gone, a computer that is not
+ * answering) are left out, since the row's state word and the composer's held send already carry those, and so is
+ * a link still inside its first-answer bound, which is not down. */
 export function linkDownLine(pane: TerminalPaneState): string | null {
   switch (pane.kind) {
     case "unanswered":
@@ -290,5 +288,23 @@ export function linkDownLine(pane: TerminalPaneState): string | null {
       const _exhaustive: never = pane;
       return null;
     }
+  }
+}
+
+/** The word a resting tile wears in its slot while its workspace's link is down, one per kind of down. */
+export const LINK_DOWN_WORDS = { reconnecting: "Reconnecting", unanswered: "Unreachable", refused: "Refused" } as const;
+
+/** That word for a pane, or null while the link is not down. */
+export function linkDownWord(pane: Pick<TerminalPaneState, "kind">): string | null {
+  switch (pane.kind) {
+    case "reconnecting":
+      return LINK_DOWN_WORDS.reconnecting;
+    case "unanswered":
+      return LINK_DOWN_WORDS.unanswered;
+    case "refused":
+    case "reauth":
+      return LINK_DOWN_WORDS.refused;
+    default:
+      return null;
   }
 }

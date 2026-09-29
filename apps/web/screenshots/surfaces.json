@@ -208,12 +208,129 @@
         "390:key:Escape",
         "390:key:Escape",
         "composer-mode=fast",
-        "composer-mode=plan",
         "testid=composer-editor",
-        "type:plan the move to the new billing api"
+        "type:move the billing api over"
       ],
-      "wait": "composer-mode=plan",
+      "wait": "composer-mode=fast",
       "settleMs": 700
+    },
+    {
+      "name": "composer-held-hover",
+      "at": "/",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:redirect",
+        "390:key:Escape",
+        "390:key:Escape",
+        "testid=composer-editor",
+        "type:/",
+        "key:Escape",
+        "hover:send-held"
+      ],
+      "wait": "slot=tooltip-positioner",
+      "settleMs": 700
+    },
+    {
+      "name": "composer-held-flyout",
+      "at": "/",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:redirect",
+        "390:key:Escape",
+        "390:key:Escape",
+        "testid=composer-editor",
+        "type:/",
+        "key:Escape",
+        "key:Enter"
+      ],
+      "wait": "notice",
+      "settleMs": 700
+    },
+    {
+      "name": "composer-refused-chip",
+      "at": "/",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:redirect",
+        "390:key:Escape",
+        "390:key:Escape",
+        "testid=composer-editor",
+        "type:read the manual and sum it up",
+        "file:manual.pdf:12582912"
+      ],
+      "wait": "composer-refused-file=manual.pdf",
+      "settleMs": 700
+    },
+    {
+      "name": "composer-menu-empty",
+      "at": "/",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:redirect",
+        "390:key:Escape",
+        "390:key:Escape",
+        "testid=composer-editor",
+        "type:#zzzz"
+      ],
+      "wait": "composer-menu-note",
+      "settleMs": 700
+    },
+    {
+      "name": "composer-queue-one",
+      "at": "/",
+      "fixture": "tiles",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:cart",
+        "390:key:Escape",
+        "390:key:Escape",
+        "testid=composer-editor",
+        "type:and check the rounding on refunds",
+        "file:refund-cases.md:640",
+        "key:Enter"
+      ],
+      "wait": "queued-id",
+      "settleMs": 800
+    },
+    {
+      "name": "composer-queue-several",
+      "at": "/",
+      "fixture": "tiles",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:cart",
+        "390:key:Escape",
+        "390:key:Escape",
+        "testid=composer-editor",
+        "type:and check the rounding on refunds",
+        "file:refund-cases.md:640",
+        "key:Enter",
+        "type:then run the cart tests",
+        "key:Enter",
+        "type:open a pull request once they pass",
+        "key:Enter"
+      ],
+      "wait": "queued-id",
+      "settleMs": 800
+    },
+    {
+      "name": "composer-glass",
+      "at": "/",
+      "mac": true,
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:redirect",
+        "390:key:Escape"
+      ],
+      "wait": "testid=composer-editor",
+      "settleMs": 800
     },
     {
       "name": "machine",
@@ -1249,6 +1366,51 @@
       "settleMs": 800
     },
     {
+      "name": "diff-changes",
+      "at": "/",
+      "fixture": "changes",
+      "widths": [1440, 390],
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:redirect",
+        "390:key:Escape",
+        "390:key:ControlOrMeta+Alt+b",
+        "surface-launch=diff"
+      ],
+      "wait": "changed-files",
+      "settleMs": 1200
+    },
+    {
+      "name": "diff-commit-box",
+      "at": "/",
+      "fixture": "changes",
+      "widths": [1440, 390],
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:redirect",
+        "390:key:Escape",
+        "390:key:ControlOrMeta+Alt+b",
+        "surface-launch=diff",
+        "diff-commit"
+      ],
+      "wait": "commit-box",
+      "settleMs": 2500
+    },
+    {
+      "name": "tiles-checkout",
+      "at": "/",
+      "fixture": "changes",
+      "widths": [1440, 390],
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger"
+      ],
+      "wait": "tile-count",
+      "settleMs": 1200
+    },
+    {
       "name": "long-prompt",
       "at": "/",
       "fixture": "long-prompt",
@@ -1573,6 +1735,71 @@
         1440,
         390
       ]
+    },
+    {
+      "name": "settings-editor-open",
+      "at": "/",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "k=settings-row",
+        "k=settings-general",
+        "k=editor"
+      ],
+      "wait": "slot=select-positioner",
+      "widths": [
+        1440,
+        390
+      ],
+      "settleMs": 600
+    },
+    {
+      "name": "transparency-off-mac",
+      "at": "/",
+      "steps": [
+        "k=settings-row",
+        "k=settings-appearance",
+        "k=transparency",
+        "key:Escape",
+        "row-id=thread:redirect"
+      ],
+      "wait": "testid=composer-editor",
+      "mac": true,
+      "fresh": true,
+      "widths": [
+        1440
+      ]
+    },
+    {
+      "name": "transparency-on-mac",
+      "at": "/",
+      "steps": [
+        "row-id=thread:redirect"
+      ],
+      "wait": "testid=composer-editor",
+      "mac": true,
+      "widths": [
+        1440
+      ]
+    },
+    {
+      "name": "settings-computer-threads",
+      "at": "/",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "k=settings-row",
+        "k=settings-computers",
+        "place-row=here"
+      ],
+      "wait": "settings-card=threads",
+      "settleMs": 700,
+      "widths": [
+        1440,
+        390
+      ],
+      "fixture": "tiles",
+      "height": 3400
     }
   ]
 }

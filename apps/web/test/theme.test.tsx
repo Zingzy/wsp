@@ -6,7 +6,7 @@ import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_PREFERENCES } from "@wsp/protocol";
 import { useStore } from "../src/protocol/store.js";
-import { SYSTEM_DARK_QUERY, applyTheme, useThemeEffect } from "../src/settings/theme.js";
+import { SOLID_CLASS, SYSTEM_DARK_QUERY, applyTheme, useThemeEffect, useTransparencyEffect } from "../src/settings/theme.js";
 import { SIDE_DEFAULT } from "../src/themes/index.js";
 
 const isDark = () => document.documentElement.classList.contains("dark");
@@ -119,5 +119,16 @@ describe("the theme", () => {
     act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, theme: "light", lightTheme: "linen" } }));
     expect(setTheme).toHaveBeenLastCalledWith("light");
     expect(setTheme.mock.calls.every(([word]) => ["system", "light", "dark"].includes(word as string))).toBe(true);
+  });
+});
+
+describe("transparency", () => {
+  it("the html carries the solid class while the record's transparency is off, and drops it when it is on again", () => {
+    renderHook(() => useTransparencyEffect());
+    expect(document.documentElement.classList.contains(SOLID_CLASS)).toBe(false);
+    act(() => useStore.setState(s => ({ preferences: { ...s.preferences, transparency: false } })));
+    expect(document.documentElement.classList.contains(SOLID_CLASS)).toBe(true);
+    act(() => useStore.setState(s => ({ preferences: { ...s.preferences, transparency: true } })));
+    expect(document.documentElement.classList.contains(SOLID_CLASS)).toBe(false);
   });
 });

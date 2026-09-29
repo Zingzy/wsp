@@ -13,7 +13,7 @@ import { DAEMON_TOKEN_PATH } from "@wsp/protocol";
 import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET, daemonTokenFor, rotateDaemonTokenScript } from "../src/daemon-token.js";
 import { writeDaemonRootsScript } from "../src/daemon-roots.js";
 import { harnessCatalog } from "../src/harness-catalog.js";
-import { copyKey, CATALOG_TTL_MS, DAEMON_REVIVE_AGAIN_MS, GRACE_MS, GUEST_LOGIN_ENV, PORT_PROBE_BODY_CAP, TOOL_RESULT_KEPT, TRANSCRIPT_BYTES, TRANSCRIPT_FLUSH_MS, createRuntime, wiredPlace, type GoldenExec, type HarnessAdapterContext, type HarnessAdapterFactory, type HarnessSession, type HarnessStartOptions } from "../src/runtime.js";
+import { copyKey, CATALOG_TTL_MS, DAEMON_REVIVE_AGAIN_MS, GRACE_MS, GUEST_LOGIN_ENV, PORT_PROBE_BODY_CAP, TOOL_RESULT_KEPT, TRANSCRIPT_BYTES, TRANSCRIPT_FLUSH_MS, TRANSCRIPTS_HELD, createRuntime, wiredPlace, type GoldenExec, type HarnessAdapterContext, type HarnessAdapterFactory, type HarnessSession, type HarnessStartOptions } from "../src/runtime.js";
 import { POLL_INTERVAL_MS } from "../src/status.js";
 import { machineExecStream } from "../src/machine-exec.js";
 import { serveRuntime } from "../src/serve.js";
@@ -847,9 +847,9 @@ describe("runtime session history", () => {
     const m = manual();
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: m.adapter } });
     const ws = await createOn(rt, { golden: "snap_g", name: "a" });
-    const handle = await rt.sessions.start(ws.id, { prompt: "go", model: "claude-opus-5-5", effort: "high", permissionMode: "plan" });
-    expect(m.lastStart()).toMatchObject({ model: "claude-opus-5-5", effort: "high", permissionMode: "plan" });
-    expect(handle.view()).toMatchObject({ model: "claude-opus-5-5", effort: "high", permissionMode: "plan" });
+    const handle = await rt.sessions.start(ws.id, { prompt: "go", model: "claude-opus-5-5", effort: "high", permissionMode: "acceptEdits" });
+    expect(m.lastStart()).toMatchObject({ model: "claude-opus-5-5", effort: "high", permissionMode: "acceptEdits" });
+    expect(handle.view()).toMatchObject({ model: "claude-opus-5-5", effort: "high", permissionMode: "acceptEdits" });
     // The CLI announces the model it resolved; that name replaces the request's on the view.
     m.start();
     expect((await rt.sessions.list(ws.id))[0]!.model).toBe("claude-sonnet-4-5");
@@ -922,7 +922,7 @@ describe("runtime session history", () => {
       // A binary that still offers Opus 5 keeps it among its current models, under the table's name for it.
       expect(claude.models[0]).toMatchObject({ label: "Opus 5", isDefault: true, contextWindows: ["200k", "1m"] });
       expect(claude.legacyModels?.map(m => m.value)).not.toContain("claude-opus-5");
-      expect(claude.permissionModes.map(o => o.value)).toEqual(["default", "acceptEdits", "auto", "bypassPermissions", "manual", "dontAsk", "plan"]);
+      expect(claude.permissionModes.map(o => o.value)).toEqual(["default", "acceptEdits", "auto", "bypassPermissions", "manual", "dontAsk"]);
       expect(probes(backend)).toHaveLength(1);
       // The probe is the adapter's line under the guest's login, so it runs under the guest's config dir, never HOME.
       expect(probes(backend)[0]).toContain("CLAUDE_CONFIG_DIR='/root/.claude-cfg'");
@@ -1109,8 +1109,8 @@ describe("runtime session history", () => {
       await expect(rt.sessions.start(ws.id, { prompt: "go", permissionMode: "yolo" })).rejects.toThrow(/^access mode "yolo" is not one claude takes; one of: Default \(default\), /);
       expect(m.lastStart()).toBeUndefined();
       expect(await rt.sessions.list(ws.id)).toEqual([]);
-      const handle = await rt.sessions.start(ws.id, { prompt: "go", effort: "high", permissionMode: "plan" });
-      expect(m.lastStart()).toMatchObject({ model: "claude-opus-5", effort: "high", permissionMode: "plan" });
+      const handle = await rt.sessions.start(ws.id, { prompt: "go", effort: "high", permissionMode: "acceptEdits" });
+      expect(m.lastStart()).toMatchObject({ model: "claude-opus-5", effort: "high", permissionMode: "acceptEdits" });
       m.start();
       m.done("ok");
       m.end();
@@ -2236,6 +2236,39 @@ describe("a turn the host comes back to", () => {
     // its own asked-set is empty and the row is still on its seed, and the start row is what stands in for both.
     expect(h.asked()).toEqual(["build it"]);
     expect((await rt2.sessions.list(workspaceId))[0]!.harnessTitle).toBeUndefined();
+    await rt2.close();
+  });
+
+  it("more running turns than the host holds transcripts, re-opened together, each read past what it already wrote", async () => {
+    // Every turn is re-opened at once, and each open lets the oldest held transcript go: a turn that looked its
+    // transcript up again found nothing and wrote its start and its lines a second time.
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h = machineRuns();
+    const rt = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    const spaces = [];
+    for (let n = 0; n < TRANSCRIPTS_HELD + 2; n++) {
+      const ws = await createOn(rt, { golden: "snap_g", name: `w${n}` });
+      await rt.sessions.start(ws.id, { prompt: "build it" });
+      await until(async () => (await rt.sessions.history(ws.id)).some(e => e.type === "session.start"));
+      spaces.push(ws);
+    }
+    const runs = h.handles();
+    runs.forEach((run, n) => h.emit(run, { type: "turn.delta", sessionId: `sess-${n + 1}`, kind: "text", text: `reading ticket ${n}` }));
+    await rt.close();
+
+    const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    await rt2.workspaces.list();
+    runs.forEach((run, n) => {
+      h.emit(run, { type: "turn.done", sessionId: `sess-${n + 1}`, result: { status: "completed", text: "done" } });
+      h.emit(run, { type: "session.end", sessionId: `sess-${n + 1}`, exitCode: 0, sawResult: true });
+    });
+    for (const ws of spaces) await until(async () => (await rt2.sessions.list(ws.id))[0]!.status === "completed");
+    for (const [n, ws] of spaces.entries()) {
+      const history = await rt2.sessions.history(ws.id);
+      expect(history.map(e => e.type)).toEqual(["session.start", "session.delta", "session.done", "session.end"]);
+      expect(history.filter(e => e.type === "session.delta").map(e => e.text)).toEqual([`reading ticket ${n}`]);
+    }
     await rt2.close();
   });
 

@@ -57,6 +57,7 @@ import { Button } from "../ui/button";
 import { getVirtualizedScrollFadeClassName } from "../ui/scroll-area";
 import type { ExpandedImagePreview } from "./ExpandedImagePreview";
 import { ChatFileRow } from "./ChatFiles";
+import { COMPOSER_WORDS } from "./composerWords";
 import { useSentFiles } from "./composerFiles";
 import { PermissionPromptRow } from "./PermissionPromptRow";
 import { SubagentFoldRow } from "./SubagentFoldRow";
@@ -1003,10 +1004,10 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
 
   return (
     <div className="group flex flex-col items-end gap-1">
-      {row.message.steered === true ? (
-        <span data-user-message-steered="true" className="pe-1 font-mono text-[11px] leading-4 text-muted-foreground">steered</span>
-      ) : null}
-      <div className="relative max-w-[80%] rounded-2xl bg-message p-3 text-message-foreground">
+      <div
+        className="relative max-w-[80%] rounded-2xl bg-message p-3 text-message-foreground"
+        {...(row.message.steered === true ? { "data-user-message-steered": "true", title: COMPOSER_WORDS.sentWhileWorking } : {})}
+      >
         <ChatFileRow records={row.message.attachments ?? []} files={files} />
         <CollapsibleUserMessageBody
           text={row.message.text}
@@ -1042,7 +1043,7 @@ function RewindButton({ messageId }: { messageId: MessageId }) {
   if (activity.isWorking) return null;
   return (
     <Tooltip>
-      <TooltipTrigger render={<Button type="button" size="xs" variant="ghost" onClick={() => ctx.onRewind(messageId)} aria-label="Rewind to here" data-k="rewind-to-here" />}>
+      <TooltipTrigger render={<Button type="button" size="icon-xs" variant="ghost" onClick={() => ctx.onRewind(messageId)} aria-label="Rewind to here" data-k="rewind-to-here" />}>
         <Undo2Icon className="size-3.5" />
       </TooltipTrigger>
       <TooltipPopup side="top">Rewind to here</TooltipPopup>
@@ -1094,8 +1095,10 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
         />
         {row.showAssistantMeta ? (
           <div className="mt-1.5 flex items-center gap-3.5 text-[13px] tabular-nums opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover/assistant:opacity-100">
-            <AssistantCopyButton row={row} />
-            {ctx.rewindableMessageIds.has(row.message.id) ? <RewindButton messageId={row.message.id} /> : null}
+            <span className="flex items-center gap-0.5">
+              <AssistantCopyButton row={row} />
+              {ctx.rewindableMessageIds.has(row.message.id) ? <RewindButton messageId={row.message.id} /> : null}
+            </span>
             {!row.message.streaming && (
               <Tooltip>
                 <TooltipTrigger

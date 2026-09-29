@@ -1,12 +1,15 @@
 // Adapted from pingdotgg/t3code apps/web/src/components/diffs/AnnotatableCodeView.tsx at 57a66608 (MIT).
 import type {
   AnnotationSide,
+  CodeViewCreateEditorOptions,
   CodeViewDiffItem,
   CodeViewItem,
   DiffLineAnnotation,
+  FileContents,
   FileDiffMetadata,
   SelectedLineRange,
 } from "@pierre/diffs";
+import { Editor } from "@pierre/diffs/editor";
 import type { CodeViewHandle } from "@pierre/diffs/react";
 import { useCallback, useMemo, useState, type ReactNode, type Ref } from "react";
 
@@ -92,6 +95,12 @@ interface AnnotatableCodeViewProps {
     fileKey: string,
     collapsed: boolean,
   ) => ReactNode;
+  /** What a file's header carries at its right end, beside the line counts. */
+  renderHeaderMetadata?: (fileDiff: FileDiffMetadata, fileKey: string) => ReactNode;
+  /** The files open in the editor, by key: their new side is edited in place. */
+  editing?: ReadonlySet<string>;
+  /** Every change to a file open in the editor, with its whole new contents. */
+  onEditChange?: (fileKey: string, contents: string) => void;
 }
 
 interface DiffSelectionContext {
@@ -110,6 +119,9 @@ export function AnnotatableCodeView({
   viewerRef,
   className,
   renderHeaderPrefix,
+  renderHeaderMetadata,
+  editing,
+  onEditChange,
 }: AnnotatableCodeViewProps) {
   const [selectedLines, setSelectedLines] = useState<{
     id: string;
@@ -145,14 +157,16 @@ export function AnnotatableCodeView({
           }, []);
         const annotations =
           draft?.fileKey === fileKey ? [...persisted, draft.annotation] : persisted;
+        const edit = editing?.has(fileKey) === true;
         return {
           id: fileKey,
           type: "diff",
           fileDiff,
           annotations,
           collapsed,
+          ...(edit ? { edit: true } : {}),
           version: fnv1a32(
-            `${fileVersion}:${collapsed ? "1" : "0"}:${annotations
+            `${fileVersion}:${collapsed ? "1" : "0"}:${edit ? "e" : ""}:${annotations
               .flatMap((annotation) =>
                 annotation.metadata.entries.map(
                   (entry) => `${entry.id}:${entry.rangeLabel}:${entry.text}`,
@@ -162,7 +176,7 @@ export function AnnotatableCodeView({
           ),
         };
       }),
-    [draft, files, reviewComments, sectionId],
+    [draft, editing, files, reviewComments, sectionId],
   );
 
   const removeEntry = useCallback(
@@ -250,6 +264,15 @@ export function AnnotatableCodeView({
         enableLineSelection: !hasOpenComment,
         onGutterUtilityClick: beginComment,
       }}
+      {...(onEditChange !== undefined
+        ? {
+            createEditor: (editorOptions: CodeViewCreateEditorOptions<DiffCommentAnnotationGroup>) => new Editor(editorOptions),
+            onItemEditChange: (item: CodeViewItem<DiffCommentAnnotationGroup>, file: FileContents) => onEditChange(item.id, file.contents),
+          }
+        : {})}
+      {...(renderHeaderMetadata !== undefined
+        ? { renderHeaderMetadata: (item: CodeViewItem<DiffCommentAnnotationGroup>) => (item.type === "diff" ? renderHeaderMetadata(item.fileDiff, item.id) : null) }
+        : {})}
       renderHeaderPrefix={(item) =>
         item.type === "diff"
           ? renderHeaderPrefix(item.fileDiff, item.id, item.collapsed === true)

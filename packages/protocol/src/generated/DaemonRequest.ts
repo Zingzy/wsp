@@ -56,6 +56,10 @@ machineId?: string, } | { "op": "fs.read", path: string, encoding?: FsReadEncodi
 /**
  * The workspace this frame is for, as on fs.list above.
  */
+machineId?: string, } | { "op": "fs.write", path: string, contents: string, 
+/**
+ * The workspace this frame is for, as on fs.list above.
+ */
 machineId?: string, } | { "op": "fs.search", path: string, query: string, mode: FsSearchMode, 
 /**
  * The workspace this frame is for, as on fs.list above.
@@ -66,6 +70,14 @@ machineId?: string, } | { "op": "git.status", cwd: string,
  */
 machineId?: string, } | { "op": "git.diff", cwd: string, scope: GitDiffScope, path?: string, 
 /**
+ * Only these files, named from the checkout's top as the reply names them.
+ */
+paths?: Array<string>, 
+/**
+ * Each file's patch holds the whole file in one hunk, which is what an editor over the new side needs.
+ */
+whole?: boolean, 
+/**
  * The workspace this frame is for, as on fs.list above.
  */
 machineId?: string, } | { "op": "git.push", cwd: string, 
@@ -74,6 +86,22 @@ machineId?: string, } | { "op": "git.push", cwd: string,
  * project recorded without a base was cloned at.
  */
 base?: string, 
+/**
+ * The workspace this frame is for, as on fs.list above.
+ */
+machineId?: string, } | { "op": "git.discard", cwd: string, 
+/**
+ * The file as git.status names it, from the checkout's top.
+ */
+path: string, 
+/**
+ * The workspace this frame is for, as on fs.list above.
+ */
+machineId?: string, } | { "op": "git.commit", cwd: string, message: string, 
+/**
+ * The files as git.status names them, from the checkout's top.
+ */
+paths: Array<string>, 
 /**
  * The workspace this frame is for, as on fs.list above.
  */

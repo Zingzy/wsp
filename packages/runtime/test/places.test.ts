@@ -252,6 +252,7 @@ function yielding(inner: Store): Store {
     getBlob: async (c, id) => (await soon(), inner.getBlob(c, id)),
     putBlob: async (c, id, b) => (await soon(), inner.putBlob(c, id, b)),
     deleteBlob: async (c, id) => (await soon(), inner.deleteBlob(c, id)),
+    statBlob: async (c, id) => (await soon(), inner.statBlob(c, id)),
   };
 }
 
@@ -2660,6 +2661,7 @@ function forks(
       case "fs.list":
       case "fs.files":
       case "fs.read":
+      case "fs.write":
       case "fs.search":
       case "git.diff":
       case "git.prState":
@@ -3195,7 +3197,7 @@ describe("a fork on a computer you joined", () => {
   });
 
   const PTY = ["pty.create", "pty.attach", "pty.detach", "pty.write", "pty.resize", "pty.kill", "pty.list"];
-  const FILES_AND_GIT = ["fs.list", "fs.files", "fs.read", "fs.search", "git.status", "git.diff", "git.push", "git.pr", "git.prState", "git.prList"];
+  const FILES_AND_GIT = ["fs.list", "fs.files", "fs.read", "fs.write", "fs.search", "git.status", "git.diff", "git.push", "git.pr", "git.prState", "git.prList"];
   const HOST_GUESTS = ["guest.watch", "guest.reply", "guest.close"];
   const REFUSED = [
     "ports.watch",
@@ -3210,6 +3212,8 @@ describe("a fork on a computer you joined", () => {
     "inbox.watch",
     "inbox.rescan",
     "fs.folders",
+    "git.discard",
+    "git.commit",
     "git.checkpoint",
     "git.restore",
     "tunnel.open",

@@ -156,11 +156,11 @@ describe("ClaudeAdapter over the recorded fixture", () => {
   it("launches with the picked model, effort and permission mode", async () => {
     const exec = scriptedExec(fixtureLines());
     const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
-    const session = adapter.start({ prompt: "go", model: "claude-opus-5", effort: "low", permissionMode: "plan", onEvent: () => {} });
+    const session = adapter.start({ prompt: "go", model: "claude-opus-5", effort: "low", permissionMode: "acceptEdits", onEvent: () => {} });
     await session.finished;
     expect(exec.calls[0]?.command).toContain("--model 'claude-opus-5'");
     expect(exec.calls[0]?.command).toContain("--effort 'low'");
-    expect(exec.calls[0]?.command).toContain("--permission-mode 'plan'");
+    expect(exec.calls[0]?.command).toContain("--permission-mode 'acceptEdits'");
   });
 
   it("a launched session carries the run its stream reported, so a later host can re-open it", async () => {

@@ -1,15 +1,42 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-//! The seal over a place link: after the two ends have proved their ed25519 keys to each other, every frame
-//! between them travels inside one AEAD under a key agreed in the same handshake, so whoever carries the bytes
-//! reads nothing and writes nothing into the link. The carrier is real: a managed tunnel ends TLS on the relay
-//! operator's account, and a plain http address is open to anyone on the path. The host's twin is
-//! packages/runtime/src/seal.ts and the fixture daemon/fixtures/place-link-seal.json holds the two to one
-//! derivation and one set of bytes.
+//! What a wsp link is built out of, as packages/keys holds it for node: the ed25519 key each end proves itself with,
+//! the fingerprint of a key as a person copies it, and the seal every frame after a handshake travels inside. The
+//! daemon's place link and the tool server's dial to a host somewhere else both stand on this.
+//!
+//! The seal: after the two ends have proved their ed25519 keys to each other, every frame between them travels
+//! inside one AEAD under a key agreed in the same handshake, so whoever carries the bytes reads nothing and writes
+//! nothing into the link. The carrier is real: a managed tunnel ends TLS on the relay operator's account, and a
+//! plain http address is open to anyone on the path. The host's twin is packages/keys and the fixture
+//! daemon/fixtures/place-link-seal.json holds the two to one derivation and one set of bytes.
 
+use base64::Engine as _;
+use ed25519_dalek::pkcs8::{DecodePrivateKey, DecodePublicKey};
+use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM, NONCE_LEN};
 use ring::agreement::{self, EphemeralPrivateKey, UnparsedPublicKey, X25519};
 use ring::hkdf;
 use ring::rand::SystemRandom;
+
+/// A signature over the bytes both sides build from one function, with an ed25519 key kept as pkcs8 PEM, which is
+/// how node writes one.
+pub fn sign(private_key_pem: &str, bytes: &[u8]) -> Result<[u8; 64], String> {
+    let key = SigningKey::from_pkcs8_pem(private_key_pem).map_err(|e| e.to_string())?;
+    Ok(key.sign(bytes).to_bytes())
+}
+
+/// Whether the key given (SPKI DER) made this signature over these bytes. A key that will not parse is a refusal
+/// rather than a failure: it came off the wire.
+pub fn verify(public_key_der: &[u8], bytes: &[u8], signature: &[u8; 64]) -> bool {
+    let Ok(key) = VerifyingKey::from_public_key_der(public_key_der) else { return false };
+    key.verify(bytes, &Signature::from_bytes(signature)).is_ok()
+}
+
+/// A key's fingerprint as every ssh tool prints it and packages/keys `keyFingerprint` writes it: the SHA256 of the
+/// key's own bytes, base64 with the padding dropped, under the name of the hash.
+pub fn fingerprint(key: &[u8]) -> String {
+    let digest = ring::digest::digest(&ring::digest::SHA256, key);
+    format!("SHA256:{}", base64::engine::general_purpose::STANDARD_NO_PAD.encode(digest.as_ref()))
+}
 
 /// One info word per direction, so the two keys of a link can never be swapped for each other.
 pub const HOST_TO_PLACE_INFO: &[u8] = b"wsp place link host to place";
@@ -67,8 +94,9 @@ pub struct Seal {
 }
 
 impl Seal {
-    /// This daemon's own end: a computer joined as a place seals what it sends its host and opens what comes
-    /// back. The host's end is node's, in the runtime's own seal; only a case here ever stands on that side.
+    /// The end that dialled: a computer joined as a place, and the tool server's dial to a host somewhere else, seal
+    /// what they send the host and open what comes back. The host's end is node's, in the runtime's own seal; only a
+    /// case here ever stands on that side.
     pub fn place(keys: &SealKeys) -> Seal {
         Seal { outward: aead_key(&keys.place_to_host), inward: aead_key(&keys.host_to_place), sent: 0, taken: 0 }
     }
@@ -113,7 +141,6 @@ fn nonce(counter: u64) -> Nonce {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use base64::Engine as _;
 
     const B64: base64::engine::general_purpose::GeneralPurpose = base64::engine::general_purpose::STANDARD;
 
@@ -182,6 +209,12 @@ mod tests {
 
     fn place_sealed(keys: &SealKeys) -> Vec<u8> {
         Seal::place(keys).seal("{\"id\":1}")
+    }
+
+    #[test]
+    fn a_fingerprint_is_the_sha256_of_the_key_bytes_unpadded() {
+        // echo -n abc | sha256sum, as base64 with no padding.
+        assert_eq!(fingerprint(b"abc"), "SHA256:ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0");
     }
 
     #[test]

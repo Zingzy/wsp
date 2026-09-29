@@ -4,8 +4,9 @@
 //! listener open at the time, the events a turn or an exec pushes. The socket opening and the answer to the token
 //! share one deadline, so a port that accepts and never answers fails in one line. When the socket goes, every
 //! request still waiting fails with the words for how it went: the host letting it go as it stopped, or the host
-//! gone. packages/host/src/verbs.ts `dialOnce` is the rule; this is its road with no seal, which a host on this
-//! computer or on its loopback takes.
+//! gone. packages/host/src/verbs.ts `dialOnce` is the rule. A host somewhere else first proves the key this computer
+//! pinned for it at `seal.open`, and every frame after that reply rides inside the seal both ends agreed, so the token
+//! and everything the line asks for cross a road whose carrier reads nothing and writes nothing into it.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -18,7 +19,13 @@ use serde::Deserialize;
 use serde_json::{Map, Value};
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
+use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
+use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 use tokio_tungstenite::tungstenite::Message;
+use wsp_frames::{
+    numbers, place_link_transcript, Base64Bytes, LinkEphemerals, LinkRole, PlaceEphemeral, PlaceNonce, PlacePublicKey, PlaceSignature,
+};
+use wsp_seal::Seal;
 
 use crate::failure::Failure;
 use crate::record::{self, fill};
@@ -43,6 +50,9 @@ struct Shared {
     /// Each open `Frames` by the number it was handed, taken out when it is dropped.
     listeners: Mutex<Vec<(u64, mpsc::UnboundedSender<String>)>>,
     heard: AtomicU64,
+    /// Set once the host proved the pinned key: from then on every frame either way is sealed, and one in the clear
+    /// or one that will not open ends the socket.
+    seal: Mutex<Option<Seal>>,
     /// Empty while the socket is open; the close code the host sent, or none, once it is gone.
     gone: watch::Sender<Option<Option<u16>>>,
 }
@@ -88,27 +98,106 @@ impl Drop for Client {
     }
 }
 
-/// Dials the host at `url` and presents `token`; `at` is the host's address as the person reads it, and `alias` the
-/// name a host on the account is held under, whose refusal of the token means this computer was taken away.
-pub async fn dial(url: &str, token: &str, at: &str, window: Duration, alias: Option<&str>) -> Result<Client, Failure> {
+/// What a dial presents once any seal is open: the token this computer holds, or its device key for a host on the
+/// account that has handed it none yet.
+pub enum Presents<'a> {
+    Token(&'a str),
+    Admit(&'a Admit),
+}
+
+/// A computer the account admitted: the key that host was told to trust, and what its listing calls this computer.
+pub struct Admit {
+    pub name: String,
+    pub public_key: String,
+    pub private_key_pem: String,
+}
+
+/// The device token a host answered an admission with.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Paired {
+    pub device_id: String,
+    pub device_token: String,
+}
+
+/// Why a dial ended, and whether it was the answer to the frame that carried the token or the admission: the one
+/// refusal a second dial can do anything about, since a host that never proved the pinned key refuses the same way
+/// however often it is asked.
+pub struct Refused {
+    pub failure: Failure,
+    pub token: bool,
+}
+
+/// Where a dial goes and what it holds the host to: the socket's url, the address as the person reads it, the time
+/// open and the first answer share, the fingerprint of the key the host must prove, and the alias a host on the
+/// account is held under, whose refusal of the token means this computer was taken away.
+pub struct Dial<'a> {
+    pub url: &'a str,
+    pub at: &'a str,
+    pub window: Duration,
+    pub pinned: Option<&'a str>,
+    pub alias: Option<&'a str>,
+}
+
+/// The host's answer to seal.open: the key it proves, its nonce, its half of the agreement and its signature.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SealOpened {
+    nonce: PlaceNonce,
+    host_public_key: PlacePublicKey,
+    signature: PlaceSignature,
+    ephemeral: PlaceEphemeral,
+}
+
+/// Dials the host and presents what `presents` names, after the host proved the pinned key where one is pinned.
+pub async fn dial(to: &Dial<'_>, presents: Presents<'_>) -> Result<(Client, Option<Paired>), Refused> {
     let words = record::words();
+    let at = to.at;
+    let not_proved = || Refused { failure: Failure::auth(fill(&words.pair_key, &[("url", at)])), token: false };
     let authed = async {
-        let (ws, _) = tokio_tungstenite::connect_async(url)
-            .await
-            .map_err(|e| Failure::of_kind(fill(&words.no_answer, &[("where", at), ("why", &e.to_string())]), "unreachable"))?;
+        let (ws, _) = tokio_tungstenite::connect_async(to.url).await.map_err(|e| Refused {
+            failure: Failure::of_kind(fill(&words.no_answer, &[("where", at), ("why", &e.to_string())]), "unreachable"),
+            token: false,
+        })?;
         let client = Client::over(ws);
-        let mut params = Map::new();
-        params.insert("token".to_owned(), Value::from(token));
-        match client.request::<Value>("auth", params).await {
-            Ok(_) => Ok(client),
-            Err(refused) => Err(client.token_refused(refused, alias).await),
+        // Before the token or the key: a host on this computer is reached over its own loopback and pins nothing.
+        let expect = match to.pinned {
+            Some(pinned) => Some(client.open_seal(pinned).await.ok_or_else(not_proved)?),
+            None => None,
+        };
+        let admit = matches!(presents, Presents::Admit(_));
+        let answered = match presents {
+            Presents::Token(token) => {
+                let mut params = Map::new();
+                params.insert("token".to_owned(), Value::from(token));
+                client.request::<Value>("auth", params).await.map(|_| None)
+            }
+            Presents::Admit(key) => {
+                // The key is proved over this socket's own handshake, so the signature stands for this dial alone.
+                let Some(expect) = expect else { return Err(not_proved()) };
+                let signature =
+                    wsp_seal::sign(&key.private_key_pem, &expect).map_err(|e| Refused { failure: Failure::new(e), token: false })?;
+                let mut params = Map::new();
+                params.insert("publicKey".to_owned(), Value::from(key.public_key.as_str()));
+                params.insert("name".to_owned(), Value::from(key.name.as_str()));
+                params.insert("signature".to_owned(), Value::from(Base64Bytes::<64>::from_bytes(&signature).as_str()));
+                client.request::<Paired>("device.auth", params).await.map(Some)
+            }
+        };
+        match answered {
+            Ok(paired) => Ok((client, paired)),
+            Err(refused) => Err(Refused { failure: client.token_refused(refused, to.alias, admit, at).await, token: true }),
         }
     };
-    match tokio::time::timeout(window, authed).await {
+    match tokio::time::timeout(to.window, authed).await {
         Ok(dialled) => dialled,
-        Err(_) => {
-            Err(Failure::of_kind(fill(&words.no_answer_within, &[("where", at), ("ms", &window.as_millis().to_string())]), "unreachable"))
-        }
+        Err(_) => Err(Refused {
+            failure: Failure::of_kind(
+                fill(&words.no_answer_within, &[("where", at), ("ms", &to.window.as_millis().to_string())]),
+                "unreachable",
+            ),
+            token: false,
+        }),
     }
 }
 
@@ -123,8 +212,10 @@ impl Client {
             waiting: Mutex::new(HashMap::new()),
             listeners: Mutex::new(Vec::new()),
             heard: AtomicU64::new(0),
+            seal: Mutex::new(None),
             gone: watch::channel(None).0,
         });
+        let closer = send.clone();
         let writer = tokio::spawn(async move {
             while let Some(message) = outgoing.recv().await {
                 if sink.send(message).await.is_err() {
@@ -136,14 +227,30 @@ impl Client {
         let reader = tokio::spawn(async move {
             let mut code = None;
             while let Some(read) = stream.next().await {
-                match read {
-                    Ok(Message::Text(text)) => reading.take(text.as_str()),
+                let text = match read {
+                    Ok(Message::Text(text)) if reading.seal.lock().unwrap().is_none() => Ok(text.to_string()),
+                    Ok(Message::Text(_)) => Err(()),
+                    Ok(Message::Binary(bytes)) => match reading.seal.lock().unwrap().as_mut() {
+                        Some(seal) => seal.unseal(&bytes).ok_or(()),
+                        None => Ok(String::from_utf8_lossy(&bytes).into_owned()),
+                    },
                     Ok(Message::Close(frame)) => {
                         code = frame.map(|f| u16::from(f.code));
                         break;
                     }
-                    Ok(_) => {}
+                    Ok(_) => continue,
                     Err(_) => break,
+                };
+                match text {
+                    Ok(text) => reading.take(&text),
+                    // A frame in the clear after the seal began and one that will not open are the same thing:
+                    // somebody carrying the bytes writing into the socket. It ends, and every waiting reply with it.
+                    Err(()) => {
+                        let refusal = CloseFrame { code: CloseCode::Protocol, reason: record::host().seal_refusal.into() };
+                        let _ = closer.send(Message::Close(Some(refusal)));
+                        code = Some(u16::from(CloseCode::Protocol));
+                        break;
+                    }
                 }
             }
             reading.went(code);
@@ -191,7 +298,16 @@ impl Client {
         let mut frame = params;
         frame.insert("id".to_owned(), Value::from(id));
         frame.insert("op".to_owned(), Value::from(op));
-        let _ = self.send.send(Message::text(Value::Object(frame).to_string()));
+        let text = Value::Object(frame).to_string();
+        {
+            // Sealed and queued under one lock, so the frames reach the wire in the order their counters were taken.
+            let mut seal = self.shared.seal.lock().unwrap();
+            let message = match seal.as_mut() {
+                Some(seal) => Message::Binary(seal.seal(&text).into()),
+                None => Message::text(text),
+            };
+            let _ = self.send.send(message);
+        }
         let text = settled.await.unwrap_or_else(|_| Err(Failure::new(self.close_words())))?;
         let head: Head = serde_json::from_str(&text).map_err(|e| Failure::new(e.to_string()))?;
         if head.ok != Some(true) {
@@ -199,6 +315,37 @@ impl Client {
             return Err(Failure { message: said, kind: head.kind.as_ref().and_then(Value::as_str).map(str::to_owned) });
         }
         serde_json::from_str(&text).map_err(|e| Failure::new(format!("{op}: {e}")))
+    }
+
+    /// The first frame of a dial that pins a key: this computer's nonce and its half of a fresh key agreement,
+    /// answered by the host with the key it proves. The fingerprint is read before the signature, since anything
+    /// answering at this address signs for itself perfectly well; both stand before a token or a key has crossed.
+    /// Answers the bytes the host expects this end to sign for an admission, or none where it proved nothing, which
+    /// is one refusal whichever check caught it.
+    async fn open_seal(&self, pinned: &str) -> Option<Vec<u8>> {
+        let word = record::host().seal_client;
+        let (private, mine) = wsp_seal::fresh_ephemeral()?;
+        let mine: PlaceEphemeral = Base64Bytes::from_bytes(&mine);
+        let mut nonce = [0u8; numbers::PLACE_LINK_NONCE_BYTES];
+        getrandom::fill(&mut nonce).ok()?;
+        let nonce: PlaceNonce = Base64Bytes::from_bytes(&nonce);
+        let mut params = Map::new();
+        params.insert("nonce".to_owned(), Value::from(nonce.as_str()));
+        params.insert("ephemeral".to_owned(), Value::from(mine.as_str()));
+        let opened: SealOpened = self.request("seal.open", params).await.ok()?;
+        let key = opened.host_public_key.to_bytes();
+        if wsp_seal::fingerprint(&key) != pinned {
+            return None;
+        }
+        let asked = LinkEphemerals { challenger: mine.as_str(), answerer: opened.ephemeral.as_str() };
+        let host_bytes = place_link_transcript(LinkRole::Host, &word, nonce.as_str(), opened.nonce.as_str(), asked);
+        if !wsp_seal::verify(&key, &host_bytes, &opened.signature.to_bytes()) {
+            return None;
+        }
+        let secret = wsp_seal::agree(private, &opened.ephemeral.to_bytes())?;
+        *self.shared.seal.lock().unwrap() = Some(Seal::place(&wsp_seal::seal_keys(&secret, &word)));
+        let answered = LinkEphemerals { challenger: opened.ephemeral.as_str(), answerer: mine.as_str() };
+        Some(place_link_transcript(LinkRole::Place, &word, opened.nonce.as_str(), nonce.as_str(), answered))
     }
 
     pub fn is_closed(&self) -> bool {
@@ -213,7 +360,7 @@ impl Client {
 
     /// What a refusal of the token means to the person. One whose frame carries no kind is classed by the close code
     /// that follows it, so an older host that sends the code alone still reads as auth.
-    async fn token_refused(&self, refused: Failure, alias: Option<&str>) -> Failure {
+    async fn token_refused(&self, refused: Failure, alias: Option<&str>, admit: bool, at: &str) -> Failure {
         let host = record::host();
         match refused.kind.as_deref() {
             None => {
@@ -222,9 +369,17 @@ impl Client {
                 if self.shared.gone.borrow().flatten() != Some(host.unauthorized_close) {
                     return refused;
                 }
+                // An admission refused with no kind behind an unauthorized close: that door does not know the frame.
+                if admit {
+                    return Failure::auth(fill(&record::words().device_auth_old_host, &[("where", at)]));
+                }
             }
             Some("auth") => {}
             Some(_) => return refused,
+        }
+        // A host that refused an admission said why in its own sentence, and there is no token to pair again for.
+        if admit {
+            return Failure::auth(refused.message);
         }
         match alias {
             Some(alias) => Failure::auth(fill(&record::words().device_refused, &[("alias", alias)])),

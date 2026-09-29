@@ -57,6 +57,8 @@ pub struct Words {
     pub host_no_key: String,
     pub launched_with: String,
     pub device_refused: String,
+    pub pair_key: String,
+    pub device_auth_old_host: String,
     pub scoped_no_pair: String,
     pub starting_host: String,
     pub no_host_answered: String,
@@ -171,6 +173,10 @@ pub struct Host {
     pub probe_ms: u64,
     /// What a tool dials in place of the wildcard a host bound.
     pub loopback: String,
+    /// The word a client's seal stands in the place id's slot with, in its transcript and its key derivation.
+    pub seal_client: String,
+    /// The reason a socket is closed with when a frame on it does not open under the agreed key.
+    pub seal_refusal: String,
     /// Words held to the address helpers and the alias rule, each with the answer the TypeScript one gives it.
     #[cfg(test)]
     pub loopbacks: HashMap<String, bool>,
@@ -203,6 +209,9 @@ pub struct Files {
     pub relay: String,
     pub hosts: String,
     pub home: String,
+    /// The key this computer signs an admission with, beside the hosts it holds.
+    #[serde(rename = "deviceKey")]
+    pub device_key: String,
 }
 
 #[derive(Deserialize)]

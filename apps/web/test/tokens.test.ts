@@ -117,11 +117,6 @@ describe("index.css", () => {
         background: color-mix(in srgb, var(--material-ground) var(--material-centre), transparent);
       }
 
-      /* The composer floats over the chat column: a lifted pane of the same material, the text behind it blurred away. */
-      .desktop-mac.dark [data-shell-center] .group\\/composer-surface {
-        --chat-composer-glass-surface: var(--material-raised);
-      }
-
       /* A translucent terminal shows the window's glass through its canvas, so with one open the centre's share moves off
          the whole column onto the thread and the header, and the drawer's own ground stays clear. */
       html.desktop-mac.dark:has([data-terminal-translucent]) [data-shell-center] {
@@ -167,6 +162,37 @@ describe("index.css", () => {
 
       .desktop-mac:not(.dark) [data-slot="sidebar-inner"] {
         background-color: color-mix(in srgb, var(--sidebar) var(--sidebar-veil), transparent);
+      }
+
+      /* Transparency off in Appearance, or the computer's Reduce transparency on: every glass takes its solid ground, each
+         region its theme's material at full share. The doubled root outweighs the Mac's dark block above. */
+      :root:root.solid {
+        --glass-opacity: 100%;
+        --material-centre: 100%;
+        --material-panel: 100%;
+        --material-sidebar: 100%;
+        --sidebar-veil: 100%;
+      }
+
+      /* The composer sets its glass on itself, so its solid ground is set there too: the theme's card, whole. */
+      :root:root.solid [data-slot="composer-shell"] {
+        --chat-composer-glass-surface: var(--card);
+        --chat-composer-glass-opacity: 100%;
+      }
+
+      @media (prefers-reduced-transparency: reduce) {
+        :root:root {
+          --glass-opacity: 100%;
+          --material-centre: 100%;
+          --material-panel: 100%;
+          --material-sidebar: 100%;
+          --sidebar-veil: 100%;
+        }
+
+        :root:root [data-slot="composer-shell"] {
+          --chat-composer-glass-surface: var(--card);
+          --chat-composer-glass-opacity: 100%;
+        }
       }
 
       /* The window paints the glass behind the page, so the page's own canvas is

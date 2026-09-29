@@ -5,6 +5,7 @@ import type { SidebarThreadSnapshot } from "../adapt/index.js";
 import { threadIndicator } from "../adapt/index.js";
 import { SidebarProvider } from "../components/ui/sidebar.js";
 import { ThreadTile, WorkspaceTile, type TilePlace } from "./ThreadTile.js";
+import type { LinkDown } from "../terminal/paneWords.js";
 
 const thread = (over: Partial<SidebarThreadSnapshot> = {}): SidebarThreadSnapshot => {
   const base = { id: "th_1", threadId: "th_1", sessionId: "s_1", workspaceId: "ws_a", title: "Cart total rounding", status: "running" as const, ran: true, startedAt: "2026-09-17T00:00:00.000Z", endedAt: null, harness: "claude", startedBy: "person" as const, project: "spoo", parentThreadId: null, attempt: null, model: null, asking: null, costUsd: null, unread: false, readAt: null, settledAt: null, needsYou: false, pinnedAt: null, snoozedUntil: null, section: null };
@@ -14,7 +15,7 @@ const thread = (over: Partial<SidebarThreadSnapshot> = {}): SidebarThreadSnapsho
 
 const PLACE: TilePlace = { projectId: "pr_1", project: "spoo-landing", computer: "zingzy's MacBook Pro" };
 
-function mount({ over = {}, branch = "fix/cart-rounding", active = false, settled = false, snoozedWorking, onSelect = () => {} }: { over?: Partial<SidebarThreadSnapshot>; branch?: string; active?: boolean; settled?: boolean; snoozedWorking?: number; onSelect?: () => void } = {}) {
+function mount({ over = {}, branch = "fix/cart-rounding", active = false, settled = false, snoozedWorking, linkDown, onSelect = () => {} }: { over?: Partial<SidebarThreadSnapshot>; branch?: string; active?: boolean; settled?: boolean; snoozedWorking?: number; linkDown?: LinkDown; onSelect?: () => void } = {}) {
   return render(
     <SidebarProvider defaultOpen>
       <ThreadTile
@@ -26,6 +27,7 @@ function mount({ over = {}, branch = "fix/cart-rounding", active = false, settle
         active={active}
         settled={settled}
         {...(snoozedWorking === undefined ? {} : { snoozedWorking })}
+        {...(linkDown === undefined ? {} : { linkDown })}
         renaming={false}
         saving={false}
         onSelect={onSelect}
@@ -44,6 +46,24 @@ const slot = (): HTMLElement => tile().querySelector<HTMLElement>("[data-thread-
 afterEach(cleanup);
 
 describe("a thread tile", () => {
+  const DOWN: LinkDown = { word: "Reconnecting", sentence: "Reconnecting to zingzy's MacBook Pro" };
+
+  it("a resting tile whose workspace's link is down says so in its slot, one quiet word with the sentence on its hover", () => {
+    mount({ over: { status: "completed", endedAt: "2026-09-17T00:05:00.000Z" }, linkDown: DOWN });
+    expect(slot().textContent).toBe("Reconnecting");
+    expect(slot().getAttribute("title")).toBe(DOWN.sentence);
+    expect(slot().dataset["tone"]).toBeUndefined();
+    expect([...slot().classList].filter(c => c.startsWith("text-status-"))).toEqual([]);
+  });
+
+  it("a thread that is working or waits on the person keeps its own status over a link that is down", () => {
+    mount({ over: { status: "running" }, linkDown: DOWN });
+    expect(slot().textContent).not.toContain("Reconnecting");
+    cleanup();
+    mount({ over: { status: "failed", endedAt: "2026-09-17T00:05:00.000Z" }, linkDown: DOWN });
+    expect(slot().textContent).toContain("Failed");
+  });
+
   it("in the Settled fold rests whatever its state: its age in the row's ink, no tone, no glyph, and a muted title", () => {
     mount({ over: { status: "failed", endedAt: "2026-09-17T00:05:00.000Z" }, settled: true });
     expect(slot().textContent).toBe("3m");

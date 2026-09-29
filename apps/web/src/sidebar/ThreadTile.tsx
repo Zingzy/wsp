@@ -24,6 +24,7 @@ import { ProjectGlyph } from "../projects/look.js";
 import { cn } from "../lib/utils.js";
 import { RowNameInput } from "./RowNameInput.js";
 import { SNOOZE_WORDS } from "./words.js";
+import type { LinkDown } from "../terminal/paneWords.js";
 import { TILE_CLASS, TILE_ROW_ONE_CLASS, TILE_ROW_THREE_CLASS, TILE_TITLE_CLASS, threadRowId } from "./rowGrammar.js";
 
 /** Where a tile's thread runs, as row one names it: the project and the computer by the names a person reads, either
@@ -62,14 +63,22 @@ function TileRows({ place, status, title, harness, third, crab }: { place: TileP
   );
 }
 
-/** The branch a tile's workspace is on, with its glyph; nothing where none is known. */
-export function TileBranch({ branch }: { branch: string }) {
+/** The branch a tile's workspace is on, with its glyph, then each count the host read beside it, spaced rather than
+ * joined; the branch gives way first, so the counts stay whole. Nothing where no branch is known. */
+export function TileBranch({ branch, counts = [] }: { branch: string; counts?: readonly string[] | undefined }) {
   if (branch === "") return null;
   return (
     <>
       <GitBranchIcon aria-hidden className="size-3 shrink-0 text-[var(--top-row-meta)]" />
-      <span data-tile-branch className="min-w-0 truncate">
-        {branch}
+      <span className="flex min-w-0 items-center gap-3">
+        <span data-tile-branch className="min-w-0 truncate">
+          {branch}
+        </span>
+        {counts.map(count => (
+          <span key={count} data-tile-count className="shrink-0">
+            {count}
+          </span>
+        ))}
       </span>
     </>
   );
@@ -105,11 +114,13 @@ export function ThreadTile({
   thread,
   place,
   branch,
+  counts,
   time,
   depth,
   active,
   settled = false,
   snoozedWorking,
+  linkDown,
   renaming,
   saving,
   onSelect,
@@ -125,6 +136,8 @@ export function ThreadTile({
   place: TilePlace;
   /** The branch the thread's workspace is on; empty where none is known. */
   branch: string;
+  /** The counts the host read beside that branch, each its own words. */
+  counts?: readonly string[] | undefined;
   /** How long ago a resting thread last moved, as the sidebar words it. */
   time: string;
   /** How many tiles of the tree stand over this one. */
@@ -134,6 +147,8 @@ export function ThreadTile({
   settled?: boolean;
   /** The tile stands for a snoozed tree while threads of it run: how many, said quietly in place of the status. */
   snoozedWorking?: number | undefined;
+  /** The workspace's link is down: a resting tile says so in its slot in place of its age. */
+  linkDown?: LinkDown | undefined;
   /** The name is being typed on this tile: row two holds the input instead of the title. */
   renaming: boolean;
   /** That name is on its way to the machine: the field stays exactly as it is and takes no second Enter. */
@@ -171,7 +186,17 @@ export function ThreadTile({
     >
       <TileRows
         place={place}
-        status={snoozed ? <SnoozedWorking count={snoozedWorking} /> : <ThreadStatus thread={thread} age={time} settled={settled} />}
+        status={
+          snoozed ? (
+            <SnoozedWorking count={snoozedWorking} />
+          ) : idle && linkDown !== undefined ? (
+            <span data-thread-status="link-down" title={linkDown.sentence} className="inline-flex shrink-0 items-center whitespace-nowrap">
+              {linkDown.word}
+            </span>
+          ) : (
+            <ThreadStatus thread={thread} age={time} settled={settled} />
+          )
+        }
         title={
           renaming ? (
             <span className="flex h-[18px] min-w-0">
@@ -182,7 +207,7 @@ export function ThreadTile({
           )
         }
         harness={thread.harness}
-        third={<TileBranch branch={branch} />}
+        third={<TileBranch branch={branch} counts={counts} />}
         crab={status.crab === true}
       />
     </SidebarMenuButton>
@@ -196,6 +221,7 @@ export function WorkspaceTile({
   name,
   place,
   branch,
+  counts,
   depth,
   active,
   renaming,
@@ -209,6 +235,7 @@ export function WorkspaceTile({
   name: string;
   place: TilePlace;
   branch: string;
+  counts?: readonly string[] | undefined;
   depth: number;
   active: boolean;
   renaming: boolean;
@@ -243,7 +270,7 @@ export function WorkspaceTile({
           )
         }
         harness={null}
-        third={<TileBranch branch={branch} />}
+        third={<TileBranch branch={branch} counts={counts} />}
         crab={false}
       />
     </SidebarMenuButton>
@@ -256,7 +283,7 @@ const LAUNCHED: ThreadStatusInput = { status: "running", asking: null, startedAt
 
 /** The send the runtime has written no row for yet, in the tile's own grammar. Not a button: the thread it stands
  * for has no id to select until the runtime answers, and the transcript the person is looking at is already it. */
-export function ThreadLaunchTile({ launch, place, branch }: { launch: Launch; place: TilePlace; branch: string }) {
+export function ThreadLaunchTile({ launch, place, branch, counts }: { launch: Launch; place: TilePlace; branch: string; counts?: readonly string[] | undefined }) {
   return (
     <SidebarMenuButton size="sm" render={<div />} data-thread-launch data-depth={0} title={tileHover(launch.title, place, launch.harness, null)} className={TILE_CLASS}>
       <TileRows
@@ -264,7 +291,7 @@ export function ThreadLaunchTile({ launch, place, branch }: { launch: Launch; pl
         status={<ThreadStatus thread={LAUNCHED} />}
         title={<Title text={launch.title} idle={false} active={false} />}
         harness={launch.harness}
-        third={<TileBranch branch={branch} />}
+        third={<TileBranch branch={branch} counts={counts} />}
         crab
       />
     </SidebarMenuButton>
