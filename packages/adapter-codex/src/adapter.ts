@@ -691,7 +691,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     ...(attach !== undefined
       ? {
           attach: async (options: AdapterAttachOptions) => {
-            const stream = await attach(options.run, { input: true });
+            const stream = await attach(options.run, { input: true, startedAt: options.startedAt });
             return stream === "gone"
               ? "gone"
               : follow({

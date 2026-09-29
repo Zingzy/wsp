@@ -280,7 +280,7 @@ describe("wsp up", () => {
     // The turn and its whole tree outlive the host: what the close frees is what this host was holding open.
     expect(() => process.kill(child, 0)).not.toThrow();
     expect(stream.run).toBeDefined();
-    expect(await localWiring(home).execStream().attach!(stream.run!, { input: false })).not.toBe("gone");
+    expect(await localWiring(home).execStream().attach!(stream.run!, { input: false, startedAt: Date.now() })).not.toBe("gone");
     // What the close freed is the reading: this process stopped polling that run, so the stream it handed out
     // settles no more and the timer that read it is no longer holding this process open.
     const quiet = await Promise.race([stream.exited.then(() => "settled"), new Promise(resolve => setTimeout(() => resolve("still running"), 500))]);
