@@ -3572,7 +3572,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (todayUsd !== undefined && placeAtLimitLine(row, todayUsd) !== undefined) throw new Error(spendCapRefusal(row.name, todayUsd, limit));
   };
 
-  /** Refuses whatever runs inside a copy (a create, a turn, a command, a pane, a port, a bring back) on a computer
+  /** Refuses whatever runs inside a copy (a create, a turn, a command, a port, a bring back) on a computer
    * whose doctor says it cannot run workspaces, in the sentence its row carries; a delete, a remove and an update
    * need no copy running and never ask. */
   const placeRefuses = async (placeId: string | undefined): Promise<void> => {
@@ -3585,13 +3585,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return report === undefined ? undefined : placeBlocked(placeDoor.nameOf(placeId), report);
   };
   const copyBlocked = (entry: LiveWorkspace): Promise<void> => placeRefuses(entry.record.place);
-  /** All a channel into a copy on such a computer carries: a stopped copy's git.status reads its files, and ping is the beat a pane's link opens on. */
-  const BLOCKED_READS: ReadonlySet<string> = new Set(["git.status", "ping"]);
-  const readsOnly = (channel: DaemonChannel, said: string): DaemonChannel => ({
-    send: frame => (BLOCKED_READS.has(frame.op) ? channel.send(frame) : Promise.resolve({ id: null, ok: false, code: "unsupported", error: said })),
-    close: () => channel.close(),
-    closed: channel.closed,
-  });
 
   /** The three frames a place daemon stamps with the workspace a session was opened inside, which is the listener
    * it arrived on and never anything the guest said. */
@@ -3691,6 +3684,25 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         link.close();
       },
       closed: link.closed,
+    };
+  };
+
+  /** All a channel into a copy on a computer that cannot run workspaces carries out: a stopped copy's git.status
+   * reads its files, and ping is the beat a pane's link opens on. In comes only their answers and the open's hello,
+   * which names the root git.status is asked under; a session or a pty the computer pushes never reaches a door. */
+  const BLOCKED_READS: ReadonlySet<string> = new Set(["git.status", "ping"]);
+  const copyChannel = async (entry: LiveWorkspace, onEvent: (event: Record<string, unknown>) => void, carries: readonly string[]): Promise<DaemonChannel> => {
+    const said = await blockedLine(entry.record.place);
+    const heard = (event: Record<string, unknown>): void => {
+      if (said === undefined || event["type"] === "daemon.hello") onEvent(event);
+    };
+    const served = servedByItsComputer(entry);
+    const channel = await (served === undefined ? ownDaemonChannel(entry, heard) : servedChannel(entry, served, heard, carries));
+    if (said === undefined) return channel;
+    return {
+      send: frame => (BLOCKED_READS.has(frame.op) ? channel.send(frame) : Promise.resolve({ id: null, ok: false, code: "unsupported", error: said })),
+      close: () => channel.close(),
+      closed: channel.closed,
     };
   };
 
@@ -6426,17 +6438,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
 
     async daemonChannel(id, onEvent, origin) {
-      const entry = await entryOf(id, origin);
-      const blocked = await blockedLine(entry.record.place);
-      const served = servedByItsComputer(entry);
-      const channel = await (served === undefined ? ownDaemonChannel(entry, onEvent) : servedChannel(entry, served, onEvent, WORKSPACE_FRAMES));
-      return blocked === undefined ? channel : readsOnly(channel, blocked);
+      return copyChannel(await entryOf(id, origin), onEvent, WORKSPACE_FRAMES);
     },
 
     async guestChannel(id, onEvent) {
-      const entry = await entryOf(id);
-      const served = servedByItsComputer(entry);
-      return served === undefined ? ownDaemonChannel(entry, onEvent) : servedChannel(entry, served, onEvent, GUEST_ROAD_FRAMES);
+      return copyChannel(await entryOf(id), onEvent, GUEST_ROAD_FRAMES);
     },
 
     async servedByItsComputer(id, origin) {

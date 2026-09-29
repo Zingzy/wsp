@@ -3157,6 +3157,17 @@ describe("a fork on a computer you joined", () => {
     own.close();
   });
 
+  it("sends a page's frame up a fork's computer's link under the link's own id, so it cannot answer another request there", async () => {
+    const { place, id } = await servedFork();
+    const channel = await runtime!.workspaces.daemonChannel(id, () => {});
+    const cwd = (await runtime!.workspaces.get(id)).project.path;
+    const asking = channel.send({ op: "git.status", cwd, id: 4242 });
+    await until(() => place.frames.some(f => f["op"] === "git.status"));
+    expect(place.frames.find(f => f["op"] === "git.status")!["id"]).not.toBe(4242);
+    expect(await asking).toMatchObject({ ok: true, branch: "work" });
+    channel.close();
+  });
+
   it("refuses a fork's process watch, reads and kills before anything reaches its computer, and that computer's own channel still carries them", async () => {
     const { place, placeId, id } = await servedFork();
     const channel = await runtime!.workspaces.daemonChannel(id, () => {});
@@ -5348,9 +5359,12 @@ describe("a computer that turns unable to run workspaces keeps its link, and ref
     expect(await sent({ op: "git.diff", cwd: "/root/work" })).toMatchObject({ ok: false, error: SAID });
   });
 
-  it("refuses every other frame on the panes' road, Terminal, Files and Diff included, in the doctor's sentence before it reaches that computer", async () => {
+  it.each([
+    { road: "the panes' road, Terminal, Files and Diff included", open: (id: string) => runtime!.workspaces.daemonChannel(id, () => {}) },
+    { road: "the guest road, which a sign-in and an agent session inside the copy reach this host by", open: (id: string) => runtime!.workspaces.guestChannel(id, () => {}) },
+  ])("refuses every other frame on $road, in the doctor's sentence before it reaches that computer", async ({ open }) => {
     const { made, place } = await blockedFork();
-    const channel = await runtime!.workspaces.daemonChannel(made.id, () => {});
+    const channel = await open(made.id);
     for (const { op } of daemonOps().filter(o => o.op !== "git.status" && o.op !== "ping")) {
       const before = place().asked[op] ?? 0;
       expect(await channel.send({ op, ptyId: "p1", path: "/root/work", cwd: "/root/work", cols: 80, rows: 24 }), op).toMatchObject({ ok: false, error: SAID });
@@ -5358,6 +5372,22 @@ describe("a computer that turns unable to run workspaces keeps its link, and ref
     }
     expect(place().frames.filter(f => f["op"] !== "git.status")).toEqual([]);
     channel.close();
+  });
+
+  it.each([
+    { road: "the panes' road", open: (id: string, on: (e: Record<string, unknown>) => void) => runtime!.workspaces.daemonChannel(id, on) },
+    { road: "the guest road", open: (id: string, on: (e: Record<string, unknown>) => void) => runtime!.workspaces.guestChannel(id, on) },
+  ])("lets no session the computer pushes in on $road, so a sign-in or an agent session there opens nothing on this host", async ({ open }) => {
+    const { made, place } = await blockedFork();
+    const heard: Record<string, unknown>[] = [];
+    const channel = await open(made.id, e => heard.push(e));
+    for (const s of [{ session: "g1", kind: "cli", argv: ["agents", "signin", "claude"] }, { session: "g2", kind: "mcp", argv: [] }]) {
+      place().push({ type: "guest.opened", machineId: made.machineId, life: "l1", token: "dev-1.tok", cwd: "/root/work", ...s });
+    }
+    // One socket carries the pushes and the answer in order, so the ping's answer comes after both pushes were read.
+    expect(await channel.send({ op: "ping" })).toMatchObject({ ok: true });
+    channel.close();
+    expect(heard.map(e => e["type"])).toEqual(["daemon.hello"]);
   });
 
   it("refuses the Browser's road to a port inside the copy in the doctor's sentence", async () => {
