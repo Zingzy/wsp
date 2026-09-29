@@ -148,13 +148,14 @@ jobs:
         run: node packages/wspx/scripts/daemon-binary.mjs --triple x86_64-unknown-linux-musl
       # The wire suite as the contract: every daemon test drives a binary, and here it is the one this job built
       # rather than the static one staged above, so a change to daemon/ is gated on the binary it produced.
-      # The tool server in the same binary, held to the one the host package serves.
+      # The tool server in the same binary, held to the one the host package serves, and its sealed dial held to the
+      # runtime's own door.
       - name: Wire suite against the binary
         working-directory: .
         env:
           WSP_DAEMON_BIN: daemon/target/release/wsp-daemon
           WSP_MCP_BIN: daemon/target/release/wsp-daemon
-        run: pnpm exec vitest run --minWorkers=1 --maxWorkers=1 packages/daemon packages/host/test/mcp-binary.test.ts
+        run: pnpm exec vitest run --minWorkers=1 --maxWorkers=1 packages/daemon packages/host/test/mcp-binary.test.ts packages/host/test/mcp-binary-seal.test.ts
 
   # The two Linux daemons this head would ship, uploaded on every run so staging one on another computer is a
   # download from the run that built the head instead of a release dispatched by hand. Outside a run that is

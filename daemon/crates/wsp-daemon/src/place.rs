@@ -2,14 +2,12 @@
 //! What a computer joined as a place says about itself, the key it proves itself with, and what its leave takes.
 //! The report is read off the home the daemon was pointed at and the words it was started with, at every dial
 //! rather than once: a laptop gains a Docker, loses a disk and is renamed under wsp rather than by it. Signing and
-//! verifying are ed25519-dalek's; the bytes they cover are the protocol's.
+//! verifying are wsp-seal's; the bytes they cover are the protocol's.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
 
-use ed25519_dalek::pkcs8::{DecodePrivateKey, DecodePublicKey};
-use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use sha2::{Digest as _, Sha256};
 use wsp_frames::{
     is_under_path, landed_files_script, numbers, own_marks, place_daemon_paths, place_owned_paths, words, Base64Bytes, PlaceFile,
@@ -24,15 +22,14 @@ pub(crate) fn read_place_file(path: &Path) -> Option<PlaceFile> {
 
 /// This place's signature over the transcript, with the pkcs8 PEM key wsp join wrote.
 pub(crate) fn sign_place_bytes(private_key_pem: &str, bytes: &[u8]) -> Result<PlaceSignature, String> {
-    let key = SigningKey::from_pkcs8_pem(private_key_pem).map_err(|e| format!("the place key does not read as pkcs8 PEM: {e}"))?;
-    Ok(Base64Bytes::from_bytes(&key.sign(bytes).to_bytes()))
+    let signed = wsp_seal::sign(private_key_pem, bytes).map_err(|e| format!("the place key does not read as pkcs8 PEM: {e}"))?;
+    Ok(Base64Bytes::from_bytes(&signed))
 }
 
 /// Whether the key given (SPKI DER, base64) made this signature over these bytes. A key that will not parse is a
 /// refusal rather than a failure: the answer came off the wire.
 pub(crate) fn verify_place_bytes(public_key: &PlacePublicKey, bytes: &[u8], signature: &PlaceSignature) -> bool {
-    let Ok(key) = VerifyingKey::from_public_key_der(&public_key.to_bytes()) else { return false };
-    key.verify(bytes, &Signature::from_bytes(&signature.to_bytes())).is_ok()
+    wsp_seal::verify(&public_key.to_bytes(), bytes, &signature.to_bytes())
 }
 
 /// One agent to look for on this computer, as the --agents flag spells it: the catalog id and the command name.
@@ -640,6 +637,7 @@ pub(crate) fn place_home(given: Option<&Path>) -> PathBuf {
 mod tests {
     use super::*;
     use ed25519_dalek::pkcs8::{EncodePrivateKey, EncodePublicKey};
+    use ed25519_dalek::SigningKey;
     use wsp_frames::{place_link_transcript, place_refusal_transcript, LinkEphemerals, LinkRole};
 
     fn pair() -> (String, PlacePublicKey) {

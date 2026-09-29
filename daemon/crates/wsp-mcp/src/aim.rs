@@ -8,7 +8,7 @@
 
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::failure::Failure;
 use crate::record::{self, fill};
@@ -24,19 +24,30 @@ pub enum Aim {
 }
 
 /// What this computer keeps about a host on its account: its address, the device token the first dial bought, and
-/// the fingerprint of the key every dial holds it to.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+/// the fingerprint of the key every dial holds it to. The fields are in the order `wsp hosts` writes them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HostRecord {
     pub url: String,
     pub device_id: String,
     pub device_token: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    paired_at: Option<String>,
     via: Via,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+/// The key this computer signs an admission with, as the command line keeps it: the public half as it travels and
+/// the private half as pkcs8 PEM.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceKey {
+    pub public_key: String,
+    pub private_key_pem: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Via {
     kind: String,
@@ -230,6 +241,31 @@ fn read_host(home: &Path, alias: &str) -> Option<HostRecord> {
     }
     let record: HostRecord = read_json(&home.join(record::host().files.hosts).join(format!("{alias}.json")))?;
     (record.via.kind == "account").then_some(record)
+}
+
+/// The key this computer signs an admission with, or none where the command line never made one.
+pub fn device_key(home: &Path) -> Option<DeviceKey> {
+    read_json(&home.join(record::host().files.device_key))
+}
+
+/// The record under this alias written again, as the command line's writeOwn writes it: the home and the hosts
+/// folder held to 0700, the bytes through a 0600 file and a rename, since the token in it opens the host.
+pub fn write_host(home: &Path, alias: &str, record: &HostRecord) -> std::io::Result<()> {
+    use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
+    let hosts = home.join(record::host().files.hosts);
+    for dir in [home, hosts.as_path()] {
+        std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir)?;
+        if std::fs::metadata(dir)?.permissions().mode() & 0o777 != 0o700 {
+            std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+        }
+    }
+    let target = hosts.join(format!("{alias}.json"));
+    let tmp = hosts.join(format!("{alias}.json.{}.tmp", std::process::id()));
+    let text = format!("{}\n", serde_json::to_string_pretty(record).map_err(std::io::Error::other)?);
+    let mut file = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp)?;
+    std::io::Write::write_all(&mut file, text.as_bytes())?;
+    std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600))?;
+    std::fs::rename(&tmp, &target)
 }
 
 /// Every record under the hosts folder with its alias, by alias.

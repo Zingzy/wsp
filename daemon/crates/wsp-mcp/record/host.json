@@ -5,7 +5,8 @@
     "log": "host.log",
     "relay": "relay.json",
     "hosts": "hosts",
-    "home": ".wsp"
+    "home": ".wsp",
+    "deviceKey": "device-key.json"
   },
   "env": {
     "host": "WSP_HOST",
@@ -34,6 +35,8 @@
   "pollMs": 200,
   "probeMs": 2000,
   "loopback": "127.0.0.1",
+  "sealClient": "client",
+  "sealRefusal": "a frame on this link did not open under the key both ends agreed",
   "loopbacks": {
     "localhost": true,
     "::1": true,
