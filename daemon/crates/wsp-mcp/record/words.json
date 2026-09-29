@@ -427,6 +427,17 @@
     "noDraftBare": "no message was drafted: the agent gave none",
     "noDraftFix": "Pass one with --message \"<message>\".",
     "discarded": "{name}: {path} discarded",
+    "fixAsked": "{name}: asked {agent} to fix {check}",
+    "fixConflicts": "{name}: asked {agent} to fix the conflicts with {base}",
+    "fixNothing": "{name}: updated from {base}, nothing to fix",
+    "fixAgentDefault": "Claude Code",
+    "merged": "{name}: merged #{number} ({method})",
+    "mergeArmed": "{name}: #{number} merges when its checks pass",
+    "updatedNone": "{name}: already has everything in {base}",
+    "updatedOne": "{name}: updated from {base}, 1 commit",
+    "updatedMany": "{name}: updated from {base}, {count} commits",
+    "updateConflicts": "{name}: conflicts with {base} in {files}",
+    "updateConflictsJoin": ", ",
     "firstTurnFailed": "created {name} {id}; first turn failed: {failure}"
   }
 }
