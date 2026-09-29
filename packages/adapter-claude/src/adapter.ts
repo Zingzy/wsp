@@ -293,7 +293,8 @@ function taskFinishedOf(event: Record<string, unknown>): { id: string; status: s
  * with a command in the background, it reports that command stopped and answers the report as a turn of its own,
  * empty and in milliseconds, before the message the resume was sent with (measured on 2.1.284). */
 function drainedNotice(event: Record<string, unknown>): boolean {
-  return str(event.type) === "result" && str(rec(event.origin)?.kind) === "task-notification";
+  if (str(event.type) !== "result" || str(rec(event.origin)?.kind) !== "task-notification" || num(event.num_turns) !== 0) return false;
+  return answeredNothing(normalizeResult(event, undefined));
 }
 
 /** A reply whose process was cut while the agent's background tasks still ran: the CLI kills them with itself, so

@@ -833,6 +833,22 @@ describe("result classification", () => {
     expect(events.at(-1)).toMatchObject({ type: "session.end", sawResult: true });
   });
 
+  it("a report's answer that carries words is the turn's reply, so a send it ends never waits on an answer that is not coming", async () => {
+    const init = `{"type":"system","subtype":"init","cwd":"/w","session_id":"${FIXTURE_SESSION_ID}","model":"claude-haiku-4-5"}`;
+    const exec = scriptedExec([
+      init,
+      `{"type":"assistant","message":{"id":"msg_1","role":"assistant","content":[{"type":"text","text":"hi"}]},"parent_tool_use_id":null,"session_id":"${FIXTURE_SESSION_ID}"}`,
+      `{"type":"result","subtype":"success","is_error":false,"num_turns":1,"duration_ms":900,"result":"hi","session_id":"${FIXTURE_SESSION_ID}","total_cost_usd":0.01,"origin":{"kind":"task-notification"},"usage":{"input_tokens":10,"output_tokens":4}}`,
+    ]);
+    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
+    const { onEvent } = collect();
+
+    const result = await adapter.start({ prompt: "x", resume: FIXTURE_SESSION_ID, onEvent }).finished;
+
+    expect(result).toMatchObject({ status: "completed", text: "hi" });
+    expect(exec.order).toContain("closeInput");
+  });
+
   it("the CLI's refusal for want of a sign-in is a failed turn carrying its sentence once: the line it wrote itself is no delta and no reply", async () => {
     // The three lines a home with no login gave on 2.1.257 (measured 2026-09-12), trimmed to the fields read here.
     const init = `{"type":"system","subtype":"init","session_id":"${FIXTURE_SESSION_ID}","model":"claude-opus-5[1m]"}`;
