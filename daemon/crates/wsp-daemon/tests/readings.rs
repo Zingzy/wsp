@@ -438,13 +438,20 @@ async fn a_socket_that_goes_while_the_probe_is_still_reading_takes_no_stream_on_
     tokio::time::sleep(Duration::from_millis(100)).await;
     // The write blocks until a reader holds the FIFO; a daemon that refused both watches before its probe would
     // never open it, and that is a failure with a cause, not a case held to its timeout.
-    let feed =
-        tokio::task::spawn_blocking(move || std::fs::write(&stat, format!("cpu  1 2 3 4 5 6 7 8 0 0\nbtime {BTIME}\nprocesses 100\n")));
+    let text = format!("cpu  1 2 3 4 5 6 7 8 0 0\nbtime {BTIME}\nprocesses 100\n");
+    let fed = stat.clone();
+    let body = text.clone();
+    let feed = tokio::task::spawn_blocking(move || std::fs::write(&fed, body));
     tokio::time::timeout(Duration::from_secs(5), feed)
         .await
         .expect("no probe opened the FIFO: the daemon refused the watches before reading")
         .unwrap()
         .unwrap();
+    // A probe the system scheduled late can come out of open() after that one writer has closed, and then waits in
+    // read() for a writer that never comes (seen on macOS under a background-priority pin): the blocking thread holds
+    // the runtime's drop, and the binary never ends. Every reader still on the FIFO is fed until none is left, and
+    // the FIFO then becomes a plain file, so a probe that opens after this reads it and cannot block.
+    drain_fifo(&stat, &text, Duration::from_secs(10)).await;
     // Well past several of the samplers' intervals: a sampler left running would have logged its start.
     tokio::time::sleep(Duration::from_millis(600)).await;
     assert_eq!(
@@ -453,6 +460,36 @@ async fn a_socket_that_goes_while_the_probe_is_still_reading_takes_no_stream_on_
         "{:?}",
         d.log()
     );
+}
+
+/// Feeds `text` to every reader holding the FIFO at `path` until none has held it for a while, then puts a plain file
+/// with the same text in its place. A write-open that does not block finds a reader or answers ENXIO, which is how a
+/// reader still waiting is told from none. Fails, naming the FIFO, when a reader is still there once `within` is out.
+async fn drain_fifo(path: &std::path::Path, text: &str, within: Duration) {
+    use nix::errno::Errno;
+    use nix::fcntl::{open, OFlag};
+    use nix::sys::stat::Mode;
+    let deadline = tokio::time::Instant::now() + within;
+    let mut quiet_since = tokio::time::Instant::now();
+    loop {
+        match open(path, OFlag::O_WRONLY | OFlag::O_NONBLOCK | OFlag::O_CLOEXEC, Mode::empty()) {
+            Ok(fd) => {
+                let _ = std::fs::File::from(fd).write_all(text.as_bytes());
+                quiet_since = tokio::time::Instant::now();
+            }
+            Err(Errno::ENXIO) => {
+                if quiet_since.elapsed() >= Duration::from_millis(300) {
+                    break;
+                }
+            }
+            Err(e) => panic!("the FIFO at {} could not be opened for writing: {e}", path.display()),
+        }
+        assert!(tokio::time::Instant::now() < deadline, "a probe still holds the FIFO at {} after {within:?}", path.display());
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let plain = path.with_extension("plain");
+    std::fs::write(&plain, text).unwrap();
+    std::fs::rename(&plain, path).unwrap();
 }
 
 #[tokio::test]
