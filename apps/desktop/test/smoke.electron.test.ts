@@ -1307,10 +1307,13 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     });
     const win = await windowAt(launched.app, APP_URL);
     const home = win.url();
-    await win.waitForSelector("[data-host-foot]");
+    await win.waitForSelector("[data-slot=sidebar-container]");
     const here = computerNameHere();
-    // The foot draws before the shell has answered which host the window is on, and names it once it has.
-    await vi.waitFor(async () => expect(await win.locator("[data-host-label]").textContent()).toBe(here), { timeout: 10_000, interval: 100 });
+    // The page names no host of its own; the shell's Hosts menu is where the window's host is marked, once the shell
+    // has answered which one it is on.
+    await vi.waitFor(async () => {
+      expect((await hostsMenuRows(launched!.app)).find(r => r.checked)?.label).toBe(here);
+    }, { timeout: 10_000, interval: 100 });
     await hostsMenu(launched.app, "box");
     await win.waitForURL(`${at}/`);
     // The shell's own menu lists every host on the account, so the owner still moves from one to another while the
@@ -1365,7 +1368,6 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     await vi.waitFor(async () => {
       expect((await hostsMenuRows(launched!.app)).map(r => r.checked)).toEqual([true, false, false]);
     }, { timeout: 30_000, interval: 100 });
-    expect(await win.locator("[data-host-label]").textContent()).toBe(here);
     // The app's own host was never stopped by the move, nor by the quit.
     await quit(launched.app);
     expect(await refused(home)).toBe(false);
@@ -1409,8 +1411,14 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
       // sidebar and one in the main column, the page's capture holds exactly the alpha the page's own backgrounds
       // stack to there, which is what says the window under them is clear.
       const points = { sidebar: { x: page.sidebarWidth / 2, y: 0.7 }, main: { x: page.sidebarWidth + 200, y: 0.7 } };
+      // The page follows the computer's own Reduce transparency, which a Mac with no graphics to spare turns on by
+      // itself, so the glass is read with the setting held off and then held on, whatever this machine asks for.
+      const reduces = await win.evaluate(() => matchMedia("(prefers-reduced-transparency: reduce)").matches);
+      const cdp = await win.context().newCDPSession(win);
+      const transparency = (value: "no-preference" | "reduce") => cdp.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-transparency", value }] });
+      await transparency("no-preference");
       const painted = await readPainted(app, win, frame.id, points);
-      console.info(`painted alpha by theme: ${JSON.stringify(painted)}`);
+      console.info(`painted alpha by theme (this machine reduces transparency: ${reduces}): ${JSON.stringify(painted)}`);
       for (const theme of ["light", "dark"] as const) {
         for (const at of ["sidebar", "main"] as const) expect(Math.abs(painted[theme][at].captured - painted[theme][at].declared)).toBeLessThanOrEqual(2);
       }
@@ -1419,6 +1427,10 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
       expect(painted.dark.sidebar.captured).toBeLessThan(255);
       expect(painted.dark.sidebar.captured).toBeGreaterThan(0);
       expect(painted.light.main.captured).toBe(255);
+      // Reduce transparency on, every glass takes its solid ground: the dark sidebar lets nothing through.
+      await transparency("reduce");
+      const solid = await readPainted(app, win, frame.id, { sidebar: points.sidebar });
+      expect(solid.dark.sidebar).toEqual({ captured: 255, declared: 255 });
     },
   );
 });
