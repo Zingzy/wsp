@@ -109,7 +109,7 @@ describe("a send after a stop", () => {
     const { backend, commands, seeds, workspaceId, threadId } = await stoppedAfterOneTurn("codex", fixture("../../adapter-codex/test/fixtures/app-server-turn.jsonl"));
     expect(commands).toHaveLength(1);
     // The server line carries the thread's own wsp server, which takes the place of any the person's config names.
-    expect(commands[0]).toMatch(/ && codex app-server -c mcp_servers\.wsp\.command=/);
+    expect(commands[0]).toMatch(/ && codex app-server -c tools.update_plan.enabled='true' -c mcp_servers\.wsp\.command=/);
     const threadLine = (at: number) => JSON.parse(seeds[at]!.at(-1)!) as { method: string; params: Record<string, unknown> };
     expect(threadLine(0).method).toBe("thread/start");
     await rt!.workspaces.wake(workspaceId);

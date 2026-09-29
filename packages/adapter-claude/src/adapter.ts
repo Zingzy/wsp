@@ -4,7 +4,7 @@
 // recorded in solari-poc/RESULTS.md.
 
 import { ASIDE_WALL_MS, INTERRUPT_GRACE_MS, PERMISSION_ALLOW, PERMISSION_DENY, RUN_EXIT_MS, asideWallLine, backgroundTasksLine, endAfterResult, endRun, fmtDuration, harnessExitLine, refusedTurn, taskFinishedLine, titlePrompt } from "@wsp/protocol";
-import type { AdapterAttachOptions, AdapterEvent, AsideAnswer, AsideQuestion, ExecStream, ExecStreamFactory, HarnessCatalogProbe, McpServerSpec, PermissionAsk, PermissionOutcome, ScreenCommand, SessionAsker, SessionHarness, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnRefusal, TurnResult, TurnStatus, CommitDrafter } from "@wsp/protocol";
+import type { AdapterAttachOptions, AdapterEvent, AsideAnswer, AsideQuestion, ExecStream, ExecStreamFactory, HarnessCatalogProbe, McpServerSpec, PermissionAsk, PermissionOutcome, ScreenCommand, SessionAsker, SessionHarness, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnRefusal, TurnResult, TurnStatus, CommitDrafter, PlanStep, TurnTokens } from "@wsp/protocol";
 import { SKIP_PROMPTS_MODE, controlAllowLine, controlAnswerLine, controlErrorLine, controlLine, modeOptionOn, setModeLine } from "./permissions.js";
 import { CLAUDE_SCREEN_COMMANDS, catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
 import { asideAnswer, asideCommand, forkCleanupCommand } from "./aside.js";
@@ -217,13 +217,54 @@ function resultStatus(event: Record<string, unknown>, errorsText: string): TurnS
   return "failed";
 }
 
+/** Every token a call's usage says the model read: the fresh input, the part written to the cache and the part read
+ * back from it. */
+function inputTokens(usage: Record<string, unknown>): number {
+  return (num(usage.input_tokens) ?? 0) + (num(usage.cache_creation_input_tokens) ?? 0) + (num(usage.cache_read_input_tokens) ?? 0);
+}
+
+/** What the model held after one call, off that call's own usage: what it read and what it wrote. */
+function heldTokens(usage: Record<string, unknown>): number {
+  return inputTokens(usage) + (num(usage.output_tokens) ?? 0);
+}
+
+/** The turn's tokens off its result: the usage sums every call of the turn, and modelUsage names each model the turn
+ * ran with its window. The model is the one that did the most of it, since a turn hands small jobs to a cheaper one. */
+function resultTokens(event: Record<string, unknown>): { tokens?: TurnTokens; model?: string } {
+  const usage = rec(event.usage);
+  const models = Object.entries(rec(event.modelUsage) ?? {}).flatMap(([id, raw]) => {
+    const row = rec(raw);
+    if (row === undefined) return [];
+    const spent = (num(row.inputTokens) ?? 0) + (num(row.outputTokens) ?? 0) + (num(row.cacheReadInputTokens) ?? 0) + (num(row.cacheCreationInputTokens) ?? 0);
+    return [{ id, spent, window: num(row.contextWindow) }];
+  });
+  const model = models.reduce<{ id: string; spent: number } | undefined>((best, row) => (best === undefined || row.spent > best.spent ? row : best), undefined)?.id;
+  const windows = models.flatMap(row => (row.window !== undefined ? [row.window] : []));
+  const cached = usage === undefined ? undefined : num(usage.cache_read_input_tokens);
+  const cacheWrite = usage === undefined ? undefined : num(usage.cache_creation_input_tokens);
+  return {
+    ...(usage !== undefined
+      ? {
+          tokens: {
+            input: inputTokens(usage),
+            output: num(usage.output_tokens) ?? 0,
+            ...(cached !== undefined ? { cached } : {}),
+            ...(cacheWrite !== undefined ? { cacheWrite } : {}),
+            ...(windows.length > 0 ? { window: Math.max(...windows) } : {}),
+          },
+        }
+      : {}),
+    ...(model !== undefined ? { model } : {}),
+  };
+}
+
 function normalizeResult(event: Record<string, unknown>, refusal: { road?: string; cause?: TurnRefusal } | undefined): TurnResult {
   const errors = strArr(event.errors) ?? [];
   const result: TurnResult = {
     status: resultStatus(event, errors.join(" ").toLowerCase()),
     durationMs: num(event.duration_ms),
     costUsd: num(event.total_cost_usd),
-    usage: rec(event.usage),
+    ...resultTokens(event),
     text: str(event.result),
     // "[ede_diagnostic] ..." entries are CLI-internal telemetry, hidden from
     // the CLI's own UI too (t3code resultUserFacingError).
@@ -244,11 +285,25 @@ function apiErrorCause(event: Record<string, unknown>): TurnRefusal | null | und
   return REFUSAL_CAUSES[str(event.error) ?? ""] ?? null;
 }
 
-/** A success with no text and no token in its usage: the CLI refused the turn (a resume of a transcript a kill left
+/** A success with no text and no token counted: the CLI refused the turn (a resume of a transcript a kill left
  * half-written) and said why on stderr only. */
 function answeredNothing(result: TurnResult): boolean {
   if (result.status !== "completed" || (result.text ?? "").trim().length > 0) return false;
-  return !Object.entries(result.usage ?? {}).some(([key, value]) => key.endsWith("_tokens") && (num(value) ?? 0) > 0);
+  return (result.tokens?.input ?? 0) + (result.tokens?.output ?? 0) === 0;
+}
+
+/** The result with what the follow saw beside it: what the model held at the end, and the model the CLI announced
+ * where the result named none. */
+function withContext(result: TurnResult, context: number | undefined, initModel: string | undefined): TurnResult {
+  const model = result.model ?? initModel;
+  const tokens = result.tokens === undefined || context === undefined ? result.tokens : { ...result.tokens, context };
+  return { ...result, ...(tokens !== undefined ? { tokens } : {}), ...(model !== undefined ? { model } : {}) };
+}
+
+/** What the model held after a compaction the CLI ran mid-turn, off its own boundary line. */
+function compactedTo(event: Record<string, unknown>): number | undefined {
+  if (str(event.type) !== "system" || str(event.subtype) !== "compact_boundary") return undefined;
+  return num(rec(event.compact_metadata)?.post_tokens);
 }
 
 /** The last lines the process printed that were not stream-json events: the CLI's stderr shares the log. */
@@ -306,7 +361,56 @@ function endedEarly(result: TurnResult, backgroundTasks: number): TurnResult {
   return { ...result, status: "failed", error: backgroundTasksLine(backgroundTasks) };
 }
 
-function normalizeEvent(event: Record<string, unknown>, fallbackSessionId: string, refusal: { road?: string; cause?: TurnRefusal } | undefined): AdapterEvent[] {
+/** The turn's plan as its calls so far built it. */
+interface PlanBook {
+  /** The ids of the calls read as the plan, whose results are bookkeeping and draw nothing either. */
+  calls: Set<string>;
+  /** The list TaskCreate and TaskUpdate keep, in the order its tasks were made, each by the id the CLI gave it. */
+  tasks: { id?: string; text: string; state: PlanStep["state"] }[];
+  /** A TaskCreate's task by its call, until the call's result names the id the CLI gave it. */
+  unnamed: Map<string, number>;
+}
+
+const newPlanBook = (): PlanBook => ({ calls: new Set(), tasks: [], unnamed: new Map() });
+
+const stepState = (status: unknown): PlanStep["state"] => (status === "completed" ? "done" : status === "in_progress" ? "working" : "pending");
+
+/** A call the agent keeps its plan in, read into the book: TodoWrite's list whole each time the agent rewrites it,
+ * 2.1.283's task list one TaskCreate or TaskUpdate at a time, and the Markdown ExitPlanMode proposes. Undefined for
+ * any other call; null for a plan call with nothing new to show, a TaskList or a TaskGet. */
+function readPlanCall(name: string | undefined, input: unknown, id: string | undefined, book: PlanBook): { steps: PlanStep[] } | { text: string } | null | undefined {
+  const fields = rec(input);
+  const listed = (): { steps: PlanStep[] } => ({ steps: book.tasks.map(({ text, state }) => ({ text, state })) });
+  switch (name) {
+    case "TodoWrite": {
+      if (!Array.isArray(fields?.todos)) return undefined;
+      const todos = fields.todos.map(rec).filter((t): t is Record<string, unknown> => t !== undefined);
+      return { steps: todos.map(t => ({ text: str(t.content) ?? "", state: stepState(t.status) })) };
+    }
+    case "ExitPlanMode": {
+      const plan = str(fields?.plan);
+      return plan === undefined ? undefined : { text: plan };
+    }
+    case "TaskCreate":
+      if (id !== undefined) book.unnamed.set(id, book.tasks.length);
+      book.tasks.push({ text: str(fields?.subject) ?? "", state: "pending" });
+      return listed();
+    case "TaskUpdate": {
+      const at = book.tasks.findIndex(t => t.id !== undefined && t.id === str(fields?.taskId));
+      if (at === -1) return null;
+      if (fields?.status === "deleted") book.tasks.splice(at, 1);
+      else book.tasks[at] = { ...book.tasks[at]!, ...(fields?.status !== undefined ? { state: stepState(fields.status) } : {}), ...(str(fields?.subject) !== undefined ? { text: str(fields?.subject)! } : {}) };
+      return listed();
+    }
+    case "TaskList":
+    case "TaskGet":
+      return null;
+    default:
+      return undefined;
+  }
+}
+
+function normalizeEvent(event: Record<string, unknown>, fallbackSessionId: string, refusal: { road?: string; cause?: TurnRefusal } | undefined, plans: PlanBook): AdapterEvent[] {
   const sessionId = str(event.session_id) ?? fallbackSessionId;
   // A subagent's lines ride the parent's stream and carry the call that launched it; the parent's own carry null.
   const parent = str(event.parent_tool_use_id);
@@ -351,7 +455,14 @@ function normalizeEvent(event: Record<string, unknown>, fallbackSessionId: strin
               ...from,
             });
             break;
-          case "tool_use":
+          case "tool_use": {
+            const id = str(block.id);
+            const plan = parent === undefined ? readPlanCall(str(block.name), block.input, id, plans) : undefined;
+            if (plan !== undefined) {
+              if (id !== undefined) plans.calls.add(id);
+              if (plan !== null) deltas.push({ type: "turn.plan", sessionId, ...plan });
+              break;
+            }
             deltas.push({
               type: "turn.delta",
               sessionId,
@@ -362,6 +473,7 @@ function normalizeEvent(event: Record<string, unknown>, fallbackSessionId: strin
               ...from,
             });
             break;
+          }
           default:
             break;
         }
@@ -375,6 +487,15 @@ function normalizeEvent(event: Record<string, unknown>, fallbackSessionId: strin
       for (const raw of blocks) {
         const block = rec(raw);
         if (block === undefined || str(block.type) !== "tool_result") continue;
+        const answered = str(block.tool_use_id);
+        if (answered !== undefined && plans.calls.delete(answered)) {
+          // A TaskCreate's result is where the CLI names the id its later TaskUpdates take.
+          const at = plans.unnamed.get(answered);
+          const named = /#(\d+)/.exec(flattenContent(block.content))?.[1];
+          if (at !== undefined && named !== undefined && plans.tasks[at] !== undefined) plans.tasks[at]!.id = named;
+          plans.unnamed.delete(answered);
+          continue;
+        }
         deltas.push({
           type: "turn.delta",
           sessionId,
@@ -439,6 +560,11 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     /** The CLI's one phrase for each background task it has reported, by its own handle for it: only the set lines
      * carry it, and the line a finished task gets is written from it. */
     const taskNames = new Map<string, string>();
+    const plans = newPlanBook();
+    /** What the model held after its last call, the agent's own and never a subagent's: the last reply's usage, or a
+     * compaction's figure where one came after it. The result's usage sums the turn, so it cannot say this. */
+    let heldContext: number | undefined;
+    let initModel: string | undefined;
     /** One line per task that finished after the held reply, in the order the CLI reported them. */
     const finishedAfter: string[] = [];
     /** Running while a held reply waits out the CLI's silence: its tasks are done, and this is the window it has to
@@ -609,14 +735,19 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
           }
           // A report's answer with no reply held is not this turn's: the person's message is answered after it.
           if (heldReply === undefined && !sawResult && drainedNotice(event)) continue;
+          const compacted = compactedTo(event);
+          if (compacted !== undefined) heldContext = compacted;
+          const usage = str(event.type) === "assistant" && str(event.parent_tool_use_id) === undefined ? rec(rec(event.message)?.usage) : undefined;
+          if (usage !== undefined && event.is_api_error_message !== true) heldContext = heldTokens(usage);
           const cause = apiErrorCause(event);
           if (cause !== undefined) {
             refusalCause = cause;
             continue;
           }
-          for (const normalized of normalizeEvent(event, claudeSessionId, refusalOf(refusalCause))) {
+          for (const normalized of normalizeEvent(event, claudeSessionId, refusalOf(refusalCause), plans)) {
             if (normalized.type === "session.start") {
               claudeSessionId = normalized.sessionId;
+              initModel = normalized.model ?? initModel;
               sawInit = true;
               harnessCwd = normalized.cwd;
               shellCwd = normalized.cwd;
@@ -641,7 +772,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
               // their own lines.
               if (sawResult) continue;
               woken = false;
-              const result = spanned(normalized.result);
+              const result = spanned(withContext(normalized.result, heldContext, initModel));
               if (backgroundTasks > 0) {
                 // The agent replied while the CLI still reports work it started. The turn is not over: ending it
                 // here kills that work mid-write and nothing ever says what came of it, so the reply is kept, the

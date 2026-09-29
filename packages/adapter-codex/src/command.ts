@@ -86,7 +86,8 @@ export function accessParams(mode: string | undefined): AccessParams {
 /** The server as one bash line in the folder the turn runs in. Guest exec carries no HOME, so the default folder is
  * `~`, which bash reads from passwd. */
 export function buildCommand(options: BuildCommandOptions): string {
-  return inFolder(options.cwd, ["codex app-server", ...serverFlags(options.mcpServers ?? {})].join(" "));
+  // The plan tool is off in a headless server unless its config turns it on; its updates are the turn's steps.
+  return inFolder(options.cwd, ["codex app-server", configRaw("tools.update_plan.enabled", "true"), ...serverFlags(options.mcpServers ?? {})].join(" "));
 }
 
 /** An image path is a plain absolute path on the machine, where the runtime landed it before the turn. */

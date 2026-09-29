@@ -91,3 +91,8 @@ export function gitDiff(wire: TerminalWire, cwd: string, scope: GitDiffScope, op
 export function fsWrite(wire: TerminalWire, path: string, contents: string): Promise<FsWriteReply> {
   return call(wire, "fs.write", { path, contents }, FsWriteReply);
 }
+
+/** What changed between two snapshot commits, each named by its full sha. */
+export function gitRange(wire: TerminalWire, cwd: string, from: string, to: string): Promise<GitDiffReply> {
+  return call(wire, "git.range", { cwd, from, to }, GitDiffReply);
+}

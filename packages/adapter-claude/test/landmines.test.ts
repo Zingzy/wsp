@@ -23,6 +23,10 @@ describe("buildEnv", () => {
     expect(env.PATH).toBe(base.PATH);
   });
 
+  it("turns on the task list tools a headless run leaves off, so the agent keeps its list as it does in its own terminal", () => {
+    expect(buildEnv({ base }).CLAUDE_CODE_ENABLE_TODO_TOOLS).toBe("1");
+  });
+
   it("drops an inherited project key and sets the one the caller named, after the strip", () => {
     // The strip takes every inherited CLAUDE_CODE_* as a nesting mark, so a key merged into the base is thrown
     // away; the key a workspace's own kind answers is set after it, which is what makes it reach the CLI.
@@ -57,7 +61,8 @@ describe("buildEnv", () => {
       (k) =>
         (k.startsWith("CLAUDE_CODE_") || k === "CLAUDECODE") &&
         k !== "CLAUDE_CODE_AUTO_CONNECT_IDE" &&
-        k !== "CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL",
+        k !== "CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL" &&
+        k !== "CLAUDE_CODE_ENABLE_TODO_TOOLS",
     );
     expect(leaked).toEqual([]);
   });

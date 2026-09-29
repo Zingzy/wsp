@@ -868,3 +868,89 @@ describe("deriveSession: what a turn kept to rewind to", () => {
     expect(model.timeline.filter(e => e.kind === "message").map(e => (e.kind === "message" ? e.message.text : ""))).toEqual(["ask 1", "reply 1", "ask 2", "reply 2", "ask 3", "reply 3"]);
   });
 });
+
+describe("a turn's model and tokens", () => {
+  const scoped = { workspaceId: "ws_t", sessionId: "sess_t", turnId: "turn_t" };
+  it("ride the turn off its result, the model the result names over the one the start announced", () => {
+    const model = deriveSession([
+      { type: "session.start", ...scoped, at: 1_000, prompt: "go", model: "claude-opus-5-5[1m]" },
+      { type: "session.delta", ...scoped, at: 2_000, kind: "text", text: "done" },
+      { type: "session.done", ...scoped, at: 3_000, result: { status: "completed", model: "claude-opus-5-5", tokens: { input: 22_564, output: 251, context: 4_269, window: 1_000_000 } } },
+      { type: "session.end", ...scoped, at: 3_100, exitCode: 0, sawResult: true },
+    ]);
+    expect(model.turns[0]).toMatchObject({ model: "claude-opus-5-5", tokens: { input: 22_564, output: 251, context: 4_269, window: 1_000_000 } });
+  });
+
+  it("are nothing on a turn whose agent reported none", () => {
+    const model = deriveSession([
+      { type: "session.start", ...scoped, at: 1_000, prompt: "go" },
+      { type: "session.done", ...scoped, at: 3_000, result: { status: "completed", text: "done" } },
+    ]);
+    expect(model.turns[0]).toMatchObject({ model: null, tokens: null });
+  });
+});
+
+describe("what a turn changed", () => {
+  const scoped = { workspaceId: "ws_c", sessionId: "sess_c" };
+  const files = [{ path: "README.md", kind: "modified", additions: 14, deletions: 3 }];
+  const from = "a".repeat(40);
+  const to = "b".repeat(40);
+  it("rides the turn it names, even when it lands after the turn ended and a later turn opened", () => {
+    const model = deriveSession([
+      { type: "session.start", ...scoped, turnId: "t1", at: 1_000, prompt: "edit" },
+      { type: "session.delta", ...scoped, turnId: "t1", at: 2_000, kind: "text", text: "edited" },
+      { type: "session.done", ...scoped, turnId: "t1", at: 3_000, result: { status: "completed" } },
+      { type: "session.end", ...scoped, turnId: "t1", at: 3_100, exitCode: 0, sawResult: true },
+      { type: "session.start", ...scoped, turnId: "t2", at: 4_000, prompt: "again" },
+      { type: "session.changes", ...scoped, turnId: "t1", at: 4_100, from, to, files, shared: true },
+    ]);
+    expect(model.turns.map(t => t.changes)).toEqual([{ from, to, files, shared: true }, null]);
+  });
+
+  it("stays on a turn whose reply lands after it", () => {
+    const model = deriveSession([
+      { type: "session.start", ...scoped, turnId: "t1", at: 1_000, prompt: "edit" },
+      { type: "session.changes", ...scoped, turnId: "t1", at: 2_000, from, to, files },
+      { type: "session.done", ...scoped, turnId: "t1", at: 3_000, result: { status: "completed", text: "edited" } },
+      { type: "session.end", ...scoped, turnId: "t1", at: 3_100, exitCode: 0, sawResult: true },
+    ]);
+    expect(model.turns[0]!.changes).toEqual({ from, to, files, shared: false });
+  });
+
+  it("opens no turn when it names none the thread holds", () => {
+    const model = deriveSession([{ type: "session.changes", ...scoped, turnId: "gone", at: 1_000, from, to, files }]);
+    expect(model.turns).toEqual([]);
+    expect(model.timeline).toEqual([]);
+  });
+});
+
+describe("the agent's plan", () => {
+  const scoped = { workspaceId: "ws_p", sessionId: "sess_p" };
+  const first = [{ text: "read", state: "working" as const }, { text: "write", state: "pending" as const }];
+  const second = [{ text: "read", state: "done" as const }, { text: "write", state: "working" as const }];
+  it("is one step list per turn, a later list replacing the earlier where it stood", () => {
+    const model = deriveSession([
+      { type: "session.start", ...scoped, turnId: "t1", at: 1_000, prompt: "go" },
+      { type: "session.plan", ...scoped, turnId: "t1", at: 2_000, steps: first },
+      { type: "session.delta", ...scoped, turnId: "t1", at: 3_000, kind: "text", text: "reading" },
+      { type: "session.plan", ...scoped, turnId: "t1", at: 4_000, steps: second },
+      { type: "session.done", ...scoped, turnId: "t1", at: 4_500, result: { status: "completed" } },
+      { type: "session.end", ...scoped, turnId: "t1", at: 4_600, exitCode: 0, sawResult: true },
+      { type: "session.start", ...scoped, turnId: "t2", at: 5_000, prompt: "again" },
+      { type: "session.plan", ...scoped, turnId: "t2", at: 6_000, steps: first },
+    ]);
+    const todos = model.timeline.filter(e => e.kind === "todo");
+    expect(todos.map(e => e.kind === "todo" && [e.todo.turnId, e.todo.steps])).toEqual([["t1", second], ["t2", first]]);
+    expect(model.timeline.map(e => e.kind)).toEqual(["message", "todo", "message", "message", "todo"]);
+  });
+
+  it("takes the plan the agent proposed as the turn's plan card, a later one replacing it", () => {
+    const model = deriveSession([
+      { type: "session.start", ...scoped, turnId: "t1", at: 1_000, prompt: "plan it" },
+      { type: "session.plan", ...scoped, turnId: "t1", at: 2_000, text: "# One" },
+      { type: "session.plan", ...scoped, turnId: "t1", at: 3_000, text: "# Two" },
+    ]);
+    const plans = model.timeline.filter(e => e.kind === "proposed-plan");
+    expect(plans.map(e => e.kind === "proposed-plan" && [e.proposedPlan.turnId, e.proposedPlan.planMarkdown])).toEqual([["t1", "# Two"]]);
+  });
+});

@@ -6,7 +6,7 @@
 // menus are built from.
 import { PauseIcon, PlayIcon, SquareIcon } from "lucide-react";
 import { describe, expect, it, vi } from "vitest";
-import { goneRefusal, kindWords, machineWord, notAnsweringYet, ownDaemonDown, threadForgetRefusal, workspaceState, workspaceWord, type HarnessCatalog, type PlaceView, type SessionStatus, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { goneRefusal, kindWords, machineWord, notAnsweringYet, ownDaemonDown, threadForgetRefusal, threadMarkdown, threadMessages, workspaceState, workspaceWord, type HarnessCatalog, type PlaceView, type SessionEvent, type SessionStatus, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { TERMINAL_WORDS, THREAD_WORDS, WORKSPACE_WORDS, terminalRefusedLine } from "../src/actions/format.js";
 import { placeMenu } from "../src/actions/menuPlacement.js";
 import { actionById, actionIfAny, resolveActions, toMenuItems } from "../src/actions/registry.js";
@@ -310,13 +310,32 @@ describe("thread actions", () => {
       { id: "thr_1", sessionId: "s1", threadId, workspaceId: "ws_a", harness, title: "fix the port list", status, ran, startedAt: null, endedAt: null, indicator: null, startedBy: "person", project: null, parentThreadId: null, attempt: null, model: null, asking: null, costUsd: null, unread: false, readAt: null, settledAt: null, needsYou: false, pinnedAt: null, snoozedUntil: null, section: null },
       { catalog: machine.catalog === undefined ? row(harness) : machine.catalog, state: machine.state ?? "running", ...(machine.goneWords !== undefined ? { goneWords: machine.goneWords } : {}) },
     );
-  const threadVerbs = (over: Partial<ThreadVerbs> = {}): ThreadVerbs => ({ stop: vi.fn(async () => {}), rename: vi.fn(), forget: vi.fn(), copyText: vi.fn(async () => {}), ...over });
+  const threadVerbs = (over: Partial<ThreadVerbs> = {}): ThreadVerbs => ({ stop: vi.fn(async () => {}), rename: vi.fn(), forget: vi.fn(), readEvents: vi.fn(async () => []), copyText: vi.fn(async () => {}), ...over });
+
+  it("copies the thread as Markdown off the events the host holds for its workspace, the thread's alone", async () => {
+    const scope = { workspaceId: "ws_a", sessionId: "s1" };
+    const events: SessionEvent[] = [
+      { type: "session.start", ...scope, threadId: "rt_1", turnId: "u1", prompt: "build it" },
+      { type: "session.delta", ...scope, threadId: "rt_1", turnId: "u1", kind: "text", text: "built" },
+      { type: "session.start", ...scope, sessionId: "s2", threadId: "rt_other", turnId: "u9", prompt: "not this one" },
+    ];
+    const readEvents = vi.fn(async () => events);
+    const copyText = vi.fn(async (_text: string) => {});
+    const actions = resolveActions(threadActions, thread("completed", "rt_1"), threadVerbs({ readEvents, copyText }));
+    expect(actionById(actions, "copy-markdown")).toMatchObject({ title: "Copy as Markdown", refusal: null });
+    await actionById(actions, "copy-markdown").run();
+    expect(readEvents).toHaveBeenCalledWith("ws_a");
+    expect(copyText).toHaveBeenCalledWith(threadMarkdown(threadMessages(events, "rt_1")));
+    expect(copyText.mock.calls[0]![0]).not.toContain("not this one");
+    expect(actionById(resolveActions(threadActions, thread("completed", null), threadVerbs()), "copy-markdown").refusal).toBe("This thread has no id yet");
+    expect(actionById(resolveActions(threadActions, thread("completed", "rt_1"), threadVerbs({ readEvents: undefined })), "copy-markdown").refusal).toBe("This client cannot read a thread");
+  });
 
   it("a running thread offers stop, rename and copy link; forget carries the runtime's own refusal", async () => {
     const verbs = threadVerbs();
     const actions = resolveActions(threadActions, thread("running"), verbs);
-    expect(titles(actions)).toEqual([THREAD_WORDS.stop, THREAD_WORDS.rename, THREAD_WORDS.copyLink, THREAD_WORDS.forget]);
-    expect(enabled(actions)).toEqual(["stop", "rename", "copy-link"]);
+    expect(titles(actions)).toEqual([THREAD_WORDS.stop, THREAD_WORDS.rename, THREAD_WORDS.copyMarkdown, THREAD_WORDS.copyLink, THREAD_WORDS.forget]);
+    expect(enabled(actions)).toEqual(["stop", "rename", "copy-markdown", "copy-link"]);
     expect(actionById(actions, "forget").refusal).toBe(threadForgetRefusal("thr_1"));
     await actionById(actions, "stop").run();
     expect(verbs.stop).toHaveBeenCalledWith("s1");
@@ -355,7 +374,7 @@ describe("thread actions", () => {
     const restore = vi.fn(async () => {});
     const root = (over: Partial<NonNullable<ThreadTarget["root"]>>): ThreadTarget => ({ ...thread("completed"), root: { threadIds: ["thr_1", "thr_2"], working: false, pinned: false, settled: false, ...over } });
     const live = resolveActions(threadActions, root({}), threadVerbs({ mark, snooze, restore, settle: vi.fn(async () => {}) }));
-    expect(titles(live)).toEqual([THREAD_WORDS.stop, THREAD_WORDS.settle, THREAD_WORDS.rename, THREAD_WORDS.pin, THREAD_WORDS.snooze, THREAD_WORDS.copyLink, THREAD_WORDS.forget]);
+    expect(titles(live)).toEqual([THREAD_WORDS.stop, THREAD_WORDS.settle, THREAD_WORDS.rename, THREAD_WORDS.copyMarkdown, THREAD_WORDS.pin, THREAD_WORDS.snooze, THREAD_WORDS.copyLink, THREAD_WORDS.forget]);
     await actionById(live, "pin").run();
     expect(mark).toHaveBeenCalledWith(["thr_1"], { pinned: true });
     await actionById(live, "snooze").run();
@@ -365,7 +384,7 @@ describe("thread actions", () => {
     await actionById(pinned, "pin").run();
     expect(mark).toHaveBeenLastCalledWith(["thr_1"], { pinned: false });
     const folded = resolveActions(threadActions, root({ settled: true }), threadVerbs({ mark, snooze, restore }));
-    expect(titles(folded)).toEqual([THREAD_WORDS.stop, THREAD_WORDS.restore, THREAD_WORDS.rename, THREAD_WORDS.copyLink, THREAD_WORDS.forget]);
+    expect(titles(folded)).toEqual([THREAD_WORDS.stop, THREAD_WORDS.restore, THREAD_WORDS.rename, THREAD_WORDS.copyMarkdown, THREAD_WORDS.copyLink, THREAD_WORDS.forget]);
     await actionById(folded, "restore").run();
     expect(restore).toHaveBeenCalledWith(["thr_1", "thr_2"]);
     // A client with no road to the marks says so, and a thread under a root offers none of them.

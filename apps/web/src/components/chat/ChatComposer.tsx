@@ -101,6 +101,7 @@ import { COMPOSER_WORDS } from "./composerWords";
 import { partitionStashFiles, usePromptStashStore, type PromptStashEntry } from "./promptStashStore";
 import { ComposerStashMenu, stashedWord } from "./ComposerStashMenu";
 import { ComposerModeToggles } from "./ComposerModeToggles";
+import { ContextMeter } from "./ContextMeter";
 import { useComposerModesStore } from "./composerModesStore";
 import { nextPastedTextName, pastesAsFile } from "./pastedText";
 import { buildComposerPromptHistoryEntries, stepComposerPromptHistory, type ComposerPromptHistoryPosition } from "./composerPromptHistory";
@@ -845,6 +846,7 @@ export function ChatComposer({
   const compact = thread.view.running || thread.view.entries.some(entry => entry.kind === "message");
   const modes = <ComposerModeToggles fast={fastOffered ? { on: fastOn, toggle: () => setFast(threadKey, !fastOn) } : null} tight={compact} held={waits} />;
   const home = useStore(s => s.projects.find(p => projectHomeKey(p.id) === workspaceId));
+  const meter = (tight: boolean) => <ContextMeter turns={thread.view.turns} agentLabel={harnessCatalog?.label ?? harnessId} tight={tight} />;
   const heightRef = useRef<HTMLDivElement | null>(null);
   const surfaceRef = useRef<HTMLDivElement | null>(null);
   const mirrorRef = useRef<HTMLDivElement | null>(null);
@@ -1018,6 +1020,7 @@ export function ChatComposer({
                           {...(waiting?.project != null ? { heldProject: waiting.project } : {})}
                         />
                         {compact ? null : modes}
+                        {compact ? null : <span className="ms-auto flex items-center ps-2">{meter(false)}</span>}
                       </div>
                       <div data-chat-composer-actions="right" className={cn("col-start-3 flex shrink-0 items-center justify-self-end", compact && !tall ? "row-start-1" : "row-start-2 self-end")}>
                         {actions}
@@ -1047,7 +1050,12 @@ export function ChatComposer({
               </>
             ) : null
           }
-          stash={stashWord}
+          stash={
+            <>
+              {compact ? meter(true) : null}
+              {stashWord}
+            </>
+          }
           />
         )}
       </ComposerSurface.Shell>

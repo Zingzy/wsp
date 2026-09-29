@@ -41,6 +41,8 @@ import type {
   TurnImage,
   TurnRefusal,
   TurnResult,
+  PlanStep,
+  TurnTokens,
 } from "@wsp/protocol";
 import { catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
 import { accessParams, buildCommand, buildEnv, imagePath } from "./command.js";
@@ -216,18 +218,44 @@ const changeLines = (changes: unknown): string =>
     .map(c => `${c.kind} ${c.path}`.trim())
     .join("\n");
 
-/** The token counts of the turn just run, under the snake_case names codex exec printed them with. */
-function usageOf(params: Record<string, unknown>): Record<string, unknown> | undefined {
-  const last = rec(rec(params.tokenUsage)?.last);
-  if (last === undefined) return undefined;
-  return {
-    input_tokens: last.inputTokens,
-    cached_input_tokens: last.cachedInputTokens,
-    cache_write_input_tokens: last.cacheWriteInputTokens ?? 0,
-    output_tokens: last.outputTokens,
-    reasoning_output_tokens: last.reasoningOutputTokens,
-  };
+const count = (value: unknown): number | undefined => (typeof value === "number" && Number.isFinite(value) ? value : undefined);
+
+/** The fields of a token breakdown the server reports, by the names TurnTokens takes. */
+const BREAKDOWN = [
+  ["input", "inputTokens"],
+  ["cached", "cachedInputTokens"],
+  ["cacheWrite", "cacheWriteInputTokens"],
+  ["output", "outputTokens"],
+  ["reasoning", "reasoningOutputTokens"],
+] as const;
+
+/** Where the thread's running total stood as the turn began and the server's latest report of it: `total` is the
+ * thread's, `last` the latest call's alone. */
+interface UsageSeen {
+  before: Record<string, unknown>;
+  total: Record<string, unknown>;
+  last: Record<string, unknown>;
+  window?: number;
 }
+
+/** The turn's own tokens: the running total less where it stood before the turn's first call, each field falling back
+ * to the latest call's where the total names none. What the model held is that latest call's whole count. */
+function turnTokensOf(seen: UsageSeen): TurnTokens {
+  const field = (key: string): number | undefined => {
+    const total = count(seen.total[key]);
+    const before = count(seen.before[key]);
+    return total !== undefined && before !== undefined ? total - before : count(seen.last[key]);
+  };
+  const fields = Object.fromEntries(BREAKDOWN.flatMap(([name, key]) => (field(key) === undefined ? [] : [[name, field(key)!]])));
+  const held = (count(seen.last.inputTokens) ?? 0) + (count(seen.last.outputTokens) ?? 0);
+  return { input: 0, output: 0, ...fields, context: held, ...(seen.window !== undefined ? { window: seen.window } : {}) };
+}
+
+/** The running total as it stood before the call a report's `last` covers. */
+const totalBefore = (total: Record<string, unknown>, last: Record<string, unknown>): Record<string, unknown> =>
+  Object.fromEntries(BREAKDOWN.flatMap(([, key]) => (count(total[key]) === undefined ? [] : [[key, count(total[key])! - (count(last[key]) ?? 0)]])));
+
+const stepState = (status: unknown): PlanStep["state"] => (status === "completed" ? "done" : status === "inProgress" ? "working" : "pending");
 
 /** Each item as the deltas a timeline draws: a call when it starts, its result when it completes. The tool names are
  * the ones codex exec reported the same calls under, which the clients read. */
@@ -310,7 +338,8 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     let interruptRequested = false;
     let turnResult: TurnResult | undefined;
     let lastText: string | undefined;
-    let usage: Record<string, unknown> | undefined;
+    let usage: UsageSeen | undefined;
+    let modelUsed = o.model;
     /** The last failure the stream showed, if any, in wsp's words and under the cause it claims. */
     let words: { line: string; cause?: TurnRefusal } | undefined;
     /** What the server said last in an error, for a process that dies without completing its turn. */
@@ -354,6 +383,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
       announced = true;
       threadId = id ?? threadId;
       const runs = o.model ?? model;
+      modelUsed = runs;
       const where = o.cwd ?? cwd;
       emit({ type: "session.start", sessionId: threadId, ...(runs !== undefined ? { model: runs } : {}), ...(where !== undefined ? { cwd: where } : {}) });
       for (const text of early.splice(0)) emit({ type: "turn.delta", sessionId: threadId, kind: "note", text });
@@ -472,9 +502,20 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
           for (const delta of itemDeltas(done, item, threadId)) emit(delta);
           break;
         }
-        case "thread/tokenUsage/updated":
-          usage = usageOf(params) ?? usage;
+        case "thread/tokenUsage/updated": {
+          const reported = rec(params.tokenUsage);
+          const total = rec(reported?.total) ?? {};
+          const last = rec(reported?.last);
+          if (last === undefined) break;
+          const window = count(reported?.modelContextWindow);
+          usage = { before: usage?.before ?? totalBefore(total, last), total, last, ...(window !== undefined ? { window } : {}) };
           break;
+        }
+        case "turn/plan/updated": {
+          const plan = Array.isArray(params.plan) ? params.plan.map(rec).filter((p): p is Record<string, unknown> => p !== undefined) : [];
+          emit({ type: "turn.plan", sessionId: threadId, steps: plan.map(p => ({ text: str(p.step) ?? "", state: stepState(p.status) })) });
+          break;
+        }
         case "configWarning":
         case "warning": {
           const text = str(params.summary) ?? str(params.message);
@@ -500,7 +541,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
           if (turnId !== undefined && id !== undefined && id !== turnId) break;
           const status = str(turn?.status);
           if (status === "completed")
-            finish({ status: "completed", durationMs: Date.now() - startedAt, ...(lastText !== undefined ? { text: lastText } : {}), ...(usage !== undefined ? { usage } : {}) });
+            finish({ status: "completed", durationMs: Date.now() - startedAt, ...(lastText !== undefined ? { text: lastText } : {}), ...(usage !== undefined ? { tokens: turnTokensOf(usage) } : {}), ...(modelUsed !== undefined ? { model: modelUsed } : {}) });
           else if (status === "interrupted") finish({ status: "interrupted" });
           else finish(failed(str(rec(turn?.error)?.message) ?? "codex reported a failed turn"));
           break;
@@ -660,7 +701,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
       onEvent: () => {},
     }).finished;
     if (result.status !== "completed") throw new Error(result.error ?? "codex did not answer the question");
-    return { text: result.text ?? "", ...(result.usage !== undefined ? { usage: result.usage } : {}) };
+    return { text: result.text ?? "", ...(result.tokens !== undefined ? { usage: result.tokens } : {}) };
   };
 
   /** The thread's own history cut before one of its turns, on a server run of its own that runs no turn: the

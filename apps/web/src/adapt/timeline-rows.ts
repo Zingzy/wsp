@@ -157,6 +157,11 @@ export function deriveMessagesTimelineRows(input: DeriveRowsInput): MessagesTime
       continue;
     }
 
+    if (entry.kind === "todo") {
+      rows.push({ kind: "todo", id: entry.id, createdAt: entry.createdAt, todo: entry.todo });
+      continue;
+    }
+
     if (entry.kind === "permission") {
       rows.push({ kind: "permission", id: entry.id, createdAt: entry.createdAt, permission: entry.permission });
       continue;
@@ -240,7 +245,9 @@ function deriveTurnFolds(
   for (const [turnId, group] of groups) {
     if (turnId === unsettledTurnId || group.streaming) continue;
     // Error rows stay visible on a settled turn: a failed turn often has no terminal message to stand in for them.
-    const hidden = new Set(group.entries.filter(e => e.id !== group.terminalId && !(e.kind === "work" && e.entry.tone === "error")).map(e => e.id));
+    // So do the turn's step list and its proposed plan, which are what the turn was for as much as its last words.
+    const kept = (e: TimelineEntry): boolean => e.id === group.terminalId || (e.kind === "work" && e.entry.tone === "error") || e.kind === "todo" || e.kind === "proposed-plan";
+    const hidden = new Set(group.entries.filter(e => !kept(e)).map(e => e.id));
     if (hidden.size === 0) continue;
     const firstHidden = group.entries.find(e => hidden.has(e.id))!;
     const turn = turnById.get(turnId);
@@ -305,6 +312,8 @@ export function entryTurnId(entry: TimelineEntry): string | null {
       return entry.message.role === "assistant" ? entry.message.turnId : null;
     case "proposed-plan":
       return entry.proposedPlan.turnId;
+    case "todo":
+      return entry.todo.turnId;
     case "permission":
       return entry.permission.turnId;
     case "subagent":

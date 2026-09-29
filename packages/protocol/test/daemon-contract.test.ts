@@ -92,6 +92,7 @@ import {
   GitCheckpointReply,
   GitRestoreReply,
   FsFilesReply,
+  GitSnapshotReply,
   GitPushReply,
   GuestCliMessage,
   GuestOpenReply,
@@ -638,6 +639,7 @@ const REPLIES: Record<string, { schema: ZodTypeAny; samples: unknown[] }> = {
     ],
   },
   GitRestoreReply: { schema: GitRestoreReply, samples: [{ before: "refs/wsp/checkpoints/spoo-fix-login/thr_01a0e365/turn_1-before-1790521483000", files: 3 }] },
+  GitSnapshotReply: { schema: GitSnapshotReply, samples: [{ commit: "0123456789abcdef0123456789abcdef01234567" }] },
   FsFilesReply: { schema: FsFilesReply, samples: [{ files: ["README.md", "src/ChatView.tsx"], truncated: false }, { files: [], truncated: true }] },
   GuestOpenReply: { schema: GuestOpenReply, samples: [{ session: "g1" }] },
   HostFolderListing: {

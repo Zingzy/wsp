@@ -175,6 +175,26 @@ const until = async (check: () => boolean): Promise<void> => {
   expect(check()).toBe(true);
 };
 
+describe("a Codex turn's tokens and plan on the app server", () => {
+  const usage = (total: [number, number], last: [number, number], window = 258_400) =>
+    `{"method":"thread/tokenUsage/updated","params":{"threadId":"${THREAD_ID}","turnId":"${TURN_ID}","tokenUsage":{"total":{"inputTokens":${total[0]},"cachedInputTokens":0,"cacheWriteInputTokens":0,"outputTokens":${total[1]},"reasoningOutputTokens":0,"totalTokens":${total[0] + total[1]}},"last":{"inputTokens":${last[0]},"cachedInputTokens":0,"cacheWriteInputTokens":0,"outputTokens":${last[1]},"reasoningOutputTokens":0,"totalTokens":${last[0] + last[1]}},"modelContextWindow":${window}}}}`;
+
+  it("counts a resumed thread's turn from where its running total stood, not from the thread's start", async () => {
+    const launch = launcher(scripted([usage([50_000, 900], [20_000, 100]), usage([72_000, 1_000], [22_000, 100]), agentMessage("m1", "done"), completed("completed")]));
+    const result = await adapterOver(launch).start({ prompt: "again", resume: THREAD_ID, onEvent: () => {} }).finished;
+    expect(result.tokens).toEqual({ input: 42_000, cached: 0, cacheWrite: 0, output: 200, reasoning: 0, context: 22_100, window: 258_400 });
+  });
+
+  it("reads the plan the server updates as the turn's steps, the step under way as working", async () => {
+    const plan = `{"method":"turn/plan/updated","params":{"threadId":"${THREAD_ID}","turnId":"${TURN_ID}","explanation":null,"plan":[{"step":"read","status":"completed"},{"step":"write","status":"inProgress"},{"step":"ship","status":"pending"}]}}`;
+    const { events, onEvent } = collect();
+    await adapterOver(launcher(scripted([plan, agentMessage("m1", "done"), completed("completed")]))).start({ prompt: "plan", onEvent }).finished;
+    expect(events.filter(e => e.type === "turn.plan")).toEqual([
+      { type: "turn.plan", sessionId: THREAD_ID, steps: [{ text: "read", state: "done" }, { text: "write", state: "working" }, { text: "ship", state: "pending" }] },
+    ]);
+  });
+});
+
 describe("CodexAdapter over codex app-server", () => {
   it("launches the app server in the folder under CODEX_HOME, seeding initialize and the thread with the picks; the turn follows the thread", async () => {
     const launch = launcher(server(fixtureLines("app-server-turn")));
@@ -182,7 +202,7 @@ describe("CodexAdapter over codex app-server", () => {
     const session = adapter.start({ prompt: "list the repo", model: "gpt-5.5", effort: "low", permissionMode: "workspace-write", cwd: "/root/app", onEvent: () => {} });
     await session.finished;
     const call = launch.calls[0]!;
-    expect(call.command).toBe("cd '/root/app' && codex app-server");
+    expect(call.command).toBe("cd '/root/app' && codex app-server -c tools.update_plan.enabled='true'");
     expect(call.command).not.toContain("list the repo");
     expect(call.env).toEqual({ CODEX_HOME: "/root/.codex" });
     expect(adapter.env).toEqual({ CODEX_HOME: "/root/.codex" });
@@ -237,8 +257,10 @@ describe("CodexAdapter over codex app-server", () => {
 
     expect(result.status).toBe("completed");
     expect(result.text).toBe("Created hi.txt in this folder.");
-    // The last call's counts, under the snake_case names codex exec printed, so a reader of either road reads one shape.
-    expect(result.usage).toEqual({ input_tokens: 20869, cached_input_tokens: 20608, cache_write_input_tokens: 0, output_tokens: 44, reasoning_output_tokens: 31 });
+    // The turn's own counts are the thread's running total less what it stood at before the turn's first call; what
+    // the model held is the last call's, and the window is the one the server names.
+    expect(result.tokens).toEqual({ input: 41_624, cached: 31_744, cacheWrite: 0, output: 124, reasoning: 31, context: 20_913, window: 258_400 });
+    expect(result.model).toBe("gpt-5.6-sol");
     expect(events.at(-1)).toEqual({ type: "session.end", sessionId: RECORDED_THREAD, exitCode: 0, sawResult: true });
     expect(session.threadId).toBe(RECORDED_THREAD);
     expect(session.localId).not.toBe(RECORDED_THREAD);
@@ -678,9 +700,9 @@ describe("a side question on a Codex thread", () => {
     );
     const adapter = adapterOver(launch);
     const answer = await adapter.aside!({ session: THREAD_ID, question: "which folder are you in?", cwd: "/root/app", model: "gpt-5.5" });
-    expect(answer).toEqual({ text: "You are in /root/app; you last asked me to count.", usage: { input_tokens: 900, cached_input_tokens: 880, cache_write_input_tokens: 0, output_tokens: 12, reasoning_output_tokens: 0 } });
+    expect(answer).toEqual({ text: "You are in /root/app; you last asked me to count.", usage: { input: 900, cached: 880, output: 12, reasoning: 0, context: 912 } });
     const call = launch.calls[0]!;
-    expect(call.command).toBe("cd '/root/app' && codex app-server");
+    expect(call.command).toBe("cd '/root/app' && codex app-server -c tools.update_plan.enabled='true'");
     const fork = parse(call.input!.at(-1)!);
     expect(fork.method).toBe("thread/fork");
     expect(fork.params).toMatchObject({ threadId: THREAD_ID, ephemeral: true, sandbox: "read-only", approvalPolicy: "never", model: "gpt-5.5" });
@@ -750,7 +772,7 @@ describe("what a rewind needs of a Codex turn", () => {
       return w;
     });
     await adapterOver(launch).revert({ session: THREAD_ID, beforeTurn: TURN_ID, cwd: "/root/app" });
-    expect(launch.calls[0]!.command).toBe("cd '/root/app' && codex app-server");
+    expect(launch.calls[0]!.command).toBe("cd '/root/app' && codex app-server -c tools.update_plan.enabled='true'");
     expect(parse(launch.calls[0]!.input!.at(-1)!)).toMatchObject({ method: "thread/resume", params: { threadId: THREAD_ID } });
     expect(launch.wires[0]!.written.find(m => m.method === "thread/revert")).toEqual({ id: "wsp-revert", method: "thread/revert", params: { threadId: THREAD_ID, beforeTurnId: TURN_ID } });
     expect(launch.wires[0]!.written.some(m => m.method === "turn/start")).toBe(false);

@@ -63,7 +63,7 @@ const workspace: WorkspaceView = {
 };
 
 const patch = ["diff --git a/src/a.ts b/src/a.ts", "index 1111111..2222222 100644", "--- a/src/a.ts", "+++ b/src/a.ts", "@@ -1 +1 @@", "-one", "+two", ""].join("\n");
-const DIFF = { base: null, files: [{ path: "src/a.ts", patch }], truncated: false };
+const DIFF = { base: null, files: [{ path: "src/a.ts", kind: "modified", additions: 1, deletions: 1, patch }], truncated: false };
 const STATUS = { branch: { oid: "abc", head: "agent/pricing-page", ahead: 1, behind: 0 }, entries: [], root: "/root" };
 
 const wire = {

@@ -399,6 +399,77 @@ const chatHistory: SessionEvent[] = [
   { type: "session.done", ...chatTurn, result: { status: "completed", durationMs: 2400, costUsd: 0.004 } },
 ];
 
+// ?chat=diagram replays a reply with a Mermaid flowchart whose label carries a script tag, a Mermaid fence that does
+// not parse, a display formula and an inline one: what the renderer has to draw, and what it must never let through.
+const DIAGRAM_MARKDOWN = [
+  "The build steps:",
+  "",
+  "```mermaid",
+  "flowchart LR",
+  '  A[Install] --> B[Build]',
+  '  B --> C["Test <script>window.__mermaidRan = true</script>"]',
+  "```",
+  "",
+  "And the quadratic formula:",
+  "",
+  "$$x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}$$",
+  "",
+  "where $a \\neq 0$, at $3 to $5 a run.",
+  "",
+  "```mermaid",
+  "flowchart LR",
+  "  A -->",
+  "```",
+].join("\n");
+// ?chat=hostile&beacon=<url> replays a reply whose Mermaid fences each try a road to fetch the beacon while they render:
+// themeCSS url() in an init directive, the same through front matter with an @import, an image shape, a click link
+// to the beacon, and a click link to a path with no address in it. None may ask the beacon for anything, and none may
+// leave a link in the page.
+const beacon = params.get("beacon") ?? "http://127.0.0.1:9";
+const HOSTILE_MARKDOWN = [
+  "```mermaid",
+  `%%{init: {"themeCSS": ".node rect { fill: url(${beacon}/fill.svg#p) } .label { cursor: url(${beacon}/cursor.png), auto }"}}%%`,
+  "flowchart LR",
+  "  A[One] --> B[Two]",
+  "```",
+  "",
+  "```mermaid",
+  "---",
+  "config:",
+  `  themeCSS: "@import url('${beacon}/import.css');"`,
+  "---",
+  "flowchart LR",
+  "  C[Three] --> D[Four]",
+  "```",
+  "",
+  "```mermaid",
+  "flowchart LR",
+  `  E@{ img: "${beacon}/picture.png", label: "pic", w: 60, h: 60 }`,
+  "```",
+  "",
+  "```mermaid",
+  "flowchart LR",
+  "  F[Five] --> G[Six]",
+  `  click G href "${beacon}/clicked" _blank`,
+  "```",
+  "",
+  "```mermaid",
+  "flowchart LR",
+  "  H[Seven] --> I[Eight]",
+  '  click I href "/clicked"',
+  "```",
+].join("\n");
+const hostileHistory: SessionEvent[] = [
+  { type: "session.start", ...chatTurn, prompt: "Draw what the page said." },
+  { type: "session.delta", ...chatTurn, kind: "text", text: HOSTILE_MARKDOWN },
+  { type: "session.done", ...chatTurn, result: { status: "completed", durationMs: 2400, costUsd: 0.004 } },
+];
+const diagramHistory: SessionEvent[] = [
+  { type: "session.start", ...chatTurn, prompt: "Draw the build and give me the formula." },
+  { type: "session.delta", ...chatTurn, kind: "text", text: DIAGRAM_MARKDOWN },
+  { type: "session.done", ...chatTurn, result: { status: "completed", durationMs: 2400, costUsd: 0.004 } },
+];
+
 const api: Api = {
   listWorkspaces: async () => workspaces,
   getWorkspace: async id => workspaces.find(w => w.id === id)!,
@@ -429,9 +500,13 @@ const api: Api = {
         ? []
         : params.get("chat") === "1"
           ? chatHistory
-          : params.get("linger") === "1"
-            ? lingering
-            : [],
+          : params.get("chat") === "diagram"
+            ? diagramHistory
+            : params.get("chat") === "hostile"
+              ? hostileHistory
+              : params.get("linger") === "1"
+                ? lingering
+                : [],
   // The row closes on the runtime's own event and never on this reply, so the fixture pushes it: a click on an
   // option has to be seen landing, not only counted.
   answerPermission: async (sessionId, askId, optionId) => {

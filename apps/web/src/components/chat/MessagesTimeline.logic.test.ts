@@ -229,6 +229,8 @@ describe("computeStableMessagesTimelineRows", () => {
       durationMs: null,
       waitedMs: null,
       costUsd: null,
+      tokens: null,
+      changes: null,
       error: null,
       startedAt,
       completedAt: null,

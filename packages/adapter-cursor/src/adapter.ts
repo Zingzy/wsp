@@ -163,10 +163,11 @@ export function createCursorAdapter(deps: CursorAdapterDeps): CursorAdapter {
               const durationMs = typeof event["duration_ms"] === "number" ? event["duration_ms"] : undefined;
               const said = str(event["result"]) ?? "";
               const usage = rec(event["usage"]);
+              const tokens = usage === undefined ? undefined : { input: typeof usage["inputTokens"] === "number" ? usage["inputTokens"] : 0, output: typeof usage["outputTokens"] === "number" ? usage["outputTokens"] : 0 };
               turnResult =
                 event["is_error"] === true
                   ? { status: "failed", ...(durationMs !== undefined ? { durationMs } : {}), error: said || "cursor reported a failed turn" }
-                  : { status: "completed", ...(durationMs !== undefined ? { durationMs } : {}), text: segment || said, ...(usage !== undefined ? { usage } : {}) };
+                  : { status: "completed", ...(durationMs !== undefined ? { durationMs } : {}), text: segment || said, ...(tokens !== undefined ? { tokens } : {}) };
               emit({ type: "turn.done", sessionId, result: turnResult });
               void endAfterResult(stream, deps.resultExitMs ?? RUN_EXIT_MS, graceMs).catch(() => {});
               break;

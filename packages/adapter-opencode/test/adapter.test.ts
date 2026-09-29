@@ -99,7 +99,9 @@ describe("OpenCodeAdapter over an opencode run --format json turn", () => {
     expect(events[1]).toEqual({ type: "turn.delta", sessionId: SESSION, kind: "text", text: "I will list the files by size.", messageId: "msg_f1d4a1b2c001" });
     expect(events[2]).toEqual({ type: "turn.delta", sessionId: SESSION, kind: "tool_use", text: JSON.stringify({ command: "ls -S | head -3", description: "Lists the three largest files" }), toolName: "bash", toolUseId: "call_f1d4ls01" });
     expect(events[3]).toEqual({ type: "turn.delta", sessionId: SESSION, kind: "tool_result", text: "pnpm-lock.yaml\nREADME.md\npackage.json\n", toolUseId: "call_f1d4ls01", isError: false });
-    expect(result).toMatchObject({ status: "completed", text: "The three largest are pnpm-lock.yaml, README.md and package.json.", costUsd: 0.002, usage: { input: 2300, output: 190, reasoning: 50, cache: { read: 1000, write: 0 } } });
+    expect(result).toMatchObject({ status: "completed", text: "The three largest are pnpm-lock.yaml, README.md and package.json.", costUsd: 0.002 });
+    // Every step's input side summed, cache reads and writes in; what the model held is the last step's whole count.
+    expect(result.tokens).toEqual({ input: 3300, cached: 1000, cacheWrite: 0, output: 190, reasoning: 50, context: 2340 });
     expect(events.at(-1)).toEqual({ type: "session.end", sessionId: SESSION, exitCode: 0, sawResult: true });
   });
 

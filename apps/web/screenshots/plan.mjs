@@ -36,7 +36,7 @@ const SCROLL = /^scroll:(\d+):(.+)$/;
 const FOCUS = /^focus:(.+)$/;
 /** A step that opens a row's own menu, a right-click on a data attribute, as a person reaches a thread's Snooze. */
 const MENU = /^menu:(.+)$/;
-/** A step that rests the pointer on a data attribute, for a control drawn only under it: a reply's Rewind to here. */
+/** A step that rests the pointer on a data attribute, for what shows only under it: a reply's Rewind to here and its footer. */
 const HOVER = /^hover:(.+)$/;
 /** A step that attaches a file of that name and that many bytes through the composer's own picker, as a person picks
  * one: what a file over the cap or a message with a file looks like. */

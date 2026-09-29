@@ -125,6 +125,8 @@ function buildTurn(
     durationMs: null,
     waitedMs: null,
     costUsd: null,
+    tokens: null,
+    changes: null,
     error: null,
     startedAt,
     completedAt,
@@ -254,12 +256,8 @@ describe("MessagesTimeline", () => {
               assistantMessageId,
               {
                 turnId,
-                checkpointTurnCount: 1,
-                checkpointRef: "checkpoint-with-files",
-                status: "ready" as const,
                 files: [{ path: "README.md", kind: "modified", additions: 2, deletions: 1 }],
-                assistantMessageId,
-                completedAt: MESSAGE_CREATED_AT,
+                shared: false,
               },
             ],
           ])

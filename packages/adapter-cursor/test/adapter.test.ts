@@ -95,7 +95,7 @@ describe("CursorAdapter over an agent -p stream-json turn", () => {
     expect(events[3]).toEqual({ type: "turn.delta", sessionId: CHAT, kind: "tool_use", text: JSON.stringify({ path: "README.md" }), toolName: "read", toolUseId: "toolu_vrtx_01Nn" });
     expect(events[4]).toEqual({ type: "turn.delta", sessionId: CHAT, kind: "tool_result", text: "# Project\n\nThis is a sample project.", toolUseId: "toolu_vrtx_01Nn", isError: false });
     // The reply is the text after the last tool call; the result's own field runs every segment together unspaced.
-    expect(result).toEqual({ status: "completed", durationMs: 5234, text: "It is a sample project.", usage: { inputTokens: 1200, outputTokens: 40 } });
+    expect(result).toEqual({ status: "completed", durationMs: 5234, text: "It is a sample project.", tokens: { input: 1200, output: 40 } });
     expect(events.at(-1)).toEqual({ type: "session.end", sessionId: CHAT, exitCode: 0, sawResult: true });
   });
 
