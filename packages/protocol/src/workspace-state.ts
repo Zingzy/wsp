@@ -593,13 +593,6 @@ export function reachShown(lastProbe: ReachState | undefined, probed: ReachState
   return lastProbe !== undefined && ANSWERED.has(lastProbe) ? lastProbe : probed;
 }
 
-/** Whether the latest poll's probes failed before leaving this computer. A road that fails here fails for every
- * machine at once, so one row saying so is the computer's network, never that row's machine. */
-export function computerOffline(statuses: Iterable<Pick<WorkspaceStatus, "reach">>): boolean {
-  for (const s of statuses) if (s.reach.offline === true) return true;
-  return false;
-}
-
 /** Whether the machine is up and billing in this state: running, or running with its edge or daemon dark (the
  * provider bills a machine it cannot be reached on). Paused, moving and gone ones bill nothing, and only a billing
  * machine has anything to nap, so the rate and the nap countdown on every surface read this one rule. */

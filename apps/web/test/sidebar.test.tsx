@@ -5,7 +5,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement, createContext, useContext, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_PREFERENCES, HOST_ASLEEP_LINE, MACHINE_UNREACHED_LINE, deleteCopiesNotice, onDeleteOf, workspaceKind, type PlaceView, type ProjectView, type SessionView, type WorkspaceLook, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, HOST_ASLEEP_LINE, deleteCopiesNotice, onDeleteOf, workspaceKind, type PlaceView, type ProjectView, type SessionView, type WorkspaceLook, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { onOpenCommandPalette } from "../src/commandPaletteBus.js";
 import { SidebarProvider } from "../src/components/ui/sidebar.js";
 import { RequestError, type Api } from "../src/protocol/client.js";
@@ -466,41 +466,24 @@ describe("keyboard navigation", () => {
   });
 });
 
-describe("Solari out of reach from this computer", () => {
-  it("a status whose probe never left this computer puts one muted mono line under the search row, and the line goes when a probe gets out again", async () => {
+describe("a probe that never left this computer", () => {
+  it("puts nothing under the search row, whatever the workspaces' statuses say, and the slot stays the host's alone", async () => {
     await mount(fakeApi([API, WEB], [status(API), status(WEB)]), "api");
-    expect(screen.queryByText(MACHINE_UNREACHED_LINE)).toBeNull();
     act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(API, { reach: { state: "reachable", offline: true } }) }));
-    const line = await screen.findByText(MACHINE_UNREACHED_LINE);
-    expect(line.closest("[data-sidebar-search]")).not.toBeNull();
-    expect(line.className).toContain("font-mono");
-    expect(line.className).not.toMatch(/border|bg-|badge|chip|destructive|warning|success/);
-    expect(rowOf("api").textContent).not.toContain("Unreachable");
-    // The line reads once, however many workspaces carry the flag.
     act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(WEB, { reach: { state: "napping", offline: true } }) }));
-    expect(screen.getAllByText(MACHINE_UNREACHED_LINE)).toHaveLength(1);
-    act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(API) }));
-    act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(WEB) }));
-    await waitFor(() => expect(screen.queryByText(MACHINE_UNREACHED_LINE)).toBeNull());
-  });
-
-  it("keeps the slot under the search row for the host's own two lines, never a workspace's link", async () => {
-    await mount(fakeApi([API, WEB], [status(API), status(WEB)]), "api");
-    // The workspace on screen has a link that nothing has answered on. Its sentence belongs to the pane that
-    // asked and to the composer under the box, both of which sit beside the workspace they name.
+    await waitFor(() => expect(rowOf("api")).toBeDefined());
+    const slot = document.querySelector("[data-sidebar-search]")!;
+    expect(slot.querySelector("[data-sidebar-offline]")).toBeNull();
+    expect(slot.textContent).not.toContain("cannot be reached");
+    // A workspace's own link that is down says so on its tile and in the pane that asked, never in this slot.
     const wt = new WorkspaceTerminals({ request: async () => ({ ok: true }) });
     act(() => {
       wt.feedStatus("unanswered");
       provideTerminals(API.id, wt);
     });
-    await waitFor(() => expect(rowOf("api")).toBeDefined());
-    const slot = document.querySelector("[data-sidebar-search]")!;
     expect(slot.querySelector("[data-sidebar-link-down]")).toBeNull();
     expect(slot.textContent).not.toContain("Nothing has answered");
     provideTerminals(API.id, null);
-    act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(API, { reach: { state: "reachable", offline: true } }) }));
-    expect((await screen.findByText(MACHINE_UNREACHED_LINE)).closest("[data-sidebar-search]")).not.toBeNull();
-    act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(API) }));
   });
 });
 

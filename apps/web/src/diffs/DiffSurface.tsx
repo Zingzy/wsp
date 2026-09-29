@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The right panel's Changes surface over git.diff: a scope picker (what a
-// commit could take, the working tree, staged, the branch against its
-// merge-base), git run in the panes' shared root (the thread's folder unless
+// The right panel's Changes surface over git.diff: a scope picker (the branch
+// against its merge-base first, what a commit could take, the working tree,
+// staged), git run in the panes' shared root (the thread's folder unless
 // pinned) named in the same breadcrumb row the Files pane uses, with the branch
 // git resolved there beside it, the changed-files tree, and the copied code view
 // with per-file collapse and inline comments that go to the thread's composer.
@@ -382,6 +382,8 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
   const paneLine = load.kind === "error" ? REPO_STATE_WORDS[load.absence].pane : "";
   const repoRoot = shown.kind === "repo" ? shown.root : null;
   const canCommit = scope === "head" && api?.commit !== undefined && model !== null && model.changedFiles.length > 0;
+  // Branch changes lists what commits changed too, which a discard cannot put back: discarding is Uncommitted's.
+  const canDiscard = scope !== "branch" && api?.discard !== undefined;
   const editOf = (file: DiffFile | undefined) => {
     if (file === undefined || repoRoot === null) return undefined;
     if (editing?.fileKey === file.fileKey) return { kind: "open" as const, saving: editing.saving, onSave: () => void saveEdit(repoRoot), onCancel: () => setEditing(null) };
@@ -617,7 +619,7 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
                         name={baseName(path)}
                         className="pe-2"
                         {...(api?.viewed !== undefined && blobOf(path) !== undefined ? { viewed: viewed[path] === blobOf(path), onViewed: () => toggleViewed(path) } : {})}
-                        {...(api?.discard !== undefined ? { onDiscard: () => setDiscarding(path) } : {})}
+                        {...(canDiscard ? { onDiscard: () => setDiscarding(path) } : {})}
                       />
                     )}
                   />
@@ -690,7 +692,7 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
                   renderHeaderMetadata={(fileDiff, fileKey) => {
                     const file = model.files.find(f => f.fileKey === fileKey);
                     const filePath = file?.filePath ?? resolveFileDiffPath(fileDiff);
-                    return <FileControls name={baseName(filePath)} edit={editOf(file)} {...(api?.discard !== undefined ? { onDiscard: () => setDiscarding(filePath) } : {})} />;
+                    return <FileControls name={baseName(filePath)} edit={editOf(file)} {...(canDiscard ? { onDiscard: () => setDiscarding(filePath) } : {})} />;
                   }}
                   options={diffPanelOptions(theme, renderMode)}
                 />

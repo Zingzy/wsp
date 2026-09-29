@@ -4,7 +4,7 @@
 // this computer belongs to: the command line, the runtime and the app all
 // read these here.
 import { describe, expect, it } from "vitest";
-import { cloneFailedLine, cloneUrlRefusal, noComputerForSourceLine, addedProjectLine, addedProjectOn, addingProjectLine, ADD_FORMS_LINE, projectSourceOf, computerNamed, folderName, HERE_PLACE_ID, hiddenFolder, isMacMachine, goldenForkName, homeShortened, kindWords, landsOn, MEMORY_KEPT_CLAUSE, noWorkspaceForFolderLine, NOT_A_REPO_LINE, ProjectGolden, projectNameOf, projectPathOn, projectRemovedOnComputerLine, projectsInPlace, type ProjectSource, type ProjectView, REGISTERING_LINE, registeredLine, registerTakesNoConsentLine, sameSourceRefusal, sourceKind, threadOpenedLine, workspaceForFolder, workspaceLands, type WorkspaceProject, WorkspaceView } from "../src/index.js";
+import { workspaceOfCopy, cloneFailedLine, cloneUrlRefusal, noComputerForSourceLine, addedProjectLine, addedProjectOn, addingProjectLine, ADD_FORMS_LINE, projectSourceOf, computerNamed, folderName, HERE_PLACE_ID, hiddenFolder, isMacMachine, goldenForkName, homeShortened, kindWords, landsOn, MEMORY_KEPT_CLAUSE, noWorkspaceForFolderLine, NOT_A_REPO_LINE, ProjectGolden, projectNameOf, projectPathOn, projectRemovedOnComputerLine, projectsInPlace, type ProjectSource, type ProjectView, REGISTERING_LINE, registeredLine, registerTakesNoConsentLine, sameSourceRefusal, sourceKind, threadOpenedLine, workspaceForFolder, workspaceLands, type WorkspaceProject, WorkspaceView } from "../src/index.js";
 
 const spoo: WorkspaceProject = { name: "spoo", dest: "/root/spoo", importedAt: "2026-09-01T00:00:00Z", size: 1024 };
 const wsp: WorkspaceProject = { name: "wsp", dest: "/root/wsp", importedAt: "2026-09-02T00:00:00Z" };
@@ -226,6 +226,16 @@ describe("the workspace a folder on this computer belongs to", () => {
     expect(workspaceForFolder([on(here)], [here], "/Users/dev/elsewhere")).toBeNull();
     expect(workspaceForFolder([], [here], "/Users/dev/wsp")).toBeNull();
     expect(workspaceForFolder([on(here)], [], "/Users/dev/wsp")).toBeNull();
+  });
+
+  it("a folder inside a copy picks that copy's workspace, which is where a thread on it starts", () => {
+    const copyOf = (p: ProjectView, name: string) => ({ ...on(p, `ws_${name}`), copy: { path: `${p.path}-${name}` } });
+    const lead = copyOf(here, "lead");
+    const other = copyOf(here, "leader");
+    expect(workspaceOfCopy([other, lead], "/Users/dev/wsp-lead")).toBe(lead);
+    expect(workspaceOfCopy([other, lead], "/Users/dev/wsp-lead/packages/host")).toBe(lead);
+    expect(workspaceOfCopy([other, lead], "/Users/dev/wsp")).toBeUndefined();
+    expect(workspaceOfCopy([on(here)], "/Users/dev/wsp")).toBeUndefined();
   });
 
   it("a project a computer cloned is on that computer, not here, so a folder of this name here is not it", () => {

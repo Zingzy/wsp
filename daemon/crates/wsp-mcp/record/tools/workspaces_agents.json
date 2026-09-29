@@ -1,7 +1,7 @@
 {
   "cloudOff": {
     "name": "workspaces_agents",
-    "description": "Turns the workspace's agents switch on or off and names its caps. With it on, a turn on this workspace is launched with a token into this host scoped to its own thread: that thread may open threads and fork machines under itself, up to maxMachines machines at once under one root thread and maxDepth levels deep, and may touch no other workspace, delete nothing, pause nothing and pair no computer. On this Mac the token is identity, not confinement: a thread there runs as the person and can read the host's own token file. Off, which is what every workspace reads as until this is called, its agents reach this host not at all. A caller that is itself a thread on a machine is refused: what agents may do is the person's to decide.",
+    "description": "Turns the workspace's agents switch on or off, names its caps, or both; a cap named alone tightens the switch as it stands. Every turn on a workspace is launched with a token into this host scoped to its own thread. With the switch on, which is what every workspace reads as until it is turned off, that thread may open threads and fork machines under itself, up to maxMachines machines at once under one root thread and maxDepth levels deep, and may touch no other workspace, delete nothing, pause nothing and pair no computer. On this Mac the token is identity, not confinement: a thread there runs as the person and can read the host's own token file. Off, each of those acts is refused in one line. A caller that is itself a thread on a machine is refused: what agents may do is the person's to decide.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -14,22 +14,22 @@
           "enum": [
             "on",
             "off"
-          ]
+          ],
+          "description": "whether the agents on this workspace may drive this host: open threads and fork machines under the thread they run in, capped. Absent is on under the default caps, which is what every workspace made without it reads as"
         },
         "max_machines": {
           "type": "integer",
           "minimum": 0,
-          "description": "how many machines may stand at once under one root thread when spawn is on; needs spawn on beside it, and defaults to 3"
+          "description": "how many machines may stand at once under one root thread while spawn is on; defaults to 3"
         },
         "max_depth": {
           "type": "integer",
           "minimum": 1,
-          "description": "how many levels deep the tree under a root thread may go when spawn is on; 1 is the root's own children and no further, which is the default, and it needs spawn on beside it"
+          "description": "how many levels deep the tree under a root thread may go while spawn is on; 1 is the root's own children and no further, which is the default"
         }
       },
       "required": [
-        "workspace",
-        "spawn"
+        "workspace"
       ],
       "additionalProperties": false,
       "$schema": "http://json-schema.org/draft-07/schema#"
@@ -346,7 +346,7 @@
   },
   "cloudOn": {
     "name": "workspaces_agents",
-    "description": "Turns the workspace's agents switch on or off and names its caps. With it on, a turn on this workspace is launched with a token into this host scoped to its own thread: that thread may open threads and fork machines under itself, up to maxMachines machines at once under one root thread and maxDepth levels deep, and may touch no other workspace, delete nothing, pause nothing and pair no computer. On this Mac the token is identity, not confinement: a thread there runs as the person and can read the host's own token file. Off, which is what every workspace reads as until this is called, its agents reach this host not at all. A caller that is itself a thread on a machine is refused: what agents may do is the person's to decide.",
+    "description": "Turns the workspace's agents switch on or off, names its caps, or both; a cap named alone tightens the switch as it stands. Every turn on a workspace is launched with a token into this host scoped to its own thread. With the switch on, which is what every workspace reads as until it is turned off, that thread may open threads and fork machines under itself, up to maxMachines machines at once under one root thread and maxDepth levels deep, and may touch no other workspace, delete nothing, pause nothing and pair no computer. On this Mac the token is identity, not confinement: a thread there runs as the person and can read the host's own token file. Off, each of those acts is refused in one line. A caller that is itself a thread on a machine is refused: what agents may do is the person's to decide.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -359,22 +359,22 @@
           "enum": [
             "on",
             "off"
-          ]
+          ],
+          "description": "whether the agents on this workspace may drive this host: open threads and fork machines under the thread they run in, capped. Absent is on under the default caps, which is what every workspace made without it reads as"
         },
         "max_machines": {
           "type": "integer",
           "minimum": 0,
-          "description": "how many machines may stand at once under one root thread when spawn is on; needs spawn on beside it, and defaults to 3"
+          "description": "how many machines may stand at once under one root thread while spawn is on; defaults to 3"
         },
         "max_depth": {
           "type": "integer",
           "minimum": 1,
-          "description": "how many levels deep the tree under a root thread may go when spawn is on; 1 is the root's own children and no further, which is the default, and it needs spawn on beside it"
+          "description": "how many levels deep the tree under a root thread may go while spawn is on; 1 is the root's own children and no further, which is the default"
         }
       },
       "required": [
-        "workspace",
-        "spawn"
+        "workspace"
       ],
       "additionalProperties": false,
       "$schema": "http://json-schema.org/draft-07/schema#"

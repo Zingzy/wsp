@@ -214,7 +214,7 @@
     "recipe_scan": "wsp recipe scan [--project <folder>]",
     "recipe": "wsp recipe [--tick used|installed|default] [--set <id>=on|off] [--signin <id>=copy|machine|later|key|skip|token] [--add <id>=<command>] [--add-check <id>=<command>] [--why <words>] [--engine] [--project <folder>] [--out <path>]",
     "new": "wsp new [<project>] \"<what you are working on>\" [--size <cpu>x<memGb>] [--engine] [--spawn on|off] [--max-machines <n>] [--max-depth <n>]",
-    "workspaces_agents": "wsp workspaces agents <workspace> --spawn on|off [--max-machines <n>] [--max-depth <n>]",
+    "workspaces_agents": "wsp workspaces agents <workspace> [--spawn on|off] [--max-machines <n>] [--max-depth <n>]",
     "rename": "wsp rename <workspace> \"<name>\"",
     "bring_back": "wsp bring back <workspace> [--title \"<title>\"] [--body \"<body>\"]",
     "commit": "wsp commit <workspace> [--message \"<message>\"] [--file <path>]...",
@@ -265,7 +265,7 @@
     "agentsOff": "agents may not spawn",
     "agentsOne": "agents may spawn: up to 1 workspace",
     "agentsMany": "agents may spawn: up to {count} workspaces",
-    "capsWithoutSpawn": "--max-machines and --max-depth say how far agents may go, so they need --spawn on beside them. Add --spawn on, or drop them.",
+    "agentsNothing": "workspaces_agents takes spawn, max_machines or max_depth. Name at least one; with none of them there is nothing to change.",
     "forgotOne": "forgot {name} {id}: its record and 1 thread are gone from this computer",
     "forgotMany": "forgot {name} {id}: its record and {count} threads are gone from this computer",
     "onDelete": {

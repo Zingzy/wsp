@@ -7,7 +7,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { agentsOffRefusal, EXIT_CODES, guestNoTokenRefusal, guestHostFlagLine, guestNamesWorkspaceLine, guestNoFileLine, guestNoKindLine, guestNoLoopbackLine, guestNoSessionLine, guestPersonsComputerLine, LOOPBACK, UNAUTHORIZED, type DaemonEvent } from "@wsp/protocol";
+import { EXIT_CODES, guestNoTokenRefusal, guestTurnNoTokenRefusal, guestHostFlagLine, guestNamesWorkspaceLine, guestNoFileLine, guestNoKindLine, guestNoLoopbackLine, guestNoSessionLine, guestPersonsComputerLine, LOOPBACK, UNAUTHORIZED, type DaemonEvent } from "@wsp/protocol";
 import { copyKey, createRuntime, memoryStore, type GuestKindModule, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { serve } from "../src/cli.js";
@@ -121,12 +121,13 @@ describe("a guest session on the host", () => {
   });
 
   describe("what a session is refused for", () => {
-    it("closes a turn's line that carried no thread's token with the sentence the switch is turned on by, and dials nothing", async () => {
-      // A turn is launched with a thread's token wherever its workspace's agents may spawn, so a turn without one
-      // was launched with the switch off.
+    it("closes a turn's line that carried no thread's token by saying the turn was launched without one, never by telling the person to turn the switch on, and dials nothing", async () => {
+      // Every turn is launched with a thread's token, whatever the switch says, so one without it was launched by a
+      // host that minted none, and the switch has nothing to do with it.
       door.event(link, opened({ token: "" }));
       await settled(() => closes().length > 0);
-      expect(closes()[0]!.params).toEqual({ session: "g0", error: agentsOffRefusal(workspaceId, "thread_new") });
+      expect(closes()[0]!.params).toEqual({ session: "g0", error: guestTurnNoTokenRefusal(workspaceId) });
+      expect(guestTurnNoTokenRefusal(workspaceId)).not.toContain("--spawn");
       expect(replies()).toEqual([]);
     });
 

@@ -561,10 +561,10 @@ export const roadOf = (caller: Caller | undefined): WorkspaceOrigin | undefined 
 /** The thread a caller is, when it is one. */
 export const scopeOf = (caller: Caller | undefined): ThreadScope | undefined => (typeof caller === "string" ? undefined : caller?.by);
 
-/** What a workspace lets the agents inside it do to this host. Absent on the record means off: an agent that asks
- * for a thread or a machine is refused, which is what every workspace made before this switch existed answers. */
+/** What a workspace lets the agents inside it do to this host. Absent on the record reads AGENTS_ON: a thread the
+ * person starts may start threads and machines under the caps, and only a switch the person turned off refuses. */
 export const WorkspaceAgents = z.object({
-  /** Whether a turn on this workspace gets a token into the host at all. */
+  /** Whether a thread on this workspace may open threads and fork machines; every turn carries its token either way. */
   spawn: z.boolean(),
   /** How many machines may stand at once under one root thread, counted off the records. */
   maxMachines: z.number().int().min(0),
@@ -573,12 +573,9 @@ export const WorkspaceAgents = z.object({
 });
 export type WorkspaceAgents = z.infer<typeof WorkspaceAgents>;
 
-/** What a workspace's switch reads as when nobody has set one: agents drive nothing. */
-export const AGENTS_OFF: WorkspaceAgents = { spawn: false, maxMachines: 0, maxDepth: 1 };
-
-/** What a workspace's switch takes when a person turns it on and names no numbers. Three machines is what one root
- * thread's builders need and few enough that a runaway is a bill a person notices, and one level is the tree the
- * app draws without indenting twice. */
+/** What a workspace's switch reads as when nobody has set one, and what it takes when a person names no numbers.
+ * Three machines is what one root thread's builders need and few enough that a runaway is a bill a person notices,
+ * and one level is the tree the app draws without indenting twice. */
 export const AGENTS_ON: WorkspaceAgents = { spawn: true, maxMachines: 3, maxDepth: 1 };
 
 /** Which road made a workspace's copy on a computer that copies by directory: a directory clone of the project
@@ -639,9 +636,9 @@ export type ProjectCopy = z.infer<typeof ProjectCopy>;
 
 /** The switch a patch leaves on the record, the one rule both roads that set one read: every key the patch does not
  * name keeps what the record holds, so turning it off and on again does not throw the caps away, and a workspace
- * that never had one takes the defaults for the caps nobody named. */
+ * that never had one starts from the default. */
 export function agentsFrom(held: WorkspaceAgents | undefined, patch: Partial<WorkspaceAgents>): WorkspaceAgents {
-  return { ...(held ?? (patch.spawn === true ? AGENTS_ON : AGENTS_OFF)), ...patch };
+  return { ...(held ?? AGENTS_ON), ...patch };
 }
 
 export const WorkspaceView = z.object({
@@ -695,8 +692,8 @@ export const WorkspaceView = z.object({
    * words that also name the rebuild road. Persisted, unlike the wake's own status line, since the machine stays
    * unreachable until something replaces it; cleared by a wake that lands and by the rebuild. */
   wakeRefused: z.string().optional(),
-  /** What the agents on this workspace may ask of this host; absent is off, which every workspace reads as until a
-   * person turns it on. */
+  /** What the agents on this workspace may ask of this host, read off the root of its tree; a workspace whose root this
+   * host no longer holds carries none, and spawns nothing. */
   agents: WorkspaceAgents.optional(),
   /** The thread that forked this workspace, and the thread at the top of that thread's tree; absent on every
    * workspace a person made. The root is what the machine cap counts against. */
@@ -3332,6 +3329,9 @@ export const FsSearchReply = z.object({
 export type FsSearchReply = WireFsSearchReply;
 type FsSearchReplyHeld = Held<Same<z.infer<typeof FsSearchReply>, FsSearchReply>>;
 
+/** The word git's branch header, and the checkout read off it, carry as the branch of a head on none. */
+export const DETACHED_HEAD = "(detached)";
+
 /** Porcelain v2 branch header: head is "(detached)" off a branch, oid
  * "(initial)" before the first commit; without an upstream, or with one whose
  * tracking ref is gone, upstream is absent and ahead/behind count against the
@@ -4265,6 +4265,7 @@ const DAEMON_CONTENTS = [
   "ca0a7c835985a42469446d3efd1e622568ef0772725ddf4700efc631038f6c1f",
   "11da9462eb0cc7aa26e3f05feed71e2e27774769026dfa6d7a4f3a08f6511ebb",
   "16e43173fadb40a741a588b14470f652528a4202fd434c2b9dc2702c7d78fc7c",
+  "7e3fcbd460f842ff7343389c09ddbf43de751d83abea5cf82580d929811656e7",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -4494,7 +4495,10 @@ const DAEMON_CONTENTS = [
  * files as new, paths, whole files in one hunk, and each file's blob id; a discard takes the folders it left empty, and
  * the binary's version verb prints this number.
  * Version 87 changes no behaviour: the place link's seal moved into a crate of its own, which the tool server's dial
- * to a host somewhere else links too, so the crate's sources and the lock moved. */
+ * to a host somewhere else links too, so the crate's sources and the lock moved.
+ * Version 88 lists untracked files in git.diff's branch scope as well as its head scope, over the whole repository
+ * from any folder, and an untracked link with no patch and no blob rather than a diff read through it; a repository
+ * whose top sits above the daemon's root answers git.diff for the files under that root alone. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -5533,7 +5537,7 @@ const RuntimeOp = z.discriminatedUnion("op", [
     memMb: z.number().optional(),
     envs: z.record(z.string()).optional(),
     labels: z.record(z.string()).optional(),
-    /** What the agents on the new workspace may ask of this host; absent is off, and a key left out takes the default. */
+    /** What the agents on the new workspace may ask of this host; absent, or a key left out, takes the default. */
     agents: WorkspaceAgents.partial().optional(),
     /** Auto-nap window for this workspace; absent takes the runtime default (20 min), null turns it off. */
     idleWindowMs: z.number().nullable().optional(),
@@ -6410,7 +6414,7 @@ export { hereName, isHere, isProviderPlace, placeName, placeOf, workspaceCompute
 export { needsYouLine, threadNeedsYou, threadState, threadStateWord, threadUnread, threadUnseenAt, threadWordOf, waitingLine, type ThreadState } from "./thread-state.js";
 export { CLOUD_CAP_DEFAULT, phaseHoldsSlot, placeAtLimitLine, placeCapOf, placeCapRefusal, placeFullLine, placeRoom, placeSpendLimit, runningOn, THREAD_MEM_MB, threadsAtOnce, workspacePlace, workspacePlaceId, type PlacedThread, type PlacedWorkspace } from "./place-state.js";
 export { MCP_SERVER_NAME, threadsFollowed, WSP_TOOL_TIMEOUT_SEC } from "./wsp-tools.js";
-export { type AbsentComputer, type AwayWord, absentComputer, actionRefusal, daemonSilent, ownDaemonDown, START_DAEMON_WORD, agentsKindRefusal, agentsMayDrive, awayMsOf, composerHeldLine, computerOffline, type CopyToDelete, deleteCopiesNotice, deleteNotice, onDeleteOf, goneRefusal, COMPUTER_LEFT, pausedOrPausing, notAnsweringYet, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, turnSpendWord, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, FORGET_NEEDS_GONE, goneRoadRefusal, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, workspaceAccess, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, whereWord, workspaceStateLine, workspaceStateOf, workspaceWord, type AbsentRoad, type AbsentRoadInput, absentRoad, BACK_OVER_SSH, backUrl, dialsBackWord, linkedOver, lastKnown, REPORTED_WORD, placeDialLine, placeNoDialLine, placeDialRoad, sshRoadOf, type PlaceDialRoad } from "./workspace-state.js";
+export { type AbsentComputer, type AwayWord, absentComputer, actionRefusal, daemonSilent, ownDaemonDown, START_DAEMON_WORD, agentsKindRefusal, agentsMayDrive, awayMsOf, composerHeldLine, type CopyToDelete, deleteCopiesNotice, deleteNotice, onDeleteOf, goneRefusal, COMPUTER_LEFT, pausedOrPausing, notAnsweringYet, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, turnSpendWord, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, FORGET_NEEDS_GONE, goneRoadRefusal, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, workspaceAccess, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, whereWord, workspaceStateLine, workspaceStateOf, workspaceWord, type AbsentRoad, type AbsentRoadInput, absentRoad, BACK_OVER_SSH, backUrl, dialsBackWord, linkedOver, lastKnown, REPORTED_WORD, placeDialLine, placeNoDialLine, placeDialRoad, sshRoadOf, type PlaceDialRoad } from "./workspace-state.js";
 export * from "./agents-report.js";
 export * from "./exit.js";
 export * from "./format.js";
