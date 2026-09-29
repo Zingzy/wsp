@@ -8,7 +8,16 @@
 // It is the process environment this empties, not every spelling of a read: a
 // test that aliases or spreads process.env is caught here rather than by the
 // grep in packages/protocol/test/test-env.test.ts, which is deliberate.
-import { CLOUD_ENV, LABS_ENV, PERSON_HOME_ENV, TURN_TOKEN_ENV, UPDATE_CHECK_ENV } from "./packages/protocol/src/env.js";
+import { CLOUD_ENV, LABS_ENV, LAUNCH_ENV, PERSON_HOME_ENV, UPDATE_CHECK_ENV } from "./packages/protocol/src/env.js";
 
-// The release check is off, so no host a test starts asks GitHub for the newest release.
-export const TEST_ENV: Record<string, string> = { [CLOUD_ENV]: "", [LABS_ENV]: "", [PERSON_HOME_ENV]: "", [TURN_TOKEN_ENV]: "", [UPDATE_CHECK_ENV]: "0" };
+// The release check is off, so no host a test starts asks GitHub for the newest release. The launch pair, the home
+// and a named host are emptied, or a run from a thread's shell reaches the host that launched it, as that thread.
+export const TEST_ENV: Record<string, string> = {
+  [CLOUD_ENV]: "",
+  [LABS_ENV]: "",
+  [PERSON_HOME_ENV]: "",
+  ...Object.fromEntries(LAUNCH_ENV.map(name => [name, ""])),
+  WSP_HOME: "",
+  WSP_HOST: "",
+  [UPDATE_CHECK_ENV]: "0",
+};
