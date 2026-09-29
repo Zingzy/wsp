@@ -53,7 +53,7 @@ A thread runs one turn at a time. `wsp send` into a thread whose turn is not run
 
 A turn is cut after ten minutes with no output, and at six hours in all. The line says why: `stopped after 15m 00s with no output for 10m`. A build that is silent for ten minutes ends the turn, so long steps must print.
 
-A turn that ends while the agent still has commands running in the background reads failed, with `ended with 3 background tasks running`, because the agent kills those on exit and nothing ever reaches the thread. Brief agents to run every command in the foreground and wait for it, or to start a server that must outlive the turn with `setsid nohup ... &`.
+A turn that ends while the agent still has commands running in the background reads done, and the reply's last line names that work: `ended with 3 background tasks running`. Nothing those commands print afterwards reaches the thread. Brief agents to run every command in the foreground and wait for it, or to start a server that must outlive the turn with `setsid nohup ... &`.
 
 When a previous turn did not finish, because of a deadline, a host restart or a nap, the next reply opens with `previous turn was cut; resuming`. The agent resumes a transcript that may be missing its last steps, so restate what matters.
 

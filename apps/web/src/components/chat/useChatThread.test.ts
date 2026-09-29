@@ -916,7 +916,7 @@ describe("a send whose turn never wrote a row of its own", () => {
   const WORKING: SessionEvent[] = [
     { type: "session.start", ...scoped("turn_a"), at: ms(1_000), prompt: "fan out five agents" },
     { type: "session.delta", ...scoped("turn_a"), at: ms(2_000), line: 1, kind: "text", text: "Five agents are running." },
-    { type: "session.done", ...scoped("turn_a"), at: ms(66_000), result: { status: "failed", error: "Ended with 5 background tasks running", durationMs: 66_000, costUsd: 0.51 } },
+    { type: "session.done", ...scoped("turn_a"), at: ms(66_000), result: { status: "failed", error: "machine paused while the agent was working", durationMs: 66_000, costUsd: 0.51 } },
   ];
   /** Road one, the runtime's: the start never reached a machine, so a session.end goes out on the bus alone
    * carrying the sentence it was refused with. Nothing of that turn is ever recorded. */
@@ -959,7 +959,7 @@ describe("a send whose turn never wrote a row of its own", () => {
       road,
     );
 
-  const THREAD_SO_FAR = ["user: fan out five agents", "assistant: Five agents are running.", "Ended with 5 background tasks running"];
+  const THREAD_SO_FAR = ["user: fan out five agents", "assistant: Five agents are running.", "machine paused while the agent was working"];
 
   it("refused before it reached a machine: the words, then the line saying why, then the turn under them as it streams", () => {
     expect(rendered(fold(afterRefusal([REFUSED]), NEXT))).toEqual([

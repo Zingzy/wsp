@@ -494,13 +494,13 @@ describe("notifyLine", () => {
   });
 
   it("a turn that did not complete says why over its reply's last line; one that did says its last line", () => {
-    expect(notifyLine(THREAD, { status: "failed", durationMs: 12_000, costUsd: 0.02, text: "Waiting for the gate to finish.", error: "ended with 1 background task running" })).toBe("thread c452d1e8 finished (failed, 12s, $0.02): ended with 1 background task running");
+    expect(notifyLine(THREAD, { status: "failed", durationMs: 12_000, costUsd: 0.02, text: "Waiting for the gate to finish.", error: "stopped after 15m 00s with no output for 10m" })).toBe("thread c452d1e8 finished (failed, 12s, $0.02): stopped after 15m 00s with no output for 10m");
     expect(notifyLine(THREAD, { status: "completed", durationMs: 12_000, text: "All green.", error: "[ede_diagnostic] noise" })).toBe("thread c452d1e8 finished (completed, 12s): All green.");
   });
 
   it("notifyTail is the line's tail alone, the one rule the wait's reply field reads", () => {
     expect(notifyTail({ status: "completed", text: "Ran the gate.\n\nAll 12 tests   green.\n" })).toBe("All 12 tests green.");
-    expect(notifyTail({ status: "failed", text: "Waiting for the gate.", error: "ended with 1 background task running" })).toBe("ended with 1 background task running");
+    expect(notifyTail({ status: "failed", text: "Waiting for the gate.", error: "stopped after 15m 00s with no output for 10m" })).toBe("stopped after 15m 00s with no output for 10m");
     expect(notifyTail({ status: "completed", text: "All green.", error: "[ede_diagnostic] noise" })).toBe("All green.");
     expect(notifyTail({ status: "interrupted" })).toBeUndefined();
   });
@@ -510,8 +510,8 @@ describe("notifyLine", () => {
       "thread c452d1e8 finished (completed, 8m 12s, $1.94): Ran the gate.\n\nAll 12 tests green.",
     );
     // A turn that did not complete still says why first, and a reply with nothing in it still leaves the line bare.
-    expect(notifyLine(THREAD, { status: "failed", durationMs: 12_000, text: "Waiting for the gate.\nStill waiting.", error: "ended with 1 background task running" }, "whole")).toBe(
-      "thread c452d1e8 finished (failed, 12s): ended with 1 background task running",
+    expect(notifyLine(THREAD, { status: "failed", durationMs: 12_000, text: "Waiting for the gate.\nStill waiting.", error: "stopped after 15m 00s with no output for 10m" }, "whole")).toBe(
+      "thread c452d1e8 finished (failed, 12s): stopped after 15m 00s with no output for 10m",
     );
     expect(notifyLine(THREAD, { status: "completed", text: "   \n\n  " }, "whole")).toBe("thread c452d1e8 finished (completed)");
     // Tail is the length a line takes when none is named, so every reader that had one keeps it.
