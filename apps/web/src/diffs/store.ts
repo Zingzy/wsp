@@ -7,8 +7,9 @@ import type { GitDiffScope } from "@wsp/protocol";
 
 export type DiffRenderMode = "stacked" | "split";
 
-/** What a commit could take, which is what the pane is first read for. */
-export const DEFAULT_SCOPE: GitDiffScope = "head";
+/** The branch against its merge-base: the one scope that holds what a thread changed whether it committed or not.
+ * A thread that commits as it goes leaves nothing uncommitted, and a pane first read there showed nothing. */
+export const DEFAULT_SCOPE: GitDiffScope = "branch";
 
 interface DiffStoreState {
   scopeByWorkspaceId: Record<string, GitDiffScope>;

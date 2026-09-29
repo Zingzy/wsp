@@ -16,7 +16,7 @@ The Search row opens the command palette. A Forwarded ports section lists the po
 
 ## The thread
 
-A running turn reads `Working for 12s`. When the machine cannot run it, that line says what it waits for: waiting for the machine to wake, with a Wake button, waking the machine, waiting for the machine to answer, or the machine is gone. Replies render as markdown with syntax highlighting, copy buttons, and file links that open in the right panel. A plan the agent proposes renders as its own card, and a turn's changed files as a tree with a link into the Diff surface. When a turn settles, one line sits under it: `completed · Worked for 1m 4s · $0.0231`.
+A running turn reads `Working for 12s`. When the machine cannot run it, that line says what it waits for: waiting for the machine to wake, with a Wake button, waking the machine, waiting for the machine to answer, or the machine is gone. Replies render as markdown with syntax highlighting, copy buttons, and file links that open in the right panel. A plan the agent proposes renders as its own card, and a turn's changed files as a tree with a link into the Changes surface. When a turn settles, one line sits under it: `completed · Worked for 1m 4s · $0.0231`.
 
 ### The composer
 
@@ -35,7 +35,7 @@ A tab strip of surfaces, one showing at a time, each with a letter shortcut from
 | Browser | B | a port on the machine, framed as a page |
 | Terminal | T | a shell on the machine |
 | Files | F | the machine's files, read only |
-| Diff | D | git changes in the project |
+| Changes | D | git changes in the project |
 | Machine | M | state, reach, size, live samples, usage, lineage |
 | Processes | P | what runs on the machine, inspect and kill |
 | Screen | S | the machine's display, when it has one |
@@ -58,9 +58,9 @@ One dense table, pid, cpu, mem and command, sortable and filterable, with a tree
 
 Any port the machine listens on, framed through the route the runtime mints for it, with back, forward, refresh, an address bar that elides the token, and "Open in system browser". The white-page problem is handled: a cross-origin frame tells the page nothing, so the pane asks the host what one fetch of the route answered and names the exact fix. Vite's `Blocked request` names `server.allowedHosts` and notes the machine's environment already sets it, so a restart is usually the whole fix. `Invalid Host header` names webpack's flag with the host filled in. A Rails body gets its `config.hosts` line. Next.js's `Unauthorized` names `allowedDevOrigins`.
 
-### Files and Diff
+### Files and Changes
 
-Files is a tree rooted where the thread works, with a pin to stop following it. Picking a file opens it as a tab beside the tree, read only, since the helper has no write op. Diff runs `git diff` in the project with a scope picker, working tree, staged, or the branch against its merge base, a changed-files tree, and split or unified views.
+Files is a tree rooted where the thread works, with a pin to stop following it. Picking a file opens it as a tab beside the tree, read only, since the helper has no write op. Changes runs `git diff` in the project with a scope picker: the branch against its merge base first, so a thread's committed work shows, then uncommitted, working tree or staged. Files git does not track yet show as new under the branch and uncommitted scopes. It has a changed-files tree and split or unified views.
 
 ## Palette and shortcuts
 

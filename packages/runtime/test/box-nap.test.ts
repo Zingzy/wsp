@@ -5,6 +5,7 @@
 // exactly as they did.
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { BOX_BUDGETS } from "@wsp/engine";
+import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { WebSocketServer } from "ws";
 import { DAEMON_TOKEN_PATH, WAKE_STOPPED } from "@wsp/protocol";
@@ -13,6 +14,11 @@ import { memoryStore, type Store } from "../src/store.js";
 import { fakeClock } from "./fake-clock.js";
 import { droppingPort } from "./held-port.js";
 import { createOn, stubBackend, tokenGuest, type StubBackend } from "./stub-backend.js";
+
+// The daemon link redials on the process's own timers while a wake's budget runs on the test's clock, which the
+// pump moves half a second a few turns of the loop at a time: a redial here waits for no time at all, or the budget
+// would run out between two dials.
+vi.mock("@wsp/protocol", async importOriginal => ({ ...(await importOriginal<typeof import("@wsp/protocol")>()), linkBackoffMs: () => 0 }));
 
 /** A stub whose guest answers what the vault road asks of it: the listing of the home it would archive and the
  * size of the archive it wrote. Every tar and untar is recorded by machine, so a nap that took the vault road is
@@ -62,6 +68,34 @@ async function slowDaemon(): Promise<{ url: string; up: () => void; close: () =>
       new Promise(resolve => {
         for (const sock of server.clients) sock.terminate();
         server.close(() => resolve());
+      }),
+  };
+}
+
+/** A box's daemon route before the daemon listens, as Boat's edge answers it: every upgrade is refused with a 502
+ * until `up()` is called, and from then on a daemon takes the socket and answers every frame at once. */
+async function lateDaemon(): Promise<{ url: string; up: () => void; dials: () => number; close: () => Promise<void> }> {
+  const daemon = new WebSocketServer({ noServer: true });
+  daemon.on("connection", sock => sock.on("message", raw => sock.send(JSON.stringify({ id: (JSON.parse(String(raw)) as { id: number }).id, ok: true }))));
+  const edge = createServer((_req, res) => res.writeHead(502).end());
+  let listening = false;
+  let dials = 0;
+  edge.on("upgrade", (req, socket, head) => {
+    dials++;
+    if (listening) daemon.handleUpgrade(req, socket, head, sock => daemon.emit("connection", sock, req));
+    else socket.end("HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+  });
+  await new Promise<void>(resolve => edge.listen(0, "127.0.0.1", resolve));
+  return {
+    url: `ws://127.0.0.1:${(edge.address() as AddressInfo).port}`,
+    up: () => void (listening = true),
+    dials: () => dials,
+    close: () =>
+      new Promise(resolve => {
+        for (const sock of daemon.clients) sock.terminate();
+        daemon.close();
+        edge.closeAllConnections();
+        edge.close(() => resolve());
       }),
   };
 }
@@ -160,20 +194,20 @@ describe("the nap of a workspace on a computer that keeps no image", () => {
   /** A napped workspace whose machine is reached the way a Boat box is, by its preview route: the daemon behind it
    * takes the socket at once and answers its auth frame only once `daemon.up()` is called, so the wait is on the
    * link, as it is on a box whose disk is still streaming in. The clock is the runtime's, stepped by `pump`. */
-  async function boatWake() {
+  async function boatWake(made: () => Promise<{ url: string; up: () => void; close: () => Promise<void> }> = slowDaemon) {
     const { backend, store } = imageless();
     const { clock, advance } = fakeClock();
     const rt = createRuntime({ backend, store, adapters: {}, clock });
     backend.lifecycle.budgets = { ...BOX_BUDGETS };
-    const daemon = await slowDaemon();
+    const daemon = await made();
     const ws = await createOn(rt, { name: "x" });
     const m1 = backend.machines[0]!;
     m1.previewUrl = async () => ({ url: daemon.url, token: "e", expiresAt: Date.now() + 3_600_000 });
     await rt.workspaces.nap(ws.id);
     /** Steps the clock half a second at a time, turning the loop between steps so the socket's frames are read,
-     * until `done` holds or ten minutes have passed. */
+     * until `done` holds or twenty minutes have passed. */
     const pump = async (done: () => boolean, each: () => void = () => {}): Promise<void> => {
-      for (let spent = 0; !done() && spent < 10 * 60_000; spent += 500) {
+      for (let spent = 0; !done() && spent < 20 * 60_000; spent += 500) {
         for (let turn = 0; turn < 5; turn++) await new Promise(resolve => setImmediate(resolve));
         advance(500);
         each();
@@ -204,7 +238,36 @@ describe("the nap of a workspace on a computer that keeps no image", () => {
     }
   });
 
-  it("a Boat wake whose daemon never answers fails once its five minutes are out, saying so, and keeps the machine", async () => {
+  it("a Boat wake whose daemon starts listening seven minutes after the box is up succeeds on the first send, on the same machine", async () => {
+    // Two wakes on the dev host (2026-09-29) had their daemon listening 8 and 12 minutes after boot: Boat starts the
+    // restored services only once its restore is done, and nothing Boat's API says tells that moment apart.
+    const late = await lateDaemon();
+    const t = await boatWake(async () => late);
+    try {
+      const began = t.clock.now();
+      let done = false;
+      const waking = t.rt.workspaces.wake(t.ws.id).finally(() => (done = true));
+      waking.catch(() => {});
+      // What the row reads a minute past the old cut, which the app words as waking with the time it has taken.
+      let atSix: Promise<string> | undefined;
+      await t.pump(
+        () => done,
+        () => {
+          if (atSix === undefined && t.clock.now() - began >= 6 * 60_000) atSix = t.rt.workspaces.get(t.ws.id).then(w => w.phase);
+          if (t.clock.now() - began >= 7 * 60_000) late.up();
+        },
+      );
+      await expect(waking).resolves.toMatchObject({ machineId: "m1", phase: "running" });
+      expect(await atSix).toBe("waking");
+      expect(t.clock.now() - began).toBeGreaterThanOrEqual(7 * 60_000);
+      expect(late.dials()).toBeGreaterThan(1);
+      expect(t.backend.machines).toHaveLength(1);
+    } finally {
+      await t.close();
+    }
+  });
+
+  it("a Boat wake whose daemon never answers fails once its fifteen minutes are out, saying so, and keeps the machine", async () => {
     const t = await boatWake();
     try {
       const began = t.clock.now();
@@ -212,9 +275,9 @@ describe("the nap of a workspace on a computer that keeps no image", () => {
       const waking = t.rt.workspaces.wake(t.ws.id).finally(() => (done = true));
       waking.catch(() => {});
       await t.pump(() => done);
-      await expect(waking).rejects.toThrow(/the wake of m1 did not finish: attempt 1: daemon on m1 did not answer within 300000 ms \(daemon link timed out after \d+ ms\).*the workspace keeps this machine and its disk/);
-      expect(t.clock.now() - began).toBeGreaterThanOrEqual(5 * 60_000);
-      expect(t.clock.now() - began).toBeLessThan(6 * 60_000);
+      await expect(waking).rejects.toThrow(/the wake of m1 did not finish: attempt 1: daemon on m1 did not answer within 900000 ms \(daemon link timed out after \d+ ms\).*the workspace keeps this machine and its disk/);
+      expect(t.clock.now() - began).toBeGreaterThanOrEqual(15 * 60_000);
+      expect(t.clock.now() - began).toBeLessThan(16 * 60_000);
       expect((await t.rt.workspaces.get(t.ws.id)).machineId).toBe("m1");
       expect(t.m1.killed).toBe(false);
     } finally {
@@ -222,7 +285,7 @@ describe("the nap of a workspace on a computer that keeps no image", () => {
     }
   });
 
-  it("a stop pulled ten seconds into a Boat wake whose daemon has not answered lets go at once, not when the five minutes are out", async () => {
+  it("a stop pulled ten seconds into a Boat wake whose daemon has not answered lets go at once, not when the fifteen minutes are out", async () => {
     const t = await boatWake();
     try {
       let done = false;

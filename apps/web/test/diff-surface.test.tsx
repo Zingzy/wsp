@@ -74,22 +74,22 @@ describe("diff surface", () => {
     const { container } = render(<DiffSurface workspaceId={WS} theme="dark" />);
     await waitFor(() => expect(items(container)).toHaveLength(2));
     act(() => useDiffRevealStore.getState().request(WS, "/root/docs/notes.md"));
-    await waitFor(() => expect(container.querySelector("[data-diff-reveal-note]")?.textContent).toBe("notes.md has no uncommitted changes"));
+    await waitFor(() => expect(container.querySelector("[data-diff-reveal-note]")?.textContent).toBe("notes.md has no branch changes"));
     expect(useDiffRevealStore.getState().pendingByWorkspaceId[WS]).toBeUndefined();
     act(() => useDiffRevealStore.getState().request(WS, "/root/src/a.ts"));
     await waitFor(() => expect(container.querySelector("[data-diff-reveal-note]")).toBeNull());
     expect(useDiffRevealStore.getState().pendingByWorkspaceId[WS]).toBeUndefined();
   });
 
-  it("reads what a commit could take at the root first and lists the changed files with a stat", async () => {
+  it("reads the branch against its base at the root first and lists the changed files with a stat", async () => {
     const wire = fakeWire({ "fs.list": LISTING, "git.diff": DIFF, "git.status": STATUS });
     provideDaemonWire(WS, wire);
     const { container } = render(<DiffSurface workspaceId={WS} theme="dark" />);
     // Before git answers there is no mark at all, rather than an icon with nothing beside it.
     expect(container.querySelector("[data-diff-repo-state]")).toBeNull();
     await waitFor(() => expect(items(container)).toHaveLength(2));
-    expect(diffCalls(wire)).toEqual([{ cwd: "/root", scope: "head" }]);
-    expect(container.querySelector("[data-diff-surface]")?.getAttribute("data-diff-scope")).toBe("head");
+    expect(diffCalls(wire)).toEqual([{ cwd: "/root", scope: "branch" }]);
+    expect(container.querySelector("[data-diff-surface]")?.getAttribute("data-diff-scope")).toBe("branch");
     await waitFor(() => expect(container.querySelector("[data-diff-repo]")?.getAttribute("data-diff-repo")).toBe("/root/app"));
     expect(container.querySelector("[data-diff-repo]")?.textContent).toBe("main");
     expect(container.querySelector("[data-diff-repo-state]")?.getAttribute("data-diff-repo-state")).toBe("repo");
@@ -100,6 +100,22 @@ describe("diff surface", () => {
     expect(tree.textContent).toContain("README.md");
   });
 
+  // A thread that commits as it goes leaves nothing uncommitted, so a pane first read there shows nothing.
+  it("shows a thread's committed work on first open, where nothing is left uncommitted", async () => {
+    const copy = "/root/app-fix-tray";
+    const wire = fakeWire({
+      "fs.list": LISTING,
+      "git.status": { ...STATUS, branch: { ...STATUS.branch, head: "fix/tray-quit" }, root: copy },
+      "git.diff": params => (params["scope"] === "branch" ? { ...DIFF, base: "origin/main" } : { base: null, files: [], truncated: false }),
+    });
+    provideDaemonWire(WS, wire);
+    act(() => useRootStore.getState().follow(WS, copy));
+    const { container } = render(<DiffSurface workspaceId={WS} theme="dark" />);
+    await waitFor(() => expect(items(container)).toHaveLength(2));
+    expect(screen.queryByText(/^No .* at /)).toBeNull();
+    expect(container.querySelector("[data-changed-files]")?.textContent).toContain("2 changed files");
+  });
+
   // Base UI menus do not open under jsdom (the positioner never settles), so
   // the pickers are driven through the store actions their items call.
   it("switches scope and asks git.diff again with it, naming the branch base", async () => {
@@ -107,18 +123,19 @@ describe("diff surface", () => {
     provideDaemonWire(WS, wire);
     const { container } = render(<DiffSurface workspaceId={WS} theme="dark" />);
     await waitFor(() => expect(items(container)).toHaveLength(2));
-    expect(screen.getByRole("button", { name: "Changes scope: Uncommitted" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Changes scope: Branch changes" })).toBeTruthy();
+    await waitFor(() => expect(container.querySelector("[data-diff-base]")?.getAttribute("data-diff-base")).toBe("main"));
+    expect(container.querySelector("[data-diff-base]")?.textContent).toContain("HEAD");
 
     act(() => useDiffStore.getState().setScope(WS, "staged"));
     await waitFor(() => expect(diffCalls(wire).at(-1)).toEqual({ cwd: "/root", scope: "staged" }));
     expect(screen.getByRole("button", { name: "Changes scope: Staged" })).toBeTruthy();
     expect(container.querySelector("[data-diff-base]")).toBeNull();
 
-    act(() => useDiffStore.getState().setScope(WS, "branch"));
-    await waitFor(() => expect(diffCalls(wire).at(-1)).toEqual({ cwd: "/root", scope: "branch" }));
-    await waitFor(() => expect(container.querySelector("[data-diff-base]")?.getAttribute("data-diff-base")).toBe("main"));
-    expect(container.querySelector("[data-diff-base]")?.textContent).toContain("HEAD");
-    expect(container.querySelector("[data-diff-surface]")?.getAttribute("data-diff-scope")).toBe("branch");
+    act(() => useDiffStore.getState().setScope(WS, "head"));
+    await waitFor(() => expect(diffCalls(wire).at(-1)).toEqual({ cwd: "/root", scope: "head" }));
+    expect(screen.getByRole("button", { name: "Changes scope: Uncommitted" })).toBeTruthy();
+    expect(container.querySelector("[data-diff-surface]")?.getAttribute("data-diff-scope")).toBe("head");
   });
 
   it("runs git in the panes' root, follows the thread's folder, and stops when pinned", async () => {
@@ -127,16 +144,16 @@ describe("diff surface", () => {
     act(() => useRootStore.getState().follow(WS, "/root/app"));
     const { container } = render(<DiffSurface workspaceId={WS} theme="dark" />);
     await waitFor(() => expect(items(container)).toHaveLength(2));
-    expect(diffCalls(wire)).toEqual([{ cwd: "/root/app", scope: "head" }]);
+    expect(diffCalls(wire)).toEqual([{ cwd: "/root/app", scope: "branch" }]);
     await waitFor(() => expect(container.querySelector("[data-diff-repo]")?.getAttribute("data-diff-repo")).toBe("/root/app"));
 
     act(() => useRootStore.getState().follow(WS, "/root/other"));
-    await waitFor(() => expect(diffCalls(wire).at(-1)).toEqual({ cwd: "/root/other", scope: "head" }));
+    await waitFor(() => expect(diffCalls(wire).at(-1)).toEqual({ cwd: "/root/other", scope: "branch" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Stay in this folder" }));
     act(() => useRootStore.getState().follow(WS, "/root/third"));
     await settle();
-    expect(diffCalls(wire).at(-1)).toEqual({ cwd: "/root/other", scope: "head" });
+    expect(diffCalls(wire).at(-1)).toEqual({ cwd: "/root/other", scope: "branch" });
     expect(container.querySelector("[data-diff-surface]")?.getAttribute("data-diff-cwd")).toBe("/root/other");
   });
 
@@ -149,10 +166,10 @@ describe("diff surface", () => {
     });
     const { container } = render(<DiffSurface workspaceId={WS} theme="dark" />);
     await waitFor(() => expect(items(container)).toHaveLength(2));
-    expect(diffCalls(wire)).toEqual([{ cwd: "/root", scope: "head" }]);
+    expect(diffCalls(wire)).toEqual([{ cwd: "/root", scope: "branch" }]);
 
     act(() => useStore.setState({ workspaces: [imported] }));
-    await waitFor(() => expect(diffCalls(wire).at(-1)).toEqual({ cwd: `${PROJECT_DEST}/packages`, scope: "head" }));
+    await waitFor(() => expect(diffCalls(wire).at(-1)).toEqual({ cwd: `${PROJECT_DEST}/packages`, scope: "branch" }));
     await waitFor(() => expect(container.querySelector("[data-diff-repo]")?.getAttribute("data-diff-repo")).toBe(PROJECT_DEST));
   });
 
@@ -217,7 +234,7 @@ describe("diff surface", () => {
     provideDaemonWire(WS, wire);
     act(() => useRootStore.getState().follow(WS, "/root/app"));
     render(<DiffSurface workspaceId={WS} theme="dark" />);
-    const none = await screen.findByText("No uncommitted changes at /root/app.");
+    const none = await screen.findByText("No branch changes at /root/app.");
     expect(none.className.split(" ")).toEqual(SENTENCE_CLASSES);
 
     wire.replies["git.diff"] = { base: null, files: [{ path: "huge.log", patch: "" }], truncated: true };
@@ -286,15 +303,15 @@ describe("diff surface", () => {
     await waitFor(() => expect(container.querySelector("[data-diff-repo]")?.textContent).toBe("main"));
 
     fireEvent.click(screen.getByRole("button", { name: "app" }));
-    await waitFor(() => expect(diffCalls(wire).at(-1)).toEqual({ cwd: "/root/app", scope: "head" }));
+    await waitFor(() => expect(diffCalls(wire).at(-1)).toEqual({ cwd: "/root/app", scope: "branch" }));
     expect(shownFolder(container)).toBe("/root/app");
 
     fireEvent.keyDown(container.querySelector("[data-diff-surface]")!, { key: "Backspace" });
-    await waitFor(() => expect(diffCalls(wire).at(-1)).toEqual({ cwd: "/root", scope: "head" }));
+    await waitFor(() => expect(diffCalls(wire).at(-1)).toEqual({ cwd: "/root", scope: "branch" }));
     expect(folderCrumbRow(container)).toEqual([["/root", "/root"]]);
     fireEvent.keyDown(container.querySelector("[data-diff-surface]")!, { key: "Backspace" });
     await settle();
-    expect(diffCalls(wire).at(-1)).toEqual({ cwd: "/root", scope: "head" });
+    expect(diffCalls(wire).at(-1)).toEqual({ cwd: "/root", scope: "branch" });
   });
 
   it("draws the root switch as its own button beside the crumb, on the real menu the Files test stands in for", async () => {
@@ -316,7 +333,7 @@ describe("diff surface", () => {
 
     fireEvent.click(crumb);
     await waitFor(() => expect(shownFolder(container)).toBe(PROJECT_DEST));
-    expect(diffCalls(wire).at(-1)).toEqual({ cwd: PROJECT_DEST, scope: "head" });
+    expect(diffCalls(wire).at(-1)).toEqual({ cwd: PROJECT_DEST, scope: "branch" });
   });
 
   it("collapses and expands every file", async () => {
@@ -375,7 +392,25 @@ const BLOBBED = { ...DIFF, files: DIFF.files.map((f, i) => ({ ...f, blob: `b${i}
 const rowOf = (container: HTMLElement, path: string): HTMLElement =>
   [...container.querySelectorAll<HTMLElement>("[data-changed-file]")].find(row => row.dataset["changedFile"] === path)!;
 
+describe("the Changes pane at its first scope", () => {
+  it("offers no discard under Branch changes, whose files a commit may hold, and offers it under Uncommitted", async () => {
+    const added = { path: "new.txt", patch: "diff --git a/new.txt b/new.txt\nnew file mode 100644\nindex 0000000..ce01362\n--- /dev/null\n+++ b/new.txt\n@@ -0,0 +1 @@\n+hello\n" };
+    provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.diff": { ...DIFF, files: [...DIFF.files, added] }, "git.status": STATUS }));
+    const { api } = paneApi();
+    useStore.setState({ api: api as never });
+    const { container } = render(<DiffSurface workspaceId={WS} theme="dark" />);
+    await waitFor(() => expect(items(container)).toHaveLength(3));
+    expect(container.querySelector("[data-diff-surface]")?.getAttribute("data-diff-scope")).toBe("branch");
+    expect(screen.queryAllByRole("button", { name: /^Discard changes to / })).toEqual([]);
+    act(() => useDiffStore.getState().setScope(WS, "head"));
+    await waitFor(() => expect(within(rowOf(container, "new.txt")).getByRole("button", { name: "Discard changes to new.txt" })).toBeTruthy());
+  });
+});
+
 describe("the Changes pane's writes", () => {
+  // Commit, and the discard that deletes a file no commit has, are the Uncommitted scope's; a person picks it.
+  beforeEach(() => useDiffStore.setState({ scopeByWorkspaceId: { [WS]: "head" } }));
+
   it("names itself Changes, never Diff, on every control it carries", async () => {
     provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.diff": DIFF, "git.status": STATUS }));
     const { container } = render(<DiffSurface workspaceId={WS} theme="dark" />);
