@@ -65,11 +65,12 @@ export const BOX_BUDGETS: LifecycleBudgets = Object.freeze({
   // A second attempt would be a stop that snapshots the disk for minutes and a resume that counts as a billed start
   // against 5 a minute and 75 a day on the trial; a wake that fails its check fails on the machine it has.
   wakeAttempts: 1,
-  // The daemon's unit came back 14 to 85 s after the box read ready on a small golden (2026-09-11), and five wakes
-  // of a 17.5 GB image had not answered 120 s after ready (2026-09-27), the one kept after its failure serving on the
-  // next send: the restored disk streams in behind the box, which the provider says can take minutes, and systemd
-  // starts the unit once its files are there. The empty journal in between is normal.
-  daemonAnswersMs: 5 * 60_000,
+  // Boat starts a box's restored services only once its restore is done, and the daemon listens within a second of
+  // its unit starting: 14 to 85 s after ready on a small golden (2026-09-11), 6 min 31 s after boot on a 17.5 GB
+  // image, and 8 min 10 s and 12 min 8 s after boot on the two wakes that failed a five minute wait (2026-09-29).
+  // Nothing the API answers tells a box still restoring from one that is done: it reads running and takes commands
+  // while its services have not started. So the wait is long enough for the slowest restore seen, in one attempt.
+  daemonAnswersMs: 15 * 60_000,
 });
 
 /** A stop reads archived 0.6 to 39 s after the call on a small golden and the vendor's own probe puts the p99 near
