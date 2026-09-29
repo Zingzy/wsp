@@ -23,7 +23,7 @@ export const APP_PAGE = join(WEB_DIR, "dist", "index.html");
 
 /** What builds the binary this computer's workspace runs. No node build makes it, which is why a checkout that has
  * built everything else still has none. */
-export const DAEMON_BUILD = "cargo build --release in daemon/, then node packages/wspx/scripts/daemon-binary.mjs";
+export const DAEMON_BUILD = "cargo build --release -p wsp-daemon-bin $(node ../packages/wspx/scripts/daemon-features.mjs) in daemon/, then node packages/wspx/scripts/daemon-binary.mjs";
 
 /** Where this computer's own wsp-daemon binary sits in this checkout, read out of the built wsp command: which
  * binary a machine runs is that command's own table, and the app a lab serves is a package that command depends
