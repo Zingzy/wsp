@@ -15,7 +15,7 @@ import { noProviderStorageLine } from "../src/storage.js";
 import { hostPlaceKeyPath } from "../src/places.js";
 import { serviceAddressHere, serviceManagerFor } from "../src/service.js";
 import { STARTED_BY_ENV } from "../src/host-lock.js";
-import { skillsRefreshedLine } from "../src/mcp-install.js";
+import { installMcp, mcpServerSpec, serversRefreshedLine, skillsRefreshedLine, type RunningWsp } from "../src/mcp-install.js";
 import { WSP_SKILL } from "../src/skill.js";
 import type { HostLock } from "../src/host-lock.js";
 import type { HostHandle } from "../src/server.js";
@@ -357,6 +357,20 @@ describe("wsp up", () => {
     expect(readFileSync(stale, "utf8")).toBe(WSP_SKILL);
     expect(mine).toContain(skillsRefreshedLine(["~/.claude/skills/wsp/SKILL.md"]));
     expect(mine.filter(l => l.includes("skill"))).toHaveLength(1);
+  });
+
+  it("a host on the person's own wsp moves the wsp tools an agent's config holds onto this computer's tool server, in one line", async () => {
+    const node: RunningWsp = { execPath: "/usr/local/bin/node", execArgv: [], argv: ["/usr/local/bin/node", "/opt/wsp/dist/bin.js"], version: "9.9.9", PATH: "/usr/bin:/bin", toolServer: false };
+    const binary: RunningWsp = { ...node, toolServer: "/opt/wsp/daemon/wsp-daemon" };
+    const own = join(home, "state.json");
+    writeFileSync(own, JSON.stringify({ goldens: { default: SEALED_GOLDEN }, [STATE_SHAPE_KEY]: shapeHere() }));
+    mkdirSync(join(dir, "user"), { recursive: true });
+    installMcp("claude", mcpServerSpec(own, node), join(dir, "user"));
+    const mine: string[] = [];
+    handles.push(await answered(await up(quietIO(mine), { port: 0, statePath: own, webDir, running: binary, runtime: createRuntime({ backend: stubBackend(), store: jsonFileStore(own, stateWriterHere()), adapters: {} }) })));
+    const held = JSON.parse(readFileSync(join(dir, "user", ".claude.json"), "utf8")) as { mcpServers: Record<string, unknown> };
+    expect(held.mcpServers["wsp"]).toMatchObject(mcpServerSpec(own, binary));
+    expect(mine).toContain(serversRefreshedLine(["~/.claude.json"]));
   });
 
   it("a host on another home writes every file of its own there and nothing under the home a bare line picks", async () => {

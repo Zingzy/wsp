@@ -35,11 +35,9 @@ describe("the wsp shim", () => {
     expect(text).toContain(
       `ELECTRON_RUN_AS_NODE=1 exec '/Applications/My Tools/wsp.app/Contents/Resources/app/assets/daemon/aarch64-apple-darwin/wsp-daemon' forward --wsp-argv '/Applications/My Tools/wsp.app/Contents/MacOS/wsp' --wsp-argv '/Applications/My Tools/wsp.app/Contents/Resources/app/main/cli.mjs' -- "$@"`,
     );
-    // Run for real: the built forwarder, with node standing in for the app's binary. A line that is not the tool
-    // server goes straight to the command; a tool server line with no host serving it is asked once and then goes
-    // there too, so the command prints once either way.
-    // The stand-in answers the forwarder's ask with nothing, which is a line no host serves.
-    writeFileSync(join(home, "cli.mjs"), 'const { WSP_FORWARD: asked } = process.env;\nif (!asked) console.log(JSON.stringify([process.env.ELECTRON_RUN_AS_NODE, ...process.argv.slice(2)]));\n');
+    // Run for real: the built forwarder, with node standing in for the app's binary. A line that is not a tool
+    // server naming where its tools go reaches the command whole, once.
+    writeFileSync(join(home, "cli.mjs"), "console.log(JSON.stringify([process.env.ELECTRON_RUN_AS_NODE, ...process.argv.slice(2)]));\n");
     const path = shimPath(join(home, ".wsp"));
     installShim(path, shimText({ execPath: process.execPath, script: join(home, "cli.mjs"), daemon: daemonBinaryHere() }));
     for (const line of [["threads", "--json", "a b"], ["mcp", "install", "--agent", "a b"]]) {

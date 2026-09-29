@@ -100,10 +100,18 @@ async fn a_wrong_flag_prints_the_usage_line_and_exits_2() {
 #[cfg(feature = "mcp")]
 #[tokio::test]
 async fn a_verb_missing_its_required_flag_names_it_on_the_first_line() {
-    let out = Command::new(BIN).arg("mcp").output().await.unwrap();
-    assert_eq!(out.status.code(), Some(2));
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert_eq!(stderr.lines().next(), Some("error: the following required arguments were not provided: --state <file>"), "{stderr}");
+    // A thread's scope and a host name where the tools go, and the recipe tools still run the wsp on the state: a
+    // line that names none is refused, never served on a state it would make up.
+    for line in [vec!["mcp"], vec!["mcp", "--scoped"], vec!["mcp", "--host", "attic"]] {
+        let out = Command::new(BIN).args(&line).output().await.unwrap();
+        assert_eq!(out.status.code(), Some(2), "{line:?}");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(
+            stderr.lines().next(),
+            Some("error: the following required arguments were not provided: --state <file>"),
+            "{line:?}: {stderr}"
+        );
+    }
 }
 
 #[tokio::test]
@@ -772,4 +780,92 @@ fn version_prints_the_number_its_hello_carries_and_nothing_else() {
     let out = std::process::Command::new(BIN).arg("version").output().unwrap();
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     assert_eq!(String::from_utf8(out.stdout).unwrap(), format!("{}\n", wsp_frames::numbers::DAEMON_VERSION));
+}
+
+/// A wsp that writes down every line it was run with.
+#[cfg(feature = "mcp")]
+fn recording_wsp(dir: &std::path::Path) -> (std::path::PathBuf, std::path::PathBuf) {
+    use std::os::unix::fs::PermissionsExt;
+    let wsp = dir.join("wsp");
+    let ran = dir.join("ran");
+    std::fs::write(&wsp, format!("#!/bin/sh\necho \"run $*\" >> '{}'\n", ran.display())).unwrap();
+    std::fs::set_permissions(&wsp, std::fs::Permissions::from_mode(0o755)).unwrap();
+    (wsp, ran)
+}
+
+#[cfg(feature = "mcp")]
+#[tokio::test]
+async fn the_forwarder_serves_a_wsp_mcp_line_that_names_its_state_from_its_own_tool_server_and_runs_no_wsp() {
+    use tokio::io::AsyncWriteExt;
+    let dir = tempfile::tempdir().unwrap();
+    let (wsp, ran) = recording_wsp(dir.path());
+    let state = dir.path().join("state").join("state.json");
+    let mut child = Command::new(BIN)
+        .args(["forward", "--wsp-argv"])
+        .arg(&wsp)
+        .args(["--", "mcp", "--state"])
+        .arg(&state)
+        .env("WSP_HOME", dir.path().join("home"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let asked = concat!(
+        r#"{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"forward","version":"0"}}}"#,
+        "\n",
+        r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
+        "\n",
+        r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#,
+        "\n"
+    );
+    stdin.write_all(asked.as_bytes()).await.unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap()).lines();
+    let next = async |lines: &mut tokio::io::Lines<BufReader<tokio::process::ChildStdout>>| {
+        let line = tokio::time::timeout(Duration::from_secs(5), lines.next_line()).await.expect("an answer within five seconds");
+        serde_json::from_str::<Value>(&line.unwrap().expect("a line")).unwrap()
+    };
+    let greeted = next(&mut stdout).await;
+    let listed = next(&mut stdout).await;
+    drop(stdin);
+    let code = tokio::time::timeout(Duration::from_secs(5), child.wait()).await.unwrap().unwrap();
+    assert_eq!(greeted["result"]["serverInfo"]["name"], "wsp");
+    assert!(listed["result"]["tools"].as_array().is_some_and(|tools| tools.iter().any(|t| t["name"] == "computers")), "{listed}");
+    assert_eq!(code.code(), Some(0));
+    assert!(!ran.exists(), "the wsp ran: {}", std::fs::read_to_string(&ran).unwrap_or_default());
+}
+
+#[cfg(feature = "mcp")]
+#[tokio::test]
+async fn the_forwarder_runs_the_wsp_for_a_mcp_line_that_names_no_state() {
+    let dir = tempfile::tempdir().unwrap();
+    let (wsp, ran) = recording_wsp(dir.path());
+    let lines = [
+        vec!["mcp"],
+        vec!["mcp", "--scoped"],
+        vec!["mcp", "--host", "attic"],
+        vec!["mcp", "install", "--agent", "claude"],
+        vec!["mcp", "--help"],
+        vec!["mcp", "--nope"],
+        vec!["threads"],
+    ];
+    for line in lines {
+        let out =
+            Command::new(BIN).args(["forward", "--wsp-argv"]).arg(&wsp).arg("--").args(&line).stdin(Stdio::null()).output().await.unwrap();
+        assert_eq!(out.status.code(), Some(0), "{line:?}: {}", String::from_utf8_lossy(&out.stderr));
+    }
+    let lines: Vec<String> = std::fs::read_to_string(&ran).unwrap().lines().map(str::to_owned).collect();
+    assert_eq!(
+        lines,
+        [
+            "run mcp",
+            "run mcp --scoped",
+            "run mcp --host attic",
+            "run mcp install --agent claude",
+            "run mcp --help",
+            "run mcp --nope",
+            "run threads"
+        ]
+    );
 }

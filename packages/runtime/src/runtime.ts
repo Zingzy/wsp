@@ -2598,9 +2598,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             // loopback, so a copy with no port of its own would race the person's own dev server for 3000.
             env: entry => (entry.record.portBase === undefined ? local.env() : { ...local.env(), PORT: String(entry.record.portBase) }),
             relayed: () => false,
-            // This computer's own command: a thread here runs the node wsp, which dials the pair its launch carries
-            // rather than riding a machine's daemon. Marked, since here a server missing that pair could otherwise
-            // dial the host on the person's own token; a fork's guest door has no such fallback.
+            // This computer's own command, as the command line hands it: a thread here runs the wsp tools on this
+            // computer, which dial the pair its launch carries rather than riding a machine's daemon. Marked, since here a
+            // server missing that pair could otherwise dial the host on the person's own token; a fork's guest door has no
+            // such fallback.
             wspMcp: () => {
               const wsp = opts.agents?.wspMcp;
               return wsp === undefined ? undefined : { ...wsp, args: [...wsp.args, SCOPED_MCP_ARG] };

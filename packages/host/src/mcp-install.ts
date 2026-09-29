@@ -3,6 +3,7 @@
 // skills folder, under the person's home. This file decides the one command
 // that runs this same wsp against this state file; the catalog entry's own
 // config module says where it goes and in what format.
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, sep } from "node:path";
@@ -11,6 +12,7 @@ import { writeConfigHere } from "@wsp/engine";
 import { tilde } from "@wsp/collect";
 import { MCP_SERVER_NAME, mcpServerCommandLine, nextInsideAgentLine, WSP_TOOL_TIMEOUT_SEC, type McpServerSpec } from "@wsp/protocol";
 import { placeSections, removeSections } from "./agents-md.js";
+import { daemonBinaryHere } from "./assets.js";
 import { SKILL_NAME, WSP_SKILL } from "./skill.js";
 import { VERSION } from "./version.js";
 
@@ -34,6 +36,9 @@ export interface RunningWsp {
   /** The shim this process runs behind, when it does: the desktop's bundled command sits inside the app bundle,
    * which moves, so an agent's config runs the shim the app wrote instead. */
   shim?: string;
+  /** The daemon binary that serves the wsp tools on this computer, or false where it carries no tool server; asked
+   * of the binary itself when unset. */
+  toolServer?: string | false;
 }
 
 export const runningWsp = (): RunningWsp => ({ execPath: process.execPath, execArgv: process.execArgv, argv: process.argv, version: VERSION, PATH: process.env.PATH });
@@ -88,16 +93,66 @@ function npxBeside(execPath: string): string {
 export function wspCommand(run: RunningWsp): McpServerSpec {
   if (run.shim !== undefined) return { command: run.shim, args: [] };
   const script = run.argv[1];
-  if (script !== undefined && script.split(sep).includes(NPX_CACHE_DIR)) return { command: npxBeside(run.execPath), args: ["-y", `${NPM_PACKAGE}@${run.version}`] };
+  if (fromNpxCache(run)) return { command: npxBeside(run.execPath), args: ["-y", `${NPM_PACKAGE}@${run.version}`] };
   const wsp = onPath("wsp", run.PATH);
   if (script !== undefined && wsp !== undefined && sameFile(script, wsp)) return { command: wsp, args: [] };
   return { command: run.execPath, args: [...run.execArgv, script ?? "wsp"] };
 }
 
-/** The line that starts this same wsp on its stdio tool server, for an agent's own config. */
+const fromNpxCache = (run: RunningWsp): boolean => run.argv[1]?.split(sep).includes(NPX_CACHE_DIR) === true;
+
+let askedToolServer: string | false | undefined;
+
+/** Whether this binary carries the tool server, asked of the binary as its own help names the verb's flag: just 0 is
+ * any program's answer to anything, and the usage line takes whatever name the binary was run by. */
+export function carriesToolServer(binary: string): boolean {
+  const asked = spawnSync(binary, ["mcp", "--help"], { encoding: "utf8", timeout: 5_000 });
+  return asked.status === 0 && asked.stdout.includes("--wsp-argv");
+}
+
+/** The daemon binary this computer serves the wsp tools from, where it carries the tool server, asked of the binary
+ * once per process: the Mac's release build does, and a Linux host's is the static guest build, which does not. */
+export function toolServerHere(): string | false {
+  if (askedToolServer !== undefined) return askedToolServer;
+  try {
+    const binary = daemonBinaryHere();
+    askedToolServer = carriesToolServer(binary) ? binary : false;
+  } catch {
+    askedToolServer = false;
+  }
+  return askedToolServer;
+}
+
+const toolServerOf = (run: RunningWsp): string | false => run.toolServer ?? toolServerHere();
+
+/** The words the tool server is handed this same wsp by, which it brings a host up with and runs the recipe tools. */
+const handedWsp = (run: RunningWsp): string[] => {
+  const wsp = wspCommand(run);
+  return [wsp.command, ...wsp.args].flatMap(word => ["--wsp-argv", word]);
+};
+
+/** The binary an agent's config launches, where it launches one: never behind the desktop's shim or out of npx's
+ * cache, whose binaries move. */
+const configBinary = (run: RunningWsp): string | false => (run.shim === undefined && !fromNpxCache(run) ? toolServerOf(run) : false);
+
+/** The line that starts the wsp tools on stdio, for an agent's own config: the daemon binary's tool server where
+ * this computer's binary has one, so no node process stays up for a session. The desktop's shim keeps its own line,
+ * since its forwarder serves it from the binary it runs and the app bundle that binary sits in moves; so does a wsp
+ * run out of npx's cache, whose binary goes with the cache. */
 export function mcpServerCommand(run: RunningWsp): McpServerSpec {
+  const binary = configBinary(run);
+  if (binary !== false) return { command: binary, args: ["mcp", ...handedWsp(run)] };
   const wsp = wspCommand(run);
   return { command: wsp.command, args: [...wsp.args, "mcp"] };
+}
+
+/** What `wsp mcp` runs where this computer's binary has the tool server: the binary, on the state the command line
+ * resolved and the flags it was given, handed this same wsp. None where the binary carries no tool server. */
+export function toolServerLine(statePath: string, given: { host?: string; scoped?: boolean; json?: boolean }, run: RunningWsp): McpServerSpec | undefined {
+  const binary = toolServerOf(run);
+  if (binary === false) return undefined;
+  const flags = [...(given.host !== undefined ? ["--host", given.host] : []), ...(given.scoped === true ? ["--scoped"] : []), ...(given.json === true ? ["--json"] : [])];
+  return { command: binary, args: ["mcp", "--state", statePath, ...flags, ...handedWsp(run)] };
 }
 
 /** The server every agent's config gets: the command that runs this same wsp, then `--state <path>`, so the
@@ -105,8 +160,43 @@ export function mcpServerCommand(run: RunningWsp): McpServerSpec {
  * instead: that host serves its own state, and a path on this computer would name a file the line never reads. */
 export function mcpServerSpec(statePath: string, run: RunningWsp = runningWsp(), opts: { host?: string } = {}): McpServerSpec {
   const wsp = mcpServerCommand(run);
-  return { command: wsp.command, args: [...wsp.args, ...(opts.host !== undefined ? ["--host", opts.host] : ["--state", statePath])] };
+  const host = opts.host !== undefined ? ["--host", opts.host] : [];
+  // The binary runs this wsp on the state for the recipe tools whatever host the tools dial, so its line always
+  // names it; the command line resolves the state itself.
+  if (configBinary(run) !== false) return { command: wsp.command, args: [...wsp.args, "--state", statePath, ...host] };
+  return { command: wsp.command, args: [...wsp.args, ...(opts.host !== undefined ? host : ["--state", statePath])] };
 }
+
+/** Brings the wsp tools a config already holds up to this computer's binary, where the entry is this wsp's own node
+ * line and the binary carries the tool server, so a config written before the switch stops keeping a node process
+ * up for every session. The state and the host the line named stay named. A line this wsp did not write (another
+ * command, the desktop's shim, npx's) is left as it is. Answers the files rewritten, `~/`-relative. */
+export function refreshServers(home: string, statePath: string, run: RunningWsp): string[] {
+  if (configBinary(run) === false) return [];
+  const node = mcpServerCommand({ ...run, toolServer: false });
+  const written: string[] = [];
+  for (const agent of MCP_AGENTS) {
+    const file = mcpConfigFile(agent, home);
+    if (!existsSync(file.abs)) continue;
+    const was = readFileSync(file.abs);
+    const held = agent.mcp.format.read(was.toString("utf8"), home).find(s => s.name === MCP_SERVER_NAME && s.scope === "user")?.transport;
+    if (held?.kind !== "stdio" || held.command !== node.command || !node.args.every((word, i) => held.args[i] === word)) continue;
+    const rest = held.args.slice(node.args.length);
+    const named = (flag: string): string | undefined => {
+      const at = rest.indexOf(flag);
+      return at === -1 ? undefined : rest[at + 1];
+    };
+    const host = named("--host");
+    const server = mcpServerSpec(named("--state") ?? statePath, run, host !== undefined ? { host } : {});
+    const placed = agent.mcp.format.place(was.toString("utf8"), MCP_SERVER_NAME, { kind: "stdio", command: server.command, args: [...server.args], env: held.env, toolTimeoutSec: WSP_TOOL_TIMEOUT_SEC });
+    writeConfigHere(file.abs, home, configSum(was), placed.text, p => tilde(home, p));
+    written.push(file.tilde);
+  }
+  return written;
+}
+
+/** The one line a refresh of the configs says, and only where it rewrote one. */
+export const serversRefreshedLine = (files: readonly string[]): string => `The wsp tools now run this wsp's own tool server in ${files.join(", ")}`;
 
 export interface Installed {
   agent: string;

@@ -13,7 +13,7 @@ import { type AddressInfo } from "node:net";
 import { promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { CLOUD_ENV, DAEMON_TOKEN_PATH, EXIT_CODES, FORWARD_ENV, SCOPED_MCP_ARG, scopedNoPairLine, HERE_PLACE_ID, shellQuote, TURN_TOKEN_ENV, VerbFailure, WS_PATH } from "@wsp/protocol";
+import { CLOUD_ENV, DAEMON_TOKEN_PATH, EXIT_CODES, SCOPED_MCP_ARG, scopedNoPairLine, HERE_PLACE_ID, shellQuote, TURN_TOKEN_ENV, VerbFailure, WS_PATH } from "@wsp/protocol";
 import { CLOUD_ON } from "../src/cloud.js";
 import { copyKey, createRuntime, DAEMON_TOKEN_SET, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import type { RestartRoad } from "../src/restart.js";
@@ -21,6 +21,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 import { z } from "zod";
 import { daemonBinaryHere } from "../src/assets.js";
+import { toolServerHere } from "../src/mcp-install.js";
 import { cli, doctorKeyAsk, jsonCliIO, serve } from "../src/cli.js";
 import type { HostStarter } from "../src/host-start.js";
 import { writeHost } from "../src/hosts.js";
@@ -687,45 +688,12 @@ describe("the agent contract on the command line and the tool door", () => {
     expect(json.lines).toEqual([]);
   });
 
-  it("the forwarder's ask of the command line answers the host serving this state file on this computer, and nothing for any other line", async () => {
-    const asked = async (argv: string[], ask: string, start?: HostStarter | false, io: Captured = captured()): Promise<Captured> => {
-      expect(await cli(argv, io, undefined, { ...ownEnv(), [FORWARD_ENV]: ask }, start)).toBe(0);
-      return io;
-    };
-    const door = await asked(["mcp", "--state", statePath], "door");
-    expect(door.lines.map(line => JSON.parse(line) as unknown)).toEqual([{ url: `ws://127.0.0.1:${handle!.port}${WS_PATH}`, token: readFileSync(hostTokenPath(statePath), "utf8").trim() }]);
-    expect(door.errors).toEqual([]);
-    // A stdout that is a terminal gets nothing, since the line carries the host's token.
-    const screen = await asked(["mcp", "--state", statePath], "door", undefined, { ...captured(), redraw: { write: () => undefined, columns: () => 80 } });
-    expect([screen.lines, screen.errors]).toEqual([[], []]);
-    // Every other line of the word is the command line's to answer, which the forwarder runs next: the ask says
-    // nothing, writes nothing and serves nothing.
-    // A scoped line is the thread's own tools: never the host's token, so the forwarder runs the wsp that decides.
-    for (const argv of [["mcp", "install", "--agent", "claude", "--state", statePath], ["mcp", "--help"], ["mcp", "--nope"], ["mcp", "--host", "nowhere"], ["mcp", "--scoped", "--state", statePath]]) {
-      const said = await asked(argv, "door");
-      expect([said.lines, said.errors], argv.join(" ")).toEqual([[], []]);
-    }
-    expect(existsSync(join(dir, "user", ".claude.json"))).toBe(false);
-    // A state file nothing serves: the ask for a door starts nothing, and the ask to start brings one up first.
-    const none = join(dir, "none", "state.json");
-    const starts: string[] = [];
-    const starter: HostStarter = async path => {
-      starts.push(path);
-      throw new Error("this stand-in starts nothing");
-    };
-    expect((await asked(["mcp", "--state", none], "door", starter)).lines).toEqual([]);
-    expect(starts).toEqual([]);
-    const failed = await asked(["mcp", "--state", none], "start", starter);
-    expect([failed.lines, failed.errors]).toEqual([[], ["this stand-in starts nothing"]]);
-    expect(starts).toEqual([none]);
-  });
-
-  it("the tool server answers through the forwarder in the same bytes as on stdio, in a process that serves nothing itself", async () => {
+  it("the tool server answers through the forwarder in the same bytes as on stdio, served by the binary where it carries the tool server", async () => {
     expect(existsSync(BIN), `${BIN} is missing: run pnpm build first`).toBe(true);
     // The wsp the forwarder runs, writing down every time it ran and what it was asked.
     const log = join(dir, "ran.log");
     const wrapper = join(dir, "wsp.sh");
-    writeStub(wrapper, `#!/bin/sh\necho "\${${FORWARD_ENV}:-run} $*" >> ${shellQuote(log)}\nexec ${shellQuote(process.execPath)} ${shellQuote(BIN)} "$@"\n`);
+    writeStub(wrapper, `#!/bin/sh\necho "run $*" >> ${shellQuote(log)}\nexec ${shellQuote(process.execPath)} ${shellQuote(BIN)} "$@"\n`);
     const lines = [
       { jsonrpc: "2.0", id: 0, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "contract", version: "0" } } },
       { jsonrpc: "2.0", method: "notifications/initialized" },
@@ -739,8 +707,10 @@ describe("the agent contract on the command line and the tool door", () => {
     expect(stdio.out).toHaveLength(4);
     expect(forwarded.out).toEqual(stdio.out);
     expect([forwarded.code, stdio.code]).toEqual([0, 0]);
-    // Asked once, and never run to serve: the host served the session.
-    expect(readFileSync(log, "utf8").trim().split("\n")).toEqual([`door ${line.join(" ")}`]);
+    // Where this computer's binary carries the tool server, the forwarder served the line itself and ran no wsp;
+    // where it carries none, which is a Linux host's static build, the wsp ran once and served it.
+    const ran = existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : [];
+    expect(ran).toEqual(toolServerHere() === false ? [`run ${line.join(" ")}`] : []);
   });
 
   it.each(["the command line", "the forwarder"] as const)("%s, built, carries the code out of the process: stdout empty, one JSON line on stderr, exit 3 on a usage refusal and 1 on a host that does not answer", async road => {

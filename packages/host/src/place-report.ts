@@ -16,7 +16,7 @@ import { LOGIN_READ, SSH_STORE_VARS, landedFilesScript, writeConfigHere, localSh
 import { DAEMON_VERSION, isPlainPath, placeDaemonPaths, placeKeptForLinkLine, placeOwnedPaths, workFolderIn, WSP_WORKSPACE_APPARMOR_PATH } from "@wsp/protocol";
 import { dirname, join, relative, sep } from "node:path";
 import { apparmorOffStep, sshDaemonPlace, type DaemonPlace } from "./doctor.js";
-import { mcpServerCommand, onPath, runningWsp, type RunningWsp } from "./mcp-install.js";
+import { onPath, runningWsp, wspCommand, type RunningWsp } from "./mcp-install.js";
 import { runAll, runFailureLine, serviceManagerFor, STOP_WAIT_MS, systemRunner, type ServiceAddress, type ServiceManager, type ServiceRunner } from "./service.js";
 
 /** Where a place keeps the file naming the wsp it belongs to, the private key it proves itself with, and the
@@ -84,11 +84,10 @@ export function writePlaceFile(path: string, file: PlaceFile): boolean {
 }
 
 /** The line that runs this same wsp again on this computer, word by word, for the tools a turn's agent is given
- * later. The one rule an agent's own config is written from, with the verb off the end since the caller names its
- * own: mcpServerCommand always puts it last. */
+ * later: the one rule an agent's own config is written from. */
 export function wspArgvOf(run: RunningWsp = runningWsp()): string[] {
-  const { command, args } = mcpServerCommand(run);
-  return [command, ...args.slice(0, -1)];
+  const { command, args } = wspCommand(run);
+  return [command, ...args];
 }
 
 /** How much room is left on the volume the work folder sits on, or nothing when this computer will not say. It is

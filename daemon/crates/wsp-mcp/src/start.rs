@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-//! The host a call brings up when none serves the state file here: the wsp this server was handed, run as
-//! `wsp up --state <file> --port 0 --ws-port 0` in a session of its own with its output on the host's log, and waited
-//! on until its lock names a live process that answers on the port the lock records. A child that ends first has
-//! said why in the log, and that is the answer. packages/host/src/host-start.ts `hostStarter` is the rule.
+//! The host a call brings up when none serves the state file here: the wsp this server was handed, run on the words
+//! the command line's own starter runs (the record's `upArgs`, `wsp up --state <file> --port 0` today) in a session
+//! of its own with its output on the host's log, and waited on until its lock names a live process that answers on
+//! the port the lock records. A child that ends first has said why in the log, and that is the answer.
+//! packages/host/src/host-start.ts `hostStarter` is the rule.
 
 use std::path::Path;
 use std::process::Stdio;
@@ -34,9 +35,7 @@ pub async fn started(state: &Path, wsp: &[String], env: &Env, say: &mut (dyn FnM
         let wrote = log.metadata()?.len();
         let mut up = Command::new(program);
         up.args(args)
-            .args(["up", "--state"])
-            .arg(state)
-            .args(["--port", "0", "--ws-port", "0"])
+            .args(names.up_args.iter().map(|word| if word == "{state}" { state.as_os_str() } else { std::ffi::OsStr::new(word) }))
             .env_clear()
             .envs(env)
             .env(&names.env.started_by, &names.started_by)
