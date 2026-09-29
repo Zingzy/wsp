@@ -10,6 +10,9 @@ import { workspaceActions, workspaceTarget, type WorkspaceVerbs } from "./worksp
 import { BRING_BACK_HINT, broughtBackRowLine, DELETE_HINT, WORKSPACE_WORDS } from "./format.js";
 import { WHERE_WORDS } from "../settings/format.js";
 
+/** Every fact of a pull request a read answers but its number, link, state and host, which each case names. */
+const PR_REST: Omit<import("@wsp/protocol").PullRequest, "number" | "url" | "state" | "host"> = { draft: false, base: "main", branch: "work", headOid: "abc1234", headSubject: "Do the work", mergeable: "unknown", mergeState: "unknown", review: "none", checks: [], additions: 1, deletions: 0, changedFiles: 1, commits: 1 };
+
 const workspace = (phase: WorkspaceView["phase"]): WorkspaceView =>
   ({ id: "ws_a", name: "pricing page", machineId: "m_a", phase, project: { id: "pr_1", name: "repo", path: "/root", computer: "here" }, createdAt: "t", kind: "cloud" }) as WorkspaceView;
 
@@ -55,7 +58,7 @@ describe("bring back on the workspace row", () => {
   });
 
   it("says pull request in full on the row's third line, and what happened where there is none", () => {
-    expect(broughtBackRowLine({ ...back, pr: { number: 12, url: "https://example/pr/12", state: "open", host: "github.com" } })).toBe("agent/pricing-page: pull request #12 open");
+    expect(broughtBackRowLine({ ...back, pr: { number: 12, url: "https://example/pr/12", state: "open", host: "github.com", ...PR_REST } })).toBe("agent/pricing-page: pull request #12 open");
     // The honest half reads on the row; the host's own sentence for why is longer than any row and rides the hover.
     expect(broughtBackRowLine({ ...back, note: "no gh on this computer" })).toBe("agent/pricing-page pushed, no pull request");
     expect(broughtBackRowLine(back)).toBe("agent/pricing-page pushed");

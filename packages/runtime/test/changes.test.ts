@@ -118,13 +118,15 @@ describe("the checkout fact", () => {
     const seen = statuses(rt!);
     const got = await rt!.workspaces.checkout(id);
     expect(got.checkout).toEqual({ branch: "fix/cart", ahead: 1, behind: 0, changed: 2, readAt: expect.any(Number) });
-    expect(daemon.frames).toEqual([{ op: "git.status", cwd: CWD }]);
+    // The pull request's read rides the same ask and is its own file's subject; this one is the branch line's.
+    const reads = (): Record<string, unknown>[] => daemon.frames.filter(f => f["op"] === "git.status");
+    expect(reads()).toEqual([{ op: "git.status", cwd: CWD }]);
     expect(seen.some(e => e.type === "workspace.status" && e.status.checkout?.branch === "fix/cart")).toBe(true);
     await rt!.workspaces.checkout(id);
-    expect(daemon.frames).toHaveLength(1);
+    expect(reads()).toHaveLength(1);
     advance(CHECKOUT_TTL_MS + 1);
     await rt!.workspaces.checkout(id);
-    expect(daemon.frames).toHaveLength(2);
+    expect(reads()).toHaveLength(2);
   });
 
   it("carries a stopped copy's unread edits and unknown counts as the daemon said them", async () => {
@@ -138,11 +140,12 @@ describe("the checkout fact", () => {
     const { clock, advance } = fakeClock();
     const { id } = await withWorkspace(daemon, { adapters: { claude: drafting() }, clock });
     await (await rt!.sessions.start(id, { prompt: "fix the cart" })).finished;
-    await until(async () => daemon.frames.some(f => f["op"] === "git.status"));
-    const read = daemon.frames.length;
+    const reads = (): Record<string, unknown>[] => daemon.frames.filter(f => f["op"] === "git.status");
+    await until(async () => reads().length > 0);
+    const read = reads().length;
     advance(10 * CHECKOUT_TTL_MS);
     await new Promise(r => setTimeout(r, 20));
-    expect(daemon.frames).toHaveLength(read);
+    expect(reads()).toHaveLength(read);
   });
 
   it("keeps the last fact while the machine naps and asks nothing of it", async () => {
@@ -153,7 +156,7 @@ describe("the checkout fact", () => {
     await rt!.workspaces.nap(id);
     advance(CHECKOUT_TTL_MS + 1);
     expect((await rt!.workspaces.checkout(id)).checkout).toEqual(first);
-    expect(daemon.frames).toHaveLength(1);
+    expect(daemon.frames.filter(f => f["op"] === "git.status")).toHaveLength(1);
   });
 });
 

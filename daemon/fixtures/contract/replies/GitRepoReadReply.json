@@ -1,0 +1,18 @@
+[
+  {
+    "methods": [
+      "merge",
+      "squash",
+      "rebase"
+    ],
+    "defaultMethod": "merge",
+    "autoMerge": false
+  },
+  {
+    "methods": [
+      "squash"
+    ],
+    "defaultMethod": "squash",
+    "autoMerge": true
+  }
+]

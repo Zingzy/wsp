@@ -898,6 +898,9 @@ describe("runtime wire types", () => {
       "editor.list", "editor.open",
       // A commit runs the copy's hooks, a draft runs its agent and spends on a model, and a discard throws work away.
       "workspaces.commit", "workspaces.commitDraft", "workspaces.discard",
+      // A fix starts the agent's turn and spends on a model, an update runs git in the copy, and a merge acts on the
+      // git host as the person.
+      "workspaces.fix", "workspaces.update", "workspaces.merge",
     ];
     for (const op of held) {
       expect(wire.RUNTIME_OPS, op).toContain(op);
@@ -1211,7 +1214,7 @@ describe("daemon files and diff ops", () => {
       { id: 4, op: "git.diff", cwd: "/root/repo", scope: "branch", machineId: "wsp-a" },
       { id: 5, op: "git.push", cwd: "/root/repo", base: "main", machineId: "wsp-a" },
       { id: 6, op: "git.pr", cwd: "/root/repo", base: "main", machineId: "wsp-a" },
-      { id: 7, op: "git.prState", cwd: "/root/repo", machineId: "wsp-a" },
+      { id: 7, op: "git.update", cwd: "/root/repo", base: "main", machineId: "wsp-a" },
     ];
     for (const r of named) expect(DaemonRequest.parse(r)).toEqual(r);
     for (const r of named) expect(() => DaemonRequest.parse({ ...r, machineId: 1 })).toThrow();
@@ -1990,17 +1993,19 @@ describe("bringing work back", () => {
     expect(() => wire.WorkspaceView.parse({ ...view, parentWorkspaceId: 7 })).toThrow();
   });
 
-  it("the three git frames parse, the base is the caller's to leave out, and the workspace op carries the two words a pull request takes", () => {
+  it("the git frames parse, the base is the caller's to leave out, a read names the remote, and the workspace op carries the two words a pull request takes", () => {
     for (const frame of [
       { id: 1, op: "git.push", cwd: "/root/landing", base: "main" },
       { id: 2, op: "git.push", cwd: "/root/landing" },
       { id: 3, op: "git.pr", cwd: "/root/landing", base: "main", title: "the pricing page", body: "what it does" },
-      { id: 4, op: "git.prState", cwd: "/root/landing" },
+      { id: 4, op: "git.prRead", cwd: "/Users/p", remote: "git@github.com:o/r.git", branch: "work" },
     ]) {
       expect(wire.DaemonRequest.parse(frame)).toEqual(frame);
     }
     expect(() => wire.DaemonRequest.parse({ id: 5, op: "git.push", base: "main" })).toThrow();
-    expect(() => wire.DaemonRequest.parse({ id: 6, op: "git.prState" })).toThrow();
+    expect(() => wire.DaemonRequest.parse({ id: 6, op: "git.prRead", cwd: "/Users/p", branch: "work" })).toThrow();
+    // The frame that read a pull request off the copy's own remote is gone: a read names the remote it is for.
+    expect(() => wire.DaemonRequest.parse({ id: 6, op: "git.prState", cwd: "/root/landing" })).toThrow();
     const asked = { id: 7, op: "workspaces.bringBack", workspaceId: "ws_child", title: "the pricing page" };
     expect(wire.RuntimeRequest.parse(asked)).toEqual(asked);
     // A thread may get its own work out, which is why the op is on the list a thread's token opens.
@@ -2009,13 +2014,35 @@ describe("bringing work back", () => {
 
   it("the result carries the push, and the pull request or the reason there is none", () => {
     const pushed = { branch: "pricing-page", base: "main", ahead: 2, uncommitted: 0, stat: [" 1 file changed"] };
-    const withPr = { ...pushed, pr: { number: 12, url: "https://github.com/o/r/pull/12", state: "open", host: "github.com" } };
+    const pr = {
+      number: 12,
+      url: "https://github.com/o/r/pull/12",
+      state: "open",
+      host: "github.com",
+      draft: false,
+      base: "main",
+      branch: "pricing-page",
+      headOid: "abc",
+      headSubject: "Price the page",
+      mergeable: "unknown",
+      mergeState: "unknown",
+      review: "none",
+      checks: [],
+      additions: 1,
+      deletions: 0,
+      changedFiles: 1,
+      commits: 2,
+    };
+    const withPr = { ...pushed, pr };
     expect(wire.BringBackResult.parse(withPr)).toEqual(withPr);
     const noted = { ...pushed, note: wire.noHostCliLine("github.com") };
     expect(wire.BringBackResult.parse(noted)).toEqual(noted);
     expect(noted.note).toBe("no signed-in command line for github.com is on this computer; the branch is pushed and the pull request waits for one");
     expect(() => wire.BringBackResult.parse({ ...withPr, pr: { ...withPr.pr, state: "draft" } })).toThrow();
     expect(wire.DaemonErrorCode.options).toContain("no-host-cli");
+    // A workspace a thread opened under a lead pushes and opens none: the lead's pull request is where its work lands.
+    const child = { ...pushed, note: wire.childPushedLine("pricing-page") };
+    expect(wire.BringBackResult.parse(child)).toEqual(child);
   });
 
   it("a thread works on its own project alone, and the refusal names both", () => {

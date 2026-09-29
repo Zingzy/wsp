@@ -15,6 +15,7 @@ const SURFACES: RightPanelSurface[] = [
   { id: "browser:new", kind: "preview", resourceId: null },
   { id: "terminal:p1", kind: "terminal", resourceId: "p1", terminalIds: ["p1"], activeTerminalId: "p1" },
   { id: "diff", kind: "diff" },
+  { id: "pr", kind: "pr" },
   { id: "files", kind: "files", path: null },
   { id: "machine", kind: "machine" },
   { id: "processes", kind: "processes" },
@@ -50,7 +51,7 @@ describe("the pane registry", () => {
   it("names every open kind on the tab strip by its label, or by what its tab holds", () => {
     tabs(SURFACES);
     const strip = [...document.querySelectorAll("[data-right-panel-tab-list] [data-active-tab]")].map(t => t.textContent);
-    expect(strip).toEqual(["Browser", "Terminal", "Changes", "Files", "Computer", "Processes", "Agents"]);
+    expect(strip).toEqual(["Browser", "Terminal", "Changes", "Pull request", "Files", "Computer", "Processes", "Agents"]);
   });
 
   it("keeps every kind it holds across a reload of the store", () => {
@@ -77,15 +78,20 @@ describe("the pane registry", () => {
       away: { here: false, workspace: view, absent: away },
       startable: { here: false, workspace: view, absent: startable },
       none: { here: false, workspace: null, absent: null },
+      // A pull request is read on the Mac, so its pane opens on a napping copy as on a running one.
+      pr: { here: false, workspace: { ...view, phase: "napping" }, absent: null, pr: { number: 12, url: "u", state: "merged", base: "main", readAt: 1 } },
+      unread: { here: false, workspace: view, absent: null, pr: { why: "no signed-in command line", readAt: 1 } },
     };
     const opens = Object.fromEntries(Object.entries(contexts).map(([name, at]) => [name, PANE_KINDS.filter(k => PANES[k].available(at))]));
     expect(opens).toEqual({
       here: ["preview", "terminal", "machine", "processes"],
-      running: PANE_KINDS,
+      running: PANE_KINDS.filter(k => k !== "pr"),
       napping: ["machine", "agents"],
       away: ["preview", "diff", "files", "machine", "agents"],
       startable: ["preview", "diff", "files", "machine", "processes", "agents"],
       none: [],
+      pr: ["pr", "machine", "agents"],
+      unread: PANE_KINDS.filter(k => k !== "pr"),
     });
     const reasons = (at: PaneContext) => Object.fromEntries(PANE_KINDS.flatMap(k => (PANES[k].reason?.(at) === undefined ? [] : [[k, PANES[k].reason!(at)]])));
     expect(reasons(contexts["here"]!)).toEqual({ diff: "Pick a project to review its changes.", files: "Pick a thread to read its files." });

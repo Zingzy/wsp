@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement, createContext, useContext, type ReactElement, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CHECKOUT_WORDS, DEFAULT_PREFERENCES, type Capabilities, type Checkout, type PlaceView, type ProjectView, type WorkspaceLanding, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { CHECKOUT_WORDS, DEFAULT_PREFERENCES, PULL_REQUEST_WORDS, type Capabilities, type Checkout, type PlaceView, type ProjectView, type PullRequestFact, type PullRequestSeen, type WorkspaceLanding, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { THREAD_TREE_WORKING } from "../actions/format.js";
 import { workspaceActions } from "../actions/workspaceActions.js";
 import { clearNotices, lastNotice } from "../../test/notice-text.js";
@@ -209,9 +209,10 @@ describe("the sidebar's list of thread tiles", () => {
       act(() => useStore.setState({ statuses: { ws_f: statusOf(fork, fact) } } as never));
       await waitFor(() => expect(three("ws_f").querySelector("[data-tile-branch]")?.textContent).toBe("fix/cart-rounding"));
       expect(counts("ws_f")).toEqual(["1 ahead", "3 changed"]);
-      // The branch and each count stand 12 px apart on the 4 px grid: one gap, with no margin of their own.
+      // The branch and each count stand 12 px apart on the 4 px grid: each count's own start margin, since a count that
+      // does not fit wraps onto the line the row hides and a gap would stay behind it.
       const branch = three("ws_f").querySelector<HTMLElement>("[data-tile-branch]")!;
-      expect(branch.parentElement!.className).toContain("gap-3");
+      expect([...three("ws_f").querySelectorAll("[data-tile-count]")].map(n => n.className.split(" ").includes("ms-3"))).toEqual([true, true]);
       expect([...branch.parentElement!.querySelectorAll("*")].map(n => n.getAttribute("class") ?? "").join(" ")).not.toMatch(/\bm[se]?-\[/);
       expect(three("ws_f").textContent).not.toContain("\u00b7");
       expect(three("ws_f").querySelector(".lucide-git-branch")).not.toBeNull();
@@ -241,6 +242,52 @@ describe("the sidebar's list of thread tiles", () => {
       await act(async () => useStore.setState({ sessions: sessions([{ ...turn, status: "completed", endedAgo: 5 * 60_000 }]) } as never));
       await waitFor(() => expect(tile().querySelector("[data-thread-status]")!.textContent).toBe("5m"));
       expect(shown()).toEqual(["3 changed"]);
+    });
+
+    const pr = (over: Partial<PullRequestFact> = {}): PullRequestFact => ({
+      number: 12,
+      url: "https://github.com/o/r/pull/12",
+      state: "open",
+      host: "github.com",
+      draft: false,
+      base: "main",
+      branch: "fix/cart-rounding",
+      headOid: "abc1234",
+      headSubject: "Round once",
+      mergeable: "mergeable",
+      mergeState: "clean",
+      review: "none",
+      checks: [],
+      additions: 1,
+      deletions: 0,
+      changedFiles: 1,
+      commits: 1,
+      readAt: 1,
+      ...over,
+    });
+    const withPr = (seen: PullRequestSeen): WorkspaceStatus => ({ ...statusOf(fork, fact), pr: seen }) as WorkspaceStatus;
+
+    it("says the pull request's one word beside the branch, muted like the counts, and counts behind against its base", async () => {
+      mount({ projects: [project("pr_1", "spoo")], workspaces: [fork] });
+      await waitFor(() => expect(rowIds()).toEqual(["ws:ws_f"]));
+      act(() => useStore.setState({ statuses: { ws_f: withPr(pr({ behindBase: 3, checks: [{ name: "ci", state: "fail" }, { name: "e2e", state: "pending" }] })) } } as never));
+      await waitFor(() => expect(counts("ws_f")).toEqual(["checks failed", "1 ahead", "3 behind main", "3 changed"]));
+      act(() => useStore.setState({ statuses: { ws_f: withPr(pr({ mergeable: "conflicting", checks: [{ name: "ci", state: "fail" }] })) } } as never));
+      await waitFor(() => expect(counts("ws_f")[0]).toBe("conflicts with main"));
+      act(() => useStore.setState({ statuses: { ws_f: withPr(pr({ review: "approved" })) } } as never));
+      await waitFor(() => expect(counts("ws_f")[0]).toBe("approved"));
+      // A word alone, never a chip: the same span the counts take.
+      const word = three("ws_f").querySelector<HTMLElement>("[data-tile-count]")!;
+      expect(word.className).toBe("ms-3 shrink-0 whitespace-nowrap");
+    });
+
+    it("says not read with the reason on the tile's hover where the pull request could not be read", async () => {
+      mount({ projects: [project("pr_1", "spoo")], workspaces: [fork] });
+      await waitFor(() => expect(rowIds()).toEqual(["ws:ws_f"]));
+      const why = "no signed-in command line for github.com is on this computer and cart rounding is stopped, so the pull request is not read";
+      act(() => useStore.setState({ statuses: { ws_f: withPr({ why, readAt: 1 }) } } as never));
+      await waitFor(() => expect(counts("ws_f")[0]).toBe(PULL_REQUEST_WORDS.unread));
+      expect(document.querySelector<HTMLElement>("[data-row-id='ws:ws_f']")!.title).toContain(why);
     });
 
     it("says the changes were not read on a stopped copy whose edits git could not read", async () => {
@@ -431,6 +478,25 @@ describe("the sidebar's list of thread tiles", () => {
     } finally {
       delete (window as { wsp?: unknown }).wsp;
     }
+  });
+
+  it("reads Merged or Closed in a settled tile's slot where its workspace's pull request merged or closed, else its age", async () => {
+    const ws = workspace("ws_a", "pricing page", "pr_1");
+    mount({ projects: [project("pr_1", "spoo")], workspaces: [ws] });
+    const done = { ws: "ws_a", id: "th_done", prompt: "shipped it", status: "completed", startedAgo: 30 * HOUR, endedAgo: 29 * HOUR, readAgo: 28 * HOUR, settledAgo: HOUR };
+    await act(async () => useStore.setState({ sessions: sessions([done]) } as never));
+    await waitFor(() => expect(rowIds()).toEqual(["settled"]));
+    fireEvent.click(document.querySelector<HTMLElement>("[data-row-id=settled]")!);
+    await waitFor(() => expect(rowIds()).toEqual(["settled", "thread:th_done"]));
+    const slot = (): HTMLElement => rowOf("shipped it").querySelector<HTMLElement>("[data-thread-status]")!;
+    expect(slot().textContent).toBe("1d");
+    const kept = { number: 12, url: "https://github.com/o/r/pull/12", state: "merged" as const, base: "main", mergedAt: 1, readAt: 1 };
+    const status = { ...ws, machineState: "running", reach: { state: "reachable" }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0, pr: kept } as WorkspaceStatus;
+    act(() => useStore.setState({ statuses: { ws_a: status } } as never));
+    await waitFor(() => expect(slot().textContent).toBe("Merged"));
+    expect(slot().dataset["tone"]).toBeUndefined();
+    act(() => useStore.setState({ statuses: { ws_a: { ...status, pr: { ...kept, state: "closed" } } } } as never));
+    await waitFor(() => expect(slot().textContent).toBe("Closed"));
   });
 
   it("keeps a failure on the list however long ago it was read, and folds it muted once settled by hand", async () => {

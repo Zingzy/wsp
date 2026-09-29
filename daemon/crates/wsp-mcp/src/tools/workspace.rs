@@ -80,6 +80,17 @@ pub struct Words {
     pub no_draft_bare: String,
     pub no_draft_fix: String,
     pub discarded: String,
+    pub fix_asked: String,
+    pub fix_conflicts: String,
+    pub fix_nothing: String,
+    pub fix_agent_default: String,
+    pub merged: String,
+    pub merge_armed: String,
+    pub updated_none: String,
+    pub updated_one: String,
+    pub updated_many: String,
+    pub update_conflicts: String,
+    pub update_conflicts_join: String,
     pub first_turn_failed: String,
 }
 

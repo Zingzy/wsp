@@ -101,6 +101,49 @@ pub enum PullRequestState {
     Closed,
 }
 
+/// Whether a pull request can merge into its base as the host reads it; unknown while the host is still working it out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "lowercase")]
+pub enum Mergeable {
+    Mergeable,
+    Conflicting,
+    Unknown,
+}
+
+/// Where a pull request's review stands: nothing asked, approved, changes asked for, or a review the base requires.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewState {
+    None,
+    Approved,
+    ChangesAsked,
+    Required,
+}
+
+/// One check on a pull request's head, in the one word the host's command line gives every check whatever ran it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "lowercase")]
+pub enum CheckState {
+    Pass,
+    Fail,
+    Pending,
+    Skipped,
+    Cancelled,
+}
+
+/// How a pull request lands on its base: a merge commit, one squashed commit, or its commits rebased on top.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "lowercase")]
+pub enum MergeMethod {
+    Merge,
+    Squash,
+    Rebase,
+}
+
 /// Which of a git host's two open lists an item came off.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]

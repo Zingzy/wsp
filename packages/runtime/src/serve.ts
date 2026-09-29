@@ -1207,6 +1207,30 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 )),
               });
               return;
+            case "workspaces.pullRequestView":
+              send({ id: msg.id, ok: true, ...(await rt.workspaces.pullRequestView({ workspaceId: msg.workspaceId }, origin)) });
+              return;
+            case "workspaces.fix":
+              send({ id: msg.id, ok: true, ...(await rt.workspaces.fix({ workspaceId: msg.workspaceId, ...(msg.check !== undefined ? { check: msg.check } : {}) }, origin)) });
+              return;
+            case "workspaces.merge":
+              send({
+                id: msg.id,
+                ok: true,
+                ...(await rt.workspaces.merge(
+                  {
+                    workspaceId: msg.workspaceId,
+                    ...(msg.method !== undefined ? { method: msg.method } : {}),
+                    ...(msg.whenChecksPass !== undefined ? { whenChecksPass: msg.whenChecksPass } : {}),
+                    ...(msg.head !== undefined ? { head: msg.head } : {}),
+                  },
+                  origin,
+                )),
+              });
+              return;
+            case "workspaces.update":
+              send({ id: msg.id, ok: true, ...(await rt.workspaces.update({ workspaceId: msg.workspaceId }, origin)) });
+              return;
             case "workspaces.delete":
               await rt.workspaces.delete(msg.workspaceId, origin);
               send({ id: msg.id, ok: true });

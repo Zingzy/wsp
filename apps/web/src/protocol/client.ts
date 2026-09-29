@@ -22,6 +22,11 @@ import {
   GitCommitReply,
   GitDiscardReply,
   ViewedMarks,
+  FixResult,
+  PullRequestPage,
+  GitUpdateReply,
+  MergeResult,
+  type MergeMethod,
   CLOUD_SETUP_WORDS,
   DeviceView,
   HarnessCatalog,
@@ -412,6 +417,15 @@ export interface Api {
   commitDraft?(id: string, paths: readonly string[]): Promise<CommitDraft>;
   /** The workspace's viewed marks; with a path, sets the mark on that file against the blob, or takes it off at null. */
   viewed?(id: string, mark?: { path: string; blob: string | null }): Promise<ViewedMarks>;
+  /** The workspace's pull request page, read anew on every ask, with the merge methods the repository allows. */
+  pullRequestView?(id: string): Promise<PullRequestPage>;
+  /** Asks the workspace's agent to fix a failed check, or, with none, updates it from its base and sends the conflicts. */
+  fix?(id: string, check?: string): Promise<FixResult>;
+  /** Merges the workspace's pull request by the method named, or the repository's default, or once its checks pass, only while
+   * its head is the one the window drew. */
+  merge?(id: string, o: { method?: MergeMethod; whenChecksPass?: boolean; head: string }): Promise<MergeResult>;
+  /** Merges the base's latest commits into the copy's branch, or names the files that conflict. */
+  update?(id: string): Promise<GitUpdateReply>;
   /** Drops a workspace whose machine is gone from the host's store; the row leaves on workspace.deleted. The host refuses
    * while the machine exists. Optional so fixtures without a gone machine need not fake it. */
   forget?(id: string): Promise<void>;
@@ -766,6 +780,10 @@ export function makeApi(c: ProtocolClient): Api {
     commit: async (id, message, paths) => GitCommitReply.parse(await c.request("workspaces.commit", { workspaceId: id, message, paths: [...paths] })),
     commitDraft: async (id, paths) => CommitDraft.parse(await c.request("workspaces.commitDraft", { workspaceId: id, paths: [...paths] })),
     viewed: async (id, mark) => ViewedMarks.parse(await c.request("workspaces.viewed", { workspaceId: id, ...(mark ?? {}) })),
+    pullRequestView: async id => PullRequestPage.parse(await c.request("workspaces.pullRequestView", { workspaceId: id })),
+    fix: async (id, check) => FixResult.parse(await c.request("workspaces.fix", { workspaceId: id, ...(check !== undefined ? { check } : {}) })),
+    merge: async (id, o) => MergeResult.parse(await c.request("workspaces.merge", { workspaceId: id, ...o })),
+    update: async id => GitUpdateReply.parse(await c.request("workspaces.update", { workspaceId: id })),
     renameWorkspace: async (id, name) => (await c.request<{ workspace: WorkspaceView }>("workspaces.rename", { workspaceId: id, name })).workspace,
     setWorkspaceLook: async (id, look) => (await c.request<{ workspace: WorkspaceView }>("workspaces.look", { workspaceId: id, ...look })).workspace,
     // Parsed, not trusted: a reply without the list must not become the list.

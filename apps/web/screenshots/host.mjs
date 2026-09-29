@@ -184,16 +184,48 @@ export function writeHereLabel(home) {
   return bin;
 }
 
-/** A folder holding a stand-in gh that lists a fixture's open pull requests and issues in gh's JSON and answers
- * nothing else, so the composer's # menu reads a list without a login or a network. Answers the folder. */
+/** A folder holding a stand-in gh that lists a fixture's open pull requests and issues in gh's JSON, and answers the
+ * reads, the page and the merge settings of the pull requests the fixture holds, so the composer's # menu, a tile's
+ * word and the Pull request pane read without a login or a network. Anything else it refuses as gh refuses a branch
+ * with no pull request. Answers the folder. */
 export function writeHereGh(home, items) {
   const bin = join(home, ".wsp-gh");
   mkdirSync(bin, { recursive: true });
-  writeFileSync(join(bin, "pr.json"), JSON.stringify(items.pr));
-  writeFileSync(join(bin, "issue.json"), JSON.stringify(items.issue));
-  writeScript(join(bin, "gh"), sh(`case "$1 $2" in\n  "pr list"|"issue list") cat "$(dirname "$0")/$1.json" ;;\n  *) exit 1 ;;\nesac`));
+  writeFileSync(join(bin, "items.json"), JSON.stringify({ pr: items.pr, issue: items.issue, pulls: items.pulls ?? [] }));
+  writeScript(join(bin, "gh"), `#!${process.execPath}
+${ghScript}
+`);
   return bin;
 }
+
+/** The stand-in gh itself, read by its argv as gh is: the repository after -R, the selector after view or checks. */
+const ghScript = `
+const { readFileSync } = require("node:fs");
+const { join, dirname } = require("node:path");
+const items = JSON.parse(readFileSync(join(dirname(process.argv[1]), "items.json"), "utf8"));
+const [a, b, c] = process.argv.slice(2);
+const repo = process.argv[process.argv.indexOf("-R") + 1];
+const say = value => (process.stdout.write(typeof value === "string" ? value + "\\n" : JSON.stringify(value)), process.exit(0));
+const none = () => (process.stderr.write("no pull requests found\\n"), process.exit(1));
+const pull = (r, sel) => items.pulls.find(p => p.repo === r && (String(p.view.number) === sel || p.branch === sel));
+if (a === "pr" && b === "list") say(items.pr);
+if (a === "issue" && b === "list") say(items.issue);
+if (a === "pr" && b === "view") {
+  const p = pull(repo, c) ?? none();
+  say(process.argv.includes("title,body,commits,reviews,comments,files") ? p.page : p.view);
+}
+if (a === "pr" && b === "checks") say((pull(repo, c) ?? none()).checks);
+if (a === "repo" && b === "view") say((items.pulls.find(p => p.repo === c) ?? none()).settings);
+if (a === "api") {
+  const path = b.split("?")[0].replace(/^repos\\//, "");
+  const byRepo = items.pulls.find(p => path === p.repo || path.startsWith(p.repo + "/")) ?? none();
+  if (path === byRepo.repo) say(String(byRepo.settings.autoMerge));
+  if (path.includes("/compare/")) say(String(byRepo.behind));
+  const n = path.match(/\\/pulls\\/(\\d+)\\/comments$/);
+  if (n !== null) say((pull(byRepo.repo, n[1]) ?? none()).lineComments);
+}
+none();
+`;
 
 /** The folders a host serving a fixture's own agents looks past its stand-ins to: the system's, where no agent a Mac
  * installs lives, so no agent of this computer's is found, run or read. */

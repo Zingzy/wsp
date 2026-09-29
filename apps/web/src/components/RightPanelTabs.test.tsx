@@ -9,7 +9,7 @@ import type { RightPanelSurface } from "../rightPanelStore";
 import { PANE_KINDS, PANES, type RightPanelKind } from "../panes";
 import { CARD_SURFACE } from "../settings/rows";
 
-function draw(over: { surfaces?: RightPanelSurface[]; activeSurfaceId?: string | null; diffAvailable?: boolean; processesAvailable?: boolean; onAdd?: (kind: RightPanelKind) => void } = {}) {
+function draw(over: { surfaces?: RightPanelSurface[]; activeSurfaceId?: string | null; diffAvailable?: boolean; processesAvailable?: boolean; prAvailable?: boolean; onAdd?: (kind: RightPanelKind) => void } = {}) {
   return render(
     <RightPanelTabs
       mode="inline"
@@ -20,7 +20,7 @@ function draw(over: { surfaces?: RightPanelSurface[]; activeSurfaceId?: string |
       onActivate={vi.fn()}
       onCloseSurface={vi.fn()}
       onAdd={over.onAdd ?? vi.fn()}
-      available={{ ...Object.fromEntries(PANE_KINDS.map(k => [k, true])), diff: over.diffAvailable ?? true, processes: over.processesAvailable ?? true } as Record<RightPanelKind, boolean>}
+      available={{ ...Object.fromEntries(PANE_KINDS.map(k => [k, true])), diff: over.diffAvailable ?? true, processes: over.processesAvailable ?? true, pr: over.prAvailable ?? false } as Record<RightPanelKind, boolean>}
     >
       <div data-pane />
     </RightPanelTabs>,
@@ -39,6 +39,16 @@ describe("the right panel's launcher", () => {
     expect(screen.queryByText("Screen")).toBeNull();
     expect(screen.queryByText("Workspace")).toBeNull();
     expect(document.querySelector("[data-surface-launcher-keys]")?.getAttribute("data-surface-launcher-keys")).toBe("BTDFMPA");
+  });
+
+  it("offers Pull request only once the work has one, beside Changes, and never draws it held", () => {
+    draw({ prAvailable: true });
+    expect(cards()).toEqual(["preview", "terminal", "diff", "pr", "files", "machine", "processes", "agents"]);
+    expect(screen.getByText("Pull request")).toBeTruthy();
+    expect(document.querySelector("[data-surface-launcher-keys]")?.getAttribute("data-surface-launcher-keys")).toBe("BTDRFMPA");
+    cleanup();
+    draw({ prAvailable: false });
+    expect(document.querySelector('[data-surface-launch="pr"]')).toBeNull();
   });
 
   it("says what each pane is for in the person's own words, never a task", () => {
@@ -73,7 +83,7 @@ describe("the right panel's launcher", () => {
   });
 
   it("draws each pane as its own card tile, 8px apart, that fills on hover, its key in mono", () => {
-    draw({ diffAvailable: false });
+    draw({ diffAvailable: false, prAvailable: true });
     const browser = document.querySelector<HTMLElement>('[data-surface-launch="preview"]')!;
     for (const kind of PANE_KINDS) {
       const tile = document.querySelector<HTMLElement>(`[data-surface-launch="${kind}"]`)!;

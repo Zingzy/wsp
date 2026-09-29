@@ -1,0 +1,102 @@
+{
+  "cloudOff": {
+    "name": "update",
+    "description": "Merges the latest commits of the workspace's base from the remote into the branch its copy is on, with a merge commit, so a branch already pushed is never rewritten. A copy with changes no commit holds is refused first with the files named. A merge that conflicts is taken back at once and answered with the files that conflict, the copy left exactly as it was; fix sends those to the agent. Nothing is pushed.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "workspace": {
+          "type": "string",
+          "description": "the workspace's name, or its id when two share a name"
+        }
+      },
+      "required": [
+        "workspace"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "base": {
+          "type": "string"
+        },
+        "merged": {
+          "type": "boolean"
+        },
+        "commits": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "conflicts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/properties/base"
+          }
+        }
+      },
+      "required": [
+        "base",
+        "merged",
+        "commits",
+        "conflicts"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  "cloudOn": {
+    "name": "update",
+    "description": "Merges the latest commits of the workspace's base from the remote into the branch its copy is on, with a merge commit, so a branch already pushed is never rewritten. A copy with changes no commit holds is refused first with the files named. A merge that conflicts is taken back at once and answered with the files that conflict, the copy left exactly as it was; fix sends those to the agent. Nothing is pushed.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "workspace": {
+          "type": "string",
+          "description": "the workspace's name, or its id when two share a name"
+        }
+      },
+      "required": [
+        "workspace"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "base": {
+          "type": "string"
+        },
+        "merged": {
+          "type": "boolean"
+        },
+        "commits": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "conflicts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/properties/base"
+          }
+        }
+      },
+      "required": [
+        "base",
+        "merged",
+        "commits",
+        "conflicts"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  }
+}

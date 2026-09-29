@@ -154,6 +154,66 @@ export const HERE_HOST_ITEMS = {
   issue: [{ number: 36, title: "Short links with a trailing slash bounce twice", body: "Seen on /r/abc/ in Safari.", url: "https://github.com/you/spoo/issues/36" }],
 };
 
+/** The pull request spoo's branch has, in gh's own JSON for each read the host makes of it: the fields a read asks
+ * for, its checks, how far main has moved on, its page with the comments on its lines, and the repository's merge
+ * settings. One check failed and changes were asked for, so the tile, the pane and the thread's row have each word to
+ * show; the conflicting one has its checks passed and a conflict with main. */
+const CART_PULL = {
+  repo: "you/spoo",
+  branch: "fix/cart-rounding",
+  behind: 2,
+  view: {
+    number: 42,
+    url: "https://github.com/you/spoo/pull/42",
+    state: "OPEN",
+    isDraft: false,
+    baseRefName: "main",
+    headRefName: "fix/cart-rounding",
+    headRefOid: "5f1c0e2b9a7d4c3e8f6a1b2c3d4e5f60718293a4",
+    mergeable: "MERGEABLE",
+    mergeStateStatus: "BLOCKED",
+    reviewDecision: "CHANGES_REQUESTED",
+    additions: 12,
+    deletions: 3,
+    changedFiles: 3,
+    commits: [
+      { oid: "7a1b2c3d4e5f60718293a45f1c0e2b9a7d4c3e8f", messageHeadline: "Tick the first thing off" },
+      { oid: "5f1c0e2b9a7d4c3e8f6a1b2c3d4e5f60718293a4", messageHeadline: "Round the cart total once, at the end" },
+    ],
+  },
+  checks: [
+    { name: "test", bucket: "fail", link: "https://github.com/you/spoo/actions/runs/36495564111/job/109174214002", workflow: "ci", description: "" },
+    { name: "lint", bucket: "pass", link: "https://github.com/you/spoo/actions/runs/36495564111/job/109174214003", workflow: "ci", description: "" },
+    { name: "preview", bucket: "pass", link: "https://vercel.com/you/spoo/deployments/7", workflow: "", description: "Deployment ready" },
+  ],
+  page: {
+    title: "Round the cart total once, at the end",
+    body: "The total rounded each line and added the pennies up, so three lines at 0.335 landed on 1.00 or 1.01 depending on the order. It rounds the sum now.",
+    commits: [
+      { oid: "7a1b2c3d4e5f60718293a45f1c0e2b9a7d4c3e8f", messageHeadline: "Tick the first thing off", committedDate: "2026-09-29T08:10:00Z" },
+      { oid: "5f1c0e2b9a7d4c3e8f6a1b2c3d4e5f60718293a4", messageHeadline: "Round the cart total once, at the end", committedDate: "2026-09-29T09:02:00Z" },
+    ],
+    reviews: [{ author: { login: "maya" }, state: "CHANGES_REQUESTED", body: "The rounding is right. The test for three lines is missing.", submittedAt: "2026-09-29T09:20:00Z" }],
+    comments: [{ author: { login: "maya" }, body: "Tried it on the staging cart, the totals match now.", createdAt: "2026-09-29T09:14:00Z" }],
+    files: [
+      { path: "src/cart/total.ts", additions: 4, deletions: 0 },
+      { path: "README.md", additions: 2, deletions: 1 },
+      { path: "todo.md", additions: 6, deletions: 2 },
+    ],
+  },
+  lineComments: [
+    { id: 7, path: "src/cart/total.ts", line: 3, original_line: 3, side: "RIGHT", user: { login: "maya" }, body: "Round once here, and add a test with three lines at 0.335.", html_url: "https://github.com/you/spoo/pull/42#discussion_r7", created_at: "2026-09-29T09:19:00Z" },
+  ],
+  settings: { mergeCommitAllowed: true, squashMergeAllowed: true, rebaseMergeAllowed: false, viewerDefaultMergeMethod: "SQUASH", autoMerge: true },
+};
+const CONFLICT_PULL = {
+  ...CART_PULL,
+  view: { ...CART_PULL.view, mergeable: "CONFLICTING", mergeStateStatus: "DIRTY", reviewDecision: "APPROVED" },
+  checks: CART_PULL.checks.map(c => ({ ...c, bucket: "pass" })),
+  page: { ...CART_PULL.page, reviews: [{ author: { login: "maya" }, state: "APPROVED", body: "", submittedAt: "2026-09-29T09:40:00Z" }] },
+};
+const FIXTURE_PULLS = { failed: [CART_PULL], conflict: [CONFLICT_PULL] };
+
 /** A project as the host records one: one computer, the source that computer sees and the folder a workspace of it
  * works in. A project here is a folder under the work folder; anywhere else it is a repo the computer cloned into
  * `path`. Every field the add writes is written, as the add writes it. */
@@ -1014,6 +1074,8 @@ const FIXTURES = {
   "image-built": { build: imageBuilt },
   "long-prompt": { build: longPrompt },
   changes: { build: macInUse, changes: ["spoo"] },
+  "pull-request": { build: macInUse, changes: ["spoo"], pulls: "failed" },
+  "pull-request-conflict": { build: macInUse, changes: ["spoo"], pulls: "conflict" },
   rewind: { build: rewind },
 };
 
@@ -1025,6 +1087,12 @@ export function fixtureChanges(name, state) {
   const named = new Set(fixtureRow(name).changes ?? []);
   return Object.values(state.projects ?? {}).flatMap(p => (p.computer === HERE && named.has(p.name) ? [p.path] : []));
 }
+
+/** The pull requests a fixture's stand-in gh answers for: none for every fixture that names none. */
+export const fixturePulls = name => {
+  const named = name === undefined ? undefined : fixtureRow(name).pulls;
+  return named === undefined ? [] : FIXTURE_PULLS[named];
+};
 
 const fixtureRow = name => {
   const row = FIXTURES[name];

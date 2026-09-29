@@ -1,0 +1,18 @@
+[
+  {
+    "id": 1,
+    "op": "git.repoRead",
+    "cwd": "/Users/p"
+  },
+  {
+    "id": 1,
+    "op": "git.repoRead",
+    "remote": "git@github.com:Zingzy/wsp-pr-lab.git"
+  },
+  {
+    "id": 1,
+    "op": "git.repoRead",
+    "cwd": "/Users/p",
+    "remote": 3
+  }
+]

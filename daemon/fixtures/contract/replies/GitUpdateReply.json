@@ -1,0 +1,17 @@
+[
+  {
+    "base": "main",
+    "merged": true,
+    "commits": 4,
+    "conflicts": []
+  },
+  {
+    "base": "release/1.0",
+    "merged": false,
+    "commits": 0,
+    "conflicts": [
+      "README.md",
+      "src/a b.ts"
+    ]
+  }
+]

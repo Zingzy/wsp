@@ -3,6 +3,7 @@
 // pushed on the workspace's status, the answers of its writes, and the question a commit message is drafted from.
 import { z } from "zod";
 import { wordsWithin } from "./format.js";
+import { isPullRequestFact, type PullRequestSeen } from "./pull-request.js";
 
 /** A copy's checkout as the host last read it: the branch git is on, its counts against its upstream or the default
  * branch, and how many files differ from HEAD. editsUnread is a stopped copy whose branch was read off its files and
@@ -19,22 +20,23 @@ export const Checkout = z.object({
 });
 export type Checkout = z.infer<typeof Checkout>;
 
-/** One word table for the counts a checkout carries, on a tile, the composer's checkout row and the command line. */
+/** One word table for the counts a checkout carries, on a tile, the composer's checkout row and the command line. Behind
+ * counts against the base, off the pull request's read: the branch's own upstream, once pushed, is almost never behind
+ * and says nothing about the base. */
 export const CHECKOUT_WORDS = {
   ahead: (n: number): string => `${n} ahead`,
-  behind: (n: number): string => `${n} behind`,
+  behind: (n: number, base: string): string => `${n} behind ${base}`,
   changed: (n: number): string => `${n} changed`,
   unread: "changes not read",
 } as const;
 
 /** The counts that follow a branch, each its own fact so the row spaces them rather than joining them: a zero is left
- * out, and a copy whose edits were not read says so in place of a count it does not have. */
-export function checkoutCounts(c: Pick<Checkout, "ahead" | "behind" | "changed" | "editsUnread" | "countsUnknown">): string[] {
+ * out, and a copy whose edits were not read says so in place of a count it does not have. The count behind the base
+ * is the git host's, off the workspace's pull request while it is open, and stands whatever git could walk here. */
+export function checkoutCounts(c: Pick<Checkout, "ahead" | "changed" | "editsUnread" | "countsUnknown">, pr?: PullRequestSeen): string[] {
   const counts: string[] = [];
-  if (c.countsUnknown !== true) {
-    if (c.ahead > 0) counts.push(CHECKOUT_WORDS.ahead(c.ahead));
-    if (c.behind > 0) counts.push(CHECKOUT_WORDS.behind(c.behind));
-  }
+  if (c.countsUnknown !== true && c.ahead > 0) counts.push(CHECKOUT_WORDS.ahead(c.ahead));
+  if (isPullRequestFact(pr) && pr.state === "open" && pr.behindBase !== undefined && pr.behindBase > 0) counts.push(CHECKOUT_WORDS.behind(pr.behindBase, pr.base));
   if (c.editsUnread === true) counts.push(CHECKOUT_WORDS.unread);
   else if (c.changed > 0) counts.push(CHECKOUT_WORDS.changed(c.changed));
   return counts;

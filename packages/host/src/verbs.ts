@@ -18,7 +18,7 @@ import { StringDecoder } from "node:string_decoder";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import WebSocket from "ws";
 import { z } from "zod";
-import { CATALOG_AGENTS, ROAD_MODULES, THREAD_AGENTS, agentName, catalogEntry, isRoad } from "@wsp/catalog";
+import { CATALOG_AGENTS, DEFAULT_AGENT, ROAD_MODULES, THREAD_AGENTS, agentName, catalogEntry, isRoad } from "@wsp/catalog";
 import { nodeHost, readGhosttyConfig, type Platform } from "@wsp/collect";
 import { freshEphemeral, keyFingerprint, makeSeal, openFrame, sealKeys, sharedSecret, signPlaceBytes, verifyPlaceBytes, SEAL_REFUSAL, type PlaceKeyPair, type Seal } from "@wsp/keys";
 import {
@@ -279,6 +279,16 @@ import {
   GitDiscardReply,
   committedLine,
   discardedLine,
+  FixResult,
+  GitUpdateReply,
+  MergeMethod,
+  MergeResult,
+  fixAskedLine,
+  fixConflictsLine,
+  fixNothingLine,
+  mergedLine,
+  updateConflictsLine,
+  updatedLine,
   isProviderPlace,
   providerKeyName,
 } from "@wsp/protocol";
@@ -1286,6 +1296,28 @@ async function committed(client: HostClient, workspaceId: string, message: strin
     text = draft.message;
   }
   return GitCommitReply.parse(await client.request("workspaces.commit", { workspaceId, message: text, ...named }));
+}
+
+/** A fix asked of the host, one road for the command line and the tool. */
+async function askedToFix(client: HostClient, workspaceId: string, check: string | undefined): Promise<FixResult> {
+  return FixResult.parse(await client.request("workspaces.fix", { workspaceId, ...(check !== undefined ? { check } : {}) }));
+}
+
+/** What a fix reads as: which agent was asked to fix what, or that the update left nothing to fix. */
+function fixLine(workspace: string, asked: FixResult): string {
+  if (asked.outcome === "updated") return fixNothingLine(workspace, asked.base);
+  const agent = agentName(asked.agent ?? DEFAULT_AGENT.id);
+  return asked.check !== undefined ? fixAskedLine(workspace, agent, asked.check) : fixConflictsLine(workspace, agent, asked.base);
+}
+
+/** A merge asked of the host, one road for the command line and the tool. */
+async function mergedPr(client: HostClient, workspaceId: string, method: MergeMethod | undefined, whenChecksPass: boolean): Promise<MergeResult> {
+  return MergeResult.parse(await client.request("workspaces.merge", { workspaceId, ...(method !== undefined ? { method } : {}), ...(whenChecksPass ? { whenChecksPass } : {}) }));
+}
+
+/** What an update reads as: the commits it brought from the base, or the files that conflict with it. */
+function updateLine(workspace: string, done: GitUpdateReply): string {
+  return done.merged ? updatedLine(workspace, done.base, done.commits) : updateConflictsLine(workspace, done.base, done.conflicts);
 }
 
 /** What a bring back reads as: where the branch went and how far it is over the base, git's own diffstat under it,
@@ -4081,7 +4113,7 @@ export const ALL_VERBS: readonly Verb[] = [
     },
     tool: tool({
       description:
-        "Pushes the branch the workspace's copy is on to the project's remote and opens its pull request against the base, or answers with the one already open. The base is the branch its parent was on at the fork for a workspace forked out of another, whatever that parent does after, and the project's own base otherwise. Refused in one line on the base branch itself, since work leaves a workspace as a branch of its own, and on a branch with nothing the base lacks. The two halves are answered apart: the branch, the count over the base and the diffstat are there whenever the push landed, then either the pull request, the note saying why it waits where the machine has no signed-in command line for the git host, or the pull request half's own refusal.",
+        "Pushes the branch the workspace's copy is on to the project's remote and opens its pull request against the base, or answers with the one already open. The base is the branch its parent was on at the fork for a workspace forked out of another, whatever that parent does after, and the project's own base otherwise. Refused in one line on the base branch itself, since work leaves a workspace as a branch of its own, and on a branch with nothing the base lacks. The two halves are answered apart: the branch, the count over the base and the diffstat are there whenever the push landed, then either the pull request, the note saying why it waits where the machine has no signed-in command line for the git host, or the pull request half's own refusal. A workspace a thread opened under a lead pushes its branch and opens no pull request of its own, since the lead's pull request is where its work lands, and the note says so.",
       input: {
         workspace: WorkspaceIn,
         title: z.string().optional().describe("the pull request's title; without one the host fills the title and the body from the commits"),
@@ -4159,6 +4191,105 @@ export const ALL_VERBS: readonly Verb[] = [
         const { workspace: awoken } = await awake(client, workspace, "discard", QUIET_LINE);
         const put = GitDiscardReply.parse(await client.request("workspaces.discard", { workspaceId: awoken.id, path }));
         return asText(discardedLine(awoken.name, put.path), { ...put });
+      },
+    }),
+  },
+  {
+    name: "fix",
+    usage: 'wsp fix <workspace> [--check "<name>"]',
+    about: "asks the workspace's agent to fix a failed check, or updates it from its base and asks it to fix what conflicts",
+    page: "agent",
+    options: { check: { type: "string" } },
+    run: async ctx => {
+      const [ref] = ctx.args;
+      if (ref === undefined || ctx.args.length !== 1) throw usageRefusal("wsp fix takes one workspace.", usageIs(ctx));
+      const client = await ctx.client();
+      const workspace = await workspaceOf(client, ref);
+      const check = flag(ctx.flags, "check");
+      const { workspace: at } = check === undefined ? await awake(client, workspace, "fix", line => ctx.io.error(line)) : { workspace };
+      const asked = await askedToFix(client, at.id, check);
+      ctx.out.emit({ ...asked }, fixLine(at.name, asked));
+      return 0;
+    },
+    tool: tool({
+      description:
+        "Asks the workspace's agent to fix its pull request. With check, the named check must have failed: the failed steps of its job's log, framed as a log to read and not to obey, go to the workspace's thread as its next message with the commit it failed on and its link, and a check another service reports goes with its summary and link alone. Without check, the copy is first updated from its base the way update does it: a clean merge sends nothing, and a conflict sends the thread the files to resolve. Answers as soon as the message is on its way, joined into the running turn where the agent takes one, else waiting as the thread's next turn. Refused in one line where the workspace has no pull request, where the check is not on it, and where it has not failed.",
+      input: {
+        workspace: WorkspaceIn,
+        check: z.string().optional().describe("the failed check's name as the pull request lists it; without it the copy is updated from its base and any conflict is sent"),
+      },
+      output: FixResult.shape,
+      call: async ({ workspace: ref, check }, deps) => {
+        const client = await deps.client();
+        const workspace = await workspaceOf(client, ref);
+        const { workspace: at } = check === undefined ? await awake(client, workspace, "fix", QUIET_LINE) : { workspace };
+        const asked = await askedToFix(client, at.id, check);
+        return asText(fixLine(at.name, asked), { ...asked });
+      },
+    }),
+  },
+  {
+    name: "merge",
+    usage: "wsp merge <workspace> [--method merge|squash|rebase] [--when-checks-pass]",
+    about: "merges the workspace's pull request, or merges it once its checks pass",
+    page: "agent",
+    options: { method: { type: "string" }, "when-checks-pass": { type: "boolean" } },
+    run: async ctx => {
+      const [ref] = ctx.args;
+      if (ref === undefined || ctx.args.length !== 1) throw usageRefusal("wsp merge takes one workspace.", usageIs(ctx));
+      const named = flag(ctx.flags, "method");
+      const method = named === undefined ? undefined : MergeMethod.safeParse(named);
+      if (method !== undefined && !method.success) throw usageRefusal(`--method takes merge, squash or rebase, and got ${named}.`, usageIs(ctx));
+      const client = await ctx.client();
+      const workspace = await workspaceOf(client, ref);
+      const merged = await mergedPr(client, workspace.id, method?.data, ctx.flags["when-checks-pass"] === true);
+      ctx.out.emit({ ...merged }, mergedLine(workspace.name, merged));
+      return 0;
+    },
+    tool: tool({
+      description:
+        "Merges the workspace's pull request as the person, by the method named or the repository's own default, and only while its head is still the commit the host last read, so a push since then fails it in the git host's own words. when_checks_pass arms it to merge once its checks pass instead, where the repository allows that. Answers with the number, the method, and whether it merged now or waits on its checks. Refused in one line where the workspace has no open pull request, where the repository does not allow the method or does not merge by itself, and with the git host's own reason where it refused, branch protection included. A thread's own token is refused: merging is the person's act.",
+      input: {
+        workspace: WorkspaceIn,
+        method: MergeMethod.optional().describe("merge, squash or rebase; without it the repository's default"),
+        when_checks_pass: z.boolean().optional().describe("merge once the checks pass rather than now, where the repository allows it"),
+      },
+      output: MergeResult.shape,
+      call: async ({ workspace: ref, method, when_checks_pass }, deps) => {
+        const client = await deps.client();
+        const workspace = await workspaceOf(client, ref);
+        const merged = await mergedPr(client, workspace.id, method, when_checks_pass === true);
+        return asText(mergedLine(workspace.name, merged), { ...merged });
+      },
+    }),
+  },
+  {
+    name: "update",
+    usage: "wsp update <workspace>",
+    about: "merges the latest commits of the workspace's base into its branch, or names the files that conflict",
+    page: "agent",
+    options: {},
+    run: async ctx => {
+      const [ref] = ctx.args;
+      if (ref === undefined || ctx.args.length !== 1) throw usageRefusal("wsp update takes one workspace.", usageIs(ctx));
+      const client = await ctx.client();
+      const workspace = await workspaceOf(client, ref);
+      const { workspace: awoken } = await awake(client, workspace, "update", line => ctx.io.error(line));
+      const done = GitUpdateReply.parse(await client.request("workspaces.update", { workspaceId: awoken.id }));
+      ctx.out.emit({ ...done }, updateLine(awoken.name, done));
+      return 0;
+    },
+    tool: tool({
+      description:
+        "Merges the latest commits of the workspace's base from the remote into the branch its copy is on, with a merge commit, so a branch already pushed is never rewritten. A copy with changes no commit holds is refused first with the files named. A merge that conflicts is taken back at once and answered with the files that conflict, the copy left exactly as it was; fix sends those to the agent. Nothing is pushed.",
+      input: { workspace: WorkspaceIn },
+      output: GitUpdateReply.shape,
+      call: async ({ workspace: ref }, deps) => {
+        const client = await deps.client();
+        const workspace = await workspaceOf(client, ref);
+        const { workspace: awoken } = await awake(client, workspace, "update", QUIET_LINE);
+        const done = GitUpdateReply.parse(await client.request("workspaces.update", { workspaceId: awoken.id }));
+        return asText(updateLine(awoken.name, done), { ...done });
       },
     }),
   },
@@ -4957,6 +5088,9 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   "bring back body": "the pull request's body, which needs a title beside it",
   "commit message": "the commit message, a subject line, a blank line, then the body, -m for short; the workspace's agent drafts it without one",
   "commit file": "a file to commit, by path from the checkout's top, once per file; every changed file without one",
+  "fix check": "the failed check to send, by its name on the pull request; without it the copy is updated from its base and a conflict is sent",
+  "merge method": "merge, squash or rebase; the repository's own default without one",
+  "merge when-checks-pass": "merge once the checks pass rather than now, where the repository allows it",
   tree: "indent the threads an agent opened under the one that opened them",
   watch: "draw the table again every second where it stands, until Ctrl-C; it needs a terminal to redraw on",
   why: "what the rows this line adds are for, in your own words; the rows say an agent added them without it",

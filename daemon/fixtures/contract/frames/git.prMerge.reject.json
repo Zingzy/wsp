@@ -1,0 +1,40 @@
+[
+  {
+    "id": 1,
+    "op": "git.prMerge",
+    "cwd": "/Users/p",
+    "remote": "git@github.com:Zingzy/wsp-pr-lab.git",
+    "number": 12,
+    "method": "fast-forward",
+    "auto": false,
+    "headOid": "abc"
+  },
+  {
+    "id": 1,
+    "op": "git.prMerge",
+    "cwd": "/Users/p",
+    "remote": "git@github.com:Zingzy/wsp-pr-lab.git",
+    "number": 12,
+    "method": "merge",
+    "auto": false
+  },
+  {
+    "id": 1,
+    "op": "git.prMerge",
+    "cwd": "/Users/p",
+    "remote": "git@github.com:Zingzy/wsp-pr-lab.git",
+    "number": 12,
+    "method": "merge",
+    "headOid": "abc"
+  },
+  {
+    "id": 1,
+    "op": "git.prMerge",
+    "cwd": "/Users/p",
+    "remote": "git@github.com:Zingzy/wsp-pr-lab.git",
+    "number": 12,
+    "method": "merge",
+    "auto": "yes",
+    "headOid": "abc"
+  }
+]

@@ -3,6 +3,7 @@ import type { FsReadEncoding } from "./FsReadEncoding.js";
 import type { FsSearchMode } from "./FsSearchMode.js";
 import type { GitDiffScope } from "./GitDiffScope.js";
 import type { GuestKind } from "./GuestKind.js";
+import type { MergeMethod } from "./MergeMethod.js";
 import type { ProcSignal } from "./ProcSignal.js";
 
 /**
@@ -108,7 +109,35 @@ machineId?: string, } | { "op": "git.pr", cwd: string, base?: string, title?: st
 /**
  * The workspace this frame is for, as on fs.list above.
  */
-machineId?: string, } | { "op": "git.prState", cwd: string, 
+machineId?: string, } | { "op": "git.prRead", cwd: string, 
+/**
+ * The project's remote as the host recorded it, which names the repository.
+ */
+remote: string, branch?: string, number?: number, 
+/**
+ * The workspace this frame is for, as on fs.list above.
+ */
+machineId?: string, } | { "op": "git.prView", cwd: string, remote: string, number: number, 
+/**
+ * The workspace this frame is for, as on fs.list above.
+ */
+machineId?: string, } | { "op": "git.runLog", cwd: string, remote: string, runId: number, jobId: number, 
+/**
+ * The workspace this frame is for, as on fs.list above.
+ */
+machineId?: string, } | { "op": "git.prMerge", cwd: string, remote: string, number: number, method: MergeMethod, auto: boolean, headOid: string, 
+/**
+ * The workspace this frame is for, as on fs.list above.
+ */
+machineId?: string, } | { "op": "git.repoRead", cwd: string, remote: string, 
+/**
+ * The workspace this frame is for, as on fs.list above.
+ */
+machineId?: string, } | { "op": "git.update", cwd: string, 
+/**
+ * The branch the work started from; without one the checkout's own default branch, as on git.push.
+ */
+base?: string, 
 /**
  * The workspace this frame is for, as on fs.list above.
  */
