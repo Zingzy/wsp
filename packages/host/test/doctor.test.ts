@@ -13,13 +13,12 @@ import { daemonUnderTest, type DaemonUnderTest } from "../../daemon/test/harness
 import { assetDir, assetProof, daemonBinaryHere } from "../src/assets.js";
 import { hostPlatform } from "../src/verbs.js";
 import { DAEMON_TARGETS, daemonBinaryIn, daemonTargetHere, GUEST_DAEMON_TARGETS } from "../src/daemon-binary.js";
-import { agentSignInWord, agentVersionWord, probePath, doctorRowRefusal, EXIT_CODES, noSuchPlaceRefusal, noSuchProjectLine, plural, projectNeedsReaddLine, THIS_COMPUTER, type PlaceProvision, type ProjectView, HERE_PLACE_ID, HOMEBREW_PREFIX, DAEMON_MEMORY_MAX_PERCENT, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_WSP_BIN, GUEST_WSP_PATH, guestWspShim, machineLacksShort, NO_SYSTEMD_LINE, placeUpdateLine, signInRefusalLine, wspBinIn, type HarnessCatalogAnswer, type PlaceCapacity, type PlaceView } from "@wsp/protocol";
+import { agentSignInWord, agentVersionWord, probePath, doctorRowRefusal, EXIT_CODES, noSuchPlaceRefusal, noSuchProjectLine, plural, projectNeedsReaddLine, THIS_COMPUTER, type PlaceProvision, type ProjectView, HERE_PLACE_ID, HOMEBREW_PREFIX, DAEMON_MEMORY_MAX_PERCENT, DAEMON_UNIT, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_WSP_BIN, GUEST_WSP_PATH, guestWspShim, machineLacksShort, NO_SYSTEMD_LINE, placeUpdateLine, signInRefusalLine, wspBinIn, type HarnessCatalogAnswer, type PlaceCapacity, type PlaceView } from "@wsp/protocol";
 import { copyKey, createRuntime, localExecStream, rotateDaemonTokenScript, writeDaemonTokenScript, type HarnessAdapterFactory, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { isReserved, LocalBackend, NoProviderBackend } from "@wsp/engine";
 import {
   connectDaemonSocket,
-  DAEMON_UNIT,
   DAEMON_UNIT_PATH,
   daemonLogCommand,
   daemonBinaryOn,

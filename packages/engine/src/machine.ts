@@ -120,6 +120,9 @@ export interface Machine {
    * previewUrl, which on a backend with a public edge is the same road a client takes. The caller's bound is the
    * whole call's, as it is on exec and putBytes. */
   daemonAnswers?(opts?: { timeoutMs?: number }): Promise<boolean>;
+  /** Optional: starts the daemon inside the guest over this machine's exec road, on a provider whose restore can
+   * leave the daemon's unit enabled and never started. A daemon already running is left as it is. */
+  startDaemon?(): Promise<ExecResult>;
   /** Optional: bytes onto the machine on a backend that mints no signed upload URL. `landBytes` is what reads it,
    * so no caller picks between the two roads itself. */
   putBytes?(path: string, bytes: Uint8Array, opts?: { timeoutMs?: number }): Promise<BytesLanded | void>;

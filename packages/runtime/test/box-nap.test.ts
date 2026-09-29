@@ -8,7 +8,7 @@ import { BOX_BUDGETS } from "@wsp/engine";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { WebSocketServer } from "ws";
-import { DAEMON_TOKEN_PATH, WAKE_STOPPED } from "@wsp/protocol";
+import { DAEMON_TOKEN_PATH, DAEMON_UNIT, EXEC_DEADLINE_EXIT, WAKE_STOPPED } from "@wsp/protocol";
 import { createRuntime } from "../src/runtime.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { fakeClock } from "./fake-clock.js";
@@ -262,6 +262,92 @@ describe("the nap of a workspace on a computer that keeps no image", () => {
       expect(t.clock.now() - began).toBeGreaterThanOrEqual(7 * 60_000);
       expect(late.dials()).toBeGreaterThan(1);
       expect(t.backend.machines).toHaveLength(1);
+    } finally {
+      await t.close();
+    }
+  });
+
+  /** A Boat wake whose daemon's unit is enabled and never started, as Boat left bx_z4284vcx (2026-09-29): the edge
+   * refuses every upgrade until the host runs the unit's start over the machine's exec road. */
+  async function unstartedWake() {
+    const late = await lateDaemon();
+    const t = await boatWake(async () => late);
+    t.m1.startDaemon = () => t.m1.exec(`systemctl start ${DAEMON_UNIT}`);
+    const base = t.backend.execImpl;
+    t.backend.execImpl = (m, cmd) => {
+      if (cmd === `systemctl start ${DAEMON_UNIT}`) late.up();
+      return base(m, cmd);
+    };
+    const starts = (): number => t.m1.execLog.filter(c => c === `systemctl start ${DAEMON_UNIT}`).length;
+    return { ...t, late, starts };
+  }
+
+  it("a Boat wake whose daemon was never started starts it through the machine's exec a minute in, and succeeds on the first send", async () => {
+    const t = await unstartedWake();
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const began = t.clock.now();
+      let done = false;
+      const waking = t.rt.workspaces.wake(t.ws.id).finally(() => (done = true));
+      waking.catch(() => {});
+      await t.pump(() => done);
+      await expect(waking).resolves.toMatchObject({ machineId: "m1", phase: "running" });
+      expect(t.starts()).toBe(1);
+      expect(t.clock.now() - began).toBeGreaterThanOrEqual(60_000);
+      // The link redials on real timers, so how much of the test's clock passes before it lands varies; the bound is
+      // what matters, long before the fifteen minute cut.
+      expect(t.clock.now() - began).toBeLessThan(5 * 60_000);
+      expect(warned.mock.calls.map(c => String(c[0]))).toContainEqual(expect.stringMatching(/^daemon on m1 \(workspace ws_\w+\) had not answered 60 s into the wait, so wsp started it \(exit 0\)$/));
+      expect(t.backend.machines).toHaveLength(1);
+    } finally {
+      warned.mockRestore();
+      await t.close();
+    }
+  });
+
+  it.each([
+    { how: "throws", first: () => Promise.reject(new Error("Request timeout after 69998ms")), said: ", and the start failed \\(Request timeout after 69998ms\\)" },
+    { how: "runs out its timeout", first: () => Promise.resolve({ exitCode: EXEC_DEADLINE_EXIT, stdout: "", stderr: "" }), said: ` \\(exit ${EXEC_DEADLINE_EXIT}\\)` },
+  ])("asks for the start again a minute after one that $how, so a start lost on a box still streaming its disk is not the last", async ({ first, said: failed }) => {
+    const t = await unstartedWake();
+    const asked = t.m1.startDaemon!;
+    let tries = 0;
+    t.m1.startDaemon = () => (++tries === 1 ? first() : asked());
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const began = t.clock.now();
+      let done = false;
+      const waking = t.rt.workspaces.wake(t.ws.id).finally(() => (done = true));
+      waking.catch(() => {});
+      await t.pump(() => done);
+      await expect(waking).resolves.toMatchObject({ machineId: "m1", phase: "running" });
+      expect(tries).toBe(2);
+      expect(t.starts()).toBe(1);
+      expect(t.clock.now() - began).toBeGreaterThanOrEqual(2 * 60_000);
+      expect(t.clock.now() - began).toBeLessThan(5 * 60_000);
+      const said = warned.mock.calls.map(c => String(c[0]));
+      expect(said).toContainEqual(expect.stringMatching(new RegExp(`^daemon on m1 \\(workspace ws_\\w+\\) had not answered 60 s into the wait, so wsp started it${failed}$`)));
+      expect(said).toContainEqual(expect.stringMatching(/^daemon on m1 \(workspace ws_\w+\) had not answered 120 s into the wait, so wsp started it \(exit 0\)$/));
+    } finally {
+      warned.mockRestore();
+      await t.close();
+    }
+  });
+
+  it("starts nothing on a machine whose daemon answered, even once the minute has passed", async () => {
+    const t = await unstartedWake();
+    try {
+      t.late.up();
+      const began = t.clock.now();
+      let done = false;
+      const waking = t.rt.workspaces.wake(t.ws.id).finally(() => (done = true));
+      waking.catch(() => {});
+      await t.pump(() => done);
+      await expect(waking).resolves.toMatchObject({ machineId: "m1", phase: "running" });
+      expect(t.clock.now() - began).toBeLessThan(60_000);
+      // A start armed by the wait and never cleared would fire here.
+      await t.pump(() => t.clock.now() - began >= 2 * 60_000);
+      expect(t.starts()).toBe(0);
     } finally {
       await t.close();
     }

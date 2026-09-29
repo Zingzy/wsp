@@ -8,6 +8,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { DAEMON_UNIT } from "@wsp/protocol";
 import { writeStub } from "../../protocol/test/stub-script.js";
 import { GuestUnusableError, MoveUnansweredError, ROAD_TRIES, isMissing, type RetryClock } from "../src/errors.js";
 import { DAEMON_ENV_FILE, DEADLINE_EXIT, INLINE_EXEC_MS } from "../src/exec-detached.js";
@@ -460,6 +461,13 @@ describe("BoxBackend against a fake Box API", () => {
     const { backend } = backendOn(api);
     await backend.checkKey();
     expect(api.calls()).toEqual(["GET /limits"]);
+  });
+
+  it("starts the daemon's unit through the box's own commands endpoint, as root", async () => {
+    const api = new FakeBox().on("POST", "/boxes/bx_tumrjngm/commands", COMMAND(""));
+    const { machine } = machineOn(api);
+    expect(await machine.startDaemon()).toEqual({ exitCode: 0, stdout: "", stderr: "" });
+    expect(commandsSent(api)).toEqual([sudoCommand(`systemctl start ${DAEMON_UNIT}`)]);
   });
 
   it("runs every command as root through sudo under the exec environment, with the timeout in seconds", async () => {
