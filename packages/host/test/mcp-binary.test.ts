@@ -261,7 +261,7 @@ suite(`the tool server in the daemon binary${MCP_BIN === undefined ? " (set WSP_
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it.each([false, true])("lists verb table entries alone, each as this package lists it, and greets in the same words, with no host (cloud on: %s)", async cloud => {
+  it.each([false, true])("lists every tool this package lists and nothing else, each as this package lists it, and greets in the same words, with no host (cloud on: %s)", async cloud => {
     const here = await hereIn(cloud);
     const { out, code } = await served([MCP_BIN!, "mcp", "--state", statePath], { ...env, [CLOUD_ENV]: cloud ? "1" : "" }, [INITIALIZE, INITIALIZED, { jsonrpc: "2.0", id: 1, method: "tools/list" }]);
     expect(code).toBe(0);
@@ -273,7 +273,8 @@ suite(`the tool server in the daemon binary${MCP_BIN === undefined ? " (set WSP_
       expect(here.table, `${String(tool["name"])} is not in the verb table`).toContain(tool["name"]);
       expect(tool, String(tool["name"])).toEqual(here.listed.find(t => t["name"] === tool["name"]));
     }
-    expect(tools.map(t => t["name"])).toContain("computers");
+    // Both ways: a tool this package lists that the binary does not is one every agent on the binary loses.
+    expect(tools.map(t => t["name"]).sort()).toEqual(here.listed.map(t => t["name"]).sort());
   });
 
   it("answers a call with nothing serving the state file in the bytes this package's server answers it with", async () => {
