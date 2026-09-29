@@ -1,0 +1,25 @@
+[
+  {
+    "id": 1,
+    "op": "git.prRead",
+    "cwd": "/Users/p",
+    "remote": "git@github.com:Zingzy/wsp-pr-lab.git",
+    "branch": "fix/ci-status"
+  },
+  {
+    "id": 2,
+    "op": "git.prRead",
+    "cwd": "/root/wsp-boat",
+    "remote": "https://github.com/o/r",
+    "number": 12,
+    "machineId": "wsp-a"
+  },
+  {
+    "id": 3,
+    "op": "git.prRead",
+    "cwd": ".",
+    "remote": "git@github.com:Zingzy/wsp-pr-lab.git",
+    "branch": "work",
+    "number": 7
+  }
+]

@@ -22,7 +22,8 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/
 import { DiffSurface } from "../diffs/DiffSurface.js";
 import { FilePreviewSurface } from "../files/FilePreviewSurface.js";
 import { FilesSurface } from "../files/FilesSurface.js";
-import { useAbsentComputer, useWorkspace } from "../protocol/store.js";
+import { useAbsentComputer, useStatus, useWorkspace } from "../protocol/store.js";
+import { PullRequestSurface } from "../pull-request/PullRequestSurface.js";
 import { useAppDark } from "../settings/theme.js";
 import { PANE_KINDS, paneOf, type PaneContext, type RightPanelKind } from "../panes.js";
 import { isOpenable, useRightPanelStore, type RightPanelSurface, type WorkspaceRightPanelState } from "../rightPanelStore.js";
@@ -60,6 +61,7 @@ const PANE_VIEWS: { readonly [K in RightPanelKind]: PaneView<K> } = {
       </DiffWorkerPoolProvider>
     ),
   },
+  pr: { Surface: ({ workspaceId }) => <PullRequestSurface workspaceId={workspaceId} /> },
   machine: { Surface: ({ workspaceId }) => <MachineSurface workspaceId={workspaceId} /> },
   processes: { Surface: ({ workspaceId }) => <ProcessesSurface workspaceId={workspaceId} /> },
   agents: { Surface: ({ workspaceId }) => <AgentsSurface workspaceId={workspaceId} /> },
@@ -101,7 +103,8 @@ export function RightPanel({
     pruneBrowserTabs(workspaceId, openBrowserTabIds);
   }, [pruneBrowserTabs, workspaceId, openBrowserTabIds]);
 
-  const at: PaneContext = { here, workspace, absent };
+  const pr = useStatus(here ? null : workspaceId)?.pr;
+  const at: PaneContext = { here, workspace, absent, pr };
   const available = Object.fromEntries(PANE_KINDS.map(kind => [kind, paneOf(kind).available(at)])) as Record<RightPanelKind, boolean>;
   const unavailableReasons = Object.fromEntries(
     PANE_KINDS.flatMap(kind => {

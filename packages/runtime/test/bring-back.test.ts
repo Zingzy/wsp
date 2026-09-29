@@ -10,6 +10,9 @@ import { daemonTokenFor } from "../src/daemon-token.js";
 import { memoryStore } from "../src/store.js";
 import { createOn, projectOn, stubBackend, tokenGuest, type StubBackend } from "./stub-backend.js";
 
+/** Every fact of a pull request a read answers but its number, link, state and host, which each case names. */
+const PR_REST: Omit<import("@wsp/protocol").PullRequest, "number" | "url" | "state" | "host"> = { draft: false, base: "main", branch: "work", headOid: "abc1234", headSubject: "Do the work", mergeable: "unknown", mergeState: "unknown", review: "none", checks: [], additions: 1, deletions: 0, changedFiles: 1, commits: 1 };
+
 const DAEMON_TOKEN = "cafef00d".repeat(3);
 
 /** A daemon that records every frame and answers each op the way one on a machine would. */
@@ -32,7 +35,7 @@ function fakeDaemon(answers: Partial<Record<string, (frame: Record<string, unkno
     uncommitted: 1,
     stat: [" src/page.tsx | 4 ++--"],
   });
-  const pr = (): DaemonResponse => ({ id: 1, ok: true, pr: { number: 12, url: "https://github.com/o/r/pull/12", state: "open", host: "github.com" }, created: true });
+  const pr = (): DaemonResponse => ({ id: 1, ok: true, pr: { number: 12, url: "https://github.com/o/r/pull/12", state: "open", host: "github.com", ...PR_REST }, created: true });
   return {
     frames,
     dials,
@@ -91,7 +94,7 @@ describe("workspaces.bringBack", () => {
       ahead: 2,
       uncommitted: 1,
       stat: [" src/page.tsx | 4 ++--"],
-      pr: { number: 12, url: "https://github.com/o/r/pull/12", state: "open", host: "github.com" },
+      pr: { number: 12, url: "https://github.com/o/r/pull/12", state: "open", host: "github.com", ...PR_REST },
     });
     expect(daemon.dials.map(({ url, token }) => ({ url, token }))).toEqual([{ url: "http://127.0.0.1:7070", token: daemonTokenFor(DAEMON_TOKEN, "m1") }]);
     expect(daemon.closed).toBe(1);

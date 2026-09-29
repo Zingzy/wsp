@@ -1,0 +1,10 @@
+[
+  {
+    "merged": true,
+    "autoArmed": false
+  },
+  {
+    "merged": false,
+    "autoArmed": true
+  }
+]

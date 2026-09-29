@@ -1,0 +1,28 @@
+[
+  {
+    "id": 1,
+    "op": "git.prRead",
+    "remote": "git@github.com:Zingzy/wsp-pr-lab.git",
+    "branch": "work"
+  },
+  {
+    "id": 1,
+    "op": "git.prRead",
+    "cwd": ".",
+    "branch": "work"
+  },
+  {
+    "id": 1,
+    "op": "git.prRead",
+    "cwd": ".",
+    "remote": "git@github.com:Zingzy/wsp-pr-lab.git",
+    "number": "12"
+  },
+  {
+    "id": 1,
+    "op": "git.prRead",
+    "cwd": ".",
+    "remote": "git@github.com:Zingzy/wsp-pr-lab.git",
+    "number": -1
+  }
+]

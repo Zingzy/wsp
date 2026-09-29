@@ -31,6 +31,9 @@ import { copyingFake, createOn, fakeDaemonStart, projectOn, CUT_LINE, EXPORT_SES
 import { runsFromItsOwnFolder } from "./own-folder.js";
 import { CLOUD_ON } from "../src/cloud.js";
 
+/** Every fact of a pull request a read answers but its number, link, state and host, which each case names. */
+const PR_REST: Omit<import("@wsp/protocol").PullRequest, "number" | "url" | "state" | "host"> = { draft: false, base: "main", branch: "work", headOid: "abc1234", headSubject: "Do the work", mergeable: "unknown", mergeState: "unknown", review: "none", checks: [], additions: 1, deletions: 0, changedFiles: 1, commits: 1 };
+
 runsFromItsOwnFolder();
 
 /** A daemon inside a workspace that answers the two frames a bring back sends, so the verb's own line is read here
@@ -45,7 +48,7 @@ function fakeGitDaemon(): { open: () => Promise<DaemonChannel>; pr: { refuse?: {
           return { id: 1, ok: true, branch: "pricing-page", base: "main", remote: "origin", ahead: 2, uncommitted: 1, stat: [" src/page.tsx | 4 ++--", " 1 file changed, 2 insertions(+), 2 deletions(-)"] };
         }
         if (state.refuse !== undefined) return { id: 1, ok: false as const, ...state.refuse };
-        return { id: 1, ok: true, pr: { number: 12, url: "https://github.com/o/r/pull/12", state: "open", host: "github.com" }, created: true };
+        return { id: 1, ok: true, pr: { number: 12, url: "https://github.com/o/r/pull/12", state: "open", host: "github.com", ...PR_REST }, created: true };
       },
       close: () => {},
       // Nothing here ends of its own: the runtime closes the channel when the verb it opened it for is done.

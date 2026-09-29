@@ -24,9 +24,17 @@ import type { GitCommitReply as WireGitCommitReply } from "./generated/GitCommit
 import type { GitDiscardReply as WireGitDiscardReply } from "./generated/GitDiscardReply.js";
 import type { GitDiffFile as WireGitDiffFile } from "./generated/GitDiffFile.js";
 import type { FsWriteReply as WireFsWriteReply } from "./generated/FsWriteReply.js";
+import type { PullRequest as WirePullRequest } from "./generated/PullRequest.js";
+import type { GitPrReadReply as WireGitPrReadReply } from "./generated/GitPrReadReply.js";
+import type { GitPrViewReply as WireGitPrViewReply } from "./generated/GitPrViewReply.js";
+import type { GitRunLogReply as WireGitRunLogReply } from "./generated/GitRunLogReply.js";
+import type { GitPrMergeReply as WireGitPrMergeReply } from "./generated/GitPrMergeReply.js";
+import type { GitRepoReadReply as WireGitRepoReadReply } from "./generated/GitRepoReadReply.js";
+import type { GitUpdateReply as WireGitUpdateReply } from "./generated/GitUpdateReply.js";
 import { HERE_PLACE_ID, namesPlace } from "./place-word.js";
 import { threadNeedsYou } from "./thread-state.js";
 import { Checkout } from "./changes.js";
+import { GitPrReadReply, GitPrViewReply, GitPrMergeReply, GitRepoReadReply, GitRunLogReply, GitUpdateReply, MergeMethod, PullRequest, PullRequestSeen } from "./pull-request.js";
 import { placeAtLimitLine, placeFullLine } from "./place-state.js";
 import type { AbsentComputer } from "./workspace-state.js";
 import type { LinkTarget } from "./app-address.js";
@@ -748,6 +756,9 @@ export const WorkspaceStatus = WorkspaceView.extend({
   /** The copy's checkout as the host last read it, at a turn's end, on view and after a write, never on a timer;
    * absent until git has answered once. */
   checkout: Checkout.optional(),
+  /** The workspace's pull request as the host last read it through the git host's command line on this computer, or
+   * the one sentence saying why it could not; absent where its branch has none. */
+  pr: PullRequestSeen.optional(),
 });
 export type WorkspaceStatus = z.infer<typeof WorkspaceStatus>;
 
@@ -3380,6 +3391,14 @@ type GitDiscardReplyHeld = Held<Same<z.infer<typeof GitDiscardReply>, GitDiscard
 export const GitCommitReply = z.object({ oid: z.string(), subject: z.string(), filesChanged: z.number().int(), insertions: z.number().int(), deletions: z.number().int() });
 export type GitCommitReply = WireGitCommitReply;
 type GitCommitReplyHeld = Held<Same<z.infer<typeof GitCommitReply>, GitCommitReply>>;
+// The pull request's shapes live beside its words; each is held to the type the daemon's crate writes.
+type PullRequestHeld = Held<Same<PullRequest, WirePullRequest>>;
+type GitPrReadReplyHeld = Held<Same<GitPrReadReply, WireGitPrReadReply>>;
+type GitPrViewReplyHeld = Held<Same<GitPrViewReply, WireGitPrViewReply>>;
+type GitRunLogReplyHeld = Held<Same<GitRunLogReply, WireGitRunLogReply>>;
+type GitPrMergeReplyHeld = Held<Same<GitPrMergeReply, WireGitPrMergeReply>>;
+type GitRepoReadReplyHeld = Held<Same<GitRepoReadReply, WireGitRepoReadReply>>;
+type GitUpdateReplyHeld = Held<Same<GitUpdateReply, WireGitUpdateReply>>;
 /** base is the ref the branch scope diffed against (null for other scopes);
  * truncated means the 2 MiB patch budget cut files or a patch short. */
 export const GitDiffReply = z.object({ base: z.string().nullable(), files: z.array(GitDiffFile), truncated: z.boolean() });
@@ -3593,8 +3612,49 @@ export const DaemonRequest = z.discriminatedUnion("op", [
   /** Opens the branch's pull request against the base through the git host's own signed-in command line, or
    * answers with the one already open. Refused with code no-host-cli where that command line is not there. */
   z.object({ id: reqId, op: z.literal("git.pr"), cwd: z.string(), base: z.string().optional(), title: z.string().optional(), body: z.string().optional(), machineId: z.string().optional() }),
-  /** Where the branch's pull request stands, read back through that same command line. */
-  z.object({ id: reqId, op: z.literal("git.prState"), cwd: z.string(), machineId: z.string().optional() }),
+  /** A pull request by branch or by number through that same command line, the repository named off the remote the
+   * frame carries and never off the folder, where nothing is read and no git runs; answered as a GitPrReadReply, with
+   * no pull request where the host knows none. The host takes the remote off the project's own record. */
+  z.object({
+    id: reqId,
+    op: z.literal("git.prRead"),
+    cwd: z.string(),
+    remote: z.string(),
+    branch: z.string().optional(),
+    number: z.number().int().nonnegative().optional(),
+    machineId: z.string().optional(),
+  }),
+  /** One pull request's page through that same command line, answered as a GitPrViewReply. */
+  z.object({ id: reqId, op: z.literal("git.prView"), cwd: z.string(), remote: z.string(), number: z.number().int().nonnegative(), machineId: z.string().optional() }),
+  /** The failed steps of one job of one run, its last CHECK_LOG_LINES lines, answered as a GitRunLogReply. */
+  z.object({
+    id: reqId,
+    op: z.literal("git.runLog"),
+    cwd: z.string(),
+    remote: z.string(),
+    runId: z.number().int().nonnegative(),
+    jobId: z.number().int().nonnegative(),
+    machineId: z.string().optional(),
+  }),
+  /** Merges a pull request by the method named, or arms it to merge once its checks pass, only while its head is the
+   * commit named, and answers a GitPrMergeReply; a refusal is the command line's own last line. */
+  z.object({
+    id: reqId,
+    op: z.literal("git.prMerge"),
+    cwd: z.string(),
+    remote: z.string(),
+    number: z.number().int().nonnegative(),
+    method: MergeMethod,
+    auto: z.boolean(),
+    headOid: z.string(),
+    machineId: z.string().optional(),
+  }),
+  /** How the repository lets a pull request land, answered as a GitRepoReadReply. */
+  z.object({ id: reqId, op: z.literal("git.repoRead"), cwd: z.string(), remote: z.string(), machineId: z.string().optional() }),
+  /** Merges the base's latest commits from the remote into the checkout's branch and answers a GitUpdateReply. A
+   * checkout with changes no commit holds is refused with the files named; a merge that conflicts is taken back at
+   * once and answered with the files, the checkout left as it was. */
+  z.object({ id: reqId, op: z.literal("git.update"), cwd: z.string(), base: z.string().optional(), machineId: z.string().optional() }),
   /** The repository's open pull requests and issues through that same command line, answered as a GitPrListReply.
    * No command line for the host, or one nobody signed in, is an empty list with the note saying so. */
   z.object({ id: reqId, op: z.literal("git.prList"), cwd: z.string(), machineId: z.string().optional() }),
@@ -4267,6 +4327,7 @@ const DAEMON_CONTENTS = [
   "16e43173fadb40a741a588b14470f652528a4202fd434c2b9dc2702c7d78fc7c",
   "7e3fcbd460f842ff7343389c09ddbf43de751d83abea5cf82580d929811656e7",
   "e927a6944459d21c2598ce6ff7511bd6bb22eed9ac962aaedcce620e92b3d321",
+  "4e36ecd1503d0cdc7690ae0f285d20341a437a6a6bf66169cd2ce9041a4b83c1",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -4502,7 +4563,12 @@ const DAEMON_CONTENTS = [
  * whose top sits above the daemon's root answers git.diff for the files under that root alone.
  * Version 89 changes nothing a guest runs: the forwarder on the host's computer no longer asks the wsp where the host
  * is, a wsp mcp line that names its state is served by the binary's own tool server, and the guest's tool server
- * session drops the reopening only that forwarder did. */
+ * session drops the reopening only that forwarder did.
+ * Version 90 reads a pull request with the repository named off the remote the frame carries: git.prRead answers one by
+ * branch or number with its checks, review, mergeability, counts and how far its base has moved on, git.prView its page
+ * with the comments on its lines, git.runLog a failed job's last lines, git.repoRead a repository's merge methods, and
+ * git.prMerge merges only the head it names; git.update merges the base's latest commits into a clean checkout and takes
+ * a conflicting merge back; git.pr answers the whole fact, and git.prState is gone. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -5595,6 +5661,19 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** The workspace's viewed marks, answered as ViewedMarks; with a path, the mark on that file is set against the
    * blob given, or taken off where the blob is null. */
   z.object({ id: reqId, op: z.literal("workspaces.viewed"), workspaceId: z.string(), path: z.string().optional(), blob: z.string().nullable().optional() }),
+  /** The workspace's pull request page, read through the git host's command line on this computer, or the running
+   * copy's where this computer has none, and answered as a GitPrViewReply; never kept, so every ask reads it anew. */
+  z.object({ id: reqId, op: z.literal("workspaces.pullRequestView"), workspaceId: z.string() }),
+  /** Asks the workspace's agent to fix a failed check, named, with its log's failed steps; with no check, updates the
+   * copy from its base first and asks it to fix the conflicts where the merge had any. Answered as a FixResult at
+   * once, the turn going on without the caller. */
+  z.object({ id: reqId, op: z.literal("workspaces.fix"), workspaceId: z.string(), check: z.string().optional() }),
+  /** Merges the workspace's pull request by the method named, or the repository's default, only while its head is
+   * the commit the host last read; whenChecksPass arms it to merge once they do. Answered as a MergeResult. */
+  z.object({ id: reqId, op: z.literal("workspaces.merge"), workspaceId: z.string(), method: MergeMethod.optional(), whenChecksPass: z.boolean().optional() }),
+  /** Merges the base's latest commits into the copy's branch, answered as a GitUpdateReply: the files that conflict
+   * where it could not, the copy left as it was. */
+  z.object({ id: reqId, op: z.literal("workspaces.update"), workspaceId: z.string() }),
   z.object({ id: reqId, op: z.literal("workspaces.delete"), workspaceId: z.string() }),
   /** Turns the workspace's agents switch on or off and names its caps. Every key left out keeps what the record
    * holds, so the two flags a person gives on one line never clear the third. */
@@ -6070,6 +6149,12 @@ export const THREAD_OPS: readonly string[] = [
   "workspaces.checkout",
   "workspaces.commit",
   "workspaces.commitDraft",
+  // A thread reads its own pull request's page, asks the agent of a workspace in its tree to fix a check or a
+  // conflict, and updates such a copy from its base, under the tree rule and the guard; a merge is not here, since
+  // merging is the person's act.
+  "workspaces.pullRequestView",
+  "workspaces.fix",
+  "workspaces.update",
   "harnesses.list",
   "sessions.start",
   "sessions.list",
@@ -6128,6 +6213,7 @@ export const DEVICE_OPS: readonly string[] = [
   "workspaces.rebuild",
   "workspaces.checkout",
   "workspaces.viewed",
+  "workspaces.pullRequestView",
   "projects.list",
   "projects.resolve",
   "projects.remove",
@@ -6443,6 +6529,7 @@ export {
 export { claudeMemoryDir, claudeProjectKey, copyPathFor, folderName, folderSlug, hiddenFolder, parentFolderName, placeDaemonPaths, placeOwnedPaths, placeProvisionPaths, probePath, rootsPathIn, standInMachinePath, standInRecordsPath, underProject, workFolderIn, type FolderMachine } from "./project-path.js";
 export * from "./bring-back.js";
 export * from "./changes.js";
+export * from "./pull-request.js";
 export * from "./daemon-contract.js";
 export * from "./projects.js";
 export { defaultSeedChoice, leftBehindLine, neverTravelsLine, noRemoteLine, notInTheMenuLine, SEED_DIR, SEED_MEMORY_DIR, SEED_PATCH, seedBytes, seedChoiceFrom, seedCommitsLandedLine, seedCommitsLostLine, seedConsentLines, seedingLine, seedMenuRows, seedRowWords, seedSummaryLines } from "./project-seed.js";

@@ -29,8 +29,8 @@ pub use auth::DaemonAuthRequest;
 pub use checkpoint::{checkpoint_copy_part, checkpoint_id_ok, checkpoint_prefix, CHECKPOINT_REFS};
 pub use copy::{Carried, CopyAsk, CopyReport, CopyRoadName};
 pub use enums::{
-    DaemonErrorCode, FsEntryType, FsReadEncoding, FsSearchMode, GitDiffScope, HostItemKind, ProcSignal, PtyMode, PullRequestState,
-    WorkspaceKind,
+    CheckState, DaemonErrorCode, FsEntryType, FsReadEncoding, FsSearchMode, GitDiffScope, HostItemKind, MergeMethod, Mergeable, ProcSignal,
+    PtyMode, PullRequestState, ReviewState, WorkspaceKind,
 };
 pub use event::{DaemonEvent, ProcEntry, Usage};
 pub use guest::{GuestCliMessage, GuestKind, GuestOpen, GuestOpenReply, GuestStream};
@@ -52,11 +52,12 @@ pub use place::{
 pub use place_paths::{place_daemon_paths, place_owned_paths, place_provision_paths, probe_path, PlaceDaemonPaths, PlaceProvisionPaths};
 pub use reply::{
     DaemonErrorResponse, DaemonExecReply, Empty, False, FsEntry, FsFilesReply, FsListReply, FsReadReply, FsSearchHit, FsSearchReply,
-    FsWriteReply, GitBranch, GitCheckpointReply, GitCommitReply, GitDiffFile, GitDiffReply, GitDiscardReply, GitPrListReply, GitPrReply,
-    GitPrStateReply, GitPushReply, GitRestoreReply, GitStatusEntry, GitStatusReply, HostFolder, HostFolderListing, HostItem,
-    InboxRescanReply, ListeningPort, ManifestEntry, ManifestGetReply, ManifestRecordReply, ManifestRestartScriptReply, PlaceLeaveReply,
-    PlaceUpdateReply, PortsWatchReply, ProcInspectReply, PtyAttachReply, PtyCreateReply, PtyListEntry, PtyListReply, PullRequest, Reply,
-    True,
+    FsWriteReply, GitBranch, GitCheckpointReply, GitCommitReply, GitDiffFile, GitDiffReply, GitDiscardReply, GitPrListReply,
+    GitPrMergeReply, GitPrReadReply, GitPrReply, GitPrViewReply, GitPushReply, GitRepoReadReply, GitRestoreReply, GitRunLogReply,
+    GitStatusEntry, GitStatusReply, GitUpdateReply, HostFolder, HostFolderListing, HostItem, InboxRescanReply, ListeningPort,
+    ManifestEntry, ManifestGetReply, ManifestRecordReply, ManifestRestartScriptReply, PlaceLeaveReply, PlaceUpdateReply, PortsWatchReply,
+    ProcInspectReply, PtyAttachReply, PtyCreateReply, PtyListEntry, PtyListReply, PullRequest, PullRequestCheck, PullRequestCheckRun,
+    PullRequestComment, PullRequestCommit, PullRequestFile, PullRequestReview, PullRequestReviewComment, Reply, True,
 };
 pub use request::{DaemonOp, DaemonRequest, DAEMON_OPS, GUEST_OPS};
 pub use shell::shell_quote;

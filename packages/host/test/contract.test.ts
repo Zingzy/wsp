@@ -15,7 +15,8 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { CLOUD_ENV, DAEMON_TOKEN_PATH, EXIT_CODES, SCOPED_MCP_ARG, scopedNoPairLine, HERE_PLACE_ID, shellQuote, TURN_TOKEN_ENV, VerbFailure, WS_PATH } from "@wsp/protocol";
 import { CLOUD_ON } from "../src/cloud.js";
-import { copyKey, createRuntime, DAEMON_TOKEN_SET, memoryStore, type Runtime, type Store } from "@wsp/runtime";
+import { copyKey, createRuntime, DAEMON_TOKEN_SET, localExecStream, memoryStore, type Runtime, type Store } from "@wsp/runtime";
+import { LocalBackend } from "@wsp/engine";
 import type { RestartRoad } from "../src/restart.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
@@ -51,6 +52,18 @@ const skillsSh: SkillsFetch = async url => {
 import { nodeHost, type Host } from "@wsp/collect";
 import { writeStub } from "../../protocol/test/stub-script.js";
 import { ownEnv, served } from "./stdio-session.js";
+
+/** Every fact of a pull request a read answers but its number, link, state and host, which each case names. */
+const PR_REST: Omit<import("@wsp/protocol").PullRequest, "number" | "url" | "state" | "host"> = { draft: false, base: "main", branch: "work", headOid: "abc1234", headSubject: "Do the work", mergeable: "unknown", mergeState: "unknown", review: "none", checks: [], additions: 1, deletions: 0, changedFiles: 1, commits: 1 };
+/** What each pull request frame answers here: a pull request whose one check failed, that check's log, a repository
+ * that allows every method, a merge that landed, and an update that merged clean. */
+const PULL_REQUEST_FRAMES = {
+  "git.prRead": { pr: { number: 3, url: "https://github.com/dev/alpha/pull/3", state: "open", host: "github.com", ...PR_REST, mergeable: "mergeable", checks: [{ name: "ci", workflow: "ci", state: "fail", run: { runId: 1, jobId: 2 } }] } },
+  "git.runLog": { lines: ["Run check\texit 1"], truncated: false },
+  "git.repoRead": { methods: ["merge", "squash", "rebase"], defaultMethod: "squash", autoMerge: true },
+  "git.prMerge": { merged: true, autoArmed: false },
+  "git.update": { base: "main", merged: true, commits: 2, conflicts: [] },
+};
 
 /** This computer's own Host over a fixture home, with the fixture's agents on its PATH. */
 function fixtureHost(at: AgentHome): Host {
@@ -162,11 +175,25 @@ describe("the agent contract on the command line and the tool door", () => {
       store,
       adapters: { claude: claude.adapter, codex: bornDeadAgent(prompt => `re: ${prompt}`).adapter },
       goneConfirmMs: 0,
-      // The daemon inside a workspace, as far as the one verb that asks it anything is concerned. Its pull request
-      // half refuses where a case sets that, since the two halves of a bring back are answered apart.
+      // This computer's own daemon, which the pull request's reads and its merge go through, answered by the same
+      // stand-in below as the daemon inside a workspace.
+      local: {
+        backend: new LocalBackend({ root: join(dir, "here") }),
+        execStream: o => localExecStream({ root: join(dir, "here"), runDir: join(dir, "here", "runs"), ...o }),
+        home: () => join(dir, "user", ".claude"),
+        homeDir: join(dir, "user"),
+        rootsPath: join(dir, "here", "roots"),
+        env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
+        platform: process.platform === "darwin" ? "darwin" : "linux",
+        daemonRoad: async () => ({ url: "ws://this-computer", expiresAt: Number.MAX_SAFE_INTEGER, daemonToken: DAEMON_TOKEN_SET }),
+      },
+      // The daemon inside a workspace, as far as the verbs that ask it anything are concerned. Its pull request half
+      // refuses where a case sets that, since the two halves of a bring back are answered apart.
       daemonChannel: async () => ({
         send: async frame =>
-          frame.op === "git.push"
+          frame.op in PULL_REQUEST_FRAMES
+            ? { id: 1, ok: true, ...PULL_REQUEST_FRAMES[frame.op as keyof typeof PULL_REQUEST_FRAMES] }
+            : frame.op === "git.push"
             ? { id: 1, ok: true, branch: "work", base: "main", remote: "origin", ahead: 1, uncommitted: 0, stat: [" a.ts | 2 +-"] }
             : frame.op === "git.commit"
               ? { id: 1, ok: true, oid: "5f1c0e2b9a7d4c3e8f6a1b2c3d4e5f60718293a4", subject: "Round the cart total once", filesChanged: 1, insertions: 1, deletions: 1 }
@@ -175,7 +202,7 @@ describe("the agent contract on the command line and the tool door", () => {
                 : frame.op === "git.status"
                   ? { id: 1, ok: true, branch: { oid: "abc", head: "work", ahead: 1, behind: 0 }, entries: [], root: "/root/alpha" }
                   : prRefusal === undefined
-              ? { id: 1, ok: true, pr: { number: 3, url: "https://github.com/dev/alpha/pull/3", state: "open", host: "github.com" }, created: true }
+              ? { id: 1, ok: true, pr: { number: 3, url: "https://github.com/dev/alpha/pull/3", state: "open", host: "github.com", ...PR_REST }, created: true }
               : { id: 1, ok: false as const, error: prRefusal },
         close: () => {},
         // Nothing here ends of its own: the runtime closes the channel when the verb it opened it for is done.
@@ -267,7 +294,7 @@ describe("the agent contract on the command line and the tool door", () => {
       ahead: 1,
       uncommitted: 0,
       stat: [" a.ts | 2 +-"],
-      pr: { number: 3, url: "https://github.com/dev/alpha/pull/3", state: "open", host: "github.com" },
+      pr: { number: 3, url: "https://github.com/dev/alpha/pull/3", state: "open", host: "github.com", ...PR_REST },
     });
     expect(await last("commit", "commit", "alpha", "--message", "Round the cart total once", "--file", "a.ts")).toEqual({
       oid: "5f1c0e2b9a7d4c3e8f6a1b2c3d4e5f60718293a4",
@@ -277,6 +304,9 @@ describe("the agent contract on the command line and the tool door", () => {
       deletions: 1,
     });
     expect(await last("discard", "discard", "alpha", "a.ts")).toEqual({ path: "a.ts" });
+    expect(await last("update", "update", "alpha")).toEqual({ base: "main", merged: true, commits: 2, conflicts: [] });
+    expect(await last("fix", "fix", "alpha")).toEqual({ outcome: "updated", base: "main" });
+    expect(await last("merge", "merge", "alpha", "--method", "squash")).toEqual({ number: 3, method: "squash", merged: true, autoArmed: false });
     // The route goes again with the guest that answered for it: a machine wearing one has every later verb wait on
     // a daemon that is not there, which is the rest of this run.
     machine.previewUrl = noRoute;

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::validate::{bounded, bounded_opt, capped_list, exec_timeout, sha256_hex, upload_word};
-use crate::{FsReadEncoding, FsSearchMode, GitDiffScope, GuestKind, ProcSignal, RequestId};
+use crate::{FsReadEncoding, FsSearchMode, GitDiffScope, GuestKind, MergeMethod, ProcSignal, RequestId};
 
 /// One request on an authed socket: the id the reply echoes and the op with its parameters.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -274,10 +274,83 @@ pub enum DaemonOp {
         #[ts(optional)]
         machine_id: Option<String>,
     },
-    /// Where the branch's pull request stands, read back through that same command line.
-    #[serde(rename = "git.prState", rename_all = "camelCase")]
-    GitPrState {
+    /// A pull request as the git host has it, by branch or by number, read through the host's signed-in command line
+    /// with the repository named off the remote given and never off the checkout: the folder is where that line runs,
+    /// and no git runs there.
+    #[serde(rename = "git.prRead", rename_all = "camelCase")]
+    GitPrRead {
         cwd: String,
+        /// The project's remote as the host recorded it, which names the repository.
+        remote: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        branch: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        number: Option<u64>,
+        /// The workspace this frame is for, as on fs.list above.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        machine_id: Option<String>,
+    },
+    /// One pull request's page: title, body, commits, reviews, the conversation, the comments on lines and the files,
+    /// through that same command line.
+    #[serde(rename = "git.prView", rename_all = "camelCase")]
+    GitPrView {
+        cwd: String,
+        remote: String,
+        number: u64,
+        /// The workspace this frame is for, as on fs.list above.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        machine_id: Option<String>,
+    },
+    /// The failed steps of one job of one run, the last CHECK_LOG_LINES lines of them.
+    #[serde(rename = "git.runLog", rename_all = "camelCase")]
+    GitRunLog {
+        cwd: String,
+        remote: String,
+        run_id: u64,
+        job_id: u64,
+        /// The workspace this frame is for, as on fs.list above.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        machine_id: Option<String>,
+    },
+    /// Merges a pull request by the method named, or arms it to merge once its checks pass, and only while its head is
+    /// still the commit named.
+    #[serde(rename = "git.prMerge", rename_all = "camelCase")]
+    GitPrMerge {
+        cwd: String,
+        remote: String,
+        number: u64,
+        method: MergeMethod,
+        auto: bool,
+        head_oid: String,
+        /// The workspace this frame is for, as on fs.list above.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        machine_id: Option<String>,
+    },
+    /// How the repository lets a pull request land: its merge methods, the default one and whether it merges by itself.
+    #[serde(rename = "git.repoRead", rename_all = "camelCase")]
+    GitRepoRead {
+        cwd: String,
+        remote: String,
+        /// The workspace this frame is for, as on fs.list above.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        machine_id: Option<String>,
+    },
+    /// Merges the base's latest commits from the remote into the branch the checkout is on. A checkout with changes
+    /// no commit holds is refused first; a merge that conflicts is taken back at once and answered with the files.
+    #[serde(rename = "git.update", rename_all = "camelCase")]
+    GitUpdate {
+        cwd: String,
+        /// The branch the work started from; without one the checkout's own default branch, as on git.push.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        base: Option<String>,
         /// The workspace this frame is for, as on fs.list above.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
@@ -408,7 +481,7 @@ pub enum DaemonOp {
 
 /// The op names above, in the protocol's order; the daemon's switch reads this to tell an op it knows from one it
 /// does not.
-pub const DAEMON_OPS: [&str; 46] = [
+pub const DAEMON_OPS: [&str; 51] = [
     "pty.create",
     "pty.attach",
     "pty.detach",
@@ -436,7 +509,6 @@ pub const DAEMON_OPS: [&str; 46] = [
     "git.diff",
     "git.push",
     "git.pr",
-    "git.prState",
     "git.prList",
     "git.checkpoint",
     "git.restore",
@@ -455,6 +527,12 @@ pub const DAEMON_OPS: [&str; 46] = [
     "git.discard",
     "git.commit",
     "fs.write",
+    "git.prRead",
+    "git.prView",
+    "git.runLog",
+    "git.prMerge",
+    "git.repoRead",
+    "git.update",
 ];
 
 /// The five of those that belong to the road a client of this machine dials in on: a guest process's two and the

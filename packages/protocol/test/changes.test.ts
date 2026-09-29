@@ -7,15 +7,27 @@ import { CHECKOUT_WORDS, checkoutCounts, commitMessage, cutDiff, DRAFT_DIFF_MAX_
 const fact = { branch: "fix/cart", ahead: 0, behind: 0, changed: 0, readAt: 1 };
 
 describe("the counts after a branch", () => {
-  it("names each count that is not zero, ahead then behind then changed, each its own words", () => {
+  it("names each count that is not zero, ahead then behind the base then changed, each its own words", () => {
     expect(checkoutCounts({ ...fact, ahead: 1, changed: 3 })).toEqual(["1 ahead", "3 changed"]);
-    expect(checkoutCounts({ ...fact, ahead: 2, behind: 1, changed: 1 })).toEqual(["2 ahead", "1 behind", "1 changed"]);
+    expect(checkoutCounts({ ...fact, ahead: 2, changed: 1 }, { behindBase: 3, base: "main" })).toEqual(["2 ahead", "3 behind main", "1 changed"]);
     expect(checkoutCounts(fact)).toEqual([]);
+  });
+
+  it("counts behind against the base the pull request read, never against the branch's own upstream", () => {
+    // Once pushed, the upstream count is almost always nothing and says nothing about main.
+    const pushed = { ...fact, ahead: 2, behind: 1, changed: 1 };
+    expect(checkoutCounts(pushed)).toEqual(["2 ahead", "1 changed"]);
+    const behindUpstream = { ...fact, behind: 5 };
+    expect(checkoutCounts(behindUpstream, { behindBase: 0, base: "main" })).toEqual([]);
+    expect(checkoutCounts(fact, { base: "develop" })).toEqual([]);
+    expect(CHECKOUT_WORDS.behind(1, "develop")).toBe("1 behind develop");
   });
 
   it("says the changes were not read where a stopped copy's edits were not, and no count it does not have", () => {
     expect(checkoutCounts({ ...fact, ahead: 1, editsUnread: true })).toEqual(["1 ahead", CHECKOUT_WORDS.unread]);
-    expect(checkoutCounts({ ...fact, ahead: 4, behind: 2, countsUnknown: true, changed: 2 })).toEqual(["2 changed"]);
+    // The count behind the base is GitHub's and stands where git's own history was too long to walk.
+    const unwalked = { ...fact, ahead: 4, behind: 2, countsUnknown: true, changed: 2 };
+    expect(checkoutCounts(unwalked, { behindBase: 1, base: "main" })).toEqual(["1 behind main", "2 changed"]);
   });
 });
 

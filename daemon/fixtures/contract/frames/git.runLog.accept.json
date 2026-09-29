@@ -1,0 +1,19 @@
+[
+  {
+    "id": 1,
+    "op": "git.runLog",
+    "cwd": "/Users/p",
+    "remote": "git@github.com:Zingzy/wsp-pr-lab.git",
+    "runId": 36495564111,
+    "jobId": 109174214002
+  },
+  {
+    "id": 2,
+    "op": "git.runLog",
+    "cwd": "/root/r",
+    "remote": "git@github.com:Zingzy/wsp-pr-lab.git",
+    "runId": 1,
+    "jobId": 2,
+    "machineId": "wsp-a"
+  }
+]

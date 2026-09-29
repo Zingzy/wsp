@@ -2,6 +2,6 @@
 import type { PullRequest } from "./PullRequest.js";
 
 /**
- * The pull request for the branch as it stands, absent where the host knows none.
+ * The pull request for the branch or the number asked about, absent where the host knows none.
  */
-export type GitPrStateReply = { pr?: PullRequest, };
+export type GitPrReadReply = { pr?: PullRequest, };

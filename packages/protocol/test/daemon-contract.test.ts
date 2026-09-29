@@ -79,7 +79,13 @@ import {
   GUEST_TOKEN_MAX,
   GUEST_WSP_PATH,
   GitPrReply,
-  GitPrStateReply,
+  GitPrReadReply,
+  GitPrViewReply,
+  GitRunLogReply,
+  GitPrMergeReply,
+  GitRepoReadReply,
+  GitUpdateReply,
+  CHECK_LOG_LINES,
   GitPrListReply,
   GitCommitReply,
   GitDiscardReply,
@@ -318,6 +324,7 @@ const numbers = (): Record<string, number | string | readonly string[]> => ({
   fsFilesCapEntries: FS_FILES_CAP_ENTRIES,
   gitPrListCap: GIT_PR_LIST_CAP,
   gitPrListBodyCap: GIT_PR_LIST_BODY_CAP,
+  checkLogLines: CHECK_LOG_LINES,
   fsSearchCapFiles: FS_SEARCH_CAP_FILES,
   fsSearchCapHits: FS_SEARCH_CAP_HITS,
   gitDiffCapBytes: GIT_DIFF_CAP_BYTES,
@@ -361,6 +368,53 @@ const numbers = (): Record<string, number | string | readonly string[]> => ({
  * that use every optional field once and leave every one out once. A daemon in another language reads the same
  * files through its own reply types and must write them back byte for byte in meaning; the schemas here parse them,
  * so a field renamed on either side fails one of the two. Only the replies such a daemon answers today are listed. */
+/** A pull request as a read answers it: a failed Actions job, a check another service reports, and each other word. */
+const PR_FACT = {
+  number: 12,
+  url: "https://github.com/Zingzy/wsp-pr-lab/pull/12",
+  state: "open",
+  host: "github.com",
+  draft: false,
+  base: "main",
+  branch: "fix/ci-status",
+  headOid: "ec5c10de663bd1860925ad42e9580bab4eb1d377",
+  headSubject: "Set .ci-status to 1",
+  mergeable: "mergeable",
+  mergeState: "blocked",
+  review: "changes_asked",
+  checks: [
+    { name: "ci", workflow: "ci", state: "fail", run: { runId: 36495564111, jobId: 109174214002 }, link: "https://github.com/Zingzy/wsp-pr-lab/actions/runs/36495564111/job/109174214002" },
+    { name: "buildkite/wsp", state: "pass", link: "https://ci.example.com/build/7", description: "All good ✓" },
+    { name: "deploy", state: "skipped" },
+    { name: "lint", state: "cancelled" },
+    { name: "e2e", workflow: "ci", state: "pending" },
+  ],
+  additions: 120,
+  deletions: 30,
+  changedFiles: 9,
+  commits: 4,
+  behindBase: 3,
+};
+const PR_MERGED = {
+  number: 12,
+  url: "https://github.com/o/r/pull/12",
+  state: "merged",
+  host: "github.com",
+  draft: false,
+  base: "main",
+  branch: "work",
+  headOid: "abc",
+  headSubject: "",
+  mergeable: "unknown",
+  mergeState: "unknown",
+  review: "approved",
+  checks: [],
+  additions: 0,
+  deletions: 0,
+  changedFiles: 0,
+  commits: 1,
+};
+
 const REPLIES: Record<string, { schema: ZodTypeAny; samples: unknown[] }> = {
   MachineBackendReply: {
     schema: MachineBackendReply,
@@ -508,13 +562,53 @@ const REPLIES: Record<string, { schema: ZodTypeAny; samples: unknown[] }> = {
   GitPrReply: {
     schema: GitPrReply,
     samples: [
-      { pr: { number: 12, url: "https://github.com/o/r/pull/12", state: "open", host: "github.com" }, created: true },
-      { pr: { number: 12, url: "https://github.com/o/r/pull/12", state: "merged", host: "github.com" }, created: false },
+      { pr: PR_FACT, created: true },
+      { pr: PR_MERGED, created: false },
     ],
   },
-  GitPrStateReply: {
-    schema: GitPrStateReply,
-    samples: [{ pr: { number: 12, url: "https://github.com/o/r/pull/12", state: "closed", host: "github.com" } }, {}],
+  GitPrReadReply: {
+    schema: GitPrReadReply,
+    samples: [{ pr: PR_FACT }, { pr: { ...PR_MERGED, state: "closed", mergeable: "conflicting", review: "none", draft: true } }, {}],
+  },
+  GitPrViewReply: {
+    schema: GitPrViewReply,
+    samples: [
+      {
+        title: "Set .ci-status back to 0",
+        body: "The check failed on \"exit 1\"…",
+        commits: [{ oid: "abc", subject: "Set ci status", at: "2026-09-28T10:00:00Z" }],
+        reviews: [{ author: "ana", state: "changes_requested", body: "see line 3", at: "2026-09-28T11:00:00Z" }],
+        comments: [{ author: "bo", body: "thanks", at: "2026-09-28T12:00:00Z" }],
+        reviewComments: [
+          { id: 7, path: "check.sh", line: 3, side: "RIGHT", author: "ana", body: "exit 1 here", url: "https://github.com/o/r/pull/12#discussion_r7", at: "2026-09-28T11:00:00Z" },
+          { id: 8, path: "old.sh", author: "ana", body: "gone", url: "u", at: "t" },
+        ],
+        files: [{ path: "check.sh", additions: 2, deletions: 1 }],
+      },
+      { title: "", body: "", commits: [], reviews: [], comments: [], reviewComments: [], files: [] },
+    ],
+  },
+  GitRunLogReply: {
+    schema: GitRunLogReply,
+    samples: [
+      { lines: ["Run tests\t2026-09-28T10:00:00Z npm ERR! test failed", "Run tests\t2026-09-28T10:00:01Z exit 1"], truncated: true },
+      { lines: [], truncated: false },
+    ],
+  },
+  GitPrMergeReply: { schema: GitPrMergeReply, samples: [{ merged: true, autoArmed: false }, { merged: false, autoArmed: true }] },
+  GitRepoReadReply: {
+    schema: GitRepoReadReply,
+    samples: [
+      { methods: ["merge", "squash", "rebase"], defaultMethod: "merge", autoMerge: false },
+      { methods: ["squash"], defaultMethod: "squash", autoMerge: true },
+    ],
+  },
+  GitUpdateReply: {
+    schema: GitUpdateReply,
+    samples: [
+      { base: "main", merged: true, commits: 4, conflicts: [] },
+      { base: "release/1.0", merged: false, commits: 0, conflicts: ["README.md", "src/a b.ts"] },
+    ],
   },
   GitPrListReply: {
     schema: GitPrListReply,

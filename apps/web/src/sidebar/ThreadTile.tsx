@@ -63,16 +63,17 @@ function TileRows({ place, status, title, harness, third, crab }: { place: TileP
   );
 }
 
-/** The branch a tile's workspace is on, with its glyph, then each count the host read beside it, spaced rather than
- * joined; the branch gives way first, so the counts stay whole. The counts alone where no branch is known. */
+/** The branch a tile's workspace is on, with its glyph, then each fact the host read beside it, spaced rather than
+ * joined; the branch gives way first down to a few letters, then the row ends at a hard edge, so the facts nearest
+ * the branch stay whole. The facts alone where no branch is known. */
 export function TileBranch({ branch, counts = [] }: { branch: string; counts?: readonly string[] | undefined }) {
   if (branch === "" && counts.length === 0) return null;
   return (
     <>
       {branch === "" ? null : <GitBranchIcon aria-hidden className="size-3 shrink-0 text-[var(--top-row-meta)]" />}
-      <span className="flex min-w-0 items-center gap-3">
+      <span className="flex min-w-0 items-center gap-3 overflow-hidden">
         {branch === "" ? null : (
-          <span data-tile-branch className="min-w-0 truncate">
+          <span data-tile-branch className="min-w-12 truncate">
             {branch}
           </span>
         )}
@@ -117,6 +118,7 @@ export function ThreadTile({
   place,
   branch,
   counts,
+  why,
   time,
   depth,
   active,
@@ -138,9 +140,11 @@ export function ThreadTile({
   place: TilePlace;
   /** The branch the thread's workspace is on; empty where none is known. */
   branch: string;
-  /** The counts the host read beside that branch, each its own words. */
+  /** The counts the host read beside that branch, each its own words, the pull request's word last. */
   counts?: readonly string[] | undefined;
-  /** How long ago a resting thread last moved, as the sidebar words it. */
+  /** Why the pull request's word is not read, for the hover. */
+  why?: string | undefined;
+  /** How long ago a resting thread last moved, as the sidebar words it, or Merged and Closed in the settled fold. */
   time: string;
   /** How many tiles of the tree stand over this one. */
   depth: number;
@@ -181,7 +185,7 @@ export function ThreadTile({
       data-sidebar-row
       data-row-id={threadRowId(thread.id)}
       data-depth={depth}
-      title={tileHover(thread.title, place, thread.harness, snoozed ? SNOOZE_WORDS.workingHover(snoozedWorking) : thread.asking)}
+      title={tileHover(thread.title, place, thread.harness, [snoozed ? SNOOZE_WORDS.workingHover(snoozedWorking) : thread.asking, why ?? null].filter(line => line !== null).join("\n") || null)}
       className={TILE_CLASS}
       {...(renaming ? {} : { onClick: onSelect, onContextMenu })}
       {...(renaming || onDragStart === undefined ? {} : { draggable: true, onDragStart, onDragEnd })}
@@ -224,6 +228,7 @@ export function WorkspaceTile({
   place,
   branch,
   counts,
+  why,
   depth,
   active,
   renaming,
@@ -238,6 +243,7 @@ export function WorkspaceTile({
   place: TilePlace;
   branch: string;
   counts?: readonly string[] | undefined;
+  why?: string | undefined;
   depth: number;
   active: boolean;
   renaming: boolean;
@@ -255,7 +261,7 @@ export function WorkspaceTile({
       data-sidebar-row
       data-row-id={rowId}
       data-depth={depth}
-      title={tileHover(name, place, null, null)}
+      title={tileHover(name, place, null, why ?? null)}
       className={TILE_CLASS}
       {...(renaming ? {} : { onClick: onSelect, onContextMenu })}
     >

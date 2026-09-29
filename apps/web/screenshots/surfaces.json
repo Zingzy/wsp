@@ -1465,6 +1465,54 @@
       "settleMs": 1200
     },
     {
+      "name": "tiles-pr",
+      "at": "/",
+      "fixture": "pull-request",
+      "widths": [1440],
+      "reason": "The sidebar is 256px at every desktop width, so 1280 draws these tiles as 1440 does. Judged against the mockup's 1440 render; the sidebar at 390 is shot in sidebar and tiles-sections.",
+      "steps": [],
+      "wait": "composer-pr-number",
+      "settleMs": 1200
+    },
+    {
+      "name": "pr-pane",
+      "at": "/",
+      "fixture": "pull-request",
+      "widths": [1440],
+      "reason": "The right panel is min(42vw, 28rem), which is 28rem at both 1280 and 1440, so 1280 draws this pane as 1440 does. Judged against the mockup's 1440 render; the panel at 390 is shot in files-tree.",
+      "steps": [
+        "row-id=thread:redirect",
+        "surface-launch=pr"
+      ],
+      "wait": "pr-comment",
+      "settleMs": 1200
+    },
+    {
+      "name": "pr-pane-conflict",
+      "at": "/",
+      "fixture": "pull-request-conflict",
+      "widths": [1440],
+      "reason": "The right panel is min(42vw, 28rem), which is 28rem at both 1280 and 1440, so 1280 draws this pane as 1440 does. Judged against the mockup's 1440 render; the panel at 390 is shot in files-tree.",
+      "steps": [
+        "row-id=thread:redirect",
+        "surface-launch=pr"
+      ],
+      "wait": "pr-fix-conflicts",
+      "settleMs": 1200
+    },
+    {
+      "name": "footer-pr-row",
+      "at": "/",
+      "fixture": "pull-request",
+      "widths": [1440],
+      "reason": "Pins the pull request's row in the composer's footer; the composer at 1280 and 390 is shot in composer-thread.",
+      "steps": [
+        "row-id=thread:redirect"
+      ],
+      "wait": "pr-row",
+      "settleMs": 1200
+    },
+    {
       "name": "long-prompt",
       "at": "/",
       "fixture": "long-prompt",

@@ -1,0 +1,13 @@
+[
+  {
+    "lines": [
+      "Run tests\t2026-09-28T10:00:00Z npm ERR! test failed",
+      "Run tests\t2026-09-28T10:00:01Z exit 1"
+    ],
+    "truncated": true
+  },
+  {
+    "lines": [],
+    "truncated": false
+  }
+]

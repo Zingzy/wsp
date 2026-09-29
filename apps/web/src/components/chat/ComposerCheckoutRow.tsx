@@ -18,7 +18,8 @@
 // not switched: the daemon has no checkout op.
 import { ArrowLeftIcon, ChevronDownIcon, CheckIcon, FolderGitIcon, FolderIcon, FolderSearchIcon, GitBranchIcon, LoaderCircleIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
-import { checkoutCounts, hiddenFolder, isMacMachine, type FolderMachine } from "@wsp/protocol";
+import { checkoutCounts, hiddenFolder, isMacMachine, isPullRequestFact, type FolderMachine } from "@wsp/protocol";
+import { PullRequestStrip } from "../../pull-request/PullRequestStrip";
 import { baseName } from "../../files/entries";
 import { FOLDER_GHOST_WITH_WALK, FolderPathField, folderPathRefusal, useFolderPick, type FolderRefusal } from "../../files/FolderPathField";
 import { useWorkspaceListing } from "../../files/listing";
@@ -282,7 +283,10 @@ export function ComposerCheckoutRow({
     const held = s.workspaces.find(w => w.id === workspaceId);
     return held?.copy?.path ?? held?.project.path;
   });
-  const counts = fact !== undefined && branch.kind === "repo" && folder === checkoutPath && fact.branch === branch.head ? checkoutCounts(fact) : [];
+  const pr = useStatus(workspaceId)?.pr;
+  const onCheckout = fact !== undefined && branch.kind === "repo" && folder === checkoutPath && fact.branch === branch.head;
+  const behind = isPullRequestFact(pr) && pr.state === "open" ? { ...(pr.behindBase !== undefined ? { behindBase: pr.behindBase } : {}), base: pr.base } : undefined;
+  const counts = onCheckout ? checkoutCounts(fact, behind) : [];
 
   useEffect(() => {
     if (cwd !== null) follow(workspaceId, cwd);
@@ -293,7 +297,8 @@ export function ComposerCheckoutRow({
 
   return (
     <ComposerSurface.ContextStrip data-composer-checkout data-pickable={pickable || undefined}>
-      <div className="flex min-w-0 flex-1 items-center gap-1">
+      {/* A floor for the folder, so the branch line's counts and its pull request never draw over its access word. */}
+      <div className="flex min-w-28 flex-1 items-center gap-1">
         {pickable && canPick ? (
           <FolderMenu workspaceId={workspaceId} wire={wire} roots={roots} machine={machine} folder={folder} open={pickerOpen} onOpenChange={onPickerOpenChange} onPick={dir => choose(workspaceId, dir)} />
         ) : (
@@ -329,7 +334,9 @@ export function ComposerCheckoutRow({
             {BRANCH_NOTE}
           </TooltipPopup>
         </Tooltip>
-      ) : (
+      ) : null}
+      {branch.kind === "repo" && onCheckout ? <PullRequestStrip workspaceId={workspaceId} branch={branch.head} /> : null}
+      {branch.kind === "repo" ? null : (
         <span className={branchSlotClass} data-composer-branch={branch.kind} />
       )}
     </ComposerSurface.ContextStrip>

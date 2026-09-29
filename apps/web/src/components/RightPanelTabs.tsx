@@ -143,7 +143,7 @@ interface SurfaceAction {
 function surfaceActions(
   props: Pick<RightPanelTabsProps, "onAdd" | "available" | "unavailableReasons">,
 ): readonly SurfaceAction[] {
-  return PANE_KINDS.map((key) => {
+  return PANE_KINDS.filter((key) => props.available[key] || paneOf(key).onlyWhenAvailable !== true).map((key) => {
     const pane = paneOf(key);
     return {
       key,

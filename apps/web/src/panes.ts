@@ -4,19 +4,21 @@
 // and this computer's link all read this table; what a pane draws is the one
 // line each kind has in RightPanel's view table. This module imports no
 // component, since the store reads it and every pane imports the store.
-import { Activity, Bot, Cpu, File, FileDiff, Folder, Globe2, TerminalSquare, type LucideIcon } from "lucide-react";
-import type { AbsentComputer, WorkspaceView } from "@wsp/protocol";
+import { Activity, Bot, Cpu, File, FileDiff, Folder, GitPullRequest, Globe2, TerminalSquare, type LucideIcon } from "lucide-react";
+import { isPullRequestNamed, type AbsentComputer, type PullRequestSeen, type WorkspaceView } from "@wsp/protocol";
 import type { PreviewTabSnapshot } from "./components/RightPanelTabs";
 import { baseName } from "./files/entries";
 import type { RightPanelSurface } from "./rightPanelStore";
 
-export type RightPanelKind = "preview" | "terminal" | "diff" | "files" | "machine" | "processes" | "agents";
+export type RightPanelKind = "preview" | "terminal" | "diff" | "pr" | "files" | "machine" | "processes" | "agents";
 
 /** What decides whether a pane can open: the panel's workspace, or this computer's own panel. */
 export interface PaneContext {
   here: boolean;
   workspace: WorkspaceView | null;
   absent: AbsentComputer | null;
+  /** The workspace's pull request as the host last pushed it; the Pull request pane stands only where there is one. */
+  pr?: PullRequestSeen | undefined;
 }
 
 /** What a tab reads its name from, for the kinds whose name is not their label. */
@@ -39,6 +41,8 @@ export interface Pane<K extends RightPanelKind = RightPanelKind> {
   tabIcon?(surface: Extract<RightPanelSurface, { kind: K }>): LucideIcon;
   /** Open on this computer's own panel, the pane reads this computer's daemon link. */
   readsHere?: true;
+  /** The launcher leaves the pane out until it can open, rather than drawing it held. */
+  onlyWhenAvailable?: true;
 }
 
 const NO_PROJECT_HERE = "Pick a project to review its changes.";
@@ -83,6 +87,16 @@ export const PANES: { readonly [K in RightPanelKind]: Pane<K> } = {
     hint: "Review the changes once it runs.",
     available: running,
     reason: at => (at.here ? NO_PROJECT_HERE : undefined),
+  },
+  pr: {
+    label: "Pull request",
+    description: "Checks, review and comments.",
+    icon: GitPullRequest,
+    shortcut: "R",
+    hint: "Available once the work has a pull request.",
+    // Read on this computer, so a stopped copy's pull request opens as well as a running one's.
+    available: at => !at.here && isPullRequestNamed(at.pr),
+    onlyWhenAvailable: true,
   },
   files: {
     label: "Files",
