@@ -1,0 +1,14 @@
+[
+  {
+    "id": 1,
+    "op": "git.update",
+    "cwd": "repo"
+  },
+  {
+    "id": 2,
+    "op": "git.update",
+    "cwd": "/root/wsp-boat",
+    "base": "main",
+    "machineId": "wsp-a"
+  }
+]

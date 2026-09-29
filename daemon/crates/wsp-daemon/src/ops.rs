@@ -12,7 +12,7 @@ use base64::Engine;
 use serde::Serialize;
 use serde_json::Value;
 use wsp_frames::{
-    numbers, words, DaemonErrorCode, DaemonErrorResponse, DaemonOp, Empty, FsReadEncoding, GitPrStateReply, GuestOpen, GuestOpenReply,
+    numbers, words, DaemonErrorCode, DaemonErrorResponse, DaemonOp, Empty, FsReadEncoding, GitPrReadReply, GuestOpen, GuestOpenReply,
     InboxRescanReply, ManifestGetReply, ManifestRecordReply, ManifestRestartScriptReply, PlaceLeaveReply, PlaceUpdateReply,
     PortsWatchReply, PtyAttachReply, PtyCreateReply, PtyListReply, Reply, RequestId, DAEMON_OPS, GUEST_OPS, MACHINE_OPS,
     MACHINE_OPS_ON_ANY_ROAD,
@@ -288,7 +288,12 @@ async fn handle_op(conn: &Arc<Conn>, ctx: &Arc<Ctx>, frame: &Value, id: Option<R
             | "git.diff"
             | "git.push"
             | "git.pr"
-            | "git.prState"
+            | "git.prRead"
+            | "git.prView"
+            | "git.runLog"
+            | "git.prMerge"
+            | "git.repoRead"
+            | "git.update"
             | "git.prList"
             | "git.discard"
             | "git.commit"
@@ -825,20 +830,62 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
                 let (remote, remote_url) = bring_back::remote_url(&runner, &at).await?;
                 let base = bring_back::base_of(&runner, &at, &remote, base.as_deref()).await?;
                 let branch = bring_back::head_for(&runner, &at, &base).await?;
-                let ask = hosts::Ask { cwd: &at, remote_url: &remote_url, branch: &branch };
-                hosts::open(&runner, &ask, &base, title.as_deref(), body.as_deref()).await
+                let ask = hosts::Ask { cwd: &at, remote_url: &remote_url };
+                hosts::open(&runner, &ask, &base, &branch, title.as_deref(), body.as_deref()).await
             };
             answer(id, opened.await)
         }
-        DaemonOp::GitPrState { cwd, machine_id } => {
+        // The reads and the merge below name the repository by the remote the frame carries, which the host took off
+        // the project's own record: the folder is only where gh runs, and nothing in it is read, so an agent writing
+        // its copy's configuration cannot point a read, and still less a merge, at another repository.
+        DaemonOp::GitPrRead { cwd, remote, branch, number, machine_id } => {
             let read = async {
-                let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Works).await?;
-                let branch = bring_back::branch_at(&runner, &at).await?;
-                let (_, remote_url) = bring_back::remote_url(&runner, &at).await?;
-                let ask = hosts::Ask { cwd: &at, remote_url: &remote_url, branch: &branch };
-                Ok(GitPrStateReply { pr: hosts::find(&runner, &ask).await? })
+                let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Reads).await?;
+                let pick = match (number, branch.as_deref()) {
+                    (Some(n), _) => hosts::Pick::Number(n),
+                    (None, Some(branch)) => hosts::Pick::Branch(branch),
+                    (None, None) => {
+                        return Err(OpError::coded(DaemonErrorCode::BadRequest, "git.prRead names a branch or a number".to_owned()))
+                    }
+                };
+                Ok(GitPrReadReply { pr: hosts::read(&runner, &hosts::Ask { cwd: &at, remote_url: &remote }, &pick).await? })
             };
             answer(id, read.await)
+        }
+        DaemonOp::GitPrView { cwd, remote, number, machine_id } => {
+            let read = async {
+                let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Reads).await?;
+                hosts::page(&runner, &hosts::Ask { cwd: &at, remote_url: &remote }, number).await
+            };
+            answer(id, read.await)
+        }
+        DaemonOp::GitRunLog { cwd, remote, run_id, job_id, machine_id } => {
+            let read = async {
+                let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Reads).await?;
+                hosts::run_log(&runner, &hosts::Ask { cwd: &at, remote_url: &remote }, run_id, job_id).await
+            };
+            answer(id, read.await)
+        }
+        DaemonOp::GitPrMerge { cwd, remote, number, method, auto, head_oid, machine_id } => {
+            let merged = async {
+                let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Works).await?;
+                hosts::merge(&runner, &hosts::Ask { cwd: &at, remote_url: &remote }, number, method, auto, &head_oid).await
+            };
+            answer(id, merged.await)
+        }
+        DaemonOp::GitRepoRead { cwd, remote, machine_id } => {
+            let read = async {
+                let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Reads).await?;
+                hosts::repo_settings(&runner, &hosts::Ask { cwd: &at, remote_url: &remote }).await
+            };
+            answer(id, read.await)
+        }
+        DaemonOp::GitUpdate { cwd, base, machine_id } => {
+            let updated = async {
+                let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Works).await?;
+                git::write::update(&runner, &at, base.as_deref()).await
+            };
+            answer(id, updated.await)
         }
         DaemonOp::GitPrList { cwd, machine_id } => {
             let read = async {
@@ -1087,7 +1134,12 @@ mod tests {
             "git.diff",
             "git.push",
             "git.pr",
-            "git.prState",
+            "git.prRead",
+            "git.prView",
+            "git.runLog",
+            "git.prMerge",
+            "git.repoRead",
+            "git.update",
             "git.prList",
             "git.discard",
             "git.commit",
@@ -1340,9 +1392,18 @@ mod tests {
             let reply = reply(&b, &sock, json!({"id": 1, "op": op, "path": "/root/repo", "machineId": "wsp-x"})).await;
             assert_eq!(reply, json!({"id": 1, "ok": false, "code": "not-found", "error": "no such workspace: wsp-x"}), "{op}");
         }
-        for op in ["git.status", "git.push", "git.pr", "git.prState"] {
+        for op in ["git.status", "git.push", "git.pr", "git.update"] {
             let reply = reply(&b, &sock, json!({"id": 1, "op": op, "cwd": "/root/repo", "machineId": "wsp-x"})).await;
             assert_eq!(reply, json!({"id": 1, "ok": false, "code": "not-found", "error": "no such workspace: wsp-x"}), "{op}");
+        }
+        for frame in [
+            json!({"id": 1, "op": "git.prRead", "cwd": "/root/repo", "remote": "git@github.com:o/r.git", "number": 3, "machineId": "wsp-x"}),
+            json!({"id": 1, "op": "git.prView", "cwd": "/root/repo", "remote": "git@github.com:o/r.git", "number": 3, "machineId": "wsp-x"}),
+            json!({"id": 1, "op": "git.runLog", "cwd": "/root/repo", "remote": "git@github.com:o/r.git", "runId": 1, "jobId": 2, "machineId": "wsp-x"}),
+            json!({"id": 1, "op": "git.repoRead", "cwd": "/root/repo", "remote": "git@github.com:o/r.git", "machineId": "wsp-x"}),
+        ] {
+            let out = reply(&b, &sock, frame.clone()).await;
+            assert_eq!(out, json!({"id": 1, "ok": false, "code": "not-found", "error": "no such workspace: wsp-x"}), "{frame}");
         }
         let search = reply(
             &b,

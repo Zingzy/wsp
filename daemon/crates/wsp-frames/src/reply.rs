@@ -5,7 +5,10 @@ use serde::de::{self, Deserializer, Visitor};
 use serde::{Deserialize, Serialize, Serializer};
 use ts_rs::TS;
 
-use crate::{DaemonErrorCode, FsEntryType, HostItemKind, MachineErrorKind, PullRequestState, RequestId};
+use crate::{
+    CheckState, DaemonErrorCode, FsEntryType, HostItemKind, MachineErrorKind, MergeMethod, Mergeable, PullRequestState, RequestId,
+    ReviewState,
+};
 
 /// The literal `true` the ok envelope carries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -404,7 +407,9 @@ pub struct PlaceUpdateReply {
     pub kept: String,
 }
 
-/// One pull request as its host's command line answered with it, read off that command's JSON and never its prose.
+/// One pull request as its host's command line answered with it, read off that command's JSON and never its prose:
+/// where it stands, its branch and its head, whether it can merge, its review, every check on its head, its size,
+/// and how many commits its base has that its head lacks, which the host alone can count without a fetch.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 #[serde(rename_all = "camelCase")]
@@ -414,6 +419,57 @@ pub struct PullRequest {
     pub state: PullRequestState,
     /// The git host it lives on, as the remote's url names it: github.com and the like.
     pub host: String,
+    pub draft: bool,
+    pub base: String,
+    pub branch: String,
+    /// The commit its head is at, which a merge names so it lands only the commit a person saw.
+    pub head_oid: String,
+    /// That commit's subject, which a message about a check that failed on it names.
+    pub head_subject: String,
+    pub mergeable: Mergeable,
+    /// The host's own word for why it can or cannot merge now, in lower case: clean, blocked, behind, dirty and the like.
+    pub merge_state: String,
+    pub review: ReviewState,
+    pub checks: Vec<PullRequestCheck>,
+    pub additions: u64,
+    pub deletions: u64,
+    pub changed_files: u64,
+    pub commits: u64,
+    /// Commits the base has that the head lacks; absent where the host did not answer or the pull request is not open.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub behind_base: Option<u64>,
+}
+
+/// One check on a pull request's head: its name, the workflow it runs in, its state, and for a job the host runs
+/// itself the run and the job whose failed log can be read; a check another service reports carries its link alone.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestCheck {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub workflow: Option<String>,
+    pub state: CheckState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub run: Option<PullRequestCheckRun>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub link: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub description: Option<String>,
+}
+
+/// The run and the job a check is, where the host's own runner ran it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestCheckRun {
+    pub run_id: u64,
+    pub job_id: u64,
 }
 
 /// One open pull request or issue as its host's command line listed it, with its body as it stands now.
@@ -490,12 +546,131 @@ pub struct GitPrReply {
     pub created: bool,
 }
 
-/// The pull request for the branch as it stands, absent where the host knows none.
+/// The pull request for the branch or the number asked about, absent where the host knows none.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 #[serde(rename_all = "camelCase")]
-pub struct GitPrStateReply {
+pub struct GitPrReadReply {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub pr: Option<PullRequest>,
+}
+
+/// One commit of a pull request: its id, its subject and when it was made, as an ISO time.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestCommit {
+    pub oid: String,
+    pub subject: String,
+    pub at: String,
+}
+
+/// One review left on a pull request: who, the state it left, its body cut at GIT_PR_LIST_BODY_CAP, and when.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestReview {
+    pub author: String,
+    /// The host's word in lower case: approved, changes_requested, commented, dismissed, pending.
+    pub state: String,
+    pub body: String,
+    pub at: String,
+}
+
+/// One comment in a pull request's conversation.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestComment {
+    pub author: String,
+    pub body: String,
+    pub at: String,
+}
+
+/// One comment left on a line of a pull request's diff: the file and line it is on, absent once the line moved away,
+/// the side of the diff, who, the body, its link and when.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestReviewComment {
+    pub id: u64,
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub line: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub side: Option<String>,
+    pub author: String,
+    pub body: String,
+    pub url: String,
+    pub at: String,
+}
+
+/// One file a pull request changes, with its counts.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestFile {
+    pub path: String,
+    pub additions: u64,
+    pub deletions: u64,
+}
+
+/// A pull request as its page reads: title, body, commits, reviews, the conversation, the comments on lines and the
+/// files, every body cut at GIT_PR_LIST_BODY_CAP.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct GitPrViewReply {
+    pub title: String,
+    pub body: String,
+    pub commits: Vec<PullRequestCommit>,
+    pub reviews: Vec<PullRequestReview>,
+    pub comments: Vec<PullRequestComment>,
+    pub review_comments: Vec<PullRequestReviewComment>,
+    pub files: Vec<PullRequestFile>,
+}
+
+/// The failed steps of one job's log, its last CHECK_LOG_LINES lines at most; truncated where there were more.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct GitRunLogReply {
+    pub lines: Vec<String>,
+    pub truncated: bool,
+}
+
+/// What a merge did: merged now, or merging once its checks pass where it was asked to wait for them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct GitPrMergeReply {
+    pub merged: bool,
+    pub auto_armed: bool,
+}
+
+/// How a repository lets its pull requests land: the methods it allows, the one its page offers first, and whether it
+/// lets one merge by itself once its checks pass.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct GitRepoReadReply {
+    pub methods: Vec<MergeMethod>,
+    pub default_method: MergeMethod,
+    pub auto_merge: bool,
+}
+
+/// What an update from the base did: merged with how many commits it brought, or nothing merged and the files that
+/// conflict, the checkout left exactly as it was.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct GitUpdateReply {
+    /// The base it merged from, as the branch's own name.
+    pub base: String,
+    pub merged: bool,
+    pub commits: u64,
+    pub conflicts: Vec<String>,
 }

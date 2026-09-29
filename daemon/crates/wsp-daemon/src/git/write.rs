@@ -6,7 +6,7 @@
 use std::path::Path;
 use std::time::Duration;
 
-use wsp_frames::{words, GitCommitReply, GitDiscardReply, GitStatusEntry};
+use wsp_frames::{words, GitCommitReply, GitDiscardReply, GitStatusEntry, GitUpdateReply};
 
 use super::{check, parse_porcelain_v2, run_git, stdout_text, GitResult, Runs};
 use crate::paths::OpError;
@@ -133,6 +133,70 @@ pub(crate) async fn commit<R: Runs>(runner: &R, cwd: &Path, message: &str, paths
     let stat = write(runner, top, &["show", "--shortstat", "--format=", "HEAD"], None, &copy).await?;
     let (files_changed, insertions, deletions) = shortstat(&stdout_text(&stat));
     Ok(GitCommitReply { oid: oid.to_owned(), subject: subject.to_owned(), files_changed, insertions, deletions })
+}
+
+/// Merges the base's latest commits from the remote into the branch the checkout is on: fetched, then merged with a
+/// merge commit, so a branch already pushed is never rewritten. A checkout holding changes no commit has is refused
+/// before anything is fetched, with the files named. A merge that conflicts is taken back at once and answered with
+/// the files that conflicted, so the checkout is left as it was and the agent redoes the merge when asked.
+pub(crate) async fn update<R: Runs>(runner: &R, cwd: &Path, named_base: Option<&str>) -> Result<GitUpdateReply, OpError> {
+    let (remote, _) = crate::bring_back::remote_url(runner, cwd).await?;
+    let base = crate::bring_back::base_of(runner, cwd, &remote, named_base).await?;
+    let (root, entries) = changes(runner, cwd).await?;
+    let copy = named(&root).to_owned();
+    let top = Path::new(&root);
+    let dirty: Vec<String> = entries.iter().filter(|e| e.xy != "??" && e.xy != "!!").map(|e| e.path.clone()).collect();
+    if !dirty.is_empty() {
+        return Err(OpError::plain(words::update_dirty(&dirty)));
+    }
+    let fetched = run_git(runner, top, &["fetch", "--no-tags", &remote, &base], None, None).await?;
+    if fetched.code != Some(0) {
+        if let Some(refusal) = crate::bring_back::no_credential(runner, top, &remote, &fetched.stderr, words::no_fetch_credential).await? {
+            return Err(OpError::plain(refusal));
+        }
+        return Err(update_refusal(&fetched, &copy));
+    }
+    let before = run_git(runner, top, &["rev-parse", "HEAD"], None, None).await?;
+    check(&before, "rev-parse")?;
+    let before = stdout_text(&before).trim().to_owned();
+    let theirs = format!("{remote}/{base}");
+    let merged = run_git(runner, top, &["merge", "--no-edit", &theirs], None, None).await?;
+    if merged.code == Some(0) {
+        let counted = run_git(runner, top, &["rev-list", "--count", &format!("{before}..{theirs}")], None, None).await?;
+        check(&counted, "rev-list")?;
+        return Ok(GitUpdateReply {
+            base,
+            merged: true,
+            commits: stdout_text(&counted).trim().parse().unwrap_or(0),
+            conflicts: Vec::new(),
+        });
+    }
+    // Whatever stopped the merge, one in progress is taken back before anything is answered.
+    let underway = run_git(runner, top, &["rev-parse", "-q", "--verify", "MERGE_HEAD"], None, None).await?;
+    if underway.code != Some(0) {
+        return Err(update_refusal(&merged, &copy));
+    }
+    let listed = run_git(runner, top, &["diff", "--name-only", "--diff-filter=U", "-z"], None, None).await?;
+    let conflicts: Vec<String> = stdout_text(&listed).split('\0').filter(|p| !p.is_empty()).map(str::to_owned).collect();
+    let aborted = run_git(runner, top, &["merge", "--abort"], None, None).await?;
+    check(&aborted, "merge --abort")?;
+    if conflicts.is_empty() {
+        return Err(update_refusal(&merged, &copy));
+    }
+    Ok(GitUpdateReply { base, merged: false, commits: 0, conflicts })
+}
+
+/// Why git refused an update, as one sentence: a held index, a copy with no author for the merge commit, or git's own
+/// last line.
+fn update_refusal(res: &GitResult, copy: &str) -> OpError {
+    let refused = refusal_of(res, copy);
+    let out = stdout_text(res);
+    let said =
+        [res.stderr.as_str(), out.as_str()].into_iter().flat_map(|text| text.lines().rev()).map(str::trim).find(|line| !line.is_empty());
+    match said {
+        Some(said) if refused.message == words::commit_refused(said) => OpError::plain(words::update_refused(said)),
+        _ => refused,
+    }
 }
 
 /// ` 3 files changed, 10 insertions(+), 2 deletions(-)`, any part of which git leaves out when it is zero.
@@ -362,5 +426,130 @@ mod tests {
         assert_eq!(repo.short(), " M b.txt\n");
         discard(&Here::new(), &repo.at().join("src"), "b.txt").await.unwrap();
         assert_eq!(repo.short(), "");
+    }
+
+    /// A checkout on a branch of its own with one commit over main, its bare origin beside it, and a second clone
+    /// standing in for everybody else pushing to main.
+    struct Pushed {
+        dir: tempfile::TempDir,
+    }
+
+    impl Pushed {
+        fn new() -> Pushed {
+            let dir = tempfile::Builder::new().prefix("wsp-update-").tempdir().unwrap();
+            let origin = dir.path().join("origin.git");
+            git(dir.path(), &["init", "-q", "--bare", "-b", "main", origin.to_str().unwrap()]);
+            for side in ["work", "other"] {
+                git(dir.path(), &["clone", "-q", origin.to_str().unwrap(), side]);
+                let at = dir.path().join(side);
+                git(&at, &["config", "commit.gpgsign", "false"]);
+                git(&at, &["config", "user.name", "t"]);
+                git(&at, &["config", "user.email", "t@x"]);
+                if side == "work" {
+                    std::fs::write(at.join("README.md"), "line one\nline two\n").unwrap();
+                    git(&at, &["add", "-A"]);
+                    git(&at, &["commit", "-q", "-m", "first"]);
+                    git(&at, &["push", "-q", "origin", "main"]);
+                    git(&at, &["checkout", "-q", "-b", "work"]);
+                    std::fs::write(at.join("work.txt"), "mine\n").unwrap();
+                    git(&at, &["add", "-A"]);
+                    git(&at, &["commit", "-q", "-m", "mine"]);
+                } else {
+                    git(&at, &["pull", "-q", "origin", "main"]);
+                }
+            }
+            Pushed { dir }
+        }
+
+        fn work(&self) -> PathBuf {
+            self.dir.path().join("work")
+        }
+
+        /// Somebody else lands a commit on main that writes this file.
+        fn main_moves(&self, file: &str, text: &str) {
+            let other = self.dir.path().join("other");
+            std::fs::write(other.join(file), text).unwrap();
+            git(&other, &["add", "-A"]);
+            git(&other, &["commit", "-q", "-m", &format!("main writes {file}")]);
+            git(&other, &["push", "-q", "origin", "main"]);
+        }
+
+        /// Everything a person could see of the checkout: HEAD, git's status, and every file's bytes.
+        fn looks(&self) -> (String, String, Vec<(String, Vec<u8>)>) {
+            let at = self.work();
+            let mut files: Vec<(String, Vec<u8>)> = std::fs::read_dir(&at)
+                .unwrap()
+                .map(|e| e.unwrap().path())
+                .filter(|p| p.is_file())
+                .map(|p| (p.file_name().unwrap().to_string_lossy().into_owned(), std::fs::read(&p).unwrap()))
+                .collect();
+            files.sort();
+            (git(&at, &["rev-parse", "HEAD"]), git(&at, &["status", "--porcelain=v2", "--branch"]), files)
+        }
+    }
+
+    #[tokio::test]
+    async fn an_update_merges_the_bases_new_commits_and_counts_what_it_brought() {
+        let repo = Pushed::new();
+        repo.main_moves("other.txt", "theirs\n");
+        repo.main_moves("third.txt", "more\n");
+        let done = update(&Here::new(), &repo.work(), Some("main")).await.unwrap();
+        assert_eq!(done, GitUpdateReply { base: "main".to_owned(), merged: true, commits: 2, conflicts: Vec::new() });
+        let log = git(&repo.work(), &["log", "--format=%s", "-4"]);
+        assert!(log.starts_with("Merge remote-tracking branch 'origin/main' into work\n"), "{log}");
+        assert_eq!(std::fs::read_to_string(repo.work().join("other.txt")).unwrap(), "theirs\n");
+        // A base with nothing new merges nothing and says so with a zero.
+        assert_eq!(
+            update(&Here::new(), &repo.work(), None).await.unwrap(),
+            GitUpdateReply { base: "main".to_owned(), merged: true, commits: 0, conflicts: Vec::new() }
+        );
+    }
+
+    #[tokio::test]
+    async fn an_update_that_conflicts_names_the_files_and_leaves_the_checkout_exactly_as_it_was() {
+        let repo = Pushed::new();
+        std::fs::write(repo.work().join("README.md"), "line one, mine\nline two\n").unwrap();
+        git(&repo.work(), &["commit", "-q", "-am", "mine on line one"]);
+        repo.main_moves("README.md", "line one, theirs\nline two\n");
+        std::fs::write(repo.work().join("scratch.txt"), "not committed, not tracked\n").unwrap();
+        let before = repo.looks();
+        let done = update(&Here::new(), &repo.work(), Some("main")).await.unwrap();
+        assert_eq!(done, GitUpdateReply { base: "main".to_owned(), merged: false, commits: 0, conflicts: vec!["README.md".to_owned()] });
+        assert_eq!(repo.looks(), before);
+        assert!(!repo.work().join(".git/MERGE_HEAD").exists());
+    }
+
+    #[tokio::test]
+    async fn an_update_over_changes_no_commit_holds_is_refused_with_the_files_and_fetches_nothing() {
+        let repo = Pushed::new();
+        repo.main_moves("other.txt", "theirs\n");
+        std::fs::write(repo.work().join("README.md"), "edited\n").unwrap();
+        std::fs::write(repo.work().join("work.txt"), "edited too\n").unwrap();
+        let err = update(&Here::new(), &repo.work(), Some("main")).await.unwrap_err();
+        assert_eq!(err.message, words::update_dirty(&["README.md".to_owned(), "work.txt".to_owned()]));
+        assert_eq!(err.message, "commit or discard the changes in README.md, work.txt before updating");
+        assert!(
+            git(&repo.work(), &["rev-parse", "-q", "--verify", "origin/main"]).trim()
+                != git(&repo.dir.path().join("other"), &["rev-parse", "HEAD"]).trim()
+        );
+        // A file nothing tracks is no reason to refuse.
+        git(&repo.work(), &["checkout", "-q", "--", "README.md", "work.txt"]);
+        std::fs::write(repo.work().join("scratch.txt"), "loose\n").unwrap();
+        assert!(update(&Here::new(), &repo.work(), Some("main")).await.unwrap().merged);
+    }
+
+    #[tokio::test]
+    async fn an_update_in_a_checkout_with_no_remote_is_refused_as_a_push_is() {
+        let repo = Repo::with(&["a.txt"]);
+        assert_eq!(update(&Here::new(), &repo.at(), Some("main")).await.unwrap_err().message, words::NO_REMOTE);
+    }
+
+    #[test]
+    fn more_than_five_dirty_files_are_counted_past_the_fifth() {
+        let files: Vec<String> = (1..=7).map(|n| format!("f{n}.txt")).collect();
+        assert_eq!(
+            words::update_dirty(&files),
+            "commit or discard the changes in f1.txt, f2.txt, f3.txt, f4.txt, f5.txt and 2 more before updating"
+        );
     }
 }

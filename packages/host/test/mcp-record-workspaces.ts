@@ -4,7 +4,7 @@
 // side fills, and the calls recorded per tool. A sentence is taken off the
 // function or the tool that says it here, with each value it names standing
 // in as {name}, so its words keep one home in this package.
-import { CATALOG, ROAD_MODULES } from "@wsp/catalog";
+import { CATALOG, DEFAULT_AGENT, ROAD_MODULES, agentName } from "@wsp/catalog";
 import {
   COPY_CURRENT,
   COPY_STALE,
@@ -21,6 +21,12 @@ import {
   agentsLine,
   committedLine,
   deleteNotice,
+  fixAskedLine,
+  fixConflictsLine,
+  fixNothingLine,
+  mergedLine,
+  updateConflictsLine,
+  updatedLine,
   discardedLine,
   goneRefusal,
   goneRoadRefusal,
@@ -166,6 +172,17 @@ export async function workspaceWords(line: LineOf, host: HostOf): Promise<Record
     noDraftBare: noDraftLine(undefined),
     noDraftFix: NO_DRAFT_FIX,
     discarded: discardedLine("{name}", "{path}"),
+    fixAsked: fixAskedLine("{name}", "{agent}", "{check}"),
+    fixConflicts: fixConflictsLine("{name}", "{agent}", "{base}"),
+    fixNothing: fixNothingLine("{name}", "{base}"),
+    fixAgentDefault: agentName(DEFAULT_AGENT.id),
+    merged: slot(mergedLine("{name}", { number: 7, method: "{method}" as never, merged: true }), "7", "number"),
+    mergeArmed: slot(mergedLine("{name}", { number: 7, method: "merge", merged: false }), "7", "number"),
+    updatedNone: updatedLine("{name}", "{base}", 0),
+    updatedOne: updatedLine("{name}", "{base}", 1),
+    updatedMany: slot(updatedLine("{name}", "{base}", 2), "2", "count"),
+    updateConflicts: updateConflictsLine("{name}", "{base}", ["{files}"]),
+    updateConflictsJoin: after(updateConflictsLine("{name}", "{base}", ["{a}", "{b}"]), updateConflictsLine("{name}", "{base}", ["{a}"])).replace("{b}", ""),
     firstTurnFailed,
   };
 }
@@ -358,7 +375,7 @@ export const WORKSPACE_ANSWERED: Record<string, TurnCase[]> = {
   ],
   projects_remove: [{ case: "removed", arguments: { project: "alpha" }, replies: { "projects.resolve": reply({ project: PROJECT }), "projects.remove": reply({ said: "alpha 'quoted' is no longer a project here \u0085" }) } }],
   bring_back: [
-    { case: "pr", arguments: { workspace: "alpha", title: "Fix it", body: "because" }, replies: { "workspaces.resolve": reply({ workspace: NAPPING }), "workspaces.wake": reply({ workspace: WORKSPACE }), "workspaces.bringBack": reply({ stat: [" a.ts | 2 +-", " b \u0085 | 1 +"], branch: "work", base: "main", ahead: 3, uncommitted: 2, pr: { url: "https://github.com/dev/alpha/pull/3", number: 3, state: "open", host: "github.com" } }) } },
+    { case: "pr", arguments: { workspace: "alpha", title: "Fix it", body: "because" }, replies: { "workspaces.resolve": reply({ workspace: NAPPING }), "workspaces.wake": reply({ workspace: WORKSPACE }), "workspaces.bringBack": reply({ stat: [" a.ts | 2 +-", " b \u0085 | 1 +"], branch: "work", base: "main", ahead: 3, uncommitted: 2, pr: { url: "https://github.com/dev/alpha/pull/3", number: 3, checks: [{ state: "fail", name: "ci \u0085", run: { jobId: 2, runId: 1 }, workflow: "ci" }], state: "open", host: "github.com", draft: false, base: "main", branch: "work", headSubject: "Fix it, caf\u00e9 again", headOid: "abc1234", mergeable: "conflicting", mergeState: "dirty", review: "changes_asked", additions: 10, deletions: 0, changedFiles: 1, commits: 2, behindBase: 3 } }) } },
     { case: "note", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.wake": reply({ workspace: WORKSPACE }), "workspaces.bringBack": reply({ branch: "work", base: "main", ahead: 1, uncommitted: 1, stat: [], note: "no signed-in gh on the machine" }) } },
     { case: "refused", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.wake": reply({ workspace: WORKSPACE }), "workspaces.bringBack": reply({ branch: "work", base: "main", ahead: 2, uncommitted: 0, stat: [], refused: "gh refused: no remote" }) } },
     { case: "gone", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: GONE }) } },
@@ -383,6 +400,28 @@ export const WORKSPACE_ANSWERED: Record<string, TurnCase[]> = {
     { case: "no draft, no note", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.wake": reply({ workspace: WORKSPACE }), "workspaces.commitDraft": reply({ message: null }) } },
     { case: "refused by a hook", arguments: { workspace: "alpha", message: "m" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.wake": reply({ workspace: WORKSPACE }), "workspaces.commit": refused("a hook said no: lint failed \u0085", "usage") } },
     { case: "gone", arguments: { workspace: "alpha", message: "m" }, replies: { "workspaces.resolve": reply({ workspace: GONE }) } },
+  ],
+  fix: [
+    { case: "a failed check", arguments: { workspace: "alpha", check: "ci \u0085 / test 🧪" }, replies: { "workspaces.resolve": reply({ workspace: NAPPING }), "workspaces.fix": reply({ outcome: "steered", threadId: "t-1", check: "ci \u0085 / test 🧪", base: "main", agent: "codex" }) } },
+    { case: "the conflicts sent", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: NAPPING }), "workspaces.wake": reply({ workspace: WORKSPACE }), "workspaces.fix": reply({ outcome: "started", threadId: "t-2", base: "main" }) } },
+    { case: "an agent the catalog does not name", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.wake": reply({ workspace: WORKSPACE }), "workspaces.fix": reply({ outcome: "queued", threadId: "t-3", base: "develop", agent: "someone-else" }) } },
+    { case: "updated clean, nothing sent", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.wake": reply({ workspace: WORKSPACE }), "workspaces.fix": reply({ outcome: "updated", base: "main \u0085 🧪" }) } },
+    { case: "refused", arguments: { workspace: "alpha", check: "lint" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.fix": refused("lint has not failed on #4", "usage") } },
+    { case: "gone", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: GONE }) } },
+  ],
+  merge: [
+    { case: "merged now", arguments: { workspace: "alpha", method: "squash" }, replies: { "workspaces.resolve": reply({ workspace: NAPPING }), "workspaces.merge": reply({ number: 4, method: "squash", merged: true, autoArmed: false }) } },
+    { case: "armed to merge on its checks", arguments: { workspace: "alpha", when_checks_pass: true }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.merge": reply({ number: 12, method: "merge", merged: false, autoArmed: true }) } },
+    { case: "a method off the list", arguments: { workspace: "alpha", method: "fast-forward" }, replies: {} },
+    { case: "refused by the repository", arguments: { workspace: "alpha", method: "rebase" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.merge": refused("the repository does not allow rebase merges \u0085", "usage") } },
+  ],
+  update: [
+    { case: "merged, several commits", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: NAPPING }), "workspaces.wake": reply({ workspace: WORKSPACE }), "workspaces.update": reply({ base: "main", merged: true, commits: 3, conflicts: [] }) } },
+    { case: "merged, one commit", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.wake": reply({ workspace: WORKSPACE }), "workspaces.update": reply({ base: "main 🧪", merged: true, commits: 1, conflicts: [] }) } },
+    { case: "already current", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.wake": reply({ workspace: WORKSPACE }), "workspaces.update": reply({ base: "main", merged: true, commits: 0, conflicts: [] }) } },
+    { case: "conflicts", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.wake": reply({ workspace: WORKSPACE }), "workspaces.update": reply({ base: "main", merged: false, commits: 0, conflicts: ["a.ts", "b \u0085.ts"] }) } },
+    { case: "a dirty copy refused", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.wake": reply({ workspace: WORKSPACE }), "workspaces.update": refused("a.ts has changes no commit holds; commit or discard them, then update again", "usage") } },
+    { case: "gone", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: GONE }) } },
   ],
   discard: [
     { case: "discarded", arguments: { workspace: "alpha", path: "src/a \u0085.ts" }, replies: { "workspaces.resolve": reply({ workspace: NAPPING }), "workspaces.wake": reply({ workspace: WORKSPACE }), "workspaces.discard": reply({ path: "src/a \u0085.ts" }) } },

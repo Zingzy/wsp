@@ -43,12 +43,50 @@ pub struct BringBackOut {
     refused: Option<String>,
 }
 
+/// packages/protocol's PullRequest, in its order, since the TypeScript tool parses the answer with it.
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct PullRequest {
     number: Number,
     url: String,
     state: String,
     host: String,
+    draft: bool,
+    base: String,
+    branch: String,
+    head_oid: String,
+    head_subject: String,
+    mergeable: String,
+    merge_state: String,
+    review: String,
+    checks: Vec<PullRequestCheck>,
+    additions: Number,
+    deletions: Number,
+    changed_files: Number,
+    commits: Number,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    behind_base: Option<Number>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct PullRequestCheck {
+    name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    workflow: Option<String>,
+    state: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    run: Option<CheckRun>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    link: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CheckRun {
+    run_id: Number,
+    job_id: Number,
 }
 
 const BRING_BACK_NAME: &str = "bring_back";

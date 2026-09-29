@@ -315,7 +315,7 @@ export function WorkspaceSidebar() {
     const copyActions = above === runs.id ? [] : resolveActions(workspaceActions, workspaceTarget(runs.workspace, runs.status, places), verbs);
     const place = placeOf(runs);
     const section = thread === null ? null : threadSection(thread);
-    const { branch, counts } = tileCheckout(runs, section === "done" || section === "idle");
+    const { branch, counts, why, settledWord } = tileCheckout(runs, section === "done" || section === "idle");
     let tile: ReactNode;
     if (thread === null) {
       tile = (
@@ -325,6 +325,7 @@ export function WorkspaceSidebar() {
           place={place}
           branch={branch}
           counts={counts}
+          why={why}
           depth={depth}
           active={selectedId === runs.id && selectedThreadId === null}
           renaming={renaming?.rowId === item.id}
@@ -349,7 +350,8 @@ export function WorkspaceSidebar() {
           place={place}
           branch={branch}
           counts={counts}
-          time={restingAge(thread)}
+          why={why}
+          time={settled && settledWord !== undefined ? settledWord : restingAge(thread)}
           depth={depth}
           active={(selectedId === thread.workspaceId && (selectedThreadId === null ? thread.threadId === null : selectedThreadId === thread.id)) || (selectedThreadId !== null && item.holds?.includes(selectedThreadId) === true)}
           settled={settled}
@@ -417,7 +419,7 @@ export function WorkspaceSidebar() {
     if (launch === undefined || (picked !== null && runs.workspace.project.id !== picked.project.id)) return [];
     return [
       <li key={`launch:${runs.id}`} data-thread-selection-safe>
-        <ThreadLaunchTile launch={launch} place={placeOf(runs)} {...tileCheckout(runs)} />
+        <ThreadLaunchTile launch={launch} place={placeOf(runs)} branch={tileCheckout(runs).branch} counts={tileCheckout(runs).counts} />
       </li>,
     ];
   });

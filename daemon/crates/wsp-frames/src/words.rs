@@ -229,6 +229,36 @@ pub fn no_host_cli(host: &str) -> String {
     format!("no signed-in command line for {host} is on this computer; the branch is pushed and the pull request waits for one")
 }
 
+/// What an update's fetch git refused for want of an https credential is refused with: nothing was fetched and the
+/// branch is as it was, and the fix is the host module's to name, as for a push.
+pub fn no_fetch_credential(host: &str, fix: Option<&str>) -> String {
+    let said = match fix {
+        Some(fix) => format!("; {fix}, then update again"),
+        None => String::new(),
+    };
+    format!("this computer has no git credential for {host}, so nothing was fetched{said}")
+}
+
+/// What an update is refused with while the checkout holds changes no commit has: a merge over them could lose them,
+/// so the files are named and nothing is fetched.
+pub fn update_dirty(files: &[String]) -> String {
+    const NAMED: usize = 5;
+    let shown = files.iter().take(NAMED).map(String::as_str).collect::<Vec<_>>().join(", ");
+    let more = if files.len() > NAMED { format!(" and {} more", files.len() - NAMED) } else { String::new() };
+    format!("commit or discard the changes in {shown}{more} before updating")
+}
+
+/// What an update git refused for any other reason is refused with: git's own last line.
+pub fn update_refused(said: &str) -> String {
+    format!("the update was refused: {said}")
+}
+
+/// What a merge the git host's command line refused is refused with: its own last line, which names branch
+/// protection, a head that moved, or a repository that merges nothing by itself.
+pub fn merge_refused(said: &str) -> String {
+    format!("the merge was refused: {said}")
+}
+
 /// What a push git refused for want of an https credential is refused with: nothing reached the remote, so this is
 /// the bring back's own refusal and not a note beside a landed push. The fix is the git host's own module to name,
 /// since only it knows which command signs its command line in; a host wsp knows no module for gets the sentence

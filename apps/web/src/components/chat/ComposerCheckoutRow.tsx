@@ -19,6 +19,7 @@
 import { ArrowLeftIcon, ChevronDownIcon, CheckIcon, FolderGitIcon, FolderIcon, FolderSearchIcon, GitBranchIcon, LoaderCircleIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { checkoutCounts, hiddenFolder, isMacMachine, type FolderMachine } from "@wsp/protocol";
+import { PullRequestStrip } from "../../pull-request/PullRequestStrip";
 import { baseName } from "../../files/entries";
 import { FOLDER_GHOST_WITH_WALK, FolderPathField, folderPathRefusal, useFolderPick, type FolderRefusal } from "../../files/FolderPathField";
 import { useWorkspaceListing } from "../../files/listing";
@@ -60,7 +61,7 @@ const labelClass = cn(slotClass, folderItemClass, BUTTON_GLYPH_INSET);
 const LOCKED_FOLDER_NOTE = "The folder this thread's harness runs in. A cd inside the agent's shell does not move it; start a new thread to work from another folder.";
 const BRANCH_NOTE = "The folder's branch as the task reports it. Nothing here switches it; check out another branch from the terminal.";
 /** The branch slot keeps the label's height while empty, so the row does not move when a branch arrives. */
-const branchSlotClass = cn(slotClass, "shrink-0 font-mono");
+const branchSlotClass = cn(slotClass, "min-w-0 font-mono");
 
 /** The menu's floor: the rows ask for what they need and it grows to them, since the row that commits a person to a
  * folder has to show which folder. Its ceiling is the composer's own width, which is measured rather than written,
@@ -282,7 +283,9 @@ export function ComposerCheckoutRow({
     const held = s.workspaces.find(w => w.id === workspaceId);
     return held?.copy?.path ?? held?.project.path;
   });
-  const counts = fact !== undefined && branch.kind === "repo" && folder === checkoutPath && fact.branch === branch.head ? checkoutCounts(fact) : [];
+  const pr = useStatus(workspaceId)?.pr;
+  const onCheckout = fact !== undefined && branch.kind === "repo" && folder === checkoutPath && fact.branch === branch.head;
+  const counts = onCheckout ? checkoutCounts(fact, pr) : [];
 
   useEffect(() => {
     if (cwd !== null) follow(workspaceId, cwd);
@@ -293,7 +296,10 @@ export function ComposerCheckoutRow({
 
   return (
     <ComposerSurface.ContextStrip data-composer-checkout data-pickable={pickable || undefined}>
-      <div className="flex min-w-0 flex-1 items-center gap-1">
+      {/* The folder gives its width up first, down to a floor, then the branch line does; the access words beside it
+          never give any. The weights are lopsided so the later ones' share rounds to nothing until the earlier ones
+          reach their floors: a fraction of a pixel is enough to cut a branch's name. */}
+      <div className={cn("flex min-w-20 shrink-[100000] items-center", access === null && "me-auto")}>
         {pickable && canPick ? (
           <FolderMenu workspaceId={workspaceId} wire={wire} roots={roots} machine={machine} folder={folder} open={pickerOpen} onOpenChange={onPickerOpenChange} onPick={dir => choose(workspaceId, dir)} />
         ) : (
@@ -309,18 +315,23 @@ export function ComposerCheckoutRow({
             </Tooltip>
           </>
         )}
-        {access !== null ? <span className="flex shrink-0 items-center">{access}</span> : null}
       </div>
+      {access !== null ? <span className="-ms-1 me-auto flex shrink-0 items-center">{access}</span> : null}
       {stash}
       {branch.kind === "repo" ? (
         <Tooltip>
           <TooltipTrigger render={<span className={branchSlotClass} tabIndex={0} data-composer-branch={branch.head} />}>
             <GitBranchIcon className="size-3 shrink-0" />
-            <span className="truncate">{branch.head}</span>
+            <span className="min-w-12 truncate">{branch.head}</span>
             {counts.length === 0 ? null : (
-              <span data-composer-counts className="ms-2 flex shrink-0 gap-3">
+              // When the line runs out the counts go before the branch's name does, whole and from the last, each onto
+              // a line the strip does not show; the empty first item holds that shown line, so even the first can go.
+              <span data-composer-counts className="flex h-lh min-w-0 shrink-[100000] flex-wrap overflow-hidden">
+                <span aria-hidden className="h-lh" />
                 {counts.map(count => (
-                  <span key={count}>{count}</span>
+                  <span key={count} className="ms-3 whitespace-nowrap">
+                    {count}
+                  </span>
                 ))}
               </span>
             )}
@@ -329,7 +340,9 @@ export function ComposerCheckoutRow({
             {BRANCH_NOTE}
           </TooltipPopup>
         </Tooltip>
-      ) : (
+      ) : null}
+      {branch.kind === "repo" && onCheckout ? <PullRequestStrip workspaceId={workspaceId} branch={branch.head} /> : null}
+      {branch.kind === "repo" ? null : (
         <span className={branchSlotClass} data-composer-branch={branch.kind} />
       )}
     </ComposerSurface.ContextStrip>

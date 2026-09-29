@@ -1,7 +1,7 @@
 {
   "cloudOff": {
     "name": "bring_back",
-    "description": "Pushes the branch the workspace's copy is on to the project's remote and opens its pull request against the base, or answers with the one already open. The base is the branch its parent was on at the fork for a workspace forked out of another, whatever that parent does after, and the project's own base otherwise. Refused in one line on the base branch itself, since work leaves a workspace as a branch of its own, and on a branch with nothing the base lacks. The two halves are answered apart: the branch, the count over the base and the diffstat are there whenever the push landed, then either the pull request, the note saying why it waits where the machine has no signed-in command line for the git host, or the pull request half's own refusal.",
+    "description": "Pushes the branch the workspace's copy is on to the project's remote and opens its pull request against the base, or answers with the one already open. The base is the branch its parent was on at the fork for a workspace forked out of another, whatever that parent does after, and the project's own base otherwise. Refused in one line on the base branch itself, since work leaves a workspace as a branch of its own, and on a branch with nothing the base lacks. The two halves are answered apart: the branch, the count over the base and the diffstat are there whenever the push landed, then either the pull request, the note saying why it waits where the machine has no signed-in command line for the git host, or the pull request half's own refusal. A workspace a thread opened under a lead pushes its branch and opens no pull request of its own, since the lead's pull request is where its work lands, and the note says so.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -49,7 +49,8 @@
           "type": "object",
           "properties": {
             "number": {
-              "type": "integer"
+              "type": "integer",
+              "minimum": 0
             },
             "url": {
               "type": "string"
@@ -64,13 +65,127 @@
             },
             "host": {
               "type": "string"
+            },
+            "draft": {
+              "type": "boolean"
+            },
+            "base": {
+              "type": "string"
+            },
+            "branch": {
+              "type": "string"
+            },
+            "headOid": {
+              "type": "string"
+            },
+            "headSubject": {
+              "type": "string"
+            },
+            "mergeable": {
+              "type": "string",
+              "enum": [
+                "mergeable",
+                "conflicting",
+                "unknown"
+              ]
+            },
+            "mergeState": {
+              "type": "string"
+            },
+            "review": {
+              "type": "string",
+              "enum": [
+                "none",
+                "approved",
+                "changes_asked",
+                "required"
+              ]
+            },
+            "checks": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "workflow": {
+                    "type": "string"
+                  },
+                  "state": {
+                    "type": "string",
+                    "enum": [
+                      "pass",
+                      "fail",
+                      "pending",
+                      "skipped",
+                      "cancelled"
+                    ]
+                  },
+                  "run": {
+                    "type": "object",
+                    "properties": {
+                      "runId": {
+                        "$ref": "#/properties/pr/properties/number"
+                      },
+                      "jobId": {
+                        "$ref": "#/properties/pr/properties/number"
+                      }
+                    },
+                    "required": [
+                      "runId",
+                      "jobId"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "link": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "state"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "additions": {
+              "$ref": "#/properties/pr/properties/number"
+            },
+            "deletions": {
+              "$ref": "#/properties/pr/properties/number"
+            },
+            "changedFiles": {
+              "$ref": "#/properties/pr/properties/number"
+            },
+            "commits": {
+              "$ref": "#/properties/pr/properties/number"
+            },
+            "behindBase": {
+              "$ref": "#/properties/pr/properties/number"
             }
           },
           "required": [
             "number",
             "url",
             "state",
-            "host"
+            "host",
+            "draft",
+            "base",
+            "branch",
+            "headOid",
+            "headSubject",
+            "mergeable",
+            "mergeState",
+            "review",
+            "checks",
+            "additions",
+            "deletions",
+            "changedFiles",
+            "commits"
           ],
           "additionalProperties": false
         },
@@ -97,7 +212,7 @@
   },
   "cloudOn": {
     "name": "bring_back",
-    "description": "Pushes the branch the workspace's copy is on to the project's remote and opens its pull request against the base, or answers with the one already open. The base is the branch its parent was on at the fork for a workspace forked out of another, whatever that parent does after, and the project's own base otherwise. Refused in one line on the base branch itself, since work leaves a workspace as a branch of its own, and on a branch with nothing the base lacks. The two halves are answered apart: the branch, the count over the base and the diffstat are there whenever the push landed, then either the pull request, the note saying why it waits where the machine has no signed-in command line for the git host, or the pull request half's own refusal.",
+    "description": "Pushes the branch the workspace's copy is on to the project's remote and opens its pull request against the base, or answers with the one already open. The base is the branch its parent was on at the fork for a workspace forked out of another, whatever that parent does after, and the project's own base otherwise. Refused in one line on the base branch itself, since work leaves a workspace as a branch of its own, and on a branch with nothing the base lacks. The two halves are answered apart: the branch, the count over the base and the diffstat are there whenever the push landed, then either the pull request, the note saying why it waits where the machine has no signed-in command line for the git host, or the pull request half's own refusal. A workspace a thread opened under a lead pushes its branch and opens no pull request of its own, since the lead's pull request is where its work lands, and the note says so.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -145,7 +260,8 @@
           "type": "object",
           "properties": {
             "number": {
-              "type": "integer"
+              "type": "integer",
+              "minimum": 0
             },
             "url": {
               "type": "string"
@@ -160,13 +276,127 @@
             },
             "host": {
               "type": "string"
+            },
+            "draft": {
+              "type": "boolean"
+            },
+            "base": {
+              "type": "string"
+            },
+            "branch": {
+              "type": "string"
+            },
+            "headOid": {
+              "type": "string"
+            },
+            "headSubject": {
+              "type": "string"
+            },
+            "mergeable": {
+              "type": "string",
+              "enum": [
+                "mergeable",
+                "conflicting",
+                "unknown"
+              ]
+            },
+            "mergeState": {
+              "type": "string"
+            },
+            "review": {
+              "type": "string",
+              "enum": [
+                "none",
+                "approved",
+                "changes_asked",
+                "required"
+              ]
+            },
+            "checks": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "workflow": {
+                    "type": "string"
+                  },
+                  "state": {
+                    "type": "string",
+                    "enum": [
+                      "pass",
+                      "fail",
+                      "pending",
+                      "skipped",
+                      "cancelled"
+                    ]
+                  },
+                  "run": {
+                    "type": "object",
+                    "properties": {
+                      "runId": {
+                        "$ref": "#/properties/pr/properties/number"
+                      },
+                      "jobId": {
+                        "$ref": "#/properties/pr/properties/number"
+                      }
+                    },
+                    "required": [
+                      "runId",
+                      "jobId"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "link": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "state"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "additions": {
+              "$ref": "#/properties/pr/properties/number"
+            },
+            "deletions": {
+              "$ref": "#/properties/pr/properties/number"
+            },
+            "changedFiles": {
+              "$ref": "#/properties/pr/properties/number"
+            },
+            "commits": {
+              "$ref": "#/properties/pr/properties/number"
+            },
+            "behindBase": {
+              "$ref": "#/properties/pr/properties/number"
             }
           },
           "required": [
             "number",
             "url",
             "state",
-            "host"
+            "host",
+            "draft",
+            "base",
+            "branch",
+            "headOid",
+            "headSubject",
+            "mergeable",
+            "mergeState",
+            "review",
+            "checks",
+            "additions",
+            "deletions",
+            "changedFiles",
+            "commits"
           ],
           "additionalProperties": false
         },

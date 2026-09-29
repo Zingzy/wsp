@@ -15,6 +15,7 @@ mod machine;
 mod named;
 mod projects;
 mod projects_change;
+mod pull_request;
 mod recipe;
 mod said;
 mod servers;
@@ -88,6 +89,9 @@ pub const TOOLS: &[Tool] = &[
     home::BRING_BACK,
     changes::COMMIT,
     changes::DISCARD,
+    pull_request::FIX,
+    pull_request::MERGE,
+    pull_request::UPDATE,
     machine::PAUSE,
     machine::WAKE,
     machine::REBUILD,

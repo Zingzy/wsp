@@ -101,6 +101,9 @@ import { fakeClock } from "./fake-clock.js";
 import { until } from "./until.js";
 import { WsClient } from "./ws-client.js";
 
+/** Every fact of a pull request a read answers but its number, link, state and host, which each case names. */
+const PR_REST: Omit<import("@wsp/protocol").PullRequest, "number" | "url" | "state" | "host"> = { draft: false, base: "main", branch: "work", headOid: "abc1234", headSubject: "Do the work", mergeable: "unknown", mergeState: "unknown", review: "none", checks: [], additions: 1, deletions: 0, changedFiles: 1, commits: 1 };
+
 let srv: RuntimeServer | undefined;
 let runtime: Runtime | undefined;
 const sockets: WebSocket[] = [];
@@ -2664,7 +2667,6 @@ function forks(
       case "fs.write":
       case "fs.search":
       case "git.diff":
-      case "git.prState":
       case "git.prList":
       case "guest.watch":
       case "guest.reply":
@@ -2677,7 +2679,7 @@ function forks(
       case "git.pr": {
         seen.frames.push(frame);
         if (seen.refuseGitPr !== undefined) return void client.say({ id, ok: false, ...seen.refuseGitPr });
-        return say({ pr: { number: 7, url: "https://github.com/o/r/pull/7", state: "open", host: "github.com" }, created: true });
+        return say({ pr: { number: 7, url: "https://github.com/o/r/pull/7", state: "open", host: "github.com", ...PR_REST }, created: true });
       }
       default:
         return;
@@ -3208,7 +3210,7 @@ describe("a fork on a computer you joined", () => {
   });
 
   const PTY = ["pty.create", "pty.attach", "pty.detach", "pty.write", "pty.resize", "pty.kill", "pty.list"];
-  const FILES_AND_GIT = ["fs.list", "fs.files", "fs.read", "fs.write", "fs.search", "git.status", "git.diff", "git.push", "git.pr", "git.prState", "git.prList"];
+  const FILES_AND_GIT = ["fs.list", "fs.files", "fs.read", "fs.write", "fs.search", "git.status", "git.diff", "git.push", "git.pr", "git.prList"];
   const HOST_GUESTS = ["guest.watch", "guest.reply", "guest.close"];
   const REFUSED = [
     "ports.watch",
@@ -3227,6 +3229,13 @@ describe("a fork on a computer you joined", () => {
     "git.commit",
     "git.checkpoint",
     "git.restore",
+    // The host sends these itself, with the remote off the project's record; a client's channel carries none of them.
+    "git.prRead",
+    "git.prView",
+    "git.runLog",
+    "git.prMerge",
+    "git.repoRead",
+    "git.update",
     "tunnel.open",
     "tunnel.write",
     "tunnel.close",

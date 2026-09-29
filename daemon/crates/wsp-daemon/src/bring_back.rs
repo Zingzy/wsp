@@ -115,14 +115,20 @@ const NO_CREDENTIAL_SAID: [&str; 3] = ["could not read Username", "terminal prom
 /// other reason. The remote's host names itself and its own module names the fix, so a host wsp knows no command
 /// line for is not told to run gh; a remote that is a folder beside the checkout has no host and no credential to
 /// want, whatever it said.
-async fn no_credential<R: Runs>(runner: &R, cwd: &Path, remote: &str, said: &str) -> Result<Option<String>, OpError> {
+pub(crate) async fn no_credential<R: Runs>(
+    runner: &R,
+    cwd: &Path,
+    remote: &str,
+    said: &str,
+    sentence: fn(&str, Option<&str>) -> String,
+) -> Result<Option<String>, OpError> {
     if !NO_CREDENTIAL_SAID.iter().any(|mark| said.contains(mark)) {
         return Ok(None);
     }
     let url = run_git(runner, cwd, &["remote", "get-url", remote], None, None).await?;
     let Some(host) = crate::hosts::host_name(stdout_text(&url).trim()) else { return Ok(None) };
     let fix = crate::hosts::host_for(stdout_text(&url).trim()).map(|module| module.credential_fix());
-    Ok(Some(words::no_git_credential(&host, fix)))
+    Ok(Some(sentence(&host, fix)))
 }
 
 /// Pushes the branch this checkout is on, with the base guard ahead of it and the counts a person reads beside it.
@@ -139,7 +145,7 @@ pub(crate) async fn push<R: Runs>(runner: &R, cwd: &Path, named: Option<&str>) -
     let stat = stat_over(runner, cwd, from.as_deref()).await?;
     let pushed = run_git(runner, cwd, &["push", "-u", &remote, &branch], None, None).await?;
     if pushed.code != Some(0) {
-        if let Some(refusal) = no_credential(runner, cwd, &remote, &pushed.stderr).await? {
+        if let Some(refusal) = no_credential(runner, cwd, &remote, &pushed.stderr, words::no_git_credential).await? {
             return Err(OpError::plain(refusal));
         }
         let said = pushed.stderr.trim();

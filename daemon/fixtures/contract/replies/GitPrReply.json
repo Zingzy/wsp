@@ -2,9 +2,53 @@
   {
     "pr": {
       "number": 12,
-      "url": "https://github.com/o/r/pull/12",
+      "url": "https://github.com/Zingzy/wsp-pr-lab/pull/12",
       "state": "open",
-      "host": "github.com"
+      "host": "github.com",
+      "draft": false,
+      "base": "main",
+      "branch": "fix/ci-status",
+      "headOid": "ec5c10de663bd1860925ad42e9580bab4eb1d377",
+      "headSubject": "Set .ci-status to 1",
+      "mergeable": "mergeable",
+      "mergeState": "blocked",
+      "review": "changes_asked",
+      "checks": [
+        {
+          "name": "ci",
+          "workflow": "ci",
+          "state": "fail",
+          "run": {
+            "runId": 36495564111,
+            "jobId": 109174214002
+          },
+          "link": "https://github.com/Zingzy/wsp-pr-lab/actions/runs/36495564111/job/109174214002"
+        },
+        {
+          "name": "buildkite/wsp",
+          "state": "pass",
+          "link": "https://ci.example.com/build/7",
+          "description": "All good ✓"
+        },
+        {
+          "name": "deploy",
+          "state": "skipped"
+        },
+        {
+          "name": "lint",
+          "state": "cancelled"
+        },
+        {
+          "name": "e2e",
+          "workflow": "ci",
+          "state": "pending"
+        }
+      ],
+      "additions": 120,
+      "deletions": 30,
+      "changedFiles": 9,
+      "commits": 4,
+      "behindBase": 3
     },
     "created": true
   },
@@ -13,7 +57,20 @@
       "number": 12,
       "url": "https://github.com/o/r/pull/12",
       "state": "merged",
-      "host": "github.com"
+      "host": "github.com",
+      "draft": false,
+      "base": "main",
+      "branch": "work",
+      "headOid": "abc",
+      "headSubject": "",
+      "mergeable": "unknown",
+      "mergeState": "unknown",
+      "review": "approved",
+      "checks": [],
+      "additions": 0,
+      "deletions": 0,
+      "changedFiles": 0,
+      "commits": 1
     },
     "created": false
   }
