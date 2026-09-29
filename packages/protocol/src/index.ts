@@ -3400,8 +3400,6 @@ export const DETACHED_HEAD = "(detached)";
  * "(initial)" before the first commit; without an upstream, or with one whose
  * tracking ref is gone, upstream is absent and ahead/behind count against the
  * default branch. */
-/** The head a detached checkout reads as, which names no branch. */
-export const DETACHED_HEAD = "(detached)";
 export const GitBranch = z.object({
   oid: z.string(),
   head: z.string(),
