@@ -1551,6 +1551,9 @@ export function hostFromEnv(env: Readonly<Record<string, string | undefined>>): 
  * because the host stages the file and the runtime builds the launch that runs it, and neither may import the
  * other's rule. */
 export const GUEST_DAEMON_DIR = "/root/wsp-daemon";
+/** The service manager's name for the daemon: the unit file, the deploy's start and stop, its log, and a wake that
+ * starts a daemon its provider left down all read it. */
+export const DAEMON_UNIT = "wsp-daemon.service";
 /** The command sits in the bundle as npm lays the published package out, its package.json beside a dist folder and
  * its own assets beside those, because the bin reads its own version through that file (`../package.json` from the
  * bin) and announces it in every MCP handshake; a client refuses a server that names none. Named as a folder
