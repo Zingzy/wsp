@@ -577,7 +577,11 @@ export interface Api {
   /** Opens a workspace's file, at its line, or its folder in the person's editor on the computer running the host,
    * and answers which editor. Optional so a fixture that opens nothing need not fake it; without it the button is
    * not drawn. */
-  openInEditor?(workspaceId: string, path: string, line?: number): Promise<EditorId>;
+  openInEditor?(workspaceId: string, path: string, line?: number, editor?: EditorId): Promise<EditorId>;
+  /** Whether the person's ~/.ssh/config reads wsp's own ssh config, which an editor's road into a workspace on
+   * another computer needs; `on` puts the one line in or takes it out first. Optional so a fixture with no editor over
+   * ssh need not fake it. */
+  sshInclude?(on?: boolean): Promise<boolean>;
   /** Every computer this wsp runs on: this one, the ones joined to it, and the provider it forks on; and beside
    * them every add over ssh the host is running and the last it finished. Optional so a fixture with no Settings
    * page need not fake it. */
@@ -834,8 +838,9 @@ export function makeApi(c: ProtocolClient): Api {
     // Parsed, not trusted: the pane paints only values the wire type vouches for.
     hostTerminalConfig: async scheme => TerminalConfig.parse((await c.request<{ config?: unknown }>("host.terminalConfig", { scheme })).config),
     editorList: async () => EditorChoice.array().parse((await c.request<{ editors?: unknown }>("editor.list")).editors),
-    openInEditor: async (workspaceId, path, line) =>
-      EditorId.parse((await c.request<{ editor?: unknown }>("editor.open", { workspaceId, path, ...(line !== undefined ? { line } : {}) })).editor),
+    openInEditor: async (workspaceId, path, line, editor) =>
+      EditorId.parse((await c.request<{ editor?: unknown }>("editor.open", { workspaceId, path, ...(line !== undefined ? { line } : {}), ...(editor !== undefined ? { editor } : {}) })).editor),
+    sshInclude: async on => (await c.request<{ sshInclude?: unknown }>("ssh.include", on !== undefined ? { on } : {})).sshInclude === true,
     addComputerOverSsh: async (login, addId) =>
       PlaceView.parse((await c.request<{ place?: unknown }>("places.add", { addId, address: login.address, ...(login.port === undefined ? {} : { sshPort: login.port }) })).place),
     // Parsed, not trusted: the sheet draws only steps and states the wire type vouches for.

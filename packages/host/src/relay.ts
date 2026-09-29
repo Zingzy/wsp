@@ -12,7 +12,7 @@ import { spawn } from "node:child_process";
 import { createServer, type Server, type Socket } from "node:net";
 import { platform } from "node:os";
 import { PassThrough } from "node:stream";
-import { DaemonEvent, LOOPBACK, callbackPortOf, hostOf, isHttpUrl, isJoinedComputer, isLoopback, type AgentsTarget, type DaemonReachView, type ForwardEvent, type GoldenBuilderView, type PortForward } from "@wsp/protocol";
+import { DaemonEvent, LOOPBACK, SshStartReply, callbackPortOf, hostOf, isHttpUrl, isJoinedComputer, isLoopback, type AgentsTarget, type DaemonReachView, type ForwardEvent, type GoldenBuilderView, type PortForward } from "@wsp/protocol";
 import { plumbTunnel, realClock, tunnelFrame, type Clock, type DaemonChannel, type EventUnion, type Runtime, type SignInForward } from "@wsp/runtime";
 import { DAEMON_CONNECT_TIMEOUT_MS, connectDaemonSocket, type ConnectOptions, type DaemonSocket } from "./doctor.js";
 import type { GuestDoor } from "./guest.js";
@@ -78,6 +78,10 @@ export interface RelayOptions {
  * url: a port a printed local URL named, one per port per workspace, kept while traffic flows. */
 export type ForwardKind = "callback" | "url";
 
+/** How often a workspace an editor is connected to is told a person is working in it: well inside the quiet a nap
+ * waits for, so an editor left open overnight keeps its workspace awake. */
+export const EDITOR_AWAKE_MS = 60_000;
+
 export interface ForwardView {
   targetId: string;
   port: number;
@@ -95,6 +99,9 @@ export interface CallbackRelay {
   stop(targetId: string, port: number): boolean;
   /** Hears every forward opened or closed, for the app's socket. */
   on(fn: (e: ForwardEvent) => void): () => void;
+  /** A port on this computer's loopback carrying to the workspace's own ssh server, started there with this key
+   * allowed, and the key that server proves itself with. The workspace's link carries it, so it needs one. */
+  sshPort(workspaceId: string, authorizedKey: string): Promise<{ port: number; hostKey: string }>;
   close(): Promise<void>;
 }
 
@@ -164,6 +171,21 @@ interface Link {
   replays: Map<string, Socket>;
 }
 
+/** One workspace's road to its editors' ssh server: a listener of its own on this computer's loopback, each
+ * connection carried by a tunnel to the port the server answered on inside the workspace. */
+interface SshRoad {
+  target: Target;
+  /** The server's port inside the workspace. */
+  far: number;
+  hostKey: string;
+  server: Server;
+  port: number;
+  conns: Map<string, Socket>;
+  startedAt: number;
+  /** Ends the beat that keeps the workspace awake; set while a connection stands. */
+  quiet?: () => void;
+}
+
 interface SignIn {
   /** The callback port of the page this sign-in armed, which a landed address must name. */
   page?: number;
@@ -203,6 +225,9 @@ function badGateway(sentence: string): string {
   const body = `${sentence}\n`;
   return `HTTP/1.1 502 Bad Gateway\r\ncontent-type: text/plain; charset=utf-8\r\ncontent-length: ${Buffer.byteLength(body)}\r\nconnection: close\r\n\r\n${body}`;
 }
+
+/** An ssh road asked of a workspace this relay holds no link to yet: one just woken has none for a moment. */
+export class NoSshLinkError extends Error {}
 
 /** What a guest session is answered with when the link it rode went between the ask and the answer. */
 export const linkDownLine = (workspace: string): string => `${workspace}: the daemon link is down`;
@@ -274,6 +299,8 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
   /** url forwards by target and port. */
   const urlForwards = new Map<string, Forward>();
   const listeners = new Set<(e: ForwardEvent) => void>();
+  /** ssh roads by workspace. */
+  const sshRoads = new Map<string, SshRoad>();
   let seq = 0;
   let closed = false;
   const detaches: (() => void)[] = [];
@@ -287,7 +314,9 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
   // so a host whose backend forwards nothing still holds them where a guest door was given.
   const forwarding = rt.backend.capabilities.callbackRelay;
   const holdsWorkspaces = forwarding || o.guest !== undefined;
-  if (!holdsWorkspaces && o.places !== true) return { forwards: () => [], list: () => [], stop: () => false, on, close: async () => {} };
+  if (!holdsWorkspaces && o.places !== true) {
+    return { forwards: () => [], list: () => [], stop: () => false, on, sshPort: () => Promise.reject(new Error("this host holds no link to any workspace")), close: async () => {} };
+  }
   const workspaceKinds: readonly ForwardKind[] = forwarding ? ["callback", "url"] : [];
 
   const urlKey = (targetId: string, port: number): string => `${targetId}:${port}`;
@@ -562,6 +591,76 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
     forward(link, port, kind).catch((e: unknown) => o.log(`${link.target.name}: not forwarding port ${port} (${e instanceof Error ? e.message : String(e)})`));
   };
 
+  // --- ssh roads ------------------------------------------------------------
+
+  const editorView = (r: SshRoad): PortForward => ({ workspaceId: r.target.id, port: r.port, startedAt: new Date(r.startedAt).toISOString(), name: r.target.name, kind: "editor" });
+
+  /** The first connection says an editor is attached and starts the beat that keeps the workspace awake; the last
+   * one to close ends both. */
+  const attached = (r: SshRoad): void => {
+    if (r.quiet !== undefined) return;
+    let stop = false;
+    const beat = (): void => {
+      if (stop) return;
+      void rt.workspaces.touch(r.target.id).catch(() => undefined);
+      const cancel = clock.schedule(beat, EDITOR_AWAKE_MS, { unref: true });
+      r.quiet = () => {
+        stop = true;
+        cancel();
+      };
+    };
+    beat();
+    emit({ type: "forward.open", forward: editorView(r) });
+  };
+  const detached = (r: SshRoad): void => {
+    if (r.conns.size > 0 || r.quiet === undefined) return;
+    r.quiet();
+    delete r.quiet;
+    emit({ type: "forward.close", workspaceId: r.target.id, port: r.port });
+  };
+
+  const closeSshRoad = (r: SshRoad): void => {
+    if (sshRoads.get(r.target.id) !== r) return;
+    sshRoads.delete(r.target.id);
+    for (const c of r.conns.values()) c.destroy();
+    r.conns.clear();
+    r.server.close();
+    detached(r);
+  };
+
+  const sshPort = async (workspaceId: string, authorizedKey: string): Promise<{ port: number; hostKey: string }> => {
+    const link = links.get(workspaceId);
+    if (link === undefined || !link.target.guests) throw new NoSshLinkError(`${workspaceId}: this host holds no link to that workspace`);
+    const read = SshStartReply.safeParse(await downward(link, "ssh.start", { authorizedKey }));
+    if (!read.success) throw new Error(`${link.target.name}: the ssh server answered a host key that is not one ed25519 line`);
+    const { port: far, hostKey } = read.data;
+    const held = sshRoads.get(workspaceId);
+    if (held !== undefined && held.far === far) {
+      held.hostKey = hostKey;
+      return { port: held.port, hostKey };
+    }
+    if (held !== undefined) closeSshRoad(held);
+    const conns = new Map<string, Socket>();
+    // Loopback's one family: a port of this road's own, handed to the one client that dials it by number.
+    const server = await listen(LOOPBACK, 0, c => {
+      c.on("error", () => {});
+      const r = sshRoads.get(workspaceId);
+      const live = links.get(workspaceId)?.sock;
+      if (r === undefined || live === undefined) {
+        c.destroy();
+        return;
+      }
+      plumbTunnel((op, params) => live.op(op, params), c, { port: r.far, conns: r.conns, tunnelId: `t${++seq}`, refused: socket => socket.destroy() });
+      attached(r);
+      c.once("close", () => detached(r));
+    });
+    if (server instanceof Error) throw new Error(`${link.target.name}: could not listen for its ssh here: ${server.message}`);
+    const address = server.address();
+    const r: SshRoad = { target: link.target, far, hostKey, server, port: typeof address === "object" && address !== null ? address.port : 0, conns, startedAt: clock.now() };
+    sshRoads.set(workspaceId, r);
+    return { port: r.port, hostKey };
+  };
+
   // --- links ----------------------------------------------------------------
 
   const onEvent = (link: Link, raw: Record<string, unknown>): void => {
@@ -632,6 +731,7 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
         // One counter mints every tunnel id here, so a frame belongs to at most one forward and the first that
         // holds it is the one it is for.
         for (const fw of allForwards(link.target.id)) if (tunnelFrame(fw.conns, e, () => touch(fw))) return;
+        if (tunnelFrame(sshRoads.get(link.target.id)?.conns ?? new Map(), e)) return;
         tunnelFrame(link.replays, e);
         return;
       default:
@@ -792,6 +892,8 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
         f.pausedBack = back;
       }
     }
+    const road = sshRoads.get(id);
+    if (road !== undefined) closeSshRoad(road);
     link.sock?.close();
     link.wake?.();
     return link.done;
@@ -1033,7 +1135,7 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
 
   return {
     forwards: () => every().map(f => ({ targetId: f.target.id, port: f.port, kind: f.kind, listener: f.listener, expiresAt: f.expiresAt })),
-    list: () => every().map(viewOf),
+    list: () => [...every().map(viewOf), ...[...sshRoads.values()].filter(r => r.quiet !== undefined).map(editorView)],
     stop: (targetId, port) => {
       const f = forwardOn(targetId, port);
       if (!f) return false;
@@ -1041,6 +1143,7 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
       return true;
     },
     on,
+    sshPort,
     close: async () => {
       closed = true;
       for (const un of detaches) un();

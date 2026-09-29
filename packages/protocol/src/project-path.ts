@@ -40,6 +40,11 @@ export function folderSlug(name: string): string {
   return slug === "" ? "work" : slug;
 }
 
+/** The ssh name every workspace goes by on this computer, which an editor shows in its title bar: its name's slug
+ * under a prefix no host a person already has goes by. */
+export const SSH_ALIAS_PREFIX = "wsp-";
+export const sshAlias = (name: string): string => `${SSH_ALIAS_PREFIX}${folderSlug(name)}`;
+
 /** Where a copy of a project folder made for one piece of work lands: beside the folder it was copied from, under
  * its own name with the work's on the end. A sibling and not a folder of wsp's own, because a directory clone
  * needs the same volume as what it clones and because a sibling is where a person's editor and their own

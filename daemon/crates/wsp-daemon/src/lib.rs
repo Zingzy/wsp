@@ -29,6 +29,7 @@ mod relay;
 /// The seal a place link agrees in its handshake. Public so the suite that drives both ends of a link can
 /// stand on the host's side of it, which in the product is node's own.
 pub use wsp_seal as seal;
+mod ssh;
 mod sys;
 mod sys_local;
 mod tunnel;
@@ -102,6 +103,10 @@ pub struct Options {
     /// own process, whose executable is the test and not a daemon, so it names the daemon binary it was built
     /// beside; nothing on a machine names it, so nothing on a machine behaves differently for it being here.
     pub runtime_helper: Option<PathBuf>,
+    /// The OpenSSH programs and folders an editor's server is made of; Ubuntu's own where unset.
+    pub ssh_programs: Option<ssh::Programs>,
+    /// How long a server with no session open stands before it and all it started is ended.
+    pub ssh_idle_ms: Option<u64>,
 }
 
 impl Options {
@@ -142,6 +147,8 @@ impl Options {
             link_backoff_ms: None,
             runtime_root: None,
             runtime_helper: None,
+            ssh_programs: None,
+            ssh_idle_ms: None,
         }
     }
 }
@@ -223,6 +230,8 @@ pub(crate) struct Ctx {
     pub(crate) files: files::FileLists,
     /// The guest sessions open on this machine, and the socket the host watches them from.
     pub(crate) guests: Arc<guest::Guests>,
+    /// The ssh servers an editor reaches this machine and its workspaces through, one per machine.
+    pub(crate) sshd: Arc<ssh::Servers>,
     /// Where the daemon's lines go: stderr in the binary, a test's own list otherwise.
     log: SharedLog,
     /// The two samplers, built on the first watch so a daemon nobody asks reads nothing; one each for the daemon.
@@ -275,6 +284,11 @@ impl Ctx {
         let guest_unwatched = Duration::from_millis(options.guest_unwatched_ms.unwrap_or(numbers::GUEST_UNWATCHED_MS));
         #[cfg(target_os = "linux")]
         let (runtime, runtime_refusal) = open_runtime(&options, &log, daemon_port);
+        let sshd = Arc::new(ssh::Servers::new(
+            options.ssh_programs.clone().unwrap_or_default(),
+            Duration::from_millis(options.ssh_idle_ms.unwrap_or(numbers::SSH_IDLE_MS)),
+            &options.token_path,
+        ));
         Ok(Ctx {
             options,
             root,
@@ -287,6 +301,7 @@ impl Ctx {
             inbox: inbox::InboxWatch::default(),
             files: files::FileLists::default(),
             guests: Arc::new(guest::Guests::new(guest_unwatched)),
+            sshd,
             log: Arc::from(log),
             sys: Mutex::new(None),
             procs: Mutex::new(None),
@@ -531,10 +546,20 @@ impl Daemon {
                 }
             }
         });
+        // An update or a restart ends this daemon with SIGTERM, and the ssh servers it started would outlive it,
+        // known to no daemon after it.
+        let mut terminated = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
         loop {
             let accepted = tokio::select! {
                 accepted = self.listener.accept() => accepted,
-                _ = self.ctx.stop.notified() => return Ok(()),
+                _ = self.ctx.stop.notified() => {
+                    self.ctx.sshd.end_all().await;
+                    return Ok(());
+                }
+                _ = terminated.recv() => {
+                    self.ctx.sshd.end_all().await;
+                    return Ok(());
+                }
             };
             let (stream, _) = accepted?;
             // As node's ws does: without it a pty's small frames sit behind the peer's delayed ACK, 40 ms measured.

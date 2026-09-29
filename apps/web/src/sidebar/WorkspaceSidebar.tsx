@@ -134,6 +134,8 @@ export function WorkspaceSidebar() {
   const api = useStore(s => s.api);
   const conn = useStore(s => s.conn);
   const workspaces = useStore(s => s.workspaces);
+  const forwards = useStore(s => s.forwards);
+  const editorsAttached = useMemo(() => new Set(forwards.filter(f => f.kind === "editor").map(f => f.workspaceId)), [forwards]);
   const select = useStore(s => s.select);
   const creations = useStore(s => s.creations);
   const dismissCreation = useStore(s => s.dismissCreation);
@@ -315,7 +317,7 @@ export function WorkspaceSidebar() {
     const copyActions = above === runs.id ? [] : resolveActions(workspaceActions, workspaceTarget(runs.workspace, runs.status, places), verbs);
     const place = placeOf(runs);
     const section = thread === null ? null : threadSection(thread);
-    const { branch, counts, why, settledWord } = tileCheckout(runs, section === "done" || section === "idle");
+    const { branch, counts, why, settledWord } = tileCheckout(runs, { done: section === "done" || section === "idle", attached: editorsAttached.has(runs.id) });
     let tile: ReactNode;
     if (thread === null) {
       tile = (
@@ -419,7 +421,7 @@ export function WorkspaceSidebar() {
     if (launch === undefined || (picked !== null && runs.workspace.project.id !== picked.project.id)) return [];
     return [
       <li key={`launch:${runs.id}`} data-thread-selection-safe>
-        <ThreadLaunchTile launch={launch} place={placeOf(runs)} branch={tileCheckout(runs).branch} counts={tileCheckout(runs).counts} />
+        <ThreadLaunchTile launch={launch} place={placeOf(runs)} branch={tileCheckout(runs).branch} counts={tileCheckout(runs, { attached: editorsAttached.has(runs.id) }).counts} />
       </li>,
     ];
   });

@@ -5335,8 +5335,8 @@ describe("runtime golden import", () => {
     expect(frames.filter(f => !f.startsWith("uploading-files:"))).toEqual([
       "creating:sandbox from base",
       "deploying-daemon",
-      ...["login shell PATH", "apt index", "curl", "uv", "Python 3.12", "git", "jq", "ripgrep", "C toolchain with cmake and ninja", "fd", "sqlite3", "wget", "zip and unzip", "xz", "rsync"].map((label, i) => `deploying-daemon:${label} (${i + 1}/15)`),
-      "deploying-daemon:15 installed; caches swept; 2.9 GB free",
+      ...["login shell PATH", "apt index", "curl", "uv", "Python 3.12", "git", "jq", "ripgrep", "C toolchain with cmake and ninja", "fd", "sqlite3", "wget", "zip and unzip", "xz", "rsync", "OpenSSH server"].map((label, i) => `deploying-daemon:${label} (${i + 1}/16)`),
+      "deploying-daemon:16 installed; caches swept; 2.9 GB free",
       // The stub answers the versions read with nothing, so the stage closes on the disk alone.
       "deploying-daemon:2.9 GB free",
       "applying-setup:1 file: shell 1",

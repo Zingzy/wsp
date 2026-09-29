@@ -4,5 +4,12 @@
     "op": "tunnel.open",
     "tunnelId": "t1",
     "port": 8123
+  },
+  {
+    "id": 2,
+    "op": "tunnel.open",
+    "tunnelId": "e7",
+    "port": 40222,
+    "machineId": "wsp-925c75ec3d5db653"
   }
 ]

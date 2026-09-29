@@ -8,10 +8,11 @@ import { createServer as createHttpServer } from "node:http";
 import { createServer, type AddressInfo, type Socket } from "node:net";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
+import { PassThrough } from "node:stream";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { type fakeCopier, NapRefusedError, NoProviderBackend, passphraseCipher, type MachineBackend } from "@wsp/engine";
 import { AGENTS_ON, agentsWord, type ProjectView, type DaemonErrorCode, noProjectImageLine, projectImageInUseRefusal, projectImageRemoveNotice, projectImageRemovedLine, DAEMON_TOKEN_PATH, noHostCliLine, napRefusedLine, copyPathFor, madeOfWord, portsWord, HERE_PLACE_ID, LIST_PRICE_WORD, goneRoadRefusal, notAnsweringYet, runForTheList, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, UP_RESTART_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, markedDefault, NO_SUCH_TURN, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, RuntimeRequest, threadStateWord, whereWord, workspaceStateOf, workspaceWord, type WorkspaceListing, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceAsleepAgainLine, workspaceKind, thisComputer, copyTakesNone, type WorkspaceOut, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, type PlaceView, localRunsOneFix, localRunsOneLine, placeForksNothingPickLine, MEMORY_KEPT_CLAUSE, projectRemovedOnComputerLine, type HarnessCatalogAnswer, noFastLine } from "@wsp/protocol";
-import { copyKey, createRuntime, DAEMON_TOKEN_SET, harnessCatalog, memoryStore, type DaemonChannel, type HarnessAdapterFactory, type PlaceBackends, type Runtime, type Store } from "@wsp/runtime";
+import { copyKey, createRuntime, DAEMON_TOKEN_SET, harnessCatalog, memoryStore, type DaemonChannel, type HarnessAdapterFactory, type HostSsh, type PlaceBackends, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 import { HELP, agentPage, cli, commandPage, COMMANDS_FOR_HELP, localWiring, localWorkFolder, serve } from "../src/cli.js";
@@ -19,7 +20,7 @@ import { hostKeyHere, placeWiring } from "../src/places.js";
 import { hostTokenPath, lockPathFor } from "../src/host-lock.js";
 import type { HostHandle } from "../src/server.js";
 import { awake, BUILT_IN_LIST_CLAUSE, BUILT_IN_TABLE_CLAUSE, CLI_VERBS, hasTool, VERBS, runVerb, PLAN_ONLY, ANSWER_IN_THE_APP, answerKeysLine, answerVerbsLine, answeredLine, noSuchAnswerLine, deleteQuestion, deletedLine, dialHost, firstEnded, messageTo, napAfterDeadLaunch, noHostServingLine, noOpenAskLine, threadRows, threadTree, threadsOf, workspaceLine, type HostClient } from "../src/verbs.js";
-import { HOST_RESTARTING_LINE, HOST_SIDE_VAULT, hostAgain, hostPlatform, hostRestartedLine, THREAD_PREFIX_WORD } from "../src/verbs.js";
+import { HOST_RESTARTING_LINE, HOST_SIDE_VAULT, SSH_PIPES_HERE_LINE, hostAgain, hostPlatform, hostRestartedLine, THREAD_PREFIX_WORD } from "../src/verbs.js";
 import { restartRoads, type RestartRoad } from "../src/restart.js";
 import { hostSideOnlyFix, hostSideOnlyLine } from "../src/hosts.js";
 import type { WatchSignals } from "../src/watch.js";
@@ -1020,6 +1021,68 @@ describe("wsp verbs over the host", () => {
     expect(woken.io.errors).toEqual([]);
     expect(backend.machines[0]!.paused).toBe(false);
     expect((await rt.workspaces.list())[0]!.phase).toBe("running");
+  });
+
+  /** The host again with this ssh door in place of the relay's, which reaches no machine the stub backend makes. */
+  async function withSsh(ssh: HostSsh): Promise<void> {
+    await handle?.close();
+    handle = await serve(captured(), { port: 0, statePath, webDir: join(dir, "web"), runtime: rt, ssh });
+  }
+  /** wsp ssh as an ssh client runs it, with these bytes on its stdin and its stdout read whole. */
+  async function sshLine(ref: string, typed: string): Promise<{ code: number; io: Captured; said: string }> {
+    const io = captured();
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const got: Buffer[] = [];
+    output.on("data", (d: Buffer) => got.push(d));
+    io.bytes = { input, output };
+    const ended = cli(["ssh", ref, "--state", statePath], io, undefined, env);
+    input.end(typed);
+    return { code: await ended, io, said: Buffer.concat(got).toString() };
+  }
+
+  it("ssh pipes its stdin and stdout to the workspace's ssh server through the port the host answers, the workspace named by its alias", async () => {
+    await run("new", "Cart rounding");
+    const echo = createServer(c => {
+      c.on("data", d => c.write(`echo: ${String(d)}`));
+      c.on("end", () => c.end());
+    });
+    await new Promise<void>(r => echo.listen(0, "127.0.0.1", r));
+    const asked: string[] = [];
+    await withSsh({ port: async w => (asked.push(w.name), (echo.address() as AddressInfo).port), include: async () => false, setInclude: async on => on });
+    try {
+      const { code, io, said } = await sshLine("wsp-cart-rounding", "SSH-2.0-OpenSSH_9.6\r\n");
+      expect({ code, said, lines: io.lines, errors: io.errors }).toEqual({ code: 0, said: "echo: SSH-2.0-OpenSSH_9.6\r\n", lines: [], errors: [] });
+      expect(asked).toEqual(["Cart rounding"]);
+      // Its name works as every other verb's does.
+      expect((await sshLine("Cart rounding", "again")).said).toBe("echo: again");
+    } finally {
+      echo.close();
+    }
+  });
+
+  it("ssh refuses an alias two workspaces go by, naming both, and writes nothing on stdout", async () => {
+    await run("new", "Cart rounding");
+    await run("new", "cart-rounding");
+    const asked: string[] = [];
+    await withSsh({ port: async w => (asked.push(w.name), 1), include: async () => false, setInclude: async on => on });
+    const { code, io, said } = await sshLine("wsp-cart-rounding", "SSH-2.0\r\n");
+    const ids = (await rt.workspaces.list()).map(w => w.id);
+    expect(code).toBe(EXIT_CODES.usage);
+    expect(said).toBe("");
+    expect(io.lines).toEqual([]);
+    for (const id of ids) expect(io.errors.join("\n")).toContain(id);
+    expect(asked).toEqual([]);
+  });
+
+  it("ssh with no terminal of this computer's to pipe, as on a line carried from a machine, says so and asks the host nothing", async () => {
+    await run("new", "Cart rounding");
+    const asked: string[] = [];
+    await withSsh({ port: async w => (asked.push(w.name), 1), include: async () => false, setInclude: async on => on });
+    const io = captured();
+    expect(await cli(["ssh", "wsp-cart-rounding", "--state", statePath], io, undefined, env)).toBe(EXIT_CODES.usage);
+    expect(io.errors.join("\n")).toContain(SSH_PIPES_HERE_LINE);
+    expect(asked).toEqual([]);
   });
 
   it("exec on a paused workspace wakes it first, says so on stderr, then runs the command; a running one is not woken", async () => {

@@ -57,6 +57,12 @@ export function useSettingsReads(): void {
       },
       () => {},
     );
+    void api?.sshInclude?.().then(
+      sshInclude => {
+        if (live) setReads({ sshInclude });
+      },
+      () => {},
+    );
     void api?.account?.().then(
       account => {
         if (live) setReads({ account });

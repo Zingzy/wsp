@@ -10,6 +10,7 @@ import type { BundleOutcome, DesktopBridge, DeviceView, PlaceView, ProjectView, 
 import { DAEMON_VERSION, DEFAULT_PREFERENCES, DEVICES_TICKET_REFUSAL, HOST_NO_RESTART_LINE, UP_RESTART_LINE, fmtBytes, projectInUseRefusal } from "@wsp/protocol";
 import { DisconnectedError, RequestError, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
+import { EDITOR_SSH_WORDS } from "../src/files/EditorConsent.js";
 import { ABOUT_WORDS, ACCOUNT_WORDS, AWAKE_WORDS, DEVICES_WORDS, FONT_WORDS, GENERAL_WORDS, KEYBINDINGS_WORDS, NOTIFY_WORDS, PRIVACY_WORDS, PROJECTS_WORDS, TRANSPARENCY_WORDS, WHERE_WORDS } from "../src/settings/format.js";
 import { builtWhen } from "../src/settings/image.js";
 import { chordsOf, keybindingCards } from "../src/settings/keybindings.js";
@@ -373,6 +374,30 @@ describe("Keeping the computer awake", () => {
     await settle();
     expect(rowTitles()).toContain("Keep zingzy's MacBook Pro awake");
     expect(document.querySelector("[data-k=keep-awake]")!.getAttribute("aria-label")).toBe("Keep zingzy's MacBook Pro awake");
+  });
+});
+
+describe("Editors over ssh", () => {
+  it("is one switch on General showing whether the line stands, and turning it off takes the line out", async () => {
+    let include = true;
+    const asked: (boolean | undefined)[] = [];
+    const { api } = settingsApi({ editorList: async () => [], sshInclude: async (on?: boolean) => (asked.push(on), on !== undefined && (include = on), include) } as Partial<Api>);
+    mountSettings({ api, at: { kind: "group", group: "general" } });
+    await settle();
+    expect(rowTitles()).toContain(EDITOR_SSH_WORDS.setting);
+    expect(descriptionOf("editor-ssh")).toBe(EDITOR_SSH_WORDS.settingNote);
+    const toggle = (): HTMLElement => document.querySelector<HTMLElement>("[data-k=editor-ssh]")!;
+    expect(toggle().getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(toggle());
+    await settle();
+    expect(asked).toEqual([undefined, false]);
+    expect(toggle().getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("is not drawn where the host carries no editor's ssh", async () => {
+    mountSettings({ api: settingsApi({ editorList: async () => [] } as Partial<Api>).api, at: { kind: "group", group: "general" } });
+    await settle();
+    expect(rowTitles()).not.toContain(EDITOR_SSH_WORDS.setting);
   });
 });
 

@@ -17,7 +17,8 @@ import { SectionRow } from "./SectionRow.js";
 import { compactTimeLabel } from "./workspaceRows.js";
 
 export function ForwardsList() {
-  const forwards = useForwards();
+  // An editor's ssh rides a port of its own that nothing but wsp ssh dials; its tile says it is attached instead.
+  const forwards = useForwards().filter(f => f.kind !== "editor");
   const stop = useStore(s => s.stopForward);
   const [collapsed, setCollapsed] = useState(false);
   // Re-render each minute so the ages move.
