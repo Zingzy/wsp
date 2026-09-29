@@ -1270,6 +1270,10 @@ async function broughtBack(client: HostClient, workspaceId: string, title?: stri
   );
 }
 
+/** Why a commit has no message when the workspace's agent drafted none, and what to do instead. */
+export const noDraftLine = (note: string | undefined): string => `no message was drafted: ${note ?? "the agent gave none"}`;
+export const NO_DRAFT_FIX = 'Pass one with --message "<message>".';
+
 /** A commit of the files named, or of every changed file, with the message given; without one the workspace's agent
  * drafts it and the draft is said on the line given before the commit is made with it. */
 async function committed(client: HostClient, workspaceId: string, message: string | undefined, files: string[], say: (line: string) => void): Promise<GitCommitReply> {
@@ -1277,7 +1281,7 @@ async function committed(client: HostClient, workspaceId: string, message: strin
   let text = message;
   if (text === undefined) {
     const draft = CommitDraft.parse(await client.request("workspaces.commitDraft", { workspaceId, ...named }));
-    if (draft.message === null) throw usageRefusal(`no message was drafted: ${draft.note ?? "the agent gave none"}`, 'Pass one with --message "<message>".');
+    if (draft.message === null) throw usageRefusal(noDraftLine(draft.note), NO_DRAFT_FIX);
     say(draft.message);
     text = draft.message;
   }

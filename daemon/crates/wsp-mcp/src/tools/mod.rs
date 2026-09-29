@@ -3,6 +3,7 @@
 //! call that answers it through the host. CONTRIBUTING.md in this crate says how one is added.
 
 mod agents;
+mod changes;
 mod computers;
 mod create;
 mod dropping;
@@ -85,6 +86,8 @@ pub const TOOLS: &[Tool] = &[
     machine::SNAPSHOT,
     create::FORK,
     home::BRING_BACK,
+    changes::COMMIT,
+    changes::DISCARD,
     machine::PAUSE,
     machine::WAKE,
     machine::REBUILD,
@@ -300,5 +303,18 @@ mod tests {
                 assert_eq!(serde_json::from_str::<Value>(entry).unwrap()["name"], tool.name);
             }
         }
+    }
+
+    #[test]
+    fn every_tool_the_record_lists_is_served() {
+        let record = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("record").join("tools");
+        let mut unserved: Vec<String> = std::fs::read_dir(record)
+            .unwrap()
+            .map(|file| file.unwrap().path().file_stem().unwrap().to_string_lossy().into_owned())
+            .filter(|name| !TOOLS.iter().any(|tool| tool.name == name))
+            .collect();
+        unserved.sort();
+        // A tool the TypeScript server lists with no tool here is one every agent on this server goes without.
+        assert_eq!(unserved, Vec::<String>::new());
     }
 }
