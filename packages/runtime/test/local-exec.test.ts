@@ -173,6 +173,36 @@ describe("local exec stream", () => {
     expect(await attached.exited).toBeNull();
   }, 15_000);
 
+  it("a run that finished while no host read it keeps its reply when it is re-opened past its wall", async () => {
+    const WALL_MS = 1_000;
+    const reading = new Set<() => void>();
+    const startedAt = Date.now();
+    const launched = localExecStream({ root, runDir, idleMs: 60_000, deadlineMs: WALL_MS, pollMs: 20, reading })("sleep 0.3; echo the-reply", { env: {} });
+    for (const drop of [...reading]) drop();
+    await new Promise(resolve => setTimeout(resolve, WALL_MS * 1.2));
+    const attached = (await localExecStream({ root, runDir, idleMs: 60_000, deadlineMs: WALL_MS, pollMs: 20 }).attach!(launched.run!, { input: false, startedAt })) as ExecStream;
+    expect(await collect(attached.lines)).toEqual(["the-reply"]);
+    expect(await attached.exited).toBe(0);
+  }, 15_000);
+
+  it("a run still going when it is re-opened past its wall hands over what it printed before the cut", async () => {
+    const WALL_MS = 1_000;
+    const reading = new Set<() => void>();
+    const startedAt = Date.now();
+    const launched = localExecStream({ root, runDir, idleMs: 60_000, deadlineMs: WALL_MS, pollMs: 20, reading })("echo while-away; sleep 30", { env: {} });
+    for (const drop of [...reading]) drop();
+    await new Promise(resolve => setTimeout(resolve, WALL_MS * 1.2));
+    const attached = (await localExecStream({ root, runDir, idleMs: 60_000, deadlineMs: WALL_MS, pollMs: 20 }).attach!(launched.run!, { input: false, startedAt })) as ExecStream;
+    const seen: string[] = [];
+    await expect(
+      (async () => {
+        for await (const line of attached.lines) seen.push(line);
+      })(),
+    ).rejects.toThrow(/cap on one turn$/);
+    expect(seen).toEqual(["while-away"]);
+    expect(await attached.exited).toBeNull();
+  }, 15_000);
+
   it("the defaults are the turn's own limits, so a quick command is never cut", async () => {
     const stream = localExecStream({ root, runDir })("printf ok", { env: {} });
     expect(await collect(stream.lines)).toEqual(["ok"]);

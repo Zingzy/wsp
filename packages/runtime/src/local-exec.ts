@@ -335,6 +335,11 @@ export function localExecStream(opts: LocalExecOptions, isWaiting?: TurnWaiting)
     let offset = 0;
     let downs = 0;
     let reading = false;
+    /** Set once a read took everything the log held at that moment, short of a chunk: until then a limit waits, and
+     * it waits too while the last read saw the exit, so a turn re-opened past its wall keeps what it printed while no
+     * host read it, and the reply of a run that finished in that time. */
+    let caughtUp = false;
+    let exitSeen = false;
     /** Set when this process lets go of the run: the poll ends where it stands, the stream never settles and the
      * run is left exactly as it is, since ending it here would write the turn off for whoever owns it. */
     let dropped = false;
@@ -402,7 +407,7 @@ export function localExecStream(opts: LocalExecOptions, isWaiting?: TurnWaiting)
           });
         }
         const cut = turnCut(limits, at - startedAt, quietMs);
-        if (cut !== undefined) return settle(null, cut);
+        if (cut !== undefined && caughtUp && !exitSeen) return settle(null, cut);
 
         // The exit file is read before the log, so a poll that sees an exit code reads a log that is complete.
         // An empty one is a run still writing: the shell's write truncates before it writes, as the cloud road reads it too.
@@ -411,12 +416,16 @@ export function localExecStream(opts: LocalExecOptions, isWaiting?: TurnWaiting)
         if (chunk.length > 0) {
           activity.touch(now());
           lines.feed(chunk.toString("utf8"));
+          if (chunk.length < EXEC_CHUNK_BYTES) caughtUp = true;
+          exitSeen = ended !== undefined && ended !== "";
           // There may be more than one chunk waiting, and a log read from its first byte can be hundreds of them: the
           // loop turns between two, or a host re-opening a long turn answers nothing until it has read all of it.
           await new Promise(resolve => setImmediate(resolve));
           continue;
         }
         if (ended !== undefined && ended !== "") return settle(Number.parseInt(ended, 10));
+        caughtUp = true;
+        if (cut !== undefined) return settle(null, cut);
         // The leader is checked after the exit file: one that finished in between shows as down with no exit yet.
         if ((pid === undefined || !alive(pid)) && ++downs > 1) return settle(null);
         await nap(pollMs);

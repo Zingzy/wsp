@@ -302,6 +302,16 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
         throw e;
       }
 
+      /** Set once a poll took everything the log held at that moment, short of a chunk: until then a limit waits, and
+       * it waits too while the last poll saw the exit, so a turn re-opened past its wall keeps what it printed while
+       * no host read it, and the reply of a run that finished in that time. */
+      let caughtUp = false;
+      let exitSeen = false;
+      const cutHere = async (e: Error): Promise<never> => {
+        await reap();
+        finish(null);
+        throw e;
+      };
       while (true) {
         // This process is done reading this run: the poll ends here and the stream settles for nobody.
         if (dropped) await never();
@@ -314,11 +324,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
         if (waiting()) activity.touch(at);
         const quietMs = activity.quietMs(at);
         const cut = turnCut({ idleMs, deadlineMs }, at - startedAt, quietMs);
-        if (cut !== undefined) {
-          await reap();
-          finish(null);
-          throw cut;
-        }
+        if (cut !== undefined && caughtUp && !exitSeen) await cutHere(cut);
 
         let res: ExecResult;
         try {
@@ -327,6 +333,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
           // Machine likely napping; polls recover after wake (P10 semantics). A poll that never reached the machine
           // says nothing about the process it was sent to read, so the stretch the road was dark is no part of the
           // turn's silence: the idle clock holds here and goes on from the road's return.
+          if (cut !== undefined) await cutHere(cut);
           await nap(pollMs);
           activity.hold(now() - at);
           continue;
@@ -335,6 +342,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
         const out = res.stdout.split("\n");
         const markIdx = out.findIndex(l => l.startsWith(sentinel));
         if (markIdx === -1) {
+          if (cut !== undefined) await cutHere(cut);
           await nap(pollMs);
           continue;
         }
@@ -352,6 +360,8 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
             yield pending.subarray(0, nl).toString("utf8");
             pending = pending.subarray(nl + 1);
           }
+          if (chunk.length < EXEC_CHUNK_BYTES) caughtUp = true;
+          exitSeen = exitStr !== "";
           continue; // there may be more than one chunk buffered up
         }
 
@@ -362,6 +372,8 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
           finish(Number.parseInt(exitStr, 10));
           return;
         }
+        caughtUp = true;
+        if (cut !== undefined) await cutHere(cut);
         // The pid is checked after the exit file: a leader that finished in between shows as down with no exit yet.
         if (live === "down" && ++downs > 1) {
           const tail = drainPending();

@@ -777,6 +777,29 @@ describe("machineExecStream attaching to a run its process did not launch", () =
     expect(await (stream as ExecStream).exited).toBe(0);
   });
 
+  it("keeps the reply of a run that finished while no host read it, when it is re-opened past its wall", async () => {
+    // Everything the run printed, and its exit, were on the machine before anything re-opened it.
+    const { factory, run } = await abandoned([{ append: '{"type":"system","subtype":"init"}\n{"type":"assistant"}\n{"type":"result"}\n', exit: 0 }]);
+    const stream = (await factory.attach!(run, { input: true, startedAt: Date.now() - 7 * 3_600_000 })) as ExecStream;
+    const lines: string[] = [];
+    for await (const line of stream.lines) lines.push(line);
+    expect(lines).toEqual(['{"type":"system","subtype":"init"}', '{"type":"assistant"}', '{"type":"result"}']);
+    expect(await stream.exited).toBe(0);
+  });
+
+  it("hands over what a run still going printed before it is cut, when it is re-opened past its wall", async () => {
+    const { factory, run } = await abandoned([{ append: "while-away\n" }]);
+    const stream = (await factory.attach!(run, { input: true, startedAt: Date.now() - 7 * 3_600_000 })) as ExecStream;
+    const lines: string[] = [];
+    await expect(
+      (async () => {
+        for await (const line of stream.lines) lines.push(line);
+      })(),
+    ).rejects.toThrow(/at the 6h cap on one turn$/);
+    expect(lines).toEqual(["while-away"]);
+    expect(await stream.exited).toBeNull();
+  });
+
   it("takes a message into the run over the channel the launch left open", async () => {
     const { factory, guest, run } = await abandoned([{ append: "one\n" }, { append: "two\n", exit: 0 }]);
     const stream = (await factory.attach!(run, { input: true, startedAt: Date.now() })) as ExecStream;

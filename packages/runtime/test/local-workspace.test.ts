@@ -1105,6 +1105,33 @@ describe("a local turn and a host restart", () => {
     await rt2.close();
   }, 30_000);
 
+  it("a turn whose run finished while the host was down keeps its reply when the next host re-opens it past the wall", async () => {
+    const WALL_MS = 2_000;
+    const gate = join(root, "gate");
+    // The first host's readers, let go of when it goes, as a host process that exits lets go of every run it read.
+    const reading = new Set<() => void>();
+    const walled = (held?: Set<() => void>): LocalWiring => ({ ...localWiring, execStream: o => localExecStream({ root, runDir, ...o, deadlineMs: WALL_MS, ...(held !== undefined ? { reading: held } : {}) }) });
+    const startedAt = Date.now();
+    const rt1 = createRuntime({ backend: stubBackend(), store, adapters: { claude: runAdapter(`echo reading the ticket; while [ ! -f ${gate} ]; do sleep 0.05; done; echo the reply`) }, local: walled(reading) });
+    const ws = await createOn(rt1, { on: HERE_PLACE_ID, name: "mac" });
+    await rt1.sessions.start(ws.id, { prompt: "build it" });
+    await until(async () => (await rt1.sessions.history(ws.id)).some(e => e.type === "session.delta"));
+    await rt1.close();
+    for (const drop of [...reading]) drop();
+
+    // While no host reads it the run replies and exits, and its wall passes.
+    writeFileSync(gate, "go\n");
+    await until(() => readdirSync(runDir).some(name => name.endsWith(".exit") && readFileSync(join(runDir, name), "utf8").trim() !== ""));
+    await new Promise(resolve => setTimeout(resolve, Math.max(0, startedAt + WALL_MS * 1.25 - Date.now())));
+
+    const rt2 = createRuntime({ backend: stubBackend(), store, adapters: { claude: runAdapter("true") }, local: walled() });
+    await until(async () => (await rt2.sessions.list(ws.id))[0]!.status !== "running", 20_000);
+    const history = await rt2.sessions.history(ws.id);
+    expect(history.filter(e => e.type === "session.delta").map(e => e.text)).toEqual(["reading the ticket", "the reply"]);
+    expect((await rt2.sessions.list(ws.id))[0]!.status).toBe("completed");
+    await rt2.close();
+  }, 30_000);
+
   it("turns on two workspaces of this computer both outlive the host: each workspace's sweep of the one run folder they share keeps the other's run", async () => {
     const gate = join(root, "gate");
     const rt1 = createRuntime({ backend: stubBackend(), store, adapters: { claude: runAdapter(`echo reading the ticket; while [ ! -f ${gate} ]; do sleep 0.05; done; echo wrote the fix; sleep 30`) }, local: localWiring });
