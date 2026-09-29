@@ -1584,7 +1584,6 @@ export const SessionNotifyEvent = z.object({
 });
 export type SessionNotifyEvent = z.infer<typeof SessionNotifyEvent>;
 
-
 /** One permission prompt the harness raised, relayed into the chat as its own row. The prompt blocks the turn until
  * sessions.answer names an option or the turn itself ends, so the row is what the thread is waiting on for as long
  * as the turn lives. */
@@ -2922,7 +2921,6 @@ export type WorkspaceCopy = z.infer<typeof WorkspaceCopy>;
 export const CopyWord = z.enum(["reflink", "snapshot", "plain"]);
 export type CopyWord = z.infer<typeof CopyWord>;
 
-
 /** One login the computer running a workspace keeps outside every one of them and mounts into this one at
  * `target`, read-write: signed in once on that computer, so a refresh inside any workspace there is the
  * computer's own refresh rather than a copy going stale. `source` is a file under that computer's own logins
@@ -4083,7 +4081,6 @@ export const PLACE_NEEDS_ROOT_LINE = "joining a Linux computer needs root, since
 /** What a word that names no place this host holds is refused with, naming the ones it does. */
 export const noSuchPlaceRefusal = (word: string, held: readonly string[]): string => `no place named ${word}; you have ${held.join(", ")}`;
 
-
 /** Whether a row is a computer somebody joined to this wsp: a computer, and not the one the host runs on, whose
  * files and threads are that host's own. The one reading, so the road that runs on the link, the road at the
  * terminal and the list of places a fork could stand on cannot disagree about which rows are those computers. */
@@ -4266,6 +4263,7 @@ const DAEMON_CONTENTS = [
   "11da9462eb0cc7aa26e3f05feed71e2e27774769026dfa6d7a4f3a08f6511ebb",
   "16e43173fadb40a741a588b14470f652528a4202fd434c2b9dc2702c7d78fc7c",
   "7e3fcbd460f842ff7343389c09ddbf43de751d83abea5cf82580d929811656e7",
+  "e927a6944459d21c2598ce6ff7511bd6bb22eed9ac962aaedcce620e92b3d321",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -4498,7 +4496,10 @@ const DAEMON_CONTENTS = [
  * to a host somewhere else links too, so the crate's sources and the lock moved.
  * Version 88 lists untracked files in git.diff's branch scope as well as its head scope, over the whole repository
  * from any folder, and an untracked link with no patch and no blob rather than a diff read through it; a repository
- * whose top sits above the daemon's root answers git.diff for the files under that root alone. */
+ * whose top sits above the daemon's root answers git.diff for the files under that root alone.
+ * Version 89 changes nothing a guest runs: the forwarder on the host's computer no longer asks the wsp where the host
+ * is, a wsp mcp line that names its state is served by the binary's own tool server, and the guest's tool server
+ * session drops the reopening only that forwarder did. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -4820,7 +4821,6 @@ export function shownPairCode(code: string): string {
   return letters.length <= half ? letters : `${letters.slice(0, half)}-${letters.slice(half)}`;
 }
 
-
 /** A pairing code as the host takes it, whichever screen it was copied off: the letters alone, upper case. A
  * person copies the code they can read, so the dash the screens put in it is one this reading takes back out. */
 export const sentPairCode = (shown: string): string => shown.replace(/-/g, "").toUpperCase();
@@ -4958,15 +4958,6 @@ export const DaemonChannelEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("daemon.closed"), channel: z.string(), code: z.number().int(), reason: z.string() }),
 ]);
 export type DaemonChannelEvent = z.infer<typeof DaemonChannelEvent>;
-
-/** What the host pushes to the one socket that opened a guest session on it: the session's messages, then its end,
- * with the host's sentence when it ended the session for a reason. The same two frames a machine's daemon hands its
- * guest, less the session id a socket holding one session has no use for, so one client reads both roads. */
-export const HereGuestEvent = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("guest.message"), message: z.unknown() }),
-  z.object({ type: z.literal("guest.closed"), error: z.string().optional() }),
-]);
-export type HereGuestEvent = z.infer<typeof HereGuestEvent>;
 
 // --- places: a computer you own, joined by dialling this host ---------------
 
@@ -5245,7 +5236,6 @@ export const hostKeyRefusal = (url: string): string => `the host at ${url} did n
 /** What a remove says about a place that was not linked when it ran: the records here are gone and the agent on
  * that computer is not, since nothing could reach it to sweep. */
 export const placeStillInstalledLine = (name: string): string => `${name} is off this host, but the agent on it is still installed; run ${PLACE_LEAVE_LINE} on that computer when it is back`;
-
 
 /** What a place that is connected but has never said which port its daemon bound is refused with: a pane needs
  * that port to carry to, and only that computer knows it. */
@@ -5633,23 +5623,6 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * link that computer is holding: nothing is dialled, and it is refused where that computer is not connected.
    * HERE_PLACE_ID names the computer the host runs on, whose own daemon is dialled. One of the two, never both. */
   z.object({ id: reqId, op: z.literal("daemon.open"), workspaceId: z.string().optional(), placeId: z.string().optional() }),
-  /** The wsp command's forwarder on this computer opening a guest session on this host itself, one hop shorter
-   * than a machine's: the same frame a guest sends its daemon, plus the environment the line was typed in, which
-   * a tool reads values off by name. Served only on a socket the host's own token opened, which is who the session
-   * is, so the token the frame carries is not read; one session per socket, and only the tool server. Replies with
-   * a GuestOpenReply, then pushes HereGuestEvent frames on this socket. */
-  z.object({
-    id: reqId,
-    op: z.literal("guest.open"),
-    kind: GuestKind,
-    token: z.string().max(GUEST_TOKEN_MAX),
-    turnToken: z.string().max(GUEST_TOKEN_MAX).optional(),
-    argv: z.array(z.string()).max(GUEST_ARGV_MAX),
-    cwd: z.string().max(GUEST_CWD_MAX),
-    env: z.record(z.string()).optional(),
-  }),
-  /** One message on the guest session this socket opened. */
-  z.object({ id: reqId, op: z.literal("guest.send"), message: z.unknown() }),
   /** Pushes WorkspaceSysEvent frames for this workspace on this socket, one per poll tick, until the socket goes.
    * The one road for a workspace whose kind reads its Live rows in the host rather than off a daemon; refused for
    * every other kind, which reads them over its own daemon link with sys.watch. Replies `{}`. */
@@ -6476,5 +6449,5 @@ export * from "./app-ports.js";
 export * from "./release.js";
 export * from "./init-job.js";
 export { catalogRefused, endAfterResult, endRun, PERMISSION_ALLOW, PERMISSION_DENY } from "./adapter-port.js";
-export { CLOUD_ENV, LAUNCH_ENV, SCOPED_MCP_ARG, FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, FORWARD_ENV, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, PERSON_HOME_ENV, RELEASE_API_ENV, TURN_TOKEN_ENV, UPDATE_CHECK_ENV, WEB_DIR_ENV } from "./env.js";
+export { CLOUD_ENV, LAUNCH_ENV, SCOPED_MCP_ARG, FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, PERSON_HOME_ENV, RELEASE_API_ENV, TURN_TOKEN_ENV, UPDATE_CHECK_ENV, WEB_DIR_ENV } from "./env.js";
 export type { AdapterAttachOptions, AdapterEvent, AsideAnswer, AsideQuestion, AttachmentRoad, CommitDrafter, DraftAsk, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, PermissionAsk, SessionAsker, SessionRenameWrite, SessionRenamer, SessionTitleMaker, SessionTitleReader, TitleTurn, TurnImage, SessionReverter } from "./adapter-port.js";

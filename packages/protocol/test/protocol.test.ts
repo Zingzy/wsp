@@ -894,7 +894,7 @@ describe("runtime wire types", () => {
       "places.add", "places.update", "places.remove", "places.dial", "places.cap", "places.loginLanded", "places.doctor", "places.door", "places.mint", "places.sshHosts", "projects.add",
       "init.keys", "init.start", "init.answer", "init.step", "init.draft", "init.retry", "init.build", "init.signInCode", "init.cancel", "image.build", "golden.prepare", "golden.seal",
       "image.export", "host.folders", "agents.read", "servers.tools", "servers.icon", "agents.signIn", "servers.signIn", "agents.signInCode", "agents.signInStop", "agents.signInLine", "agents.key", "agents.addTools", "skills.search", "skills.get", "skills.preview", "skills.add", "skills.remove", "skills.toggle", "servers.add", "servers.remove", "servers.toggle", "project.seed.plan", "project.plan", "project.import", "project.export",
-      "pair.issue", "pair.redeem", "seal.open", "device.auth", "place.join", "place.auth", "place.prove", "host.restart", "guest.open", "guest.send",
+      "pair.issue", "pair.redeem", "seal.open", "device.auth", "place.join", "place.auth", "place.prove", "host.restart",
       "editor.list", "editor.open",
       // A commit runs the copy's hooks, a draft runs its agent and spends on a model, and a discard throws work away.
       "workspaces.commit", "workspaces.commitDraft", "workspaces.discard",

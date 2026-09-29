@@ -3,6 +3,7 @@
 // on loopback. There is no control plane; the Solari key is read here
 // and used only for direct calls from this process to the machine API.
 
+import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, platform } from "node:os";
@@ -30,7 +31,7 @@ import {
 } from "@wsp/runtime";
 import { writeOwn } from "@wsp/own-file";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, GUEST_HOME, MCP_AGENT_IDS, THREAD_AGENTS, serverValuesOf } from "@wsp/catalog";
-import { authRefusal, cloudOffRefusal, FORWARD_ENV, holdsNothing, hostFromEnv, jsonLine, SCOPED_MCP_ARG, scopedNoPairLine, imageHomeKeptLine, isJoinedComputer, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, loopbackThreadsLine, LOOPBACK, PERSON_HOME_ENV, portInsteadLine, PORT_TAKEN_REFUSAL, portsAsked, portsPickedLine, portTakenLine, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, namesPlace, noSuchPlaceRefusal, type PlaceView, unknownWordLine, usageRefusal, verbFailure, foreignFlagLine } from "@wsp/protocol";
+import { authRefusal, cloudOffRefusal, holdsNothing, type McpServerSpec, hostFromEnv, jsonLine, SCOPED_MCP_ARG, scopedNoPairLine, imageHomeKeptLine, isJoinedComputer, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, loopbackThreadsLine, LOOPBACK, PERSON_HOME_ENV, portInsteadLine, PORT_TAKEN_REFUSAL, portsAsked, portsPickedLine, portTakenLine, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, namesPlace, noSuchPlaceRefusal, type PlaceView, unknownWordLine, usageRefusal, verbFailure, foreignFlagLine } from "@wsp/protocol";
 import { agentHome, agentHomes, checkProviderKey, type Copier, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, providerSlot, type ProviderSlot, verbCopier } from "@wsp/engine";
 import { CLOUD_ON } from "./cloud.js";
 import { noMachinesLine, providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerKeyRows, providerKeySet, providerModule, providerPlaces, wiredPlaceRow, wiredProviderId, type ProviderEnv } from "./providers.js";
@@ -91,7 +92,7 @@ import { serviceServesState, starterFor, type HostStarter } from "./host-start.j
 import { restartRoads, type RestartingHost, type RestartRoad } from "./restart.js";
 import { stopRecordedConnector } from "./connector.js";
 import { admittedDevices, hostsCommand, loginCommand, logoutCommand, readRelayRecord, relayCommand, relayOnLoopbackLine, startRelay } from "./relay-link.js";
-import { aimAddress, aimedHost, aimName, DEFAULT_HOME, type HostPick, namedHost, stateIgnoredLine, wspHome } from "./hosts.js";
+import { aimAddress, aimName, DEFAULT_HOME, type HostPick, namedHost, stateIgnoredLine, wspHome } from "./hosts.js";
 import { defaultHomeIn, homeNamed, realState, servingHome } from "./serving-home.js";
 import { advertiseWord, devicesCommand, hereUrl, pairCommand, type HereAt } from "./pairing.js";
 import { addCommand, addFlags, dialHere, joinCommand, leaveCommand, placeWiring, removeCommand } from "./places.js";
@@ -104,8 +105,8 @@ import { hostActs } from "./agents-signin.js";
 import { startHost, workspaceRoads, type HostDoctorReaders, type HostHandle } from "./server.js";
 import { choosePorts, type PortProbes, type PortsPicked } from "./ports.js";
 import { writeThreadWsp } from "./shim.js";
-import { agentsOnPath, installEach, installLines, mcpServerCommand, mcpServerSpec, nextLine, refreshSkills, registeredLine, removeEach, removeLines, runningWsp, skillsRefreshedLine, wspCommand, type RunningWsp } from "./mcp-install.js";
-import { CLI_VERBS, cloudLineOf, COMMON, COMMON_FLAG_WORDS, hostPlatform, NO_PROJECT_YET, type DialOpts, dialHost, failed, findVerb, HELP_WIDTH, hereDoor, helpPage, type HostClient, jsonAsked, type Page, runVerb, takeCommon, toolName, usageLines, verbUsage, type VerbDeps } from "./verbs.js";
+import { agentsOnPath, installEach, installLines, mcpServerSpec, nextLine, refreshSkills, registeredLine, removeEach, removeLines, runningWsp, serversRefreshedLine, refreshServers, skillsRefreshedLine, toolServerLine, wspCommand, type RunningWsp } from "./mcp-install.js";
+import { CLI_VERBS, cloudLineOf, COMMON, COMMON_FLAG_WORDS, hostPlatform, NO_PROJECT_YET, type DialOpts, dialHost, failed, findVerb, HELP_WIDTH, helpPage, type HostClient, jsonAsked, type Page, runVerb, takeCommon, toolName, usageLines, verbUsage, type VerbDeps } from "./verbs.js";
 import { installedVersion, stateWriterHere, VERSION } from "./version.js";
 import { latestWords, releaseReading, releaseWatch } from "./release.js";
 
@@ -771,7 +772,7 @@ export function makeRuntime(
     // wsp command an agent's config on this computer is given. A fork's turn needs neither, its wsp rides its daemon.
     agents: {
       ...(agents?.here !== undefined ? { here: agents.here } : {}),
-      wspMcp: mcpServerCommand(agents?.run ?? runningWsp()),
+      wspMcp: mcpServerSpec(statePath, agents?.run ?? runningWsp()),
     },
     local,
     // The provider row off the same pick the slot and the table stand on, so a key saved while this host serves
@@ -1466,6 +1467,8 @@ async function hostFor(
     if (realState(opts.statePath) === realState(join(home, "state.json"))) {
       const refreshed = refreshSkills(homedir());
       if (refreshed.length > 0) io.log(skillsRefreshedLine(refreshed));
+      const servers = refreshServers(homedir(), opts.statePath, run);
+      if (servers.length > 0) io.log(serversRefreshedLine(servers));
     }
 
     for (const line of addressLines(opts.statePath, { ...handle, address })) io.log(line);
@@ -2333,7 +2336,11 @@ async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => st
   if (values.scoped === true && words.length === 0 && hostFromEnv(env) === undefined) return failed(io, jsonAsked(argv), authRefusal(scopedNoPairLine));
   const statePath = statePathOf(values.state);
   if (words.length === 0) {
-    // The agent starts the server in its own folder, which is the folder a thread opened with no workspace is placed by.
+    const line = toolServerLine(statePath, values, run);
+    if (line !== undefined) return toolServerRan(io, line, env);
+    // A platform gap: a Linux host's daemon binary is the static guest build, which carries no tool server, so the
+    // TypeScript server answers there. The agent starts it in its own folder, which is the folder a thread opened with
+    // no workspace is placed by.
     const { serveMcp } = await import("./mcp.js");
     await serveMcp(statePath, { alsoHere, cwd: process.cwd(), env, ...starts, ...(values.host !== undefined ? { host: values.host } : {}) });
     return 0;
@@ -2373,36 +2380,16 @@ async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => st
   return report.failures.length > 0 ? 1 : 0;
 }
 
-/** What the forwarder asks before it serves `wsp mcp` itself: the host this line would serve against, as one JSON
- * line on stdout, when that is the host on this computer and it is serving, brought up first when the ask says
- * start. Anything else prints nothing and serves nothing: at the start of a session the forwarder runs the same line
- * as a wsp of its own next, which says whatever this one would have. The one thing said is why a host could not be
- * brought up, since the ask to start comes mid-session and nothing runs after it to say so. */
-async function forwardDoor(io: CliIO, argv: string[], env: Readonly<Record<string, string | undefined>>, starts: { start?: HostStarter }): Promise<number> {
-  // The token is the host's; it goes down a pipe to the forwarder and never onto a terminal.
-  if (io.redraw !== undefined) return 0;
-  let values: { host?: string; state?: string; scoped?: boolean; help?: boolean };
-  let words: string[];
-  try {
-    ({ values, positionals: words } = parseArgs({ args: argv, options: MCP_OPTIONS, allowPositionals: true }));
-  } catch {
-    return 0;
-  }
-  // A scoped line is a thread's own tools, which never ride the host's token: the wsp run next serves or refuses it.
-  if (values.help === true || values.scoped === true || words.length > 0) return 0;
-  const notes: string[] = [];
-  try {
-    const statePath = statePathFrom(values.state, env, line => notes.push(line));
-    const pick = { env, ...(values.host !== undefined ? { host: values.host } : {}) };
-    if (aimedHost(statePath, pick).kind === "here") await heldOrStarted(statePath, starts.start, line => io.error(line));
-    const door = hereDoor(statePath, pick);
-    if (door === undefined) return 0;
-    for (const note of notes) io.error(note);
-    io.log(JSON.stringify(door));
-  } catch (e) {
-    if (starts.start !== undefined) io.error(e instanceof Error ? e.message : String(e));
-  }
-  return 0;
+/** The tool server run on this process's own stdio until the agent closes it, and the code it exits with. */
+function toolServerRan(io: CliIO, line: McpServerSpec, env: Readonly<Record<string, string | undefined>>): Promise<number> {
+  return new Promise(done => {
+    const child = spawn(line.command, [...line.args], { stdio: "inherit", env: env as NodeJS.ProcessEnv });
+    child.once("error", e => {
+      io.error(`${line.command}: ${e.message}`);
+      done(EXIT_CODES.provider);
+    });
+    child.once("exit", code => done(code ?? EXIT_CODES.provider));
+  });
 }
 
 /** The flags the shared parse reads for up, init and doctor. The ones that shape a serving host come from the table
@@ -2632,10 +2619,7 @@ export async function cli(
   caller: { cwd?: string; elsewhere?: boolean } = {},
   deps: CommandDeps = SYSTEM_COMMAND_DEPS,
 ): Promise<number> {
-  // The forwarder's ask is this line's alone: nothing it starts or runs carries it, or the host a line brings up
-  // would hand it to every wsp its turns run.
-  const forward = given[FORWARD_ENV];
-  const env = forward === undefined ? given : Object.fromEntries(Object.entries(given).filter(([name]) => name !== FORWARD_ENV));
+  const env = given;
   const starter = start ?? starterFor(run, env);
   const starts = starter === false ? {} : { start: starter };
   // One reading for every road out of this process, and the sentence about it said once: a verb, a command and the
@@ -2653,7 +2637,7 @@ export async function cli(
   }
   if (rest[0] === MCP_COMMAND) {
     const argv = [...common, ...rest.slice(1)];
-    return forward === undefined ? mcp(io, argv, chooseState, run, env, starts) : forwardDoor(io, argv, env, forward === "start" ? starts : {});
+    return mcp(io, argv, chooseState, run, env, starts);
   }
   let values: SharedFlags;
   let positionals: string[];

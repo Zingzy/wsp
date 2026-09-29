@@ -57,7 +57,11 @@ async fn brings_up_the_wsp_it_was_handed_and_answers_once_that_host_serves() {
     let answered = computers(state.clone(), &wsp, &env_in(dir.path())).await;
     assert_eq!(answered["structuredContent"], json!({ "computers": [], "spend": [] }), "{answered}");
     let ran = std::fs::read_to_string(dir.path().join("ran")).unwrap();
-    assert_eq!(ran.trim(), format!("verb up --state {} --port 0 --ws-port 0", state.display()));
+    // The words the command line's own starter runs, as the record holds them.
+    let host: Value = serde_json::from_str(include_str!("../record/host.json")).unwrap();
+    let up: Vec<String> =
+        host["upArgs"].as_array().unwrap().iter().map(|w| w.as_str().unwrap().replace("{state}", &state.to_string_lossy())).collect();
+    assert_eq!(ran.trim(), format!("verb {}", up.join(" ")));
     assert_eq!(std::fs::read_to_string(state.parent().unwrap().join("host.log")).unwrap(), "serving\n");
 }
 

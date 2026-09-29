@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { spawn } from "node:child_process";
-import { FORWARD_ENV, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, TURN_TOKEN_ENV } from "@wsp/protocol";
+import { HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, TURN_TOKEN_ENV } from "@wsp/protocol";
 import { expect, vi } from "vitest";
 
 /** This process's environment less every variable that aims a line at a host, so a spawned wsp reaches the host this
  * case serves and no other. */
 export const ownEnv = (): NodeJS.ProcessEnv =>
-  Object.fromEntries(Object.entries(process.env).filter(([name]) => ![HOST_URL_ENV, HOST_TOKEN_ENV, HOST_KEY_ENV, TURN_TOKEN_ENV, FORWARD_ENV, "WSP_HOST", "WSP_STARTED_BY"].includes(name)));
+  Object.fromEntries(Object.entries(process.env).filter(([name]) => ![HOST_URL_ENV, HOST_TOKEN_ENV, HOST_KEY_ENV, TURN_TOKEN_ENV, "WSP_HOST", "WSP_STARTED_BY"].includes(name)));
 
 /** One stdio session with a tool server: each line written in turn, and the lines it printed once it has answered
  * every request among them; then its stdin closes and its code is read. */
-export async function served(argv: readonly string[], env: NodeJS.ProcessEnv, lines: readonly Record<string, unknown>[]): Promise<{ out: string[]; code: number | null }> {
-  const child = spawn(argv[0]!, argv.slice(1), { env, stdio: ["pipe", "pipe", "inherit"] });
+export async function served(argv: readonly string[], env: NodeJS.ProcessEnv, lines: readonly Record<string, unknown>[], cwd?: string): Promise<{ out: string[]; code: number | null }> {
+  const child = spawn(argv[0]!, argv.slice(1), { env, stdio: ["pipe", "pipe", "inherit"], ...(cwd !== undefined ? { cwd } : {}) });
   const out: string[] = [];
   let held = "";
   child.stdout.on("data", (chunk: Buffer) => {

@@ -61,6 +61,10 @@ export function serviceServesState(
   return service === undefined ? undefined : serviceServesStateLine(statePath, service);
 }
 
+/** The words after the wsp that bring a host up on this state file: the one line every starter runs, this one and the
+ * tool server's in the daemon binary, which reads it off the record. */
+export const upArgs = (statePath: string, port: number | string = 0): string[] => ["up", "--state", statePath, "--port", String(port)];
+
 export function hostStarter(deps: StartDeps): HostStarter {
   return async (statePath, say, ports) => {
     // Before anything is spawned: a state file the service owns is served by the service or by nothing.
@@ -76,7 +80,7 @@ export function hostStarter(deps: StartDeps): HostStarter {
     try {
       // A free port on purpose: another host, the app's or a service, often holds the default on this computer, and
       // every client dials the address the lock records rather than a number written down anywhere.
-      child = deps.spawn(deps.wsp.command, [...deps.wsp.args, "up", "--state", statePath, "--port", String(ports?.port ?? 0)], {
+      child = deps.spawn(deps.wsp.command, [...deps.wsp.args, ...upArgs(statePath, ports?.port ?? 0)], {
         detached: true,
         stdio: ["ignore", log, log],
         env: { ...deps.env, [STARTED_BY_ENV]: "verb" },

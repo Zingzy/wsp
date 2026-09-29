@@ -67,7 +67,8 @@ jobs:
             daemon-release-${{ matrix.target }}-
       # Each Linux binary is a static musl build on its own chip's runner: ring carries C, which musl-tools compiles
       # for the musl target, and libcontainer links a libseccomp built against musl by the script, from its pinned
-      # release. The darwin builds link no C library of their own.
+      # release. The darwin builds link no C library of their own, and carry the tool server: a Mac is never a guest,
+      # so the feature costs no guest a byte, and an agent's wsp tools run from this binary with no node process.
       - name: C compiler for the musl target, and libseccomp built against musl
         if: runner.os == 'Linux'
         run: |
@@ -80,7 +81,7 @@ jobs:
           if [ "$RUNNER_OS" = "Linux" ]; then
             LIBSECCOMP_LIB_PATH="$PWD/target/libseccomp/musl" cargo build --locked --release --target "$TARGET" -p wsp-daemon-bin
           else
-            cargo build --locked --release --target "$TARGET" -p wsp-daemon-bin
+            cargo build --locked --release --target "$TARGET" -p wsp-daemon-bin --features mcp
           fi
           cp "target/$TARGET/release/wsp-daemon" "wsp-daemon-$TARGET"
           ls -l "wsp-daemon-$TARGET"

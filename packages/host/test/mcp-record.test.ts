@@ -21,7 +21,7 @@ import { CATALOG, agentName } from "@wsp/catalog";
 import { SEAL_REFUSAL } from "@wsp/keys";
 import { CLOUD_ENV, cloudFromEnv, EXIT_CODES, HERE_PLACE_ID, HOST_CLOSED_LINE, HOST_KEY_ENV, HOST_STOPPING_CLOSE, HOST_STOPPING_LINE, HOST_TOKEN_ENV, HOST_URL_ENV, KIND_CLASS, LAUNCHED_WITH, LOOPBACK, SKILL_PREVIEW_BYTES, WS_PATH, isLoopback, isUrl, isWildcard, servedHostname, wsUrlOf, hostNoKeyLine, jsonLine, NEWER_TURN_LINE, noMessagesLine, noReplyLine, NO_TERMINAL_CONFIG_LINE, refusalLine, scopedNoPairLine, commandWords, authRefusal, deviceAuthOldHostLine, noSuchPlaceRefusal, pairKeyRefusal, SEAL_CLIENT, unclosedQuoteRefusal, validatorRefusal, type PlaceSpend, type PlaceView, type ServerToolsAnswer } from "@wsp/protocol";
 import { describe, expect, it, vi } from "vitest";
-import { hostExitedLine, noHostAnsweredLine, startingHostLine } from "../src/host-start.js";
+import { hostExitedLine, noHostAnsweredLine, startingHostLine, upArgs } from "../src/host-start.js";
 import { hostLogPath, hostTokenPath, lockPathFor, POLL_MS, SERVICE_WAIT_MS, STARTED_BY_ENV } from "../src/host-lock.js";
 import { deviceKeyPath, relayRecordPath } from "../src/account.js";
 import { PROBE_MS } from "../src/service.js";
@@ -247,6 +247,7 @@ function host(): Record<string, unknown> {
     unauthorizedClose: UNAUTHORIZED_CLOSE,
     stoppingClose: HOST_STOPPING_CLOSE,
     startWaitMs: SERVICE_WAIT_MS,
+    upArgs: upArgs("{state}"),
     pollMs: POLL_MS,
     probeMs: PROBE_MS,
     loopback: LOOPBACK,
