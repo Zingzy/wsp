@@ -30,7 +30,7 @@ export const SCOPE_NOUNS: Record<GitDiffScope, string> = {
   branch: "branch changes",
 };
 
-export const SCOPES: readonly GitDiffScope[] = ["head", "unstaged", "staged", "branch"];
+export const SCOPES: readonly GitDiffScope[] = ["branch", "head", "unstaged", "staged"];
 
 export interface DiffFile {
   readonly fileDiff: FileDiffMetadata;
