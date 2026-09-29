@@ -95,8 +95,25 @@ describe("a surfaces list", () => {
   });
 
   it("leaves a surface out of a width it does not name", () => {
-    const read = list([{ name: "wide", at: "/", widths: [1440] }]);
+    const read = list([{ name: "wide", at: "/", widths: [1440], reason: "A dialog of one width at every desktop size." }]);
     expect(shotPlan(read).map(s => s.width)).toEqual([1440, 1440]);
+  });
+
+  it("refuses a surface shot at fewer widths than the list with no reason why, so no width drops silently", () => {
+    expect(() => list([{ name: "wide", at: "/", widths: [1440] }])).toThrow(/wide: .*"reason"/);
+    expect(() => list([{ name: "wide", at: "/", widths: [1440], reason: "  " }])).toThrow(/wide: .*"reason"/);
+  });
+
+  it("refuses a reason on a surface shot at every width, where it would only go stale", () => {
+    expect(() => list([{ name: "full", at: "/", reason: "Once narrowed." }])).toThrow(/full: .*"reason"/);
+    expect(() => list([{ name: "full", at: "/", widths: [1440, 390], reason: "Once narrowed." }])).toThrow(/full: .*"reason"/);
+  });
+
+  it("carries the reason into the index under the surface it narrows", () => {
+    const read = list([{ name: "wide", at: "/", widths: [1440], reason: "The dialog is 440px at every desktop width." }]);
+    expect(read.surfaces[0].reason).toBe("The dialog is 440px at every desktop width.");
+    const index = indexMarkdown(read, [shotName("wide", "light", 1440)], { at: "now", sha: "abc1234", branch: "main" });
+    expect(index).toContain("Shot at 1440 alone: the dialog is 440px at every desktop width.");
   });
 
   it("refuses two surfaces of one name, whose files would overwrite each other", () => {
