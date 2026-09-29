@@ -35,7 +35,7 @@
 
 import { randomBytes } from "node:crypto";
 import { HANDSHAKE, INLINE_EXEC_MS, MachineUnreachableError, MachineUnreached, RUN_DIR, execFits, isPlaceAbsent, machineAnswer, putFiles, realRetryClock, untilReached, type ExecResult, type GuestWrite, type Machine } from "@wsp/engine";
-import { EXEC_CHUNK_BYTES, RUN_STOP_MS, TURN_IDLE_MS, TURN_WALL_MS, TURN_WORK_TICKS_PER_S, shellQuote, turnCutLine, workScoreLine } from "@wsp/protocol";
+import { EXEC_CHUNK_BYTES, LINK_RETRY_WINDOW_MS, RUN_STOP_MS, TURN_IDLE_MS, TURN_WALL_MS, TURN_WORK_TICKS_PER_S, shellQuote, turnCutLine, workScoreLine } from "@wsp/protocol";
 import type { ExecStream, ExecStreamFactory, TurnCutRule } from "@wsp/protocol";
 
 export interface MachineExecOptions {
@@ -228,7 +228,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
    * host process left behind. `opened` settles once the run is known to be on the machine and rejects with the words
    * the turn fails on when it is not. The log is read from its first byte either way, so a run that printed while no
    * host was listening is replayed to whoever attaches. */
-  const open = (base: string, hasInput: boolean, opened: Promise<void>): ExecStream => {
+  const open = (base: string, hasInput: boolean, opened: Promise<void>, turnStartedAt?: number): ExecStream => {
     const sentinel = `__WSP_EOF_${randomBytes(6).toString("hex")}__`;
 
     let killed = false;
@@ -243,10 +243,10 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
       wake();
     };
     opts.reading?.add(drop);
-    // Both limits run from this reader's first second: nothing on the machine records when the run's last byte
-    // landed, so an attach cannot inherit an idle clock and starts the turn's cap again.
-    const startedAt = now();
-    const activity = turnActivity(startedAt);
+    // The idle clock runs from this reader's first second, since nothing on the machine records when the run's last
+    // byte landed; the wall runs from the turn's own start, which an attach is handed.
+    const startedAt = turnStartedAt ?? now();
+    const activity = turnActivity(now());
     let finishCode: number | null | undefined;
     let resolveExit: (code: number | null) => void = () => {};
     const exited = new Promise<number | null>(resolve => {
@@ -302,6 +302,23 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
         throw e;
       }
 
+      /** Set once a poll took everything the log held at that moment, short of a chunk: until then a limit waits, and
+       * it waits too while the last poll saw the exit, so a turn re-opened past its wall keeps what it printed while
+       * no host read it, and the reply of a run that finished in that time. */
+      let caughtUp = false;
+      let exitSeen = false;
+      /** When the polls last started coming back with nothing: before the reader has caught up, a cut waits out the
+       * same reach window an attach's probe gets, so one gateway error after a re-open does not take the reply. */
+      let darkSince: number | undefined;
+      const cutInTheDark = async (cut: Error | undefined, at: number): Promise<void> => {
+        darkSince ??= at;
+        if (cut !== undefined && (caughtUp || now() - darkSince >= LINK_RETRY_WINDOW_MS)) await cutHere(cut);
+      };
+      const cutHere = async (e: Error): Promise<never> => {
+        await reap();
+        finish(null);
+        throw e;
+      };
       while (true) {
         // This process is done reading this run: the poll ends here and the stream settles for nobody.
         if (dropped) await never();
@@ -314,11 +331,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
         if (waiting()) activity.touch(at);
         const quietMs = activity.quietMs(at);
         const cut = turnCut({ idleMs, deadlineMs }, at - startedAt, quietMs);
-        if (cut !== undefined) {
-          await reap();
-          finish(null);
-          throw cut;
-        }
+        if (cut !== undefined && caughtUp && !exitSeen) await cutHere(cut);
 
         let res: ExecResult;
         try {
@@ -327,6 +340,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
           // Machine likely napping; polls recover after wake (P10 semantics). A poll that never reached the machine
           // says nothing about the process it was sent to read, so the stretch the road was dark is no part of the
           // turn's silence: the idle clock holds here and goes on from the road's return.
+          await cutInTheDark(cut, at);
           await nap(pollMs);
           activity.hold(now() - at);
           continue;
@@ -335,9 +349,11 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
         const out = res.stdout.split("\n");
         const markIdx = out.findIndex(l => l.startsWith(sentinel));
         if (markIdx === -1) {
+          await cutInTheDark(cut, at);
           await nap(pollMs);
           continue;
         }
+        darkSince = undefined;
         const [, exitStr = "", live = "up", workStr = ""] = out[markIdx]!.split(" ");
         const work = Number.parseInt(workStr, 10);
         if (Number.isSafeInteger(work)) activity.read(work, now());
@@ -352,6 +368,8 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
             yield pending.subarray(0, nl).toString("utf8");
             pending = pending.subarray(nl + 1);
           }
+          if (chunk.length < EXEC_CHUNK_BYTES) caughtUp = true;
+          exitSeen = exitStr !== "";
           continue; // there may be more than one chunk buffered up
         }
 
@@ -362,6 +380,8 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
           finish(Number.parseInt(exitStr, 10));
           return;
         }
+        caughtUp = true;
+        if (cut !== undefined) await cutHere(cut);
         // The pid is checked after the exit file: a leader that finished in between shows as down with no exit yet.
         if (live === "down" && ++downs > 1) {
           const tail = drainPending();
@@ -459,13 +479,13 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
     return open(base, input !== undefined, opened);
   };
 
-  factory.attach = async (run, { input }) => {
+  factory.attach = async (run, { input, startedAt }) => {
     if (!minted(run)) throw new Error(`${run} is not a run this host could have launched`);
     const res = await untilReached(() => machine.exec(`[ -d ${q(claim(run))} ] && echo ${HANDSHAKE.run} || echo ${HANDSHAKE.gone}`, { timeoutMs: execTimeoutMs }), { now, sleep });
     // Only these two answers say anything about the run. Anything else is the machine failing to answer the
     // question, which is the unreached road, not a run to end: the reader is built and the run swept on WSP_GONE
     // alone, so nothing here can take a live turn's process group with it.
-    if (res.stdout.includes(HANDSHAKE.run)) return open(run, input, Promise.resolve());
+    if (res.stdout.includes(HANDSHAKE.run)) return open(run, input, Promise.resolve(), startedAt);
     if (res.stdout.includes(HANDSHAKE.gone)) return "gone";
     throw new Error(`the machine did not answer whether it still holds ${run}; ${machineAnswer(res)}`);
   };

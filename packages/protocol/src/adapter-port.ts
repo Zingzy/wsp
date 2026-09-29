@@ -163,8 +163,10 @@ export interface ExecStreamFactory {
    * its first byte when it does: what the run printed while no host was listening is on the machine, so the reader
    * is where the replay happens. `gone` is the machine's own answer that the run is not there, the one answer that
    * may take what is left of it. A machine that answers nothing rejects, since silence says nothing about the run
-   * and must leave it running. Absent on a factory whose runs die with the process that launched them. */
-  attach?(run: string, options: { input: boolean }): Promise<ExecStream | "gone">;
+   * and must leave it running. Absent on a factory whose runs die with the process that launched them. `startedAt` is
+   * when the turn began, in ms epoch off the row that survives a restart: the wall counts from it, so a host that
+   * restarts does not hand every turn it re-opens its whole cap again. */
+  attach?(run: string, options: { input: boolean; startedAt: number }): Promise<ExecStream | "gone">;
   /** Ends every run of this road the machine still holds that is not named in `keep`, and answers the ones it ended.
    * A host that went down mid-turn, and a turn whose row this host could not re-open, leave a harness process nobody
    * reads holding the machine's memory for its life, so a host that connects ends the runs it does not own. The runs
