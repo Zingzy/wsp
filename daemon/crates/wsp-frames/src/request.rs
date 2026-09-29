@@ -166,6 +166,16 @@ pub enum DaemonOp {
         #[ts(optional)]
         machine_id: Option<String>,
     },
+    /// Replaces an existing regular file's contents whole, keeping its mode and owner: a pane's save.
+    #[serde(rename = "fs.write", rename_all = "camelCase")]
+    FsWrite {
+        path: String,
+        contents: String,
+        /// The workspace this frame is for, as on fs.list above.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        machine_id: Option<String>,
+    },
     /// Every file under the folder whose path holds the query's letters in order (files), or every line of a text
     /// file there that holds the query (text), walked with the folder's ignore rules and hidden names left out.
     #[serde(rename = "fs.search", rename_all = "camelCase")]
@@ -193,6 +203,14 @@ pub enum DaemonOp {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
         path: Option<String>,
+        /// Only these files, named from the checkout's top as the reply names them.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        paths: Option<Vec<String>>,
+        /// Each file's patch holds the whole file in one hunk, which is what an editor over the new side needs.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        whole: Option<bool>,
         /// The workspace this frame is for, as on fs.list above.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
@@ -208,6 +226,30 @@ pub enum DaemonOp {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
         base: Option<String>,
+        /// The workspace this frame is for, as on fs.list above.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        machine_id: Option<String>,
+    },
+    /// Puts one changed file back as HEAD has it, or removes it where HEAD has none: the one file named, never the
+    /// rest of the checkout.
+    #[serde(rename = "git.discard", rename_all = "camelCase")]
+    GitDiscard {
+        cwd: String,
+        /// The file as git.status names it, from the checkout's top.
+        path: String,
+        /// The workspace this frame is for, as on fs.list above.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        machine_id: Option<String>,
+    },
+    /// Commits the named files and no others with the message given, hooks and all.
+    #[serde(rename = "git.commit", rename_all = "camelCase")]
+    GitCommit {
+        cwd: String,
+        message: String,
+        /// The files as git.status names them, from the checkout's top.
+        paths: Vec<String>,
         /// The workspace this frame is for, as on fs.list above.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
@@ -366,7 +408,7 @@ pub enum DaemonOp {
 
 /// The op names above, in the protocol's order; the daemon's switch reads this to tell an op it knows from one it
 /// does not.
-pub const DAEMON_OPS: [&str; 43] = [
+pub const DAEMON_OPS: [&str; 46] = [
     "pty.create",
     "pty.attach",
     "pty.detach",
@@ -410,6 +452,9 @@ pub const DAEMON_OPS: [&str; 43] = [
     "guest.reply",
     "guest.close",
     "place.update",
+    "git.discard",
+    "git.commit",
+    "fs.write",
 ];
 
 /// The five of those that belong to the road a client of this machine dials in on: a guest process's two and the

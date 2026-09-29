@@ -78,6 +78,8 @@ export const AUTH_DEADLINE_MS = 5_000;
 export const TUNNEL_CAP = 64;
 /** How much of one file fs.read carries; the whole size travels beside it. */
 export const FS_READ_CAP_BYTES = 2 * 1024 * 1024;
+/** The most one fs.write replaces a file with, the read cap's twin: a file a pane could not read whole it does not write. */
+export const FS_WRITE_CAP_BYTES = 2 * 1024 * 1024;
 /** Entries one fs.list carries; total counts the rest. */
 export const FS_LIST_CAP_ENTRIES = 10_000;
 /** Paths one fs.files carries; truncated says there were more. */

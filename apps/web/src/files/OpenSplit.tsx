@@ -7,17 +7,16 @@
 // while the host lists its editors, so the header does not move when they
 // arrive. A workspace whose files are on another machine draws nothing here;
 // its sentence stands on the file tab.
-import { editorMark } from "@wsp/catalog";
-import { isLocalWorkspace, type EditorChoice, type EditorId } from "@wsp/protocol";
+import { isLocalWorkspace, type EditorChoice } from "@wsp/protocol";
 import { ChevronDownIcon } from "lucide-react";
 import { useEffect, useState } from "react";
-import { MarkSvg } from "../components/chat/HarnessMark.js";
 import { Button } from "../components/ui/button.js";
 import { Kbd } from "../components/ui/kbd.js";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../components/ui/menu.js";
 import { cn } from "../lib/utils.js";
 import { useStore, useWorkspace } from "../protocol/store.js";
 import { useShortcutLabel } from "../shell/useKeybindings.js";
+import { EditorGlyph } from "./EditorGlyph.js";
 import { openCopyInEditor } from "./openCopy.js";
 
 export const OPEN_WORDS = {
@@ -42,11 +41,6 @@ function useEditors(): readonly EditorChoice[] | null {
     };
   }, [list]);
   return editors;
-}
-
-function EditorGlyph({ id }: { id: EditorId }) {
-  const mark = editorMark(id);
-  return mark === undefined ? <span className="size-4" /> : <MarkSvg mark={mark} data-editor-mark={id} className="size-4" />;
 }
 
 export function OpenSplit({ workspaceId }: { workspaceId: string }) {

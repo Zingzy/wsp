@@ -13,16 +13,15 @@ beforeEach(() => {
 });
 
 describe("composer queue", () => {
-  it("enqueues in order, edits in place, removes by id and drops the empty queue", () => {
-    store.getState().enqueue(WS, "first");
-    store.getState().enqueue(WS, "second");
+  it("enqueues in order under the id it answers with, removes by id and drops the empty queue", () => {
+    const first = store.getState().enqueue(WS, "first");
+    const second = store.getState().enqueue(WS, "second");
     expect(prompts()).toEqual(["first", "second"]);
     const [a, b] = queue();
+    expect([a!.id, b!.id]).toEqual([first, second]);
     expect(a!.id).not.toBe(b!.id);
-    store.getState().editQueued(WS, b!.id, "second, edited");
-    expect(prompts()).toEqual(["first", "second, edited"]);
     store.getState().removeQueued(WS, a!.id);
-    expect(prompts()).toEqual(["second, edited"]);
+    expect(prompts()).toEqual(["second"]);
     store.getState().removeQueued(WS, b!.id);
     expect(store.getState().queues[WS]).toBeUndefined();
   });
@@ -97,7 +96,6 @@ describe("composer queue", () => {
     store.getState().enqueue("ws_2", "elsewhere");
     const before = store.getState();
     store.getState().removeQueued(WS, "missing");
-    store.getState().editQueued("ws_2", "missing", "x");
     expect(store.getState()).toBe(before);
     expect(store.getState().queues["ws_2"]?.map(r => r.prompt)).toEqual(["elsewhere"]);
   });

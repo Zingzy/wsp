@@ -87,6 +87,7 @@ describe("accessParams", () => {
 
   it("refuses any other mode by the three it takes", () => {
     expect(() => accessParams("yolo")).toThrow("permissionMode must be one of read-only, workspace-write, danger-full-access");
+    expect(() => accessParams("plan")).toThrow('permissionMode must be one of read-only, workspace-write, danger-full-access, got "plan"');
   });
 
   it("a fast thread asks the server for the fast service tier, and a thread that is not fast names no tier", () => {
@@ -94,14 +95,6 @@ describe("accessParams", () => {
     expect(JSON.parse(threadStartLine({ access, serviceTier: "fast" })).params.serviceTier).toBe("fast");
     expect(JSON.parse(threadResumeLine({ access, serviceTier: "fast", threadId: "t1" })).params.serviceTier).toBe("fast");
     expect(JSON.parse(threadStartLine({ access })).params).not.toHaveProperty("serviceTier");
-  });
-
-  it("plan reads in a sandbox that asks nobody, with the planning instructions as the thread's developer instructions", () => {
-    const plan = accessParams("plan");
-    expect(plan).toMatchObject({ sandbox: "read-only", approvalPolicy: "never" });
-    expect(plan.developerInstructions).toContain("Plan Mode");
-    expect(JSON.parse(threadStartLine({ access: plan })).params.developerInstructions).toContain("Plan Mode");
-    expect(accessParams("read-only")).not.toHaveProperty("developerInstructions");
   });
 });
 

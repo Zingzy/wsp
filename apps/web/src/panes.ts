@@ -76,7 +76,7 @@ export const PANES: { readonly [K in RightPanelKind]: Pane<K> } = {
     title: (surface, names) => names.terminalLabelsById.get(surface.activeTerminalId) ?? "Terminal",
   },
   diff: {
-    label: "Diff",
+    label: "Changes",
     description: "Review the changes here.",
     icon: FileDiff,
     shortcut: "D",

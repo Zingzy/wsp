@@ -74,8 +74,42 @@ export function titleForCommand(options: { prompt: string; model?: string; baseE
   const env = buildEnv({ base: options.baseEnv });
   const exports = Object.entries(env).map(([k, v]) => `${k}=${shellQuote(v)}`).join(" ");
   const clean = `unset \${!CLAUDE_CODE_@} CLAUDECODE FORCE_CODE_TERMINAL; export ${exports}`;
-  const claude = ["claude -p", "--safe-mode", "--output-format json", "--allowed-tools ''", ...(options.model === undefined ? [] : [`--model ${shellQuote(options.model)}`])].join(" ");
-  return `cd ~ && ${clean}; printf '%s' ${shellQuote(options.prompt)} | ${claude}`;
+  return `cd ~ && ${clean}; printf '%s' ${shellQuote(options.prompt)} | ${questionLine(options.model)}`;
+}
+
+/** The print-mode question as the title asks it: the person's customizations off, no tool, and their sign-in read. */
+const questionLine = (model?: string): string =>
+  ["claude -p", "--safe-mode", "--output-format json", "--allowed-tools ''", ...(model === undefined ? [] : [`--model ${shellQuote(model)}`])].join(" ");
+
+/**
+ * One shell line for the guest that asks the CLI for a commit message: the same print-mode question the title asks,
+ * with no thread, no tool and the person's customizations off, reading the question from the file the runtime put on
+ * the machine, since a diff is longer than any command line may be.
+ */
+export function draftForCommand(options: { promptFile: string; model?: string; baseEnv?: Readonly<Record<string, string | undefined>> }): string {
+  const env = buildEnv({ base: options.baseEnv });
+  const exports = Object.entries(env).map(([k, v]) => `${k}=${shellQuote(v)}`).join(" ");
+  const clean = `unset \${!CLAUDE_CODE_@} CLAUDECODE FORCE_CODE_TERMINAL; export ${exports}`;
+  return `cd ~ && ${clean}; ${questionLine(options.model)} < ${shellQuote(options.promptFile)}`;
+}
+
+/** The message out of the print-mode answer, its result field whole; null when the CLI errored or answered nothing. */
+export function parseDraftFor(stdout: string): string | null {
+  for (const raw of stdout.split("\n")) {
+    const line = raw.trim();
+    if (!line.startsWith("{")) continue;
+    let value: unknown;
+    try {
+      value = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (typeof value !== "object" || value === null || Array.isArray(value)) continue;
+    const answer = value as Record<string, unknown>;
+    if (answer.type !== "result" || answer.is_error === true || typeof answer.result !== "string") continue;
+    return answer.result.trim() === "" ? null : answer.result;
+  }
+  return null;
 }
 
 /** The title out of the print-mode answer: its result field, sanitized; null when the CLI errored, answered nothing

@@ -1,0 +1,30 @@
+[
+  {
+    "id": 1,
+    "op": "git.commit",
+    "cwd": "repo",
+    "paths": [
+      "a.txt"
+    ]
+  },
+  {
+    "id": 1,
+    "op": "git.commit",
+    "cwd": "repo",
+    "message": "m"
+  },
+  {
+    "id": 1,
+    "op": "git.commit",
+    "cwd": "repo",
+    "message": "m",
+    "paths": "a.txt"
+  },
+  {
+    "id": 1,
+    "op": "git.commit",
+    "cwd": "repo",
+    "message": 3,
+    "paths": []
+  }
+]

@@ -896,6 +896,8 @@ describe("runtime wire types", () => {
       "image.export", "host.folders", "agents.read", "servers.tools", "servers.icon", "agents.signIn", "servers.signIn", "agents.signInCode", "agents.signInStop", "agents.signInLine", "agents.key", "agents.addTools", "skills.search", "skills.get", "skills.preview", "skills.add", "skills.remove", "skills.toggle", "servers.add", "servers.remove", "servers.toggle", "project.seed.plan", "project.plan", "project.import", "project.export",
       "pair.issue", "pair.redeem", "seal.open", "device.auth", "place.join", "place.auth", "place.prove", "host.restart", "guest.open", "guest.send",
       "editor.list", "editor.open",
+      // A commit runs the copy's hooks, a draft runs its agent and spends on a model, and a discard throws work away.
+      "workspaces.commit", "workspaces.commitDraft", "workspaces.discard",
     ];
     for (const op of held) {
       expect(wire.RUNTIME_OPS, op).toContain(op);
@@ -961,7 +963,7 @@ describe("runtime wire types", () => {
       models: [{ value: "claude-opus-5", label: "Opus 5", isDefault: true, contextWindows: ["200k", "1m"] }, { value: "claude-haiku-4-5", label: "Haiku", efforts: [], contextWindows: [] }],
       efforts: [{ value: "high", label: "High", isDefault: true }],
       contextWindows: [{ value: "200k", label: "200k" }, { value: "1m", label: "1M", isDefault: true }],
-      permissionModes: [{ value: "plan", label: "Plan", description: "Read and plan only" }],
+      permissionModes: [{ value: "acceptEdits", label: "Accept edits", description: "Edits files without asking" }],
       steers: true,
       renames: true,
       images: true,
@@ -1047,7 +1049,7 @@ describe("runtime wire types", () => {
       ],
       efforts: [{ value: "low", label: "Low" }, { value: "high", label: "High" }],
       contextWindows: [{ value: "200k", label: "200k" }, { value: "1m", label: "1M", isDefault: true }],
-      permissionModes: [{ value: "plan", label: "Plan" }],
+      permissionModes: [{ value: "acceptEdits", label: "Accept edits" }],
       steers: true,
       renames: true,
       images: true,
@@ -1498,13 +1500,13 @@ describe("thread provenance", () => {
     expect("costUsd" in said!).toBe(false);
   });
 
-  it("foldThreads carries the access and the fast mode the latest turn ran at, so a listing shows a thread in plan or fast", () => {
+  it("foldThreads carries the access and the fast mode the latest turn ran at, so a listing shows a thread in accept edits or fast", () => {
     const [thread, plain] = foldThreads([
       { ...row, id: "s1", threadId: "thr_a", permissionMode: "default" },
-      { ...row, id: "s2", threadId: "thr_a", permissionMode: "plan", fast: true },
+      { ...row, id: "s2", threadId: "thr_a", permissionMode: "acceptEdits", fast: true },
       { ...row, id: "s3", threadId: "thr_b" },
     ]);
-    expect([thread!.permissionMode, thread!.fast]).toEqual(["plan", true]);
+    expect([thread!.permissionMode, thread!.fast]).toEqual(["acceptEdits", true]);
     expect("permissionMode" in plain! || "fast" in plain!).toBe(false);
     expect(ThreadView.parse(thread)).toEqual(thread);
   });

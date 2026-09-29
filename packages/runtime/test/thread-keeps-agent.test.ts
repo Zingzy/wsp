@@ -135,10 +135,10 @@ describe("the agent and the access a send into an existing thread runs on", () =
     await first.finished;
     // A second thread in the same workspace, on another agent at another access: neither the thread beside it nor
     // the agent the project now remembers stands in the way of the picks this start names.
-    const other = await rt.sessions.start(ws.id, { prompt: "two", harness: "claude", permissionMode: "plan" });
+    const other = await rt.sessions.start(ws.id, { prompt: "two", harness: "claude", permissionMode: "acceptEdits" });
     await other.finished;
     expect(other.view().threadId).not.toBe(first.view().threadId);
-    expect(claude.starts.at(-1)?.permissionMode).toBe("plan");
+    expect(claude.starts.at(-1)?.permissionMode).toBe("acceptEdits");
     expect(codex.starts).toHaveLength(1);
   });
 });

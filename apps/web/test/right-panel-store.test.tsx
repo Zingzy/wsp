@@ -109,7 +109,7 @@ describe("rightPanelStore hydrate", () => {
       return <RightPanel workspaceId={WS} state={state} mode="inline" />;
     };
     render(<Panel />);
-    expect(screen.getAllByText(/diff/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/changes/i).length).toBeGreaterThan(0);
   });
 
   it("a stored value that is not an object hydrates to the empty map", async () => {

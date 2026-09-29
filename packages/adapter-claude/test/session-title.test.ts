@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterAll, describe, expect, it } from "vitest";
 import type { SessionRenameWrite } from "@wsp/protocol";
-import { parseRename, parseSessionTitle, parseTitleFor, renameCommand, sessionTitleCommand, titleForCommand } from "../src/session-title.js";
+import { draftForCommand, parseDraftFor, parseRename, parseSessionTitle, parseTitleFor, renameCommand, sessionTitleCommand, titleForCommand } from "../src/session-title.js";
 import { writeStub } from "../../protocol/test/stub-script.js";
 
 const SESSION = "5b3d3ddb-86d6-47ba-b216-0a510284d8b6";
@@ -181,5 +181,28 @@ describe("naming a Claude Code session from wsp", () => {
     expect(parseRename("bash: no such file\n")).toEqual({ kind: "failed", error: "bash: no such file" });
     expect(parseRename("no-session\n")).toEqual({ kind: "no-session" });
     expect(parseRename("wrote\n")).toEqual({ kind: "written" });
+  });
+});
+
+describe("the commit message Claude Code drafts", () => {
+  it("reads the question from the file on stdin with no tool and the person's customizations off, and answers the result whole", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-claude-draft-"));
+    const seen = join(dir, "seen");
+    const asked = join(dir, "it's the question.txt");
+    writeFileSync(asked, "Write a commit message.\n\nThe diff:\n+one\n");
+    const bin = fakeClaude(`{ printf '%s\\n' "$*"; cat; } > ${seen}\nprintf '{"type":"result","is_error":false,"result":"Round the total once\\\\n\\\\nIt rounded per line."}\\n'`);
+    const command = draftForCommand({ promptFile: asked, model: "claude-haiku-4-5" });
+    const { stdout } = await run("bash", ["-c", command], { env: { PATH: `${bin}:${process.env["PATH"] ?? ""}` } });
+    expect(parseDraftFor(stdout)).toBe("Round the total once\n\nIt rounded per line.");
+    const [argv, ...rest] = readFileSync(seen, "utf8").split("\n");
+    expect(argv).toBe("-p --safe-mode --output-format json --allowed-tools  --model claude-haiku-4-5");
+    expect(rest.join("\n")).toBe("Write a commit message.\n\nThe diff:\n+one\n");
+    expect(command).not.toContain("--bare");
+  });
+
+  it("reads no message out of an error or out of nothing", () => {
+    expect(parseDraftFor('{"type":"result","is_error":true,"result":"Credit balance is too low"}')).toBeNull();
+    expect(parseDraftFor('{"type":"result","is_error":false,"result":"  "}')).toBeNull();
+    expect(parseDraftFor("Invalid API key\n")).toBeNull();
   });
 });

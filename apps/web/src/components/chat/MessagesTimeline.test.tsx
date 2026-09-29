@@ -273,7 +273,7 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("!size-[22px]");
     expect(markup).toContain("size-3");
     expect(markup).toContain('aria-label="Collapse all folders"');
-    expect(markup).toContain('aria-label="Open diff"');
+    expect(markup).toContain('aria-label="Open changes"');
     expect(markup).toContain("1 changed file");
   });
 
@@ -475,16 +475,16 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("transparent calc(100% - 1.5rem)");
   });
 
-  it("marks a steered user message with the muted mono word and nothing else; a plain one carries no mark", () => {
+  it("puts nothing above a message sent into a running turn: the bubble's hover says it, and a plain one says nothing", () => {
     const entry = buildUserTimelineEntry("when it ends, say pineapple");
     const steered = renderToStaticMarkup(
       <MessagesTimeline {...buildProps()} timelineEntries={[{ ...entry, message: { ...entry.message, steered: true } }]} />,
     );
-    expect(steered).toContain('data-user-message-steered="true"');
-    expect(steered).toMatch(/font-mono[^>]*>steered</);
-    expect(steered).not.toContain("role=\"status\"");
+    expect(steered).not.toMatch(/>steered</);
+    expect(steered).toMatch(/data-user-message-steered="true"[^>]*title="Sent while the agent was working"|title="Sent while the agent was working"[^>]*data-user-message-steered="true"/);
     const plain = renderToStaticMarkup(<MessagesTimeline {...buildProps()} timelineEntries={[entry]} />);
-    expect(plain).not.toContain("steered");
+    expect(plain).not.toContain("Sent while the agent was working");
+    expect(plain).not.toContain("data-user-message-steered");
   });
 
   it("does not render collapse controls for short user messages", () => {

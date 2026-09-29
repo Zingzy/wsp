@@ -272,6 +272,11 @@ import {
   escapeC1,
   jsonLine,
   withoutControlChars,
+  CommitDraft,
+  GitCommitReply,
+  GitDiscardReply,
+  committedLine,
+  discardedLine,
   isProviderPlace,
   providerKeyName,
 } from "@wsp/protocol";
@@ -1269,6 +1274,20 @@ async function broughtBack(client: HostClient, workspaceId: string, title?: stri
   return BringBackResult.parse(
     await client.request("workspaces.bringBack", { workspaceId, ...(title !== undefined ? { title } : {}), ...(body !== undefined ? { body } : {}) }),
   );
+}
+
+/** A commit of the files named, or of every changed file, with the message given; without one the workspace's agent
+ * drafts it and the draft is said on the line given before the commit is made with it. */
+async function committed(client: HostClient, workspaceId: string, message: string | undefined, files: string[], say: (line: string) => void): Promise<GitCommitReply> {
+  const named = files.length > 0 ? { paths: files } : {};
+  let text = message;
+  if (text === undefined) {
+    const draft = CommitDraft.parse(await client.request("workspaces.commitDraft", { workspaceId, ...named }));
+    if (draft.message === null) throw usageRefusal(`no message was drafted: ${draft.note ?? "the agent gave none"}`, 'Pass one with --message "<message>".');
+    say(draft.message);
+    text = draft.message;
+  }
+  return GitCommitReply.parse(await client.request("workspaces.commit", { workspaceId, message: text, ...named }));
 }
 
 /** What a bring back reads as: where the branch went and how far it is over the base, git's own diffstat under it,
@@ -2781,7 +2800,7 @@ const ConfirmIn = z.boolean().optional().describe("true deletes the machine; abs
 const PICK_INPUTS = {
   model: z.string().optional().describe("the model the turn runs on, by the agent's own slug (claude-sonnet-5); absent on a new thread means the catalog's default, on send the thread's own"),
   effort: z.string().optional().describe("the reasoning effort, by the agent's own word (low, medium, high, xhigh, max); absent means the agent's default, high for claude"),
-  access: z.string().optional().describe("the access mode, by the agent's own word (plan, acceptEdits, bypassPermissions); absent means what a thread on that workspace starts at, which on this computer and on a machine wsp forked is every action without asking, and on a computer you own is asking about each one"),
+  access: z.string().optional().describe("the access mode, by the agent's own word (Claude Code's acceptEdits or bypassPermissions, Codex's read-only or workspace-write); absent means what a thread on that workspace starts at, which on this computer and on a machine wsp forked is every action without asking, and on a computer you own is asking about each one"),
 };
 /** The same two on send, for the reason SEND_FLAGS gives. */
 const SEND_INPUTS = { model: PICK_INPUTS.model, effort: PICK_INPUTS.effort };
@@ -4080,6 +4099,70 @@ export const ALL_VERBS: readonly Verb[] = [
     }),
   },
   {
+    name: "commit",
+    usage: 'wsp commit <workspace> [--message "<message>"] [--file <path>]...',
+    about: "commits the files the workspace's copy changed, or the ones named; without a message its agent drafts one",
+    page: "agent",
+    options: { message: { type: "string", short: "m" }, file: { type: "string", multiple: true } },
+    run: async ctx => {
+      const [ref] = ctx.args;
+      if (ref === undefined || ctx.args.length !== 1) throw usageRefusal("wsp commit takes one workspace.", usageIs(ctx));
+      const client = await ctx.client();
+      const workspace = await workspaceOf(client, ref);
+      const { workspace: awoken } = await awake(client, workspace, "commit", line => ctx.io.error(line));
+      const made = await committed(client, awoken.id, flag(ctx.flags, "message"), flagList(ctx.flags, "file"), line => ctx.io.error(line));
+      ctx.out.emit({ ...made }, committedLine(awoken.name, made));
+      return 0;
+    },
+    tool: tool({
+      description:
+        "Commits the files the workspace's copy changed against its last commit, untracked ones added, with the message given, running the copy's hooks as git does; files names some of them by path from the checkout's top and leaves the rest uncommitted. Without a message the workspace's own agent drafts one from the diff and the task its newest thread was opened with, on its own command line with no thread and no tool, and the commit is made with that. Refused in one line when a file named has no change, when git knows no author in the copy (with the command that sets one), when a hook said no (with its last line), and when another git in the copy holds the index after one wait. Nothing reaches a remote: bring back is what pushes.",
+      input: {
+        workspace: WorkspaceIn,
+        message: z.string().optional().describe("the commit message, a subject line then a blank line and the body; without one the workspace's agent drafts it"),
+        files: z.array(z.string()).optional().describe("the files to commit, by path from the checkout's top as git status names them; without it every changed file"),
+      },
+      output: GitCommitReply.shape,
+      call: async ({ workspace: ref, message, files }, deps) => {
+        const client = await deps.client();
+        const workspace = await workspaceOf(client, ref);
+        const { workspace: awoken } = await awake(client, workspace, "commit", QUIET_LINE);
+        const made = await committed(client, awoken.id, message, files ?? [], () => {});
+        return asText(committedLine(awoken.name, made), { ...made });
+      },
+    }),
+  },
+  {
+    name: "discard",
+    usage: "wsp discard <workspace> <path>",
+    about: "puts one changed file of the workspace's copy back as its last commit has it, or removes it where that has none",
+    page: "agent",
+    options: {},
+    run: async ctx => {
+      const [ref, path] = ctx.args;
+      if (ref === undefined || path === undefined || ctx.args.length !== 2) throw usageRefusal("wsp discard takes one workspace and one file.", usageIs(ctx));
+      const client = await ctx.client();
+      const workspace = await workspaceOf(client, ref);
+      const { workspace: awoken } = await awake(client, workspace, "discard", line => ctx.io.error(line));
+      const put = GitDiscardReply.parse(await client.request("workspaces.discard", { workspaceId: awoken.id, path }));
+      ctx.out.emit({ ...put }, discardedLine(awoken.name, put.path));
+      return 0;
+    },
+    tool: tool({
+      description:
+        "Puts one changed file of the workspace's copy back as its last commit has it: an edit or a deletion is undone, a rename takes its new name away and brings the old one back, and a file the last commit does not have is removed. Only the file named moves, and it cannot be undone. Refused in one line when the file has no change.",
+      input: { workspace: WorkspaceIn, path: z.string().describe("the file, by path from the checkout's top as git status names it") },
+      output: GitDiscardReply.shape,
+      call: async ({ workspace: ref, path }, deps) => {
+        const client = await deps.client();
+        const workspace = await workspaceOf(client, ref);
+        const { workspace: awoken } = await awake(client, workspace, "discard", QUIET_LINE);
+        const put = GitDiscardReply.parse(await client.request("workspaces.discard", { workspaceId: awoken.id, path }));
+        return asText(discardedLine(awoken.name, put.path), { ...put });
+      },
+    }),
+  },
+  {
     name: "pause",
     usage: "wsp pause <workspace>",
     about: "naps the workspace's machine",
@@ -4798,7 +4881,7 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   agents: "the agents whose sessions for that folder travel with it, by catalog id, comma separated; every one that has them without it",
   "add-check": "<id>=<command> proving that added tool is on the machine; repeats",
   add: "<id>=<command> carrying a tool neither the catalog nor this computer has, installed by that command on the machine; repeats",
-  access: "how far the agent may go without asking, by the agent's own word (plan, acceptEdits, bypassPermissions); without it, what a thread on that workspace starts at: every action without asking on this computer and on a machine wsp forked, asking about each one on a computer you own",
+  access: "how far the agent may go without asking, by the agent's own word (Claude Code's acceptEdits or bypassPermissions, Codex's read-only or workspace-write); without it, what a thread on that workspace starts at: every action without asking on this computer and on a machine wsp forked, asking about each one on a computer you own",
   cwd: "the folder on the machine to work in; the project's folder without it",
   detach: "print the thread's id and return, leaving the reply to the thread's finished line",
   effort: "how hard the agent thinks, by its own word (low, medium, high, xhigh, max); its default without it",
@@ -4872,6 +4955,8 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   title: "what to call the thread; the agent names it from the task without one",
   "bring back title": "what to call the pull request; the host fills its title and its body from the commits without one",
   "bring back body": "the pull request's body, which needs a title beside it",
+  "commit message": "the commit message, a subject line, a blank line, then the body, -m for short; the workspace's agent drafts it without one",
+  "commit file": "a file to commit, by path from the checkout's top, once per file; every changed file without one",
   tree: "indent the threads an agent opened under the one that opened them",
   watch: "draw the table again every second where it stands, until Ctrl-C; it needs a terminal to redraw on",
   why: "what the rows this line adds are for, in your own words; the rows say an agent added them without it",

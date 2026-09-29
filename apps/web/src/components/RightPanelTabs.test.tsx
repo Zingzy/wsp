@@ -32,10 +32,10 @@ const cards = () => [...document.querySelectorAll<HTMLElement>("[data-surface-la
 afterEach(cleanup);
 
 describe("the right panel's launcher", () => {
-  it("offers Browser, Terminal, Diff, Files, Computer, Processes and Agents and nothing else", () => {
+  it("offers Browser, Terminal, Changes, Files, Computer, Processes and Agents and nothing else", () => {
     draw();
     expect(cards()).toEqual(["preview", "terminal", "diff", "files", "machine", "processes", "agents"]);
-    for (const label of ["Browser", "Terminal", "Diff", "Files", "Computer", "Processes", "Agents"]) expect(screen.getByText(label)).toBeTruthy();
+    for (const label of ["Browser", "Terminal", "Changes", "Files", "Computer", "Processes", "Agents"]) expect(screen.getByText(label)).toBeTruthy();
     expect(screen.queryByText("Screen")).toBeNull();
     expect(screen.queryByText("Workspace")).toBeNull();
     expect(document.querySelector("[data-surface-launcher-keys]")?.getAttribute("data-surface-launcher-keys")).toBe("BTDFMPA");
@@ -43,7 +43,7 @@ describe("the right panel's launcher", () => {
 
   it("says what each pane is for in the person's own words, never a task", () => {
     draw();
-    expect(screen.getByText("A browser, a terminal, the diff, the files, the computer or what runs on it.")).toBeTruthy();
+    expect(screen.getByText("A browser, a terminal, the changes, the files, the computer or what runs on it.")).toBeTruthy();
     expect(screen.getByText("Browse and read the files here.")).toBeTruthy();
     expect(screen.getByText("Open your dev server or a URL.")).toBeTruthy();
     expect(screen.getByText("Start a shell here.")).toBeTruthy();
@@ -102,7 +102,7 @@ describe("the right panel's launcher", () => {
   it("dims a held row's label, glyph and key at 0.64 and leaves its reason at full ink", () => {
     draw({ diffAvailable: false });
     const diff = document.querySelector<HTMLElement>('[data-surface-launch="diff"]')!;
-    expect(within(diff).getByText("Diff").className).toContain("opacity-64");
+    expect(within(diff).getByText("Changes").className).toContain("opacity-64");
     expect(diff.querySelector("kbd")!.className).toContain("opacity-64");
     expect(diff.querySelector("svg")!.getAttribute("class")).toContain("opacity-64");
     expect(within(diff).getByText("Review the changes once it runs.").className).not.toContain("opacity");
@@ -119,7 +119,7 @@ describe("the right panel's launcher", () => {
   it("names the open panes on the tab strip", () => {
     draw({ surfaces: [{ id: "diff", kind: "diff" }, { id: "machine", kind: "machine" }, { id: "processes", kind: "processes" }], activeSurfaceId: "diff" });
     const strip = document.querySelector("[data-right-panel-tab-list]")?.textContent;
-    expect(strip).toContain("Diff");
+    expect(strip).toContain("Changes");
     expect(strip).toContain("Computer");
     expect(strip).toContain("Processes");
     expect(document.querySelector("[data-pane]")).not.toBeNull();

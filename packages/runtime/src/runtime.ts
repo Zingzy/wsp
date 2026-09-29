@@ -227,13 +227,13 @@ import type {
 } from "@wsp/protocol";
 import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding } from "./project-landing.js";
 import { projectRemote, projectSource } from "./project-sources.js";
-import { vaultUnlistedRefusal, ThreadPlacement, ThreadScope, WorkspaceOrigin, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, agentsFrom, foldThreads, runningOn as runningOnPlace, phaseHoldsSlot, placeAtLimitLine, placeSpendLimit, spendCapRefusal, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadKeyOf, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, SCOPED_MCP_ARG, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
-import { ASIDE_NO_SESSION_LINE, BLANK_ASIDE_LINE, asideUnsupportedLine, REWIND_LATEST_LINE, REWIND_NO_CHECKPOINT_LINE, REWIND_NO_UNDO_LINE, REWIND_OWN_FOLDER_LINE, REWIND_WORKING_LINE, rewindBesideLine, rewindChildrenLine, rewindNoAnchorLine, PLACE_WORKSPACE_PATH, THIS_COMPUTER, COPY_BUILD_FIX, copyAsksSignIns, refusal, copyFirstLine, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildOf, copyIsCurrent, type CopyBuild, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, serverIconsLeftLine, homeShortened, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, threadRunsOnLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, GONE_UNCHECKED, goneUnconfirmedLine, type GoneSeenBy, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, cloneFailedLine, cloneIntoNeeded, cloneIntoTakenLine, cloneUrlRefusal, intoIsHereLine, INTO_TAKES_A_REPO_LINE, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeBlocked, placeDaemonBehind, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeDaemonPaths, placeDialBackLine, placeWentAwayLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, workspaceLands, copyPathFor, folderSlug, type ProjectCopy, attachmentRecord, filesBlocked, isImage, sendFilesDir, filePathIn, landFilesLine, filesNotLandedLine, attachedFilesPrompt, dropFilesLine } from "@wsp/protocol";
+import { vaultUnlistedRefusal, ThreadPlacement, ThreadScope, WorkspaceOrigin, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, GitCommitReply, GitDiscardReply, GitDiffReply, GitStatusReply, DRAFT_NOTES, cleanCheckoutLine, commitMessage, cutDiff, draftPrompt, type Checkout, type CheckoutReply, type CommitDraft, type CommitDrafter, type ViewedMarks, agentsFrom, foldThreads, runningOn as runningOnPlace, phaseHoldsSlot, placeAtLimitLine, placeSpendLimit, spendCapRefusal, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadKeyOf, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, SCOPED_MCP_ARG, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
+import { ASIDE_NO_SESSION_LINE, BLANK_ASIDE_LINE, asideUnsupportedLine, PLACE_WORKSPACE_PATH, THIS_COMPUTER, COPY_BUILD_FIX, copyAsksSignIns, refusal, copyFirstLine, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildOf, copyIsCurrent, type CopyBuild, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, serverIconsLeftLine, homeShortened, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, threadRunsOnLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, GONE_UNCHECKED, goneUnconfirmedLine, type GoneSeenBy, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, cloneFailedLine, cloneIntoNeeded, cloneIntoTakenLine, cloneUrlRefusal, intoIsHereLine, INTO_TAKES_A_REPO_LINE, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeBlocked, placeDaemonBehind, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeDaemonPaths, placeDialBackLine, placeWentAwayLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, workspaceLands, copyPathFor, folderSlug, type ProjectCopy, REWIND_LATEST_LINE, REWIND_NO_CHECKPOINT_LINE, REWIND_NO_UNDO_LINE, REWIND_OWN_FOLDER_LINE, REWIND_WORKING_LINE, rewindBesideLine, rewindChildrenLine, rewindNoAnchorLine, attachmentRecord, filesBlocked, isImage, sendFilesDir, filePathIn, landFilesLine, filesNotLandedLine, attachedFilesPrompt, dropFilesLine } from "@wsp/protocol";
 import { agentsReads, type AgentsActs, type AgentsReader, type CallbackForwards, type ServerIcons, type ServersActs, type SignInAsk, type SkillAsk, type SkillsActs } from "./agents-read.js";
 import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from "./daemon-channel.js";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
-import { isNoProvider, isPlaceAbsent, projectStateKey, type Copier } from "@wsp/engine";
+import { isNoProvider, isPlaceAbsent, projectStateKey, putFiles, type Copier } from "@wsp/engine";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
 import { assertTokenShape, daemonTokenFor, daemonTokenPathOf, rotateDaemonToken } from "./daemon-token.js";
@@ -395,6 +395,9 @@ export interface HarnessAdapter {
   /** Asks the harness itself for a name for a thread it has just replied in; absent on a harness that cannot answer a
    * question of its own. */
   titleFor?: SessionTitleMaker;
+  /** Asks the harness itself for a commit message with no thread and no tool; absent on a harness that cannot answer
+   * a question of its own, and the commit box opens empty with the line saying so. */
+  draftFor?: CommitDrafter;
   /** Answers a question beside a thread on a copy of its session that nothing keeps; absent on a harness that cannot
    * copy a session, and the composer offers no side question for it. */
   aside?: SessionAsker;
@@ -433,6 +436,10 @@ const CATALOG_PROBE_TIMEOUT_MS = 25_000;
 /** How long a harness's title for a session stands before its store is read again on a refresh. Clients reload the
  * index on every session event, and a person renaming a session in the harness waits at most this long to see it. */
 export const SESSION_TITLE_TTL_MS = 10_000;
+
+/** How long a copy's checkout, once read, answers a tile or a pane asking again without asking git: every tile reads
+ * it as it mounts, and a sidebar of twenty is one read, not twenty. */
+export const CHECKOUT_TTL_MS = 10_000;
 /** A grep of one session file or a row out of one sqlite; a guest slower than this keeps the title it last gave. */
 const SESSION_TITLE_TIMEOUT_MS = 15_000;
 /** How many of a workspace's harness sessions one refresh asks about, newest first: a store read is an exec on the
@@ -729,6 +736,10 @@ interface LiveWorkspace {
   wakeAsk?: { ask: number; of: number };
   /** Set from the fork until the create is ready: the sweep knows the machine, nothing else can reach it yet. */
   creating?: true;
+  /** The copy's checkout as git last answered it, carried on every status built for the workspace. */
+  checkout?: Checkout;
+  /** The checkout read in flight, which a second asker joins. */
+  checkoutReading?: Promise<Checkout | undefined>;
 }
 
 /** Reports one create stage as it is reached; the runtime stamps id, name and elapsed time. A notice is a second
@@ -1379,6 +1390,20 @@ export interface Runtime {
      * workspace as a branch of its own. A machine with no signed-in command line for the git host still pushes,
      * and says why the pull request waits as the result's note. */
     bringBack(o: { workspaceId: string; title?: string; body?: string }, origin?: Caller): Promise<BringBackResult>;
+    /** The copy's checkout as the host holds it, read again through the copy's daemon unless it was read within
+     * CHECKOUT_TTL_MS; a machine that is not running and whose computer does not answer for it keeps its last fact. */
+    checkout(id: string, origin?: Caller): Promise<CheckoutReply>;
+    /** Puts one changed file of the copy back as HEAD has it, then reads the checkout again. */
+    discard(o: { workspaceId: string; path: string }, origin?: Caller): Promise<GitDiscardReply>;
+    /** Commits the files named in the copy with the message given, then reads the checkout again; no paths is every
+     * changed file. A thread commits under the same guard a bring back passes. */
+    commit(o: { workspaceId: string; message: string; paths?: string[] }, origin?: Caller): Promise<GitCommitReply>;
+    /** A commit message for the files named, or every changed file, from their diff against HEAD and the task the
+     * workspace's newest thread was opened with, drafted by that thread's agent with no thread and no tool; none with
+     * the line saying why. */
+    commitDraft(o: { workspaceId: string; paths?: string[] }, origin?: Caller): Promise<CommitDraft>;
+    /** The workspace's viewed marks; with a path, the mark on that file set against the blob or taken off at null. */
+    viewed(o: { workspaceId: string; path?: string; blob?: string | null }, origin?: Caller): Promise<ViewedMarks>;
     /** How a browser dials this workspace's daemon; throws on backends without preview URLs. */
     daemonReach(id: string, origin?: Caller): Promise<DaemonReachView>;
     /** One channel to the daemon answering for this workspace, frame by frame, with every event that daemon
@@ -1967,6 +1992,8 @@ interface ThreadRecord {
 
 interface SessionIndexRecord {
   workspaceId: string;
+  /** The files a person marked viewed, by path, against the blob id each had then. */
+  viewed?: Record<string, string>;
   /** reply is the held status of a turn whose result landed while its process still ran, on a row still running;
    * run is where that turn is on its machine, so a host that comes back re-opens it rather than failing it, and
    * turnToken is what that surviving process still has in its environment, so the host that re-opens it can answer
@@ -3330,6 +3357,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   // Rows are copied at queue time, like the transcript: the store may serialise after it returns. A harness that
   // settles after its workspace was deleted must not write the document back.
+  /** Every workspace's viewed marks, by path against the blob id each file had when it was marked; kept on the session
+   * index so they outlive the host and go with the workspace. */
+  const viewedMarks = new Map<string, Record<string, string>>();
+
   const persistSessions = (workspaceId: string): Promise<void> => {
     if (!live.has(workspaceId)) return Promise.resolve();
     capSessions(workspaceId);
@@ -3350,7 +3381,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       }));
     const threads: Record<string, ThreadRecord> = {};
     for (const [threadId, { workspaceId: on, ...held }] of threadRecords) if (on === workspaceId) threads[threadId] = held;
-    const snapshot: SessionIndexRecord = { workspaceId, sessions: rows, threads };
+    const marks = viewedMarks.get(workspaceId);
+    const snapshot: SessionIndexRecord = { workspaceId, sessions: rows, threads, ...(marks !== undefined && Object.keys(marks).length > 0 ? { viewed: marks } : {}) };
     const queued = (indexFlushes.get(workspaceId) ?? Promise.resolve())
       .then(() => store.put(SESSIONS, workspaceId, snapshot))
       .catch(() => {});
@@ -3576,7 +3608,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** The whole of what a client's channel into a served workspace carries, for the reason DEVICE_OPS is a list: that
    * computer's daemon runs every other op on the computer itself, so a deny list would let an op added later reach it.
    * Each of these names the workspace it is for, and the daemon answers it inside that workspace. */
-  const WORKSPACE_FRAMES = ["pty.create", "pty.attach", "pty.detach", "pty.write", "pty.resize", "pty.kill", "pty.list", "fs.list", "fs.files", "fs.read", "fs.search", "git.status", "git.diff", "git.push", "git.pr", "git.prState", "git.prList", "ping"];
+  const WORKSPACE_FRAMES = ["pty.create", "pty.attach", "pty.detach", "pty.write", "pty.resize", "pty.kill", "pty.list", "fs.list", "fs.files", "fs.read", "fs.write", "fs.search", "git.status", "git.diff", "git.push", "git.pr", "git.prState", "git.prList", "ping"];
   /** And the host's own guest road, which answers the sessions that computer relays by the id it gave them. */
   const GUEST_ROAD_FRAMES = [...WORKSPACE_FRAMES, "guest.watch", "guest.reply", "guest.close"];
 
@@ -3956,6 +3988,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         ...(reason !== undefined ? { reason } : {}),
         ...(entry.wakeAsk !== undefined ? { wakeAsk: entry.wakeAsk } : {}),
         ...(idleAt !== undefined ? { idleAt } : {}),
+        ...(entry.checkout !== undefined ? { checkout: entry.checkout } : {}),
       },
     });
   };
@@ -3992,6 +4025,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const pingDaemon = async (entry: LiveWorkspace): Promise<string | undefined> => {
     const machine = entry.machine;
     const answersMs = lifecycleOf(entry).budgets.daemonAnswersMs;
+    // The person's stop on a wake ends the wait here too: the budget runs to minutes, and the row's toggle waits for
+    // the wake to let go.
+    const stop = entry.wakeStop?.signal;
+    const orStopped = <T>(p: Promise<T>): Promise<T> =>
+      stop === undefined
+        ? p
+        : Promise.race([p, new Promise<never>((_, reject) => (stop.aborted ? reject(new Error(WAKE_STOPPED)) : stop.addEventListener("abort", () => reject(new Error(WAKE_STOPPED)), { once: true })))]);
     if (machine.daemonAnswers !== undefined) {
       const deadline = clock.now() + answersMs;
       try {
@@ -3999,10 +4039,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         // its nap rather than frozen comes back with its boot still running, and the budget is what the daemon is
         // given to answer in. A machine that answers at once costs one ask, as it always did.
         for (;;) {
-          const up = await until(machine.daemonAnswers({ timeoutMs: Math.min(answersMs, ASK_DAEMON_MS) }), deadline, "daemon answer");
+          const up = await orStopped(until(machine.daemonAnswers({ timeoutMs: Math.min(answersMs, ASK_DAEMON_MS) }), deadline, "daemon answer"));
           if (up) return undefined;
           if (clock.now() >= deadline) return `nothing listens on the daemon's port inside ${machine.id}`;
-          await new Promise<void>(done => clock.schedule(done, ASK_AGAIN_MS, { unref: true }));
+          await orStopped(new Promise<void>(done => clock.schedule(done, ASK_AGAIN_MS, { unref: true })));
         }
       } catch (e) {
         // The error is in hand here, so it is what the row says: only the edge road, which learns nothing but that
@@ -4011,17 +4051,20 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       }
     }
     if (!machine.previewUrl) return undefined;
-    const deadline = Date.now() + answersMs;
+    const deadline = clock.now() + answersMs;
     let link: DaemonReach | null = null;
     try {
-      link = await dialDaemon(entry, deadline, { heartbeatMs: answersMs });
+      const dialled = dialDaemon(entry, deadline, { heartbeatMs: answersMs });
+      // A dial the stop walked away from still lets go of its link once it lands.
+      dialled.then(l => (stop?.aborted === true ? l?.close() : undefined), () => {});
+      link = await orStopped(dialled);
       if (link === null) {
         // No daemon to ask; an exec that returns is the guest's own answer.
-        await until(machine.exec("true"), deadline, "guest exec");
+        await orStopped(until(machine.exec("true"), deadline, "guest exec", clock));
         return undefined;
       }
-      await until(link.ready, deadline, "daemon link");
-      await until(link.request("ping"), deadline, "daemon ping");
+      await orStopped(until(link.ready, deadline, "daemon link", clock));
+      await orStopped(until(link.request("ping"), deadline, "daemon ping", clock));
       return undefined;
     } catch (e) {
       return `daemon on ${machine.id} did not answer within ${answersMs} ms (${e instanceof Error ? e.message : String(e)})`;
@@ -4055,6 +4098,39 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const pushStatus = async (entry: LiveWorkspace): Promise<void> => {
     if (entry.record.phase !== "running") return;
     await emitStatus(entry, reachOf(entry));
+  };
+
+  /** The copy's checkout read through its own daemon, kept on the entry and pushed on its status: at a turn's end, on
+   * view and after a write, and never on a timer. Within CHECKOUT_TTL_MS the fact held answers unless the caller
+   * forces a read. A machine that is not running is asked nothing unless its computer answers for it, which reads a
+   * stopped copy off its files; one that cannot answer keeps its last fact and the time git gave it. */
+  const readCheckout = (entry: LiveWorkspace, force: boolean): Promise<Checkout | undefined> => {
+    const held = entry.checkout;
+    if (!force && held !== undefined && clock.now() - held.readAt < CHECKOUT_TTL_MS) return Promise.resolve(held);
+    if (entry.record.phase !== "running" && servedByItsComputer(entry) === undefined) return Promise.resolve(held);
+    if (entry.checkoutReading !== undefined) return entry.checkoutReading;
+    const reading = (async (): Promise<Checkout | undefined> => {
+      try {
+        const said = GitStatusReply.parse(await withDaemon(entry, ask => ask({ op: "git.status", cwd: checkoutOf(entry.record) })));
+        entry.checkout = {
+          branch: said.branch.head,
+          ahead: said.branch.ahead,
+          behind: said.branch.behind,
+          changed: said.entries.filter(e => e.xy !== "!!").length,
+          ...(said.editsUnread === true ? { editsUnread: true } : {}),
+          ...(said.countsUnknown === true ? { countsUnknown: true } : {}),
+          readAt: clock.now(),
+        };
+        await emitStatus(entry, entry.record.phase === "running" ? reachOf(entry) : "napping");
+      } catch {
+        // A copy git could not read keeps the last fact it gave; the time on it says how old it is.
+      }
+      return entry.checkout;
+    })().finally(() => {
+      delete entry.checkoutReading;
+    });
+    entry.checkoutReading = reading;
+    return reading;
   };
 
   /** The line the machine's row carries while the runtime is doing something to its daemon; undefined clears it. */
@@ -4713,6 +4789,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     daemonNotes.delete(id);
     for (const [handleId, s] of sessions) if (s.view.workspaceId === id) sessions.delete(handleId);
     for (const [threadId, held] of threadRecords) if (held.workspaceId === id) threadRecords.delete(threadId);
+    viewedMarks.delete(id);
     cancelFlush(id);
     await transcriptQueue.get(id);
     transcriptQueue.delete(id);
@@ -5236,6 +5313,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       for (const raw of await store.list(SESSIONS)) {
         const index = raw as SessionIndexRecord;
         if (!live.has(index.workspaceId)) continue;
+        const marks = Object.entries(index.viewed ?? {}).filter((pair): pair is [string, string] => typeof pair[1] === "string");
+        if (marks.length > 0) viewedMarks.set(index.workspaceId, Object.fromEntries(marks));
         for (const [threadId, held] of Object.entries(index.threads ?? {})) {
           if (typeof held?.harness !== "string") continue;
           const placed = ThreadPlacement.safeParse(held.section);
@@ -6261,6 +6340,84 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const apart = half.note !== undefined ? { note: half.note } : half.refused !== undefined ? { refused: half.refused } : { pr: GitPrReply.parse(opened).pr };
         return { branch: push.branch, base: push.base, ahead: push.ahead, uncommitted: push.uncommitted, stat: push.stat, ...apart };
       });
+    },
+
+    async checkout(id, origin) {
+      const entry = await entryOf(id, origin);
+      const checkout = await readCheckout(entry, false);
+      return checkout === undefined ? {} : { checkout };
+    },
+
+    async discard({ workspaceId, path }, origin) {
+      const entry = await entryOf(workspaceId, origin);
+      await copyBlocked(entry);
+      const put = GitDiscardReply.parse(await withDaemon(entry, ask => ask({ op: "git.discard", cwd: checkoutOf(entry.record), path })));
+      await readCheckout(entry, true);
+      return put;
+    },
+
+    async commit({ workspaceId, message, paths }, origin) {
+      spawnGuard("commit", origin);
+      const entry = await entryOf(workspaceId, origin);
+      await copyBlocked(entry);
+      const cwd = checkoutOf(entry.record);
+      const made = GitCommitReply.parse(
+        await withDaemon(entry, async ask => {
+          // Every changed file, each untracked one on its own, as the Changes pane lists them.
+          const named = paths ?? GitDiffReply.parse(await ask({ op: "git.diff", cwd, scope: "head" })).files.map(f => f.path);
+          if (paths === undefined && named.length === 0) throw new Error(cleanCheckoutLine(entry.record.name));
+          return ask({ op: "git.commit", cwd, message, paths: named });
+        }),
+      );
+      await readCheckout(entry, true);
+      return made;
+    },
+
+    async commitDraft({ workspaceId, paths }, origin) {
+      spawnGuard("commit", origin);
+      if (paths !== undefined && paths.length === 0) return { message: null, note: DRAFT_NOTES.nothing };
+      const entry = await entryOf(workspaceId, origin);
+      await copyBlocked(entry);
+      // The workspace's newest thread drafts, on its own agent and from the task it was opened with; a workspace
+      // with no thread yet drafts on the default agent from the diff alone.
+      const rows = [...sessions.values()].map(s => s.view).filter(v => v.workspaceId === workspaceId).sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0));
+      const newest = rows.at(-1);
+      const opening = newest?.threadId === undefined ? undefined : rows.find(v => v.threadId === newest.threadId)?.prompt;
+      const named = newest?.harness ?? DEFAULT_AGENT.id;
+      if (adapters[named] === undefined) return { message: null, note: DRAFT_NOTES.noAgent };
+      const { harness, adapter } = adapterFor(entry, named);
+      if (adapter.draftFor === undefined) return { message: null, note: DRAFT_NOTES.noAgent };
+      const diff = GitDiffReply.parse(await withDaemon(entry, ask => ask({ op: "git.diff", cwd: checkoutOf(entry.record), scope: "head", ...(paths !== undefined ? { paths } : {}) })));
+      const table = harnessCatalog(harness);
+      const model = smallestModel(table === undefined ? undefined : await catalogOn(table, entry, adapter));
+      // The question rides a file on the machine, since a diff is longer than one exec may carry, and only the
+      // login that wrote it may read it; it goes once the answer is in, whatever the answer was.
+      const promptFile = `/tmp/wsp-draft-${randomBytes(6).toString("hex")}.txt`;
+      const question = draftPrompt(cutDiff(diff.files.map(f => f.patch).join("\n")), opening);
+      const put = await putFiles(entry.machine, [{ path: promptFile, text: question }], { before: ["umask 077"] });
+      if (put.exitCode !== 0) return { message: null, note: DRAFT_NOTES.noAnswer };
+      try {
+        const answer = await adapter.draftFor(
+          { promptFile, ...(model !== undefined ? { model } : {}) },
+          command => entry.machine.exec(command, { timeoutMs: TITLE_MAKE_TIMEOUT_MS }).then(res => res.stdout),
+        );
+        const message = answer === null ? null : commitMessage(answer);
+        return message === null ? { message: null, note: DRAFT_NOTES.noAnswer } : { message };
+      } finally {
+        await entry.machine.exec(`rm -f ${shellQuote(promptFile)}`).catch(() => undefined);
+      }
+    },
+
+    async viewed({ workspaceId, path, blob }, origin) {
+      await entryOf(workspaceId, origin);
+      const marks = { ...(viewedMarks.get(workspaceId) ?? {}) };
+      if (path === undefined) return { viewed: marks };
+      if (typeof blob === "string") marks[path] = blob;
+      else delete marks[path];
+      viewedMarks.set(workspaceId, marks);
+      await persistSessions(workspaceId);
+      bus.emit({ type: "workspace.viewed", workspaceId, viewed: marks });
+      return { viewed: marks };
     },
 
     async daemonReach(id, origin) {
@@ -7310,6 +7467,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // and the harness's own store for it goes with the machine, so the read would reach a machine that is being
       // taken down and say so in the log for every thread on it.
       if (!ended) void refreshTitle(view, true);
+      // The turn may have moved the branch or the files, so the tile's line is read again now rather than on a timer.
+      if (!ended) void readCheckout(entry, true);
       if (t.imagesDir !== undefined) dropImages(entry, t.imagesDir);
     };
     // The reload a client runs on session.end shares that read rather than starting a second.
@@ -9723,6 +9882,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         // A pause the provider refused stays on the row as long as it stands, for the same reason.
         ...(deleteLine(e) ?? e.wakeSaid ?? e.record.wakeRefused ?? napRefusedReason(e)) !== undefined ? { reason: (deleteLine(e) ?? e.wakeSaid ?? e.record.wakeRefused ?? napRefusedReason(e))! } : {},
         ...(e.wakeAsk !== undefined ? { wakeAsk: e.wakeAsk } : {}),
+        ...(e.checkout !== undefined ? { checkout: e.checkout } : {}),
         ...(e.record.phase === "running" && idle.idleAt(e.record.id) !== undefined ? { idleAt: idle.idleAt(e.record.id)! } : {}),
         ...(awayLine(e.record) !== undefined ? { away: awayLine(e.record)! } : {}),
         ...(unreachedOf(e) !== undefined ? { unreached: unreachedOf(e)! } : {}),

@@ -57,6 +57,7 @@ import { Button } from "../ui/button";
 import { getVirtualizedScrollFadeClassName } from "../ui/scroll-area";
 import type { ExpandedImagePreview } from "./ExpandedImagePreview";
 import { ChatFileRow } from "./ChatFiles";
+import { COMPOSER_WORDS } from "./composerWords";
 import { useSentFiles } from "./composerFiles";
 import { PermissionPromptRow } from "./PermissionPromptRow";
 import { SubagentFoldRow } from "./SubagentFoldRow";
@@ -1003,10 +1004,10 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
 
   return (
     <div className="group flex flex-col items-end gap-1">
-      {row.message.steered === true ? (
-        <span data-user-message-steered="true" className="pe-1 font-mono text-[11px] leading-4 text-muted-foreground">steered</span>
-      ) : null}
-      <div className="relative max-w-[80%] rounded-2xl bg-message p-3 text-message-foreground">
+      <div
+        className="relative max-w-[80%] rounded-2xl bg-message p-3 text-message-foreground"
+        {...(row.message.steered === true ? { "data-user-message-steered": "true", title: COMPOSER_WORDS.sentWhileWorking } : {})}
+      >
         <ChatFileRow records={row.message.attachments ?? []} files={files} />
         <CollapsibleUserMessageBody
           text={row.message.text}

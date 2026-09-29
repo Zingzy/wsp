@@ -1,0 +1,15 @@
+[
+  {
+    "id": 1,
+    "op": "git.discard",
+    "cwd": "repo",
+    "path": "src/a.ts"
+  },
+  {
+    "id": 1,
+    "op": "git.discard",
+    "cwd": "/root/repo",
+    "path": "a*b.txt",
+    "machineId": "wsp-a"
+  }
+]

@@ -14,6 +14,9 @@ use wsp_frames::{numbers, CopyAsk, CopyRoadName};
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum Verb {
+    /// The protocol version this binary speaks, the number its hello carries, on one line: what a checkout's
+    /// tooling asks before it serves a host with a binary a build may have left behind.
+    Version,
     /// The workspace runtime's own verbs.
     Runtime {
         #[command(subcommand)]
@@ -194,6 +197,10 @@ fn copy(verb: CopyVerb) -> i32 {
 
 pub(crate) fn run(verb: Verb) -> i32 {
     match verb {
+        Verb::Version => {
+            println!("{}", numbers::DAEMON_VERSION);
+            0
+        }
         Verb::Runtime { verb: RuntimeVerb::Ask { frame, root } } => linux::ask(&root, &frame),
         Verb::Runtime { verb: RuntimeVerb::Create { root, id } } => linux::create(&root, &id),
         Verb::Runtime { verb: RuntimeVerb::Exec { root, id, timeout_ms, pid_file, cmd } } => {

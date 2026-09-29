@@ -4,9 +4,9 @@
 // it; a pull request or issue row is wsp's own, off the # menu; the arms name
 // their harness by string; and the one flat list became groups, each under the
 // heading the palette gives its own, since a hundred and thirty names in one
-// run are a list nobody reads. Nothing matching draws no menu at all rather
-// than an empty state: the composer's own slot already holds the one line
-// saying why, and two readings of it are one too many.
+// run are a list nobody reads. The @ and # menus close on a note of their
+// own, the one line that says what their list is doing: on its way, failed,
+// cut at the cap, or answered with nothing that matches.
 import type { HostItem } from "@wsp/protocol";
 import { CircleDotIcon, FileIcon, GitPullRequestIcon } from "lucide-react";
 import { memo, useLayoutEffect, useRef } from "react";
@@ -39,6 +39,8 @@ function rowMark(item: ComposerCommandItem) {
 
 export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
   groups: ReadonlyArray<ComposerCommandGroup>;
+  /** The menu's own last line, or null while it has none to say. */
+  note?: string | null;
   triggerKind: ComposerTriggerKind | null;
   activeItemId: string | null;
   onHighlightedItemChange: (itemId: string | null) => void;
@@ -86,6 +88,11 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
               ))}
             </CommandGroup>
           ))}
+          {props.note != null ? (
+            <p data-composer-menu-note className="px-3 py-2 text-xs leading-4 text-muted-foreground">
+              {props.note}
+            </p>
+          ) : null}
         </CommandList>
       </ComposerBanner.Surface>
     </Command>
