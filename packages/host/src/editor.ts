@@ -49,7 +49,7 @@ const jetbrainsRow = (id: EditorId, name: string, apps: readonly string[]): Edit
 export const EDITORS: readonly EditorRow[] = [
   vscodeRow("vscode", "VS Code", "Visual Studio Code.app", "code"),
   vscodeRow("cursor", "Cursor", "Cursor.app", "cursor"),
-  vscodeRow("vscode-insiders", "VS Code Insiders", "Visual Studio Code - Insiders.app", "code-insiders"),
+  vscodeRow("vscode-insiders", "VS Code Insiders", "Visual Studio Code - Insiders.app", "code"),
   {
     id: "zed",
     name: "Zed",

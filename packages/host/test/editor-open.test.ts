@@ -60,14 +60,16 @@ describe("opening a path", () => {
     const { host, ran } = mac([
       "/Applications/Visual Studio Code.app",
       "/Applications/Cursor.app",
+      "/Applications/Visual Studio Code - Insiders.app",
       "/Applications/Zed.app",
       "/Applications/WebStorm.app",
       "/System/Library/CoreServices/Finder.app",
     ]);
-    for (const editor of ["vscode", "cursor", "zed", "webstorm", "finder"] as const) expect(await host.open({ path: file, line: 12, inside: [work], editor })).toBe(editor);
+    for (const editor of ["vscode", "cursor", "vscode-insiders", "zed", "webstorm", "finder"] as const) expect(await host.open({ path: file, line: 12, inside: [work], editor })).toBe(editor);
     expect(ran).toEqual([
       { file: "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code", args: ["-g", `${file}:12`] },
       { file: "/Applications/Cursor.app/Contents/Resources/app/bin/cursor", args: ["-g", `${file}:12`] },
+      { file: "/Applications/Visual Studio Code - Insiders.app/Contents/Resources/app/bin/code", args: ["-g", `${file}:12`] },
       { file: "/Applications/Zed.app/Contents/MacOS/cli", args: [`${file}:12`] },
       { file: "/usr/bin/open", args: ["-na", "/Applications/WebStorm.app", "--args", "--line", "12", file] },
       { file: "/usr/bin/open", args: ["-R", file] },
