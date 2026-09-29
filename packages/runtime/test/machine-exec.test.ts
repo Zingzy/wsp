@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { EXEC_ENV, ExecFailedError, INLINE_EXEC_MS, MachineUnreachableError, MachineUnreached, PlaceAbsentError, type ExecResult, type Machine } from "@wsp/engine";
-import { EXEC_BODY_MAX, absentComputer, execFailedLine, machineUnreachableLine, machineUnreachedLine, TURN_IDLE_MS, shellQuote, workScoreLine } from "@wsp/protocol";
+import { EXEC_BODY_MAX, LINK_RETRY_WINDOW_MS, absentComputer, execFailedLine, machineUnreachableLine, machineUnreachedLine, TURN_IDLE_MS, shellQuote, workScoreLine } from "@wsp/protocol";
 import type { ExecStream } from "@wsp/protocol";
 import { GROUP_WORK_AWK, machineExecStream } from "../src/machine-exec.js";
 import { scriptGuest, type Step } from "./script-guest.js";
@@ -761,7 +761,7 @@ describe("machineExecStream attaching to a run its process did not launch", () =
     const factory = machineExecStream(machine, { pollMs: 5 });
     const launched = factory("claude -p hi", { env: {}, input: ["go"] });
     await vi.waitFor(() => expect(guest.getLaunch()).not.toBe(""));
-    return { factory, guest, run: launched.run! };
+    return { factory, guest, backend, machine, run: launched.run! };
   };
 
   it("reads the run's whole log from its first byte and ends on the exit the run left", async () => {
@@ -785,6 +785,47 @@ describe("machineExecStream attaching to a run its process did not launch", () =
     for await (const line of stream.lines) lines.push(line);
     expect(lines).toEqual(['{"type":"system","subtype":"init"}', '{"type":"assistant"}', '{"type":"result"}']);
     expect(await stream.exited).toBe(0);
+  });
+
+  it("keeps the reply of a finished run re-opened past its wall when the poll after the re-open fails once", async () => {
+    const { factory, backend, run } = await abandoned([{ append: '{"type":"system","subtype":"init"}\n{"type":"assistant"}\n{"type":"result"}\n', exit: 0 }]);
+    // The probe reached the machine; the first poll after it meets a gateway that falls over once.
+    const inner = backend.execImpl;
+    let failed = false;
+    backend.execImpl = async (m, cmd): Promise<ExecResult> => {
+      if (!failed && cmd.includes("__WSP_EOF_")) {
+        failed = true;
+        throw new Error("gateway said 502");
+      }
+      return inner(m, cmd);
+    };
+    const stream = (await factory.attach!(run, { input: true, startedAt: Date.now() - 7 * 3_600_000 })) as ExecStream;
+    const lines: string[] = [];
+    for await (const line of stream.lines) lines.push(line);
+    expect(failed).toBe(true);
+    expect(lines).toEqual(['{"type":"system","subtype":"init"}', '{"type":"assistant"}', '{"type":"result"}']);
+    expect(await stream.exited).toBe(0);
+  });
+
+  it("cuts a turn re-opened past its wall on a machine that stays dark, once the reach window has passed", async () => {
+    const { backend, machine, run } = await abandoned([{ append: "while-away\n" }]);
+    const clock = { now: 0 };
+    const inner = backend.execImpl;
+    backend.execImpl = async (m, cmd): Promise<ExecResult> => {
+      if (!cmd.includes("__WSP_EOF_")) return inner(m, cmd);
+      clock.now += 10_000;
+      throw new Error("gateway said 502");
+    };
+    const factory = machineExecStream(machine, { pollMs: 1, now: () => clock.now });
+    const stream = (await factory.attach!(run, { input: true, startedAt: -7 * 3_600_000 })) as ExecStream;
+    await expect(
+      (async () => {
+        for await (const line of stream.lines) void line;
+      })(),
+    ).rejects.toThrow(/at the 6h cap on one turn$/);
+    expect(clock.now).toBeGreaterThanOrEqual(LINK_RETRY_WINDOW_MS);
+    expect(clock.now).toBeLessThan(LINK_RETRY_WINDOW_MS + 20_000);
+    expect(await stream.exited).toBeNull();
   });
 
   it("hands over what a run still going printed before it is cut, when it is re-opened past its wall", async () => {

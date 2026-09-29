@@ -35,7 +35,7 @@
 
 import { randomBytes } from "node:crypto";
 import { HANDSHAKE, INLINE_EXEC_MS, MachineUnreachableError, MachineUnreached, RUN_DIR, execFits, isPlaceAbsent, machineAnswer, putFiles, realRetryClock, untilReached, type ExecResult, type GuestWrite, type Machine } from "@wsp/engine";
-import { EXEC_CHUNK_BYTES, RUN_STOP_MS, TURN_IDLE_MS, TURN_WALL_MS, TURN_WORK_TICKS_PER_S, shellQuote, turnCutLine, workScoreLine } from "@wsp/protocol";
+import { EXEC_CHUNK_BYTES, LINK_RETRY_WINDOW_MS, RUN_STOP_MS, TURN_IDLE_MS, TURN_WALL_MS, TURN_WORK_TICKS_PER_S, shellQuote, turnCutLine, workScoreLine } from "@wsp/protocol";
 import type { ExecStream, ExecStreamFactory, TurnCutRule } from "@wsp/protocol";
 
 export interface MachineExecOptions {
@@ -307,6 +307,13 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
        * no host read it, and the reply of a run that finished in that time. */
       let caughtUp = false;
       let exitSeen = false;
+      /** When the polls last started coming back with nothing: before the reader has caught up, a cut waits out the
+       * same reach window an attach's probe gets, so one gateway error after a re-open does not take the reply. */
+      let darkSince: number | undefined;
+      const cutInTheDark = async (cut: Error | undefined, at: number): Promise<void> => {
+        darkSince ??= at;
+        if (cut !== undefined && (caughtUp || now() - darkSince >= LINK_RETRY_WINDOW_MS)) await cutHere(cut);
+      };
       const cutHere = async (e: Error): Promise<never> => {
         await reap();
         finish(null);
@@ -333,7 +340,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
           // Machine likely napping; polls recover after wake (P10 semantics). A poll that never reached the machine
           // says nothing about the process it was sent to read, so the stretch the road was dark is no part of the
           // turn's silence: the idle clock holds here and goes on from the road's return.
-          if (cut !== undefined) await cutHere(cut);
+          await cutInTheDark(cut, at);
           await nap(pollMs);
           activity.hold(now() - at);
           continue;
@@ -342,10 +349,11 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
         const out = res.stdout.split("\n");
         const markIdx = out.findIndex(l => l.startsWith(sentinel));
         if (markIdx === -1) {
-          if (cut !== undefined) await cutHere(cut);
+          await cutInTheDark(cut, at);
           await nap(pollMs);
           continue;
         }
+        darkSince = undefined;
         const [, exitStr = "", live = "up", workStr = ""] = out[markIdx]!.split(" ");
         const work = Number.parseInt(workStr, 10);
         if (Number.isSafeInteger(work)) activity.read(work, now());
