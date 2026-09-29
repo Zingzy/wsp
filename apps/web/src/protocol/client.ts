@@ -421,8 +421,9 @@ export interface Api {
   pullRequestView?(id: string): Promise<PullRequestPage>;
   /** Asks the workspace's agent to fix a failed check, or, with none, updates it from its base and sends the conflicts. */
   fix?(id: string, check?: string): Promise<FixResult>;
-  /** Merges the workspace's pull request by the method named, or the repository's default, or once its checks pass. */
-  merge?(id: string, o: { method?: MergeMethod; whenChecksPass?: boolean }): Promise<MergeResult>;
+  /** Merges the workspace's pull request by the method named, or the repository's default, or once its checks pass, only while
+   * its head is the one the window drew. */
+  merge?(id: string, o: { method?: MergeMethod; whenChecksPass?: boolean; head: string }): Promise<MergeResult>;
   /** Merges the base's latest commits into the copy's branch, or names the files that conflict. */
   update?(id: string): Promise<GitUpdateReply>;
   /** Drops a workspace whose machine is gone from the host's store; the row leaves on workspace.deleted. The host refuses

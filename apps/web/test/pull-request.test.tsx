@@ -130,7 +130,7 @@ describe("the Pull request pane", () => {
     });
     expect(items.map(i => i.dataset["prMergeMethod"])).toEqual(["squash", "merge"]);
     fireEvent.click(items[1]!);
-    await waitFor(() => expect(api.merge).toHaveBeenCalledWith(WS, { method: "merge" }));
+    await waitFor(() => expect(api.merge).toHaveBeenCalledWith(WS, { method: "merge", head: fact().headOid }));
     // A failed check or a conflict offers no merge; running checks offer the wait where the repository merges by itself.
     act(() => useStore.setState({ statuses: { [WS]: statusWith(fact()) } }));
     rerender(<PullRequestSurface workspaceId={WS} />);
@@ -139,7 +139,7 @@ describe("the Pull request pane", () => {
     await waitFor(() => expect(container.querySelector("[data-pr-merge-when]")).not.toBeNull());
     expect(container.querySelector("[data-pr-merge]")).toBeNull();
     fireEvent.click(container.querySelector("[data-pr-merge-when]")!);
-    await waitFor(() => expect(api.merge).toHaveBeenLastCalledWith(WS, { whenChecksPass: true }));
+    await waitFor(() => expect(api.merge).toHaveBeenLastCalledWith(WS, { whenChecksPass: true, head: fact().headOid }));
   });
 
   it("offers one Merge where the repository allows one method, and the fix for a conflict with the base", async () => {
@@ -154,7 +154,7 @@ describe("the Pull request pane", () => {
     act(() => useStore.setState({ statuses: { [WS]: statusWith(fact({ checks: [] })) } }));
     await waitFor(() => expect(container.querySelector("[data-pr-merge]")).not.toBeNull());
     fireEvent.click(container.querySelector("[data-pr-merge]")!);
-    await waitFor(() => expect(api.merge).toHaveBeenCalledWith(WS, {}));
+    await waitFor(() => expect(api.merge).toHaveBeenCalledWith(WS, { head: fact().headOid }));
     expect(document.querySelector("[data-pr-merge-method]")).toBeNull();
   });
 

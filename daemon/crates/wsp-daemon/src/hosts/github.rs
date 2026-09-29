@@ -258,6 +258,17 @@ fn run_of(link: &str) -> Option<PullRequestCheckRun> {
     Some(PullRequestCheckRun { run_id: run.parse().ok()?, job_id: job.parse().ok()? })
 }
 
+/// A branch name as one part of an API path: every byte but a letter, a digit, `-._~` and the `/` GitHub reads inside
+/// a branch name escaped, since this is the one place a pull request's branch reaches a URL.
+fn path_part(text: &str) -> String {
+    text.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => (b as char).to_string(),
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
+}
+
 fn some(text: String) -> Option<String> {
     (!text.trim().is_empty()).then_some(text)
 }
@@ -339,7 +350,7 @@ impl PullRequests for GitHub {
     }
 
     fn behind_argv(&self, repo: &str, base: &str, head_oid: &str) -> Vec<String> {
-        words(&["api", &format!("repos/{repo}/compare/{base}...{head_oid}"), "--jq", ".behind_by"])
+        words(&["api", &format!("repos/{repo}/compare/{}...{}", path_part(base), path_part(head_oid)), "--jq", ".behind_by"])
     }
 
     fn page_argv(&self, repo: &str, number: u64) -> Vec<String> {
@@ -505,6 +516,11 @@ pub(crate) mod tests {
         );
         assert_eq!(GitHub.checks_argv("o/r", 12), ["pr", "checks", "12", "-R", "o/r", "--json", "name,bucket,link,workflow,description"]);
         assert_eq!(GitHub.behind_argv("o/r", "main", "abc123"), ["api", "repos/o/r/compare/main...abc123", "--jq", ".behind_by"]);
+        // A branch name is git's to allow: a `#`, a `%` or a space in it is escaped so the path is not cut there, and a
+        // slash stays the separator GitHub reads in a branch name.
+        assert_eq!(GitHub.behind_argv("o/r", "release#2", "abc123")[1], "repos/o/r/compare/release%232...abc123");
+        assert_eq!(GitHub.behind_argv("o/r", "50% off", "ab")[1], "repos/o/r/compare/50%25%20off...ab");
+        assert_eq!(GitHub.behind_argv("o/r", "release/1.0", "ab")[1], "repos/o/r/compare/release/1.0...ab");
         assert_eq!(GitHub.page_argv("o/r", 12), ["pr", "view", "12", "-R", "o/r", "--json", "title,body,commits,reviews,comments,files"]);
         assert_eq!(GitHub.line_comments_argv("o/r", 12), ["api", "repos/o/r/pulls/12/comments?per_page=100"]);
         assert_eq!(GitHub.log_argv("o/r", 36, 109), ["run", "view", "36", "-R", "o/r", "--job", "109", "--log-failed"]);

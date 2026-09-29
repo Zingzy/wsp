@@ -4,7 +4,7 @@
 // once as the sidebar mounts, and reads no daemon of its own. A copy the host has not read yet shows the branch it
 // was made on, off its record.
 import { useEffect } from "react";
-import { capitalised, checkoutCounts, DETACHED_HEAD, isPullRequestFact, isPullRequestNamed, pullRequestWord } from "@wsp/protocol";
+import { capitalised, checkoutCounts, DETACHED_HEAD, isPullRequestNamed, pullRequestWord } from "@wsp/protocol";
 import type { SidebarProjectSnapshot } from "../adapt/index.js";
 import { useStore } from "../protocol/store.js";
 import { branchLine } from "./workspaceRows.js";
@@ -24,13 +24,12 @@ export function tileCheckout(runs: Pick<SidebarProjectSnapshot, "workspace" | "s
   const fact = runs.status?.checkout;
   const pr = runs.status?.pr;
   const word = pr === undefined ? [] : [pullRequestWord(pr)];
-  const behind = isPullRequestFact(pr) && pr.state === "open" ? { ...(pr.behindBase !== undefined ? { behindBase: pr.behindBase } : {}), base: pr.base } : undefined;
   // The word stands next to the branch, ahead of the counts: a tile is too narrow for all of them, and the pull
   // request's state is the one a person scans the list for.
   const shown =
     fact === undefined
       ? { branch: branchLine(runs), counts: word }
-      : { branch: fact.branch === DETACHED_HEAD ? "" : fact.branch, counts: [...word, ...checkoutCounts({ ...fact, ...(done ? { ahead: 0 } : {}) }, behind)] };
+      : { branch: fact.branch === DETACHED_HEAD ? "" : fact.branch, counts: [...word, ...checkoutCounts({ ...fact, ...(done ? { ahead: 0 } : {}) }, pr)] };
   return {
     ...shown,
     ...(pr !== undefined && "why" in pr ? { why: pr.why } : {}),

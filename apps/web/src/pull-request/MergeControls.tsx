@@ -24,19 +24,19 @@ export function MergeControls({ workspaceId, name, fact, repo }: { workspaceId: 
           </MenuTrigger>
           <MenuPopup align="end" side="bottom">
             {methods.map(method => (
-              <MenuItem key={method} data-pr-merge-method={method} onClick={() => void mergePullRequest(workspaceId, name, { method })}>
+              <MenuItem key={method} data-pr-merge-method={method} onClick={() => void mergePullRequest(workspaceId, name, { method, head: fact.headOid })}>
                 {METHOD_WORDS[method]}
               </MenuItem>
             ))}
           </MenuPopup>
         </Menu>
       ) : merges ? (
-        <Button type="button" size="xs" variant="outline" data-pr-merge onClick={() => void mergePullRequest(workspaceId, name, {})}>
+        <Button type="button" size="xs" variant="outline" data-pr-merge onClick={() => void mergePullRequest(workspaceId, name, { head: fact.headOid })}>
           {PR_WORDS.merge}
         </Button>
       ) : null}
       {waits ? (
-        <Button type="button" size="xs" variant="ghost" data-pr-merge-when onClick={() => void mergePullRequest(workspaceId, name, { whenChecksPass: true })}>
+        <Button type="button" size="xs" variant="ghost" data-pr-merge-when onClick={() => void mergePullRequest(workspaceId, name, { whenChecksPass: true, head: fact.headOid })}>
           {PR_WORDS.mergeWhenChecksPass}
         </Button>
       ) : null}

@@ -1218,7 +1218,12 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 id: msg.id,
                 ok: true,
                 ...(await rt.workspaces.merge(
-                  { workspaceId: msg.workspaceId, ...(msg.method !== undefined ? { method: msg.method } : {}), ...(msg.whenChecksPass !== undefined ? { whenChecksPass: msg.whenChecksPass } : {}) },
+                  {
+                    workspaceId: msg.workspaceId,
+                    ...(msg.method !== undefined ? { method: msg.method } : {}),
+                    ...(msg.whenChecksPass !== undefined ? { whenChecksPass: msg.whenChecksPass } : {}),
+                    ...(msg.head !== undefined ? { head: msg.head } : {}),
+                  },
                   origin,
                 )),
               });

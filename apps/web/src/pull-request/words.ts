@@ -4,7 +4,7 @@
 import type { MergeMethod } from "@wsp/protocol";
 
 export const PR_WORDS = {
-  /** One word for sending a failed check or a conflict to the agent, everywhere (the coordinator's ruling). */
+  /** One word for sending a failed check or a conflict to the agent, everywhere. */
   fix: "Ask your agent to fix",
   update: (base: string): string => `Update from ${base}`,
   merge: "Merge",

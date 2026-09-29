@@ -186,6 +186,13 @@ const FOLDER_ITEM = ["min-w-0", "shrink", "overflow-hidden"];
 const FOLDER_PATH = ["min-w-0", "truncate", "font-mono", "[direction:rtl]"];
 const folderItem = () => document.querySelector<HTMLElement>("[data-composer-folder]")!;
 const folderPath = () => folderItem().querySelector<HTMLElement>("span")!;
+/** The folder's box on the strip gives its width up before the branch slot gives any: its weight is lopsided, and the
+ * branch slot carries none of its own, so the slot's share rounds to nothing until the folder reaches its floor. */
+const givesFirst = () => {
+  const box = folderItem().closest<HTMLElement>("[data-composer-checkout] > *")!;
+  expect(box.className.split(" ")).toEqual(expect.arrayContaining(["min-w-20", "shrink-[100000]"]));
+  expect(branchSlot()!.className.split(" ").filter(c => c.startsWith("shrink"))).toEqual([]);
+};
 const settle = () => act(() => new Promise<void>(resolve => setTimeout(resolve, 0)));
 const root = () => selectRoot(useRootStore.getState().byWorkspaceId, WS, [DAEMON_ROOT]);
 const menuEntry = (path: string) => document.querySelector<HTMLElement>(`[data-composer-folder-entry="${path}"]`);
@@ -358,7 +365,7 @@ describe("composer checkout row", () => {
     // The button's own no-shrink rule is what grew it over the branch, so that it loses the merge is read first.
     expect(picker.item).not.toContain("shrink-0");
     expect(picker.item).toEqual(expect.arrayContaining(FOLDER_ITEM));
-    expect(branchSlot()!.className.split(" ")).toContain("shrink-0");
+    givesFirst();
     cleanup();
 
     // On a thread that has run: the plain label, carrying that thread's own folder.
@@ -370,7 +377,7 @@ describe("composer checkout row", () => {
     const label = { item: folderItem().className.split(" "), path: folderPath().className, text: folderPath().textContent };
     expect(label.item).not.toContain("shrink-0");
     expect(label.item).toEqual(expect.arrayContaining(FOLDER_ITEM));
-    expect(branchSlot()!.className.split(" ")).toContain("shrink-0");
+    givesFirst();
 
     // The glyph inset the picker button brings with it, so the path starts on the same pixel in both forms.
     expect(label.item).toContain(BUTTON_GLYPH_INSET);

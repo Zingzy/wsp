@@ -34,8 +34,9 @@ export async function updateFromBase(workspaceId: string, name: string): Promise
   }
 }
 
-/** Merges the pull request by the method given, or the repository's default, or once its checks pass. */
-export async function mergePullRequest(workspaceId: string, name: string, o: { method?: MergeMethod; whenChecksPass?: boolean }): Promise<void> {
+/** Merges the pull request by the method given, or the repository's default, or once its checks pass, naming the head the
+ * window drew so a push since then fails the merge rather than landing unseen. */
+export async function mergePullRequest(workspaceId: string, name: string, o: { method?: MergeMethod; whenChecksPass?: boolean; head: string }): Promise<void> {
   const merge = useStore.getState().api?.merge;
   if (merge === undefined) return;
   try {

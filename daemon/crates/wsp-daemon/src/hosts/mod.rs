@@ -184,7 +184,8 @@ fn refused_by(host: &'static dyn PullRequests, stdout: &str, stderr: &str) -> Op
 }
 
 /// The pull request as its host has it, with every check on its head and, while it is open, how far its base has
-/// moved on; nothing where the host knows none, which is what a line that refused a view means on every host here.
+/// moved on; nothing where a branch has none, which is what a line that refused a view by branch means on every host
+/// here. A number always names one, so a view of it refused is the line failing, and says so rather than none.
 /// A checks line that answered no JSON, which is what gh does on a head with no checks, is no checks.
 async fn read_with<R: Runs>(
     runner: &R,
@@ -193,7 +194,10 @@ async fn read_with<R: Runs>(
     ask: &Ask<'_>,
     pick: &Pick<'_>,
 ) -> Result<Option<PullRequest>, OpError> {
-    let (code, stdout, _) = run_cli(runner, host, ask, &host.view_argv(repo, pick)).await?;
+    let (code, stdout, said) = run_cli(runner, host, ask, &host.view_argv(repo, pick)).await?;
+    if code != Some(0) && matches!(pick, Pick::Number(_)) {
+        return Err(refused_by(host, &stdout, &said));
+    }
     let Some(mut pr) = (if code == Some(0) { host.read(&stdout) } else { None }) else { return Ok(None) };
     let (_, checks, _) = run_cli(runner, host, ask, &host.checks_argv(repo, pr.number)).await?;
     pr.checks = host.read_checks(&checks).unwrap_or_default();
@@ -464,6 +468,17 @@ mod tests {
         assert_eq!(calls.iter().filter(|c| c.get(1).is_some_and(|w| w == "create")).count(), 1, "{calls:?}");
         assert_eq!(calls[0], ["pr", "view", "work", "-R", "o/r", "--json", FIELDS]);
         assert_eq!(calls[2], ["pr", "create", "--base", "main", "--head", "work", "--fill"]);
+    }
+
+    /// A pull request known by number is never answered as none: gh refusing that view is gh failing (offline, signed
+    /// out mid-read), and a none would wipe the fact the host holds for one lost read.
+    #[tokio::test]
+    async fn a_view_by_number_that_fails_is_an_error_and_never_no_pull_request() {
+        let gh = fake_gh();
+        let runner = with_gh(&gh);
+        let ask = Ask { cwd: gh.path(), remote_url: "git@github.com:o/r.git" };
+        let said = read(&runner, &ask, &Pick::Number(7)).await.unwrap_err().message;
+        assert!(said.contains("no pull requests found for branch"), "{said}");
     }
 
     #[tokio::test]

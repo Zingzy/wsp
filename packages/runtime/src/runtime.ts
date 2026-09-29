@@ -2,7 +2,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { homedir, hostname, tmpdir } from "node:os";
 import { isAbsolute, join, posix, resolve as resolvePathOn } from "node:path";
-import { CATALOG_AGENTS, DEFAULT_AGENT, GUEST_HOME, PATH_BOUND_DIR_NAMES, TOOL_PREFIX, catalogIdOfRow, gitHostOf, serverValuesOf, guestEnv, installEnv, installHomes, sharedOn } from "@wsp/catalog";
+import { CATALOG_AGENTS, DEFAULT_AGENT, GUEST_HOME, PATH_BOUND_DIR_NAMES, TOOL_PREFIX, catalogIdOfRow, gitHostOf, remoteHost, serverValuesOf, guestEnv, installEnv, installHomes, sharedOn } from "@wsp/catalog";
 import {
   BUILDER_IDLE_MS,
   DAEMON_PORT,
@@ -227,7 +227,7 @@ import type {
 } from "@wsp/protocol";
 import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding } from "./project-landing.js";
 import { projectRemote, projectSource } from "./project-sources.js";
-import { vaultUnlistedRefusal, ThreadPlacement, ThreadScope, WorkspaceOrigin, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, GitCommitReply, GitDiscardReply, GitDiffReply, GitStatusReply, GitPrReadReply, GitPrViewReply, GitRunLogReply, GitPrMergeReply, GitRepoReadReply, GitUpdateReply, PR_POLL_MS, type PullRequestPage, checkFailedPrompt, conflictsPrompt, checkNotFailedRefusal, childPushedLine, isPullRequestFact, mergeMethodRefusal, noPullRequestRefusal, noSuchCheckRefusal, notOpenRefusal, pullRequestPolls, pullRequestStoppedLine, pullRequestUnreadLine, AUTO_MERGE_OFF_LINE, type FixResult, type MergeMethod, type MergeResult, type PullRequestFact, type PullRequestRecord, type PullRequestSeen, DRAFT_NOTES, cleanCheckoutLine, commitMessage, cutDiff, draftPrompt, type Checkout, type CheckoutReply, type CommitDraft, type CommitDrafter, type ViewedMarks, AGENTS_ON, agentsFrom, foldThreads, runningOn as runningOnPlace, phaseHoldsSlot, placeAtLimitLine, placeSpendLimit, spendCapRefusal, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadKeyOf, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, SCOPED_MCP_ARG, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
+import { vaultUnlistedRefusal, ThreadPlacement, ThreadScope, WorkspaceOrigin, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, GitCommitReply, GitDiscardReply, GitDiffReply, GitStatusReply, GitPrReadReply, GitPrViewReply, GitRunLogReply, GitPrMergeReply, GitRepoReadReply, GitUpdateReply, PR_POLL_MS, type PullRequestPage, checkFailedPrompt, conflictsPrompt, checkNotFailedRefusal, childPushedLine, isPullRequestFact, mergeMethodRefusal, noPullRequestRefusal, noSuchCheckRefusal, notOpenRefusal, pullRequestStoppedLine, pullRequestUnreadLine, AUTO_MERGE_OFF_LINE, type FixResult, type MergeMethod, type MergeResult, type PullRequestFact, type PullRequestRecord, type PullRequestSeen, DRAFT_NOTES, cleanCheckoutLine, commitMessage, cutDiff, draftPrompt, type Checkout, type CheckoutReply, type CommitDraft, type CommitDrafter, type ViewedMarks, AGENTS_ON, agentsFrom, foldThreads, runningOn as runningOnPlace, phaseHoldsSlot, placeAtLimitLine, placeSpendLimit, spendCapRefusal, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadKeyOf, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, SCOPED_MCP_ARG, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
 import { ASIDE_NO_SESSION_LINE, BLANK_ASIDE_LINE, asideUnsupportedLine, PLACE_WORKSPACE_PATH, THIS_COMPUTER, COPY_BUILD_FIX, copyAsksSignIns, refusal, copyFirstLine, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildOf, copyIsCurrent, type CopyBuild, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, serverIconsLeftLine, homeShortened, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, threadRunsOnLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, GONE_UNCHECKED, goneUnconfirmedLine, type GoneSeenBy, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, cloneFailedLine, cloneIntoNeeded, cloneIntoTakenLine, cloneUrlRefusal, intoIsHereLine, INTO_TAKES_A_REPO_LINE, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeBlocked, placeDaemonBehind, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeDaemonPaths, placeDialBackLine, placeWentAwayLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, workspaceLands, copyPathFor, folderSlug, type ProjectCopy, REWIND_LATEST_LINE, REWIND_NO_CHECKPOINT_LINE, REWIND_NO_UNDO_LINE, REWIND_OWN_FOLDER_LINE, REWIND_WORKING_LINE, rewindBesideLine, rewindChildrenLine, rewindNoAnchorLine, attachmentRecord, filesBlocked, isImage, sendFilesDir, filePathIn, landFilesLine, filesNotLandedLine, attachedFilesPrompt, dropFilesLine } from "@wsp/protocol";
 import { agentsReads, type AgentsActs, type AgentsReader, type CallbackForwards, type ServerIcons, type ServersActs, type SignInAsk, type SkillAsk, type SkillsActs } from "./agents-read.js";
 import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from "./daemon-channel.js";
@@ -1422,9 +1422,9 @@ export interface Runtime {
      * clean. Answers once the message is on its way, the turn going on without the caller. */
     fix(o: { workspaceId: string; check?: string }, origin?: Caller): Promise<FixResult>;
     /** Merges the workspace's pull request by the method named, or the repository's default, only while its head is
-     * the commit the host last read, or arms it to merge once its checks pass; then reads it again. A person's act:
-     * a thread's own token is refused. */
-    merge(o: { workspaceId: string; method?: MergeMethod; whenChecksPass?: boolean }, origin?: Caller): Promise<MergeResult>;
+     * the commit named, which is the one the window drew, else the one the host holds; or arms it to merge once its
+     * checks pass; then reads it again. A person's act: a thread's own token is refused. */
+    merge(o: { workspaceId: string; method?: MergeMethod; whenChecksPass?: boolean; head?: string }, origin?: Caller): Promise<MergeResult>;
     /** Merges the base's latest commits into the copy's branch, or answers the files that conflict with the copy left
      * as it was; then reads the branch line and the pull request again. */
     update(o: { workspaceId: string }, origin?: Caller): Promise<GitUpdateReply>;
@@ -4234,7 +4234,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   /** One read of the git host for a workspace: on this computer, then through the copy's own daemon where this computer
    * has no signed-in command line for the host and the copy can read it. The frame names the remote off the project's
-   * record on either road, never the copy's own configuration, which the agent writes. */
+   * record on either road, never the copy's own configuration, which the agent writes. The copy's gh is on a PATH its
+   * agent can write, so a read through it is the agent's word: a forged merged there settles the tree and naps its
+   * machine, and nothing past that, which is why a merge never takes this road. */
   const readHost = async <T>(entry: LiveWorkspace, frame: (cwd: string) => DaemonFrame, parse: (reply: Record<string, unknown>) => T): Promise<T> => {
     try {
       return await onThisComputer(async (ask, home) => parse(await ask(frame(home))));
@@ -4245,11 +4247,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   };
 
   /** The host a project's remote lives on, as a sentence about its command line names it. */
-  const hostOfRemote = (remote: string): string => gitHostOf(remote)?.sshHosts[0] ?? remote.replace(/^[a-z+]+:\/\//, "").replace(/^[^@/]+@/, "").split(/[/:]/)[0] ?? remote;
+  const hostOfRemote = (remote: string): string => gitHostOf(remote)?.sshHosts[0] ?? remoteHost(remote) ?? remote;
 
   /** The workspace's pull request read through the git host's command line, kept on the entry and pushed on its status:
-   * on view, at a turn's end, after a bring back, a merge, a fix and an update, and on a timer while an open one has a
-   * check running. An open one known by number is read by number, otherwise by the copy's branch; a merged or closed
+   * on view, at a turn's end, after a bring back, a merge, a fix and an update, and on a timer while it is open. An
+   * open one known by number is read by number, otherwise by the copy's branch; a merged or closed
    * one is never read again. Within CHECKOUT_TTL_MS the fact held answers unless the caller forces a read. A read the
    * host refused for any reason but a missing command line keeps the last fact, whose time says how old it is. */
   const readPullRequest = (entry: LiveWorkspace, force: boolean): Promise<PullRequestSeen | undefined> => {
@@ -4272,7 +4274,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           const host = hostOfRemote(project.remote);
           const stopped = !isLocalWorkspace(entry.record) && entry.record.phase !== "running";
           await takePullRequest(entry, { why: stopped ? pullRequestStoppedLine(host, entry.record.name) : pullRequestUnreadLine(host), readAt: at });
-        }
+        } else pollPullRequest(entry);
       }
       return entry.pr;
     })().finally(() => {
@@ -4283,7 +4285,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   };
 
   /** A pull request just read, onto the entry and the status, the record following it where it moved, the timer set
-   * for an open one with a check running, and the tree settled where it merged or closed. */
+   * for an open one, and the tree settled where it merged or closed. */
   const takePullRequest = async (entry: LiveWorkspace, seen: PullRequestSeen | undefined): Promise<void> => {
     entry.pr = seen;
     if (isPullRequestFact(seen)) {
@@ -4299,13 +4301,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (entry.record.pr !== undefined && entry.record.pr.state !== "open") await settleTree(entry);
   };
 
-  /** The one timed read an open pull request with a check running, or whose mergeability the host has not worked out,
-   * waits on; nothing is armed for any other, so a merged or closed one is never read again. */
+  /** The one timed read an open pull request waits on; nothing is armed for a merged or closed one, which is never
+   * read again. */
   const pollPullRequest = (entry: LiveWorkspace): void => {
     entry.prPoll?.();
     delete entry.prPoll;
     const fact = entry.pr;
-    if (!isPullRequestFact(fact) || !pullRequestPolls(fact) || live.get(entry.record.id) !== entry) return;
+    if (!isPullRequestFact(fact) || fact.state !== "open" || live.get(entry.record.id) !== entry) return;
     entry.prPoll = clock.schedule(
       () => {
         delete entry.prPoll;
@@ -6731,10 +6733,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       return { outcome: said.outcome, threadId: said.threadId, ...(check !== undefined ? { check } : {}), base, agent: said.harness };
     },
 
-    async merge({ workspaceId, method, whenChecksPass }, origin) {
+    async merge({ workspaceId, method, whenChecksPass, head }, origin) {
       spawnGuard("merge", origin);
       const entry = await entryOf(workspaceId, origin);
-      const fact = await readPullRequest(entry, false);
+      // The fact the host holds is the one every window drew, however old it is: a fresh read here would hand the
+      // guard below whatever the agent pushed since the person looked. Read only where nothing was ever read.
+      const fact = isPullRequestFact(entry.pr) ? entry.pr : await readPullRequest(entry, false);
       if (!isPullRequestFact(fact)) {
         const kept = entry.record.pr;
         throw new Error(kept !== undefined && kept.state !== "open" ? notOpenRefusal(kept.number, kept.state) : noPullRequestRefusal(entry.record.name));
@@ -6745,10 +6749,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const by = method ?? settings.defaultMethod;
       if (!settings.methods.includes(by)) throw new Error(mergeMethodRefusal(by, settings.methods));
       if (whenChecksPass === true && !settings.autoMerge) throw new Error(AUTO_MERGE_OFF_LINE);
-      // Merged on this computer as the person, and only while the head is the commit the person was shown: a push
-      // between the read and the press fails the merge in the host's own words rather than landing unseen code.
+      // Merged on this computer as the person, and only while the head is the commit the person was shown, which the
+      // window that drew it names: a push between the drawing and the press fails the merge in the host's own words
+      // rather than landing unseen code.
       const done = GitPrMergeReply.parse(
-        await onThisComputer((ask, home) => ask({ op: "git.prMerge", cwd: home, remote, number: fact.number, method: by, auto: whenChecksPass === true, headOid: fact.headOid })),
+        await onThisComputer((ask, home) => ask({ op: "git.prMerge", cwd: home, remote, number: fact.number, method: by, auto: whenChecksPass === true, headOid: head ?? fact.headOid })),
       );
       await readPullRequest(entry, true);
       return { number: fact.number, method: by, merged: done.merged, autoArmed: done.autoArmed };

@@ -49,8 +49,14 @@ export const gitHost = (id: string): GitHost | undefined => GIT_HOSTS.find(h => 
  * is that host's, whatever form it was written in. Read where a folder's origin is an ssh remote no box can open,
  * so the clone goes through that host's signed-in command instead. */
 export function gitHostOf(remote: string): GitHost | undefined {
-  const host = remote.replace(/^[a-z+]+:\/\//, "").replace(/^[^@/]+@/, "").split(/[/:]/)[0]?.toLowerCase();
+  const host = remoteHost(remote);
   return host === undefined ? undefined : GIT_HOSTS.find(h => h.sshHosts.includes(host));
+}
+
+/** The host name a remote's URL names, in lower case, whatever form it was written in; nothing for one that names none. */
+export function remoteHost(remote: string): string | undefined {
+  const host = remote.replace(/^[a-z+]+:\/\//, "").replace(/^[^@/]+@/, "").split(/[/:]/)[0]?.toLowerCase();
+  return host === undefined || host === "" ? undefined : host;
 }
 
 /** The `owner/repo` an https or ssh remote of a known host names, or nothing where the remote names no path. */

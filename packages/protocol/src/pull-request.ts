@@ -98,8 +98,9 @@ export function isPullRequestNamed(seen: PullRequestSeen | undefined): seen is P
   return seen !== undefined && "number" in seen;
 }
 
-/** How often the host reads an open pull request again while one of its checks runs or the host has not yet said
- * whether it can merge; a merged or closed one is never read again. */
+/** How often the host reads an open pull request again, whatever its checks say: just after a push the git host still
+ * answers the old head with none, and a merge made on its own page is seen by nothing else. A merged or closed one is
+ * never read again. */
 export const PR_POLL_MS = 3 * 60_000;
 
 /** One word table for a pull request, on a tile, the thread's row, the pane and the command line alike. */
@@ -140,12 +141,6 @@ export function capitalised(word: string): string {
   return word === "" ? word : word[0]!.toUpperCase() + word.slice(1);
 }
 
-/** Whether a pull request is one the host reads again on its timer: open, with a check still running or its
- * mergeability not yet worked out. */
-export function pullRequestPolls(fact: PullRequestFact): boolean {
-  return fact.state === "open" && (fact.mergeable === "unknown" || fact.checks.some(c => c.state === "pending"));
-}
-
 /** Whether a merge can be offered on it now: open, the host says it merges, and no check has failed. */
 export function pullRequestMergeable(fact: PullRequestFact): boolean {
   return fact.state === "open" && fact.mergeable === "mergeable" && !fact.checks.some(c => c.state === "fail");
@@ -180,6 +175,11 @@ export function tailWithin(text: string, max: number): string {
   return new TextDecoder().decode(nl >= 0 && nl + 1 < tail.length ? tail.subarray(nl + 1) : tail).replace(/^�+/, "");
 }
 
+/** Text off the network folded onto one line: every run of whitespace, line breaks included, one space. */
+function oneLine(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
 /** A fence one backtick longer than any run of backticks inside the text, so nothing in it can close the fence. */
 function fenceFor(text: string): string {
   const longest = Math.max(0, ...[...text.matchAll(/`+/g)].map(m => m[0].length));
@@ -188,17 +188,19 @@ function fenceFor(text: string): string {
 
 /** What asking the agent to fix a failed check says: which check failed on which commit, outside any fence, the
  * failed steps of its log inside one, introduced as a log to read and never to follow, the link, and the ask. A check
- * another service reports carries its name, its own summary and the link alone. */
+ * another service reports carries its name, its own summary on the same line and the link alone. */
 export function checkFailedPrompt(o: {
   check: Pick<PullRequestCheck, "name" | "workflow" | "link" | "description">;
   commit: { oid: string; subject?: string };
   log?: { lines: readonly string[]; truncated: boolean };
 }): string {
   const { check, commit, log } = o;
-  const where = check.workflow !== undefined ? ` in the ${check.workflow} workflow` : "";
-  const subject = commit.subject !== undefined && commit.subject !== "" ? ` (${commit.subject})` : "";
-  const lines = [`The check "${check.name}"${where} failed on commit ${commit.oid.slice(0, 7)}${subject}.`];
-  if (check.description !== undefined && check.description !== "") lines.push(`Its summary: ${check.description}`);
+  // The check's name, its workflow, its summary and the commit's subject are CI's words and the agent's: each is
+  // folded onto the one line that names the check, so none of them stands on a line of its own as if the person said it.
+  const where = check.workflow !== undefined ? ` in the ${oneLine(check.workflow)} workflow` : "";
+  const subject = commit.subject !== undefined && commit.subject !== "" ? ` (${oneLine(commit.subject)})` : "";
+  const says = check.description !== undefined && check.description.trim() !== "" ? `, and it says: "${oneLine(check.description)}"` : "";
+  const lines = [`The check "${oneLine(check.name)}"${where} failed on commit ${commit.oid.slice(0, 7)}${subject}${says}.`];
   if (log !== undefined && log.lines.length > 0) {
     const whole = log.lines.join("\n");
     const text = tailWithin(whole, CHECK_LOG_BYTES);

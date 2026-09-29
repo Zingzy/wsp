@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The pull request's host half: the read through this computer's own daemon with the remote off the project's record,
-// the copy asked only when this computer has no command line and the copy runs, the timer that reads an open one with
-// a check running and nothing merged, the tree settled once its pull request merges and nothing in it works, and the
+// the copy asked only when this computer has no command line and the copy runs, the timer that reads an open one
+// whatever its checks say and nothing merged, the tree settled once its pull request merges and nothing in it works, and the
 // acts on it: the page, a fix sent into the workspace's thread, a merge of the head the host read, and an update.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -237,32 +237,47 @@ describe("reading the pull request", () => {
     expect((await prOf(id))?.pr).toMatchObject({ why: pullRequestUnreadLine("github.com") });
   });
 
-  it("reads again on its timer only while a check runs, and never again once merged", async () => {
-    let pr = open({ checks: [{ name: "ci", state: "pending" }] });
+  it("keeps the fact it holds through a read gh failed, and reads again on its timer after it", async () => {
+    let answer: Answer = () => ({ id: 1, ok: true, pr: open({ checks: [{ name: "ci", state: "pass" }] }) });
+    const daemons = fakeDaemons({ here: { "git.prRead": held => answer(held) } });
+    const { clock, advance } = fakeClock();
+    const { id } = await withWorkspace(daemons, { clock });
+    await rt!.workspaces.checkout(id);
+    await until(async () => (await prOf(id))?.pr?.["number"] === 12);
+    answer = () => ({ id: 1, ok: false, error: "gh said: error connecting to api.github.com" }) as DaemonResponse;
+    advance(PR_POLL_MS);
+    await until(() => daemons.ops("here").length === 2);
+    await new Promise(r => setTimeout(r, 20));
+    expect((await prOf(id))?.pr).toMatchObject({ number: 12, state: "open" });
+    answer = () => ({ id: 1, ok: true, pr: open({ state: "merged" }) });
+    advance(PR_POLL_MS);
+    await until(() => daemons.ops("here").length === 3);
+    await until(async () => (await prOf(id))?.pr?.["state"] === "merged");
+  });
+
+  it("reads an open one again on its timer whatever its checks say, so a merge made on the host's own page is seen, and never again once merged", async () => {
+    // Just after a push the host answers the old head with no checks at all, and once checks pass nothing is pending:
+    // neither is the last word on an open pull request.
+    let pr = open({ checks: [] });
     const daemons = fakeDaemons({ here: { "git.prRead": () => ({ id: 1, ok: true, pr }) } });
     const { clock, advance } = fakeClock();
     const { id } = await withWorkspace(daemons, { clock });
     await rt!.workspaces.checkout(id);
     await until(() => daemons.ops("here").length === 1);
+    pr = open({ checks: [{ name: "ci", state: "pass" }] });
     advance(PR_POLL_MS);
     await until(() => daemons.ops("here").length === 2);
-    // Passed, nothing to wait on: the timer stops.
-    pr = open();
+    // Merged on the host's page, with no window open and no turn ending: the timer is what sees it.
+    pr = open({ state: "merged", checks: [{ name: "ci", state: "pass" }] });
     advance(PR_POLL_MS);
     await until(() => daemons.ops("here").length === 3);
+    await until(async () => (await prOf(id))?.pr?.["state"] === "merged");
+    // Merged is never read again, whatever asks.
     advance(PR_POLL_MS * 3);
+    advance(20_000);
+    await rt!.workspaces.checkout(id);
     await new Promise(r => setTimeout(r, 20));
     expect(daemons.ops("here")).toHaveLength(3);
-    // Merged is never read again, whatever asks.
-    pr = open({ state: "merged", checks: [{ name: "ci", state: "pending" }] });
-    advance(20_000);
-    await rt!.workspaces.checkout(id);
-    await until(async () => (await prOf(id))?.pr?.["state"] === "merged");
-    advance(PR_POLL_MS * 3);
-    advance(20_000);
-    await rt!.workspaces.checkout(id);
-    await new Promise(r => setTimeout(r, 20));
-    expect(daemons.ops("here")).toHaveLength(4);
   });
 });
 
@@ -428,7 +443,39 @@ describe("the acts on a pull request", () => {
     await until(async () => (await prOf(id))?.pr?.["state"] === "merged");
   });
 
-  it("refuses a merge and a fix asked by a thread's own token in the guard's words, and lets a thread update its own copy", async () => {
+  it("merges the head the person was shown and never one a later read found, whatever the fact's age", async () => {
+    let pr = open();
+    const merges: Record<string, unknown>[] = [];
+    const daemons = fakeDaemons({
+      here: {
+        "git.prRead": () => ({ id: 1, ok: true, pr }),
+        "git.repoRead": () => ({ id: 1, ok: true, methods: ["squash"], defaultMethod: "squash", autoMerge: false }),
+        "git.prMerge": f => {
+          merges.push(f);
+          return { id: 1, ok: true, merged: false, autoArmed: false };
+        },
+      },
+    });
+    const { clock, advance } = fakeClock();
+    const { id } = await withWorkspace(daemons, { clock });
+    await rt!.workspaces.checkout(id);
+    await until(async () => (await prOf(id))?.pr?.["headOid"] === HEAD);
+    // The agent pushes after the page was drawn and the fact grows old: the merge still names what was shown.
+    pr = open({ headOid: "b".repeat(40) });
+    advance(60_000);
+    const reads = daemons.ops("here").filter(op => op === "git.prRead").length;
+    // With no head named, the fact the host holds is the head, not a fresh read of it.
+    await rt!.workspaces.merge({ workspaceId: id });
+    expect(merges.at(-1)).toMatchObject({ headOid: HEAD });
+    const before = daemons.frames.findIndex(f => f.frame["op"] === "git.prMerge");
+    expect(daemons.frames.slice(0, before).filter(f => f.frame["op"] === "git.prRead")).toHaveLength(reads);
+    // The read after that merge holds the new head; a window that drew the old one still merges only the old one.
+    await until(async () => (await prOf(id))?.pr?.["headOid"] === "b".repeat(40));
+    await rt!.workspaces.merge({ workspaceId: id, head: HEAD });
+    expect(merges.at(-1)).toMatchObject({ headOid: HEAD });
+  });
+
+  it("refuses a merge asked by a thread's own token in the guard's words, and lets a thread update a copy of its tree", async () => {
     const daemons = fakeDaemons({ copy: { "git.update": () => ({ id: 1, ok: true, base: "main", merged: true, commits: 1, conflicts: [] }) } });
     const agent = heldAgent();
     const { id } = await withWorkspace(daemons, { adapters: { claude: agent.factory } });

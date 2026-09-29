@@ -209,9 +209,10 @@ describe("the sidebar's list of thread tiles", () => {
       act(() => useStore.setState({ statuses: { ws_f: statusOf(fork, fact) } } as never));
       await waitFor(() => expect(three("ws_f").querySelector("[data-tile-branch]")?.textContent).toBe("fix/cart-rounding"));
       expect(counts("ws_f")).toEqual(["1 ahead", "3 changed"]);
-      // The branch and each count stand 12 px apart on the 4 px grid: one gap, with no margin of their own.
+      // The branch and each count stand 12 px apart on the 4 px grid: each count's own start margin, since a count that
+      // does not fit wraps onto the line the row hides and a gap would stay behind it.
       const branch = three("ws_f").querySelector<HTMLElement>("[data-tile-branch]")!;
-      expect(branch.parentElement!.className).toContain("gap-3");
+      expect([...three("ws_f").querySelectorAll("[data-tile-count]")].map(n => n.className.split(" ").includes("ms-3"))).toEqual([true, true]);
       expect([...branch.parentElement!.querySelectorAll("*")].map(n => n.getAttribute("class") ?? "").join(" ")).not.toMatch(/\bm[se]?-\[/);
       expect(three("ws_f").textContent).not.toContain("\u00b7");
       expect(three("ws_f").querySelector(".lucide-git-branch")).not.toBeNull();
@@ -277,7 +278,7 @@ describe("the sidebar's list of thread tiles", () => {
       await waitFor(() => expect(counts("ws_f")[0]).toBe("approved"));
       // A word alone, never a chip: the same span the counts take.
       const word = three("ws_f").querySelector<HTMLElement>("[data-tile-count]")!;
-      expect(word.className).toBe("shrink-0");
+      expect(word.className).toBe("ms-3 shrink-0 whitespace-nowrap");
     });
 
     it("says not read with the reason on the tile's hover where the pull request could not be read", async () => {

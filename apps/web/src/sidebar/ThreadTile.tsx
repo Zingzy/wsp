@@ -64,24 +64,31 @@ function TileRows({ place, status, title, harness, third, crab }: { place: TileP
 }
 
 /** The branch a tile's workspace is on, with its glyph, then each fact the host read beside it, spaced rather than
- * joined; the branch gives way first down to a few letters, then the row ends at a hard edge, so the facts nearest
- * the branch stay whole. The facts alone where no branch is known. */
+ * joined; the branch gives way first down to a few letters, then the facts go whole from the last, each wrapping onto
+ * a line the row does not show, so no fact is ever cut mid-word. The branch's weight is lopsided so the facts' share
+ * rounds to nothing until it reaches its floor. The facts alone where no branch is known. */
 export function TileBranch({ branch, counts = [] }: { branch: string; counts?: readonly string[] | undefined }) {
   if (branch === "" && counts.length === 0) return null;
   return (
     <>
       {branch === "" ? null : <GitBranchIcon aria-hidden className="size-3 shrink-0 text-[var(--top-row-meta)]" />}
-      <span className="flex min-w-0 items-center gap-3 overflow-hidden">
+      <span className="flex min-w-0 items-center">
         {branch === "" ? null : (
-          <span data-tile-branch className="min-w-12 truncate">
+          <span data-tile-branch className="min-w-12 shrink-[100000] truncate">
             {branch}
           </span>
         )}
-        {counts.map(count => (
-          <span key={count} data-tile-count className="shrink-0">
-            {count}
+        {counts.length === 0 ? null : (
+          // The empty first item holds the one line shown, so even the first fact can go onto the hidden one.
+          <span className="flex h-lh min-w-0 flex-wrap overflow-hidden">
+            <span aria-hidden className="h-lh" />
+            {counts.map((count, i) => (
+              <span key={count} data-tile-count className={cn(branch === "" && i === 0 ? "" : "ms-3", "shrink-0 whitespace-nowrap")}>
+                {count}
+              </span>
+            ))}
           </span>
-        ))}
+        )}
       </span>
     </>
   );
@@ -140,7 +147,7 @@ export function ThreadTile({
   place: TilePlace;
   /** The branch the thread's workspace is on; empty where none is known. */
   branch: string;
-  /** The counts the host read beside that branch, each its own words, the pull request's word last. */
+  /** The counts the host read beside that branch, each its own words, the pull request's word first. */
   counts?: readonly string[] | undefined;
   /** Why the pull request's word is not read, for the hover. */
   why?: string | undefined;

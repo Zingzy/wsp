@@ -4327,7 +4327,7 @@ const DAEMON_CONTENTS = [
   "16e43173fadb40a741a588b14470f652528a4202fd434c2b9dc2702c7d78fc7c",
   "7e3fcbd460f842ff7343389c09ddbf43de751d83abea5cf82580d929811656e7",
   "e927a6944459d21c2598ce6ff7511bd6bb22eed9ac962aaedcce620e92b3d321",
-  "4e36ecd1503d0cdc7690ae0f285d20341a437a6a6bf66169cd2ce9041a4b83c1",
+  "1796fa8ef2dcd4c907e1314205bdca852b06c8fb807c5580b517c7ee389a188a",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -4565,10 +4565,11 @@ const DAEMON_CONTENTS = [
  * is, a wsp mcp line that names its state is served by the binary's own tool server, and the guest's tool server
  * session drops the reopening only that forwarder did.
  * Version 90 reads a pull request with the repository named off the remote the frame carries: git.prRead answers one by
- * branch or number with its checks, review, mergeability, counts and how far its base has moved on, git.prView its page
- * with the comments on its lines, git.runLog a failed job's last lines, git.repoRead a repository's merge methods, and
- * git.prMerge merges only the head it names; git.update merges the base's latest commits into a clean checkout and takes
- * a conflicting merge back; git.pr answers the whole fact, and git.prState is gone. */
+ * branch or number with its checks, review, mergeability, counts and how far its base has moved on, and a read by
+ * number that gh refused is an error rather than none; git.prView its page with the comments on its lines, git.runLog
+ * a failed job's last lines, git.repoRead a repository's merge methods, and git.prMerge merges only the head it names;
+ * git.update merges the base's latest commits into a clean checkout and takes a conflicting merge back; git.pr answers
+ * the whole fact, and git.prState is gone. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -5669,8 +5670,9 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * once, the turn going on without the caller. */
   z.object({ id: reqId, op: z.literal("workspaces.fix"), workspaceId: z.string(), check: z.string().optional() }),
   /** Merges the workspace's pull request by the method named, or the repository's default, only while its head is
-   * the commit the host last read; whenChecksPass arms it to merge once they do. Answered as a MergeResult. */
-  z.object({ id: reqId, op: z.literal("workspaces.merge"), workspaceId: z.string(), method: MergeMethod.optional(), whenChecksPass: z.boolean().optional() }),
+   * the commit named in head, which a window sends as the one it drew; absent is the head the host holds, never a
+   * fresh read. whenChecksPass arms it to merge once they do. Answered as a MergeResult. */
+  z.object({ id: reqId, op: z.literal("workspaces.merge"), workspaceId: z.string(), method: MergeMethod.optional(), whenChecksPass: z.boolean().optional(), head: z.string().min(1).optional() }),
   /** Merges the base's latest commits into the copy's branch, answered as a GitUpdateReply: the files that conflict
    * where it could not, the copy left as it was. */
   z.object({ id: reqId, op: z.literal("workspaces.update"), workspaceId: z.string() }),
