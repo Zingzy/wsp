@@ -421,35 +421,49 @@
       "settleMs": 700
     },
     {
-      "name": "composer-folder",
+      "name": "new-thread-all-projects",
       "at": "/",
       "steps": [
-        "390:key:Escape",
-        "390:sidebar=trigger",
         "row-id=thread:redirect",
-        "390:key:Escape",
-        "key:ControlOrMeta+n",
-        "composer-folder"
+        "key:ControlOrMeta+n"
       ],
-      "wait": "k=folder-path",
-      "settleMs": 700
+      "wait": "k=project-home",
+      "settleMs": 700,
+      "widths": [
+        1440
+      ],
+      "reason": "What this adds is the project New thread opens on; the empty thread's heading and composer are shot at 1280 and 390 in workspace, and the box is 768px wide at most, so 1280 draws it as 1440 does."
     },
     {
-      "name": "composer-folder-refused",
+      "name": "new-thread-one-project",
       "at": "/",
       "steps": [
-        "390:key:Escape",
-        "390:sidebar=trigger",
         "row-id=thread:redirect",
-        "390:key:Escape",
-        "key:ControlOrMeta+n",
-        "composer-folder",
-        "k=folder-path",
-        "type:/does/not/exist",
-        "key:Enter"
+        "k=project-switcher",
+        "switcher-option=pr_wsp",
+        "key:ControlOrMeta+n"
       ],
-      "wait": "refused",
-      "settleMs": 700
+      "wait": "k=project-home",
+      "settleMs": 700,
+      "widths": [
+        1440
+      ],
+      "reason": "What this adds is the project New thread opens on with one filtered; the empty thread's heading and composer are shot at 1280 and 390 in workspace, and the box is 768px wide at most, so 1280 draws it as 1440 does."
+    },
+    {
+      "name": "new-thread-project-menu",
+      "at": "/",
+      "steps": [
+        "row-id=thread:redirect",
+        "key:ControlOrMeta+n",
+        "new-thread-project=pr_spoo"
+      ],
+      "wait": "new-thread-project-row=pr_wsp",
+      "settleMs": 700,
+      "widths": [
+        1440
+      ],
+      "reason": "The menu is 256px wide under the heading at every width; the heading and composer themselves are shot at 1280 and 390 in workspace."
     },
     {
       "name": "settings-computers",

@@ -1204,7 +1204,7 @@ describe("a new thread while another thread of the workspace works", () => {
     await screen.findByText("On it.");
     expect(screen.getByRole("button", { name: "Stop generation" })).toBeDefined();
     act(() => requestNewThread({ workspaceId: WS }));
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("What should we build in api?");
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("What should we build in the-project?");
     const editor = composerEditor();
     expect(isEditable(editor)).toBe(true);
     noLineAbove();

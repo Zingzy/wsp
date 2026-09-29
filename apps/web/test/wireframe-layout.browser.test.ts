@@ -39,7 +39,6 @@ import type { Browser, Page } from "playwright";
 import { DEFAULT_PREFERENCES, PlaceAddStep } from "@wsp/protocol";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { textContrast, wcagContrast } from "./contrast";
-import { MICRO_LABEL } from "../src/lib/microLabel";
 import { launchRender, renderSkipped, stopRender } from "./render-browser";
 import { startVite, type ViteChild } from "./vite-child";
 
@@ -517,7 +516,7 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
   };
 
   const read = (): Promise<SettingsRead> =>
-    page!.evaluate(micro => {
+    page!.evaluate(() => {
       const box = (el: Element) => el.getBoundingClientRect();
       const spills = (el: HTMLElement): boolean => el.scrollHeight > el.clientHeight + 1;
       const rows = [...document.querySelectorAll<HTMLElement>("[data-settings-page] [data-settings-row]")].map(el => ({
@@ -558,16 +557,12 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
         opacity: Number(getComputedStyle(el).opacity),
       }));
       const cutSegments = [...document.querySelectorAll<HTMLElement>("[data-settings-page] [data-slot=segmented-control] [role=radio]")].filter(el => el.scrollWidth > el.clientWidth + 1).map(el => el.textContent ?? "");
-      // Caps and tracked-out words outside the one small label, which wears MICRO_LABEL itself or sits inside it; the
-      // page title's tight tracking draws it closer, which is no dress, and a picture's masked code is not words.
-      const eyebrow = (el: Element): boolean => {
-        for (let n: Element | null = el; n !== null; n = n.parentElement) if (micro.every(c => n!.classList.contains(c))) return true;
-        return false;
-      };
+      // Caps and tracked-out words, which nothing wears now; the page title's tight tracking draws it closer, which is
+      // no dress, and a picture's masked code is not words.
       const dressed = [...document.querySelectorAll<HTMLElement>("[data-settings-page] *, [data-slot=sidebar] *")]
         .filter(el => {
           const s = getComputedStyle(el);
-          return /\p{L}/u.test(el.textContent ?? "") && (s.textTransform !== "none" || parseFloat(s.letterSpacing) > 0) && !eyebrow(el);
+          return /\p{L}/u.test(el.textContent ?? "") && (s.textTransform !== "none" || parseFloat(s.letterSpacing) > 0);
         })
         .map(el => (el.textContent ?? "").trim().slice(0, 20));
       const pageEl = document.querySelector<HTMLElement>("[data-settings-page]")!;
@@ -582,7 +577,7 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
         scroll: { page: Math.max(pageEl.scrollWidth, viewport.scrollWidth), client: viewport.clientWidth },
         opacities: { held: opacity("[data-settings-page] [data-slot=button][data-held]"), live: opacity("[data-settings-page] [data-slot=button]:not([data-held]):not(:disabled)") },
       };
-    }, MICRO_LABEL.split(" "));
+    });
 
   const expectGrammar = (got: SettingsRead, where: string, narrow: boolean): void => {
     // One height per kind at each width: a row is 64, 72 below 640 px, or 96 there where its slot has moved under a

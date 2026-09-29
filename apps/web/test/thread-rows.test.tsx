@@ -55,11 +55,11 @@ describe("ThreadRows", () => {
     vi.useRealTimers();
   });
 
-  it("heads the list with its label in the small caps and draws one 36px line per thread", () => {
+  it("heads the list with its label in sentence case sans and draws one 36px line per thread", () => {
     render(<ThreadRows label="Threads" rows={ROWS} />);
     const head = document.querySelector<HTMLElement>("[data-thread-rows-head]")!;
     expect(head.textContent).toBe("Threads");
-    expect(head.className).toContain("uppercase");
+    expect(head.className).not.toMatch(/uppercase|font-mono|tracking/);
     expect(head.className).toContain("h-8");
     expect(rows()).toHaveLength(4);
     for (const row of rows()) expect(row.className).toContain("h-9");

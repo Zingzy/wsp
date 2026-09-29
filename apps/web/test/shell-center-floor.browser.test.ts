@@ -134,7 +134,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's centre column floor la
   };
 
   const expectRowWhole = (shell: Shell, where: string): void => {
-    expect(shell.triggers.map(t => t.picker), `the pickers at ${where}`).toEqual(["model", "reasoning", "access", "project"]);
+    expect(shell.triggers.map(t => t.picker), `the pickers at ${where}`).toEqual(["model", "reasoning"]);
     for (const t of shell.triggers) {
       expect(t.cut, `${t.picker} reads "${t.text}" cut at ${where}`).toBe(false);
       expect(t.left, `${t.picker} starts before the row at ${where}`).toBeGreaterThanOrEqual(shell.group.left - 0.5);
@@ -159,7 +159,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's centre column floor la
       const byTheme: Record<string, { open: Shell; closed: Shell }> = {};
       for (const theme of ["dark", "light"] as const) {
         await page!.goto(`${base}?theme=${theme}&local=1&ws=ws_m&projects=1&efforts=1&sidebar=${SIDEBAR_MAX_WIDTH}&panel=preview`);
-        await page!.waitForSelector("[data-composer-picker='project']");
+        await page!.waitForSelector("[data-composer-picker='access']");
         await page!.waitForSelector("text=loading transcript", { state: "detached" });
         await settle();
         const open = await readShell();
@@ -216,7 +216,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's centre column floor la
     const cap = sidebarMaxWidthBeside(viewport, true);
     await page!.setViewportSize({ width: viewport, height: 800 });
     await page!.goto(`${base}?theme=dark&local=1&ws=ws_m&projects=1&efforts=1&sidebar=${SIDEBAR_MAX_WIDTH}&panel=preview`);
-    await page!.waitForSelector("[data-composer-picker='project']");
+    await page!.waitForSelector("[data-composer-picker='access']");
     await settle();
     const sidebarWidth = (): Promise<number> => page!.evaluate(() => document.querySelector("[data-slot=sidebar-gap]")!.getBoundingClientRect().width);
     const togglePanel = async (open: boolean): Promise<void> => {
@@ -264,7 +264,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's centre column floor la
     await page!.setViewportSize({ width: viewport, height: 800 });
     for (const theme of ["dark", "light"] as const) {
       await page!.goto(`${base}?theme=${theme}&local=1&ws=ws_m&projects=1&efforts=1&sidebar=${SIDEBAR_MAX_WIDTH}&panel=preview`);
-      await page!.waitForSelector("[data-composer-picker='project']");
+      await page!.waitForSelector("[data-composer-picker='access']");
       await page!.waitForSelector("text=loading transcript", { state: "detached" });
       await page!.waitForSelector("[data-preview-panel-mode=sheet]");
       await settle();

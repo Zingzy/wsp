@@ -385,14 +385,14 @@ const collapse = async () => {
 };
 
 describe("the header row", () => {
-  it("open: the sidebar's row carries the toggle then the wordmark, the page's row the workspace's breadcrumb with no toggle and no wordmark", async () => {
+  it("open: the sidebar's row carries the toggle then the wordmark, the page's row the breadcrumb with no toggle and no wordmark", async () => {
     await mountShell();
     expect(toggleIn(sidebarHeader())).not.toBeNull();
     expect(sidebarHeader().querySelector("[role=img][aria-label=wsp]")).not.toBeNull();
     expect(sidebarHeader().getAttribute("data-header-row")).toBe("frame");
     expect(toggleIn(banner())).toBeNull();
     expect(banner().querySelector("[role=img][aria-label=wsp]")).toBeNull();
-    expect(banner().textContent).toContain("api");
+    expect(banner().textContent).toContain("New thread");
     expect(banner().textContent).not.toContain("/");
   });
 
@@ -405,8 +405,9 @@ describe("the header row", () => {
     const crumb = banner().querySelector("[data-thread-breadcrumb]")!;
     // No folder before the name: the sidebar's folder means project, and a workspace there wears no glyph.
     expect(crumb.querySelector("svg")).toBeNull();
-    // The crumb names the thread the centre is on, which is the one the address names, and the workspace alone until one is.
-    expect(crumb.textContent).toBe("api");
+    // The crumb names the thread the centre is on, which is the one the address names, and New thread until one is,
+    // never the workspace's name.
+    expect(crumb.textContent).toBe("New thread");
     act(() => useStore.getState().select("ws_a", "thr_2"));
     expect(banner().querySelector("[data-thread-breadcrumb]")!.textContent).toBe("add a health route");
     act(() => useStore.getState().select("ws_a", "thr_1"));
@@ -434,8 +435,9 @@ describe("the header row", () => {
     expect(crumb().textContent).toBe("add a health route");
   });
 
-  it("the compose glyph sits in the search row, raises the request for the selected workspace, and is held rather than gone without one", async () => {
+  it("the compose glyph sits in the search row and opens New thread on the selected workspace's project rather than inside it, and stays live on New thread itself", async () => {
     await mountShell();
+    act(() => useStore.setState({ projects: [{ id: "pr_1", name: "the-project", computer: "here", source: { kind: "folder", path: "/root" }, path: "/root", remote: "", defaultBranch: "main", memoryKey: "-root", memoryDir: "/root/memory", createdAt: "t" }] }));
     const seen: string[] = [];
     const off = onNewThreadRequest(d => seen.push(d.workspaceId));
     const compose = screen.getByRole("button", { name: "New thread" });
@@ -443,10 +445,11 @@ describe("the header row", () => {
     expect(banner().contains(compose)).toBe(false);
     expect(compose.getAttribute("aria-disabled")).toBeNull();
     fireEvent.click(compose);
-    expect(seen).toEqual(["ws_a"]);
+    expect(seen).toEqual([]);
+    expect(useStore.getState()).toMatchObject({ projectHome: "pr_1", selectedId: null, freshThread: false });
     off();
+    expect(screen.getByRole("button", { name: "New thread" }).getAttribute("aria-disabled")).toBeNull();
     act(() => useStore.getState().select(null));
-    await waitFor(() => expect(screen.getByRole("button", { name: "New thread" }).getAttribute("aria-disabled")).toBe("true"));
   });
 });
 

@@ -1,16 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Where the person is: the settings crumbs while Settings is open; else the
 // open thread's agent mark, the thread that opened this one where an agent did,
-// a slash and the open thread's title; the workspace's name while no thread is
-// open, since the sidebar's tiles already say where a thread runs; a creation
-// in progress by its name; the words for no selection otherwise, and nothing at
+// a slash and the open thread's title; New thread before the first message,
+// on a project or inside a workspace, never a workspace's name; a creation in
+// progress by its name; the words for no selection otherwise, and nothing at
 // all while the first run is the centre, since that screen's own title says
 // the same emptiness and two sentences about it read as a fault. The thread is
 // the one the centre shows. The header carries no state word for a thread that
 // is simply working or settled, since the pane under it already shows that; it
 // carries the one state a person has to act on, so a prompt is never hidden by
 // the header the pane is scrolled under.
-import { ProjectGlyph } from "../projects/look.js";
 import { agentName } from "@wsp/catalog";
 import { HarnessMark } from "../components/chat/HarnessMark.js";
 import { threadState, threadWordOf, waitingLine } from "@wsp/protocol";
@@ -19,6 +18,8 @@ import { ThreadLink } from "../components/ThreadLink.js";
 import { cn } from "../lib/utils.js";
 import { SettingsCrumbs } from "../settings/SettingsCrumbs.js";
 import { openedBy } from "../sidebar/threadTree.js";
+
+const NEW_THREAD = "New thread";
 
 export function ThreadBreadcrumb() {
   const creation = useCreation(useSelectedId());
@@ -31,18 +32,14 @@ export function ThreadBreadcrumb() {
   // An opener may run on any workspace, so the whole fleet is read rather than this one's threads.
   const opener = openedBy(useSidebarProjects(), { parentThreadId: thread?.parentThreadId ?? null });
   const name = workspace?.name ?? creation?.name;
-  // A project's home names its project, which is where the next task lands.
-  const home = useStore(s => (s.projectHome === null ? undefined : s.projects.find(p => p.id === s.projectHome)));
+  const home = useStore(s => s.projectHome !== null && s.projects.some(p => p.id === s.projectHome));
   return (
     <span className="flex min-w-0 items-center gap-2 text-sm" data-thread-breadcrumb>
       {settingsOpen ? (
         <SettingsCrumbs />
       ) : name === undefined ? (
-        home !== undefined ? (
-          <span className="flex min-w-0 items-center gap-2" data-breadcrumb-project>
-            <ProjectGlyph projectId={home.id} />
-            <span className="truncate font-medium text-foreground">{home.name}</span>
-          </span>
+        home ? (
+          <span className="truncate font-medium text-foreground">{NEW_THREAD}</span>
         ) : firstRun ? null : (
           <span className="truncate text-muted-foreground">No task selected</span>
         )
@@ -61,7 +58,7 @@ export function ThreadBreadcrumb() {
               <span aria-hidden className="text-muted-foreground/50">/</span>
             </>
           ) : null}
-          {thread === null ? <span className="truncate font-medium text-foreground">{name}</span> : null}
+          {thread === null ? <span className="truncate font-medium text-foreground">{workspace === null ? name : NEW_THREAD}</span> : null}
           {thread !== null ? (
             <>
               {/* The thread on screen is the last thing to give way: beside an opener it keeps its whole measure and

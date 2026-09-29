@@ -96,7 +96,7 @@ describe("chat tab rendering", () => {
   it("mounts the thread view: empty headline first, then the fixture conversation with its settled footer", async () => {
     const { api, emit } = fixtureApi([workspace]);
     await setup(api);
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("What should we build in api?");
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("What should we build in the-project?");
 
     for (const e of FIXTURE) emit(e);
     // An event for another workspace never renders.
@@ -689,7 +689,7 @@ describe("chat tab new thread", () => {
     expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
 
     act(() => requestNewThread({ workspaceId: WS }));
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("What should we build in api?");
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("What should we build in the-project?");
     expect(screen.queryByText(/Server is live at :3000\./)).toBeNull();
     expect(screen.queryByTestId("settled-footer")).toBeNull();
     const editor = composerEditor();

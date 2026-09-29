@@ -16,6 +16,7 @@ export function PreviewLocalServerCard({ server, onOpen }: Props) {
   return (
     <button
       type="button"
+      data-server-port={server.port}
       onClick={onOpen}
       className="group flex w-full items-center gap-3 rounded-md px-2 py-2 text-left transition-colors duration-150 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
     >

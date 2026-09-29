@@ -42,7 +42,10 @@ interface PaneView<K extends RightPanelKind> {
 /** What each pane kind draws, the one line per kind the registry in panes.ts cannot hold without importing every
  * pane into the store. */
 const PANE_VIEWS: { readonly [K in RightPanelKind]: PaneView<K> } = {
-  preview: { Surface: ({ workspaceId, surface }) => <BrowserSurface key={surface.id} workspaceId={workspaceId} surface={surface} /> },
+  preview: {
+    Surface: ({ workspaceId, surface }) => <BrowserSurface key={surface.id} workspaceId={workspaceId} surface={surface} />,
+    open: workspaceId => useRightPanelStore.getState().openNewBrowser(workspaceId),
+  },
   terminal: {
     Surface: ({ workspaceId, surface }) => <WorkspaceTerminalPanel workspaceId={workspaceId} surface={surface} />,
     open: workspaceId => void openPanelTerminal(workspaceId),

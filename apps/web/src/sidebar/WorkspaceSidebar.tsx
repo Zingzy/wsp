@@ -497,9 +497,9 @@ export function WorkspaceSidebar() {
   };
 
   const newThreadShortcut = useShortcutLabel("chat.new");
-  /** The one add control at rest: a new thread in the selected workspace, held while none is selected. Held by
-   * aria-disabled rather than the disabled attribute, so the pointer still reaches it and the tooltip can say what
-   * it is in the one state a person might ask why it is held. */
+  /** The one add control at rest: New thread on a project, which needs no workspace selected, held while there is no
+   * project to open one on. Held by aria-disabled rather than the disabled attribute, so the pointer still reaches it
+   * and the tooltip can say what it is. */
   const compose = (
     <Tooltip>
       <TooltipTrigger
@@ -507,10 +507,8 @@ export function WorkspaceSidebar() {
           <SidebarGroupAction
             className="text-sidebar-muted-foreground transition-colors duration-150 aria-disabled:cursor-default aria-disabled:opacity-50 aria-disabled:hover:bg-transparent aria-disabled:hover:text-sidebar-muted-foreground"
             aria-label="New thread"
-            aria-disabled={selectedWorkspace === null || undefined}
-            onClick={() => {
-              if (selectedWorkspace !== null) verbs.newThread(selectedWorkspace.id);
-            }}
+            aria-disabled={recorded.length === 0 || undefined}
+            onClick={verbs.newThread}
           />
         }
       >

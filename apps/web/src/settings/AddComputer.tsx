@@ -14,7 +14,7 @@ import { AddButton } from "../components/ui/add-button.js";
 import { Button } from "../components/ui/button.js";
 import { Input } from "../components/ui/input.js";
 import { Kbd } from "../components/ui/kbd.js";
-import { MICRO_LABEL } from "../lib/microLabel.js";
+import { GROUP_LABEL } from "../lib/microLabel.js";
 import { cn } from "../lib/utils.js";
 import { useStore } from "../protocol/store.js";
 import { NO_REASON, type Api } from "../protocol/client.js";
@@ -323,7 +323,7 @@ function SshForm({ job }: { job: PlaceAddJob | undefined }) {
       </div>
       {refusal !== null || held !== undefined ? <RefusalSlot k="ssh-refusal" {...(refusal === null ? { waiting: held } : refusal)} /> : null}
       <div className="flex flex-col gap-3">
-        <span className={cn(MICRO_LABEL, "text-muted-foreground")}>{MINE.whatHappens}</span>
+        <span className={cn(GROUP_LABEL, "text-muted-foreground")}>{MINE.whatHappens}</span>
         <Steps lines={planLines(job)} />
       </div>
       {!running && hostsRefused !== null ? (
@@ -331,7 +331,7 @@ function SshForm({ job }: { job: PlaceAddJob | undefined }) {
       ) : null}
       {!running && suggested.length > 0 ? (
         <div className="flex flex-col gap-3" data-k="ssh-hosts">
-          <span className={cn(MICRO_LABEL, "text-muted-foreground")}>{MINE.suggested}</span>
+          <span className={cn(GROUP_LABEL, "text-muted-foreground")}>{MINE.suggested}</span>
           <ul className="flex flex-col overflow-hidden rounded-lg border border-border">
             {suggested.slice(0, 8).map(h => (
               <li key={h.alias} className="border-border border-b last:border-b-0">

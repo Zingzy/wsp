@@ -37,6 +37,7 @@ function workspaceVerbs(over: Partial<WorkspaceVerbs> = {}): WorkspaceVerbs {
     openTerminal: vi.fn(async () => {}),
     openBrowser: vi.fn(),
     newThread: vi.fn(),
+    newThreadHere: vi.fn(),
     bringBack: vi.fn(async () => {}),
     deleteWorkspace: vi.fn(),
     copyText: vi.fn(async () => {}),
@@ -172,7 +173,8 @@ describe("workspace actions", () => {
     await actionById(actions, "export-project").run();
     expect(verbs.exportProject).toHaveBeenCalledWith("ws_a");
     expect(verbs.togglePhase).toHaveBeenCalledWith("ws_a");
-    expect(verbs.newThread).toHaveBeenCalledWith("ws_a");
+    expect(verbs.newThreadHere).toHaveBeenCalledWith("ws_a");
+    expect(verbs.newThread).not.toHaveBeenCalled();
     expect(verbs.openTerminal).toHaveBeenCalledWith("ws_a");
     expect(verbs.openBrowser).toHaveBeenCalledWith("ws_a");
     expect(verbs.bringBack).toHaveBeenCalledWith("ws_a");

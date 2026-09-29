@@ -5,7 +5,7 @@ import { Menu as MenuPrimitive } from "@base-ui/react/menu";
 import { ChevronRightIcon } from "lucide-react";
 import type * as React from "react";
 
-import { MENU_GROUP_LABEL } from "../../lib/microLabel";
+import { GROUP_LABEL } from "../../lib/microLabel";
 import { cn } from "../../lib/utils";
 
 const MenuCreateHandle = MenuPrimitive.createHandle;
@@ -195,7 +195,7 @@ function MenuGroupLabel({
     <MenuPrimitive.GroupLabel
       className={cn(
         "px-2 py-1.5 text-muted-foreground data-inset:ps-9 sm:data-inset:ps-8",
-        MENU_GROUP_LABEL,
+        GROUP_LABEL,
         className,
       )}
       data-inset={inset}

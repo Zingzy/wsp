@@ -115,11 +115,11 @@ const threaded = (text: string): SessionEvent[] => [
 ];
 
 describe("ChatView", () => {
-  it("shows the empty-thread headline with the workspace name before any turn", async () => {
+  it("shows the empty-thread headline with the project's name before any turn", async () => {
     const { api } = fixtureApi([workspace]);
     await setup(api);
     const heading = screen.getByRole("heading", { level: 1 });
-    expect(heading.textContent).toBe("What should we build in api?");
+    expect(heading.textContent).toBe("What should we build in the-project?");
     expect(screen.queryByTestId("settled-footer")).toBeNull();
   });
 
@@ -363,7 +363,7 @@ describe("ChatView", () => {
     render(<ChatView workspaceId={WS}>{thread => { handle.current = thread; return null; }}</ChatView>);
     await screen.findByText("Added GET /health.");
     act(() => requestNewThread({ workspaceId: WS }));
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("What should we build in api?");
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("What should we build in the-project?");
     expect(screen.queryByText("Added GET /health.")).toBeNull();
     sendFrom(handle.current, "second thread");
     for (const e of settledTurn(WS, "second thread", "Second answer.", 2)) emit(e);
@@ -383,7 +383,7 @@ describe("ChatView", () => {
     act(() => requestNewThread({ workspaceId: WS }));
     act(() => release(settledTurn(WS, "add a health route", "Added GET /health.")));
     await waitFor(() => expect(screen.queryByText("loading transcript")).toBeNull());
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("What should we build in api?");
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("What should we build in the-project?");
     expect(screen.queryByText("Added GET /health.")).toBeNull();
     expect(screen.getByTestId("fresh").textContent).toBe("true");
   });
@@ -401,7 +401,7 @@ describe("ChatView", () => {
     expect(screen.getByText("Alpha answer.")).toBeDefined();
     view.rerender(<ChatView workspaceId={other.id} />);
     await waitFor(() => expect(screen.queryByText("loading transcript")).toBeNull());
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("What should we build in beta?");
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("What should we build in the-project?");
     expect(screen.queryByText("Beta answer.")).toBeNull();
     // Taken once: mounting alpha again shows alpha's transcript.
     view.rerender(<ChatView workspaceId={WS} />);
@@ -419,7 +419,7 @@ describe("ChatView", () => {
     await screen.findByText(/Creating the server file, then starting it\./);
     expect(screen.getByTestId("busy").textContent).toBe("true");
     act(() => requestNewThread({ workspaceId: WS }));
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("What should we build in api?");
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("What should we build in the-project?");
     expect(screen.getByTestId("busy").textContent).toBe("false");
     for (const e of FIXTURE.slice(6)) emit(e);
     expect(screen.getByRole("heading", { level: 1 })).toBeDefined();
@@ -449,7 +449,7 @@ describe("ChatView", () => {
     act(() => requestNewThread({ workspaceId: other.id }));
     view.rerender(<ChatView workspaceId={other.id}>{thread => <span data-testid="busy">{String(thread.busy)}</span>}</ChatView>);
     await waitFor(() => expect(screen.queryByText("loading transcript")).toBeNull());
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("What should we build in beta?");
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("What should we build in the-project?");
     expect(screen.getByTestId("busy").textContent).toBe("false");
     emit({ type: "session.delta", ...beta, at: T0 + 600, kind: "text", text: " and the beta tail." });
     emit({ type: "session.done", ...beta, at: T0 + 900, result: { status: "completed", durationMs: 900, costUsd: 0.001 } });

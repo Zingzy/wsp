@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The model, defaults and project pickers inside the composer box. Each lists
+// The model and effort pickers inside the composer box, and the access picker
+// in the strip under it. Each lists
 // what the runtime's catalog says the harness's CLI takes, asked of the
 // binary on the workspace's machine once it runs; a picker whose list is
 // empty does not exist. The reasoning effort, the context window and the
@@ -11,9 +12,7 @@
 // the one pick that says what the agent may touch. No button shrinks: the row wraps
 // before any of them is cut, so every pick reads whole down to a centre column
 // of about 300 px (measured 2026-09-09); the shell keeps the column wider
-// than that beside the inline panel. The one label a person writes, the
-// project's name, has no bound, so its button alone is capped at the row and
-// cuts the name; the menu row says it whole. A pick is remembered per
+// than that beside the inline panel. A pick is remembered per
 // workspace and rides the next sessions.start, except that a thread that has
 // run keeps the agent and the access its own rows carry: the model, its
 // window and the effort a pick made on such a thread still ride its next
@@ -25,23 +24,16 @@
 // mode change mid-turn it reaches the turn in front of the person too, the
 // prompt it is stopped on included, and the menu says which of the two a pick
 // will do while a turn runs, over the list, before the pick is made.
-// The project pick exists only on a workspace holding projects and only while
-// the thread is still to be opened: it reads the runtime's default folder rule
-// off the record, its menu is the workspace's projects and other folder, which
-// opens the folder picker under the box, and a pick lands on the host's record
-// as the workspace's last project, where the runtime reads it for every road.
-import { ChevronDownIcon, CircleSlashIcon, FolderIcon, FolderOpenIcon, HandIcon, LockIcon, LockOpenIcon, PenLineIcon, PencilRulerIcon, ShieldIcon, SparklesIcon, type LucideIcon } from "lucide-react";
+import { BrainIcon, ChevronDownIcon, CircleSlashIcon, HandIcon, LockIcon, LockOpenIcon, PenLineIcon, PencilRulerIcon, ShieldIcon, SparklesIcon, type LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { DEFAULT_AGENT } from "@wsp/catalog";
-import { ACCESS_REFUSED_LINE, accessReachLine, kindForComputer, workspaceAccess, contextWindowsFor, effortsFor, movesRunningAccess, type HarnessCatalog, type HarnessModel, type HarnessOption, type ProjectRef, type ProjectView, type SessionView } from "@wsp/protocol";
-import { baseName } from "../../files/entries";
-import { useChosenFolder, useDefaultProject, useProject, useRootStore } from "../../files/root";
+import { ACCESS_REFUSED_LINE, accessReachLine, kindForComputer, workspaceAccess, contextWindowsFor, effortsFor, movesRunningAccess, type HarnessCatalog, type HarnessModel, type HarnessOption, type ProjectView, type SessionView } from "@wsp/protocol";
+import { useProject } from "../../files/root";
 import { projectHomeKey, useHarnessCatalog, useHarnessCatalogs, useLatestSession, useProjects, useStore, useThreadSessions, useWorkspace } from "../../protocol/store";
 import { useComputerName } from "../../sidebar/workspaceRows";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
-import { Menu, MenuGroup, MenuGroupLabel, MenuItem, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuSeparator, MenuTrigger } from "../ui/menu";
-import { canPickFolder } from "./ComposerCheckoutRow";
+import { Menu, MenuGroup, MenuGroupLabel, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuSeparator, MenuTrigger } from "../ui/menu";
 import { ComposerModelPicker } from "./ComposerModelPicker";
 import { useComposerDraftStore } from "./composerDraftStore";
 import { togglePick, useMultiPicks, useMultiPickStore } from "./composerMultiPick";
@@ -212,6 +204,7 @@ function ReasoningPicker({
         data-effort={picks.effort ?? undefined}
         data-context-window={picks.contextWindow ?? undefined}
       >
+        <BrainIcon className="size-4 shrink-0" aria-hidden />
         <span className="truncate">{label}</span>
         <ChevronDownIcon className="size-3.5 shrink-0 opacity-60" />
       </MenuTrigger>
@@ -335,102 +328,19 @@ export function useAccessPick(workspaceId: string, target: AccessTarget | null, 
   return { pick, line: note !== null && note.turnId === target?.turnId ? ACCESS_REFUSED_LINE : null };
 }
 
-/** The word other folder wears in the project menu and, once one is chosen, the folder's own name on the trigger. */
-export const OTHER_FOLDER = "other folder";
-
-/** The project the workspace holds, and the road to a folder beside it: the project's own name, or the chosen
- * folder's last segment once one is picked. A workspace is one project's copy, so the menu offers that project and
- * other folder, which hands the pick to the folder picker under the box. The button is capped at the row's width,
- * since a folder's name is as long as the person made it. */
-/** The project picker's own face with nothing behind it. */
-function HeldProject({ name }: { name: string }) {
-  return (
-    <Button type="button" variant="ghost" size="xs" disabled className={`${triggerClass} max-w-full`} aria-label={`Project: ${name}`} data-composer-picker="project">
-      <FolderIcon className="size-3.5 shrink-0" aria-hidden />
-      <span data-composer-project-name className="min-w-0 truncate font-mono">
-        {name}
-      </span>
-      <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
-    </Button>
-  );
-}
-
-function ProjectPicker({ workspaceId, projects, onOtherFolder }: { workspaceId: string; projects: readonly ProjectRef[]; onOtherFolder: () => void }) {
-  const project = useDefaultProject(workspaceId);
-  const chosen = useChosenFolder(workspaceId);
-  const unchoose = useRootStore(s => s.unchoose);
-  const follow = useRootStore(s => s.follow);
-  const value = chosen === null ? project?.name ?? null : null;
-  const label = chosen !== null ? baseName(chosen) : project?.name ?? "Project";
-  const Icon = chosen !== null ? FolderOpenIcon : FolderIcon;
-  return (
-    <Menu>
-      <MenuTrigger
-        render={<Button type="button" variant="ghost" size="xs" />}
-        className={`${triggerClass} max-w-full`}
-        aria-label={`Project: ${label}`}
-        data-composer-picker="project"
-        data-value={value ?? undefined}
-      >
-        <Icon className="size-3.5 shrink-0" aria-hidden />
-        <span data-composer-project-name className="min-w-0 truncate font-mono">{label}</span>
-        <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
-      </MenuTrigger>
-      <MenuPopup align="start" side="top" className="w-72">
-        <MenuRadioGroup
-          value={value}
-          onValueChange={next => {
-            const picked = projects.find(p => p.name === next);
-            if (picked === undefined) return;
-            unchoose(workspaceId);
-            follow(workspaceId, picked.path);
-          }}
-        >
-          {projects.map(p => (
-            <MenuRadioItem key={p.name} value={p.name} data-composer-project={p.name} title={p.path}>
-              <span className="flex min-w-0 items-center gap-2">
-                <FolderIcon className="mx-0! size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-                <span className="truncate font-mono">{p.name}</span>
-              </span>
-            </MenuRadioItem>
-          ))}
-        </MenuRadioGroup>
-        <MenuSeparator />
-        <MenuItem onClick={onOtherFolder} data-composer-project-other>
-          <FolderOpenIcon />
-          <span className="truncate">{OTHER_FOLDER}</span>
-        </MenuItem>
-      </MenuPopup>
-    </Menu>
-  );
-}
-
 export function ComposerOptionPickers({
   workspaceId,
   thread,
-  onPickAccess,
-  accessRefused = null,
-  onOtherFolder,
   compact = false,
-  heldProject,
 }: {
-  /** The one-line composer's pickers: the model and the reasoning only, the access having moved under the box. */
+  /** The one-line composer's pickers, with no rule between them. */
   compact?: boolean;
-  /** The project a workspace still being made will run in, drawn where its picker will stand and taking no press. */
-  heldProject?: string;
   workspaceId: string;
   thread: ChatThreadHandle;
-  onPickAccess: (mode: string) => void;
-  /** The refusal the running turn gave the last access pick, which stands on the picker. */
-  accessRefused?: string | null;
-  /** Opens the folder picker under the box, where the project menu's other folder row sends the pick. */
-  onOtherFolder: () => void;
 }) {
   useMachineCatalogs(workspaceId);
   const pick = useComposerOptionsStore(s => s.pick);
   const catalogs = useHarnessCatalogs(workspaceId);
-  const project = useProject(workspaceId);
-  const projects = useMemo(() => (project === null ? [] : [project]), [project]);
   const where = useComputerName(workspaceId);
   const { catalog, model, picks, pinned } = useComposerPicks(workspaceId, thread);
   // Only a home's send opens a copy per model; a send anywhere else lands in the one thread on screen.
@@ -469,22 +379,11 @@ export function ComposerOptionPickers({
           <ReasoningPicker workspaceId={workspaceId} threadKey={thread.threadKey} efforts={efforts} contextWindows={contextWindows} picks={picks} />
         </>
       ) : null}
-      {!compact && catalog.permissionModes.length > 0 ? (
-        <>
-          <BarRule />
-          <AccessPicker modes={catalog.permissionModes} picks={picks} refused={accessRefused} note={thread.view.running ? accessReachLine(movesRunningAccess(catalog)) : null} onPickAccess={onPickAccess} />
-        </>
-      ) : null}
-      {compact ? null : heldProject !== undefined ? (
-        <HeldProject name={heldProject} />
-      ) : projects.length > 0 && canPickFolder(thread) ? (
-        <ProjectPicker workspaceId={workspaceId} projects={projects} onOtherFolder={onOtherFolder} />
-      ) : null}
     </>
   );
 }
 
-/** The access picker alone, sized for the strip under the one-line composer. */
+/** The access picker, sized for the strip under the box. */
 export function ComposerAccessPicker({ workspaceId, thread, onPickAccess, refused }: { workspaceId: string; thread: ChatThreadHandle; onPickAccess: (mode: string) => void; refused: string | null }) {
   const { catalog, picks } = useComposerPicks(workspaceId, thread);
   if (catalog === null || picks === null || catalog.permissionModes.length === 0) return null;

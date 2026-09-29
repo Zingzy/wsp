@@ -239,7 +239,7 @@ export function ChatView({
           <>
             <HeroAtmosphere {...(workspace?.project?.id === undefined ? {} : { projectId: workspace.project.id })} />
             <div className="absolute inset-x-0 bottom-[calc(var(--empty-lift)+var(--chat-composer-inset)+2.5rem)]">
-              <EmptyThread workspaceName={workspace?.name ?? workspaceId} {...(workspace?.project?.id === undefined ? {} : { projectId: workspace.project.id })} />
+              <EmptyThread name={workspace?.project.name ?? workspaceId} {...(workspace?.project?.id === undefined ? {} : { projectId: workspace.project.id })} />
             </div>
           </>
         ) : (
@@ -307,13 +307,15 @@ function ScrollToEnd({ hidden, onClick }: { hidden: boolean; onClick: () => void
   );
 }
 
-export function EmptyThread({ workspaceName, projectId }: { workspaceName: string; projectId?: string }) {
+/** The question over a thread with no message yet, naming the project: `picker` stands in for the name where the
+ * project is still the person's to change. */
+export function EmptyThread({ name, projectId, picker }: { name: string; projectId?: string; picker?: ReactNode }) {
   return (
     <div className="flex flex-col items-center justify-center gap-6 px-6">
       <HeroMark {...(projectId === undefined ? {} : { projectId })} />
       <h1 className="mx-auto w-full max-w-5xl text-center font-normal text-2xl text-foreground tracking-tight sm:text-3xl">
         What should we build in{" "}
-        <span className="inline-block max-w-64 truncate border-foreground/60 border-b border-dotted align-baseline">{workspaceName}</span>?
+        {picker ?? <span className="inline-block max-w-64 truncate align-baseline">{name}</span>}?
       </h1>
     </div>
   );
