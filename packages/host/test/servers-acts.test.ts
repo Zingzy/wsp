@@ -419,7 +419,10 @@ describe("adding an MCP server", () => {
           child.stdout.on("data", (b: Buffer) => out.push(b));
           child.stdin.on("error", () => undefined);
           const poll = setInterval(() => {
-            if (opts?.stdin !== undefined && halfway()) process.kill(-child.pid!, "SIGKILL");
+            if (opts?.stdin === undefined || !halfway()) return;
+            // Once only: a tick between the kill and the child's close would kill a group that is gone (ESRCH).
+            clearInterval(poll);
+            process.kill(-child.pid!, "SIGKILL");
           }, 5);
           child.on("close", (code, signal) => {
             clearInterval(poll);
