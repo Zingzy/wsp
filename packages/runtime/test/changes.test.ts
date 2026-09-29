@@ -97,7 +97,7 @@ async function withWorkspace(
     ...(o.clock !== undefined ? { clock: o.clock } : {}),
   });
   const project = await projectOn(rt, undefined, undefined, { base: "main" });
-  const ws = await createOn(rt, { project: project.id, golden: "snap_g", name: "cart", ...(o.agents === true ? { agents: { spawn: true, maxMachines: 2, maxDepth: 2 } } : {}) });
+  const ws = await createOn(rt, { project: project.id, golden: "snap_g", name: "cart", ...(o.agents === true ? { agents: { spawn: true, maxMachines: 2, maxDepth: 2 } } : o.agents === false ? { agents: { spawn: false } } : {}) });
   backend.machines[0]!.previewUrl = async () => ({ url: "http://127.0.0.1:7070", token: "e", expiresAt: Date.now() + 3_600_000 });
   return { backend, id: ws.id, name: ws.name };
 }
@@ -198,7 +198,7 @@ describe("a discard and a commit", () => {
 
   it("is refused to a thread whose workspace lets its agents do nothing, by the act's own word", async () => {
     const daemon = fakeDaemon();
-    const { id, name } = await withWorkspace(daemon);
+    const { id, name } = await withWorkspace(daemon, { agents: false });
     const thread: Caller = { origin: "here", by: { kind: "thread", threadId: "thr_1", workspaceId: id, rootThreadId: "thr_1" } };
     await expect(rt!.workspaces.commit({ workspaceId: id, message: "m", paths: ["a.ts"] }, thread)).rejects.toThrow(agentsOffRefusal(name, "commit"));
     // The draft is the commit's first half and runs the agent's command line, so it is held by the same word.

@@ -227,7 +227,7 @@ import type {
 } from "@wsp/protocol";
 import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding } from "./project-landing.js";
 import { projectRemote, projectSource } from "./project-sources.js";
-import { vaultUnlistedRefusal, ThreadPlacement, ThreadScope, WorkspaceOrigin, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, GitCommitReply, GitDiscardReply, GitDiffReply, GitStatusReply, DRAFT_NOTES, cleanCheckoutLine, commitMessage, cutDiff, draftPrompt, type Checkout, type CheckoutReply, type CommitDraft, type CommitDrafter, type ViewedMarks, agentsFrom, foldThreads, runningOn as runningOnPlace, phaseHoldsSlot, placeAtLimitLine, placeSpendLimit, spendCapRefusal, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadKeyOf, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, SCOPED_MCP_ARG, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
+import { vaultUnlistedRefusal, ThreadPlacement, ThreadScope, WorkspaceOrigin, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, GitCommitReply, GitDiscardReply, GitDiffReply, GitStatusReply, DRAFT_NOTES, cleanCheckoutLine, commitMessage, cutDiff, draftPrompt, type Checkout, type CheckoutReply, type CommitDraft, type CommitDrafter, type ViewedMarks, AGENTS_ON, agentsFrom, foldThreads, runningOn as runningOnPlace, phaseHoldsSlot, placeAtLimitLine, placeSpendLimit, spendCapRefusal, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadKeyOf, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, SCOPED_MCP_ARG, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
 import { ASIDE_NO_SESSION_LINE, BLANK_ASIDE_LINE, asideUnsupportedLine, PLACE_WORKSPACE_PATH, THIS_COMPUTER, COPY_BUILD_FIX, copyAsksSignIns, refusal, copyFirstLine, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildOf, copyIsCurrent, type CopyBuild, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, serverIconsLeftLine, homeShortened, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, threadRunsOnLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, GONE_UNCHECKED, goneUnconfirmedLine, type GoneSeenBy, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, cloneFailedLine, cloneIntoNeeded, cloneIntoTakenLine, cloneUrlRefusal, intoIsHereLine, INTO_TAKES_A_REPO_LINE, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeBlocked, placeDaemonBehind, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeDaemonPaths, placeDialBackLine, placeWentAwayLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, workspaceLands, copyPathFor, folderSlug, type ProjectCopy, REWIND_LATEST_LINE, REWIND_NO_CHECKPOINT_LINE, REWIND_NO_UNDO_LINE, REWIND_OWN_FOLDER_LINE, REWIND_WORKING_LINE, rewindBesideLine, rewindChildrenLine, rewindNoAnchorLine, attachmentRecord, filesBlocked, isImage, sendFilesDir, filePathIn, landFilesLine, filesNotLandedLine, attachedFilesPrompt, dropFilesLine } from "@wsp/protocol";
 import { agentsReads, type AgentsActs, type AgentsReader, type CallbackForwards, type ServerIcons, type ServersActs, type SignInAsk, type SkillAsk, type SkillsActs } from "./agents-read.js";
 import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from "./daemon-channel.js";
@@ -512,7 +512,7 @@ export interface CreateWorkspaceOptions extends WorkspaceSpec {
   /** Snapshot id of a project image to fork; absent takes the head of this host's own image. */
   golden?: string;
   name: string;
-  /** What the agents on the new workspace may ask of this host; absent is off, and on a fork a thread asked for it
+  /** What the agents on the new workspace may ask of this host; absent takes the default, and on a fork a thread asked for it
    * is the forking workspace's own switch, so a tree of machines carries one rule rather than needing it set again.
    * A key left out takes the default. */
   agents?: Partial<WorkspaceAgents>;
@@ -2807,11 +2807,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** The switch that governs a workspace, which is the one on the workspace the root thread of its tree runs on: a
    * fork carries the tree it belongs to and not a rule of its own, so turning a lead's switch off stops everything
    * its threads spawned rather than leaving a copy of the old answer standing on every machine under it. A root
-   * whose workspace this host no longer holds governs nothing, so the tree under it spawns nothing more. */
+   * whose workspace this host no longer holds governs nothing, so the tree under it spawns nothing more. A switch
+   * nobody set reads as the default. */
   const agentsOf = (record: { agents?: WorkspaceAgents; rootThreadId?: string }): WorkspaceAgents | undefined => {
-    if (record.rootThreadId === undefined) return record.agents;
+    if (record.rootThreadId === undefined) return record.agents ?? AGENTS_ON;
     const at = rowsOn(record.rootThreadId)[0]?.workspaceId;
-    return at === undefined ? undefined : live.get(at)?.record.agents;
+    const root = at === undefined ? undefined : live.get(at)?.record;
+    return root === undefined ? undefined : (root.agents ?? AGENTS_ON);
   };
   /** The tree a thread sits in, read off the rows: its parent, then its parent's, up to the thread a person opened.
    * The walk is bounded by the rows there are, since a chain that somehow looped would otherwise never end. */
@@ -2927,9 +2929,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     ];
     return upgradePlan(from.owned, to.owned, await readOwnedFiles(m, read));
   };
-  // One device door for this host: the ops the protocol server answers and the token every turn on a spawn enabled
-  // workspace is launched with come out of the same table, so a scoped token is listed, matched and revoked by the
-  // rules a paired computer's token already lives under.
+  // One device door for this host: the ops the protocol server answers and the token every turn is launched with
+  // come out of the same table, so a scoped token is listed, matched and revoked by the rules a paired computer's
+  // token already lives under.
   const deviceDoor = makeDevices(store);
   // The places joined to this host, over the one code store every code is spent from: the door holds the records
   // and the links, and the two roads into the runtime it needs are the ordinary record and delete roads below.
@@ -7692,11 +7694,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const turnToken = randomBytes(16).toString("hex");
       // The token this turn's own agent drives this host with, and the address it dials: a device of this host's,
       // scoped to this thread and taken away when the turn's process exits, so a token read out of a machine after
-      // the turn opens nothing. Minted only where the person turned the switch on and only where the turn has a road
-      // to this host, since a token with nowhere to go is one more secret for nothing.
+      // the turn opens nothing. Minted whatever the switch says, since a turn with none reaches this host through the
+      // person's own wsp server and acts as them; the guard refuses what the switch refuses. Only where the turn has
+      // a road to this host, since a token with nowhere to go is one more secret for nothing.
       const reach = agentsReach(entry);
       const scoped =
-        agentsOf(entry.record)?.spawn === true && reach !== undefined
+        reach !== undefined
           ? await deviceDoor.mint(`thread ${threadWord(threadId)}`, { kind: "thread", threadId, workspaceId, rootThreadId: tree.rootThreadId ?? threadId }, Date.now(), moduleOf(entry.record.kind).turnRoad)
           : undefined;
       const dropScope = (): void => {
@@ -7730,9 +7733,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         throw e;
       }
       const { harness, adapter } = built;
-      // The wsp tools ride the launch on a workspace whose agents may spawn, for a harness that takes servers with
-      // one: the guest's own config is the golden's and says nothing about this host. A harness that takes none is
-      // refused where a caller named servers and left alone here, since the person asked for a thread, not for tools.
+      // The wsp tools ride every launch, for a harness that takes servers with one: under the same name as the
+      // person's own wsp server, which Claude Code's --mcp-config and Codex's -c overrides both replace while the
+      // person's other servers stay (measured on 2.1.284 and 0.155.1 against the user-scope config; a project's own
+      // .mcp.json naming wsp was not measured). A harness that takes none is refused where a caller named servers and
+      // left alone here, since the person asked for a thread, not for tools.
       const mcpServers =
         scoped !== undefined && reach?.wsp !== undefined && adapter.mcpServers === true
           ? { [MCP_SERVER_NAME]: reach.wsp, ...o.mcpServers }

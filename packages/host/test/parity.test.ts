@@ -10,7 +10,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it } from "vitest";
 import { DEFAULT_AGENT } from "@wsp/catalog";
-import { COORDINATOR_HANDOFF, DaemonRequest, EXIT_CODES, EXIT_WORDS, ExitClass, NOTIFY_CALLER, NOTIFY_WORDS, RUNTIME_OPS, RuntimeRequest, SessionStartOutcome, TURN_END_WORDS, effortsFor, markedDefault, stillWorkingLine, type WorkspaceView } from "@wsp/protocol";
+import { ANOTHER_AGENT_WORDS, COORDINATOR_HANDOFF, DaemonRequest, EXIT_CODES, EXIT_WORDS, ExitClass, NOTIFY_CALLER, NOTIFY_WORDS, RUNTIME_OPS, RuntimeRequest, SessionStartOutcome, TURN_END_WORDS, effortsFor, markedDefault, stillWorkingLine, type WorkspaceView } from "@wsp/protocol";
 import { harnessCatalog } from "@wsp/runtime";
 import { agentPage, cli, COMMAND_LINES, commandPage, COMMANDS_FOR_HELP, HELP, HOST_FLAG, JSON_COMMANDS, PROSE_COMMANDS, SERVE_FLAGS, SHARED_FLAGS, type CliIO, type CommandLine } from "../src/cli.js";
 
@@ -599,6 +599,8 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
       expect(text).toContain(TURN_END_WORDS);
       expect(text).toContain(NOTIFY_WORDS);
     }
+    // Another agent the person asks for is a thread they can see, in every door an agent reads before it picks a tool.
+    for (const text of [tool, WSP_SKILL, INSTRUCTIONS]) expect(text).toContain(ANOTHER_AGENT_WORDS);
     // The page wraps the sentence at 80 columns, so it is read with its line breaks folded.
     const help = agentPage().replace(/\s+/g, " ");
     expect(help).toContain(TURN_END_WORDS);

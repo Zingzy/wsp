@@ -217,6 +217,32 @@ describe("the sidebar's list of thread tiles", () => {
       expect(three("ws_f").querySelector(".lucide-git-branch")).not.toBeNull();
     });
 
+    it("leaves out behind and a detached head, which tell a tile's reader nothing, and keeps the counts that do", async () => {
+      mount({ projects: [project("pr_1", "spoo")], workspaces: [fork] });
+      await waitFor(() => expect(rowIds()).toEqual(["ws:ws_f"]));
+      act(() => useStore.setState({ statuses: { ws_f: statusOf(fork, { ...fact, behind: 4 }) } } as never));
+      await waitFor(() => expect(counts("ws_f")).toEqual(["1 ahead", "3 changed"]));
+      act(() => useStore.setState({ statuses: { ws_f: statusOf(fork, { ...fact, branch: "(detached)", behind: 4 }) } } as never));
+      await waitFor(() => expect(three("ws_f").querySelector("[data-tile-branch]")).toBeNull());
+      expect(counts("ws_f")).toEqual(["1 ahead", "3 changed"]);
+      expect(three("ws_f").textContent).not.toMatch(/detached|behind/);
+    });
+
+    it("counts a thread's commits ahead while it works and drops them once it is done", async () => {
+      mount({ projects: [project("pr_1", "spoo")], workspaces: [fork] });
+      const turn = { ws: "ws_f", id: "th_cart", prompt: "round the cart", startedAgo: 6 * 60_000 };
+      const tile = (): HTMLElement => document.querySelector<HTMLElement>("[data-row-id='thread:th_cart']")!;
+      const shown = (): string[] => [...tile().children[2]!.querySelectorAll("[data-tile-count]")].map(n => n.textContent ?? "");
+      await act(async () => useStore.setState({ sessions: sessions([turn]), statuses: { ws_f: statusOf(fork, fact) } } as never));
+      await waitFor(() => expect(shown()).toEqual(["1 ahead", "3 changed"]));
+      await act(async () => useStore.setState({ sessions: sessions([{ ...turn, status: "completed", endedAgo: 5 * 60_000, readAgo: HOUR }]) } as never));
+      await waitFor(() => expect(tile().querySelector("[data-thread-status]")!.textContent).toBe("Done"));
+      expect(shown()).toEqual(["3 changed"]);
+      await act(async () => useStore.setState({ sessions: sessions([{ ...turn, status: "completed", endedAgo: 5 * 60_000 }]) } as never));
+      await waitFor(() => expect(tile().querySelector("[data-thread-status]")!.textContent).toBe("5m"));
+      expect(shown()).toEqual(["3 changed"]);
+    });
+
     it("says the changes were not read on a stopped copy whose edits git could not read", async () => {
       mount({ projects: [project("pr_1", "spoo")], workspaces: [fork] });
       await waitFor(() => expect(rowIds()).toEqual(["ws:ws_f"]));
