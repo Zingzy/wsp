@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Every button that says Add on a settings page or in the agents manager is
 // the one shared Add button: each group's page, a computer's page and a
-// project's page, the Add a computer panel on every road, and the manager on
-// every tab and at its add level.
+// project's page, the Add a computer panel on every road, and the manager in a
+// task's panel on every tab and at its add level.
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { InitSetup, PlaceView, ProjectView } from "@wsp/protocol";
+import type { InitSetup, PlaceView, ProjectView, WorkspaceView } from "@wsp/protocol";
+import { AgentsSurface } from "../src/components/agents/AgentsSurface.js";
+import { TooltipProvider } from "../src/components/ui/tooltip.js";
 import { useStore } from "../src/protocol/store.js";
 import { FirstRun } from "../src/shell/FirstRun.js";
 import { useAdds } from "../src/settings/adds.js";
@@ -19,6 +21,7 @@ const here: PlaceView = { id: "here", kind: "computer", name: "zingzy-mbp", defa
 const box: PlaceView = { id: "p_spoo", kind: "computer", name: "spoo", default: false, present: true, takesForks: true, engine: "docker", os: "Ubuntu 24.04", shape: { cpu: 4, memMb: 8192 }, diskFreeBytes: 63 * 1024 ** 3, joinedAt: "2026-09-12T11:00:00.000Z", lastSeenAt: "2026-09-12T11:59:00.000Z" };
 const solari: PlaceView = { id: "solari", kind: "provider", name: "solari", default: false, rateUsdPerHour: 0.11, takesForks: true };
 const project: ProjectView = { id: "pr_spoo", name: "spoo", computer: "here", source: { kind: "folder", path: "/Users/dev/spoo" }, path: "/Users/dev/spoo", remote: "https://github.com/dev/spoo.git", defaultBranch: "main", memoryKey: "-Users-dev-spoo", memoryDir: "/Users/dev/.claude-cfg/projects/-Users-dev-spoo/memory", createdAt: "2026-09-12T09:14:00.000Z" };
+const MINE: WorkspaceView = { id: "ws_here", project: { id: "pr_spoo", name: "spoo", path: "/Users/dev/spoo", computer: "here" }, name: "spoo", kind: "local", machineId: "local", phase: "running", golden: "", createdAt: "2026-09-12T09:14:00.000Z" };
 const setup = { keys: { box: false, solari: true }, home: "/Users/dev", agents: [], pricing: null, job: null } as unknown as InitSetup;
 
 const api = () =>
@@ -33,7 +36,7 @@ const api = () =>
 
 /** A button's word as a person hears it: its name where the word is hidden, else its text. */
 const wordOf = (b: HTMLButtonElement): string => (b.getAttribute("aria-label") ?? b.textContent ?? "").trim();
-const addsOn = (): HTMLButtonElement[] => [...document.querySelectorAll<HTMLButtonElement>("[data-settings-page] button, [data-slot=dialog-popup] button")].filter(b => wordOf(b).startsWith("Add"));
+const addsOn = (): HTMLButtonElement[] => [...document.querySelectorAll<HTMLButtonElement>("[data-settings-page] button, [data-agents-manager] button, [data-slot=dialog-popup] button")].filter(b => wordOf(b).startsWith("Add"));
 /** Rows that carry their plus and stay rows: the Add a project sheet's side list ends in Add a computer. */
 const SIDE_ROWS = ["[data-slot=dialog-popup] aside [data-k=add-computer]"];
 /** The Add buttons standing now that are drawn some other way, by word. */
@@ -99,6 +102,17 @@ const keycap = (b: Element | null): void => {
   expect(cls.filter(c => /^sm:h-(6|9|10)$|^h-(8|10)$|^sm:text-xs$/.test(c))).toEqual([]);
 };
 
+/** The agents manager where it stands now, in a task's panel on this computer. */
+const mountPanel = async (): Promise<void> => {
+  useStore.setState({ api: api(), places: [here], workspaces: [MINE] });
+  render(
+    <TooltipProvider>
+      <AgentsSurface workspaceId={MINE.id} />
+    </TooltipProvider>,
+  );
+  await settle();
+};
+
 describe("the one size of the shared Add button", () => {
   it("is the 32 px keycap on the key road, the ssh road, the manager's head and the first run", async () => {
     mountSettings({ api: api(), at: { kind: "group", group: "computers" } });
@@ -111,8 +125,9 @@ describe("the one size of the shared Add button", () => {
     fireEvent.click(document.querySelector("[data-add-road='ssh']")!);
     await settle();
     keycap(document.querySelector("[data-k='ssh-add']"));
-    await go({ kind: "computer", id: "here" });
-    const tabs = document.querySelectorAll<HTMLElement>("[data-settings-page] [data-slot=segmented-control] [role=radio]");
+    cleanup();
+    await mountPanel();
+    const tabs = document.querySelectorAll<HTMLElement>("[data-agents-manager] [data-slot=segmented-control] [role=radio]");
     fireEvent.click(tabs[1]!);
     await settle();
     keycap(document.querySelector("[data-k=agents-add]"));
@@ -125,9 +140,8 @@ describe("the one size of the shared Add button", () => {
 
 describe("the shared Add button in the agents manager", () => {
   it("is every Add on each tab, at the add level and in the Add an MCP server form", async () => {
-    mountSettings({ api: api(), at: { kind: "computer", id: "here" } });
-    await settle();
-    const tabs = (): HTMLElement[] => [...document.querySelectorAll<HTMLElement>("[data-settings-page] [data-slot=segmented-control] [role=radio]")];
+    await mountPanel();
+    const tabs = (): HTMLElement[] => [...document.querySelectorAll<HTMLElement>("[data-agents-manager] [data-slot=segmented-control] [role=radio]")];
     const names = tabs().map(t => t.textContent ?? "");
     expect(names.length).toBe(3);
     const seen = new Set<string>();

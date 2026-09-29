@@ -65,7 +65,7 @@ export const drawnGroups = (): SettingsGroup[] => SETTINGS_GROUPS.filter(group =
 export function searchGroup(group: SettingsGroup, ctx: SettingsContext, query: string): SettingsItem[] {
   const q = normalizeSearchText(query);
   if (q === "") return [];
-  return group.cards(ctx).flatMap(card => card.items.filter(item => itemWords(item).some(word => normalizeSearchText(word).includes(q))));
+  return group.cards(ctx).flatMap(card => (card.search ?? card.items).filter(item => itemWords(item).some(word => normalizeSearchText(word).includes(q))));
 }
 
 /** The palette row's description: the groups a person will find, named. */

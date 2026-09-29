@@ -738,10 +738,14 @@ const imageRecord = () => ({
       at: new Date(ago(150)).toISOString(),
       histories: [],
       rows: [
-        ...["agents/claude", "agents/codex"].map(id => recipeRow(id, "agent")),
-        ...["ripgrep", "fd", "jq", "gh", "fzf", "bat", "delta", "httpie", "node", "pnpm", "uv", "tmux", "neovim"].map(name => recipeRow(`tools/brew/${name}`, "tool")),
+        ...["claude", "codex"].map(id => recipeRow(id, "agent")),
+        ...["ripgrep", "fd", "jq", "gh", "node", "pnpm", "uv", "tmux"].map(id => recipeRow(id, "tool")),
       ],
     },
+    pins: [
+      { id: "claude", tag: "2.1.283" },
+      { id: "codex", tag: "0.155.1" },
+    ],
     logins: [
       { name: "claude", state: "copied" },
       { name: "gh", state: "signed-in" },
@@ -959,7 +963,9 @@ const tiles = ({ marked = false, snoozedTree = false } = {}) => {
       threadsOn("ws_diff", [[tileThread("diff", "Try the new diff viewer", { agent: "codex", seen: true }), 60 * 24 * 6]]),
     ),
     readsSince: 60 * 24 * 7,
-    goldens: sealed(),
+    // The image built at Solari off the record, so the cloud's page reads its agents and its image row.
+    goldens: { ...sealed(), ...Object.fromEntries([copyAt("solari", 90)]) },
+    images: imageRecord(),
     places: { p_spoo: spooPlace },
     preferences: {
       projectLook: { "pr_spoo-landing": landing, "pr_spoo-landing-cloud": landing, "pr_spoo-landing-spoo": landing, "pr_dark-contrast": landing, pr_wsp: { icon: "terminal", hue: "teal" } },
@@ -1138,7 +1144,8 @@ const replies = () =>
 
 /** Every setup a lab can serve, by the word `--fixture` takes. One row per kind of person: what builds its store,
  * the cloud its machines are meant to be at, which the stand-in provider then wears as its own word, and the
- * repositories that person already keeps at the top of their home, which wsp has imported nowhere. Without the
+ * repositories that person already keeps at the top of their home, which wsp has imported nowhere, and the keys
+ * they have saved, which is what the host reads a cloud's key as held off. Without the
  * cloud word every fork in a fixture reads "fake" on the row where a person reads which cloud they are paying;
  * without a repository of their own, a person told to point the app at one of their repositories has none to point
  * it at. Adding a fixture is a row here and its builder above. */
@@ -1154,7 +1161,7 @@ const FIXTURES = {
   "mac-and-boxes": { build: macAndBoxes },
   orchestrator: { build: orchestrator, cloud: "box" },
   "thread-states": { build: threadStates, cloud: "box" },
-  tiles: { build: tiles, cloud: "solari" },
+  tiles: { build: tiles, cloud: "solari", keys: { SOLARI_API_KEY: "slr_fixture_not_a_key" } },
   "tiles-marks": { build: tilesMarked, cloud: "solari" },
   "tiles-snoozed": { build: tilesSnoozed, cloud: "solari" },
   "tiles-attempt": { build: tilesAttempt },
@@ -1257,6 +1264,12 @@ export function fixtureFolders(state) {
  * Empty for a fixture whose person keeps none. */
 export function fixtureRepos(name, { home = homedir() } = {}) {
   return (fixtureRow(name).repos ?? []).map(folder => join(resolve(home), folder));
+}
+
+/** The keys a fixture's person has saved, by the variable each is read under: what the host reads as held, never a
+ * key any provider takes. The stand-in serves the cloud whatever it holds, so nothing is ever asked with one. */
+export function fixtureKeys(name = "mac-in-use") {
+  return fixtureRow(name).keys ?? {};
 }
 
 /** The cloud a fixture's machines are meant to be at, by the id that provider's own module carries; nothing for a

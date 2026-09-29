@@ -50,9 +50,11 @@ export const IMAGE_WORDS = {
   copyAnyway: "Copy anyway",
   tryAgain: "Try again",
   steps: (done: number, total: number): string => `${done} of ${total} steps done`,
-  startTask: "Start a task here",
-  /** Said under the card while Start a task here is held: a task goes where its project lands, and none lands here. */
-  startHeld: (computer: string): string => `No project lands its tasks on ${computer} yet.`,
+  startTask: "New thread here",
+  /** Said under the card while New thread here is held: a thread goes where its project lands, and none lands here. */
+  startHeld: (computer: string): string => `No project lands its threads on ${computer} yet.`,
+  /** A build's one line on a page's IMAGE row: the stage it is on, then how far it has come. */
+  stepNow: (stage: string | undefined, done: number, total: number): string => (stage === undefined ? `${done} of ${total} steps done` : `${stage}, ${done} of ${total}`),
 } as const;
 
 /** What a copy build takes, said beside the press that starts one, a line each: the time, and the rate where the

@@ -13,6 +13,7 @@ import { useStore } from "../protocol/store.js";
 import { AddProjectDialog } from "../sidebar/AddProjectDialog.js";
 import { ComputerPage } from "./computers.js";
 import { SETTINGS_WORDS, groupBlurbs } from "./format.js";
+import { PageHead } from "./grid.js";
 import { drawnGroups, groupById, searchGroup } from "./groups.js";
 import { hereName } from "./places.js";
 import { ProjectPage } from "./projects.js";
@@ -67,10 +68,9 @@ function Page({ at, ctx }: { at: SettingsAt; ctx: SettingsContext }) {
     const group = groupById(at.group);
     return (
       <>
-        <header data-k="settings-page-head" className="flex flex-col gap-1.5 pb-2">
-          <h1 className="text-lg font-medium tracking-tight">{group.name}</h1>
+        <PageHead title={group.name}>
           <p className="text-[13px] text-muted-foreground">{groupBlurbs(hereName(ctx.places))[at.group]}</p>
-        </header>
+        </PageHead>
         <Cards cards={group.cards(ctx)} />
       </>
     );

@@ -16,6 +16,7 @@ import { FIRST_PAGE, NO_READS, useSettingsStore, type SettingsAt } from "../src/
 import { AppShell } from "../src/shell/AppShell.js";
 import { forgetAgentsReports } from "../src/components/agents/useAgentsReport.js";
 import { TooltipProvider } from "../src/components/ui/tooltip.js";
+import { ImageCardHost } from "./image-card-host.js";
 
 /** A fake api that answers the reads the pages make, records the patches the picks write, and pushes events. */
 export function settingsApi(over: Partial<Api> = {}, record: Preferences = { ...DEFAULT_PREFERENCES, labs: false }): { api: Api; sets: PreferencesPatch[]; push(event: EventUnion): void } {
@@ -72,6 +73,20 @@ export function mountSettings({ api, at, children }: { api?: Api; at?: SettingsA
       {children}
       <AppShell>
         <SettingsPage />
+      </AppShell>
+    </TooltipProvider>,
+  );
+}
+
+/** The Image card with its recipe and its build, as the Add a computer sheet draws it for a computer just added, for
+ * the computer the settings store is on: a computer's own page draws the image as one row and leaves the recipe out. */
+export function mountImageCard({ api, at }: { api: Api; at: SettingsAt }): RenderResult {
+  useStore.setState({ api, settingsOpen: true });
+  useSettingsStore.getState().go(at);
+  return render(
+    <TooltipProvider>
+      <AppShell>
+        <ImageCardHost />
       </AppShell>
     </TooltipProvider>,
   );

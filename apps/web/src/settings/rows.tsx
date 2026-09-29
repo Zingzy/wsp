@@ -97,8 +97,10 @@ export interface SettingsCardData {
   readonly head?: string;
   readonly items: ReadonlyArray<SettingsItem>;
   readonly under?: ReactNode;
-  /** A control too large for a row, drawn under the head in place of the card's surface. */
+  /** A control too large for a row, drawn under the head and over the card's surface where it has rows too. */
   readonly body?: ReactNode;
+  /** The rows a search finds in place of the items, for a card whose body draws them its own way. */
+  readonly search?: ReadonlyArray<SettingsItem>;
 }
 
 /** The words a search reads on an item: its title or label, its description and its hover sentence. */

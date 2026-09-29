@@ -8,8 +8,9 @@
 //
 // The New workspace dialog's Where control reads its rows and its caption from
 // the bottom of this file rather than wording a second set of place facts.
-import { FREE_WORD, JOINED_COMPUTER, hereName, isHere, isProviderPlace, placeName, placeOf, PLACE_BLOCKED_WORD, absentComputer, placeDaemonBehind, awayMsOf, chargesNothing, daemonSilent, fmtBytes, fmtRate, imageCopyStaysLine, isLocalWorkspace, landsOn, namesPlace, ownDaemonDown, plural, provisionWord, type AbsentComputer, type CpuWord, type InitSetup, type PlaceKind, type PlaceProvisionRow, type PlaceView, type ProjectView, type SealedImageCopy, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
-import { PROVISION_OUTCOME_WORDS, WHERE_WORDS } from "./format.js";
+import { FREE_WORD, JOINED_COMPUTER, hereName, isHere, isProviderPlace, placeName, placeOf, absentComputer, placeDaemonBehind, awayMsOf, chargesNothing, daemonSilent, fmtBytes, fmtRate, imageCopyStaysLine, isLocalWorkspace, landsOn, namesPlace, ownDaemonDown, plural, provisionWord, type AbsentComputer, type CpuWord, type InitSetup, type PlaceKind, type PlaceProvisionRow, type PlaceView, type ProjectView, type SealedImageCopy, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { agentName } from "@wsp/catalog";
+import { PLACE_STATE_WORDS, PROVISION_OUTCOME_WORDS, capitalised } from "./format.js";
 
 export { hereName, isHere, isProviderPlace, placeName, placeOf };
 
@@ -129,25 +130,26 @@ export function absentOf(place: PlaceView, now: number | null): AbsentComputer |
   return placeIsOffline(place) ? absentComputer(placeName(place), now === null ? null : awayMsOf(place, now)) : null;
 }
 
-/** The one word the slot beside a row's name carries, in the order a waiting thread reads its computer: can't run
- * threads first, since only a person fixes it, then not answering, since nothing can be put on a computer that is off. A computer that is answering and runs an
- * older daemon than this wsp deploys says so in the protocol's own word, the same one `wsp places` prints in its
- * BEHIND column, so the app and the command line cannot word it twice. */
-export function placeStateWord(place: PlaceView, absent: AbsentComputer | null): string {
-  return (place.blocked === undefined ? undefined : PLACE_BLOCKED_WORD) ?? absent?.away ?? (provisionWord(place.provision) || undefined) ?? placeDaemonBehind(place) ?? "";
-}
+/** What a list row's state cell says: one capitalised word with its whole sentence for the hover, or the one act the
+ * row offers. Read in the order a waiting thread reads its computer: blocked first, since only a person fixes it, then
+ * not answering, the recipe on it, the daemon behind, an agent there that needs a sign-in, then Ready. */
+export type PlaceStateCell =
+  | { readonly kind: "word"; readonly word: string; readonly why?: string }
+  | { readonly kind: "update"; readonly why: string }
+  | { readonly kind: "sign-in"; readonly why: string };
 
-/** How many workspaces stand on each row, by the id of the row: every workspace the app holds goes to exactly one
- * row through placeOf, which is this computer's own workspace on the first row, a fork at the provider it was made
- * at, and the one workspace a joined computer is. Keyed by id rather than counted per row, so the whole table is
- * one walk of the list. A row nothing stands on is not in the record and reads as none. */
-export function placeWorkspaceCounts(places: readonly PlaceView[], workspaces: readonly Pick<WorkspaceView, "kind" | "machineId">[]): Record<string, number> {
-  const counts: Record<string, number> = {};
-  for (const workspace of workspaces) {
-    const place = placeOf(places, workspace);
-    if (place !== undefined) counts[place.id] = (counts[place.id] ?? 0) + 1;
-  }
-  return counts;
+export function placeStateCell(place: PlaceView, absent: AbsentComputer | null, { canUpdate }: { canUpdate: boolean }): PlaceStateCell {
+  if (place.blocked !== undefined) return { kind: "word", word: PLACE_STATE_WORDS.blocked, why: place.blocked };
+  if (absent !== null) return { kind: "word", word: capitalised(absent.away), why: absent.sentence };
+  const job = place.provision;
+  if (job?.state === "running") return { kind: "word", word: PLACE_STATE_WORDS.building(job.at), why: provisionWord(job) };
+  if (job?.state === "stopped") return { kind: "word", word: PLACE_STATE_WORDS.stopped, why: provisionWord(job) };
+  if (job?.rows.some(row => row.outcome === "failed") === true) return { kind: "word", word: PLACE_STATE_WORDS.failed, why: provisionWord(job) };
+  const behind = placeDaemonBehind(place);
+  if (behind !== undefined) return canUpdate ? { kind: "update", why: behind } : { kind: "word", word: PLACE_STATE_WORDS.behind, why: behind };
+  const unsigned = Object.entries(place.signIns ?? {}).flatMap(([agent, state]) => (state === "none" ? [agentName(agent)] : []));
+  if (unsigned.length > 0) return { kind: "sign-in", why: PLACE_STATE_WORDS.needsSignIn(unsigned) };
+  return { kind: "word", word: PLACE_STATE_WORDS.ready };
 }
 
 /** The rows the New workspace dialog offers as somewhere to put one, in the list's own order. The computer the host
@@ -164,15 +166,6 @@ export const PROJECT_PICK_WORDS = {
 } as const;
 
 
-
-/** How a workspace's copy of a project is made on this computer, as that computer last reported it: the
- * protocol's own word (snapshot, reflink, plain), and the sentence for a computer that makes no copy at all.
- * Nothing for a computer that has not said, and nothing for the computer the app runs on, whose copies are its
- * own local mode and whose word the row's Ports line carries instead. */
-export function copiesWord(place: PlaceView, here: boolean): string {
-  if (place.copies !== undefined) return place.copies;
-  return !here && place.takesForks === false ? WHERE_WORDS.copiesNothing : "";
-}
 
 /** The word for what one row of the recipe came to, or nothing for a row no job carried. A present row's note is
  * the one thing its read has to say beyond the outcome, which is a command answering from outside the directories

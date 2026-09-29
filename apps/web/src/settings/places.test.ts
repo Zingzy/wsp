@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { DAEMON_VERSION, JOINED_COMPUTER, PLACE_BLOCKED_WORD, absentComputer, placeDaemonBehind, type PlaceProvision, type PlaceView, type SealedImageCopy, type WorkspaceView } from "@wsp/protocol";
 import { copyOn } from "./image.js";
-import { NOTHING_HELD, PLACE_KIND_WORDS, PROJECT_PICK_WORDS, copiesWord, hereName, outcomeWord, placeName, placeOf, placeStateWord, placeWorkspaceCounts, removeSentence, removeTitle, whereSegments } from "./places.js";
+import { NOTHING_HELD, PLACE_KIND_WORDS, PROJECT_PICK_WORDS, hereName, outcomeWord, placeName, placeOf, placeStateCell, removeSentence, removeTitle, whereSegments } from "./places.js";
 
 const NOW = Date.parse("2026-09-12T12:00:00.000Z");
 const ago = (ms: number): string => new Date(NOW - ms).toISOString();
@@ -136,42 +136,42 @@ describe("which row a workspace stands on", () => {
     expect(placeOf([here, ascii], on("ws_e", "cloud", "ctr_1", "p_gone"))).toBeUndefined();
   });
 
-  it("counts what stands on each row off the workspace list: this computer's own, the forks at a provider, the forks on a joined computer", () => {
-    const places = [here, hetzner, ascii];
-    const workspaces = [on("ws_a", "local", "local"), on("ws_b", "cloud", "fk_1"), on("ws_c", "cloud", "fk_2"), on("ws_d", "cloud", "ctr_1", "p_1")];
-    expect(placeWorkspaceCounts(places, workspaces)).toEqual({ here: 1, box: 2, p_1: 1 });
-  });
-
-  it("leaves a row nothing stands on out, and counts nothing for a workspace no row holds", () => {
-    expect(placeWorkspaceCounts([here, hetzner], [on("ws_a", "local", "local")])).toEqual({ here: 1 });
-    expect(placeWorkspaceCounts([here], [on("ws_b", "cloud", "ctr_1", "p_gone")])).toEqual({});
-  });
 });
 
-describe("the one word the slot beside a row's name carries", () => {
-  it("says a computer runs an older daemon than this wsp deploys, in the protocol's own word", () => {
+describe("the state cell of a list row", () => {
+  const ready = { kind: "word", word: "Ready" };
+  it("says a computer behind this wsp's daemon as Update where the client can ask for one, else as Behind, the protocol's word on the hover", () => {
     const behind = { ...hetzner, daemonVersion: DAEMON_VERSION - 5 };
-    expect(placeStateWord(behind, null)).toBe(`daemon ${DAEMON_VERSION - 5}, host ${DAEMON_VERSION}`);
-    // The same word wsp places prints in its BEHIND column, read off the protocol by both.
-    expect(placeStateWord(behind, null)).toBe(placeDaemonBehind(behind));
+    expect(placeStateCell(behind, null, { canUpdate: true })).toEqual({ kind: "update", why: placeDaemonBehind(behind) });
+    expect(placeStateCell(behind, null, { canUpdate: false })).toEqual({ kind: "word", word: "Behind", why: `daemon ${DAEMON_VERSION - 5}, host ${DAEMON_VERSION}` });
   });
 
   it("says a computer that is not answering first, since nothing can be put on a computer that is off", () => {
     const away = absentComputer("hetzner", 32 * 60 * 1000);
-    expect(placeStateWord({ ...hetzner, daemonVersion: DAEMON_VERSION - 5, present: false }, away)).toBe(away.away);
+    expect(placeStateCell({ ...hetzner, daemonVersion: DAEMON_VERSION - 5, present: false }, away, { canUpdate: true })).toEqual({ kind: "word", word: "No answer", why: away.sentence });
   });
 
-  it("says a computer that cannot run workspaces can't run threads first, before not answering and before behind", () => {
+  it("says a computer that cannot run workspaces is Blocked first, its reason on the hover, before not answering and before behind", () => {
     const blocked = { ...hetzner, daemonVersion: DAEMON_VERSION - 5, blocked: "hetzner cannot run wsp workspaces: it mounts cgroup v1 at /sys/fs/cgroup" };
-    expect(placeStateWord(blocked, null)).toBe(PLACE_BLOCKED_WORD);
-    const away = absentComputer("hetzner", 32 * 60 * 1000);
-    expect(placeStateWord({ ...blocked, present: false }, away)).toBe(PLACE_BLOCKED_WORD);
+    expect(placeStateCell(blocked, null, { canUpdate: true })).toEqual({ kind: "word", word: "Blocked", why: blocked.blocked });
+    expect(placeStateCell({ ...blocked, present: false }, absentComputer("hetzner", 32 * 60 * 1000), { canUpdate: true })).toEqual({ kind: "word", word: "Blocked", why: blocked.blocked });
   });
 
-  it("says nothing of a computer that is answering on this wsp's own daemon, or one that has never reported", () => {
-    expect(placeStateWord({ ...hetzner, daemonVersion: DAEMON_VERSION }, null)).toBe("");
-    expect(placeStateWord(hetzner, null)).toBe("");
-    expect(placeStateWord(ascii, null)).toBe("");
+  it("offers Sign in where an agent there needs one, naming it, and reads Ready otherwise", () => {
+    expect(placeStateCell({ ...hetzner, signIns: { claude: "signed-in", codex: "none" } }, null, { canUpdate: true })).toEqual({ kind: "sign-in", why: "needs a sign-in: Codex" });
+    expect(placeStateCell({ ...hetzner, daemonVersion: DAEMON_VERSION }, null, { canUpdate: true })).toEqual(ready);
+    expect(placeStateCell(hetzner, null, { canUpdate: false })).toEqual(ready);
+    expect(placeStateCell(ascii, null, { canUpdate: false })).toEqual(ready);
+  });
+
+  it("reads the recipe after the computer's silence and before the daemon behind: Building with its step, Stopped, Failed", () => {
+    const running: PlaceProvision = { state: "running", addId: "a_1", recipeAt: "x", startedAt: "x", rows: [], at: { label: "uv", index: 3, of: 7 } };
+    const stopped: PlaceProvision = { ...running, state: "stopped", said: "the box went away" };
+    const failed: PlaceProvision = { ...running, state: "done", rows: [{ id: "tools/gh", label: "GitHub CLI", outcome: "failed" }] };
+    expect(placeStateCell({ ...hetzner, provision: running, daemonVersion: 1 }, null, { canUpdate: true })).toEqual({ kind: "word", word: "Building 3/7", why: "setting up 3/7: uv" });
+    expect(placeStateCell({ ...hetzner, provision: stopped }, null, { canUpdate: true })).toEqual({ kind: "word", word: "Stopped", why: "stopped: the box went away" });
+    expect(placeStateCell({ ...hetzner, provision: failed }, null, { canUpdate: true })).toEqual({ kind: "word", word: "Failed", why: "1 of 1 failed: GitHub CLI" });
+    expect(placeStateCell({ ...laptop, provision: running }, absentComputer("old-macbook", null), { canUpdate: true })).toMatchObject({ word: "No answer" });
   });
 });
 
@@ -179,16 +179,6 @@ describe("the word for a row's kind", () => {
   it("names a cloud row cloud where a row's kind is read in a sentence, and a computer of the person's own by what it is", () => {
     expect(PLACE_KIND_WORDS.provider).toBe("cloud");
     expect(PLACE_KIND_WORDS.computer).toBe(JOINED_COMPUTER);
-  });
-
-  it("says how a computer makes a copy in the word it reported, and says so when it makes none", () => {
-    expect(copiesWord({ ...hetzner, copies: "reflink" }, false)).toBe("reflink");
-    expect(copiesWord({ ...hetzner, copies: "snapshot" }, false)).toBe("snapshot");
-    // A computer that has not said carries no word rather than a guess, and neither does the computer the app runs
-    // on, whose own row says what its copies share instead.
-    expect(copiesWord(hetzner, false)).toBe("");
-    expect(copiesWord(here, true)).toBe("");
-    expect(copiesWord({ ...hetzner, takesForks: false }, false)).toBe("copies nothing");
   });
 
   it("shows a present row's own note, which is where a tool answered from outside the directories its road links into", () => {
@@ -200,14 +190,4 @@ describe("the word for a row's kind", () => {
     expect(outcomeWord({ id: "tools/brew/gh", label: "gh", outcome: "installed", note: "already on the machine" })).toBe("installed");
   });
 
-  it("reads the recipe's word in the state slot after the computer's silence and before the daemon behind", () => {
-    const running: PlaceProvision = { state: "running", addId: "a_1", recipeAt: "x", startedAt: "x", rows: [], at: { label: "uv", index: 3, of: 7 } };
-    const behind = { ...hetzner, daemonVersion: 1 };
-    expect(placeStateWord({ ...hetzner, provision: running }, null)).toBe("setting up 3/7: uv");
-    // A computer that is not answering says that first: nothing can be put on a computer that is off.
-    expect(placeStateWord({ ...laptop, provision: running }, absentComputer("old-macbook", null))).toBe("no answer");
-    // With no job on it, the slot reads what it always did.
-    expect(placeStateWord(behind, null)).toBe(placeDaemonBehind(behind));
-    expect(placeStateWord(hetzner, null)).toBe("");
-  });
 });

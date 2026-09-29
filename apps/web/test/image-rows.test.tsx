@@ -11,7 +11,7 @@ import { CLOUD_SETUP_WORDS, DEFAULT_PREFERENCES, GOLDEN_STAGE_WORDS, INIT_ROW_ST
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { KEY_REFUSED_LINE, KEY_REFUSED_ROWS, keyStoppedRows } from "./fixtures/keyRefusedJob.js";
-import { mountSettings, resetSettings, settingsApi, settle } from "./settings-harness.js";
+import { mountImageCard, mountSettings, resetSettings, settingsApi, settle } from "./settings-harness.js";
 
 /** The tally as its text reads: the count, then the estimate beside it with only space between. */
 const tallyText = (count: number, noun: string, used: number, total?: number): string => `${initTallyCount(count, noun)} ${fmtBytesOfTotal(used, total)}`;
@@ -153,7 +153,7 @@ const pick = async (picker: HTMLElement, value: string): Promise<void> => {
 /** The box's page with the job standing in the store, as a reload finds it. */
 const open = async (fake: ReturnType<typeof host>, job: InitJob | null = null, at = "p_2"): Promise<void> => {
   useStore.setState({ initJob: job });
-  mountSettings({ api: fake.api, at: { kind: "computer", id: at } });
+  mountImageCard({ api: fake.api, at: { kind: "computer", id: at } });
   await settle();
 };
 const press = async (key: string): Promise<void> => {
