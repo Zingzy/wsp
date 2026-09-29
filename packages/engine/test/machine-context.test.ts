@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { BACKGROUND_WORK_WORDS, TURN_END_WORDS, TURN_WALL_MS, fmtBytes } from "@wsp/protocol";
+import { BACKGROUND_WORK_WORDS, backgroundWorkWords, TURN_END_WORDS, TURN_WALL_MS, fmtBytes } from "@wsp/protocol";
 import {
   ALIAS_PROBES,
   BROWSER_SHIM_PATH,
@@ -258,7 +258,12 @@ describe("the document", () => {
     const short = renderShortContext({ workspace: { name: "task-1" }, golden: GOLDEN, probe: probeOf(), facts: FACTS });
     expect(short.startsWith(`${CONTEXT_MARKER}\n`)).toBe(true);
     expect(short).toContain("The wsp-machine skill has the full picture");
-    expect(short).toContain("dies when that tool call ends. Detach it: setsid nohup <cmd> > /tmp/<name>.log 2>&1 < /dev/null &, or tmux new -d -s <name> '<cmd>'.");
+    expect(short).toContain("- Keep a server alive: setsid nohup <cmd> > /tmp/<name>.log 2>&1 < /dev/null &, or tmux new -d -s <name> '<cmd>'.");
+    // One sentence says what a shell & is, the measured one: nothing tracks it. Each agent is told its own road.
+    expect(short).not.toContain("dies when that tool call ends");
+    const claude = renderShortContext({ workspace: { name: "task-1" }, golden: GOLDEN, probe: probeOf(), facts: FACTS, agent: ctx("claude") });
+    expect(claude).toContain(backgroundWorkWords("run_in_background on the Bash tool"));
+    expect(renderShortContext({ workspace: { name: "task-1" }, golden: GOLDEN, probe: probeOf(), facts: FACTS, agent: ctx("codex") })).toContain(BACKGROUND_WORK_WORDS);
     expect(short).toContain("- Every agent session starts in the thread's folder; terminal panes open in the home folder.");
     expect(short).toContain(`- ${TURN_END_WORDS}; a command you run in the background holds the turn open until it finishes, up to the ${TURN_WALL_MS / 3_600_000} hour cap on one turn, and its result reaches you there. ${BACKGROUND_WORK_WORDS}. Nothing else wakes you, so a command whose output you want in the same breath runs in the foreground and you wait for it. Only a server you mean to keep serving is detached with setsid nohup, and that one holds nothing open.`);
     expect(short).not.toContain("lasts for that command only");
