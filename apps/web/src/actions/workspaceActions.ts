@@ -87,7 +87,10 @@ export interface WorkspaceVerbs {
    * host wires no such road. */
   readonly restartDaemon?: ((workspaceId: string) => Promise<void>) | undefined;
   readonly openBrowser: (workspaceId: string) => void;
-  readonly newThread: (workspaceId: string) => void;
+  /** New thread on a project, the sidebar's filter else the last one used: never inside this workspace. */
+  readonly newThread: () => void;
+  /** A new thread inside this workspace, the road its own menu takes. */
+  readonly newThreadHere: (workspaceId: string) => void;
   /** Pushes the agent's branch and opens its pull request; the answer lands on the row. Absent on a client whose
    * host carries no such request. */
   readonly bringBack?: ((workspaceId: string) => Promise<void>) | undefined;
@@ -161,7 +164,7 @@ export const workspaceActions: ReadonlyArray<ActionEntry<WorkspaceTarget, Worksp
     title: () => WORKSPACE_WORDS.newThread,
     rowLabel: target => rowNewThread(target.displayName),
     refusal: target => (dead(target) ? NEW_THREAD_WAITS : null),
-    run: (target, verbs) => verbs.newThread(target.id),
+    run: (target, verbs) => verbs.newThreadHere(target.id),
   },
   {
     id: "open-terminal",

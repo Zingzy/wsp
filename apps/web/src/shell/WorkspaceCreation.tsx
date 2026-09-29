@@ -66,12 +66,12 @@ export function WorkspaceCreation({ creation }: { creation: Creation }) {
         <div className="absolute inset-0">
           <HeroAtmosphere {...project} />
           <div ref={questionRef} className="absolute inset-x-0 bottom-[calc(var(--empty-lift)+var(--chat-composer-inset)+2.5rem)]">
-            <EmptyThread workspaceName={creation.name} {...project} />
+            <EmptyThread name={projectName ?? creation.name} {...project} />
           </div>
           <SettingUp creation={creation} open={open} onToggle={() => setOpen(o => !o)} />
         </div>
         <div ref={composerRef} data-chat-composer-dock data-centred className="pointer-events-none absolute inset-x-0 bottom-(--empty-lift) z-10 *:pointer-events-auto">
-          <ChatComposer key={creation.key} workspaceId={creation.key} thread={thread} waiting={{ line: creationWaitLine(creation.name), folder, project: projectName }} />
+          <ChatComposer key={creation.key} workspaceId={creation.key} thread={thread} waiting={{ line: creationWaitLine(creation.name), folder }} />
         </div>
       </div>
     </div>

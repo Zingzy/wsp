@@ -1,17 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The composer's picker row in a real Chromium, on a kept machine that holds
-// projects and whose harness takes an effort, so the row carries every
-// trigger it has: model, reasoning, access and project. At the 1200 px viewport
+// projects and whose harness takes an effort, so the box's footer carries the
+// model and the reasoning and the strip under the box the access. At the 1200 px viewport
 // with the right panel open, as it opens by default, and at the narrowest
 // centre the shell hands the row (an 1100 px viewport with the sidebar at its
 // widest and the right panel open inline, where the sidebar gives way and the
 // column sits at the shell's floor), every trigger reads
 // whole, none is cut by its own box or by the row's, and a pick of the access
-// mode whose label names the machine moves no other trigger: the access
-// trigger wears the mode's short form, and its menu row the long one. A project
-// name, the one label a person writes and no width bounds, is cut on its
-// button inside the row rather than running under the send button, and
-// reads whole in its menu row. Photographed in both themes. Runs only when
+// mode whose label names the machine moves no trigger in the box: the access
+// trigger wears the mode's short form, and its menu row the long one.
+// Photographed in both themes. Runs only when
 // asked for (WSP_RENDER=1) and skips without Playwright's Chromium.
 import { mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -66,12 +64,6 @@ describe.skipIf(renderSkipped !== undefined)("the composer's picker row laid out
 
   afterAll(() => stopRender(browser, vite?.child));
 
-  const box = async (selector: string): Promise<{ x: number; y: number; width: number; height: number }> => {
-    const b = await page!.locator(selector).first().boundingBox();
-    if (!b) throw new Error(`${selector} has no box`);
-    return b;
-  };
-
   const readRow = (): Promise<Row> =>
     page!.locator("[data-chat-composer-footer]").evaluate(footer => {
       const group = footer;
@@ -111,7 +103,7 @@ describe.skipIf(renderSkipped !== undefined)("the composer's picker row laid out
   };
 
   const expectWhole = (row: Row, where: string): void => {
-    expect(row.triggers.map(t => t.picker), `the pickers at ${where}`).toEqual(["model", "reasoning", "access", "project"]);
+    expect(row.triggers.map(t => t.picker), `the pickers at ${where}`).toEqual(["model", "reasoning"]);
     for (const t of row.triggers) {
       expect(t.cut, `${t.picker} reads "${t.text}" cut at ${where}`).toBe(false);
       expect(t.left, `${t.picker} starts before the row at ${where}`).toBeGreaterThanOrEqual(row.group.left - 0.5);
@@ -130,7 +122,7 @@ describe.skipIf(renderSkipped !== undefined)("the composer's picker row laid out
       await page!.setViewportSize({ width: width.viewport, height: 800 });
       for (const theme of ["dark", "light"] as const) {
         await page!.goto(`${base}?theme=${theme}&local=1&ws=ws_m&projects=1&efforts=1${width.query}`);
-        await page!.waitForSelector("[data-composer-picker='project']");
+        await page!.waitForSelector("[data-composer-picker='access']");
         await page!.waitForSelector("text=loading transcript", { state: "detached" });
         const before = await readRow();
         console.info(`${width.name} ${theme} before: ${JSON.stringify(before)}`);
@@ -143,39 +135,13 @@ describe.skipIf(renderSkipped !== undefined)("the composer's picker row laid out
 
         expectWhole(before, `${width.label} before the pick in ${theme}`);
         expectWhole(after, `${width.label} after the pick in ${theme}`);
-        const access = after.triggers.find(t => t.picker === "access")!;
-        expect(access.text).toBe(accessLabel({ value: "bypassPermissions", label: `Bypass on ${THIS_COMPUTER}`, short: "Bypass" }));
+        const access = (await page!.locator("[data-composer-checkout] [data-composer-picker='access']").textContent()) ?? "";
+        expect(access).toBe(accessLabel({ value: "bypassPermissions", label: `Bypass on ${THIS_COMPUTER}`, short: "Bypass" }));
         expect(menuRow).toContain(`Bypass on ${THIS_COMPUTER}`);
-        // The pick moves nothing but the triggers after its own, and those only by the width of the word: every
-        // trigger keeps its line and its height, the ones before the access pick keep their boxes, and the footer
-        // keeps its height.
-        const lines = (row: Row) => row.triggers.map(t => ({ picker: t.picker, top: t.top, height: t.height }));
-        expect(lines(after)).toEqual(lines(before));
-        const ahead = (row: Row) => row.triggers.slice(0, row.triggers.findIndex(t => t.picker === "access"));
-        expect(ahead(after)).toEqual(ahead(before));
+        // The pick moves nothing in the box: every trigger keeps its box and the footer keeps its height.
+        expect(after.triggers).toEqual(before.triggers);
         expect(after.footer.height).toBe(before.footer.height);
         expect(new Set(after.triggers.map(t => t.height))).toEqual(new Set([32]));
-
-        // A project name longer than the row: its button is cut inside the row, under nothing, and every other
-        // trigger still reads whole.
-        const longest = "customer-billing-service-platform";
-        await page!.goto(`${base}?theme=${theme}&local=1&ws=ws_m&projects=1&efforts=1&longproject=1${width.query}`);
-        await page!.waitForSelector(`[data-composer-picker='project'][data-value='${longest}']`);
-        const long = await readRow();
-        console.info(`${width.name} ${theme} long name: ${JSON.stringify(long)}`);
-        const longShot = join(SHOTS_DIR, `composer-pickers-long-${width.name}-${theme}.png`);
-        await page!.locator("[data-chat-composer]").screenshot({ path: longShot });
-        console.info(`composer pickers long name screenshot: ${longShot}`);
-        const project = long.triggers.find(t => t.picker === "project")!;
-        expect(project.text).toBe(longest);
-        for (const t of long.triggers) {
-          if (t.picker !== "project") expect(t.cut, `${t.picker} reads "${t.text}" cut beside the long name at ${width.label} in ${theme}`).toBe(false);
-          expect(t.left, `${t.picker} starts before the row at ${width.label} in ${theme}`).toBeGreaterThanOrEqual(long.group.left - 0.5);
-          expect(t.right, `${t.picker} runs past the row at ${width.label} in ${theme}`).toBeLessThanOrEqual(long.group.right + 0.5);
-        }
-        expect(long.group.overflow, `the row scrolls with the long name at ${width.label} in ${theme}`).toBe(0);
-        const send = await box("[data-chat-composer-actions] button[type=submit]");
-        expect(project.right, `the long name runs under the send button at ${width.label} in ${theme}`).toBeLessThanOrEqual(send.x);
       }
     }, 60_000);
   }

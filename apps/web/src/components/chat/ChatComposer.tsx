@@ -69,7 +69,7 @@
 // next turn, and never the agent or the access, which are that thread's own
 // off its rows.
 import { cn } from "../../lib/utils";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ClipboardEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode, type ClipboardEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { PaperclipIcon } from "lucide-react";
 import { composerHeldLine, HOST_ASLEEP_SEND, FILES_MAX, FILE_MAX_WORDS, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, movesRunningAccess, noImagesLine, readsImages, screenCommandLine, screenCommandTyped, screenCommandsOf, sendRefusal, type SendRefusalKind, type WorkspaceState } from "@wsp/protocol";
 import type { ConnStatus } from "../../protocol/client";
@@ -88,7 +88,7 @@ import { hostItemText, serializeComposerMention, splitPromptIntoComposerSegments
 import { ComposerPromptEditor, type ComposerCommandKey, type ComposerPromptEditorHandle } from "../ComposerPromptEditor";
 import { asideQuestion, catalogFromHarness, composerPlaceholder, offersSlashCommands, slashHoldLine } from "./adapt";
 import { useAsideStore } from "./asideStore";
-import { canPickFolder, ComposerCheckoutRow, HomeCheckoutRow } from "./ComposerCheckoutRow";
+import { opensThread, ComposerCheckoutRow, HomeCheckoutRow } from "./ComposerCheckoutRow";
 import { ComposerCommandMenu, type ComposerCommandItem } from "./ComposerCommandMenu";
 import type { ComposerCommandGroup } from "./composerCommandGroups";
 import { fileGroups, referenceGroups, skillGroups, slashGroups } from "./composerMenuItems";
@@ -205,11 +205,14 @@ export function ChatComposer({
   thread,
   onStart,
   waiting,
+  under,
 }: {
   workspaceId: string;
   thread: ChatThreadHandle;
   onStart?: (prompt: string) => Promise<string | null>;
-  waiting?: { line: string; folder: string; project: string | null };
+  waiting?: { line: string; folder: string };
+  /** One more line under the checkout row: New thread's where it runs. */
+  under?: ReactNode;
 }) {
   const api = useStore(s => s.api);
   const waits = waiting !== undefined;
@@ -230,12 +233,8 @@ export function ChatComposer({
   const nextStart = useThreadStart(workspaceId);
   // A view locked to a turn resumes in that turn's folder, as its row says; only a view about to open a thread reads the pick.
   const viewCwd = thread.view.cwd;
-  const pickable = canPickFolder(thread);
-  const folderStart = useMemo(() => (pickable ? nextStart : viewCwd !== null ? { cwd: viewCwd } : {}), [nextStart, pickable, viewCwd]);
-  // The folder picker under the box is up: opened from its own trigger, from new thread here, or from the project
-  // menu's other folder row in the footer; it goes with the pick once the view is locked to a turn.
-  const [folderPicker, setFolderPicker] = useState(false);
-  const openFolderPicker = useCallback(() => setFolderPicker(true), []);
+  const opening = opensThread(thread);
+  const folderStart = useMemo(() => (opening ? nextStart : viewCwd !== null ? { cwd: viewCwd } : {}), [nextStart, opening, viewCwd]);
   const { harness: harnessId, startOptions, pinned, latestRow, catalog: harnessCatalog, model: pickedModel, picks } = useComposerPicks(workspaceId, thread);
   const launching = useStore(s => s.launching);
   const launched = useStore(s => s.launched);
@@ -362,7 +361,7 @@ export function ChatComposer({
   const wire = useDaemonWire(workspaceId);
   const startFolder = useThreadFolder(workspaceId);
   // The folder the thread runs in, which is where its @ paths are read from and the one the checkout row names.
-  const folder = pickable ? startFolder : (viewCwd ?? startFolder);
+  const folder = opening ? startFolder : (viewCwd ?? startFolder);
   const listed = onStart === undefined && unavailable === null && wire !== null && folder !== null;
   const session = trigger === null ? "" : `${trigger.kind}:${trigger.rangeStart}`;
   const itemsKey = listed ? `${workspaceId}\0items\0${folder}` : null;
@@ -844,6 +843,7 @@ export function ChatComposer({
 
   // A home's thread carries a history-unavailable row and no message, so the count is of messages alone.
   const compact = thread.view.running || thread.view.entries.some(entry => entry.kind === "message");
+  const access = <ComposerAccessPicker workspaceId={workspaceId} thread={thread} onPickAccess={accessPick.pick} refused={accessPick.line} />;
   const modes = <ComposerModeToggles fast={fastOffered ? { on: fastOn, toggle: () => setFast(threadKey, !fastOn) } : null} tight={compact} held={waits} />;
   const home = useStore(s => s.projects.find(p => projectHomeKey(p.id) === workspaceId));
   const meter = (tight: boolean) => <ContextMeter turns={thread.view.turns} agentLabel={harnessCatalog?.label ?? harnessId} tight={tight} />;
@@ -1014,10 +1014,6 @@ export function ChatComposer({
                           compact={compact}
                           workspaceId={workspaceId}
                           thread={thread}
-                          onPickAccess={accessPick.pick}
-                          accessRefused={accessPick.line}
-                          onOtherFolder={openFolderPicker}
-                          {...(waiting?.project != null ? { heldProject: waiting.project } : {})}
                         />
                         {compact ? null : modes}
                         {compact ? null : <span className="ms-auto flex items-center ps-2">{meter(false)}</span>}
@@ -1033,22 +1029,18 @@ export function ChatComposer({
           </form>
         </ComposerSurface.Host>
         {home !== undefined ? (
-          <HomeCheckoutRow path={home.path} branch={home.defaultBranch} />
+          <HomeCheckoutRow path={home.path} branch={home.defaultBranch} access={access} />
         ) : waiting !== undefined ? (
-          <HomeCheckoutRow path={waiting.folder} branch="" />
+          <HomeCheckoutRow path={waiting.folder} branch="" access={access} />
         ) : (
           <ComposerCheckoutRow
           workspaceId={workspaceId}
           thread={thread}
-          pickerOpen={folderPicker && pickable}
-          onPickerOpenChange={setFolderPicker}
           access={
-            compact ? (
-              <>
-                <ComposerAccessPicker workspaceId={workspaceId} thread={thread} onPickAccess={accessPick.pick} refused={accessPick.line} />
-                {modes}
-              </>
-            ) : null
+            <>
+              {access}
+              {compact ? modes : null}
+            </>
           }
           stash={
             <>
@@ -1058,6 +1050,7 @@ export function ChatComposer({
           }
           />
         )}
+        {under !== undefined ? <ComposerSurface.ContextStrip data-composer-under>{under}</ComposerSurface.ContextStrip> : null}
       </ComposerSurface.Shell>
     </div>
   );

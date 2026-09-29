@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// A project's home: the new-thread screen with no workspace under it yet, the
-// same composer included. The task typed here names the workspace the send makes;
+// A project's home: New thread with no workspace under it yet, the same
+// composer included, the project the one choice on it. The task typed here names the workspace the send makes;
 // the picks made here move to that workspace and the message is queued on its
 // fresh thread, which sends it the moment the copy stands, so a person types once
 // and lands in the running thread. A send to several models makes one copy per
@@ -19,6 +19,7 @@ import { useComposerOptions, useComposerOptionsStore } from "../components/chat/
 import { startOptionsFrom } from "../components/chat/composerPicks.js";
 import { useChatThread } from "../components/chat/useChatThread.js";
 import { noticeFailure } from "../notices/store.js";
+import { HomeProjectPicker, WhereItRuns } from "./NewThreadPicks.js";
 import type { Api } from "../protocol/client.js";
 import { projectHomeKey, useHarnessCatalogs, useStore } from "../protocol/store.js";
 
@@ -106,8 +107,8 @@ export function ProjectHome({ projectId }: { projectId: string }) {
   return (
     <div data-k="project-home" className="relative isolate flex min-h-0 flex-1 flex-col justify-center gap-10 pb-[8vh]">
       <HeroAtmosphere projectId={project.id} />
-      <EmptyThread workspaceName={project.name} projectId={project.id} />
-      <ChatComposer key={key} workspaceId={key} thread={thread} onStart={start} />
+      <EmptyThread name={project.name} projectId={project.id} picker={<HomeProjectPicker project={project} />} />
+      <ChatComposer key={key} workspaceId={key} thread={thread} onStart={start} under={<WhereItRuns project={project} />} />
     </div>
   );
 }

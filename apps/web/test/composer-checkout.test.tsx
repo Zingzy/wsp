@@ -1,17 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The checkout row under the composer: before the first message it offers
-// the folder and names its branch over the daemon wire, across the same
-// roots the panes browse, and the send starts the session in that folder;
-// after a turn it is a label carrying the harness's own cwd, which the
-// panes follow until pinned. Base UI's menu popup never settles under jsdom
-// (its positioner loops and a close hangs the run), so the menu primitives
-// are stood in by a plain open/closed context here and the picker's own
-// browsing and picking run for real.
+// The checkout row under the composer: a label naming the folder, never a
+// picker, and its branch read over the daemon wire; before the first message
+// the folder is the one the next start opens, after a turn the harness's own
+// cwd, which the panes follow until pinned. Base UI's menu popup never
+// settles under jsdom (its positioner loops and a close hangs the run), so
+// the menu primitives are stood in by a plain open/closed context here.
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { cloneElement, createContext, useContext, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { type EventUnion, type SessionEvent, type SessionView, type WorkspaceView } from "@wsp/protocol";
-import { FOLDER_GHOST_WITH_WALK } from "../src/files/FolderPathField.js";
 
 vi.mock("../src/components/ui/menu.js", () => {
   const Ctx = createContext<{ open: boolean; set: (open: boolean) => void }>({ open: false, set: () => {} });
@@ -104,10 +101,9 @@ import { useComposerDraftStore } from "../src/components/chat/composerDraftStore
 import { useNewThreadRequests } from "../src/components/chat/newThreadRequests.js";
 import { selectRoot, useRootStore } from "../src/files/root.js";
 import { provideDaemonHello, provideDaemonWire } from "../src/files/wire.js";
-import { DAEMON_HELLO, DAEMON_ROOT, fakeWire, imported, LISTING, PROJECT_DEST, resetSurfaces } from "./surface-harness.js";
+import { DAEMON_HELLO, DAEMON_ROOT, fakeWire, LISTING, PROJECT_DEST, resetSurfaces } from "./surface-harness.js";
 import { CHAT_STREAM, CHAT_WS } from "./fixtures/chat-stream.js";
 import { caps } from "./caps.js";
-import { statusOf } from "./workspace-status.js";
 import { noDaemonApi } from "./fake-daemon-api.js";
 
 let restoreLayout: () => void = () => {};
@@ -195,63 +191,28 @@ const givesFirst = () => {
 };
 const settle = () => act(() => new Promise<void>(resolve => setTimeout(resolve, 0)));
 const root = () => selectRoot(useRootStore.getState().byWorkspaceId, WS, [DAEMON_ROOT]);
-const menuEntry = (path: string) => document.querySelector<HTMLElement>(`[data-composer-folder-entry="${path}"]`);
-const menuPick = (path: string) => document.querySelector<HTMLElement>(`[data-composer-folder-pick="${path}"]`);
-const menuUp = () => document.querySelector<HTMLElement>("[data-composer-folder-up]");
-/** The path inside a row that commits the person to a folder, which is the part that has to read whole at its tail. */
-const rowPath = (row: HTMLElement) => row.querySelector<HTMLElement>("[dir=ltr]")!.parentElement!;
-const menuPopup = () => document.querySelector<HTMLElement>("[role=menu]")!;
-const composerBox = () => document.querySelector<HTMLElement>("[data-chat-composer]")!;
-const menuRoots = () =>
-  Array.from(document.querySelectorAll<HTMLElement>("[data-composer-folder-root]")).map(el => [el.dataset["composerFolderRoot"], el.getAttribute("aria-checked")]);
-const pathField = () => document.querySelector<HTMLInputElement>('[data-k="folder-path"]');
-const refusalSlot = () => document.querySelector<HTMLElement>('[data-k="folder-path-refusal"]');
-const chooseRow = () => document.querySelector<HTMLElement>("[data-composer-folder-choose]");
-/** What the workspace's machine says it is, which is half of the rule that hides a home's own Library. */
-const onAMac = (mac: boolean) => {
-  const workspaceView = useStore.getState().workspaces[0]!;
-  act(() => useStore.setState({ statuses: { [WS]: statusOf(workspaceView, { facts: { os: mac ? "macOS 15.5" : "Ubuntu 24.04.1 LTS", uptimeMs: 1_000, folder: "/" } }) } }));
-};
-
-const openPicker = async (at: string) => {
-  fireEvent.click(screen.getByRole("button", { name: `Working folder: ${at}` }));
-  await waitFor(() => expect(pathField()).not.toBeNull());
-};
-const typePath = (path: string) => {
-  const field = pathField()!;
-  fireEvent.change(field, { target: { value: path } });
-  fireEvent.keyDown(field, { key: "Enter" });
-};
 
 describe("composer checkout row", () => {
-  it("offers the folder before the first message, names its branch, and starts the session there", async () => {
-    const wire = fakeWire({ "fs.list": LISTING, "git.status": params => ({ ...STATUS, root: String(params["cwd"]) }) });
-    provideDaemonWire(WS, wire);
-    const { api, started } = fixtureApi();
+  it("names the folder as a plain label before the first message, never a picker, and names its branch", async () => {
+    provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": params => ({ ...STATUS, root: String(params["cwd"]) }) }));
+    const { api } = fixtureApi();
     await setup(api);
-    expect(row()?.dataset["pickable"]).toBe("true");
+    expect(row()?.dataset["opening"]).toBe("true");
     expect(folder()).toBe("/root");
     await waitFor(() => expect(branch()).toBe("feature/panes"));
+    expect(folderItem().tagName).toBe("SPAN");
+    expect(folderItem().closest("button")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Working folder/ })).toBeNull();
+  });
 
-    // The picker browses the daemon's listings from the daemon root down; the pick is the folder's absolute path.
-    fireEvent.click(screen.getByRole("button", { name: "Working folder: /root" }));
-    await waitFor(() => expect(menuEntry("/root/app")).not.toBeNull());
-    expect(menuPick("/root")).not.toBeNull();
-    expect(menuUp()).toBeNull();
-    expect(menuRoots()).toEqual([]);
-    fireEvent.click(menuEntry("/root/app")!);
-    await waitFor(() => expect(menuEntry("/root/app/lib")).not.toBeNull());
-    expect(wire.calls.filter(([op]) => op === "fs.list").map(([, p]) => p["path"])).toEqual(["/root", "/root/app"]);
-    fireEvent.click(menuPick("/root/app")!);
-    await waitFor(() => expect(screen.getByRole("button", { name: "Working folder: /root/app" })).toBeTruthy());
-    expect(wire.calls.filter(([op]) => op === "git.status").map(([, p]) => p["cwd"])).toEqual(["/root", "/root/app"]);
-    expect(root()).toBe("/root/app");
-
-    const editor = composerEditor();
-    await typeInto(editor, "build it here");
-    await press(editor, "Enter");
-    await waitFor(() => expect(started).toHaveLength(1));
-    expect(started[0]).toMatchObject({ prompt: "build it here", cwd: "/root/app" });
+  it("shows no branch word for a copy on a detached head", async () => {
+    provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": { ...STATUS, branch: { ...STATUS.branch, head: "(detached)" } } }));
+    const { api } = fixtureApi();
+    await setup(api);
+    await waitFor(() => expect(branch()).toBe("detached"));
+    expect(branchSlot()!.textContent).toBe("");
+    expect(branchSlot()!.querySelector("svg")).toBeNull();
+    expect(document.body.textContent).not.toContain("(detached)");
   });
 
   it("names a repository's branch with the glyph beside it and says on hover that it is read, not switched", async () => {
@@ -271,7 +232,6 @@ describe("composer checkout row", () => {
     const { api } = fixtureApi();
     await setup(api);
     await waitFor(() => expect(branch()).toBe("refused"));
-    expect(screen.getByRole("button", { name: "Working folder: /root" })).toBeTruthy();
     const slot = branchSlot()!;
     expect(slot.querySelector("svg")).toBeNull();
     expect(slot.textContent).toBe("");
@@ -285,7 +245,7 @@ describe("composer checkout row", () => {
     const { api } = fixtureApi(CHAT_STREAM.slice());
     await setup(api);
     await screen.findByText(/Server is live at :3000\./);
-    expect(row()?.dataset["pickable"]).toBeUndefined();
+    expect(row()?.dataset["opening"]).toBeUndefined();
     await waitFor(() => expect(branch()).toBe("refused"));
     const slot = branchSlot()!;
     expect(slot.textContent).toBe("");
@@ -356,15 +316,15 @@ describe("composer checkout row", () => {
     provideDaemonHello(WS, { ...DAEMON_HELLO, root: LONG });
     const onLong = { ...workspace, project: { id: "pr_1", name: "the-project", path: LONG, computer: "default" } };
 
-    // Before the first message: the picker button.
+    // Before the first message: the label naming the folder the start opens.
     provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": STATUS }));
     await setup(fixtureApi([], [], onLong).api);
     await waitFor(() => expect(branch()).toBe("feature/panes"));
     expect(folder()).toBe(LONG);
-    const picker = { item: folderItem().className.split(" "), path: folderPath().className, text: folderPath().textContent };
+    const fresh = { item: folderItem().className.split(" "), path: folderPath().className, text: folderPath().textContent };
     // The button's own no-shrink rule is what grew it over the branch, so that it loses the merge is read first.
-    expect(picker.item).not.toContain("shrink-0");
-    expect(picker.item).toEqual(expect.arrayContaining(FOLDER_ITEM));
+    expect(fresh.item).not.toContain("shrink-0");
+    expect(fresh.item).toEqual(expect.arrayContaining(FOLDER_ITEM));
     givesFirst();
     cleanup();
 
@@ -372,22 +332,22 @@ describe("composer checkout row", () => {
     provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": STATUS }));
     await setup(fixtureApi(CHAT_STREAM.map(e => (e.type === "session.start" ? { ...e, cwd: LONG } : e))).api);
     await screen.findByText(/Server is live at :3000\./);
-    expect(row()?.dataset["pickable"]).toBeUndefined();
+    expect(row()?.dataset["opening"]).toBeUndefined();
     expect(folder()).toBe(LONG);
     const label = { item: folderItem().className.split(" "), path: folderPath().className, text: folderPath().textContent };
     expect(label.item).not.toContain("shrink-0");
     expect(label.item).toEqual(expect.arrayContaining(FOLDER_ITEM));
     givesFirst();
 
-    // The glyph inset the picker button brings with it, so the path starts on the same pixel in both forms.
+    // A button's glyph inset, so the path starts on the pixel the pickers' glyphs do, in both forms.
     expect(label.item).toContain(BUTTON_GLYPH_INSET);
-    expect(picker.item).toContain(BUTTON_GLYPH_INSET);
+    expect(fresh.item).toContain(BUTTON_GLYPH_INSET);
 
     // One rule for the path, written once, and the whole path in the DOM: the cut is the box's, not a shortened string.
-    expect(label.path).toBe(picker.path);
+    expect(label.path).toBe(fresh.path);
     expect(label.path.split(" ")).toEqual(expect.arrayContaining(FOLDER_PATH));
     expect(label.text).toBe(LONG);
-    expect(picker.text).toBe(LONG);
+    expect(fresh.text).toBe(LONG);
   });
 
   it("leaves the branch slot empty, no glyph and no words, while the ask is still out", async () => {
@@ -418,43 +378,6 @@ describe("composer checkout row", () => {
     expect(slot.className.split(" ")).toEqual(expect.arrayContaining(SLOT_HEIGHT));
     expect(screen.queryByText("no repository")).toBeNull();
     expect(screen.queryByText(BRANCH_NOTE)).toBeNull();
-  });
-
-  it("offers home and the imported project as roots, and browses and picks inside the project", async () => {
-    const wire = fakeWire({ "fs.list": LISTING, "git.status": params => ({ ...STATUS, root: String(params["cwd"]) }) });
-    provideDaemonWire(WS, wire);
-    const { api, started } = fixtureApi([], [], withProject);
-    await setup(api);
-    // A workspace with an imported project opens its threads there, so the picker starts inside it.
-    expect(folder()).toBe(PROJECT_DEST);
-
-    fireEvent.click(screen.getByRole("button", { name: `Working folder: ${PROJECT_DEST}` }));
-    await waitFor(() => expect(menuEntry(`${PROJECT_DEST}/packages`)).not.toBeNull());
-    expect(menuRoots()).toEqual([["/root", "false"], [PROJECT_DEST, "true"]]);
-    expect(menuPick(PROJECT_DEST)).not.toBeNull();
-    // Up stops at the project root, which the daemon browses; its parent is outside every root.
-    expect(menuUp()).toBeNull();
-
-    // Home is still a root the picker offers, and switching back is one click.
-    fireEvent.click(document.querySelector<HTMLElement>('[data-composer-folder-root="/root"]')!);
-    await waitFor(() => expect(menuEntry("/root/app")).not.toBeNull());
-    expect(menuRoots()).toEqual([["/root", "true"], [PROJECT_DEST, "false"]]);
-    fireEvent.click(document.querySelector<HTMLElement>(`[data-composer-folder-root="${PROJECT_DEST}"]`)!);
-    await waitFor(() => expect(menuEntry(`${PROJECT_DEST}/packages`)).not.toBeNull());
-
-    fireEvent.click(menuEntry(`${PROJECT_DEST}/packages`)!);
-    await waitFor(() => expect(menuEntry(`${PROJECT_DEST}/packages/web`)).not.toBeNull());
-    expect(menuUp()?.dataset["composerFolderUp"]).toBe(PROJECT_DEST);
-    // The listing is kept per folder, so coming back to the project root costs no second fs.list.
-    expect(wire.calls.filter(([op]) => op === "fs.list").map(([, p]) => p["path"])).toEqual([PROJECT_DEST, "/root", `${PROJECT_DEST}/packages`]);
-
-    fireEvent.click(menuPick(`${PROJECT_DEST}/packages`)!);
-    await waitFor(() => expect(screen.getByRole("button", { name: `Working folder: ${PROJECT_DEST}/packages` })).toBeTruthy());
-    const editor = composerEditor();
-    await typeInto(editor, "work in the project");
-    await press(editor, "Enter");
-    await waitFor(() => expect(started).toHaveLength(1));
-    expect(started[0]).toMatchObject({ prompt: "work in the project", cwd: `${PROJECT_DEST}/packages` });
   });
 
   it("starts an unpicked thread naming no folder at all: the runtime opens it in the workspace's project, which is the folder under the box", async () => {
@@ -498,12 +421,11 @@ describe("composer checkout row", () => {
     expect(started[0]?.project).toBeUndefined();
   });
 
-  it("offers no picker and sends no cwd before the daemon named its root", async () => {
+  it("sends no cwd before the daemon named its root", async () => {
     provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": STATUS }));
     provideDaemonHello(WS, null);
     const { api, started } = fixtureApi();
     await setup(api);
-    expect(screen.queryByRole("button", { name: /Working folder/ })).toBeNull();
     const editor = composerEditor();
     await typeInto(editor, "hello");
     await press(editor, "Enter");
@@ -516,7 +438,7 @@ describe("composer checkout row", () => {
     const { api, started, emit } = fixtureApi(CHAT_STREAM.map(e => ({ ...e, threadId: "thr_a" })));
     await setup(api);
     await screen.findByText(/Server is live at :3000\./);
-    expect(row()?.dataset["pickable"]).toBeUndefined();
+    expect(row()?.dataset["opening"]).toBeUndefined();
     expect(screen.queryByRole("button", { name: /Working folder/ })).toBeNull();
     expect(folder()).toBe("/root");
     expect(root()).toBe("/root");
@@ -569,272 +491,11 @@ describe("composer checkout row", () => {
     const { api } = fixtureApi(CHAT_STREAM.slice());
     await setup(api);
     await screen.findByText(/Server is live at :3000\./);
-    expect(row()?.dataset["pickable"]).toBeUndefined();
-    expect(screen.getByText("The folder this thread's harness runs in. A cd inside the agent's shell does not move it; start a new thread to work from another folder.").getAttribute("role")).toBe("tooltip");
+    expect(row()?.dataset["opening"]).toBeUndefined();
+    expect(screen.getByText("The folder this thread's harness runs in. A cd inside the agent's shell does not move it; to work in another folder, add it as a project.").getAttribute("role")).toBe("tooltip");
     expect(screen.queryByRole("button", { name: "New thread here" })).toBeNull();
   });
 
-  it("walks past the machine's own folders, and the typed path is the road into one on purpose", async () => {
-    // A person's own home, as the machine really answers one: two dot-named folders, a Mac's own Library, and the
-    // one folder they made.
-    const HOME = "/Users/priya";
-    const home = {
-      entries: [
-        { name: ".cache", type: "dir", size: 0, mtime: 1 },
-        { name: ".config", type: "dir", size: 0, mtime: 1 },
-        { name: "Library", type: "dir", size: 0, mtime: 1 },
-        { name: "code", type: "dir", size: 0, mtime: 1 },
-        { name: "notes.md", type: "file", size: 12, mtime: 1 },
-      ],
-      truncated: false,
-      total: 5,
-    };
-    provideDaemonHello(WS, { ...DAEMON_HELLO, root: HOME });
-    const wire = fakeWire({
-      "fs.list": params => {
-        const path = String(params["path"]);
-        if (path === HOME) return home;
-        if (path === `${HOME}/code` || path === `${HOME}/.config`) return { entries: [], truncated: false, total: 0 };
-        throw Object.assign(new Error(`${path} does not exist`), { code: "not-found" });
-      },
-      "git.status": STATUS,
-    });
-    provideDaemonWire(WS, wire);
-    const { api } = fixtureApi([], [], { ...workspace, project: { id: "pr_1", name: "the-project", path: HOME, computer: "default" } });
-    await setup(api);
-    // The machine says what it is; the Library is hidden because this home is its own, not because of the path.
-    onAMac(true);
-    await openPicker(HOME);
-    await waitFor(() => expect(menuEntry(`${HOME}/code`)).not.toBeNull());
-    expect(menuEntry(`${HOME}/.cache`)).toBeNull();
-    expect(menuEntry(`${HOME}/.config`)).toBeNull();
-    expect(menuEntry(`${HOME}/Library`)).toBeNull();
-    expect(Array.from(document.querySelectorAll("[data-composer-folder-entry]")).map(el => el.textContent)).toEqual(["code"]);
-
-    // Hidden from the walk, not out of reach: the path typed whole opens one.
-    typePath(`${HOME}/.config`);
-    await waitFor(() => expect(screen.getByRole("button", { name: `Working folder: ${HOME}/.config` })).toBeTruthy());
-    expect(root()).toBe(`${HOME}/.config`);
-  });
-
-  it("keeps a Library that is not a Mac home's own, since only a Mac keeps one there", async () => {
-    const HOME = "/home/dev";
-    const home = {
-      entries: [
-        { name: ".config", type: "dir", size: 0, mtime: 1 },
-        { name: "Library", type: "dir", size: 0, mtime: 1 },
-        { name: "code", type: "dir", size: 0, mtime: 1 },
-      ],
-      truncated: false,
-      total: 3,
-    };
-    provideDaemonHello(WS, { ...DAEMON_HELLO, root: HOME });
-    provideDaemonWire(
-      WS,
-      fakeWire({
-        "fs.list": params => (String(params["path"]) === HOME ? home : { entries: [], truncated: false, total: 0 }),
-        "git.status": STATUS,
-      }),
-    );
-    const { api } = fixtureApi([], [], { ...workspace, project: { id: "pr_1", name: "the-project", path: HOME, computer: "default" } });
-    await setup(api);
-    onAMac(false);
-    await openPicker(HOME);
-    await waitFor(() => expect(menuEntry(`${HOME}/code`)).not.toBeNull());
-    // The dot folder is the machine's own wherever it runs; the Library on this one is a folder somebody made.
-    expect(menuEntry(`${HOME}/.config`)).toBeNull();
-    expect(menuEntry(`${HOME}/Library`)).not.toBeNull();
-  });
-
-  it("picks a folder pasted into the field on Enter, whatever level the walk is on, and starts the session there", async () => {
-    const wire = fakeWire({ "fs.list": LISTING, "git.status": params => ({ ...STATUS, root: String(params["cwd"]) }) });
-    provideDaemonWire(WS, wire);
-    const { api, started } = fixtureApi();
-    await setup(api);
-    await openPicker("/root");
-    expect(refusalSlot()!.textContent).toBe("");
-
-    typePath("  /root/app/lib  ");
-    await waitFor(() => expect(screen.getByRole("button", { name: "Working folder: /root/app/lib" })).toBeTruthy());
-    // The pick closes the picker, as a pick from a row does.
-    expect(pathField()).toBeNull();
-    expect(root()).toBe("/root/app/lib");
-    expect(wire.calls.filter(([op]) => op === "fs.list").map(([, p]) => p["path"])).toEqual(["/root", "/root/app/lib"]);
-
-    const editor = composerEditor();
-    await typeInto(editor, "work where I pasted");
-    await press(editor, "Enter");
-    await waitFor(() => expect(started).toHaveLength(1));
-    expect(started[0]).toMatchObject({ prompt: "work where I pasted", cwd: "/root/app/lib" });
-  });
-
-  it("refuses a folder the workspace has not, in the two halves under the field, and moves nothing else", async () => {
-    const wire = fakeWire({ "fs.list": LISTING, "git.status": params => ({ ...STATUS, root: String(params["cwd"]) }) });
-    provideDaemonWire(WS, wire);
-    const { api, started } = fixtureApi();
-    await setup(api);
-    await openPicker("/root");
-    // The slot stands at its two lines before anything is refused, so a refusal arriving moves nothing under it.
-    expect(refusalSlot()!.textContent).toBe("");
-    expect(refusalSlot()!.className.split(" ")).toEqual(expect.arrayContaining(["min-h-9", "text-[13px]", "text-destructive-foreground"]));
-    expect(refusalSlot()!.className.split(" ")).not.toContain("font-mono");
-    expect(pathField()!.getAttribute("aria-invalid")).toBeNull();
-    expect(document.querySelector("[data-refused]")).toBeNull();
-
-    typePath("/root/nope");
-    await waitFor(() => expect(refusalSlot()!.textContent).toBe("No folder there. Check the path, or walk to it below."));
-    expect(refusalSlot()!.querySelector("span")!.className).toContain("text-foreground");
-    expect(pathField()!.getAttribute("aria-invalid")).toBe("true");
-    expect(document.querySelector("[data-refused]")).not.toBeNull();
-    expect(pathField()!.value).toBe("/root/nope");
-    // The picker is still up on the level it was on, the row still names the folder it named, and the panes did not move.
-    expect(menuPick("/root")).not.toBeNull();
-    expect(menuEntry("/root/app")).not.toBeNull();
-    expect(folder()).toBe("/root");
-    expect(root()).toBe("/root");
-
-    const editor = composerEditor();
-    await typeInto(editor, "hello");
-    await press(editor, "Enter");
-    await waitFor(() => expect(started).toHaveLength(1));
-    expect(started[0]?.cwd).toBeUndefined();
-  });
-
-  it("refuses a path that is not a full one without asking the workspace, and the next edit clears the refusal", async () => {
-    const wire = fakeWire({ "fs.list": LISTING, "git.status": STATUS });
-    provideDaemonWire(WS, wire);
-    await setup(fixtureApi().api);
-    await openPicker("/root");
-
-    typePath("code/spoo");
-    await waitFor(() => expect(refusalSlot()!.textContent).toBe("That is not a full path. Start it with a slash."));
-    expect(wire.calls.filter(([op]) => op === "fs.list").map(([, p]) => p["path"])).toEqual(["/root"]);
-
-    fireEvent.change(pathField()!, { target: { value: "/root/app" } });
-    await waitFor(() => expect(refusalSlot()!.textContent).toBe(""));
-    expect(pathField()!.getAttribute("aria-invalid")).toBeNull();
-  });
-
-  it("keeps a slow read's refusal off a path typed after it", async () => {
-    let refuse: (() => void) | undefined;
-    const inner = fakeWire({ "fs.list": LISTING, "git.status": STATUS });
-    const wire: TerminalWire = {
-      request: (op, params = {}) =>
-        op === "fs.list" && params["path"] === "/root/slow"
-          ? new Promise((_ok, no) => {
-              refuse = () => no(Object.assign(new Error("/root/slow does not exist"), { code: "not-found" }));
-            })
-          : inner.request(op, params),
-    };
-    provideDaemonWire(WS, wire);
-    await setup(fixtureApi().api);
-    await openPicker("/root");
-
-    typePath("/root/slow");
-    fireEvent.change(pathField()!, { target: { value: "/root/app" } });
-    await act(async () => {
-      refuse!();
-      await Promise.resolve();
-    });
-    expect(refusalSlot()!.textContent).toBe("");
-    expect(pathField()!.value).toBe("/root/app");
-  });
-
-  it("wears the card field's own size and ghosts a hint, never a path a person could type back", async () => {
-    provideDaemonHello(WS, { ...DAEMON_HELLO, root: "/root" });
-    provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": STATUS }));
-    await setup(fixtureApi().api);
-    await openPicker("/root");
-    // A ghost shaped like a path reads as the app naming a folder that is there; the one that stood here was typed
-    // back and refused. It names the two roads instead and carries no path at all.
-    expect(pathField()!.placeholder).toBe(FOLDER_GHOST_WITH_WALK);
-    expect(pathField()!.placeholder).not.toContain("/");
-    // The shipped compact size, so the typed path reads at the refusal's 12 px rather than the primitive's 14.
-    expect(pathField()!.className.split(" ")).toEqual(expect.arrayContaining(["text-xs"]));
-    expect(pathField()!.closest("[data-slot=input-control]")!.getAttribute("data-size")).toBe("compact");
-  });
-
-  it("shows which folder each committing row is about, cut at its head, in a menu that grows to the rows", async () => {
-    provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": STATUS }));
-    await setup(fixtureApi().api);
-    await openPicker("/root");
-    fireEvent.click(menuEntry("/root/app")!);
-    await waitFor(() => expect(menuUp()).not.toBeNull());
-
-    // Both rows name their folder whole, in the row's own slot; under a deep home the tail is what tells two
-    // folders apart, so the path is cut at its head exactly as the button above the box cuts it.
-    const pick = rowPath(menuPick("/root/app")!);
-    const up = rowPath(menuUp()!);
-    expect(pick.textContent).toBe("/root/app");
-    expect(up.textContent).toBe("/root");
-    for (const path of [pick, up]) expect(path.className.split(" ")).toEqual(expect.arrayContaining(FOLDER_PATH));
-
-    // The menu is no longer held at one width: it asks for what its rows need and grows to them up to the width of
-    // the composer it belongs to, which is where the ticket puts its ceiling. The fake layout gives every box 800 px,
-    // so that is what the composer measures here.
-    expect(menuPopup().style.maxWidth).toBe(`${composerBox().getBoundingClientRect().width}px`);
-    expect(menuPopup().className.split(" ")).toEqual(["min-w-72"]);
-  });
-
-  it("opens the picker again empty: a refusal from last time is not still standing", async () => {
-    provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": STATUS }));
-    await setup(fixtureApi().api);
-    await openPicker("/root");
-    typePath("/root/nope");
-    await waitFor(() => expect(refusalSlot()!.textContent).toBe("No folder there. Check the path, or walk to it below."));
-
-    fireEvent.click(screen.getByRole("button", { name: "Working folder: /root" }));
-    await waitFor(() => expect(pathField()).toBeNull());
-    await openPicker("/root");
-    expect(pathField()!.value).toBe("");
-    expect(refusalSlot()!.textContent).toBe("");
-    expect(pathField()!.getAttribute("aria-invalid")).toBeNull();
-  });
-
-  it("closes on Escape typed in the field, the one key the field does not keep to itself", async () => {
-    provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": STATUS }));
-    await setup(fixtureApi().api);
-    await openPicker("/root");
-
-    fireEvent.change(pathField()!, { target: { value: "/root/app" } });
-    fireEvent.keyDown(pathField()!, { key: "Escape" });
-    await waitFor(() => expect(pathField()).toBeNull());
-    expect(menuPick("/root")).toBeNull();
-    expect(folder()).toBe("/root");
-  });
-
-  it("offers the system chooser only where the shell has one, and lands its folder as a pick", async () => {
-    provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": STATUS }));
-    await setup(fixtureApi().api);
-    await openPicker("/root");
-    expect(chooseRow()).toBeNull();
-    cleanup();
-
-    const pickFolder = vi.fn(async () => "/root/app");
-    (window as { wsp?: unknown }).wsp = { pickFolder };
-    try {
-      resetSurfaces();
-      provideDaemonHello(WS, DAEMON_HELLO);
-      provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": STATUS }));
-      const { api, started } = fixtureApi();
-      await setup(api);
-      await openPicker("/root");
-      expect(chooseRow()!.textContent).toContain("Choose a folder");
-
-      fireEvent.click(chooseRow()!);
-      await waitFor(() => expect(screen.getByRole("button", { name: "Working folder: /root/app" })).toBeTruthy());
-      expect(pickFolder).toHaveBeenCalledTimes(1);
-      expect(root()).toBe("/root/app");
-
-      const editor = composerEditor();
-      await typeInto(editor, "work in the chosen folder");
-      await press(editor, "Enter");
-      await waitFor(() => expect(started).toHaveLength(1));
-      expect(started[0]).toMatchObject({ cwd: "/root/app" });
-    } finally {
-      delete (window as { wsp?: unknown }).wsp;
-    }
-  });
 });
 
 describe("composer checkout row on a thread resumed from its row", () => {
@@ -848,7 +509,7 @@ describe("composer checkout row on a thread resumed from its row", () => {
     await setup(api, "thr_a");
     await screen.findByText(/Server is live at :3000\./);
     await waitFor(() => expect(folder()).toBe("/root/app"));
-    expect(row()?.dataset["pickable"]).toBeUndefined();
+    expect(row()?.dataset["opening"]).toBeUndefined();
     expect(root()).toBe("/root/app");
 
     const editor = composerEditor();
@@ -863,7 +524,7 @@ describe("composer checkout row on a thread resumed from its row", () => {
     const { api, started } = fixtureApi([], [ROW]);
     await setup(api);
     await waitFor(() => expect(folder()).toBe("/root/app"));
-    expect(row()?.dataset["pickable"]).toBeUndefined();
+    expect(row()?.dataset["opening"]).toBeUndefined();
     expect(screen.queryByRole("button", { name: /Working folder/ })).toBeNull();
     expect(root()).toBe("/root/app");
 
@@ -874,11 +535,11 @@ describe("composer checkout row on a thread resumed from its row", () => {
     expect(started[0]).toMatchObject({ thread: "thr_a", cwd: "/root/app" });
   });
 
-  it("an empty latest view whose remembered session has no row keeps the picker: nothing names its folder", async () => {
+  it("an empty latest view whose remembered session has no row names the folder the next start opens: no turn names one", async () => {
     provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": STATUS }));
     const { api } = fixtureApi([], []);
     await setup(api);
-    expect(row()?.dataset["pickable"]).toBe("true");
+    expect(row()?.dataset["opening"]).toBe("true");
     expect(folder()).toBe("/root");
   });
 });

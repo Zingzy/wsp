@@ -273,14 +273,16 @@ function appSources(dir: string, out: Array<readonly [string, string]> = []): Ar
 }
 
 describe("composer pickers", () => {
-  it("sit inside the composer box with the machine's catalog, read the defaults, and picks ride the next start", async () => {
+  it("sit inside the composer box, the access under it, with the machine's catalog, read the defaults, and picks ride the next start", async () => {
     const { api, started, listed } = fixtureApi({ table: [TABLE, CODEX], machine: [CLAUDE, CODEX] });
     await setup(api);
     await waitFor(() => expect(document.querySelector('[data-composer-picker="model"][data-value]')).not.toBeNull());
     await waitFor(() => expect(listed).toContain(WS));
     const footer = document.querySelector("[data-chat-composer-footer]")!;
     expect(footer.contains(picker("model"))).toBe(true);
-    expect(document.querySelector("[data-composer-checkout] [data-composer-picker]")).toBeNull();
+    expect(footer.contains(picker("reasoning"))).toBe(true);
+    expect(footer.contains(picker("access"))).toBe(false);
+    expect(document.querySelector("[data-composer-checkout]")!.contains(picker("access"))).toBe(true);
     // Defaults read: the catalog's default model beside its agent's mark, the default
     // context, and the mode under the word for what it sets.
     expect(picker("model")?.textContent).toBe("Opus 5");
@@ -708,41 +710,6 @@ describe("composer pickers", () => {
     expect(accessRefusal()).toBeNull();
   });
 
-  const SPOO = { name: "spoo", dest: "/root/spoo", importedAt: "2026-09-01T00:00:00Z" };
-  const WSP = { name: "wsp", dest: "/root/wsp", importedAt: "2026-09-02T00:00:00Z" };
-  const withProjects: WorkspaceView = { ...BARE, project: { id: "pr_spoo", name: "spoo", path: "/root/spoo", computer: "default" } };
-  const projectOption = (name: string) => document.querySelector<HTMLElement>(`[data-composer-project="${name}"]`);
-  const folderLine = () => document.querySelector<HTMLElement>("[data-composer-folder]")?.dataset["composerFolder"];
-
-
-
-  it("other folder opens the folder picker under the box; the folder picked there is what the start names as cwd, and the pick reads as that folder until a project is picked again", async () => {
-    const { api, started, patches } = fixtureApi({ table: [CLAUDE], workspace: withProjects });
-    await setup(api);
-    await waitFor(() => expect(pickerValue("project")).toBe("spoo"));
-    fireEvent.click(picker("project")!);
-    fireEvent.click(screen.getByRole("menuitem", { name: /other folder/ }));
-    // The picker opens on the folder the thread would start in, the project's; up is the daemon's home, which lists.
-    await waitFor(() => expect(document.querySelector('[data-composer-folder-pick="/root/spoo"]')).not.toBeNull());
-    fireEvent.click(screen.getByText(/Up to/));
-    await waitFor(() => expect(document.querySelector('[data-composer-folder-entry="/root/app"]')).not.toBeNull());
-    fireEvent.click(document.querySelector<HTMLElement>('[data-composer-folder-entry="/root/app"]')!);
-    await waitFor(() => expect(document.querySelector('[data-composer-folder-pick="/root/app"]')).not.toBeNull());
-    fireEvent.click(document.querySelector<HTMLElement>('[data-composer-folder-pick="/root/app"]')!);
-    await waitFor(() => expect(folderLine()).toBe("/root/app"));
-    expect(pickerValue("project")).toBeUndefined();
-    expect(picker("project")!.textContent).toContain("app");
-    // A folder is not a project: the workspace's own project stands, so the next thread still opens in spoo.
-    expect(patches).toEqual([]);
-
-    const editor = composerEditor();
-    await typeInto(editor, "go");
-    await press(editor, "Enter");
-    await waitFor(() => expect(started).toHaveLength(1));
-    expect(started[0]).toMatchObject({ cwd: "/root/app" });
-    expect(started[0]?.project).toBeUndefined();
-  });
-
   it("reads each access mode's sentence off the runtime's table, so the app spells none of them itself", async () => {
     const { api } = fixtureApi({ table: [CLAUDE_TABLE] });
     await setup(api);
@@ -825,7 +792,7 @@ describe("composer pickers", () => {
   it("shows nothing at all when the runtime serves no catalog for the harness", async () => {
     const { api } = fixtureApi({ table: [] });
     await setup(api);
-    await waitFor(() => expect(screen.getByRole("button", { name: /Working folder/ })).toBeTruthy());
+    await waitFor(() => expect(document.querySelector("[data-composer-folder]")).not.toBeNull());
     expect(document.querySelector("[data-composer-picker]")).toBeNull();
   });
 });

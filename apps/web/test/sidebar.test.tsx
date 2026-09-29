@@ -304,23 +304,20 @@ describe("tiles from the fixture wire", () => {
 });
 
 describe("new thread", () => {
-  it("the compose glyph raises a new-thread request for the selected workspace; no tile carries a plus of its own", async () => {
+  it("the compose glyph opens New thread on a project, with or without a workspace selected, never inside one; no tile carries a plus of its own", async () => {
     await mount(fakeApi([API, WEB], [status(API), status(WEB)], [session("s1", "ws_a", { prompt: "hello" })]), "hello");
     const seen: string[] = [];
     const off = onNewThreadRequest(d => seen.push(d.workspaceId));
     const compose = screen.getByRole("button", { name: "New thread" });
     act(() => useStore.getState().select(null));
-    // Held by aria-disabled rather than the disabled attribute, so the pointer still reaches it and its tooltip
-    // can say what it is in the one state a person might ask.
-    expect(compose.getAttribute("aria-disabled")).toBe("true");
-    expect(compose.hasAttribute("disabled")).toBe(false);
-    expect(compose.className).not.toContain("pointer-events-none");
-    fireEvent.click(compose);
-    fireEvent.click(rowOf("web"));
-    expect(useStore.getState().selectedId).toBe("ws_b");
     expect(compose.getAttribute("aria-disabled")).toBeNull();
     fireEvent.click(compose);
-    expect(seen).toEqual(["ws_b"]);
+    expect(useStore.getState()).toMatchObject({ projectHome: PROJECTS[0]!.id, selectedId: null });
+    fireEvent.click(rowOf("web"));
+    expect(useStore.getState().selectedId).toBe("ws_b");
+    fireEvent.click(compose);
+    expect(seen).toEqual([]);
+    expect(useStore.getState()).toMatchObject({ projectHome: PROJECTS[0]!.id, selectedId: null });
     expect(document.querySelectorAll("[data-sidebar-tree] svg.lucide-plus")).toHaveLength(0);
     off();
   });
@@ -410,7 +407,7 @@ describe("the body before the first list has arrived, and on a wsp with no proje
     expect(screen.queryByText(/A project is a folder/)).toBeNull();
     expect(screen.queryByText(PROJECT_WORDS.add)).toBeNull();
     expect(rowIds()).toEqual([]);
-    // The compose glyph stands, held: there is no workspace to open a thread in.
+    // The compose glyph stands, held: there is no project to open a thread on.
     expect(screen.getByRole("button", { name: "New thread" }).getAttribute("aria-disabled")).toBe("true");
     // Pressing the row opens the same Add a project dialog the first run's button opens.
     expect(document.querySelector("[data-k=add-project]")).toBeNull();

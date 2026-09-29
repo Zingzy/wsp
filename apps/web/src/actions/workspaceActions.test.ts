@@ -22,6 +22,7 @@ const verbs = (over: Partial<WorkspaceVerbs> = {}): WorkspaceVerbs =>
     openTerminal: vi.fn(async () => {}),
     openBrowser: vi.fn(),
     newThread: vi.fn(),
+    newThreadHere: vi.fn(),
     copyText: vi.fn(async () => {}),
     bringBack: vi.fn(async () => {}),
     ...over,

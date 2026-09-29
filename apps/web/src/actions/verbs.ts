@@ -5,6 +5,7 @@
 import { useMemo } from "react";
 import { useStore } from "../protocol/store.js";
 import { useRightPanelStore } from "../rightPanelStore.js";
+import { openNewThread } from "../shell/NewThreadPicks.js";
 import { showTerminal } from "../shell/shellCommands.js";
 import { requestDeleteWorkspace, requestForgetWorkspace, requestProjectTrip, requestRenameWorkspace, requestWorkspaceLook, requestUndoRewind } from "../shell/shellRequests.js";
 import { copyText } from "./clipboard.js";
@@ -31,7 +32,8 @@ export function useWorkspaceVerbs(): WorkspaceVerbs {
       openTerminal: showTerminal,
       restartDaemon: restartDaemon === undefined ? undefined : async workspaceId => await restartDaemon(workspaceId),
       openBrowser: workspaceId => openSurface(workspaceId, "preview"),
-      newThread,
+      newThread: openNewThread,
+      newThreadHere: newThread,
       bringBack: canBringBack ? bringBackWork : undefined,
       copyText,
       rebuild:

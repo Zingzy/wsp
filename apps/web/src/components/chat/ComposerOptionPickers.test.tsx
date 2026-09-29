@@ -72,7 +72,7 @@ vi.mock("../ui/popover", () => {
 import { useStore } from "../../protocol/store";
 import { useComposerDraftStore } from "./composerDraftStore";
 import { useComposerOptionsStore } from "./composerOptionsStore";
-import { ComposerOptionPickers } from "./ComposerOptionPickers";
+import { ComposerAccessPicker, ComposerOptionPickers } from "./ComposerOptionPickers";
 import type { ChatThreadHandle, ChatThreadView } from "./useChatThread";
 
 const WS = "ws_a";
@@ -165,7 +165,12 @@ function draw(opts: { catalogs?: HarnessCatalog[]; project?: ProjectView; sessio
     harnesses: catalogs,
     harnessesByWorkspace: { [WS]: catalogs },
   });
-  return render(<ComposerOptionPickers workspaceId={WS} thread={opts.thread ?? thread} onPickAccess={() => {}} onOtherFolder={() => {}} />);
+  return render(
+    <>
+      <ComposerOptionPickers workspaceId={WS} thread={opts.thread ?? thread} />
+      <ComposerAccessPicker workspaceId={WS} thread={opts.thread ?? thread} onPickAccess={() => {}} refused={null} />
+    </>,
+  );
 }
 
 const reasoning = () => document.querySelector<HTMLElement>('[data-composer-picker="reasoning"]')!;
@@ -180,15 +185,15 @@ afterEach(() => {
 });
 
 describe("the composer's reasoning and access buttons", () => {
-  it("read the picked effort with its window, and the picked access, each its own button after the model with a rule between", () => {
+  it("read the picked effort with its window, and the picked access, each its own button, the effort after the model with a rule between", () => {
     draw();
     expect(reasoning().textContent).toBe("High 1M");
     expect(reasoning().getAttribute("aria-label")).toBe("Reasoning: High 1M");
     expect(access().textContent).toBe("Bypass");
     expect(access().getAttribute("aria-label")).toBe("Access: Bypass");
-    expect([...document.querySelectorAll("[data-composer-picker]")].map(el => el.getAttribute("data-composer-picker"))).toEqual(["model", "reasoning", "access", "project"]);
-    // A hairline stands before each of the two, so every picker reads as its own control.
-    for (const picker of [reasoning(), access()]) expect(picker.previousElementSibling?.getAttribute("aria-hidden")).toBe("true");
+    expect([...document.querySelectorAll("[data-composer-picker]")].map(el => el.getAttribute("data-composer-picker"))).toEqual(["model", "reasoning", "access"]);
+    // A hairline stands before the effort, so it reads as its own control beside the model.
+    expect(reasoning().previousElementSibling?.getAttribute("aria-hidden")).toBe("true");
   });
 
   it("holds Reasoning and Context window in one menu and Access in the other, each with the agent's default marked", () => {
