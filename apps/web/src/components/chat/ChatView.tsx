@@ -30,7 +30,7 @@ import { useReadStamp } from "./useReadStamp";
 import { threadsOpenedBy, type ThreadOnWorkspace } from "../../sidebar/threadTree";
 import { computerName, useComputerName } from "../../sidebar/workspaceRows";
 import { TimelineRuleLine } from "./TimelineRuleLine";
-import { MessagesTimeline, type MachineWait } from "./MessagesTimeline";
+import { MessagesTimeline, type MachineWait, type ReplyRuns } from "./MessagesTimeline";
 import { useNewThreadRequests } from "./newThreadRequests";
 import { useChatThread, type ChatThreadHandle } from "./useChatThread";
 import { rewindableReplies, type RewindableReply } from "./RewindDialog";
@@ -108,6 +108,11 @@ export function ChatView({
   // word under the transcript in the timeline's own rule grammar, with the wake beside it, never a dialog.
   const paused = state === "paused" && !view.running ? workspaceWord(state, capabilities?.pauseMode) : null;
   const { startNewThread, hydrated, threadKey } = thread;
+  // A reply's shell blocks run in the thread the view holds, in its folder; a view holding none yet offers no Run.
+  const replyRuns = useMemo<ReplyRuns | null>(
+    () => (thread.thread === undefined ? null : { workspaceId, threadId: thread.thread, cwd, runs: view.runs }),
+    [cwd, thread.thread, view.runs, workspaceId],
+  );
   // What the footer's figure is: on this computer the turn ran on the person's own sign-in, so the number is the
   // agent's own list price and nobody is billed for it. The word goes on the figure from the record alone, which
   // the page has before it draws the footer at all; a word that arrived a moment after the figure would be the
@@ -268,6 +273,7 @@ export function ChatView({
             onQuote={onQuote}
             rewindableMessageIds={rewindableIds}
             onRewind={onRewind}
+            replyRuns={replyRuns}
           />
         )}
       </div>

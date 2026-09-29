@@ -7,7 +7,7 @@
 // session id repeats across turns. Wire order is the timeline order. createdAt
 // is the wire's `at` (ms epoch) as ISO, else the caller's receipt clock, else
 // "" for unstamped history.
-import { AFTER_CUT_LINE, NOTIFY_ME, internalToolResult, subagentTaskLine, toolActivityLine, toolCallFacts, toolDoneLine, toolResultLine, type SessionEvent, type SessionHarness, type TurnResult } from "@wsp/protocol";
+import { AFTER_CUT_LINE, NOTIFY_ME, internalToolResult, subagentTaskLine, toolActivityLine, toolCallFacts, toolDoneLine, toolResultLine, type SessionEvent, type SessionHarness, type SessionRunEvent, type TurnResult } from "@wsp/protocol";
 import type {
   ChatMessage,
   PermissionPrompt,
@@ -33,6 +33,9 @@ export interface SessionModel {
    * the thread runs on, by its catalog id, and the access its last turn started at. Null before a start carried it. */
   readonly agent: string | null;
   readonly permissionMode: string | null;
+  /** Every reply block's latest run, by the block it was run from: an ending, once recorded, is never read back to
+   * running, whichever window reported the steps in whatever order. */
+  readonly runs: ReadonlyMap<string, SessionRunEvent>;
 }
 
 export interface DeriveSessionOptions {
@@ -79,6 +82,7 @@ interface TurnBuild {
 export function deriveSession(events: ReadonlyArray<SessionEvent>, options: DeriveSessionOptions = {}): SessionModel {
   const timeline: TimelineEntry[] = [];
   const turns: TurnSummary[] = [];
+  const runs = new Map<string, SessionRunEvent>();
   const startsBySession = new Map<string, number>();
   /** Where each relayed permission prompt sits in the timeline, so its close lands on the row it opened rather than
    * on a second row after the work the answer let through. */
@@ -412,6 +416,12 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
         }
         continue;
       }
+      case "session.run": {
+        const had = runs.get(event.block);
+        if (had !== undefined && had.runId === event.runId && had.state !== "running") continue;
+        runs.set(event.block, event);
+        continue;
+      }
       case "session.checkpoint": {
         // Taken once the turn is over, so a later turn may already be open: the row goes on its own turn's summary.
         const at = turns.findIndex(t => t.turnId === event.turnId);
@@ -594,7 +604,7 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
     if (entry.kind === "message") messages.push(entry.message);
     else if (entry.kind === "work") workEntries.push(entry.entry);
   }
-  return { turns, messages, workEntries, timeline, latestTurn: turns[turns.length - 1] ?? null, running, model, harness, agent, permissionMode };
+  return { turns, messages, workEntries, timeline, latestTurn: turns[turns.length - 1] ?? null, running, model, harness, agent, permissionMode, runs };
 }
 
 /** Reasoning renders as one collapsed line (preview) that opens onto the text (detail). */

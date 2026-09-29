@@ -1,0 +1,12 @@
+[
+  {
+    "id": 1,
+    "op": "pty.tab"
+  },
+  {
+    "id": 1,
+    "op": "pty.tab",
+    "ptyId": "pty_1",
+    "machineId": 1
+  }
+]
