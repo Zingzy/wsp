@@ -183,7 +183,8 @@ pub const AGENTS: Tool = Tool {
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct AgentsIn {
     pub workspace: String,
-    pub spawn: String,
+    #[serde(default)]
+    pub spawn: Option<String>,
     #[serde(default)]
     #[cfg_attr(test, schemars(with = "Option<u64>"))]
     pub max_machines: Option<Number>,
@@ -194,7 +195,8 @@ pub struct AgentsIn {
 
 async fn set_agents(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     let AgentsIn { workspace, spawn, max_machines, max_depth } = input(AGENTS_NAME, arguments)?;
-    let asked = agents_asked(Some(&spawn), max_machines.as_ref(), max_depth.as_ref())?.unwrap_or_default();
+    let asked = agents_asked(spawn.as_deref(), max_machines.as_ref(), max_depth.as_ref())
+        .ok_or_else(|| Failure::usage(workspace::words().agents_nothing))?;
     let client = host.client().await?;
     let source = workspace_of(&client, &workspace).await?;
     let mut frame = params([("workspaceId", Value::from(source.id))]);

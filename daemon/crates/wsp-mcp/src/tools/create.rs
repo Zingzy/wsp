@@ -274,7 +274,7 @@ async fn new(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     let NewIn { project, name, from, size, engine, spawn, max_machines, max_depth } = input(NEW_NAME, arguments)?;
     let client = host.client().await?;
     let project = the_project(&client, project.as_deref()).await?;
-    let agents = agents_asked(spawn.as_deref(), max_machines.as_ref(), max_depth.as_ref())?;
+    let agents = agents_asked(spawn.as_deref(), max_machines.as_ref(), max_depth.as_ref());
     let created = create_for(&client, &project, &name, Asked { from, size, agents, engine: engine == Some(true), parent: None }).await?;
     Ok(Answer::json(&created))
 }
@@ -346,7 +346,7 @@ async fn fork(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     if let Some(task) = &task {
         turn::checked_start(&client, task, agent.as_deref(), &picks, &source.id).await?;
     }
-    let agents = agents_asked(spawn.as_deref(), max_machines.as_ref(), max_depth.as_ref())?;
+    let agents = agents_asked(spawn.as_deref(), max_machines.as_ref(), max_depth.as_ref());
     let project = project_of(&client, &source.project.id).await?;
     let name = name.unwrap_or_else(|| format!("{}-fork", source.name));
     let Created { workspace, notice } =

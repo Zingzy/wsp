@@ -8,7 +8,7 @@
 // through a hook per agent without any file of the person's being touched. A
 // hook the person's own file already claims is left alone and named in the result.
 import { BREW_PREFIX, CATALOG_AGENTS, CONTEXT_MARKER, MODE, SKILL_NAME, agentName, type AgentContext, type AgentEntry, type ContextHooks, type ContextOutcomeKind, type GuestFile, type GuestRoots } from "@wsp/catalog";
-import { backgroundWorkWords, TURN_END_WORDS, TURN_WALL_MS, fmtBytes, shellQuote, type GoldenBaseTool, type GoldenVersion } from "@wsp/protocol";
+import { ANOTHER_AGENT_WORDS, backgroundWorkWords, TURN_END_WORDS, TURN_WALL_MS, fmtBytes, shellQuote, type GoldenBaseTool, type GoldenVersion } from "@wsp/protocol";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
 import { SHELL_READ } from "./machine-facts.js";
 import { BASE_VERSION_LINES, parseVersions } from "./golden-base.js";
@@ -343,6 +343,7 @@ export function renderMachineContext(input: ContextInput): string {
   machine.push(`- wsp-daemon listens on 0.0.0.0:${DAEMON_PORT} with its own token. Do not stop it and do not bind port ${DAEMON_PORT}.`);
   machine.push("- wsp on this machine's PATH drives the person's host as this thread; wsp --help agent lists its verbs.");
   machine.push(turnFact(input.agent));
+  machine.push(`- ${ANOTHER_AGENT_WORDS}.`);
   machine.push(cdFact(input.agent));
   machine.push("- A server listening on a port shows in the app as a server the person can open. A loopback-only bind (127.0.0.1) is unreachable through the preview edge; bind 0.0.0.0. Ports below 1024 are not forwarded.");
   if (shim) machine.push(`- Sign-ins go through wsp: BROWSER is ${BROWSER_SHIM_PATH} and xdg-open is the same shim. The page opens on the person's computer and the callback port is tunnelled back here.`);
@@ -403,6 +404,7 @@ export function renderShortContext(input: ContextInput): string {
     "",
     `- Keep a server alive: setsid nohup <cmd> > /tmp/<name>.log 2>&1 < /dev/null &${tmux ? ", or tmux new -d -s <name> '<cmd>'" : ""}.`,
     turnFact(input.agent),
+    `- ${ANOTHER_AGENT_WORDS}.`,
     cdFact(input.agent),
     "- A server listening on a port shows in the app for the person to open; bind 0.0.0.0, not 127.0.0.1. A printed http://localhost:<port> link has its port forwarded to their computer. Ports below 1024 are not forwarded.",
   ];

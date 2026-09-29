@@ -10,7 +10,7 @@ import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { type fakeCopier, NapRefusedError, NoProviderBackend, passphraseCipher, type MachineBackend } from "@wsp/engine";
-import { type ProjectView, type DaemonErrorCode, noProjectImageLine, projectImageInUseRefusal, projectImageRemoveNotice, projectImageRemovedLine, DAEMON_TOKEN_PATH, noHostCliLine, napRefusedLine, copyPathFor, madeOfWord, portsWord, HERE_PLACE_ID, LIST_PRICE_WORD, goneRoadRefusal, notAnsweringYet, runForTheList, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, UP_RESTART_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, markedDefault, NO_SUCH_TURN, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, RuntimeRequest, threadStateWord, whereWord, workspaceStateOf, workspaceWord, type WorkspaceListing, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceAsleepAgainLine, workspaceKind, thisComputer, copyTakesNone, type WorkspaceOut, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, type PlaceView, localRunsOneFix, localRunsOneLine, placeForksNothingPickLine, MEMORY_KEPT_CLAUSE, projectRemovedOnComputerLine, type HarnessCatalogAnswer, noFastLine } from "@wsp/protocol";
+import { AGENTS_ON, agentsWord, type ProjectView, type DaemonErrorCode, noProjectImageLine, projectImageInUseRefusal, projectImageRemoveNotice, projectImageRemovedLine, DAEMON_TOKEN_PATH, noHostCliLine, napRefusedLine, copyPathFor, madeOfWord, portsWord, HERE_PLACE_ID, LIST_PRICE_WORD, goneRoadRefusal, notAnsweringYet, runForTheList, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, UP_RESTART_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, markedDefault, NO_SUCH_TURN, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, RuntimeRequest, threadStateWord, whereWord, workspaceStateOf, workspaceWord, type WorkspaceListing, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceAsleepAgainLine, workspaceKind, thisComputer, copyTakesNone, type WorkspaceOut, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, type PlaceView, localRunsOneFix, localRunsOneLine, placeForksNothingPickLine, MEMORY_KEPT_CLAUSE, projectRemovedOnComputerLine, type HarnessCatalogAnswer, noFastLine } from "@wsp/protocol";
 import { copyKey, createRuntime, DAEMON_TOKEN_SET, harnessCatalog, memoryStore, type DaemonChannel, type HarnessAdapterFactory, type PlaceBackends, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
@@ -338,7 +338,7 @@ describe("wsp verbs over the host", () => {
     // id the provider minted for the machine is on no row.
     const cells = (row: string): string[] => row.split(/ {2,}/);
     expect(rows.map(cells)).toEqual([
-      ["alpha", expect.stringMatching(/^ws_/), expect.stringMatching(/^\S+$/), expect.stringMatching(/^\S+$/), expect.stringMatching(/^\d+ vCPU, \d+ GB$/), expect.stringMatching(/^\S+$/)],
+      ["alpha", expect.stringMatching(/^ws_/), expect.stringMatching(/^\S+$/), expect.stringMatching(/^\S+$/), expect.stringMatching(/^\d+ vCPU, \d+ GB$/), expect.stringMatching(/^\S+$/), agentsWord(AGENTS_ON)],
       [
         "mac",
         expect.stringMatching(/^ws_/),
@@ -348,6 +348,7 @@ describe("wsp verbs over the host", () => {
         expect.stringMatching(/^shares this (?:Mac|computer)'s ports, PORT \d+$/),
         expect.stringMatching(/^\d+ cores, \d+ GB$/),
         expect.stringMatching(/^\S+$/),
+        agentsWord(AGENTS_ON),
       ],
     ]);
     expect(listed.io.errors).toEqual([]);
@@ -361,8 +362,8 @@ describe("wsp verbs over the host", () => {
     expect(cells(rows[1]!)[6]).toBe(fmtSize(rawRows[1]!.size, kindWords("local").cpu));
     // Which word each row carries is the one predicate's, read off that row's own status: what this computer's
     // daemon is doing on the machine this test runs on decides the word, and never whether there is a word. The
-    // state is a row's last cell either way, since nothing here has turned its agents on.
-    expect(rows.map(r => cells(r).at(-1))).toEqual(rawRows.map(w => workspaceWord(workspaceStateOf(w, w))));
+    // state is the cell before the agents cap.
+    expect(rows.map(r => cells(r).at(-2))).toEqual(rawRows.map(w => workspaceWord(workspaceStateOf(w, w))));
     expect(rawRows.map(w => [w.name, workspaceKind(w), w.golden])).toEqual([
       ["alpha", "cloud", head(SEALED_GOLDEN).snapshotId],
       ["mac", "local", ""],
@@ -3749,10 +3750,10 @@ describe("wsp verbs over the host", () => {
   });
 
   describe("what the agents on a workspace may do", () => {
-    it("the switch is off until a person turns it on, and the listing and the card read it off the record", async () => {
+    it("the switch is on under the default caps until a person turns it off, and the listing and the card read it off the record", async () => {
       await run("new", "alpha");
-      const off = await run("workspaces");
-      expect(off.io.lines[0]!.split("\n")[1]).not.toContain("machines");
+      const unset = await run("workspaces");
+      expect(unset.io.lines[0]!.split("\n")[1]).toContain("3 machines");
       const on = await run("workspaces", "agents", "alpha", "--spawn", "on", "--max-machines", "2");
       expect(on.code).toBe(0);
       expect(on.io.lines).toEqual(["alpha: agents may spawn: up to 2 workspaces"]);
@@ -3764,17 +3765,25 @@ describe("wsp verbs over the host", () => {
       expect((await rt.workspaces.list())[0]!.agents).toEqual({ spawn: false, maxMachines: 2, maxDepth: 1 });
     });
 
-    it("a cap with no --spawn beside it is refused, and so is a word that is neither on nor off", async () => {
+    it("a cap alone tightens the switch it finds and leaves it on or off, and a word that is neither on nor off, or no word at all, is refused", async () => {
       await run("new", "alpha");
-      const bare = await run("workspaces", "agents", "alpha", "--max-machines", "2");
-      expect(bare.code).toBe(EXIT_CODES.usage);
-      expect(bare.io.errors[0]).toContain("need --spawn on beside them");
+      const tightened = await run("workspaces", "agents", "alpha", "--max-machines", "2");
+      expect(tightened.code, tightened.io.errors.join("\n")).toBe(0);
+      expect((await rt.workspaces.list())[0]!.agents).toEqual({ ...AGENTS_ON, maxMachines: 2 });
+      expect((await run("workspaces", "agents", "alpha", "--spawn", "off")).code).toBe(0);
+      expect((await run("workspaces", "agents", "alpha", "--max-depth", "2")).code).toBe(0);
+      expect((await rt.workspaces.list())[0]!.agents).toEqual({ spawn: false, maxMachines: 2, maxDepth: 2 });
+      expect((await run("workspaces", "agents", "alpha", "--spawn", "on")).code).toBe(0);
       const wrong = await run("workspaces", "agents", "alpha", "--spawn", "yes");
       expect(wrong.code).toBe(EXIT_CODES.usage);
       expect(wrong.io.errors[0]).toContain("--spawn takes on or off");
       const none = await run("workspaces", "agents", "alpha");
       expect(none.code).toBe(EXIT_CODES.usage);
-      expect((await rt.workspaces.list())[0]!.agents).toBeUndefined();
+      expect(none.io.errors[0]).toContain("--max-machines");
+      expect((await rt.workspaces.list())[0]!.agents).toEqual({ spawn: true, maxMachines: 2, maxDepth: 2 });
+      // A new workspace takes a cap alone the same way, on the default switch.
+      expect((await run("new", "beta", "--max-machines", "1")).code).toBe(0);
+      expect((await rt.workspaces.list()).find(w => w.name === "beta")!.agents).toEqual({ ...AGENTS_ON, maxMachines: 1 });
     });
 
     it("--max-depth 0 is a usage sentence, not a shape the wire refuses", async () => {

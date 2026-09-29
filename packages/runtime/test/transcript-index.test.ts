@@ -210,7 +210,9 @@ describe("a transcript file that did not read", () => {
     const statePath = join(home, "state.json");
     const writer = { wsp: "test", daemon: DAEMON_VERSION, bin: "/usr/local/bin/wsp" };
     const { adapter } = replying(p => `reply to ${p}`);
-    const rt = createRuntime({ backend: stubBackend(), store: jsonFileStore(statePath, writer), adapters: { claude: adapter } });
+    // One backend for every host over this state, so the machine the record names is still there when the next one reads it.
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store: jsonFileStore(statePath, writer), adapters: { claude: adapter } });
     const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     await (await rt.sessions.start(ws.id, { prompt: "one" })).finished;
     await rt.close();
@@ -222,7 +224,7 @@ describe("a transcript file that did not read", () => {
     symlinkSync(file, file);
     const warned: string[] = [];
     const warn = vi.spyOn(console, "warn").mockImplementation(line => void warned.push(String(line)));
-    const after = createRuntime({ backend: stubBackend(), store: jsonFileStore(statePath, writer), adapters: { claude: adapter } });
+    const after = createRuntime({ backend, store: jsonFileStore(statePath, writer), adapters: { claude: adapter } });
     try {
       await (await after.sessions.start(ws.id, { prompt: "two" })).finished;
       await (await after.sessions.start(ws.id, { prompt: "three" })).finished;
@@ -236,7 +238,7 @@ describe("a transcript file that did not read", () => {
     }
     await after.close();
 
-    const third = createRuntime({ backend: stubBackend(), store: jsonFileStore(statePath, writer), adapters: {} });
+    const third = createRuntime({ backend, store: jsonFileStore(statePath, writer), adapters: {} });
     const replies = (await third.sessions.history(ws.id)).flatMap(e => (e.type === "session.delta" && e.kind === "text" ? [e.text] : []));
     expect(replies.join("")).toBe("reply to onereply to tworeply to three");
     expect(warned.filter(line => line.startsWith(`the transcript of ${ws.id} does not read`) && line.endsWith("its newest events wait for the next flush"))).toHaveLength(1);
@@ -252,7 +254,9 @@ describe("a transcript file that reads and does not parse", () => {
     const statePath = join(home, "state.json");
     const writer = { wsp: "test", daemon: DAEMON_VERSION, bin: "/usr/local/bin/wsp" };
     const { adapter } = replying(p => `reply to ${p}`);
-    const rt = createRuntime({ backend: stubBackend(), store: jsonFileStore(statePath, writer), adapters: { claude: adapter } });
+    // One backend for every host over this state, so the machine the record names is still there when the next one reads it.
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store: jsonFileStore(statePath, writer), adapters: { claude: adapter } });
     const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     await (await rt.sessions.start(ws.id, { prompt: "one" })).finished;
     await rt.close();
@@ -262,7 +266,7 @@ describe("a transcript file that reads and does not parse", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       for (const prompt of ["two", "three"]) {
-        const next = createRuntime({ backend: stubBackend(), store: jsonFileStore(statePath, writer), adapters: { claude: adapter } });
+        const next = createRuntime({ backend, store: jsonFileStore(statePath, writer), adapters: { claude: adapter } });
         await (await next.sessions.start(ws.id, { prompt })).finished;
         await next.close();
       }
@@ -270,7 +274,7 @@ describe("a transcript file that reads and does not parse", () => {
       warn.mockRestore();
     }
 
-    const last = createRuntime({ backend: stubBackend(), store: jsonFileStore(statePath, writer), adapters: {} });
+    const last = createRuntime({ backend, store: jsonFileStore(statePath, writer), adapters: {} });
     const replies = (await last.sessions.history(ws.id)).flatMap(e => (e.type === "session.delta" && e.kind === "text" ? [e.text] : []));
     expect(replies.join("")).toBe("reply to tworeply to three");
     expect((await last.sessions.search("reply to two")).hits).toHaveLength(1);
