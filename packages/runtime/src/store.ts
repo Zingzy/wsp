@@ -15,6 +15,14 @@ export interface Store {
   getBlob(collection: string, id: string): Promise<Buffer | undefined>;
   putBlob(collection: string, id: string, bytes: Buffer): Promise<void>;
   deleteBlob(collection: string, id: string): Promise<void>;
+  /** Which write a blob is: its size and the moment it was written, nothing where there is no blob. A blob that is
+   * there and cannot be read answers here where getBlob answers nothing, which is how a reader tells them apart. */
+  statBlob(collection: string, id: string): Promise<BlobMark | undefined>;
+}
+
+export interface BlobMark {
+  bytes: number;
+  at: number;
 }
 
 type Data = Record<string, Record<string, unknown>>;
@@ -65,6 +73,8 @@ export const stateShapeUnreadableLine = (statePath: string, document: unknown): 
 export function memoryStore(): Store {
   const data: Data = {};
   const blobs = new Map<string, Buffer>();
+  const marks = new Map<string, BlobMark>();
+  let writes = 0;
   return {
     async get(collection, id) {
       return data[collection]?.[id];
@@ -86,9 +96,14 @@ export function memoryStore(): Store {
     },
     async putBlob(collection, id, bytes) {
       blobs.set(`${collection}/${id}`, Buffer.from(bytes));
+      marks.set(`${collection}/${id}`, { bytes: bytes.length, at: ++writes });
     },
     async deleteBlob(collection, id) {
       blobs.delete(`${collection}/${id}`);
+      marks.delete(`${collection}/${id}`);
+    },
+    async statBlob(collection, id) {
+      return marks.get(`${collection}/${id}`);
     },
   };
 }
@@ -224,6 +239,15 @@ export function jsonFileStore(path: string, writer: StateWriter): Store {
     async deleteBlob(collection, id) {
       load();
       rmSync(blobPath(collection, id), { force: true });
+    },
+    async statBlob(collection, id) {
+      try {
+        const st = statSync(blobPath(collection, id));
+        return { bytes: st.size, at: st.mtimeMs };
+      } catch (e) {
+        if ((e as { code?: string }).code === "ENOENT") return undefined;
+        throw e;
+      }
     },
   };
 }
