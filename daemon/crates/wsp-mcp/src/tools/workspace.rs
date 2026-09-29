@@ -74,6 +74,12 @@ pub struct Words {
     pub pr_line: String,
     pub left_one: String,
     pub left_many: String,
+    pub committed_one: String,
+    pub committed_many: String,
+    pub no_draft: String,
+    pub no_draft_bare: String,
+    pub no_draft_fix: String,
+    pub discarded: String,
     pub first_turn_failed: String,
 }
 
