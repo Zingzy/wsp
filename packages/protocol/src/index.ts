@@ -4391,6 +4391,7 @@ const DAEMON_CONTENTS = [
   "e927a6944459d21c2598ce6ff7511bd6bb22eed9ac962aaedcce620e92b3d321",
   "1796fa8ef2dcd4c907e1314205bdca852b06c8fb807c5580b517c7ee389a188a",
   "fcbf00c4e8075aea8eec9513751ad6412db3feae36f2a1e78d2465eca51b86a4",
+  "9468bfd7e5cd26a8458b328ef1f01634bbd12954c7b2d4dc13711adb7f19ae95",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -4635,7 +4636,9 @@ const DAEMON_CONTENTS = [
  * the whole fact, and git.prState is gone.
  * Version 91 adds git.snapshot, the checkout as it stands as one commit on HEAD taken through an index of its own,
  * and git.range, the diff between two such commits by their full shas, held to the daemon's root as git.diff is;
- * every git.diff file gains its kind and its line counts, and a checkpoint starts no fsmonitor. */
+ * every git.diff file gains its kind and its line counts, and a checkpoint starts no fsmonitor.
+ * Version 92 opens a new listener on the reading that finds it and asks it once, beside the reading, whether it is a
+ * browser's DevTools port; one that answers as one closes on the next reading and is left out of every one after. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary

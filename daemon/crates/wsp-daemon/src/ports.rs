@@ -2,7 +2,7 @@
 //! This machine's listening TCP ports, one road per platform: Linux reads /proc/net/tcp and finds each socket's
 //! holder through the /proc/[pid]/fd tables (pgrep is not on every guest); macOS asks lsof. The watcher diffs one
 //! snapshot against the next and says what opened and what closed. A browser's DevTools debugging port is no server
-//! and is left out here, where every reader of the ports gets them.
+//! and is dropped here, where every reader of the ports gets them, once it has answered as one.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -306,6 +306,9 @@ fn pid_alive(pid: u32) -> bool {
     }
 }
 
+/// Each listener's answer to the DevTools question, by port and holder; None while the ask is out.
+type DevtoolsAnswers = Arc<Mutex<HashMap<(u16, Option<u32>), Option<bool>>>>;
+
 pub(crate) struct PortWatcher {
     source: PortSource,
     alive: Box<dyn Fn(u32) -> bool + Send + Sync>,
@@ -314,8 +317,8 @@ pub(crate) struct PortWatcher {
     /// The first poll seeds what is already listening without events: a listener that predates the watcher is not
     /// a change.
     primed: bool,
-    /// Each listener's answer to the DevTools question, by port and holder, so a port is asked once while it lives.
-    devtools: HashMap<(u16, Option<u32>), bool>,
+    /// Kept while a listener lives, so each is asked once.
+    devtools: DevtoolsAnswers,
 }
 
 impl PortWatcher {
@@ -328,24 +331,34 @@ impl PortWatcher {
         alive: Box<dyn Fn(u32) -> bool + Send + Sync>,
         now: Box<dyn Fn() -> u64 + Send + Sync>,
     ) -> PortWatcher {
-        PortWatcher { source, alive, now, known: Vec::new(), primed: false, devtools: HashMap::new() }
+        PortWatcher { source, alive, now, known: Vec::new(), primed: false, devtools: Arc::new(Mutex::new(HashMap::new())) }
     }
 
     pub(crate) fn current(&self) -> Vec<ListeningPort> {
         self.known.clone()
     }
 
-    /// One reading with the browsers' DevTools ports left out, each new listener asked once.
+    /// One reading with the ports that answered as a browser's DevTools left out. A new listener is a server until
+    /// its ask comes back, so a slow or silent one opens on the reading that finds it, and a DevTools port closes on
+    /// the reading after its answer.
     async fn servers(&mut self) -> Vec<ListeningPort> {
         let read = (self.source)().await;
-        self.devtools.retain(|(port, pid), _| read.iter().any(|r| r.port == *port && r.pid == *pid));
-        // Asked all at once: a port that takes the connection and says nothing costs the whole timeout, and one such
-        // port after another would hold the seed for as many timeouts as there are.
-        let unknown: Vec<(u16, Option<u32>)> =
-            read.iter().map(|r| (r.port, r.pid)).filter(|key| !self.devtools.contains_key(key)).collect();
-        let answers = futures_util::future::join_all(unknown.iter().map(|(port, _)| is_devtools(*port))).await;
-        self.devtools.extend(unknown.into_iter().zip(answers));
-        read.into_iter().filter(|r| self.devtools.get(&(r.port, r.pid)) != Some(&true)).collect()
+        let mut answers = self.devtools.lock().unwrap_or_else(|e| e.into_inner());
+        answers.retain(|(port, pid), _| read.iter().any(|r| r.port == *port && r.pid == *pid));
+        for key in read.iter().map(|r| (r.port, r.pid)) {
+            if answers.contains_key(&key) {
+                continue;
+            }
+            answers.insert(key, None);
+            let devtools = Arc::clone(&self.devtools);
+            tokio::spawn(async move {
+                let answer = is_devtools(key.0).await;
+                if let Some(slot) = devtools.lock().unwrap_or_else(|e| e.into_inner()).get_mut(&key) {
+                    *slot = Some(answer);
+                }
+            });
+        }
+        read.into_iter().filter(|r| answers.get(&(r.port, r.pid)) != Some(&Some(true))).collect()
     }
 
     /// One reading against the last: what opened and what closed since, as the events to push.
@@ -552,7 +565,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn listeners_that_never_answer_cost_the_seed_one_probe_timeout_together_not_one_each() {
+    async fn listeners_that_never_answer_hold_up_no_seed() {
         let mut rows = Vec::new();
         for n in 0..6u32 {
             rows.push(row(silent().await, Some(700 + n), u64::from(n) + 1, 0, true));
@@ -562,21 +575,52 @@ mod tests {
         assert!(w.poll().await.is_empty());
         let took = started.elapsed();
         assert_eq!(w.current().len(), 6, "a port that says nothing is still a server");
-        assert!(took < DEVTOOLS_PROBE * 2, "six silent ports took {took:?} to seed");
+        assert!(took < DEVTOOLS_PROBE / 2, "six silent ports took {took:?} to seed");
     }
 
     #[tokio::test]
-    async fn a_browsers_devtools_port_is_no_server_and_is_left_out_of_the_seed_and_the_opens_while_a_plain_listener_stays() {
+    async fn a_listener_that_never_answers_http_opens_on_the_poll_that_first_reads_it() {
+        let snapshot = Arc::new(Mutex::new(Vec::new()));
+        let mut w = PortWatcher::new(fixed(Arc::clone(&snapshot)));
+        assert!(w.poll().await.is_empty());
+        let port = silent().await;
+        snapshot.lock().unwrap().push(row(port, Some(800), 1, 0, true));
+        let started = std::time::Instant::now();
+        let opened = w.poll().await;
+        let took = started.elapsed();
+        assert_eq!(opened, [DaemonEvent::PortOpen { port, pid: Some(800), process: None, loopback: Some(true) }]);
+        assert!(took < DEVTOOLS_PROBE / 2, "the open waited {took:?} on a port that says nothing");
+    }
+
+    /// Polls until a reading says something, as the watch's interval would.
+    async fn next_change(w: &mut PortWatcher) -> Vec<DaemonEvent> {
+        for _ in 0..40 {
+            let events = w.poll().await;
+            if !events.is_empty() {
+                return events;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        Vec::new()
+    }
+
+    #[tokio::test]
+    async fn a_browsers_devtools_port_is_dropped_once_it_answers_as_one_while_a_plain_listener_stays() {
         let devtools = answering(r#"{"Browser":"HeadlessChrome/140.0.7339.16","Protocol-Version":"1.3","webSocketDebuggerUrl":"ws://127.0.0.1/devtools/browser/x"}"#).await;
         let server = answering("<!doctype html><title>dev</title>").await;
         let later = answering(r#"{"Browser":"Chrome/140.0","Protocol-Version":"1.3"}"#).await;
         let snapshot = Arc::new(Mutex::new(vec![row(devtools, Some(900), 1, 0, true), row(server, Some(901), 2, 0, true)]));
         let mut w = PortWatcher::new(fixed(Arc::clone(&snapshot)));
         assert!(w.poll().await.is_empty());
+        let dropped = next_change(&mut w).await;
+        assert!(matches!(dropped.as_slice(), [DaemonEvent::PortClose { port, .. }] if *port == devtools), "{dropped:?}");
         assert_eq!(w.current().iter().map(|p| p.port).collect::<Vec<_>>(), [server]);
         snapshot.lock().unwrap().push(row(later, Some(902), 3, 0, true));
-        assert!(w.poll().await.is_empty(), "a devtools port that opens later is no open either");
+        assert_eq!(w.poll().await, [DaemonEvent::PortOpen { port: later, pid: Some(902), process: None, loopback: Some(true) }]);
+        let dropped = next_change(&mut w).await;
+        assert!(matches!(dropped.as_slice(), [DaemonEvent::PortClose { port, .. }] if *port == later), "{dropped:?}");
         assert_eq!(w.current().iter().map(|p| p.port).collect::<Vec<_>>(), [server]);
+        assert!(next_change(&mut w).await.is_empty(), "a dropped port stays dropped");
     }
 
     /// A /proc lookalike: net/tcp from the fixture, pid 123 owning inode 45678 with comm "node" and a cmdline, pid
