@@ -21,7 +21,7 @@
 import { openProjectSettings } from "../settings/openAt.js";
 import { ChevronDownIcon, CopyIcon, PlusIcon, SquarePenIcon, Trash2Icon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
-import { HOST_ASLEEP_LINE, MACHINE_UNREACHED_LINE, computerOffline, modelOf, workspaceState, type WorkspaceState } from "@wsp/protocol";
+import { HOST_ASLEEP_LINE, modelOf, workspaceState, type WorkspaceState } from "@wsp/protocol";
 import { openContextMenu, runAction } from "../actions/contextMenu.js";
 import { THREAD_TREE_WORKING, rebuildRefusedLine } from "../actions/format.js";
 import { CREATE_ASKED, CREATE_STEP_WORDS, currentStep, stepWords, stoppedStep } from "../shell/creationLog.js";
@@ -52,7 +52,7 @@ import { ComputerSwitcher } from "./ComputerSwitcher.js";
 import { COMPUTER_PICK_KEY, PROJECT_PICK_KEY, pickCodec, underPicks } from "./picks.js";
 import { CHILD_LIST_CLASS, ONE_LINE_ROW_CLASS, RAIL_ITEM_CLASS, ROW_META_CLASS, ROW_PROSE_CLASS, SETTLED_ROW_ID, sectionRowId, threadRowId, workspaceRowId } from "./rowGrammar.js";
 import { SearchRow } from "./SearchRow.js";
-import { resolveAdjacentThreadId, topSidebarThread } from "./Sidebar.logic.js";
+import { resolveAdjacentThreadId, threadSection, topSidebarThread } from "./Sidebar.logic.js";
 import { SIDEBAR_SECTIONS, dropMarks, settleableRoots, sidebarTiles, treeSettle, treeThreadIds, type ProjectGroup, type SidebarSection, type TileNode } from "./threadTree.js";
 import { SnoozeDialog } from "./SnoozeDialog.js";
 import { SidebarCorner } from "./SidebarCorner.js";
@@ -134,7 +134,6 @@ export function WorkspaceSidebar() {
   const api = useStore(s => s.api);
   const conn = useStore(s => s.conn);
   const workspaces = useStore(s => s.workspaces);
-  const statuses = useStore(s => s.statuses);
   const select = useStore(s => s.select);
   const creations = useStore(s => s.creations);
   const dismissCreation = useStore(s => s.dismissCreation);
@@ -315,7 +314,8 @@ export function WorkspaceSidebar() {
     }
     const copyActions = above === runs.id ? [] : resolveActions(workspaceActions, workspaceTarget(runs.workspace, runs.status, places), verbs);
     const place = placeOf(runs);
-    const { branch, counts } = tileCheckout(runs);
+    const section = thread === null ? null : threadSection(thread);
+    const { branch, counts } = tileCheckout(runs, section === "done" || section === "idle");
     let tile: ReactNode;
     if (thread === null) {
       tile = (
@@ -494,7 +494,6 @@ export function WorkspaceSidebar() {
     e.preventDefault();
   };
 
-  const offline = useMemo(() => computerOffline(Object.values(statuses)), [statuses]);
   const newThreadShortcut = useShortcutLabel("chat.new");
   /** The one add control at rest: a new thread in the selected workspace, held while none is selected. Held by
    * aria-disabled rather than the disabled attribute, so the pointer still reaches it and the tooltip can say what
@@ -540,10 +539,6 @@ export function WorkspaceSidebar() {
       {asleep ? (
         <p data-sidebar-asleep className={cn(ROW_PROSE_CLASS, "px-2 pt-1 leading-4")}>
           {HOST_ASLEEP_LINE}
-        </p>
-      ) : offline ? (
-        <p data-sidebar-offline className={cn(ROW_PROSE_CLASS, "px-2 pt-1 leading-4")}>
-          {MACHINE_UNREACHED_LINE}
         </p>
       ) : null}
     </div>

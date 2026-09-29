@@ -8,7 +8,7 @@
 // through a hook per agent without any file of the person's being touched. A
 // hook the person's own file already claims is left alone and named in the result.
 import { BREW_PREFIX, CATALOG_AGENTS, CONTEXT_MARKER, MODE, SKILL_NAME, agentName, type AgentContext, type AgentEntry, type ContextHooks, type ContextOutcomeKind, type GuestFile, type GuestRoots } from "@wsp/catalog";
-import { TURN_END_WORDS, TURN_WALL_MS, fmtBytes, shellQuote, type GoldenBaseTool, type GoldenVersion } from "@wsp/protocol";
+import { ANOTHER_AGENT_WORDS, TURN_END_WORDS, TURN_WALL_MS, fmtBytes, shellQuote, type GoldenBaseTool, type GoldenVersion } from "@wsp/protocol";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
 import { SHELL_READ } from "./machine-facts.js";
 import { BASE_VERSION_LINES, parseVersions } from "./golden-base.js";
@@ -341,6 +341,7 @@ export function renderMachineContext(input: ContextInput): string {
   else if (containers.length === 0) machine.push("- Docker and Podman are not installed.");
   machine.push(`- wsp-daemon listens on 0.0.0.0:${DAEMON_PORT} with its own token. Do not stop it and do not bind port ${DAEMON_PORT}.`);
   machine.push("- wsp on this machine's PATH drives the person's host as this thread; wsp --help agent lists its verbs.");
+  machine.push(`- ${ANOTHER_AGENT_WORDS}.`);
   machine.push("- A background process started with a plain & inside a tool call dies when that tool call ends.");
   machine.push(TURN_FACT);
   machine.push(cdFact(input.agent));
@@ -403,6 +404,7 @@ export function renderShortContext(input: ContextInput): string {
     "",
     `- A background process started with a plain & inside a tool call dies when that tool call ends. Detach it: setsid nohup <cmd> > /tmp/<name>.log 2>&1 < /dev/null &${tmux ? ", or tmux new -d -s <name> '<cmd>'" : ""}.`,
     TURN_FACT,
+    `- ${ANOTHER_AGENT_WORDS}.`,
     cdFact(input.agent),
     "- A server listening on a port shows in the app for the person to open; bind 0.0.0.0, not 127.0.0.1. A printed http://localhost:<port> link has its port forwarded to their computer. Ports below 1024 are not forwarded.",
   ];

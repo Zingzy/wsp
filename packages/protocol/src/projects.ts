@@ -294,6 +294,16 @@ export function workspaceForFolder<W extends Pick<WorkspaceView, "id" | "project
   return workspace === undefined ? null : { workspace, project: found };
 }
 
+/** The workspace whose copy holds this folder, the nearest where copies nest: a thread on this computer starts in its
+ * copy, and the copy is on the workspace's own row, so the folder names it with nothing a thread may not read. */
+export function workspaceOfCopy<W extends { id: string; copy?: { path: string } }>(workspaces: readonly W[], folder: string): W | undefined {
+  let found: W | undefined;
+  for (const w of workspaces) {
+    if (w.copy !== undefined && underProject(folder, w.copy.path) && (found === undefined || w.copy.path.length > found.copy!.path.length)) found = w;
+  }
+  return found;
+}
+
 /** Whether a workspace of this kind is a copy of a folder on this computer, made by directory, and forks no image:
  * the one reading of the kind table both the create and the folder rule take. */
 export function copiesFolder(kind: WorkspaceKind): boolean {

@@ -33,7 +33,7 @@ import {
   workspaceStateLine,
   type WorkspaceState,
 } from "@wsp/protocol";
-import { absoluteFolder, agentsAsked, broughtBackLine, deletedLine, forgotLine, imageMovedLine, otherVersion, projectGoldenOf, rebuiltLine, renamedWorkspaceLine, theProject, type HostClient } from "../src/verbs.js";
+import { absoluteFolder, agentsToolAskedNothing, broughtBackLine, deletedLine, forgotLine, imageMovedLine, otherVersion, projectGoldenOf, rebuiltLine, renamedWorkspaceLine, theProject, type HostClient } from "../src/verbs.js";
 import type { TurnCase } from "./mcp-record-turns.js";
 
 type Replies = Record<string, string>;
@@ -107,7 +107,9 @@ export async function workspaceWords(line: LineOf, host: HostOf): Promise<Record
     agentsOff: agentsLine(undefined),
     agentsOne: agentsLine({ spawn: true, maxMachines: 1, maxDepth: 1 }),
     agentsMany: agentsLine({ spawn: true, maxMachines: "{count}" as never, maxDepth: 1 }),
-    capsWithoutSpawn: await thrown(() => agentsAsked(undefined, 1)),
+    agentsNothing: await thrown(() => {
+      throw agentsToolAskedNothing();
+    }),
     forgotOne: forgotLine({ workspace: { name: "{name}", id: "{id}" } as never, threads: 1 }),
     forgotMany: forgotLine({ workspace: { name: "{name}", id: "{id}" } as never, threads: "{count}" as never }),
     onDelete: {
@@ -288,6 +290,8 @@ export const WORKSPACE_ANSWERED: Record<string, TurnCase[]> = {
     { case: "on", arguments: { workspace: "alpha", spawn: "on", max_machines: 2 }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.agents": reply({ workspace: WORKSPACE }) } },
     { case: "one", arguments: { workspace: "alpha", spawn: "on", max_machines: 1, max_depth: 3 }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.agents": reply({ workspace: { ...WORKSPACE, agents: { spawn: true, maxMachines: 1, maxDepth: 3 } } }) } },
     { case: "off", arguments: { workspace: "alpha", spawn: "off" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.agents": reply({ workspace: { ...WORKSPACE, agents: { spawn: false, maxMachines: 2, maxDepth: 1 } } }) } },
+    { case: "caps alone", arguments: { workspace: "alpha", max_machines: 2, max_depth: 2 }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.agents": reply({ workspace: { ...WORKSPACE, agents: { spawn: true, maxMachines: 2, maxDepth: 2 } } }) } },
+    { case: "nothing named", arguments: { workspace: "alpha" }, replies: {} },
   ],
   rebuild: onCloud([
     { case: "rebuilt", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: GONE }), "status.list": reply({ statuses: [] }), "workspaces.rebuild": reply({ workspace: { ...WORKSPACE, machineId: "m-2" } }) } },
@@ -387,7 +391,7 @@ export const WORKSPACE_ANSWERED: Record<string, TurnCase[]> = {
     { case: "several projects", arguments: { name: "fix" }, replies: { "projects.list": reply({ projects: [PROJECT, { ...PROJECT, id: "proj-2", name: "beta, two" }] }) } },
     { case: "no project", arguments: { name: "fix" }, replies: { "projects.list": reply({ projects: [] }) } },
     { case: "a thread's projects", arguments: { name: "fix" }, replies: { "projects.list": refused("not yours to read", "auth"), "workspaces.list": reply({ workspaces: [WORKSPACE, { ...WORKSPACE, id: "ws-9" }] }), "workspaces.landing": reply({ capabilities: { sizes: [] } }), "workspaces.create": reply({ workspace: WORKSPACE }) } },
-    { case: "caps without spawn", arguments: { project: "alpha", name: "fix", max_machines: 2 }, replies: { "projects.resolve": reply({ project: PROJECT }) } },
+    { case: "a cap alone", arguments: { project: "alpha", name: "fix", max_machines: 2 }, replies: { "projects.resolve": reply({ project: PROJECT }), "workspaces.landing": reply({ capabilities: { sizes: [] } }), "workspaces.create": reply({ workspace: WORKSPACE }) } },
   ],
   fork: onCloud([
     { case: "forked", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "projects.resolve": reply({ project: PROJECT }), "workspaces.landing": reply({ capabilities: { sizes: [] } }), "workspaces.create": reply({ workspace: { ...WORKSPACE, id: "ws-3", name: "alpha-fork", parentWorkspaceId: "ws-1" } }) } },

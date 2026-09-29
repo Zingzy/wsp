@@ -64,16 +64,18 @@ function TileRows({ place, status, title, harness, third, crab }: { place: TileP
 }
 
 /** The branch a tile's workspace is on, with its glyph, then each count the host read beside it, spaced rather than
- * joined; the branch gives way first, so the counts stay whole. Nothing where no branch is known. */
+ * joined; the branch gives way first, so the counts stay whole. The counts alone where no branch is known. */
 export function TileBranch({ branch, counts = [] }: { branch: string; counts?: readonly string[] | undefined }) {
-  if (branch === "") return null;
+  if (branch === "" && counts.length === 0) return null;
   return (
     <>
-      <GitBranchIcon aria-hidden className="size-3 shrink-0 text-[var(--top-row-meta)]" />
+      {branch === "" ? null : <GitBranchIcon aria-hidden className="size-3 shrink-0 text-[var(--top-row-meta)]" />}
       <span className="flex min-w-0 items-center gap-3">
-        <span data-tile-branch className="min-w-0 truncate">
-          {branch}
-        </span>
+        {branch === "" ? null : (
+          <span data-tile-branch className="min-w-0 truncate">
+            {branch}
+          </span>
+        )}
         {counts.map(count => (
           <span key={count} data-tile-count className="shrink-0">
             {count}
