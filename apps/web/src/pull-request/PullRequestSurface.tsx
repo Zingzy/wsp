@@ -6,8 +6,8 @@
 // same tree the turn's changed-files card draws. The page is read as the pane opens and on its refresh, never kept;
 // the head reads the fact the host pushes on the workspace's status.
 import { Suspense, useCallback, useEffect, useState, type ReactNode } from "react";
-import { ArrowLeftIcon, ChevronsDownUpIcon, ChevronsUpDownIcon, CircleCheckIcon, CircleDashedIcon, CircleMinusIcon, CircleXIcon, GitMergeIcon, HammerIcon, RefreshCwIcon, type LucideIcon } from "lucide-react";
-import { CHECK_STATE_WORDS, capitalised, isPullRequestFact, isPullRequestNamed, pullRequestCounts, pullRequestWord, type CheckState, type PullRequestPage } from "@wsp/protocol";
+import { ArrowLeftIcon, ChevronsDownUpIcon, ChevronsUpDownIcon, CircleCheckIcon, CircleDashedIcon, CircleMinusIcon, CircleXIcon, GitMergeIcon, HammerIcon, RefreshCwIcon, ScanEyeIcon, type LucideIcon } from "lucide-react";
+import { CHECK_STATE_WORDS, START_WORDS, capitalised, isPullRequestFact, isPullRequestNamed, pullRequestCounts, pullRequestWord, type CheckState, type PullRequestPage } from "@wsp/protocol";
 import ChatMarkdown from "../components/ChatMarkdown.js";
 import { ChangedFilesTree } from "../components/chat/ChangedFilesTree.js";
 import { CLAMP_FADE_MASK, shouldClampText } from "../components/chat/clamp.js";
@@ -25,6 +25,8 @@ import { useAppDark } from "../settings/theme.js";
 import { useProjects, useStatus, useStore, useWorkspace } from "../protocol/store.js";
 import { askToFix, updateFromBase } from "./acts.js";
 import { MergeControls } from "./MergeControls.js";
+import { ReviewDialog } from "./ReviewDialog.js";
+import { ReviewDraftSection } from "./ReviewDraftSection.js";
 import { PR_INK, PR_WORDS } from "./words.js";
 
 const ROW = "flex min-w-0 items-start gap-3 rounded-[var(--control-radius)] px-2 py-2 transition-colors duration-150 hover:bg-accent";
@@ -149,6 +151,7 @@ export function PullRequestSurface({ workspaceId }: { workspaceId: string }) {
   const [refusal, setRefusal] = useState<string | null>(null);
   const [asked, setAsked] = useState(0);
   const [tab, setTab] = useState<Tab>("overview");
+  const [reviewing, setReviewing] = useState(false);
   const name = workspace?.name ?? workspaceId;
   const project = projects.find(p => p.id === workspace?.project.id);
   const base = isPullRequestFact(seen) ? seen.base : (project?.base ?? project?.defaultBranch ?? "main");
@@ -186,6 +189,7 @@ export function PullRequestSurface({ workspaceId }: { workspaceId: string }) {
   const word = pullRequestWord(seen);
   const checks = fact === null ? [] : [...fact.checks].sort((a, b) => CHECK_RANK[a.state] - CHECK_RANK[b.state]);
   const updated = page !== null && page.updatedAt !== "" ? formatRelativeTimeLabel(page.updatedAt) : "";
+  const from = workspace?.from;
   const treeFiles: TurnDiffFileChange[] = (page?.files ?? []).map(f => ({ path: f.path, kind: "modified", additions: f.additions, deletions: f.deletions }));
 
   return (
@@ -219,6 +223,11 @@ export function PullRequestSurface({ workspaceId }: { workspaceId: string }) {
             </span>
           ))}
         </div>
+        {from !== undefined && from.kind !== "review" ? (
+          <a data-pr-from href={from.url} target="_blank" rel="noopener noreferrer" className="mt-1 min-w-0 truncate text-xs text-muted-foreground hover:text-foreground hover:underline">
+            {from.kind === "issue" ? START_WORDS.fromIssue(from.number, from.title) : START_WORDS.fromPullRequest(from.number)}
+          </a>
+        ) : null}
         {fact === null ? null : (
           <div className="mt-3 flex flex-wrap items-center gap-2 empty:hidden">
             <MergeControls workspaceId={workspaceId} name={name} fact={fact} repo={page?.merge} />
@@ -234,10 +243,18 @@ export function PullRequestSurface({ workspaceId }: { workspaceId: string }) {
                 {PR_WORDS.fix}
               </Button>
             ) : null}
+            {fact.state === "open" && from?.kind !== "review" ? (
+              <Button type="button" size="xs" variant="outline" data-pr-review-agent onClick={() => setReviewing(true)}>
+                <ScanEyeIcon aria-hidden />
+                {START_WORDS.reviewWithAgent}
+              </Button>
+            ) : null}
           </div>
         )}
         {refusal === null ? null : <p className="mt-2 text-[13px] text-error-foreground">{refusal}</p>}
       </div>
+
+      {reviewing ? <ReviewDialog workspaceId={workspaceId} onClose={() => setReviewing(false)} /> : null}
 
       <div data-pr-tabs className="mt-4 px-2">
         <SegmentedControl<Tab> value={tab} segments={TABS} onChange={setTab} aria-label={PR_WORDS.row(seen.number)} />
@@ -252,6 +269,8 @@ export function PullRequestSurface({ workspaceId }: { workspaceId: string }) {
               </Suspense>
             </ClampedBody>
           )}
+
+          {from?.kind === "review" ? <ReviewDraftSection workspaceId={workspaceId} name={name} fact={fact} head={PR_WORDS.heads.draft} /> : null}
 
           {checks.length === 0 ? null : (
             <Section head={PR_WORDS.heads.checks}>

@@ -6,6 +6,7 @@
 // in as {name}, so its words keep one home in this package.
 import { CATALOG, DEFAULT_AGENT, ROAD_MODULES, agentName } from "@wsp/catalog";
 import {
+  START_WORDS,
   COPY_CURRENT,
   COPY_STALE,
   HERE_PLACE_ID,
@@ -192,6 +193,11 @@ export async function workspaceWords(line: LineOf, host: HostOf): Promise<Record
     updatedOne: updatedLine("{name}", "{base}", 1),
     updatedMany: slot(updatedLine("{name}", "{base}", 2), "2", "count"),
     updateConflicts: updateConflictsLine("{name}", "{base}", ["{files}"]),
+    madeBare: START_WORDS.made("{name}", undefined),
+    madeIssue: slot(START_WORDS.made("{name}", { kind: "issue", number: 7 } as never), "7", "number"),
+    madePullRequest: slot(START_WORDS.made("{name}", { kind: "pull_request", number: 7 } as never), "7", "number"),
+    postedOne: slot(slot(START_WORDS.posted("{name}", 7, 1, 3), "7", "number"), "3", "folded"),
+    postedMany: slot(slot(slot(START_WORDS.posted("{name}", 7, 2, 3), "7", "number"), "2", "count"), "3", "folded"),
     updateConflictsJoin: after(updateConflictsLine("{name}", "{base}", ["{a}", "{b}"]), updateConflictsLine("{name}", "{base}", ["{a}"])).replace("{b}", ""),
     mergedInOne: mergedInLine("{lead}", "{branch}", "{child}", 1),
     mergedInMany: slot(mergedInLine("{lead}", "{branch}", "{child}", 2), "2", "count"),
@@ -453,6 +459,23 @@ export const WORKSPACE_ANSWERED: Record<string, TurnCase[]> = {
     { case: "armed to merge on its checks", arguments: { workspace: "alpha", when_checks_pass: true }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.merge": reply({ number: 12, method: "merge", merged: false, autoArmed: true }) } },
     { case: "a method off the list", arguments: { workspace: "alpha", method: "fast-forward" }, replies: {} },
     { case: "refused by the repository", arguments: { workspace: "alpha", method: "rebase" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.merge": refused("the repository does not allow rebase merges \u0085", "usage") } },
+  ],
+  start: [
+    { case: "an issue", arguments: { link: "https://github.com/o/r/issues/5" }, replies: { "workspaces.start": reply({ workspace: { ...WORKSPACE, from: { kind: "issue", repo: "o/r", number: 5, url: "https://github.com/o/r/issues/5", title: "Add a line \u0085 🧪" } }, threadId: "t-1", sessionId: "s-1" }) } },
+    { case: "a pull request, at the picks named", arguments: { link: "https://github.com/o/r/pull/7", project: "alpha", agent: "claude", model: "opus", effort: "high", access: "acceptEdits" }, replies: { "workspaces.start": reply({ workspace: { ...WORKSPACE, from: { kind: "pull_request", repo: "o/r", number: 7, url: "https://github.com/o/r/pull/7", title: "Rename", base: "main", head: { branch: "lab/review-me" } } }, threadId: "t-2", sessionId: "s-2" }) } },
+    { case: "a workspace answered with no origin", arguments: { link: "https://github.com/o/r/issues/6" }, replies: { "workspaces.start": reply({ workspace: WORKSPACE, threadId: "t-3", sessionId: "s-3" }) } },
+    { case: "no project for the repository", arguments: { link: "https://github.com/x/y/issues/1" }, replies: { "workspaces.start": refused("no project here is a checkout of x/y; add one with wsp add https://github.com/x/y", "usage") } },
+  ],
+  review: [
+    { case: "a link", arguments: { target: "https://github.com/o/r/pull/7" }, replies: { "workspaces.review": reply({ workspace: { ...WORKSPACE, from: { kind: "review", repo: "o/r", number: 7, url: "https://github.com/o/r/pull/7", title: "Rename \u0085" } }, threadId: "t-4", sessionId: "s-4" }) } },
+    { case: "a workspace's own pull request", arguments: { target: "alpha", agent: "claude", effort: "high" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.review": reply({ workspace: { ...WORKSPACE, from: { kind: "review", repo: "o/r", number: 12, url: "https://github.com/o/r/pull/12", title: "Fix" } }, threadId: "t-5", sessionId: "s-5" }) } },
+    { case: "an agent with no read-only access", arguments: { target: "https://github.com/o/r/pull/7", agent: "opencode" }, replies: { "workspaces.review": refused("opencode has no read-only access wsp can give a reviewer; review with codex or claude", "usage") } },
+  ],
+  review_post: [
+    { case: "posted as drafted", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.reviewPost": reply({ url: "https://github.com/o/r/pull/7#pullrequestreview-9", number: 7, comments: 2, folded: 1 }) } },
+    { case: "one comment, the verdict and summary edited first", arguments: { workspace: "alpha", verdict: "approve", summary: "Fine \u0085 🧪" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.reviewDraft": reply({ review: { note: "x", at: 1 } }), "workspaces.reviewPost": reply({ url: "https://github.com/o/r/pull/12#pullrequestreview-3", number: 12, comments: 1, folded: 0 }) } },
+    { case: "no review yet", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.reviewPost": refused("alpha has no review to post yet", "usage") } },
+    { case: "a verdict off the list", arguments: { workspace: "alpha", verdict: "lgtm" }, replies: {} },
   ],
   update: [
     { case: "merged, several commits", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: NAPPING }), "workspaces.wake": reply({ workspace: WORKSPACE }), "workspaces.update": reply({ base: "main", merged: true, commits: 3, conflicts: [] }) } },

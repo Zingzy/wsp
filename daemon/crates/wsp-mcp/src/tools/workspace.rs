@@ -99,6 +99,11 @@ pub struct Words {
     pub merged_in_many: String,
     pub merge_conflicts: String,
     pub nothing_to_merge: String,
+    pub made_bare: String,
+    pub made_issue: String,
+    pub made_pull_request: String,
+    pub posted_one: String,
+    pub posted_many: String,
     pub first_turn_failed: String,
 }
 

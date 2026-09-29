@@ -24,6 +24,7 @@
   "gitPrListCap": 50,
   "gitPrListBodyCap": 4000,
   "checkLogLines": 300,
+  "reviewDiffMaxBytes": 98304,
   "fsSearchCapFiles": 5000,
   "fsSearchCapHits": 500,
   "gitDiffCapBytes": 2097152,

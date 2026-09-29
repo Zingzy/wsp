@@ -255,6 +255,31 @@ const CONFLICT_PULL = {
 };
 const FIXTURE_PULLS = { failed: [CART_PULL], conflict: [CONFLICT_PULL] };
 
+/** macInUse with its spoo workspace turned into a review of pull request 42: where the work came from and the draft
+ * the reviewer's reply wrote, two comments on lines of the diff and one outside it, which goes into the summary;
+ * posted, the same draft once Post has put it on the pull request. */
+const REVIEW_FROM = { kind: "review", repo: "you/spoo", number: 42, url: CART_PULL.view.url, title: CART_PULL.page.title, base: "main", head: { branch: CART_PULL.branch, oid: CART_PULL.view.headRefOid } };
+const REVIEW_DRAFT = {
+  verdict: "request_changes",
+  summary: "The rounding is right and the sum is rounded once. The three-line case the bug came from has no test, and the README still says each line rounds.",
+  comments: [
+    { id: "c1", path: "src/cart/total.ts", line: 3, side: "RIGHT", body: "Round here once, then add a test with three lines at 0.335 so the order no longer matters.", on: true },
+    { id: "c2", path: "README.md", line: 12, side: "RIGHT", body: "This still says each line is rounded before the sum.", on: true },
+    { id: "c3", path: "src/cart/lines.ts", line: 40, side: "RIGHT", body: "lineTotal rounds too; it is not in this diff, but it is the second rounding.", on: true, inSummary: true },
+  ],
+  headOid: CART_PULL.view.headRefOid,
+  threadId: threadId("redirect"),
+  at: ago(6),
+};
+const inReview = posted => () => {
+  const state = macInUse();
+  const ws = state.workspaces.ws_api;
+  ws.name = "Review #42 Round the cart total once, at";
+  ws.from = REVIEW_FROM;
+  ws.review = posted ? { ...REVIEW_DRAFT, posted: { url: `${CART_PULL.view.url}#pullrequestreview-9`, at: ago(2), folded: ["src/cart/lines.ts:40"] } } : REVIEW_DRAFT;
+  return state;
+};
+
 /** A project as the host records one: one computer, the source that computer sees and the folder a workspace of it
  * works in. A project here is a folder under the work folder; anywhere else it is a repo the computer cloned into
  * `path`. Every field the add writes is written, as the add writes it. */
@@ -1308,6 +1333,8 @@ const FIXTURES = {
   "pull-request-conflict": { build: macInUse, changes: ["spoo"], pulls: "conflict" },
   tree: { build: treeRows, compares: TREE_COMPARES },
   "tree-conflict": { build: treeConflict, compares: TREE_COMPARES },
+  "review-draft": { build: inReview(false), changes: ["spoo"], pulls: "failed" },
+  "review-posted": { build: inReview(true), changes: ["spoo"], pulls: "failed" },
   rewind: { build: rewind },
   replies: { build: replies },
 };

@@ -104,6 +104,9 @@ export const HARNESS_CATALOGS: readonly HarnessCatalog[] = [
     // workspaceAccess places the mark against it.
     keptMode: "default",
     bypassMode: "bypassPermissions",
+    // A reviewer's mode: every action that needs permission refused without asking, Bash included, so it reads and
+    // changes nothing; the diff rides its task. wsp offers no plan mode, though the binary lists one.
+    readOnlyMode: "dontAsk",
     permissionModes: [
       option("default", "Default", "Asks in the chat about each action that needs permission"),
       option("acceptEdits", "Accept edits", "Edits files without asking; asks about commands that need permission"),
@@ -141,6 +144,8 @@ export const HARNESS_CATALOGS: readonly HarnessCatalog[] = [
     // approval requests; the narrowest sandbox a turn can still work in is the answer for a kept machine.
     keptMode: "workspace-write",
     bypassMode: "danger-full-access",
+    // A reviewer's mode: the sandbox stops every write, .git included, so the diff rides its task.
+    readOnlyMode: "read-only",
     permissionModes: [
       option("read-only", "Read only", "Reads only; edits no files and runs no command that writes"),
       option("workspace-write", "Workspace write", "Edits files and runs commands inside the working folder"),

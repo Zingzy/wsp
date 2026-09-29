@@ -1,0 +1,17 @@
+[
+  {
+    "id": 1,
+    "op": "git.prDiff",
+    "cwd": "/Users/p",
+    "remote": "git@github.com:Zingzy/wsp-pr-lab.git",
+    "number": 7
+  },
+  {
+    "id": 2,
+    "op": "git.prDiff",
+    "cwd": "/root/r",
+    "remote": "git@github.com:Zingzy/wsp-pr-lab.git",
+    "number": 7,
+    "machineId": "wsp-a"
+  }
+]

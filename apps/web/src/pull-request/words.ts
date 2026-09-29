@@ -14,7 +14,7 @@ export const PR_WORDS = {
   sendToThread: "Send to thread",
   refresh: "Refresh",
   reading: "Reading the pull request",
-  heads: { checks: "Checks", review: "Review", comments: "Comments", conversation: "Conversation" },
+  heads: { draft: "Draft review", checks: "Checks", review: "Review", comments: "Comments", conversation: "Conversation" },
   tabs: { overview: "Overview", commits: "Commits", files: "Files" },
   showMore: "Show more",
   showLess: "Show less",

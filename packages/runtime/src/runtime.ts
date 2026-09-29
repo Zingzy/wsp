@@ -245,6 +245,29 @@ import { makeDevices, type DeviceDoor, type ScopedRoad } from "./devices.js";
 import { makePlaceDoor, PlaceForksNowhereError, PlaceProvisioningError, type PlaceDoor, type PlaceRecord, type PlaceWiring } from "./places.js";
 import type { BlobMark, Store } from "./store.js";
 import { HARNESS_CATALOGS, catalogFromProbe, harnessCatalog, smallestModel } from "./harness-catalog.js";
+import {
+  GitIssueReadReply,
+  GitPrDiffReply,
+  GitPrReviewReply,
+  START_WORDS,
+  fromTaskPrompt,
+  githubLinkOf,
+  isReviewRead,
+  lineInDiff,
+  reviewFromReply,
+  reviewReaskPrompt,
+  reviewTaskPrompt,
+  startName,
+  takenNameAfter,
+  withCloses,
+  type IssueRead,
+  type PullRequest,
+  type ReviewDraft,
+  type ReviewPostResult,
+  type ReviewVerdict,
+  type StartResult,
+  type WorkspaceFrom,
+} from "@wsp/protocol";
 
 // --- adapter port -------------------------------------------------------------
 
@@ -732,6 +755,10 @@ interface WorkspaceRecord extends Omit<WorkspaceView, "project"> {
   /** What a child keeps of the tree it is in: its merge into its lead, the files a merge stopped on, and why its last
    * push was refused. Absent on a workspace that is nobody's child and on one nothing has happened to yet. */
   tree?: TreeRecord;
+  /** Where the work came from: an issue or a pull request started on, or a pull request under review. */
+  from?: WorkspaceFrom;
+  /** A review workspace's review as the person shapes it before Post. */
+  review?: ReviewDraft;
 }
 
 interface LiveWorkspace {
@@ -1460,6 +1487,18 @@ export interface Runtime {
      * to on the child's record, then reads the lead's branch line and its tree again. Refused for a workspace that is
      * not the lead's child, while a turn runs on the lead, and for a thread merging into any workspace but its own. */
     mergeIn(o: { workspaceId: string; child: string }, origin?: Caller): Promise<MergeInResult>;
+    /** A workspace started off a GitHub issue or pull request link: the project whose remote names the link's
+     * repository, the text read on this computer, the copy made and, for a pull request, put on its head branch, and
+     * a thread opened with the composed task. A person's act: a thread's own token is refused. */
+    start(o: { url: string; project?: string; agent?: string; model?: string; effort?: string; access?: string }, origin?: Caller): Promise<StartResult>;
+    /** A reviewer thread on a pull request, off its link or a workspace's own pull request: a fresh copy at its head,
+     * the agent at its harness's read-only word, Codex where none is named, the diff in its task. A person's act. */
+    review(o: { url?: string; workspaceId?: string; agent?: string; model?: string; effort?: string }, origin?: Caller): Promise<StartResult>;
+    /** A review workspace's draft, edited first where asked: its summary, its verdict and which comments stay ticked. */
+    reviewDraft(o: { workspaceId: string; summary?: string; verdict?: ReviewVerdict; on?: readonly { id: string; on: boolean }[] }, origin?: Caller): Promise<{ review?: ReviewDraft }>;
+    /** Posts the draft on its pull request in one call as the person, the ticked comments alone, pinned to the head the
+     * review was written against. A person's act. */
+    reviewPost(o: { workspaceId: string }, origin?: Caller): Promise<ReviewPostResult>;
     /** How a browser dials this workspace's daemon; throws on backends without preview URLs. */
     daemonReach(id: string, origin?: Caller): Promise<DaemonReachView>;
     /** One channel to the daemon answering for this workspace, frame by frame, with every event that daemon
@@ -3882,6 +3921,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     createdAt: r.createdAt,
     project: refOf(projectHeld(r.project)),
     ...(r.copy !== undefined ? { copy: r.copy } : {}),
+    ...(r.from !== undefined ? { from: r.from } : {}),
+    ...(r.review !== undefined ? { review: r.review } : {}),
     ...(r.portBase !== undefined ? { portBase: r.portBase } : {}),
     ...(r.claudeSessionId !== undefined ? { claudeSessionId: r.claudeSessionId } : {}),
     ...(r.screen !== undefined ? { screen: r.screen } : {}),
@@ -6223,6 +6264,127 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return lines.length === 0 ? v : { ...v, notice: lines.join("\n") };
   };
 
+  /** The project a GitHub repository names: the one whose remote is that repository, this computer's where two
+   * computers hold it, or the one named by name or id among them. A link is only ever matched to a project the
+   * person added, and every later call names the repository off that project's record. */
+  const projectByRepo = (repo: string, named: string | undefined): ProjectView => {
+    const matches = [...projectsHeld.values()].filter(p => ownerRepoOf(p.remote)?.toLowerCase() === repo.toLowerCase());
+    const picked = named === undefined ? (matches.find(p => p.computer === HERE_PLACE_ID) ?? matches[0]) : matches.find(p => p.id === named || p.name === named);
+    if (picked === undefined) throw Object.assign(new Error(START_WORDS.noProjectForRepo(repo)), { kind: "invalid" });
+    return picked;
+  };
+
+  /** An issue, or a pull request read as the issue it also is, on this computer's own git host command line. */
+  const issueOf = async (remote: string, number: number): Promise<IssueRead> =>
+    GitIssueReadReply.parse(await onThisComputer((ask, home) => ask({ op: "git.issueRead", cwd: home, remote, number }))).issue;
+
+  /** A pull request by number, read in full on this computer. */
+  const pullRequestOf = async (remote: string, number: number): Promise<PullRequest> => {
+    const read = GitPrReadReply.parse(await onThisComputer((ask, home) => ask({ op: "git.prRead", cwd: home, remote, number }))).pr;
+    if (read === undefined) throw new Error(`#${number} is not a pull request`);
+    return read;
+  };
+
+  /** Where the work came from, off the link's kind and what was read. */
+  const fromOf = (kind: WorkspaceFrom["kind"], repo: string, read: IssueRead, fact: PullRequest | undefined): WorkspaceFrom => ({
+    kind,
+    repo,
+    number: read.number,
+    url: read.url,
+    title: read.title,
+    ...(fact !== undefined
+      ? { base: fact.base, head: { branch: fact.branch, oid: fact.headOid, ...(fact.fork !== undefined ? { fork: fact.fork } : {}) } }
+      : {}),
+  });
+
+  /** A workspace made for a start or a review: the copy made by the create road, where the work came from on its
+   * record, and for a pull request its base, its pull request and its head, the copy put on the head branch through
+   * its own daemon. A checkout that is refused takes the half-made workspace with it and answers its own sentence. */
+  const workspaceFrom = async (project: ProjectView, from: WorkspaceFrom, fact: PullRequest | undefined, kind: "start" | "review", origin: Caller | undefined): Promise<LiveWorkspace> => {
+    const taken = new Set([...live.values()].map(e => e.record.name));
+    const name = takenNameAfter(startName(kind, from.number, from.title), taken);
+    const made = await workspaces.create({ project: project.id, name }, origin);
+    const entry = live.get(made.id);
+    if (entry === undefined) throw new Error(`${name} was made and then not found`);
+    entry.record.from = from;
+    if (fact !== undefined) {
+      entry.record.base = fact.base;
+      entry.record.pr = { number: fact.number, url: fact.url, state: fact.state, base: fact.base };
+      entry.pr = { ...fact, readAt: clock.now() };
+    }
+    await persist(entry.record);
+    if (fact !== undefined) {
+      try {
+        await withDaemon(entry, ask => ask({ op: "git.prCheckout", cwd: checkoutOf(entry.record), number: fact.number }));
+      } catch (e) {
+        await workspaces.delete(entry.record.id, origin).catch((d: unknown) => console.warn(`${name} was not taken back after its checkout failed: ${d instanceof Error ? d.message : String(d)}`));
+        throw e;
+      }
+    }
+    return entry;
+  };
+
+  /** The thread a start or a review opens, detached: the turn goes on without the caller. */
+  const openWith = async (entry: LiveWorkspace, o: { prompt: string; harness?: string; model?: string; effort?: string; permissionMode?: string }, origin: Caller | undefined): Promise<StartResult> => {
+    const handle = await sessionsApi.start(
+      entry.record.id,
+      {
+        prompt: o.prompt,
+        ...(o.harness !== undefined ? { harness: o.harness } : {}),
+        ...(o.model !== undefined ? { model: o.model } : {}),
+        ...(o.effort !== undefined ? { effort: o.effort } : {}),
+        ...(o.permissionMode !== undefined ? { permissionMode: o.permissionMode } : {}),
+      },
+      origin,
+    );
+    const v = handle.view();
+    return { workspace: view(entry.record), threadId: v.threadId ?? v.id, sessionId: v.id };
+  };
+
+  /** The harnesses whose table names a mode that changes nothing, which are the ones that can review. */
+  const readOnlyOf = (agent: string): string | undefined => HARNESS_CATALOGS.find(c => c.harness === agent)?.readOnlyMode;
+  const reviewers = (): string[] => {
+    const all = HARNESS_CATALOGS.filter(c => c.readOnlyMode !== undefined).map(c => c.harness);
+    // Codex first: the owner's rule since 2026-09-26 is that Codex runs reviews.
+    return [...all.filter(h => h === "codex"), ...all.filter(h => h !== "codex")];
+  };
+
+  /** A reviewer's reply read at its turn's end: the review its last fenced json block writes becomes the draft, each
+   * comment on a line outside the diff marked for the summary; a reply with no block that reads is asked once more
+   * in the same thread, and a second that does not read leaves the sentence. A reply with no block after a draft that
+   * read leaves that draft as it was: the person may have asked the reviewer something else. */
+  const takeReview = async (entry: LiveWorkspace, threadId: string, text: string): Promise<void> => {
+    const from = entry.record.from;
+    if (from?.kind !== "review") return;
+    const read = reviewFromReply(text);
+    const prior = entry.record.review;
+    const at = clock.now();
+    if (!read.ok) {
+      if (isReviewRead(prior)) return;
+      const reasked = prior !== undefined && "note" in prior && prior.reasked === true;
+      entry.record.review = { note: read.why, at, reasked: true };
+      await persist(entry.record);
+      bus.emit({ type: "workspace.review", workspaceId: entry.record.id });
+      if (!reasked) void sendDetached(entry.record.id, { prompt: reviewReaskPrompt(read.why), thread: threadId }, undefined).catch((e: unknown) => console.warn(`the reviewer of ${entry.record.name} was not asked again: ${e instanceof Error ? e.message : String(e)}`));
+      return;
+    }
+    const remote = projectHeld(entry.record.project).remote;
+    const diff = await onThisComputer((ask, home) => ask({ op: "git.prDiff", cwd: home, remote, number: from.number })).then(
+      r => GitPrDiffReply.parse(r).diff,
+      () => undefined,
+    );
+    const comments = read.review.comments.map((c, n) => ({
+      id: `c${n + 1}`,
+      ...c,
+      on: true,
+      ...(diff !== undefined && lineInDiff(diff, c.path, c.line, c.side) === false ? { inSummary: true } : {}),
+    }));
+    const headOid = (isPullRequestFact(entry.pr) ? entry.pr.headOid : undefined) ?? from.head?.oid ?? "";
+    entry.record.review = { verdict: read.review.verdict, summary: read.review.summary, comments, headOid, threadId, at };
+    await persist(entry.record);
+    bus.emit({ type: "workspace.review", workspaceId: entry.record.id });
+  };
+
   const workspaces: Runtime["workspaces"] = {
     async landing(o, origin) {
       await ready();
@@ -6790,7 +6952,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       return { ...inner, lines: lines(), exited: Promise.race([inner.exited, ended.then(() => null)]), ...(ranIn !== undefined ? { ranIn } : {}) };
     },
 
-    async bringBack({ workspaceId, title, body }, origin) {
+    async bringBack({ workspaceId, title, body: given }, origin) {
+      let body = given;
       spawnGuard("bring_back", origin);
       const entry = await entryOf(workspaceId, origin);
       await copyBlocked(entry);
@@ -6801,6 +6964,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // named. A record written before that fact was kept reads the branch its project starts from, as it did.
       const base = entry.record.base ?? projectHeld(entry.record.project).base;
       const against = base === undefined ? {} : { base };
+      // A pull request off someone's fork takes a push only where its author allowed maintainers to push; refused
+      // before anything is pushed.
+      const fork = entry.record.from?.head?.fork;
+      if (entry.record.from?.kind === "pull_request" && fork !== undefined && !fork.pushable) throw new Error(START_WORDS.forkNotPushable(fork.owner));
+      // Work on an issue closes it once its pull request merges: the body says so, once, whoever wrote the rest of it.
+      const issue = entry.record.from?.kind === "issue" ? entry.record.from.number : undefined;
+      if (issue !== undefined) body = withCloses(body ?? "", issue);
       const brought = await withDaemon(entry, async (ask): Promise<BringBackResult> => {
         const push = GitPushReply.parse(
           await ask({ op: "git.push", cwd, ...against }).catch(async (e: unknown) => {
@@ -7040,6 +7210,87 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       await readCheckout(lead, true);
       await keepTree(kid, kept);
       return { lead: lead.record.name, child: kid.record.name, branch, merged: done.merged, commits: done.commits, conflicts: done.conflicts };
+    },
+
+    async start({ url, project: named, agent, model, effort, access }, origin) {
+      spawnGuard("start", origin);
+      await ready();
+      const link = githubLinkOf(url);
+      if (link === undefined) throw Object.assign(new Error(START_WORDS.notALink(url)), { kind: "invalid" });
+      const project = projectByRepo(link.repo, named);
+      const read = await issueOf(project.remote, link.number);
+      const fact = link.kind === "pull_request" ? await pullRequestOf(project.remote, link.number) : undefined;
+      const from = fromOf(link.kind, link.repo, read, fact);
+      const entry = await workspaceFrom(project, from, fact, "start", origin);
+      return openWith(entry, { prompt: fromTaskPrompt(from, read), ...(agent !== undefined ? { harness: agent } : {}), ...(model !== undefined ? { model } : {}), ...(effort !== undefined ? { effort } : {}), ...(access !== undefined ? { permissionMode: access } : {}) }, origin);
+    },
+
+    async review({ url, workspaceId, agent, model, effort }, origin) {
+      spawnGuard("review", origin);
+      await ready();
+      let repo: string;
+      let number: number;
+      let project: ProjectView;
+      if (url !== undefined) {
+        const link = githubLinkOf(url);
+        if (link === undefined) throw Object.assign(new Error(START_WORDS.notALink(url)), { kind: "invalid" });
+        if (link.kind !== "pull_request") throw Object.assign(new Error(START_WORDS.notAPullRequest), { kind: "invalid" });
+        project = projectByRepo(link.repo, undefined);
+        ({ repo, number } = link);
+      } else {
+        const entry = workspaceId === undefined ? undefined : await entryOf(workspaceId, origin);
+        const kept = entry?.record.pr ?? (entry?.record.from?.kind !== "issue" ? entry?.record.from : undefined);
+        if (entry === undefined || kept === undefined) throw Object.assign(new Error(START_WORDS.notAPullRequest), { kind: "invalid" });
+        project = projectHeld(entry.record.project);
+        repo = ownerRepoOf(project.remote) ?? project.remote;
+        number = kept.number;
+      }
+      const reviewer = agent ?? "codex";
+      const readOnly = readOnlyOf(reviewer);
+      if (readOnly === undefined) throw Object.assign(new Error(START_WORDS.noReadOnly(reviewer, reviewers())), { kind: "invalid" });
+      const fact = await pullRequestOf(project.remote, number);
+      const read = await issueOf(project.remote, number);
+      const diff = GitPrDiffReply.parse(await onThisComputer((ask, home) => ask({ op: "git.prDiff", cwd: home, remote: project.remote, number })));
+      const from = fromOf("review", repo, read, fact);
+      const entry = await workspaceFrom(project, from, fact, "review", origin);
+      return openWith(entry, { prompt: reviewTaskPrompt(from, read, diff), harness: reviewer, ...(model !== undefined ? { model } : {}), ...(effort !== undefined ? { effort } : {}), permissionMode: readOnly }, origin);
+    },
+
+    async reviewDraft({ workspaceId, summary, verdict, on }, origin) {
+      const entry = await entryOf(workspaceId, origin);
+      const draft = entry.record.review;
+      if (isReviewRead(draft) && (summary !== undefined || verdict !== undefined || on !== undefined)) {
+        const ticks = new Map((on ?? []).map(t => [t.id, t.on]));
+        entry.record.review = {
+          ...draft,
+          ...(summary !== undefined ? { summary } : {}),
+          ...(verdict !== undefined ? { verdict } : {}),
+          comments: draft.comments.map(c => (ticks.has(c.id) ? { ...c, on: ticks.get(c.id)! } : c)),
+        };
+        await persist(entry.record);
+        bus.emit({ type: "workspace.review", workspaceId });
+      }
+      return entry.record.review === undefined ? {} : { review: entry.record.review };
+    },
+
+    async reviewPost({ workspaceId }, origin) {
+      spawnGuard("review_post", origin);
+      const entry = await entryOf(workspaceId, origin);
+      const draft = entry.record.review;
+      const from = entry.record.from;
+      if (!isReviewRead(draft) || from === undefined) throw new Error(START_WORDS.noReviewYet(entry.record.name));
+      const ticked = draft.comments.filter(c => c.on).map(({ id, path, line, side, body }) => ({ id, path, line, side, body }));
+      const remote = projectHeld(entry.record.project).remote;
+      // One call on this computer as the person, pinned to the head the review was written against, so a push since
+      // is GitHub's to say and a half-made review is never seen.
+      const done = GitPrReviewReply.parse(
+        await onThisComputer((ask, home) => ask({ op: "git.prReview", cwd: home, remote, number: from.number, headOid: draft.headOid, event: draft.verdict, body: draft.summary, comments: ticked })),
+      );
+      entry.record.review = { ...draft, posted: { url: done.url, at: clock.now(), folded: done.folded } };
+      await persist(entry.record);
+      bus.emit({ type: "workspace.review", workspaceId });
+      void readPullRequest(entry, true);
+      return { url: done.url, number: from.number, comments: ticked.length - done.folded.length, folded: done.folded.length };
     },
 
     async daemonReach(id, origin) {
@@ -8166,7 +8417,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     };
     // The reload a client runs on session.end shares that read rather than starting a second.
     started.finished.then(
-      result => settled(result.status),
+      result => {
+        settled(result.status);
+        if (!ended && result.status === "completed") void takeReview(entry, threadId, result.text ?? "").catch((e: unknown) => console.warn(`the review in ${entry.record.name} was not read: ${e instanceof Error ? e.message : String(e)}`));
+      },
       () => settled("failed"),
     );
     return handle;

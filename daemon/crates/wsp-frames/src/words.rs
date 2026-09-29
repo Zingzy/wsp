@@ -303,6 +303,11 @@ pub fn merge_refused(said: &str) -> String {
     format!("the merge was refused: {said}")
 }
 
+/// A review the git host refused, in its own last line: approving one's own pull request, a line it does not take.
+pub fn review_refused(said: &str) -> String {
+    format!("the review was refused: {said}")
+}
+
 /// What a push git refused for want of an https credential is refused with: nothing reached the remote, so this is
 /// the bring back's own refusal and not a note beside a landed push. The fix is the git host's own module to name,
 /// since only it knows which command signs its command line in; a host wsp knows no module for gets the sentence

@@ -7,8 +7,9 @@
 use std::path::Path;
 
 use wsp_frames::{
-    numbers, words, DaemonErrorCode, GitBranchCompareReply, GitPrListReply, GitPrMergeReply, GitPrReply, GitPrViewReply, GitRepoReadReply,
-    GitRunLogReply, HostItem, HostItemKind, MergeMethod, PullRequest, PullRequestCheck, PullRequestState,
+    numbers, words, DaemonErrorCode, GitBranchCompareReply, GitIssueReadReply, GitPrCheckoutReply, GitPrDiffReply, GitPrListReply,
+    GitPrMergeReply, GitPrReply, GitPrReviewReply, GitPrViewReply, GitRepoReadReply, GitRunLogReply, HostItem, HostItemKind, IssueRead,
+    MergeMethod, PullRequest, PullRequestCheck, PullRequestState, ReviewComment, ReviewEvent, ReviewSide,
 };
 
 use crate::git::Runs;
@@ -82,6 +83,21 @@ pub(crate) trait PullRequests: Sync {
     /// What gives this computer a git credential for the host, in the words of the one command only the person can
     /// run. Said beside a push refused for want of one; a host with no module here says none of it.
     fn credential_fix(&self) -> &'static str;
+
+    /// An issue by number, and its reading.
+    fn issue_argv(&self, repo: &str, number: u64) -> Vec<String>;
+    fn read_issue(&self, stdout: &str) -> Option<IssueRead>;
+    /// The line that puts the checkout it runs in on a pull request's head, tracking where that head lives.
+    fn checkout_argv(&self, number: u64) -> Vec<String>;
+    /// A pull request's diff against its base, as one plain patch.
+    fn diff_argv(&self, repo: &str, number: u64) -> Vec<String>;
+    /// A pull request's files with each one's patch, whose hunks say which lines a comment may stand on.
+    fn files_argv(&self, repo: &str, number: u64) -> Vec<String>;
+    fn read_files(&self, stdout: &str) -> Option<Vec<(String, String)>>;
+    /// The line that posts one review whole, its JSON on stdin, and that JSON; then the posted review's page.
+    fn review_argv(&self, repo: &str, number: u64) -> Vec<String>;
+    fn review_input(&self, head_oid: &str, event: ReviewEvent, body: &str, comments: &[ReviewComment]) -> String;
+    fn read_review_url(&self, stdout: &str) -> Option<String>;
 }
 
 /// Every git host wsp knows a command line for.
@@ -369,6 +385,144 @@ pub(crate) async fn list<R: Runs>(runner: &R, cwd: &Path) -> Result<GitPrListRep
     Ok(reply)
 }
 
+/// An issue, or a pull request read as the issue it also is: its text and its conversation.
+pub(crate) async fn issue<R: Runs>(runner: &R, ask: &Ask<'_>, number: u64) -> Result<GitIssueReadReply, OpError> {
+    let (host, repo) = cli_for(runner, ask).await?;
+    let (code, stdout, stderr) = run_cli(runner, host, ask, &host.issue_argv(&repo, number)).await?;
+    if code != Some(0) {
+        return Err(refused_by(host, &stdout, &stderr));
+    }
+    let issue =
+        host.read_issue(&stdout).ok_or_else(|| OpError::plain(format!("{} answered with an issue this does not read", host.program())))?;
+    Ok(GitIssueReadReply { issue })
+}
+
+/// The copy put on a pull request's head branch by the git host's own command line, which sets the branch to track
+/// where that head lives: the repository's own remote, or the fork's where its author allowed maintainers to push.
+/// The host is read off the copy's own remote, since the copy was made from the project a person added.
+pub(crate) async fn checkout<R: Runs>(runner: &R, cwd: &Path, number: u64) -> Result<GitPrCheckoutReply, OpError> {
+    let (_, remote_url) = crate::bring_back::remote_url(runner, cwd).await?;
+    let ask = Ask { cwd, remote_url: &remote_url };
+    let (host, _) = cli_for(runner, &ask).await?;
+    let (code, stdout, stderr) = run_cli(runner, host, &ask, &host.checkout_argv(number)).await?;
+    if code != Some(0) {
+        return Err(refused_by(host, &stdout, &stderr));
+    }
+    Ok(GitPrCheckoutReply { branch: crate::bring_back::branch_at(runner, cwd).await? })
+}
+
+/// A pull request's diff, cut on a file's boundary at REVIEW_DIFF_MAX_BYTES with every file the cut left out named.
+pub(crate) async fn diff<R: Runs>(runner: &R, ask: &Ask<'_>, number: u64) -> Result<GitPrDiffReply, OpError> {
+    let (host, repo) = cli_for(runner, ask).await?;
+    let (code, stdout, stderr) = run_cli(runner, host, ask, &host.diff_argv(&repo, number)).await?;
+    if code != Some(0) {
+        return Err(refused_by(host, &stdout, &stderr));
+    }
+    let (diff, truncated, left) = cut_diff(&stdout, numbers::REVIEW_DIFF_MAX_BYTES);
+    Ok(GitPrDiffReply { diff, truncated, left })
+}
+
+/// One review posted whole, so a half-made review is never seen: the pull request's files read first, each comment
+/// whose line falls outside every hunk put into the body as `path:line: text`, then the verdict, the body and the rest
+/// in one call pinned to the head named. A refusal is the host's own last line.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn review<R: Runs>(
+    runner: &R,
+    ask: &Ask<'_>,
+    number: u64,
+    head_oid: &str,
+    event: ReviewEvent,
+    body: &str,
+    comments: &[ReviewComment],
+) -> Result<GitPrReviewReply, OpError> {
+    let (host, repo) = cli_for(runner, ask).await?;
+    let (code, stdout, stderr) = run_cli(runner, host, ask, &host.files_argv(&repo, number)).await?;
+    if code != Some(0) {
+        return Err(refused_by(host, &stdout, &stderr));
+    }
+    let files =
+        host.read_files(&stdout).ok_or_else(|| OpError::plain(format!("{} answered with files this does not read", host.program())))?;
+    let (kept, body, folded) = fold_review(&files, body, comments);
+    let input = host.review_input(head_oid, event, &body, &kept);
+    let argv = host.review_argv(&repo, number);
+    let args: Vec<&str> = argv.iter().map(String::as_str).collect();
+    let done = runner.run(ask.cwd, host.program(), &args, Some(input.as_bytes()), None).await?;
+    if done.code.is_some() && done.code == host.sign_in_exit() {
+        return Err(OpError::coded(DaemonErrorCode::NoHostCli, words::no_host_cli(host.host())));
+    }
+    let stdout = String::from_utf8_lossy(&done.stdout).into_owned();
+    if done.code != Some(0) {
+        return Err(OpError::plain(words::review_refused(&last_said(&stdout, &done.stderr))));
+    }
+    let url = host.read_review_url(&stdout).unwrap_or_default();
+    Ok(GitPrReviewReply { url, folded })
+}
+
+/// Whether a line on a side of a file stands inside one of its patch's hunks, which is the only place a git host takes
+/// a comment on a line: the new file's lines for RIGHT, the old file's for LEFT, each hunk's header naming its span.
+pub(crate) fn in_hunks(patch: &str, line: u64, side: ReviewSide) -> bool {
+    patch.lines().filter_map(|l| l.strip_prefix("@@ ")).any(|header| {
+        let spans: Vec<&str> = header.split_whitespace().take(2).collect();
+        let wanted = match side {
+            ReviewSide::Left => spans.first().and_then(|s| s.strip_prefix('-')),
+            ReviewSide::Right => spans.get(1).and_then(|s| s.strip_prefix('+')),
+        };
+        let Some(span) = wanted else { return false };
+        let (start, len) = span.split_once(',').unwrap_or((span, "1"));
+        let (Ok(start), Ok(len)) = (start.parse::<u64>(), len.parse::<u64>()) else { return false };
+        len > 0 && line >= start && line < start + len
+    })
+}
+
+/// A review's comments split into those a git host takes on their line and those it would refuse there, the latter
+/// put into the body one line each as `path:line: text`; answers the comments kept, the body, and the ids folded.
+pub(crate) fn fold_review(files: &[(String, String)], body: &str, comments: &[ReviewComment]) -> (Vec<ReviewComment>, String, Vec<String>) {
+    let mut kept = Vec::new();
+    let mut lines = Vec::new();
+    let mut folded = Vec::new();
+    for c in comments {
+        let on_a_hunk = files.iter().any(|(path, patch)| *path == c.path && in_hunks(patch, c.line, c.side));
+        if on_a_hunk {
+            kept.push(c.clone());
+        } else {
+            lines.push(format!("{}:{}: {}", c.path, c.line, c.body.trim()));
+            folded.push(c.id.clone());
+        }
+    }
+    let body = match (body.trim(), lines.is_empty()) {
+        (summary, true) => summary.to_owned(),
+        ("", false) => lines.join("\n"),
+        (summary, false) => format!("{summary}\n\n{}", lines.join("\n")),
+    };
+    (kept, body, folded)
+}
+
+/// A patch of many files cut at the last file that fits whole under the cap, with the paths of every file left out; a
+/// patch under the cap as it is.
+pub(crate) fn cut_diff(diff: &str, max: usize) -> (String, bool, Vec<String>) {
+    if diff.len() <= max {
+        return (diff.to_owned(), false, Vec::new());
+    }
+    let mut starts: Vec<usize> =
+        diff.match_indices("diff --git ").map(|(at, _)| at).filter(|&at| at == 0 || diff.as_bytes()[at - 1] == b'\n').collect();
+    if starts.first() != Some(&0) {
+        starts.insert(0, 0);
+    }
+    let ends: Vec<usize> = starts.iter().skip(1).copied().chain([diff.len()]).collect();
+    let mut kept = 0;
+    let mut left = Vec::new();
+    for (start, end) in starts.iter().zip(&ends) {
+        if left.is_empty() && *end <= max {
+            kept = *end;
+        } else {
+            let header = diff[*start..*end].lines().next().unwrap_or_default();
+            let path = header.rsplit_once(" b/").map_or(header, |(_, b)| b);
+            left.push(path.to_owned());
+        }
+    }
+    (diff[..kept].to_owned(), true, left)
+}
+
 /// A body as a list or a page carries it: at most GIT_PR_LIST_BODY_CAP characters, the cut marked with an ellipsis.
 pub(crate) fn cut_body(body: &str) -> String {
     let body = body.trim();
@@ -384,10 +538,10 @@ mod tests {
     use super::*;
     use crate::git::here::Here;
     use crate::git::recorded::Recorded;
-    use wsp_frames::{CheckState, Mergeable};
+    use wsp_frames::{CheckState, Mergeable, ReviewSide as Side};
 
     const FIELDS: &str =
-        "number,url,state,isDraft,baseRefName,headRefName,headRefOid,mergeable,mergeStateStatus,reviewDecision,additions,deletions,changedFiles,commits";
+        "number,url,state,isDraft,baseRefName,headRefName,headRefOid,mergeable,mergeStateStatus,reviewDecision,additions,deletions,changedFiles,commits,author,isCrossRepository,maintainerCanModify,headRepositoryOwner";
 
     #[test]
     fn the_host_name_is_read_off_a_url_and_off_the_scp_form_alike() {
@@ -508,7 +662,10 @@ mod tests {
         let runner = with_gh(&gh);
         let ask = Ask { cwd: gh.path(), remote_url: "https://github.com/o/r" };
         open(&runner, &ask, "main", "work", Some("a title"), Some("a body")).await.unwrap();
-        assert_eq!(argv_of(&gh)[1], ["pr", "create", "--base", "main", "--head", "work", "--title", "a title", "--body", "a body"]);
+        assert_eq!(
+            argv_of(&gh)[1],
+            ["pr", "create", "--base", "main", "--head", "work", "--fill", "--title", "a title", "--body", "a body"]
+        );
     }
 
     /// How far a child's branch is from its lead's, as the host holds them: one gh line naming the repository off the
@@ -595,7 +752,7 @@ mod tests {
         let calls = runner.asked();
         assert!(calls.iter().all(|call| call.cwd == "/private/tmp/proof/repo" && call.program == "gh"), "a call ran somewhere else");
         assert_eq!(calls[0].args, ["pr", "view", "work", "-R", "o/r", "--json", FIELDS]);
-        assert_eq!(calls[1].args, ["pr", "create", "--base", "main", "--head", "work", "--title", "a title", "--body", "a body"]);
+        assert_eq!(calls[1].args, ["pr", "create", "--base", "main", "--head", "work", "--fill", "--title", "a title", "--body", "a body"]);
         // And a way of running whose PATH holds no gh is the note beside a landed push, whatever the host is.
         let bare = Recorded::new(&[]);
         let err = open(&bare, &ask, "main", "work", None, None).await.unwrap_err();
@@ -773,5 +930,40 @@ mod tests {
         let err = open(&runner, &elsewhere, "main", "work", None, None).await.unwrap_err();
         assert_eq!((err.code, err.message.as_str()), (Some(DaemonErrorCode::NoHostCli), words::no_host_cli("gitlab.com").as_str()));
         assert!(argv_of(&gh).is_empty());
+    }
+
+    #[test]
+    fn a_comment_on_a_hunks_last_line_stays_and_one_outside_every_hunk_goes_into_the_body() {
+        let patch = "@@ -1,3 +1,4 @@\n a\n+b\n c\n d\n@@ -20,2 +21,3 @@\n x\n+y\n z";
+        assert!(in_hunks(patch, 4, Side::Right));
+        assert!(in_hunks(patch, 1, Side::Left));
+        assert!(in_hunks(patch, 23, Side::Right));
+        assert!(!in_hunks(patch, 10, Side::Right));
+        assert!(!in_hunks(patch, 4, Side::Left));
+        assert!(!in_hunks("", 1, Side::Right));
+        let files = vec![("check.sh".to_owned(), patch.to_owned())];
+        let comments = vec![
+            ReviewComment { id: "a".into(), path: "check.sh".into(), line: 4, side: Side::Right, body: "last line".into() },
+            ReviewComment { id: "b".into(), path: "check.sh".into(), line: 10, side: Side::Right, body: "outside".into() },
+            ReviewComment { id: "c".into(), path: "other.sh".into(), line: 1, side: Side::Right, body: "not in the diff".into() },
+        ];
+        let (kept, body, folded) = fold_review(&files, "Summary.", &comments);
+        assert_eq!(kept.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), ["a"]);
+        assert_eq!(folded, ["b", "c"]);
+        assert_eq!(body, "Summary.\n\ncheck.sh:10: outside\nother.sh:1: not in the diff");
+    }
+
+    #[test]
+    fn a_diff_past_the_cap_is_cut_on_a_files_boundary_and_names_every_file_left_out() {
+        let file = |name: &str, lines: usize| {
+            format!("diff --git a/{name} b/{name}\n--- a/{name}\n+++ b/{name}\n@@ -0,0 +1,{lines} @@\n{}", "+x\n".repeat(lines))
+        };
+        let whole = [file("a.txt", 2), file("big.json", 400), file("c.txt", 2)].concat();
+        let (kept, truncated, left) = cut_diff(&whole, 300);
+        assert!(truncated);
+        assert_eq!(kept, file("a.txt", 2));
+        assert_eq!(left, ["big.json", "c.txt"]);
+        let (all, truncated, left) = cut_diff(&whole, whole.len());
+        assert_eq!((all.as_str(), truncated, left.len()), (whole.as_str(), false, 0));
     }
 }

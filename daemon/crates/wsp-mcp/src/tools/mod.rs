@@ -21,6 +21,7 @@ mod said;
 mod servers;
 mod setup;
 mod skills;
+mod start;
 mod target;
 mod terminal_config;
 mod thread;
@@ -92,6 +93,9 @@ pub const TOOLS: &[Tool] = &[
     changes::DISCARD,
     pull_request::FIX,
     pull_request::MERGE,
+    start::START,
+    start::REVIEW,
+    start::REVIEW_POST,
     pull_request::UPDATE,
     tree::MERGE_IN,
     machine::PAUSE,

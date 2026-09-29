@@ -7,9 +7,9 @@
 use serde::de::IgnoredAny;
 use serde::Deserialize;
 use wsp_frames::{
-    numbers, CheckState, GitPrViewReply, GitRepoReadReply, HostItem, HostItemKind, MergeMethod, Mergeable, PullRequest, PullRequestCheck,
-    PullRequestCheckRun, PullRequestComment, PullRequestCommit, PullRequestFile, PullRequestReview, PullRequestReviewComment,
-    PullRequestState, ReviewState,
+    numbers, CheckState, GitPrViewReply, GitRepoReadReply, HostItem, HostItemKind, IssueComment, IssueRead, MergeMethod, Mergeable,
+    PullRequest, PullRequestCheck, PullRequestCheckRun, PullRequestComment, PullRequestCommit, PullRequestFile, PullRequestFork,
+    PullRequestReview, PullRequestReviewComment, PullRequestState, ReviewComment, ReviewEvent, ReviewSide, ReviewState,
 };
 
 use super::{Pick, PullRequests};
@@ -17,8 +17,7 @@ use super::{Pick, PullRequests};
 pub(crate) struct GitHub;
 
 /// The fields a read asks gh for, in gh's own spelling.
-const FIELDS: &str =
-    "number,url,state,isDraft,baseRefName,headRefName,headRefOid,mergeable,mergeStateStatus,reviewDecision,additions,deletions,changedFiles,commits";
+const FIELDS: &str = "number,url,state,isDraft,baseRefName,headRefName,headRefOid,mergeable,mergeStateStatus,reviewDecision,additions,deletions,changedFiles,commits,author,isCrossRepository,maintainerCanModify,headRepositoryOwner";
 
 /// gh's JSON for one pull request; every word in it is the API's, in capitals.
 #[derive(Deserialize)]
@@ -49,6 +48,12 @@ struct GhPullRequest {
     changed_files: u64,
     #[serde(default)]
     commits: Vec<GhHeadCommit>,
+    author: Option<GhLogin>,
+    #[serde(default)]
+    is_cross_repository: bool,
+    #[serde(default)]
+    maintainer_can_modify: bool,
+    head_repository_owner: Option<GhLogin>,
 }
 
 /// One commit of the list a read asks for, of which only the head's subject is kept.
@@ -197,6 +202,39 @@ struct GhMerged {
     auto_merge_request: Option<IgnoredAny>,
 }
 
+/// The fields an issue read asks for.
+const ISSUE_FIELDS: &str = "number,url,title,body,state,comments";
+
+/// gh's JSON for an issue, or a pull request read as the issue it also is.
+#[derive(Deserialize)]
+struct GhIssue {
+    number: u64,
+    url: String,
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    body: String,
+    #[serde(default)]
+    state: String,
+    #[serde(default)]
+    comments: Vec<GhComment>,
+}
+
+/// The REST API's JSON for one file of a pull request, whose patch carries the hunks a comment on a line must fall in.
+#[derive(Deserialize)]
+struct GhPrFile {
+    filename: String,
+    #[serde(default)]
+    patch: String,
+}
+
+/// The REST API's JSON for a review once posted.
+#[derive(Deserialize)]
+struct GhPostedReview {
+    #[serde(default)]
+    html_url: String,
+}
+
 /// The fields a list asks for, in gh's own spelling.
 const LIST_FIELDS: &str = "number,title,body,url";
 
@@ -313,10 +351,13 @@ impl PullRequests for GitHub {
     }
 
     fn create_argv(&self, base: &str, branch: &str, title: Option<&str>, body: Option<&str>) -> Vec<String> {
-        let mut argv = words(&["pr", "create", "--base", base, "--head", branch]);
-        match title {
-            Some(title) => argv.extend(["--title".to_owned(), title.to_owned(), "--body".to_owned(), body.unwrap_or_default().to_owned()]),
-            None => argv.push("--fill".to_owned()),
+        // The fill always stands, and a title or a body given wins over what it fills, as gh's own help says.
+        let mut argv = words(&["pr", "create", "--base", base, "--head", branch, "--fill"]);
+        if let Some(title) = title {
+            argv.extend(["--title".to_owned(), title.to_owned()]);
+        }
+        if let Some(body) = body {
+            argv.extend(["--body".to_owned(), body.to_owned()]);
         }
         argv
     }
@@ -344,6 +385,11 @@ impl PullRequests for GitHub {
             changed_files: read.changed_files,
             commits: read.commits.len() as u64,
             behind_base: None,
+            author: read.author.map(|a| a.login).filter(|l| !l.is_empty()),
+            fork: read.is_cross_repository.then(|| PullRequestFork {
+                owner: read.head_repository_owner.map(|o| o.login).unwrap_or_default(),
+                pushable: read.maintainer_can_modify,
+            }),
         })
     }
 
@@ -517,6 +563,72 @@ impl PullRequests for GitHub {
         )
     }
 
+    fn issue_argv(&self, repo: &str, number: u64) -> Vec<String> {
+        words(&["issue", "view", &number.to_string(), "-R", repo, "--json", ISSUE_FIELDS])
+    }
+
+    fn read_issue(&self, stdout: &str) -> Option<IssueRead> {
+        let read: GhIssue = serde_json::from_str(stdout.trim()).ok()?;
+        let cut = super::cut_body;
+        Some(IssueRead {
+            number: read.number,
+            url: read.url,
+            title: read.title,
+            body: cut(&read.body),
+            state: read.state,
+            comments: read
+                .comments
+                .into_iter()
+                .map(|c| IssueComment { author: login(c.author), body: cut(&c.body), at: c.created_at })
+                .collect(),
+        })
+    }
+
+    fn checkout_argv(&self, number: u64) -> Vec<String> {
+        words(&["pr", "checkout", &number.to_string()])
+    }
+
+    fn diff_argv(&self, repo: &str, number: u64) -> Vec<String> {
+        words(&["pr", "diff", &number.to_string(), "-R", repo])
+    }
+
+    fn files_argv(&self, repo: &str, number: u64) -> Vec<String> {
+        words(&["api", &format!("repos/{repo}/pulls/{number}/files?per_page=100")])
+    }
+
+    fn read_files(&self, stdout: &str) -> Option<Vec<(String, String)>> {
+        let read: Vec<GhPrFile> = serde_json::from_str(stdout.trim()).ok()?;
+        Some(read.into_iter().map(|f| (f.filename, f.patch)).collect())
+    }
+
+    fn review_argv(&self, repo: &str, number: u64) -> Vec<String> {
+        words(&["api", "--method", "POST", &format!("repos/{repo}/pulls/{number}/reviews"), "--input", "-"])
+    }
+
+    fn review_input(&self, head_oid: &str, event: ReviewEvent, body: &str, comments: &[ReviewComment]) -> String {
+        let event = match event {
+            ReviewEvent::Comment => "COMMENT",
+            ReviewEvent::Approve => "APPROVE",
+            ReviewEvent::RequestChanges => "REQUEST_CHANGES",
+        };
+        let comments: Vec<serde_json::Value> = comments
+            .iter()
+            .map(|c| {
+                let side = match c.side {
+                    ReviewSide::Left => "LEFT",
+                    ReviewSide::Right => "RIGHT",
+                };
+                serde_json::json!({ "path": c.path, "line": c.line, "side": side, "body": c.body })
+            })
+            .collect();
+        serde_json::json!({ "commit_id": head_oid, "event": event, "body": body, "comments": comments }).to_string()
+    }
+
+    fn read_review_url(&self, stdout: &str) -> Option<String> {
+        let read: GhPostedReview = serde_json::from_str(stdout.trim()).ok()?;
+        some(read.html_url)
+    }
+
     fn sign_in_exit(&self) -> Option<i32> {
         Some(AUTH_REQUIRED)
     }
@@ -551,12 +663,7 @@ pub(crate) mod tests {
         assert_eq!(GitHub.create_argv("main", "work", None, None), ["pr", "create", "--base", "main", "--head", "work", "--fill"]);
         assert_eq!(
             GitHub.create_argv("main", "work", Some("a title"), Some("a body")),
-            ["pr", "create", "--base", "main", "--head", "work", "--title", "a title", "--body", "a body"]
-        );
-        // A body with no title has no title to hang on, so the host fills both and the body rides the commits.
-        assert_eq!(
-            GitHub.create_argv("main", "work", None, Some("a body")),
-            ["pr", "create", "--base", "main", "--head", "work", "--fill"]
+            ["pr", "create", "--base", "main", "--head", "work", "--fill", "--title", "a title", "--body", "a body"]
         );
         assert_eq!(GitHub.checks_argv("o/r", 12), ["pr", "checks", "12", "-R", "o/r", "--json", "name,bucket,link,workflow,description"]);
         assert_eq!(GitHub.behind_argv("o/r", "main", "abc123"), ["api", "repos/o/r/compare/main...abc123", "--jq", ".behind_by"]);
@@ -571,6 +678,57 @@ pub(crate) mod tests {
         );
         assert_eq!(GitHub.line_comments_argv("o/r", 12), ["api", "repos/o/r/pulls/12/comments?per_page=100"]);
         assert_eq!(GitHub.log_argv("o/r", 36, 109), ["run", "view", "36", "-R", "o/r", "--job", "109", "--log-failed"]);
+    }
+
+    #[test]
+    fn the_start_and_review_lines_name_the_repository_and_the_number_by_argv_alone() {
+        assert_eq!(GitHub.issue_argv("o/r", 5), ["issue", "view", "5", "-R", "o/r", "--json", "number,url,title,body,state,comments"]);
+        assert_eq!(GitHub.checkout_argv(7), ["pr", "checkout", "7"]);
+        assert_eq!(GitHub.diff_argv("o/r", 7), ["pr", "diff", "7", "-R", "o/r"]);
+        assert_eq!(GitHub.files_argv("o/r", 7), ["api", "repos/o/r/pulls/7/files?per_page=100"]);
+        assert_eq!(GitHub.review_argv("o/r", 7), ["api", "--method", "POST", "repos/o/r/pulls/7/reviews", "--input", "-"]);
+        // The fill always stands under a title or a body given, which win over it, as gh's own help says.
+        assert_eq!(
+            GitHub.create_argv("main", "work", None, Some("Closes #5")),
+            ["pr", "create", "--base", "main", "--head", "work", "--fill", "--body", "Closes #5"]
+        );
+    }
+
+    #[test]
+    fn a_read_names_its_author_and_a_fork_with_whether_its_author_allowed_edits() {
+        let fork = r#"{"number":14519,"url":"u","state":"OPEN","author":{"login":"waldyrious"},"isCrossRepository":true,"maintainerCanModify":true,"headRepositoryOwner":{"login":"waldyrious"}}"#;
+        let read = GitHub.read(fork).unwrap();
+        assert_eq!(read.author.as_deref(), Some("waldyrious"));
+        assert_eq!(read.fork, Some(PullRequestFork { owner: "waldyrious".into(), pushable: true }));
+        let closed = r#"{"number":1,"url":"u","state":"OPEN","isCrossRepository":true,"maintainerCanModify":false,"headRepositoryOwner":{"login":"ana"}}"#;
+        assert_eq!(GitHub.read(closed).unwrap().fork, Some(PullRequestFork { owner: "ana".into(), pushable: false }));
+        let own = r#"{"number":892,"url":"u","state":"OPEN","author":{"login":"Zingzy"},"isCrossRepository":false,"maintainerCanModify":false,"headRepositoryOwner":{"login":"Zingzy"}}"#;
+        assert_eq!(GitHub.read(own).unwrap().fork, None);
+    }
+
+    #[test]
+    fn an_issue_is_read_off_ghs_json_with_each_comment_by_its_author() {
+        let json = r#"{"number":5,"url":"https://github.com/o/r/issues/5","title":"Add a greeting","body":"The first line says hello.","state":"OPEN","comments":[{"author":{"login":"maya"},"authorAssociation":"OWNER","body":"Keep it one line.","createdAt":"2026-09-29T10:00:00Z","id":"IC_1"}]}"#;
+        let read = GitHub.read_issue(json).unwrap();
+        assert_eq!((read.number, read.title.as_str(), read.state.as_str()), (5, "Add a greeting", "OPEN"));
+        assert_eq!(
+            read.comments,
+            [IssueComment { author: "maya".into(), body: "Keep it one line.".into(), at: "2026-09-29T10:00:00Z".into() }]
+        );
+        assert!(GitHub.read_issue("not found").is_none());
+    }
+
+    #[test]
+    fn the_files_walk_reads_each_patch_by_its_path() {
+        let json = r#"[{"sha":"a","filename":"check.sh","status":"modified","patch":"@@ -1,3 +1,4 @@\n a\n+b\n c\n d"},{"sha":"b","filename":"logo.png","status":"added"}]"#;
+        let files = GitHub.read_files(json).unwrap();
+        assert_eq!(files, [("check.sh".to_owned(), "@@ -1,3 +1,4 @@\n a\n+b\n c\n d".to_owned()), ("logo.png".to_owned(), String::new())]);
+        assert_eq!(
+            GitHub
+                .read_review_url(r#"{"id":1,"state":"COMMENTED","html_url":"https://github.com/o/r/pull/7#pullrequestreview-1"}"#)
+                .as_deref(),
+            Some("https://github.com/o/r/pull/7#pullrequestreview-1")
+        );
     }
 
     #[test]

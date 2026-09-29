@@ -26,6 +26,10 @@ import type { GitDiffFile as WireGitDiffFile } from "./generated/GitDiffFile.js"
 import type { FsWriteReply as WireFsWriteReply } from "./generated/FsWriteReply.js";
 import type { PullRequest as WirePullRequest } from "./generated/PullRequest.js";
 import type { GitPrReadReply as WireGitPrReadReply } from "./generated/GitPrReadReply.js";
+import type { GitIssueReadReply as WireGitIssueReadReply } from "./generated/GitIssueReadReply.js";
+import type { GitPrCheckoutReply as WireGitPrCheckoutReply } from "./generated/GitPrCheckoutReply.js";
+import type { GitPrDiffReply as WireGitPrDiffReply } from "./generated/GitPrDiffReply.js";
+import type { GitPrReviewReply as WireGitPrReviewReply } from "./generated/GitPrReviewReply.js";
 import type { GitPrViewReply as WireGitPrViewReply } from "./generated/GitPrViewReply.js";
 import type { GitRunLogReply as WireGitRunLogReply } from "./generated/GitRunLogReply.js";
 import type { GitPrMergeReply as WireGitPrMergeReply } from "./generated/GitPrMergeReply.js";
@@ -40,6 +44,7 @@ import { threadNeedsYou } from "./thread-state.js";
 import { Checkout } from "./changes.js";
 import { GitBranchCompareReply, GitMergeInReply, GitStartOnReply, TreeFact } from "./tree.js";
 import { GitPrReadReply, GitPrViewReply, GitPrMergeReply, GitRepoReadReply, GitRunLogReply, GitUpdateReply, MergeMethod, PullRequest, PullRequestSeen } from "./pull-request.js";
+import { GitIssueReadReply, GitPrCheckoutReply, GitPrDiffReply, GitPrReviewReply, ReviewDraft, WorkspaceFrom } from "./start.js";
 import { placeAtLimitLine, placeFullLine } from "./place-state.js";
 import type { AbsentComputer } from "./workspace-state.js";
 import type { LinkTarget } from "./app-address.js";
@@ -734,6 +739,10 @@ export const WorkspaceView = z.object({
    * has not yet heard what it forks with. A row names this where it would otherwise have only the provider's
    * opaque id for the machine. */
   provider: z.string().optional(),
+  /** Where the work came from where it started off an issue or a pull request, or is a review of one. */
+  from: WorkspaceFrom.optional(),
+  /** A review workspace's review as the person shapes it before Post, read off the reviewer's reply. */
+  review: ReviewDraft.optional(),
 });
 export type WorkspaceView = z.infer<typeof WorkspaceView>;
 
@@ -777,7 +786,7 @@ export type WorkspaceStatus = z.infer<typeof WorkspaceStatus>;
 const WORKSPACE_OUT = {
   id: true, name: true, machineId: true, phase: true, kind: true, golden: true, createdAt: true, project: true, folder: true, home: true,
   claudeSessionId: true, gone: true, theme: true, glyph: true, daemonNote: true, daemonRefusedAt: true, vaultedAt: true, vaultRefused: true, wakeRefused: true,
-  agents: true, parentThreadId: true, rootThreadId: true, parentWorkspaceId: true, place: true, provider: true, copy: true, portBase: true,
+  agents: true, parentThreadId: true, rootThreadId: true, parentWorkspaceId: true, place: true, provider: true, copy: true, portBase: true, from: true, review: true,
 } as const;
 
 /** A workspace as every verb answers with it: the view without the display stream a desktop machine carries, which
@@ -1224,8 +1233,18 @@ export const HarnessCatalog = z.object({
    * every other kind. A picker on a machine the person owns names that machine on this one, since picking it hands
    * that computer over for the turn. Absent on a harness whose CLI has no such mode. */
   bypassMode: z.string().optional(),
+  /** This CLI's mode that changes nothing, as it spells it, which a reviewer runs at: absent on a harness wsp can give
+   * no read-only access, which reviews nothing. */
+  readOnlyMode: z.string().optional(),
 });
 export type HarnessCatalog = z.infer<typeof HarnessCatalog>;
+
+/** What a start or a review answers: the workspace it made, and the thread it opened there. */
+export const StartResult = z.object({ workspace: z.lazy(() => WorkspaceOut), threadId: z.string(), sessionId: z.string() });
+export type StartResult = z.infer<typeof StartResult>;
+/** What a posted review answers: its page, the comments that went on lines, and those put into the body. */
+export const ReviewPostResult = z.object({ url: z.string(), number: z.number().int().nonnegative(), comments: z.number().int().nonnegative(), folded: z.number().int().nonnegative() });
+export type ReviewPostResult = z.infer<typeof ReviewPostResult>;
 
 /** An MCP server as every agent's config names it and as a launch may carry it: the program and its arguments, run
  * over stdio. The catalog's config writers, the adapters that hand a server to a turn and the install that writes
@@ -1822,6 +1841,8 @@ export const WorkspaceGoneEvent = z.object({
 });
 
 export const WorkspaceStatusEvent = z.object({ type: z.literal("workspace.status"), status: WorkspaceStatus });
+/** A review workspace's draft moved: read off the reviewer's reply, edited by a person, or posted. */
+export const WorkspaceReviewEvent = z.object({ type: z.literal("workspace.review"), workspaceId: z.string() });
 
 /** A person marked a file of the workspace viewed or took the mark off: every mark it now holds, by path, against the
  * blob id the file's contents had when it was marked. */
@@ -3303,6 +3324,7 @@ export const EventUnion = z.discriminatedUnion("type", [
   WorkspaceDeletedEvent.extend(sequenced),
   WorkspaceGoneEvent.extend(sequenced),
   WorkspaceStatusEvent.extend(sequenced),
+  WorkspaceReviewEvent.extend(sequenced),
   WorkspaceViewedEvent.extend(sequenced),
   WorkspaceCostEvent.extend(sequenced),
   SessionStartEvent.extend(sequenced),
@@ -3508,6 +3530,10 @@ type GitCommitReplyHeld = Held<Same<z.infer<typeof GitCommitReply>, GitCommitRep
 // The pull request's shapes live beside its words; each is held to the type the daemon's crate writes.
 type PullRequestHeld = Held<Same<PullRequest, WirePullRequest>>;
 type GitPrReadReplyHeld = Held<Same<GitPrReadReply, WireGitPrReadReply>>;
+type GitIssueReadReplyHeld = Held<Same<GitIssueReadReply, WireGitIssueReadReply>>;
+type GitPrCheckoutReplyHeld = Held<Same<GitPrCheckoutReply, WireGitPrCheckoutReply>>;
+type GitPrDiffReplyHeld = Held<Same<GitPrDiffReply, WireGitPrDiffReply>>;
+type GitPrReviewReplyHeld = Held<Same<GitPrReviewReply, WireGitPrReviewReply>>;
 type GitPrViewReplyHeld = Held<Same<GitPrViewReply, WireGitPrViewReply>>;
 type GitRunLogReplyHeld = Held<Same<GitRunLogReply, WireGitRunLogReply>>;
 type GitPrMergeReplyHeld = Held<Same<GitPrMergeReply, WireGitPrMergeReply>>;
@@ -3795,6 +3821,31 @@ export const DaemonRequest = z.discriminatedUnion("op", [
     method: MergeMethod,
     auto: z.boolean(),
     headOid: z.string(),
+    machineId: z.string().optional(),
+  }),
+  /** An issue, or a pull request read as the issue it also is, by number in the repository the remote names, answered
+   * as a GitIssueReadReply with each body cut as a page cuts it. */
+  z.object({ id: reqId, op: z.literal("git.issueRead"), cwd: z.string(), remote: z.string(), number: z.number().int().nonnegative(), machineId: z.string().optional() }),
+  /** Puts the copy on a pull request's head branch through the git host's own command line, run inside the copy, the
+   * host read off the copy's own remote; answered as a GitPrCheckoutReply naming the branch, which tracks where the
+   * head lives. */
+  z.object({ id: reqId, op: z.literal("git.prCheckout"), cwd: z.string(), number: z.number().int().nonnegative(), machineId: z.string().optional() }),
+  /** A pull request's diff against its base, cut on a file's boundary at REVIEW_DIFF_MAX_BYTES, answered as a
+   * GitPrDiffReply naming every file the cut left out. */
+  z.object({ id: reqId, op: z.literal("git.prDiff"), cwd: z.string(), remote: z.string(), number: z.number().int().nonnegative(), machineId: z.string().optional() }),
+  /** Posts one review in one call pinned to the head named: the verdict, the body and every comment on a line, a comment
+   * whose line falls outside the diff put into the body; answered as a GitPrReviewReply. A refusal is the command
+   * line's own last line. */
+  z.object({
+    id: reqId,
+    op: z.literal("git.prReview"),
+    cwd: z.string(),
+    remote: z.string(),
+    number: z.number().int().nonnegative(),
+    headOid: z.string(),
+    event: z.enum(["comment", "approve", "request_changes"]),
+    body: z.string(),
+    comments: z.array(z.object({ id: z.string(), path: z.string(), line: z.number().int().nonnegative(), side: z.enum(["LEFT", "RIGHT"]), body: z.string() })),
     machineId: z.string().optional(),
   }),
   /** How the repository lets a pull request land, answered as a GitRepoReadReply. */
@@ -5900,6 +5951,46 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * the commit named in head, which a window sends as the one it drew; absent is the head the host holds, never a
    * fresh read. whenChecksPass arms it to merge once they do. Answered as a MergeResult. */
   z.object({ id: reqId, op: z.literal("workspaces.merge"), workspaceId: z.string(), method: MergeMethod.optional(), whenChecksPass: z.boolean().optional(), head: z.string().min(1).optional() }),
+  /** A workspace started off a GitHub issue or pull request link: the link matched to a project here by its remote
+   * (project names one where two match), the text read on this computer, the copy made and, for a pull request, put
+   * on its head branch, and a thread opened with the composed task at the agent, model, effort and access given or
+   * the workspace's defaults. Answered as a StartResult. The person's act alone: no thread's token and no paired
+   * computer reaches it. */
+  z.object({
+    id: reqId,
+    op: z.literal("workspaces.start"),
+    url: z.string(),
+    project: z.string().optional(),
+    agent: z.string().optional(),
+    model: z.string().optional(),
+    effort: z.string().optional(),
+    access: z.string().optional(),
+  }),
+  /** A reviewer thread on a pull request, off its link or off a workspace's own pull request: a fresh copy at its
+   * head, the agent at its harness's read-only word (Codex where none is named), and the diff in its task. Answered
+   * as a StartResult. The person's act alone. */
+  z.object({
+    id: reqId,
+    op: z.literal("workspaces.review"),
+    url: z.string().optional(),
+    workspaceId: z.string().optional(),
+    agent: z.string().optional(),
+    model: z.string().optional(),
+    effort: z.string().optional(),
+  }),
+  /** A review workspace's draft, read, or edited first: its summary, its verdict and which comments stay ticked.
+   * Answered as { review? }. */
+  z.object({
+    id: reqId,
+    op: z.literal("workspaces.reviewDraft"),
+    workspaceId: z.string(),
+    summary: z.string().optional(),
+    verdict: z.enum(["comment", "approve", "request_changes"]).optional(),
+    on: z.array(z.object({ id: z.string(), on: z.boolean() })).optional(),
+  }),
+  /** Posts the draft on the pull request in one call as the person, pinned to the head it was written against, the
+   * ticked comments alone. Answered as a ReviewPostResult. The person's act alone. */
+  z.object({ id: reqId, op: z.literal("workspaces.reviewPost"), workspaceId: z.string() }),
   /** Merges the base's latest commits into the copy's branch, answered as a GitUpdateReply: the files that conflict
    * where it could not, the copy left as it was. */
   z.object({ id: reqId, op: z.literal("workspaces.update"), workspaceId: z.string() }),
@@ -6466,6 +6557,9 @@ export const DEVICE_OPS: readonly string[] = [
   "workspaces.checkout",
   "workspaces.viewed",
   "workspaces.pullRequestView",
+  // A review draft's ticks, verdict and summary are a record on this computer, as a viewed mark is; its post is not
+  // here, since posting under the person's name is the person's act.
+  "workspaces.reviewDraft",
   "projects.list",
   "projects.resolve",
   "projects.remove",
@@ -6784,6 +6878,7 @@ export * from "./changes.js";
 export * from "./pull-request.js";
 export * from "./run-block.js";
 export * from "./tree.js";
+export * from "./start.js";
 export * from "./daemon-contract.js";
 export * from "./projects.js";
 export { defaultSeedChoice, leftBehindLine, neverTravelsLine, noRemoteLine, notInTheMenuLine, SEED_DIR, SEED_MEMORY_DIR, SEED_PATCH, seedBytes, seedChoiceFrom, seedCommitsLandedLine, seedCommitsLostLine, seedConsentLines, seedingLine, seedMenuRows, seedRowWords, seedSummaryLines } from "./project-seed.js";
