@@ -34,6 +34,7 @@ export const CREATION_FAILED = threadStateWord("failed");
 export const THREAD_WORDS = {
   stop: "Stop thread",
   rename: "Rename thread",
+  copyMarkdown: "Copy as Markdown",
   copyLink: "Copy thread link",
   forget: "Forget thread",
   settle: "Settle thread",
@@ -155,6 +156,7 @@ export const openBrowserRefusal = (state: WorkspaceState): string | null => acti
 
 export const THREAD_NOT_RUNNING = "Thread is not running";
 export const CLIENT_CANNOT_STOP = "This client cannot stop a turn";
+export const CLIENT_CANNOT_READ = "This client cannot read a thread";
 export const THREAD_HAS_NO_ID = "This thread has no id yet";
 export const CLIENT_CANNOT_RENAME = "This client cannot rename a thread";
 export const CLIENT_CANNOT_FORGET_THREAD = "This client cannot forget a thread";

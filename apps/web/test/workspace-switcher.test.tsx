@@ -721,6 +721,17 @@ describe("buildSwitcherCards", () => {
     expect(card([MAC])).toBe("zingzy's MacBook Pro");
   });
 
+  it("offers Copy as Markdown for the thread on screen, and nothing where no thread is open", async () => {
+    const copyThreadMarkdown = vi.fn(async () => {});
+    const items = (copy: (() => Promise<void>) | null) =>
+      buildPaletteItems({ projects: [], selectedId: null, query: "", messageHits: [], canCreate: false, handlers: { copyThreadMarkdown: copy } as never, verbs: {} as never, places: [] }).actionItems;
+    const copy = items(copyThreadMarkdown).find(item => item.title === "Copy as Markdown")!;
+    expect(copy.disabled).not.toBe(true);
+    await copy.run();
+    expect(copyThreadMarkdown).toHaveBeenCalledTimes(1);
+    expect(items(null).find(item => item.title === "Copy as Markdown")).toBeUndefined();
+  });
+
   it("a thread in the palette wears the agent's mark and the one status slot, and a workspace no dot for its state", () => {
     const running = { ...session("s_run", "ws_a", "The running one.", Date.now() - 125_000), status: "running" as const, endedAt: undefined };
     const projects = deriveSidebarProjects({ workspaces: WORKSPACES, sessions: { ws_a: [running] } });

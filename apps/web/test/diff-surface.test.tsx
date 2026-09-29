@@ -49,7 +49,7 @@ import { fakeWire, folderCrumbRow, imported, LISTING, PROJECT_DEST, resetSurface
 const patch = (path: string, from: string, to: string) =>
   [`diff --git a/${path} b/${path}`, "index 1111111..2222222 100644", `--- a/${path}`, `+++ b/${path}`, "@@ -1 +1 @@", `-${from}`, `+${to}`, ""].join("\n");
 
-const DIFF = { base: null, files: [{ path: "src/a.ts", patch: patch("src/a.ts", "one", "two") }, { path: "README.md", patch: patch("README.md", "old", "new") }], truncated: false };
+const DIFF = { base: null, files: [{ path: "src/a.ts", kind: "modified", additions: 1, deletions: 1, patch: patch("src/a.ts", "one", "two") }, { path: "README.md", kind: "modified", additions: 1, deletions: 1, patch: patch("README.md", "old", "new") }], truncated: false };
 const STATUS = { branch: { oid: "abc", head: "main", ahead: 0, behind: 0 }, entries: [], root: "/root/app" };
 const NOT_A_REPO = () => Object.assign(new Error("not inside a git repository"), { code: "not-a-git-repo" });
 const OUTSIDE_ROOT = () => Object.assign(new Error("outside the browsable roots"), { code: "outside-root" });
@@ -60,7 +60,7 @@ const SENTENCE_CLASSES = ["flex", "flex-1", "items-center", "justify-center", "p
 
 beforeEach(() => {
   resetSurfaces();
-  useDiffStore.setState({ scopeByWorkspaceId: {}, renderMode: "stacked" });
+  useDiffStore.setState({ scopeByWorkspaceId: {}, turnByWorkspaceId: {}, renderMode: "stacked" });
 });
 
 const settle = () => act(() => new Promise<void>(resolve => setTimeout(resolve, 20)));
@@ -237,7 +237,7 @@ describe("diff surface", () => {
     const none = await screen.findByText("No branch changes at /root/app.");
     expect(none.className.split(" ")).toEqual(SENTENCE_CLASSES);
 
-    wire.replies["git.diff"] = { base: null, files: [{ path: "huge.log", patch: "" }], truncated: true };
+    wire.replies["git.diff"] = { base: null, files: [{ path: "huge.log", kind: "modified", additions: 0, deletions: 0, patch: "" }], truncated: true };
     fireEvent.click(screen.getByRole("button", { name: "Refresh changes" }));
     const over = await screen.findByText("Every changed file was over the patch budget; nothing to render.");
     expect(over.className.split(" ")).toEqual(SENTENCE_CLASSES);
@@ -351,7 +351,7 @@ describe("diff surface", () => {
   });
 
   it("announces the budget cut and still lists the file without a patch", async () => {
-    provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": STATUS, "git.diff": { ...DIFF, files: [DIFF.files[0]!, { path: "huge.log", patch: "" }], truncated: true } }));
+    provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": STATUS, "git.diff": { ...DIFF, files: [DIFF.files[0]!, { path: "huge.log", kind: "modified", additions: 0, deletions: 0, patch: "" }], truncated: true } }));
     const { container } = render(<DiffSurface workspaceId={WS} theme="dark" />);
     await waitFor(() => expect(container.querySelector("[data-diff-truncated]")).not.toBeNull());
     expect(container.querySelector("[data-diff-truncated]")?.textContent).toContain("2 MB budget");
@@ -363,6 +363,56 @@ describe("diff surface", () => {
     provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": STATUS, "git.diff": () => { throw new Error("git diff failed (128): fatal: bad revision"); } }));
     render(<DiffSurface workspaceId={WS} theme="dark" />);
     await waitFor(() => expect(screen.getByRole("alert").textContent).toBe("git diff failed (128): fatal: bad revision"));
+  });
+  describe("one turn's changes", () => {
+    const from = "a".repeat(40);
+    const to = "b".repeat(40);
+    const rangeCalls = (wire: { calls: [string, Record<string, unknown>][] }) => wire.calls.filter(([op]) => op === "git.range").map(([, p]) => p);
+
+    it("reads the range between the turn's snapshots in its folder, reveals the file asked for, and leaves for a scope", async () => {
+      const wire = fakeWire({ "fs.list": LISTING, "git.status": STATUS, "git.diff": DIFF, "git.range": DIFF });
+      provideDaemonWire(WS, wire);
+      act(() => useDiffStore.getState().openTurn(WS, { turnId: "t1", cwd: "/root/app", from, to, path: "gone.ts" }));
+      const { container } = render(<DiffSurface workspaceId={WS} theme="dark" />);
+      await waitFor(() => expect(items(container)).toHaveLength(2));
+      expect(rangeCalls(wire)).toEqual([{ cwd: "/root/app", from, to }]);
+      expect(diffCalls(wire)).toEqual([]);
+      expect(screen.getByRole("button", { name: "Changes scope: This turn" })).toBeTruthy();
+      expect(container.querySelector("[data-diff-surface]")?.getAttribute("data-diff-scope")).toBe("turn");
+      await waitFor(() => expect(container.querySelector("[data-diff-reveal-note]")?.textContent).toBe("gone.ts has no changes in this turn"));
+      act(() => useDiffStore.getState().openTurn(WS, { turnId: "t1", cwd: "/root/app", from, to, path: "src/a.ts" }));
+      await waitFor(() => expect(container.querySelector("[data-diff-reveal-note]")).toBeNull());
+
+      act(() => useDiffStore.getState().setScope(WS, "staged"));
+      await waitFor(() => expect(diffCalls(wire).at(-1)).toEqual({ cwd: "/root", scope: "staged" }));
+      expect(useDiffStore.getState().turnByWorkspaceId[WS]).toBeUndefined();
+    });
+
+    it("offers no commit, no edit and no discard on a turn's range, which is a record of what the turn changed", async () => {
+      // Discard on a turn's range would put back the file's working tree, not the turn.
+      const wire = fakeWire({ "fs.list": LISTING, "git.status": STATUS, "git.diff": DIFF, "git.range": DIFF });
+      provideDaemonWire(WS, wire);
+      const { api } = paneApi();
+      useStore.setState({ api: api as never });
+      // Opened over Uncommitted, the one scope that offers all three.
+      useDiffStore.setState({ scopeByWorkspaceId: { [WS]: "head" } });
+      act(() => useDiffStore.getState().openTurn(WS, { turnId: "t1", cwd: "/root/app", from, to }));
+      const { container } = render(<DiffSurface workspaceId={WS} theme="dark" />);
+      await waitFor(() => expect(items(container)).toHaveLength(2));
+      await waitFor(() => expect(container.querySelector("[data-diff-repo]")).not.toBeNull());
+      expect(screen.queryByRole("button", { name: "Commit" })).toBeNull();
+      expect(screen.queryAllByRole("button", { name: /^Discard changes to / })).toEqual([]);
+      expect(screen.queryAllByRole("button", { name: /^Edit / })).toEqual([]);
+    });
+
+    it("says the snapshot is gone when git no longer holds it", async () => {
+      const gone = () => Object.assign(new Error(`the snapshot ${from} is gone`), { code: "not-found" });
+      const wire = fakeWire({ "fs.list": LISTING, "git.status": STATUS, "git.range": gone });
+      provideDaemonWire(WS, wire);
+      act(() => useDiffStore.getState().openTurn(WS, { turnId: "t1", cwd: "/root/app", from, to }));
+      render(<DiffSurface workspaceId={WS} theme="dark" />);
+      expect(await screen.findByText("The snapshot for this turn is gone")).toBeTruthy();
+    });
   });
 });
 
@@ -394,7 +444,7 @@ const rowOf = (container: HTMLElement, path: string): HTMLElement =>
 
 describe("the Changes pane at its first scope", () => {
   it("offers no discard under Branch changes, whose files a commit may hold, and offers it under Uncommitted", async () => {
-    const added = { path: "new.txt", patch: "diff --git a/new.txt b/new.txt\nnew file mode 100644\nindex 0000000..ce01362\n--- /dev/null\n+++ b/new.txt\n@@ -0,0 +1 @@\n+hello\n" };
+    const added = { path: "new.txt", kind: "added", additions: 1, deletions: 0, patch: "diff --git a/new.txt b/new.txt\nnew file mode 100644\nindex 0000000..ce01362\n--- /dev/null\n+++ b/new.txt\n@@ -0,0 +1 @@\n+hello\n" };
     provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.diff": { ...DIFF, files: [...DIFF.files, added] }, "git.status": STATUS }));
     const { api } = paneApi();
     useStore.setState({ api: api as never });
@@ -439,7 +489,7 @@ describe("the Changes pane's writes", () => {
   });
 
   it("says a file no commit has is deleted, since discarding it leaves nothing behind", async () => {
-    const added = { path: "new.txt", patch: "diff --git a/new.txt b/new.txt\nnew file mode 100644\nindex 0000000..ce01362\n--- /dev/null\n+++ b/new.txt\n@@ -0,0 +1 @@\n+hello\n" };
+    const added = { path: "new.txt", kind: "added", additions: 1, deletions: 0, patch: "diff --git a/new.txt b/new.txt\nnew file mode 100644\nindex 0000000..ce01362\n--- /dev/null\n+++ b/new.txt\n@@ -0,0 +1 @@\n+hello\n" };
     provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.diff": { ...DIFF, files: [...DIFF.files, added] }, "git.status": STATUS }));
     const { api } = paneApi();
     useStore.setState({ api: api as never });
@@ -513,7 +563,7 @@ describe("the Changes pane's writes", () => {
   });
 
   it("offers no edit on the staged scope, and none on a file whose line endings carry a return", async () => {
-    const crlf = { ...DIFF, files: [{ path: "win.txt", patch: patch("win.txt", "a\r", "b\r") }] };
+    const crlf = { ...DIFF, files: [{ path: "win.txt", kind: "modified", additions: 1, deletions: 1, patch: patch("win.txt", "a\r", "b\r") }] };
     const wire = fakeWire({ "fs.list": LISTING, "git.diff": params => (params["whole"] === true ? crlf : DIFF), "git.status": STATUS });
     provideDaemonWire(WS, wire);
     const { container } = render(<DiffSurface workspaceId={WS} theme="dark" />);

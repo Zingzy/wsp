@@ -102,7 +102,7 @@ async fn record<R: Runs>(runner: &R, top: &Path, name: &str) -> Result<GitCheckp
     Ok(GitCheckpointReply { checkpoint_ref: name.to_owned(), commit, changed: true })
 }
 
-async fn top_of<R: Runs>(runner: &R, cwd: &Path) -> Result<PathBuf, OpError> {
+pub(super) async fn top_of<R: Runs>(runner: &R, cwd: &Path) -> Result<PathBuf, OpError> {
     let top = run_git(runner, cwd, &["rev-parse", "--show-toplevel"], None, None).await?;
     check(&top, "rev-parse")?;
     if top.code != Some(0) {
@@ -117,7 +117,7 @@ fn prefix_at(top: &Path) -> String {
 
 /// A temporary index beside the checkout's own, seeded from it, handed to the work and removed after whatever the
 /// work came to. Named per call, so two turns ending in one copy at once do not share one.
-async fn with_index<R, F, Fut, T>(runner: &R, top: &Path, work: F) -> Result<T, OpError>
+pub(super) async fn with_index<R, F, Fut, T>(runner: &R, top: &Path, work: F) -> Result<T, OpError>
 where
     R: Runs,
     F: FnOnce(PathBuf) -> Fut,
@@ -141,16 +141,17 @@ async fn git_path<R: Runs>(runner: &R, top: &Path, name: &str) -> Result<PathBuf
     Ok(top.join(stdout_text(&at).trim()))
 }
 
-/// git with its index at that path: the variable is the only way git takes one, so the program is env.
-async fn git_on<R: Runs>(runner: &R, top: &Path, index: &Path, args: &[&str]) -> Result<GitResult, OpError> {
+/// git with its index at that path: the variable is the only way git takes one, so the program is env. The
+/// fsmonitor is off, since a checkout's config is the agent's to write and that setting names a program git starts.
+pub(super) async fn git_on<R: Runs>(runner: &R, top: &Path, index: &Path, args: &[&str]) -> Result<GitResult, OpError> {
     let variable = format!("GIT_INDEX_FILE={}", index.to_string_lossy());
-    let mut all = vec![variable.as_str(), "git"];
+    let mut all = vec![variable.as_str(), "git", "-c", "core.fsmonitor=false"];
     all.extend_from_slice(args);
     runner.run(top, "env", &all, None, None).await
 }
 
 /// Exit 0 alone is success for the plumbing here; unlike a diff, a 1 is a failure.
-fn ran(res: &GitResult, what: &str) -> Result<(), OpError> {
+pub(super) fn ran(res: &GitResult, what: &str) -> Result<(), OpError> {
     if res.code == Some(0) {
         return Ok(());
     }
@@ -216,6 +217,45 @@ mod tests {
         assert!(!git(&at, &["log", "--branches", "--format=%H"]).contains(&taken.commit));
         assert_eq!(git(&at, &["diff", "--cached", "--name-only"]), "", "nothing is staged");
         assert_eq!(git(&at, &["status", "--porcelain"]), "M one.txt\n?? new.txt");
+    }
+
+    #[tokio::test]
+    async fn a_checkpoint_starts_no_fsmonitor_the_checkouts_config_names() {
+        // The checkout's config is the agent's to write, and core.fsmonitor names a program git starts on add.
+        let (dir, at) = copy();
+        let ran = dir.path().join("fsmonitor-ran");
+        let hook = dir.path().join("fsmonitor.sh");
+        fs::write(&hook, format!("#!/bin/sh\ntouch {}\n", ran.display())).unwrap();
+        fs::set_permissions(&hook, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        git(&at, &["config", "core.fsmonitor", &hook.to_string_lossy()]);
+        fs::write(at.join("one.txt"), "uno\n").unwrap();
+        checkpoint(&Here::new(), &at, "thr_1", "turn_1").await.unwrap();
+        assert!(!ran.exists(), "the checkpoint started the checkout's fsmonitor");
+    }
+
+    #[tokio::test]
+    async fn a_snapshot_from_a_subfolder_takes_the_whole_checkout_on_top_of_head_and_starts_no_fsmonitor() {
+        let (dir, at) = copy();
+        let ran = dir.path().join("fsmonitor-ran");
+        let hook = dir.path().join("fsmonitor.sh");
+        fs::write(&hook, format!("#!/bin/sh\ntouch {}\n", ran.display())).unwrap();
+        fs::set_permissions(&hook, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        git(&at, &["config", "core.fsmonitor", &hook.to_string_lossy()]);
+        fs::write(at.join("one.txt"), "uno\n").unwrap();
+        fs::write(at.join("new.txt"), "untracked\n").unwrap();
+        let index = fs::read(at.join(".git/index")).unwrap();
+        let taken = crate::git::git_snapshot(&Here::new(), &at.join("src")).await.unwrap();
+        assert!(!ran.exists(), "the snapshot started the checkout's fsmonitor");
+        assert_eq!(git(&at, &["rev-parse", &format!("{}^", taken.commit)]), git(&at, &["rev-parse", "HEAD"]));
+        let listed = git(&at, &["ls-tree", "-r", "--name-only", &taken.commit]);
+        assert_eq!(listed.lines().collect::<Vec<_>>(), [".gitignore", "new.txt", "one.txt", "src/keep.txt"]);
+        assert_eq!(fs::read(at.join(".git/index")).unwrap(), index, "the checkout's own index moved");
+        let left: Vec<_> = fs::read_dir(at.join(".git"))
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".index"))
+            .collect();
+        assert!(left.is_empty(), "a temporary index stayed behind");
     }
 
     #[tokio::test]

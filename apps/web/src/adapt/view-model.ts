@@ -5,7 +5,7 @@
 // useDiscoveredLocalServers.ts and contracts (commit 57a66608). Fields the
 // wsp wire cannot fill today are kept when a copied component reads them and
 // dropped when nothing does. Everything here is data: no React, no schemas.
-import type { AttachmentRecord, MachineState, PermissionOption, PermissionOutcome, ReachState, SessionOrigin, SessionStatus, ThreadPlacement, WorkspacePhase, WorkspaceState, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
+import type { AttachmentRecord, MachineState, PermissionOption, PermissionOutcome, ReachState, SessionOrigin, SessionStatus, ThreadPlacement, WorkspacePhase, WorkspaceState, WorkspaceStatus, WorkspaceView, PlanStep, TurnChangedFile, TurnTokens } from "@wsp/protocol";
 
 // --- chat -------------------------------------------------------------------
 
@@ -69,6 +69,12 @@ export interface WorkLogEntry {
   readonly requestKind?: ProviderRequestKind;
   readonly toolLifecycleStatus?: WorkLogToolLifecycleStatus;
   readonly sourceActivityKind: WorkLogSourceKind;
+}
+
+/** The agent's step list for one turn as it last wrote it. */
+export interface TodoList {
+  readonly turnId: string;
+  readonly steps: ReadonlyArray<PlanStep>;
 }
 
 export interface ProposedPlan {
@@ -140,9 +146,18 @@ export type TimelineEntry =
   | { readonly id: string; readonly kind: "permission"; readonly createdAt: string; readonly permission: PermissionPrompt }
   | { readonly id: string; readonly kind: "subagent"; readonly createdAt: string; readonly subagent: SubagentRun }
   | { readonly id: string; readonly kind: "proposed-plan"; readonly createdAt: string; readonly proposedPlan: ProposedPlan }
+  | { readonly id: string; readonly kind: "todo"; readonly createdAt: string; readonly todo: TodoList }
   | { readonly id: string; readonly kind: "work"; readonly createdAt: string; readonly entry: WorkLogEntry };
 
 export type TurnState = "running" | "completed" | "interrupted" | "error";
+
+export interface TurnChanges {
+  readonly from: string;
+  readonly to: string;
+  readonly files: ReadonlyArray<TurnChangedFile>;
+  /** Another thread's turn ran in the same folder between the two snapshots. */
+  readonly shared: boolean;
+}
 
 /** One wsp session run is one turn; the chat's footer and folds read this. */
 export interface TurnSummary {
@@ -158,6 +173,11 @@ export interface TurnSummary {
    * on nobody. The footer takes it off the duration, so Worked for counts work. */
   readonly waitedMs: number | null;
   readonly costUsd: number | null;
+  /** What the turn read and wrote, and what the model held at its end, as its agent counted them; null on a turn whose
+   * agent reported none. */
+  readonly tokens: TurnTokens | null;
+  /** What the turn changed in its folder, between the snapshots at its launch and its end; null on one that changed nothing. */
+  readonly changes: TurnChanges | null;
   readonly error: string | null;
   readonly startedAt: string | null;
   readonly completedAt: string | null;
@@ -217,6 +237,7 @@ export type MessagesTimelineRow =
       readonly assistantCopyStreaming: boolean;
     }
   | { readonly kind: "proposed-plan"; readonly id: string; readonly createdAt: string; readonly proposedPlan: ProposedPlan }
+  | { readonly kind: "todo"; readonly id: string; readonly createdAt: string; readonly todo: TodoList }
   | {
       readonly kind: "permission";
       readonly id: string;

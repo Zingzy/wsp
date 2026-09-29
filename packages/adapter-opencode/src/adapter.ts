@@ -9,7 +9,7 @@
 // its error, so any other reason is the turn's end.
 import { randomUUID } from "node:crypto";
 import { INTERRUPT_GRACE_MS, RUN_EXIT_MS, endAfterResult, endRun, refusedTurn } from "@wsp/protocol";
-import type { AdapterAttachOptions, AdapterEvent, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, TurnImage, TurnRefusal, TurnResult } from "@wsp/protocol";
+import type { AdapterAttachOptions, AdapterEvent, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, TurnImage, TurnRefusal, TurnResult, TurnTokens } from "@wsp/protocol";
 import { catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
 import { buildCommand, buildEnv } from "./command.js";
 
@@ -132,6 +132,8 @@ export function createOpenCodeAdapter(deps: OpenCodeAdapterDeps): OpenCodeAdapte
     let failure: { line: string; cause?: TurnRefusal } | undefined;
     let costUsd = 0;
     const usage = { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } };
+    /** The last step's whole count, which is what the model held at the turn's end. */
+    let held: number | undefined;
     const stderr: string[] = [];
 
     const failed = (f: { line: string; cause?: TurnRefusal }): TurnResult => {
@@ -147,8 +149,11 @@ export function createOpenCodeAdapter(deps: OpenCodeAdapterDeps): OpenCodeAdapte
       usage.reasoning += num(tokens?.["reasoning"]);
       usage.cache.read += num(cache?.["read"]);
       usage.cache.write += num(cache?.["write"]);
+      if (tokens !== undefined) held = num(tokens["input"]) + num(cache?.["read"]) + num(cache?.["write"]) + num(tokens["output"]);
     };
-    const completed = (): TurnResult => ({ status: "completed", durationMs: Date.now() - o.startedAt, costUsd, usage: { ...usage, cache: { ...usage.cache } }, ...(lastText !== undefined ? { text: lastText } : {}) });
+    // OpenCode counts cache reads and writes apart from the input, so the input side is the three together.
+    const tokens = (): TurnTokens => ({ input: usage.input + usage.cache.read + usage.cache.write, cached: usage.cache.read, cacheWrite: usage.cache.write, output: usage.output, reasoning: usage.reasoning, ...(held !== undefined ? { context: held } : {}) });
+    const completed = (): TurnResult => ({ status: "completed", durationMs: Date.now() - o.startedAt, costUsd, tokens: tokens(), ...(lastText !== undefined ? { text: lastText } : {}) });
 
     const finished = (async (): Promise<TurnResult> => {
       let streamError: string | undefined;

@@ -80,6 +80,14 @@ whole?: boolean,
 /**
  * The workspace this frame is for, as on fs.list above.
  */
+machineId?: string, } | { "op": "git.snapshot", cwd: string, 
+/**
+ * The workspace this frame is for, as on fs.list above.
+ */
+machineId?: string, } | { "op": "git.range", cwd: string, from: string, to: string, path?: string, 
+/**
+ * The workspace this frame is for, as on fs.list above.
+ */
 machineId?: string, } | { "op": "git.push", cwd: string, 
 /**
  * The branch the work started from; without one the checkout's own default branch, which is what a

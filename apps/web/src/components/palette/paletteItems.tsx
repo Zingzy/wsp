@@ -5,9 +5,10 @@
 // whose title holds the typed query and every other one whose messages hold
 // it, as the host found them. Pure apart from the callbacks it is handed, so
 // the list is testable without the dialog.
-import { ArrowDownIcon, ArrowUpIcon, ChevronDownIcon, ChevronUpIcon, FolderIcon, FolderPlusIcon, MonitorIcon, PanelLeftIcon, PanelRightIcon, PlusIcon, SettingsIcon } from "lucide-react";
+import { ArrowDownIcon, ArrowUpIcon, ChevronDownIcon, ChevronUpIcon, FileTextIcon, FolderIcon, FolderPlusIcon, MonitorIcon, PanelLeftIcon, PanelRightIcon, PlusIcon, SettingsIcon } from "lucide-react";
 import { agentName } from "@wsp/catalog";
 import { PLACES_WORDS, type PlaceView, type SessionSearchHit } from "@wsp/protocol";
+import { THREAD_WORDS } from "../../actions/format.js";
 import { resolveActions, type ResolvedAction } from "../../actions/registry.js";
 import { workspaceActions, workspaceTarget, type WorkspaceVerbs } from "../../actions/workspaceActions.js";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot } from "../../adapt/index.js";
@@ -43,6 +44,8 @@ export interface PaletteHandlers {
   readonly openSettings: () => void;
   readonly addProject: () => void;
   readonly openAddComputer: () => void;
+  /** Copies the thread on screen as Markdown; null while no thread is open. */
+  readonly copyThreadMarkdown: (() => Promise<void>) | null;
 }
 
 export interface PaletteItemsInput {
@@ -113,6 +116,17 @@ function actionItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
       run: sync(handlers.addProject),
     },
   ];
+  if (handlers.copyThreadMarkdown !== null) {
+    items.push({
+      kind: "action",
+      value: "action:copy-markdown",
+      searchTerms: ["copy", "markdown", "export thread", "copy chat"],
+      icon: <FileTextIcon className={ITEM_ICON_CLASS} />,
+      title: THREAD_WORDS.copyMarkdown,
+      description: "The thread on screen, as the host holds it",
+      run: handlers.copyThreadMarkdown,
+    });
+  }
   if (selected !== null) {
     // The one New thread row is the dialog's, opened on this copy's project; the copy's own act stays off the palette.
     items.push(...resolveActions(workspaceActions, workspaceTarget(selected.workspace, selected.status, input.places), input.verbs).filter(action => action.id !== "new-thread").map(action => actionItem(action, selected.displayName)));

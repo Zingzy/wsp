@@ -39,3 +39,11 @@ export const VIEWED_WORDS = {
   tick: (file: string): string => `Viewed ${file}`,
   count: (viewed: number, of: number): string => `${viewed} of ${of} viewed`,
 } as const;
+
+/** The scope picker's name for one turn's changes, opened off a reply. */
+export const TURN_SCOPE = "This turn";
+/** What a file missing from a turn's range has none of. */
+export const TURN_NOUN = "changes in this turn";
+
+/** The pane's line for a turn whose snapshot git has since pruned. */
+export const SNAPSHOT_GONE = "The snapshot for this turn is gone";

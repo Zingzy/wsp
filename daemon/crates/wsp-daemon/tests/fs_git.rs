@@ -865,3 +865,62 @@ async fn fs_folders_asked_for_repos_answers_every_repo_under_the_roots_newest_fi
     assert!(touched.windows(2).all(|w| w[0] >= w[1]), "{touched:?}");
     assert!(listed["folders"].as_array().unwrap().iter().all(|f| f["repo"] == true));
 }
+
+#[tokio::test]
+async fn git_snapshot_and_range_list_a_turn_s_changes_with_new_files_in_and_the_checkout_s_index_untouched() {
+    let (t, _d, mut c) = bench().await;
+    let repo = t.repo();
+    let index_before = fs::read(repo.join(".git/index")).unwrap();
+    let before = c.request("git.snapshot", json!({ "cwd": "repo" })).await;
+    assert_eq!(before["ok"], true, "{before}");
+    let from = before["commit"].as_str().unwrap().to_owned();
+    assert_eq!(from.len(), 40, "{before}");
+    fs::write(repo.join("NOTES.md"), "one\ntwo\nthree\n").unwrap();
+    fs::write(repo.join("feature.txt"), "feature\nmore\n").unwrap();
+    fs::write(repo.join("ignored.log"), "a louder log\n").unwrap();
+    let after = c.request("git.snapshot", json!({ "cwd": "repo" })).await;
+    let to = after["commit"].as_str().unwrap().to_owned();
+    assert_eq!(fs::read(repo.join(".git/index")).unwrap(), index_before, "the checkout's own index moved");
+    let range = c.request("git.range", json!({ "cwd": "repo", "from": from, "to": to })).await;
+    assert_eq!(range["ok"], true, "{range}");
+    let files: Vec<(String, String, u64, u64)> = range["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| {
+            (
+                f["path"].as_str().unwrap().to_owned(),
+                f["kind"].as_str().unwrap().to_owned(),
+                f["additions"].as_u64().unwrap(),
+                f["deletions"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(files, [("NOTES.md".to_owned(), "added".to_owned(), 3, 0), ("feature.txt".to_owned(), "modified".to_owned(), 1, 0)]);
+    assert!(range["files"][0]["patch"].as_str().unwrap().contains("+three"), "{range}");
+    // Nothing changed between two snapshots reads as nothing.
+    let again = c.request("git.snapshot", json!({ "cwd": "repo" })).await;
+    let same = c.request("git.range", json!({ "cwd": "repo", "from": to, "to": again["commit"] })).await;
+    assert_eq!(same["files"], json!([]), "{same}");
+    // A snapshot git no longer holds is its own refusal, so the pane can say the snapshot is gone.
+    let gone = "0".repeat(40);
+    refused(&c.request("git.range", json!({ "cwd": "repo", "from": gone, "to": to })).await, "not-found");
+    refused(&c.request("git.range", json!({ "cwd": "repo", "from": from, "to": gone })).await, "not-found");
+}
+
+#[tokio::test]
+async fn git_range_refuses_a_ref_that_is_not_forty_hex_before_any_git_runs_and_both_ops_stay_inside_the_root() {
+    let (t, _d, mut c) = bench().await;
+    let good = "a".repeat(40);
+    for bad in ["HEAD".to_owned(), "--output=/tmp/wsp-range".to_owned(), "a".repeat(39), "g".repeat(40), format!("{good} ")] {
+        refused(&c.request("git.range", json!({ "cwd": "repo", "from": bad, "to": good })).await, "bad-request");
+        refused(&c.request("git.range", json!({ "cwd": "repo", "from": good, "to": bad })).await, "bad-request");
+    }
+    assert!(!Path::new("/tmp/wsp-range").exists());
+    for op in ["git.snapshot", "git.range"] {
+        let frame = |cwd: Value| if op == "git.range" { json!({ "cwd": cwd, "from": good, "to": good }) } else { json!({ "cwd": cwd }) };
+        refused(&c.request(op, frame(json!(t.outside()))).await, "outside-root");
+        refused(&c.request(op, frame(json!(".."))).await, "outside-root");
+        refused(&c.request(op, frame(json!("repo/escape"))).await, "outside-root");
+    }
+}

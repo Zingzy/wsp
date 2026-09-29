@@ -50,7 +50,7 @@ const CODE_PATCH = [
   "",
 ].join("\n");
 
-const model = toDiffModel({ base: null, truncated: false, files: [{ path: "README.md", patch: PATCH }, { path: "src/rate.ts", patch: CODE_PATCH }] }, "diff-panel-harness");
+const model = toDiffModel({ base: null, truncated: false, files: [{ path: "README.md", kind: "modified", additions: 1, deletions: 1, patch: PATCH }, { path: "src/rate.ts", kind: "modified", additions: 1, deletions: 1, patch: CODE_PATCH }] }, "diff-panel-harness");
 const files = model.files.map(f => ({ ...f, collapsed: false }));
 
 createRoot(document.getElementById("root")!).render(

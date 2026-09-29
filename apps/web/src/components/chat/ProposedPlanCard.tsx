@@ -107,7 +107,7 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
   };
 
   return (
-    <div className="rounded-xl border border-border/80 bg-card/70 p-4 sm:p-5">
+    <div className="rounded-xl border border-border/80 bg-card/70 p-4 sm:p-5" data-proposed-plan>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="min-w-0 truncate text-sm font-medium text-foreground">{title}</p>
         <Menu>

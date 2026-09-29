@@ -37,13 +37,9 @@ export interface TurnDiffFileChange {
   readonly additions: number;
   readonly deletions: number;
 }
-export type TurnDiffStatus = "ready" | "missing" | "error";
 export interface TurnDiffSummary {
   readonly turnId: TurnId;
-  readonly checkpointTurnCount: number;
-  readonly checkpointRef: string;
-  readonly status: TurnDiffStatus;
   readonly files: ReadonlyArray<TurnDiffFileChange>;
-  readonly assistantMessageId: MessageId | null;
-  readonly completedAt: string;
+  /** Another thread's turn ran in the same folder while this one did, so some of these files may be its. */
+  readonly shared: boolean;
 }

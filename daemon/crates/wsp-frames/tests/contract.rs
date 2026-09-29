@@ -14,9 +14,9 @@ use wsp_frames::{
     guest_wsp_shim, landed_files_script, numbers, place_owned_paths, probe_path, words, BackendFacts, CopyReport, DaemonAuthRequest,
     DaemonErrorResponse, DaemonEvent, DaemonRequest, FsFilesReply, GitCheckpointReply, GitCommitReply, GitDiscardReply, GitPrListReply,
     GitPrMergeReply, GitPrReadReply, GitPrReply, GitPrViewReply, GitPushReply, GitRepoReadReply, GitRestoreReply, GitRunLogReply,
-    GitUpdateReply, GuestCliMessage, GuestOpenReply, HostFolderListing, MachineAnswersReply, MachineExecReply, MachineHandleReply,
-    MachineLinkRequest, MachineListReply, MachineReachReply, MachineReadingReply, MachineShapeReply, MachineStateReply, PlaceAuthRequest,
-    PlaceCapacity, PlaceProveRequest, DAEMON_OPS, MACHINE_OPS,
+    GitSnapshotReply, GitUpdateReply, GuestCliMessage, GuestOpenReply, HostFolderListing, MachineAnswersReply, MachineExecReply,
+    MachineHandleReply, MachineLinkRequest, MachineListReply, MachineReachReply, MachineReadingReply, MachineShapeReply, MachineStateReply,
+    PlaceAuthRequest, PlaceCapacity, PlaceProveRequest, DAEMON_OPS, MACHINE_OPS,
 };
 
 fn fixtures() -> PathBuf {
@@ -246,6 +246,9 @@ fn every_reply_fixture_round_trips_through_the_reply_types() {
                 "FsFilesReply" => {
                     round_trip::<FsFilesReply>(&sample, &at);
                 }
+                "GitSnapshotReply" => {
+                    round_trip::<GitSnapshotReply>(&sample, &at);
+                }
                 "GuestOpenReply" => {
                     round_trip::<GuestOpenReply>(&sample, &at);
                 }
@@ -277,6 +280,7 @@ fn every_reply_fixture_round_trips_through_the_reply_types() {
         "GitRepoReadReply",
         "GitRestoreReply",
         "GitRunLogReply",
+        "GitSnapshotReply",
         "GitUpdateReply",
         "GuestCliMessage",
         "GuestOpenReply",

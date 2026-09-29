@@ -4,7 +4,8 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
-import ChatMarkdown, { orderedListGutterStyle } from "./ChatMarkdown";
+import ChatMarkdown, { hasMath, orderedListGutterStyle } from "./ChatMarkdown";
+import { namesAnAddress } from "./chat/MermaidBlock";
 import { getSyntaxHighlighterPromise } from "../lib/syntaxHighlighting";
 
 beforeAll(() => {
@@ -194,6 +195,63 @@ describe("ChatMarkdown", () => {
     expect(chip?.textContent).toContain("main.ts");
     expect(screen.queryByRole("button")).toBeNull();
   });
+});
+
+describe("math and diagrams", () => {
+  it("finds math by Pandoc's rules, so prices stay prose", () => {
+    expect(hasMath("It costs $3 to $5 a month")).toBe(false);
+    expect(hasMath("a $ 5 $ gap")).toBe(false);
+    expect(hasMath("$$E=mc^2$$")).toBe(true);
+    expect(hasMath("where $x^2$ is the square")).toBe(true);
+    expect(hasMath("no dollars here")).toBe(false);
+  });
+
+  it("leaves a price as text", () => {
+    const { container } = render(<ChatMarkdown text="It costs $3 to $5 a month." cwd="/tmp/project" resolvedTheme="dark" />);
+    expect(container.textContent).toContain("It costs $3 to $5 a month.");
+    expect(container.querySelector(".katex, .language-math")).toBeNull();
+  });
+
+  it("typesets a display formula once KaTeX has loaded", async () => {
+    const { container } = render(<ChatMarkdown text={"The energy:\n\n$$E=mc^2$$"} cwd="/tmp/project" resolvedTheme="dark" />);
+    await waitFor(() => expect(container.querySelector(".katex-display .katex")).not.toBeNull(), { timeout: 10_000 });
+  });
+
+  it("draws a formula's link command as text, never a link", async () => {
+    const { container } = render(<ChatMarkdown text={"Click $\\href{javascript:alert(1)}{here}$ now."} cwd="/tmp/project" resolvedTheme="dark" />);
+    await waitFor(() => expect(container.querySelector(".katex")).not.toBeNull(), { timeout: 10_000 });
+    expect(container.querySelector("a[href^='javascript']")).toBeNull();
+    expect(container.innerHTML).not.toContain('href="javascript');
+  });
+
+  it("refuses a Mermaid fence that names an address before Mermaid can fetch it, and passes a plain one", () => {
+    for (const road of [
+      '%%{init: {"themeCSS": ".node rect { fill: url(http://h/x.svg) }"}}%%\nflowchart LR\n  A --> B',
+      "---\nconfig:\n  themeCSS: \"@import 'h.css';\"\n---\nflowchart LR\n  A --> B",
+      'flowchart LR\n  A@{ img: "/p.png", label: "pic" }',
+      'flowchart LR\n  A --> B\n  click B href "https://h" _blank',
+      'flowchart LR\n  A --> B\n  click B href "/settings"',
+      'flowchart LR\n  A --> B\n  click B call alert()',
+      'flowchart LR\n  A["see https://h"]',
+      "flowchart LR\n  A --> B\n  style A fill:image-set('p.png' 1x)",
+    ]) expect(namesAnAddress(road), road).toBe(true);
+    expect(namesAnAddress("flowchart LR\n  A[Install] --> B[Build]\n  B --> C[Test]")).toBe(false);
+  });
+
+  it("keeps a Mermaid block as code while the reply streams", () => {
+    const { container } = render(<ChatMarkdown text={"```mermaid\ngraph TD\nA-->B\n```"} cwd="/tmp/project" resolvedTheme="dark" isStreaming />);
+    expect(container.querySelector("[data-mermaid]")).toBeNull();
+    expect(container.textContent).toContain("A-->B");
+  });
+
+  it("shows a Mermaid block that does not parse as its source, with the line under it", async () => {
+    const { container } = render(<ChatMarkdown text={"```mermaid\ngraph TD\nA-->\n```"} cwd="/tmp/project" resolvedTheme="dark" />);
+    const line = await screen.findByText("Diagram did not parse", undefined, { timeout: 20_000 });
+    expect(line.className).toContain("text-xs");
+    expect(line.className).toContain("text-muted-foreground");
+    expect(container.textContent).toContain("A-->");
+    expect(container.querySelector("[data-mermaid] svg")).toBeNull();
+  }, 30_000);
 });
 
 describe("orderedListGutterStyle", () => {

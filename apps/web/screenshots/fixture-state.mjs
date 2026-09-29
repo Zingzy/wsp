@@ -264,20 +264,32 @@ const turn = (thread, minutes, workspaceId = "ws_api") => ({
 
 const event = (thread, rest, workspaceId = "ws_api") => ({ workspaceId, sessionId: sessionId(thread.id), threadId: threadId(thread.id), turnId: turnId(thread.id), ...rest });
 
-/** A whole turn as the transcript holds it: the person's words, a thought, one tool call and its result,
- * the reply, and the two events that close it. */
+/** A whole turn as the transcript holds it: the person's words, a thought, one tool call and its result, the step
+ * list or the plan where the agent kept one, the reply, the two events that close it, and what the turn changed in
+ * its folder where it changed something. */
 const replay = (thread, minutes, workspaceId = "ws_api") => {
   const events = [
     event(thread, { type: "session.start", at: ago(minutes), prompt: thread.prompt, model: "opus", cwd: thread.cwd ?? projectDest("spoo"), ...(thread.harness === undefined ? {} : { harness: thread.harness }) }, workspaceId),
     event(thread, { type: "session.delta", at: ago(minutes - 1), kind: "thinking", text: thread.thought }, workspaceId),
     event(thread, { type: "session.delta", at: ago(minutes - 1), kind: "tool_use", toolName: thread.tool.name, toolUseId: `tu_${thread.id}`, text: thread.tool.input }, workspaceId),
     event(thread, { type: "session.delta", at: ago(minutes - 2), kind: "tool_result", toolName: thread.tool.name, toolUseId: `tu_${thread.id}`, text: thread.tool.result }, workspaceId),
+    ...(thread.steps === undefined ? [] : [event(thread, { type: "session.plan", at: ago(minutes - 2), steps: thread.steps }, workspaceId)]),
+    ...(thread.proposed === undefined ? [] : [event(thread, { type: "session.plan", at: ago(minutes - 2), text: thread.proposed }, workspaceId)]),
     event(thread, { type: "session.delta", at: ago(minutes - 2), kind: "text", text: thread.reply }, workspaceId),
-    event(thread, { type: "session.done", at: ago(minutes - 3), result: { status: "completed", durationMs: 178_000, costUsd: thread.costUsd, text: thread.reply } }, workspaceId),
+    event(
+      thread,
+      {
+        type: "session.done",
+        at: ago(minutes - 3),
+        result: { status: "completed", durationMs: 178_000, costUsd: thread.costUsd, text: thread.reply, ...(thread.model === undefined ? {} : { model: thread.model }), ...(thread.tokens === undefined ? {} : { tokens: thread.tokens }) },
+      },
+      workspaceId,
+    ),
     event(thread, { type: "session.end", at: ago(minutes - 3), exitCode: 0, sawResult: true }, workspaceId),
   ];
   // A running turn has not closed, so its transcript stops at the reply so far.
-  return thread.status === "running" ? events.slice(0, -2) : events;
+  if (thread.status === "running") return events.slice(0, -2);
+  return thread.changes === undefined ? events : [...events, event(thread, { type: "session.changes", at: ago(minutes - 3), ...thread.changes }, workspaceId)];
 };
 
 /** What a real init announces, cut to what fits a shot: a run of bare names, the CLI's own screens among them,
@@ -1049,6 +1061,81 @@ const rewind = () => {
   });
 };
 
+/** One project on this computer with three answered threads, each carrying what a reply draws under it: the model and
+ * tokens its agent counted, the files it changed, the step list it worked through, the plan it proposed, and a reply
+ * holding a diagram and a formula. */
+const REPLY_TOKENS = { input: 22_564, output: 1_251, cached: 18_435, cacheWrite: 4_113, context: 42_310, window: 200_000 };
+const replies = () =>
+  store({
+    projects: [project("spoo-landing", HERE, 60 * 30)],
+    workspaces: [workspace("ws_replies", THIS_COMPUTER, { project: "pr_spoo-landing", copy: copyOn("spoo-landing-replies", "agent/slash") })],
+    ...merge(
+      threadsOn("ws_replies", [
+        [
+          tileThread("replies", "Short links keep their slash", {
+            prompt: "keep the trailing slash on short links, and work through it as a list",
+            model: "claude-opus-5-5",
+            tokens: REPLY_TOKENS,
+            steps: [
+              { text: "Read the redirect middleware", state: "done" },
+              { text: "Move the rewrite ahead of the host check", state: "done" },
+              { text: "Pin the order with a test", state: "done" },
+              { text: "Run the suite", state: "working" },
+              { text: "Push the branch", state: "pending" },
+            ],
+            reply: ["The rewrite now runs before the canonical host check, so `/r/abc/` answers once.", "", "I added a test for the slash and the bare form, and the suite is running."].join("\n"),
+            changes: {
+              from: "1".repeat(40),
+              to: "2".repeat(40),
+              files: [
+                { path: "apps/api/src/redirect.ts", kind: "modified", additions: 14, deletions: 3 },
+                { path: "apps/api/src/middleware.ts", kind: "modified", additions: 2, deletions: 2 },
+                { path: "apps/api/test/redirect.test.ts", kind: "added", additions: 38, deletions: 0 },
+              ],
+            },
+          }),
+          40,
+        ],
+        [
+          tileThread("planned", "Plan a quiet flag", {
+            prompt: "plan how to add a --quiet flag",
+            model: "claude-opus-5-5",
+            tokens: { ...REPLY_TOKENS, context: 18_900 },
+            proposed: ["# Add a --quiet flag", "", "1. Parse `--quiet` beside `--json` in `cli.ts`.", "2. Route every progress line through one writer that the flag silences.", "3. Keep errors on stderr whatever the flag says.", "4. Add a test for each of the three."].join("\n"),
+            reply: "That is the plan. Say go and I will start with the parser.",
+          }),
+          20,
+        ],
+        [
+          tileThread("diagram", "Build steps as a diagram", {
+            prompt: "reply with a Mermaid flowchart of the build steps and the quadratic formula in LaTeX",
+            model: "claude-opus-5-5",
+            tokens: { ...REPLY_TOKENS, context: 61_020 },
+            reply: [
+              "The build, step by step:",
+              "",
+              "```mermaid",
+              "flowchart LR",
+              "  A[Install] --> B[Type check]",
+              "  B --> C[Test]",
+              "  C --> D[Bundle]",
+              "  D --> E[Stage the app]",
+              "```",
+              "",
+              "And the quadratic formula:",
+              "",
+              "$$x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}$$",
+              "",
+              "which holds for any $a \\neq 0$.",
+            ].join("\n"),
+          }),
+          10,
+        ],
+      ]),
+    ),
+    goldens: sealed(),
+  });
+
 /** Every setup a lab can serve, by the word `--fixture` takes. One row per kind of person: what builds its store,
  * the cloud its machines are meant to be at, which the stand-in provider then wears as its own word, and the
  * repositories that person already keeps at the top of their home, which wsp has imported nowhere. Without the
@@ -1077,6 +1164,7 @@ const FIXTURES = {
   "pull-request": { build: macInUse, changes: ["spoo"], pulls: "failed" },
   "pull-request-conflict": { build: macInUse, changes: ["spoo"], pulls: "conflict" },
   rewind: { build: rewind },
+  replies: { build: replies },
 };
 
 export const FIXTURE_NAMES = Object.keys(FIXTURES);

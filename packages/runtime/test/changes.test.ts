@@ -35,7 +35,7 @@ function fakeDaemon(answers: Partial<Record<string, (frame: Record<string, unkno
     "git.status": () => STATUS,
     "git.discard": f => ({ id: 1, ok: true, path: String(f["path"]) }),
     "git.commit": () => ({ id: 1, ok: true, oid: "5f1c0e2b9a7d4c3e8f6a1b2c3d4e5f60718293a4", subject: "Round the cart total once", filesChanged: 2, insertions: 10, deletions: 4 }),
-    "git.diff": () => ({ id: 1, ok: true, base: null, files: [{ path: "a.ts", patch: "diff --git a/a.ts b/a.ts\n+one\n" }], truncated: false }),
+    "git.diff": () => ({ id: 1, ok: true, base: null, files: [{ path: "a.ts", kind: "modified", additions: 1, deletions: 0, patch: "diff --git a/a.ts b/a.ts\n+one\n" }], truncated: false }),
     ...answers,
   } as Record<string, (frame: Record<string, unknown>) => DaemonResponse>;
   return {

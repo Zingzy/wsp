@@ -70,6 +70,10 @@ interface TurnBuild {
   subagents: Map<string, number>;
   /** The reply's result once session.done landed; the turn stays running until session.end applies its status. */
   reply: TurnResult | null;
+  /** Where the turn's step list and its proposed plan sit in the timeline, once each has come: a later one of either
+   * replaces the row in place, so a turn has one of each however often the agent rewrote them. */
+  todoRow: number | null;
+  planRow: number | null;
 }
 
 export function deriveSession(events: ReadonlyArray<SessionEvent>, options: DeriveSessionOptions = {}): SessionModel {
@@ -199,6 +203,8 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
       durationMs: result.durationMs ?? null,
       waitedMs: result.waitedMs ?? null,
       costUsd: result.costUsd ?? null,
+      tokens: result.tokens ?? null,
+      model: result.model ?? t.summary.model,
       error: result.error ?? null,
       completedAt: at || null,
     };
@@ -239,13 +245,15 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
       durationMs: null,
       waitedMs: null,
       costUsd: null,
+      tokens: null,
+      changes: null,
       error: null,
       startedAt: at || null,
       completedAt: null,
       checkpoint: null,
     };
     turns.push(summary);
-    return { summary, startCount: count, ordinal: 0, openMessage: null, openMessageId: null, sawText: false, tools: new Map(), childCalls: new Map(), openAnonymousTool: null, subagents: new Map(), reply: null };
+    return { summary, startCount: count, ordinal: 0, openMessage: null, openMessageId: null, sawText: false, tools: new Map(), childCalls: new Map(), openAnonymousTool: null, subagents: new Map(), reply: null, todoRow: null, planRow: null };
   };
   /** A delta, done or end whose turn never started here (history capped mid-turn) still needs a turn to hang on. */
   const turnFor = (event: SessionEvent, at: string): TurnBuild => {
@@ -341,6 +349,38 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
           ...row,
           permission: { ...row.permission, outcome: event.outcome, optionId: event.optionId ?? null },
         });
+        continue;
+      }
+      case "session.changes": {
+        const index = turns.findIndex(t => t.turnId === event.turnId);
+        if (index === -1) continue;
+        const changes = { from: event.from, to: event.to, files: event.files, shared: event.shared === true };
+        turns[index] = { ...turns[index]!, changes };
+        if (turn !== null && turn.summary.turnId === event.turnId) turn.summary = turns[index]!;
+        continue;
+      }
+      case "session.plan": {
+        const t = turnFor(event, at);
+        const turnId = t.summary.turnId;
+        if (event.steps !== undefined) {
+          const entry: TimelineEntry = { id: `todo:${turnId}`, kind: "todo", createdAt: at, todo: { turnId, steps: event.steps } };
+          if (t.todoRow !== null) replace(t.todoRow, { ...entry, createdAt: timeline[t.todoRow]!.createdAt });
+          else {
+            closeOpenMessage(t);
+            t.todoRow = push(entry);
+          }
+        }
+        if (event.text !== undefined) {
+          const earlier = t.planRow === null ? undefined : timeline[t.planRow];
+          const createdAt = earlier?.createdAt ?? at;
+          const proposedPlan = { id: `plan:${turnId}`, turnId, planMarkdown: event.text, createdAt, updatedAt: at, implementedAt: null };
+          const entry: TimelineEntry = { id: `plan:${turnId}`, kind: "proposed-plan", createdAt, proposedPlan };
+          if (t.planRow !== null) replace(t.planRow, entry);
+          else {
+            closeOpenMessage(t);
+            t.planRow = push(entry);
+          }
+        }
         continue;
       }
       case "session.done": {

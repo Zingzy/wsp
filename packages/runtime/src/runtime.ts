@@ -990,6 +990,8 @@ export interface RuntimeOptions {
   /** How this host dials a workspace's own daemon: for the frames the runtime sends itself, and for the channel a
    * client of this host drives one frame at a time; the real dial unless a test hands in its own. */
   daemonChannel?: (o: DaemonChannelOptions) => Promise<DaemonChannel>;
+  /** How long a turn's launch waits on the snapshot of its folder before it runs without one (tests shrink it). */
+  turnSnapshotMs?: number;
   /** How long a daemon gets to announce itself when an update reads the version either side of its deploy; the
    * hello lands on connect, so a daemon that is there answers in one round trip (tests shrink it). */
   daemonHelloTimeoutMs?: number;
@@ -3637,7 +3639,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** The whole of what a client's channel into a served workspace carries, for the reason DEVICE_OPS is a list: that
    * computer's daemon runs every other op on the computer itself, so a deny list would let an op added later reach it.
    * Each of these names the workspace it is for, and the daemon answers it inside that workspace. */
-  const WORKSPACE_FRAMES = ["pty.create", "pty.attach", "pty.detach", "pty.write", "pty.resize", "pty.kill", "pty.list", "fs.list", "fs.files", "fs.read", "fs.write", "fs.search", "git.status", "git.diff", "git.push", "git.pr", "git.prList", "ping"];
+  const WORKSPACE_FRAMES = ["pty.create", "pty.attach", "pty.detach", "pty.write", "pty.resize", "pty.kill", "pty.list", "fs.list", "fs.files", "fs.read", "fs.write", "fs.search", "git.status", "git.diff", "git.snapshot", "git.range", "git.push", "git.pr", "git.prList", "ping"];
   /** And the host's own guest road, which answers the sessions that computer relays by the id it gave them. */
   const GUEST_ROAD_FRAMES = [...WORKSPACE_FRAMES, "guest.watch", "guest.reply", "guest.close"];
 
@@ -7394,6 +7396,34 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     });
   };
 
+  /** How long a launch waits on its folder's snapshot before the turn runs without one. */
+  const snapshotMs = opts.turnSnapshotMs ?? 3_000;
+
+  /** The folder a turn works in as one commit, through the daemon's own snapshot, which leaves the checkout's index
+   * and refs as they were. Nothing where the workspace is the person's own folder, the machine has no daemon to ask,
+   * the folder is no checkout, or the daemon does not answer inside the deadline: the turn runs regardless and its
+   * reply lists no changes. */
+  const snapshotOf = async (entry: LiveWorkspace, cwd: string): Promise<string | undefined> => {
+    if (ownFolder(entry.record) || reachOf(entry) !== "reachable") return undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<"late">(resolve => (timer = setTimeout(() => resolve("late"), snapshotMs)));
+    const taken = withDaemon(entry, async ask => String((await ask({ op: "git.snapshot", cwd }))["commit"])).catch((e: unknown) => {
+      if (!(e instanceof DaemonRefusal && e.code === "not-a-git-repo")) console.warn(`no snapshot of ${cwd} on ${entry.record.name}: ${e instanceof Error ? e.message : String(e)}`);
+      return undefined;
+    });
+    try {
+      const commit = await Promise.race([taken, late]);
+      if (commit === "late") console.warn(`no snapshot of ${cwd} on ${entry.record.name} inside ${snapshotMs}ms; the turn runs without one and its reply lists no changes`);
+      return commit === "late" ? undefined : commit;
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
+  /** Whether another thread's turn in this workspace ran in the same folder at any point between the two times. */
+  const sharedFolder = (workspaceId: string, threadId: string, cwd: string, from: number, to: number): boolean =>
+    [...sessions.values()].some(({ view }) => view.workspaceId === workspaceId && view.threadId !== threadId && view.cwd === cwd && (view.startedAt ?? 0) <= to && (view.endedAt ?? to) >= from);
+
   /** What a turn is once its harness session exists: the one road from the harness's events to the transcript, the
    * index, the bus and the row, whether the session was launched here or re-opened on the machine after a restart.
    * A re-opened turn's run is read from its first byte, so what the transcript already holds for this turn is
@@ -7432,6 +7462,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     /** The folder this turn's images landed in on the machine, removed when the turn ends however it ends; absent on
      * a turn that landed none, whose harness read them inline or which carried none at all. */
     imagesDir?: string;
+    /** The snapshot of the turn's folder taken as it launched, which the range of what it changed starts from. */
+    snapshot?: { from: string; cwd: string };
     /** The box the turn's own exec stream reads to know it is waiting on something outside its own process: flipped
      * while a permission prompt of this turn stands open, and while its harness reports a command or a subagent it
      * started still running, so the turn's idle clock does not run out under a question nobody has answered yet nor
@@ -7442,6 +7474,28 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const { entry, view, threadId, turnId, opening, outcome, notify, notifyBy, notifyRoad, turnToken, scopeDeviceId } = t;
     const workspaceId = entry.record.id;
     const { lines: deltasWritten, reply: recordedReply, started: startWritten } = t.written ?? { lines: 0, started: false };
+    /** What the turn changed, read once at the first of its reply and its exit: a second snapshot, the range from the
+     * launch's, and the files in it recorded under the turn. A turn that changed nothing records nothing. */
+    let changesRead = false;
+    const readChanges = (sessionId: string): void => {
+      if (changesRead || t.snapshot === undefined) return;
+      changesRead = true;
+      const { from, cwd } = t.snapshot;
+      const startedAt = view.startedAt ?? Date.now();
+      void (async () => {
+        const to = await snapshotOf(entry, cwd);
+        if (to === undefined) return;
+        const range = await withDaemon(entry, ask => ask({ op: "git.range", cwd, from, to })).catch((e: unknown) => {
+          console.warn(`what ${turnId} changed in ${cwd} was not read: ${e instanceof Error ? e.message : String(e)}`);
+          return undefined;
+        });
+        const read = GitDiffReply.safeParse(range);
+        if (!read.success || read.data.files.length === 0) return;
+        const files = read.data.files.map(({ path, kind, additions, deletions }) => ({ path, kind, additions, deletions }));
+        const shared = sharedFolder(workspaceId, threadId, cwd, startedAt, Date.now());
+        record({ type: "session.changes", workspaceId, sessionId, turnId, threadId, from, to, files, ...(shared ? { shared: true as const } : {}) });
+      })();
+    };
     // The reply and its line to the parent go together, so one gate stands for both.
     let replyRecorded = recordedReply !== undefined;
     let startRecorded = startWritten;
@@ -7669,10 +7723,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           void persistSessions(workspaceId);
           if (notify !== undefined) notifyEnd({ view, turnId }, notify, tellAs(t), result);
           record({ type: "session.done", workspaceId, sessionId, turnId, threadId, result });
+          readChanges(sessionId);
           return;
         }
         case "turn.anchor":
           anchor = event.anchor;
+          return;
+        case "turn.plan":
+          record({ type: "session.plan", workspaceId, sessionId, turnId, threadId, ...(event.steps !== undefined ? { steps: event.steps } : {}), ...(event.text !== undefined ? { text: event.text } : {}) });
           return;
         case "turn.tasks":
           // The harness's own word on the work this turn started: while any of it runs the turn is working, whatever
@@ -7712,6 +7770,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             sawResult: event.sawResult,
           });
           turnOver(anchor);
+          readChanges(sessionId);
           return;
       }
     };
@@ -8131,7 +8190,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       let imagesDir: string | undefined;
       let filePaths: string[] = [];
       let filesFolder: string | undefined;
-      let landed = (o.attachments?.length ?? 0) === 0;
+      // Every send takes one trip before its launch: its files land and its folder's snapshot is taken.
+      let landed = false;
+      let snapshot: { from: string; cwd: string } | undefined;
       // This send's own folder on the machine, named by the request id it minted: the landing runs before any turn is
       // registered, so two sends arriving together both pass the wait, and a folder they shared would leave the first
       // turn holding the second's picture.
@@ -8192,6 +8253,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             const landing = (resume !== undefined ? folderOf(workspaceId, resume) : undefined) ?? folder;
             filePaths = await landFiles(entry, landing, sendFilesDir(landing, threadId, o.requestId, randomUUID()), (o.attachments ?? []).filter(a => !isImage(a.mediaType)));
             if (filePaths.length > 0) filesFolder = landing;
+            const from = await snapshotOf(entry, landing);
+            snapshot = from === undefined ? undefined : { from, cwd: landing };
             refuse();
             continue;
           }
@@ -8231,6 +8294,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           ...(scoped !== undefined ? { scopeDeviceId: scoped.deviceId } : {}),
           opening: { prompt: o.prompt, ...(o.requestId !== undefined ? { requestId: o.requestId } : {}), ...(afterCut ? { afterCut } : {}), ...(title !== undefined ? { title } : {}), ...(records.length > 0 ? { attachments: records } : {}) },
           ...(imagesDir !== undefined ? { imagesDir } : {}),
+          ...(snapshot !== undefined ? { snapshot } : {}),
           ...(resume !== undefined ? { resume } : {}),
           ...(cutAt !== undefined ? { cutAt } : {}),
           waiting,

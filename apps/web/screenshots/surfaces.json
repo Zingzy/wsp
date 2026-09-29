@@ -1926,6 +1926,85 @@
       "reason": "Settings caps its content at 760px, so 1280 draws this page as 1440 does; 390 is where it reflows, which is shot here.",
       "fixture": "tiles",
       "height": 3400
+    },
+    {
+      "name": "reply-facts",
+      "at": "/",
+      "fixture": "replies",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:replies",
+        "390:key:Escape",
+        "hover:message-role=assistant"
+      ],
+      "wait": "reply-facts",
+      "settleMs": 800
+    },
+    {
+      "name": "context-meter",
+      "at": "/",
+      "fixture": "replies",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:replies",
+        "390:key:Escape"
+      ],
+      "wait": "context-meter",
+      "settleMs": 800
+    },
+    {
+      "name": "reply-changes",
+      "at": "/",
+      "fixture": "replies",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:replies",
+        "390:key:Escape"
+      ],
+      "wait": "changed-files-state",
+      "settleMs": 800
+    },
+    {
+      "name": "todo-card",
+      "at": "/",
+      "fixture": "replies",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:replies",
+        "390:key:Escape"
+      ],
+      "wait": "todo-card",
+      "settleMs": 800
+    },
+    {
+      "name": "plan-card",
+      "at": "/",
+      "fixture": "replies",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:planned",
+        "390:key:Escape"
+      ],
+      "wait": "proposed-plan",
+      "settleMs": 800
+    },
+    {
+      "name": "reply-mermaid-math",
+      "at": "/",
+      "fixture": "replies",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:diagram",
+        "390:key:Escape"
+      ],
+      "wait": "mermaid=true",
+      "settleMs": 1500
     }
   ]
 }

@@ -64,6 +64,11 @@ describe("a click or wait word", () => {
     expect(stepFor("390:file:notes.md:40", [1440, 390])).toEqual({ width: 390, file: { name: "notes.md", bytes: 40 } });
   });
 
+  it("reads a hover: word as the pointer resting on a data attribute, for what shows only under it", () => {
+    expect(stepFor("hover:message-role=assistant", [1440, 390])).toEqual({ hover: '[data-message-role="assistant"]' });
+    expect(stepFor("390:hover:row-id=thread:replies", [1440, 390])).toEqual({ width: 390, hover: `[data-row-id="thread:${threadId("replies")}"]` });
+  });
+
   it("reads a type: word as typing into whatever the step before it focused", () => {
     expect(stepFor("type:/does/not/exist", [1440, 390])).toEqual({ type: "/does/not/exist" });
     expect(stepFor("390:type:/tmp", [1440, 390])).toEqual({ width: 390, type: "/tmp" });

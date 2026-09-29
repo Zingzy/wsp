@@ -8,7 +8,7 @@
 // not rows, since a read is for the words of a thread and either of those runs
 // to megabytes.
 import { z } from "zod";
-import { NEWER_TURN_LINE, notifyBody, notifyReply, toolActivityLine, toolDoneLine, turnEndLine } from "./format.js";
+import { NEWER_TURN_LINE, fmtClock, notifyBody, notifyReply, planStepsLine, toolActivityLine, toolDoneLine, turnChangesLine, turnEndLine } from "./format.js";
 import type { SessionEvent, SessionPermissionEvent, TurnResult } from "./index.js";
 
 /** Who a row of a read is: the message that opened or steered a turn, the agent's own words, one tool call, or the
@@ -48,6 +48,9 @@ export function threadMessages(events: ReadonlyArray<SessionEvent>, threadId: st
   const calls = new Map<string, { row: number; name: string; input: string }>();
   let sawText = false;
   let replied = false;
+  /** The running turn's step list row and proposed plan row, which a later one of each rewrites where it stands. */
+  let stepsRow: number | undefined;
+  let planRow: number | undefined;
   const say = (who: ThreadVoice, at: number | undefined, text: string): number => {
     open = undefined;
     rows.push(message(who, at, text));
@@ -67,6 +70,8 @@ export function threadMessages(events: ReadonlyArray<SessionEvent>, threadId: st
         calls.clear();
         sawText = false;
         replied = false;
+        stepsRow = undefined;
+        planRow = undefined;
         if (event.prompt !== undefined) say("person", event.at, event.prompt);
         continue;
       case "session.steer":
@@ -115,11 +120,61 @@ export function threadMessages(events: ReadonlyArray<SessionEvent>, threadId: st
         // A turn the runtime ended before the harness replied: the read says so where the transcript has no result.
         if (!replied) turn(event.at, { status: "failed", error: event.reason ?? NO_RESULT_LINE });
         continue;
+      case "session.plan":
+        if (event.steps !== undefined) {
+          if (stepsRow === undefined) stepsRow = say("tool", event.at, planStepsLine(event.steps));
+          else rows[stepsRow]!.text = planStepsLine(event.steps);
+        }
+        if (event.text !== undefined) {
+          if (planRow === undefined) planRow = say("agent", event.at, event.text);
+          else rows[planRow]!.text = event.text;
+        }
+        continue;
+      case "session.changes": {
+        // The count lands after the turn's end, and reads with the turn's work above that end.
+        const row = message("tool", event.at, turnChangesLine(event.files));
+        if (rows.at(-1)?.who === "turn") rows.splice(rows.length - 1, 0, row);
+        else rows.push(row);
+        open = undefined;
+        continue;
+      }
       default:
         continue;
     }
   }
   return rows;
+}
+
+/** The thread as Markdown, for a person to paste elsewhere: each message a person sent under a bold header with its
+ * clock, the agent's words as it wrote them under one header until the person speaks again, every tool row an item
+ * of a list, a step list nested under its count, and each turn's end in italics. */
+export function threadMarkdown(rows: readonly ThreadMessage[]): string {
+  const blocks: string[][] = [];
+  let speaker: ThreadVoice | undefined;
+  for (const [index, row] of rows.entries()) {
+    if (row.who === "person") {
+      const clock = fmtClock(row.at);
+      blocks.push([clock === "" ? "**You**" : `**You** ${clock}`], row.text.split("\n"));
+      speaker = "person";
+      continue;
+    }
+    if (row.who === "turn") {
+      blocks.push(row.text.split("\n").map(line => (line === "" ? line : `*${line}*`)));
+      speaker = "turn";
+      continue;
+    }
+    if (speaker !== "agent") blocks.push(["**Agent**"]);
+    speaker = "agent";
+    if (row.who === "agent") {
+      blocks.push(row.text.split("\n"));
+      continue;
+    }
+    const [head = "", ...rest] = row.text.split("\n");
+    const item = [`- ${head}`, ...rest.map(line => `  ${line}`)];
+    if (rows[index - 1]?.who === "tool") blocks.at(-1)!.push(...item);
+    else blocks.push(item);
+  }
+  return blocks.map(block => block.join("\n")).join("\n\n");
 }
 
 /** The thread's latest turn as its transcript ended it, with the time of the row it came off: the done's result

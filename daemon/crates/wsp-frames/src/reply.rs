@@ -349,6 +349,11 @@ pub struct GitStatusReply {
 #[ts(export)]
 pub struct GitDiffFile {
     pub path: String,
+    /// added, modified, deleted, renamed or copied, off git's own status letter.
+    pub kind: String,
+    /// Lines added and removed; a binary file counts none.
+    pub additions: u32,
+    pub deletions: u32,
     pub patch: String,
     /// The id git gives the file's contents in the worktree now; absent for a file that is gone.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -371,6 +376,13 @@ pub struct GitCommitReply {
     pub files_changed: u64,
     pub insertions: u64,
     pub deletions: u64,
+}
+
+/// The commit a git.snapshot recorded, by its full sha.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct GitSnapshotReply {
+    pub commit: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
