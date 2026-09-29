@@ -33,8 +33,7 @@ export interface SessionModel {
    * the thread runs on, by its catalog id, and the access its last turn started at. Null before a start carried it. */
   readonly agent: string | null;
   readonly permissionMode: string | null;
-  /** Every reply block's latest run, by the block it was run from: an ending, once recorded, is never read back to
-   * running, whichever window reported the steps in whatever order. */
+  /** Every reply block's latest run, by the block it was run from; the host records no step after a run's ending. */
   readonly runs: ReadonlyMap<string, SessionRunEvent>;
 }
 
@@ -416,12 +415,9 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
         }
         continue;
       }
-      case "session.run": {
-        const had = runs.get(event.block);
-        if (had !== undefined && had.runId === event.runId && had.state !== "running") continue;
+      case "session.run":
         runs.set(event.block, event);
         continue;
-      }
       case "session.checkpoint": {
         // Taken once the turn is over, so a later turn may already be open: the row goes on its own turn's summary.
         const at = turns.findIndex(t => t.turnId === event.turnId);

@@ -146,7 +146,7 @@ interface TimelineRowSharedState {
 export interface ReplyRuns {
   readonly workspaceId: string;
   readonly threadId: string;
-  readonly cwd: string | undefined;
+  readonly cwd: string;
   readonly runs: ReadonlyMap<string, SessionRunEvent>;
 }
 

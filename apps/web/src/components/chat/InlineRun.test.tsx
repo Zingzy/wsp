@@ -7,12 +7,23 @@ import ChatMarkdown from "../ChatMarkdown.js";
 import { InlineRun, ReplyRunContext, type ReplyRunScope } from "./InlineRun.js";
 
 const started = vi.hoisted(() => [] as unknown[]);
+const focusing = vi.hoisted(() => new Set<string>());
 vi.mock("./replyRun.js", async importOriginal => ({
   ...(await importOriginal<typeof import("./replyRun.js")>()),
   startRun: async (_api: unknown, target: unknown) => {
     started.push(target);
     return "run-1";
   },
+  heldPty: () => "pty_1",
+  takeFocus: (runId: string) => focusing.delete(runId),
+}));
+const link = vi.hoisted(() => ({ io: () => ({}), onAltScreen: () => () => undefined, status: () => "live", onStatus: () => () => undefined }));
+vi.mock("../../terminal/link.js", async importOriginal => ({
+  ...(await importOriginal<typeof import("../../terminal/link.js")>()),
+  getTerminals: () => link,
+}));
+vi.mock("../ThreadTerminalDrawer.js", () => ({
+  TerminalViewport: ({ autoFocus }: { autoFocus: boolean }) => <div data-terminal-viewport data-autofocus={String(autoFocus)} />,
 }));
 
 const REPLY = [
@@ -110,5 +121,16 @@ describe("a run under its block", () => {
     const quiet = render(<InlineRun run={run({ exitCode: 0, output: "" })} />);
     expect(quiet.container.querySelector("[data-reply-run-output]")).toBeNull();
     expect(quiet.container.querySelector("[data-reply-run-state]")!.textContent).toBe("Exited 0");
+  });
+
+  it("takes the keyboard on the mount after the click that started it, and not when scrolled back in or reloaded", () => {
+    useStore.setState({ api: { recordRun: async () => ({}) } } as never);
+    focusing.add("run-1");
+    const live = run({ state: "running", ptyId: "pty_1" });
+    const first = render(<InlineRun run={live} />);
+    expect(first.container.querySelector("[data-terminal-viewport]")!.getAttribute("data-autofocus")).toBe("true");
+    first.unmount();
+    const again = render(<InlineRun run={live} />);
+    expect(again.container.querySelector("[data-terminal-viewport]")!.getAttribute("data-autofocus")).toBe("false");
   });
 });

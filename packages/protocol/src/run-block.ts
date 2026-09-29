@@ -10,14 +10,20 @@ export const SHELL_FENCES: ReadonlySet<string> = new Set(["sh", "bash", "zsh", "
  * as one: written once here and quoted, and a label it does not name gets no Run. */
 export const RUN_BLOCK_WORDS = "A command you mean the person to run goes in a fenced block labelled `sh`, which the app shows with Run: the person runs it with one click, in this thread's folder, and sees its output under the block";
 
+/** Characters a page draws reordered, not at all, or as nothing: bidirectional overrides and isolates, zero-width
+ * marks, and every control but tab and newline. A block holding one can run something other than what it shows. */
+const HIDDEN = /[\u0000-\u0008\u000b-\u001f\u007f\u00ad\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/;
+
 /** The command a block holds, or nothing where the block is not one to run. A console block is a transcript: its
  * `$ ` lines are the commands and the lines between them are output, left out. */
 export function runnableCommand(language: string, code: string): string | null {
   const label = language.trim().toLowerCase();
   if (!SHELL_FENCES.has(label)) return null;
-  const lines = code.replace(/\r\n/g, "\n").split("\n");
+  const text = code.replace(/\r\n/g, "\n");
+  if (HIDDEN.test(text)) return null;
+  const lines = text.split("\n");
   const prompted = label === "console" ? lines.filter(l => l.startsWith("$ ")).map(l => l.slice(2)) : [];
-  const command = (prompted.length > 0 ? prompted.join("\n") : code).trim();
+  const command = (prompted.length > 0 ? prompted.join("\n") : text).trim();
   return command === "" ? null : command;
 }
 
@@ -62,7 +68,10 @@ export function terminalText(raw: string): string {
         while (j < raw.length && raw[j] !== "\x07" && !(raw[j] === "\x1b" && raw[j + 1] === "\\")) j++;
         i = raw[j] === "\x07" ? j : j + 1;
       } else {
-        i += 1;
+        // Two bytes, or an intermediate run (0x20 to 0x2f) and its final: ESC ( B, ESC # 8.
+        let j = i + 1;
+        while (j < raw.length && raw.charCodeAt(j) >= 0x20 && raw.charCodeAt(j) <= 0x2f) j++;
+        i = j;
       }
       continue;
     }
@@ -126,5 +135,8 @@ export function runOutputMessage(command: string, run: { state: "exited" | "move
   const lines = output.split("\n");
   const tail = lines.slice(-RUN_SENT_LINES).join("\n");
   if (output.trim() === "") return `I ran \`${command}\` and ${ended}. It printed nothing.`;
-  return `I ran \`${command}\` and ${ended}. The last lines it printed:\n\n\`\`\`text\n${tail}\n\`\`\``;
+  // Longer than any run of backticks the output holds, so no line of it closes the fence and reads as the person's.
+  const longest = Math.max(0, ...[...tail.matchAll(/`+/g)].map(m => m[0].length));
+  const fence = "`".repeat(Math.max(3, longest + 1));
+  return `I ran \`${command}\` and ${ended}. The last lines it printed:\n\n${fence}text\n${tail}\n${fence}`;
 }

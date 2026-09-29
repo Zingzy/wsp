@@ -14,7 +14,7 @@ import { composedPtyIo, type TerminalIo } from "./pty-io.js";
 /** Mirrors the daemon's per-pty scrollback cap (pty-manager.ts), in UTF-16 units. */
 const MIRROR_CAP = 256 * 1024;
 
-/** The rows a reply's run opens at: the box under its block, which scrolls, is this tall. */
+/** The rows a reply's run opens at, before the box under its block has measured it; its first fit takes the box's own. */
 export const RUN_ROWS = 12;
 
 /** The word a link reads on before anything has been open on it: nothing has, so nothing is coming back. Written
@@ -65,6 +65,8 @@ export interface RunExit {
 
 /** The sequences a program switches to the alternate screen with: xterm's two and the one that saves the cursor too. */
 const ALT_SCREEN = /\x1b\[\?(?:1049|1047|47)h/;
+/** The longest of those, which is as much of a frame as the next one needs to see a switch cut between them. */
+const ALT_SCREEN_LONGEST = "\x1b[?1049h".length;
 
 interface PtyState {
   ptyId: string;
@@ -84,11 +86,13 @@ interface PtyState {
   altFns: Set<() => void>;
   /** Set once the program took the whole screen, so a listener that comes late still hears it. */
   alt: boolean;
+  /** The last bytes of the frame before, so a switch the daemon's frames cut in two is read whole. */
+  altTail: string;
 }
 
 /** A pty's local state as it is first held. */
 function held(ptyId: string, title: string, reply: boolean): PtyState {
-  return { ptyId, title, exited: false, lost: false, chunks: [], length: 0, sinks: new Set(), mode: null, reply, exit: null, exitFns: new Set(), altFns: new Set(), alt: false };
+  return { ptyId, title, exited: false, lost: false, chunks: [], length: 0, sinks: new Set(), mode: null, reply, exit: null, exitFns: new Set(), altFns: new Set(), alt: false, altTail: "" };
 }
 
 // A shell started at a width other than its view's redraws its prompt on the first resize and leaves zsh's
@@ -151,9 +155,13 @@ export class WorkspaceTerminals {
       if (!p) return;
       this.#mirror(p, e.data);
       for (const s of p.sinks) s.data(e.data);
-      if (p.reply && !p.alt && ALT_SCREEN.test(e.data)) {
-        p.alt = true;
-        for (const fn of p.altFns) fn();
+      if (p.reply && !p.alt) {
+        const seen = p.altTail + e.data;
+        p.altTail = seen.slice(-ALT_SCREEN_LONGEST);
+        if (ALT_SCREEN.test(seen)) {
+          p.alt = true;
+          for (const fn of p.altFns) fn();
+        }
       }
       return;
     }

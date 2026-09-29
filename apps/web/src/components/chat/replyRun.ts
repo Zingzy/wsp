@@ -45,6 +45,15 @@ export const RUN_NO_HOST_LINE = "this host keeps no record of a reply's run, so 
  * however many blocks draw it; another window may watch the same run, and the host keeps the first ending. */
 const watching = new Map<string, { ptyId: string; moved: boolean }>();
 
+/** The runs a click in this window started, whose terminal takes the keyboard when it first mounts, and no other:
+ * a block scrolled back into the list, a reload and another window leave the keyboard where the person has it. */
+const focusing = new Set<string>();
+
+/** Whether this run's terminal takes the keyboard as it mounts: true once, for a run a click here started. */
+export function takeFocus(runId: string): boolean {
+  return focusing.delete(runId);
+}
+
 /** The pty a run this window watches is running in, or null for a run it does not hold. */
 export function heldPty(runId: string): string | null {
   const held = watching.get(runId);
@@ -65,14 +74,18 @@ export async function startRun(api: Recorder, t: RunTarget, deps: RunDeps = WIND
   const runId = deps.runId();
   const ptyId = await wt.run({ command: t.command, ...(t.cwd !== undefined ? { cwd: t.cwd } : {}) });
   const step = stepOf(t, runId);
+  // Held before the record goes: its event can reach the block, which then mounts, before the answer does.
+  watching.set(runId, { ptyId, moved: false });
+  focusing.add(runId);
   try {
     await record({ ...step, state: "running", ptyId });
   } catch (cause) {
     // A run no thread records is one no block can draw or end: the command goes with the refusal.
+    watching.delete(runId);
+    focusing.delete(runId);
     await wt.forgetRun(ptyId);
     throw cause;
   }
-  watching.set(runId, { ptyId, moved: false });
   void watch(record, wt, step, ptyId);
   return runId;
 }

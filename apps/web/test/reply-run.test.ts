@@ -79,3 +79,17 @@ describe("a pane coming live on a daemon holding a reply's pty", () => {
     expect(asked.filter(op => op === "pty.attach")).toHaveLength(2);
   });
 });
+
+describe("a full-screen switch", () => {
+  it("is heard when the daemon's frames split its sequence in two", async () => {
+    const wire: TerminalWire = { request: async op => (op === "pty.create" ? { ptyId: "pty_9" } : { ok: true }) };
+    const wt = new WorkspaceTerminals(wire);
+    const ptyId = await wt.run({ command: "vim" });
+    let full = false;
+    wt.onAltScreen(ptyId, () => (full = true));
+    wt.feedEvent({ type: "pty.data", ptyId, data: "loading\x1b[?10" });
+    expect(full).toBe(false);
+    wt.feedEvent({ type: "pty.data", ptyId, data: "49h\x1b[H" });
+    expect(full).toBe(true);
+  });
+});

@@ -108,11 +108,12 @@ export function ChatView({
   // word under the transcript in the timeline's own rule grammar, with the wake beside it, never a dialog.
   const paused = state === "paused" && !view.running ? workspaceWord(state, capabilities?.pauseMode) : null;
   const { startNewThread, hydrated, threadKey } = thread;
-  // A reply's shell blocks run in the thread the view holds, in its folder; a view holding none yet offers no Run.
-  const replyRuns = useMemo<ReplyRuns | null>(
-    () => (thread.thread === undefined ? null : { workspaceId, threadId: thread.thread, cwd, runs: view.runs }),
-    [cwd, thread.thread, view.runs, workspaceId],
-  );
+  // A reply's shell blocks run in the thread the view holds, in its folder: the one its start named, else the
+  // workspace's thread folder, as a file named in the transcript opens. Neither known, or no thread yet, offers no Run.
+  const replyRuns = useMemo<ReplyRuns | null>(() => {
+    const folder = cwd ?? threadFolderOf(workspaceId);
+    return thread.thread === undefined || folder === null ? null : { workspaceId, threadId: thread.thread, cwd: folder, runs: view.runs };
+  }, [cwd, thread.thread, view.runs, workspaceId]);
   // What the footer's figure is: on this computer the turn ran on the person's own sign-in, so the number is the
   // agent's own list price and nobody is billed for it. The word goes on the figure from the record alone, which
   // the page has before it draws the footer at all; a word that arrived a moment after the figure would be the

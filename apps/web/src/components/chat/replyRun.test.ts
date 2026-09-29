@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { PTY_RUN_DAEMON_VERSION, type RunStep, type SessionRunEvent } from "@wsp/protocol";
 import type { RunExit, RunOpts } from "../../terminal/link.js";
 import { useTerminalDrawerStore } from "../../terminal/drawerStore.js";
-import { moveRun, resumeRun, startRun, type RunDeps, type RunTarget } from "./replyRun.js";
+import { heldPty, moveRun, resumeRun, startRun, takeFocus, type RunDeps, type RunTarget } from "./replyRun.js";
 
 /** A terminal model for one workspace that runs nothing: each run's exit and output are the test's to give. */
 function fakeTerminals() {
@@ -70,6 +70,33 @@ describe("a reply block's run, as this window drives it", () => {
     await expect(startRun(api, TARGET, deps)).rejects.toThrow(/daemon/);
     expect(t.runs).toEqual([]);
     expect(steps).toEqual([]);
+  });
+
+  it("holds the run while its start is being recorded, since the block the record draws may mount before the answer", async () => {
+    const t = fakeTerminals();
+    let seenHeld: string | null | undefined;
+    const api = {
+      recordRun: async (step: RunStep): Promise<SessionRunEvent> => {
+        seenHeld = heldPty(step.runId);
+        return { type: "session.run", workspaceId: "ws_a", sessionId: "s", ...step };
+      },
+    };
+    const deps: RunDeps = { terminals: () => t.wt as never, version: () => PTY_RUN_DAEMON_VERSION, runId: () => "run-held" };
+    await startRun(api, TARGET, deps);
+    expect(seenHeld).toBe("pty_1");
+  });
+
+  it("gives the keyboard to the run a click here started, once, and never to one taken back after a reload", async () => {
+    const t = fakeTerminals();
+    const { api } = recorder();
+    const deps: RunDeps = { terminals: () => t.wt as never, version: () => PTY_RUN_DAEMON_VERSION, runId: () => "run-focus" };
+    await startRun(api, TARGET, deps);
+    expect(takeFocus("run-focus")).toBe(true);
+    // A block scrolled out and back in mounts its terminal again, and must not take the composer's keys.
+    expect(takeFocus("run-focus")).toBe(false);
+    t.resumable.add("pty_5");
+    await resumeRun(api, { type: "session.run", workspaceId: "ws_a", sessionId: "s", threadId: "th_1", turnId: "turn_1", runId: "run-back", block: "b", command: "ls", state: "running", ptyId: "pty_5" }, deps);
+    expect(takeFocus("run-back")).toBe(false);
   });
 
   it("lets go of the pty it made when the host will not record the run, and says why", async () => {
