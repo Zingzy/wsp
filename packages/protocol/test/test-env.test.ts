@@ -5,38 +5,40 @@
 // exported saw unrelated cases fail. So a test hands the environment it means
 // into the code under test, and the only wsp variables a test may read off its
 // own process are the gates that decide whether the file runs at all.
-import { readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import * as protocol from "../src/index.js";
-import { ROOT, testFiles } from "./source-files.js";
-import { TEST_ENV } from "../../../vitest.env.js";
+import { ROOT, sourceFiles, testFiles } from "./source-files.js";
+import { GATES, TEST_ENV } from "../../../vitest.env.js";
 
-/** The gates a person throws to turn a suite on, each read once to decide whether its file runs. Nothing else: a
- * variable that changes what the code under test does is handed in, never read off the process running the suite. */
-const GATES: Record<string, string> = {
-  WSP_LIVE: "runs the tests that create real machines",
-  WSP_LIVE_LONG: "runs the live tests that take hours",
-  WSP_LIVE_STATE: "the state file the live tests read their golden from",
-  WSP_GOLDEN: "the golden the live tests build on instead of the state file's",
-  WSP_RUNTIME_LIVE: "runs the tests that drive the workspace runtime on this computer, which take root and cgroup v2",
-  WSP_RENDER: "runs the Chromium render tests",
-  WSP_PACK_SMOKE: "runs the npm pack smoke",
-  WSP_DESKTOP_SMOKE: "runs the packaged desktop smoke",
-  WSP_DESKTOP_APP: "the packaged app the desktop smoke drives instead of the built one",
-  WSP_DAEMON_BIN: "the daemon binary the daemon suite drives instead of the daemon in its own process",
-  WSP_MCP_BIN: "runs the tool server suite against a daemon binary built with its mcp feature",
-  WSP_SIGNED: "says a Developer ID signed the bundles the release runner built, which the certificate itself never reaches a test to say",
-};
-
-/** Every WSP_ variable the protocol names, by the constant it is exported as, so a read written as
- * process.env[TURN_TOKEN_ENV] is caught as the read of WSP_TURN that it is. */
+/** Every WSP_ variable a package names, by the constant it is exported as, so a read written as
+ * process.env[TURN_TOKEN_ENV] is caught as the read of WSP_TURN that it is: the protocol's exports, and every constant
+ * a package's own source exports, since a test imports the constant from whichever package holds it. */
 function namedConstants(): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [name, value] of Object.entries(protocol)) {
     if (typeof value === "string" && value.startsWith("WSP_")) out[name] = value;
   }
+  for (const rel of sourceFiles()) {
+    for (const [, name, value] of readFileSync(join(ROOT, rel), "utf8").matchAll(/export const ([A-Z][A-Z0-9_]*) = "(WSP_[A-Z0-9_]+)"/g)) out[name!] = value!;
+  }
   return out;
+}
+
+/** Every WSP_ variable a workflow step or a package's script sets on purpose, which is a gate for the suite it runs. */
+function setOnPurpose(): string[] {
+  const workflows = join(ROOT, ".github", "workflows");
+  const texts = [
+    ...readdirSync(workflows).filter(f => f.endsWith(".yml")).map(f => readFileSync(join(workflows, f), "utf8")),
+    readFileSync(join(ROOT, "package.json"), "utf8"),
+    ...["apps", "packages"].flatMap(top =>
+      readdirSync(join(ROOT, top), { withFileTypes: true })
+        .filter(d => d.isDirectory() && existsSync(join(ROOT, top, d.name, "package.json")))
+        .map(d => readFileSync(join(ROOT, top, d.name, "package.json"), "utf8")),
+    ),
+  ];
+  return [...new Set(texts.flatMap(text => [...text.matchAll(/\b(WSP_[A-Z0-9_]+)(?:: |=)/g)].map(m => m[1]!)))].sort();
 }
 
 /** Every wsp variable this file reads off process.env, whether spelled out or reached through a constant. */
@@ -60,6 +62,8 @@ describe("a test reads no wsp variable off the process running it", () => {
   it("names the two variables that broke this, so the grep cannot go blind", () => {
     expect(constants["LABS_ENV"]).toBe("WSP_LABS");
     expect(constants["TURN_TOKEN_ENV"]).toBe("WSP_TURN");
+    // A constant another package holds, which a test imports from there.
+    expect(constants["REQUIRE_DAEMON_ENV"]).toBe("WSP_REQUIRE_DAEMON");
     expect(wspReads('process.env[TURN_TOKEN_ENV]\nprocess.env.WSP_LABS\nprocess.env["WSP_TURN"]', constants)).toEqual(["WSP_TURN", "WSP_LABS", "WSP_TURN"]);
     // Naming the variable is what this catches. A spread, an alias, a destructuring or a computed key reaches the
     // same value and is not a finding here on purpose: a spread of process.env into a child's environment is
@@ -82,6 +86,10 @@ describe("a test reads no wsp variable off the process running it", () => {
     expect(offending).toEqual([]);
   });
 
+  it("keeps every variable a workflow or a package's script sets on purpose, so the belt cannot drop one", () => {
+    expect(setOnPurpose().filter(name => !(name in GATES))).toEqual([]);
+  });
+
   it("has no gate in the list nothing gates any more", () => {
     const everyRead = new Set(read.flatMap(f => f.names));
     expect(Object.keys(GATES).filter(n => !everyRead.has(n))).toEqual([]);
@@ -91,5 +99,18 @@ describe("a test reads no wsp variable off the process running it", () => {
 describe("the environment every test runs under", () => {
   it("turns the release check off, so no host a test starts asks GitHub", () => {
     expect(TEST_ENV[protocol.UPDATE_CHECK_ENV]).toBe("0");
+  });
+
+  it("leaves no launch pair, home, named host, cloud, labs or person's home to a test, since none of them is a gate", () => {
+    const aims = [...protocol.LAUNCH_ENV, "WSP_HOME", "WSP_HOST", protocol.CLOUD_ENV, protocol.LABS_ENV, protocol.PERSON_HOME_ENV];
+    expect(aims.filter(name => name in GATES)).toEqual([]);
+    expect(aims.filter(name => process.env[name] !== undefined)).toEqual([]);
+  });
+
+  it("holds no wsp variable of the shell that started the suite but the gates, so no suite dials that shell's host", () => {
+    // A suite started inside a wsp thread inherits the pair the thread's launch carries, and code under test that
+    // reads the process's own environment would dial that host as that thread.
+    const own = new Set([...Object.keys(GATES), ...Object.keys(TEST_ENV)]);
+    expect(Object.keys(process.env).filter(name => name.startsWith("WSP_") && !own.has(name))).toEqual([]);
   });
 });

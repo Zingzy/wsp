@@ -19,7 +19,9 @@ import {
   WORKSPACE_KIND_WORDS,
   addedProjectOn,
   agentsLine,
+  committedLine,
   deleteNotice,
+  discardedLine,
   goneRefusal,
   goneRoadRefusal,
   imageKeptLine,
@@ -33,7 +35,7 @@ import {
   workspaceStateLine,
   type WorkspaceState,
 } from "@wsp/protocol";
-import { absoluteFolder, agentsToolAskedNothing, broughtBackLine, deletedLine, forgotLine, imageMovedLine, otherVersion, projectGoldenOf, rebuiltLine, renamedWorkspaceLine, theProject, type HostClient } from "../src/verbs.js";
+import { absoluteFolder, agentsToolAskedNothing, broughtBackLine, deletedLine, forgotLine, imageMovedLine, otherVersion, projectGoldenOf, NO_DRAFT_FIX, noDraftLine, rebuiltLine, renamedWorkspaceLine, theProject, type HostClient } from "../src/verbs.js";
 import type { TurnCase } from "./mcp-record-turns.js";
 
 type Replies = Record<string, string>;
@@ -158,6 +160,12 @@ export async function workspaceWords(line: LineOf, host: HostOf): Promise<Record
     prLine: slot(back({ pr: { number: 1, url: "{url}", state: "open", host: "h" } })[1]!, "open", "state"),
     leftOne: back({ uncommitted: 1 })[1],
     leftMany: slot(back({ uncommitted: 2 })[1]!, "2", "count"),
+    committedOne: slot(committedLine("{name}", { oid: "abcdefghij", subject: "{subject}", filesChanged: 1 }), "abcdefg", "oid"),
+    committedMany: slot(slot(committedLine("{name}", { oid: "abcdefghij", subject: "{subject}", filesChanged: 2 }), "abcdefg", "oid"), "2", "count"),
+    noDraft: noDraftLine("{note}"),
+    noDraftBare: noDraftLine(undefined),
+    noDraftFix: NO_DRAFT_FIX,
+    discarded: discardedLine("{name}", "{path}"),
     firstTurnFailed,
   };
 }
@@ -354,6 +362,32 @@ export const WORKSPACE_ANSWERED: Record<string, TurnCase[]> = {
     { case: "note", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.wake": reply({ workspace: WORKSPACE }), "workspaces.bringBack": reply({ branch: "work", base: "main", ahead: 1, uncommitted: 1, stat: [], note: "no signed-in gh on the machine" }) } },
     { case: "refused", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.wake": reply({ workspace: WORKSPACE }), "workspaces.bringBack": reply({ branch: "work", base: "main", ahead: 2, uncommitted: 0, stat: [], refused: "gh refused: no remote" }) } },
     { case: "gone", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: GONE }) } },
+  ],
+  commit: [
+    {
+      case: "every change, the message drafted",
+      arguments: { workspace: "alpha" },
+      replies: {
+        "workspaces.resolve": reply({ workspace: NAPPING }),
+        "workspaces.wake": reply({ workspace: WORKSPACE }),
+        "workspaces.commitDraft": reply({ message: "Fix the \u0085 thing 🧪\n\nBecause it broke." }),
+        "workspaces.commit": reply({ oid: "0123456789abcdef0123", subject: "Fix the \u0085 thing 🧪", filesChanged: 1, insertions: 3, deletions: 1 }),
+      },
+    },
+    {
+      case: "the files named, with a message",
+      arguments: { workspace: "alpha", message: "Name the files", files: ["a.ts", "b \u0085.ts"] },
+      replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.wake": reply({ workspace: WORKSPACE }), "workspaces.commit": reply({ oid: "fedcba9876543210", subject: "Name the files", filesChanged: 2, insertions: 10, deletions: 0 }) },
+    },
+    { case: "no draft, with the note", arguments: { workspace: "alpha", files: ["a.ts"] }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.wake": reply({ workspace: WORKSPACE }), "workspaces.commitDraft": reply({ message: null, note: "No agent here drafts commit messages; write it yourself." }) } },
+    { case: "no draft, no note", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.wake": reply({ workspace: WORKSPACE }), "workspaces.commitDraft": reply({ message: null }) } },
+    { case: "refused by a hook", arguments: { workspace: "alpha", message: "m" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.wake": reply({ workspace: WORKSPACE }), "workspaces.commit": refused("a hook said no: lint failed \u0085", "usage") } },
+    { case: "gone", arguments: { workspace: "alpha", message: "m" }, replies: { "workspaces.resolve": reply({ workspace: GONE }) } },
+  ],
+  discard: [
+    { case: "discarded", arguments: { workspace: "alpha", path: "src/a \u0085.ts" }, replies: { "workspaces.resolve": reply({ workspace: NAPPING }), "workspaces.wake": reply({ workspace: WORKSPACE }), "workspaces.discard": reply({ path: "src/a \u0085.ts" }) } },
+    { case: "no change", arguments: { workspace: "alpha", path: "src/a.ts" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.wake": reply({ workspace: WORKSPACE }), "workspaces.discard": refused("src/a.ts has no change to discard", "usage") } },
+    { case: "gone", arguments: { workspace: "alpha", path: "src/a.ts" }, replies: { "workspaces.resolve": reply({ workspace: GONE }) } },
   ],
   export: [
     {

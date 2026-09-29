@@ -421,6 +421,12 @@
     "prLine": "{url} ({state})",
     "leftOne": "1 change left in the workspace; nothing uncommitted travels",
     "leftMany": "{count} changes left in the workspace; nothing uncommitted travels",
+    "committedOne": "{name}: committed {oid} {subject} (1 file)",
+    "committedMany": "{name}: committed {oid} {subject} ({count} files)",
+    "noDraft": "no message was drafted: {note}",
+    "noDraftBare": "no message was drafted: the agent gave none",
+    "noDraftFix": "Pass one with --message \"<message>\".",
+    "discarded": "{name}: {path} discarded",
     "firstTurnFailed": "created {name} {id}; first turn failed: {failure}"
   }
 }
