@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { EXEC_ENV, ExecFailedError, INLINE_EXEC_MS, MachineUnreachableError, MachineUnreached, PlaceAbsentError, type ExecResult, type Machine } from "@wsp/engine";
-import { EXEC_BODY_MAX, absentComputer, execFailedLine, machineUnreachableLine, machineUnreachedLine, TURN_IDLE_MS, shellQuote, workScoreLine } from "@wsp/protocol";
+import { EXEC_BODY_MAX, LINK_RETRY_WINDOW_MS, absentComputer, execFailedLine, machineUnreachableLine, machineUnreachedLine, TURN_IDLE_MS, shellQuote, workScoreLine } from "@wsp/protocol";
 import type { ExecStream } from "@wsp/protocol";
 import { GROUP_WORK_AWK, machineExecStream } from "../src/machine-exec.js";
 import { scriptGuest, type Step } from "./script-guest.js";
@@ -419,6 +419,24 @@ describe("machineExecStream", () => {
     expect(guest.files()).toEqual([]);
   });
 
+  it("a run re-opened after a restart is cut at its first start plus the wall, not at the re-open plus the wall", async () => {
+    const { backend, machine } = await makeMachine();
+    const { guest, clock } = minuteGuest(backend, Number.POSITIVE_INFINITY);
+    const reading = new Set<() => void>();
+    const launched = machineExecStream(machine, { pollMs: 1, deadlineMs: 30 * 60_000, now: () => clock.now, reading })("claude", { env: {} });
+    await vi.waitFor(() => expect(guest.getLaunch()).not.toBe(""));
+    // The host goes and comes back twenty minutes into the turn; the next one re-opens the run by handle.
+    for (const drop of [...reading]) drop();
+    clock.now = 20 * 60_000;
+    const attached = (await machineExecStream(machine, { pollMs: 1, deadlineMs: 30 * 60_000, now: () => clock.now }).attach!(launched.run!, { input: false, startedAt: 0 })) as ExecStream;
+    await expect(
+      (async () => {
+        for await (const line of attached.lines) void line;
+      })(),
+    ).rejects.toThrow(/^stopped after 30m 00s at the 30m cap on one turn$/);
+    expect(clock.now).toBe(30 * 60_000);
+  });
+
   it("a run that prints nothing while its process group works runs past the idle limit, and only the wall ends it", async () => {
     const { backend, machine } = await makeMachine();
     const { guest, clock } = minuteGuest(backend, 0, Number.POSITIVE_INFINITY, CORE_MINUTE);
@@ -743,7 +761,7 @@ describe("machineExecStream attaching to a run its process did not launch", () =
     const factory = machineExecStream(machine, { pollMs: 5 });
     const launched = factory("claude -p hi", { env: {}, input: ["go"] });
     await vi.waitFor(() => expect(guest.getLaunch()).not.toBe(""));
-    return { factory, guest, run: launched.run! };
+    return { factory, guest, backend, machine, run: launched.run! };
   };
 
   it("reads the run's whole log from its first byte and ends on the exit the run left", async () => {
@@ -751,7 +769,7 @@ describe("machineExecStream attaching to a run its process did not launch", () =
       { append: '{"type":"system","subtype":"init"}\n{"type":"assistant"}\n' },
       { append: '{"type":"result"}\n', exit: 0 },
     ]);
-    const stream = await factory.attach!(run, { input: true });
+    const stream = await factory.attach!(run, { input: true, startedAt: Date.now() });
     expect(stream).not.toBe("gone");
     const lines: string[] = [];
     for await (const line of (stream as ExecStream).lines) lines.push(line);
@@ -759,9 +777,73 @@ describe("machineExecStream attaching to a run its process did not launch", () =
     expect(await (stream as ExecStream).exited).toBe(0);
   });
 
+  it("keeps the reply of a run that finished while no host read it, when it is re-opened past its wall", async () => {
+    // Everything the run printed, and its exit, were on the machine before anything re-opened it.
+    const { factory, run } = await abandoned([{ append: '{"type":"system","subtype":"init"}\n{"type":"assistant"}\n{"type":"result"}\n', exit: 0 }]);
+    const stream = (await factory.attach!(run, { input: true, startedAt: Date.now() - 7 * 3_600_000 })) as ExecStream;
+    const lines: string[] = [];
+    for await (const line of stream.lines) lines.push(line);
+    expect(lines).toEqual(['{"type":"system","subtype":"init"}', '{"type":"assistant"}', '{"type":"result"}']);
+    expect(await stream.exited).toBe(0);
+  });
+
+  it("keeps the reply of a finished run re-opened past its wall when the poll after the re-open fails once", async () => {
+    const { factory, backend, run } = await abandoned([{ append: '{"type":"system","subtype":"init"}\n{"type":"assistant"}\n{"type":"result"}\n', exit: 0 }]);
+    // The probe reached the machine; the first poll after it meets a gateway that falls over once.
+    const inner = backend.execImpl;
+    let failed = false;
+    backend.execImpl = async (m, cmd): Promise<ExecResult> => {
+      if (!failed && cmd.includes("__WSP_EOF_")) {
+        failed = true;
+        throw new Error("gateway said 502");
+      }
+      return inner(m, cmd);
+    };
+    const stream = (await factory.attach!(run, { input: true, startedAt: Date.now() - 7 * 3_600_000 })) as ExecStream;
+    const lines: string[] = [];
+    for await (const line of stream.lines) lines.push(line);
+    expect(failed).toBe(true);
+    expect(lines).toEqual(['{"type":"system","subtype":"init"}', '{"type":"assistant"}', '{"type":"result"}']);
+    expect(await stream.exited).toBe(0);
+  });
+
+  it("cuts a turn re-opened past its wall on a machine that stays dark, once the reach window has passed", async () => {
+    const { backend, machine, run } = await abandoned([{ append: "while-away\n" }]);
+    const clock = { now: 0 };
+    const inner = backend.execImpl;
+    backend.execImpl = async (m, cmd): Promise<ExecResult> => {
+      if (!cmd.includes("__WSP_EOF_")) return inner(m, cmd);
+      clock.now += 10_000;
+      throw new Error("gateway said 502");
+    };
+    const factory = machineExecStream(machine, { pollMs: 1, now: () => clock.now });
+    const stream = (await factory.attach!(run, { input: true, startedAt: -7 * 3_600_000 })) as ExecStream;
+    await expect(
+      (async () => {
+        for await (const line of stream.lines) void line;
+      })(),
+    ).rejects.toThrow(/at the 6h cap on one turn$/);
+    expect(clock.now).toBeGreaterThanOrEqual(LINK_RETRY_WINDOW_MS);
+    expect(clock.now).toBeLessThan(LINK_RETRY_WINDOW_MS + 20_000);
+    expect(await stream.exited).toBeNull();
+  });
+
+  it("hands over what a run still going printed before it is cut, when it is re-opened past its wall", async () => {
+    const { factory, run } = await abandoned([{ append: "while-away\n" }]);
+    const stream = (await factory.attach!(run, { input: true, startedAt: Date.now() - 7 * 3_600_000 })) as ExecStream;
+    const lines: string[] = [];
+    await expect(
+      (async () => {
+        for await (const line of stream.lines) lines.push(line);
+      })(),
+    ).rejects.toThrow(/at the 6h cap on one turn$/);
+    expect(lines).toEqual(["while-away"]);
+    expect(await stream.exited).toBeNull();
+  });
+
   it("takes a message into the run over the channel the launch left open", async () => {
     const { factory, guest, run } = await abandoned([{ append: "one\n" }, { append: "two\n", exit: 0 }]);
-    const stream = (await factory.attach!(run, { input: true })) as ExecStream;
+    const stream = (await factory.attach!(run, { input: true, startedAt: Date.now() })) as ExecStream;
     expect(await stream.write('{"type":"user"}')).toBe("written");
     expect(guest.getInput()).toBe('go\n{"type":"user"}\n');
     for await (const line of stream.lines) void line;
@@ -771,14 +853,14 @@ describe("machineExecStream attaching to a run its process did not launch", () =
   it("a machine that answers and no longer holds the run says gone, with no reader and no poll of its own", async () => {
     const { factory, guest, run } = await abandoned([{ append: "never read\n", exit: 0 }]);
     guest.sweep();
-    expect(await factory.attach!(run, { input: true })).toBe("gone");
+    expect(await factory.attach!(run, { input: true, startedAt: Date.now() })).toBe("gone");
     expect(guest.calls.filter(c => c.includes("__WSP_EOF_"))).toEqual([]);
   });
 
   it("a probe nothing answers leaves the run alone: no kill, no rm, and the reach window is what it waits out", async () => {
     const { factory, guest, run } = await abandoned([{ append: "still working\n" }]);
     guest.refuseProbes(new Error("gateway said 502"));
-    const failure = await factory.attach!(run, { input: true }).then(
+    const failure = await factory.attach!(run, { input: true, startedAt: Date.now() }).then(
       () => new Error("the probe answered where it should have failed"),
       (e: unknown) => e as Error,
     );
@@ -797,7 +879,7 @@ describe("machineExecStream attaching to a run its process did not launch", () =
     const launched = factory("claude -p hi", { env: {}, input: ["go"] });
     await vi.waitFor(() => expect(guest.getLaunch()).not.toBe(""));
     guest.refuseProbes(Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNRESET" } }));
-    const failure = await factory.attach!(launched.run!, { input: true }).then(
+    const failure = await factory.attach!(launched.run!, { input: true, startedAt: Date.now() }).then(
       () => new Error("the probe answered where it should have failed"),
       (e: unknown) => e as Error,
     );
@@ -810,7 +892,7 @@ describe("machineExecStream attaching to a run its process did not launch", () =
   it("a machine that answers neither way is not a run to end", async () => {
     const { factory, guest, run } = await abandoned([{ append: "still working\n" }]);
     guest.garbleProbes();
-    const failure = await factory.attach!(run, { input: true }).then(
+    const failure = await factory.attach!(run, { input: true, startedAt: Date.now() }).then(
       () => new Error("the probe answered where it should have failed"),
       (e: unknown) => e as Error,
     );
@@ -823,7 +905,7 @@ describe("machineExecStream attaching to a run its process did not launch", () =
     const { factory, guest } = await abandoned([{ append: "still working\n" }]);
     const before = guest.calls.length;
     for (const bad of ["/tmp/wsp-run/../../etc/x", "/tmp/wsp-run/$(id)", "/etc/wsp-run/aabbccddeeff", "/tmp/wsp-run/nothex000000", "/tmp/wsp-run/aabbccddeef"]) {
-      await expect(factory.attach!(bad, { input: true })).rejects.toThrow("is not a run this host could have launched");
+      await expect(factory.attach!(bad, { input: true, startedAt: Date.now() })).rejects.toThrow("is not a run this host could have launched");
     }
     expect(guest.calls.length).toBe(before);
   });

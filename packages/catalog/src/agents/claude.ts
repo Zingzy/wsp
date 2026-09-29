@@ -26,6 +26,8 @@ export const CLAUDE: AgentEntry = {
   projectDocs: [AGENTS_MD, "CLAUDE.md"],
   // The slash is the skill's folder name, host's SKILL_NAME, which the catalog cannot import; mcp-install.test.ts pins this to it.
   firstMove: `/wsp ${SET_UP_WSP}`,
+  // 2.1.284: such a call is reported as a task, and its end wakes the agent with a fresh turn.
+  backgroundRoad: "run_in_background on the Bash tool",
   installRoad: { road: "script", script: CLAUDE_INSTALL, version: CLAUDE_CODE.version, bins: [LOCAL_BIN] },
   latest: { from: "text", url: CLAUDE_LATEST },
   signIn: SIGN_IN_ROWS.claude,
