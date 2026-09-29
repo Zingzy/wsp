@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { useStore } from "../src/protocol/store.js";
 import { selectActiveRightPanel, selectPanelTerminalIds, selectWorkspaceRightPanelState, useRightPanelStore } from "../src/rightPanelStore.js";
 import { RightPanel } from "../src/shell/RightPanel.js";
+import { useBrowserTabs } from "../src/browser/tabs.js";
 import { clearNotices } from "./notice-text.js";
 
 const KEY = "wsp:right-panel-state:v1";
@@ -28,6 +29,33 @@ async function hydrate(surfaces: unknown[], activeSurfaceId: string | null = nul
   window.localStorage.setItem(KEY, JSON.stringify({ state: { byWorkspaceId: { [WS]: { isOpen: true, activeSurfaceId, surfaces } } }, version: 1 }));
   await useRightPanelStore.persist.rehydrate();
 }
+
+describe("a new browser tab from the panel", () => {
+  it("opens a new browser tab on the servers list each time, active, beside the one already open", () => {
+    const { open, openNewBrowser } = useRightPanelStore.getState();
+    open(WS, "preview");
+    openNewBrowser(WS);
+    openNewBrowser(WS);
+    const state = selectWorkspaceRightPanelState(useRightPanelStore.getState().byWorkspaceId, WS);
+    const browsers = state.surfaces.filter(surface => surface.kind === "preview");
+    expect(browsers).toHaveLength(2);
+    expect(new Set(browsers.map(surface => surface.id)).size).toBe(2);
+    expect(state.activeSurfaceId).toBe(browsers[1]!.id);
+    for (const surface of browsers) {
+      const tabId = surface.kind === "preview" ? surface.resourceId : null;
+      expect(tabId).not.toBeNull();
+      const tab = useBrowserTabs.getState().byWorkspaceId[WS]![tabId!]!;
+      expect(tab.entries[tab.index]).toBeNull();
+    }
+  });
+
+  it("every other road that opens the browser keeps reusing the tab already open", () => {
+    const { openNewBrowser, open } = useRightPanelStore.getState();
+    openNewBrowser(WS);
+    open(WS, "preview");
+    expect(selectWorkspaceRightPanelState(useRightPanelStore.getState().byWorkspaceId, WS).surfaces.filter(surface => surface.kind === "preview")).toHaveLength(1);
+  });
+});
 
 describe("rightPanelStore hydrate", () => {
   it("keeps a stored Agents surface, and keeps it active", async () => {

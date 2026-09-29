@@ -12,6 +12,7 @@
  * Keyed by workspace id: a wsp workspace is one machine, and every surface
  * here belongs to the machine, not to one conversation on it.
  */
+import { useBrowserTabs } from "./browser/tabs.js";
 import { HERE_KEY } from "./terminal/computer.js";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
@@ -62,6 +63,8 @@ interface RightPanelStoreState {
   byWorkspaceId: Record<string, WorkspaceRightPanelState>;
   open: (workspaceId: string, kind: OpenableKind) => void;
   openBrowser: (workspaceId: string, tabId: string | null) => void;
+  /** A new browser tab on the servers list, the panel's own Browser: every other road reuses the tab it names. */
+  openNewBrowser: (workspaceId: string) => void;
   openFile: (workspaceId: string, path: string, line?: number) => void;
   openTerminal: (workspaceId: string, terminalId: string) => void;
   splitTerminal: (
@@ -243,7 +246,7 @@ export function migratePersistedRightPanelState(persistedState: unknown): {
 
 export const useRightPanelStore = create<RightPanelStoreState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       byWorkspaceId: {},
       open: (workspaceId, kind) =>
         set((state) => ({
@@ -261,6 +264,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             return upsertSurface({ ...current, surfaces: withoutPlaceholder }, surface);
           }),
         })),
+      openNewBrowser: (workspaceId) => get().openBrowser(workspaceId, useBrowserTabs.getState().createTab(workspaceId, null)),
       openFile: (workspaceId, path, line) =>
         set((state) => ({
           byWorkspaceId: updateWorkspace(state.byWorkspaceId, workspaceId, (current) => {
