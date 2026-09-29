@@ -159,8 +159,8 @@ describe("the header and the body through a settle", () => {
 describe("a new thread's address", () => {
   it("the screen it is written on has one, and its first turn takes the thread's own", async () => {
     const { emit, started, center, editor, shell } = await mount();
-    fireEvent.click(shell.getByRole("button", { name: "New thread" }));
-    await waitFor(() => expect(center().getByRole("heading", { level: 1 }).textContent).toBe("What should we build in api?"));
+    act(() => useStore.getState().newThread(WS));
+    await waitFor(() => expect(center().getByRole("heading", { level: 1 }).textContent).toBe("What should we build in the-project?"));
     expect(window.location.hash).toBe(`#w/${WS}/new`);
     emit({ type: "session.done", ...B, at: T0 + 100_000, result: { status: "completed", durationMs: 40_000, costUsd: 0.002 } });
     emit({ type: "session.end", ...B, at: T0 + 100_100, exitCode: 0, sawResult: true });
@@ -313,13 +313,13 @@ describe("switching threads while a turn runs", () => {
     ];
     const rows: SessionView[] = [ROWS[0]!, ROWS[1]!, { id: "s_a2", workspaceId: WS, harness: "claude", status: "running", prompt: "add a readiness route too", startedAt: T0 + 90_000, threadId: "thr_a" }];
     const { emit, started, center, editor, shell } = await mount(fixtureApi([...SETTLED_A, ...RUNNING_B, ...RUNNING_A2], rows), "Adding GET /ready.");
-    fireEvent.click(shell.getByRole("button", { name: "New thread" }));
-    await waitFor(() => expect(center().getByRole("heading", { level: 1 }).textContent).toBe("What should we build in api?"));
+    act(() => useStore.getState().newThread(WS));
+    await waitFor(() => expect(center().getByRole("heading", { level: 1 }).textContent).toBe("What should we build in the-project?"));
     emit({ type: "session.delta", ...B, at: T0 + 91_000, kind: "text", text: " Found it in the keychain." });
     expect(center().queryByText(/Found it in the keychain/)).toBeNull();
     emit({ type: "session.delta", ...A2, at: T0 + 91_300, kind: "text", text: " Wiring it in." });
     expect(center().queryByText(/Wiring it in/)).toBeNull();
-    expect(center().getByRole("heading", { level: 1 }).textContent).toBe("What should we build in api?");
+    expect(center().getByRole("heading", { level: 1 }).textContent).toBe("What should we build in the-project?");
     // The composer opens once the left turn ends; the start that follows the send is the person's own by the prompt it carries.
     emit({ type: "session.done", ...A2, at: T0 + 100_000, result: { status: "completed", durationMs: 10_000, costUsd: 0.002 } });
     emit({ type: "session.end", ...A2, at: T0 + 100_100, exitCode: 0, sawResult: true });
@@ -342,9 +342,9 @@ describe("switching threads while a turn runs", () => {
     const { emit, started, center, threadRow, editor, shell } = await mount();
     fireEvent.click(threadRow("make me a simple server"));
     await center().findByText("Added GET /health.");
-    fireEvent.click(shell.getByRole("button", { name: "New thread" }));
+    act(() => useStore.getState().newThread(WS));
     expect(useStore.getState()).toMatchObject({ selectedId: WS, selectedThreadId: null });
-    await waitFor(() => expect(center().getByRole("heading", { level: 1 }).textContent).toBe("What should we build in api?"));
+    await waitFor(() => expect(center().getByRole("heading", { level: 1 }).textContent).toBe("What should we build in the-project?"));
     expect(threadRow("make me a simple server").getAttribute("data-active")).toBe("false");
     emit({ type: "session.done", ...B, at: T0 + 100_000, result: { status: "completed", durationMs: 40_000, costUsd: 0.002 } });
     emit({ type: "session.end", ...B, at: T0 + 100_100, exitCode: 0, sawResult: true });

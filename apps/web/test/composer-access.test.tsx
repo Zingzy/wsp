@@ -12,7 +12,7 @@ import { workspaceAccess, type HarnessCatalog, type WorkspaceView } from "@wsp/p
 import { harnessCatalog } from "@wsp/runtime";
 import { catalogIn, catalogsIn, useStore } from "../src/protocol/store.js";
 import { effectivePicks } from "../src/components/chat/composerPicks.js";
-import { ComposerOptionPickers } from "../src/components/chat/ComposerOptionPickers.js";
+import { ComposerAccessPicker, ComposerOptionPickers } from "../src/components/chat/ComposerOptionPickers.js";
 import type { ChatThreadHandle, ChatThreadView } from "../src/components/chat/useChatThread.js";
 
 const WS = "ws_a";
@@ -87,7 +87,12 @@ describe("the composer's access button", () => {
 
   it("is not drawn at all until the workspace's catalog lands, and then reads what that workspace starts a thread at", () => {
     act(() => useStore.setState({ harnesses: [TABLE], harnessesByWorkspace: {}, workspaces: [WORKSPACE], sessions: {} }));
-    const drawn = render(<ComposerOptionPickers workspaceId={WS} thread={handle} onPickAccess={() => {}} onOtherFolder={() => {}} />);
+    const drawn = render(
+      <>
+        <ComposerOptionPickers workspaceId={WS} thread={handle} />
+        <ComposerAccessPicker workspaceId={WS} thread={handle} onPickAccess={() => {}} refused={null} />
+      </>,
+    );
     // The model button is there, so the row is drawn and it is the access one alone that is missing.
     expect(document.querySelector('[data-composer-picker="model"]')).not.toBeNull();
     expect(accessButton()?.dataset["access"]).toBeUndefined();

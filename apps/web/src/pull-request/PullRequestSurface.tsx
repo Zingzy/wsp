@@ -9,7 +9,7 @@ import { RefreshCwIcon } from "lucide-react";
 import { CHECK_STATE_WORDS, capitalised, isPullRequestFact, isPullRequestNamed, pullRequestCounts, pullRequestWord, type PullRequestPage } from "@wsp/protocol";
 import { Button } from "../components/ui/button.js";
 import { sendToThread, prCommentQuote } from "../diffs/sendToThread.js";
-import { MICRO_LABEL } from "../lib/microLabel.js";
+import { GROUP_LABEL } from "../lib/microLabel.js";
 import { cn } from "../lib/utils.js";
 import { failureOf } from "../protocol/failure.js";
 import { useProjects, useStatus, useStore, useWorkspace } from "../protocol/store.js";
@@ -24,7 +24,7 @@ const WORD = "shrink-0 text-[13px] leading-5 text-muted-foreground";
 function Section({ head, children }: { head: string; children: ReactNode }) {
   return (
     <section data-pr-section={head.toLowerCase()} className="mt-8 flex flex-col gap-0.5">
-      <span className={cn(MICRO_LABEL, "flex h-6 items-center px-2 text-muted-foreground")}>{head}</span>
+      <span className={cn(GROUP_LABEL, "flex h-6 items-center px-2 text-muted-foreground")}>{head}</span>
       {children}
     </section>
   );

@@ -9,7 +9,7 @@ import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } fro
 import { copyText } from "../actions/clipboard.js";
 import { Button } from "../components/ui/button.js";
 import { Spinner } from "../components/ui/spinner.js";
-import { MICRO_LABEL } from "../lib/microLabel.js";
+import { GROUP_LABEL } from "../lib/microLabel.js";
 import { cn } from "../lib/utils.js";
 import { STATE_WORD } from "./recipe/rows.js";
 
@@ -60,7 +60,7 @@ export function CopyRow({ label, value, k, children }: { label?: string; value: 
   return (
     <div data-copy-row={k} className="flex h-10 w-full items-center gap-3 rounded-md border border-border bg-(--input-fill) px-3">
       {label === undefined ? null : (
-        <span className={cn(LABEL_WIDTH, MICRO_LABEL, "shrink-0 text-muted-foreground")}>{label}</span>
+        <span className={cn(LABEL_WIDTH, GROUP_LABEL, "shrink-0 text-muted-foreground")}>{label}</span>
       )}
       {/* The name is on the value, not the row: a reader after the fact alone must not also get the label. */}
       <span

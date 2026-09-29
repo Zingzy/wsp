@@ -77,7 +77,7 @@ describe("workspace center", () => {
     await mount([workspace]);
     const heading = await screen.findByRole("heading", { level: 1 });
     expect(heading.textContent).toContain("What should we build in");
-    expect(heading.textContent).toContain("api");
+    expect(heading.textContent).toContain("the-project");
     expect(screen.getByTestId("composer-editor")).toBeDefined();
     expect(screen.queryByRole("tablist")).toBeNull();
     expect(screen.queryByRole("tab", { name: "terminal" })).toBeNull();
@@ -132,10 +132,10 @@ describe("workspace creation view", () => {
     void useStore.getState().createWorkspace("pr_1", "beta");
     const view = await screen.findByTestId("workspace-creation");
     expect(view.getAttribute("aria-busy")).toBe("true");
-    expect(within(view).getByRole("heading", { level: 1 }).textContent).toBe("What should we build in beta?");
+    expect(within(view).getByRole("heading", { level: 1 }).textContent).toBe("What should we build in the-project?");
     expect(screen.getByRole("banner").textContent).toContain("beta");
-    // The compose glyph stays and is held: a creation is not yet a workspace to open a thread in.
-    expect(screen.getByRole("button", { name: "New thread" }).getAttribute("aria-disabled")).toBe("true");
+    // The compose glyph stays live: New thread opens on a project, which needs no workspace standing.
+    expect(screen.getByRole("button", { name: "New thread" }).getAttribute("aria-disabled")).toBeNull();
     expect(within(view).queryByRole("progressbar")).toBeNull();
     const fold = view.querySelector<HTMLElement>("[data-k=setting-up]")!;
     expect(fold.textContent).toContain("Setting up");
@@ -192,7 +192,7 @@ describe("workspace creation view", () => {
     expect(screen.queryByTestId("workspace-creation")).toBeNull();
     expect(useStore.getState().selectedId).toBe("ws_beta");
     expect(screen.queryByText(TRANSCRIPT_LOADING)).toBeNull();
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("What should we build in beta?");
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("What should we build in the-project?");
     expect(document.querySelector("[data-chat-composer-dock]")!.hasAttribute("data-centred")).toBe(true);
   });
 
@@ -274,6 +274,6 @@ describe("workspace creation view", () => {
     // And so does everything else kept under the creation's key, which nothing would ever read again.
     expect(useComposerDraftStore.getState().drafts[key]).toBeUndefined();
     expect(useComposerOptionsStore.getState().byWorkspaceId[key]).toBeUndefined();
-    expect((await screen.findByRole("heading", { level: 1 })).textContent).toContain("api");
+    expect((await screen.findByRole("heading", { level: 1 })).textContent).toContain("the-project");
   });
 });

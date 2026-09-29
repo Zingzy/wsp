@@ -3,7 +3,7 @@
 // with one folded "Setting up" row at the top whose steps are the step words'
 // table and whose times stand right-aligned in mono, and the composer ready,
 // where a message waits until the machine is up.
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { HOSTNAME_KEPT, WorkspaceCreateStage } from "@wsp/protocol";
 import { useComposerDraftStore } from "../src/components/chat/composerDraftStore.js";
@@ -205,13 +205,12 @@ describe("the creation page", () => {
     expect(question.textContent).toBe("What should we build in beta?");
   });
 
-  it("draws the thread's footer while it waits, the picks held where they will stand", async () => {
+  it("draws the thread's footer while it waits, with no project chip in it", async () => {
     const project = { id: "pr_here", name: "spoo", computer: "here", source: { kind: "folder", path: "/Users/dev/spoo" }, path: "/Users/dev/spoo", remote: "", defaultBranch: "main", memoryKey: "-", memoryDir: "/m", createdAt: "t" };
     act(() => useStore.setState({ projects: [project], harnesses: [TABLE_CATALOG] } as never));
     const view = await mount(making([], { project: "pr_here" }));
-    const picker = view.querySelector<HTMLButtonElement>('[data-composer-picker="project"]')!;
-    expect(picker.textContent).toContain("spoo");
-    expect(picker.disabled).toBe(true);
+    await waitFor(() => expect(view.querySelector('[data-composer-picker="model"]')).not.toBeNull());
+    expect(view.querySelector('[data-composer-picker="project"]')).toBeNull();
   });
 
   it("names the folder the copy is going to under the box, never the project's own", async () => {

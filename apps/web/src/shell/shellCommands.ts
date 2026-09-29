@@ -34,6 +34,7 @@ import { workspaceOrHere } from "../terminal/computer.js";
 import { useTerminalDrawerStore } from "../terminal/drawerStore.js";
 import { resetTerminalZoom, stepTerminalZoom } from "../terminal/fontSetting.js";
 import { getTerminals, type WorkspaceTerminals } from "../terminal/link.js";
+import { openNewThread } from "./NewThreadPicks.js";
 import { requestComposerFocus } from "./shellRequests.js";
 import { recentThreads, useThreadHistory } from "./threadHistory.js";
 import { highlightedTarget, stepSwitcherAt, useWorkspaceSwitcher } from "./workspaceSwitcher.js";
@@ -320,7 +321,7 @@ export function runShellCommand(command: KeybindingCommand, target: ShellCommand
       if (workspaceId) resetTerminalZoom(workspaceId);
       return;
     case "chat.new":
-      if (workspaceId) useStore.getState().newThread(workspaceId);
+      openNewThread();
       return;
     case "workspace.next":
       cycleWorkspaceSwitcher(1, hold);

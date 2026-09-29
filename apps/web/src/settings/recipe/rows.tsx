@@ -15,7 +15,7 @@ import { Menu, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "../
 import { Spinner } from "../../components/ui/spinner.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip.js";
 import { TONE_FILL, TONE_TEXT } from "../../lib/tone.js";
-import { MICRO_LABEL } from "../../lib/microLabel.js";
+import { GROUP_LABEL } from "../../lib/microLabel.js";
 import { cn } from "../../lib/utils.js";
 import { CARD_SURFACE } from "../rows.js";
 
@@ -75,10 +75,10 @@ export const FIELD = "h-8 w-full rounded-md border border-input bg-background fo
 /** A field standing on its own, outside any card: 48 px high, 13 px mono. */
 export const LONE_FIELD = "h-12 w-full rounded-md border border-input bg-background font-mono text-[13px] [&_input]:h-12 [&_input]:px-[14px] [&_input]:text-[13px] [&_input]:leading-[48px]";
 
-/** One caps mono divider over a group of rows. */
+/** One heading over a group of rows, in the group heading's sentence case sans. */
 export function GroupLabel({ children }: { children: ReactNode }) {
   return (
-    <li data-k="group" className={cn(ROW_LINE, "flex h-8 items-center pl-4 text-muted-foreground", MICRO_LABEL)}>
+    <li data-k="group" className={cn(ROW_LINE, "flex h-8 items-center pl-4 text-muted-foreground", GROUP_LABEL)}>
       {children}
     </li>
   );

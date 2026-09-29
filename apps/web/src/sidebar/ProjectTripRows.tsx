@@ -13,11 +13,11 @@ import { Button } from "../components/ui/button.js";
 import { Checkbox } from "../components/ui/checkbox.js";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../components/ui/collapsible.js";
 import { Input } from "../components/ui/input.js";
-import { MICRO_LABEL } from "../lib/microLabel.js";
+import { GROUP_LABEL } from "../lib/microLabel.js";
 import { cn } from "../lib/utils.js";
 import { count, type StatusTone } from "./projectTrip.js";
 
-const SECTION_LABEL = cn(MICRO_LABEL, "text-muted-foreground");
+const SECTION_LABEL = cn(GROUP_LABEL, "text-muted-foreground");
 
 /** One section of the dialog's single container: its label over its rows, set apart from the next by space alone. */
 export function TripSection({ k, label, htmlFor, children }: { k: string; label: string; htmlFor?: string; children: ReactNode }) {

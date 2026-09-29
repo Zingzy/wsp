@@ -19,7 +19,7 @@ export function PreviewRecentUrlCard({ entry, visitedLabel, onOpen, onRemove }: 
   const path = parsed.pathname === "/" ? "" : parsed.pathname;
   const label = `${parsed.host}${path}${parsed.search}${parsed.hash}`;
   return (
-    <div className="group relative flex w-full items-center">
+    <div data-recent-url={entry.url} className="group relative flex w-full items-center">
       <button
         type="button"
         onClick={onOpen}

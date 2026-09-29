@@ -25,7 +25,7 @@ The owner kept both as they are. Everything else takes the grammar below.
 
 System stacks, already in `index.css`: `--font-sans` and `--font-mono`. Every
 mono run has `font-variant-numeric: tabular-nums`. Mono is for machine text:
-numbers, versions, paths, sizes, money, keyboard hints, section headers.
+numbers, versions, paths, sizes, money, keyboard hints.
 Words a person reads are sans: a computer's name, a state word, a source
 ("brew"), a location ("spoo-landing @ Solari"), a note, a branch name on a
 tile.
@@ -43,7 +43,7 @@ tile.
 | Grid numbers and versions, mono, right-aligned | 12 | 400 | foreground |
 | Tile rows one and three, row notes | 11 / 14 | 400 | muted |
 | Mono facts and meta | 11 / 16 | 400 | muted |
-| Section header on a Settings list, mono uppercase, tracking 0.12em | 11 | 400 | muted-foreground |
+| Group heading in a list, a menu or the palette (`GROUP_LABEL`), sans, sentence case | 12 / 16 | 400 | muted-foreground |
 | Sidebar section head, `Needs you (2)`, sans | 12 / 16 | 400 | sidebar-muted-foreground |
 
 No 10px, no 16px, no bold. Something that has to stand out gets weight 500 or
@@ -135,10 +135,10 @@ a thread. See `references/computers-graphite.png` and `references/image-graphite
 - Glyph frame: 32px square, radius 6, 1px `--border`, fill foreground 4%. An
   agent's catalog mark at 20px, a brand mark at 18px, a lucide glyph at 16px
   in foreground 80%.
-- The section's name is the first column's header, in the small caps mono:
-  `COMPUTER  CORES  MEMORY  THREADS`, `CLOUD  MACHINES  SPEND TODAY`, `AGENTS
-  VERSION  SOURCE`. No card title above it, no floating label between
-  sections. Number columns and their header cell are right-aligned.
+- The section's name is the first column's header, in the group heading's
+  sentence case sans: `Computer  Cores  Memory  Threads`, `Agents  Version
+  Source`. No card title above it, no floating label between sections. Number
+  columns and their header cell are right-aligned.
 - Row: glyph frame, name at 14px sans (a path at 13px mono), an optional tag
   beside it at 12px muted ("default"), an optional note under it at 11px
   muted. Then numbers in 12px mono foreground, words in 13px sans muted, a load
@@ -368,9 +368,9 @@ in place, this list decides.
 - No fake or sample data in the shipped app; the mockup's rows are the
   mockup's. Tests and screenshots feed real components fixtures, and a zero
   count reads as 0, never a dash.
-- No em dashes, no Title Case sentences, no lowercase state words. Sentence
-  case, capitalised single state words, and a Settings list's section headers
-  as the one caps dress; the sidebar's section heads are sentence case.
+- No em dashes, no Title Case sentences, no lowercase state words, and no caps
+  anywhere: every heading is sentence case in sans (the owner's ruling of
+  2026-09-28), and capitalised single state words.
 
 ## Proving a screen matches
 

@@ -103,7 +103,7 @@ export function ProcessesSurface({ workspaceId }: { workspaceId: string }) {
           {stale ?? (unavailable !== null ? "unavailable" : count)}
         </span>
       </div>
-      <div className={cn(COLUMNS, "h-6 shrink-0 border-b border-border/50 text-[.65rem] uppercase tracking-wider text-muted-foreground")} role="row">
+      <div className={cn(COLUMNS, "h-6 shrink-0 border-b border-border/50 text-xs text-muted-foreground")} role="row">
         <span className="text-right">pid</span>
         <SortButton k="cpu" sort={sort} onSort={setSort}>
           cpu
@@ -164,7 +164,7 @@ function SortButton({ k, sort, onSort, children }: { k: ProcSort; sort: ProcSort
       type="button"
       aria-pressed={sort === k}
       onClick={() => onSort(k)}
-      className={cn("cursor-pointer text-right uppercase tracking-wider hover:text-foreground", sort === k ? "text-foreground" : "text-muted-foreground")}
+      className={cn("cursor-pointer text-right hover:text-foreground", sort === k ? "text-foreground" : "text-muted-foreground")}
     >
       {children}
     </button>
