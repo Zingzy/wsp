@@ -415,6 +415,21 @@ async fn locate(ctx: &Ctx, requested: &str) -> Result<PathBuf, OpError> {
     fs::blocking(move || paths::resolve_inside(&paths::roots_now(&root, &roots_path)?, &requested)).await
 }
 
+/// The folder a diff may answer for, as the runner sees paths: the outermost root the folder resolved under on this
+/// computer, since every fs op reads anywhere under any root, or a workspace's own `/`, which nothing sits above.
+async fn bound_of(ctx: &Ctx, machine: Option<&str>, at: &Path) -> Result<PathBuf, OpError> {
+    if machine.is_some() {
+        return Ok(PathBuf::from("/"));
+    }
+    let (root, roots_path, at) = (PathBuf::from(&ctx.root), ctx.roots_path(), at.to_path_buf());
+    fs::blocking(move || {
+        let roots = paths::roots_now(&root, &roots_path)?;
+        let real = roots.iter().filter_map(|r| std::fs::canonicalize(r).ok()).filter(|r| paths::is_inside(r, &at));
+        Ok(real.min_by_key(|r| r.as_os_str().len()).unwrap_or(at))
+    })
+    .await
+}
+
 /// Which way an op runs a program, and so which machine it is answered for: this computer, or one workspace this
 /// computer holds. One enum rather than a generic on every arm, and one module behind each way.
 enum Runner {
@@ -745,8 +760,9 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
         DaemonOp::GitDiff { cwd, scope, path, paths, whole, machine_id } => {
             let diff = async {
                 let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Reads).await?;
+                let bound = bound_of(ctx, machine_id.as_deref(), &at).await?;
                 let paths = paths.unwrap_or_default();
-                git::git_diff(&runner, &at, scope, path.as_deref(), &paths, whole == Some(true), numbers::GIT_DIFF_CAP_BYTES).await
+                git::git_diff(&runner, &at, &bound, scope, path.as_deref(), &paths, whole == Some(true), numbers::GIT_DIFF_CAP_BYTES).await
             };
             answer(id, diff.await)
         }
