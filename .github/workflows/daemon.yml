@@ -206,7 +206,7 @@ jobs:
         env:
           TARGET: ${{ matrix.target }}
         run: |
-          LIBSECCOMP_LIB_PATH="$PWD/target/libseccomp/musl" cargo build --locked --release --target "$TARGET" -p wsp-daemon-bin
+          LIBSECCOMP_LIB_PATH="$PWD/target/libseccomp/musl" cargo build --locked --release --target "$TARGET" -p wsp-daemon-bin --features mcp
           cp "target/$TARGET/release/wsp-daemon" "wsp-daemon-$TARGET"
           ls -l "wsp-daemon-$TARGET"
           file "wsp-daemon-$TARGET"
