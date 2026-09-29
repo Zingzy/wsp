@@ -16,7 +16,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CLOUD_ENV, EXIT_CODES, jsonLine, scopedNoPairLine } from "@wsp/protocol";
-import { copyKey, createRuntime, memoryStore } from "@wsp/runtime";
+import { copyKey, createRuntime, memoryStore, type PlaceWiring } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cli, localWiring, serve } from "../src/cli.js";
 import { dialer, mcpServer } from "../src/mcp.js";
@@ -322,7 +322,11 @@ suite(`the tool server in the daemon binary${MCP_BIN === undefined ? " (set WSP_
         store,
         adapters: {},
         local: localWiring(join(dir, "user"), undefined, fakeDaemonStart, undefined, copyingFake()),
-        placeLinks: placeWiring(statePath),
+        // This computer's row read once: its free disk moves between the verb's read and the tool server's.
+        placeLinks: ((wiring: PlaceWiring): PlaceWiring => {
+          const here = wiring.here();
+          return { ...wiring, here: () => here };
+        })(placeWiring(statePath)),
         agentsReader: agentsReader({ vault: () => ({}), here: home }),
         agentsActs: hostActs({ vaultFile: join(dir, ".env"), home: () => join(dir, "user"), wspServer: () => ({ command: "wsp", args: ["mcp"] }) }),
         skillsActs: skillsActs({ fetch: SKILLS_SH, here: home }),

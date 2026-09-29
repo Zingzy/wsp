@@ -43,6 +43,7 @@ import { ownedStore } from "../../runtime/test/stub-backend.js";
 import { guestAnswer, type StubBackend, stubBackend, type StubMachine } from "./stub-backend.js";
 import { loginOf } from "./signin-questions.js";
 import { copyingFake, createOn, projectOn } from "./verbs-fixture.js";
+import { mcpServerSpec, toolServerHere } from "../src/mcp-install.js";
 
 /** The screens read this computer for whose login a copy would carry; a home with nothing in it names none. */
 const HOME_HERE = "/home/nobody";
@@ -1216,11 +1217,16 @@ describe("wsp init, the summary-first screens", () => {
     expect(out).toContain("Claude Code now has the wsp tools: ~/.claude.json");
     expect(out.indexOf("Recipe saved to")).toBeLessThan(out.indexOf("Claude Code now has the wsp tools"));
     const written = JSON.parse(readFileSync(join(f.opts.home, ".claude.json"), "utf8")) as { mcpServers: { wsp: { command: string; args: string[] } } };
-    expect(written.mcpServers.wsp.command).toBe(process.execPath);
-    expect(written.mcpServers.wsp.args.slice(-3)).toEqual(["mcp", "--state", f.opts.statePath]);
+    // The command this computer's configs are written with: the binary's tool server where it carries one.
+    const spec = mcpServerSpec(f.opts.statePath);
+    expect(written.mcpServers.wsp).toEqual({ command: spec.command, args: spec.args });
+    // The road this computer takes: its binary's tool server where it carries one, else this node running wsp.
+    const binary = toolServerHere();
+    expect(spec.command).toBe(binary === false ? process.execPath : binary);
+    expect(binary === false ? spec.args.slice(-3) : [spec.args[0], ...spec.args.slice(-2)]).toEqual(["mcp", "--state", f.opts.statePath]);
     // The command the config now runs, named once after the agents' lines.
-    expect(out).toContain(`The server command is ${process.execPath}`);
-    expect(out).toContain(`mcp --state ${f.opts.statePath}`);
+    expect(out).toContain(`The server command is ${spec.command}`);
+    expect(out).toContain(`--state ${f.opts.statePath}`);
     await f.press("n");
     expect((await run).code).toBe(1);
   });
@@ -4222,7 +4228,7 @@ describe("wsp init --recipe", () => {
     expect(text).toContain("// the theme\n");
     const settings = parseJsonc(text) as { theme: string; mcpServers: { wsp: { args: string[] } } };
     expect(settings.theme).toBe("dark");
-    expect(settings.mcpServers.wsp.args.slice(-3)).toEqual(["mcp", "--state", f.opts.statePath]);
+    expect(settings.mcpServers.wsp.args).toEqual(mcpServerSpec(f.opts.statePath).args);
     await f.press("n");
     expect((await run).code).toBe(1);
     // The saved recipe is this Mac's rows with the file's ticks on them: what is here as each row's source, a row the file lacked off.

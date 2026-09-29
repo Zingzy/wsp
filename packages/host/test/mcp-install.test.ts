@@ -12,7 +12,7 @@ import { configHardLinkRefusal, mcpServerCommandLine, nextInsideAgentLine, WSP_T
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HELP, JSON_COMMANDS, PROSE_COMMANDS, agentPage, cli, type CliIO } from "../src/cli.js";
 import { SECTION_BEGIN, sectionText } from "../src/agents-md.js";
-import { agentsOnPath, installEach, installLines, installMcp, mcpServerSpec, refreshSkills, removeLines, runningWsp, thisComputersPath, type RunningWsp } from "../src/mcp-install.js";
+import { agentsOnPath, installEach, installLines, installMcp, mcpServerSpec, refreshSkills, removeLines, runningWsp, thisComputersPath, toolServerHere, type RunningWsp } from "../src/mcp-install.js";
 import { shimPath } from "../src/shim.js";
 import { noHostServingLine } from "../src/verbs.js";
 import { SKILL_NAME, WSP_SKILL } from "../src/skill.js";
@@ -20,7 +20,9 @@ import { VERSION } from "../src/version.js";
 import { CLOUD_ON } from "../src/cloud.js";
 
 /** wsp run from a checkout: node given the bundle's path, and no wsp on PATH is that file. */
-const PROC: RunningWsp = { execPath: "/opt/node/bin/node", execArgv: ["--disable-warning=ExperimentalWarning"], argv: ["/opt/node/bin/node", "/opt/wsp/dist/bin.js", "mcp", "install"], version: "0.1.2", PATH: "/usr/bin:/bin" };
+/** A wsp on a computer whose binary carries no tool server, so its configs run this wsp: mcp-switch.test.ts holds
+ * the binary's own line. */
+const PROC: RunningWsp = { execPath: "/opt/node/bin/node", execArgv: ["--disable-warning=ExperimentalWarning"], argv: ["/opt/node/bin/node", "/opt/wsp/dist/bin.js", "mcp", "install"], version: "0.1.2", PATH: "/usr/bin:/bin", toolServer: false };
 
 /** The command line the install prints for the spec it registered. */
 const commandLine = (spec: { command: string; args: readonly string[] }): string => mcpServerCommandLine(spec.command, spec.args);
@@ -352,7 +354,10 @@ describe("installing the MCP server for a local agent", () => {
     const out = io();
     expect(await cli(["mcp", "install", "--agent", "claude", "--state", statePath], out)).toBe(0);
     const registered = mcpServerSpec(statePath);
-    expect(registered.command).toBe(process.execPath);
+    // The road this computer takes: its binary's tool server where it carries one, else this node running wsp.
+    const binary = toolServerHere();
+    expect(registered.command).toBe(binary === false ? process.execPath : binary);
+    expect(binary === false ? registered.args.slice(-3) : [registered.args[0], ...registered.args.slice(-2)]).toEqual(["mcp", "--state", statePath]);
     expect(out.lines).toEqual([
       "Claude Code now has the wsp tools: ~/.claude.json",
       "The wsp skill went to ~/.claude/skills/wsp/SKILL.md",
@@ -360,12 +365,11 @@ describe("installing the MCP server for a local agent", () => {
       commandLine(registered),
       "Next: run claude in this folder and say: /wsp set up wsp for me",
     ]);
-    expect(out.lines[3]).toContain(`mcp --state ${statePath}`);
+    expect(out.lines[3]).toContain(`--state ${statePath}`);
     expect(out.lines.at(-1)).toBe(nextInsideAgentLine("claude", `/${SKILL_NAME} set up wsp for me`));
     expect(readFileSync(join(home, ".claude", "skills", "wsp", "SKILL.md"), "utf8")).toBe(WSP_SKILL);
     const written = JSON.parse(readFileSync(join(home, ".claude.json"), "utf8")) as { mcpServers: { wsp: { command: string; args: string[] } } };
-    expect(written.mcpServers.wsp.command).toBe(process.execPath);
-    expect(written.mcpServers.wsp.args.slice(-3)).toEqual(["mcp", "--state", statePath]);
+    expect(written.mcpServers.wsp).toEqual({ command: registered.command, args: registered.args });
     const bare = { ...io(), isTTY: true };
     expect(await cli(["mcp", "install", "--state", statePath], bare)).toBe(3);
     expect(bare.errors).toEqual([
