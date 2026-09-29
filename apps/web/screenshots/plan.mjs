@@ -108,7 +108,7 @@ const stepWords = step =>
 
 const surfaceFrom = (raw, index, widths) => {
   if (raw === null || typeof raw !== "object") fail(`surface ${index} is not an object`);
-  const { name, at, steps, wait, settleMs, fixture, remote, fresh, mac, height } = raw;
+  const { name, at, steps, wait, settleMs, fixture, remote, fresh, mac, height, reason } = raw;
   if (typeof name !== "string" || !NAME.test(name)) fail(`surface ${index} needs a name of lowercase words and dashes, got ${JSON.stringify(name)}`);
   if (typeof at !== "string" || !at.startsWith("/")) fail(`${name}: "at" is the route or hash the page opens, starting with /`);
   if (steps !== undefined && !Array.isArray(steps)) fail(`${name}: "steps" is an array of data attribute words, key presses and typed words`);
@@ -120,6 +120,10 @@ const surfaceFrom = (raw, index, widths) => {
   const own = raw.widths;
   if (own !== undefined && (!Array.isArray(own) || own.length === 0 || own.some(w => !widths.includes(w)))) fail(`${name}: "widths" picks one or more from the list's own ${widths.join(", ")}`);
   if (fixture !== undefined && (typeof fixture !== "string" || !NAME.test(fixture))) fail(`${name}: "fixture" is the name of a fixture the state file serves`);
+  // A surface shot at fewer widths than the list says why, so a width is never dropped without a word.
+  const narrowed = own !== undefined && widths.some(w => !own.includes(w));
+  if (narrowed && (typeof reason !== "string" || reason.trim() === "")) fail(`${name}: shot at ${own.join(" and ")} of ${widths.join(", ")}, it needs a "reason" saying why the others are left out`);
+  if (!narrowed && reason !== undefined) fail(`${name}: shot at every width the list takes, so a "reason" has nothing to explain`);
   return {
     name,
     at,
@@ -132,6 +136,7 @@ const surfaceFrom = (raw, index, widths) => {
     fresh: fresh === true,
     mac: mac === true,
     ...(height !== undefined ? { height } : {}),
+    ...(narrowed ? { reason: reason.trim() } : {}),
   };
 };
 
@@ -182,7 +187,8 @@ export function indexMarkdown(list, written, meta) {
     const rows = plan.filter(s => s.name === surface.name && has.has(s.file));
     if (rows.length === 0) continue;
     const road = `Route \`${surface.at}\`${surface.remote ? ", served to a window on another computer" : ""}${surface.mac ? ", drawn as the Mac window over a stand-in desktop" : ""}${surface.steps.length > 0 ? `, then ${surface.steps.map(s => `${stepWords(s)}${s.width === undefined ? "" : ` (at ${s.width} only)`}`).join(", ")}` : ""}${surface.fixture === undefined ? "" : `, served from the ${surface.fixture} fixture`}.`;
-    lines.push(`## ${surface.name}`, "", road, "", "| theme | width | file |", "| --- | --- | --- |");
+    const reason = surface.reason === undefined ? [] : [`Shot at ${surface.widths.join(" and ")} alone: ${surface.reason.charAt(0).toLowerCase()}${surface.reason.slice(1)}`, ""];
+    lines.push(`## ${surface.name}`, "", road, "", ...reason, "| theme | width | file |", "| --- | --- | --- |");
     for (const row of rows) lines.push(`| ${row.theme} | ${row.width} | [${row.file}](${row.file}) |`);
     lines.push("");
   }
