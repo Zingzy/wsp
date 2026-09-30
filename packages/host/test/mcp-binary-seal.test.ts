@@ -6,20 +6,17 @@
 // admission are held to the bytes the TypeScript host writes and reads.
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { keyFingerprint, newPlaceKeyPair, signPlaceBytes, type PlaceKeyPair } from "@wsp/keys";
 import { deviceAdmissionTranscript, EXIT_CODES, pairKeyRefusal, type AccountDevice } from "@wsp/protocol";
 import { createRuntime, memoryStore, serveRuntime, type AdmittedDevices, type Runtime, type RuntimeServer } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { deviceKeyPath } from "../src/account.js";
 import { readHost, writeHost } from "../src/hosts.js";
-import { ownEnv, served } from "./stdio-session.js";
+import { mcpBinNamed, ownEnv, served } from "./stdio-session.js";
 import { stubBackend } from "./stub-backend.js";
 
-const REPO = fileURLToPath(new URL("../../../", import.meta.url));
-const named = process.env["WSP_MCP_BIN"];
-const MCP_BIN = named === undefined || named === "" ? undefined : resolve(REPO, named);
+const MCP_BIN = mcpBinNamed(process.env["WSP_MCP_BIN"]);
 const suite = MCP_BIN !== undefined ? describe : describe.skip;
 
 const HOST_KEY = newPlaceKeyPair();
