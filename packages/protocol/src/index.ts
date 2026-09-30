@@ -4377,9 +4377,9 @@ export const ProcSnapshot = z.object({
 export type ProcSnapshot = z.infer<typeof ProcSnapshot>;
 
 /** The content of every daemon this project has deployed, oldest first, one entry per version: the last one is
- * what a deploy installs today, so appending the sha the host's daemon-content test prints is the whole of
- * cutting a new version. An entry with no sha to name is UNRECORDED: the three cut before the record existed, and
- * a version whose sha another change records. */
+ * what a deploy installs today. No branch writes it: the landing runs scripts/cut-daemon-version.mjs, which appends
+ * the sha of the tree it lands where the daemon changed, with the version and its note. An entry with no sha to
+ * name is UNRECORDED: the three cut before the record existed, and the versions branches held before the cut. */
 const UNRECORDED = "";
 const DAEMON_CONTENTS = [
   UNRECORDED,

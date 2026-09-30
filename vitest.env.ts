@@ -26,6 +26,7 @@ export const GATES: Record<string, string> = {
   WSP_MCP_BIN: "runs the tool server suite against a daemon binary built with its mcp feature",
   WSP_SIGNED: "says a Developer ID signed the bundles the release runner built, which the certificate itself never reaches a test to say",
   WSP_REQUIRE_DAEMON: "fails the staged-daemon case where the build staged no binary, rather than skipping it, so a stale asset cannot ship",
+  WSP_DAEMON_CUT: "holds the daemon record to the tree, as the landing gate does once its cut has run",
 };
 
 // Every other wsp variable of the shell that started the suite goes before a worker starts, and every worker and
