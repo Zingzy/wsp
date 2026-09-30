@@ -4564,6 +4564,7 @@ const DAEMON_CONTENTS = [
   "f2efbe27af183ea59d6f6875831f6263b013d6a179d94ba977075c5478172e5a",
   "66a2d192c8d56348d567f6cae3120df03a0022011f42b426be17d94238c8870f",
   "3cfade0dea7b54831d65ec361226fb95958f457ad08a3aa6003e67da5581ada8",
+  "9a59b1daa92807a07d52f8d1ee0a3b3d3d5680202be1da20498b093b5b1daa71",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -4847,7 +4848,12 @@ const DAEMON_CONTENTS = [
  * Version 105: Reads a pull request's author and last-updated time and each commit's author from the one gh page read,
  * so the pane's header names who opened it and when it last moved and each commit names who wrote it.
  * Version 106: Changes nothing a guest runs: a leave run as root takes the workspace profile the daemon's options name,
- * the one a root install writes unless a test names a file under its own home. */
+ * the one a root install writes unless a test names a file under its own home.
+ * Version 107: Starts and reviews from a link: git.issueRead reads an issue, git.prCheckout puts a copy on a pull
+ * request's head through the host's command line, git.prDiff reads a diff cut on a file's boundary, and git.prReview
+ * posts one review whole with a comment outside the diff put into its body. A pull request read names its author and
+ * its fork, a bring back pushes where the branch's own configuration points, and git.pr fills under a title or a body
+ * given. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
