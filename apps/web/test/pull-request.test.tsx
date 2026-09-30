@@ -2,7 +2,7 @@
 // The pull request in the app: the pane's rows off the page the host reads and the fact it pushes, a failed check's
 // fix button, a line comment's Send to thread writing the quote into the composer, Merge offered only where the pull
 // request can land with a menu of the repository's methods, the conflict's fix, the thread header's git button, and
-// the composer's branch line with Update from the base.
+// the composer's branch line, and Update from the base in the pane while the branch is behind.
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fixAskedLine, updateConflictsLine, type Checkout, type PullRequestFact, type PullRequestPage, type WorkspaceStatus } from "@wsp/protocol";
@@ -214,21 +214,36 @@ describe("the thread header's git button", () => {
 });
 
 describe("the composer's branch line", () => {
-  it("says the number as the link after the counts with its word on hover, and Update from the base names the files that conflict with the fix beside them", async () => {
-    const api = withApi(fact({ checks: [] }));
-    const { container } = render(<PullRequestStrip workspaceId={WS} branch="fix/ci" />);
+  it("says the number as the link with its word on hover, and never offers Update or the fix, which live in the Pull request pane", () => {
+    withApi(fact({ checks: [], mergeable: "conflicting" }));
+    const { container } = render(<PullRequestStrip workspaceId={WS} />);
     const link = container.querySelector<HTMLAnchorElement>("[data-composer-pr-number]")!;
-    expect([link.textContent, link.getAttribute("href"), link.title]).toEqual(["#12", "https://github.com/o/r/pull/12", "open"]);
-    fireEvent.click(screen.getByText("Update from main"));
+    expect([link.textContent, link.getAttribute("href"), link.title]).toEqual(["#12", "https://github.com/o/r/pull/12", "conflicts with main"]);
+    expect(screen.queryByText("Update from main")).toBeNull();
+    expect(screen.queryByText("Ask your agent to fix")).toBeNull();
+    cleanup();
+    withApi(undefined);
+    render(<PullRequestStrip workspaceId={WS} />);
+    expect(screen.queryByText("Update from main")).toBeNull();
+  });
+});
+
+describe("Update from the base in the Pull request pane", () => {
+  it("is offered only while the branch is behind its base, and names the files that conflict with the fix beside them", async () => {
+    const api = withApi(fact({ checks: [], behindBase: 2 }));
+    render(<PullRequestSurface workspaceId={WS} />);
+    fireEvent.click(await screen.findByText("Update from main"));
     await waitFor(() => expect(api.update).toHaveBeenCalledWith(WS));
     await waitFor(() => expect(useNotices.getState().notices[0]?.text).toBe(updateConflictsLine("api", "main", ["README.md"])));
     const notice = useNotices.getState().notices[0]!;
     expect(notice.action?.word).toBe("Ask your agent to fix");
     notice.action!.run();
     await waitFor(() => expect(api.fix).toHaveBeenCalledWith(WS, undefined));
-    // On the base itself there is nothing to update from.
-    cleanup();
-    render(<PullRequestStrip workspaceId={WS} branch="main" />);
+    act(() => useStore.setState({ statuses: { [WS]: statusWith(fact({ checks: [], behindBase: 0 })) } }));
+    await waitFor(() => expect(screen.queryByText("Update from main")).toBeNull());
+    // A conflict with the base is the fix's, which tries the same update first.
+    act(() => useStore.setState({ statuses: { [WS]: statusWith(fact({ checks: [], behindBase: 2, mergeable: "conflicting" })) } }));
+    await waitFor(() => expect(document.querySelector("[data-pr-fix-conflicts]")).not.toBeNull());
     expect(screen.queryByText("Update from main")).toBeNull();
   });
 });

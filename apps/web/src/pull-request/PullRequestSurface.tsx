@@ -104,7 +104,7 @@ export function PullRequestSurface({ workspaceId }: { workspaceId: string }) {
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-2">
           {fact === null ? null : <MergeControls workspaceId={workspaceId} name={name} fact={fact} repo={page?.merge} />}
-          {fact !== null && fact.state === "open" ? (
+          {fact !== null && fact.state === "open" && (fact.behindBase ?? 0) > 0 && fact.mergeable !== "conflicting" ? (
             <Button type="button" size="xs" variant="ghost" data-pr-update onClick={() => void updateFromBase(workspaceId, name)}>
               {PR_WORDS.update(base)}
             </Button>
