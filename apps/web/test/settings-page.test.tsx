@@ -21,6 +21,7 @@ import { pickOption } from "./select.js";
 import { runShellCommand } from "../src/shell/shellCommands.js";
 import { THEMES } from "../src/themes/index.js";
 import { useTerminalDrawerStore } from "../src/terminal/drawerStore.js";
+import { AGENTS_REPORT } from "./fixtures/agents-report.js";
 import { crumb, descriptionOf, liftedRowIds, lineLabels, mountSettings, pageAt, resetSettings, rowOf, rowTitles, settingsApi, settle, sidebarRowIds } from "./settings-harness.js";
 
 const FILE: TerminalConfig = { files: ["/Users/dev/.config/ghostty/config"], fontFamily: [], fontSize: 16, palette: Array<null>(16).fill(null) };
@@ -182,26 +183,28 @@ describe("search", () => {
 });
 
 describe("search over a computer", () => {
-  it("finds a computer by the facts its chips say", async () => {
-    useStore.setState({ places: [here], projects: [] });
+  it("finds a computer by its name", async () => {
+    useStore.setState({ places: [here, box], projects: [] });
     mountSettings({ api: settingsApi().api });
     await settle();
-    fireEvent.change(field(), { target: { value: "210 GB free" } });
-    expect(rowTitles()).toEqual(["zingzy's MacBook Pro"]);
+    fireEvent.change(field(), { target: { value: "spoo" } });
+    expect(rowTitles()).toEqual(["spoo"]);
   });
 });
 
 describe("the row grammar", () => {
-  const walk = (): { rows: HTMLElement[]; lines: HTMLElement[]; cards: HTMLElement[] } => ({
+  const walk = (): { rows: HTMLElement[]; lines: HTMLElement[]; cards: HTMLElement[]; grid: HTMLElement[] } => ({
     rows: [...document.querySelectorAll<HTMLElement>("[data-settings-page] [data-settings-row]")],
+    grid: [...document.querySelectorAll<HTMLElement>("[data-settings-page] [data-grid-row], [data-settings-page] [data-thread-row], [data-settings-page] [data-k=remove-line]")],
     lines: [...document.querySelectorAll<HTMLElement>("[data-settings-page] [data-settings-line]")],
     cards: [...document.querySelectorAll<HTMLElement>("[data-settings-page] [data-settings-card]")],
   });
   const check = (where: string): void => {
-    const { rows, lines, cards } = walk();
+    const { rows, lines, cards, grid } = walk();
     // Appearance's theme picker is drawn in place of a card's rows.
     if (where === "appearance") expect(document.querySelector("[data-settings-page] [data-k=theme-picker]"), where).not.toBeNull();
-    expect(rows.length + lines.length, where).toBeGreaterThan(0);
+    expect(rows.length + lines.length + grid.length, where).toBeGreaterThan(0);
+    for (const row of document.querySelectorAll("[data-settings-page] [data-grid-row]")) expect(row.querySelector("[data-grid-name]")?.textContent, `${where}: a grid row's name`).not.toBe("");
     for (const row of rows) {
       expect(row.querySelector("[data-settings-title]")?.textContent, `${where}: a row's title`).not.toBe("");
       expect(row.querySelector("[data-settings-description]")?.textContent, `${where}: a row's description`).not.toBe("");
@@ -234,6 +237,7 @@ describe("the row grammar", () => {
       image: async () => ({ image: null, copies: [], projects: [] }),
       initGet: async () => ({ keys: { solari: true }, home: "/Users/dev", agents: [{ id: "claude", name: "Claude Code", configured: false, takesTools: true }], pricing: null, job: null }),
       hostTerminalConfig: async () => FILE,
+      agentsRead: async () => AGENTS_REPORT,
     } as Partial<Api>).api;
     const spooProject = project("pr_spoo", "spoo");
     useStore.setState({ places: [here, { ...box, agents: ["claude", "codex"], signIns: { claude: "vault-key", codex: "none" }, agentVersions: { claude: "2.1.270 (Claude Code)" } }, solari], projects: [spooProject, project("pr_landing", "landing", "p_spoo")], workspaces: [view("ws_a", "pricing page")] });

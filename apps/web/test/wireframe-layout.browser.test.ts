@@ -440,10 +440,10 @@ const SETTINGS_SCREENS = [
   ["settings-appearance", "[data-settings-at=appearance]"],
   ["settings-light-picked", "[data-settings-at=appearance]"],
   ["settings-computers", "[data-settings-at=computers] [data-place-row=solari]"],
-  ["settings-computer", "[data-settings-at='computer:p_spoo'] [data-agents-row]"],
-  ["settings-computer-failed", "[data-settings-at='computer:p_lab'] [data-agents-refused]"],
-  ["settings-this-mac", "[data-settings-at='computer:here'] [data-agents-row]"],
-  ["settings-cloud", "[data-settings-at='computer:solari'] [data-k=image-copy]"],
+  ["settings-computer", "[data-settings-at='computer:p_spoo'] [data-grid='agents'] [data-grid-row]"],
+  ["settings-computer-failed", "[data-settings-at='computer:p_lab'] [data-k=agents-misses]"],
+  ["settings-this-mac", "[data-settings-at='computer:here'] [data-grid='agents'] [data-grid-row]"],
+  ["settings-cloud", "[data-settings-at='computer:solari'] [data-k=remove-line]"],
   ["settings-projects", "[data-settings-at=projects] [data-project-row=pr_landing]"],
   ["settings-project", "[data-settings-at='project:pr_spoo'] [data-k=seeded]"],
   ["settings-devices", "[data-settings-at=devices] [data-device-row=d_3]"],
@@ -684,7 +684,7 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
     }
   }, 120_000);
 
-  it("photographs a computer's page to its foot at both widths, so its skills, its workspaces and its two acts are read", async () => {
+  it("photographs a computer's page to its foot at both widths, so its agents, its servers, its threads and Remove are read", async () => {
     for (const theme of THEMES) {
       for (const screen of FOOT_SCREENS) {
         const waitFor = SETTINGS_SCREENS.find(([name]) => name === screen)![1];

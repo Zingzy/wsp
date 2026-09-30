@@ -10,13 +10,16 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type InitJob, COPY_CURRENT, DEFAULT_PREFERENCES, PLACES_TICKET_REFUSAL, PLACES_WORDS, PLACE_CONNECTS, PLACE_LOGIN_REFUSED_KIND, PlaceAddStep, absentRoad, fmtBytes, fmtSize, imageCopyStaysLine, placeAddSheetWord, placeDaemonBehind, placeNoDialLine, provisionWord, type AgentsReport, type AgentsTarget, type EventUnion, type InitSetup, type PlaceAddJob, type PlaceProvision, type PlaceView, type SealedImage, type SessionView, type WorkspaceStatus, type WorkspaceView, PLACE_INSTALL, PROVIDER_KEY_WORDS } from "@wsp/protocol";
 import { render } from "@testing-library/react";
 import { makeApi, ProtocolClient, RequestError, type Api, type SshLogin } from "../src/protocol/client.js";
+import { useContextMenuStore } from "../src/actions/contextMenu.js";
 import { useStore } from "../src/protocol/store.js";
 import { AddComputer } from "../src/settings/AddComputer.js";
 import { useAdds } from "../src/settings/adds.js";
-import { ADD_COMPUTER_WORDS, WHERE_WORDS } from "../src/settings/format.js";
+import { AGENTS_LIST_WORDS } from "../src/components/agents/agentsRows.js";
+import { ADD_COMPUTER_WORDS, WHERE_WORDS, capitalised } from "../src/settings/format.js";
 import { AGENTS_REPORT } from "./fixtures/agents-report.js";
 import { IMAGE_WORDS } from "../src/settings/image.js";
 import { absentOf } from "../src/settings/places.js";
+import { openImageRecipe } from "../src/settings/openAt.js";
 import { useSettingsStore, type SettingsAt } from "../src/settings/settingsStore.js";
 import { SidebarCorner } from "../src/sidebar/SidebarCorner.js";
 import { shortcutLabelForCommand } from "../src/keybindings.js";
@@ -83,22 +86,18 @@ const session = (id: string, workspaceId: string): SessionView => ({ id, workspa
 const computersApi = (over: Partial<Api> = {}, setup: InitSetup = setupOf()) => settingsApi({ initGet: async () => setup, ...over });
 
 /** The list page, drawn: one row per computer by id. */
-const listIds = (): string[] => [...document.querySelectorAll<HTMLElement>("[data-settings-page] [data-place-row]")].map(row => row.dataset["placeRow"] ?? "");
-const listRow = (id: string): HTMLElement => document.querySelector<HTMLElement>(`[data-settings-page] [data-place-row='${id}']`)!;
-const stateOf = (id: string): string | undefined => listRow(id).querySelector("[data-settings-word]")?.textContent ?? undefined;
-/** A row's facts as its chips say them, one after another. */
-const factsOf = (id: string): string => [...listRow(id).querySelectorAll("[data-chip]")].map(chip => chip.textContent).join(" · ");
+const listIds = (): string[] => [...document.querySelectorAll<HTMLElement>("[data-settings-page] [data-grid-row][data-place-row]")].map(row => row.dataset["placeRow"] ?? "");
+const listRow = (id: string): HTMLElement => document.querySelector<HTMLElement>(`[data-settings-page] [data-grid-row][data-place-row='${id}']`)!;
+const nameOf = (id: string): string | undefined => listRow(id).querySelector("[data-grid-name]")?.textContent ?? undefined;
+const stateOf = (id: string): string | undefined => listRow(id).querySelector("[data-state-cell]")?.textContent ?? undefined;
+/** One cell of a row by the column it stands in. */
+const cellOf = (id: string, k: string): string | undefined => listRow(id).querySelector(`[data-k='${k}']`)?.textContent ?? undefined;
 const openPage = (id: string): void => {
   fireEvent.click(listRow(id));
 };
 
-/** The agent rows of the open page, by the name a person reads. */
-const agentTitles = (): string[] => [...document.querySelectorAll("[data-settings-page] [data-agents-row] [data-row-title]")].map(t => t.textContent ?? "");
 /** A report with nothing on it. */
 const EMPTY_REPORT: AgentsReport = { ...AGENTS_REPORT, agents: [], skills: [], servers: [], projects: [] };
-/** The word the laptop's own page reads it by while it is away, which is what every act there is held with. */
-const stateOfPage = (): string | undefined => absentOf(laptop, Date.now())?.away;
-const lineValue = (k: string): string | undefined => document.querySelector(`[data-settings-page] [data-k='${k}'] [data-settings-word]`)?.textContent ?? undefined;
 
 let live: ProtocolClient | undefined;
 
@@ -119,60 +118,79 @@ const mountComputers = async (api: Api, at: SettingsAt = { kind: "group", group:
 };
 
 describe("the Computers list", () => {
-  it("lists this computer first with its default mark and facts, and a computer that is not answering with its word in the slot", async () => {
+  it("lists this computer first with its default tag, cores, memory, running threads and Ready, and a computer that is not answering by its word", async () => {
     useStore.setState({ places: [here, laptop], workspaces: [mine, onLaptop] });
     await mountComputers(computersApi().api);
     expect(listIds()).toEqual(["here", "p_1"]);
-    expect(listRow("here").querySelector("[data-settings-title]")?.textContent).toBe(MAC);
+    expect(nameOf("here")).toBe(MAC);
     expect(listRow("here").textContent).not.toContain("zingzy-mbp");
-    expect(listRow("here").querySelector("[data-settings-mark]")?.textContent).toBe("default");
-    expect(factsOf("here")).toBe(`${here.shape!.cpu} cores · 16 GB · 210 GB free · 1 task`);
-    expect(stateOf("here")).toBeUndefined();
-    // The slot holds the one word for the silence, in the words every other surface says it in.
-    expect(stateOf("p_1")).toBe("no answer");
-    expect(factsOf("p_1")).toMatch(/ cores · .* GB · 91 GB free · 1 task$/);
-    // Facts are chips in the mono fact face, each whole on hover.
-    const chip = listRow("p_1").querySelector("[data-chip]")!;
-    expect(chip.className).toContain("font-mono");
-    expect(chip.getAttribute("title")).toBe(chip.textContent);
+    expect(listRow("here").querySelector("[data-grid-tag]")?.textContent).toBe("default");
+    expect(cellOf("here", "cores")).toBe("8");
+    expect(cellOf("here", "memory")).toBe("16 GB");
+    expect(cellOf("here", "threads")).toBe("0");
+    expect(stateOf("here")).toBe("Ready");
+    // The slot holds the one word for the silence, capitalised; the whole sentence rides the hover.
+    expect(stateOf("p_1")).toBe("No answer");
+    expect(listRow("p_1").getAttribute("title")).toBe(absentOf(laptop, Date.now())?.sentence);
+    // No chip, no middle dot, no rule: facts are cells on the template.
+    expect(document.querySelector("[data-settings-page] [data-chip]")).toBeNull();
+    expect(document.querySelector("[data-settings-page]")?.textContent).not.toContain("\u00b7");
+    expect(listRow("here").className).toContain("h-13");
   });
 
   it("says this computer's own daemon is not running in the slot, rather than listing this Mac as perfectly fine", async () => {
     const silent = { id: mine.id, phase: "running", machineState: "running", reach: { state: "unreachable" }, machineId: "local", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, kind: "local", size: { cpu: 8, memMb: 16384 }, name: mine.name, golden: "", createdAt: mine.createdAt } as unknown as WorkspaceStatus;
     useStore.setState({ places: [here], workspaces: [mine], statuses: { [mine.id]: silent } });
     await mountComputers(computersApi().api);
-    expect(stateOf("here")).toBe("no daemon");
+    expect(stateOf("here")).toBe("No daemon");
     expect(listRow("here").textContent).not.toContain("Unreachable");
   });
 
-  it("leaves out a fact a computer has not reported, so a row that has said nothing carries its name alone and keeps its height", async () => {
+  it("leaves a fact a computer has not reported blank, never a dash, and keeps the row's height", async () => {
     useStore.setState({ places: [{ id: "p_2", kind: "computer", name: "attic", default: false, present: true }] });
     await mountComputers(computersApi().api);
-    expect(factsOf("p_2")).toBe("");
+    expect(cellOf("p_2", "cores")).toBe("");
+    expect(cellOf("p_2", "memory")).toBe("");
     expect(listRow("p_2").textContent).not.toMatch(/[-\u2014]/);
-    expect(listRow("p_2").querySelector("[data-slot=skeleton]")).toBeNull();
-    expect(listRow("p_2").className).toContain("min-h-24");
+    expect(listRow("p_2").className).toContain("h-13");
   });
 
-  it("counts the workspaces standing on each row off the list the sidebar shows, and draws every row the host lists and no other", async () => {
-    useStore.setState({ places: [here, ascii], workspaces: [mine, fork("ws_x"), fork("ws_y")] });
+  it("counts the threads with a turn running on the workspaces each row holds, and a zero as 0", async () => {
+    const running = (id: string, workspaceId: string): SessionView => ({ ...session(id, workspaceId), status: "running" });
+    useStore.setState({ places: [here, laptop], workspaces: [mine, onLaptop], sessions: { ws_a: [running("r1", "ws_a"), session("d1", "ws_a"), running("r2", "ws_a")], ws_b: [session("d2", "ws_b")] } });
     await mountComputers(computersApi().api);
-    expect(listIds()).toEqual(["here", "box"]);
-    expect(factsOf("here")).toContain("1 task");
-    expect(factsOf("box")).toBe("cloud · $0.018/hr · 2 tasks");
-    expect(document.querySelector("[data-place-row='solari']")).toBeNull();
-    expect(screen.queryByText("Where agents run")).toBeNull();
+    expect(cellOf("here", "threads")).toBe("2");
+    expect(cellOf("p_1", "threads")).toBe("0");
   });
 
-  it("draws a cloud row once this host holds its key, named as a person reads it, with what it took this month in its own row and no foot under the card", async () => {
-    const api = computersApi({ spend: async () => [{ place: "solari", todayUsd: 0.26, monthUsd: 1.23, rateUsdPerHour: 0.11 }] } as Partial<Api>, setupOf({ keys: { solari: true } })).api;
-    useStore.setState({ places: [here, solari], workspaces: [atSolari("ws_s")] });
-    await mountComputers(api);
-    expect(listIds()).toEqual(["here", "solari"]);
-    expect(listRow("solari").querySelector("[data-settings-title]")?.textContent).toBe("Solari");
-    expect(factsOf("solari")).toBe("cloud · $0.11/hr · 1 task · $1.23 this month");
-    expect(document.querySelector("[data-k='places-spend']")).toBeNull();
-    expect(document.body.textContent?.match(/this month/g)?.length).toBe(1);
+  it("keeps every row's state at every width, the word or the act, on the computers and the clouds alike", async () => {
+    const behind: PlaceView = { ...box, daemonVersion: 1 };
+    useStore.setState({ places: [here, behind, solari], workspaces: [] });
+    await mountComputers(computersApi({ placesUpdate: async () => ({ name: "hetzner" }) } as unknown as Partial<Api>).api);
+    for (const id of ["here", "p_2", "solari"]) {
+      const cell = listRow(id).querySelector<HTMLElement>("[data-state-cell]")!;
+      expect(cell.textContent, id).not.toBe("");
+      // A phone's list keeps the state: nothing on the cell or on the row's template hides it below a width.
+      expect(cell.className, id).not.toMatch(/max-\w+:hidden|(^|\s)hidden(\s|$)/);
+      expect(listRow(id).className, id).toMatch(/max-md:grid-cols-\[minmax\(0,1fr\)_auto_100px_14px\]/);
+    }
+    expect(stateOf("p_2")).toBe(WHERE_WORDS.update);
+  });
+
+  it("draws the clouds as their own list on the same template, and no machines column while the host reads none", async () => {
+    const withRoom: PlaceView = { ...solari, forks: { running: 1, room: 1 } };
+    useStore.setState({ places: [here, withRoom, ascii], workspaces: [] });
+    await mountComputers(computersApi().api);
+    const grids = [...document.querySelectorAll<HTMLElement>("[data-settings-page] [data-grid]")];
+    expect(grids.map(g => g.dataset["grid"])).toEqual(["computers", "clouds"]);
+    expect(grids.map(g => [...g.querySelectorAll("[data-grid-head] span")].map(c => c.textContent))).toEqual([["Computer", "Cores", "Memory", "Threads"], ["Cloud"]]);
+    // The two lists share one column template, so the state column is one line down the page.
+    expect(new Set(grids.map(g => g.querySelector("[data-grid-row]")?.className.match(/grid-cols-\[[^\s]+\]/)?.[0])).size).toBe(1);
+    expect(nameOf("solari")).toBe("Solari");
+    expect(stateOf("solari")).toBe("Ready");
+    // Nothing on the host writes a cloud's running count or its room yet, so none is drawn, even off a row that says one.
+    expect(listRow("solari").textContent).not.toContain("1/2");
+    expect(document.querySelector("[data-settings-page]")?.textContent).not.toMatch(/this month|Machines/);
   });
 
   it("draws a cloud row the host lists even with no key held and no workspace on it, as a stand-in serving that cloud is", async () => {
@@ -210,7 +228,7 @@ describe("the Computers list", () => {
     expect(useSettingsStore.getState().reads.setup?.keys["box"]).toBe(true);
   });
 
-  it("reads the state slot in one order: the computer that is not answering, then the recipe on it, then the daemon behind", async () => {
+  it("reads the state cell in one order: blocked, not answering, the recipe on it, the daemon behind, a sign-in, then Ready", async () => {
     const running: PlaceProvision = { state: "running", addId: "a_1", recipeAt: AT, startedAt: AT, rows: [], at: { label: "uv", index: 3, of: 7 } };
     const failed: PlaceProvision = {
       state: "done",
@@ -224,42 +242,80 @@ describe("the Computers list", () => {
         ...Array.from({ length: 5 }, (_, at) => ({ id: `tools/t${at}`, label: `t${at}`, outcome: "installed" as const })),
       ],
     };
+    const stuck = { ...box, id: "p_stuck", name: "stuck", blocked: "its login cannot run docker", provision: running };
     const busy = { ...box, id: "p_busy", name: "busy", provision: running };
     const broke = { ...box, id: "p_broke", name: "broke", provision: failed };
     const gone = { ...laptop, id: "p_gone", name: "gone", provision: running };
     const behind = { ...box, id: "p_old", name: "old", daemonVersion: 1 };
-    useStore.setState({ places: [here, busy, broke, gone, behind] });
+    const unsigned = { ...box, id: "p_sign", name: "sign", signIns: { claude: "signed-in", codex: "none" } } as PlaceView;
+    useStore.setState({ places: [here, stuck, busy, broke, gone, behind, unsigned, box] });
     await mountComputers(computersApi().api);
-    expect(stateOf("p_busy")).toBe(provisionWord(running));
-    expect(stateOf("p_broke")).toBe("2 of 7 failed: GitHub CLI, uv");
-    expect(stateOf("p_gone")).toBe("no answer");
-    expect(stateOf("p_old")).toBe(placeDaemonBehind(behind));
+    expect(stateOf("p_stuck")).toBe("Blocked");
+    expect(listRow("p_stuck").getAttribute("title")).toBe("its login cannot run docker");
+    expect(stateOf("p_busy")).toBe("Building 3/7");
+    expect(listRow("p_busy").getAttribute("title")).toBe(provisionWord(running));
+    expect(stateOf("p_broke")).toBe("Failed");
+    expect(listRow("p_broke").getAttribute("title")).toBe("2 of 7 failed: GitHub CLI, uv");
+    expect(stateOf("p_gone")).toBe("No answer");
+    // Behind with no road to update reads the word; the button stands only where a press can go.
+    expect(stateOf("p_old")).toBe("Behind");
+    expect(listRow("p_old").getAttribute("title")).toBe(placeDaemonBehind(behind));
+    expect(listRow("p_sign").querySelector("[data-k='sign-in']")?.textContent).toBe("Sign in");
+    expect(listRow("p_sign").getAttribute("title")).toBe("needs a sign-in: Codex");
+    expect(stateOf("p_2")).toBe("Ready");
+    // Sign in goes to the computer's page, whose agent rows carry each one's own.
+    fireEvent.click(listRow("p_sign").querySelector("[data-k='sign-in']")!);
+    expect(pageAt()).toBe("computer:p_sign");
   });
 
-  it("draws Add a computer and Add a cloud side by side under the one list, each opening the panel on its road, and a row opens the computer's page", async () => {
+  it("offers Update in the cell of a computer behind this wsp's daemon, puts it there on a press, and reads the job in the cell after", async () => {
+    const asked: string[] = [];
+    const provision: PlaceProvision = { state: "running", addId: "a_2", recipeAt: AT, startedAt: AT, rows: [], at: { label: "uv", index: 3, of: 7 } };
+    const behind: PlaceView = { ...box, daemonVersion: 1 };
+    const api = computersApi({ placesUpdate: async (placeId: string) => (asked.push(placeId), { name: "hetzner", provision }) } as unknown as Partial<Api>).api;
+    useStore.setState({ places: [here, behind] });
+    await mountComputers(api);
+    const update = listRow("p_2").querySelector<HTMLElement>("[data-k='update']")!;
+    expect(update.textContent).toBe(WHERE_WORDS.update);
+    fireEvent.click(update);
+    await waitFor(() => expect(asked).toEqual(["p_2"]));
+    // The press is the button's own: the row does not open the page under it.
+    expect(pageAt()).toBe("computers");
+    await waitFor(() => expect(useStore.getState().places.find(place => place.id === "p_2")?.provision).toEqual(provision));
+  });
+
+  it("draws Add a computer under the computers and Add a cloud under the clouds, each opening the panel on its road, and a row opens its page", async () => {
     useStore.setState({ places: [here, box, solari] });
     await mountComputers(computersApi().api);
-    expect([...document.querySelectorAll("[data-settings-card='computers'] [data-place-row]")].map(r => r.getAttribute("data-place-row"))).toEqual(["here", "p_2", "solari"]);
-    expect([...document.querySelectorAll("[data-settings-card='computers'] [data-add-button]")].map(b => b.textContent)).toEqual([ADD_COMPUTER_WORDS.title, ADD_COMPUTER_WORDS.addCloud]);
+    expect([...document.querySelectorAll("[data-settings-card='computers'] [data-place-row]")].map(r => r.getAttribute("data-place-row"))).toEqual(["here", "p_2"]);
+    expect([...document.querySelectorAll("[data-settings-card='computers'] [data-add-button]")].map(b => b.textContent)).toEqual([ADD_COMPUTER_WORDS.title]);
+    expect([...document.querySelectorAll("[data-settings-card='clouds'] [data-add-button]")].map(b => b.textContent)).toEqual([ADD_COMPUTER_WORDS.addCloud]);
     expect(document.querySelector("[data-k='add-computer']")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: ADD_COMPUTER_WORDS.addCloud }));
     expect(document.querySelector("[data-add-road='cloud']")?.getAttribute("aria-checked")).toBe("true");
-    expect(document.querySelector("[data-k='road-cloud']")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: ADD_COMPUTER_WORDS.title }));
     expect(document.querySelector("[data-k='add-computer'] [data-add-road='ssh']")).toBeTruthy();
-    expect(document.querySelector("[data-k^='road-']")).toBeNull();
-    expect(document.querySelector("[data-k='connect-provider']")).toBeNull();
     openPage("p_2");
     expect(pageAt()).toBe("computer:p_2");
   });
 
-  it("draws Add a computer alone where the host registered no cloud", async () => {
+  it("draws Add a computer alone where the host registered no cloud, and no CLOUD list over nothing", async () => {
     useStore.setState({ places: [here, box] });
     await mountComputers(computersApi({}, setupOf({ keys: {} })).api);
     expect([...document.querySelectorAll("[data-settings-card='computers'] [data-add-button]")].map(b => b.textContent)).toEqual([ADD_COMPUTER_WORDS.title]);
+    expect(document.querySelector("[data-settings-card='clouds']")).toBeNull();
+    expect(document.querySelectorAll("[data-settings-page] [data-add-button]")).toHaveLength(1);
   });
 
-  it("asks the host once for the month and follows the meter, and says no money at all on a window that may not read it", async () => {
+  it("finds a computer by its name in the settings search", async () => {
+    useStore.setState({ places: [here, box] });
+    await mountComputers(computersApi().api);
+    act(() => useSettingsStore.getState().setSearch("hetz"));
+    await settle();
+    expect([...document.querySelectorAll("[data-settings-page] [data-place-row]")].map(r => r.getAttribute("data-place-row"))).toEqual(["p_2"]);
+  });
+
+  it("asks the host once for the month and follows the meter, and says no money on the list", async () => {
     let asks = 0;
     const fake = computersApi({
       spend: async () => {
@@ -270,10 +326,10 @@ describe("the Computers list", () => {
     useStore.setState({ places: [here, ascii], workspaces: [fork("ws_x")] });
     await mountComputers(fake.api);
     await waitFor(() => expect(asks).toBe(1));
-    expect(factsOf("box")).not.toContain("this month");
     act(() => fake.push({ type: "workspace.cost", workspaceId: "ws_x", phase: "running", rateUsdPerHour: 0.16, awakeMs: 60_000, accruedUsd: 0.41, at: AT, seq: 1 } as EventUnion));
     await settle();
     expect(asks).toBe(1);
+    expect(listRow("box").textContent).not.toContain("$");
   });
 });
 
@@ -285,6 +341,158 @@ describe("a computer's own page", () => {
       sessions: { ws_b: [session("s1", "ws_b"), session("s2", "ws_b")] },
     });
   };
+  const gridHeads = (): string[] => [...document.querySelectorAll("[data-settings-page] [data-grid] [data-grid-head] span:first-child")].map(s => s.textContent ?? "");
+  const kindRows = (grid: string): string[] => [...document.querySelectorAll(`[data-settings-page] [data-grid='${grid}'] [data-grid-row] [data-grid-name]`)].map(n => n.textContent ?? "");
+  const noteOf = (grid: string, name: string): string | undefined =>
+    [...document.querySelectorAll(`[data-settings-page] [data-grid='${grid}'] [data-grid-row]`)].find(r => r.querySelector("[data-grid-name]")?.textContent === name)?.querySelector("[data-grid-note]")?.textContent ?? undefined;
+
+  it("heads the page with its crumbs, its name and its state, and none of the old cards", async () => {
+    useStore.setState({ places: [here, { ...box, os: "Ubuntu 24.04", joinedAt: AT, copies: "reflink" }] });
+    await mountComputers(computersApi({ agentsRead: async () => AGENTS_REPORT }).api, { kind: "computer", id: "p_2" });
+    expect(document.querySelector("[data-k='page-crumbs']")?.textContent).toBe("Computers/hetzner");
+    expect(document.querySelector("[data-settings-page] h1")?.textContent).toBe("hetzner");
+    expect(document.querySelector("[data-k='place-state']")?.textContent).toBe("Ready");
+    for (const k of ["system", "size", "disk-free", "joined", "address", "answered", "copies", "ports", "computer-icon", "workspace-line"]) expect(document.querySelector(`[data-settings-page] [data-k='${k}']`)).toBeNull();
+    expect(document.querySelector("[data-settings-page] [data-settings-card]")).toBeNull();
+    fireEvent.click(document.querySelector("[data-k='page-crumbs-group']")!);
+    expect(pageAt()).toBe("computers");
+  });
+
+  it("lists the agents with their version and sign-in, and the MCP servers with their state, off the computer's own report", async () => {
+    const asked: AgentsTarget[] = [];
+    useStore.setState({ places: [here] });
+    await mountComputers(computersApi({ agentsRead: async (target: AgentsTarget) => (asked.push(target), AGENTS_REPORT) }).api, { kind: "computer", id: "here" });
+    expect(asked).toEqual([{ placeId: "here" }]);
+    const installed = AGENTS_REPORT.agents.filter(a => a.installed);
+    expect(kindRows("agents")).toEqual(installed.map(a => a.name));
+    expect(gridHeads().slice(0, 2)).toEqual(["Agents", "MCP servers"]);
+    const claude = installed.find(a => a.id === "claude")!;
+    const row = [...document.querySelectorAll("[data-grid='agents'] [data-grid-row]")].find(r => r.querySelector("[data-grid-name]")?.textContent === claude.name)!;
+    expect(row.querySelector("[data-k='lead-tile'] svg")).not.toBeNull();
+    if (claude.version !== undefined) expect(row.textContent).toContain(claude.version);
+    // The sign-in is the quiet note, in sentence case, never a dot.
+    expect(noteOf("agents", claude.name)).toMatch(/^[A-Z]/);
+    expect(document.querySelector("[data-settings-page] [data-grid='agents'] .rounded-full")).toBeNull();
+    expect(kindRows("servers").length).toBeGreaterThan(0);
+    // No manager shell, tabs or search on the page.
+    expect(document.querySelector("[data-settings-page] [role='radiogroup']")).toBeNull();
+    for (const k of ["remove", "update", "dial"]) expect(document.querySelector(`[data-settings-page] [data-k='${k}']`)).toBeNull();
+  });
+
+  it("offers Sign in on an agent that needs one there, and draws its flow under the row once it starts", async () => {
+    const report: AgentsReport = { ...EMPTY_REPORT, agents: [{ id: "claude", name: "Claude Code", installed: true, version: "2.1.283", road: "wsp", signIn: "none", signInRoad: "device", wspTools: false }] };
+    const started: string[] = [];
+    const agentsSignIn = async (_target: AgentsTarget, agent: string, _server: unknown, step: (e: { state: string; url?: string }) => void) => {
+      started.push(agent);
+      step({ state: "waiting", url: "https://example.test/login" });
+      return { stop: () => {} };
+    };
+    useStore.setState({ places: [here, box] });
+    await mountComputers(computersApi({ agentsRead: async () => report, agentsSignIn } as unknown as Partial<Api>).api, { kind: "computer", id: "p_2" });
+    expect(noteOf("agents", "Claude Code")).toBe("Needs sign-in");
+    const signIn = document.querySelector<HTMLElement>("[data-grid='agents'] [data-k='act-sign-in']")!;
+    expect(signIn.textContent).toBe("Sign in");
+    fireEvent.click(signIn);
+    await settle();
+    expect(started).toEqual(["claude"]);
+    expect(document.querySelector("[data-grid='agents'] [data-k='sign-in-flow']")).not.toBeNull();
+    // While the flow waits on the person its own controls are the step, and the note says so.
+    expect(document.querySelector("[data-grid='agents'] [data-k='act-sign-in']")).toBeNull();
+    expect(noteOf("agents", "Claude Code")).toBe(capitalised(AGENTS_LIST_WORDS.waitingOnYou));
+  });
+
+  it("puts the recipe's rows that did not land and the report's refusals under the lists as quiet lines", async () => {
+    const provision: PlaceProvision = {
+      state: "done",
+      addId: "a_1",
+      recipeAt: AT,
+      startedAt: AT,
+      finishedAt: AT,
+      rows: [
+        { id: "agents/claude", label: "Claude Code", outcome: "installed" },
+        { id: "agents/codex", label: "Codex", outcome: "failed", note: "npm exited 1" },
+        { id: "tools/gh", label: "GitHub CLI", outcome: "failed" },
+        { id: "agents/mcp/linear", label: "linear", outcome: "skipped", kind: "server", note: "waited on GitHub CLI" },
+      ],
+    };
+    useStore.setState({ places: [here, { ...laptop, present: true, name: "spoo", provision }] });
+    await mountComputers(computersApi({ agentsRead: async () => ({ ...EMPTY_REPORT, refused: ["skills: the folder is not readable"] }) }).api, { kind: "computer", id: "p_1" });
+    expect([...document.querySelectorAll("[data-k='agents-misses'] [data-refused-line]")].map(l => [l.querySelector("[data-refused-label]")?.textContent, l.querySelector("[data-refused-value]")?.textContent])).toEqual([
+      ["Skills", "the folder is not readable"],
+      ["Codex", "failed: npm exited 1"],
+      ["linear", "set aside: waited on GitHub CLI"],
+    ]);
+  });
+
+  it("says a computer that is not answering in the state line with the dial beside it, whose answer takes the sentence's place", async () => {
+    const said = "ssh: connect to host 65.21.4.12 port 22: Connection refused";
+    const vps: PlaceView = { ...laptop, id: "p_3", name: "vps", road: { ssh: "root@65.21.4.12" }, dialled: { at: "2026-09-12T11:59:00.000Z", answered: false, said } };
+    const line = "root@65.21.4.12 answered over ssh in 412 ms, so the computer is on; the agent on it is not dialling this host.";
+    useStore.setState({ places: [here, vps] });
+    await mountComputers(computersApi(dialling(line)).api, { kind: "computer", id: "p_3" });
+    const state = document.querySelector("[data-k='place-state']")!;
+    expect(state.querySelector("[data-state-cell]")?.textContent).toBe("No answer");
+    // The last refusal the record kept is the sentence until a press asks again.
+    expect(document.querySelector("[data-k='place-sentence']")?.textContent).toBe(said);
+    expect(state.querySelector("[data-k='dial']")?.textContent).toBe("Try over ssh");
+    fireEvent.click(state.querySelector("[data-k='dial']")!);
+    await waitFor(() => expect(document.querySelector("[data-k='place-sentence']")?.textContent).toBe(line));
+    expect(document.querySelector("[data-k='place-sentence']")?.getAttribute("title")).toBe(line);
+  });
+
+  it("draws a refused dial under the state line with the host's fix", async () => {
+    const vps: PlaceView = { ...laptop, id: "p_3", name: "vps", road: { ssh: "root@65.21.4.12" } };
+    useStore.setState({ places: [here, vps] });
+    const refused = { dialPlace: async () => Promise.reject(new RequestError("wsp holds no login for vps. Add it again over ssh.", undefined, "Add it again over ssh.")) } as unknown as Partial<Api>;
+    await mountComputers(computersApi(refused).api, { kind: "computer", id: "p_3" });
+    fireEvent.click(document.querySelector("[data-k='dial']")!);
+    const slot = await waitFor(() => {
+      const found = document.querySelector("[data-settings-page] [data-k='dial-refusal']");
+      expect(found).not.toBeNull();
+      return found!;
+    });
+    expect(slot.textContent).toBe("wsp holds no login for vps. Add it again over ssh.");
+    expect(slot.querySelector("span.text-foreground")?.textContent?.trim()).toBe("Add it again over ssh.");
+  });
+
+  it("offers no dial where there is no road to dial over or the client cannot dial, and none on a computer that is answering", async () => {
+    const byCode: PlaceView = { ...laptop, road: { from: "192.168.1.34" }, dialled: { at: "2026-09-12T11:59:00.000Z", answered: false, said: placeNoDialLine("old-macbook") } };
+    const vps: PlaceView = { ...laptop, id: "p_3", name: "vps", road: { ssh: "root@65.21.4.12" } };
+    useStore.setState({ places: [here, byCode, vps, box] });
+    await mountComputers(computersApi(dialling()).api, { kind: "computer", id: "p_1" });
+    expect(document.querySelector("[data-k='place-sentence']")?.textContent).toBe(placeNoDialLine("old-macbook"));
+    expect(document.querySelector("[data-k='dial']")).toBeNull();
+    act(() => useSettingsStore.getState().go({ kind: "computer", id: "p_2" }));
+    await settle();
+    expect(document.querySelector("[data-k='dial']")).toBeNull();
+    cleanup();
+    await mountComputers(computersApi().api, { kind: "computer", id: "p_3" });
+    expect(document.querySelector("[data-k='place-sentence']")?.textContent).toBe(WHERE_WORDS.cannotDial);
+    expect(document.querySelector("[data-k='dial']")).toBeNull();
+  });
+
+  it("puts Update in the state line of a computer behind this wsp's daemon, with the reading as its sentence", async () => {
+    const behind: PlaceView = { ...box, daemonVersion: 1 };
+    useStore.setState({ places: [here, behind] });
+    await mountComputers(computersApi({ placesUpdate: async () => ({ name: "hetzner" }) } as unknown as Partial<Api>).api, { kind: "computer", id: "p_2" });
+    expect(document.querySelector("[data-k='place-state'] [data-k='update']")?.textContent).toBe(WHERE_WORDS.update);
+    expect(document.querySelector("[data-k='place-sentence']")?.textContent).toBe(placeDaemonBehind(behind));
+  });
+
+  it("lists the threads on the workspaces it holds, each opening its thread, with the project and the one status slot", async () => {
+    const running = { ...session("s1", "ws_b"), status: "running" as const, threadId: "t_1" };
+    useStore.setState({
+      places: [here, laptop],
+      workspaces: [{ ...onLaptop, project: { id: "pr_1", name: "spoo-landing", path: "/root", computer: "p_1" } }],
+      sessions: { ws_b: [running] },
+    });
+    await mountComputers(computersApi().api, { kind: "computer", id: "p_1" });
+    const rows = [...document.querySelectorAll("[data-grid='threads-here'] [data-thread-row]")];
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.querySelector("[data-thread-place]")?.textContent).toBe("spoo-landing");
+    expect(rows[0]?.querySelector("[data-thread-status]")?.getAttribute("data-thread-status")).toBe("working");
+    expect(document.querySelector("[data-grid='threads-here'] [data-grid-head]")?.textContent).toBe("Threads running here");
+  });
 
   it("lists the threads running or asking on a computer as the THREADS list does: the agent's mark, the title, the project, and the one status slot, a working one's time in the working ink with the crab", async () => {
     const running: SessionView = { ...session("s_run", "ws_b"), prompt: "move the relay", status: "running", startedAt: Date.now() - 22 * 60_000 };
@@ -293,8 +501,8 @@ describe("a computer's own page", () => {
     const resting: SessionView = { ...session("s_rest", "ws_b"), prompt: "old refactor" };
     useStore.setState({ places: [here, laptop], workspaces: [{ ...onLaptop, name: "spoo-fix" }], sessions: { ws_b: [running, asking, failed, resting] } });
     await mountComputers(computersApi().api, { kind: "computer", id: "p_1" });
-    const card = document.querySelector<HTMLElement>("[data-settings-page] [data-settings-card='threads']")!;
-    expect(card.querySelector("[data-settings-head]")?.textContent).toBe(WHERE_WORDS.threadsHere);
+    const card = document.querySelector<HTMLElement>("[data-settings-page] [data-grid='threads-here']")!;
+    expect(card.querySelector("[data-grid-head]")?.textContent).toBe(WHERE_WORDS.heads.threadsHere);
     const rows = [...card.querySelectorAll<HTMLElement>("[data-thread-row]")];
     // Running here is what the head says: a failed or a resting thread is no longer running anywhere.
     expect(rows.map(row => row.textContent?.replace(/(Needs you|\d+m).*$/, ""))).toEqual(["move the relay", "fix the checkout"].map(t => expect.stringMatching(new RegExp(`^${t}`))));
@@ -313,273 +521,19 @@ describe("a computer's own page", () => {
     expect(card.querySelector("[data-thread-rows-head]")).toBeNull();
   });
 
-  it("draws no threads card for a computer where nothing is running or asking", async () => {
+  it("draws no threads list for a computer where nothing is running or asking", async () => {
     const resting: SessionView = { ...session("s_rest", "ws_b"), prompt: "old refactor" };
     useStore.setState({ places: [here, laptop], workspaces: [{ ...onLaptop, name: "spoo-fix" }], sessions: { ws_b: [resting] } });
     await mountComputers(computersApi().api, { kind: "computer", id: "p_1" });
-    expect(document.querySelector("[data-settings-page] [data-settings-card='threads']")).toBeNull();
-  });
-
-  it("says its facts as lines, the login it dials and how long the last dial took as rows", async () => {
-    // Stamps against the clock the page reads, so the words hold whatever day the suite runs.
-    // A minute past the hour, since the page reads a clock quantised to the minute.
-    const seen = new Date(Date.now() - 2 * 3_600_000 - 60_000).toISOString();
-    const vps: PlaceView = { ...laptop, id: "p_3", name: "vps", lastSeenAt: seen, road: { ssh: "root@65.21.4.12" }, dialled: { at: seen, answered: true, roundTripMs: 14 }, joinedAt: new Date(Date.now() - 3_600_000 - 60_000).toISOString() };
-    useStore.setState({ places: [here, vps], workspaces: [{ ...onLaptop, place: "p_3", name: "spoo-fix" }], sessions: { ws_b: [session("s1", "ws_b"), session("s2", "ws_b")] } });
-    await mountComputers(computersApi(dialling()).api, { kind: "computer", id: "p_3" });
-    // The facts are lines with the value at the right and no sentence under them; the whole is on hover.
-    expect(lineLabels()).toEqual([WHERE_WORDS.system, WHERE_WORDS.size, WHERE_WORDS.diskFree, WHERE_WORDS.joined]);
-    expect(lineValue("system")).toBe("Ubuntu 24.04, last seen 2 h ago");
-    expect(lineOf("system")?.getAttribute("title")).toBe(WHERE_WORDS.systemHover);
-    expect(lineValue("size")).toBe(fmtSize(vps.shape!, "cores"));
-    expect(lineValue("disk-free")).toBe(fmtBytes(vps.diskFreeBytes!));
-    expect(lineValue("joined")).toBe("1 h ago");
-    expect(lineOf("system")?.querySelector("[data-settings-description]")).toBeNull();
-    // The connection card: the address and when it last answered with how long the frame took, beside Try.
-    expect(wordOf("address")).toBe("root@65.21.4.12 over ssh");
-    expect(wordOf("answered")).toBe(`${absentRoad({ name: "vps", awayMs: 2 * 3_600_000 + 60_000 }).answered}, 14 ms`);
-    expect(descriptionOf("answered")).toBe(WHERE_WORDS.answeredDescription);
-    // The rows and the lines stand at their own two heights.
-    expect(rowOf("address")?.className).toContain("h-16");
-    expect(lineOf("system")?.className).toContain("h-11");
-  });
-
-  it("says a box on the ssh dial-back dials back over ssh under its login, and never that it dials in from this computer's loopback", async () => {
-    const spoo: PlaceView = { ...laptop, id: "p_4", name: "spoo", present: true, road: { ssh: "root@spoo", from: "127.0.0.1", back: { boxPort: 4640 } } };
-    useStore.setState({ places: [here, spoo] });
-    await mountComputers(computersApi(dialling()).api, { kind: "computer", id: "p_4" });
-    expect(wordOf("address")).toBe("root@spoo over ssh");
-    expect(descriptionOf("address")).toBe(WHERE_WORDS.addressBackDescription("dials back over ssh (127.0.0.1:4640 on spoo)"));
-    expect(descriptionOf("address")).toBe("It dials back over ssh (127.0.0.1:4640 on spoo).");
-    const page = document.querySelector("[data-settings-page]")?.textContent ?? "";
-    expect(page).not.toContain("dials in");
-    expect(page).not.toContain("127.0.0.1 dials in");
-  });
-
-  it("the Mac's page has no Connection card and no acts, and reads its agents, skills and servers off this computer", async () => {
-    const asked: AgentsTarget[] = [];
-    useStore.setState({ places: [here] });
-    await mountComputers(computersApi({ agentsRead: async (target: AgentsTarget) => (asked.push(target), AGENTS_REPORT) }).api, { kind: "computer", id: "here" });
-    for (const k of ["remove", "update", "dial", "address", "answered", "joined"]) expect(document.querySelector(`[data-settings-page] [data-k='${k}']`)).toBeNull();
-    expect(asked).toEqual([{ placeId: "here" }]);
-    expect(agentTitles()).toEqual(["Claude Code", "Codex", "OpenCode", "Pi"]);
-    // The manager stands where the Agents card stood, the section named for all three kinds.
-    expect(document.querySelector("[data-settings-card='agents'] section")?.getAttribute("aria-label")).toBe("Agents, MCP servers and skills");
-    expect(document.querySelector("[data-settings-card='agents'] [data-k=agents-line]")?.textContent).toBe(`Agents, MCP servers and skills on ${MAC} and in its projects.`);
-    expect(document.querySelector("[data-settings-card='agents'] [data-settings-head]")).toBeNull();
-  });
-
-  it("says the page covers each project once the computer holds any, and only then", async () => {
-    useStore.setState({ places: [here] });
-    const projects = [{ id: "pr_app", name: "app", path: "~/code/app" }];
-    await mountComputers(computersApi({ agentsRead: async () => ({ ...AGENTS_REPORT, projects }) }).api, { kind: "computer", id: "here" });
-    expect(document.querySelector("[data-k=agents-line]")?.textContent).toBe(`Agents, MCP servers and skills on ${MAC} and in its projects.`);
-  });
-
-  it("says so when a computer reported no agent at all, the head naming that computer", async () => {
-    useStore.setState({ places: [here, { ...laptop, present: true, agents: [] }] });
-    await mountComputers(computersApi({ agentsRead: async () => EMPTY_REPORT }).api, { kind: "computer", id: "here" });
-    expect(document.querySelector("[data-k='agents-empty'] .border-dashed")?.textContent).toBe("no agents");
-    expect(document.querySelector("[data-k=agents-line]")?.textContent).toBe(`Agents, MCP servers and skills on ${MAC}.`);
-    act(() => useSettingsStore.getState().go({ kind: "computer", id: "p_1" }));
-    await settle();
-    expect(document.querySelector("[data-k='agents-empty'] .border-dashed")?.textContent).toBe("no agents");
-    expect(document.querySelector("[data-k=agents-line]")?.textContent).toBe("Agents, MCP servers and skills on old-macbook.");
-  });
-
-  it("reads a joined computer by its id, and holds every act with the page's away word while it does not answer", async () => {
-    const asked: AgentsTarget[] = [];
-    useStore.setState({ places: [here, laptop] });
-    await mountComputers(computersApi({ agentsRead: async (target: AgentsTarget) => (asked.push(target), AGENTS_REPORT) }).api, { kind: "computer", id: "p_1" });
-    expect(asked).toEqual([{ placeId: "p_1" }]);
-    const again = screen.getByRole("button", { name: "Read again" });
-    expect(again.hasAttribute("disabled")).toBe(true);
-    expect(again.parentElement?.getAttribute("title")).toBe(stateOfPage());
-    // Agents has no search, so no toolbar; Add stands on the other tabs.
-    fireEvent.click(screen.getByRole("radio", { name: /^Skills/ }));
-    expect(document.querySelector("[data-k=agents-add]")?.parentElement?.getAttribute("title")).toBe(stateOfPage());
-  });
-
-  it("puts the recipe's rows that are not on the computer under the rows as lines, and draws no recipe card", async () => {
-    const provision: PlaceProvision = {
-      state: "done",
-      addId: "a_1",
-      recipeAt: AT,
-      startedAt: AT,
-      finishedAt: AT,
-      rows: [
-        { id: "agents/claude", label: "Claude Code", outcome: "installed" },
-        { id: "agents/codex", label: "Codex", outcome: "failed", note: "npm exited 1" },
-        { id: "tools/gh", label: "GitHub CLI", outcome: "failed" },
-        { id: "agents/files/skills", label: "code-review", outcome: "installed", kind: "file" },
-        { id: "agents/mcp/linear", label: "linear", outcome: "skipped", kind: "server", note: "waited on GitHub CLI" },
-      ],
-    };
-    useStore.setState({ places: [here, { ...laptop, present: true, name: "spoo", provision }] });
-    await mountComputers(computersApi({ agentsRead: async () => ({ ...EMPTY_REPORT, refused: [] }) }).api, { kind: "computer", id: "p_1" });
-    expect(document.querySelector("[data-settings-card='recipe']")).toBeNull();
-    expect([...document.querySelectorAll("[data-agents-refused] [data-refused-line]")].map(l => [l.querySelector("[data-refused-label]")?.textContent, l.querySelector("[data-refused-value]")?.textContent])).toEqual([
-      ["Codex", "failed: npm exited 1"],
-      ["linear", "set aside: waited on GitHub CLI"],
-    ]);
-  });
-
-  it("draws a cloud's agents off its image, with Edit image in Add's place, which opens the recipe in the Image card on the same page", async () => {
-    const image = { name: "default", version: 1, hash: "a".repeat(64), recipeHash: "r", pins: [{ id: "claude", tag: "2.1.280" }], logins: [], sealedAt: AT, sealedFrom: "this Mac" } as SealedImage;
-    useStore.setState({ places: [here, { ...solari, buildsImages: true }] });
-    await mountComputers(computersApi({ image: async () => ({ image, copies: [], projects: [] }), initStart: async () => ({}) as InitJob }, setupOf({ keys: { solari: true } })).api, { kind: "computer", id: "solari" });
-    expect(agentTitles()).toEqual(["Claude Code"]);
-    expect(screen.queryByRole("button", { name: "Read again" })).toBeNull();
-    fireEvent.click(screen.getByRole("radio", { name: /^Skills/ }));
-    fireEvent.click(document.querySelector<HTMLElement>("[data-k=agents-add]")!);
-    await settle();
-    expect(pageAt()).toBe("computer:solari");
-    expect(document.querySelector("[data-settings-card='image'] [data-k='recipe']")).not.toBeNull();
-  });
-
-  it("says how a copy is made there and what it has for a network as rows, off the row and off the landing's own flags", async () => {
-    const project = { id: "pr_box", name: "spoo", computer: "p_1", source: { kind: "folder", path: "/root/spoo" }, path: "/root/spoo", createdAt: AT } as never;
-    const mac = { id: "pr_here", name: "wsp", computer: "here", source: { kind: "folder", path: "/Users/dev/wsp" }, path: "/Users/dev/wsp", createdAt: AT } as never;
-    useStore.setState({
-      places: [here, { ...laptop, present: true, copies: "reflink" }],
-      projects: [mac, project],
-      landings: {
-        pr_here: { name: "here", capabilities: { copies: true, ownNetwork: false } as never },
-        pr_box: { place: "p_1", name: "old-macbook", capabilities: { copies: true, ownNetwork: true } as never },
-      },
-    });
-    await mountComputers(computersApi().api, { kind: "computer", id: "p_1" });
-    expect(wordOf("copies")).toBe("reflink");
-    expect(wordOf("ports")).toBe("own network");
-    act(() => useSettingsStore.getState().go({ kind: "computer", id: "here" }));
-    await settle();
-    expect(wordOf("ports")).toBe(`shares ${MAC}'s ports`);
-    expect(rowOf("copies")).toBeNull();
-  });
-
-  it("says a computer that copies nothing does, rather than leaving the row out", async () => {
-    useStore.setState({ places: [here, { ...laptop, present: true, takesForks: false }] });
-    await mountComputers(computersApi().api, { kind: "computer", id: "p_1" });
-    expect(wordOf("copies")).toBe(WHERE_WORDS.copiesNothing);
-  });
-
-  it("puts this wsp's daemon and the recipe on a computer from Update, holds it at its word while it runs, and reads the job in the list's slot", async () => {
-    const asked: string[] = [];
-    let answer: (() => void) | undefined;
-    const provision: PlaceProvision = { state: "running", addId: "a_2", recipeAt: AT, startedAt: AT, rows: [], at: { label: "uv", index: 3, of: 7 } };
-    const api = computersApi({
-      placesUpdate: (placeId: string) => {
-        asked.push(placeId);
-        return new Promise(ok => (answer = () => ok({ name: "old-macbook", provision })));
-      },
-    } as unknown as Partial<Api>).api;
-    useStore.setState({ places: [here, { ...laptop, present: true }] });
-    await mountComputers(api, { kind: "computer", id: "p_1" });
-    const update = (): Element => document.querySelector("[data-settings-page] [data-k='update']")!;
-    expect(rowOf("update")?.querySelector("[data-settings-title]")?.textContent).toBe("Update wsp on old-macbook");
-    expect(descriptionOf("update")).toBe(WHERE_WORDS.updateDescription);
-    fireEvent.click(update());
-    await waitFor(() => expect(asked).toEqual(["p_1"]));
-    await waitFor(() => expect(update().hasAttribute("disabled")).toBe(true));
-    expect(update().textContent).toBe(WHERE_WORDS.update);
-    await act(async () => {
-      answer?.();
-      await Promise.resolve();
-    });
-    await waitFor(() => expect(update().hasAttribute("disabled")).toBe(false));
-    expect(useStore.getState().places.find(place => place.id === "p_1")?.provision).toEqual(provision);
-    act(() => useSettingsStore.getState().go({ kind: "group", group: "computers" }));
-    await settle();
-    expect(stateOf("p_1")).toBe("setting up 3/7: uv");
-  });
-
-  it("holds Update with no title on a wsp whose client cannot ask for one, and the description ends with why", async () => {
-    useStore.setState({ places: [here, { ...laptop, present: true }] });
-    await mountComputers(computersApi().api, { kind: "computer", id: "p_1" });
-    const update = document.querySelector("[data-settings-page] [data-k='update']")!;
-    expect(update.hasAttribute("disabled")).toBe(true);
-    expect(update.hasAttribute("title")).toBe(false);
-    expect(descriptionOf("update")).toBe(`${WHERE_WORDS.updateDescription} ${WHERE_WORDS.updateHeld}`);
-  });
-
-  /** A client that can dial, so a button drawn beside a row is held for the row's own reason and never the app's. */
-  const dialling = (line = "vps answered in 12 ms."): Partial<Api> =>
-    ({ dialPlace: async (placeId: string) => ({ dialled: { at: "2026-09-12T12:00:00.000Z", answered: true, roundTripMs: 12 }, line, place: { ...laptop, id: placeId } }) }) as Partial<Api>;
-
-  it("says a computer that never answered so, reads a computer that is answering plain, and says nothing about reaching a cloud", async () => {
-    const fresh: PlaceView = { ...laptop, id: "p_4", name: "vps", lastSeenAt: undefined };
-    const alive: PlaceView = { ...laptop, id: "p_5", name: "vps2", present: true, lastSeenAt: "2026-09-12T11:59:00.000Z" };
-    useStore.setState({ places: [here, fresh, alive, ascii] });
-    await mountComputers(computersApi({}, setupOf({ keys: { box: true } })).api, { kind: "computer", id: "p_4" });
-    expect(wordOf("answered")).toBe("not since it joined");
-    act(() => useSettingsStore.getState().go({ kind: "computer", id: "p_5" }));
-    await settle();
-    expect(lineValue("system")).toBe("Ubuntu 24.04");
-    act(() => useSettingsStore.getState().go({ kind: "computer", id: "box" }));
-    await settle();
-    // A cloud's machines are at the other end of a key: no address, nothing that last answered, no dial, no agents.
-    for (const k of ["answered", "address", "dial", "agent"]) expect(document.querySelector(`[data-settings-page] [data-k='${k}']`)).toBeNull();
-    expect(document.querySelector("[data-settings-card='agents']")).toBeNull();
-  });
-
-  it("keeps the last refusal in the Answered row's description and replaces it with what a press of Try now got, one line whole on hover", async () => {
-    const said = "ssh: connect to host 65.21.4.12 port 22: Connection refused";
-    const vps: PlaceView = { ...laptop, id: "p_3", name: "vps", road: { ssh: "root@65.21.4.12" }, dialled: { at: "2026-09-12T11:59:00.000Z", answered: false, said } };
-    const line = "root@65.21.4.12 answered over ssh in 412 ms, so the computer is on; the agent on it is not dialling this host.";
-    useStore.setState({ places: [here, vps] });
-    await mountComputers(computersApi(dialling(line)).api, { kind: "computer", id: "p_3" });
-    expect(descriptionOf("answered")).toBe(said);
-    expect(document.querySelector("[data-k='dial']")?.textContent).toBe("Try over ssh");
-    fireEvent.click(document.querySelector("[data-k='dial']")!);
-    await waitFor(() => expect(descriptionOf("answered")).toBe(line));
-    expect(rowOf("answered")?.querySelector("[data-settings-description]")?.getAttribute("title")).toBe(line);
-    expect(rowOf("answered")?.querySelector("[data-settings-description]")?.className).toContain("truncate");
-  });
-
-  it("draws a refused Try now in the refusal slot with the host's fix, and leaves the Answered row's description as it was", async () => {
-    const said = "ssh: connect to host 65.21.4.12 port 22: Connection refused";
-    const vps: PlaceView = { ...laptop, id: "p_3", name: "vps", road: { ssh: "root@65.21.4.12" }, dialled: { at: "2026-09-12T11:59:00.000Z", answered: false, said } };
-    useStore.setState({ places: [here, vps] });
-    const refused = { dialPlace: async () => Promise.reject(new RequestError("wsp holds no login for vps. Add it again over ssh.", undefined, "Add it again over ssh.")) } as unknown as Partial<Api>;
-    await mountComputers(computersApi(refused).api, { kind: "computer", id: "p_3" });
-    fireEvent.click(document.querySelector("[data-k='dial']")!);
-    const slot = await waitFor(() => {
-      const found = document.querySelector("[data-settings-page] [data-k='dial-refusal']");
-      expect(found).not.toBeNull();
-      return found!;
-    });
-    expect(slot.textContent).toBe("wsp holds no login for vps. Add it again over ssh.");
-    expect(slot.querySelector("span.text-foreground")?.textContent?.trim()).toBe("Add it again over ssh.");
-    expect(descriptionOf("answered")).toBe(said);
-  });
-
-  it("offers no dial where there is no road to dial over, says why in the description, and words the button for the road there is", async () => {
-    const said = placeNoDialLine("old-macbook");
-    const byCode: PlaceView = { ...laptop, road: { from: "192.168.1.34" }, dialled: { at: "2026-09-12T11:59:00.000Z", answered: false, said } };
-    const linked: PlaceView = { ...laptop, id: "p_6", name: "linked", present: true };
-    useStore.setState({ places: [here, byCode, linked] });
-    await mountComputers(computersApi(dialling()).api, { kind: "computer", id: "p_1" });
-    expect(descriptionOf("answered")).toBe(said);
-    expect(document.querySelector("[data-k='dial']")).toBeNull();
-    act(() => useSettingsStore.getState().go({ kind: "computer", id: "p_6" }));
-    await settle();
-    expect(document.querySelector("[data-k='dial']")?.textContent).toBe("Try now");
-  });
-
-  it("says in the description that this wsp cannot dial, and draws no button, where the client has no dial road", async () => {
-    const vps: PlaceView = { ...laptop, id: "p_3", name: "vps", road: { ssh: "root@65.21.4.12" } };
-    useStore.setState({ places: [here, vps] });
-    await mountComputers(computersApi().api, { kind: "computer", id: "p_3" });
-    expect(descriptionOf("answered")).toBe(WHERE_WORDS.cannotDial);
-    expect(document.querySelector("[data-k='dial']")).toBeNull();
+    expect(document.querySelector("[data-settings-page] [data-grid='threads-here']")).toBeNull();
   });
 
   it("computes the Remove sentence from what that computer holds, hands an offline one the line to run by hand, and takes it out on the host's own road", async () => {
     const removed: string[] = [];
     withWorkspaces();
     await mountComputers(computersApi({ removePlace: async (id: string) => (removed.push(id), { removed: true, swept: [] }) } as unknown as Partial<Api>).api, { kind: "computer", id: "p_1" });
-    expect(rowOf("remove")?.querySelector("[data-settings-title]")?.textContent).toBe("Remove old-macbook");
-    expect(descriptionOf("remove")).toBe(WHERE_WORDS.removeDescription("old-macbook", MAC));
+    expect(document.querySelector("[data-k='remove-line']")?.textContent).toContain("Remove old-macbook");
+    expect(document.querySelector("[data-k='remove-note']")?.textContent).toBe(WHERE_WORDS.removeDescription("old-macbook", MAC));
     fireEvent.click(document.querySelector("[data-settings-page] [data-k='remove']")!);
     expect(screen.getByText("Remove old-macbook?")).toBeTruthy();
     expect(document.querySelector("[data-k='remove-sentence']")?.textContent).toBe("wsp and its task come off old-macbook, which is otherwise left as it is, and the copy of your image stays where it is. The task's record and 2 threads leave zingzy's MacBook Pro. It is offline; what is on it is swept the next time it connects.");
@@ -587,7 +541,6 @@ describe("a computer's own page", () => {
     expect(document.querySelector("[data-remove-place-dialog]")?.textContent).toContain(imageCopyStaysLine());
     fireEvent.click(document.querySelector("[data-k='remove-confirm']")!);
     await waitFor(() => expect(removed).toEqual(["p_1"]));
-    // The page that was about the removed computer goes back to the list.
     await waitFor(() => expect(pageAt()).toBe("computers"));
   });
 
@@ -601,21 +554,27 @@ describe("a computer's own page", () => {
     await waitFor(() => expect(document.querySelector("[data-k='remove-refusal']")?.textContent).toBe("old-macbook still holds a running workspace. Stop it first, then remove again."));
     const slot = document.querySelector("[data-k='remove-refusal']")!;
     expect(slot.className).toContain("text-destructive-foreground");
-    expect(slot.querySelector("span.text-foreground")?.textContent?.trim()).toBe("Stop it first, then remove again.");
     answer = async () => ({ removed: false, swept: [], note: "old-macbook was not removed: its record is locked" });
     fireEvent.click(document.querySelector("[data-k='remove-confirm']")!);
     await waitFor(() => expect(document.querySelector("[data-k='remove-refusal']")?.textContent).toBe("old-macbook was not removed: its record is locked"));
-    expect(document.querySelector("[data-k='remove-refusal'] span.text-foreground")).toBeNull();
   });
 
-  it("gives a computer that is answering no line to run by hand: the host sweeps it over the link", async () => {
+  it("gives a computer that is answering no line to run by hand, and the Mac no Remove at all", async () => {
     useStore.setState({ places: [here, { ...laptop, present: true }] });
     await mountComputers(computersApi().api, { kind: "computer", id: "p_1" });
     fireEvent.click(document.querySelector("[data-settings-page] [data-k='remove']")!);
     expect(screen.getByText("Remove old-macbook?")).toBeTruthy();
     expect(document.querySelector("[data-k='leave-line']")).toBeNull();
+    cleanup();
+    await mountComputers(computersApi().api, { kind: "computer", id: "here" });
+    expect(document.querySelector("[data-k='remove-line']")).toBeNull();
   });
 });
+
+/** A client that can dial, so a button drawn beside a row is held for the row's own reason and never the app's. */
+function dialling(line = "vps answered in 12 ms."): Partial<Api> {
+  return { dialPlace: async (placeId: string) => ({ dialled: { at: "2026-09-12T12:00:00.000Z", answered: true, roundTripMs: 12 }, line, place: { ...laptop, id: placeId } }) } as unknown as Partial<Api>;
+}
 
 describe("a computer's icon", () => {
   it("draws each computer's own icon on its Settings sidebar row, the size and edge of the group's glyph: this Mac the model it is, a joined computer a server, a cloud its provider's mark", async () => {
@@ -647,13 +606,16 @@ describe("a computer's icon", () => {
     expect(listRow("solari").querySelector("[data-computer-glyph]")?.classList.contains("lucide-server")).toBe(true);
   });
 
-  it("reads the default off what the computer is, writes a pick as that computer's look, and the row draws the pick", async () => {
+  it("reads the default off what the computer is, offers every other icon in the row's context menu, and the row draws the pick", async () => {
     useStore.setState({ places: [here, box], workspaces: [] });
     const { api, sets } = computersApi();
-    await mountComputers(api, { kind: "computer", id: "p_2" });
-    const select = document.querySelector<HTMLElement>("[data-settings-page] [data-k=computer-icon]")!;
-    expect(select.textContent).toBe("Server");
-    await pickOption(select, "Home");
+    await mountComputers(api);
+    expect(listRow("p_2").querySelector("[data-computer-glyph]")?.classList.contains("lucide-server")).toBe(true);
+    fireEvent.contextMenu(listRow("p_2"));
+    const menu = useContextMenuStore.getState().menu!;
+    expect(menu.items.map(item => item.id)).not.toContain("icon-server");
+    expect(menu.items.find(item => item.id === "icon-home")?.label).toBe("Home icon");
+    act(() => menu.choose("icon-home"));
     await waitFor(() => expect(sets).toEqual([{ computerLook: { p_2: { icon: "home" } } }]));
     cleanup();
     useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: false, computerLook: { p_2: { icon: "home" } } } });
@@ -671,48 +633,55 @@ describe("the cloud's page", () => {
     version: 2,
     hash: HASH,
     recipeHash: "recipe-1",
+    pins: [{ id: "claude", tag: "2.1.283" }],
+    recipe: { version: 1, at: AT, histories: [], rows: [{ id: "claude", kind: "agent", on: true, source: { kind: "popular", sessions: 0, images: 0 } }] },
     logins: [{ name: "claude", state: "copied" }, { name: "gh", state: "signed-in" }],
     sealedAt: "2026-09-12T09:12:00.000Z",
     sealedFrom: "this Mac",
     vault: { sha256: "c".repeat(64), bytes: 4_200, paths: 7, takenAt: AT },
     usedBytes: 4.2 * 1024 ** 3,
-  };
-  const copy = { place: "hetzner", version: 1, hash: HASH, snapshotId: "snap_h", builtAt: "2026-09-12T10:00:00.000Z", sizeBytes: 4.2 * 1024 ** 3 };
+  } as SealedImage;
+  const copy = { place: "solari", version: 2, hash: HASH, snapshotId: "snap_s", builtAt: "2026-09-12T10:00:00.000Z", sizeBytes: 4.2 * 1024 ** 3 };
 
-  it("carries the spend as a line, the Image card with what the image holds and Edit in it, the copies as lines and Remove saying the key is forgotten, while the key is held", async () => {
+  it("lists the image's agents and your image as one row with the tools on one line and no recipe list, while the key is held", async () => {
     const api = computersApi(
       { image: async () => ({ image: IMAGE, copies: [copy], projects: [] }), spend: async () => [{ place: "solari", todayUsd: 0.38, monthUsd: 4.12, rateUsdPerHour: 0.16 }], initStart: async () => ({}) as InitJob } as Partial<Api>,
       setupOf({ keys: { solari: true } }),
     ).api;
-    useStore.setState({ places: [here, { ...solari, buildsImages: true }], workspaces: [atSolari("ws_y"), atSolari("ws_z")] });
+    useStore.setState({ places: [here, { ...solari, buildsImages: true }], workspaces: [atSolari("ws_y")] });
     await mountComputers(api, { kind: "computer", id: "solari" });
-    // The rate is what is running there, so the count of workspaces it is spread over is not said again: the
-    // clause wrapped the value onto a second line at a phone's width to add nothing.
-    expect(lineValue("spend")).toBe("$4.12 this month $0.16/hr");
-    expect([...document.querySelectorAll("[data-settings-page] [data-settings-card]")].map(card => card.getAttribute("data-settings-card"))).toEqual(["cloud", "image", "agents", "copies", "acts"]);
-    expect(document.querySelector("[data-k='image-state']")?.getAttribute("data-state")).toBe("none");
-    expect(document.querySelector("[data-k='edit-recipe']")?.textContent).toBe(IMAGE_WORDS.holdsEdit);
-    expect([...document.querySelectorAll("[data-k='image-copy']")].map(row => [row.getAttribute("data-place"), row.querySelector("[data-settings-word]")?.textContent])).toEqual([["hetzner", expect.stringMatching(new RegExp(`^v1 \\(${COPY_CURRENT}\\), 4\\.2 GB, `))]]);
-    expect(descriptionOf("remove")).toBe(WHERE_WORDS.removeCloudDescription(MAC));
-    fireEvent.click(document.querySelector("[data-k='edit-recipe']")!);
-    await settle();
-    // The recipe opens in the card.
-    expect(document.querySelector("[data-settings-card='image'] [data-k='recipe']")).not.toBeNull();
+    expect([...document.querySelectorAll("[data-grid='agents'] [data-grid-name]")].map(n => n.textContent)).toEqual(["Claude Code"]);
+    expect(document.querySelector("[data-grid='agents'] [data-k='act-edit-image']")).toBeNull();
+    const image = document.querySelector("[data-k='image-state']")!;
+    expect(image.getAttribute("data-state")).toBe("ready");
+    expect(image.querySelector("[data-grid-name]")?.textContent).toBe(WHERE_WORDS.yourImage);
+    expect(image.querySelector("[data-grid-note]")?.textContent).toMatch(/^built .*; Claude Code$/);
+    // The locked row carries neither a version nor a build's time beside its press.
+    expect(image.textContent).not.toContain("v2");
+    expect(image.querySelector("[data-k='image-cost']")).toBeNull();
+    expect(document.querySelector("[data-settings-page] [data-chip]")).toBeNull();
+    // The long list is the Image page's: no recipe, no Edit and no copies here.
+    for (const k of ["recipe", "edit-recipe", "image-holds", "image-copy", "spend"]) expect(document.querySelector(`[data-settings-page] [data-k='${k}']`)).toBeNull();
+    expect(document.querySelector("[data-k='remove-note']")?.textContent).toBe(WHERE_WORDS.removeCloudDescription);
   });
 
-  it("says nothing about the image on a cloud whose key this host does not hold, and draws no card with nothing in it", async () => {
-    // A cloud row stands on a workspace alone; the image is what this host's own key builds, so a page with no key
-    // has no image line, no Edit image and no copies, and the card those would have stood in is not drawn.
+  it("opens no recipe on a page asked to edit the image, since the list is not drawn on these pages", async () => {
+    const api = computersApi({ image: async () => ({ image: IMAGE, copies: [copy], projects: [] }), initStart: async () => ({}) as InitJob } as Partial<Api>, setupOf({ keys: { solari: true } })).api;
+    useStore.setState({ places: [here, { ...solari, buildsImages: true }] });
+    openImageRecipe("solari");
+    mountSettings({ api });
+    await settle();
+    expect(pageAt()).toBe("computer:solari");
+    expect(document.querySelector("[data-settings-page] [data-k='recipe']")).toBeNull();
+    expect(document.querySelector("[data-k='image-state']")).not.toBeNull();
+  });
+
+  it("says nothing about the image on a cloud whose key this host does not hold, and keeps Remove neutral at rest", async () => {
     const api = computersApi({ image: async () => ({ image: IMAGE, copies: [copy], projects: [] }) } as Partial<Api>, setupOf({ keys: { solari: false } })).api;
     useStore.setState({ places: [here, { ...solari, buildsImages: true }], workspaces: [atSolari("ws_y")] });
     await mountComputers(api, { kind: "computer", id: "solari" });
-    expect(document.querySelector("[data-settings-card='image']")).toBeNull();
-    expect(document.querySelector("[data-k='edit-image']")).toBeNull();
-    expect(document.querySelector("[data-settings-card='copies']")).toBeNull();
-    expect(document.querySelector("[data-settings-card='cloud']")).toBeNull();
-    // Its one act stands, and the card that holds it is the only one on the page.
-    expect([...document.querySelectorAll("[data-settings-page] [data-settings-card]")].map(card => card.getAttribute("data-settings-card"))).toEqual(["acts"]);
-    // Remove is the neutral door, red only under the pointer, and the dialog's own button is the red one.
+    expect(document.querySelector("[data-k='image-state']")).toBeNull();
+    expect(document.querySelector("[data-grid='agents']")).toBeNull();
     const remove = document.querySelector<HTMLElement>("[data-settings-page] [data-k='remove']")!;
     expect(remove.className).not.toMatch(/warning/);
     expect(remove.className).toContain("[:hover,[data-pressed]]:text-destructive-foreground");
@@ -720,12 +689,24 @@ describe("the cloud's page", () => {
     expect(document.querySelector<HTMLElement>("[data-k='remove-confirm']")!.className).toContain("bg-destructive");
   });
 
-  it("draws the Image card before a build, and no copies card", async () => {
-    const api = computersApi({ image: async () => ({ image: null, copies: [], projects: [] }) } as Partial<Api>, setupOf({ keys: { solari: true } })).api;
+  it("draws your image before a build with no press that opens the recipe", async () => {
+    const api = computersApi({ image: async () => ({ image: null, copies: [], projects: [] }), initStart: async () => ({}) as InitJob } as Partial<Api>, setupOf({ keys: { solari: true } })).api;
     useStore.setState({ places: [here, { ...solari, buildsImages: true }] });
     await mountComputers(api, { kind: "computer", id: "solari" });
     expect(document.querySelector("[data-k='image-state']")?.getAttribute("data-state")).toBe("none");
-    expect(document.querySelector("[data-settings-card='copies']")).toBeNull();
+    expect(document.querySelector("[data-k='image-press']")).toBeNull();
+  });
+
+  it("says a build running on another cloud nowhere on this cloud's page", async () => {
+    const job = { id: "init_1", road: "manual", phase: "building", keys: {}, step: 0, stoppable: true, screens: [], rows: [], progress: { done: 1, total: 5 }, log: [], place: { id: "box", name: "box" } } as unknown as InitJob;
+    const api = computersApi({ image: async () => ({ image: IMAGE, copies: [copy], projects: [] }) } as Partial<Api>, setupOf({ keys: { solari: true, box: true } })).api;
+    useStore.setState({ places: [here, { ...solari, buildsImages: true }, { ...ascii, buildsImages: true }], initJob: job });
+    await mountComputers(api, { kind: "computer", id: "solari" });
+    expect(document.querySelector("[data-settings-page]")?.textContent).not.toContain("building on");
+    act(() => useSettingsStore.getState().go({ kind: "computer", id: "box" }));
+    await settle();
+    expect(document.querySelector("[data-k='image-state']")?.getAttribute("data-state")).toBe("building");
+    expect(document.querySelector("[data-k='image-state'] [data-grid-note]")?.textContent).toBe("1 of 5 steps done; Claude Code");
   });
 });
 
@@ -963,7 +944,7 @@ describe("Add a computer on the page", () => {
     fireEvent.change(host(), { target: { value: "root@65.21.4.12" } });
     fireEvent.click(document.querySelector("[data-k='ssh-add']")!);
     await waitFor(() => expect(document.querySelector("[data-k='joined'] [data-place-row='p_2']")).toBeTruthy());
-    expect(document.querySelector("[data-k='joined'] [data-settings-title]")?.textContent).toBe("hetzner");
+    expect(document.querySelector("[data-k='joined'] [data-grid-name]")?.textContent).toBe("hetzner");
     fireEvent.click(screen.getByRole("button", { name: ADD_COMPUTER_WORDS.another }));
     expect(document.querySelector("[data-k='joined']")).toBeNull();
     expect(host().value).toBe("");

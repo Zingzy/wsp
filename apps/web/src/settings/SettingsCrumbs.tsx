@@ -8,16 +8,11 @@ import { ProjectGlyph } from "../projects/look.js";
 import { useIsMobile } from "../hooks/useMediaQuery.js";
 import { useStore } from "../protocol/store.js";
 import { SETTINGS_WORDS } from "./format.js";
+import { Slash } from "./grid.js";
 import { groupById } from "./groups.js";
 import { placeName } from "./places.js";
 import { useSettingsAt } from "./settingsContext.js";
 import { groupOf, useSettingsStore } from "./settingsStore.js";
-
-const Slash = () => (
-  <span aria-hidden className="shrink-0 text-muted-foreground/50">
-    /
-  </span>
-);
 
 export function SettingsCrumbs() {
   const at = useSettingsAt();
@@ -60,3 +55,4 @@ export function SettingsCrumbs() {
     </>
   );
 }
+

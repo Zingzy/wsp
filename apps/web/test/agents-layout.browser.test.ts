@@ -7,10 +7,10 @@
 // ladder; every row of a tab stands at the tab's one height; the tab's line,
 // the tabs, the search box, the first group label, the first row's mark and a
 // detail's first label share one left edge and the tabs and Add one right
-// edge, and on the computer page the page's own edges; labels and rows keep
-// one rhythm; in the panel the tabs, the line and the toolbar stay pinned
-// while the list scrolls, and on the page they scroll with it on the page's
-// own ground; the list's end keeps the rows' side gutter under it; a tab's tooltip
+// edge; a computer's page, which lists the same rows on the settings grid,
+// stands on one left edge; labels and rows keep one rhythm; the tabs, the
+// line and the toolbar stay pinned while the panel's list scrolls, whose end
+// keeps the rows' side gutter under it; a tab's tooltip
 // opens only while its word is hidden; Tab reaches every row with its ring
 // drawn.
 // Photographs of every tab, a detail of each kind and an agent not installed,
@@ -209,7 +209,7 @@ describe.skipIf(renderSkipped !== undefined)("the agents manager laid out in Chr
     }
   });
 
-  it("pins the tabs, the line and the toolbar in the panel while the list scrolls; on the page they stand on the page's own ground and scroll with it", async () => {
+  it("pins the tabs, the line and the toolbar at the top while the list scrolls in the panel", async () => {
     await open("screen=panel-agents&theme=dark", { width: 1280, height: 420 });
     await page!.waitForSelector("[data-k=agents-surface] [data-agents-row]");
     const surface = page!.locator("[data-k=agents-surface]");
@@ -226,16 +226,6 @@ describe.skipIf(renderSkipped !== undefined)("the agents manager laid out in Chr
     expect(panel.inside).toBe(false);
     expect(await page!.locator("[data-k=agents-surface] [data-agents-top] [data-k=agents-line]").count()).toBe(1);
     expect(await page!.locator("[data-k=agents-surface] [data-agents-head]").count()).toBe(0);
-    await open("screen=settings-computer&theme=dark", { width: 1280, height: 600 });
-    await page!.waitForSelector("[data-settings-card='agents'] [data-agents-row]");
-    const card = page!.locator("[data-settings-card='agents']");
-    await card.locator("[data-segment]").filter({ has: page!.locator('[aria-label="MCP servers"]') }).click();
-    const onPage = await card.evaluate(el => {
-      const top = el.querySelector<HTMLElement>("[data-agents-top]")!;
-      const style = getComputedStyle(top);
-      return { position: style.position, color: style.backgroundColor, image: style.backgroundImage };
-    });
-    expect(onPage).toEqual({ position: "static", color: "rgba(0, 0, 0, 0)", image: "none" });
   });
 
   it("keeps the rows' side gutter under the list's end on every tab, once it is scrolled there", async () => {
@@ -260,35 +250,21 @@ describe.skipIf(renderSkipped !== undefined)("the agents manager laid out in Chr
     }
   });
 
-  it("stands on the computer page's edges: its outer edge on the section labels and card borders, its content on the cards' text", async () => {
+  it("stands a computer's page on one left edge: the crumbs, the title, each list's header and its glyph frames", async () => {
     await open("screen=settings-computer&theme=dark", { width: 1280, height: 1800 });
-    await page!.waitForSelector("[data-settings-card='agents'] [data-agents-row]");
-    const read = async () =>
-      page!.evaluate(() => {
-        const x = (el: Element | null | undefined) => Math.round(el?.getBoundingClientRect().left ?? NaN);
-        const manager = document.querySelector("[data-settings-card='agents'] [data-agents-manager]");
-        const card = document.querySelector("[data-settings-card]:not([data-settings-card='agents']) [data-settings-row]")?.parentElement;
-        return {
-          sectionLabel: x(document.querySelector("[data-settings-head]")),
-          cardBorder: x(card),
-          cardText: x(card?.querySelector("[data-settings-title]")),
-          manager: x(manager),
-          line: x(manager?.querySelector("[data-k=agents-line]")),
-          label: x(manager?.querySelector("[data-group-label] span")),
-          mark: x(manager?.querySelector("[data-agents-row] [data-row-trigger] > *")),
-          detail: x(manager?.querySelector("[data-fact-label]")),
-        };
-      });
-    const list = await read();
-    await page!.locator("[data-settings-card='agents'] [data-agents-row='agent-claude'] [data-row-trigger]").click();
-    const { detail } = await read();
-    console.info(`agents page edges: ${JSON.stringify({ ...list, detail })}`);
-    expect(list.cardBorder).toBe(list.sectionLabel);
-    expect(list.manager).toBe(list.sectionLabel);
-    expect([list.line, list.mark, detail]).toEqual([list.cardText, list.cardText, list.cardText]);
-    await page!.locator("[data-settings-card='agents'] [data-k=agents-back]").click();
-    await page!.locator("[data-settings-card='agents'] [data-segment]").filter({ has: page!.locator('[aria-label="Skills"]') }).click();
-    expect((await read()).label).toBe(list.cardText);
+    await page!.waitForSelector("[data-grid='agents'] [data-grid-row]");
+    const edges = await page!.evaluate(() => {
+      const x = (el: Element | null | undefined) => Math.round(el?.getBoundingClientRect().left ?? NaN);
+      return {
+        crumbs: x(document.querySelector("[data-k='page-crumbs']")),
+        title: x(document.querySelector("[data-settings-page] h1")),
+        heads: [...document.querySelectorAll("[data-settings-page] [data-grid-head] > span:first-child")].map(x),
+        frames: [...document.querySelectorAll("[data-settings-page] [data-grid-row] > span:first-child > span:first-child")].map(x),
+      };
+    });
+    console.info(`computer page edges: ${JSON.stringify(edges)}`);
+    expect(edges.heads.length).toBeGreaterThan(0);
+    expect(new Set([edges.crumbs, edges.title, ...edges.heads, ...edges.frames])).toEqual(new Set([edges.title]));
   });
 
   it("opens a tab's tooltip only while its word is hidden", async () => {
@@ -524,19 +500,18 @@ describe.skipIf(renderSkipped !== undefined)("the agents manager laid out in Chr
     }
   }, 180_000);
 
-  it("draws a device sign-in under the detail's acts with Cancel first, and photographs both themes", async () => {
+  it("draws a device sign-in under the agent's row on a computer's page, and photographs both themes", async () => {
     for (const theme of ["dark", "light"] as const) {
       await open(`screen=settings-computer&theme=${theme}`, { width: 1280, height: 1800 });
-      const card = page!.locator("[data-settings-card='agents']");
-      await card.locator("[data-agents-row]").first().waitFor();
-      await card.locator('[data-agents-row="agent-codex"] [data-row-slot] [data-k=act-sign-in]').click();
-      await card.locator("[data-k=sign-in-code]").waitFor();
-      expect(await card.locator("[data-detail-acts] button").first().textContent()).toBe("Cancel");
+      const grid = page!.locator("[data-grid='agents']");
+      await grid.locator("[data-grid-row]").first().waitFor();
+      await grid.locator("[data-kind-row='agent-codex'] [data-k=act-sign-in]").click();
+      await grid.locator("[data-k=sign-in-code]").waitFor();
       // A device code is typed on the page, so the flow holds the code's line and no field's.
-      const lines = await card.locator("[data-sign-in-line]").evaluateAll(els => els.map(el => Math.round(el.getBoundingClientRect().height)));
+      const lines = await grid.locator("[data-sign-in-line]").evaluateAll(els => els.map(el => Math.round(el.getBoundingClientRect().height)));
       expect(lines).toEqual([40]);
       expect(await page!.evaluate(() => document.documentElement.classList.contains("dark"))).toBe(theme === "dark");
-      await card.screenshot({ path: join(SHOTS_DIR, `agents-signin-page-${theme}.png`), animations: "disabled" });
+      await grid.screenshot({ path: join(SHOTS_DIR, `agents-signin-page-${theme}.png`), animations: "disabled" });
     }
   }, 120_000);
 
@@ -599,7 +574,7 @@ describe.skipIf(renderSkipped !== undefined)("the agents manager laid out in Chr
       await surface.locator("[data-agents-row] [data-k=status]:not([data-state=checking])").first().waitFor();
       await page!.screenshot({ path: join(SHOTS_DIR, `agents-panel-servers-${theme}.png`), animations: "disabled" });
       await open(`screen=settings-computer&theme=${theme}`, { width: 1280, height: 1800 });
-      await page!.waitForSelector("[data-settings-card='agents'] [data-agents-row]");
+      await page!.waitForSelector("[data-grid='agents'] [data-grid-row]");
       expect(await page!.evaluate(() => document.documentElement.classList.contains("dark"))).toBe(theme === "dark");
       await page!.screenshot({ path: join(SHOTS_DIR, `agents-page-${theme}.png`), fullPage: true, animations: "disabled" });
     }
