@@ -44,6 +44,7 @@ export function BrowserSurface({ workspaceId, surface }: { workspaceId: string; 
   const [recents, setRecents] = useRecents(workspaceId);
   const [hint, setHint] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [query, setQuery] = useState("");
 
   const address = currentAddress(tab);
   const port = address?.port ?? null;
@@ -113,6 +114,7 @@ export function BrowserSurface({ workspaceId, surface }: { workspaceId: string; 
         onForward={withTab(id => tabs.forward(workspaceId, id))}
         onRefresh={withTab(id => tabs.reload(workspaceId, id))}
         onSubmit={openUrl}
+        onDraft={setQuery}
         onOpenInBrowser={realUrl !== null ? openOutside : undefined}
         trailingActions={
           <>
@@ -143,6 +145,7 @@ export function BrowserSurface({ workspaceId, surface }: { workspaceId: string; 
           <PreviewEmptyState
             servers={servers}
             recentEntries={recents}
+            query={query}
             onOpenUrl={openUrl}
             onRemoveRecent={url => setRecents(prev => removeVisit(prev, url))}
           />
