@@ -293,11 +293,15 @@ pub(super) fn opening(
 }
 
 /// Where a thread goes: the workspace named, else the one standing on the project the server's folder is a repo of,
-/// and then the first line says where it went.
-async fn thread_target(client: &Client, named: Option<&str>, cwd: Option<&Path>) -> Result<(Workspace, bool), Failure> {
+/// and then the first line says where it went. A guest's folder is on its machine, so walking one here would read the
+/// person's own checkouts: a guest names the workspace.
+async fn thread_target(client: &Client, named: Option<&str>, cwd: Option<&Path>, guest: bool) -> Result<(Workspace, bool), Failure> {
     let words = turns();
     if let Some(named) = named {
         return Ok((workspace_of(client, named).await?, false));
+    }
+    if guest {
+        return Err(Failure::usage(words.guest_names_workspace.clone()));
     }
     let Some(root) = cwd.and_then(git_root_of) else { return Err(Failure::usage(words.no_thread_target.clone())) };
     let root = root.to_string_lossy().into_owned();
@@ -338,8 +342,13 @@ fn shell_quote(value: &str) -> String {
 /// The files a call names, read off this computer and carried as bytes, so nothing on the machine reaches back for the
 /// person's files: an image told by its own first bytes and carried as one, any other file under its own name, and
 /// the caps checked against what the files weigh before any of them is read whole.
-fn files_from(paths: &[String]) -> Result<Vec<Value>, Failure> {
+fn files_from(paths: &[String], guest: bool) -> Result<Vec<Value>, Failure> {
     let words = &turns().files;
+    // Before a path is resolved: a guest would otherwise learn from the refusals which paths exist on the person's
+    // disk, and a file that does exist would be read and sent.
+    if guest && !paths.is_empty() {
+        return Err(Failure::usage(words.guest.clone()));
+    }
     let mut files = Vec::new();
     for given in paths {
         let path = std::path::absolute(given).unwrap_or_else(|_| PathBuf::from(given));
@@ -673,7 +682,7 @@ fn opened_thread(thread_id: &str, opened: Option<&Opened>) -> String {
 async fn run(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     let RunIn { workspace, task, agent, model, effort, access, fast, cwd, notify, title, files, detach } = input("run", arguments)?;
     let client = host.client().await?;
-    let (found, inferred) = thread_target(&client, workspace.as_deref(), host.cwd()).await?;
+    let (found, inferred) = thread_target(&client, workspace.as_deref(), host.cwd(), host.args().guest).await?;
     let picks = Picks { model, effort, access, fast };
     checked_start(&client, &task, agent.as_deref(), &picks, &found.id).await?;
     let opened = inferred.then(|| Opened {
@@ -683,7 +692,7 @@ async fn run(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     let woken = awake(&client, &found, "send").await?;
     let notify = notify_of(&client, notify.as_deref().unwrap_or_default()).await?;
     let folder = absolute_folder(cwd.as_deref())?;
-    let attachments = files_from(files.as_deref().unwrap_or_default())?;
+    let attachments = files_from(files.as_deref().unwrap_or_default(), host.args().guest)?;
     let mut start = opening(&host, &woken.workspace.id, &task, agent, folder, notify);
     if let Some(title) = title {
         start.insert("title".to_owned(), Value::from(title));
@@ -724,7 +733,7 @@ async fn send(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     let picks = Picks { model, effort, access: None, fast };
     checked_start(&client, &message, Some(&thread.harness), &picks, &thread.workspace_id).await?;
     awake(&client, &workspace_of(&client, &thread.workspace_id).await?, "send").await?;
-    let attachments = files_from(files.as_deref().unwrap_or_default())?;
+    let attachments = files_from(files.as_deref().unwrap_or_default(), host.args().guest)?;
     let mut start = params([
         ("workspaceId", Value::from(thread.workspace_id.as_str())),
         ("prompt", Value::from(message.as_str())),
@@ -763,20 +772,20 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let shot = dir.path().join("shot.txt");
         std::fs::write(&shot, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2]).unwrap();
-        let carried = files_from(&[shot.to_string_lossy().into_owned()]).unwrap();
+        let carried = files_from(&[shot.to_string_lossy().into_owned()], false).unwrap();
         assert_eq!(carried, [serde_json::json!({ "mediaType": "image/png", "name": "shot.txt", "bytes": "iVBORw0KGgoBAg==" })]);
         let words = &turns().files;
         let many: Vec<String> = (0..=words.max).map(|_| shot.to_string_lossy().into_owned()).collect();
-        let refused = files_from(&many).unwrap_err();
+        let refused = files_from(&many, false).unwrap_err();
         assert_eq!(refused.kind.as_deref(), Some("usage"));
         assert!(refused.message.contains(&format!("carries {}", words.max + 1)), "{}", refused.message);
         let text = dir.path().join("notes.png");
         std::fs::write(&text, "ab").unwrap();
-        let carried = files_from(&[text.to_string_lossy().into_owned()]).unwrap();
+        let carried = files_from(&[text.to_string_lossy().into_owned()], false).unwrap();
         assert_eq!(carried, [serde_json::json!({ "mediaType": words.untyped, "name": "notes.png", "bytes": "YWI=" })]);
         let empty = dir.path().join("empty.md");
         std::fs::write(&empty, "").unwrap();
-        assert!(files_from(&[empty.to_string_lossy().into_owned()]).unwrap_err().message.contains("empty.md is empty"));
+        assert!(files_from(&[empty.to_string_lossy().into_owned()], false).unwrap_err().message.contains("empty.md is empty"));
         assert_eq!(base64(b"ab"), "YWI=");
         assert_eq!(base64(b"abc"), "YWJj");
         assert_eq!(request_id().len(), 36);

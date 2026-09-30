@@ -492,7 +492,24 @@
           "op": "workspaces.wake",
           "workspaceId": "ws-1"
         }
-      ]
+      ],
+      "guest": {
+        "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"a path on this line would be read on the person's computer, not on the machine the line was typed on. Name a file on the machine the line runs on, or none.\"}],\"structuredContent\":{\"error\":\"a path on this line would be read on the person's computer, not on the machine the line was typed on. Name a file on the machine the line runs on, or none.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+        "asked": [
+          {
+            "op": "workspaces.resolve",
+            "ref": "attic-work"
+          },
+          {
+            "op": "harnesses.list",
+            "workspaceId": "ws-1"
+          },
+          {
+            "op": "workspaces.wake",
+            "workspaceId": "ws-1"
+          }
+        ]
+      }
     },
     {
       "case": "fast on a model with none",
@@ -524,7 +541,11 @@
       },
       "replies": {},
       "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"workspace is needed outside a repo: run from inside a repo one of the workspaces holds, or name the workspace. Run wsp workspaces to read the names.\"}],\"structuredContent\":{\"error\":\"workspace is needed outside a repo: run from inside a repo one of the workspaces holds, or name the workspace. Run wsp workspaces to read the names.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
-      "asked": []
+      "asked": [],
+      "guest": {
+        "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"a line from a workspace names the workspace it means, since the folder it was typed in is not one this host can read. Name the workspace on the line.\"}],\"structuredContent\":{\"error\":\"a line from a workspace names the workspace it means, since the folder it was typed in is not one this host can read. Name the workspace on the line.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+        "asked": []
+      }
     },
     {
       "case": "no thread stamped",

@@ -147,6 +147,7 @@ async function fileWords(): Promise<Record<string, unknown>> {
   const size = `is ${(big / 1024 / 1024).toString()} MB`;
   return {
     notAFile: await refused(() => filesFrom(["{path}"])),
+    guest: await refused(() => filesFrom(["{path}"], true)),
     refused: (await refused(() => filesFrom(pngs))).replace(tooMany, "{refusal}"),
     tooMany: filesRefusal(many)!.replace(`carries ${many.length}`, "carries {count}"),
     empty: filesRefusal([{ mediaType: "image/png", bytes: 0, name: "{name}" }])!,
@@ -255,6 +256,7 @@ export async function turnWords(): Promise<Record<string, unknown>> {
     noAdapterNone: await refused(() => checkedStart(answering({ "harnesses.list": { harnesses: [] } }), "t", "{agent}", {})),
     picks: await pickWords(),
     noThreadTarget: await refused(() => threadTarget(answering({}), undefined, "/", "workspace")),
+    guestNamesWorkspace: await refused(() => threadTarget(answering({}), undefined, "/", "workspace", true)),
     noWorkspaceForFolder: noWorkspaceForFolderLine("{folder}", "workspace"),
     threadOpened: threadOpenedLine("{thread}", "{workspace}", "{folder}"),
     openedThread: openedThreadLine("{thread}", undefined),
@@ -456,6 +458,7 @@ export const TURN_ANSWERED: Record<string, TurnCase[]> = {
     { case: "an empty message", arguments: { thread: THREAD, message: "" }, replies: { "sessions.list": listed() } },
     { case: "a model off the list", arguments: { thread: OTHER, message: "m", model: "o3" }, replies: { "sessions.list": listed(), "harnesses.list": HARNESSES } },
     { case: "a failed turn", arguments: { thread: THREAD, message: "m" }, replies: { "sessions.list": listed(), "harnesses.list": HARNESSES, "workspaces.resolve": resolved(NAPPING), "workspaces.wake": resolved(), "sessions.start": START }, pushed: { "sessions.start": [done({ status: "interrupted" })] } },
+    { case: "a file that is not there", arguments: { thread: THREAD, message: "m", files: ["no-such-shot.png"] }, replies: { "sessions.list": listed(), "harnesses.list": HARNESSES, "workspaces.resolve": resolved(), "workspaces.wake": resolved() } },
   ],
 };
 

@@ -12,10 +12,8 @@ import { agentsOffRefusal, HERE_PLACE_ID, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL
 import { copyKey, createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cli, localWiring, serve } from "../src/cli.js";
-import { guestCli } from "../src/guest-cli.js";
-import { guestMcp } from "../src/guest-mcp.js";
+import { guestKinds } from "../src/guest-tools.js";
 import { guestDoor, type GuestDoor, type GuestLink } from "../src/guest.js";
-import { runningWsp } from "../src/mcp-install.js";
 import type { HostHandle } from "../src/server.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend } from "./stub-backend.js";
@@ -65,7 +63,7 @@ describe("the wsp command on a thread's machine", () => {
     door = guestDoor({
       authorize: token => rt.devices.match(token).then(device => (device === undefined ? undefined : { kind: "device", device })),
       hostUrl: () => `http://${LOOPBACK}:${port}`,
-      kinds: { mcp: guestMcp(statePath), cli: guestCli(statePath, runningWsp()) },
+      kinds: guestKinds(statePath),
     });
   });
   afterEach(async () => {

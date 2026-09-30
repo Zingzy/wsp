@@ -12,5 +12,10 @@
     "2024-11-05",
     "2024-10-07"
   ],
-  "latestProtocolVersion": "2025-11-25"
+  "latestProtocolVersion": "2025-11-25",
+  "readsHere": [
+    "recipe_scan",
+    "recipe",
+    "terminal_config"
+  ]
 }

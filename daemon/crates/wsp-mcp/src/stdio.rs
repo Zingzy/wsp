@@ -93,7 +93,7 @@ fn take(line: &[u8], host: &Arc<Host>, answer: &mpsc::UnboundedSender<String>, c
             let _ = answer.send(result(&id, "{}"));
         }
         "tools/list" => {
-            let listed: Vec<String> = tools::listed(host.cloud()).map(compact).collect();
+            let listed: Vec<String> = tools::listed(host.cloud(), host.args().guest).map(compact).collect();
             let _ = answer.send(result(&id, &format!(r#"{{"tools":[{}]}}"#, listed.join(","))));
         }
         "tools/call" => {
@@ -129,7 +129,7 @@ fn greeting(params: Option<&Value>, cloud: bool) -> String {
 }
 
 async fn called(host: Arc<Host>, asked: CallParams) -> String {
-    let Some((tool, entry)) = tools::named(&asked.name, host.cloud()) else {
+    let Some((tool, entry)) = tools::named(&asked.name, host.cloud(), host.args().guest) else {
         return refused_text(&format!("MCP error -32602: Tool {} not found", asked.name));
     };
     let arguments = match refused_before_call(tool.name, entry, asked.arguments) {

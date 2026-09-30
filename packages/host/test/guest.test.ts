@@ -7,14 +7,13 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { EXIT_CODES, guestNoTokenRefusal, guestTurnNoTokenRefusal, guestHostFlagLine, guestNamesWorkspaceLine, guestNoFileLine, guestNoKindLine, guestNoLoopbackLine, guestNoSessionLine, guestPersonsComputerLine, LOOPBACK, UNAUTHORIZED, type DaemonEvent } from "@wsp/protocol";
+import { EXIT_CODES, GUEST_SESSIONS_PER_WORKSPACE_CAP, GUEST_WORKSPACE_FULL, guestNoTokenRefusal, guestTurnNoTokenRefusal, guestHostFlagLine, guestNamesWorkspaceLine, guestNoFileLine, guestNoKindLine, guestNoLoopbackLine, guestNoSessionLine, guestPersonsComputerLine, LOOPBACK, UNAUTHORIZED, type DaemonEvent } from "@wsp/protocol";
 import { copyKey, createRuntime, memoryStore, type GuestKindModule, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { serve } from "../src/cli.js";
-import { guestCli, guestRefusal } from "../src/guest-cli.js";
-import { guestMcp } from "../src/guest-mcp.js";
+import { guestRefusal } from "../src/guest-cli.js";
+import { guestKinds } from "../src/guest-tools.js";
 import { guestDoor, type GuestDoor, type GuestLink } from "../src/guest.js";
-import { runningWsp } from "../src/mcp-install.js";
 import { placeWiring } from "../src/places.js";
 import type { HostHandle } from "../src/server.js";
 import { hasTool, readsHere, toolName, VERBS } from "../src/verbs.js";
@@ -109,7 +108,7 @@ describe("a guest session on the host", () => {
     door = guestDoor({
       authorize: token => rt.devices.match(token).then(device => (device === undefined ? undefined : { kind: "device", device })),
       hostUrl: () => `http://${LOOPBACK}:${port}`,
-      kinds: { mcp: guestMcp(statePath), cli: guestCli(statePath, runningWsp()) },
+      kinds: guestKinds(statePath),
     });
   });
 
@@ -412,6 +411,25 @@ describe("a guest session on the host", () => {
     counting.event(link, opened({ token, argv: ["threads"], life: "life-2" }));
     await settled(() => lines.length === 3);
     expect(closed).toEqual([0, 1]);
+  });
+
+  it("holds as many sessions of one workspace as its machine's daemon may, and ends the one past that in the daemon's words", async () => {
+    // Each session here can be a process on the person's computer, and a machine whose agent is root can bypass its
+    // own daemon's count: this door keeps the same count on this side.
+    const token = await tokenOn(workspaceId);
+    const lines: string[][] = [];
+    const closed: number[] = [];
+    const counting = countingDoor(lines, closed);
+    for (let at = 0; at < GUEST_SESSIONS_PER_WORKSPACE_CAP; at++) counting.event(link, opened({ token, argv: ["threads"], session: `g${at}` }));
+    await settled(() => lines.length === GUEST_SESSIONS_PER_WORKSPACE_CAP);
+    counting.event(link, opened({ token, argv: ["threads"], session: "g-over" }));
+    await settled(() => closes().some(c => c.params["session"] === "g-over"));
+    expect(closes().find(c => c.params["session"] === "g-over")?.params["error"]).toBe(GUEST_WORKSPACE_FULL);
+    expect(lines).toHaveLength(GUEST_SESSIONS_PER_WORKSPACE_CAP);
+    // A session that ends makes room for the next.
+    counting.event(link, { type: "guest.closed", session: "g0" });
+    counting.event(link, opened({ token, argv: ["threads"], session: "g-after" }));
+    await settled(() => lines.length === GUEST_SESSIONS_PER_WORKSPACE_CAP + 1);
   });
 
   it("drops every session of a workspace that is gone, and ends the next frame that arrives for one", async () => {

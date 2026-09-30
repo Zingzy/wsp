@@ -9,18 +9,20 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import type { GuestKindModule, GuestOpening, GuestSession } from "@wsp/runtime";
 import type { Dialer } from "./mcp.js";
-import { readsHere, type VerbDeps } from "./verbs.js";
+import { readsHere, type Verb, type VerbDeps } from "./verbs.js";
+
+/** The tool server as a session from inside a machine is served it. A verb whose work is on the computer the process
+ * runs on is not this session's to call: here that computer is the person's, and the caller asked about the machine
+ * it is on. `elsewhere` is the same reading one level down, for the flags and inputs of the verbs that do pass: a
+ * path this session names is on its own machine, and the rules that would resolve one here refuse it. */
+export const GUEST_SERVED = { elsewhere: true, skip: (verb: Verb): boolean => readsHere(verb) !== undefined } as const;
 
 export function guestMcp(statePath: string): GuestKindModule {
   return {
     open(o) {
       return served(o, ({ dialer, mcpServer }) => {
         const dial = dialer(statePath, { env: o.env });
-        // A verb whose work is on the computer the process runs on is not this session's to call: here that
-        // computer is the person's, and the caller asked about the machine it is on. `elsewhere` is the same reading
-        // one level down, for the flags and inputs of the verbs that do pass: a path this session names is on its
-        // own machine, and the rules that would resolve one here refuse it.
-        return { dial, server: mcpServer(statePath, { dial, cwd: o.cwd, env: o.env, elsewhere: true, skip: verb => readsHere(verb) !== undefined }) };
+        return { dial, server: mcpServer(statePath, { dial, cwd: o.cwd, env: o.env, ...GUEST_SERVED }) };
       });
     },
   };

@@ -123,7 +123,7 @@ export function toolServerHere(): string | false {
   return askedToolServer;
 }
 
-const toolServerOf = (run: RunningWsp): string | false => run.toolServer ?? toolServerHere();
+export const toolServerOf = (run: RunningWsp): string | false => run.toolServer ?? toolServerHere();
 
 /** The words the tool server is handed this same wsp by, which it brings a host up with and runs the recipe tools. */
 const handedWsp = (run: RunningWsp): string[] => {
