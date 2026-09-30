@@ -4419,6 +4419,7 @@ const DAEMON_CONTENTS = [
   "fcbf00c4e8075aea8eec9513751ad6412db3feae36f2a1e78d2465eca51b86a4",
   "9468bfd7e5cd26a8458b328ef1f01634bbd12954c7b2d4dc13711adb7f19ae95",
   "17dc947dabc1776d901352d4d681af228e620309b8b4d8b8043ac9d904788bb4",
+  "eb62eb296316d8c81da569e60be2c5db173b00f00a2ef7f562db39265db49423",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -4672,7 +4673,9 @@ const DAEMON_CONTENTS = [
  * tunnel.data and tunnel.end carry it back. The server and every process it started are stopped five minutes after
  * its last tunnel closes, and when the daemon ends; one an ended daemon left behind goes before another starts. A
  * daemon answering for a computer somebody owns starts none on that computer itself, and inside a workspace the
- * server's files are written with no link of the workspace's followed. */
+ * server's files are written with no link of the workspace's followed.
+ * Version 94 asks the DevTools question on the person's own computer only of a listener wsp's own processes hold, the
+ * daemon and everything under the host that started it, so no other server of theirs gets a request from wsp. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
