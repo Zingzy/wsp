@@ -23,7 +23,7 @@ Every installed agent gets the machine's context through its own always-loaded h
 - Containers do not run here; services install natively.
 - `wsp-daemon` listens on `0.0.0.0:7070` with its own token and must not be stopped or shadowed.
 - A background process started with a plain `&` inside a tool call dies when that call ends; a server that must outlive the turn starts with `setsid nohup ... &`.
-- A turn ends when the agent process exits, not at its reply, and a reply given with a command still running reads failed.
+- A turn ends when the agent process exits, not at its reply. A command run in the background holds the turn open until it finishes, and one still running when the turn ends is named on the reply's last line.
 - A loopback-only bind is unreachable through the preview edge; bind `0.0.0.0`. Ports below 1024 are not forwarded.
 - Secrets are exported by `/etc/profile.d/wsp-secrets.sh`, used by name, and that file is never read, printed, logged or committed.
 - `.env` files, `.netrc` and private keys were never copied from the person's computer.

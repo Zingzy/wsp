@@ -137,7 +137,7 @@ describe("the wsp skill", () => {
     expect(INSTRUCTIONS).toContain("Stopping a thread stops every thread under it");
   });
 
-  it("quotes the failure a reply with a background command gets, as the adapter words it", () => {
+  it("quotes the line a reply ends on when a background command is still running, as the adapter words it", () => {
     const rules = WSP_SKILL.slice(WSP_SKILL.indexOf("## Rules learned the hard way"));
     expect(rules).toContain(`\`${backgroundTasksLine(1)}\``);
   });
