@@ -4510,6 +4510,7 @@ const DAEMON_CONTENTS = [
   UNRECORDED,
   "fdfe7e8214a09e7c6e73ddea88aa9c167869ef0e02436b4c1ce7df85c7fdaa72",
   "4b81b5dc48a8d5472532d2c900a0247233533c19da9516bbb8ee2c17cfe4c9c1",
+  "f2efbe27af183ea59d6f6875831f6263b013d6a179d94ba977075c5478172e5a",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -4784,7 +4785,12 @@ const DAEMON_CONTENTS = [
  * Version 103 asks the DevTools question only of a listener whose holder goes by a browser's or Electron's name
  * (Chrome and its helpers, Chromium, headless_shell, Edge, Brave, Arc, Electron and its helpers), so a node server a
  * thread's tests start gets no request. It reverses the rule of version 92, which asked every listener by what it
- * answers, on the owner's ruling. */
+ * answers, on the owner's ruling.
+ * Version 104: git.startOn puts a checkout on a branch as the remote holds it, git.branchCompare counts a branch
+ * against a base branch or commit through the git host's command line on this computer, and git.mergeIn merges a
+ * child's branch in with a merge commit and answers with the child's commit it took, fetched from the remote or from a
+ * copy's folder on this computer under overrides that stop a served repository's configured commands. A fetch or a push
+ * refused for want of a credential carries the code no-git-credential. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
