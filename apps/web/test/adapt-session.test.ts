@@ -631,13 +631,13 @@ describe("deriveSession: a turn refused before it reached a machine", () => {
   const working: SessionEvent[] = [
     { type: "session.start", ...first, at: 1_000, prompt: "fan out five agents" },
     { type: "session.delta", ...first, at: 2_000, line: 1, kind: "text", text: "Five agents are running." },
-    { type: "session.done", ...first, at: 66_000, result: { status: "failed", error: "Ended with 5 background tasks running", durationMs: 66_000, costUsd: 0.51 } },
+    { type: "session.done", ...first, at: 66_000, result: { status: "failed", error: "machine paused while the agent was working", durationMs: 66_000, costUsd: 0.51 } },
   ];
 
   it("says why in the transcript, as one line carrying the turn that was refused", () => {
     const m = deriveSession([...working, refused]);
     expect(m.workEntries.map(w => [w.turnId, w.label, w.tone])).toEqual([
-      ["turn_1", "Ended with 5 background tasks running", "error"],
+      ["turn_1", "machine paused while the agent was working", "error"],
       ["turn_2", "the harness would not launch", "error"],
     ]);
   });
@@ -657,7 +657,7 @@ describe("deriveSession: a turn refused before it reached a machine", () => {
   it("an end that says nothing stays a wake for whoever waits on the thread and puts no line in the transcript", () => {
     const quiet: SessionEvent = { ...refused, reason: undefined };
     const m = deriveSession([...working, { type: "session.end", ...first, at: 67_000, exitCode: 0, sawResult: true }, quiet]);
-    expect(m.workEntries.map(w => w.label)).toEqual(["Ended with 5 background tasks running"]);
+    expect(m.workEntries.map(w => w.label)).toEqual(["machine paused while the agent was working"]);
     expect(m.turns.map(t => t.turnId)).toEqual(["turn_1"]);
   });
 
@@ -673,7 +673,7 @@ describe("deriveSession: a turn refused before it reached a machine", () => {
     expect(m.running).toBe(false);
     expect(m.turns.map(t => [t.turnId, t.state])).toEqual([["turn_1", "error"], ["turn_2", "error"]]);
     expect(m.workEntries.map(w => [w.turnId, w.label])).toEqual([
-      ["turn_1", "Ended with 5 background tasks running"],
+      ["turn_1", "machine paused while the agent was working"],
       ["turn_2", "claude answered with no output and no usage after 48ms"],
     ]);
   });

@@ -32,7 +32,7 @@ Every refusal in wsp is one line on stderr that says what happened and, where th
 | --- | --- | --- |
 | `thread <id> replied, still working; wait for its turn to finish before sending` | the reply is in but the agent process has not exited | wait and send again; do not loop |
 | `previous turn was cut; resuming` at the top of a reply | the last turn ended on a deadline, a host restart or a nap | restate what matters; the agent may be missing its last steps |
-| a reply that reads failed with `ended with 1 background task running` | the agent left a command running in the background | brief agents to run every command in the foreground and wait for it |
+| a reply whose last line is `ended with 1 background task running` | the turn ended with a command the agent started still running in the background | nothing, if it is a server the agent meant to keep; otherwise brief agents to run every command in the foreground and wait for it |
 | a turn that ends after ten quiet minutes | nothing printed for 10 minutes | long steps must print; a build that is silent for ten minutes ends the turn |
 | a turn that ends at six hours | the hard cap | split the work |
 | `thread <id> not running` on `stop` | the turn had already ended | nothing; it is not an error |
