@@ -54,7 +54,7 @@ describe("index.css", () => {
     expect(scope).toContain("--muted-foreground: var(--sidebar-quiet);");
   });
 
-  it("draws no blur of the page's own on the Mac, where the window's glass is macOS's: each pane's blur is written for the other platforms alone, and no rule turns one off", () => {
+  it("draws no blur of the page's own on the Mac, where the window's glass is macOS's: each pane's blur is written for the other platforms alone, the composer's excepted, and no rule turns one off", () => {
     // Each blur declaration with the blocks it sits in, outermost first. A block's head is the text before its brace.
     const blurs: string[][] = [];
     const heads: string[] = [];
@@ -81,7 +81,8 @@ describe("index.css", () => {
     expect(applied).toBe([...css.matchAll(/@apply glass-backdrop;/g)].length);
     const uses = execFileSync("git", ["grep", "-hoE", "[^ \"'`]*glass-backdrop", "--", "src", ":!*.css", ":!*.test.*"], { cwd: join(__dirname, ".."), encoding: "utf8" }).trim().split("\n");
     expect(uses.length).toBeGreaterThan(0);
-    expect(uses.filter(use => !use.startsWith("off-mac:"))).toEqual([]);
+    // The composer alone frosts on the Mac too (ComposerSurface.tsx): the owner wants the page under it to show.
+    expect(uses.filter(use => !use.startsWith("off-mac:"))).toEqual(["before:glass-backdrop"]);
   });
 
   it("pins the sidebar glass utility added after the upstream set", () => {
@@ -199,21 +200,10 @@ describe("index.css", () => {
       }
 
       /* The Mac's glass shows what is behind the window, never the page under a pane, so a pane that frosts what scrolls
-         under it elsewhere (the composer, a pill, a banner) stands on its material whole here. A dialog's and a sheet's
+         under it elsewhere (a pill, a banner) stands on its material whole here; the composer alone keeps its frost. A dialog's and a sheet's
          scrim keep their blur: they stand only while open, and a sharp page under a dim scrim reads busier. */
       .desktop-mac {
         --glass-opacity: 100%;
-      }
-
-      /* The composer's ground there is the card, and in the dark the raised material the chrome's panes stand on: its tint
-         elsewhere is the ink at a few percent over a blur, which whole would be a slab of the ink. */
-      .desktop-mac [data-slot="composer-shell"] {
-        --chat-composer-glass-surface: var(--card);
-        --chat-composer-glass-opacity: 100%;
-      }
-
-      .desktop-mac.dark [data-slot="composer-shell"] {
-        --chat-composer-glass-surface: var(--material-raised);
       }
 
       /* The page drawing no glass (Transparency off in Appearance, or the computer's Reduce transparency on, read in

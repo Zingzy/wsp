@@ -154,12 +154,15 @@ describe("a thread tile", () => {
     expect(three.querySelector("[data-tile-branch]")).toBeNull();
   });
 
-  it("a resting thread's title takes the muted ink and its slot the age; a working one's the foreground", () => {
+  it("a resting or working thread's title recedes, the open one's does not, and a resting slot reads the age", () => {
     mount({ over: { status: "completed" } });
     expect(rows()[1]!.className).toContain("text-sidebar-muted-foreground");
     expect(slot().textContent).toBe("3m");
     cleanup();
     mount();
+    expect(rows()[1]!.className).toContain("text-sidebar-muted-foreground");
+    cleanup();
+    mount({ active: true });
     expect(rows()[1]!.className).toContain("text-sidebar-foreground");
   });
 

@@ -29,9 +29,16 @@ export function contextFigure(snapshot: ContextSnapshot): string {
   return snapshot.max === null ? fmtTokens(snapshot.used) : `${fmtTokens(snapshot.used)} / ${fmtTokens(snapshot.max)}`;
 }
 
-/** The meter's hover line, naming the agent where the limit is its to report. */
+/** The share as a percentage, one decimal under ten as T3 Code says it; null where there is no limit. */
+export function contextPercent(snapshot: ContextSnapshot): string | null {
+  if (snapshot.share === null) return null;
+  const value = snapshot.share * 100;
+  return value < 10 ? `${value.toFixed(1).replace(/\.0$/, "")}%` : `${Math.round(value)}%`;
+}
+
+/** The ring's hover line, naming the agent where the limit is its to report. */
 export function contextTitle(snapshot: ContextSnapshot, agentLabel: string): string {
   return snapshot.max === null
     ? `Context: ${fmtTokens(snapshot.used)} tokens; ${agentLabel} does not report its limit`
-    : `Context: ${fmtTokens(snapshot.used)} of ${fmtTokens(snapshot.max)} tokens`;
+    : `Context: ${contextPercent(snapshot)} used, ${fmtTokens(snapshot.used)} of ${fmtTokens(snapshot.max)} tokens`;
 }

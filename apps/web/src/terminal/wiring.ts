@@ -48,7 +48,7 @@ export function wireTerminals(store: typeof useStore, opts: WiringOptions = {}):
   // This computer's own terminal: its model is there from the start so the drawer has one to read, and its daemon
   // is dialled only once that drawer or a pane that reads it has been opened, since the host starts the daemon on
   // the first dial.
-  const hereWire: TerminalWire = { request: (op, params) => (here.link ? here.link.request(op, params) : Promise.reject(new Error("daemon unreachable"))) };
+  const hereWire: TerminalWire = { request: (op, params) => (here.link ? here.link.request(op, params) : Promise.reject(new Error("not answering"))) };
   const here: Pick<Wired, "link" | "wt"> = { link: null, wt: new WorkspaceTerminals(hereWire) };
   provideTerminals(HERE_KEY, here.wt);
   provideDaemonWire(HERE_KEY, hereWire);
@@ -111,7 +111,7 @@ export function wireTerminals(store: typeof useStore, opts: WiringOptions = {}):
               fresh.touched = Date.now();
               store.getState().api?.touch?.(w.id).catch(() => {});
             }
-            return fresh.link ? fresh.link.request(op, params) : Promise.reject(new Error("daemon unreachable"));
+            return fresh.link ? fresh.link.request(op, params) : Promise.reject(new Error("not answering"));
           },
         };
         fresh.wt = new WorkspaceTerminals(wire);

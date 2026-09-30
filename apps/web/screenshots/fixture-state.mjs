@@ -1103,6 +1103,22 @@ const replies = () =>
           40,
         ],
         [
+          tileThread("tasks", "Pin the redirect order", {
+            prompt: "pin the redirect order with a test and push it, as a list",
+            model: "claude-opus-5-5",
+            status: "running",
+            steps: [
+              { text: "Read the redirect middleware", state: "done" },
+              { text: "Move the rewrite ahead of the host check", state: "done" },
+              { text: "Pin the order with a test", state: "done" },
+              { text: "Run the suite", state: "working" },
+              { text: "Push the branch", state: "pending" },
+            ],
+            reply: "The rewrite runs first now; running the suite before I push.",
+          }),
+          6,
+        ],
+        [
           tileThread("planned", "Plan a quiet flag", {
             prompt: "plan how to add a --quiet flag",
             model: "claude-opus-5-5",

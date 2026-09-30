@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import type { TurnSummary } from "../../adapt";
 
-import { contextFigure, contextSnapshot, contextTitle } from "./contextMeter.logic";
+import { contextFigure, contextPercent, contextSnapshot, contextTitle } from "./contextMeter.logic";
 
 const turn = (turnId: string, tokens: TurnSummary["tokens"]): Pick<TurnSummary, "turnId" | "tokens"> => ({ turnId, tokens });
 
@@ -13,7 +13,7 @@ describe("the context meter's reading of a thread", () => {
     expect(one).toEqual({ used: 4_269, max: 200_000, share: 4_269 / 200_000 });
     expect(two).toEqual({ used: 12_400, max: 200_000, share: 0.062 });
     expect(contextFigure(two!)).toBe("12.4k / 200k");
-    expect(contextTitle(two!, "Claude Code")).toBe("Context: 12.4k of 200k tokens");
+    expect(contextTitle(two!, "Claude Code")).toBe("Context: 6.2% used, 12.4k of 200k tokens");
   });
 
   it("drops to what a compaction left, and skips a turn that reported nothing", () => {
@@ -31,6 +31,13 @@ describe("the context meter's reading of a thread", () => {
   it("is nothing on a thread no turn of which said", () => {
     expect(contextSnapshot([])).toBeNull();
     expect(contextSnapshot([turn("t1", { input: 1, output: 1 })])).toBeNull();
+  });
+
+  it("says the share as a percentage, one decimal under ten, and none where there is no window", () => {
+    const at = (context: number) => contextPercent(contextSnapshot([turn("t1", { input: 1, output: 1, context, window: 200_000 })])!);
+    expect([at(4_269), at(10_000), at(68_250), at(250_000)]).toEqual(["2.1%", "5%", "34%", "100%"]);
+    expect(contextPercent(contextSnapshot([turn("t1", { input: 1, output: 1, context: 24_763 })])!)).toBeNull();
+    expect(contextTitle(contextSnapshot([turn("t1", { input: 1, output: 1, context: 4_269, window: 200_000 })])!, "Claude Code")).toBe("Context: 2.1% used, 4.3k of 200k tokens");
   });
 
   it("never fills past full", () => {

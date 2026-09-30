@@ -47,7 +47,8 @@ export const useDiffStore = create<DiffStoreState>()(
     {
       name: "wsp:diff-surface:v2",
       storage: createJSONStorage(() => window.localStorage),
-      partialize: s => ({ scopeByWorkspaceId: s.scopeByWorkspaceId, renderMode: s.renderMode }),
+      // The turn a reply opened is kept too, so a reload shows that turn and not the branch against its base.
+      partialize: s => ({ scopeByWorkspaceId: s.scopeByWorkspaceId, turnByWorkspaceId: s.turnByWorkspaceId, renderMode: s.renderMode }),
     },
   ),
 );

@@ -311,7 +311,7 @@ export function workspaceStateLine(name: string, state: WorkspaceState, pauseMod
 
 /** Every word a slot beside facts can hold for a computer that is not answering, which is what lets a reader of
  * that slot keep a closed set of words: a reading added here is a word added there, in one place. */
-export type AwayWord = "no answer" | "no daemon";
+export type AwayWord = "no answer" | "stopped";
 
 /** What every surface says about a workspace whose computer is not answering, one reading per slot that has to
  * hold it: the mono word of a state slot, a row's third line, the length of the silence beside the computer's own
@@ -353,7 +353,7 @@ export function absentComputer(name: string, awayMs: number | null): AbsentCompu
 }
 
 /** The word on the button under every pane that needs the daemon this host started. */
-export const START_DAEMON_WORD = "Start it";
+export const START_DAEMON_WORD = "Start again";
 
 /** The one state of the daemon this host started for its own computer's workspace while it is not running. The
  * daemon is a child of the host, so this computer's reach is that child's reach and the app reads it as the
@@ -361,10 +361,10 @@ export const START_DAEMON_WORD = "Start it";
  * button rather than a second sentence, and a turn here runs without it. Unreachable is never one of these words:
  * the computer the app is drawn on is the one computer a person can see is on. */
 export function ownDaemonDown(name: string): AbsentComputer {
-  const said = `${name}'s daemon is not running`;
+  const said = `${name}'s terminals and files stopped`;
   // The row leaves thirty characters, which the sentence itself does not fit in, so the line says the same fact
   // without the computer's name: the row already names the workspace, and the whole sentence rides its title.
-  return { word: "No daemon", away: "no daemon", line: "daemon not running, start it", said, sentence: said, start: START_DAEMON_WORD };
+  return { word: "Stopped", away: "stopped", line: "stopped, start again", said, sentence: said, start: START_DAEMON_WORD };
 }
 
 /** What the slot above the composer says while the workspace's computer is not answering. The box stays open and

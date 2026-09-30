@@ -7,7 +7,7 @@ import { askingLine, initNeedsYouLine, type InitJob, type PlaceView, type Releas
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
-import { ABSENT_NOTICE_MS, HOST_NOTICE_WORDS, RELEASE_SAID_KEY, useHostNotices } from "../src/notices/hostNotices.js";
+import { HOST_NOTICE_WORDS, RELEASE_SAID_KEY, useHostNotices } from "../src/notices/hostNotices.js";
 import { useNotices, type Notice } from "../src/notices/store.js";
 import { useSettingsStore } from "../src/settings/settingsStore.js";
 import { resetAskedToNotify } from "../src/shell/needsYou.js";
@@ -136,68 +136,13 @@ describe("a computer's install and its link", () => {
     expect(notices()).toEqual([]);
   });
 
-  it("a computer gone quiet is said after thirty seconds, once per absence, and a return before then says nothing", () => {
+  it("a computer gone quiet never pops as a notice, however long it stays quiet and whatever the runtime knows of why", () => {
     vi.useFakeTimers();
     emit({ type: "place.absent", placeId: "pl_box" });
-    act(() => vi.advanceTimersByTime(ABSENT_NOTICE_MS - 1));
+    emit({ type: "place.absent", placeId: "pl_box", said: "spoo can no longer boot the image: its kernel has no overlay filesystem" });
+    act(() => vi.advanceTimersByTime(10 * 60_000));
     expect(notices()).toEqual([]);
-    act(() => vi.advanceTimersByTime(1));
-    expect(notices()).toMatchObject([{ kind: "error", text: HOST_NOTICE_WORDS.away("spoo"), where: "spoo", action: { word: "Open" } }]);
-    // The same absence said again is not a second notice.
-    emit({ type: "place.absent", placeId: "pl_box" });
-    act(() => vi.advanceTimersByTime(ABSENT_NOTICE_MS));
-    expect(notices()).toHaveLength(1);
-
-    act(() => useNotices.getState().clear());
-    emit({ type: "place.present", placeId: "pl_box", from: "10.0.0.9" });
-    emit({ type: "place.absent", placeId: "pl_box" });
-    act(() => vi.advanceTimersByTime(ABSENT_NOTICE_MS / 2));
-    emit({ type: "place.present", placeId: "pl_box", from: "10.0.0.9" });
-    act(() => vi.advanceTimersByTime(ABSENT_NOTICE_MS));
-    expect(notices()).toEqual([]);
-  });
-
-  it("a computer that came back and went quiet again is a new absence, said again", () => {
-    vi.useFakeTimers();
-    emit({ type: "place.absent", placeId: "pl_box" });
-    act(() => vi.advanceTimersByTime(ABSENT_NOTICE_MS));
-    emit({ type: "place.present", placeId: "pl_box", from: "10.0.0.9" });
-    emit({ type: "place.absent", placeId: "pl_box" });
-    act(() => vi.advanceTimersByTime(ABSENT_NOTICE_MS));
-    expect(texts()).toEqual([HOST_NOTICE_WORDS.away("spoo"), HOST_NOTICE_WORDS.away("spoo")]);
-  });
-
-  it("an absence the runtime knows the reason for says that reason, even when a plain absence follows it", () => {
-    vi.useFakeTimers();
-    const said = "spoo can no longer boot the image: its kernel has no overlay filesystem";
-    emit({ type: "place.absent", placeId: "pl_box", said });
-    emit({ type: "place.absent", placeId: "pl_box" });
-    act(() => vi.advanceTimersByTime(ABSENT_NOTICE_MS));
-    expect(texts()).toEqual([said]);
-  });
-
-  it("an absence with Computers showing is the row's to say", () => {
-    vi.useFakeTimers();
-    openComputers();
-    emit({ type: "place.absent", placeId: "pl_box" });
-    act(() => vi.advanceTimersByTime(ABSENT_NOTICE_MS));
-    expect(notices()).toEqual([]);
-  });
-
-  it("a computer removed while it was away leaves no timer behind", () => {
-    vi.useFakeTimers();
-    emit({ type: "place.absent", placeId: "pl_box" });
-    expect(vi.getTimerCount()).toBe(1);
-    emit({ type: "place.removed", placeId: "pl_box" });
     expect(vi.getTimerCount()).toBe(0);
-  });
-
-  it("a computer removed while it was away is never said", () => {
-    vi.useFakeTimers();
-    emit({ type: "place.absent", placeId: "pl_box" });
-    emit({ type: "place.removed", placeId: "pl_box" });
-    act(() => vi.advanceTimersByTime(ABSENT_NOTICE_MS));
-    expect(notices()).toEqual([]);
   });
 });
 

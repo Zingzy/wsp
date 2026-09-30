@@ -172,6 +172,9 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
   --color-status-working: var(--status-working);
   --color-status-failed: var(--status-failed);
   --color-status-done: var(--status-done);
+  --color-pr-open: var(--status-done);
+  --color-pr-merged: var(--pr-merged);
+  --color-pr-closed: var(--status-failed);
   --color-info-foreground: var(--info-foreground);
   --color-info: var(--info);
   --color-destructive-foreground: var(--destructive-foreground);
@@ -1505,21 +1508,10 @@ html.desktop-mac.dark [data-preview-panel-mode="inline"]:has([data-terminal-tran
 }
 
 /* The Mac's glass shows what is behind the window, never the page under a pane, so a pane that frosts what scrolls
-   under it elsewhere (the composer, a pill, a banner) stands on its material whole here. A dialog's and a sheet's
+   under it elsewhere (a pill, a banner) stands on its material whole here; the composer alone keeps its frost. A dialog's and a sheet's
    scrim keep their blur: they stand only while open, and a sharp page under a dim scrim reads busier. */
 .desktop-mac {
   --glass-opacity: 100%;
-}
-
-/* The composer's ground there is the card, and in the dark the raised material the chrome's panes stand on: its tint
-   elsewhere is the ink at a few percent over a blur, which whole would be a slab of the ink. */
-.desktop-mac [data-slot="composer-shell"] {
-  --chat-composer-glass-surface: var(--card);
-  --chat-composer-glass-opacity: 100%;
-}
-
-.desktop-mac.dark [data-slot="composer-shell"] {
-  --chat-composer-glass-surface: var(--material-raised);
 }
 
 /* The page drawing no glass (Transparency off in Appearance, or the computer's Reduce transparency on, read in

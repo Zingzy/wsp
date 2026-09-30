@@ -211,20 +211,21 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("Worked for 8.0s");
   });
 
-  it("draws the settled turn's facts on the last reply's row, beside its time", () => {
+  it("keeps a settled reply's row to its copy and its time, whatever the turn ran on and read", () => {
     const turnId = "turn-with-meta";
     const assistantEntry = buildAssistantTimelineEntry("Done.");
+    const turn = { ...buildTurn(turnId, "completed", "2026-03-17T19:12:20.000Z", "2026-03-17T19:12:28.000Z"), model: "claude-sonnet-4-5", tokens: { input: 22_564, output: 251, cached: 0, context: 4_269, window: 200_000 } };
     const markup = renderToStaticMarkup(
       <MessagesTimeline
         {...buildProps()}
-        turns={[buildTurn(turnId, "completed", "2026-03-17T19:12:20.000Z", "2026-03-17T19:12:28.000Z")]}
+        turns={[turn as never]}
         timelineEntries={[{ ...assistantEntry, message: { ...assistantEntry.message, turnId } }]}
-        replyMeta={<span data-reply-meta>$0.47</span>}
       />,
     );
-    const row = markup.slice(markup.lastIndexOf("group-hover/assistant:opacity-100"));
-    expect(row.indexOf("data-reply-meta")).toBeGreaterThan(0);
-    expect(row.indexOf("data-reply-meta")).toBeLessThan(row.indexOf("</div>"));
+    const row = markup.slice(markup.indexOf("data-reply-meta"));
+    expect(row).toContain("data-reply-time");
+    expect(markup).not.toContain("claude-sonnet-4-5");
+    expect(markup).not.toMatch(/22\.6k in|251 out/);
   });
 
   it("keeps assistant changed-files headers sticky below the thread header", () => {

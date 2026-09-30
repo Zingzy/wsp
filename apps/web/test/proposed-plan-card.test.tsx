@@ -108,7 +108,7 @@ describe("saving a plan to the workspace", () => {
     const field = await openSave(vi.fn(async () => { throw new DisconnectedError("lost"); }));
     fireEvent.change(field, { target: { value: "plan.md" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(refusalText()).toBe("Plan not saved: runtime connection lost"));
+    await waitFor(() => expect(refusalText()).toBe("Plan not saved: the connection to wsp was lost"));
     expect(useNotices.getState().notices).toEqual([]);
   });
 });

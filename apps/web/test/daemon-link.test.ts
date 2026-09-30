@@ -86,7 +86,7 @@ describe("connectDaemonLink over the host's relay", () => {
     const statuses: DaemonLinkStatus[] = [];
     link = connect(harness, { onStatus: s => statuses.push(s), backoffMs: () => 40 });
     await until(() => link!.status() === "reauth-needed");
-    await expect(link.request("ping")).rejects.toThrow("daemon unreachable");
+    await expect(link.request("ping")).rejects.toThrow("not answering");
 
     writeFileSync(tokenPath, harnessMachineToken("m1"));
     await until(() => link!.status() === "live");
@@ -172,7 +172,7 @@ describe("connectDaemonLink over the host's relay", () => {
     harness = await startRelayHarness();
     link = connect(harness, { backoffMs: () => 30 });
     // The dial is in flight: no channel is proven yet, so the pane's keystroke is refused rather than raced onto it.
-    await expect(link.request("ping")).rejects.toThrow("daemon unreachable");
+    await expect(link.request("ping")).rejects.toThrow("not answering");
     await until(() => link!.status() === "live");
     expect((await link.request("ping"))["ok"]).toBe(true);
   }, 20_000);
@@ -188,6 +188,6 @@ describe("connectDaemonLink over the host's relay", () => {
     l.close();
     expect(l.status()).toBe("dead");
     await until(() => proxy!.live() === 0);
-    await expect(l.request("ping")).rejects.toThrow("daemon unreachable");
+    await expect(l.request("ping")).rejects.toThrow("not answering");
   }, 20_000);
 });

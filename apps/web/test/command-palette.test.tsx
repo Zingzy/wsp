@@ -239,7 +239,7 @@ describe("command palette", () => {
     await waitFor(() => expect(useStore.getState().selectedId).toBe(here.id));
     mod("k");
     await waitFor(() => expect(palette()).not.toBeNull());
-    await waitFor(() => expect(metaOn("mac")).toContain("No daemon"));
+    await waitFor(() => expect(metaOn("mac")).toContain("Stopped"));
     expect(metaOn("mac")).not.toContain("Unreachable");
     // The rebuild forks a machine again from the image, and there is no machine of wsp's here to fork, so the
     // palette offers no such row at all rather than one held with a reason nobody can clear.
