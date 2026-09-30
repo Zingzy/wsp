@@ -71,10 +71,17 @@ export interface WorkLogEntry {
   readonly sourceActivityKind: WorkLogSourceKind;
 }
 
+/** One step of the agent's list, with how long it took where the list set it working and later marked it done. */
+export interface TaskStep extends PlanStep {
+  /** The step's words and how many steps with those words came before it: one step's key across the list's rewrites. */
+  readonly key: string;
+  readonly durationMs?: number;
+}
+
 /** The agent's step list for one turn as it last wrote it. */
-export interface TodoList {
+export interface TurnPlan {
   readonly turnId: string;
-  readonly steps: ReadonlyArray<PlanStep>;
+  readonly steps: ReadonlyArray<TaskStep>;
 }
 
 export interface ProposedPlan {
@@ -146,7 +153,6 @@ export type TimelineEntry =
   | { readonly id: string; readonly kind: "permission"; readonly createdAt: string; readonly permission: PermissionPrompt }
   | { readonly id: string; readonly kind: "subagent"; readonly createdAt: string; readonly subagent: SubagentRun }
   | { readonly id: string; readonly kind: "proposed-plan"; readonly createdAt: string; readonly proposedPlan: ProposedPlan }
-  | { readonly id: string; readonly kind: "todo"; readonly createdAt: string; readonly todo: TodoList }
   | { readonly id: string; readonly kind: "work"; readonly createdAt: string; readonly entry: WorkLogEntry };
 
 export type TurnState = "running" | "completed" | "interrupted" | "error";
@@ -237,7 +243,6 @@ export type MessagesTimelineRow =
       readonly assistantCopyStreaming: boolean;
     }
   | { readonly kind: "proposed-plan"; readonly id: string; readonly createdAt: string; readonly proposedPlan: ProposedPlan }
-  | { readonly kind: "todo"; readonly id: string; readonly createdAt: string; readonly todo: TodoList }
   | {
       readonly kind: "permission";
       readonly id: string;

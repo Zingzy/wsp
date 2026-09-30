@@ -117,6 +117,8 @@ import { ComposerSurface } from "./ComposerSurface";
 import { useAnimatedHeight, useFlip, useTallDraft } from "./composerMotion";
 import { Button } from "../ui/button";
 import type { ChatThreadHandle } from "./useChatThread";
+import { ComposerTasks } from "./ComposerTasks";
+import { asksThePerson, composerTasks } from "./composerTasks.logic";
 
 const noop = () => {};
 
@@ -236,6 +238,9 @@ export function ChatComposer({
   const opening = opensThread(thread);
   const folderStart = useMemo(() => (opening ? nextStart : viewCwd !== null ? { cwd: viewCwd } : {}), [nextStart, opening, viewCwd]);
   const { harness: harnessId, startOptions, pinned, latestRow, catalog: harnessCatalog, model: pickedModel, picks } = useComposerPicks(workspaceId, thread);
+  const latestTurnId = thread.view.latestTurn?.turnId ?? null;
+  const prompts = thread.view.entries.flatMap(e => (e.kind === "permission" && e.permission.turnId === latestTurnId ? [e.permission] : []));
+  const tasks = composerTasks({ latestTurn: thread.view.latestTurn, running: thread.view.running, plan: thread.view.plan, asking: asksThePerson(prompts, latestRow?.waitingOn !== undefined) });
   const launching = useStore(s => s.launching);
   const launched = useStore(s => s.launched);
   const harnessCatalogs = useHarnessCatalogs(workspaceId);
@@ -927,6 +932,7 @@ export function ChatComposer({
     <div className="relative w-full px-3 pt-1.5 pb-4 sm:px-5 sm:pt-2 sm:pb-5" data-chat-composer>
       <ComposerQueue rows={queue} files={queuedFiles} next={next} waiting={waiting?.line ?? null} onEdit={editCard} onRemove={removeCard} />
       <ComposerSurface.Shell contextStrip>
+        {tasks !== null ? <ComposerTasks tasks={tasks} /> : null}
         <ComposerSurface.Host>
           <form
             className="mx-auto w-full min-w-0 max-w-3xl"

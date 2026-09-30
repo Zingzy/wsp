@@ -1865,16 +1865,30 @@
       "settleMs": 800
     },
     {
-      "name": "todo-card",
+      "name": "composer-tasks",
       "at": "/",
       "fixture": "replies",
       "steps": [
         "390:key:Escape",
         "390:sidebar=trigger",
-        "row-id=thread:replies",
+        "row-id=thread:tasks",
         "390:key:Escape"
       ],
-      "wait": "todo-card",
+      "wait": "composer-tasks",
+      "settleMs": 800
+    },
+    {
+      "name": "composer-tasks-open",
+      "at": "/",
+      "fixture": "replies",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:tasks",
+        "390:key:Escape",
+        "composer-tasks-row"
+      ],
+      "wait": "composer-tasks-list",
       "settleMs": 800
     },
     {

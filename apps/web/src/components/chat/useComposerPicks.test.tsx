@@ -59,6 +59,7 @@ const view = (model: string | null, running = false, recorded: Recorded = UNRECO
   shellCwd: null,
   harness: null,
   model,
+  plan: null,
   ...recorded,
 });
 

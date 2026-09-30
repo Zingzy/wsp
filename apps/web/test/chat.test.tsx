@@ -167,15 +167,33 @@ describe("chat tab rendering", () => {
     expect([panel?.isOpen, panel?.activeSurfaceId]).toEqual([true, "diff"]);
   });
 
-  it("draws the agent's step list as one card under the turn, rewritten in place as the steps move", async () => {
+  it("carries the agent's step list on the composer's edge while its turn runs, never in the transcript", async () => {
     const { api, emit } = fixtureApi([workspace]);
     await setup(api);
     emit({ type: "session.start", ...scope, prompt: "make a list and work through it" });
     emit({ type: "session.plan", ...scope, steps: [{ text: "one", state: "working" }, { text: "two", state: "pending" }] });
-    await waitFor(() => expect(document.querySelectorAll("[data-todo-card]")).toHaveLength(1));
+    const row = await waitFor(() => document.querySelector<HTMLElement>("[data-composer-tasks-row]")!);
+    expect(row.querySelector("[data-composer-task-current]")!.textContent).toBe("one");
+    expect(row.querySelector("[data-composer-task-progress]")!.textContent).toBe("0/2");
     emit({ type: "session.plan", ...scope, steps: [{ text: "one", state: "done" }, { text: "two", state: "working" }] });
-    await waitFor(() => expect(document.querySelector("[data-todo-header]")?.textContent).toContain("1 of 2 done"));
-    expect(document.querySelectorAll("[data-todo-card]")).toHaveLength(1);
+    await waitFor(() => expect(document.querySelector("[data-composer-task-progress]")?.textContent).toBe("1/2"));
+    expect(document.querySelector("[data-chat-composer] [data-composer-tasks]")).not.toBeNull();
+    expect(document.querySelector("[data-timeline-root] [data-composer-tasks], [data-todo-card]")).toBeNull();
+    // A click opens the whole list, each step with its mark.
+    fireEvent.click(document.querySelector("[data-composer-tasks-row]")!);
+    expect([...document.querySelectorAll("[data-composer-task]")].map(e => e.getAttribute("data-composer-task"))).toEqual(["done", "working"]);
+
+    // While the agent asks the person something, the question is the one thing to read.
+    emit({ type: "session.permission", ...scope, askId: "ask-1", toolName: "Bash", input: "{}", options: [{ id: "allow", label: "Allow", effect: "allow" }] });
+    await waitFor(() => expect(document.querySelector("[data-composer-tasks]")).toBeNull());
+    emit({ type: "session.permission.closed", ...scope, askId: "ask-1", outcome: "allowed", optionId: "allow" });
+    await waitFor(() => expect(document.querySelector("[data-composer-tasks]")).not.toBeNull());
+
+    // The turn ends and the row goes with it.
+    emit({ type: "session.done", ...scope, result: { status: "completed", durationMs: 900 } });
+    emit({ type: "session.end", ...scope, exitCode: 0, sawResult: true });
+    await waitFor(() => expect(document.querySelector("[data-composer-tasks]")).toBeNull());
+    emit({ type: "session.start", ...scope, prompt: "plan it" });
     emit({ type: "session.plan", ...scope, text: "# Add a quiet flag\n\n1. Parse it" });
     expect(await screen.findByText("Add a quiet flag")).toBeDefined();
   });

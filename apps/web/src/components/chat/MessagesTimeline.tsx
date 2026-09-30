@@ -63,7 +63,6 @@ import { useSentFiles } from "./composerFiles";
 import { PermissionPromptRow } from "./PermissionPromptRow";
 import { SubagentFoldRow } from "./SubagentFoldRow";
 import { ProposedPlanCard } from "./ProposedPlanCard";
-import { TodoCard } from "./TodoCard";
 import { TimelineRuleLine } from "./TimelineRuleLine";
 import { ChangedFilesCard } from "./ChangedFilesTree";
 import { shouldAutoExpandChangedFiles } from "./changedFilesPresentation";
@@ -990,11 +989,6 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
         <AssistantTimelineRow row={row} />
       ) : null}
       {row.kind === "proposed-plan" ? <ProposedPlanTimelineRow row={row} /> : null}
-      {row.kind === "todo" ? (
-        <div className="min-w-0 px-1 py-0.5">
-          <TodoCard steps={row.todo.steps} />
-        </div>
-      ) : null}
       {row.kind === "permission" ? <PermissionTimelineRow row={row} /> : null}
       {row.kind === "subagent" ? <SubagentTimelineRow row={row} /> : null}
       {row.kind === "working" ? <WorkingTimelineRow row={row} /> : null}
