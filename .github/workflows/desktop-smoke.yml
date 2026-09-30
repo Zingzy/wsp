@@ -57,9 +57,9 @@ jobs:
           key: daemon-rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('daemon/Cargo.lock', 'daemon/rust-toolchain.toml') }}
           restore-keys: |
             daemon-rust-${{ runner.os }}-${{ runner.arch }}-
-      - name: The daemon this runner runs, with the tool server a Mac's release build carries
+      - name: The daemon this runner runs, with the features a Mac's release build takes
         working-directory: daemon
-        run: cargo build --locked --release -p wsp-daemon-bin --features mcp
+        run: cargo build --locked --release -p wsp-daemon-bin $(node ../packages/wspx/scripts/daemon-features.mjs)
       - run: node packages/wspx/scripts/daemon-binary.mjs
       - run: pnpm install --frozen-lockfile
       - name: Build what the desktop app depends on

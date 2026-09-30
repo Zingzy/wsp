@@ -35,6 +35,8 @@ interface Reading {
   heldMb: number;
   rssMb: number;
   turns: number;
+  /** Each collection's figure from the last turn until one freed nothing more. */
+  readings?: number[];
 }
 
 /** The host as its own process: the wiring `wsp up` builds, a local workspace, and one harness that answers with a
@@ -105,8 +107,10 @@ for (let t = 0; t < ${THREADS}; t++) threads.push(await turn(undefined));
 for (let n = 1; n < ${TURNS_PER_THREAD}; n++) for (const thread of threads) await turn(thread);
 
 // The host writes its index and its transcripts behind a queue. What it holds is only known once it has been left
-// alone the way an idle minute leaves it, so this reads until two collections agree. external covers the buffers a
-// socket frame and a queued write live in, arrayBuffers among them, which the heap alone does not count.
+// alone the way an idle minute leaves it, so this reads until a collection frees nothing more: the drain falls from
+// about 41 MB to the floor, and stopping at two reads within a megabyte could stop on the way down.
+// external covers the buffers a socket frame and a queued write live in, arrayBuffers among them, which the heap
+// alone does not count.
 const held = () => {
   global.gc();
   global.gc();
@@ -115,12 +119,14 @@ const held = () => {
 };
 let before = Infinity;
 let after = held();
-for (let i = 0; i < 60 && Math.abs(before - after) > 1; i++) {
+const readings = [after];
+for (let i = 0; i < 60 && Math.abs(before - after) > 0.1; i++) {
   await sleep(250);
   before = after;
   after = held();
+  readings.push(after);
 }
-console.log(\`measured \${JSON.stringify({ heldMb: +after.toFixed(1), rssMb: +(process.memoryUsage().rss / 1048576).toFixed(1), turns: ${THREADS * TURNS_PER_THREAD} })}\`);
+console.log(\`measured \${JSON.stringify({ heldMb: +after.toFixed(1), rssMb: +(process.memoryUsage().rss / 1048576).toFixed(1), turns: ${THREADS * TURNS_PER_THREAD}, readings: readings.map(r => +r.toFixed(1)) })}\`);
 await host.close();
 process.exit(0);
 `;
@@ -205,7 +211,7 @@ describeWithDists("what the host holds after a day of agents", ["host", "runtime
     const run = await ran(hostScript(home), home);
     expect(run.code, run.out).toBe(0);
     const held = reading(run.out, "the host");
-    const said = `the host held ${held.heldMb} MB after ${held.turns} turns (resident ${held.rssMb} MB, an empty node on this runner ${floor.rssMb} MB)`;
+    const said = `the host held ${held.heldMb} MB after ${held.turns} turns (resident ${held.rssMb} MB, an empty node on this runner ${floor.rssMb} MB; read ${(held.readings ?? []).join(", ")})`;
     // Printed on a pass too, so the margin a run kept can be read off CI before it is gone.
     console.log(said);
     expect(HOST_MEMORY_CAP_MB).toBeLessThanOrEqual(HOST_MEMORY_BUDGET_MB);
