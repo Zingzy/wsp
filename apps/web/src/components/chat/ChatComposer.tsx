@@ -100,7 +100,6 @@ import { attachmentOf, fileFromStash, recordOf, releaseFiles, stashedOf, useComp
 import { COMPOSER_WORDS } from "./composerWords";
 import { partitionStashFiles, usePromptStashStore, type PromptStashEntry } from "./promptStashStore";
 import { ComposerStashMenu, stashedWord } from "./ComposerStashMenu";
-import { ComposerModeToggles } from "./ComposerModeToggles";
 import { ContextMeter } from "./ContextMeter";
 import { useComposerModesStore } from "./composerModesStore";
 import { nextPastedTextName, pastesAsFile } from "./pastedText";
@@ -344,8 +343,8 @@ export function ChatComposer({
   // The harness's own row decides whether the pick moves the running turn, and it is the same row the menu reads
   // to say so before the pick.
   const accessPick = useAccessPick(workspaceId, pickTarget, thread.threadKey, movesRunningAccess(harnessCatalog));
-  // Fast is the thread's own: a hand toggle on this thread, else what its latest turn ran at. It rides only where the
-  // model in front of the person offers it, which is also the only place the toggle shows.
+  // Fast is the thread's own: a hand pick on this thread, else what its latest turn ran at. It rides only where the
+  // model in front of the person offers it, which is also the only place the options menu offers it.
   const fastPicked = useComposerModesStore(s => s.fast[threadKey]);
   const setFast = useComposerModesStore(s => s.setFast);
   const fastOffered = pickedModel?.fast === true;
@@ -849,7 +848,6 @@ export function ChatComposer({
   // A home's thread carries a history-unavailable row and no message, so the count is of messages alone.
   const compact = thread.view.running || thread.view.entries.some(entry => entry.kind === "message");
   const access = <ComposerAccessPicker workspaceId={workspaceId} thread={thread} onPickAccess={accessPick.pick} refused={accessPick.line} />;
-  const modes = <ComposerModeToggles fast={fastOffered ? { on: fastOn, toggle: () => setFast(threadKey, !fastOn) } : null} tight={compact} held={waits} />;
   const home = useStore(s => s.projects.find(p => projectHomeKey(p.id) === workspaceId));
   const meter = (tight: boolean) => <ContextMeter turns={thread.view.turns} agentLabel={harnessCatalog?.label ?? harnessId} tight={tight} />;
   const heightRef = useRef<HTMLDivElement | null>(null);
@@ -1020,8 +1018,8 @@ export function ChatComposer({
                           compact={compact}
                           workspaceId={workspaceId}
                           thread={thread}
+                          fast={fastOffered ? { on: fastOn, set: on => setFast(threadKey, on), held: waits } : null}
                         />
-                        {compact ? null : modes}
                         {compact ? null : <span className="ms-auto flex items-center ps-2">{meter(false)}</span>}
                       </div>
                       <div data-chat-composer-actions="right" className={cn("col-start-3 flex shrink-0 items-center justify-self-end", compact && !tall ? "row-start-1" : "row-start-2 self-end")}>
@@ -1042,12 +1040,7 @@ export function ChatComposer({
           <ComposerCheckoutRow
           workspaceId={workspaceId}
           thread={thread}
-          access={
-            <>
-              {access}
-              {compact ? modes : null}
-            </>
-          }
+          access={access}
           stash={
             <>
               {compact ? meter(true) : null}

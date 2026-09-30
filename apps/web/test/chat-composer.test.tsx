@@ -519,48 +519,52 @@ describe("fast", () => {
     permissionModes: [option("default", "Ask", { isDefault: true }), option("acceptEdits", "Accept edits"), option("plan", "Plan")],
   };
   const withModes = (api: Api): Api => ({ ...api, listHarnesses: async () => [MODES_CATALOG] });
-  const toggle = (mode: string) => document.querySelector<HTMLButtonElement>(`[data-composer-mode='${mode}']`);
+  const options = () => document.querySelector<HTMLElement>("[data-composer-picker='reasoning']");
+  const bolt = () => options()?.querySelector("[data-composer-fast-bolt]") ?? null;
+  const fastItem = (value: "on" | "off") => document.querySelector<HTMLElement>(`[data-composer-fast='${value}']`);
 
   beforeEach(() => {
     useComposerModesStore.setState({ fast: {} });
     useComposerOptionsStore.setState({ byWorkspaceId: {}, pickedOn: {} });
   });
 
-  it("offers fast on a model that has it, and a send with it on carries fast", async () => {
+  it("offers Fast as On and Off in the model options menu, the button wearing a bolt only while it is on, and a send with it on carries fast", async () => {
     const { api, started } = fixtureApi([workspace]);
     await setup(withModes(api));
-    await waitFor(() => expect(toggle("fast")).not.toBeNull());
-    expect(toggle("fast")!.getAttribute("aria-pressed")).toBe("false");
-    // In the tall composer the toggles wear the pickers' type beside them, not the strip's mono.
-    const pickerType = document.querySelector<HTMLElement>("[data-composer-picker='model']")!.className.match(/text-\[\d+px\]/)?.[0];
-    expect(toggle("fast")!.className).not.toContain("font-mono");
-    expect(toggle("fast")!.className).toContain(pickerType);
-    act(() => toggle("fast")!.click());
-    await waitFor(() => expect(toggle("fast")!.getAttribute("aria-pressed")).toBe("true"));
+    await waitFor(() => expect(options()).not.toBeNull());
+    expect(document.querySelector("[data-composer-mode]")).toBeNull();
+    expect(bolt()).toBeNull();
+    act(() => options()!.click());
+    await waitFor(() => expect(fastItem("on")).not.toBeNull());
+    expect(fastItem("off")!.getAttribute("aria-checked")).toBe("true");
+    act(() => fastItem("on")!.click());
+    await waitFor(() => expect(bolt()).not.toBeNull());
     await typeInto(composerEditor(), "quick one");
     await press(composerEditor(), "Enter");
     await waitFor(() => expect(started).toHaveLength(1));
     expect(started[0]!.fast).toBe(true);
   });
 
-  it("hides fast on a model that has none, and sends nothing of it", async () => {
+  it("offers no Fast on a model that has none, and sends nothing of it", async () => {
     const { api, started } = fixtureApi([workspace]);
     await setup(withModes(api));
-    await waitFor(() => expect(toggle("fast")).not.toBeNull());
-    act(() => toggle("fast")!.click());
+    await waitFor(() => expect(options()).not.toBeNull());
+    act(() => useComposerModesStore.getState().setFast(WS, true));
     act(() => useComposerOptionsStore.getState().pick(WS, "model", "claude-haiku-4-5-20251001"));
-    await waitFor(() => expect(toggle("fast")).toBeNull());
+    await waitFor(() => expect(options()).toBeNull());
     await typeInto(composerEditor(), "slow one");
     await press(composerEditor(), "Enter");
     await waitFor(() => expect(started).toHaveLength(1));
     expect(started[0]!.fast).toBeUndefined();
   });
 
-  it("has no plan toggle: the footer holds fast alone, and a plan an agent lists is one more access in the picker", async () => {
+  it("has no toggle in the footer and no slash command for it, and a plan an agent lists is one more access in the picker", async () => {
     const { api } = fixtureApi([workspace]);
     await setup(withModes(api));
-    await waitFor(() => expect(toggle("fast")).not.toBeNull());
-    expect(toggle("plan")).toBeNull();
+    await waitFor(() => expect(options()).not.toBeNull());
+    expect(document.querySelector("[data-composer-mode]")).toBeNull();
+    await typeInto(composerEditor(), "/fast");
+    expect(document.querySelector("[data-composer-item-id='slash:fast']")).toBeNull();
     const picker = document.querySelector<HTMLElement>("[data-composer-picker='access']")!;
     act(() => picker.click());
     await waitFor(() => expect(document.querySelector("[data-composer-option='plan']")).not.toBeNull());

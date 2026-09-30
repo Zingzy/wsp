@@ -201,7 +201,7 @@
       "settleMs": 700
     },
     {
-      "name": "composer-modes",
+      "name": "composer-fast",
       "at": "/",
       "steps": [
         "390:key:Escape",
@@ -209,11 +209,26 @@
         "row-id=ws:ws_web",
         "390:key:Escape",
         "390:key:Escape",
-        "composer-mode=fast",
+        "composer-picker=reasoning",
+        "composer-fast=on",
         "testid=composer-editor",
         "type:move the billing api over"
       ],
-      "wait": "composer-mode=fast",
+      "wait": "composer-fast-bolt",
+      "settleMs": 700
+    },
+    {
+      "name": "composer-fast-menu",
+      "at": "/",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=ws:ws_web",
+        "390:key:Escape",
+        "390:key:Escape",
+        "composer-picker=reasoning"
+      ],
+      "wait": "composer-fast=on",
       "settleMs": 700
     },
     {
