@@ -6,9 +6,9 @@
 // lexically and then through its links, so a path from a page opens nothing
 // else on this computer.
 import { spawn } from "node:child_process";
-import { realpathSync, statSync } from "node:fs";
+import { readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, join, posix, resolve } from "node:path";
+import { dirname, isAbsolute, join, posix, resolve } from "node:path";
 import { editorOpensHereLine, type EditorChoice, type EditorId } from "@wsp/protocol";
 import type { HostEditor } from "@wsp/runtime";
 import { under } from "./init-import.js";
@@ -28,15 +28,29 @@ interface EditorRow {
   /** The same over ssh into a workspace on another computer: the workspace's folder, and the file at its line where
    * one was asked for. Absent on an editor with no remote road of its own. */
   remote?(app: string, alias: string, folder: string, file: string | undefined, line: number | undefined): EditorCommand;
+  /** The extension the remote road goes through, where the editor has no ssh of its own. */
+  remoteExtension?: RemoteExtension;
+}
+
+/** The extension a VS Code family editor opens an ssh remote with: its ids, any of which will do and the first of
+ * which is the one to install, the folder under the home where that editor keeps its extensions, the data folder a
+ * portable install keeps beside its app where the product has one, and the command a person installs it with.
+ * Without one the editor starts and opens nothing. */
+interface RemoteExtension {
+  readonly ids: readonly [string, ...string[]];
+  readonly folder: string;
+  readonly portable?: string;
+  readonly cli: string;
 }
 
 const OPEN = "/usr/bin/open";
 
 /** VS Code and the editors built on it take `-g path:line` for a line. */
-const vscodeRow = (id: EditorId, name: string, app: string, bin: string): EditorRow => ({
+const vscodeRow = (id: EditorId, name: string, app: string, bin: string, remoteExtension: RemoteExtension): EditorRow => ({
   id,
   name,
   apps: [app],
+  remoteExtension,
   command: (found, path, line) => ({ file: join(found, "Contents/Resources/app/bin", bin), args: line === undefined ? [path] : ["-g", `${path}:${line}`] }),
   remote: (found, alias, folder, file, line) => ({
     file: join(found, "Contents/Resources/app/bin", bin),
@@ -54,9 +68,10 @@ const jetbrainsRow = (id: EditorId, name: string, apps: readonly string[]): Edit
 
 /** In the order the picker lists them. */
 export const EDITORS: readonly EditorRow[] = [
-  vscodeRow("vscode", "VS Code", "Visual Studio Code.app", "code"),
-  vscodeRow("cursor", "Cursor", "Cursor.app", "cursor"),
-  vscodeRow("vscode-insiders", "VS Code Insiders", "Visual Studio Code - Insiders.app", "code"),
+  vscodeRow("vscode", "VS Code", "Visual Studio Code.app", "code", { ids: ["ms-vscode-remote.remote-ssh"], folder: ".vscode/extensions", portable: "code-portable-data", cli: "code" }),
+  // Cursor ships its own; an older install carries Microsoft's, which it runs as well.
+  vscodeRow("cursor", "Cursor", "Cursor.app", "cursor", { ids: ["anysphere.remote-ssh", "ms-vscode-remote.remote-ssh"], folder: ".cursor/extensions", cli: "cursor" }),
+  vscodeRow("vscode-insiders", "VS Code Insiders", "Visual Studio Code - Insiders.app", "code", { ids: ["ms-vscode-remote.remote-ssh"], folder: ".vscode-insiders/extensions", portable: "code-insiders-portable-data", cli: "code-insiders" }),
   {
     id: "zed",
     name: "Zed",
@@ -89,11 +104,15 @@ export const EDITORS: readonly EditorRow[] = [
 export const NO_EDITOR_LINE = "No editor wsp knows is installed on this computer.";
 export const editorMissingLine = (name: string): string => `${name} is not installed on this computer; pick another editor in Settings.`;
 export const editorOutsideLine = (path: string): string => `${path} is not in this workspace's folder, so it does not open in your editor.`;
+export const remoteExtensionLine = (name: string, install: string): string =>
+  `${name} has no Remote SSH extension, so it cannot open files on another computer; install it with ${install}`;
 
 export interface EditorHostOptions {
   /** What this computer runs; the table is the Mac's, and anything else has no editor in it. */
   platform?: NodeJS.Platform;
   home?: string;
+  /** The environment the editor is started with, which is this process's: startProgram hands it on. */
+  env?: Readonly<Record<string, string | undefined>>;
   /** Whether a path exists; the disk's own answer unless a test gives one. */
   exists?: (path: string) => boolean;
   /** Starts the program and resolves once it started; spawn with no shell unless a test gives one. */
@@ -107,6 +126,24 @@ function onDisk(path: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** Whether the editor lists one of the extensions as installed, off the extensions.json it keeps in that folder: a
+ * folder an uninstall left behind is not on it. Nothing there reads as not installed. */
+function hasExtension(folder: string, ids: readonly string[]): boolean {
+  let listed: unknown;
+  try {
+    listed = JSON.parse(readFileSync(join(folder, "extensions.json"), "utf8"));
+  } catch {
+    return false;
+  }
+  const wanted = new Set(ids.map(id => id.toLowerCase()));
+  const idOf = (row: unknown): unknown =>
+    typeof row === "object" && row !== null && "identifier" in row && typeof row.identifier === "object" && row.identifier !== null && "id" in row.identifier ? row.identifier.id : undefined;
+  return Array.isArray(listed) && listed.some(row => {
+    const named = idOf(row);
+    return typeof named === "string" && wanted.has(named.toLowerCase());
+  });
 }
 
 function realOf(path: string): string | null {
@@ -155,6 +192,7 @@ function remotePath(path: string, folder: string): string {
 export function editorHost(o: EditorHostOptions = {}): HostEditor {
   const platform = o.platform ?? process.platform;
   const home = o.home ?? homedir();
+  const env = o.env ?? process.env;
   const exists = o.exists ?? onDisk;
   const run = o.run ?? startProgram;
   const foundApp = (row: EditorRow): string | undefined => {
@@ -170,8 +208,20 @@ export function editorHost(o: EditorHostOptions = {}): HostEditor {
       const app = foundApp(row);
       return app === undefined ? [] : [{ row, app }];
     });
+  /** The folder the launched editor reads its extensions from, in the order it reads them: the one VSCODE_EXTENSIONS
+   * names, then a portable install's data folder beside the app where it stands, then its own under the home. The
+   * per-launch --extensions-dir is wsp's to pass, and it passes none. */
+  const extensionsOf = (needs: RemoteExtension, app: string): string => {
+    const moved = env["VSCODE_EXTENSIONS"];
+    if (moved !== undefined && moved !== "") return moved;
+    const portable = needs.portable === undefined ? undefined : join(dirname(app), needs.portable);
+    return portable !== undefined && exists(portable) ? join(portable, "extensions") : join(home, needs.folder);
+  };
+  /** Whether the editor can open an ssh remote now: a road of its own, and the extension that road needs where it needs one. */
+  const remoteReady = (row: EditorRow, app: string): boolean =>
+    row.remote !== undefined && (row.remoteExtension === undefined || hasExtension(extensionsOf(row.remoteExtension, app), row.remoteExtension.ids));
   return {
-    list: async (): Promise<EditorChoice[]> => installed().map(({ row }) => ({ id: row.id, name: row.name, ...(row.remote !== undefined ? { remote: true as const } : {}) })),
+    list: async (): Promise<EditorChoice[]> => installed().map(({ row, app }) => ({ id: row.id, name: row.name, ...(remoteReady(row, app) ? { remote: true as const } : {}) })),
     open: async ({ path, line, inside, editor, remote }) => {
       // A workspace on another computer holds its files there, so its path is held to the folder by its words alone.
       const opening = remote === undefined ? openablePath(path, inside) : remotePath(path, remote.folder);
@@ -183,6 +233,8 @@ export function editorHost(o: EditorHostOptions = {}): HostEditor {
       }
       if (remote !== undefined) {
         if (pick.row.remote === undefined) throw new Error(editorOpensHereLine(remote.name));
+        const needs = pick.row.remoteExtension;
+        if (needs !== undefined && !remoteReady(pick.row, pick.app)) throw new Error(remoteExtensionLine(pick.row.name, `${needs.cli} --install-extension ${needs.ids[0]}`));
         const folder = posix.resolve(remote.folder);
         await run(pick.row.remote(pick.app, remote.alias, folder, opening === folder ? undefined : opening, line));
         return pick.row.id;
