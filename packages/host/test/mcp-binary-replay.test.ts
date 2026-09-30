@@ -8,20 +8,19 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "n
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import { CLOUD_ENV, escapeC1, HOST_TOKEN_ENV, HOST_URL_ENV } from "@wsp/protocol";
 import { describe, expect, it, vi } from "vitest";
 import { guestTools } from "../src/guest-tools.js";
 import { mcpServerSpec, toolServerLine, type RunningWsp } from "../src/mcp-install.js";
-import { ownEnv, served } from "./stdio-session.js";
+import { mcpBinNamed, ownEnv, served } from "./stdio-session.js";
 import { writeStub } from "../../protocol/test/stub-script.js";
 
 const REPO = fileURLToPath(new URL("../../../", import.meta.url));
 const ANSWERS = join(REPO, "daemon", "crates", "wsp-mcp", "tests", "answers");
-const named = process.env["WSP_MCP_BIN"];
-const MCP_BIN = named === undefined || named === "" ? undefined : resolve(REPO, named);
+const MCP_BIN = mcpBinNamed(process.env["WSP_MCP_BIN"]);
 const suite = MCP_BIN !== undefined ? describe : describe.skip;
 const TOKEN = "replay-token";
 const STOPPING_CLOSE = 4001;
