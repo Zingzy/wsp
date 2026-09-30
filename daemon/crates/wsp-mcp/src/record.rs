@@ -52,6 +52,8 @@ pub struct Words {
     pub no_answer_within: String,
     pub host_closed: String,
     pub host_stopping: String,
+    /// A send whose start the host stopped under and no host came back to take.
+    pub not_delivered: String,
     pub no_such_host_none: String,
     pub no_such_host_some: String,
     pub several_hosts: String,

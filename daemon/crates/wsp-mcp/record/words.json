@@ -5,6 +5,7 @@
   "noAnswerWithin": "the host at {where} did not answer: nothing came back within {ms} ms",
   "hostClosed": "the host closed the connection",
   "hostStopping": "the host is restarting; the turn goes on and its reply lands in the thread",
+  "notDelivered": "the host stopped before it took the message, so it was not delivered; send it again",
   "noSuchHostNone": "no host named {alias} is connected; this computer holds none, and wsp login puts the hosts on your account here. Run wsp hosts for the list.",
   "noSuchHostSome": "no host named {alias} is connected; this computer holds {known}, and wsp login puts the hosts on your account here. Run wsp hosts for the list.",
   "severalHosts": "this computer can reach {count} hosts on your account ({aliases}) and none of them is the one every line takes. Name one on the line with --host <name>.\n\nRun wsp hosts for the list.",

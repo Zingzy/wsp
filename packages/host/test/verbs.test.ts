@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { type fakeCopier, NapRefusedError, NoProviderBackend, passphraseCipher, type MachineBackend } from "@wsp/engine";
-import { AGENTS_ON, agentsWord, childStartedLine, type ProjectView, type DaemonErrorCode, noProjectImageLine, projectImageInUseRefusal, projectImageRemoveNotice, projectImageRemovedLine, DAEMON_TOKEN_PATH, noHostCliLine, napRefusedLine, copyPathFor, madeOfWord, portsWord, HERE_PLACE_ID, LIST_PRICE_WORD, goneRoadRefusal, notAnsweringYet, runForTheList, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, UP_RESTART_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, markedDefault, NO_SUCH_TURN, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, RuntimeRequest, threadStateWord, whereWord, workspaceStateOf, workspaceWord, type WorkspaceListing, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceAsleepAgainLine, workspaceKind, thisComputer, copyTakesNone, type WorkspaceOut, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, type PlaceView, localRunsOneFix, localRunsOneLine, placeForksNothingPickLine, MEMORY_KEPT_CLAUSE, projectRemovedOnComputerLine, type HarnessCatalogAnswer, noFastLine, shellLine } from "@wsp/protocol";
+import { AGENTS_ON, agentsWord, childStartedLine, type ProjectView, type DaemonErrorCode, noProjectImageLine, projectImageInUseRefusal, projectImageRemoveNotice, projectImageRemovedLine, DAEMON_TOKEN_PATH, noHostCliLine, napRefusedLine, copyPathFor, madeOfWord, portsWord, HERE_PLACE_ID, LIST_PRICE_WORD, goneRoadRefusal, notAnsweringYet, runForTheList, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, UP_RESTART_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, markedDefault, NO_SUCH_TURN, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, RuntimeRequest, threadStateWord, whereWord, workspaceStateOf, workspaceWord, type WorkspaceListing, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceAsleepAgainLine, workspaceKind, thisComputer, copyTakesNone, type WorkspaceOut, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, type PlaceView, localRunsOneFix, localRunsOneLine, placeForksNothingPickLine, MEMORY_KEPT_CLAUSE, projectRemovedOnComputerLine, type HarnessCatalogAnswer, noFastLine, shellLine, NOT_DELIVERED_LINE } from "@wsp/protocol";
 import { copyKey, createRuntime, DAEMON_TOKEN_SET, harnessCatalog, memoryStore, type DaemonChannel, type HarnessAdapterFactory, type HostSsh, type PlaceBackends, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
@@ -2490,6 +2490,111 @@ describe("wsp verbs over the host", () => {
     expect(prefixed.code).toBe(0);
     const missing = await run("send", "nope", "x");
     expect(missing.io.errors).toEqual(["wsp send: no thread nope"]);
+  });
+
+  it("a send whose start the host never answered before it stopped is delivered by the host that comes back, once, and never reads as a turn going on", async () => {
+    await run("new", "alpha");
+    const [alpha] = await rt.workspaces.list();
+    await run("run", "alpha", "first");
+    const [thread] = await rt.sessions.list();
+    for (const detach of [false, true]) {
+      // This host takes the start and never answers it, and records nothing: the window between the send's dial and
+      // the start's answer, which a host that stops leaves as it goes.
+      let reached = 0;
+      rt.sessions.start = (() => {
+        reached++;
+        return new Promise(() => {});
+      }) as typeof rt.sessions.start;
+      const message = detach ? "third" : "second";
+      const send = starting("send", thread!.threadId!, ...(detach ? ["--detach"] : []), message);
+      await vi.waitFor(() => expect(reached).toBe(1), { timeout: 5_000, interval: 10 });
+      await restartHost({ claude: claude.adapter });
+      expect(await send.ended).toBe(0);
+      expect(send.io.errors.filter(line => line.includes(HOST_STOPPING_LINE))).toEqual([]);
+      if (!detach) expect(send.io.lines).toEqual([`re: ${message}`]);
+      await vi.waitFor(async () => expect((await rt.sessions.history(alpha!.id)).filter(e => e.type === "session.done" && e.sessionId !== undefined).length).toBe(detach ? 3 : 2), { timeout: 5_000, interval: 10 });
+      // One start of the message on the thread, under the one request id the send minted.
+      const starts = (await rt.sessions.history(alpha!.id)).filter(e => e.type === "session.start" && e.prompt === message);
+      expect(starts).toHaveLength(1);
+      expect(starts[0]).toMatchObject({ threadId: thread!.threadId, requestId: expect.any(String) });
+    }
+  });
+
+  it("a send the host took and stopped before it answered is not sent again: the host that comes back holds it, and the send follows that turn", async () => {
+    await run("new", "alpha");
+    const [alpha] = await rt.workspaces.list();
+    await run("run", "alpha", "first");
+    const [thread] = await rt.sessions.list();
+    // This host runs the start and records it, then never answers it.
+    const took = rt.sessions.start.bind(rt.sessions);
+    let reached = 0;
+    rt.sessions.start = (async (...args: Parameters<typeof rt.sessions.start>) => {
+      reached++;
+      await took(...args);
+      return new Promise(() => {});
+    }) as typeof rt.sessions.start;
+    const send = starting("send", thread!.threadId!, "second");
+    await vi.waitFor(async () => expect((await rt.sessions.history(alpha!.id)).some(e => e.type === "session.start" && e.prompt === "second")).toBe(true), { timeout: 5_000, interval: 10 });
+    await restartHost({ claude: claude.adapter });
+    expect(await send.ended).toBe(0);
+    expect(reached).toBe(1);
+    expect(claude.starts.map(s => s.prompt)).toEqual(["first", "second"]);
+    const [second] = (await rt.sessions.history(alpha!.id)).filter(e => e.type === "session.start" && e.prompt === "second") as { turnId?: string; requestId?: string }[];
+    expect(send.io.errors.filter(line => line.includes(HOST_STOPPING_LINE))).toEqual([]);
+    // The rule is the host's: a start under a request id its transcript holds answers with that turn and starts nothing.
+    const again = await rt.sessions.start(alpha!.id, { prompt: "second", thread: thread!.threadId!, requestId: second!.requestId! });
+    expect([again.turnId, again.outcome]).toEqual([second!.turnId, "started"]);
+    expect(claude.starts.map(s => s.prompt)).toEqual(["first", "second"]);
+  });
+
+  it("a run whose host stops under the reads before its start fails in one line saying the task was not delivered", async () => {
+    await run("new", "alpha");
+    let reached = 0;
+    rt.harnesses.list = (() => {
+      reached++;
+      return new Promise(() => {});
+    }) as typeof rt.harnesses.list;
+    const started = starting("run", "alpha", "build it");
+    await vi.waitFor(() => expect(reached).toBeGreaterThan(0), { timeout: 5_000, interval: 10 });
+    await handle!.close();
+    handle = undefined;
+    expect(await started.ended).toBe(1);
+    expect(started.io.errors).toEqual([`wsp run: ${NOT_DELIVERED_LINE}`]);
+  });
+
+  it("a host that boots over an index file written before it kept starts by request id reads the transcript again, so a start sent again is still the one it took", async () => {
+    await run("new", "alpha");
+    const [alpha] = await rt.workspaces.list();
+    await run("run", "alpha", "first");
+    const [first] = (await rt.sessions.history(alpha!.id)).filter(e => e.type === "session.start") as { turnId?: string; requestId?: string; threadId?: string }[];
+    await handle!.close();
+    handle = undefined;
+    // The index as a host of the build before wrote it: every map it kept then, and none by request id.
+    const held = await store.getBlob("transcript-index", alpha!.id);
+    expect(held).toBeDefined();
+    const { taken: _taken, ...older } = JSON.parse(held!.toString("utf8")) as Record<string, unknown>;
+    await store.putBlob("transcript-index", alpha!.id, Buffer.from(JSON.stringify(older)));
+    await restartHost({ claude: claude.adapter });
+    const again = await rt.sessions.start(alpha!.id, { prompt: "first", thread: first!.threadId!, requestId: first!.requestId! });
+    expect(again.turnId).toBe(first!.turnId);
+    expect(claude.starts.map(s => s.prompt)).toEqual(["first"]);
+  });
+
+  it("a send whose host stops before it sent anything fails in one line saying the message was not delivered", async () => {
+    await run("new", "alpha");
+    await run("run", "alpha", "first");
+    const [thread] = await rt.sessions.list();
+    let reached = 0;
+    rt.sessions.list = (() => {
+      reached++;
+      return new Promise(() => {});
+    }) as typeof rt.sessions.list;
+    const send = starting("send", thread!.threadId!, "second");
+    await vi.waitFor(() => expect(reached).toBeGreaterThan(0), { timeout: 5_000, interval: 10 });
+    await handle!.close();
+    handle = undefined;
+    expect(await send.ended).toBe(1);
+    expect(send.io.errors).toEqual([`wsp send: ${NOT_DELIVERED_LINE}`]);
   });
 
   it("send into a thread whose turn runs joins that turn when the agent steers: one stderr line, the running turn's reply, one session.start and one session.steer", async () => {

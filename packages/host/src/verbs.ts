@@ -33,6 +33,7 @@ import {
   HOST_STOPPING_CLOSE,
   HOST_CLOSED_LINE,
   HOST_STOPPING_LINE,
+  NOT_DELIVERED_LINE,
   fmtDuration,
   HostFolderListing,
   AgentRow,
@@ -2055,9 +2056,9 @@ interface StartNews {
 /** Starts a turn as `startedBy` and answers with it the moment the runtime names it: what a detached start returns
  * and what a follow goes on from. The send carries its own request id so an app view with the same text in flight
  * cannot take this turn's start for its own, and so each notice is known to be this start's. */
-async function begin(client: HostClient, start: Record<string, unknown>, startedBy: SessionOrigin, news: StartNews = {}): Promise<{ turn: Turn; turnId: string }> {
+async function begin(client: HostClient, start: Sent, startedBy: SessionOrigin, news: StartNews = {}): Promise<{ turn: Turn; turnId: string }> {
   await client.events();
-  const requestId = randomUUID();
+  const { requestId, ...asked } = start;
   const offNews = client.onFrame(f => {
     if (f["requestId"] !== requestId) return;
     if (f.type === "session.queued") news.queued?.();
@@ -2065,7 +2066,7 @@ async function begin(client: HostClient, start: Record<string, unknown>, started
   });
   let answer: Record<string, unknown>;
   try {
-    answer = await client.request("sessions.start", { ...start, startedBy, requestId });
+    answer = await client.request("sessions.start", { ...asked, startedBy, requestId });
   } finally {
     offNews();
   }
@@ -2077,11 +2078,40 @@ async function begin(client: HostClient, start: Record<string, unknown>, started
   return { turn: { session, threadId, outcome }, turnId };
 }
 
+/** A start as it goes out: with the request id its every send carries, so the host that answers it, or a host that
+ * comes back after one stopped under it, can tell this message from any other with the same words. */
+type Sent = Record<string, unknown> & { requestId: string };
+
+const sent = (start: Record<string, unknown>): Sent => ({ ...start, requestId: randomUUID() });
+
+/** The socket to send a start again on, after `failed` ended the try before the host answered it: a host that stopped
+ * under it is dialled again, and the host that comes back knows the start by its request id and answers with the turn
+ * it already opened where it took the message, so whether a message landed is the host's to say. Any other failure is
+ * the start's own, and a host that did not come back in time, or no road back, is a message nobody took: the line says
+ * so rather than that a turn goes on. */
+async function redialUnanswered(failed: unknown, socket: HostClient, redial: (() => Promise<HostClient>) | undefined, redialed?: () => void): Promise<HostClient> {
+  if (!(await stoppedUnder(socket))) throw failed;
+  if (redial === undefined) throw new Error(NOT_DELIVERED_LINE);
+  redialed?.();
+  return redial().catch(() => {
+    throw new Error(NOT_DELIVERED_LINE);
+  });
+}
+
 /** A start whose caller does not stay for the reply: the turn runs on, and a wait on the thread or its notify
  * carries the end. Answers once the turn is started, so a start queued behind the thread's running turn answers
- * when that turn has ended and this one began. */
-export async function startDetached(client: HostClient, start: Record<string, unknown>, startedBy: SessionOrigin, onQueued?: () => void): Promise<Turn> {
-  return (await begin(client, start, startedBy, onQueued === undefined ? {} : { queued: onQueued })).turn;
+ * when that turn has ended and this one began. A host that stops before it answers is dialled again through
+ * `redial`, and the same start goes to the host that comes back. */
+export async function startDetached(client: HostClient, start: Record<string, unknown>, startedBy: SessionOrigin, onQueued?: () => void, redial?: () => Promise<HostClient>): Promise<Turn> {
+  const going = sent(start);
+  let socket = client;
+  for (;;) {
+    try {
+      return (await begin(socket, going, startedBy, onQueued === undefined ? {} : { queued: onQueued })).turn;
+    } catch (e) {
+      socket = await redialUnanswered(e, socket, redial);
+    }
+  }
 }
 
 /** Starts a turn as `startedBy` and follows it to its reply: `on.queued` when the runtime says the start waits behind
@@ -2092,7 +2122,9 @@ export async function startDetached(client: HostClient, start: Record<string, un
  * runtime ended itself has no done, so its end is the last event instead. A host that stops under the follow once
  * the turn is named is dialled again through `redial`, `on.redialed` says so, and the follow goes on from the new
  * host, which re-opens the run: an end the transcript already holds is read off it, and the rest arrive as they
- * come. Fails when the host goes away any other way, or stops before the turn is named. */
+ * come. A host that stops before it answers the start is dialled again the same way and sent the same start, which
+ * it answers with the turn it opened where it took it; none back in time is a message not delivered. Fails when the
+ * host goes away any other way. */
 export async function follow(
   client: HostClient,
   start: Record<string, unknown>,
@@ -2100,6 +2132,7 @@ export async function follow(
   on: { queued?(): void; steered?(event: SessionSteerEvent): void; started?(turn: Turn): void; redialed?(): void; event(e: SessionEvent, turn: Turn): void },
   redial?: () => Promise<HostClient>,
 ): Promise<Turn> {
+  const going = sent(start);
   let named: { turn: Turn; turnId: string } | undefined;
   let over = false;
   const take = (f: Frame, turn: Turn): void => {
@@ -2116,7 +2149,7 @@ export async function follow(
     const pushed = pushedFrames(socket);
     try {
       if (named === undefined) {
-        named = await begin(socket, start, startedBy, { ...(on.queued !== undefined ? { queued: on.queued } : {}), ...(on.steered !== undefined ? { steered: on.steered } : {}) });
+        named = await begin(socket, going, startedBy, { ...(on.queued !== undefined ? { queued: on.queued } : {}), ...(on.steered !== undefined ? { steered: on.steered } : {}) });
         on.started?.(named.turn);
       } else await socket.events();
       const { turn, turnId } = named;
@@ -2137,6 +2170,10 @@ export async function follow(
       }
       return await untilSettled(socket, ended);
     } catch (e) {
+      if (named === undefined) {
+        socket = await redialUnanswered(e, socket, redial, on.redialed);
+        continue;
+      }
       if (redial === undefined || named === undefined || !(await stoppedUnder(socket))) throw e;
       on.redialed?.();
       socket = await redial();
@@ -2581,11 +2618,22 @@ async function followVerb(ctx: VerbContext, client: HostClient, start: Record<st
   return turn;
 }
 
+/** A send's reads before its start, which send nothing: a host that stops under them has taken no message, so the
+ * line says the message was not delivered rather than that a turn goes on. */
+async function beforeSending<T>(client: HostClient, read: () => Promise<T>): Promise<T> {
+  try {
+    return await read();
+  } catch (e) {
+    if (await stoppedUnder(client)) throw new Error(NOT_DELIVERED_LINE);
+    throw e;
+  }
+}
+
 /** The verbs' way through a detached start: the queued and joined lines on stderr as a follow prints them, then the
  * thread's id on stdout the moment the runtime names it, and nothing of the reply, which the thread's finished line
  * carries to whoever its start named. */
 async function detachVerb(ctx: VerbContext, client: HostClient, start: Record<string, unknown>, picks: Picks = {}, opened?: (threadId: string) => string): Promise<void> {
-  const turn = await startDetached(client, start, "cli", () => ctx.io.error(WAITING));
+  const turn = await startDetached(client, start, "cli", () => ctx.io.error(WAITING), () => hostBack(ctx));
   if (turn.outcome !== "started") ctx.io.error(JOINED[turn.outcome](picks));
   ctx.out.emit(turnView(turn), openedThreadSaid(turn.threadId, opened));
 }
@@ -4101,14 +4149,18 @@ export const ALL_VERBS: readonly Verb[] = [
       const task = flag(ctx.flags, "send");
       for (const dependent of ["agent", ...PICK_FLAGS, "cwd", "notify"]) if (task === undefined && flag(ctx.flags, dependent) !== undefined) throw usageRefusal(`--${dependent} says how a thread opens, and this line opens none.`, `Add --send "<task>", or drop --${dependent}.`);
       const client = await ctx.client();
-      const source = await workspaceOf(client, ref);
-      if (workspaceState({ phase: source.phase }) === "gone") throw new Error(goneRefusal(source.name, "fork", source.gone));
-      // Resolved and checked before the machine is minted, so a bad reference or pick costs nothing. The picks are
-      // checked against the source's machine, since the fork's own comes from the golden that machine runs.
-      const notify = await notifyOf(client, flagList(ctx.flags, "notify"));
       const harness = flag(ctx.flags, "agent");
       const picks = pickFlags(ctx.flags);
-      if (task !== undefined) await checkedStart(client, task, harness, picks, source.id);
+      // Resolved and checked before the machine is minted, so a bad reference or pick costs nothing. The picks are
+      // checked against the source's machine, since the fork's own comes from the golden that machine runs.
+      const reads = async (): Promise<{ source: WorkspaceView; notify: string[] | undefined }> => {
+        const source = await workspaceOf(client, ref);
+        if (workspaceState({ phase: source.phase }) === "gone") throw new Error(goneRefusal(source.name, "fork", source.gone));
+        const notify = await notifyOf(client, flagList(ctx.flags, "notify"));
+        if (task !== undefined) await checkedStart(client, task, harness, picks, source.id);
+        return { source, notify };
+      };
+      const { source, notify } = task === undefined ? await reads() : await beforeSending(client, reads);
       const asked = agentsAsked(flag(ctx.flags, "spawn"), flag(ctx.flags, "max-machines"), flag(ctx.flags, "max-depth"));
       const created = await createFor(client, ctx.out, await projectOf(client, source.project.id), flag(ctx.flags, "name") ?? `${source.name}-fork`, { parent: source.id, ...(flag(ctx.flags, "size") !== undefined ? { size: flag(ctx.flags, "size")! } : {}), ...(asked !== undefined ? { agents: asked } : {}) });
       if (task === undefined) return 0;
@@ -4123,8 +4175,12 @@ export const ALL_VERBS: readonly Verb[] = [
       call: async ({ workspace: ref, name, size: word, task, agent: harness, cwd: folder, notify: tell, spawn, max_machines: maxMachines, max_depth: maxDepth, ...input }, deps) => {
         absoluteFolder(folder);
         const client = await deps.client();
-        const source = await workspaceOf(client, ref);
-        if (task !== undefined) await checkedStart(client, task, harness, input, source.id);
+        const reads = async (): Promise<WorkspaceView> => {
+          const source = await workspaceOf(client, ref);
+          if (task !== undefined) await checkedStart(client, task, harness, input, source.id);
+          return source;
+        };
+        const source = task === undefined ? await reads() : await beforeSending(client, reads);
         const asked = agentsAsked(spawn, maxMachines, maxDepth);
         const created = await createFor(client, QUIET, await projectOf(client, source.project.id), name ?? `${source.name}-fork`, { parent: source.id, ...(word !== undefined ? { size: word } : {}), ...(asked !== undefined ? { agents: asked } : {}) });
         if (task === undefined) return asJson(created);
@@ -4651,16 +4707,18 @@ export const ALL_VERBS: readonly Verb[] = [
       if (ctx.args.length === 0) throw usageRefusal("wsp run takes a task and got none.", 'Put the task in quotes: wsp run <workspace> "say hi".');
       if (ctx.args.length > 2) throw usageRefusal(`wsp run takes a workspace and a task; ${ctx.args[2]!} reads as a third word.`, usageIs(ctx));
       const client = await ctx.client();
-      const [ref, task] = await workspaceFirst(client, "run", ctx.args, "the task");
-      const target = await threadTarget(client, ref, ctx.cwd, "<workspace>", ctx.elsewhere);
-      const found = target.workspace;
       const harness = flag(ctx.flags, "agent");
       const picks = pickFlags(ctx.flags);
-      await checkedStart(client, task, harness, picks, found.id);
       const cwd = flag(ctx.flags, "cwd");
-      const opened = openedLine(target, found, cwd);
-      const woken = await awake(client, found, "send", line => ctx.io.error(line));
-      const opening = openingOf(ctx.env, woken.workspace, task, { harness, ...picks, cwd, notify: await notifyOf(client, flagList(ctx.flags, "notify")), title: flag(ctx.flags, "title"), files: flagList(ctx.flags, "file"), elsewhere: ctx.elsewhere });
+      const { opened, woken, opening } = await beforeSending(client, async () => {
+        const [ref, task] = await workspaceFirst(client, "run", ctx.args, "the task");
+        const target = await threadTarget(client, ref, ctx.cwd, "<workspace>", ctx.elsewhere);
+        const found = target.workspace;
+        await checkedStart(client, task, harness, picks, found.id);
+        const woken = await awake(client, found, "send", line => ctx.io.error(line));
+        const opening = openingOf(ctx.env, woken.workspace, task, { harness, ...picks, cwd, notify: await notifyOf(client, flagList(ctx.flags, "notify")), title: flag(ctx.flags, "title"), files: flagList(ctx.flags, "file"), elsewhere: ctx.elsewhere });
+        return { opened: openedLine(target, found, cwd), woken, opening };
+      });
       let started: Turn | undefined;
       try {
         if (ctx.flags["detach"] === true) await detachVerb(ctx, client, opening, {}, opened);
@@ -4676,15 +4734,17 @@ export const ALL_VERBS: readonly Verb[] = [
       output: TurnOut.shape,
       call: async ({ workspace: ref, task, agent: harness, cwd: folder, notify: tell, title, files, detach, ...input }, deps) => {
         const client = await deps.client();
-        const target = await threadTarget(client, ref, deps.cwd, "workspace", deps.elsewhere);
-        const found = target.workspace;
-        await checkedStart(client, task, harness, input, found.id);
-        const opened = openedLine(target, found, folder);
-        const woken = await awake(client, found, "send", QUIET_LINE);
-        const opening = openingOf(deps.env, woken.workspace, task, { harness, ...input, cwd: folder, notify: await notifyOf(client, tell ?? []), title, files, elsewhere: deps.elsewhere });
+        const { opened, woken, opening } = await beforeSending(client, async () => {
+          const target = await threadTarget(client, ref, deps.cwd, "workspace", deps.elsewhere);
+          const found = target.workspace;
+          await checkedStart(client, task, harness, input, found.id);
+          const woken = await awake(client, found, "send", QUIET_LINE);
+          const opening = openingOf(deps.env, woken.workspace, task, { harness, ...input, cwd: folder, notify: await notifyOf(client, tell ?? []), title, files, elsewhere: deps.elsewhere });
+          return { opened: openedLine(target, found, folder), woken, opening };
+        });
         let started: Turn | undefined;
         try {
-          if (detach === true) return detachedOut(await startDetached(client, opening, "agent"), opened);
+          if (detach === true) return detachedOut(await startDetached(client, opening, "agent", undefined, () => hostBack(deps)), opened);
           const out = turnOut(await follow(client, opening, "agent", { ...QUIET_TURN, started: t => (started = t) }, () => hostBack(deps)));
           return asText(opened === undefined ? turnText(out) : `${opened(out.threadId)}\n${turnText(out)}`, out);
         } catch (e) {
@@ -4794,9 +4854,11 @@ export const ALL_VERBS: readonly Verb[] = [
       if (ref === undefined || message === undefined || ctx.args.length !== 2) throw usageRefusal("wsp send takes a thread and one message.", usageIs(ctx));
       const client = await ctx.client();
       const picks = pickFlags(ctx.flags);
-      const thread = await threadOf(client, ref);
-      await checkedStart(client, message, thread.harness, picks, thread.workspaceId);
-      const { workspace } = await awake(client, await workspaceOf(client, thread.workspaceId), "send", line => ctx.io.error(line));
+      const { thread, workspace } = await beforeSending(client, async () => {
+        const thread = await threadOf(client, ref);
+        await checkedStart(client, message, thread.harness, picks, thread.workspaceId);
+        return { thread, ...(await awake(client, await workspaceOf(client, thread.workspaceId), "send", line => ctx.io.error(line))) };
+      });
       const files = flagList(ctx.flags, "file");
       if (ctx.flags["detach"] === true) await detachVerb(ctx, client, messageTo(thread, message, picks, files, ctx.elsewhere), picks);
       else ctx.out.emit(turnView(await followVerb(ctx, client, messageTo(thread, message, picks, files, ctx.elsewhere), false, picks, { spend: turnSpendWord(workspace) })));
@@ -4808,10 +4870,13 @@ export const ALL_VERBS: readonly Verb[] = [
       output: TurnOut.shape,
       call: async ({ thread: ref, message, files, detach, ...input }, deps) => {
         const client = await deps.client();
-        const thread = await threadOf(client, ref);
-        await checkedStart(client, message, thread.harness, input, thread.workspaceId);
-        await awake(client, await workspaceOf(client, thread.workspaceId), "send", QUIET_LINE);
-        if (detach === true) return detachedOut(await startDetached(client, messageTo(thread, message, input, files, deps.elsewhere), "agent"));
+        const thread = await beforeSending(client, async () => {
+          const thread = await threadOf(client, ref);
+          await checkedStart(client, message, thread.harness, input, thread.workspaceId);
+          await awake(client, await workspaceOf(client, thread.workspaceId), "send", QUIET_LINE);
+          return thread;
+        });
+        if (detach === true) return detachedOut(await startDetached(client, messageTo(thread, message, input, files, deps.elsewhere), "agent", undefined, () => hostBack(deps)));
         const out = turnOut(await follow(client, messageTo(thread, message, input, files, deps.elsewhere), "agent", QUIET_TURN, () => hostBack(deps)));
         return asText(turnText(out), out);
       },

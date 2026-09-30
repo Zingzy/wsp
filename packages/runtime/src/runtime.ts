@@ -1890,6 +1890,16 @@ interface TranscriptIndex {
   cut: Map<string, boolean>;
   /** The folder, access and model each session's newest start that named one named. */
   facts: Map<string, SessionFacts>;
+  /** The turn each start the transcript holds by its request id opened or joined: a start sent again under that id
+   * after the host stopped under it is answered with this turn, never a second one. */
+  taken: Map<string, Taken>;
+}
+
+interface Taken {
+  sessionId: string;
+  threadId: string;
+  turnId: string;
+  outcome: "started" | "steered";
 }
 
 /** A transcript file that is there and did not read. Nothing is written over it, since what it holds is still in it. */
@@ -1899,12 +1909,15 @@ const transcriptUnreadLine = (workspaceId: string, why: string): string => `the 
 const SESSION_FACTS = ["cwd", "permissionMode", "model"] as const;
 type SessionFacts = Partial<Record<(typeof SESSION_FACTS)[number], string>>;
 
-const emptyIndex = (): TranscriptIndex => ({ words: new Map(), starts: new Map(), cut: new Map(), facts: new Map() });
+const emptyIndex = (): TranscriptIndex => ({ words: new Map(), starts: new Map(), cut: new Map(), facts: new Map(), taken: new Map() });
 
 /** One event into an index: the person's messages and its own agent's replies by thread, a reply's pieces joined back
  * into the one message they are, and the newest start and end of each thread and session. A subagent's lines are the
  * subagent's, and a row stamped no thread names none a hit could open. */
 function foldEvent(index: TranscriptIndex, e: SessionEvent): void {
+  if ((e.type === "session.start" || e.type === "session.steer") && e.requestId !== undefined && e.threadId !== undefined && e.turnId !== undefined) {
+    index.taken.set(e.requestId, { sessionId: e.sessionId, threadId: e.threadId, turnId: e.turnId, outcome: e.type === "session.start" ? "started" : "steered" });
+  }
   if (e.type === "session.start") {
     if (e.threadId !== undefined) index.starts.set(e.threadId, e.sessionId);
     const facts = index.facts.get(e.sessionId) ?? {};
@@ -1958,13 +1971,15 @@ const turnWritten = (events: readonly SessionEvent[], turnId: string): TurnWritt
 
 /** An index as its file holds it, with the mark of the transcript file it was read off: an index whose transcript
  * has been written since (a crash between the two writes, a failed index write) is one boot reads again, and so is
- * one that does not parse. */
+ * one that does not parse, and one written before it held the starts by request id, since the restart that brings
+ * this host up is the one a send may be waiting across. */
 const indexBytes = (index: TranscriptIndex, of: BlobMark | undefined): Buffer =>
-  Buffer.from(JSON.stringify({ of, words: [...index.words], starts: [...index.starts], cut: [...index.cut], facts: [...index.facts] }));
+  Buffer.from(JSON.stringify({ of, words: [...index.words], starts: [...index.starts], cut: [...index.cut], facts: [...index.facts], taken: [...index.taken] }));
 const indexRead = (bytes: Buffer): { index: TranscriptIndex; of?: BlobMark } | undefined => {
   try {
-    const held = JSON.parse(bytes.toString("utf8")) as { of?: BlobMark; words: [string, ThreadWords][]; starts: [string, string][]; cut: [string, boolean][]; facts: [string, SessionFacts][] };
-    return { index: { words: new Map(held.words), starts: new Map(held.starts), cut: new Map(held.cut), facts: new Map(held.facts) }, ...(held.of !== undefined ? { of: held.of } : {}) };
+    const held = JSON.parse(bytes.toString("utf8")) as { of?: BlobMark; words: [string, ThreadWords][]; starts: [string, string][]; cut: [string, boolean][]; facts: [string, SessionFacts][]; taken?: [string, Taken][] };
+    if (held.taken === undefined) return undefined;
+    return { index: { words: new Map(held.words), starts: new Map(held.starts), cut: new Map(held.cut), facts: new Map(held.facts), taken: new Map(held.taken) }, ...(held.of !== undefined ? { of: held.of } : {}) };
   } catch {
     return undefined;
   }
@@ -7640,6 +7655,19 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     record({ type: "session.checkpoint", workspaceId: entry.record.id, sessionId: turn.sessionId, turnId: turn.turnId, threadId: turn.threadId, ...(ref !== undefined ? { ref } : {}), ...(turn.anchor !== undefined ? { anchor: turn.anchor } : {}) });
   };
   /** Recorded once the harness took the line, so the row sits where the turn could first see it. */
+  /** The handle a start already taken answers with: the turn's own while it runs, and while it does not, one whose
+   * finish is the end the transcript holds. Nothing where the session index no longer holds the session. */
+  const takenTurn = async (workspaceId: string, taken: Taken): Promise<SessionHandle | undefined> => {
+    const held = sessions.get(taken.sessionId);
+    if (held === undefined) return undefined;
+    if (held.handle !== undefined && held.turnId === taken.turnId) return { ...held.handle, outcome: taken.outcome };
+    const events = await openTranscript(workspaceId);
+    const done = events.find(e => e.type === "session.done" && e.turnId === taken.turnId);
+    const end = events.find(e => e.type === "session.end" && e.turnId === taken.turnId);
+    const result: TurnResult = done?.type === "session.done" ? done.result : { status: "failed", error: end?.type === "session.end" && end.reason !== undefined ? end.reason : RESTARTED_REASON };
+    return { id: taken.sessionId, workspaceId, turnId: taken.turnId, outcome: taken.outcome, finished: Promise.resolve(result), view: () => sessions.get(taken.sessionId)?.view ?? held.view, interrupt: async () => {} };
+  };
+
   const recordSteer = (s: { view: SessionView; turnId: string }, handleId: string, o: { prompt: string; requestId?: string }): void => {
     record({
       type: "session.steer",
@@ -8264,6 +8292,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const sessionsApi: Runtime["sessions"] = {
     async start(workspaceId, opened, origin) {
       await ready();
+      // A start is known by its request id, so one sent again after the host stopped under it is the same message:
+      // the host that took it answers with the turn it opened or joined, on a thread the caller reaches, and starts
+      // nothing. The one rule every client's road back reads, so a restart neither drops a message nor runs it twice.
+      const taken = opened.requestId === undefined ? undefined : transcriptIndex.get(workspaceId)?.taken.get(opened.requestId);
+      if (taken !== undefined && (await entryOfRow({ threadId: taken.threadId, workspaceId }, origin)) !== undefined) {
+        const answered = await takenTurn(workspaceId, taken);
+        if (answered !== undefined) return answered;
+      }
       // The thread this start lands in is read before the workspace is: a send into a thread of the caller's tree
       // reaches it on whatever workspace it runs, and only a start that opens a thread is a workspace act.
       // A thread whose rows fell off the index cap, or whose index is gone, is still the thread its record or its
