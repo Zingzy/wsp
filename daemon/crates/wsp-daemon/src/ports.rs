@@ -2,8 +2,9 @@
 //! This machine's listening TCP ports, one road per platform: Linux reads /proc/net/tcp and finds each socket's
 //! holder through the /proc/[pid]/fd tables (pgrep is not on every guest); macOS asks lsof. The watcher diffs one
 //! snapshot against the next and says what opened and what closed. A browser's DevTools debugging port is no server
-//! and is dropped here, where every reader of the ports gets them, once it has answered as one. On the person's own
-//! computer only a listener of wsp's own processes is asked: their other servers get no request from wsp.
+//! and is dropped here, where every reader of the ports gets them, once it has answered as one. Only a listener a
+//! browser or Electron holds is asked, and on the person's own computer only one of wsp's own processes: a thread's
+//! test servers, and every other server of theirs, get no request from wsp.
 
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
@@ -266,7 +267,7 @@ pub(crate) fn source_for(proc_root: Option<&Path>) -> PortSource {
     }
 }
 
-/// Whether a listener is a browser's DevTools debugging port, by what it answers rather than who holds it: such a
+/// Whether a listener is a browser's DevTools debugging port, by what it answers once its holder is one: such a
 /// port answers `GET /json/version` with a `Browser` field. A port that refuses, stalls or says anything else is not.
 /// Chrome's server closes on an HTTP/1.0 request and holds an HTTP/1.1 one open after its reply, so the ask is 1.1
 /// and the read stops at the reply's Content-Length.
@@ -306,6 +307,32 @@ fn pid_alive(pid: u32) -> bool {
         Ok(()) => true,
         Err(errno) => errno == nix::errno::Errno::EPERM,
     }
+}
+
+/// The processes a DevTools port can belong to, by the name the listener's holder goes by: /proc/<pid>/comm on Linux,
+/// cut at 15 bytes, and lsof's whole command name on a Mac, where each app's helpers are named after it. Electron is
+/// here because a DevTools port on an Electron app is one to hide too. A listener held by anything else is never
+/// asked, a node server a thread's tests start among them.
+const BROWSER_NAMES: [&str; 11] = [
+    "google chrome",
+    "chrome",
+    "chromium",
+    "chromium-browse",
+    "headless_shell",
+    "microsoft edge",
+    "msedge",
+    "brave browser",
+    "brave",
+    "arc",
+    "electron",
+];
+
+/// Whether a listener's holder goes by a browser's or Electron's name: one of the names, or one of them and then a
+/// word, as "Google Chrome Helper (Renderer)" is. A holder with no name is no browser.
+fn browser_held(process: Option<&str>) -> bool {
+    let Some(name) = process else { return false };
+    let name = name.to_lowercase();
+    BROWSER_NAMES.iter().any(|b| name == *b || name.strip_prefix(b).is_some_and(|rest| rest.starts_with(' ')))
 }
 
 /// Each listener's answer to the DevTools question, by port and holder; None while the ask is out.
@@ -413,7 +440,7 @@ impl PortWatcher {
         let read = (self.source)().await;
         let unasked = {
             let answers = self.devtools.lock().unwrap_or_else(|e| e.into_inner());
-            read.iter().any(|r| !answers.contains_key(&(r.port, r.pid)))
+            read.iter().any(|r| browser_held(r.process.as_deref()) && !answers.contains_key(&(r.port, r.pid)))
         };
         let mine = match &self.own {
             Some(own) if unasked => Some(own().await),
@@ -421,11 +448,12 @@ impl PortWatcher {
         };
         let mut answers = self.devtools.lock().unwrap_or_else(|e| e.into_inner());
         answers.retain(|(port, pid), _| read.iter().any(|r| r.port == *port && r.pid == *pid));
-        for key in read.iter().map(|r| (r.port, r.pid)) {
+        for r in &read {
+            let key = (r.port, r.pid);
             if answers.contains_key(&key) {
                 continue;
             }
-            if mine.as_ref().is_some_and(|mine| !key.1.is_some_and(|pid| mine.contains(&pid))) {
+            if !browser_held(r.process.as_deref()) || mine.as_ref().is_some_and(|mine| !key.1.is_some_and(|pid| mine.contains(&pid))) {
                 answers.insert(key, Some(false));
                 continue;
             }
@@ -571,6 +599,11 @@ mod tests {
         ListeningPort { port, pid, inode: Some(inode), uid, process: None, command: None, loopback }
     }
 
+    /// A listener held by a process of this name, as /proc/<pid>/comm or lsof names it.
+    fn named(port: u16, pid: u32, inode: u64, process: &str) -> ListeningPort {
+        ListeningPort { process: Some(process.to_owned()), ..row(port, Some(pid), inode, 0, true) }
+    }
+
     fn watcher_with(source: PortSource, alive: bool, at: u64) -> PortWatcher {
         PortWatcher::with(source, Box::new(move |_| alive), Box::new(move || at))
     }
@@ -649,7 +682,7 @@ mod tests {
         // Counted at the asker, since any other wsp on this computer may connect to a test's listener on its own.
         let asked = Arc::new(Mutex::new(Vec::new()));
         let count = Arc::clone(&asked);
-        let snapshot = Arc::new(Mutex::new(vec![row(4100, Some(700), 1, 0, true), row(4200, Some(1234), 2, 0, true)]));
+        let snapshot = Arc::new(Mutex::new(vec![named(4100, 700, 1, "chrome"), named(4200, 1234, 2, "chrome")]));
         let mut w = PortWatcher::new(fixed(Arc::clone(&snapshot))).asking_only(only(&[1234]));
         w.ask = Arc::new(move |port| {
             count.lock().unwrap().push(port);
@@ -667,12 +700,66 @@ mod tests {
     async fn a_browser_wsps_own_processes_started_still_drops_while_their_plain_server_stays() {
         let devtools = answering(r#"{"Browser":"HeadlessChrome/140.0.7339.16","Protocol-Version":"1.3"}"#).await;
         let server = answering("<!doctype html><title>dev</title>").await;
-        let snapshot = Arc::new(Mutex::new(vec![row(devtools, Some(900), 1, 0, true), row(server, Some(901), 2, 0, true)]));
+        let snapshot = Arc::new(Mutex::new(vec![named(devtools, 900, 1, "Google Chrome Helper"), row(server, Some(901), 2, 0, true)]));
         let mut w = PortWatcher::new(fixed(Arc::clone(&snapshot))).asking_only(only(&[900, 901]));
         assert!(w.poll().await.is_empty());
         let dropped = next_change(&mut w).await;
         assert!(matches!(dropped.as_slice(), [DaemonEvent::PortClose { port, .. }] if *port == devtools), "{dropped:?}");
         assert_eq!(w.current().iter().map(|p| p.port).collect::<Vec<_>>(), [server]);
+    }
+
+    #[tokio::test]
+    async fn only_a_listener_a_browser_or_electron_holds_is_asked_so_a_threads_node_server_hears_nothing() {
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        let count = Arc::clone(&asked);
+        // Every one of them under the host's own tree, as a thread's test servers and its screenshot browser are.
+        let snapshot = Arc::new(Mutex::new(vec![
+            named(4300, 800, 1, "node"),
+            named(4301, 801, 2, "vitest"),
+            row(4302, Some(802), 3, 0, true),
+            named(4400, 803, 4, "Google Chrome Helper"),
+            named(4401, 804, 5, "headless_shell"),
+            named(4402, 805, 6, "chrome"),
+            named(4403, 806, 7, "Electron Helper"),
+        ]));
+        let mut w = PortWatcher::new(fixed(snapshot)).asking_only(only(&[800, 801, 802, 803, 804, 805, 806]));
+        w.ask = Arc::new(move |port| {
+            count.lock().unwrap().push(port);
+            Box::pin(async { false })
+        });
+        assert!(w.poll().await.is_empty());
+        assert!(w.poll().await.is_empty());
+        assert_eq!(
+            *asked.lock().unwrap(),
+            [4400, 4401, 4402, 4403],
+            "a node server, a nameless holder and anything not a browser are never asked"
+        );
+        assert_eq!(w.current().len(), 7, "every one of them is still listed as a server");
+    }
+
+    #[test]
+    fn a_browsers_or_electrons_name_is_one_of_the_list_or_one_of_them_and_then_a_word() {
+        for name in [
+            "Google Chrome",
+            "Google Chrome Helper (Renderer)",
+            "Chromium",
+            "chromium-browse",
+            "headless_shell",
+            "chrome",
+            "Microsoft Edge Helper",
+            "msedge",
+            "Brave Browser Helper",
+            "Arc",
+            "Arc Helper",
+            "Electron",
+            "Electron Helper",
+        ] {
+            assert!(browser_held(Some(name)), "{name}");
+        }
+        for name in ["node", "vitest", "chromedriver", "archiver", "Code Helper", "python3"] {
+            assert!(!browser_held(Some(name)), "{name}");
+        }
+        assert!(!browser_held(None));
     }
 
     #[test]
@@ -753,14 +840,17 @@ mod tests {
         let devtools = answering(r#"{"Browser":"HeadlessChrome/140.0.7339.16","Protocol-Version":"1.3","webSocketDebuggerUrl":"ws://127.0.0.1/devtools/browser/x"}"#).await;
         let server = answering("<!doctype html><title>dev</title>").await;
         let later = answering(r#"{"Browser":"Chrome/140.0","Protocol-Version":"1.3"}"#).await;
-        let snapshot = Arc::new(Mutex::new(vec![row(devtools, Some(900), 1, 0, true), row(server, Some(901), 2, 0, true)]));
+        let snapshot = Arc::new(Mutex::new(vec![named(devtools, 900, 1, "headless_shell"), row(server, Some(901), 2, 0, true)]));
         let mut w = PortWatcher::new(fixed(Arc::clone(&snapshot)));
         assert!(w.poll().await.is_empty());
         let dropped = next_change(&mut w).await;
         assert!(matches!(dropped.as_slice(), [DaemonEvent::PortClose { port, .. }] if *port == devtools), "{dropped:?}");
         assert_eq!(w.current().iter().map(|p| p.port).collect::<Vec<_>>(), [server]);
-        snapshot.lock().unwrap().push(row(later, Some(902), 3, 0, true));
-        assert_eq!(w.poll().await, [DaemonEvent::PortOpen { port: later, pid: Some(902), process: None, loopback: Some(true) }]);
+        snapshot.lock().unwrap().push(named(later, 902, 3, "chrome"));
+        assert_eq!(
+            w.poll().await,
+            [DaemonEvent::PortOpen { port: later, pid: Some(902), process: Some("chrome".to_owned()), loopback: Some(true) }]
+        );
         let dropped = next_change(&mut w).await;
         assert!(matches!(dropped.as_slice(), [DaemonEvent::PortClose { port, .. }] if *port == later), "{dropped:?}");
         assert_eq!(w.current().iter().map(|p| p.port).collect::<Vec<_>>(), [server]);
