@@ -599,6 +599,10 @@ export interface HostEditor {
   /** Opens the path in the editor named, else the first installed, and answers which one; refused where the path
    * does not resolve inside one of the folders given. */
   open(req: { path: string; line?: number; inside: readonly string[]; editor?: EditorId; remote?: EditorRemote }): Promise<EditorId>;
+  /** The line open would refuse a workspace on another computer with, in the editor named or else the first
+   * installed; nothing where that editor can open one. Asked before anything reaches that computer, and `name` is the
+   * workspace's. */
+  remoteRefusal(req: { editor?: EditorId; name: string }): Promise<string | undefined>;
 }
 
 /** Where a workspace on another computer opens from: its ssh alias on this computer and its folder there. */

@@ -869,6 +869,12 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
         // the socket that minted it; a relay ticket's word is stricter still and stays, whoever minted it.
         const road = asPaired ? "paired" : (stamped ?? msg.origin);
         const origin: Caller | undefined = by !== undefined && road !== undefined ? { origin: road, by } : road;
+        /** The workspace as its ssh door takes it, woken first where it is not running: a reconnect or an editor's open
+         * is what brings a napped one back, and the door's link wait alone never would. */
+        const awakeForSsh = async (held: WorkspaceView): Promise<{ id: string; name: string }> => {
+          const workspace = held.phase === "running" ? held : await rt.workspaces.wake(held.id, origin);
+          return { id: workspace.id, name: workspace.name };
+        };
         try {
           switch (msg.op) {
             case "auth":
@@ -1723,12 +1729,15 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               const picked = msg.editor ?? (await rt.preferences.get()).editor;
               if (!isLocalWorkspace(workspace)) {
                 if (opts.ssh === undefined) throw new Error(editorOpensHereLine(workspace.name));
+                // Asked of this computer alone, so an editor that cannot open a remote costs no wake and no port wait.
+                const refused = await editor().remoteRefusal({ name: workspace.name, ...(picked !== undefined ? { editor: picked } : {}) });
+                if (refused !== undefined) throw new Error(refused);
                 if (!(await opts.ssh.include())) {
                   send({ id: msg.id, ok: false, error: sshIncludeLine(workspace.name), kind: "sshInclude" });
                   return;
                 }
                 // Before the editor runs, so a workspace with no ssh server says so here rather than in the editor's log.
-                await opts.ssh.port({ id: workspace.id, name: workspace.name });
+                await opts.ssh.port(await awakeForSsh(workspace));
                 const remote = { alias: sshAlias(workspace.name), folder: workspace.copy?.path ?? workspace.project.path, name: workspace.name };
                 const opened = await editor().open({ path: msg.path, inside: [], remote, ...(msg.line !== undefined ? { line: msg.line } : {}), ...(picked !== undefined ? { editor: picked } : {}) });
                 send({ id: msg.id, ok: true, editor: opened });
@@ -1752,9 +1761,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               const door = ssh();
               const held = await rt.workspaces.get(msg.workspaceId, origin);
               if (isLocalWorkspace(held)) throw new Error(sshCopyHereLine(held.name));
-              // An editor reconnecting after a nap asks here first, and a reconnect is what brings the workspace back.
-              const workspace = held.phase === "running" ? held : await rt.workspaces.wake(held.id, origin);
-              send({ id: msg.id, ok: true, port: await door.port({ id: workspace.id, name: workspace.name }) });
+              send({ id: msg.id, ok: true, port: await door.port(await awakeForSsh(held)) });
               return;
             }
             case "init.get":
