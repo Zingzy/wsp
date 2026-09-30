@@ -45,6 +45,7 @@ import { DEFAULT_TERMINAL_SIZING, appScheme, terminalFontWith, terminalSurfaceSe
 import { rememberTerminalFile } from "../terminal/terminalFile";
 import type { Api } from "../protocol/client";
 import { useStore } from "../protocol/store";
+import { useGlass } from "../settings/theme";
 import { type GhosttyColor, type GhosttyTheme } from "../terminal/ghostty/core";
 import type { TerminalIo } from "../terminal/pty-io";
 import { SHELL_ENDED_LINE, terminalEmptyLine, terminalInputRefusal, terminalPaneTitle, type TerminalPaneState } from "../adapt/index";
@@ -256,8 +257,8 @@ export function TerminalViewport({
   // The person's Ghostty config, as the host read it when this viewport opened; null until then and when no host answers.
   const fileRef = useRef<TerminalConfig | null>(null);
   const [translucent, setTranslucent] = useState(false);
-  // With Transparency off every glass is solid, the terminal too, whatever the Ghostty file's opacity says.
-  const transparency = useStore(s => s.preferences.transparency);
+  // Where the page draws no glass every surface is solid, the terminal too, whatever the Ghostty file's opacity says.
+  const transparency = useGlass();
   const transparencyRef = useRef(transparency);
   transparencyRef.current = transparency;
   const opacityOf = (fileOpacity: number): number => (transparencyRef.current ? fileOpacity : 1);

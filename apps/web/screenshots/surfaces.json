@@ -1960,6 +1960,37 @@
       ],
       "reason": "Settings caps its content at 760px, so 1280 draws this page as 1440 does; 390 is where it reflows, which is shot here.",
       "height": 1200
+    },
+    {
+      "name": "delete-dialog-mac",
+      "at": "/",
+      "steps": [
+        "row-id=thread:redirect",
+        "key:ControlOrMeta+k",
+        "type:delete",
+        "key:Enter"
+      ],
+      "wait": "k=forget-refusal",
+      "mac": true,
+      "widths": [
+        1440
+      ],
+      "reason": "What this shot adds is the Mac window's glass behind the dialog's scrim; the dialog itself is shot in delete-dialog."
+    },
+    {
+      "name": "composer-over-text-mac",
+      "at": "/",
+      "fixture": "long-prompt",
+      "steps": [
+        "row-id=thread:brief"
+      ],
+      "wait": "testid=composer-editor",
+      "mac": true,
+      "widths": [
+        1440
+      ],
+      "reason": "What this shot adds is the Mac window's glass under the composer over a long transcript; the prompt itself is shot in long-prompt.",
+      "settleMs": 800
     }
   ]
 }
