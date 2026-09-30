@@ -2,7 +2,7 @@
 // The wsp verbs against a host over the fake runtime: each one a client of
 // the protocol on localhost, authenticated with the token the host wrote,
 // reading the same session index the sidebar reads.
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { createServer, type AddressInfo, type Socket } from "node:net";
@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { type fakeCopier, NapRefusedError, NoProviderBackend, passphraseCipher, type MachineBackend } from "@wsp/engine";
-import { AGENTS_ON, agentsWord, type ProjectView, type DaemonErrorCode, noProjectImageLine, projectImageInUseRefusal, projectImageRemoveNotice, projectImageRemovedLine, DAEMON_TOKEN_PATH, noHostCliLine, napRefusedLine, copyPathFor, madeOfWord, portsWord, HERE_PLACE_ID, LIST_PRICE_WORD, goneRoadRefusal, notAnsweringYet, runForTheList, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, UP_RESTART_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, markedDefault, NO_SUCH_TURN, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, RuntimeRequest, threadStateWord, whereWord, workspaceStateOf, workspaceWord, type WorkspaceListing, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceAsleepAgainLine, workspaceKind, thisComputer, copyTakesNone, type WorkspaceOut, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, type PlaceView, localRunsOneFix, localRunsOneLine, placeForksNothingPickLine, MEMORY_KEPT_CLAUSE, projectRemovedOnComputerLine, type HarnessCatalogAnswer, noFastLine } from "@wsp/protocol";
+import { AGENTS_ON, agentsWord, type ProjectView, type DaemonErrorCode, noProjectImageLine, projectImageInUseRefusal, projectImageRemoveNotice, projectImageRemovedLine, DAEMON_TOKEN_PATH, noHostCliLine, napRefusedLine, copyPathFor, madeOfWord, portsWord, HERE_PLACE_ID, LIST_PRICE_WORD, goneRoadRefusal, notAnsweringYet, runForTheList, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, UP_RESTART_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, markedDefault, NO_SUCH_TURN, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, RuntimeRequest, threadStateWord, whereWord, workspaceStateOf, workspaceWord, type WorkspaceListing, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceAsleepAgainLine, workspaceKind, thisComputer, copyTakesNone, type WorkspaceOut, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, type PlaceView, localRunsOneFix, localRunsOneLine, placeForksNothingPickLine, MEMORY_KEPT_CLAUSE, projectRemovedOnComputerLine, type HarnessCatalogAnswer, noFastLine, shellLine } from "@wsp/protocol";
 import { copyKey, createRuntime, DAEMON_TOKEN_SET, harnessCatalog, memoryStore, type DaemonChannel, type HarnessAdapterFactory, type HostSsh, type PlaceBackends, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
@@ -27,6 +27,10 @@ import type { WatchSignals } from "../src/watch.js";
 import { writeHost } from "../src/hosts.js";
 import { withRefused } from "../../runtime/test/fs-refusal.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
+import { TEST_ENV } from "../../../vitest.env.js";
+import { writeStub } from "../../protocol/test/stub-script.js";
+import { runningWsp } from "../src/mcp-install.js";
+import { wspArgvOf } from "../src/place-report.js";
 import { guestAnswer, stubBackend, type StubBackend } from "./stub-backend.js";
 import { copyingFake, createOn, fakeDaemonStart, projectOn, CUT_LINE, EXPORT_SESSION, EXPORT_SOURCE, PAGE, UNREACHED_LINE, bornDeadAgent, captured, doneOnlyAgent, execGuest, exportGuest, heldAgent, lastingAgent, launchedScript, launchedScripts, projectBundler, sayingAgent, scriptedAgent, stuckAgent, toolingAgent, type Captured } from "./verbs-fixture.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
@@ -1083,6 +1087,31 @@ describe("wsp verbs over the host", () => {
     expect(await cli(["ssh", "wsp-cart-rounding", "--state", statePath], io, undefined, env)).toBe(EXIT_CODES.usage);
     expect(io.errors.join("\n")).toContain(SSH_PIPES_HERE_LINE);
     expect(asked).toEqual([]);
+  });
+
+  it("writes an ssh config OpenSSH runs on the host's own state, however that state's path is spelled", async () => {
+    await handle?.close();
+    const served = join(dir, `it's a "quoted" 100%h state`, "state.json");
+    handle = await serve(captured(), { port: 0, statePath: served, webDir: join(dir, "web"), runtime: rt });
+    // The include goes into the person's own ~/.ssh/config, under the home this file stubs, which a person always has.
+    mkdirSync(join(dir, "user"), { recursive: true });
+    const client = await dialHost(served);
+    try {
+      expect(await client.request("ssh.include", { on: true })).toMatchObject({ sshInclude: true });
+    } finally {
+      client.close();
+    }
+    const config = join(dir, "home", "ssh_config");
+    const written = readFileSync(config, "utf8");
+    const wsp = `ProxyCommand ${shellLine(wspArgvOf(runningWsp())).replaceAll("%", "%%")} `;
+    expect(written).toContain(wsp);
+    // The words that run wsp are this test process's own; a stub that prints its arguments takes their place, so what
+    // OpenSSH hands the command after them is read back as it arrived.
+    const said = join(dir, "argv");
+    const printer = writeStub(join(dir, "print-argv"), `#!/bin/sh\nfor a; do printf '%s\\n' "$a"; done > ${shellLine([said])}\n`);
+    writeFileSync(config, written.replace(wsp, `ProxyCommand ${shellLine([printer]).replaceAll("%", "%%")} `));
+    spawnSync("ssh", ["-F", config, "-o", "BatchMode=yes", "wsp-cart-rounding", "true"], { env: { ...TEST_ENV, PATH: process.env["PATH"], HOME: join(dir, "user") }, encoding: "utf8", timeout: 20_000 });
+    expect(readFileSync(said, "utf8").split("\n").slice(0, -1)).toEqual(["--state", served, "ssh", "wsp-cart-rounding"]);
   });
 
   it("exec on a paused workspace wakes it first, says so on stderr, then runs the command; a running one is not woken", async () => {
@@ -4060,5 +4089,36 @@ describe("what the projects remove tool says", () => {
     expect(description).not.toContain("the memory its threads kept");
     // The words the remove itself answers with carry that same clause, so the two cannot drift apart.
     expect(projectRemovedOnComputerLine("spoo-landing", "spoo", "/wsp/projects/pr_1", true)).toContain(MEMORY_KEPT_CLAUSE);
+  });
+});
+
+describe("wsp ssh with no host serving its state", () => {
+  it("refuses in one line and starts no host, so no second lock appears for a state no host serves", async () => {
+    const home = mkdtempSync(join(tmpdir(), "wsp-ssh-no-host-"));
+    try {
+      const statePath = join(home, ".wsp", "state.json");
+      const io = captured();
+      io.bytes = { input: new PassThrough(), output: new PassThrough() };
+      const started: string[] = [];
+      const code = await cli(["ssh", "wsp-cart-rounding", "--state", statePath], io, undefined, { ...TEST_ENV, HOME: home }, async state => {
+        started.push(state);
+        throw new Error("this test starts no host");
+      }, { cwd: home });
+      expect(started).toEqual([]);
+      expect(io.errors).toEqual([`wsp ssh: ${noHostServingLine(statePath)}`]);
+      expect(code).toBe(EXIT_CODES.provider);
+      // Under --json the same refusal is the one failure object, carrying its class.
+      const json = captured();
+      json.bytes = { input: new PassThrough(), output: new PassThrough() };
+      expect(await cli(["ssh", "wsp-cart-rounding", "--state", statePath, "--json"], json, undefined, { ...TEST_ENV, HOME: home }, async state => {
+        started.push(state);
+        throw new Error("this test starts no host");
+      }, { cwd: home })).toBe(EXIT_CODES.provider);
+      expect(json.errors.map(line => JSON.parse(line) as unknown)).toEqual([{ error: noHostServingLine(statePath), class: "provider", exit: EXIT_CODES.provider }]);
+      expect(started).toEqual([]);
+      expect(existsSync(lockPathFor(statePath))).toBe(false);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });
