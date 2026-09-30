@@ -50,6 +50,7 @@ const UNRECORDED: Recorded = { agent: null, permissionMode: null };
 const view = (model: string | null, running = false, recorded: Recorded = UNRECORDED): ChatThreadView => ({
   entries: [{ id: "e1" } as unknown as ChatThreadView["entries"][number]],
   turns: [],
+  runs: new Map(),
   latestTurn: null,
   running,
   activeTurnStartedAt: null,

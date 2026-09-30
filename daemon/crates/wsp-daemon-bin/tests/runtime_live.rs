@@ -2717,7 +2717,7 @@ async fn a_pane_opens_a_shell_inside_the_workspace_on_a_pty_of_the_workspaces_ow
     assert_eq!(code, 0, "the reading of the workspace's /dev failed: {said}");
 
     let opened = Instant::now();
-    let mut running = match w.ops.pty_in(&id, 100, 40, "/root", None).await {
+    let mut running = match w.ops.pty_in(&id, 100, 40, "/root", None, None).await {
         Ok(running) => running,
         // On its own line and whole: the sentence names which step gave out, how the helper ended and what it
         // printed, which is what says whether this is a mount, a filter or the road itself.

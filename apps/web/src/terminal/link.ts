@@ -14,6 +14,9 @@ import { composedPtyIo, type TerminalIo } from "./pty-io.js";
 /** Mirrors the daemon's per-pty scrollback cap (pty-manager.ts), in UTF-16 units. */
 const MIRROR_CAP = 256 * 1024;
 
+/** The rows a reply's run opens at, before the box under its block has measured it; its first fit takes the box's own. */
+export const RUN_ROWS = 12;
+
 /** The word a link reads on before anything has been open on it: nothing has, so nothing is coming back. Written
  * here because the model, the hook that reads it for a surface with no pane, and the panel all need the same one,
  * and a second copy of it drifts silently (it drove no words when it did). */
@@ -45,6 +48,26 @@ export interface OpenOpts {
   cwd?: string;
 }
 
+/** A reply's block run in a pty of its own: the command, the folder, and a shell only a test names. */
+export interface RunOpts {
+  command: string;
+  cwd?: string;
+  shell?: string;
+}
+
+/** How a run's process ended, as the daemon reported it. */
+export interface RunExit {
+  code: number;
+  signal?: number;
+  /** The daemon no longer held the pty when this model came back: nobody saw how it ended. */
+  lost?: true;
+}
+
+/** The sequences a program switches to the alternate screen with: xterm's two and the one that saves the cursor too. */
+const ALT_SCREEN = /\x1b\[\?(?:1049|1047|47)h/;
+/** The longest of those, which is as much of a frame as the next one needs to see a switch cut between them. */
+const ALT_SCREEN_LONGEST = "\x1b[?1049h".length;
+
 interface PtyState {
   ptyId: string;
   title: string;
@@ -55,6 +78,21 @@ interface PtyState {
   sinks: Set<TerminalSink>;
   /** Null until the daemon reports; the tab treats that as raw. */
   mode: PtyModeReport | null;
+  /** A reply's run, held here for its block and never a tab until it is moved to one. */
+  reply: boolean;
+  /** How its process ended, once the daemon said. */
+  exit: RunExit | null;
+  exitFns: Set<(exit: RunExit) => void>;
+  altFns: Set<() => void>;
+  /** Set once the program took the whole screen, so a listener that comes late still hears it. */
+  alt: boolean;
+  /** The last bytes of the frame before, so a switch the daemon's frames cut in two is read whole. */
+  altTail: string;
+}
+
+/** A pty's local state as it is first held. */
+function held(ptyId: string, title: string, reply: boolean): PtyState {
+  return { ptyId, title, exited: false, lost: false, chunks: [], length: 0, sinks: new Set(), mode: null, reply, exit: null, exitFns: new Set(), altFns: new Set(), alt: false, altTail: "" };
 }
 
 // A shell started at a width other than its view's redraws its prompt on the first resize and leaves zsh's
@@ -117,12 +155,28 @@ export class WorkspaceTerminals {
       if (!p) return;
       this.#mirror(p, e.data);
       for (const s of p.sinks) s.data(e.data);
+      if (p.reply && !p.alt) {
+        const seen = p.altTail + e.data;
+        p.altTail = seen.slice(-ALT_SCREEN_LONGEST);
+        if (ALT_SCREEN.test(seen)) {
+          p.alt = true;
+          for (const fn of p.altFns) fn();
+        }
+      }
       return;
     }
     if (e.type === "pty.exit") {
       const p = this.#ptys.get(e.ptyId);
       if (!p || p.exited) return;
+      p.exit = { code: e.exitCode, ...(e.signal !== undefined ? { signal: e.signal } : {}) };
+      if (p.reply) {
+        // A reply's output is kept as text once it ends, so no line of ours joins what the command printed.
+        p.exited = true;
+        for (const fn of p.exitFns) fn(p.exit);
+        return;
+      }
       this.#markExited(p);
+      for (const fn of p.exitFns) fn(p.exit);
       return;
     }
     if (e.type === "pty.mode") {
@@ -177,22 +231,94 @@ export class WorkspaceTerminals {
     const created = await this.#wire.request("pty.create", params);
     this.#everOpened = true;
     const ptyId = String(created["ptyId"]);
-    const p: PtyState = {
-      ptyId,
-      title: (opts.shell ?? "shell").split("/").pop() ?? "shell",
-      exited: false,
-      lost: false,
-      chunks: [],
-      length: 0,
-      sinks: new Set(),
-      mode: null,
-    };
+    const p = held(ptyId, (opts.shell ?? "shell").split("/").pop() ?? "shell", false);
     this.#ptys.set(ptyId, p);
     this.#order.push(ptyId);
     this.#activeId = ptyId;
     await this.#wire.request("pty.attach", { ptyId });
     this.#notifyTabs();
     return { ptyId: p.ptyId, title: p.title, exited: p.exited, lost: p.lost };
+  }
+
+  // --- a reply's block run ---------------------------------------------------------
+
+  /** Runs a reply's command in a pty of its own, held for its block and never a tab: the daemon runs it through the
+   * person's shell and the pty exits with it. Answers the pty's id once the daemon took it and it is attached. */
+  async run(opts: RunOpts): Promise<string> {
+    const params: Record<string, unknown> = { ...lastSize, rows: RUN_ROWS, run: opts.command };
+    if (opts.shell !== undefined) params["shell"] = opts.shell;
+    if (opts.cwd !== undefined) params["cwd"] = opts.cwd;
+    const created = await this.#wire.request("pty.create", params);
+    const ptyId = String(created["ptyId"]);
+    this.#ptys.set(ptyId, held(ptyId, "run", true));
+    await this.#wire.request("pty.attach", { ptyId });
+    return ptyId;
+  }
+
+  /** Takes back a run the thread's record names, after a reload or in another window: false where the daemon holds no
+   * such pty any more. A pty this model already holds answers at once. */
+  async resumeRun(ptyId: string): Promise<boolean> {
+    if (this.#ptys.has(ptyId)) return true;
+    const p = held(ptyId, "run", true);
+    this.#ptys.set(ptyId, p);
+    try {
+      await this.#wire.request("pty.attach", { ptyId });
+      return true;
+    } catch {
+      this.#ptys.delete(ptyId);
+      return false;
+    }
+  }
+
+  /** Settles when the run's process ends, at once for one already over. */
+  runExit(ptyId: string): Promise<RunExit> {
+    const p = this.#ptys.get(ptyId);
+    if (!p) return Promise.reject(new Error(`no pty ${ptyId} here`));
+    if (p.exit !== null) return Promise.resolve(p.exit);
+    return new Promise(resolve => {
+      const once = (exit: RunExit): void => {
+        p.exitFns.delete(once);
+        resolve(exit);
+      };
+      p.exitFns.add(once);
+    });
+  }
+
+  /** Called once the run's program takes the whole screen, at once where it already has. */
+  onAltScreen(ptyId: string, fn: () => void): () => void {
+    const p = this.#ptys.get(ptyId);
+    if (!p) return () => {};
+    if (p.alt) fn();
+    p.altFns.add(fn);
+    return () => p.altFns.delete(fn);
+  }
+
+  /** Everything the pty has printed that the mirror still holds, as the terminal received it. */
+  mirrorText(ptyId: string): string {
+    return this.#ptys.get(ptyId)?.chunks.join("") ?? "";
+  }
+
+  /** Hands a running reply's pty to the terminal tabs, the process untouched: it becomes the active tab here, and the
+   * daemon stops marking it so every other pane adopts it too. */
+  async moveToTab(ptyId: string): Promise<void> {
+    const p = this.#ptys.get(ptyId);
+    if (!p) throw new Error(`no pty ${ptyId} here`);
+    await this.#wire.request("pty.tab", { ptyId });
+    p.reply = false;
+    p.title = "shell";
+    if (!this.#order.includes(ptyId)) this.#order.push(ptyId);
+    this.#activeId = ptyId;
+    this.#everOpened = true;
+    this.#notifyTabs();
+  }
+
+  /** Lets go of a finished run: its text is on the thread now, so the pty and its mirror go. */
+  async forgetRun(ptyId: string): Promise<void> {
+    const p = this.#ptys.get(ptyId);
+    if (!p || !p.reply) return;
+    this.#ptys.delete(ptyId);
+    this.#ios.delete(ptyId);
+    await this.#wire.request("pty.kill", { ptyId }).catch(() => {});
   }
 
   /** True once any pty was ever created; the tab auto-opens only before this. */
@@ -263,7 +389,8 @@ export class WorkspaceTerminals {
   }
 
   resize(ptyId: string, cols: number, rows: number): void {
-    keepSize(cols, rows);
+    // A reply's box is a few rows tall on purpose; the size the next tab opens at is a tab's.
+    if (this.#ptys.get(ptyId)?.reply !== true) keepSize(cols, rows);
     this.#wire.request("pty.resize", { ptyId, cols, rows }).catch(() => {});
   }
 
@@ -312,19 +439,11 @@ export class WorkspaceTerminals {
     const reply = PtyListReply.safeParse(listed);
     if (!reply.success) return;
     for (const entry of reply.data.ptys) {
-      if (this.#ptys.has(entry.id)) continue;
+      // A reply's pty is its block's, which takes it back by the thread's record; it becomes a tab only when moved.
+      if (this.#ptys.has(entry.id) || entry.reply === true) continue;
       // Registered before the attach, and not yet exited: the daemon replays scrollback as pty.data ahead of its
       // reply and pushes pty.exit for a dead pty, and feedEvent drops both for an unknown or already exited pty.
-      const p: PtyState = {
-        ptyId: entry.id,
-        title: "shell",
-        exited: false,
-        lost: false,
-        chunks: [],
-        length: 0,
-        sinks: new Set(),
-        mode: null,
-      };
+      const p = held(entry.id, "shell", false);
       this.#ptys.set(entry.id, p);
       this.#order.push(entry.id);
       let attached = false;
@@ -370,6 +489,13 @@ export class WorkspaceTerminals {
         // transition re-runs the full ritual. A per-pty refusal on a live wire
         // means that pty is gone (daemon restarted); the rest must still attach.
         if (gen !== this.#liveGen) return;
+        if (p.reply && !p.exited) {
+          p.exited = true;
+          p.lost = true;
+          p.exit = { code: -1, lost: true };
+          for (const fn of p.exitFns) fn(p.exit);
+          continue;
+        }
         if (!p.exited) {
           p.exited = true;
           p.lost = true;
