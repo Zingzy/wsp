@@ -210,17 +210,27 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
 });
 
 export const ChangedFilesTree = memo(function ChangedFilesTree(props: {
-  turnId: TurnId;
   files: ReadonlyArray<TurnDiffFileChange>;
   allDirectoriesExpanded: boolean;
   resolvedTheme: "light" | "dark";
-  onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
+  /** A turn's changed-files card opens the row in the turn's diff; the pull request pane hands its own opener. One
+   * of the two is given. */
+  turnId?: TurnId;
+  onOpenTurnDiff?: (turnId: TurnId, filePath?: string) => void;
+  onOpenFile?: ((path: string) => void) | undefined;
+  /** Neutral in the turn's card; the diff tone gives every count its green and red where a diff is what the reader
+   * is looking at, as the pull request pane's Files tab does. */
+  statTone?: "neutral" | "diff";
   /** What stands before a file row's name, as the Changes pane's commit tick does. */
   renderFileLead?: ((path: string) => ReactNode) | undefined;
   /** What stands at a file row's end, as the Changes pane's per-file controls do. */
   renderFileControls?: ((path: string) => ReactNode) | undefined;
 }) {
-  const { files, allDirectoriesExpanded, onOpenTurnDiff, resolvedTheme, turnId, renderFileLead, renderFileControls } = props;
+  const { files, allDirectoriesExpanded, onOpenTurnDiff, onOpenFile, resolvedTheme, turnId, statTone = "neutral", renderFileLead, renderFileControls } = props;
+  const openFile = (path: string): void => {
+    if (onOpenFile !== undefined) onOpenFile(path);
+    else if (onOpenTurnDiff !== undefined && turnId !== undefined) onOpenTurnDiff(turnId, path);
+  };
   const treeNodes = useMemo(() => buildTurnDiffTree(files), [files]);
   const directoryPathsKey = useMemo(
     () => collectDirectoryPaths(treeNodes).join("\u0000"),
@@ -286,7 +296,7 @@ export const ChangedFilesTree = memo(function ChangedFilesTree(props: {
             </span>
             {hasNonZeroStat(node.stat) && (
               <span className="ml-auto shrink-0 font-mono text-[10px] tabular-nums">
-                <DiffStatLabel additions={node.stat.additions} deletions={node.stat.deletions} />
+                <DiffStatLabel additions={node.stat.additions} deletions={node.stat.deletions} tone={statTone} />
               </span>
             )}
           </button>
@@ -310,7 +320,7 @@ export const ChangedFilesTree = memo(function ChangedFilesTree(props: {
           slotted ? "min-w-0 flex-1" : "w-full hover:bg-accent/60",
         )}
         style={{ paddingLeft: slotted ? undefined : `${leftPadding}px` }}
-        onClick={() => onOpenTurnDiff(turnId, node.path)}
+        onClick={() => openFile(node.path)}
       >
         {hasDirectoryNodes || depth > 0 ? (
           <span aria-hidden="true" className="size-3.5 shrink-0" />
@@ -326,7 +336,7 @@ export const ChangedFilesTree = memo(function ChangedFilesTree(props: {
         </span>
         {node.stat && (
           <span className="ml-auto shrink-0 font-mono text-[10px] tabular-nums">
-            <DiffStatLabel additions={node.stat.additions} deletions={node.stat.deletions} />
+            <DiffStatLabel additions={node.stat.additions} deletions={node.stat.deletions} tone={statTone} />
           </span>
         )}
       </button>

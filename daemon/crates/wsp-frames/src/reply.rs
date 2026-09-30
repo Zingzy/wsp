@@ -572,7 +572,7 @@ pub struct GitPrReadReply {
     pub pr: Option<PullRequest>,
 }
 
-/// One commit of a pull request: its id, its subject and when it was made, as an ISO time.
+/// One commit of a pull request: its id, its subject, when it was made as an ISO time, and its author.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 #[serde(rename_all = "camelCase")]
@@ -580,6 +580,7 @@ pub struct PullRequestCommit {
     pub oid: String,
     pub subject: String,
     pub at: String,
+    pub author: String,
 }
 
 /// One review left on a pull request: who, the state it left, its body cut at GIT_PR_LIST_BODY_CAP, and when.
@@ -634,14 +635,16 @@ pub struct PullRequestFile {
     pub deletions: u64,
 }
 
-/// A pull request as its page reads: title, body, commits, reviews, the conversation, the comments on lines and the
-/// files, every body cut at GIT_PR_LIST_BODY_CAP.
+/// A pull request as its page reads: title, body, the author and when it was last updated, commits, reviews, the
+/// conversation, the comments on lines and the files, every body cut at GIT_PR_LIST_BODY_CAP.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct GitPrViewReply {
     pub title: String,
     pub body: String,
+    pub author: String,
+    pub updated_at: String,
     pub commits: Vec<PullRequestCommit>,
     pub reviews: Vec<PullRequestReview>,
     pub comments: Vec<PullRequestComment>,

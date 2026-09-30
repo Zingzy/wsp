@@ -14,10 +14,15 @@ export const PR_WORDS = {
   sendToThread: "Send to thread",
   refresh: "Refresh",
   reading: "Reading the pull request",
-  heads: { checks: "Checks", review: "Review", comments: "Comments", timeline: "Timeline" },
-  commented: "commented",
-  committed: "committed",
-  noDescription: "No description",
+  heads: { checks: "Checks", review: "Review", comments: "Comments", conversation: "Conversation" },
+  tabs: { overview: "Overview", commits: "Commits", files: "Files" },
+  showMore: "Show more",
+  showLess: "Show less",
+  updated: (ago: string): string => `updated ${ago}`,
+  noCommits: "No commits yet",
+  noFiles: "No files changed",
+  expandFolders: "Expand all folders",
+  collapseFolders: "Collapse all folders",
 } as const;
 
 /** Each method as its menu item reads it. */

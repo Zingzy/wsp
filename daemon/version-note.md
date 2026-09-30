@@ -1,0 +1,1 @@
+Reads a pull request's author and last-updated time and each commit's author from the one gh page read, so the pane's header names who opened it and when it last moved and each commit names who wrote it.

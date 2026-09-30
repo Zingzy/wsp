@@ -158,6 +158,49 @@ export const HERE_HOST_ITEMS = {
  * for, its checks, how far main has moved on, its page with the comments on its lines, and the repository's merge
  * settings. One check failed and changes were asked for, so the tile, the pane and the thread's row have each word to
  * show; the conflicting one has its checks passed and a conflict with main. */
+/** A long markdown body, so the Overview tab shows its headings, lists, code and inline code clamped under the fade. */
+const CART_BODY = [
+  "## What changed",
+  "",
+  "The total **rounded each line** and added the pennies up, so three lines at `0.335` landed on `1.00` or `1.01`",
+  "depending on the order. It rounds the sum now, once, at the end.",
+  "",
+  "### Why",
+  "",
+  "- Per-line rounding compounds the error across a cart.",
+  "- The order of the lines then decides the total, which a cart must never do.",
+  "- Rounding the sum once is the only place a penny is dropped.",
+  "",
+  "```ts",
+  "export function cartTotal(lines: readonly Line[]): Money {",
+  "  const sum = lines.reduce((acc, line) => acc + line.price * line.qty, 0);",
+  "  return roundMoney(sum);",
+  "}",
+  "```",
+  "",
+  "### Still to do",
+  "",
+  "1. A test with three lines at 0.335.",
+  "2. A note in the changelog.",
+  "3. A look at the discount path, which rounds twice.",
+  "",
+  "See the [rounding note](https://github.com/you/spoo/wiki/rounding) for the history.",
+].join("\n");
+
+/** Twenty commits for the Commits tab, the last a merge from main so its dot reads hollow. */
+const CART_AUTHORS = ["cass", "maya", "ravi", "you"];
+const CART_PAGE_COMMITS = Array.from({ length: 20 }, (_, i) => {
+  const n = i + 1;
+  const merge = n === 20;
+  return {
+    oid: `${n.toString(16).padStart(2, "0")}${"c0ffee0b1d2e3f405162738495a6b7c8d9e0f1a2".slice(0, 38)}`,
+    messageHeadline: merge ? "Merge branch 'main' into fix/cart-rounding" : `Round the cart total, step ${n}`,
+    committedDate: `2026-09-${String(8 + Math.floor(i / 3)).padStart(2, "0")}T${String(9 + (i % 8)).padStart(2, "0")}:${String((i * 7) % 60).padStart(2, "0")}:00Z`,
+    authors: [{ login: CART_AUTHORS[i % CART_AUTHORS.length], name: CART_AUTHORS[i % CART_AUTHORS.length] }],
+  };
+});
+const CART_VIEW_COMMITS = CART_PAGE_COMMITS.map(c => ({ oid: c.oid, messageHeadline: c.messageHeadline }));
+
 const CART_PULL = {
   repo: "you/spoo",
   branch: "fix/cart-rounding",
@@ -175,11 +218,8 @@ const CART_PULL = {
     reviewDecision: "CHANGES_REQUESTED",
     additions: 12,
     deletions: 3,
-    changedFiles: 3,
-    commits: [
-      { oid: "7a1b2c3d4e5f60718293a45f1c0e2b9a7d4c3e8f", messageHeadline: "Tick the first thing off" },
-      { oid: "5f1c0e2b9a7d4c3e8f6a1b2c3d4e5f60718293a4", messageHeadline: "Round the cart total once, at the end" },
-    ],
+    changedFiles: 5,
+    commits: CART_VIEW_COMMITS,
   },
   checks: [
     { name: "test", bucket: "fail", link: "https://github.com/you/spoo/actions/runs/36495564111/job/109174214002", workflow: "ci", description: "" },
@@ -188,15 +228,16 @@ const CART_PULL = {
   ],
   page: {
     title: "Round the cart total once, at the end",
-    body: "The total rounded each line and added the pennies up, so three lines at 0.335 landed on 1.00 or 1.01 depending on the order. It rounds the sum now.",
-    commits: [
-      { oid: "7a1b2c3d4e5f60718293a45f1c0e2b9a7d4c3e8f", messageHeadline: "Tick the first thing off", committedDate: "2026-09-29T08:10:00Z" },
-      { oid: "5f1c0e2b9a7d4c3e8f6a1b2c3d4e5f60718293a4", messageHeadline: "Round the cart total once, at the end", committedDate: "2026-09-29T09:02:00Z" },
-    ],
+    body: CART_BODY,
+    author: { login: "cass" },
+    updatedAt: "2026-09-29T09:22:00Z",
+    commits: CART_PAGE_COMMITS,
     reviews: [{ author: { login: "maya" }, state: "CHANGES_REQUESTED", body: "The rounding is right. The test for three lines is missing.", submittedAt: "2026-09-29T09:20:00Z" }],
     comments: [{ author: { login: "maya" }, body: "Tried it on the staging cart, the totals match now.", createdAt: "2026-09-29T09:14:00Z" }],
     files: [
       { path: "src/cart/total.ts", additions: 4, deletions: 0 },
+      { path: "src/cart/discount.ts", additions: 3, deletions: 2 },
+      { path: "test/cart/total.test.ts", additions: 8, deletions: 0 },
       { path: "README.md", additions: 2, deletions: 1 },
       { path: "todo.md", additions: 6, deletions: 2 },
     ],

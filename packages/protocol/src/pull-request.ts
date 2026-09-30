@@ -308,7 +308,10 @@ const text = z.string();
 export const GitPrViewReply = z.object({
   title: text,
   body: text,
-  commits: z.array(z.object({ oid: text, subject: text, at: text })),
+  /** Who opened the pull request and when it last moved, for the pane's header. */
+  author: text,
+  updatedAt: text,
+  commits: z.array(z.object({ oid: text, subject: text, at: text, author: text })),
   reviews: z.array(z.object({ author: text, state: text, body: text, at: text })),
   comments: z.array(z.object({ author: text, body: text, at: text })),
   reviewComments: z.array(
