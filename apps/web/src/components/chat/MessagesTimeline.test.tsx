@@ -257,8 +257,7 @@ describe("MessagesTimeline", () => {
               assistantMessageId,
               {
                 turnId,
-                files: [{ path: "README.md", kind: "modified", additions: 2, deletions: 1 }],
-                shared: false,
+                files: [{ path: "src/README.md", kind: "modified", additions: 2, deletions: 1 }],
               },
             ],
           ])
@@ -268,11 +267,9 @@ describe("MessagesTimeline", () => {
 
     expect(markup).toContain("sticky top-2 z-10");
     expect(markup).not.toContain("self-start");
-    expect(markup).toContain("whitespace-nowrap");
-    expect(markup).toContain("!size-[22px]");
     expect(markup).toContain("size-3");
-    expect(markup).toContain('aria-label="Collapse all folders"');
-    expect(markup).toContain('aria-label="Open changes"');
+    expect(markup).toContain('aria-label="Expand all folders"');
+    expect(markup).toContain('aria-label="Open diff"');
     expect(markup).toContain("1 changed file");
   });
 

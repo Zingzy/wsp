@@ -124,11 +124,11 @@ export function ChatView({
     const last = view.entries.findLast(e => e.kind === "message" && e.message.role === "assistant" && e.message.turnId === turn.turnId);
     return last?.kind === "message" ? [{ messageId: last.message.id, turn: turn.turnId, changes: turn.changes }] : [];
   });
-  const diffKey = JSON.stringify(diffPlaces.map(p => [p.messageId, p.turn, p.changes.to, p.changes.shared]));
+  const diffKey = JSON.stringify(diffPlaces.map(p => [p.messageId, p.turn, p.changes.to]));
   const diffPlacesRef = useRef(diffPlaces);
   diffPlacesRef.current = diffPlaces;
   const turnDiffs = useMemo(
-    () => new Map<MessageId, TurnDiffSummary>(diffPlacesRef.current.map(p => [p.messageId, { turnId: p.turn, files: p.changes.files, shared: p.changes.shared }])),
+    () => new Map<MessageId, TurnDiffSummary>(diffPlacesRef.current.map(p => [p.messageId, { turnId: p.turn, files: p.changes.files }])),
     [diffKey],
   );
   const turnsRef = useRef(view.turns);

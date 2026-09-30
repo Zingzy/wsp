@@ -337,6 +337,8 @@ const replay = (thread, minutes, workspaceId = "ws_api") => {
  * and the commands two plugins named themselves in. The menu groups on the source those names carry. */
 const ANNOUNCED_COMMANDS = ["compact", "context", "cost", "init", "review", "login", "model", "unslop", "why", "wizard", "code-review:code-review", "ralph-loop:ralph-loop", "ralph-loop:cancel-ralph"];
 
+const REPLY_TOKENS = { input: 22_564, output: 1_251, cached: 18_435, cacheWrite: 4_113, context: 42_310, window: 200_000 };
+
 const REDIRECT = {
   id: "redirect",
   harness: { slashCommands: ANNOUNCED_COMMANDS },
@@ -355,6 +357,7 @@ const REDIRECT = {
     "Both forms answer 302 once.",
   ].join("\n"),
   costUsd: 0.42,
+  tokens: REPLY_TOKENS,
 };
 
 const CHART = {
@@ -1166,7 +1169,6 @@ const rewind = () => {
 /** One project on this computer with three answered threads, each carrying what a reply draws under it: the model and
  * tokens its agent counted, the files it changed, the step list it worked through, the plan it proposed, and a reply
  * holding a diagram and a formula. */
-const REPLY_TOKENS = { input: 22_564, output: 1_251, cached: 18_435, cacheWrite: 4_113, context: 42_310, window: 200_000 };
 const replies = () =>
   store({
     projects: [project("spoo-landing", HERE, 60 * 30)],
@@ -1197,6 +1199,28 @@ const replies = () =>
             },
           }),
           40,
+        ],
+        [
+          tileThread("sweep", "Rename the link store across the app", {
+            prompt: "rename LinkStore to Links everywhere it is used",
+            model: "claude-opus-5-5",
+            tokens: { ...REPLY_TOKENS, context: 96_400 },
+            reply: "Renamed across the API, the web app and the shared package; the suite passes.",
+            changes: {
+              from: "3".repeat(40),
+              to: "4".repeat(40),
+              files: [
+                ...Array.from({ length: 24 }, (_, n) => ({ path: `apps/api/src/links/route${n}.ts`, kind: "modified", additions: 6 + (n % 5), deletions: 4 + (n % 3) })),
+                ...Array.from({ length: 14 }, (_, n) => ({ path: `apps/web/src/links/Link${n}.tsx`, kind: "modified", additions: 3 + (n % 4), deletions: 2 })),
+                ...Array.from({ length: 8 }, (_, n) => ({ path: `packages/shared/src/store${n}.ts`, kind: n === 0 ? "added" : "modified", additions: 12, deletions: n === 0 ? 0 : 9 })),
+                { path: ".github/workflows/ci.yml", kind: "modified", additions: 1, deletions: 1 },
+                { path: "docs/links.md", kind: "modified", additions: 8, deletions: 8 },
+                { path: "CHANGELOG.md", kind: "modified", additions: 3, deletions: 0 },
+                { path: "README.md", kind: "modified", additions: 2, deletions: 2 },
+              ],
+            },
+          }),
+          30,
         ],
         [
           tileThread("tasks", "Pin the redirect order", {

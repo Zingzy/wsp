@@ -145,14 +145,14 @@ describe("chat tab rendering", () => {
     expect(ring.querySelector("svg circle[data-context-used]")).not.toBeNull();
   });
 
-  it("draws what a turn changed under its reply, says when another thread shared the folder, and opens the Changes pane on that turn", async () => {
+  it("draws what a turn changed under its reply, and opens the Changes pane on that turn", async () => {
     useDiffStore.setState({ turnByWorkspaceId: {} });
     useRightPanelStore.setState({ byWorkspaceId: {} });
     const { api, emit } = fixtureApi([workspace]);
     await setup(api);
     for (const e of FIXTURE) emit(e);
     await screen.findByText(/Server is live at :3000\./);
-    expect(screen.queryByRole("button", { name: "Open changes" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Open diff" })).toBeNull();
     const from = "a".repeat(40);
     const to = "b".repeat(40);
     const files = [
@@ -160,15 +160,12 @@ describe("chat tab rendering", () => {
       { path: "README.md", kind: "modified", additions: 2, deletions: 3 },
     ];
     emit({ type: "session.changes", ...scope, from, to, files, shared: true });
-    const open = await screen.findByRole("button", { name: "Open changes" });
+    const open = await screen.findByRole("button", { name: "Open diff" });
     expect(screen.getByText("2 changed files")).toBeDefined();
-    // The counts are neutral at rest, as in the Changes pane: no success or destructive ink under a reply.
     const counts = document.querySelector<HTMLElement>('[aria-label="14 additions, 3 deletions"]')!;
-    expect(counts.innerHTML).not.toMatch(/text-success|text-destructive/);
-    expect([...counts.children].every(c => c.className.includes("text-muted-foreground"))).toBe(true);
-    const shared = screen.getByText("Includes changes from another thread in this copy");
-    expect(shared.className).toContain("text-[11px]");
-    expect(shared.className).toContain("text-muted-foreground");
+    expect([...counts.children].map(c => c.className.includes("text-success") || c.className.includes("text-error-foreground"))).toEqual([true, true]);
+    // Another thread's turn in the same folder adds no line under the card.
+    expect(screen.queryByText(/another thread/)).toBeNull();
     fireEvent.click(open);
     expect(useDiffStore.getState().turnByWorkspaceId[WS]).toEqual({ turnId: CHAT_TURN, cwd: expect.any(String), from, to, path: "server.js" });
     const panel = useRightPanelStore.getState().byWorkspaceId[WS];

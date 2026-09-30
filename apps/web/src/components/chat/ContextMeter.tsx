@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // What the model held at the thread's latest turn, as a small ring in the
-// thread's top bar beside Open, after T3 Code's context window meter: the
+// thread's top bar, first of its buttons, after T3 Code's context window meter: the
 // ring fills with the share of the window, and its hover says the numbers
 // and the percentage. The thread's view publishes its reading, since the
 // top bar stands outside it; a thread whose agent reports no limit draws an

@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SidebarThreadSnapshot } from "../adapt/index.js";
 import { threadIndicator } from "../adapt/index.js";
 import { SidebarProvider } from "../components/ui/sidebar.js";
 import { ThreadTile, WorkspaceTile, type TilePlace } from "./ThreadTile.js";
 import type { LinkDown } from "../terminal/paneWords.js";
+import type { TileCheckout } from "./tileCheckout.js";
+import type { PlaceView } from "@wsp/protocol";
 
 const thread = (over: Partial<SidebarThreadSnapshot> = {}): SidebarThreadSnapshot => {
   const base = { id: "th_1", threadId: "th_1", sessionId: "s_1", workspaceId: "ws_a", title: "Cart total rounding", status: "running" as const, ran: true, startedAt: "2026-09-17T00:00:00.000Z", endedAt: null, harness: "claude", startedBy: "person" as const, project: "spoo", parentThreadId: null, attempt: null, model: null, asking: null, costUsd: null, unread: false, readAt: null, settledAt: null, needsYou: false, pinnedAt: null, snoozedUntil: null, section: null };
@@ -13,15 +15,17 @@ const thread = (over: Partial<SidebarThreadSnapshot> = {}): SidebarThreadSnapsho
   return { ...merged, indicator: threadIndicator({ status: merged.status, ...(merged.asking === null ? {} : { asking: merged.asking }) }) };
 };
 
-const PLACE: TilePlace = { projectId: "pr_1", project: "spoo-landing", computer: "zingzy's MacBook Pro" };
+const HERE: PlaceView = { id: "here", kind: "computer", name: "zingzy-mbp", label: "zingzy's MacBook Pro", mac: "macbook", default: true, present: true, takesForks: false, engine: "none", shape: { cpu: 8, memMb: 16384 }, diskFreeBytes: 210 * 1024 ** 3 };
+const PLACE: TilePlace = { projectId: "pr_1", project: "spoo-landing", computer: "zingzy's MacBook Pro", at: HERE };
 
-function mount({ over = {}, branch = "fix/cart-rounding", active = false, settled = false, snoozedWorking, linkDown, onSelect = () => {} }: { over?: Partial<SidebarThreadSnapshot>; branch?: string; active?: boolean; settled?: boolean; snoozedWorking?: number; linkDown?: LinkDown; onSelect?: () => void } = {}) {
+function mount({ over = {}, checkout = { branch: "fix/cart-rounding", counts: [] }, active = false, settled = false, snoozedWorking, linkDown, onSelect = () => {} }: { over?: Partial<SidebarThreadSnapshot>; checkout?: TileCheckout; active?: boolean; settled?: boolean; snoozedWorking?: number; linkDown?: LinkDown; onSelect?: () => void } = {}) {
   return render(
     <SidebarProvider defaultOpen>
       <ThreadTile
         thread={thread(over)}
         place={PLACE}
-        branch={branch}
+        checkout={checkout}
+        model="Opus 5.5"
         time="3m"
         depth={1}
         active={active}
@@ -85,7 +89,7 @@ describe("a thread tile", () => {
     expect([...slot().classList].filter(c => c.startsWith("text-status-"))).toEqual([]);
     expect(tile().querySelector("canvas")).toBeNull();
     expect(tile().querySelector("[data-thread-title]")!.className).toContain("text-sidebar-muted-foreground");
-    expect(tile().title).toContain("Snoozed, 2 working in it");
+    expect(tile().hasAttribute("title")).toBe(false);
   });
 
   it("a finish nobody has seen says Done in the slot and keeps its title in the foreground ink; opened, it rests with its age and a muted title", () => {
@@ -95,47 +99,42 @@ describe("a thread tile", () => {
     const title = tile().querySelector("[data-thread-title]")!;
     expect(title.className).toContain("text-sidebar-foreground");
     expect(title.className).not.toContain("text-sidebar-muted-foreground");
-    expect(rows()[2]!.querySelector("canvas")).toBeNull();
+    expect(tile().querySelector("canvas")).toBeNull();
     cleanup();
     mount({ over: { status: "completed", endedAt: "2026-09-17T00:05:00.000Z", unread: false } });
     expect(slot().textContent).toBe("3m");
     expect(tile().querySelector("[data-thread-title]")!.className).toContain("text-sidebar-muted-foreground");
   });
 
-  it("is three rows: where it runs with the status at the right, the title, then the agent's mark and the branch", () => {
+  it("is two rows: where it runs with the status at the right, then the agent's mark and the title, and nothing of the branch", () => {
     mount({ over: { status: "failed" } });
-    expect(rows()).toHaveLength(3);
-    const [one, two, three] = rows();
+    expect(rows()).toHaveLength(2);
+    const [one, two] = rows();
     expect(one!.querySelector("svg")).not.toBeNull();
     expect(one!.querySelector("[data-tile-where]")!.textContent).toBe("spoo-landing @ zingzy's MacBook Pro");
     expect(one!.lastElementChild).toBe(slot());
     expect(slot().textContent).toBe("Failed");
-    expect(two!.textContent).toBe("Cart total rounding");
-    expect(two!.hasAttribute("data-thread-title")).toBe(true);
-    expect(three!.querySelector("[data-harness-mark=claude]")).not.toBeNull();
-    expect(three!.querySelector(".lucide-git-branch")).not.toBeNull();
-    expect(three!.querySelector("[data-tile-branch]")!.textContent).toBe("fix/cart-rounding");
-    expect(tile().textContent).not.toMatch(/[·•]/);
+    expect(two!.firstElementChild!.matches("[data-harness-mark=claude]")).toBe(true);
+    expect(two!.querySelector("[data-thread-title]")!.textContent).toBe("Cart total rounding");
+    expect(tile().querySelector(".lucide-git-branch, [data-tile-branch]")).toBeNull();
+    expect(tile().textContent).not.toMatch(/fix\/cart-rounding|[·•]/);
   });
 
-  it("draws the tile at its sizes: 68 px, rows of 14, 18 and 14 with 3 px between, rows one and three at 11 px", () => {
+  it("draws the tile at its sizes: 52 px, rows of 14 and 18 with 4 px between, row one at 11 px", () => {
     mount();
-    expect(tile().className).toContain("h-[68px]");
-    expect(tile().className).toContain("gap-[3px]");
+    expect(tile().className).toContain("h-[52px]");
+    expect(tile().className).toContain("gap-1");
     expect(tile().className).toContain("p-2");
-    const [one, two, three] = rows();
+    const [one, two] = rows();
     expect(one!.className).toContain("h-3.5");
     expect(one!.className).toContain("text-[11px]");
     expect(two!.className).toContain("h-[18px]");
-    expect(two!.className).toContain("text-sm");
-    expect(three!.className).toContain("h-3.5");
-    expect(three!.className).toContain("text-[11px]");
+    expect(two!.querySelector("[data-thread-title]")!.className).toContain("text-sm");
   });
 
-  it("walks the crab at row three's right end while working, never in the status slot, and the slot holds the elapsed time", () => {
+  it("walks the crab at row two's right end while working, never in the status slot, and the slot holds the elapsed time", () => {
     mount();
-    const three = rows()[2]!;
-    expect(three.lastElementChild!.matches("canvas[data-crab]")).toBe(true);
+    expect(rows()[1]!.lastElementChild!.matches("canvas[data-crab]")).toBe(true);
     expect(slot().querySelector("canvas")).toBeNull();
     expect(slot().dataset["tone"]).toBe("working");
     cleanup();
@@ -146,31 +145,86 @@ describe("a thread tile", () => {
     }
   });
 
-  it("a copy with no branch shows the agent's mark alone on row three", () => {
-    mount({ branch: "" });
-    const three = rows()[2]!;
-    expect(three.querySelector("[data-harness-mark=claude]")).not.toBeNull();
-    expect(three.querySelector(".lucide-git-branch")).toBeNull();
-    expect(three.querySelector("[data-tile-branch]")).toBeNull();
+  it("ends row two in one small muted icon while its pull request is open, no number and no colour; merged or closed, nothing", () => {
+    mount({ over: { status: "completed" }, checkout: { branch: "fix/cart-rounding", counts: [], pr: { number: 42, state: "open", url: "u" } } });
+    const icon = rows()[1]!.querySelector<SVGElement>("[data-tile-pr]")!;
+    expect(icon.matches(".lucide-git-pull-request")).toBe(true);
+    expect(icon.getAttribute("class")).toContain("text-[var(--top-row-meta)]");
+    expect(tile().textContent).not.toContain("42");
+    for (const state of ["merged", "closed"] as const) {
+      cleanup();
+      mount({ over: { status: "completed" }, checkout: { branch: "fix/cart-rounding", counts: [], pr: { number: 42, state, url: "u" } } });
+      expect(tile().querySelector("[data-tile-pr]"), state).toBeNull();
+    }
+  });
+
+  it("opens a card to its right once the pointer rests on it: the full title, where it runs, the branch, the model, the pull request as a word, the changes", async () => {
+    vi.useFakeTimers();
+    try {
+      mount({ over: { status: "completed", asking: "Permission for Bash: pnpm install" }, checkout: { branch: "fix/cart-rounding", counts: [], changed: "3 changed", pr: { number: 42, state: "merged", url: "u" } } });
+      fireEvent.pointerEnter(tile(), { pointerType: "mouse" });
+      fireEvent.mouseEnter(tile());
+      fireEvent.mouseMove(tile());
+      expect(document.querySelector("[data-tile-card]")).toBeNull();
+      await act(async () => void vi.advanceTimersByTime(600));
+      const card = document.querySelector<HTMLElement>("[data-tile-card]")!;
+      expect(card.querySelector("[data-tile-card-title]")!.textContent).toBe("Cart total rounding");
+      expect([...card.querySelectorAll<HTMLElement>("[data-tile-card-line]")].map(line => [line.dataset["tileCardLine"], line.textContent])).toEqual([
+        ["project", "spoo-landing"],
+        ["computer", "zingzy's MacBook Pro"],
+        ["branch", "fix/cart-rounding"],
+        ["agent", "Opus 5.5"],
+        ["pr", "Pull request #42, merged"],
+        ["changed", "3 changed"],
+        ["note", "Permission for Bash: pnpm install"],
+      ]);
+      // The computer's icon is the registry's, the one the Computers page draws for this Mac.
+      expect(card.querySelector('[data-tile-card-line="computer"] [data-computer-glyph]')?.getAttribute("data-computer-glyph")).toBe("laptop");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the sidebar button's slot under the card's trigger, the slot the sidebar's styles and measures find a row by", () => {
+    mount({ over: { status: "completed" }, checkout: { branch: "fix/cart-rounding", counts: [] } });
+    expect(tile().dataset["slot"]).toBe("sidebar-menu-button");
+  });
+
+  it("shuts its card when the tile is pressed, so a right-click's menu never stands beside it", async () => {
+    vi.useFakeTimers();
+    try {
+      mount({ over: { status: "completed" }, checkout: { branch: "fix/cart-rounding", counts: [] } });
+      fireEvent.pointerEnter(tile(), { pointerType: "mouse" });
+      fireEvent.mouseEnter(tile());
+      fireEvent.mouseMove(tile());
+      await act(async () => void vi.advanceTimersByTime(600));
+      expect(document.querySelector("[data-tile-card]")).not.toBeNull();
+      fireEvent.pointerDown(tile(), { button: 2, pointerType: "mouse" });
+      fireEvent.contextMenu(tile());
+      await act(async () => void vi.advanceTimersByTime(600));
+      expect(document.querySelector("[data-tile-card]")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("a resting or working thread's title recedes, the open one's does not, and a resting slot reads the age", () => {
     mount({ over: { status: "completed" } });
-    expect(rows()[1]!.className).toContain("text-sidebar-muted-foreground");
+    expect(rows()[1]!.querySelector("[data-thread-title]")!.className).toContain("text-sidebar-muted-foreground");
     expect(slot().textContent).toBe("3m");
     cleanup();
     mount();
-    expect(rows()[1]!.className).toContain("text-sidebar-muted-foreground");
+    expect(rows()[1]!.querySelector("[data-thread-title]")!.className).toContain("text-sidebar-muted-foreground");
     cleanup();
     mount({ active: true });
-    expect(rows()[1]!.className).toContain("text-sidebar-foreground");
+    expect(rows()[1]!.querySelector("[data-thread-title]")!.className).toContain("text-sidebar-foreground");
   });
 
   it("a failed thread and one waiting on the person keep the foreground ink, whatever their session says", () => {
     for (const over of [{ status: "failed" as const }, { status: "completed" as const, asking: "Permission for Bash: pnpm install" }]) {
       mount({ over });
-      expect(rows()[1]!.className, JSON.stringify(over)).toContain("text-sidebar-foreground");
-      expect(rows()[1]!.className, JSON.stringify(over)).not.toContain("text-sidebar-muted-foreground");
+      expect(rows()[1]!.querySelector("[data-thread-title]")!.className, JSON.stringify(over)).toContain("text-sidebar-foreground");
+      expect(rows()[1]!.querySelector("[data-thread-title]")!.className, JSON.stringify(over)).not.toContain("text-sidebar-muted-foreground");
       cleanup();
     }
   });
@@ -179,14 +233,14 @@ describe("a thread tile", () => {
     mount({ active: true });
     expect(tile().dataset["active"]).toBe("true");
     expect(tile().className).toContain("data-[active=true]:font-normal");
-    expect(rows()[1]!.className).toContain("font-medium");
+    expect(rows()[1]!.querySelector("[data-thread-title]")!.className).toContain("font-medium");
     expect(rows()[0]!.className).not.toContain("font-medium");
   });
 
-  it("carries the title, where it runs, the agent and the question it waits on in its hover text, and selects on a click", () => {
+  it("selects on a click, and keeps no native hover text, the card being the one", () => {
     const onSelect = vi.fn();
     mount({ over: { asking: "Permission for Bash: pnpm install" }, onSelect });
-    expect(tile().getAttribute("title")).toBe("Cart total rounding\nspoo-landing @ zingzy's MacBook Pro\nClaude Code\nPermission for Bash: pnpm install");
+    expect(tile().hasAttribute("title")).toBe(false);
     fireEvent.click(tile());
     expect(onSelect).toHaveBeenCalledOnce();
   });
@@ -196,15 +250,15 @@ describe("a workspace with no thread yet", () => {
   it("is a tile of the same shape: where it runs, its name muted, no status and no agent", () => {
     render(
       <SidebarProvider defaultOpen>
-        <WorkspaceTile rowId="ws:ws_a" name="pricing page" place={PLACE} branch="agent/pricing-page" depth={0} active={false} renaming={false} saving={false} onSelect={() => {}} onContextMenu={() => {}} onRename={() => {}} onRenameCancel={() => {}} />
+        <WorkspaceTile rowId="ws:ws_a" name="pricing page" place={PLACE} checkout={{ branch: "agent/pricing-page", counts: [] }} depth={0} active={false} renaming={false} saving={false} onSelect={() => {}} onContextMenu={() => {}} onRename={() => {}} onRenameCancel={() => {}} />
       </SidebarProvider>,
     );
-    expect(rows()).toHaveLength(3);
+    expect(rows()).toHaveLength(2);
     expect(tile().dataset["rowId"]).toBe("ws:ws_a");
     expect(tile().querySelector("[data-thread-status]")).toBeNull();
     expect(tile().querySelector("[data-harness-mark]")).toBeNull();
     expect(rows()[1]!.textContent).toBe("pricing page");
-    expect(rows()[1]!.className).toContain("text-sidebar-muted-foreground");
-    expect(rows()[2]!.querySelector("[data-tile-branch]")!.textContent).toBe("agent/pricing-page");
+    expect(rows()[1]!.querySelector("[data-thread-title]")!.className).toContain("text-sidebar-muted-foreground");
+    expect(tile().textContent).not.toContain("agent/pricing-page");
   });
 });
