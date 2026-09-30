@@ -2709,6 +2709,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * and nothing is looked up or built for it. The one reading of that road above the backend, so no road here
    * names a provider or a place to learn it. */
   const keepsImages = (at: MachineBackend): boolean => at.capabilities.images;
+  /** Whether this backend's pause keeps the disk: a stop that snapshots it, so a wake resumes the same machine with
+   * its home. Such a nap reads nothing of the home; the vault is taken off the running machine at a rebuild instead. */
+  const pauseKeepsDisk = (at: MachineBackend): boolean => at.capabilities.pauseMode === "disk";
   /** Whether the machines of this backend come up under the workspace's own name. The one reading of that road
    * above the backend, beside the images one: a fork that is named at its boot is never named again from here. */
   const namesWorkspace = (at: MachineBackend): boolean => at.namesWorkspace === true;
@@ -4973,17 +4976,33 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           }, override),
         ...(vaulted
           ? ({
-              vaultExport: (m, drop) => vaultExport(m, drop === undefined ? {} : { drop }),
+              // Taken off the running machine right before a replacement, capped: over the cap it says so, in the
+              // one line that names the size and the cap, and the replacement goes on with no backup.
+              vaultExport: async (m, drop) => {
+                try {
+                  return await vaultExport(m, { maxBytes: vaultCapBytes, ...(drop === undefined ? {} : { drop }) });
+                } catch (e) {
+                  if (e !== null && typeof e === "object" && (e as { kind?: unknown }).kind === "vaultTooLarge") {
+                    console.warn(`vault for ${record.id} not taken before the replacement: ${e instanceof Error ? e.message : String(e)}; replacing with no backup`);
+                    return undefined;
+                  }
+                  throw e;
+                }
+              },
               vaultImport: async (m, payload) => {
                 await importInto(m, payload, "/");
               },
               stashVault: async m => {
                 // The vault the last landed nap stored stands until the provider pauses this machine at all.
                 if (napRefusedOf(entry) !== undefined) return;
-                // A box's pause keeps the disk alone, so it is synced first; a machine that cannot be asked still pauses.
+                // The disk is synced before the pause whatever the backend, so a stop that snapshots it holds a whole
+                // one; a machine that cannot be asked still pauses.
                 await syncDisk(entry.machine).catch((e: unknown) => {
                   console.warn(`disk sync before the nap of ${record.id} failed: ${e instanceof DiskSyncError ? e.answer : e instanceof Error ? e.message : String(e)}; napping anyway`);
                 });
+                // A pause that keeps the disk resumes the same machine with the home on it, so the nap reads none of
+                // it; the vault is taken off the running machine at a rebuild instead.
+                if (pauseKeepsDisk(at)) return;
                 try {
                   await store.putBlob(VAULTS, record.id, await vaultExport(m, { maxBytes: vaultCapBytes }));
                   record.vaultedAt = new Date(clock.now()).toISOString();
@@ -6418,14 +6437,39 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       refuseCannot(entry, "replacesMachine", "be rebuilt");
       if (entry.waking) await entry.waking.catch(() => {});
       if ((await recoverGone(entry)) !== undefined) return view(entry.record);
+      const at = backendFor(entry.record);
+      // Where the pause keeps the disk no nap stored a vault, so a rebuild takes one off the running machine before
+      // the replacement, over the cap or unreadable going on with none. A napped one holds its home on its paused
+      // disk, so it is woken first and the vault taken live, not the one a nap stored (this rule stores none); a wake
+      // that cannot land refuses the rebuild rather than replacing with no backup. Where the pause does not keep the
+      // disk, the rebuild reads the vault the nap stored.
+      if (keepsImages(at) && pauseKeepsDisk(at) && entry.record.phase !== "running") {
+        try {
+          await workspaces.wake(id, origin);
+        } catch (e) {
+          throw Object.assign(new Error(`${entry.record.name} could not be woken to back up before the rebuild: ${e instanceof Error ? e.message : String(e)}`), { kind: "conflict" });
+        }
+      }
       const old = entry.record.machineId;
-      const vaulted = (await store.getBlob(VAULTS, id)) !== undefined;
-      await entry.ws.rebuild();
+      const fromRunning = keepsImages(at) && pauseKeepsDisk(at) && entry.record.phase === "running";
+      const napVault = fromRunning ? undefined : (await store.getBlob(VAULTS, id)) !== undefined;
+      if (fromRunning) {
+        try {
+          await entry.ws.upgrade();
+        } catch (e) {
+          console.warn(`rebuild of ${id}: the running machine gave no vault (${e instanceof Error ? e.message : String(e)}); replacing with none`);
+          await entry.ws.rebuild();
+        }
+      } else {
+        await entry.ws.rebuild();
+      }
       followMachine(entry);
       delete entry.record.wakeRefused;
       await persist(entry.record);
       bus.emit({ type: "workspace.upgraded", workspaceId: id, machineId: entry.record.machineId });
-      const reason = `rebuilt: ${old} replaced by ${entry.record.machineId}, ${vaulted ? "nap-time vault imported" : "no vault to import"}`;
+      const reason = fromRunning
+        ? `rebuilt: ${old} replaced by ${entry.record.machineId}`
+        : `rebuilt: ${old} replaced by ${entry.record.machineId}, ${napVault ? "nap-time vault imported" : "no vault to import"}`;
       console.warn(`rebuild of ${id}: ${reason}`);
       await emitStatus(entry, reachOf(entry), reason);
       return view(entry.record);
