@@ -10,7 +10,9 @@ import { BOX_API_URL } from "@wsp/engine";
 import { BOX_KEY_ENV, PROVIDER_ENV } from "../src/providers.js";
 import { NO_PROJECT_YET } from "../src/verbs.js";
 import { stateWriterHere } from "../src/version.js";
-import { cli, localWiring, SYSTEM_COMMAND_DEPS, localWorkFolder, noClaudeKeyNote, optsFor, statesHere, up, type CliIO } from "../src/cli.js";
+import { cli, localWiring, SYSTEM_COMMAND_DEPS, localWorkFolder, noClaudeKeyNote, optsFor, statesHere, up, type CliIO, type LocalDaemonStart } from "../src/cli.js";
+import { LocalDaemon } from "../src/local-daemon.js";
+import { spawnedDaemons } from "./spawned-daemons.js";
 import { noProviderStorageLine } from "../src/storage.js";
 import { hostPlaceKeyPath } from "../src/places.js";
 import { serviceAddressHere, serviceManagerFor } from "../src/service.js";
@@ -58,6 +60,9 @@ describe("wsp up", () => {
   const handles: HostHandle[] = [];
   /** Runtimes a case built by hand, closed after it whether it got that far or not. */
   const runtimes: Runtime[] = [];
+  const daemons = spawnedDaemons();
+  /** This computer's daemon as the host starts it, its pid recorded for the teardown. */
+  const startDaemon: LocalDaemonStart = opts => LocalDaemon.start({ ...opts, spawned: daemons.record });
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "wsp-up-home-"));
@@ -75,6 +80,7 @@ describe("wsp up", () => {
   afterEach(async () => {
     for (const h of handles.splice(0)) await h.close();
     for (const rt of runtimes.splice(0)) await rt.close();
+    await daemons.stop();
     vi.unstubAllEnvs();
     rmSync(dir, { recursive: true, force: true });
   });
@@ -185,7 +191,7 @@ describe("wsp up", () => {
       },
     });
     const lines: string[] = [];
-    const rt = createRuntime({ backend: stubBackend(), store: jsonFileStore(statePath, stateWriterHere()), adapters: {}, local: localWiring(home) });
+    const rt = createRuntime({ backend: stubBackend(), store: jsonFileStore(statePath, stateWriterHere()), adapters: {}, local: localWiring(home, undefined, startDaemon) });
     const handle = await up(quietIO(lines), { port: 0, statePath, webDir, runtime: rt });
     if (handle === undefined) throw new Error("up refused a state with a local workspace");
     handles.push(handle);
@@ -297,7 +303,7 @@ describe("wsp up", () => {
         ws_l: { id: "ws_l", name: "mac", kind: "local", machineId: "local", phase: "running", golden: "", createdAt: new Date().toISOString(), project: "pr_l", spec: {}, firstLife: false, idleWindowMs: null },
       },
     });
-    const wiring = localWiring(home);
+    const wiring = localWiring(home, undefined, startDaemon);
     const rt = createRuntime({ backend: stubBackend(), store: jsonFileStore(statePath, stateWriterHere()), adapters: {}, local: wiring });
     runtimes.push(rt);
     // Nothing is bound before a pane asks: the road is what starts the daemon.
@@ -379,7 +385,7 @@ describe("wsp up", () => {
     const user = join(dir, "user");
     const folder = localWorkFolder(home);
     localWorkspaceState(folder);
-    const rt = createRuntime({ backend: stubBackend(), store: jsonFileStore(statePath, stateWriterHere()), adapters: {}, local: localWiring(home, process.env, undefined, statePath) });
+    const rt = createRuntime({ backend: stubBackend(), store: jsonFileStore(statePath, stateWriterHere()), adapters: {}, local: localWiring(home, process.env, startDaemon, statePath) });
     runtimes.push(rt);
     handles.push(await answered(await up(quietIO(), { port: 0, statePath, webDir, runtime: rt })));
 

@@ -17,6 +17,7 @@ import { daemonBinaryHere } from "../src/assets.js";
 import { choosePorts } from "../src/ports.js";
 import { LocalDaemon, type LocalDaemonOptions } from "../src/local-daemon.js";
 import { writeStub } from "../../protocol/test/stub-script.js";
+import { spawnedDaemons } from "./spawned-daemons.js";
 
 async function waitForEvent(events: DaemonEvent[], type: string, ms = 10_000): Promise<DaemonEvent> {
   const deadline = Date.now() + ms;
@@ -76,18 +77,20 @@ function fakeDaemon(root: string, version?: number, noise: readonly string[] = [
 describe("local daemon", () => {
   let root: string;
   let daemon: LocalDaemon | undefined;
+  const daemons = spawnedDaemons();
   /** The folder the host serving this daemon keeps its own files in, which is where its state file sits. */
   const stateFolder = (): string => join(root, "state");
   /** This daemon as a host starts it: the person's home as the browse root, and the roots file and the inbox
    * named by the host, beside its state file. */
   const startLocal = (over: Partial<LocalDaemonOptions> = {}): Promise<LocalDaemon> =>
-    LocalDaemon.start({ root, workFolder: root, rootsPath: join(stateFolder(), "roots"), inboxDir: join(stateFolder(), "inbox"), ...over });
+    LocalDaemon.start({ root, workFolder: root, rootsPath: join(stateFolder(), "roots"), inboxDir: join(stateFolder(), "inbox"), spawned: daemons.record, ...over });
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), "wsp-localdaemon-"));
   });
   afterEach(async () => {
     await daemon?.close();
     daemon = undefined;
+    await daemons.stop();
     vi.unstubAllEnvs();
     rmSync(root, { recursive: true, force: true });
   });
