@@ -13,7 +13,7 @@ a key.
 Node 22 or newer and pnpm.
 
 ```sh
-cd daemon && cargo build --release && cd ..
+cd daemon && cargo build --release -p wsp-daemon-bin $(node ../packages/wspx/scripts/daemon-features.mjs) && cd ..
 node packages/wspx/scripts/daemon-binary.mjs   # this computer's daemon, where the host and the suite read it
 pnpm install && pnpm build
 pnpm test                    # no key needed, creates nothing
