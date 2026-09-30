@@ -26,8 +26,13 @@ export const DiffStatLabel = memo(function DiffStatLabel(props: {
   className?: string;
   showParentheses?: boolean;
   layout?: "aligned" | "inline";
+  /** The add in green and the delete in red wherever a line count shows (the owner's ruling on #1560); neutral only
+   * where a caller asks for a count at rest. */
+  tone?: "neutral" | "diff";
 }) {
-  const { additions, deletions, className, showParentheses = false, layout = "aligned" } = props;
+  const { additions, deletions, className, showParentheses = false, layout = "aligned", tone = "diff" } = props;
+  const addInk = tone === "diff" ? "text-success" : "text-muted-foreground";
+  const delInk = tone === "diff" ? "text-error-foreground" : "text-muted-foreground";
   return (
     <>
       {showParentheses && <span className="text-muted-foreground/70">(</span>}
@@ -41,10 +46,10 @@ export const DiffStatLabel = memo(function DiffStatLabel(props: {
           className,
         )}
       >
-        <span aria-hidden="true" className="font-mono text-success">
+        <span aria-hidden="true" className={cn("font-mono", addInk)}>
           +{formatCompactDiffCount(additions)}
         </span>
-        <span aria-hidden="true" className="font-mono text-error-foreground">
+        <span aria-hidden="true" className={cn("font-mono", delInk)}>
           -{formatCompactDiffCount(deletions)}
         </span>
       </span>

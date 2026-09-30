@@ -79,12 +79,20 @@ struct GhCheck {
 }
 
 /// The fields a pull request's page asks for.
-const PAGE_FIELDS: &str = "title,body,commits,reviews,comments,files";
+const PAGE_FIELDS: &str = "title,body,author,updatedAt,commits,reviews,comments,files";
 
 #[derive(Deserialize)]
 struct GhLogin {
     #[serde(default)]
     login: String,
+}
+
+#[derive(Deserialize)]
+struct GhCommitAuthor {
+    #[serde(default)]
+    login: String,
+    #[serde(default)]
+    name: String,
 }
 
 #[derive(Deserialize)]
@@ -95,6 +103,8 @@ struct GhCommit {
     message_headline: String,
     #[serde(default)]
     committed_date: String,
+    #[serde(default)]
+    authors: Vec<GhCommitAuthor>,
 }
 
 #[derive(Deserialize)]
@@ -129,11 +139,15 @@ struct GhFile {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct GhPage {
     #[serde(default)]
     title: String,
     #[serde(default)]
     body: String,
+    author: Option<GhLogin>,
+    #[serde(default)]
+    updated_at: String,
     #[serde(default)]
     commits: Vec<GhCommit>,
     #[serde(default)]
@@ -277,6 +291,10 @@ fn login(author: Option<GhLogin>) -> String {
     author.map(|a| a.login).unwrap_or_default()
 }
 
+fn commit_author(authors: Vec<GhCommitAuthor>) -> String {
+    authors.into_iter().next().map(|a| if a.login.is_empty() { a.name } else { a.login }).unwrap_or_default()
+}
+
 fn words(line: &[&str]) -> Vec<String> {
     line.iter().map(|w| (*w).to_owned()).collect()
 }
@@ -387,10 +405,17 @@ impl PullRequests for GitHub {
         Some(GitPrViewReply {
             title: read.title,
             body: cut(&read.body),
+            author: login(read.author),
+            updated_at: read.updated_at,
             commits: read
                 .commits
                 .into_iter()
-                .map(|c| PullRequestCommit { oid: c.oid, subject: c.message_headline, at: c.committed_date })
+                .map(|c| PullRequestCommit {
+                    oid: c.oid,
+                    subject: c.message_headline,
+                    at: c.committed_date,
+                    author: commit_author(c.authors),
+                })
                 .collect(),
             reviews: read
                 .reviews
@@ -540,7 +565,10 @@ pub(crate) mod tests {
         assert_eq!(GitHub.behind_argv("o/r", "release#2", "abc123")[1], "repos/o/r/compare/release%232...abc123");
         assert_eq!(GitHub.behind_argv("o/r", "50% off", "ab")[1], "repos/o/r/compare/50%25%20off...ab");
         assert_eq!(GitHub.behind_argv("o/r", "release/1.0", "ab")[1], "repos/o/r/compare/release/1.0...ab");
-        assert_eq!(GitHub.page_argv("o/r", 12), ["pr", "view", "12", "-R", "o/r", "--json", "title,body,commits,reviews,comments,files"]);
+        assert_eq!(
+            GitHub.page_argv("o/r", 12),
+            ["pr", "view", "12", "-R", "o/r", "--json", "title,body,author,updatedAt,commits,reviews,comments,files"]
+        );
         assert_eq!(GitHub.line_comments_argv("o/r", 12), ["api", "repos/o/r/pulls/12/comments?per_page=100"]);
         assert_eq!(GitHub.log_argv("o/r", 36, 109), ["run", "view", "36", "-R", "o/r", "--job", "109", "--log-failed"]);
     }
@@ -637,13 +665,22 @@ pub(crate) mod tests {
 
     #[test]
     fn a_page_reads_its_parts_and_a_line_comment_off_the_rest_api_with_its_line_or_the_one_it_was_on() {
-        let page = r#"{"title":"Round the total","body":"Why it changed","commits":[{"oid":"abc","messageHeadline":"Round once","committedDate":"2026-09-28T10:00:00Z"}],"reviews":[{"author":{"login":"ana"},"state":"CHANGES_REQUESTED","body":"see line 3","submittedAt":"2026-09-28T11:00:00Z"}],"comments":[{"author":{"login":"bo"},"body":"thanks","createdAt":"2026-09-28T12:00:00Z"}],"files":[{"path":"check.sh","additions":2,"deletions":1}]}"#;
+        let page = r#"{"title":"Round the total","body":"Why it changed","author":{"login":"cid"},"updatedAt":"2026-09-28T13:00:00Z","commits":[{"oid":"abc","messageHeadline":"Round once","committedDate":"2026-09-28T10:00:00Z","authors":[{"name":"Dana","email":"d@e","login":"dana"}]},{"oid":"def","messageHeadline":"Fix","committedDate":"2026-09-28T10:01:00Z","authors":[{"name":"Eli","email":"e@e","login":""}]}],"reviews":[{"author":{"login":"ana"},"state":"CHANGES_REQUESTED","body":"see line 3","submittedAt":"2026-09-28T11:00:00Z"}],"comments":[{"author":{"login":"bo"},"body":"thanks","createdAt":"2026-09-28T12:00:00Z"}],"files":[{"path":"check.sh","additions":2,"deletions":1}]}"#;
         let lines = r#"[{"id":7,"path":"check.sh","line":3,"original_line":3,"side":"RIGHT","user":{"login":"ana"},"body":"exit 1 here","html_url":"https://github.com/o/r/pull/12#discussion_r7","created_at":"2026-09-28T11:00:00Z"},{"id":8,"path":"old.sh","line":null,"original_line":9,"side":"LEFT","user":{"login":"ana"},"body":"gone","html_url":"u","created_at":"t"}]"#;
         let read = GitHub.read_page(page, lines).unwrap();
         assert_eq!((read.title.as_str(), read.body.as_str()), ("Round the total", "Why it changed"));
+        assert_eq!((read.author.as_str(), read.updated_at.as_str()), ("cid", "2026-09-28T13:00:00Z"));
         assert_eq!(
             read.commits,
-            [PullRequestCommit { oid: "abc".into(), subject: "Round once".into(), at: "2026-09-28T10:00:00Z".into() }]
+            [
+                PullRequestCommit {
+                    oid: "abc".into(),
+                    subject: "Round once".into(),
+                    at: "2026-09-28T10:00:00Z".into(),
+                    author: "dana".into()
+                },
+                PullRequestCommit { oid: "def".into(), subject: "Fix".into(), at: "2026-09-28T10:01:00Z".into(), author: "Eli".into() }
+            ]
         );
         assert_eq!((read.reviews[0].author.as_str(), read.reviews[0].state.as_str()), ("ana", "changes_requested"));
         assert_eq!((read.comments[0].author.as_str(), read.comments[0].body.as_str()), ("bo", "thanks"));

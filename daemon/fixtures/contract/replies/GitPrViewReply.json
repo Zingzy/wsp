@@ -2,11 +2,14 @@
   {
     "title": "Set .ci-status back to 0",
     "body": "The check failed on \"exit 1\"…",
+    "author": "ana",
+    "updatedAt": "2026-09-28T12:00:00Z",
     "commits": [
       {
         "oid": "abc",
         "subject": "Set ci status",
-        "at": "2026-09-28T10:00:00Z"
+        "at": "2026-09-28T10:00:00Z",
+        "author": "ana"
       }
     ],
     "reviews": [
@@ -55,6 +58,8 @@
   {
     "title": "",
     "body": "",
+    "author": "",
+    "updatedAt": "",
     "commits": [],
     "reviews": [],
     "comments": [],

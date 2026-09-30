@@ -273,11 +273,12 @@ function useKatex(wanted: boolean): RehypePlugin | null {
 
 const MermaidBlock = lazy(() => import("./chat/MermaidBlock"));
 
-/** The sanitizer's schema for a restricted file: no image, links only to web pages and mail addresses, no source
- * for anything, and the span the restricted plugin writes for an image or a link it took apart. */
+/** The sanitizer's schema for a restricted file: links only to web pages and mail addresses, an image only over https
+ * (the restricted plugin below has already turned every one but a GitHub image host's into a link), and the span the
+ * plugin writes for a link it took apart. The skill viewer reads this schema too, so a skill file's GitHub-hosted
+ * image renders the same way a pull request's does. */
 const SKILL_SANITIZE_SCHEMA = {
   ...defaultSchema,
-  tagNames: (defaultSchema.tagNames ?? []).filter((tag) => tag !== "img"),
   attributes: {
     ...defaultSchema.attributes,
     "*": (defaultSchema.attributes?.["*"] ?? []).filter((attribute) => attribute !== "title"),
@@ -285,13 +286,27 @@ const SKILL_SANITIZE_SCHEMA = {
     blockquote: [...(defaultSchema.attributes?.blockquote ?? []), "dataAlert"],
     span: [...(defaultSchema.attributes?.span ?? []), "dataK", "className"],
   },
-  protocols: { ...defaultSchema.protocols, href: ["http", "https", "mailto"], src: [] },
+  protocols: { ...defaultSchema.protocols, href: ["http", "https", "mailto"], src: ["https"] },
 } satisfies Parameters<typeof rehypeSanitize>[0];
 
 const RESTRICTED_FACT_CLASS = ["font-mono", "text-[11px]", "text-muted-foreground"];
 
 /** Whether a restricted file's link may stay one: a web page, a mail address, or a place in the same document. */
 const restrictedHref = (href: unknown): href is string => typeof href === "string" && (/^(https?:|mailto:)/i.test(href) || href.startsWith("#"));
+
+/** GitHub's own image hosts, the only sources a restricted file renders an image from (the owner's ruling); anything
+ * else it shows as a link. github.com itself only for an uploaded attachment. */
+const restrictedImageSrc = (src: unknown): src is string => {
+  if (typeof src !== "string") return false;
+  try {
+    const url = new URL(src);
+    if (url.protocol !== "https:") return false;
+    if (url.hostname === "github.com") return url.pathname.startsWith("/user-attachments/");
+    return ["user-images.githubusercontent.com", "private-user-images.githubusercontent.com", "avatars.githubusercontent.com"].includes(url.hostname);
+  } catch {
+    return false;
+  }
+};
 
 type RestrictedNode = { type: string; value?: string; tagName?: string; properties?: Record<string, unknown>; children?: RestrictedNode[] };
 
@@ -306,6 +321,10 @@ function rehypeRestrict() {
     if (node.type === "element" && node.tagName === "img") {
       const alt = typeof node.properties?.alt === "string" ? node.properties.alt : "";
       const src = typeof node.properties?.src === "string" ? node.properties.src : "";
+      // A GitHub image host's image renders; another web host's becomes a link to it; anything else (a non-web or
+      // empty source) is its alt and address as text, the same fact a bad link reads as.
+      if (restrictedImageSrc(src)) return node;
+      if (/^https?:\/\//i.test(src)) return { type: "element", tagName: "a", properties: { href: src }, children: [text(alt === "" ? src : alt)] };
       return fact([alt, src].filter((w) => w !== "").join(" "), "skill-image");
     }
     const children = node.children?.map(visit);
@@ -1736,6 +1755,20 @@ function ChatMarkdown({
       },
       img: function MarkdownImage({ node, title, src, alt, ...props }) {
         if (restricted) {
+          // The restrict plugin turned every image but a GitHub image host's into a link, so one that reaches here is
+          // that host's and renders; anything else stays its alt and address as text.
+          if (restrictedImageSrc(src)) {
+            return (
+              <img
+                {...props}
+                src={src}
+                alt={typeof alt === "string" ? alt : ""}
+                loading="lazy"
+                className={cn(props.className, CHAT_MARKDOWN_IMAGE_SIZE_CLASS_NAME)}
+                style={authoredImageSizeStyle(props.width, props.height)}
+              />
+            );
+          }
           return (
             <span data-k="skill-image" className={RESTRICTED_FACT_CLASS.join(" ")}>
               {[alt, typeof src === "string" ? src : ""].filter(Boolean).join(" ")}

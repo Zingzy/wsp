@@ -212,7 +212,7 @@ if (a === "pr" && b === "list") say(items.pr);
 if (a === "issue" && b === "list") say(items.issue);
 if (a === "pr" && b === "view") {
   const p = pull(repo, c) ?? none();
-  say(process.argv.includes("title,body,commits,reviews,comments,files") ? p.page : p.view);
+  say(process.argv.some(arg => arg.split(",").includes("body")) ? p.page : p.view);
 }
 if (a === "pr" && b === "checks") say((pull(repo, c) ?? none()).checks);
 if (a === "repo" && b === "view") say((items.pulls.find(p => p.repo === c) ?? none()).settings);

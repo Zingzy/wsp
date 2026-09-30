@@ -268,3 +268,43 @@ describe("orderedListGutterStyle", () => {
     expect(orderedListGutterStyle(3, -15)).toEqual({ "--list-gutter": "4ch" });
   });
 });
+
+describe("ChatMarkdown restricted images", () => {
+  const renderRestricted = (text: string) =>
+    render(<ChatMarkdown text={text} cwd="" resolvedTheme="dark" restricted />).container;
+
+  it("renders an image from a GitHub image host as an image", () => {
+    const c = renderRestricted("![a shot](https://user-images.githubusercontent.com/1/x.png)");
+    const img = c.querySelector("img");
+    expect(img).not.toBeNull();
+    expect(img!.getAttribute("src")).toBe("https://user-images.githubusercontent.com/1/x.png");
+    expect(img!.getAttribute("alt")).toBe("a shot");
+  });
+
+  it("renders github.com only under /user-attachments/, else a link", () => {
+    const attached = renderRestricted("![v](https://github.com/user-attachments/assets/abc-123)");
+    expect(attached.querySelector("img")).not.toBeNull();
+    const elsewhere = renderRestricted("![v](https://github.com/o/r/raw/main/x.png)");
+    expect(elsewhere.querySelector("img")).toBeNull();
+    expect(elsewhere.querySelector("a")?.getAttribute("href")).toBe("https://github.com/o/r/raw/main/x.png");
+  });
+
+  it("turns another host's image into a link, not an image", () => {
+    const c = renderRestricted("![alt](https://evil.example.com/x.png)");
+    expect(c.querySelector("img")).toBeNull();
+    const a = c.querySelector("a");
+    expect(a?.getAttribute("href")).toBe("https://evil.example.com/x.png");
+    expect(a?.textContent).toBe("alt");
+  });
+
+  it("never renders an image for a non-https source: http and javascript stay out", () => {
+    // http, even to a GitHub host, is not https and is not an image.
+    const http = renderRestricted("![alt](http://user-images.githubusercontent.com/1/x.png)");
+    expect(http.querySelector("img")).toBeNull();
+    // A javascript: source is never an image and is not linked out either; it is left as text.
+    const js = renderRestricted("![alt](javascript:alert(1))");
+    expect(js.querySelector("img")).toBeNull();
+    expect(js.querySelector("a")).toBeNull();
+    expect(js.textContent).toContain("alt");
+  });
+});
