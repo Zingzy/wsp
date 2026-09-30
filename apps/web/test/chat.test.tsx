@@ -110,29 +110,27 @@ describe("chat tab rendering", () => {
     expect(screen.queryByText("alien text")).toBeNull();
     expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
 
-    const footer = screen.getByTestId("settled-footer");
-    expect(footer.textContent).toContain("Worked for");
-    expect(footer.textContent).toContain("Worked for 10s");
-    expect(footer.textContent).toContain("$0.02");
+    // A reply's footer is its copy and its time: the fold's head says how long the turn worked, and nothing prices it.
+    expect(screen.queryByTestId("settled-footer")).toBeNull();
+    const meta = document.querySelector<HTMLElement>("[data-reply-meta]")!;
+    expect(meta.querySelector("[data-reply-time]")).not.toBeNull();
+    expect(meta.textContent).not.toMatch(/Worked for|\$|list price/);
     expect(screen.queryByText(/Working for/)).toBeNull();
   });
 
-  it("says the reply's model and tokens in its footer beside the time, the model by the picker's own name", async () => {
+  it("keeps the reply's model and tokens out of its footer, the model being the composer's to say", async () => {
     const { api, emit } = fixtureApi([workspace]);
     const named = { ...TABLE_CATALOG, models: [{ value: "claude-sonnet-4-5", label: "Sonnet 4.5", efforts: [], contextWindows: [] }] };
     await setup({ ...api, listHarnesses: async () => [named] });
     for (const e of FIXTURE) emit(e.type === "session.done" ? { ...e, result: { ...e.result, model: "claude-sonnet-4-5", tokens: { input: 22_564, output: 251, context: 4_269, window: 200_000 } } } : e);
     await screen.findByText(/Server is live at :3000\./);
-    const facts = await waitFor(() => {
-      const row = document.querySelector<HTMLElement>("[data-reply-facts]");
+    const meta = await waitFor(() => {
+      const row = document.querySelector<HTMLElement>("[data-reply-meta]");
       expect(row).not.toBeNull();
       return row!;
     });
-    expect([...facts.children].map(c => c.textContent)).toEqual(["Sonnet 4.5", "22.6k in", "251 out"]);
-    expect(facts.className).toContain("tabular-nums");
-    // On a phone the row wraps between facts, never inside one.
-    for (const fact of facts.children) expect(fact.className).toContain("whitespace-nowrap");
-    expect(facts.className).toContain("flex-wrap");
+    expect(document.querySelector("[data-reply-facts]")).toBeNull();
+    expect(meta.textContent).not.toMatch(/Sonnet 4\.5|22\.6k in|251 out/);
     // The composer's meter reads what the model held at that turn's end, out of its window.
     expect(document.querySelector("[data-context-meter]")?.textContent).toBe("4.3k / 200k");
     expect(document.querySelectorAll("[data-context-meter]")).toHaveLength(1);
@@ -213,11 +211,9 @@ describe("chat tab: a turn whose process lives past its reply", () => {
     expect(document.querySelector("[data-composer-refusal]")).toBeNull();
     expect(stopButton()).toBeDefined();
     expect(screen.queryByRole("button", { name: "Send message" })).toBeNull();
-    expect(screen.queryByTestId("settled-footer")).toBeNull();
 
     emit({ type: "session.end", ...thread, exitCode: 0, sawResult: true });
     expect(sendButton().getAttribute("aria-label")).toBe("Send message");
-    expect(screen.getByTestId("settled-footer")).toBeDefined();
   });
 });
 
@@ -438,7 +434,7 @@ describe("chat tab send after a harness died before its init", () => {
     for (const e of RETRY) emit(e);
     expect(screen.getByText("Second time lucky.")).toBeDefined();
     expect(screen.getByText(/exited before init/)).toBeDefined();
-    expect(screen.getByTestId("settled-footer").textContent).toContain("Worked for");
+    expect(document.querySelector("[data-reply-time]")).not.toBeNull();
     expect(sendButton().getAttribute("aria-label")).toBe("Send message");
   });
 
@@ -810,7 +806,7 @@ describe("chat tab threads", () => {
     await screen.findByText("two.");
     expect(screen.getByText("second")).toBeDefined();
     expect(screen.queryByText(/Server is live at :3000\./)).toBeNull();
-    expect(screen.getByTestId("settled-footer").textContent).toContain("Worked for");
+    expect(document.querySelector("[data-reply-time]")).not.toBeNull();
     expect(isEditable(composerEditor())).toBe(true);
     expect(sendButton().getAttribute("aria-label")).toBe("Send message");
 
@@ -952,7 +948,7 @@ describe("chat tab threads", () => {
     expect(screen.queryByText(/Server is live at :3000\./)).toBeNull();
     expect(status()).toBeNull();
     expect(sendButton().getAttribute("aria-label")).toBe("Send message");
-    expect(screen.getByTestId("settled-footer").textContent).toContain("Worked for");
+    expect(document.querySelector("[data-reply-time]")).not.toBeNull();
   });
 
   it("fresh thread, send, drop, gap, reload while the person's turn still runs: it shows as in flight, never as the previous turn", async () => {
@@ -977,6 +973,6 @@ describe("chat tab threads", () => {
     for (const e of fresh.slice(2)) emit(e);
     expect(status()).toBeNull();
     expect(sendButton().getAttribute("aria-label")).toBe("Send message");
-    expect(screen.getByTestId("settled-footer").textContent).toContain("Worked for");
+    expect(document.querySelector("[data-reply-time]")).not.toBeNull();
   });
 });

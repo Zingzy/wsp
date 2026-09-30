@@ -1825,7 +1825,7 @@
       "height": 3400
     },
     {
-      "name": "reply-facts",
+      "name": "reply-footer",
       "at": "/",
       "fixture": "replies",
       "steps": [
@@ -1835,7 +1835,7 @@
         "390:key:Escape",
         "hover:message-role=assistant"
       ],
-      "wait": "reply-facts",
+      "wait": "reply-time",
       "settleMs": 800
     },
     {
