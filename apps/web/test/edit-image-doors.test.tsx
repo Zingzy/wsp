@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Every Edit image outside a computer's Image card lands on that computer's
-// page with the recipe open in its card: the task panel's on a fork, and the
-// cloud page's agents list. While the image builds on another computer the
-// door lands on the page and leaves the recipe shut, as the card's own Edit is
-// held there.
+// Every Edit image outside a computer's page lands on that computer's page:
+// the task panel's on a fork. The page draws the image as one row and never
+// the recipe's long list, so the door opens the page and the ask is dropped.
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_PREFERENCES, type InitJob, type InitSetup, type PlaceView, type WorkspaceView } from "@wsp/protocol";
@@ -12,7 +10,6 @@ import { useStore } from "../src/protocol/store.js";
 import { AGENTS_LIST_WORDS } from "../src/components/agents/agentsRows.js";
 import { AgentsSurface } from "../src/components/agents/AgentsSurface.js";
 import { TooltipProvider } from "../src/components/ui/tooltip.js";
-import { IMAGE_WORDS } from "../src/settings/image.js";
 import { openImageRecipe } from "../src/settings/openAt.js";
 import { useSettingsStore } from "../src/settings/settingsStore.js";
 import { AGENTS_REPORT } from "./fixtures/agents-report.js";
@@ -23,10 +20,8 @@ const box: PlaceView = { id: "p_2", kind: "computer", name: "hetzner", default: 
 const solari: PlaceView = { id: "solari", kind: "provider", name: "solari", default: false, rateUsdPerHour: 0.11, takesForks: true, buildsImages: true };
 const SETUP: InitSetup = { keys: { solari: true }, home: "/Users/dev", agents: [{ id: "claude", name: "Claude Code", configured: true, takesTools: true }], pricing: { size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 }, job: null };
 const FORK: WorkspaceView = { id: "ws_f", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, name: "ws_f", kind: "cloud", machineId: "fk_1", phase: "running", golden: "", createdAt: "2026-09-11T00:00:00.000Z", provider: "solari" };
-const BUILDING: InitJob = { id: "init_1", road: "manual", phase: "building", keys: {}, step: 1, stoppable: true, screens: [], rows: [], progress: { done: 1, total: 3 }, log: [], place: { id: "solari", name: "solari" } };
 
 const api = (): Api => settingsApi({ initGet: async () => ({ ...SETUP, job: useStore.getState().initJob }), image: async () => ({ image: null, copies: [], projects: [] }), initStart: async () => ({}) as InitJob } as Partial<Api>).api;
-const card = (): HTMLElement | null => document.querySelector<HTMLElement>("[data-settings-page] [data-settings-card='image']");
 
 beforeEach(() => {
   resetSettings();
@@ -72,37 +67,13 @@ describe("an Edit image outside the Image card", () => {
     expect(document.querySelector("[data-k=agents-add]")?.parentElement?.getAttribute("title")).toBe(AGENTS_LIST_WORDS.editImageHeld);
   });
 
-  it("lands on that computer's page with the recipe open in its card, once", async () => {
+  it("lands on that computer's page, which draws your image as one row and no recipe, and drops the ask", async () => {
     openImageRecipe("p_2");
     mountSettings({ api: api() });
     await settle();
     expect(pageAt()).toBe("computer:p_2");
-    expect(card()?.querySelector("[data-k='recipe']")?.getAttribute("data-step")).toBe("choice");
-    expect(useSettingsStore.getState().recipeAsked).toBeNull();
-    // Closed, it stays closed: the ask was one press, not a standing state of the page.
-    fireEvent.click(card()!.querySelector<HTMLElement>("[data-k='recipe-close']")!);
-    await settle();
-    expect(card()?.querySelector("[data-k='recipe']")).toBeNull();
-  });
-
-  it("drops an ask no card took once the page moves, so a later visit opens no recipe", async () => {
-    openImageRecipe("p_2");
-    useSettingsStore.getState().go({ kind: "group", group: "appearance" });
-    expect(useSettingsStore.getState().recipeAsked).toBeNull();
-    useSettingsStore.getState().go({ kind: "computer", id: "p_2" });
-    mountSettings({ api: api() });
-    await settle();
-    expect(card()?.querySelector("[data-k='recipe']")).toBeNull();
-  });
-
-  it("leaves the recipe shut while the image builds on another computer, saying where", async () => {
-    useStore.setState({ initJob: BUILDING });
-    openImageRecipe("p_2");
-    mountSettings({ api: api() });
-    await settle();
-    expect(pageAt()).toBe("computer:p_2");
-    expect(card()?.querySelector("[data-k='recipe']")).toBeNull();
-    expect(card()?.querySelector("[data-k='image-refusal']")?.textContent).toContain(IMAGE_WORDS.buildingOn("Solari"));
+    expect(document.querySelector("[data-settings-page] [data-k='image-state']")).not.toBeNull();
+    expect(document.querySelector("[data-settings-page] [data-k='recipe']")).toBeNull();
     expect(useSettingsStore.getState().recipeAsked).toBeNull();
   });
 });

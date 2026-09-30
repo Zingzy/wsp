@@ -58,7 +58,7 @@ export const onName = (name: string): string => onceNamed(name, n => ` on ${n}`)
 export const groupBlurbs = (here: string) => ({
   general: onceNamed(here, h => `How wsp behaves on ${h}.`),
   appearance: "How wsp looks, on every screen that opens it.",
-  computers: onceNamed(here, h => `The computers your tasks run on. ${h} is the first one.`),
+  computers: onceNamed(here, h => `The computers your threads run on, and the clouds that lend them machines. ${h} is the first one.`),
   projects: "The repos wsp makes tasks from, each on one computer.",
   devices: "The phones and other computers paired with this wsp.",
   account: "Your sign-in, which lets your other devices find this wsp.",
@@ -71,53 +71,20 @@ export const groupBlurbs = (here: string) => ({
  * computer's own page, its agents and the Remove dialog, which are this build's and are drawn nowhere else. No
  * word is in both. */
 export const WHERE_WORDS = {
-  icon: "Icon",
-  iconDescription: "How this computer shows in the sidebar and here.",
   /** A place list the host refused, said where the list would stand. */
   notRead: (said: string) => `Computers not read: ${said}`,
-  /** How a workspace's copy of a project is made on that computer, and the sentence for one that makes none. */
-  copies: "Copies",
-  copiesDescription: "How a task's copy of a project is made there.",
-  copiesNothing: "copies nothing",
-  /** What a copy there has for a network, in the protocol's own words off the flags the landing carries. */
-  ports: "Ports",
-  portsDescription: "What a task there has for a network.",
-  workspaceThere: "A task there",
-  connection: "Connection",
-  threadsHere: "Threads running here",
   /** Puts this wsp's daemon on that computer and runs the recipe there again. One word in both states, held and
    * dimmed while it runs: a label that changed to Updating moved the button's own width. */
   update: "Update",
-  updateTitle: (computer: string): string => `Update wsp on ${computer}`,
-  updateDescription: "Puts this wsp's daemon there and runs the recipe again.",
-  /** Why Update is held on a wsp whose client has no such request: said at the end of the row's description. */
-  updateHeld: "Not on this wsp yet.",
   default: "default",
   remove: "Remove",
   removeTitle: (computer: string): string => `Remove ${computer}`,
-  removeDescription: (computer: string, here: string): string => onceNamed(here, h => `wsp comes off ${computer} and its tasks' records leave ${h}. Your files there stay.`),
-  removeCloudDescription: (here: string): string => onceNamed(here, h => `Its key is forgotten on ${h}.`),
+  removeDescription: (computer: string, here: string): string => onceNamed(here, h => `wsp comes off ${computer} and its threads' records leave ${h}. Your files there stay.`),
+  removeCloudDescription: "Deletes every machine wsp made there and forgets the key.",
   removing: "Removing…",
   cancel: "Cancel",
   /** Why a row's action is held: the op that carries it is not on the wire yet. */
   notYet: "not on this wsp yet",
-  system: "System",
-  systemHover: "What it reported last.",
-  size: "Size",
-  diskFree: "Disk free",
-  spend: "Spend",
-  joined: "Joined",
-  answered: "Answered",
-  answeredDescription: "When it last answered, and how long that frame took.",
-  /** The row that says where the host expects that computer: the login it dials, or the address the computer
-   * dialled in from, with the road it is. */
-  address: "Address",
-  addressDescription: "The ssh login it was installed over, or where it dialled in from.",
-  /** The same row for a box that reaches this host only through a forward on its own loopback: the address it links
-   * from is this computer's own, so the road back is said instead, in two lines at a phone's width. */
-  addressBackDescription: (dialsBack: string): string => `It ${dialsBack}.`,
-  cloud: "cloud",
-  ago: (span: string): string => `${span} ago`,
   /** The button beside that reading, which asks the host to dial the computer once, worded by the road that dial
    * would take: a frame on the link the computer is holding, or the ssh login it was installed over. A computer
    * that joined by typing a code and is not answering has neither, and gets no button at all. */
@@ -129,6 +96,24 @@ export const WHERE_WORDS = {
    * full stop reads as a line that broke. */
   cannotDial: "This wsp cannot dial a computer from here.",
   cannotSaveKey: "This wsp cannot save a key from here.",
+  /** The first cell of each list's header row, which is the only name a section has. */
+  heads: { computer: "Computer", cores: "Cores", memory: "Memory", threads: "Threads", cloud: "Cloud", agents: "Agents", version: "Version", servers: "MCP servers", image: "Image", threadsHere: "Threads running here" },
+  yourImage: "Your image",
+} as const;
+
+/** A word as the first of a sentence or a state: its first letter capitalised, the rest as written. */
+export const capitalised = (word: string): string => word.charAt(0).toUpperCase() + word.slice(1);
+
+/** A row's state as the list's state cell says it: one capitalised word, the whole sentence on its hover. */
+export const PLACE_STATE_WORDS = {
+  ready: "Ready",
+  blocked: "Blocked",
+  building: (at: { index: number; of: number } | undefined): string => (at === undefined ? "Building" : `Building ${at.index}/${at.of}`),
+  stopped: "Stopped",
+  failed: "Failed",
+  behind: "Behind",
+  signIn: "Sign in",
+  needsSignIn: (agents: readonly string[]): string => `needs a sign-in: ${agents.join(", ")}`,
 } as const;
 
 /** What Add a computer says beyond PLACES_WORDS.sheet and the roads' own names. */

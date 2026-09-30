@@ -22,9 +22,9 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { chromium } from "playwright";
-import { fixtureChanges, fixtureCloud, fixtureFleet, fixtureFolders, fixturePulls, fixtureRepos, fixtureState, HERE_AGENTS, HERE_HOST_ITEMS, HERE_PROJECT_FILES } from "./fixture-state.mjs";
+import { fixtureChanges, fixtureCloud, fixtureFleet, fixtureFolders, fixtureKeys, fixturePulls, fixtureRepos, fixtureState, HERE_AGENTS, HERE_HOST_ITEMS, HERE_PROJECT_FILES } from "./fixture-state.mjs";
 import { BROWSER_ARGS, freePort, REPO, startHost, stopHost, WEB_DIR, whatIsNotBuilt } from "./host.mjs";
-import { leaveMidWork, writeStandIn, writeWorkFolder } from "./lab-home.mjs";
+import { leaveMidWork, writeKeys, writeStandIn, writeWorkFolder } from "./lab-home.mjs";
 import { indexMarkdown, readSurfaces, shotPlan } from "./plan.mjs";
 import { APP_UP, failuresToCheck, STILL_LOADING } from "./ready.mjs";
 
@@ -214,6 +214,8 @@ function fixtureOn(home, fixture = "mac-in-use") {
     execFileSync("git", ["remote", "add", "origin", project.remote], { cwd: project.path, stdio: "ignore" });
   }
   for (const dest of fixtureChanges(fixture, state)) leaveMidWork(dest);
+  const keys = fixtureKeys(fixture);
+  if (Object.keys(keys).length > 0) writeKeys(home, keys);
   return state;
 }
 

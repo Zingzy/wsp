@@ -12,7 +12,7 @@ import { useStore } from "../src/protocol/store.js";
 import { ADD_COMPUTER_WORDS } from "../src/settings/format.js";
 import { IMAGE_WORDS } from "../src/settings/image.js";
 import { useSettingsStore } from "../src/settings/settingsStore.js";
-import { mountSettings, resetSettings, settingsApi, settle } from "./settings-harness.js";
+import { mountImageCard, mountSettings, resetSettings, settingsApi, settle } from "./settings-harness.js";
 import { KEY_REFUSED_LINE, KEY_REFUSED_ROWS } from "./fixtures/keyRefusedJob.js";
 
 const AGENTS: InitScreen = { id: "agents", title: "Agents", top: "Which agents go on the image", items: [{ id: "claude", label: "Claude Code", detail: [] }], ticks: ["claude"], answers: {}, footer: [], tally: "agents" };
@@ -83,7 +83,7 @@ const build = (): HTMLElement | null => k("build");
 const stateRow = (): HTMLElement => card().querySelector<HTMLElement>("[data-k='image-state']")!;
 
 const open = async (api: Api, id: string): Promise<void> => {
-  mountSettings({ api, at: { kind: "computer", id } });
+  mountImageCard({ api, at: { kind: "computer", id } });
   await settle();
 };
 const press = async (key: string): Promise<void> => {
@@ -274,7 +274,7 @@ describe("the first build in the Image card", () => {
   it("says the build is on screen while it is drawn, and nothing once the page is left", async () => {
     useStore.setState({ initJob: BUILDING });
     const mounted = await (async () => {
-      const m = mountSettings({ api: host(BUILDING).api, at: { kind: "computer", id: "p_2" } });
+      const m = mountImageCard({ api: host(BUILDING).api, at: { kind: "computer", id: "p_2" } });
       await settle();
       return m;
     })();

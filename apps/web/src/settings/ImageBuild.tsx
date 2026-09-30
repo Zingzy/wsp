@@ -16,7 +16,7 @@ import { RecipeStep, type StepAction } from "./recipe/RecipeStep.js";
 import { useRecipeJob } from "./recipe/useRecipeJob.js";
 import { useSettingsStore } from "./settingsStore.js";
 
-export function ImageBuild({ job, place, onAgain, onClose }: { job: InitJob; place: PlaceView; onAgain: () => void; onClose: () => void }) {
+export function ImageBuild({ job, place, onAgain, onClose }: { job: InitJob; place: PlaceView; /** Starts over in the recipe, where the card holds one. */ onAgain?: (() => void) | undefined; onClose: () => void }) {
   const words = CLOUD_SETUP_WORDS.build;
   const { api, refusal, attempt, busy } = useRecipeJob();
   const [asking, setAsking] = useState(false);
@@ -44,7 +44,7 @@ export function ImageBuild({ job, place, onAgain, onClose }: { job: InitJob; pla
           { k: "keep", word: words.cancelKeep, onPress: () => setAsking(false) },
         ]
       : [{ k: "cancel", word: words.cancel, destructive: true, disabled: !job.stoppable, onPress: () => setAsking(true) }];
-  const primary = building || changing ? undefined : keyWords !== undefined ? { word: CLOUD_SETUP_WORDS.keys.changeKey, onPress: () => setChanging(true) } : { word: words.again, onPress: onAgain };
+  const primary = building || changing ? undefined : keyWords !== undefined ? { word: CLOUD_SETUP_WORDS.keys.changeKey, onPress: () => setChanging(true) } : onAgain === undefined ? undefined : { word: words.again, onPress: onAgain };
   const top = building ? (view.slide ? words.slideTop : words.top) : job.error;
   return (
     <RecipeStep
@@ -71,7 +71,7 @@ export function ImageBuild({ job, place, onAgain, onClose }: { job: InitJob; pla
               if (!yes) return;
               // The job was about the key just replaced: it is put away, and the recipe is where the next build starts.
               onClose();
-              onAgain();
+              onAgain?.();
             }}
           />
         </div>

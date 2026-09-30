@@ -534,40 +534,11 @@
       "settleMs": 700
     },
     {
-      "name": "agents-add",
-      "at": "/",
-      "widths": [
-        1440,
-        390
-      ],
-      "reason": "Settings caps its content at 760px, so 1280 draws this page as 1440 does; 390 is where it reflows, which is shot here.",
-      "steps": [
-        "390:key:Escape",
-        "390:sidebar=trigger",
-        "k=settings-row",
-        "k=settings-computers",
-        "390:key:Escape",
-        "place-row=here",
-        "segment=servers"
-      ],
-      "wait": "k=agents-empty",
-      "settleMs": 700
-    },
-    {
       "name": "agents-add-server",
       "at": "/",
-      "widths": [
-        1440,
-        390
-      ],
-      "reason": "Settings caps its content at 760px, so 1280 draws this page as 1440 does; 390 is where it reflows, which is shot here.",
       "steps": [
-        "390:key:Escape",
-        "390:sidebar=trigger",
-        "k=settings-row",
-        "k=settings-computers",
-        "390:key:Escape",
-        "place-row=here",
+        "1440:row-id=thread:redirect",
+        "surface-launch=agents",
         "segment=servers",
         "k=agents-add"
       ],
@@ -598,7 +569,7 @@
         "place-row=p_hetzner"
       ],
       "fixture": "image-built",
-      "wait": "k=image-holds",
+      "wait": "k=image-state",
       "settleMs": 700
     },
     {
@@ -610,28 +581,13 @@
         "place-row=p_hetzner"
       ],
       "fixture": "image-built",
-      "wait": "k=image-holds",
+      "wait": "k=image-state",
       "settleMs": 700,
       "mac": true,
       "widths": [
         1440
       ],
       "reason": "What this shot adds is the Mac window's glass behind the page; the page itself is shot at every width in settings-image-built."
-    },
-    {
-      "name": "settings-image-recipe",
-      "at": "/",
-      "steps": [
-        "390:key:Escape",
-        "390:sidebar=trigger",
-        "k=settings-row",
-        "k=settings-computers",
-        "place-row=p_hetzner",
-        "k=edit-recipe"
-      ],
-      "fixture": "image-built",
-      "wait": "k=recipe",
-      "settleMs": 700
     },
     {
       "name": "settings-computer-open",
@@ -1719,40 +1675,6 @@
       "reason": "Settings caps its content at 760px, so 1280 draws this page as 1440 does; 390 is where it reflows, which is shot here."
     },
     {
-      "name": "agents-page-mac",
-      "at": "/",
-      "steps": [
-        "k=settings-row",
-        "k=settings-computers",
-        "place-row=here"
-      ],
-      "wait": "k=agents-line",
-      "settleMs": 1500,
-      "mac": true,
-      "widths": [
-        1440
-      ],
-      "reason": "What this shot adds is the Mac window's glass behind the page; the page itself is shot in agents-page."
-    },
-    {
-      "name": "settings-image-recipe-mac",
-      "at": "/",
-      "fixture": "image-built",
-      "steps": [
-        "k=settings-row",
-        "k=settings-computers",
-        "place-row=p_hetzner",
-        "k=edit-recipe"
-      ],
-      "wait": "k=recipe",
-      "settleMs": 700,
-      "mac": true,
-      "widths": [
-        1440
-      ],
-      "reason": "What this shot adds is the Mac window's glass behind the page; the page itself is shot at every width in settings-image-recipe."
-    },
-    {
       "name": "thread-open",
       "at": "/",
       "steps": [
@@ -1815,45 +1737,6 @@
         390
       ],
       "reason": "The Open button sits at the right of the page header at its own width, so 1280 draws it as 1440 does; 390 is where the header narrows, which is shot here."
-    },
-    {
-      "name": "agents-page",
-      "at": "/",
-      "steps": [
-        "390:key:Escape",
-        "390:sidebar=trigger",
-        "k=settings-row",
-        "k=settings-computers",
-        "place-row=here"
-      ],
-      "wait": "k=agents-line",
-      "settleMs": 1500,
-      "widths": [
-        1440,
-        390
-      ],
-      "reason": "Settings caps its content at 760px, so 1280 draws this page as 1440 does; 390 is where it reflows, which is shot here."
-    },
-    {
-      "name": "settings-image-recipe-rows-mac",
-      "at": "/",
-      "fixture": "image-built",
-      "steps": [
-        "k=settings-row",
-        "k=settings-computers",
-        "place-row=p_hetzner",
-        "k=edit-recipe",
-        "k=recipe-primary",
-        "slot=checkbox"
-      ],
-      "wait": "k=row",
-      "settleMs": 700,
-      "mac": true,
-      "widths": [
-        1440
-      ],
-      "reason": "What this shot adds is the Mac window's glass behind the recipe's rows; the rows themselves are shot at every width in settings-image-recipe.",
-      "fresh": true
     },
     {
       "name": "settings-computers-boat",
@@ -1931,7 +1814,7 @@
         "k=settings-computers",
         "place-row=here"
       ],
-      "wait": "settings-card=threads",
+      "wait": "grid=threads-here",
       "settleMs": 700,
       "widths": [
         1440,
@@ -2019,6 +1902,64 @@
       ],
       "wait": "mermaid=true",
       "settleMs": 1500
+    },
+    {
+      "name": "computers-list",
+      "at": "/",
+      "fixture": "tiles",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "k=settings-row",
+        "k=settings-computers"
+      ],
+      "wait": "settings-at=computers",
+      "settleMs": 1500,
+      "widths": [
+        1440,
+        390
+      ],
+      "reason": "Settings caps its content at 760px, so 1280 draws this page as 1440 does; 390 is where it reflows, which is shot here."
+    },
+    {
+      "name": "computer-spoo",
+      "at": "/",
+      "fixture": "tiles",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "k=settings-row",
+        "k=settings-computers",
+        "place-row=p_spoo"
+      ],
+      "wait": "settings-at=computer:p_spoo",
+      "settleMs": 1500,
+      "widths": [
+        1440,
+        390
+      ],
+      "reason": "Settings caps its content at 760px, so 1280 draws this page as 1440 does; 390 is where it reflows, which is shot here.",
+      "height": 1100
+    },
+    {
+      "name": "cloud-solari",
+      "at": "/",
+      "fixture": "tiles",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "k=settings-row",
+        "k=settings-computers",
+        "place-row=solari"
+      ],
+      "wait": "settings-at=computer:solari",
+      "settleMs": 1500,
+      "widths": [
+        1440,
+        390
+      ],
+      "reason": "Settings caps its content at 760px, so 1280 draws this page as 1440 does; 390 is where it reflows, which is shot here.",
+      "height": 1200
     }
   ]
 }

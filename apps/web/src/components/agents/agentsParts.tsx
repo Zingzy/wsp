@@ -8,6 +8,7 @@ import { useState } from "react";
 import { agentName } from "@wsp/catalog";
 import { cn } from "../../lib/utils.js";
 import { FACT } from "../../settings/format.js";
+import { GLYPH_FRAME } from "../../settings/grid.js";
 import { HarnessMark, MarkSvg } from "../chat/HarnessMark.js";
 import { AlertDialog, AlertDialogClose, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogPopup, AlertDialogTitle } from "../ui/alert-dialog.js";
 import { AddButton } from "../ui/add-button.js";
@@ -95,14 +96,12 @@ export function ActButton({ act, className, k, tall = false, wordClassName }: { 
   );
 }
 
-const TILE = "flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-foreground/[0.04]";
-
 /** A row's or a head's lead: the agent's own mark in its own colours in a tile, installed or not; a server's
  * brand mark, icon or glyph in its bordered box; the kind's glyph. */
 export function LeadMark({ lead, label, big = false }: { lead: Lead; label: string; big?: boolean }) {
   if (lead.kind === "agent") {
     return (
-      <span data-k="lead-tile" className={TILE}>
+      <span data-k="lead-tile" className={GLYPH_FRAME}>
         <HarnessMark harness={lead.agent} label={label} className="size-5" />
       </span>
     );
@@ -110,7 +109,7 @@ export function LeadMark({ lead, label, big = false }: { lead: Lead; label: stri
   const Icon = lead.icon;
   if (lead.kind === "box" && lead.mark !== undefined) {
     return (
-      <span data-k="lead-box" className={TILE}>
+      <span data-k="lead-box" className={GLYPH_FRAME}>
         <MarkSvg mark={lead.mark} className="size-[18px]" data-brand-mark={lead.mark.id} />
       </span>
     );
@@ -123,7 +122,7 @@ export function LeadMark({ lead, label, big = false }: { lead: Lead; label: stri
 function BoxLead({ icon: Icon, host }: { icon: LucideIcon; host: string | undefined }) {
   const src = useServerIcon(host);
   return (
-    <span data-k="lead-box" className={TILE}>
+    <span data-k="lead-box" className={GLYPH_FRAME}>
       {src === null ? <Icon aria-hidden className="size-4 text-foreground/80" /> : <img data-k="server-icon" src={src} alt="" draggable={false} className="size-5 rounded-sm object-contain" />}
     </span>
   );

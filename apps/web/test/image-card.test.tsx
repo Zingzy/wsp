@@ -9,7 +9,7 @@ import { COPY_BUILD_FIX, DEFAULT_PREFERENCES, copyBuildingLine, copyStoppedLine,
 import { RequestError, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { copyCost, IMAGE_WORDS } from "../src/settings/image.js";
-import { mountSettings, resetSettings, settingsApi, settle } from "./settings-harness.js";
+import { mountImageCard, mountSettings, resetSettings, settingsApi, settle } from "./settings-harness.js";
 
 const AT = "2026-09-12T11:00:00.000Z";
 const HASH = "a".repeat(64);
@@ -61,7 +61,7 @@ const press = (): HTMLButtonElement => stateRow().querySelector<HTMLButtonElemen
 const slot = (): string => card()!.querySelector("[data-k='image-refusal']")?.textContent ?? "";
 
 const open = async (api: Api, id: string): Promise<void> => {
-  mountSettings({ api, at: { kind: "computer", id } });
+  mountImageCard({ api, at: { kind: "computer", id } });
   await settle();
 };
 

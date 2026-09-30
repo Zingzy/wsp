@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Served by Vite to a real browser: the Image card on a box's page in
-// Settings, over a fake api, with the recipe or the image's first build at each
+// Served by Vite to a real browser: the Image card for a box, as the Add a
+// computer sheet draws it in the settings column, over a fake api, with the recipe or the image's first build at each
 // of its steps (?screen=choice|agent|agent-stopped|reading|agents|tools|also|
 // logins|building|signing|retry|failed|failed-key|stopped|you-stopped|slot|
 // over|sweeping|no-extras|many-tools), in either theme (?theme=light), so a test can lay
@@ -13,7 +13,7 @@ import { TooltipProvider } from "../../src/components/ui/tooltip";
 import type { Api } from "../../src/protocol/client";
 import { KEY_REFUSED_LINE, KEY_REFUSED_ROWS } from "../fixtures/keyRefusedJob";
 import { useStore } from "../../src/protocol/store";
-import { SettingsPage } from "../../src/settings/SettingsPage";
+import { ImageCardHost } from "../image-card-host";
 import { useSettingsStore } from "../../src/settings/settingsStore";
 import "../../src/index.css";
 import "../../src/themes/index";
@@ -255,7 +255,7 @@ if (at === "choice" || at === "agent-stopped") {
 createRoot(document.getElementById("root")!).render(
   <TooltipProvider>
     <div className="flex h-dvh flex-col">
-      <SettingsPage />
+      <ImageCardHost />
     </div>
   </TooltipProvider>,
 );

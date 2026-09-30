@@ -10,7 +10,7 @@ import { CLOUD_SETUP_WORDS, DEFAULT_PREFERENCES, copyStoppedLine, initDiskOverLi
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { copyCost, IMAGE_WORDS } from "../src/settings/image.js";
-import { mountSettings, resetSettings, settingsApi, settle } from "./settings-harness.js";
+import { mountImageCard, mountSettings, resetSettings, settingsApi, settle } from "./settings-harness.js";
 
 const MIB = 1024 * 1024;
 const GIB = 1024 * MIB;
@@ -98,7 +98,7 @@ const recipeStep = (): string | null => k("recipe")?.getAttribute("data-step") ?
 const statePress = (): HTMLButtonElement | null => card().querySelector<HTMLButtonElement>("[data-k='image-state'] [data-k='image-press']");
 
 const open = async (api: Api, id: string): Promise<void> => {
-  mountSettings({ api, at: { kind: "computer", id } });
+  mountImageCard({ api, at: { kind: "computer", id } });
   await settle();
 };
 const press = async (key: string): Promise<void> => {

@@ -1,60 +1,52 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Settings > Computers: one row per computer this wsp runs on, this one
-// first, each opening the computer's own page; and that page, which says what
-// the host knows about the computer as lines, its connection and what a
-// workspace there is made of as rows, the agents, skills and MCP servers on it,
-// the workspaces standing on it, and the two things a person can do to it. Only facts the host carries are drawn; a fact
-// not reported is left out rather than stood in for.
+// Settings > Computers: two lists on one column template, the computers this
+// wsp runs on and the clouds that lend it machines, each row opening its own
+// page; and that page, whose head says the state and the one act it invites,
+// then the agents and MCP servers there, your image, the threads running
+// there and Remove. Only facts the host carries are drawn; a fact not
+// reported is left out rather than stood in for.
 //
 // The list draws every row the host's places list carries: the host lists a
 // cloud only once it holds that cloud's key or a stand-in serves in its place,
 // so nothing here filters again.
-import { CloudIcon, CpuIcon, GaugeIcon, HardDriveIcon, LayersIcon, MemoryStickIcon, ReceiptIcon } from "lucide-react";
-import type { ChipItem } from "../components/ui/chips.js";
-import { useState } from "react";
-import { HERE_PLACE_ID, fmtMemGb, absentRoad, awayMsOf, copyStanding, fmtBytes, fmtRate, fmtSize, isLocalWorkspace, lastKnown, offlineFor, plural, portsWord, spentThisMonth, workspaceStateOf, workspaceWord, type PlaceSpend, type PlaceView, type SealedImageView, type WorkspaceLanding, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
-import { AddButton } from "../components/ui/add-button.js";
-import { Button, DANGER_BUTTON } from "../components/ui/button.js";
-import { AgentsManager } from "../components/agents/AgentsManager.js";
-import { imageAgentsReport, recipeMissLines } from "../components/agents/agentsRows.js";
-import { useAgentsReport } from "../components/agents/useAgentsReport.js";
-import { useServerTools } from "../components/agents/useServerTools.js";
+import { useEffect, useRef, useState } from "react";
+import { HERE_PLACE_ID, PLACES_WORDS, absentRoad, awayMsOf, fmtMemGb, foldThreads, isLocalWorkspace, workspaceStateOf, workspaceWord, type AbsentComputer, type AgentsReport, type PlaceView, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { computerActions } from "../actions/computerActions.js";
+import { openContextMenu } from "../actions/contextMenu.js";
+import { resolveActions } from "../actions/registry.js";
+import type { SidebarProjectSnapshot } from "../adapt/index.js";
+import { ActButton, LeadMark } from "../components/agents/agentsParts.js";
+import { imageAgentsReport, recipeMissLines, refusedLines, type FlowView, type RefusedLine, type RowAct, type RowsContext } from "../components/agents/agentsRows.js";
+import { AGENTS_KIND } from "../components/agents/kinds/agents.js";
+import type { KindModule, Lead } from "../components/agents/kinds/kind.js";
+import { SERVERS_KIND } from "../components/agents/kinds/servers.js";
+import { SignInFlowView } from "../components/agents/SignInFlowView.js";
 import { useAgentActs } from "../components/agents/useAgentActs.js";
+import { useAgentsReport } from "../components/agents/useAgentsReport.js";
 import { useServerActs } from "../components/agents/useServerActs.js";
-import { useSkillActs } from "../components/agents/useSkillActs.js";
-import { useStore } from "../protocol/store.js";
-import { deriveSidebarProjects } from "../adapt/index.js";
+import { useServerTools } from "../components/agents/useServerTools.js";
 import { NEEDS_YOU } from "../components/status/kinds/needs-you.js";
 import { WORKING } from "../components/status/kinds/working.js";
 import { threadStatusOf } from "../components/status/threadStatusOf.js";
-import { ThreadRows, type ThreadRowItem } from "../components/threads/ThreadRows.js";
-import { cn } from "../lib/utils.js";
+import { ThreadRow } from "../components/threads/ThreadRows.js";
+import { AddButton } from "../components/ui/add-button.js";
+import { Button, DANGER_BUTTON } from "../components/ui/button.js";
+import { useSidebarProjects, useStore } from "../protocol/store.js";
 import { DialButton, useDialPlace } from "./AbsentRoad.js";
-import { ADD_COMPUTER_WORDS, WHERE_WORDS } from "./format.js";
 import { AddComputer } from "./AddComputer.js";
-import { ComputerGlyph, ComputerIconSelect } from "./ComputerGlyph.js";
-import { builtWhen, copyOn, IMAGE_WORDS } from "./image.js";
-import { useImageCard } from "./ImageCard.js";
+import { ComputerGlyph, useComputerIcon } from "./ComputerGlyph.js";
+import { ADD_COMPUTER_WORDS, PLACE_STATE_WORDS, VALUE, WHERE_WORDS, capitalised } from "./format.js";
+import { Chevron, GlyphFrame, Grid, GridHead, GridName, GridRow, LIST_COLUMNS, Num, PAGE_COLUMNS, PageCrumbs, PageHead, StateCell, type HeadCell } from "./grid.js";
+import { copyOn } from "./image.js";
+import { ImageCard, useImageStanding } from "./ImageCard.js";
 import { openImageRecipe } from "./openAt.js";
-import { NOTHING_HELD, absenceOf, hereName, absentOf, copiesWord, isProviderPlace, placeCpuWord, placeName, placeOf, placeStateWord, placeWorkspaceCounts, projectOn, type PlaceHolding } from "./places.js";
+import { NOTHING_HELD, absenceOf, absentOf, hereName, isProviderPlace, placeName, placeOf, placeStateCell, type PlaceHolding, type PlaceStateCell } from "./places.js";
 import { cloudsOffered, keyHeld } from "./providers.js";
 import { RemoveComputerDialog } from "./RemoveComputerDialog.js";
-import { RefusalSlot } from "./sheetParts.js";
-import { Card, CARD_SURFACE, cardDrops, Cards, Row, type SettingsCardData, type SettingsItem, type SettingsRowData } from "./rows.js";
+import type { SettingsCardData, SettingsRowData } from "./rows.js";
 import type { SettingsContext } from "./settingsContext.js";
 import type { SettingsAt } from "./settingsStore.js";
-
-/** The threads running or asking on a computer's tasks, read off the sidebar's own snapshot, each named by its
- * project: running here is what the card's head says, so a finished thread leaves it. */
-function threadsHere(ctx: SettingsContext, place: PlaceView): ThreadRowItem[] {
-  const pauseModes = Object.fromEntries(Object.entries(ctx.landings).map(([project, landing]) => [project, landing?.capabilities.pauseMode]));
-  return deriveSidebarProjects({ workspaces: ctx.workspaces, statuses: ctx.statuses, sessions: ctx.sessions, pauseModes })
-    .filter(snapshot => placeOf(ctx.places, snapshot.workspace)?.id === place.id)
-    .flatMap(snapshot => snapshot.threads.map(thread => ({ thread, place: snapshot.workspace.project.name })))
-    .filter(({ thread }) => RUNNING_HERE.has(threadStatusOf(thread).id));
-}
-
-const RUNNING_HERE = new Set([WORKING.id, NEEDS_YOU.id]);
+import { RefusalSlot } from "./sheetParts.js";
 
 /** What stands on each computer, folded from the workspaces the store already has, each workspace going to
  * exactly one computer by placeOf, the one reading of which computer a workspace stands on. */
@@ -72,59 +64,31 @@ export function holdingsFor(
   return held;
 }
 
-/** The facts a computer's list row says under its name, each with its glyph, none of them where none has arrived. */
-export function computerChips(place: PlaceView, count: number, spend: PlaceSpend | undefined): ChipItem[] {
-  const workspaces: ChipItem | null = count === 0 ? null : { text: plural(count, "task"), icon: LayersIcon };
-  if (isProviderPlace(place)) {
-    const cloud: (ChipItem | null)[] = [
-      { text: WHERE_WORDS.cloud, icon: CloudIcon },
-      place.rateUsdPerHour === undefined ? null : { text: fmtRate(place.rateUsdPerHour), icon: GaugeIcon },
-      workspaces,
-      spend === undefined ? null : { text: spentThisMonth(spend.monthUsd), icon: ReceiptIcon },
-    ];
-    return cloud.filter((c): c is ChipItem => c !== null);
+/** How many threads have a turn running on each row, by the id of the row, over the workspaces placeOf puts there. */
+export function runningThreadsOn(ctx: Pick<SettingsContext, "places" | "workspaces" | "sessions">): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const workspace of ctx.workspaces) {
+    const place = placeOf(ctx.places, workspace);
+    if (place === undefined) continue;
+    const running = foldThreads(ctx.sessions[workspace.id] ?? []).filter(thread => thread.status === "running").length;
+    counts[place.id] = (counts[place.id] ?? 0) + running;
   }
-  const own: (ChipItem | null)[] = [
-    place.shape === undefined ? null : { text: `${place.shape.cpu} ${placeCpuWord(place)}`, icon: CpuIcon },
-    place.shape === undefined ? null : { text: fmtMemGb(place.shape.memMb), icon: MemoryStickIcon },
-    place.diskFreeBytes === undefined ? null : { text: `${fmtBytes(place.diskFreeBytes)} free`, icon: HardDriveIcon },
-    workspaces,
-  ];
-  return own.filter((c): c is ChipItem => c !== null);
+  return counts;
 }
 
-/** One computer's row: the name a person reads it as with the default mark, the facts it has reported, and the
- * state word while there is one, then the chevron where the row opens a page. */
-export function computerRowData(place: PlaceView, o: { count: number; spend?: PlaceSpend | undefined; now: number; state?: string | undefined; open?: (() => void) | undefined }): SettingsRowData {
-  const state = o.state ?? placeStateWord(place, absentOf(place, o.now));
-  const chips = computerChips(place, o.count, o.spend);
-  return {
-    kind: "row",
-    id: place.id,
-    title: placeName(place),
-    lead: (
-      <span className="flex size-11 items-center justify-center rounded-xl border border-border bg-foreground/[0.04]">
-        <ComputerGlyph place={place} className="size-5 text-foreground/80" />
-      </span>
-    ),
-    ...(place.default ? { mark: WHERE_WORDS.default } : {}),
-    description: chips.map(chip => chip.text),
-    chips,
-    mono: true,
-    ...(state === "" ? {} : { word: state, wordClass: "fact" }),
-    ...(o.open === undefined ? {} : { open: o.open }),
-    attrs: { "data-place-row": place.id },
-  };
-}
-
-/** The state of the computer the host runs on, read off its own workspace's daemon rather than off a link it
- * never reports: this row said the Mac was fine while every pane on it said unreachable. */
-function ownStateWord(ctx: SettingsContext): string {
+/** Why a row is not answering, or null while it is. The computer the host runs on is read off its own workspace's
+ * daemon rather than off a link it never reports: this row said the Mac was fine while every pane on it said
+ * unreachable. */
+function absenceAt(ctx: SettingsContext, place: PlaceView): AbsentComputer | null {
+  if (place.id !== HERE_PLACE_ID) return absentOf(place, ctx.now);
   const here = ctx.workspaces.find(w => isLocalWorkspace(w)) ?? null;
-  const absent = absenceOf(ctx.places, here, here === null ? null : (ctx.statuses[here.id] ?? null), ctx.now);
-  const own = ctx.places.find(place => place.id === HERE_PLACE_ID);
-  return own === undefined ? "" : placeStateWord(own, absent);
+  return absenceOf(ctx.places, here, here === null ? null : (ctx.statuses[here.id] ?? null), ctx.now);
 }
+
+const stateCellAt = (ctx: SettingsContext, place: PlaceView): PlaceStateCell =>
+  placeStateCell(place, absenceAt(ctx, place), { canUpdate: place.id !== HERE_PLACE_ID && ctx.api?.placesUpdate !== undefined });
+
+const stateWords = (cell: PlaceStateCell): string => (cell.kind === "word" ? cell.word : cell.why);
 
 /** The pages under Computers in the sidebar: one per computer the list draws, this one first, off the same list so a
  * row and its sidebar row cannot disagree about which computers there are. */
@@ -132,53 +96,162 @@ export function computerSubPages(ctx: SettingsContext): { at: SettingsAt; name: 
   return ctx.places.map(place => ({ at: { kind: "computer", id: place.id }, name: placeName(place) }));
 }
 
+/** The computers list's header row: the section's name, then the columns a computer's row fills. */
+const COMPUTER_HEAD: readonly HeadCell[] = [
+  { word: WHERE_WORDS.heads.computer },
+  { word: WHERE_WORDS.heads.cores, num: true, wideOnly: true },
+  { word: WHERE_WORDS.heads.memory, num: true, wideOnly: true },
+  { word: WHERE_WORDS.heads.threads },
+];
+
+/** A row as the search reads and draws it: the name a person types to find a computer, over its state. */
+const searchRow = (ctx: SettingsContext, place: PlaceView): SettingsRowData => ({
+  kind: "row",
+  id: place.id,
+  title: placeName(place),
+  description: stateWords(stateCellAt(ctx, place)),
+  open: () => ctx.go({ kind: "computer", id: place.id }),
+  attrs: { "data-place-row": place.id },
+});
+
 export function computersCards(ctx: SettingsContext): SettingsCardData[] {
-  const counts = placeWorkspaceCounts(ctx.places, ctx.workspaces);
-  const row = (place: PlaceView): SettingsRowData => {
-    const here = place.id === HERE_PLACE_ID;
-    return computerRowData(place, {
-      count: counts[place.id] ?? 0,
-      spend: ctx.reads.spend.find(spent => spent.place === place.id),
-      now: ctx.now,
-      ...(here ? { state: ownStateWord(ctx) } : {}),
-      open: () => ctx.go({ kind: "computer", id: place.id }),
-    });
-  };
+  const computers = ctx.places.filter(place => !isProviderPlace(place));
+  const clouds = ctx.places.filter(isProviderPlace);
+  const running = runningThreadsOn(ctx);
+  const go = (place: PlaceView) => () => ctx.go({ kind: "computer", id: place.id });
   const refused =
     ctx.placesRefused === null ? null : <RefusalSlot k="places-refused" said={WHERE_WORDS.notRead(ctx.placesRefused.said)} {...(ctx.placesRefused.fix === undefined ? {} : { fix: ctx.placesRefused.fix })} />;
-  const adds = (
-    <div className="flex gap-2">
-      <AddButton data-k="add-computer-button" onClick={() => ctx.askAdd(null)}>
-        {ADD_COMPUTER_WORDS.title}
-      </AddButton>
-      {cloudsOffered(ctx.reads.setup).length === 0 ? null : (
-        <AddButton data-k="add-cloud-button" onClick={() => ctx.askAdd("cloud")}>
-          {ADD_COMPUTER_WORDS.addCloud}
-        </AddButton>
+  const H = WHERE_WORDS.heads;
+  const offered = cloudsOffered(ctx.reads.setup).length > 0;
+  const computersBody = (
+    <div className="flex flex-col gap-2">
+      {computers.length === 0 ? null : (
+        <Grid id="computers">
+          <GridHead columns={LIST_COLUMNS} cells={COMPUTER_HEAD} />
+          {computers.map(place => (
+            <ComputerListRow key={place.id} place={place} running={running[place.id] ?? 0} cell={stateCellAt(ctx, place)} open={go(place)} ctx={ctx} />
+          ))}
+        </Grid>
       )}
+      {refused}
+      <div className="flex">
+        <AddButton data-k="add-computer-button" onClick={() => ctx.askAdd(null)}>
+          {ADD_COMPUTER_WORDS.title}
+        </AddButton>
+      </div>
+    </div>
+  );
+  const cloudsBody = (
+    <div className="flex flex-col gap-2">
+      {clouds.length === 0 ? null : (
+        <Grid id="clouds">
+          <GridHead columns={LIST_COLUMNS} cells={[{ word: H.cloud }]} />
+          {clouds.map(place => (
+            <CloudListRow key={place.id} place={place} cell={stateCellAt(ctx, place)} open={go(place)} ctx={ctx} />
+          ))}
+        </Grid>
+      )}
+      {offered ? (
+        <div className="flex">
+          <AddButton data-k="add-cloud-button" onClick={() => ctx.askAdd("cloud")}>
+            {ADD_COMPUTER_WORDS.addCloud}
+          </AddButton>
+        </div>
+      ) : null}
     </div>
   );
   return [
-    { id: "computers", items: ctx.places.map(row), under: refused === null ? adds : <div className="flex flex-col items-start gap-3">{refused}{adds}</div> },
+    { id: "computers", items: [], search: computers.map(place => searchRow(ctx, place)), body: computersBody },
+    ...(clouds.length === 0 && !offered ? [] : [{ id: "clouds", items: [], search: clouds.map(place => searchRow(ctx, place)), body: cloudsBody }]),
     ...(ctx.addAsked === null ? [] : [{ id: "add-computer", head: ADD_COMPUTER_WORDS.title, items: [], body: <AddComputer key={ctx.addAsked.n} setup={ctx.reads.setup} road={ctx.addAsked.road} /> }]),
   ];
 }
 
+/** The row's own context menu: the icon it shows as. */
+function useRowMenu(place: PlaceView, ctx: Pick<SettingsContext, "setPreferences">) {
+  const icon = useComputerIcon(place);
+  return (event: React.MouseEvent<HTMLDivElement>): void =>
+    void openContextMenu(event, resolveActions(computerActions, { id: place.id, icon }, { setIcon: (id, next) => ctx.setPreferences({ computerLook: { [id]: { icon: next } } }) }));
+}
+
+const placeGlyph = (place: PlaceView) => (
+  <GlyphFrame>
+    <ComputerGlyph place={place} className="size-4 text-foreground/80" />
+  </GlyphFrame>
+);
+
+/** One computer on the list: its cores, its memory, the threads running there as a count until a cap gives the
+ * count a track, and its state. */
+export function ComputerListRow({ place, running, cell, open, ctx }: { place: PlaceView; running: number; cell: PlaceStateCell; open?: () => void; ctx: Pick<SettingsContext, "setPreferences"> }) {
+  const menu = useRowMenu(place, ctx);
+  return (
+    <GridRow columns={LIST_COLUMNS} {...(open === undefined ? {} : { open })} onContextMenu={menu} {...(cell.why === undefined ? {} : { title: cell.why })} attrs={{ "data-place-row": place.id }}>
+      <GridName glyph={placeGlyph(place)} name={placeName(place)} {...(place.default ? { tag: WHERE_WORDS.default } : {})} />
+      <Num k="cores" wideOnly>
+        {place.shape?.cpu}
+      </Num>
+      <Num k="memory" wideOnly>
+        {place.shape === undefined ? undefined : fmtMemGb(place.shape.memMb)}
+      </Num>
+      <span data-k="threads" className={VALUE}>
+        {running}
+      </span>
+      <PlaceState place={place} cell={cell} {...(open === undefined ? {} : { onSignIn: open })} />
+      {open === undefined ? <span /> : <Chevron />}
+    </GridRow>
+  );
+}
+
+/** One cloud on the list: its name and its state. What runs there and its room wait on the host reading them. */
+function CloudListRow({ place, cell, open, ctx }: { place: PlaceView; cell: PlaceStateCell; open: () => void; ctx: SettingsContext }) {
+  const menu = useRowMenu(place, ctx);
+  return (
+    <GridRow columns={LIST_COLUMNS} open={open} onContextMenu={menu} {...(cell.why === undefined ? {} : { title: cell.why })} attrs={{ "data-place-row": place.id }}>
+      <GridName glyph={placeGlyph(place)} name={placeName(place)} />
+      <span className="col-span-3 max-md:col-auto" />
+      <PlaceState place={place} cell={cell} onSignIn={open} />
+      <Chevron />
+    </GridRow>
+  );
+}
+
+/** A state cell off its reading: the word, or the act itself. Sign in goes to the computer's page, whose agent rows
+ * each carry their own. */
+function PlaceState({ place, cell, onSignIn, className }: { place: PlaceView; cell: PlaceStateCell; onSignIn?: () => void; className?: string }) {
+  const why = cell.why === undefined ? {} : { why: cell.why };
+  if (cell.kind === "update") {
+    return (
+      <StateCell {...why} {...(className === undefined ? {} : { className })}>
+        <UpdateControl place={place} />
+      </StateCell>
+    );
+  }
+  if (cell.kind === "sign-in") {
+    return (
+      <StateCell {...why} {...(className === undefined ? {} : { className })}>
+        <Button data-k="sign-in" size="xs" variant="outline" held={onSignIn === undefined} onClick={onSignIn}>
+          {PLACE_STATE_WORDS.signIn}
+        </Button>
+      </StateCell>
+    );
+  }
+  return <StateCell word={cell.word} {...why} {...(className === undefined ? {} : { className })} />;
+}
+
 /** The one computer row on its own, for the Add a computer sheet's joined screen. */
 export function ComputerRow({ place, now }: { place: PlaceView; now: number }) {
-  const data = computerRowData(place, { count: 0, now });
-  const { kind: _row, ...row } = data;
+  const setPreferences = useStore(s => s.setPreferences);
   return (
-    <Card id="joined">
-      <Row {...row} drops={cardDrops([data])} />
-    </Card>
+    <Grid id="joined">
+      <GridHead columns={LIST_COLUMNS} cells={COMPUTER_HEAD} />
+      <ComputerListRow place={place} running={0} cell={placeStateCell(place, absentOf(place, now), { canUpdate: false })} ctx={{ setPreferences: patch => void setPreferences(patch) }} />
+    </Grid>
   );
 }
 
 /** Update: puts this wsp's daemon on the computer and runs the recipe there again. One word in both states, held
- * and dimmed while it runs; held with no title where the client has no such request, since the row's description
- * says why. */
-function UpdateControl({ place, held }: { place: PlaceView; held: boolean }) {
+ * and dimmed while it runs. */
+function UpdateControl({ place }: { place: PlaceView }) {
   const updatePlace = useStore(s => s.updatePlace);
   const [updating, setUpdating] = useState(false);
   return (
@@ -186,7 +259,6 @@ function UpdateControl({ place, held }: { place: PlaceView; held: boolean }) {
       data-k="update"
       size="xs"
       variant="outline"
-      held={held}
       disabled={updating}
       onClick={() => {
         setUpdating(true);
@@ -222,207 +294,221 @@ function RemoveControl({ place, holding, imageBytes, onRemoved }: { place: Place
   );
 }
 
-/** What the agents manager's head says on a computer's page, naming its projects where it holds any, and on a cloud's,
- * whose rows are its image's. */
-const AGENTS_PAGE_LINE = (computer: string, projects: boolean): string => `Agents, MCP servers and skills on ${computer}${projects ? " and in its projects" : ""}.`;
-const AGENTS_IMAGE_LINE = (cloud: string): string => `The agents in the image every copy at ${cloud} is made from.`;
-
-/** The agents, skills and MCP servers a computer reports, read when its page opens. Every act is held with the
- * page's away word while the computer is not answering, over the last report this window read. */
-function ComputerAgents({ place, here, ctx }: { place: PlaceView; here: boolean; ctx: SettingsContext }) {
-  const { report, reading, error, refresh } = useAgentsReport({ placeId: place.id });
-  const tools = useServerTools({ placeId: place.id });
-  const acts = useAgentActs({ placeId: place.id });
-  const skills = useSkillActs({ placeId: place.id });
-  const servers = useServerActs({ placeId: place.id });
-  const away = absentOf(place, ctx.now)?.away ?? null;
-  const name = placeName(place);
+/** The line under a page's title: the state as its word or its act, the sentence beside it, and while the computer is
+ * not answering the dial beside that, whose answer takes the sentence's place and whose refusal stands under it. */
+function PlaceStateLine({ place, ctx }: { place: PlaceView; ctx: SettingsContext }) {
+  const here = place.id === HERE_PLACE_ID;
+  const absent = absenceAt(ctx, place);
+  const cell = stateCellAt(ctx, place);
+  const { dial, busy, line, refused, held, heldWhy, road } = useDialPlace(place);
+  const away = !here && absent !== null;
+  const kept = away ? absentRoad({ name: place.name, road: place.road, awayMs: awayMsOf(place, ctx.now), dialled: place.dialled }).refused : null;
+  const sentence = away ? (line ?? kept ?? heldWhy ?? cell.why) : cell.why;
   return (
-    <AgentsManager
-      shell="page"
-      head={{ line: AGENTS_PAGE_LINE(name, (report?.projects?.length ?? 0) > 0) }}
-      report={report}
-      reading={reading}
-      error={error}
-      on={name}
-      ctx={{ where: here ? "here" : "box", ...(here ? {} : { computer: name }), heldWhy: away, ...(tools === undefined ? {} : { tools }), ...(acts === undefined ? {} : { acts }), ...(skills === undefined ? {} : { skills }), ...(servers === undefined ? {} : { servers }) }}
-      onRefresh={refresh}
-      now={ctx.now}
-      misses={recipeMissLines(place.provision?.rows ?? [])}
-    />
+    <div className="flex flex-col gap-2">
+      <div data-k="place-state" className="flex min-w-0 items-center gap-2.5 text-[13px] leading-5">
+        <PlaceState place={place} cell={cell} className="shrink-0" />
+        {sentence === undefined || sentence === null || sentence === "" ? null : (
+          <span data-k="place-sentence" className="min-w-0 truncate text-muted-foreground" title={sentence}>
+            {sentence}
+          </span>
+        )}
+        {away && road !== undefined && heldWhy === null ? <DialButton busy={busy} held={held} road={road} onDial={dial} /> : null}
+      </div>
+      {refused === null ? null : <RefusalSlot k="dial-refusal" said={refused.said} {...(refused.fix === undefined ? {} : { fix: refused.fix })} />}
+    </div>
   );
 }
 
-/** What a computer has cost, as its own line: the month's figure and the hourly rate, both the protocol's. The
- * count of workspaces the rate is spread over is not said, since the rate already is what is running there and a
- * line that ends "now across 0 workspaces" wraps at a phone's width to say nothing. */
-/** A copy of the image as one comma list: the version with how it stands beside it, its size, and when it was built. */
-const copyLineValue = (image: Parameters<typeof copyStanding>[0], copy: SealedImageView["copies"][number], now: number): string => {
-  const standing = copyStanding(image, copy);
-  return [`v${copy.version}${standing === undefined ? "" : ` (${standing})`}`, ...(copy.sizeBytes === undefined ? [] : [fmtBytes(copy.sizeBytes)]), builtWhen(copy.builtAt, now)].join(", ");
-};
-
-const spendLine = (spend: PlaceSpend): string[] => [spentThisMonth(spend.monthUsd), fmtRate(spend.rateUsdPerHour)];
-
-/** Where a workspace of a project on this computer would land, for the Ports row: the first project the host holds
- * on it, since every workspace there reads the same two flags. */
-function landingOn(ctx: SettingsContext, place: PlaceView): WorkspaceLanding | null {
-  const project = projectOn(place, ctx.projects);
-  return project === undefined ? null : (ctx.landings[project.id] ?? null);
+/** One row of the AGENTS or MCP SERVERS list, off the kind's own row. */
+interface KindLine {
+  readonly key: string;
+  readonly title: string;
+  readonly lead: Lead;
+  readonly note?: string;
+  readonly version?: string;
+  readonly act?: RowAct;
+  readonly flow?: FlowView;
 }
 
-/** The cloud's page: what it has taken, the image this host sealed and its copies, since the image exists only
- * behind the cloud's row, then Remove, whose dialog says the key is forgotten.
- *
- * The image is what this host builds with the cloud's key, so every word about it stands under the same rule the
- * list row's own cloud stands under: the key is held here. A cloud row drawn for a workspace alone is a machine
- * somebody else's key made, and this host has nothing to say about its image and nothing to edit. */
-function cloudCards(ctx: SettingsContext, place: PlaceView, view: SealedImageView | null, imageCard: SettingsCardData[], holding: PlaceHolding, onRemoved: () => void): SettingsCardData[] {
-  const held = keyHeld(place.name, ctx.reads.setup);
-  const image = held ? (view?.image ?? null) : null;
-  const spend = ctx.reads.spend.find(row => row.place === place.id);
-  const facts: SettingsItem[] = spend === undefined ? [] : [{ kind: "line" as const, id: "spend", label: WHERE_WORDS.spend, value: spendLine(spend), attrs: { "data-k": "spend" } }];
-  const copies: SettingsItem[] =
-    image === null || view === null
-      ? []
-      : view.copies.map(copy => ({
-          kind: "line" as const,
-          id: `copy-${copy.place}`,
-          label: copy.place,
-          value: copyLineValue(image, copy, ctx.now),
-          attrs: { "data-k": "image-copy", "data-place": copy.place },
-        }));
-  // A cloud keeps no computer to read: its agents are the image's, and the image is what every act there edits.
-  const agents =
-    image === null ? undefined : <AgentsManager shell="page" head={{ line: AGENTS_IMAGE_LINE(placeName(place)) }} report={imageAgentsReport(image, place.id)} reading={false} on={placeName(place)} ctx={{ where: "provider", editImage: () => openImageRecipe(place.id) }} now={ctx.now} />;
-  return [
-    // No card is drawn with nothing in it: before the host has answered, a cloud's page is its one act.
-    ...(facts.length === 0 ? [] : [{ id: "cloud", items: facts }]),
-    ...(held ? imageCard : []),
-    ...(agents === undefined ? [] : [{ id: "agents", items: [], body: agents }]),
-    ...(copies.length === 0 ? [] : [{ id: "copies", head: IMAGE_WORDS.copies, items: copies }]),
-    {
-      id: "acts",
-      items: [
-        {
-          kind: "row" as const,
-          id: "remove",
-          title: WHERE_WORDS.removeTitle(placeName(place)),
-          description: WHERE_WORDS.removeCloudDescription(hereName(ctx.places)),
-          control: <RemoveControl place={place} holding={holding} imageBytes={undefined} onRemoved={onRemoved} />,
-        },
-      ],
-    },
-  ];
+const NO_NAV = { openUnder: () => {} };
+
+/** An act as its word alone, as every act on the settings grid is: the plus is Add's and no other button wears a glyph. */
+const wordOnly = ({ icon: _icon, ...act }: RowAct): RowAct => act;
+
+/** A kind's rows as lines: the row's lead, name and state word as the note, and its step only where it has a road,
+ * since a held button beside every row is furniture. A state nothing has read yet is no state, and says nothing. */
+function kindLines<T>(kind: KindModule<T>, items: readonly T[], ctx: RowsContext, version: (item: T) => string | undefined): KindLine[] {
+  return items.map(item => {
+    const row = kind.row(item, ctx);
+    const flow = kind.detail(item, ctx, NO_NAV).flow;
+    const v = version(item);
+    const act = row.quick !== undefined && (row.quick.run !== undefined || row.quick.busy === true) ? wordOnly(row.quick) : undefined;
+    return { key: row.key, title: row.title, lead: row.lead, ...(row.status === undefined || row.status.state === "unknown" ? {} : { note: capitalised(row.status.words) }), ...(v === undefined ? {} : { version: v }), ...(act === undefined ? {} : { act }), ...(flow === undefined ? {} : { flow }) };
+  });
 }
 
-/** One computer's own page. */
-export function ComputerPage({ place, ctx }: { place: PlaceView; ctx: SettingsContext }) {
-  const here = place.id === HERE_PLACE_ID;
-  const noUpdate = ctx.api?.placesUpdate === undefined;
-  const { dial, busy, line, refused, held, heldWhy, road: dialRoad } = useDialPlace(place);
+function KindGrid({ id, head, lines }: { id: string; head: string; lines: readonly KindLine[] }) {
+  const versioned = lines.some(line => line.version !== undefined);
+  return (
+    <Grid id={id}>
+      <GridHead columns={PAGE_COLUMNS} cells={[{ word: head }, ...(versioned ? [{ word: WHERE_WORDS.heads.version, num: true, wideOnly: true }] : [])]} />
+      {lines.map(line => (
+        <div key={line.key} className="flex flex-col">
+          <GridRow columns={PAGE_COLUMNS} tight attrs={{ "data-kind-row": line.key }}>
+            <GridName glyph={<LeadMark lead={line.lead} label={line.title} />} name={line.title} {...(line.note === undefined ? {} : { note: line.note })} />
+            <Num wideOnly>{line.version}</Num>
+            <span className="flex min-w-0 items-center justify-self-end gap-2">{line.act === undefined ? null : <ActButton act={line.act} />}</span>
+          </GridRow>
+          {line.flow === undefined ? null : (
+            <div className="pr-2 pb-3 pl-[52px]">
+              <SignInFlowView view={line.flow} label={line.title} />
+            </div>
+          )}
+        </div>
+      ))}
+    </Grid>
+  );
+}
+
+/** What the lists cannot show, one quiet line each: a reader that could not answer, and a recipe row that did not land. */
+function MissLines({ lines }: { lines: readonly RefusedLine[] }) {
+  if (lines.length === 0) return null;
+  return (
+    <div data-k="agents-misses" className="flex flex-col gap-1">
+      {lines.map(line => (
+        <p key={line.id} data-refused-line className="flex min-w-0 gap-3 text-xs leading-4 text-muted-foreground">
+          <span data-refused-label className="shrink-0 text-foreground">
+            {line.label}
+          </span>
+          {line.value === undefined ? null : (
+            <span data-refused-value className="min-w-0 truncate" title={line.value}>
+              {line.value}
+            </span>
+          )}
+        </p>
+      ))}
+    </div>
+  );
+}
+
+/** The agents installed there and the MCP servers set up there, off one report. */
+function ReportLists({ report, ctx }: { report: AgentsReport; ctx: RowsContext }) {
+  const agents = AGENTS_KIND.items(report, ctx).filter(item => item.row.installed);
+  const servers = SERVERS_KIND.items(report, ctx);
+  // Each time a report stands, the servers kind asks what it checks there, as the manager's tab does.
+  const shown = useRef<() => void>(() => {});
+  shown.current = () => SERVERS_KIND.shown?.(servers, ctx);
+  useEffect(() => shown.current(), [report]);
+  const H = WHERE_WORDS.heads;
+  return (
+    <>
+      {agents.length === 0 ? null : <KindGrid id="agents" head={H.agents} lines={kindLines(AGENTS_KIND, agents, ctx, item => item.row.version)} />}
+      {servers.length === 0 ? null : <KindGrid id="servers" head={H.servers} lines={kindLines(SERVERS_KIND, servers, ctx, () => undefined)} />}
+    </>
+  );
+}
+
+/** What a computer reports of its agents and servers, read when its page opens. Every act is held with the page's
+ * away word while the computer is not answering, over the last report this window read. */
+function ComputerLists({ place, here, ctx }: { place: PlaceView; here: boolean; ctx: SettingsContext }) {
+  const target = { placeId: place.id };
+  const { report, error } = useAgentsReport(target);
+  const tools = useServerTools(target);
+  const acts = useAgentActs(target);
+  const servers = useServerActs(target);
+  const away = absentOf(place, ctx.now);
+  const misses = recipeMissLines(place.provision?.rows ?? []);
+  if (report === null) return <MissLines lines={[...misses, ...(error === null || away !== null ? [] : [{ id: "read-refused", label: error }])]} />;
+  const name = placeName(place);
+  const rows: RowsContext = {
+    where: here ? "here" : "box",
+    ...(here ? {} : { computer: name }),
+    on: name,
+    heldWhy: away?.away ?? null,
+    ...(report.reach === undefined ? {} : { reach: report.reach }),
+    ...(tools === undefined ? {} : { tools }),
+    ...(acts === undefined ? {} : { acts }),
+    ...(servers === undefined ? {} : { servers }),
+  };
+  return (
+    <>
+      <ReportLists report={report} ctx={rows} />
+      <MissLines lines={[...refusedLines(report.refused), ...misses]} />
+    </>
+  );
+}
+
+const RUNNING_HERE = new Set([WORKING.id, NEEDS_YOU.id]);
+
+/** The threads running or asking on the workspaces this row holds, newest first: running here is what the head says,
+ * so a finished thread leaves it. */
+export function threadsHere(projects: ReadonlyArray<SidebarProjectSnapshot>, places: readonly PlaceView[], place: PlaceView) {
+  return projects
+    .filter(runs => placeOf(places, runs.workspace)?.id === place.id)
+    .flatMap(runs => runs.threads.filter(thread => RUNNING_HERE.has(threadStatusOf(thread).id)).map(thread => ({ thread, place: runs.workspace.project.name })))
+    .sort((a, b) => Date.parse(b.thread.startedAt ?? "") - Date.parse(a.thread.startedAt ?? "") || 0);
+}
+
+function ThreadsHere({ place, ctx }: { place: PlaceView; ctx: SettingsContext }) {
+  const rows = threadsHere(useSidebarProjects(), ctx.places, place);
+  if (rows.length === 0) return null;
+  return (
+    <Grid id="threads-here">
+      <GridHead cells={[{ word: WHERE_WORDS.heads.threadsHere }]} />
+      {rows.map(row => (
+        <ThreadRow key={row.thread.id} {...row} />
+      ))}
+    </Grid>
+  );
+}
+
+/** Remove at the foot, a tall line with what it takes: wsp comes off a computer, and a cloud's machines go with its key. */
+function RemoveLine({ place, ctx, onRemoved }: { place: PlaceView; ctx: SettingsContext; onRemoved: () => void }) {
   const threadsOf = (workspaceId: string): number => ctx.sessions[workspaceId]?.length ?? 0;
   const holding = holdingsFor(ctx.places, ctx.workspaces, threadsOf, id => ctx.statuses[id] ?? null)[place.id] ?? NOTHING_HELD;
+  const cloud = isProviderPlace(place);
+  const imageBytes = cloud || ctx.reads.image === null ? undefined : copyOn(ctx.reads.image.copies, place)?.sizeBytes;
+  const name = placeName(place);
+  const note = cloud ? WHERE_WORDS.removeCloudDescription : WHERE_WORDS.removeDescription(name, hereName(ctx.places));
+  return (
+    <div data-k="remove-line" className="-mx-2 flex min-h-11 items-center justify-between gap-3 rounded-lg p-2">
+      <span className="flex min-w-0 flex-col">
+        <span className="text-sm leading-5 text-foreground">{WHERE_WORDS.removeTitle(name)}</span>
+        {note === "" ? null : (
+          <span data-k="remove-note" className="text-[11px] leading-[14px] text-muted-foreground">
+            {note}
+          </span>
+        )}
+      </span>
+      <RemoveControl place={place} holding={holding} imageBytes={imageBytes} onRemoved={onRemoved} />
+    </div>
+  );
+}
+
+/** One computer's or cloud's own page. A cloud keeps no computer to read: its agents are the image's, and every word
+ * about the image stands under the rule the cloud's key does, since a cloud row drawn for a workspace alone is a
+ * machine somebody else's key made. */
+export function ComputerPage({ place, ctx }: { place: PlaceView; ctx: SettingsContext }) {
+  const here = place.id === HERE_PLACE_ID;
+  const cloud = isProviderPlace(place);
+  const name = placeName(place);
+  const held = !cloud || keyHeld(place.name, ctx.reads.setup);
+  const standing = useImageStanding(place, ctx);
+  const image = cloud && held ? (ctx.reads.image?.image ?? null) : null;
   // After the dialog has closed: the page under it goes with the computer, and a portal torn down with its page
   // in one frame is a node React cannot find.
   const onRemoved = (): void => void setTimeout(() => ctx.go({ kind: "group", group: "computers" }), 0);
-  const view = ctx.reads.image;
-  const image = useImageCard(place, ctx);
-  const imageCard: SettingsCardData[] = image === undefined ? [] : [image];
-  if (isProviderPlace(place)) return <Cards cards={cloudCards(ctx, place, view, imageCard, holding, onRemoved)} />;
-
-  // How long this host has not heard from it, and null while it is holding its link: a computer that is answering
-  // reads its facts plain, since nothing about them is stale.
-  const away = place.present === true ? null : awayMsOf(place, ctx.now);
-  // A cloud is no computer this host reaches, and this computer is reached by being here: the road reading is a
-  // joined computer's alone, and the Connection card stands or goes with it.
-  const road = here ? null : absentRoad({ name: place.name, road: place.road, awayMs: awayMsOf(place, ctx.now), dialled: place.dialled });
-  const took = place.dialled?.answered === true && place.dialled.roundTripMs !== undefined ? `, ${place.dialled.roundTripMs} ms` : "";
-  const copies = copiesWord(place, here);
-  const landing = landingOn(ctx, place);
-  const ports = landing === null ? "" : portsWord(landing.capabilities, undefined, placeName(place));
-  const spend = ctx.reads.spend.find(row => row.place === place.id);
-
-  const facts: SettingsItem[] = [
-    // Marked while the computer is not answering, the way the pane's OS row is: a person who cannot tell which of
-    // two screens is stale is the whole of what this line was reported for.
-    ...(place.os === undefined ? [] : [{ kind: "line" as const, id: "system", label: WHERE_WORDS.system, value: lastKnown(place.engine !== undefined && place.engine !== "none" ? `${place.os}, ${place.engine}` : place.os, away), hover: WHERE_WORDS.systemHover, attrs: { "data-k": "system" } }]),
-    ...(place.shape === undefined ? [] : [{ kind: "line" as const, id: "size", label: WHERE_WORDS.size, value: fmtSize(place.shape, placeCpuWord(place)), attrs: { "data-k": "size" } }]),
-    ...(place.diskFreeBytes === undefined ? [] : [{ kind: "line" as const, id: "disk-free", label: WHERE_WORDS.diskFree, value: fmtBytes(place.diskFreeBytes), attrs: { "data-k": "disk-free" } }]),
-    ...(here || place.joinedAt === undefined ? [] : [{ kind: "line" as const, id: "joined", label: WHERE_WORDS.joined, value: WHERE_WORDS.ago(offlineFor(ctx.now - Date.parse(place.joinedAt))), attrs: { "data-k": "joined" } }]),
-    ...(spend === undefined ? [] : [{ kind: "line" as const, id: "spend", label: WHERE_WORDS.spend, value: spendLine(spend), attrs: { "data-k": "spend" } }]),
-  ];
-  // The dial's answer replaces the description while it stands, one line with the whole on hover; a wsp that
-  // cannot dial says so there and draws no button. A refused dial goes under the card, whole and with its fix.
-  const answered = line ?? road?.refused ?? heldWhy ?? WHERE_WORDS.answeredDescription;
-  const connection: SettingsItem[] =
-    road === null
-      ? []
-      : [
-          ...(road.address === null ? [] : [{ kind: "row" as const, id: "address", title: WHERE_WORDS.address, description: road.dialsBack === null ? WHERE_WORDS.addressDescription : WHERE_WORDS.addressBackDescription(road.dialsBack), word: road.address, attrs: { "data-k": "address" } }]),
-          {
-            kind: "row" as const,
-            id: "answered",
-            title: WHERE_WORDS.answered,
-            description: answered,
-            word: `${road.answered}${took}`,
-            attrs: { "data-k": "answered" },
-            ...(dialRoad === undefined || heldWhy !== null ? {} : { control: <DialButton busy={busy} held={held} road={dialRoad} onDial={dial} /> }),
-          },
-        ];
-  const workspaceThere: SettingsItem[] = [
-    ...(copies === "" ? [] : [{ kind: "row" as const, id: "copies", title: WHERE_WORDS.copies, description: WHERE_WORDS.copiesDescription, word: copies, attrs: { "data-k": "copies" } }]),
-    ...(ports === "" ? [] : [{ kind: "row" as const, id: "ports", title: WHERE_WORDS.ports, description: WHERE_WORDS.portsDescription, word: ports, attrs: { "data-k": "ports" } }]),
-  ];
-  const running = threadsHere(ctx, place);
-  const imageBytes = ctx.reads.image === null ? undefined : copyOn(ctx.reads.image.copies, place)?.sizeBytes;
-  const cards: SettingsCardData[] = [
-    { id: "look", items: [{ kind: "row", id: "icon", title: WHERE_WORDS.icon, description: WHERE_WORDS.iconDescription, control: <ComputerIconSelect place={place} onChange={icon => ctx.setPreferences({ computerLook: { [place.id]: { icon } } })} /> }] },
-    ...(facts.length === 0 ? [] : [{ id: "facts", items: facts }]),
-    ...imageCard,
-    ...(connection.length === 0
-      ? []
-      : [{ id: "connection", head: WHERE_WORDS.connection, items: connection, ...(refused === null ? {} : { under: <RefusalSlot k="dial-refusal" said={refused.said} {...(refused.fix === undefined ? {} : { fix: refused.fix })} /> }) }]),
-    ...(workspaceThere.length === 0 ? [] : [{ id: "workspace-there", head: WHERE_WORDS.workspaceThere, items: workspaceThere }]),
-    { id: "agents", items: [], body: <ComputerAgents place={place} here={here} ctx={ctx} /> },
-    ...(running.length === 0
-      ? []
-      : [
-          {
-            id: "threads",
-            head: WHERE_WORDS.threadsHere,
-            items: [],
-            body: (
-              <div className={cn(CARD_SURFACE, "p-1.5")}>
-                <ThreadRows rows={running} />
-              </div>
-            ),
-          },
-        ]),
-    // This computer is the one nothing can be done to: it is the computer the host runs on.
-    ...(here
-      ? []
-      : [
-          {
-            id: "acts",
-            items: [
-              {
-                kind: "row" as const,
-                id: "update",
-                title: WHERE_WORDS.updateTitle(placeName(place)),
-                description: noUpdate ? `${WHERE_WORDS.updateDescription} ${WHERE_WORDS.updateHeld}` : WHERE_WORDS.updateDescription,
-                control: <UpdateControl place={place} held={noUpdate} />,
-              },
-              {
-                kind: "row" as const,
-                id: "remove",
-                title: WHERE_WORDS.removeTitle(placeName(place)),
-                description: WHERE_WORDS.removeDescription(placeName(place), hereName(ctx.places)),
-                control: <RemoveControl place={place} holding={holding} imageBytes={imageBytes} onRemoved={onRemoved} />,
-              },
-            ],
-          },
-        ]),
-  ];
-  return <Cards cards={cards} />;
+  return (
+    <>
+      <PageHead title={name} crumbs={<PageCrumbs group={PLACES_WORDS.section} page={name} onGroup={() => ctx.go({ kind: "group", group: "computers" })} />}>
+        <PlaceStateLine place={place} ctx={ctx} />
+      </PageHead>
+      {cloud ? image === null ? null : <ReportLists report={imageAgentsReport(image, place.id)} ctx={{ where: "provider", on: name, editImage: () => openImageRecipe(place.id) }} /> : <ComputerLists place={place} here={here} ctx={ctx} />}
+      {standing === undefined || !held ? null : <ImageCard place={place} name={standing.name} state={standing.state} view={standing.view} ctx={ctx} row />}
+      <ThreadsHere place={place} ctx={ctx} />
+      {here ? null : <RemoveLine place={place} ctx={ctx} onRemoved={onRemoved} />}
+    </>
+  );
 }
+
