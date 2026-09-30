@@ -217,6 +217,10 @@ mod tests {
         async fn on_path(&self, program: &str) -> Result<bool, OpError> {
             Here::new().on_path(program).await
         }
+
+        fn on_this_side(&self, folder: &Path) -> Option<crate::git::OnThisSide> {
+            Here::new().on_this_side(folder)
+        }
     }
 
     #[tokio::test]

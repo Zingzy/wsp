@@ -4,6 +4,7 @@
 //! passes a socket and nothing here binds anything but the address it was told.
 
 mod auth;
+mod beneath;
 mod bring_back;
 mod clock;
 mod door;
