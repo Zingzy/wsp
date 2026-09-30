@@ -270,7 +270,7 @@ import {
   type WorkspaceFrom,
 } from "@wsp/protocol";
 import { secretsOf } from "./adapters.js";
-import { accountRows, createPriceTable, createUsageLedger } from "./usage.js";
+import { accountOf, accountRows, createPriceTable, createUsageLedger, type Vaulted } from "./usage.js";
 
 // --- adapter port -------------------------------------------------------------
 
@@ -1346,7 +1346,8 @@ export interface LogUsageRow {
 const LOG_READ_EVERY_MS = 60_000;
 
 export interface UsageDoor {
-  used(q: { range: UsageRange; split: UsageSplit }): Promise<UsedAnswer>;
+  /** outside: count the rows read from this computer's agent logs, where the person has not turned that off. */
+  used(q: { range: UsageRange; split: UsageSplit; outside?: boolean }): Promise<UsedAnswer>;
   accounts(): Promise<AccountsAnswer>;
   /** A computer's readings over a range, off the daemon that kept them: this computer, a joined one, or a workspace's
    * own machine. A daemon that keeps none, or none yet, answers no points. */
@@ -8003,17 +8004,21 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** The computer a workspace runs on as the usage records key it: its place, this computer, or the provider it forks at. */
   const usageComputerOf = (r: WorkspaceRecord): string => r.place ?? (isLocalWorkspace(r) ? HERE_PLACE_ID : (r.provider ?? r.kind));
 
-  /** The sign-in a machine runs a harness with, as the usage records key it: the account the harness named, else the
-   * vault's token or key handed to every machine alike, else the login that computer keeps of its own. */
-  const usageAccountOf = (entry: LiveWorkspace, harness: string, named?: { id: string; label?: string }): { key: string; label: string } => {
-    if (named !== undefined) return { key: `${harness}:${named.id}`, label: named.label ?? named.id };
-    const agent = harnessCatalog(harness)?.label ?? harness;
-    const known = CATALOG_AGENTS.some(a => a.id === harness);
-    const secrets = known ? secretsOf(opts.vault?.() ?? {}, harness as ThreadAgent, moduleOf(entry.record.kind).loginStands(entry, harness)) : {};
-    if (secrets.oauthToken !== undefined) return { key: `${harness}:vault-token`, label: `your ${agent} sign-in` };
-    if (secrets.apiKey !== undefined) return { key: `${harness}:vault-key`, label: `your ${agent} key` };
-    return { key: `${harness}@${usageComputerOf(entry.record)}`, label: `${agent} on ${computerOf(entry)}` };
+  /** What the vault holds for an agent's sign-in, where the machine's own login does not stand in front of it. */
+  const vaultedFor = (agent: string, loginStands?: boolean): Vaulted => {
+    const secrets = CATALOG_AGENTS.some(a => a.id === agent) ? secretsOf(opts.vault?.() ?? {}, agent as ThreadAgent, loginStands) : {};
+    return secrets.oauthToken !== undefined ? "token" : secrets.apiKey !== undefined ? "key" : undefined;
   };
+
+  /** The sign-in a machine runs a harness with, as the usage records key and name it. */
+  const usageAccountOf = (entry: LiveWorkspace, harness: string, named?: { id: string; label?: string }) =>
+    accountOf({
+      agent: harness,
+      agentName: harnessCatalog(harness)?.label ?? harness,
+      ...(named !== undefined ? { named } : {}),
+      vaulted: vaultedFor(harness, moduleOf(entry.record.kind).loginStands(entry, harness)),
+      computer: { id: usageComputerOf(entry.record), name: computerOf(entry) },
+    });
 
   const runTurn = (t: {
     entry: LiveWorkspace;
@@ -8317,6 +8322,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
                 at: clock.now(),
                 agent: view.harness,
                 account: account.key,
+                accountLabel: account.label,
                 computer: usageComputerOf(entry.record),
                 project: entry.record.project,
                 ...((result.model ?? view.model) !== undefined ? { model: (result.model ?? view.model)! } : {}),
@@ -8340,7 +8346,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           turnAccount = event.limit.account ?? turnAccount;
           const account = usageAccountOf(entry, view.harness, turnAccount);
           void ledger
-            .limit({ key: account.key, agent: view.harness, label: account.label, computer: usageComputerOf(entry.record), limit: event.limit })
+            .limit({ key: account.key, agent: view.harness, label: account.label, road: account.road, computer: usageComputerOf(entry.record), limit: event.limit })
             .catch((e: unknown) => console.warn(`the limits of ${account.key} were not kept: ${e instanceof Error ? e.message : String(e)}`));
           return;
         }
@@ -10942,7 +10948,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const ledger = createUsageLedger({ store, clock, prices: () => prices.get() });
 
   /** A usage split value as a person reads it: the agent's name, the account's label, the computer's, the project's. */
-  const usageLabel = (places: readonly PlaceView[], limits: readonly { key: string; label: string }[]) => (split: UsageSplit, value: string): string => {
+  const usageLabel = (places: readonly PlaceView[], accounts: ReadonlyMap<string, string>) => (split: UsageSplit, value: string): string => {
     switch (split) {
       case "agent":
         return harnessCatalog(value)?.label ?? value;
@@ -10950,15 +10956,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         return value === "" ? "No project" : (projectsHeld.get(value)?.name ?? value);
       case "computer":
         return places.find(p => p.id === value)?.name ?? (value === HERE_PLACE_ID ? THIS_COMPUTER : value);
-      case "account": {
-        const read = limits.find(l => l.key === value)?.label;
-        if (read !== undefined) return read;
-        const [agent, rest] = value.includes("@") ? value.split("@") : value.split(":");
-        const name = harnessCatalog(agent ?? "")?.label ?? agent ?? value;
-        if (rest === "vault-token") return `your ${name} sign-in`;
-        if (rest === "vault-key") return `your ${name} key`;
-        return value.includes("@") ? `${name} on ${places.find(p => p.id === rest)?.name ?? (rest === HERE_PLACE_ID ? THIS_COMPUTER : (rest ?? value))}` : (rest ?? value);
-      }
+      case "account":
+        return accounts.get(value) ?? value;
       default: {
         const _exhaustive: never = split;
         return value;
@@ -10975,12 +10974,21 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     logsReadAt = clock.now();
     const here = [...projectsHeld.values()].filter(p => p.computer === HERE_PLACE_ID);
     const limits = await ledger.limits();
-    const rows = await opts.logUsage();
+    // A thread wsp ran here writes its transcript to the same logs, whether or not its turn filed a row.
+    await ready();
+    const threads = new Set([...sessions.values()].flatMap(s => (s.view.claudeSessionId !== undefined ? [s.view.claudeSessionId] : [])));
+    const rows = (await opts.logUsage()).filter(r => !threads.has(r.session));
+    const hereName = ((await placeDoor?.list(clock.now())) ?? []).find(p => p.id === HERE_PLACE_ID)?.name ?? THIS_COMPUTER;
+    // Work in a terminal here runs on this computer's own login: the account a turn here named, else the login itself.
+    const accountHere = (agent: string): { key: string; label: string } =>
+      limits.find(l => l.agent === agent && l.road === "named" && l.computers.includes(HERE_PLACE_ID)) ??
+      accountOf({ agent, agentName: harnessCatalog(agent)?.label ?? agent, vaulted: undefined, computer: { id: HERE_PLACE_ID, name: hereName } });
     await ledger.fileLogs(
       rows.map(r => ({
         at: r.at,
         agent: r.agent,
-        account: limits.find(l => l.agent === r.agent && l.computers.includes(HERE_PLACE_ID))?.key ?? `${r.agent}@${HERE_PLACE_ID}`,
+        account: accountHere(r.agent).key,
+        accountLabel: accountHere(r.agent).label,
         computer: HERE_PLACE_ID,
         project: (r.folder !== undefined ? here.find(p => underProject(r.folder!, p.path))?.id : undefined) ?? "",
         model: r.model,
@@ -10994,9 +11002,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   const usage: UsageDoor = {
     used: async q => {
-      await readLogs().catch((e: unknown) => console.warn(`this computer's agent logs were not read for usage: ${e instanceof Error ? e.message : String(e)}`));
+      const outside = q.outside === true && (await preferences.get()).usageLogs;
+      if (outside) await readLogs().catch((e: unknown) => console.warn(`this computer's agent logs were not read for usage: ${e instanceof Error ? e.message : String(e)}`));
       const places = (await placeDoor?.list(clock.now())) ?? [];
-      return ledger.used({ ...q, label: usageLabel(places, await ledger.limits()), outside: (await preferences.get()).usageLogs });
+      return ledger.used({ range: q.range, split: q.split, label: usageLabel(places, await ledger.accountLabels()), outside });
     },
     readings: async (target, range, origin) => {
       const to = clock.now();
@@ -11004,14 +11013,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const stepMs = READINGS_STEP_MS[range];
       const frame = { op: "sys.history", from, to, stepMs } as DaemonFrame;
       const read = async (ask: (frame: DaemonFrame) => Promise<Record<string, unknown>>): Promise<ReadingsAnswer> => {
-        try {
-          const reply = SysHistoryReply.parse(await ask(frame));
-          return { points: reply.points, stepMs: reply.stepMs, from, to };
-        } catch (e) {
-          // A daemon from before it kept readings has none to give: its chart reads empty, as a stopped one's does.
-          if (e instanceof DaemonRefusal && e.code === "unsupported") return { points: [], stepMs, from, to };
-          throw e;
-        }
+        const reply = SysHistoryReply.parse(await ask(frame));
+        return { points: reply.points, stepMs: reply.stepMs, from, to };
       };
       if ("workspaceId" in target) return withDaemon(await entryOf(target.workspaceId, origin), read);
       if (target.placeId === HERE_PLACE_ID) return overChannel(await channelOver(await localRoad(), THIS_COMPUTER, () => {}), read);
@@ -11020,7 +11023,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       return overChannel(onLink, read);
     },
     accounts: async () => {
-      const vault = opts.vault?.() ?? {};
       const places = (await placeDoor?.list(clock.now())) ?? [];
       // No report carries this computer's own sign-ins, so they are read off its agents; a read that fails lists none.
       const hereSignIns = await (opts.agentsReader?.read({ kind: "here" }, { latest: false }) ?? Promise.resolve(undefined)).then(
@@ -11037,10 +11039,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           places: listed,
           nameOf: id => places.find(p => p.id === id)?.name ?? (id === HERE_PLACE_ID ? THIS_COMPUTER : id),
           agentName: agent => harnessCatalog(agent)?.label ?? agent,
-          vaulted: agent => {
-            const secrets = CATALOG_AGENTS.some(a => a.id === agent) ? secretsOf(vault, agent as ThreadAgent) : {};
-            return secrets.oauthToken !== undefined ? "token" : secrets.apiKey !== undefined ? "key" : undefined;
-          },
+          vaulted: agent => vaultedFor(agent),
+          printsLimits: agent => CATALOG_AGENTS.find(a => a.id === agent)?.printsLimits === true,
         }),
       };
     },

@@ -214,7 +214,7 @@ export const PRIVACY_WORDS = {
   agentVersionsDescription: "wsp asks npm, GitHub and each agent's maker for every agent's newest version, once a day.",
   agentVersionsHeld: "Off on the host: WSP_UPDATE_CHECK is 0.",
   usageLogs: "Agent logs",
-  usageLogsDescription: (here: string): string => `Usage counts the work Claude Code, Codex and OpenCode logged on ${here === "" ? "this computer" : here} outside wsp. The logs are read there and never sent anywhere.`,
+  usageLogsDescription: (here: string): string => `Usage counts the work Claude Code, Codex and OpenCode logged on ${here === "" ? "this computer" : here} outside wsp. wsp reads the logs there and shows what they count on this page alone, never to an agent.`,
 } as const;
 
 /** Settings > Appearance's Notifications: the one switch over the sound a notification makes. */

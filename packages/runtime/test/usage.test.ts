@@ -134,15 +134,65 @@ describe("work done outside wsp", () => {
     // A log on this computer is work in a folder here, so it maps to this computer's projects alone.
     const here = await projectOn(rt, HERE_PLACE_ID);
     project = here.path;
-    const rows = (await rt.usage.used({ range: "day", split: "project" })).rows;
+    const rows = (await rt.usage.used({ range: "day", split: "project", outside: true })).rows;
     expect(rows.map(r => [r.label, r.tokens.input, r.outside])).toEqual([
       [here.name, 40, true],
       ["No project", 5, true],
     ]);
+    // Only a reader that asks for them gets them: the command line and its tool, whose answer an agent reads, never do.
+    expect((await rt.usage.used({ range: "day", split: "project" })).rows).toEqual([]);
     await rt.preferences.set({ usageLogs: false });
     const off = reads;
-    expect((await rt.usage.used({ range: "day", split: "project" })).rows).toEqual([]);
+    expect((await rt.usage.used({ range: "day", split: "project", outside: true })).rows).toEqual([]);
     expect(reads).toBe(off);
+  });
+});
+
+describe("work outside wsp on this computer", () => {
+  it("is filed under this computer's own login, not under the vault's token that a thread here ran on", async () => {
+    const backend = stubBackend();
+    rt = createRuntime({
+      backend,
+      store: memoryStore(),
+      adapters: { claude: turning({ status: "completed", text: "done", tokens: { input: 10, output: 1 } }, sessionId => [{ type: "limit", sessionId, limit: window }]) },
+      vault: () => OAUTH,
+      pricesFetch: async () => ({}),
+      local: fakeLocal(mkdtempSync(join(tmpdir(), "wsp-usage-local-"))),
+      logUsage: async () => [{ agent: "claude", session: "s-terminal", at: Date.now(), model: "claude-opus-5", folder: "/somewhere", tokens: { input: 7, output: 1, cached: 0, cacheWrite: 0, reasoning: 0 } }],
+    });
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "here" });
+    await (await rt.sessions.start(ws.id, { prompt: "go" })).finished;
+    const rows = (await rt.usage.used({ range: "day", split: "account", outside: true })).rows;
+    expect(rows.map(r => [r.key, r.label, r.tokens.input])).toEqual([
+      ["claude:vault-token", "your Claude Code sign-in", 10],
+      ["log:claude@here", expect.stringMatching(/^Claude Code on /), 7],
+    ]);
+  });
+});
+
+describe("a wsp thread's own transcript", () => {
+  it("is never filed as outside wsp, even from a turn that reported no tokens and so filed no row", async () => {
+    const backend = stubBackend();
+    backend.execImpl = tokenGuest;
+    const fixed: HarnessAdapterFactory = () => ({
+      steers: false,
+      start: options => {
+        const finished = (async () => {
+          const result: TurnResult = { status: "completed", text: "done" };
+          options.onEvent({ type: "session.start", sessionId: "sess-wsp", model: "claude-opus-5" });
+          options.onEvent({ type: "turn.done", sessionId: "sess-wsp", result });
+          options.onEvent({ type: "session.end", sessionId: "sess-wsp", exitCode: 0, sawResult: true });
+          return result;
+        })();
+        return { localId: "sess-wsp", finished, interrupt: async () => {} };
+      },
+    });
+    const row = (session: string) => ({ agent: "claude", session, at: Date.now(), model: "claude-opus-5", folder: "/somewhere", tokens: { input: 9, output: 1, cached: 0, cacheWrite: 0, reasoning: 0 } });
+    rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: fixed }, vault: () => OAUTH, pricesFetch: async () => ({}), logUsage: async () => [row("sess-wsp"), row("sess-mine")] });
+    const ws = await createOn(rt, { golden: "snap_g", name: "usage" });
+    await (await rt.sessions.start(ws.id, { prompt: "go" })).finished;
+    const rows = (await rt.usage.used({ range: "day", split: "agent", outside: true })).rows;
+    expect(rows.map(r => [r.key, r.tokens.input])).toEqual([["log:claude", 9]]);
   });
 });
 
@@ -174,8 +224,8 @@ describe("a computer's readings", () => {
     expect(frames.find(f => f["op"] === "sys.history")).toMatchObject({ op: "sys.history", from: answer.from, to: answer.to, stepMs: 1_800_000 });
   });
 
-  it("reads a daemon from before it kept readings as none, the chart's empty state", async () => {
-    const { rt, ws } = await readingsFrom(frame => (frame["op"] === "sys.history" ? { id: 1, ok: false, code: "unsupported", error: "sys.history is not in this daemon" } : { id: 1, ok: true }) as DaemonResponse);
-    expect((await rt.usage.readings({ workspaceId: ws.id }, "day")).points).toEqual([]);
+  it("hands on a daemon's refusal as it said it: one from before it kept readings names the op, and the page reads any refusal as no readings", async () => {
+    const { rt, ws } = await readingsFrom(frame => (frame["op"] === "sys.history" ? { id: 1, ok: false, error: "unknown op: sys.history" } : { id: 1, ok: true }) as DaemonResponse);
+    await expect(rt.usage.readings({ workspaceId: ws.id }, "day")).rejects.toThrow("unknown op: sys.history");
   });
 });

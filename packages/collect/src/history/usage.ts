@@ -173,12 +173,12 @@ const opencodeUsage: UsageReader = {
   },
 };
 
-/** Each agent this computer's logs are read for, and where its store is: the catalog's own history root for Claude
- * Code and Codex, and OpenCode's database in its state home. */
+/** Each agent this computer's logs are read for, and where its store is: the catalog's history root where its
+ * history carries the counts, else its usage log. */
 function readerOf(agent: AgentEntry): { reader: UsageReader; root: string } | undefined {
   if (agent.history?.format === "claude-jsonl") return { reader: claudeUsage, root: agent.history.root };
   if (agent.history?.format === "codex-rollout") return { reader: codexUsage, root: agent.history.root };
-  if (agent.id === "opencode") return { reader: opencodeUsage, root: `~/${agent.stateHome}/opencode.db` };
+  if (agent.usageLog?.format === "opencode-sqlite") return { reader: opencodeUsage, root: agent.usageLog.root };
   return undefined;
 }
 

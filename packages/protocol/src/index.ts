@@ -6191,7 +6191,8 @@ const RuntimeOp = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("cost.spend") }),
   // What was used over a range split one way, and what each account signed in anywhere may still use: two answers,
   // never one figure.
-  z.object({ id: reqId, op: z.literal("usage.used"), range: UsageRange, split: UsageSplit }),
+  /** outside: the rows read from this computer's agent logs, which only the person's own page asks for. */
+  z.object({ id: reqId, op: z.literal("usage.used"), range: UsageRange, split: UsageSplit, outside: z.boolean().optional() }),
   z.object({ id: reqId, op: z.literal("usage.accounts") }),
   // A computer's readings over a range, off its daemon: this computer, a joined one, or a workspace's own machine.
   z.object({ id: reqId, op: z.literal("places.readings"), placeId: z.string().optional(), workspaceId: z.string().optional(), range: UsageRange }),

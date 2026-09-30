@@ -22,6 +22,7 @@ export const OPENCODE: AgentEntry = {
   installRoad: { road: "npm", package: "opencode-ai", version: "1.18.27" },
   latest: { from: "npm", package: "opencode-ai" },
   signIn: SIGN_IN_ROWS.opencode,
+  usageLog: { format: "opencode-sqlite", root: "~/.local/share/opencode/opencode.db" },
   // https://opencode.ai/docs/mcp-servers/ (project scope is a repo's opencode.json)
   mcp: { format: OPENCODE_JSON, files: ["~/.config/opencode/opencode.json", "~/.config/opencode/opencode.jsonc"], projectFiles: ["opencode.json", "opencode.jsonc"], scope: "user scope", login: OPENCODE_MCP_LOGIN },
   configPaths: [

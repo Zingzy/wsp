@@ -995,7 +995,7 @@ export function makeApi(c: ProtocolClient): Api {
     costHistory: async workspaceId => WorkspaceCostEvent.array().parse((await c.request<{ points?: unknown }>("cost.history", { workspaceId })).points),
     // Parsed, not trusted: a figure a person reads as money is a figure the wire type vouched for.
     spend: async () => PlaceSpend.array().parse((await c.request<{ places?: unknown }>("cost.spend")).places),
-    usageUsed: async (range, split) => UsedAnswer.parse((await c.request<{ used?: unknown }>("usage.used", { range, split })).used),
+    usageUsed: async (range, split) => UsedAnswer.parse((await c.request<{ used?: unknown }>("usage.used", { range, split, outside: true })).used),
     usageAccounts: async () => AccountsAnswer.parse(await c.request<unknown>("usage.accounts")),
     placesReadings: async (placeId, range) => ReadingsAnswer.parse(await c.request<unknown>("places.readings", { placeId, range })),
     // Parsed, not trusted: the lineage renders and forks only snapshots the wire type vouches for.

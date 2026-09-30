@@ -4,7 +4,7 @@
 // limit and a reset are read in.
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { dayKeyOf, LIMIT_KINDS, limitKindOfMinutes, parseRateTable, priceOf, resetsWord, USAGE_WORDS } from "../src/usage.js";
+import { dayKeyOf, LIMIT_KINDS, limitKindOfMinutes, parseRateTable, priceOf, resetsWord, usedPrice, USAGE_WORDS } from "../src/usage.js";
 
 const PRICES: unknown = JSON.parse(readFileSync(new URL("./fixtures/litellm-prices.json", import.meta.url), "utf8"));
 
@@ -85,5 +85,15 @@ describe("a limit's windows and words", () => {
       unread: "not read yet: runs a thread first",
       reached: "limit reached",
     });
+  });
+});
+
+describe("a used row's price", () => {
+  it("says not priced wherever some of its tokens had no price, beside whatever figure the rest came to", () => {
+    expect(usedPrice({ costList: 1.5, priced: false })).toEqual({ figure: "$1.50", word: USAGE_WORDS.notPriced });
+    expect(usedPrice({ costReported: 0.4, priced: false })).toEqual({ figure: "$0.40", word: USAGE_WORDS.notPriced });
+    expect(usedPrice({ priced: false })).toEqual({ word: USAGE_WORDS.notPriced });
+    expect(usedPrice({ costList: 1.5, priced: true })).toEqual({ figure: "$1.50", word: USAGE_WORDS.listPrice });
+    expect(usedPrice({ costReported: 0.4, priced: true })).toEqual({ figure: "$0.40" });
   });
 });

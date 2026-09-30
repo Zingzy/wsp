@@ -791,14 +791,14 @@ export function makeRuntime(
     // Read at every launch, never copied: a token minted after this host started is in the next turn, and nothing
     // of it is written to a machine.
     vault: () => vaultNow(statePath),
-    // What this computer's agents used outside wsp, off their own logs here, counts and a model name alone; the cache
-    // beside the state file keeps a daily read to the files that changed.
     // LiteLLM's price table off GitHub, once a day, nothing sent: the one read the usage ledger makes of the network.
     pricesFetch: async () => {
       const res = await fetch(PRICES_URL, { signal: AbortSignal.timeout(30_000) });
       if (!res.ok) throw new Error(`GitHub answered ${res.status}`);
       return (await res.json()) as unknown;
     },
+    // What this computer's agents used outside wsp, off their own logs here, counts and a model name alone, read at
+    // most once a minute; the cache beside the state file keeps each read to the files that changed.
     logUsage: () => readLogUsage(nodeHost(), CATALOG_AGENTS, { cache: fileUsageCache(join(dirname(statePath), "usage-cache.json")) }),
     // The same vault stands behind the sign-in word of an agent whose own login is not on the computer read.
     // Each agent's newest version is asked of its vendor from this host, never from a machine, and kept a day.

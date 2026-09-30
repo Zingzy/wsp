@@ -5,7 +5,6 @@
 // still use. Also the rate table the ledger prices bare tokens off.
 import {
   AccountLimit,
-  LIMIT_AGENTS,
   PRICES_TTL_MS,
   USAGE_WORDS,
   RANGE_DAYS,
@@ -14,6 +13,7 @@ import {
   hourOf,
   parseRateTable,
   priceOf,
+  type AccountRoad,
   type AccountRow,
   type AgentSignInState,
   type HarnessLimit,
@@ -33,6 +33,7 @@ const USAGE_DAYS = "usage-days";
 /** The days the ledger holds, which is what retention reads: a store has no listing of its blobs. */
 const USAGE_INDEX = "usage-index";
 const LIMITS = "limits";
+const ACCOUNT_LABELS = "usage-accounts";
 const PRICES = "prices";
 
 /** The documents of the ledger kept, a day each. */
@@ -46,6 +47,8 @@ export interface UsageEntry {
   at: number;
   agent: string;
   account: string;
+  /** What the account reads as, kept beside its key so no reader takes the key apart. */
+  accountLabel: string;
   computer: string;
   project: string;
   model?: string;
@@ -69,6 +72,7 @@ export interface LimitReading {
   key: string;
   agent: string;
   label: string;
+  road: AccountRoad;
   computer: string;
   limit: HarnessLimit;
 }
@@ -82,6 +86,21 @@ export interface UsageLedger {
   days(): Promise<string[]>;
   limit(reading: LimitReading): Promise<void>;
   limits(): Promise<AccountLimit[]>;
+  /** Every account a row or a limit was filed under, by key, with what it reads as. */
+  accountLabels(): Promise<Map<string, string>>;
+}
+
+/** What the vault holds for an agent's sign-in: its token, its key, or nothing. */
+export type Vaulted = "token" | "key" | undefined;
+
+/** An account as the usage records key and name it, the one rule the ledger, the limits and the Usage page read: the
+ * account the harness named, else the vault's token or key handed to every computer alike, else the login that
+ * computer keeps of its own. */
+export function accountOf(o: { agent: string; agentName: string; named?: { id: string; label?: string }; vaulted: Vaulted; computer: { id: string; name: string } }): { key: string; label: string; road: AccountRoad } {
+  if (o.named !== undefined) return { key: `${o.agent}:${o.named.id}`, label: o.named.label ?? o.named.id, road: "named" };
+  if (o.vaulted === "token") return { key: `${o.agent}:vault-token`, label: `your ${o.agentName} sign-in`, road: "vault" };
+  if (o.vaulted === "key") return { key: `${o.agent}:vault-key`, label: `your ${o.agentName} key`, road: "vault" };
+  return { key: `${o.agent}@${o.computer.id}`, label: `${o.agentName} on ${o.computer.name}`, road: "own" };
 }
 
 /** The instant a zone's day began, for the day holding `at`. */
@@ -173,8 +192,16 @@ export function createUsageLedger(o: { store: Store; clock: Clock; timeZone?: st
     await o.store.put(USAGE_INDEX, "days", { days: kept });
   };
 
+  const nameAccounts = async (named: ReadonlyArray<{ key: string; label: string }>): Promise<void> => {
+    for (const { key, label } of new Map(named.map(n => [n.key, n])).values()) {
+      const held = (await o.store.get(ACCOUNT_LABELS, key)) as { label?: unknown } | undefined;
+      if (held?.label !== label) await o.store.put(ACCOUNT_LABELS, key, { key, label });
+    }
+  };
+
   const add = (entry: UsageEntry): Promise<void> =>
     inTurn(async () => {
+      await nameAccounts([{ key: entry.account, label: entry.accountLabel }]);
       const day = dayKeyOf(entry.at, zone);
       const held = (await readDay(day)) ?? { day, rows: [] };
       fold(held, entry);
@@ -183,6 +210,7 @@ export function createUsageLedger(o: { store: Store; clock: Clock; timeZone?: st
 
   const fileLogs = (entries: readonly UsageEntry[]): Promise<void> =>
     inTurn(async () => {
+      await nameAccounts(entries.map(e => ({ key: e.account, label: e.accountLabel })));
       const oldest = dayKeyOf(o.clock.now() - (keepDays - 1) * DAY, zone);
       const days = new Map<string, UsageDay>();
       for (const day of await index()) {
@@ -267,10 +295,12 @@ export function createUsageLedger(o: { store: Store; clock: Clock; timeZone?: st
       const plan = r.limit.plan ?? held?.plan;
       const status = r.limit.status ?? held?.status;
       const keyed = r.limit.keyed ?? held?.keyed;
+      await nameAccounts([{ key: r.key, label: r.label }]);
       const next: AccountLimit = {
         key: r.key,
         agent: r.agent,
         label: r.label,
+        road: r.road,
         ...(plan !== undefined ? { plan } : {}),
         windows: r.limit.windows.length > 0 || r.limit.keyed === true ? r.limit.windows : (held?.windows ?? []),
         ...(status !== undefined ? { status } : {}),
@@ -287,7 +317,16 @@ export function createUsageLedger(o: { store: Store; clock: Clock; timeZone?: st
       return parsed.success ? [parsed.data] : [];
     });
 
-  return { add, fileLogs, used, day: readDay, days: index, limit, limits };
+  const accountLabels = async (): Promise<Map<string, string>> => {
+    const labels = new Map<string, string>();
+    for (const raw of await o.store.list(ACCOUNT_LABELS)) {
+      const held = raw as { key?: unknown; label?: unknown };
+      if (typeof held.key === "string" && typeof held.label === "string") labels.set(held.key, held.label);
+    }
+    return labels;
+  };
+
+  return { add, fileLogs, used, day: readDay, days: index, limit, limits, accountLabels };
 }
 
 /** The rate table, read off LiteLLM's price file once a day and kept under the wsp home, so a host offline prices
@@ -341,11 +380,13 @@ export function accountRows(o: {
   nameOf: (placeId: string) => string;
   agentName: (agent: string) => string;
   /** What the vault holds for an agent: a token, a key, or nothing. */
-  vaulted: (agent: string) => "token" | "key" | undefined;
+  vaulted: (agent: string) => Vaulted;
+  /** Whether the agent prints its plan's limits in a turn, as the catalog says. */
+  printsLimits: (agent: string) => boolean;
 }): AccountRow[] {
   const rows = new Map<string, AccountRow>();
   const noteFor = (agent: string, keyed: boolean | undefined): AccountRow["note"] =>
-    keyed === true ? USAGE_WORDS.keyed : LIMIT_AGENTS.includes(agent) ? USAGE_WORDS.unread : USAGE_WORDS.noLimit;
+    keyed === true ? USAGE_WORDS.keyed : o.printsLimits(agent) ? USAGE_WORDS.unread : USAGE_WORDS.noLimit;
   for (const l of o.limits) {
     const read = l.windows.length > 0;
     rows.set(l.key, {
@@ -363,14 +404,10 @@ export function accountRows(o: {
     for (const [agent, state] of Object.entries(place.signIns ?? {})) {
       if (state === "none") continue;
       const held = state === "vault-key" ? o.vaulted(agent) : undefined;
-      const key = held !== undefined ? `${agent}:vault-${held}` : (o.limits.find(l => l.agent === agent && l.computers.includes(place.id))?.key ?? `${agent}@${place.id}`);
-      const row = rows.get(key) ?? {
-        key,
-        agent,
-        label: held === "token" ? `your ${o.agentName(agent)} sign-in` : held === "key" ? `your ${o.agentName(agent)} key` : `${o.agentName(agent)} on ${o.nameOf(place.id)}`,
-        computers: [],
-        note: noteFor(agent, held === "key"),
-      };
+      // A computer's own login is the account a turn there named, where one did.
+      const read = held === undefined ? o.limits.find(l => l.agent === agent && l.road !== "vault" && l.computers.includes(place.id)) : undefined;
+      const { key, label } = read ?? accountOf({ agent, agentName: o.agentName(agent), vaulted: held, computer: { id: place.id, name: o.nameOf(place.id) } });
+      const row = rows.get(key) ?? { key, agent, label, computers: [], note: noteFor(agent, held === "key") };
       const name = o.nameOf(place.id);
       if (!row.computers.includes(name)) row.computers = [...row.computers, name];
       rows.set(key, row);

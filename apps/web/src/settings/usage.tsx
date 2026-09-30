@@ -6,7 +6,7 @@
 // charts. The accounts and the tokens are two ledgers and are never summed.
 import { useEffect, useState, type ReactNode } from "react";
 import { agentName } from "@wsp/catalog";
-import { USAGE_WORDS, accountState, fmtMemGb, fmtTokens, isProviderPlace, resetsWord, usedPrice, type AccountRow, type AccountsAnswer, type LimitKind, type PlaceView, type ReadingsAnswer, type SysPoint, type UsageRange, type UsageSplit, type UsedAnswer } from "@wsp/protocol";
+import { USAGE_RANGES, USAGE_SPLITS, USAGE_WORDS, accountState, fmtMemGb, fmtTokens, isProviderPlace, resetsWord, usedPrice, type AccountRow, type AccountsAnswer, type LimitKind, type PlaceView, type ReadingsAnswer, type SysPoint, type UsageRange, type UsageSplit, type UsedAnswer } from "@wsp/protocol";
 import { ChartPlot, spanPoints } from "../components/machine/MachineSurface.js";
 import { HarnessMark } from "../components/chat/HarnessMark.js";
 import { SegmentedControl } from "../components/ui/segmented-control.js";
@@ -197,8 +197,8 @@ function AccountLine({ row, now }: { row: AccountRow; now: number }) {
   );
 }
 
-const RANGES = (["day", "week", "month"] as const).map(value => ({ value, label: W.ranges[value] }));
-const SPLITS = (["agent", "account", "computer", "project"] as const).map(value => ({ value, label: W.splits[value] }));
+const RANGES = USAGE_RANGES.map(value => ({ value, label: W.ranges[value] }));
+const SPLITS = USAGE_SPLITS.map(value => ({ value, label: W.splits[value] }));
 
 /** The ticks under the tokens chart: each hour's in a day's range every sixth, each day's in a week, every fifth day
  * in a month, placed where their point is. */

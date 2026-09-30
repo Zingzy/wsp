@@ -31,8 +31,6 @@ export const HarnessLimit = z.object({
 });
 export type HarnessLimit = z.infer<typeof HarnessLimit>;
 
-/** The agents whose harness prints its plan's limits in a turn; every other agent's row reads limit not available. */
-export const LIMIT_AGENTS: readonly string[] = ["claude", "codex"];
 
 /** A window's length in minutes as a limit kind: five hours is the session and seven days the week. */
 export function limitKindOfMinutes(minutes: number): LimitKind {
@@ -41,12 +39,18 @@ export function limitKindOfMinutes(minutes: number): LimitKind {
   return "month";
 }
 
+/** How a turn reached its account: one the harness named, the vault's token or key handed to every computer, or
+ * the login a computer keeps of its own. */
+export const AccountRoad = z.enum(["named", "vault", "own"]);
+export type AccountRoad = z.infer<typeof AccountRoad>;
+
 /** An account's limits as the host keeps them: the last reading any computer's turn gave, and every computer whose
  * turns ran on it. */
 export const AccountLimit = z.object({
   key: z.string(),
   agent: z.string(),
   label: z.string(),
+  road: AccountRoad.optional(),
   plan: z.string().optional(),
   windows: z.array(LimitWindow),
   status: LimitStatus.optional(),
@@ -242,12 +246,13 @@ export function asOfWord(readAt: number, now: number, timeZone?: string): string
   return `as of ${new Intl.DateTimeFormat("en-US", { weekday: "short", ...zone }).format(readAt)} ${time}`;
 }
 
-/** A used row's price as a row reads it: the figure, with list price where any of it came off the table, or not
- * priced where none could be; nothing where no turn carried a price at all. */
+/** A used row's price as a row reads it: the figure, with not priced where any of its tokens had no price, since
+ * the figure then leaves them out, else list price where any of it came off the table; nothing where no turn
+ * carried a price at all. */
 export function usedPrice(row: Pick<UsedRow, "costReported" | "costList" | "priced">): { figure?: string; word?: string } {
-  if (row.costReported === undefined && row.costList === undefined) return row.priced ? {} : { word: USAGE_WORDS.notPriced };
-  const figure = fmtCost((row.costReported ?? 0) + (row.costList ?? 0));
-  return row.costList !== undefined && row.costList > 0 ? { figure, word: USAGE_WORDS.listPrice } : { figure };
+  const word = !row.priced ? USAGE_WORDS.notPriced : row.costList !== undefined && row.costList > 0 ? USAGE_WORDS.listPrice : undefined;
+  const figure = row.costReported === undefined && row.costList === undefined ? undefined : fmtCost((row.costReported ?? 0) + (row.costList ?? 0));
+  return { ...(figure !== undefined ? { figure } : {}), ...(word !== undefined ? { word } : {}) };
 }
 
 /** A window as a row's cell: how much of it is used and when it starts again. */

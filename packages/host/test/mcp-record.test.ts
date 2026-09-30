@@ -538,7 +538,7 @@ const ANSWERED: Answered = {
             split: "agent",
             rows: [
               { key: "codex", label: "Codex \u0085 \"cli\"", tokens: { input: 1_500, output: 150, cached: 400 }, costList: 0.0123, priced: true },
-              { key: "log:claude", label: "Claude Code", tokens: { input: 7, output: 3, cached: 0 }, costReported: 0.5, priced: true, outside: true },
+              { key: "claude", label: "Claude Code", tokens: { input: 7, output: 3, cached: 0 }, costReported: 0.5, costList: 0.01, priced: false },
             ],
             series: [{ t: 1_790_640_000_000, tokens: 1_660 }],
             since: 1_790_640_000_000,

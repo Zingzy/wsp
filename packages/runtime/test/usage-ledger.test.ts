@@ -4,7 +4,7 @@
 // the rate table where no harness put a cost on them, and never added together.
 import { describe, expect, it } from "vitest";
 import { parseRateTable, type AgentSignInState, type HarnessLimit, type RateTable, type UsageSplit } from "@wsp/protocol";
-import { accountRows, createPriceTable, createUsageLedger, type UsageEntry } from "../src/usage.js";
+import { accountOf, accountRows, createPriceTable, createUsageLedger, type UsageEntry } from "../src/usage.js";
 import { memoryStore } from "../src/store.js";
 import { fakeClock } from "./fake-clock.js";
 
@@ -25,6 +25,7 @@ function ledger(start = NOON, table: RateTable = TABLE) {
 const turn = (o: Partial<UsageEntry> & { at: number }): UsageEntry => ({
   agent: "codex",
   account: "codex:acct_1",
+  accountLabel: "dev@example.com",
   computer: "here",
   project: "p_spoo",
   model: "gpt-5.5",
@@ -156,19 +157,19 @@ describe("what each account may still use", () => {
 
   it("keeps an account's last reading and every computer a reading came from, and never touches the ledger", async () => {
     const { usage, advance } = ledger();
-    await usage.limit({ key: "codex:acct_1", agent: "codex", label: "dev@example.com", computer: "here", limit: reading });
+    await usage.limit({ key: "codex:acct_1", agent: "codex", label: "dev@example.com", road: "named", computer: "here", limit: reading });
     advance(60_000);
-    await usage.limit({ key: "codex:acct_1", agent: "codex", label: "dev@example.com", computer: "pl_boat", limit: { ...reading, windows: [{ kind: "session", usedPercent: 55 }] } });
+    await usage.limit({ key: "codex:acct_1", agent: "codex", label: "dev@example.com", road: "named", computer: "pl_boat", limit: { ...reading, windows: [{ kind: "session", usedPercent: 55 }] } });
     expect(await usage.limits()).toEqual([
-      { key: "codex:acct_1", agent: "codex", label: "dev@example.com", plan: "plus", windows: [{ kind: "session", usedPercent: 55 }], status: "ok", readAt: NOON + 60_000, computers: ["here", "pl_boat"] },
+      { key: "codex:acct_1", agent: "codex", label: "dev@example.com", road: "named", plan: "plus", windows: [{ kind: "session", usedPercent: 55 }], status: "ok", readAt: NOON + 60_000, computers: ["here", "pl_boat"] },
     ]);
     expect(await usage.days()).toEqual([]);
   });
 
   it("keeps what a reading leaves out: the plan a later reading does not name stays", async () => {
     const { usage } = ledger();
-    await usage.limit({ key: "codex:acct_1", agent: "codex", label: "dev@example.com", computer: "here", limit: reading });
-    await usage.limit({ key: "codex:acct_1", agent: "codex", label: "dev@example.com", computer: "here", limit: { windows: [{ kind: "week", usedPercent: 3 }] } });
+    await usage.limit({ key: "codex:acct_1", agent: "codex", label: "dev@example.com", road: "named", computer: "here", limit: reading });
+    await usage.limit({ key: "codex:acct_1", agent: "codex", label: "dev@example.com", road: "named", computer: "here", limit: { windows: [{ kind: "week", usedPercent: 3 }] } });
     expect((await usage.limits())[0]).toMatchObject({ plan: "plus", windows: [{ kind: "week", usedPercent: 3 }] });
   });
 });
@@ -201,6 +202,23 @@ describe("the rate table", () => {
   });
 });
 
+describe("an account's key and label", () => {
+  const computer = { id: "here", name: "zingzy's MacBook Pro" };
+  it("names the account a harness named, else the vault's token or key, else the computer's own login", () => {
+    expect(accountOf({ agent: "codex", agentName: "Codex", named: { id: "maya@example.com" }, vaulted: "token", computer })).toEqual({ key: "codex:maya@example.com", label: "maya@example.com", road: "named" });
+    expect(accountOf({ agent: "claude", agentName: "Claude Code", vaulted: "token", computer })).toEqual({ key: "claude:vault-token", label: "your Claude Code sign-in", road: "vault" });
+    expect(accountOf({ agent: "claude", agentName: "Claude Code", vaulted: "key", computer })).toEqual({ key: "claude:vault-key", label: "your Claude Code key", road: "vault" });
+    expect(accountOf({ agent: "opencode", agentName: "OpenCode", vaulted: undefined, computer })).toEqual({ key: "opencode@here", label: "OpenCode on zingzy's MacBook Pro", road: "own" });
+  });
+
+  it("keeps the label each account was filed under, so an account split reads it and never takes the key apart", async () => {
+    const { usage } = ledger();
+    await usage.add(turn({ at: NOON, account: "codex:maya@example.com", accountLabel: "maya@example.com" }));
+    await usage.fileLogs([turn({ at: NOON, account: "claude@here", accountLabel: "Claude Code on zingzy's MacBook Pro", agent: "claude", source: "log" })]);
+    expect(Object.fromEntries(await usage.accountLabels())).toEqual({ "codex:maya@example.com": "maya@example.com", "claude@here": "Claude Code on zingzy's MacBook Pro" });
+  });
+});
+
 describe("the account rows", () => {
   const places: { id: string; name: string; signIns: Record<string, AgentSignInState> }[] = [
     { id: "here", name: "zingzy's MacBook Pro", signIns: { claude: "vault-key", codex: "signed-in", opencode: "signed-in" } },
@@ -208,11 +226,12 @@ describe("the account rows", () => {
     { id: "pl_spoo", name: "spoo", signIns: { claude: "signed-in", cursor: "none" } },
   ];
   const nameOf = (id: string): string => places.find(p => p.id === id)?.name ?? id;
+  const printsLimits = (agent: string): boolean => agent === "claude" || agent === "codex";
   const agentName = (agent: string): string => ({ claude: "Claude Code", codex: "Codex", opencode: "OpenCode" })[agent] ?? agent;
 
   it("lists the vault's token once across every computer it was handed to, a computer's own login apart, and the account a turn named across its computers", () => {
     const codex = { key: "codex:acct_7f3a", agent: "codex", label: "dev@example.com", plan: "plus", windows: [{ kind: "session" as const, usedPercent: 34 }], status: "ok" as const, readAt: NOON, computers: ["here", "pl_boat"] };
-    const rows = accountRows({ limits: [codex], places, nameOf, agentName, vaulted: agent => (agent === "claude" ? "token" : undefined) });
+    const rows = accountRows({ limits: [codex], places, nameOf, agentName, printsLimits, vaulted: agent => (agent === "claude" ? "token" : undefined) });
     expect(rows.map(r => [r.key, r.label, r.computers, r.note])).toEqual([
       ["claude@pl_spoo", "Claude Code on spoo", ["spoo"], "not read yet: runs a thread first"],
       ["claude:vault-token", "your Claude Code sign-in", ["zingzy's MacBook Pro", "Boat"], "not read yet: runs a thread first"],
@@ -224,7 +243,7 @@ describe("the account rows", () => {
 
   it("reads a vault key or a key a turn named as a sign-in with no plan window", () => {
     const keyed = { key: "claude@pl_spoo", agent: "claude", label: "spoo", windows: [], keyed: true, readAt: NOON, computers: ["pl_spoo"] };
-    const rows = accountRows({ limits: [keyed], places, nameOf, agentName, vaulted: agent => (agent === "claude" ? "key" : undefined) });
+    const rows = accountRows({ limits: [keyed], places, nameOf, agentName, printsLimits, vaulted: agent => (agent === "claude" ? "key" : undefined) });
     expect(rows.filter(r => r.agent === "claude").map(r => [r.key, r.label, r.note])).toEqual([
       ["claude@pl_spoo", "spoo", "no plan limit: signed in with a key"],
       ["claude:vault-key", "your Claude Code key", "no plan limit: signed in with a key"],

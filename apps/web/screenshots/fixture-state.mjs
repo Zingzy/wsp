@@ -951,8 +951,8 @@ const usageState = () => ({
   }),
   "usage-index": { days: { days: usageDays().map(d => d.day) } },
   limits: {
-    "claude@here": { key: "claude@here", agent: "claude", label: `Claude Code on ${THIS_COMPUTER}`, windows: [{ kind: "session", usedPercent: 100, resetsAt: Date.now() + 83 * 60_000 }, { kind: "week", usedPercent: 71, resetsAt: Date.now() + 4 * 86_400_000 }], status: "reached", readAt: Date.now() - 12 * 60_000, computers: [HERE] },
-    "codex:acct_7f3": { key: "codex:acct_7f3", agent: "codex", label: "maya@example.com", plan: "plus", windows: [{ kind: "session", usedPercent: 62, resetsAt: Date.now() + 150 * 60_000 }, { kind: "week", usedPercent: 18, resetsAt: Date.now() + 3 * 86_400_000 }], status: "ok", readAt: Date.now() - 20 * 60_000, computers: [HERE, "p_hetzner"] },
+    "claude@here": { key: "claude@here", agent: "claude", label: `Claude Code on ${THIS_COMPUTER}`, road: "own", windows: [{ kind: "session", usedPercent: 100, resetsAt: Date.now() + 83 * 60_000 }, { kind: "week", usedPercent: 71, resetsAt: Date.now() + 4 * 86_400_000 }], status: "reached", readAt: Date.now() - 12 * 60_000, computers: [HERE] },
+    "codex:acct_7f3": { key: "codex:acct_7f3", agent: "codex", label: "maya@example.com", road: "named", plan: "plus", windows: [{ kind: "session", usedPercent: 62, resetsAt: Date.now() + 150 * 60_000 }, { kind: "week", usedPercent: 18, resetsAt: Date.now() + 3 * 86_400_000 }], status: "ok", readAt: Date.now() - 20 * 60_000, computers: [HERE, "p_hetzner"] },
   },
 });
 

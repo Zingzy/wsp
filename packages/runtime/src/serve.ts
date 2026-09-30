@@ -1548,7 +1548,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
                 return;
               }
-              if (msg.op === "usage.used") send({ id: msg.id, ok: true, used: await rt.usage.used({ range: msg.range, split: msg.split }) });
+              if (msg.op === "usage.used") send({ id: msg.id, ok: true, used: await rt.usage.used({ range: msg.range, split: msg.split, ...(msg.outside !== undefined ? { outside: msg.outside } : {}) }) });
               else send({ id: msg.id, ok: true, ...(await rt.usage.accounts()) });
               return;
             case "places.readings": {
