@@ -59,7 +59,7 @@ import { SidebarCorner } from "./SidebarCorner.js";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./SidebarChrome.js";
 import { CreationTile, ThreadLaunchTile, ThreadTile, WorkspaceTile, type TilePlace } from "./ThreadTile.js";
 import { useLinkDowns } from "../terminal/paneWords.js";
-import { newThreadTitle, computerName, copyName, placeNames } from "./workspaceRows.js";
+import { newThreadTitle, computerName, computerOf, copyName, placeNames } from "./workspaceRows.js";
 import { CheckoutAsk, tileCheckout } from "./tileCheckout.js";
 import { restingAge } from "../components/status/restingAge.js";
 import { PROJECT_WORDS, SECTION_WORDS } from "./words.js";
@@ -299,7 +299,7 @@ export function WorkspaceSidebar() {
 
   /** Where a copy runs, as row one names it. */
   const linksDown = useLinkDowns();
-  const placeOf = (runs: SidebarProjectSnapshot): TilePlace => ({ projectId: runs.workspace.project.id, project: runs.workspace.project.name, computer: computerName(places, runs) });
+  const placeOf = (runs: SidebarProjectSnapshot): TilePlace => ({ projectId: runs.workspace.project.id, project: runs.workspace.project.name, computer: computerName(places, runs), at: computerOf(places, runs) });
 
   /** One tile's item with the tiles its agents opened under it. The first tile of a copy in the tree, a root or a
    * tile whose opener runs on another copy, carries every one of that copy's verbs after the thread's own. A tile's verbs reach
@@ -317,7 +317,7 @@ export function WorkspaceSidebar() {
     }
     const copyActions = above === runs.id ? [] : resolveActions(workspaceActions, workspaceTarget(runs.workspace, runs.status, places), verbs);
     const place = placeOf(runs);
-    const { branch, commit, pr, counts, why } = tileCheckout(runs, { attached: editorsAttached.has(runs.id) });
+    const checkout = tileCheckout(runs, { attached: editorsAttached.has(runs.id) });
     let tile: ReactNode;
     if (thread === null) {
       tile = (
@@ -325,11 +325,7 @@ export function WorkspaceSidebar() {
           rowId={item.id}
           name={copyName(places, runs)}
           place={place}
-          branch={branch}
-          commit={commit}
-          pr={pr}
-          counts={counts}
-          why={why}
+          checkout={checkout}
           depth={depth}
           active={selectedId === runs.id && selectedThreadId === null}
           renaming={renaming?.rowId === item.id}
@@ -352,11 +348,8 @@ export function WorkspaceSidebar() {
           thread={thread}
           {...(linksDown[thread.workspaceId] !== undefined ? { linkDown: linksDown[thread.workspaceId] } : {})}
           place={place}
-          branch={branch}
-          commit={commit}
-          pr={pr}
-          counts={counts}
-          why={why}
+          checkout={checkout}
+          model={thread.model === null ? null : catalog === null ? thread.model : (modelOf(catalog, modelPicks(thread.model).model)?.label ?? thread.model)}
           time={restingAge(thread)}
           depth={depth}
           active={(selectedId === thread.workspaceId && (selectedThreadId === null ? thread.threadId === null : selectedThreadId === thread.id)) || (selectedThreadId !== null && item.holds?.includes(selectedThreadId) === true)}

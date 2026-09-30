@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The sidebar of thread tiles in a real Chromium, on the wireframe page's
-// fixed store: every tile is 68 px and every one-line row (search, head, the
+// fixed store: every tile is 52 px and every one-line row (search, head, the
 // Settled fold) 36 at three sidebar widths and in the 390 px sheet; every row
 // and every status slot ends at one right edge; each child list steps 16 px in
 // and draws its rail the height of its item, stopping at the 15 px tick on the
@@ -48,7 +48,7 @@ const THEMES = ["dark", "light"] as const;
 const WIDTHS = [220, 256, 480] as const;
 const ONE_LINE = 36;
 /** A thread tile: three rows of 14, 18 and 14 px with 3 px between, 8 px in. */
-const TILE = 68;
+const TILE = 52;
 
 /** Every row of the sidebar by what it is, with its box and the box of the status slot on its first row. */
 interface RowRead {
@@ -117,7 +117,7 @@ describe.skipIf(renderSkipped !== undefined)("the sidebar of thread tiles laid o
     expect(slots.size, `slot edges at ${where}`).toBeLessThanOrEqual(1);
   };
 
-  it("every tile is 68 px and every one-line row 36 at 220, 256 and 480, every row and every slot ending at one x, each child 16 px in, in both themes", async () => {
+  it("every tile is 52 px and every one-line row 36 at 220, 256 and 480, every row and every slot ending at one x, each child 16 px in, in both themes", async () => {
     for (const theme of THEMES) {
       for (const width of WIDTHS) {
         await open("sidebar", theme, `&sidebar=${width}`);

@@ -161,8 +161,6 @@ export interface TurnChanges {
   readonly from: string;
   readonly to: string;
   readonly files: ReadonlyArray<TurnChangedFile>;
-  /** Another thread's turn ran in the same folder between the two snapshots. */
-  readonly shared: boolean;
 }
 
 /** One wsp session run is one turn; the chat's footer and folds read this. */

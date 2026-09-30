@@ -223,6 +223,19 @@ describe("the creation page", () => {
     expect(view.querySelector("[data-composer-folder]")!.getAttribute("data-composer-folder")).toBe("/root/spoo");
   });
 
+  it("names the computer the work lands on as the first item under the box, as the New thread row did before the send, with no picker", async () => {
+    const project = { id: "pr_box", name: "spoo", computer: "p_box", source: { kind: "folder", path: "/root/spoo" }, path: "/root/spoo", remote: "", defaultBranch: "main", memoryKey: "-", memoryDir: "/m", createdAt: "t" };
+    const box = { id: "p_box", kind: "computer", name: "box", label: "the box", default: false, present: true, takesForks: true, engine: "docker", shape: { cpu: 2, memMb: 4096 }, diskFreeBytes: 1024 ** 3 };
+    act(() => useStore.setState({ projects: [project], places: [box] } as never));
+    const view = await mount(making([], { name: "pricing page", project: "pr_box", where: "p_box" }));
+    const row = view.querySelector<HTMLElement>("[data-composer-checkout]")!;
+    const first = row.firstElementChild as HTMLElement;
+    expect(first.matches("[data-new-thread-where]")).toBe(true);
+    expect(first.textContent).toBe("the box");
+    expect(first.querySelector("[data-computer-glyph]")?.getAttribute("data-computer-glyph")).toBe("server");
+    expect(first.closest("button")).toBeNull();
+  });
+
   it("names what it is making, in flight and refused, and never says task or workspace", async () => {
     let view = await mount(making([], { workspaceId: null }));
     expect(view.textContent).not.toMatch(/\b(tasks?|workspaces?)\b/i);

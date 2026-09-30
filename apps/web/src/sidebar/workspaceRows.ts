@@ -40,10 +40,13 @@ export function branchLine(project: Pick<SidebarProjectSnapshot, "workspace">): 
 /** The fuller reading of computerName, for the pane that has a whole row for it: the name, then what that row is.
  * The computer the host runs on gets its name alone, being the one row a person needs no kind word for. */
 export function whereRuns(places: readonly PlaceView[], project: Pick<SidebarProjectSnapshot, "status" | "workspace">): string {
-  const at = placeOf(places, liveRecord(project));
+  const at = computerOf(places, project);
   const name = computerName(places, project);
   return at === undefined || isHere(at) ? name : `${name} (${PLACE_KIND_WORDS[at.kind]})`;
 }
+
+/** The row of the places list a workspace runs on, which its icon and its kind word are read off. */
+export const computerOf = (places: readonly PlaceView[], project: Pick<SidebarProjectSnapshot, "status" | "workspace">): PlaceView | undefined => placeOf(places, liveRecord(project));
 
 /** The workspace's record as the live status has it once one has arrived, kind read off the record. */
 const liveRecord = (project: Pick<SidebarProjectSnapshot, "status" | "workspace">) => ({ ...(project.status ?? project.workspace), kind: workspaceKind(project.workspace) });
@@ -70,6 +73,14 @@ export function useComputerName(workspaceId: string): string {
   const workspace = useWorkspace(workspaceId);
   const status = useStatus(workspaceId);
   return workspace === null ? workspaceId : computerName(places, { workspace, status });
+}
+
+/** The row of the places list a workspace runs on, by its id. */
+export function useComputer(workspaceId: string): PlaceView | undefined {
+  const places = usePlaces();
+  const workspace = useWorkspace(workspaceId);
+  const status = useStatus(workspaceId);
+  return workspace === null ? undefined : computerOf(places, { workspace, status });
 }
 
 /** The computer a project lives on, as the switcher and a project row name it: nothing for a project on the
