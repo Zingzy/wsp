@@ -66,8 +66,8 @@ themes Paper's until tuned.
 | `--input` / `--input-fill` | #1e1e1e / #101010 | #d4d4d8 / #ffffff | button and field edge and fill |
 | `--primary` | #346bf1 | #1b4ed8 | the one primary button, the focus ring |
 | `--warning` | #fe9a00 | #e17100 | a cloud's Full and At limit |
-| `--error-foreground` | #ff6467 | #c10007 | a refusal sentence, Remove inside a dialog |
-| `--success` | #00bc7d | #009966 | the sign-in dot on an agents panel row |
+| `--error-foreground` | #ff6467 | #c10007 | a refusal sentence, Remove inside a dialog, a diff count's deletions |
+| `--success` | #00bc7d | #009966 | the sign-in dot on an agents panel row, a diff count's additions |
 | `--sidebar` | #000000 | #fafafa | the sidebar |
 | `--sidebar-foreground` | #f1f3f7 | #27272a | tile titles |
 | `--sidebar-muted-foreground` | #a3a3a3 | #52525c | tile rows one and three, idle titles |
@@ -82,7 +82,10 @@ themes Paper's until tuned.
 
 Working is rose pink because orange is Claude Code's mark on the same row and
 blue is the primary (the owner's ruling, 2026-09-26). Nothing else is coloured
-at rest except a real brand or agent mark and a project's own glyph.
+at rest except a real brand or agent mark, a project's own glyph, and the
+line counts, whose additions are `--success` and deletions `--error-foreground`
+as in T3, one tone on the card under a reply, the Changes pane and the PR pane
+(2026-10-01).
 
 ### Spacing and pitch
 

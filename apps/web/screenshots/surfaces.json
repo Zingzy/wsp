@@ -1916,6 +1916,18 @@
       "settleMs": 800
     },
     {
+      "name": "reply-changes-many",
+      "at": "/",
+      "fixture": "replies",
+      "widths": [1440],
+      "reason": "The card is the transcript's width, 768px at most, so 1280 draws it as 1440 does; the card at 390 is shot in reply-changes.",
+      "steps": [
+        "row-id=thread:sweep"
+      ],
+      "wait": "changed-files-state",
+      "settleMs": 800
+    },
+    {
       "name": "composer-tasks",
       "at": "/",
       "fixture": "replies",

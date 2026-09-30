@@ -41,10 +41,10 @@ export const DiffStatLabel = memo(function DiffStatLabel(props: {
           className,
         )}
       >
-        <span aria-hidden="true" className="font-mono text-muted-foreground">
+        <span aria-hidden="true" className="font-mono text-success">
           +{formatCompactDiffCount(additions)}
         </span>
-        <span aria-hidden="true" className="font-mono text-muted-foreground">
+        <span aria-hidden="true" className="font-mono text-error-foreground">
           -{formatCompactDiffCount(deletions)}
         </span>
       </span>

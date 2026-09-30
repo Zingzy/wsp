@@ -1105,6 +1105,28 @@ const replies = () =>
           40,
         ],
         [
+          tileThread("sweep", "Rename the link store across the app", {
+            prompt: "rename LinkStore to Links everywhere it is used",
+            model: "claude-opus-5-5",
+            tokens: { ...REPLY_TOKENS, context: 96_400 },
+            reply: "Renamed across the API, the web app and the shared package; the suite passes.",
+            changes: {
+              from: "3".repeat(40),
+              to: "4".repeat(40),
+              files: [
+                ...Array.from({ length: 24 }, (_, n) => ({ path: `apps/api/src/links/route${n}.ts`, kind: "modified", additions: 6 + (n % 5), deletions: 4 + (n % 3) })),
+                ...Array.from({ length: 14 }, (_, n) => ({ path: `apps/web/src/links/Link${n}.tsx`, kind: "modified", additions: 3 + (n % 4), deletions: 2 })),
+                ...Array.from({ length: 8 }, (_, n) => ({ path: `packages/shared/src/store${n}.ts`, kind: n === 0 ? "added" : "modified", additions: 12, deletions: n === 0 ? 0 : 9 })),
+                { path: ".github/workflows/ci.yml", kind: "modified", additions: 1, deletions: 1 },
+                { path: "docs/links.md", kind: "modified", additions: 8, deletions: 8 },
+                { path: "CHANGELOG.md", kind: "modified", additions: 3, deletions: 0 },
+                { path: "README.md", kind: "modified", additions: 2, deletions: 2 },
+              ],
+            },
+          }),
+          30,
+        ],
+        [
           tileThread("tasks", "Pin the redirect order", {
             prompt: "pin the redirect order with a test and push it, as a list",
             model: "claude-opus-5-5",

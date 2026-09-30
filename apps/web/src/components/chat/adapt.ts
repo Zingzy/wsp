@@ -40,6 +40,4 @@ export interface TurnDiffFileChange {
 export interface TurnDiffSummary {
   readonly turnId: TurnId;
   readonly files: ReadonlyArray<TurnDiffFileChange>;
-  /** Another thread's turn ran in the same folder while this one did, so some of these files may be its. */
-  readonly shared: boolean;
 }

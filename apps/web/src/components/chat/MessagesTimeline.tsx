@@ -65,7 +65,6 @@ import { SubagentFoldRow } from "./SubagentFoldRow";
 import { ProposedPlanCard } from "./ProposedPlanCard";
 import { TimelineRuleLine } from "./TimelineRuleLine";
 import { ChangedFilesCard } from "./ChangedFilesTree";
-import { shouldAutoExpandChangedFiles } from "./changedFilesPresentation";
 import {
   CHAT_TIMELINE_ANCHOR_OFFSET,
   keepTimelineEndVisibleAfterOverlayGrowth,
@@ -156,7 +155,6 @@ export interface MachineWait {
 interface TimelineRowActivityState {
   isWorking: boolean;
   isPreparingWorktree: boolean;
-  latestTurnId: TurnId | null;
   machineWait: MachineWait | null;
 }
 
@@ -567,10 +565,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     () => ({
       isWorking,
       isPreparingWorktree,
-      latestTurnId: latestTurn?.turnId ?? null,
       machineWait,
     }),
-    [isWorking, isPreparingWorktree, latestTurn?.turnId, machineWait],
+    [isWorking, isPreparingWorktree, machineWait],
   );
 
   // Stable renderItem — no closure deps. Row components read shared state
@@ -1614,7 +1611,7 @@ function WorkGroupToggleTimelineRow({
   );
 }
 
-/** Owns the expand/collapse state for one turn's changed files,
+/** Owns the expand-all state for one turn's changed files,
  *  so toggling re-renders only this component, not the entire list. */
 const AssistantChangedFilesSection = memo(function AssistantChangedFilesSection({
   turnSummary,
@@ -1652,33 +1649,17 @@ function AssistantChangedFilesSectionInner({
   resolvedTheme: "light" | "dark";
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
 }) {
-  const activity = use(TimelineRowActivityCtx);
-  const isLatestTurn = activity.latestTurnId === turnSummary.turnId;
-  const [autoExpanded] = useState(() =>
-    shouldAutoExpandChangedFiles(checkpointFiles, isLatestTurn),
-  );
-  const [expanded, setExpanded] = useState(isLatestTurn && autoExpanded);
-  const [allDirectoriesExpanded, setAllDirectoriesExpanded] = useState(autoExpanded);
+  const [allDirectoriesExpanded, setAllDirectoriesExpanded] = useState(false);
 
   return (
-    <>
-      <ChangedFilesCard
-        turnId={turnSummary.turnId}
-        files={checkpointFiles}
-        expanded={expanded}
-        showCompactPreview={isLatestTurn}
-        allDirectoriesExpanded={allDirectoriesExpanded}
-        resolvedTheme={resolvedTheme}
-        onExpandedChange={setExpanded}
-        onToggleAllDirectories={() => setAllDirectoriesExpanded((current) => !current)}
-        onOpenTurnDiff={onOpenTurnDiff}
-      />
-      {turnSummary.shared ? (
-        <p className="mt-1.5 px-2 text-[11px] text-muted-foreground" data-changes-shared>
-          Includes changes from another thread in this copy
-        </p>
-      ) : null}
-    </>
+    <ChangedFilesCard
+      turnId={turnSummary.turnId}
+      files={checkpointFiles}
+      allDirectoriesExpanded={allDirectoriesExpanded}
+      resolvedTheme={resolvedTheme}
+      onToggleAllDirectories={() => setAllDirectoriesExpanded((current) => !current)}
+      onOpenTurnDiff={onOpenTurnDiff}
+    />
   );
 }
 
