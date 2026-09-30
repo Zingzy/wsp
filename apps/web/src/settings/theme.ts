@@ -52,15 +52,27 @@ export function useThemeEffect(): void {
   }, [theme, lightTheme, darkTheme, systemDark]);
 }
 
-/** The root's class while the record's transparency is off: the stylesheet takes every glass to its solid ground. */
+/** The root's class while the page draws no glass: the stylesheet takes every glass to its solid ground. */
 export const SOLID_CLASS = "solid";
 
-/** Mounted once beside the theme: the root carries the solid class while the record's transparency is off. */
-export function useTransparencyEffect(): void {
+/** The computer's Reduce transparency, as the page reads it. */
+export const REDUCED_TRANSPARENCY_QUERY = "(prefers-reduced-transparency: reduce)";
+
+/** Whether the page draws glass: the record's Transparency on, and the computer not asking for less of it. */
+export function useGlass(): boolean {
   const transparency = useStore(s => s.preferences.transparency);
+  const reduced = useMediaQuery(REDUCED_TRANSPARENCY_QUERY);
+  return transparency && !reduced;
+}
+
+/** Mounted once beside the theme: the root carries the solid class while the page draws no glass, and the desktop
+ * shell hears it, so the window draws its own glass only under a page that draws glass. */
+export function useTransparencyEffect(): void {
+  const glass = useGlass();
   useLayoutEffect(() => {
-    document.documentElement.classList.toggle(SOLID_CLASS, !transparency);
-  }, [transparency]);
+    document.documentElement.classList.toggle(SOLID_CLASS, !glass);
+    desktopBridge()?.setGlass?.(glass);
+  }, [glass]);
 }
 
 /** Mounted once beside the theme: the root's app and code font tokens follow the record's picks. */

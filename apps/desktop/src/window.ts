@@ -13,6 +13,16 @@ interface WindowFrame {
 
 const STOCK: WindowFrame = { options: { backgroundColor: "#09090b" } };
 
+/** The material a Mac window stands on while its page draws glass: macOS draws it once for the whole window. */
+const MAC_VIBRANCY = "sidebar";
+
+/** The window's own glass for what the page draws: macOS's material while the page draws glass, none while every
+ * surface is solid, and nothing to set where the platform has none. */
+export function vibrancyFor(platform: NodeJS.Platform, glass: boolean): typeof MAC_VIBRANCY | null | undefined {
+  if (platform !== "darwin") return undefined;
+  return glass ? MAC_VIBRANCY : null;
+}
+
 // The lights' ink measures 14px tall on screen and the header row is 52px; y 19 puts their centre on the row's, at 26,
 // and x 16 is where Finder puts them. No tabbingIdentifier: native tabs would take ctrl+tab and the digit chords at the
 // window level, and the page switches workspaces with them.
@@ -20,7 +30,7 @@ const MAC: WindowFrame = {
   options: {
     titleBarStyle: "hiddenInset",
     trafficLightPosition: { x: 16, y: 19 },
-    vibrancy: "sidebar",
+    vibrancy: MAC_VIBRANCY,
     visualEffectState: "followWindow",
     backgroundColor: "#00000000",
   },
