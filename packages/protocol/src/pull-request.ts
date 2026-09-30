@@ -230,7 +230,7 @@ export function conflictsPrompt(o: { base: string; branch: string; files: readon
  * not sent since an update from the base left nothing to fix. */
 export const FixOutcome = z.enum(["steered", "queued", "started", "updated"]);
 export type FixOutcome = z.infer<typeof FixOutcome>;
-export const FixResult = z.object({ outcome: FixOutcome, threadId: z.string().optional(), check: z.string().optional(), base: z.string(), agent: z.string().optional() });
+export const FixResult = z.object({ outcome: FixOutcome, threadId: z.string().optional(), check: z.string().optional(), child: z.string().optional(), base: z.string(), agent: z.string().optional() });
 export type FixResult = z.infer<typeof FixResult>;
 
 /** What a merge answers: merged now, or armed to merge once its checks pass, with the number and the method. */

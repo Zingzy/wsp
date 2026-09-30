@@ -940,6 +940,61 @@ const tileThread = (id, title, over = {}) => ({
 /** A copy on a branch, as the record keeps the copy it was made of. */
 const copyOn = (name, branch) => ({ road: "clonefile", path: join(HOME, "wsp-work", name), source: projectDest("spoo-landing"), base: "abc1234", branch, carried: "deps-and-config" });
 
+/** A lead on this computer and the threads its agent opened, each on a child copy of the same project on a branch of
+ * its own: what the lead's THREADS rows read as the tree of branches. The copies' folders are not made, so each row's
+ * branch is the one its copy record keeps, and the lead's is the branch it was cut from; the counts come from the
+ * stand-in gh's compare, a branch it answers 404 for being one the remote lacks. */
+const TREE_LEAD = {
+  id: "tree-lead",
+  prompt: "split the cart fixes across three helpers, then merge them into one pull request",
+  title: "Cart fixes, one helper each",
+  thought: "Three small fixes that touch different files: one child each, then merge them into my branch.",
+  tool: { name: "wsp", input: '{"tool":"new","count":3}', result: "rounding, coupons, totals" },
+  reply: "Three helpers are on it. I will merge each branch into mine as it lands and open one pull request.",
+  costUsd: 0.42,
+};
+const helper = (id, title, over = {}) => ({
+  ...spawned(
+    id,
+    { id, prompt: title.toLowerCase(), title, thought: "One file, then a commit on my own branch.", tool: { name: "Edit", input: '{"file_path":"src/cart/total.ts"}', result: "The file was updated." }, reply: "Done, committed on my branch and pushed.", costUsd: 0.2 },
+    "tree-lead",
+    "tree-lead",
+  ),
+  ...over,
+});
+const treeChild = (id, name, branch, extra = {}) =>
+  workspace(id, name, { machineId: `local-${name}`, project: "pr_tree-lab", copy: copyOn(`tree-lab-${name}`, branch), parentWorkspaceId: "ws_lead", parentThreadId: threadId("tree-lead"), rootThreadId: threadId("tree-lead"), base: "tree/lead", ...extra });
+const treeFixture = children =>
+  store({
+    projects: [project("tree-lab", HERE, 60 * 3)],
+    workspaces: [workspace("ws_lead", "cart fixes", { project: "pr_tree-lab", copy: copyOn("tree-lab-lead", "tree/lead"), base: "tree/lead", agents: { spawn: true, maxMachines: 5, maxDepth: 1 } }), ...children.map(c => c.workspace)],
+    ...merge(threadsOn("ws_lead", [[TREE_LEAD, 50]]), ...children.map(c => threadsOn(c.workspace.id, [[c.thread, c.minutes]]))),
+  });
+/** A child in each state the row draws before anything went wrong: working, quiet and ahead, merged, and not pushed. */
+const treeRows = () =>
+  treeFixture([
+    { workspace: treeChild("ws_rounding", "rounding", "fix/rounding"), thread: helper("rounding", "Round the cart total once", { status: "running" }), minutes: 6 },
+    { workspace: treeChild("ws_coupons", "coupons", "fix/coupons"), thread: helper("coupons", "Expire coupons at midnight"), minutes: 30 },
+    { workspace: treeChild("ws_totals", "totals", "fix/totals", { tree: { merged: { oid: "4b825dc", at: ago(20), head: "9daeafb" } } }), thread: helper("totals", "Show totals with tax"), minutes: 40 },
+    { workspace: treeChild("ws_badges", "badges", "fix/badges"), thread: helper("badges", "Badge the free shipping line"), minutes: 25 },
+  ]);
+/** A child whose merge into the lead stopped on conflicts, and one whose computer could not push its branch. */
+const treeConflict = () =>
+  treeFixture([
+    { workspace: treeChild("ws_header", "header", "fix/header", { tree: { conflicts: ["lead.txt", "src/cart/total.ts"] } }), thread: helper("header", "Rename the cart header"), minutes: 20 },
+    { workspace: treeChild("ws_badges", "badges", "fix/badges", { tree: { pushRefused: "this computer has no git credential for github.com, so nothing was pushed; sign gh in on it with gh auth login, then gh auth setup-git, then bring back again" } }), thread: helper("badges", "Badge the free shipping line"), minutes: 15 },
+  ]);
+/** What the stand-in gh's compare answers for the tree's branches against the lead's. */
+const TREE_COMPARES = {
+  "you/tree-lab": {
+    "fix/rounding": { ahead_by: 1, behind_by: 0, status: "ahead" },
+    "fix/coupons": { ahead_by: 2, behind_by: 0, status: "ahead" },
+    "fix/totals": { ahead_by: 0, behind_by: 1, status: "behind" },
+    "fix/badges": 404,
+    "fix/header": { ahead_by: 1, behind_by: 1, status: "diverged" },
+  },
+};
+
 /** The same sidebar with the person's marks on it: the relay pinned to the top, the paused fork's finish snoozed
  * out of the list, and the projects dragged into an order of their own. */
 const tilesMarked = () => tiles({ marked: true });
@@ -1227,6 +1282,8 @@ const FIXTURES = {
   changes: { build: macInUse, changes: ["spoo"] },
   "pull-request": { build: macInUse, changes: ["spoo"], pulls: "failed" },
   "pull-request-conflict": { build: macInUse, changes: ["spoo"], pulls: "conflict" },
+  tree: { build: treeRows, compares: TREE_COMPARES },
+  "tree-conflict": { build: treeConflict, compares: TREE_COMPARES },
   rewind: { build: rewind },
   replies: { build: replies },
 };
@@ -1239,6 +1296,9 @@ export function fixtureChanges(name, state) {
   const named = new Set(fixtureRow(name).changes ?? []);
   return Object.values(state.projects ?? {}).flatMap(p => (p.computer === HERE && named.has(p.name) ? [p.path] : []));
 }
+
+/** The branch compares a fixture's stand-in gh answers, by repository and head branch: none for every fixture that names none. */
+export const fixtureCompares = name => (name === undefined ? {} : (fixtureRow(name).compares ?? {}));
 
 /** The pull requests a fixture's stand-in gh answers for: none for every fixture that names none. */
 export const fixturePulls = name => {

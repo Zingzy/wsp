@@ -219,7 +219,8 @@
     "bring_back": "wsp bring back <workspace> [--title \"<title>\"] [--body \"<body>\"]",
     "commit": "wsp commit <workspace> [--message \"<message>\"] [--file <path>]...",
     "discard": "wsp discard <workspace> <path>",
-    "fix": "wsp fix <workspace> [--check \"<name>\"]",
+    "fix": "wsp fix <workspace> [--check \"<name>\" | --child <workspace>]",
+    "merge_in": "wsp merge in <lead> <child>",
     "merge": "wsp merge <workspace> [--method merge|squash|rebase] [--when-checks-pass]",
     "update": "wsp update <workspace>",
     "pause": "wsp pause <workspace>",
@@ -431,6 +432,8 @@
     "fixConflicts": "{name}: asked {agent} to fix the conflicts with {base}",
     "fixNothing": "{name}: updated from {base}, nothing to fix",
     "fixAgentDefault": "Claude Code",
+    "fixMergeChild": "{name}: asked {agent} to merge {child}",
+    "fixCheckOrChild": "name a failed check or a child to merge, not both",
     "merged": "{name}: merged #{number} ({method})",
     "mergeArmed": "{name}: #{number} merges when its checks pass",
     "updatedNone": "{name}: already has everything in {base}",
@@ -438,6 +441,10 @@
     "updatedMany": "{name}: updated from {base}, {count} commits",
     "updateConflicts": "{name}: conflicts with {base} in {files}",
     "updateConflictsJoin": ", ",
+    "mergedInOne": "{lead}: merged {branch} from {child}, 1 commit",
+    "mergedInMany": "{lead}: merged {branch} from {child}, {count} commits",
+    "mergeConflicts": "{lead}: conflicts with {branch} in {paths}",
+    "nothingToMerge": "{lead}: nothing to merge from {child}",
     "firstTurnFailed": "created {name} {id}; first turn failed: {failure}"
   }
 }

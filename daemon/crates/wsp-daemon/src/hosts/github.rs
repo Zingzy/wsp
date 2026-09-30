@@ -371,6 +371,25 @@ impl PullRequests for GitHub {
         words(&["api", &format!("repos/{repo}/compare/{}...{}", path_part(base), path_part(head_oid)), "--jq", ".behind_by"])
     }
 
+    fn compare_argv(&self, repo: &str, base: &str, head: &str) -> Vec<String> {
+        words(&["api", &format!("repos/{repo}/compare/{}...{}", path_part(base), path_part(head)), "--jq", "{ahead_by,behind_by,status}"])
+    }
+
+    fn read_compare(&self, stdout: &str) -> Option<(u64, u64, String)> {
+        #[derive(serde::Deserialize)]
+        struct Compared {
+            ahead_by: u64,
+            behind_by: u64,
+            status: String,
+        }
+        let read: Compared = serde_json::from_str(stdout.trim()).ok()?;
+        Some((read.ahead_by, read.behind_by, read.status))
+    }
+
+    fn not_found(&self, stderr: &str) -> bool {
+        stderr.contains("(HTTP 404)")
+    }
+
     fn page_argv(&self, repo: &str, number: u64) -> Vec<String> {
         words(&["pr", "view", &number.to_string(), "-R", repo, "--json", PAGE_FIELDS])
     }

@@ -7,8 +7,8 @@
 use std::path::Path;
 
 use wsp_frames::{
-    numbers, words, DaemonErrorCode, GitPrListReply, GitPrMergeReply, GitPrReply, GitPrViewReply, GitRepoReadReply, GitRunLogReply,
-    HostItem, HostItemKind, MergeMethod, PullRequest, PullRequestCheck, PullRequestState,
+    numbers, words, DaemonErrorCode, GitBranchCompareReply, GitPrListReply, GitPrMergeReply, GitPrReply, GitPrViewReply, GitRepoReadReply,
+    GitRunLogReply, HostItem, HostItemKind, MergeMethod, PullRequest, PullRequestCheck, PullRequestState,
 };
 
 use crate::git::Runs;
@@ -51,6 +51,12 @@ pub(crate) trait PullRequests: Sync {
     fn read_checks(&self, stdout: &str) -> Option<Vec<PullRequestCheck>>;
     /// The line that answers with how many commits the base has that the head lacks, as a bare number.
     fn behind_argv(&self, repo: &str, base: &str, head_oid: &str) -> Vec<String>;
+    /// The line that answers with how far one branch is from another, and the counts and word read off it: commits
+    /// the head has that the base lacks, the other way, and the host's word for the two.
+    fn compare_argv(&self, repo: &str, base: &str, head: &str) -> Vec<String>;
+    fn read_compare(&self, stdout: &str) -> Option<(u64, u64, String)>;
+    /// Whether a line refused because the host lacks what it named, off what the program said.
+    fn not_found(&self, stderr: &str) -> bool;
     /// The two lines a pull request's page is read from: its own JSON, and the comments left on its lines.
     fn page_argv(&self, repo: &str, number: u64) -> Vec<String>;
     fn line_comments_argv(&self, repo: &str, number: u64) -> Vec<String>;
@@ -206,6 +212,21 @@ async fn read_with<R: Runs>(
         pr.behind_base = if code == Some(0) { behind.trim().parse().ok() } else { None };
     }
     Ok(Some(pr))
+}
+
+/// How far a head branch is from a base branch as the host holds them; not pushed where the host lacks one of them,
+/// which for a lead's base that the host does hold is the head.
+pub(crate) async fn compare<R: Runs>(runner: &R, ask: &Ask<'_>, base: &str, head: &str) -> Result<GitBranchCompareReply, OpError> {
+    let (host, repo) = cli_for(runner, ask).await?;
+    let (code, stdout, stderr) = run_cli(runner, host, ask, &host.compare_argv(&repo, base, head)).await?;
+    if code != Some(0) {
+        if host.not_found(&stderr) {
+            return Ok(GitBranchCompareReply { pushed: false, ahead_by: None, behind_by: None, status: None });
+        }
+        return Err(refused_by(host, &stdout, &stderr));
+    }
+    let (ahead, behind, status) = host.read_compare(&stdout).ok_or_else(|| refused_by(host, &stdout, &stderr))?;
+    Ok(GitBranchCompareReply { pushed: true, ahead_by: Some(ahead), behind_by: Some(behind), status: Some(status) })
 }
 
 /// The pull request a branch or a number names, read in full.
@@ -488,6 +509,33 @@ mod tests {
         let ask = Ask { cwd: gh.path(), remote_url: "https://github.com/o/r" };
         open(&runner, &ask, "main", "work", Some("a title"), Some("a body")).await.unwrap();
         assert_eq!(argv_of(&gh)[1], ["pr", "create", "--base", "main", "--head", "work", "--title", "a title", "--body", "a body"]);
+    }
+
+    /// How far a child's branch is from its lead's, as the host holds them: one gh line naming the repository off the
+    /// remote and both branches percent-encoded into the path, a head the host lacks read as not pushed, and any
+    /// other refusal gh's own last line.
+    #[tokio::test]
+    async fn a_compare_is_one_gh_line_and_a_head_the_host_lacks_is_not_pushed() {
+        let ask = Ask { cwd: Path::new("/Users/p"), remote_url: "git@github.com:Zingzy/wsp.git" };
+        let runner = Recorded::new(&["gh"]).answering(vec![(0, "{\"ahead_by\":2,\"behind_by\":1,\"status\":\"diverged\"}\n")]);
+        let read = compare(&runner, &ask, "tree/lead", "child/one #2").await.unwrap();
+        assert_eq!(
+            read,
+            GitBranchCompareReply { pushed: true, ahead_by: Some(2), behind_by: Some(1), status: Some("diverged".to_owned()) }
+        );
+        let calls = runner.asked();
+        assert_eq!((calls.len(), calls[0].program.as_str(), calls[0].cwd.as_str()), (1, "gh", "/Users/p"));
+        assert_eq!(calls[0].args, ["api", "repos/Zingzy/wsp/compare/tree/lead...child/one%20%232", "--jq", "{ahead_by,behind_by,status}"]);
+        let runner = Recorded::new(&["gh"]).answering_said(vec![(1, "{\"message\":\"Not Found\"}", "gh: Not Found (HTTP 404)")]);
+        assert_eq!(
+            compare(&runner, &ask, "tree/lead", "child/one").await.unwrap(),
+            GitBranchCompareReply { pushed: false, ahead_by: None, behind_by: None, status: None }
+        );
+        let runner = Recorded::new(&["gh"]).answering_said(vec![(1, "", "gh: API rate limit exceeded (HTTP 403)")]);
+        assert_eq!(
+            compare(&runner, &ask, "tree/lead", "child/one").await.unwrap_err().message,
+            "gh said: gh: API rate limit exceeded (HTTP 403)"
+        );
     }
 
     /// The read the host asks on the Mac's own daemon: three gh lines, each naming the repository off the remote it

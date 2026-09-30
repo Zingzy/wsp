@@ -13,7 +13,7 @@ import { ReadBuffer, serializeMessage } from "@modelcontextprotocol/sdk/shared/s
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { CATALOG, THREAD_AGENTS } from "@wsp/catalog";
-import { type ProjectView, cloneIntoTakenLine, HERE_PLACE_ID, noProjectImageLine, projectImageInUseRefusal, projectImageRemoveNotice, projectImageRemovedLine, addedProjectLine, goneRoadRefusal, EMPTY_TASK_LINE, EXIT_CODES, NO_SUCH_TURN, noSuchProjectLine, noThreadTargetLine, ProjectGolden, Recipe, registeredLine, registerTakesNoConsentLine, threadOpenedLine, ThreadView, TURN_TOKEN_ENV, workspaceKind, WorkspaceView, type ExitClass } from "@wsp/protocol";
+import { type ProjectView, childStartedLine, cloneIntoTakenLine, HERE_PLACE_ID, noProjectImageLine, projectImageInUseRefusal, projectImageRemoveNotice, projectImageRemovedLine, addedProjectLine, goneRoadRefusal, EMPTY_TASK_LINE, EXIT_CODES, NO_SUCH_TURN, noSuchProjectLine, noThreadTargetLine, ProjectGolden, Recipe, registeredLine, registerTakesNoConsentLine, threadOpenedLine, ThreadView, TURN_TOKEN_ENV, workspaceKind, WorkspaceView, type ExitClass } from "@wsp/protocol";
 import { copyKey, createRuntime, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { localWiring, serve } from "../src/cli.js";
@@ -30,7 +30,8 @@ import { HERE } from "./recipe-fixture.js";
  * on, which is where a workspace that forks nothing lives. */
 const HERE_PLACE = hostname().toLowerCase();
 import { SEALED_GOLDEN } from "./sealed-golden.js";
-import { stubBackend, type StubBackend } from "./stub-backend.js";
+import { stubBackend, withDaemonRoads, type StubBackend } from "./stub-backend.js";
+import { branchDaemons } from "../../runtime/test/stub-backend.js";
 import { copyingFake, createOn, fakeDaemonStart, projectOn, CUT_LINE, EXPORT_SESSION, EXPORT_SOURCE, PAGE, captured, execGuest, exportGuest, launchedScripts, projectBundler, heldAgent, lastingAgent, scriptedAgent, doneOnlyAgent } from "./verbs-fixture.js";
 import { CLOUD_ON } from "../src/cloud.js";
 
@@ -99,7 +100,7 @@ describe("the MCP server over the host", () => {
     await store.put("goldens", copyKey("default", "default"), SEALED_GOLDEN);
     claude = scriptedAgent(prompt => (prompt === "die" ? "" : `re: ${prompt}`));
     codex = scriptedAgent(prompt => `codex: ${prompt}`);
-    rt = createRuntime({ backend, store, adapters: { claude: claude.adapter, codex: codex.adapter }, local: localWiring(join(dir, "user"), undefined, fakeDaemonStart, undefined, copyingFake()), placeLinks: placeWiring(statePath) });
+    rt = createRuntime({ backend, store, adapters: { claude: claude.adapter, codex: codex.adapter }, local: localWiring(join(dir, "user"), undefined, fakeDaemonStart, undefined, copyingFake()), placeLinks: placeWiring(statePath), daemonChannel: branchDaemons().open });
     handle = await serve(captured(), { port: 0, statePath, webDir, runtime: rt });
     // A workspace is one project's copy, so every call that makes one needs a project first; one project here, so
     // new takes the work alone.
@@ -144,7 +145,7 @@ describe("the MCP server over the host", () => {
   async function restartHost(adapters: Parameters<typeof createRuntime>[0]["adapters"]): Promise<void> {
     await handle?.close();
     handle = undefined;
-    rt = createRuntime({ backend, store, adapters, local: localWiring(join(dir, "user"), undefined, fakeDaemonStart, undefined, copyingFake()), placeLinks: placeWiring(statePath) });
+    rt = createRuntime({ backend, store, adapters, local: localWiring(join(dir, "user"), undefined, fakeDaemonStart, undefined, copyingFake()), placeLinks: placeWiring(statePath), daemonChannel: branchDaemons().open });
     vi.stubEnv("SOLARI_API_KEY", "slr_live_fake_mcp_key");
     handle = await serve(captured(), { port: 0, statePath, webDir: join(dir, "web"), runtime: rt });
     vi.stubEnv("SOLARI_API_KEY", "");
@@ -161,7 +162,7 @@ describe("the MCP server over the host", () => {
   it.runIf(CLOUD_ON)("offers the verbs as tools, each described", async () => {
     const c = await connect();
     const { tools } = await c.listTools();
-    expect(tools.map(t => t.name).sort()).toEqual(["agents", "agents_addtools", "bring_back", "commit", "computers", "delete", "discard", "exec", "export", "fix", "folders", "forget", "fork", "image", "image_build", "image_move", "image_remove", "merge", "new", "pause", "projects", "projects_add", "projects_remove", "rebuild", "recipe", "recipe_scan", "rename", "restart", "run", "send", "servers", "servers_add", "servers_disable", "servers_enable", "servers_remove", "servers_tools", "setup", "skills", "skills_add", "skills_disable", "skills_enable", "skills_remove", "skills_search", "skills_show", "snapshot", "stop", "terminal_config", "thread_allow", "thread_deny", "thread_forget", "thread_read", "thread_rename", "threads", "threads_wait", "update", "wake", "workspaces", "workspaces_agents"]);
+    expect(tools.map(t => t.name).sort()).toEqual(["agents", "agents_addtools", "bring_back", "commit", "computers", "delete", "discard", "exec", "export", "fix", "folders", "forget", "fork", "image", "image_build", "image_move", "image_remove", "merge", "merge_in", "new", "pause", "projects", "projects_add", "projects_remove", "rebuild", "recipe", "recipe_scan", "rename", "restart", "run", "send", "servers", "servers_add", "servers_disable", "servers_enable", "servers_remove", "servers_tools", "setup", "skills", "skills_add", "skills_disable", "skills_enable", "skills_remove", "skills_search", "skills_show", "snapshot", "stop", "terminal_config", "thread_allow", "thread_deny", "thread_forget", "thread_read", "thread_rename", "threads", "threads_wait", "update", "wake", "workspaces", "workspaces_agents"]);
     for (const name of ["agents", "skills", "servers"]) expect(Object.keys((tools.find(t => t.name === name)!.inputSchema as { properties: Record<string, unknown> }).properties).sort(), name).toEqual(["on", "workspace"]);
     expect(Object.keys((tools.find(t => t.name === "servers_tools")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["agent", "name", "on", "project", "refresh", "workspace"]);
     expect(Object.keys((tools.find(t => t.name === "folders")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["folder", "hidden", "on", "repos"]);
@@ -248,6 +249,7 @@ describe("the MCP server over the host", () => {
     const big = await call("new", { name: "big", size: "2x8" });
     expect(big.isError).toBe(false);
     expect(backend.machines.at(-1)!.spec).toMatchObject({ cpu: 2, memMb: 8192 });
+    withDaemonRoads(backend);
     const wide = await call("fork", { workspace: "big", name: "wide", size: "4x8" });
     expect(wide.isError).toBe(false);
     expect(backend.machines.at(-1)!.spec).toMatchObject({ cpu: 4, memMb: 8192 });
@@ -265,6 +267,7 @@ describe("the MCP server over the host", () => {
       if (spec.fromSnapshot !== undefined) throw Object.assign(new Error("Too many concurrent sessions"), { kind: "concurrency", status: 429 });
       return create(spec);
     };
+    withDaemonRoads(backend);
     const refused = await call("fork", { workspace: "first", name: "f2" });
     expect(refused).toMatchObject({ isError: true, text: "both machine slots are in use: first, t-cap. Pause one or wait for a nap." });
     expect((await rt.workspaces.list()).map(w => w.name).sort()).toEqual(["first", "t-cap"]);
@@ -321,15 +324,14 @@ describe("the MCP server over the host", () => {
     expect(inside.screen).toEqual({ streamUrl: `wss://stub/stream/${ws!.machineId}` });
     expect(inside.reach.url).toBe("http://127.0.0.1:1/?pt_token=stub-bearer");
 
-    const doors: [string, Record<string, unknown>][] = [
-      ["workspaces", {}],
-      ["rename", { workspace: "alpha", name: "beta" }],
-      ["fork", { workspace: "beta", name: "gamma" }],
-      ["pause", { workspace: "gamma" }],
-      ["wake", { workspace: "gamma" }],
-    ];
+    // The fork's source is one whose daemon answers: beta's route is the stub's, which nothing answers on.
+    withDaemonRoads(backend);
+    await call("new", { name: "delta" });
     const answers: [string, Called][] = [["new", opened]];
-    for (const [name, args] of doors) answers.push([name, await call(name, args)]);
+    for (const [name, args] of [["workspaces", {}], ["rename", { workspace: "alpha", name: "beta" }], ["fork", { workspace: "delta", name: "gamma" }]] as const) answers.push([name, await call(name, args)]);
+    // The fork's own road goes with it, so the pause and the wake below meet a machine with no daemon, as they did.
+    delete (backend.machines.at(-1) as { previewUrl?: unknown }).previewUrl;
+    for (const [name, args] of [["pause", { workspace: "gamma" }], ["wake", { workspace: "gamma" }]] as const) answers.push([name, await call(name, args)]);
     for (const [name, answered] of answers) {
       expect(answered.isError, name).toBe(false);
       expect(routeValues(answered.structured, name), name).toEqual([]);
@@ -338,7 +340,7 @@ describe("the MCP server over the host", () => {
     }
     // The words the table turns on are all still there, on the machine whose route the test minted.
     const { workspaces } = (await call("workspaces")).structured as { workspaces: { name: string; machineState: string; reach: Record<string, unknown> }[] };
-    expect(workspaces.map(w => w.name)).toEqual(["beta", "gamma"]);
+    expect(workspaces.map(w => w.name)).toEqual(["beta", "delta", "gamma"]);
     const listed = workspaces.find(w => w.name === "beta")!;
     expect([listed.machineState, listed.reach["state"]]).toEqual(["running", "unreachable"]);
   });
@@ -387,6 +389,7 @@ describe("the MCP server over the host", () => {
   it.runIf(CLOUD_ON)("fork makes a sibling from the source's golden version, by name or id, and a task opens its first thread", async () => {
     await call("new", { name: "alpha" });
     const [alpha] = await rt.workspaces.list();
+    withDaemonRoads(backend);
     const plain = await call("fork", { workspace: "alpha" });
     expect(plain.isError).toBe(false);
     const forks = (await rt.workspaces.list()).filter(w => w.id !== alpha!.id);
@@ -401,18 +404,20 @@ describe("the MCP server over the host", () => {
 
   it.runIf(CLOUD_ON)("fork with a task whose first turn fails names the minted workspace beside the reason, so a retry does not mint another", async () => {
     await call("new", { name: "alpha" });
+    withDaemonRoads(backend);
     const failed = await call("fork", { workspace: "alpha", name: "worker", task: "die" });
     const worker = (await rt.workspaces.list()).find(w => w.name === "worker")!;
     expect(worker).toMatchObject({ phase: "running" });
     expect(failed.isError).toBe(true);
     expect(failed.text).toBe(`created worker ${worker.id}; first turn failed: the harness died`);
-    expect(failed.structured).toEqual({ workspace: expect.objectContaining({ id: worker.id, name: "worker" }), failure: "the harness died" });
+    expect(failed.structured).toEqual({ workspace: expect.objectContaining({ id: worker.id, name: "worker" }), notice: childStartedLine("worker", "work"), failure: "the harness died" });
     expect((await rt.sessions.list(worker.id))[0]).toMatchObject({ startedBy: "agent", status: "failed" });
     expect((await rt.workspaces.list()).map(w => w.name)).toEqual(["alpha", "worker"]);
   });
 
   it.runIf(CLOUD_ON)("fork and run under an agent the host has no adapter for are refused naming the agents it has; no machine is minted or woken", async () => {
     await call("new", { name: "alpha" });
+    withDaemonRoads(backend);
     const refused = await call("fork", { workspace: "alpha", name: "worker", task: "hi", agent: "gpt9" });
     expect(refused).toEqual(failedWith('no adapter registered for harness "gpt9"; agents on this host: claude, codex. Name one of those with --agent.', "usage"));
     expect((await rt.workspaces.list()).map(w => w.name)).toEqual(["alpha"]);
@@ -430,6 +435,7 @@ describe("the MCP server over the host", () => {
     await call("pause", { workspace: "alpha" });
     for (const task of ["", " \n\t "]) {
       expect(await call("run", { workspace: "alpha", task })).toEqual(failedWith(`${EMPTY_TASK_LINE}. Put it in quotes after the flags.`, "usage"));
+      withDaemonRoads(backend);
       expect(await call("fork", { workspace: "alpha", name: "worker", task })).toEqual(failedWith(`${EMPTY_TASK_LINE}. Put it in quotes after the flags.`, "usage"));
       expect(await call("send", { thread: threadId, message: task })).toEqual(failedWith(`${EMPTY_TASK_LINE}. Put it in quotes after the flags.`, "usage"));
     }
@@ -626,6 +632,7 @@ describe("the MCP server over the host", () => {
     // A thread opens in the workspace's own project, which is what a workspace is a copy for.
     expect(claude.starts.map(s => s.cwd)).toEqual([alpha!.project.path]);
 
+    withDaemonRoads(backend);
     const forked = await call("fork", { workspace: "alpha", name: "worker", task: "build it", cwd: "/root/work/site" });
     expect(forked.isError).toBe(false);
     expect(claude.starts.at(-1)?.cwd).toBe("/root/work/site");
@@ -698,6 +705,7 @@ describe("the MCP server over the host", () => {
     const named = await call("send", { thread: threadId, message: "and now", access: "acceptEdits" });
     expect(named.isError).toBe(false);
     expect(claude.starts.at(-1)!.permissionMode).toBe(own);
+    withDaemonRoads(backend);
     const forked = await call("fork", { workspace: "alpha", name: "worker", task: "build it", model: "claude-sonnet-5", access: "bypassPermissions" });
     expect(forked.isError).toBe(false);
     expect(claude.starts.at(-1)).toMatchObject({ model: "claude-sonnet-5", permissionMode: "bypassPermissions" });
@@ -723,6 +731,7 @@ describe("the MCP server over the host", () => {
     const relative = await call("run", { workspace: "alpha", task: "look here", cwd: "packages/host" });
     expect(relative.isError).toBe(true);
     expect(relative.text).toContain('cwd is a path on the machine, absolute, and got "packages/host"');
+    withDaemonRoads(backend);
     const forked = await call("fork", { workspace: "alpha", name: "worker", task: "build it", cwd: "packages/host" });
     expect(forked.isError).toBe(true);
     expect(forked.text).toContain('cwd is a path on the machine, absolute, and got "packages/host"');
@@ -932,6 +941,7 @@ describe("the MCP server over the host", () => {
 
   it.runIf(CLOUD_ON)("fork with a task and notify me records the first turn's end in the new thread for the person", async () => {
     await call("new", { name: "alpha" });
+    withDaemonRoads(backend);
     const sent = await call("fork", { workspace: "alpha", name: "worker", task: "build it", notify: ["me"] });
     expect(sent.isError).toBe(false);
     const worker = (await rt.workspaces.list()).find(w => w.name === "worker")!;

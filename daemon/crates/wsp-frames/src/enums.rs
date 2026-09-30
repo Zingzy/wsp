@@ -42,6 +42,9 @@ pub enum DaemonErrorCode {
     /// No command line for the git host this remote names is on this computer, so the pull request waits; the push
     /// itself went through, which is why a client reads this as a note beside the push rather than as a failure.
     NoHostCli,
+    /// Git refused a fetch or a push for want of a credential on the computer it ran on: nothing moved, and the
+    /// fix is that computer's sign-in, which the lead's rows name beside the child whose push it stopped.
+    NoGitCredential,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]

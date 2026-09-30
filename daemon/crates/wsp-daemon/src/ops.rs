@@ -297,6 +297,9 @@ async fn handle_op(conn: &Arc<Conn>, ctx: &Arc<Ctx>, frame: &Value, id: Option<R
             | "git.prMerge"
             | "git.repoRead"
             | "git.update"
+            | "git.startOn"
+            | "git.branchCompare"
+            | "git.mergeIn"
             | "git.prList"
             | "git.discard"
             | "git.commit"
@@ -955,6 +958,36 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
             };
             answer(id, updated.await)
         }
+        DaemonOp::GitStartOn { cwd, branch, machine_id } => {
+            let put = async {
+                let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Works).await?;
+                git::write::start_on(&runner, &at, &branch).await
+            };
+            answer(id, put.await)
+        }
+        DaemonOp::GitBranchCompare { cwd, remote, base, head } => {
+            let read = async {
+                let (runner, _, at) = road(ctx, None, &cwd, Reads).await?;
+                hosts::compare(&runner, &hosts::Ask { cwd: &at, remote_url: &remote }, &base, &head).await
+            };
+            answer(id, read.await)
+        }
+        DaemonOp::GitMergeIn { cwd, branch, from, machine_id } => {
+            let merged = async {
+                // A copy's folder is fetched from only where both copies sit on the computer this daemon is, never
+                // inside a workspace, where no other copy is visible.
+                if from.is_some() && (machine_id.is_some() || ctx.options.kind != "local") {
+                    return Err(OpError::coded(DaemonErrorCode::Forbidden, words::MERGE_FROM_HERE_ONLY));
+                }
+                let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Works).await?;
+                let from = match from {
+                    Some(path) => Some(locate(ctx, &path).await?),
+                    None => None,
+                };
+                git::write::merge_in(&runner, &at, &branch, from.as_deref().and_then(Path::to_str)).await
+            };
+            answer(id, merged.await)
+        }
         DaemonOp::GitPrList { cwd, machine_id } => {
             let read = async {
                 let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Reads).await?;
@@ -1278,6 +1311,22 @@ mod tests {
         assert_eq!(reply_raw(&b, &scoped, "[1,2,3]").await["code"], "forbidden");
     }
 
+    /// A merge from a copy's folder is this computer's alone: a daemon of any other kind refuses it, and so does this
+    /// computer's own for a frame naming a workspace, whose git runs where no other copy is visible. Nothing is run.
+    #[tokio::test]
+    async fn a_merge_from_a_folder_is_refused_on_any_daemon_but_this_computers_own_and_for_a_workspace() {
+        let refused = json!({"id": 1, "ok": false, "code": "forbidden", "error": words::MERGE_FROM_HERE_ONLY});
+        let b = bench();
+        let (c, _rx) = conn(None);
+        let frame = json!({"id": 1, "op": "git.mergeIn", "cwd": ".", "branch": "child/one", "from": "."});
+        assert_eq!(reply(&b, &c, frame.clone()).await, refused);
+        let mut here = bench();
+        Arc::get_mut(&mut here.ctx).unwrap().options.kind = "local".to_owned();
+        let mut named = frame;
+        named["machineId"] = json!("wsp-a");
+        assert_eq!(reply(&here, &c, named).await, refused);
+    }
+
     #[tokio::test]
     async fn an_unknown_op_is_named_never_silent() {
         let b = bench();
@@ -1323,6 +1372,9 @@ mod tests {
             "git.prMerge",
             "git.repoRead",
             "git.update",
+            "git.startOn",
+            "git.branchCompare",
+            "git.mergeIn",
             "git.prList",
             "git.discard",
             "git.commit",

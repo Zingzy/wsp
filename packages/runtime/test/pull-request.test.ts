@@ -31,7 +31,7 @@ import type { DaemonChannel, DaemonChannelOptions } from "../src/daemon-channel.
 import { localExecStream } from "../src/local-exec.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { fakeClock } from "./fake-clock.js";
-import { copyingFake, createOn, projectOn, stubBackend, testPlatform, tokenGuest, type StubBackend } from "./stub-backend.js";
+import { copyingFake, createOn, projectOn, stubBackend, testPlatform, tokenGuest, withDaemonRoads, type StubBackend } from "./stub-backend.js";
 import { until } from "./until.js";
 
 const DAEMON_TOKEN = "cafef00d".repeat(3);
@@ -71,7 +71,11 @@ type Answer = (frame: Record<string, unknown>) => DaemonResponse;
 function fakeDaemons(o: { here?: Partial<Record<string, Answer>>; copy?: Partial<Record<string, Answer>> } = {}) {
   const frames: { road: "here" | "copy"; frame: Record<string, unknown> }[] = [];
   const here: Record<string, Answer> = { "git.prRead": () => ({ id: 1, ok: true, pr: open() }), ...o.here } as Record<string, Answer>;
-  const copy: Record<string, Answer> = { "git.status": () => STATUS, ...o.copy } as Record<string, Answer>;
+  const copy: Record<string, Answer> = {
+    "git.status": () => STATUS,
+    "git.startOn": f => ({ id: 1, ok: true, branch: String(f["branch"]), oid: "c0ffee" }) as DaemonResponse,
+    ...o.copy,
+  } as Record<string, Answer>;
   return {
     frames,
     ops: (road?: "here" | "copy") => frames.filter(f => road === undefined || f.road === road).map(f => f.frame["op"]),
@@ -158,7 +162,7 @@ async function withWorkspace(
   daemons: ReturnType<typeof fakeDaemons>,
   o: { adapters?: Record<string, HarnessAdapterFactory>; clock?: ReturnType<typeof fakeClock>["clock"]; daemonRoad?: boolean } = {},
 ): Promise<{ backend: StubBackend; id: string; name: string; remote: string }> {
-  const backend = stubBackend();
+  const backend = withDaemonRoads(stubBackend());
   backend.execImpl = tokenGuest;
   rt = createRuntime({
     backend,

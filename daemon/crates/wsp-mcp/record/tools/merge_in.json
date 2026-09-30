@@ -1,0 +1,128 @@
+{
+  "cloudOff": {
+    "name": "merge_in",
+    "description": "Merges a child workspace's branch into its lead's copy with a merge commit, so the lead's history shows each child landing: fetched from the project's remote, or from the child's own folder where the project has none and both copies sit on this computer. The lead is woken first where it sleeps. A lead with changes no commit holds is refused first with the files named, and a merge that conflicts is taken back at once and answered with the files, the lead's copy left exactly as it was; fix with child hands those to the lead's agent. Refused, naming the thread, while a turn runs on the lead in any thread but the asking one (a lead's thread merges from inside its own turn), for a workspace that is not the lead's child, and for a thread merging into any workspace but its own. Nothing is pushed.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "lead": {
+          "type": "string",
+          "description": "the workspace's name, or its id when two share a name"
+        },
+        "child": {
+          "type": "string",
+          "description": "the child workspace whose branch is merged in, by name or id"
+        }
+      },
+      "required": [
+        "lead",
+        "child"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "lead": {
+          "type": "string"
+        },
+        "child": {
+          "$ref": "#/properties/lead"
+        },
+        "branch": {
+          "$ref": "#/properties/lead"
+        },
+        "merged": {
+          "type": "boolean"
+        },
+        "commits": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "conflicts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/properties/lead"
+          }
+        }
+      },
+      "required": [
+        "lead",
+        "child",
+        "branch",
+        "merged",
+        "commits",
+        "conflicts"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  "cloudOn": {
+    "name": "merge_in",
+    "description": "Merges a child workspace's branch into its lead's copy with a merge commit, so the lead's history shows each child landing: fetched from the project's remote, or from the child's own folder where the project has none and both copies sit on this computer. The lead is woken first where it sleeps. A lead with changes no commit holds is refused first with the files named, and a merge that conflicts is taken back at once and answered with the files, the lead's copy left exactly as it was; fix with child hands those to the lead's agent. Refused, naming the thread, while a turn runs on the lead in any thread but the asking one (a lead's thread merges from inside its own turn), for a workspace that is not the lead's child, and for a thread merging into any workspace but its own. Nothing is pushed.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "lead": {
+          "type": "string",
+          "description": "the workspace's name, or its id when two share a name"
+        },
+        "child": {
+          "type": "string",
+          "description": "the child workspace whose branch is merged in, by name or id"
+        }
+      },
+      "required": [
+        "lead",
+        "child"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "lead": {
+          "type": "string"
+        },
+        "child": {
+          "$ref": "#/properties/lead"
+        },
+        "branch": {
+          "$ref": "#/properties/lead"
+        },
+        "merged": {
+          "type": "boolean"
+        },
+        "commits": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "conflicts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/properties/lead"
+          }
+        }
+      },
+      "required": [
+        "lead",
+        "child",
+        "branch",
+        "merged",
+        "commits",
+        "conflicts"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  }
+}
