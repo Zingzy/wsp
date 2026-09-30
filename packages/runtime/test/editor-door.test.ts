@@ -42,6 +42,7 @@ describe("the editor ops over the wire", () => {
     const asked: Parameters<HostEditor["open"]>[0][] = [];
     const editor: HostEditor = {
       list: async () => [{ id: "zed", name: "Zed" }],
+      remoteRefusal: async () => undefined,
       open: async req => {
         asked.push(req);
         return req.editor ?? ("zed" satisfies EditorId);
@@ -72,6 +73,36 @@ describe("the editor ops over the wire", () => {
       { path: "/root/wsp-boat/src/cart.ts", line: 12, inside: [], remote: { alias: "wsp-delete-compatibility-and-duplicates", folder: "/root/wsp-boat", name: "Delete compatibility and duplicates" } },
       { path: "/root/wsp-boat", inside: [], editor: "vscode", remote: { alias: "wsp-delete-compatibility-and-duplicates", folder: "/root/wsp-boat", name: "Delete compatibility and duplicates" } },
     ]);
+  });
+
+  /** A server whose fork is napped, recording in one list each step an open takes: the wake, the port, the launch. */
+  const napped = async (refusal?: string) => {
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {} });
+    const steps: string[] = [];
+    const asleep = { ...FORK, phase: "napping" } as WorkspaceView;
+    vi.spyOn(rt.workspaces, "get").mockImplementation(async () => asleep);
+    vi.spyOn(rt.workspaces, "wake").mockImplementation(async () => (steps.push("wake"), { ...FORK, phase: "running" } as WorkspaceView));
+    const ssh: HostSsh = { port: async () => (steps.push("port"), 51022), include: async () => true, setInclude: async on => on };
+    const editor: HostEditor = {
+      list: async () => [],
+      remoteRefusal: async () => refusal,
+      open: async req => (steps.push("launch"), req.editor ?? ("zed" satisfies EditorId)),
+    };
+    srv = await serveRuntime(rt, { port: 0, authToken: "t", editor, ssh });
+    return { port: srv.port, steps };
+  };
+
+  it("wakes a napped workspace before it asks for the port, as an ssh reconnect does, and only then launches", async () => {
+    const { port, steps } = await napped();
+    expect(await wsRequest(port, "t", { op: "editor.open", workspaceId: FORK.id, path: "/root/wsp-boat", editor: "zed" })).toMatchObject({ ok: true, editor: "zed" });
+    expect(steps).toEqual(["wake", "port", "launch"]);
+  });
+
+  it("refuses an editor that cannot open a remote before anything: no wake, no port, no launch", async () => {
+    const said = "VS Code Insiders has no Remote SSH extension, so it cannot open files on another computer; install it with code-insiders --install-extension ms-vscode-remote.remote-ssh";
+    const { port, steps } = await napped(said);
+    expect(await wsRequest(port, "t", { op: "editor.open", workspaceId: FORK.id, path: "/root/wsp-boat", editor: "vscode-insiders" })).toMatchObject({ ok: false, error: said });
+    expect(steps).toEqual([]);
   });
 
   it("asks for the one line in the person's ssh config before any ssh, and opens nothing until it stands", async () => {

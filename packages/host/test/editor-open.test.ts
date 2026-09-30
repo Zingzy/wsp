@@ -232,6 +232,16 @@ describe("opening a path inside a workspace on another computer", () => {
     expect(await host.open({ path: join(work, "src", "a.ts"), inside: [work], editor: "vscode-insiders" })).toBe("vscode-insiders");
   });
 
+  it("answers, before anything runs, the line open would refuse a remote with, and nothing for an editor that can open one", async () => {
+    const { host, ran } = mac(all, { ".vscode/extensions": ["ms-vscode-remote.remote-ssh"], ".vscode-insiders/extensions": [] });
+    expect(await host.remoteRefusal({ editor: "vscode", name: remote.name })).toBeUndefined();
+    expect(await host.remoteRefusal({ editor: "zed", name: remote.name })).toBeUndefined();
+    expect(await host.remoteRefusal({ editor: "vscode-insiders", name: remote.name })).toBe(remoteExtensionLine("VS Code Insiders", "code-insiders --install-extension ms-vscode-remote.remote-ssh"));
+    expect(await host.remoteRefusal({ editor: "webstorm", name: remote.name })).toBe(editorOpensHereLine("Cart rounding"));
+    expect(await host.remoteRefusal({ editor: "rider", name: remote.name })).toBe(editorMissingLine("Rider"));
+    expect(ran).toEqual([]);
+  });
+
   it("keeps the sentence for an editor with no remote road, and opens nothing outside the workspace's folder", async () => {
     const { host, ran } = mac(all, REMOTE_SSH);
     for (const editor of ["webstorm", "finder"] as const) await expect(host.open({ path: "/root/wsp-boat/a.ts", inside: [], editor, remote })).rejects.toThrow(editorOpensHereLine("Cart rounding"));
