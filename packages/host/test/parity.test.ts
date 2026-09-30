@@ -350,7 +350,7 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
   it("the Changes and Pull request panes' own ops that no verb sends say why they stay with the pane", () => {
     const verbs = readFileSync(new URL("../src/verbs.ts", import.meta.url), "utf8");
     const PANE_ONLY: Record<string, string> = {
-      "workspaces.checkout": "the branch line and the pull request word a tile reads, which the host pushes on every status; an agent reads its own with git and gh in its copy",
+      "workspaces.checkout": "the branch line and the pull request word a tile reads, and a lead's children with their branches, which the host pushes on every status; an agent reads its own with git and gh in its copy and its children with threads",
       "workspaces.pullRequestView": "the pull request's page the pane shows; an agent reads its pull request with gh in its copy",
       "workspaces.viewed": "a viewed mark is one person's place in a review; an agent reads the diff whole with git and marks nothing",
       "fs.write": "the pane's save of an edit made inside the diff; the command line reaches a file through wsp exec",

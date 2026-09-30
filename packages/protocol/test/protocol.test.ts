@@ -902,7 +902,7 @@ describe("runtime wire types", () => {
       "workspaces.commit", "workspaces.commitDraft", "workspaces.discard",
       // A fix starts the agent's turn and spends on a model, an update runs git in the copy, and a merge acts on the
       // git host as the person.
-      "workspaces.fix", "workspaces.update", "workspaces.merge",
+      "workspaces.fix", "workspaces.update", "workspaces.merge", "workspaces.mergeIn",
     ];
     for (const op of held) {
       expect(wire.RUNTIME_OPS, op).toContain(op);

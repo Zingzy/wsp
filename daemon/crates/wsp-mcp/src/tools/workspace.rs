@@ -84,6 +84,8 @@ pub struct Words {
     pub fix_conflicts: String,
     pub fix_nothing: String,
     pub fix_agent_default: String,
+    pub fix_merge_child: String,
+    pub fix_check_or_child: String,
     pub merged: String,
     pub merge_armed: String,
     pub updated_none: String,
@@ -91,6 +93,10 @@ pub struct Words {
     pub updated_many: String,
     pub update_conflicts: String,
     pub update_conflicts_join: String,
+    pub merged_in_one: String,
+    pub merged_in_many: String,
+    pub merge_conflicts: String,
+    pub nothing_to_merge: String,
     pub first_turn_failed: String,
 }
 

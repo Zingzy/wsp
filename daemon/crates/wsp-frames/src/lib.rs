@@ -52,13 +52,13 @@ pub use place::{
 pub use place_paths::{place_daemon_paths, place_owned_paths, place_provision_paths, probe_path, PlaceDaemonPaths, PlaceProvisionPaths};
 pub use reply::{
     DaemonErrorResponse, DaemonExecReply, Empty, False, FsEntry, FsFilesReply, FsListReply, FsReadReply, FsSearchHit, FsSearchReply,
-    FsWriteReply, GitBranch, GitCheckpointReply, GitCommitReply, GitDiffFile, GitDiffReply, GitDiscardReply, GitPrListReply,
-    GitPrMergeReply, GitPrReadReply, GitPrReply, GitPrViewReply, GitPushReply, GitRepoReadReply, GitRestoreReply, GitRunLogReply,
-    GitSnapshotReply, GitStatusEntry, GitStatusReply, GitUpdateReply, HostFolder, HostFolderListing, HostItem, InboxRescanReply,
-    ListeningPort, ManifestEntry, ManifestGetReply, ManifestRecordReply, ManifestRestartScriptReply, PlaceLeaveReply, PlaceUpdateReply,
-    PortsWatchReply, ProcInspectReply, PtyAttachReply, PtyCreateReply, PtyListEntry, PtyListReply, PullRequest, PullRequestCheck,
-    PullRequestCheckRun, PullRequestComment, PullRequestCommit, PullRequestFile, PullRequestReview, PullRequestReviewComment, Reply,
-    SshStartReply, True,
+    FsWriteReply, GitBranch, GitBranchCompareReply, GitCheckpointReply, GitCommitReply, GitDiffFile, GitDiffReply, GitDiscardReply,
+    GitMergeInReply, GitPrListReply, GitPrMergeReply, GitPrReadReply, GitPrReply, GitPrViewReply, GitPushReply, GitRepoReadReply,
+    GitRestoreReply, GitRunLogReply, GitSnapshotReply, GitStartOnReply, GitStatusEntry, GitStatusReply, GitUpdateReply, HostFolder,
+    HostFolderListing, HostItem, InboxRescanReply, ListeningPort, ManifestEntry, ManifestGetReply, ManifestRecordReply,
+    ManifestRestartScriptReply, PlaceLeaveReply, PlaceUpdateReply, PortsWatchReply, ProcInspectReply, PtyAttachReply, PtyCreateReply,
+    PtyListEntry, PtyListReply, PullRequest, PullRequestCheck, PullRequestCheckRun, PullRequestComment, PullRequestCommit, PullRequestFile,
+    PullRequestReview, PullRequestReviewComment, Reply, SshStartReply, True,
 };
 pub use request::{DaemonOp, DaemonRequest, DAEMON_OPS, GUEST_OPS};
 pub use shell::shell_quote;

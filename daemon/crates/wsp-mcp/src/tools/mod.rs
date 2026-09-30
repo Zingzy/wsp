@@ -25,6 +25,7 @@ mod target;
 mod terminal_config;
 mod thread;
 mod threads;
+mod tree;
 mod turn;
 mod wait;
 pub(crate) mod workspace;
@@ -92,6 +93,7 @@ pub const TOOLS: &[Tool] = &[
     pull_request::FIX,
     pull_request::MERGE,
     pull_request::UPDATE,
+    tree::MERGE_IN,
     machine::PAUSE,
     machine::WAKE,
     machine::REBUILD,

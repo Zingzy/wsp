@@ -678,6 +678,52 @@ pub struct GitRepoReadReply {
     pub auto_merge: bool,
 }
 
+/// The branch a checkout was put on and the commit it now stands at.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct GitStartOnReply {
+    pub branch: String,
+    pub oid: String,
+}
+
+/// How far a head is from a base on the git host: not pushed where the host lacks the head, else the commits each has
+/// that the other lacks and the host's own word for the two (ahead, behind, diverged, identical).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct GitBranchCompareReply {
+    pub pushed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub ahead_by: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub behind_by: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub status: Option<String>,
+}
+
+/// What a merge of another branch did: merged with how many commits it brought and the commit it left, or nothing
+/// merged and the files that conflict, the checkout left exactly as it was.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct GitMergeInReply {
+    pub branch: String,
+    pub merged: bool,
+    pub commits: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub oid: Option<String>,
+    /// The other branch's commit the merge took, which the lead's copy holds from then on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub head: Option<String>,
+    pub conflicts: Vec<String>,
+}
+
 /// What an update from the base did: merged with how many commits it brought, or nothing merged and the files that
 /// conflict, the checkout left exactly as it was.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
