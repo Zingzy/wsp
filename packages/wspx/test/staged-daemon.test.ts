@@ -14,9 +14,12 @@ import { DAEMON_VERSION } from "@wsp/protocol";
 import { REQUIRE_DAEMON_ENV } from "@wsp/host";
 import { daemonBinaryHere } from "../../host/src/assets.js";
 import { LocalDaemon } from "../../host/src/local-daemon.js";
+import { spawnedDaemons } from "../../host/test/spawned-daemons.js";
 
 const made: string[] = [];
-afterEach(() => {
+const daemons = spawnedDaemons();
+afterEach(async () => {
+  await daemons.stop();
   for (const dir of made.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -43,7 +46,7 @@ describe("the daemon staged beside this command", () => {
     }
     const root = mkdtempSync(join(tmpdir(), "wsp-staged-daemon-"));
     made.push(root);
-    const daemon = await LocalDaemon.start({ root, workFolder: root, rootsPath: join(root, "roots"), inboxDir: join(root, "inbox") });
+    const daemon = await LocalDaemon.start({ root, workFolder: root, rootsPath: join(root, "roots"), inboxDir: join(root, "inbox"), spawned: daemons.record });
     try {
       expect(daemon.version).toBe(DAEMON_VERSION);
     } finally {
