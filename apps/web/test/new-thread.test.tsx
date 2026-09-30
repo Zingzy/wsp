@@ -157,16 +157,22 @@ describe("New thread from Cmd+T", () => {
     expect(asked).toBe(1);
   });
 
-  it("says under the box where the thread will run, and picking another computer holding the repo is --on", async () => {
+  it("names the computer the thread will run on as the first item of the one row under the box, and picking another computer holding the repo is --on", async () => {
     await mount([WSP, SPOO, WSP_ON_SPOO]);
     cmdT();
-    await waitFor(() => expect(where()?.textContent).toBe("Runs on this Mac"));
+    await waitFor(() => expect(where()?.textContent).toBe("this Mac"));
+    const strip = document.querySelector<HTMLElement>("[data-composer-checkout]")!;
+    expect(strip.firstElementChild!.contains(where())).toBe(true);
+    // The computer's icon is the one the Computers page draws for it, the person's own pick included.
+    act(() => useStore.setState(s => ({ preferences: { ...s.preferences, computerLook: { here: { icon: "home" } } } })));
+    expect(where()!.querySelector("[data-composer-computer] [data-computer-glyph]")?.getAttribute("data-computer-glyph")).toBe("home");
+    expect(document.querySelectorAll("[data-slot=composer-context-strip]")).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: "Runs on this Mac" }));
     const menu = await screen.findByRole("menu");
     expect(within(menu).getAllByRole("menuitemradio").map(item => item.textContent)).toEqual(["this Mac", "spoo"]);
     fireEvent.click(within(menu).getByRole("menuitemradio", { name: "spoo" }));
     await waitFor(() => expect(useStore.getState().projectHome).toBe(WSP_ON_SPOO.id));
-    await waitFor(() => expect(where()?.textContent).toBe("Runs on spoo"));
+    await waitFor(() => expect(where()?.textContent).toBe("spoo"));
   });
 
   it("names each computer once, however many clones of the repo it holds", async () => {
@@ -179,14 +185,14 @@ describe("New thread from Cmd+T", () => {
     expect(within(menu).getByRole("menuitemradio", { name: "this Mac" }).getAttribute("aria-checked")).toBe("true");
   });
 
-  it("the line is plain words where no other computer holds the repo", async () => {
+  it("the computer is plain words, no picker, where no other computer holds the repo", async () => {
     await mount();
     cmdT();
-    await waitFor(() => expect(where()?.textContent).toBe("Runs on this Mac"));
+    await waitFor(() => expect(where()?.textContent).toBe("this Mac"));
     expect(where()!.closest("button")).toBeNull();
   });
 
-  it("the box carries model, effort with its brain, attach and send; under it a plain folder, access and branch, and no project chip", async () => {
+  it("the box carries model, effort with its brain, attach and send; under it the computer, access and branch, no folder path, and no project chip", async () => {
     await mount();
     cmdT();
     const effort = await waitFor(() => document.querySelector<HTMLElement>('[data-composer-picker="reasoning"]')!);
@@ -199,9 +205,9 @@ describe("New thread from Cmd+T", () => {
     expect(strip.querySelector('[data-composer-picker="access"]')).not.toBeNull();
     const footer = document.querySelector<HTMLElement>("[data-chat-composer-footer]")!;
     expect(footer.querySelector('[data-composer-picker="access"]')).toBeNull();
-    const folder = strip.querySelector<HTMLElement>("[data-composer-folder]")!;
-    expect(folder.tagName).not.toBe("BUTTON");
-    expect(folder.closest("button")).toBeNull();
+    expect(strip.dataset["composerFolder"]).toBeDefined();
+    expect(strip.textContent).not.toContain(strip.dataset["composerFolder"]!);
+    expect(strip.querySelector("[data-composer-computer]")).not.toBeNull();
   });
 });
 

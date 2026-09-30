@@ -5,14 +5,15 @@ import { tileCardLines, tilePrIcon } from "./tileCard";
 const place = { projectId: "pr_1", project: "spoo-landing", computer: "zingzy's MacBook Pro" };
 
 describe("the card a tile opens to its right", () => {
-  it("says the full title, then the project, the computer, the branch, the agent's model, the pull request with its state as a word and the files changed", () => {
+  it("says the full title, then the project, the computer, the folder, the branch, the agent's model, the pull request with its state as a word and the files changed", () => {
     expect(
-      tileCardLines({ title: "Round the cart total once, at the end of the checkout", place, branch: "fix/cart-rounding", harness: "claude", model: "Opus 5.5", pr: { number: 42, state: "merged" }, changed: "3 changed", notes: [] }),
+      tileCardLines({ title: "Round the cart total once, at the end of the checkout", place, folder: "/Users/zingzy/wsp-work/spoo-cart", branch: "fix/cart-rounding", harness: "claude", model: "Opus 5.5", pr: { number: 42, state: "merged" }, changed: "3 changed", notes: [] }),
     ).toEqual({
       title: "Round the cart total once, at the end of the checkout",
       lines: [
         { kind: "project", text: "spoo-landing" },
         { kind: "computer", text: "zingzy's MacBook Pro" },
+        { kind: "folder", text: "/Users/zingzy/wsp-work/spoo-cart" },
         { kind: "branch", text: "fix/cart-rounding" },
         { kind: "agent", text: "Opus 5.5" },
         { kind: "pr", text: "Pull request #42, merged" },

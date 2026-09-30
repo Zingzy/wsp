@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // What a tile tells on its hover card to its right, as T3 Code's sidebar
-// details tooltip: the full title, where the thread runs, its branch, the
+// details tooltip: the full title, where the thread runs and in which folder, its branch, the
 // agent's model, the pull request with its state as a word and the files
 // changed, then whatever holds the thread. The tile itself keeps two rows and
 // one mark: an open pull request's icon.
@@ -12,6 +12,8 @@ import type { TilePlace } from "./ThreadTile.js";
 export interface TileCardInput {
   readonly title: string;
   readonly place: TilePlace;
+  /** The folder the workspace works in: its copy, or the project's own. */
+  readonly folder?: string | undefined;
   /** Empty where the workspace is on no branch or none is known. */
   readonly branch: string;
   readonly harness: string | null;
@@ -24,7 +26,7 @@ export interface TileCardInput {
   readonly notes: ReadonlyArray<string | null>;
 }
 
-export type TileCardLine = { readonly kind: "project" | "computer" | "branch" | "agent" | "pr" | "changed" | "note"; readonly text: string };
+export type TileCardLine = { readonly kind: "project" | "computer" | "folder" | "branch" | "agent" | "pr" | "changed" | "note"; readonly text: string };
 
 export function tileCardLines(o: TileCardInput): { title: string; lines: TileCardLine[] } {
   const line = (kind: TileCardLine["kind"], text: string | null | undefined): TileCardLine[] => (text === null || text === undefined || text === "" ? [] : [{ kind, text }]);
@@ -33,6 +35,7 @@ export function tileCardLines(o: TileCardInput): { title: string; lines: TileCar
     lines: [
       ...line("project", o.place.project),
       ...line("computer", o.place.computer),
+      ...line("folder", o.folder),
       ...line("branch", o.branch),
       ...line("agent", o.model ?? (o.harness === null ? null : agentName(o.harness))),
       ...line("pr", o.pr === undefined ? null : `${PR_WORDS.row(o.pr.number)}, ${PULL_REQUEST_WORDS[o.pr.state]}`),

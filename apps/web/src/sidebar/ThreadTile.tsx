@@ -10,7 +10,7 @@
 // tiles a person is waiting on stand out. Renaming turns the title into the
 // sidebar's one name box in the same row, so the tile keeps its height.
 import type { ComponentProps, DragEvent, MouseEvent, ReactNode } from "react";
-import { AlarmClockIcon, FileDiffIcon, GitBranchIcon, GitPullRequestIcon } from "lucide-react";
+import { AlarmClockIcon, FileDiffIcon, FolderIcon, GitBranchIcon, GitPullRequestIcon } from "lucide-react";
 import { agentName } from "@wsp/catalog";
 import type { PlaceView } from "@wsp/protocol";
 import { THREAD_WORDS, WORKSPACE_WORDS } from "../actions/format.js";
@@ -49,7 +49,7 @@ const whereWords = (place: TilePlace): string => [place.project, place.computer]
 /** How long the pointer rests on a tile before its card opens, so a pass of the pointer down the list opens none. */
 const CARD_DELAY_MS = 450;
 
-const CARD_GLYPHS: Partial<Record<TileCardLine["kind"], typeof GitBranchIcon>> = { branch: GitBranchIcon, pr: GitPullRequestIcon, changed: FileDiffIcon };
+const CARD_GLYPHS: Partial<Record<TileCardLine["kind"], typeof FolderIcon>> = { folder: FolderIcon, branch: GitBranchIcon, pr: GitPullRequestIcon, changed: FileDiffIcon };
 
 /** The card a tile opens to its right: the full title, then one line per fact with its glyph, then what holds it. */
 function TileCard({ card, place, harness }: { card: ReturnType<typeof tileCardLines>; place: TilePlace; harness: string | null }) {
@@ -216,7 +216,7 @@ export function ThreadTile({
   const card = tileCardLines({
     title: thread.title,
     place,
-    branch: checkout.branch,
+    folder: checkout.folder, branch: checkout.branch,
     harness: thread.harness,
     model,
     pr: checkout.pr,
@@ -304,7 +304,7 @@ export function WorkspaceTile({
   onRename: (name: string) => void;
   onRenameCancel: () => void;
 }) {
-  const card = tileCardLines({ title: name, place, branch: checkout.branch, harness: null, model: null, pr: checkout.pr, changed: checkout.changed, notes: [...checkout.counts, checkout.why ?? null] });
+  const card = tileCardLines({ title: name, place, folder: checkout.folder, branch: checkout.branch, harness: null, model: null, pr: checkout.pr, changed: checkout.changed, notes: [...checkout.counts, checkout.why ?? null] });
   return (
     <TileFrame
       card={card}
@@ -338,7 +338,7 @@ const LAUNCHED: ThreadStatusInput = { status: "running", asking: null, startedAt
 /** The send the runtime has written no row for yet, in the tile's own grammar. Not a button: the thread it stands
  * for has no id to select until the runtime answers, and the transcript the person is looking at is already it. */
 export function ThreadLaunchTile({ launch, place, checkout }: { launch: Launch; place: TilePlace; checkout: TileCheckout }) {
-  const card = tileCardLines({ title: launch.title, place, branch: checkout.branch, harness: launch.harness, model: null, pr: checkout.pr, changed: checkout.changed, notes: [] });
+  const card = tileCardLines({ title: launch.title, place, folder: checkout.folder, branch: checkout.branch, harness: launch.harness, model: null, pr: checkout.pr, changed: checkout.changed, notes: [] });
   return (
     <TileFrame card={card} place={place} harness={launch.harness} renaming={false} render={<div />} data-thread-launch data-depth={0} className={TILE_CLASS}>
       <TileRows place={place} status={<ThreadStatus thread={LAUNCHED} />} title={<Title text={launch.title} idle={false} active={false} />} harness={launch.harness} pr={checkout.pr} crab />

@@ -16,6 +16,8 @@ import { branchLine } from "./workspaceRows.js";
  * own words; the word for an editor attached over ssh while one is, since it is also what keeps the workspace awake;
  * and why the pull request is not read. */
 export interface TileCheckout {
+  /** The folder the workspace works in: its copy, or the project's own. */
+  folder?: string;
   branch: string;
   pr?: { number: number; state: PullRequestState; url: string };
   changed?: string;
@@ -28,7 +30,9 @@ export function tileCheckout(runs: Pick<SidebarProjectSnapshot, "workspace" | "s
   const pr = runs.status?.pr;
   const branch = fact === undefined ? branchLine(runs) : fact.branch === DETACHED_HEAD ? "" : fact.branch;
   const changed = fact === undefined ? undefined : checkoutCounts(fact)[0];
+  const folder = runs.workspace.copy?.path ?? runs.workspace.project.path;
   return {
+    ...(folder !== undefined && folder !== "" ? { folder } : {}),
     branch,
     ...(isPullRequestNamed(pr) ? { pr: { number: pr.number, state: pr.state, url: pr.url } } : {}),
     ...(changed !== undefined ? { changed } : {}),

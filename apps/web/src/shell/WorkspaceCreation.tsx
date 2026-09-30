@@ -15,7 +15,9 @@ import { Crab } from "../components/status/Crab.js";
 import { WorkingSince } from "../components/status/WorkingSince.js";
 import { Button } from "../components/ui/button.js";
 import { cn } from "../lib/utils.js";
-import { useStore, type Creation, type CreationLine } from "../protocol/store.js";
+import { usePlaces, useStore, type Creation, type CreationLine } from "../protocol/store.js";
+import { placeNames } from "../sidebar/workspaceRows.js";
+import { RunsOn } from "./NewThreadPicks.js";
 import { CREATE_ASKED, CREATE_STEP_WORDS, creationFolder, currentStep, stepTime, stepWords } from "./creationLog.js";
 
 /** What the composer says over a message that waits for the machine. */
@@ -29,12 +31,14 @@ const STEP_ROW_PX = 24;
 export function WorkspaceCreation({ creation }: { creation: Creation }) {
   const thread = useChatThread(creation.key, null, true);
   const [open, setOpen] = useState(false);
-  const { folder, project: projectName } = useStore(
+  const { folder, project: projectName, at } = useStore(
     useShallow(s => {
       const project = s.projects.find(p => p.id === creation.project);
-      return project === undefined ? { folder: "", project: null } : { folder: creationFolder(project, creation.name), project: project.name };
+      return project === undefined ? { folder: "", project: null, at: creation.where } : { folder: creationFolder(project, creation.name), project: project.name, at: creation.where ?? project.computer };
     }),
   );
+  const places = usePlaces();
+  const computer = at === undefined ? undefined : placeNames(places).get(at);
   const rootRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
   const questionRef = useRef<HTMLDivElement>(null);
@@ -71,7 +75,7 @@ export function WorkspaceCreation({ creation }: { creation: Creation }) {
           <SettingUp creation={creation} open={open} onToggle={() => setOpen(o => !o)} />
         </div>
         <div ref={composerRef} data-chat-composer-dock data-centred className="pointer-events-none absolute inset-x-0 bottom-(--empty-lift) z-10 *:pointer-events-auto">
-          <ChatComposer key={creation.key} workspaceId={creation.key} thread={thread} waiting={{ line: creationWaitLine(creation.name), folder }} />
+          <ChatComposer key={creation.key} workspaceId={creation.key} thread={thread} waiting={{ line: creationWaitLine(creation.name), folder }} where={at === undefined || computer === undefined ? undefined : <RunsOn at={at} name={computer} />} />
         </div>
       </div>
     </div>

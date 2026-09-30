@@ -8,7 +8,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { cloneElement, createContext, useContext, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { type EventUnion, type SessionEvent, type SessionView, type WorkspaceView } from "@wsp/protocol";
+import { type EventUnion, type PlaceView, type SessionEvent, type SessionView, type WorkspaceView } from "@wsp/protocol";
 
 vi.mock("../src/components/ui/menu.js", () => {
   const Ctx = createContext<{ open: boolean; set: (open: boolean) => void }>({ open: false, set: () => {} });
@@ -89,7 +89,6 @@ vi.mock("../src/components/ui/tooltip.js", () => ({
   TooltipPopup: ({ children }: { children: ReactNode }) => <div role="tooltip">{children}</div>,
 }));
 
-import { BUTTON_GLYPH_INSET } from "../src/components/ui/button.js";
 import { installFakeLayout } from "./fake-layout.js";
 import { TABLE_CATALOG, whenAgentsAnswered } from "./agents.js";
 import { composerEditor, press, typeInto } from "./composer-harness.js";
@@ -174,34 +173,30 @@ const folder = () => document.querySelector<HTMLElement>("[data-composer-folder]
 const branchSlot = () => document.querySelector<HTMLElement>("[data-composer-branch]");
 const branch = () => branchSlot()?.dataset["composerBranch"];
 const BRANCH_NOTE = "The folder's branch as the task reports it. Nothing here switches it; check out another branch from the terminal.";
-/** The height pair the folder label and the size-xs picker button carry; an empty slot with it keeps the row from moving. */
+/** The height pair every item of the row carries; an empty slot with it keeps the row from moving. */
 const SLOT_HEIGHT = ["h-7", "sm:h-6"];
-/** The folder's own item in either form: it is the one that gives its width up, and it keeps what it cannot hold inside its box. */
-const FOLDER_ITEM = ["min-w-0", "shrink", "overflow-hidden"];
-/** The path inside it, cut with an ellipsis at its head. */
-const FOLDER_PATH = ["min-w-0", "truncate", "font-mono", "[direction:rtl]"];
-const folderItem = () => document.querySelector<HTMLElement>("[data-composer-folder]")!;
-const folderPath = () => folderItem().querySelector<HTMLElement>("span")!;
-/** The folder's box on the strip gives its width up before the branch slot gives any: its weight is lopsided, and the
- * branch slot carries none of its own, so the slot's share rounds to nothing until the folder reaches its floor. */
-const givesFirst = () => {
-  const box = folderItem().closest<HTMLElement>("[data-composer-checkout] > *")!;
-  expect(box.className.split(" ")).toEqual(expect.arrayContaining(["min-w-20", "shrink-[100000]"]));
-  expect(branchSlot()!.className.split(" ").filter(c => c.startsWith("shrink"))).toEqual([]);
-};
 const settle = () => act(() => new Promise<void>(resolve => setTimeout(resolve, 0)));
 const root = () => selectRoot(useRootStore.getState().byWorkspaceId, WS, [DAEMON_ROOT]);
 
 describe("composer checkout row", () => {
-  it("names the folder as a plain label before the first message, never a picker, and names its branch", async () => {
+  it("names the computer first, then the access and the branch, every item in one grammar, and neither the folder's path nor a pull request's number", async () => {
     provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": params => ({ ...STATUS, root: String(params["cwd"]) }) }));
     const { api } = fixtureApi();
     await setup(api);
     expect(row()?.dataset["opening"]).toBe("true");
+    // The folder the start opens is still what the row reads, though it no longer says it.
     expect(folder()).toBe("/root");
     await waitFor(() => expect(branch()).toBe("feature/panes"));
-    expect(folderItem().tagName).toBe("SPAN");
-    expect(folderItem().closest("button")).toBeNull();
+    const items = ([...row()!.children] as HTMLElement[]).filter(item => item.getAttribute("role") !== "tooltip");
+    expect(items[0]!.matches("[data-composer-computer]")).toBe(true);
+    expect(items.at(-1)!.matches("[data-composer-branch]")).toBe(true);
+    for (const item of items) {
+      expect(item.className.split(" "), item.outerHTML.slice(0, 80)).toEqual(expect.arrayContaining(["h-7", "sm:h-6", "px-2", "text-xs", "text-muted-foreground"]));
+      expect(item.className).not.toContain("font-mono");
+      expect(item.className.split(" ").filter(c => /^(\w+:)*text-(\[\d|xs|sm|base)/.test(c))).toEqual(["text-xs"]);
+    }
+    expect(row()!.className.split(" ")).toContain("gap-1");
+    expect(row()!.textContent).not.toMatch(/\/root|#\d/);
     expect(screen.queryByRole("button", { name: /Working folder/ })).toBeNull();
   });
 
@@ -311,45 +306,6 @@ describe("composer checkout row", () => {
     expect(answers.length).toBeLessThanOrEqual(asked + 1);
   });
 
-  it("draws the path the one way in both forms, inside a box that gives its width up, so a long one never reaches the branch slot", async () => {
-    const LONG = "/var/folders/xx/90zsjs6n7yjgw9bb1vp6_tx00000gn/T/checkouts/acme-platform/services/gateway-and-edge-router";
-    provideDaemonHello(WS, { ...DAEMON_HELLO, root: LONG });
-    const onLong = { ...workspace, project: { id: "pr_1", name: "the-project", path: LONG, computer: "default" } };
-
-    // Before the first message: the label naming the folder the start opens.
-    provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": STATUS }));
-    await setup(fixtureApi([], [], onLong).api);
-    await waitFor(() => expect(branch()).toBe("feature/panes"));
-    expect(folder()).toBe(LONG);
-    const fresh = { item: folderItem().className.split(" "), path: folderPath().className, text: folderPath().textContent };
-    // The button's own no-shrink rule is what grew it over the branch, so that it loses the merge is read first.
-    expect(fresh.item).not.toContain("shrink-0");
-    expect(fresh.item).toEqual(expect.arrayContaining(FOLDER_ITEM));
-    givesFirst();
-    cleanup();
-
-    // On a thread that has run: the plain label, carrying that thread's own folder.
-    provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": STATUS }));
-    await setup(fixtureApi(CHAT_STREAM.map(e => (e.type === "session.start" ? { ...e, cwd: LONG } : e))).api);
-    await screen.findByText(/Server is live at :3000\./);
-    expect(row()?.dataset["opening"]).toBeUndefined();
-    expect(folder()).toBe(LONG);
-    const label = { item: folderItem().className.split(" "), path: folderPath().className, text: folderPath().textContent };
-    expect(label.item).not.toContain("shrink-0");
-    expect(label.item).toEqual(expect.arrayContaining(FOLDER_ITEM));
-    givesFirst();
-
-    // A button's glyph inset, so the path starts on the pixel the pickers' glyphs do, in both forms.
-    expect(label.item).toContain(BUTTON_GLYPH_INSET);
-    expect(fresh.item).toContain(BUTTON_GLYPH_INSET);
-
-    // One rule for the path, written once, and the whole path in the DOM: the cut is the box's, not a shortened string.
-    expect(label.path).toBe(fresh.path);
-    expect(label.path.split(" ")).toEqual(expect.arrayContaining(FOLDER_PATH));
-    expect(label.text).toBe(LONG);
-    expect(fresh.text).toBe(LONG);
-  });
-
   it("leaves the branch slot empty, no glyph and no words, while the ask is still out", async () => {
     const inner = fakeWire({ "fs.list": LISTING });
     const wire: TerminalWire = { request: (op, params) => (op === "git.status" ? new Promise(() => {}) : inner.request(op, params)) };
@@ -400,6 +356,14 @@ describe("composer checkout row", () => {
     const { api, started } = fixtureApi([], [], { ...workspace, kind: "local", machineId: "local", project: { id: "pr_1", name: "the-project", path: WORK, computer: "default" }, golden: "", folder: WORK });
     await setup(api);
     expect(folder()).toBe(WORK);
+    // The computer's icon is the one the Computers page draws for it, the person's own pick included.
+    const here: PlaceView = { id: "here", kind: "computer", name: "dev-mbp", label: "dev's MacBook Pro", mac: "macbook", default: true, present: true, takesForks: false, engine: "none", shape: { cpu: 8, memMb: 16384 }, diskFreeBytes: 1024 ** 3 };
+    act(() => useStore.setState({ places: [here] }));
+    const glyph = () => row()!.querySelector("[data-composer-computer] [data-computer-glyph]")?.getAttribute("data-computer-glyph");
+    await waitFor(() => expect(glyph()).toBe("laptop"));
+    act(() => useStore.setState(s => ({ preferences: { ...s.preferences, computerLook: { here: { icon: "home" } } } })));
+    expect(glyph()).toBe("home");
+    act(() => useStore.setState({ places: [] }));
     const editor = composerEditor();
     await typeInto(editor, "hello");
     await press(editor, "Enter");
@@ -486,13 +450,14 @@ describe("composer checkout row", () => {
     await waitFor(() => expect(root()).toBe("/root"));
   });
 
-  it("explains the locked folder on hover and offers no new-thread button beside it", async () => {
+  it("keeps a long folder off the row on a thread that has run, and offers no new-thread button", async () => {
+    const LONG = "/var/folders/xx/90zsjs6n7yjgw9bb1vp6_tx00000gn/T/checkouts/acme-platform/services/gateway-and-edge-router";
     provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": STATUS }));
-    const { api } = fixtureApi(CHAT_STREAM.slice());
-    await setup(api);
+    await setup(fixtureApi(CHAT_STREAM.map(e => (e.type === "session.start" ? { ...e, cwd: LONG } : e))).api);
     await screen.findByText(/Server is live at :3000\./);
     expect(row()?.dataset["opening"]).toBeUndefined();
-    expect(screen.getByText("The folder this thread's harness runs in. A cd inside the agent's shell does not move it; to work in another folder, add it as a project.").getAttribute("role")).toBe("tooltip");
+    expect(folder()).toBe(LONG);
+    expect(row()!.textContent).not.toContain("gateway-and-edge-router");
     expect(screen.queryByRole("button", { name: "New thread here" })).toBeNull();
   });
 

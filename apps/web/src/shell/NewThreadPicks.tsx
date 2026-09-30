@@ -15,6 +15,7 @@ import { inProjectOrder } from "../sidebar/threadTree.js";
 import { placeNames, projectComputerWord } from "../sidebar/workspaceRows.js";
 import { PROJECT_WORDS } from "../sidebar/words.js";
 import { requestAddProject } from "./shellRequests.js";
+import { RowComputer } from "../components/chat/ComposerCheckoutRow.js";
 
 /** The project New thread opens on: the one the sidebar is filtered to, else the last one used, which is the open
  * workspace's or the open New thread's, else the first in the person's order. */
@@ -68,8 +69,18 @@ export function HomeProjectPicker({ project }: { project: ProjectView }) {
   );
 }
 
-/** The one line under the box saying where the thread will run, the placement rule's answer the host gives for the
- * project. Where another computer holds the same repo the name is a picker over those computers. */
+/** The computer a thread will run on, as the row under the box names it: its icon and its name, no picker. */
+export function RunsOn({ at, name }: { at: string; name: string }) {
+  const place = usePlaces().find(p => p.id === at);
+  return (
+    <span data-new-thread-where title={`Runs on ${name}`}>
+      <RowComputer name={name} place={place} />
+    </span>
+  );
+}
+
+/** The first item of the row under the box: the computer the thread will run on, the placement rule's answer the host
+ * gives for the project, by its icon and name. Where another computer holds the same repo it is a picker over them. */
 export function WhereItRuns({ project }: { project: ProjectView }) {
   const landing = useStore(s => s.landings[project.id]);
   const loadLanding = useStore(s => s.loadLanding);
@@ -91,27 +102,25 @@ export function WhereItRuns({ project }: { project: ProjectView }) {
   const name = named.get(landing?.place ?? project.computer) ?? landing?.name;
   if (name === undefined) return null;
   const line = `Runs on ${name}`;
+  const at = landing?.place ?? project.computer;
+  const place = places.find(p => p.id === at);
+  if (holders.length < 2) return <RunsOn at={at} name={name} />;
   return (
-    <span data-new-thread-where className="px-2 text-sm text-muted-foreground sm:text-xs">
-      {holders.length < 2 ? (
-        line
-      ) : (
-        <Menu>
-          <MenuTrigger render={<button type="button" />} className="inline-flex items-center gap-1 outline-none transition-colors hover:text-foreground focus-visible:text-foreground" aria-label={line}>
-            {line}
-            <ChevronDownIcon aria-hidden className="size-3 opacity-60" />
-          </MenuTrigger>
-          <MenuPopup align="start" side="top" className="w-56">
-            <MenuRadioGroup value={project.id} onValueChange={next => typeof next === "string" && open(next)}>
-              {holders.map(holder => (
-                <MenuRadioItem key={holder.id} value={holder.id}>
-                  <span className="truncate">{named.get(holder.computer) ?? holder.computer}</span>
-                </MenuRadioItem>
-              ))}
-            </MenuRadioGroup>
-          </MenuPopup>
-        </Menu>
-      )}
-    </span>
+    <Menu>
+      <MenuTrigger render={<button type="button" data-new-thread-where />} className="outline-none transition-colors hover:[&_[data-composer-computer]]:text-foreground focus-visible:[&_[data-composer-computer]]:text-foreground" aria-label={line}>
+        <RowComputer name={name} place={place}>
+          <ChevronDownIcon aria-hidden className="opacity-50" />
+        </RowComputer>
+      </MenuTrigger>
+      <MenuPopup align="start" side="top" className="w-56">
+        <MenuRadioGroup value={project.id} onValueChange={next => typeof next === "string" && open(next)}>
+          {holders.map(holder => (
+            <MenuRadioItem key={holder.id} value={holder.id}>
+              <span className="truncate">{named.get(holder.computer) ?? holder.computer}</span>
+            </MenuRadioItem>
+          ))}
+        </MenuRadioGroup>
+      </MenuPopup>
+    </Menu>
   );
 }

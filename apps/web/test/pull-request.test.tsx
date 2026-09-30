@@ -11,7 +11,6 @@ import { useNotices } from "../src/notices/store.js";
 import { useStore } from "../src/protocol/store.js";
 import { useDiffStore } from "../src/diffs/store.js";
 import { GitSplit } from "../src/pull-request/GitSplit.js";
-import { PullRequestStrip } from "../src/pull-request/PullRequestStrip.js";
 import { PullRequestSurface } from "../src/pull-request/PullRequestSurface.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
 import { resetSurfaces, view, WS } from "./surface-harness.js";
@@ -216,21 +215,6 @@ describe("the thread header's git button", () => {
   it("draws nothing where the checkout is not read", () => {
     withApi(fact());
     expect(render(<GitSplit workspaceId={WS} />).container.innerHTML).toBe("");
-  });
-});
-
-describe("the composer's branch line", () => {
-  it("says the number as the link with its word on hover, and never offers Update or the fix, which live in the Pull request pane", () => {
-    withApi(fact({ checks: [], mergeable: "conflicting" }));
-    const { container } = render(<PullRequestStrip workspaceId={WS} />);
-    const link = container.querySelector<HTMLAnchorElement>("[data-composer-pr-number]")!;
-    expect([link.textContent, link.getAttribute("href"), link.title]).toEqual(["#12", "https://github.com/o/r/pull/12", "conflicts with main"]);
-    expect(screen.queryByText("Update from main")).toBeNull();
-    expect(screen.queryByText("Ask your agent to fix")).toBeNull();
-    cleanup();
-    withApi(undefined);
-    render(<PullRequestStrip workspaceId={WS} />);
-    expect(screen.queryByText("Update from main")).toBeNull();
   });
 });
 
