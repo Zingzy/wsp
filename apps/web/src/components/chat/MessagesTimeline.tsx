@@ -58,6 +58,7 @@ import { Button } from "../ui/button";
 import { getVirtualizedScrollFadeClassName } from "../ui/scroll-area";
 import type { ExpandedImagePreview } from "./ExpandedImagePreview";
 import { ChatFileRow } from "./ChatFiles";
+import { CLAMP_FADE_MASK, shouldClampText } from "./clamp";
 import { COMPOSER_WORDS } from "./composerWords";
 import { useSentFiles } from "./composerFiles";
 import { PermissionPromptRow } from "./PermissionPromptRow";
@@ -1686,22 +1687,9 @@ function AssistantChangedFilesSectionInner({
 // Leaf components
 // ---------------------------------------------------------------------------
 
-const MAX_COLLAPSED_USER_MESSAGE_LINES = 8;
-const MAX_COLLAPSED_USER_MESSAGE_LENGTH = 600;
-/** The last lines fade out over this band, and the toggle stands in its clear bottom, so a clamped message ends in
- * words going to nothing rather than a hard edge with a blank strip before the toggle. */
-const COLLAPSED_USER_MESSAGE_FADE_MASK = "linear-gradient(to bottom, black calc(100% - 5rem), transparent calc(100% - 1.5rem))";
-
-function shouldCollapseUserMessage(text: string): boolean {
-  if (text.trim().length === 0) {
-    return false;
-  }
-
-  return (
-    text.length > MAX_COLLAPSED_USER_MESSAGE_LENGTH ||
-    text.split("\n").length > MAX_COLLAPSED_USER_MESSAGE_LINES
-  );
-}
+// The fade and the length rule are the pane's too, so they live in one place and are read from there.
+const COLLAPSED_USER_MESSAGE_FADE_MASK = CLAMP_FADE_MASK;
+const shouldCollapseUserMessage = shouldClampText;
 
 const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(props: {
   text: string;

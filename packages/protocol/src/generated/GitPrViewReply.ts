@@ -6,7 +6,7 @@ import type { PullRequestReview } from "./PullRequestReview.js";
 import type { PullRequestReviewComment } from "./PullRequestReviewComment.js";
 
 /**
- * A pull request as its page reads: title, body, commits, reviews, the conversation, the comments on lines and the
- * files, every body cut at GIT_PR_LIST_BODY_CAP.
+ * A pull request as its page reads: title, body, the author and when it was last updated, commits, reviews, the
+ * conversation, the comments on lines and the files, every body cut at GIT_PR_LIST_BODY_CAP.
  */
-export type GitPrViewReply = { title: string, body: string, commits: Array<PullRequestCommit>, reviews: Array<PullRequestReview>, comments: Array<PullRequestComment>, reviewComments: Array<PullRequestReviewComment>, files: Array<PullRequestFile>, };
+export type GitPrViewReply = { title: string, body: string, author: string, updatedAt: string, commits: Array<PullRequestCommit>, reviews: Array<PullRequestReview>, comments: Array<PullRequestComment>, reviewComments: Array<PullRequestReviewComment>, files: Array<PullRequestFile>, };
