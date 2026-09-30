@@ -9,7 +9,7 @@
 // One concern per interface: this door binds a session to the workspace its
 // link serves and picks the kind; each kind is one module, and adding a kind is
 // one module and one row in the table below.
-import { type DaemonEvent, guestNoKindLine, guestNoLoopbackLine, guestNoSessionLine, guestNoTokenRefusal, guestTurnNoTokenRefusal, HOST_TOKEN_ENV, HOST_URL_ENV, TURN_TOKEN_ENV, UNAUTHORIZED, type GuestKind } from "@wsp/protocol";
+import { type DaemonEvent, GUEST_SESSIONS_PER_WORKSPACE_CAP, GUEST_WORKSPACE_FULL, guestNoKindLine, guestNoLoopbackLine, guestNoSessionLine, guestNoTokenRefusal, guestTurnNoTokenRefusal, HOST_TOKEN_ENV, HOST_URL_ENV, TURN_TOKEN_ENV, UNAUTHORIZED, type GuestKind } from "@wsp/protocol";
 import type { Authed, GuestKindModule, GuestSession } from "@wsp/runtime";
 
 /** The road back down to one machine's daemon, and which workspace that machine is. */
@@ -141,6 +141,11 @@ export function guestDoor(o: GuestDoorOptions): GuestDoor {
           // a session that died with the machine it ran on, since a rebuilt machine is what starts the names
           // over: those rows go here, whichever names they hold, before this one is opened.
           dropRows(held => held.workspaceId === link.workspaceId && held.life !== e.life);
+          // The machine's daemon keeps this count too, but its agent is root there and can go around it, and a
+          // session here can be a process on this computer: past the count, one more is ended in the daemon's words.
+          if ([...open.values()].filter(held => held.workspaceId === link.workspaceId).length >= GUEST_SESSIONS_PER_WORKSPACE_CAP) {
+            return down(link, "guest.close", { session: e.session, error: GUEST_WORKSPACE_FULL });
+          }
           const held: Held = { workspaceId: link.workspaceId, life: e.life, link, queued: [], ended: false };
           open.set(key, held);
           // The read of a token is a promise; a throw out of it closes the session rather than the link.

@@ -49,7 +49,9 @@ pub(crate) enum Verb {
     /// The wsp tools for an agent on this computer: an MCP server on stdio, dialling the host the state file names as
     /// the command line does. The state is named on purpose, since which file a bare wsp works on is the command
     /// line's rule, and a host or a thread's scope still needs it: the recipe tools run the wsp on it. The words
-    /// after --wsp-argv are the wsp that brings a host up when none serves it.
+    /// after --wsp-argv are the wsp that brings a host up when none serves it. --guest is the host serving a session
+    /// from inside a machine: a path or a folder it names is on that machine, and a tool that reads this computer is
+    /// not listed.
     #[cfg(feature = "mcp")]
     Mcp {
         #[arg(long, value_name = "file")]
@@ -60,6 +62,8 @@ pub(crate) enum Verb {
         scoped: bool,
         #[arg(long)]
         json: bool,
+        #[arg(long, requires = "scoped")]
+        guest: bool,
         #[arg(long = "wsp-argv", value_name = "word", action = clap::ArgAction::Append, allow_hyphen_values = true)]
         wsp_argv: Vec<String>,
     },
@@ -231,7 +235,9 @@ pub(crate) fn run(verb: Verb) -> i32 {
             wsp_guest::run_here(&line, &wsp_argv)
         }
         #[cfg(feature = "mcp")]
-        Verb::Mcp { state, host, scoped, json, wsp_argv } => wsp_mcp::run(&wsp_mcp::Args { state, host, scoped, json, wsp: wsp_argv }),
+        Verb::Mcp { state, host, scoped, json, guest, wsp_argv } => {
+            wsp_mcp::run(&wsp_mcp::Args { state, host, scoped, json, guest, wsp: wsp_argv })
+        }
     }
 }
 
@@ -254,8 +260,8 @@ fn served_here(line: &[String], wsp: &[String]) -> Option<wsp_mcp::Args> {
         return None;
     }
     match <Forwarded as clap::Parser>::try_parse_from(line).ok()?.verb {
-        Verb::Mcp { state, host, scoped, json, wsp_argv } if wsp_argv.is_empty() => {
-            Some(wsp_mcp::Args { state, host, scoped, json, wsp: wsp.to_vec() })
+        Verb::Mcp { state, host, scoped, json, guest: false, wsp_argv } if wsp_argv.is_empty() => {
+            Some(wsp_mcp::Args { state, host, scoped, json, guest: false, wsp: wsp.to_vec() })
         }
         _ => None,
     }

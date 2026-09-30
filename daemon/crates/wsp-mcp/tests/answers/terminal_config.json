@@ -6,7 +6,11 @@
       "arguments": {},
       "replies": {},
       "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"No Ghostty config on this computer; the terminal pane keeps its defaults.\"}],\"structuredContent\":{\"files\":[],\"fontFamily\":[],\"palette\":[null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null]}},\"jsonrpc\":\"2.0\",\"id\":1}",
-      "asked": []
+      "asked": [],
+      "guest": {
+        "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Tool terminal_config not found\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+        "asked": []
+      }
     },
     {
       "case": "a scheme",
@@ -15,7 +19,11 @@
       },
       "replies": {},
       "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"No Ghostty config on this computer; the terminal pane keeps its defaults.\"}],\"structuredContent\":{\"files\":[],\"fontFamily\":[],\"palette\":[null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null]}},\"jsonrpc\":\"2.0\",\"id\":1}",
-      "asked": []
+      "asked": [],
+      "guest": {
+        "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Tool terminal_config not found\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+        "asked": []
+      }
     }
   ]
 }

@@ -38,7 +38,11 @@
             "WSP_RECORD_KEY": "sk-ant-x"
           }
         }
-      ]
+      ],
+      "guest": {
+        "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"WSP_RECORD_KEY is not set in this environment, so there is no value to write. servers_add takes a workspace or on, not both\"}],\"structuredContent\":{\"error\":\"WSP_RECORD_KEY is not set in this environment, so there is no value to write. servers_add takes a workspace or on, not both\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+        "asked": []
+      }
     },
     {
       "case": "address",
@@ -79,7 +83,11 @@
           },
           "project": true
         }
-      ]
+      ],
+      "guest": {
+        "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"WSP_RECORD_KEY is not set in this environment, so there is no value to write. servers_add takes a workspace or on, not both\"}],\"structuredContent\":{\"error\":\"WSP_RECORD_KEY is not set in this environment, so there is no value to write. servers_add takes a workspace or on, not both\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+        "asked": []
+      }
     },
     {
       "case": "unset variable",
