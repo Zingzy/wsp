@@ -92,6 +92,10 @@ export interface LocalDaemonOptions {
    * the answer, so the line that started it there keeps none. The ring behind the start's failure sentence is kept
    * either way. Without one the line goes to this process's stderr. */
   say?: (line: string) => void;
+  /** Handed the binary's process the moment it is spawned, before it has listened or answered: whatever must stop it
+   * holds it even where the start never resolves, as a case that times out on a loaded computer does. The process and
+   * not its pid, since a pid the daemon left can be another process's by the time it is signalled. */
+  spawned?: (child: ChildProcess) => void;
 }
 
 /** Which daemon the binary that just listened is, off the hello it sends after the auth frame: one socket, opened
@@ -185,6 +189,7 @@ export class LocalDaemon {
     // does not have.
     const argv = ["--kind", "local", "--host", LOOPBACK, "--port", "0", "--token-path", tokenPath, "--root", opts.root, "--roots-path", opts.rootsPath, "--inbox", opts.inboxDir, "--work-folder", opts.workFolder, "--manifest", join(ownDir, "manifest.json")];
     const child = spawn(bin, argv, { stdio: ["ignore", "pipe", "pipe"] });
+    opts.spawned?.(child);
     const said: string[] = [];
     child.stderr!.setEncoding("utf8");
     const say = opts.say ?? ((line: string): void => void process.stderr.write(`${line}\n`));

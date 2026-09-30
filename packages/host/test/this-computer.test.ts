@@ -9,14 +9,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { localWiring, type LocalDaemonStart } from "../src/cli.js";
 import { LocalDaemon } from "../src/local-daemon.js";
 import { writeStub } from "../../protocol/test/stub-script.js";
+import { spawnedDaemons } from "./spawned-daemons.js";
 
 let dir: string;
+const daemons = spawnedDaemons();
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "wsp-this-computer-"));
 });
 
-afterEach(() => {
+afterEach(async () => {
+  await daemons.stop();
   rmSync(dir, { recursive: true, force: true });
   vi.restoreAllMocks();
 });
@@ -98,7 +101,7 @@ describe("the daemon this computer's panes dial", () => {
     const bin = join(dir, "noisy-daemon");
     writeStub(bin, '#!/bin/sh\ni=0\nwhile [ $i -lt 400 ]; do echo "thread main panicked at src/main.rs:$i:5: called unwrap on an Err value" >&2; i=$((i+1)); done\nexit 101\n');
     const logged: string[] = [];
-    const wiring = localWiring(dir, { HOME: dir }, opts => LocalDaemon.start({ ...opts, binary: bin }), join(dir, "state.json"), undefined, line => void logged.push(line));
+    const wiring = localWiring(dir, { HOME: dir }, opts => LocalDaemon.start({ ...opts, binary: bin, spawned: daemons.record }), join(dir, "state.json"), undefined, line => void logged.push(line));
     const why = await wiring.restartDaemon!().then(
       () => "",
       (e: unknown) => (e as Error).message,
