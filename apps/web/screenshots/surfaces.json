@@ -1471,15 +1471,15 @@
       "settleMs": 1200
     },
     {
-      "name": "footer-pr-row",
+      "name": "header-git-button",
       "at": "/",
       "fixture": "pull-request",
       "widths": [1440],
-      "reason": "Pins the pull request's row in the composer's footer; the composer at 1280 and 390 is shot in composer-thread.",
+      "reason": "Pins the thread header's git button on a branch with an open pull request; the header at 1280 and 390 is shot in composer-thread.",
       "steps": [
         "row-id=thread:redirect"
       ],
-      "wait": "pr-row",
+      "wait": "git-split",
       "settleMs": 1200
     },
     {

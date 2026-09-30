@@ -19,7 +19,6 @@ import { Button } from "../ui/button";
 import { useCapabilities, useHarnessCatalog, usePlaces, useSidebarProjects, useStore, useThreadSessions, useWorkspace, useWorkspaceState } from "../../protocol/store";
 import { Facts } from "../Facts.js";
 import { ThreadRows } from "../threads/ThreadRows.js";
-import { PullRequestRow } from "../../pull-request/PullRequestRow.js";
 import { openNamedFile } from "../../files/open";
 import { threadFolderOf } from "../../files/root";
 import { cn } from "../../lib/utils";
@@ -211,7 +210,6 @@ export function ChatView({
   const footer = thread.hydrated ? (
     <div className="mx-auto w-full min-w-0 max-w-3xl">
       {opened.length > 0 ? <OpenedThreads opened={opened} /> : null}
-      <PullRequestRow workspaceId={workspaceId} />
       {view.settled !== null && !settledOnReply ? <SettledFooter turn={view.settled} /> : null}
       {paused !== null ? (
         <TimelineRuleLine data-workspace-paused line={paused}>

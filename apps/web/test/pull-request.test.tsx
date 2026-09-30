@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The pull request in the app: the pane's rows off the page the host reads and the fact it pushes, a failed check's
 // fix button, a line comment's Send to thread writing the quote into the composer, Merge offered only where the pull
-// request can land with a menu of the repository's methods, the conflict's fix, the thread's own row, and the
-// composer's branch line with Update from the base.
+// request can land with a menu of the repository's methods, the conflict's fix, the thread header's git button, and
+// the composer's branch line with Update from the base.
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fixAskedLine, updateConflictsLine, type PullRequestFact, type PullRequestPage, type WorkspaceStatus } from "@wsp/protocol";
+import { fixAskedLine, updateConflictsLine, type Checkout, type PullRequestFact, type PullRequestPage, type WorkspaceStatus } from "@wsp/protocol";
 import { useComposerDraftStore } from "../src/components/chat/composerDraftStore.js";
 import { useNotices } from "../src/notices/store.js";
 import { useStore } from "../src/protocol/store.js";
-import { PullRequestRow } from "../src/pull-request/PullRequestRow.js";
+import { useDiffStore } from "../src/diffs/store.js";
+import { GitSplit } from "../src/pull-request/GitSplit.js";
 import { PullRequestStrip } from "../src/pull-request/PullRequestStrip.js";
 import { PullRequestSurface } from "../src/pull-request/PullRequestSurface.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
@@ -165,21 +166,54 @@ describe("the Pull request pane", () => {
   });
 });
 
-describe("the thread's pull request row and the composer's branch line", () => {
-  it("names the pull request under the thread with its word, opens the pane, and carries the fix where a check failed", async () => {
-    const api = withApi(fact());
-    const { container } = render(<PullRequestRow workspaceId={WS} />);
-    expect(container.querySelector("[data-pr-row-open]")!.textContent).toBe("Pull request #12");
-    expect(container.querySelector("[data-pr-row-word]")!.textContent).toBe("checks failed");
-    fireEvent.click(container.querySelector("[data-pr-row-open]")!);
+describe("the thread header's git button", () => {
+  const withGit = (checkout: Partial<Checkout>, pr: WorkspaceStatus["pr"], draft: string | null = "Round the cart once") => {
+    const api = {
+      ...withApi(pr),
+      bringBack: vi.fn(async () => ({ branch: "fix/ci", base: "main", ahead: 1, uncommitted: 0, stat: [], pr: fact() })),
+      commitDraft: vi.fn(async () => (draft === null ? { message: null, note: "No agent is signed in to draft it." } : { message: draft })),
+      commit: vi.fn(async () => ({ oid: "5f1c0e2b9a7d4c3e8f6a1b2c3d4e5f60718293a4", subject: "Round the cart once", filesChanged: 2, insertions: 3, deletions: 1 })),
+    };
+    act(() => useStore.setState({ api: api as never, statuses: { [WS]: { ...statusWith(pr), checkout: { branch: "fix/ci", ahead: 0, behind: 0, changed: 0, readAt: 1, ...checkout } } } }));
+    return api;
+  };
+  const quick = (): HTMLButtonElement => document.querySelector<HTMLButtonElement>("[data-git-quick]")!;
+
+  it("names the act the checkout calls for, and View PR opens the Pull request pane", () => {
+    withGit({}, fact({ checks: [] }));
+    render(<GitSplit workspaceId={WS} />);
+    expect(quick().textContent).toBe("View PR");
+    fireEvent.click(quick());
     expect(useRightPanelStore.getState().byWorkspaceId[WS]?.activeSurfaceId).toBe("pr");
-    fireEvent.click(container.querySelector("[data-pr-row-fix]")!);
-    await waitFor(() => expect(api.fix).toHaveBeenCalledWith(WS, "ci"));
-    cleanup();
-    withApi(undefined);
-    expect(render(<PullRequestRow workspaceId={WS} />).container.innerHTML).toBe("");
   });
 
+  it("commits every changed file with the agent's draft, then pushes and opens the pull request", async () => {
+    const api = withGit({ changed: 2 }, undefined);
+    render(<GitSplit workspaceId={WS} />);
+    expect(quick().textContent).toBe("Commit, push and PR");
+    fireEvent.click(quick());
+    await waitFor(() => expect(api.bringBack).toHaveBeenCalledWith(WS));
+    expect(api.commitDraft).toHaveBeenCalledWith(WS);
+    expect(api.commit).toHaveBeenCalledWith(WS, "Round the cart once");
+  });
+
+  it("opens the Changes pane on the uncommitted files where no draft comes back, and pushes nothing", async () => {
+    const api = withGit({ changed: 2 }, undefined, null);
+    render(<GitSplit workspaceId={WS} />);
+    fireEvent.click(quick());
+    await waitFor(() => expect(useRightPanelStore.getState().byWorkspaceId[WS]?.activeSurfaceId).toBe("diff"));
+    expect(useDiffStore.getState().scopeByWorkspaceId[WS]).toBe("head");
+    expect(api.commit).not.toHaveBeenCalled();
+    expect(api.bringBack).not.toHaveBeenCalled();
+  });
+
+  it("draws nothing where the checkout is not read", () => {
+    withApi(fact());
+    expect(render(<GitSplit workspaceId={WS} />).container.innerHTML).toBe("");
+  });
+});
+
+describe("the composer's branch line", () => {
   it("says the number as the link after the counts with its word on hover, and Update from the base names the files that conflict with the fix beside them", async () => {
     const api = withApi(fact({ checks: [] }));
     const { container } = render(<PullRequestStrip workspaceId={WS} branch="fix/ci" />);

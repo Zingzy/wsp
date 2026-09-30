@@ -414,9 +414,9 @@ export interface Api {
   /** Puts one changed file back as its last commit has it. */
   discard?(id: string, path: string): Promise<GitDiscardReply>;
   /** Commits the files named with the message given. */
-  commit?(id: string, message: string, paths: readonly string[]): Promise<GitCommitReply>;
+  commit?(id: string, message: string, paths?: readonly string[]): Promise<GitCommitReply>;
   /** A message for those files, drafted by the workspace's own agent, or none with the line saying why. */
-  commitDraft?(id: string, paths: readonly string[]): Promise<CommitDraft>;
+  commitDraft?(id: string, paths?: readonly string[]): Promise<CommitDraft>;
   /** The workspace's viewed marks; with a path, sets the mark on that file against the blob, or takes it off at null. */
   viewed?(id: string, mark?: { path: string; blob: string | null }): Promise<ViewedMarks>;
   /** The workspace's pull request page, read anew on every ask, with the merge methods the repository allows. */
@@ -785,8 +785,8 @@ export function makeApi(c: ProtocolClient): Api {
     bringBack: async id => BringBackResult.parse(await c.request("workspaces.bringBack", { workspaceId: id })),
     workspaceCheckout: async id => CheckoutReply.parse(await c.request("workspaces.checkout", { workspaceId: id })),
     discard: async (id, path) => GitDiscardReply.parse(await c.request("workspaces.discard", { workspaceId: id, path })),
-    commit: async (id, message, paths) => GitCommitReply.parse(await c.request("workspaces.commit", { workspaceId: id, message, paths: [...paths] })),
-    commitDraft: async (id, paths) => CommitDraft.parse(await c.request("workspaces.commitDraft", { workspaceId: id, paths: [...paths] })),
+    commit: async (id, message, paths) => GitCommitReply.parse(await c.request("workspaces.commit", { workspaceId: id, message, ...(paths !== undefined ? { paths: [...paths] } : {}) })),
+    commitDraft: async (id, paths) => CommitDraft.parse(await c.request("workspaces.commitDraft", { workspaceId: id, ...(paths !== undefined ? { paths: [...paths] } : {}) })),
     viewed: async (id, mark) => ViewedMarks.parse(await c.request("workspaces.viewed", { workspaceId: id, ...(mark ?? {}) })),
     pullRequestView: async id => PullRequestPage.parse(await c.request("workspaces.pullRequestView", { workspaceId: id })),
     fix: async (id, check) => FixResult.parse(await c.request("workspaces.fix", { workspaceId: id, ...(check !== undefined ? { check } : {}) })),
