@@ -35,6 +35,8 @@ interface Props {
   onForward: () => void;
   onRefresh: () => void;
   onSubmit: (url: string) => void;
+  /** What the person has typed, each time it changes; the address itself once it moves. */
+  onDraft?: ((draft: string) => void) | undefined;
   /** When provided, renders an "Open in browser" affordance to the right. */
   onOpenInBrowser?: (() => void) | undefined;
   onCapture?: ((record: boolean) => void) | undefined;
@@ -74,6 +76,7 @@ export function PreviewChromeRow({
   onForward,
   onRefresh,
   onSubmit,
+  onDraft,
   onOpenInBrowser,
   onCapture,
   captureDisabled,
@@ -90,6 +93,11 @@ export function PreviewChromeRow({
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [draft, setDraft] = useState(url);
   const [inputFocused, setInputFocused] = useState(false);
+  // With no page open the field is the list's filter too, so what was typed stays shown after focus leaves.
+  const shown = inputFocused || url === "" ? draft : url;
+
+  useEffect(() => setDraft(url), [url]);
+  useEffect(() => onDraft?.(draft), [draft, onDraft]);
 
   useEffect(() => {
     if (focusUrlNonce == null) return;
@@ -173,7 +181,7 @@ export function PreviewChromeRow({
               render={
                 <InputGroupInput
                   ref={inputRef}
-                  value={inputFocused ? draft : url}
+                  value={shown}
                   className={cn(
                     onOpenInBrowser &&
                       !inputFocused &&
@@ -181,7 +189,7 @@ export function PreviewChromeRow({
                   )}
                   onChange={(event) => setDraft(event.target.value)}
                   onFocus={() => {
-                    setDraft(url);
+                    if (url !== "") setDraft(url);
                     setInputFocused(true);
                     queueMicrotask(() => inputRef.current?.select());
                   }}

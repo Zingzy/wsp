@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { BROWSER_SHIM_PATH, type GoldenManifest, type Machine } from "@wsp/engine";
-import { DAEMON_TOKEN_PATH, type DaemonResponse, type ForwardEvent } from "@wsp/protocol";
+import { DAEMON_TOKEN_PATH, SSH_BEHIND_KIND, sshBehindLine, type DaemonResponse, type ForwardEvent, unknownOpLine } from "@wsp/protocol";
 import { copyKey, DAEMON_TOKEN_SET, createRuntime, memoryStore, type Clock, type GoldenRecipe, type GuestOpening, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import { fakeProcTree } from "../../daemon/test/fake-proc.js";
@@ -65,6 +65,8 @@ interface FakeLink extends DaemonSocket {
   refuseTunnels: boolean;
   /** What ssh.start answers as the server's host key, where a case wants other than one plain line. */
   hostKey?: string;
+  /** What ssh.start answers in whole, where a case wants a refusal or another shape. */
+  sshStart?: Record<string, unknown>;
   emit(event: Record<string, unknown>): void;
   drop(): void;
 }
@@ -116,7 +118,7 @@ function fakeConnect(): {
             return { ok: true, ports: link.ports.map(port => ({ port, pid: null, inode: port, uid: 0, loopback: true })) };
           }
           if (op === "guest.watch" && fake.slowGuestWatch) await fake.slowGuestWatch();
-          if (op === "ssh.start") return { ok: true, port: 40022, hostKey: link.hostKey ?? "ssh-ed25519 AAAAC3Nz the-workspace" };
+          if (op === "ssh.start") return link.sshStart ?? { ok: true, port: 40022, hostKey: link.hostKey ?? "ssh-ed25519 AAAAC3Nz the-workspace" };
           return { ok: true };
         },
         close() {
@@ -804,6 +806,21 @@ describe("callback relay over a fake daemon link", () => {
     ]) {
       link.hostKey = hostKey;
       await expect(relay!.sshPort(ws.id, "ssh-ed25519 AAAAC3Nz the-mac"), JSON.stringify(hostKey)).rejects.toThrow("task-1: the ssh server answered a host key that is not one ed25519 line");
+    }
+    expect(relay!.list()).toEqual([]);
+  });
+
+  it("says a computer whose daemon does not know ssh.start runs an older wsp, as a wait, and keeps the key's sentence for a key", async () => {
+    const { link, ws } = await setup();
+    link.sshStart = { ok: false, error: unknownOpLine("ssh.start") };
+    const older = await relay!.sshPort(ws.id, "ssh-ed25519 AAAAC3Nz the-mac").catch((e: unknown) => e);
+    expect(older).toMatchObject({ message: sshBehindLine("task-1"), kind: SSH_BEHIND_KIND });
+    // Any other refusal is the daemon's own sentence, and an answer of another shape says so rather than naming a key.
+    link.sshStart = { ok: false, error: "this image has no ssh server" };
+    await expect(relay!.sshPort(ws.id, "ssh-ed25519 AAAAC3Nz the-mac")).rejects.toThrow(/^task-1: this image has no ssh server$/);
+    for (const answer of [{ listening: 40022 }, { port: 40022 }, { hostKey: "ssh-ed25519 AAAAC3Nz the-workspace" }, { port: "40022", hostKey: "ssh-rsa AAAA" }]) {
+      link.sshStart = { ok: true, ...answer };
+      await expect(relay!.sshPort(ws.id, "ssh-ed25519 AAAAC3Nz the-mac"), JSON.stringify(answer)).rejects.toThrow(/^task-1: its daemon answered ssh\.start with no port and host key$/);
     }
     expect(relay!.list()).toEqual([]);
   });

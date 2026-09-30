@@ -3,20 +3,20 @@
 // the person's ~/.ssh/config. Raised by an Open the host refused for want of that line, whichever road the Open
 // came by, and on yes the line goes in and the same Open runs again.
 import { create } from "zustand";
-import type { EditorId } from "@wsp/protocol";
+import { hereName, type EditorId } from "@wsp/protocol";
 import { Button } from "../components/ui/button.js";
 import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../components/ui/dialog.js";
-import { noticeFailure } from "../notices/store.js";
-import { useStore } from "../protocol/store.js";
+import { usePlaces, useStore } from "../protocol/store.js";
+import { openFailed } from "./openCopy.js";
 
 export const EDITOR_SSH_WORDS = {
-  title: "Open workspaces on other computers in your editor",
-  says: (name: string) => `Your editor reaches ${name} over ssh. wsp adds one line at the top of ~/.ssh/config that reads wsp's own ssh settings, which name only hosts starting with wsp-, and changes nothing else in the file.`,
+  title: "Open in your editor over SSH",
+  says: "wsp adds one line to ~/.ssh/config. It covers only hosts named wsp-*, and nothing else in the file changes.",
   /** What changes once an editor is attached, which the agent there being root already did not: its server runs
    * inside the workspace for as long as the window is open, and what runs there can reach this computer through it. */
-  reach: "While your editor is attached, anything running in the workspace can reach this computer through it: ports the editor forwards here, files and links it asks the editor to open, and the editor's own git sign-in.",
-  off: "Settings, General takes the line back out.",
-  add: "Add the line",
+  reach: (computer: string) => `While your editor is connected, the workspace can reach ${computer || "your computer"} through it: ports it forwards, files it asks to open, and your editor's git sign-in.`,
+  off: "Remove it any time in Settings, General.",
+  add: "Add to SSH config",
   setting: "Editors over ssh",
   settingNote: "One line at the top of ~/.ssh/config lets your editor open a workspace on another computer.",
   small: "An editor here takes about what one more thread does, or more.",
@@ -24,10 +24,9 @@ export const EDITOR_SSH_WORDS = {
   attached: "editor attached",
 } as const;
 
-/** The Open waiting on the person's answer: the workspace and the editor it was for. */
+/** The Open waiting on the person's answer: the workspace it was for and the Open to run again on a yes. */
 interface Asking {
   workspaceId: string;
-  name: string;
   run: () => Promise<void>;
 }
 
@@ -36,6 +35,7 @@ export const useSshConsent = create<{ asking: Asking | null }>(() => ({ asking: 
 export function EditorConsent({ workspaceId }: { workspaceId: string }) {
   const asking = useSshConsent(s => (s.asking?.workspaceId === workspaceId ? s.asking : null));
   const include = useStore(s => s.api?.sshInclude);
+  const computer = hereName(usePlaces());
   if (asking === null || include === undefined) return null;
   const close = (): void => useSshConsent.setState({ asking: null });
   const add = async (): Promise<void> => {
@@ -44,7 +44,7 @@ export function EditorConsent({ workspaceId }: { workspaceId: string }) {
       await include(true);
       await asking.run();
     } catch (e) {
-      noticeFailure(e);
+      openFailed(e);
     }
   };
   return (
@@ -54,8 +54,8 @@ export function EditorConsent({ workspaceId }: { workspaceId: string }) {
           <DialogTitle>{EDITOR_SSH_WORDS.title}</DialogTitle>
         </DialogHeader>
         <DialogPanel className="flex flex-col gap-2 pt-1">
-          <DialogDescription className="text-sm text-foreground">{EDITOR_SSH_WORDS.says(asking.name)}</DialogDescription>
-          <p className="text-[13px] leading-5 text-muted-foreground">{EDITOR_SSH_WORDS.reach}</p>
+          <DialogDescription className="text-sm text-foreground">{EDITOR_SSH_WORDS.says}</DialogDescription>
+          <p className="text-[13px] leading-5 text-muted-foreground">{EDITOR_SSH_WORDS.reach(computer)}</p>
           <p className="text-[13px] leading-5 text-muted-foreground">{EDITOR_SSH_WORDS.off}</p>
         </DialogPanel>
         <DialogFooter>

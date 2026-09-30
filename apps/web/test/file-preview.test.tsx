@@ -25,7 +25,7 @@ vi.mock("@pierre/diffs/react", () => ({
   }),
 }));
 
-import { sshIncludeLine } from "@wsp/protocol";
+import { SSH_BEHIND_KIND, sshBehindLine, sshIncludeLine } from "@wsp/protocol";
 import { useSshConsent } from "../src/files/EditorConsent.js";
 import { RequestError } from "../src/protocol/client.js";
 import { FilePreviewSurface } from "../src/files/FilePreviewSurface.js";
@@ -139,7 +139,7 @@ describe("open in editor, from the file tab", () => {
     provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "fs.read": { content: "x\n", size: 2, truncated: false } }));
     const { container } = render(<FilePreviewSurface workspaceId={WS} surface={fileSurface("/root/wsp-boat/README.md", 12)} theme="dark" />);
     await act(async () => void fireEvent.click(screen.getByRole("button", { name: "Open in editor" })));
-    expect(useSshConsent.getState().asking).toMatchObject({ workspaceId: WS, name: "Delete compatibility and duplicates" });
+    expect(useSshConsent.getState().asking).toMatchObject({ workspaceId: WS });
     expect(container.querySelector("[data-open-in-editor-said]")).toBeNull();
     act(() => useSshConsent.setState({ asking: null }));
   });
@@ -153,6 +153,20 @@ describe("open in editor, from the file tab", () => {
     expect(container.querySelector("[data-open-in-editor-said]")?.textContent).toBe("These files are on Delete compatibility and duplicates, so they open here.");
     expect(screen.queryByRole("button", { name: "Open in editor" })).toBeNull();
     expect(openInEditor).not.toHaveBeenCalled();
+  });
+
+  it("says a computer that runs an older wsp in place of the button as a wait, in the quiet ink", async () => {
+    const openInEditor = vi.fn(async () => {
+      throw new RequestError(sshBehindLine("Delete compatibility and duplicates"), SSH_BEHIND_KIND);
+    });
+    act(() => useStore.setState({ workspaces: [{ ...view, kind: "cloud", name: "Delete compatibility and duplicates" }], api: { openInEditor } as never }));
+    provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "fs.read": { content: "x\n", size: 2, truncated: false } }));
+    const { container } = render(<FilePreviewSurface workspaceId={WS} surface={fileSurface("/root/wsp-boat/README.md", 12)} theme="dark" />);
+    await act(async () => void fireEvent.click(screen.getByRole("button", { name: "Open in editor" })));
+    const said = container.querySelector("[data-open-in-editor-said]")!;
+    expect(said.textContent).toBe(sshBehindLine("Delete compatibility and duplicates"));
+    expect(said.className).toContain("text-muted-foreground");
+    expect(said.className).not.toContain("text-destructive-foreground");
   });
 
   it("says the host's refusal in place of the button", async () => {

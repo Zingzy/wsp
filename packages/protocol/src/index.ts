@@ -2065,16 +2065,20 @@ export type EditorChoice = z.infer<typeof EditorChoice>;
 
 /** What Open in editor says for a workspace whose files are on another machine, named as the person reads it. */
 export const editorOpensHereLine = (name: string): string => `These files are on ${name}, so they open here.`;
-/** The refusal for editor.list and editor.open on a socket let in on a ticket: a program starts only for this computer's
- * own window, and the list of what could start is read on the same terms. */
 /** editor.open on a workspace on another computer before the person's ssh config reads wsp's: the window asks them
  * for that one line with the refusal's kind, and opens again once it stands. */
 export const sshIncludeLine = (name: string): string => `${name} opens in your editor over ssh, which needs one line at the top of ~/.ssh/config.`;
 /** ssh.port on a copy on this computer: its folder is right here, so an editor opens it with no ssh at all. */
 export const sshCopyHereLine = (name: string): string => `${name} is a copy on this computer, so its folder opens here with no ssh.`;
+/** The kind an Open carries when the workspace's computer runs a daemon from before ssh.start: a wait for that
+ * daemon's update, which a running turn there holds back, and not a failure. */
+export const SSH_BEHIND_KIND = "sshBehind";
+export const sshBehindLine = (name: string): string => `${name}'s computer runs an older wsp; it updates when its running turn ends, then Open works.`;
 /** The refusal for ssh.port and ssh.include on a socket let in on a ticket: the port is on this computer's loopback,
  * and the Include is in the person's own ssh config. */
 export const SSH_TICKET_REFUSAL = "a socket let in on a ticket cannot reach a workspace's ssh; use the wsp command or the app on the computer the host runs on";
+/** The refusal for editor.list and editor.open on a socket let in on a ticket: a program starts only for this computer's
+ * own window, and the list of what could start is read on the same terms. */
 export const EDITOR_TICKET_REFUSAL = "a socket let in on a ticket cannot list or open the editors on this computer; use the app on the computer the host runs on";
 
 export const Preferences = z.object({

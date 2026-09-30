@@ -15,7 +15,7 @@ import { Button } from "../components/ui/button.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
 import { RequestError } from "../protocol/client.js";
 import { useSshConsent } from "./EditorConsent.js";
-import { opensInEditor } from "./openCopy.js";
+import { opensInEditor, waitsForUpdate } from "./openCopy.js";
 
 export const OPEN_IN_EDITOR = "Open in editor";
 
@@ -40,8 +40,8 @@ export function OpenInEditor({ workspaceId, path, line }: { workspaceId: string;
     }
     const run = async (): Promise<void> => void (await open(workspaceId, path, line ?? undefined));
     run().catch((e: unknown) => {
-      if (e instanceof RequestError && e.kind === "sshInclude") useSshConsent.setState({ asking: { workspaceId, name: workspace.name, run } });
-      else setSaid({ line: errorText(e), refused: true });
+      if (e instanceof RequestError && e.kind === "sshInclude") useSshConsent.setState({ asking: { workspaceId, run } });
+      else setSaid({ line: errorText(e), refused: !waitsForUpdate(e) });
     });
   };
   return (
