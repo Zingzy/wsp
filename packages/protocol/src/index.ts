@@ -4327,7 +4327,8 @@ export type ProcSnapshot = z.infer<typeof ProcSnapshot>;
 
 /** The content of every daemon this project has deployed, oldest first, one entry per version: the last one is
  * what a deploy installs today, so appending the sha the host's daemon-content test prints is the whole of
- * cutting a new version. The three cut before the record existed have no sha to name. */
+ * cutting a new version. An entry with no sha to name is UNRECORDED: the three cut before the record existed, and
+ * a version whose sha another change records. */
 const UNRECORDED = "";
 const DAEMON_CONTENTS = [
   UNRECORDED,
@@ -4425,6 +4426,7 @@ const DAEMON_CONTENTS = [
   "17dc947dabc1776d901352d4d681af228e620309b8b4d8b8043ac9d904788bb4",
   "eb62eb296316d8c81da569e60be2c5db173b00f00a2ef7f562db39265db49423",
   "4d9cc489a1a3cbd2b502fa2f899bfddd5bf206ae00f1a2a76b9fa8dd7aef5f60",
+  "5bc5f0d1888a8f254ffffa1bee6b77a302bf5c1164f520e5255b2f6c4a83a252",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -4682,7 +4684,11 @@ const DAEMON_CONTENTS = [
  * Version 94 asks the DevTools question on the person's own computer only of a listener wsp's own processes hold, the
  * daemon and everything under the host that started it, so no other server of theirs gets a request from wsp.
  * Version 95 is the deploy landing each file of the bundle by a rename over the one it replaces, so a daemon that is
- * running is replaced rather than refused as a busy file. */
+ * running is replaced rather than refused as a busy file.
+ * Version 96 reads every worktree file git.diff answers for itself, from the folder the caller may read down with no
+ * link followed: an untracked file's patch and every file's blob id come from that read, and a tracked file's hunk is
+ * diffed from the base object and the blob hashed off that read, so no content byte comes from a path a link could
+ * have redirected after git listed it. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
