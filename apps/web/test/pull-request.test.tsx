@@ -75,22 +75,28 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("the Pull request pane", () => {
-  it("reads the title as the link with its number, the word, the counts, then checks, review, comments and the timeline", async () => {
+  it("says the title once, the number in its state's ink as the link, the state and the stats as quiet facts, then checks, review, comments and the timeline", async () => {
     const api = withApi(fact());
     const { container } = render(<PullRequestSurface workspaceId={WS} />);
     await waitFor(() => expect(container.querySelector("[data-pr-title]")?.textContent).toBe("Set .ci-status back to 0"));
     expect(api.pullRequestView).toHaveBeenCalledWith(WS);
-    expect(container.querySelector("[data-pr-title]")!.getAttribute("href")).toBe("https://github.com/o/r/pull/12");
-    expect(container.querySelector("[data-pr-head]")!.textContent).toContain("#12");
-    expect(container.querySelector("[data-pr-word]")!.textContent).toBe("checks failed");
-    expect([...container.querySelectorAll("[data-pr-counts] span")].map(n => n.textContent)).toEqual(["+120 -30", "9 files", "4 commits"]);
+    const head = container.querySelector<HTMLElement>("[data-pr-head]")!;
+    expect(head.textContent!.split("Set .ci-status back to 0")).toHaveLength(2);
+    expect(head.textContent!.split("#12")).toHaveLength(2);
+    const number = container.querySelector<HTMLAnchorElement>("[data-pr-number]")!;
+    expect([number.textContent, number.getAttribute("href"), number.dataset["prState"]]).toEqual(["#12", "https://github.com/o/r/pull/12", "open"]);
+    expect(number.className).toContain("text-pr-open");
+    expect([...container.querySelectorAll("[data-pr-facts] > span")].map(n => n.textContent)).toEqual(["Checks failed", "+120 -30", "9 files", "4 commits"]);
     const checks = [...container.querySelectorAll<HTMLElement>("[data-pr-check]")];
-    expect(checks.map(c => [c.dataset["prCheck"], c.querySelector("[data-pr-check-state]")!.textContent])).toEqual([
-      ["ci", "Failed"],
-      ["lint", "Passed"],
+    // The mark is the state; the word stands only on the failure, which is the row that opens.
+    expect(checks.map(c => [c.dataset["prCheck"], c.querySelector("[data-pr-check-state]")?.textContent ?? null, c.querySelector("[data-pr-check-mark]")!.getAttribute("aria-label"), c.dataset["open"] ?? null])).toEqual([
+      ["ci", "Failed", null, "true"],
+      ["lint", null, "Passed", null],
     ]);
-    // The fix stands under the failed check alone.
+    // Each check wears its mark; only the failure opens, with its fix under it.
+    expect(checks.every(c => c.querySelector("[data-pr-check-mark] svg, svg[data-pr-check-mark]") !== null)).toBe(true);
     expect(container.querySelectorAll("[data-pr-fix]")).toHaveLength(1);
+    expect(checks[0]!.querySelector("[data-pr-fix]")).not.toBeNull();
     expect(container.querySelector("[data-pr-review]")!.textContent).toContain("Changes requested");
     expect(container.querySelector("[data-pr-comment='7']")!.textContent).toContain("check.sh:3");
     expect([...container.querySelectorAll("[data-pr-event]")].map(n => n.textContent)).toEqual(["abc1234committedSet ci status", "bocommentedthanks"]);
@@ -148,7 +154,7 @@ describe("the Pull request pane", () => {
     const { container } = render(<PullRequestSurface workspaceId={WS} />);
     await waitFor(() => expect(container.querySelector("[data-pr-title]")?.textContent).toBe(PAGE.title));
     await waitFor(() => expect(container.querySelector("[data-pr-fix-conflicts]")).not.toBeNull());
-    expect(container.querySelector("[data-pr-word]")!.textContent).toBe("conflicts with main");
+    expect(container.querySelector("[data-pr-word]")!.textContent).toBe("Conflicts with main");
     expect(container.querySelector("[data-pr-merge]")).toBeNull();
     fireEvent.click(container.querySelector("[data-pr-fix-conflicts]")!);
     await waitFor(() => expect(api.fix).toHaveBeenCalledWith(WS, undefined));
