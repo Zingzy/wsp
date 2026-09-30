@@ -13,7 +13,7 @@ import { ReadBuffer, serializeMessage } from "@modelcontextprotocol/sdk/shared/s
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { CATALOG, THREAD_AGENTS } from "@wsp/catalog";
-import { type ProjectView, childStartedLine, cloneIntoTakenLine, HERE_PLACE_ID, noProjectImageLine, projectImageInUseRefusal, projectImageRemoveNotice, projectImageRemovedLine, addedProjectLine, goneRoadRefusal, EMPTY_TASK_LINE, EXIT_CODES, NO_SUCH_TURN, noSuchProjectLine, noThreadTargetLine, ProjectGolden, Recipe, registeredLine, registerTakesNoConsentLine, threadOpenedLine, ThreadView, TURN_TOKEN_ENV, workspaceKind, WorkspaceView, type ExitClass } from "@wsp/protocol";
+import { type ProjectView, childStartedLine, cloneIntoTakenLine, HERE_PLACE_ID, noProjectImageLine, projectImageInUseRefusal, projectImageRemoveNotice, projectImageRemovedLine, addedProjectLine, goneRoadRefusal, EMPTY_TASK_LINE, EXIT_CODES, NO_SUCH_TURN, noSuchProjectLine, noThreadTargetLine, ProjectGolden, Recipe, registeredLine, registerTakesNoConsentLine, threadOpenedLine, ThreadView, TURN_TOKEN_ENV, workspaceKind, WorkspaceView, type ExitClass, NOT_DELIVERED_LINE } from "@wsp/protocol";
 import { copyKey, createRuntime, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { localWiring, serve } from "../src/cli.js";
@@ -1106,6 +1106,38 @@ describe("the MCP server over the host", () => {
     expect(await turn).toEqual(failedWith(noHostServingLine(statePath)));
     expect(Date.now() - started).toBeGreaterThanOrEqual(300);
     expect(Date.now() - started).toBeLessThan(5_000);
+  });
+
+  it("a detached run whose start the host never answered is sent again to the host that comes back", async () => {
+    await call("new", { name: "alpha" });
+    let reached = 0;
+    rt.sessions.start = (() => {
+      reached++;
+      return new Promise(() => {});
+    }) as typeof rt.sessions.start;
+    const turn = call("run", { workspace: "alpha", task: "build it", detach: true });
+    await vi.waitFor(() => expect(reached).toBe(1), { timeout: 5_000, interval: 10 });
+    await restartHost({ claude: claude.adapter });
+    const answered = await turn;
+    expect(answered.isError, answered.text).toBe(false);
+    await vi.waitFor(async () => expect((await rt.sessions.history((await rt.workspaces.list())[0]!.id)).filter(e => e.type === "session.start" && e.prompt === "build it")).toHaveLength(1), { timeout: 5_000, interval: 10 });
+  });
+
+  it("a send whose start the host never answered and that does not come back is a tool error saying the message was not delivered", async () => {
+    await connect({ hostWaitMs: 300 });
+    await call("new", { name: "alpha" });
+    await call("run", { workspace: "alpha", task: "first" });
+    const [thread] = await rt.sessions.list();
+    let reached = 0;
+    rt.sessions.start = (() => {
+      reached++;
+      return new Promise(() => {});
+    }) as typeof rt.sessions.start;
+    const sent = call("send", { thread: thread!.threadId!, message: "second" });
+    await vi.waitFor(() => expect(reached).toBe(1), { timeout: 5_000, interval: 10 });
+    await handle!.close();
+    handle = undefined;
+    expect(await sent).toEqual(failedWith(NOT_DELIVERED_LINE));
   });
 
   it("wsp mcp speaks the protocol over stdio and returns when its stdin ends, closing the host socket", async () => {

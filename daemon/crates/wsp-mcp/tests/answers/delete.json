@@ -10,7 +10,7 @@
         "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
         "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"id\":\"s-1\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"threadId\":\"t-1\"},{\"id\":\"s-2\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"threadId\":\"t-1\"},{\"id\":\"s-3\",\"workspaceId\":\"ws-1\",\"harness\":\"codex\",\"status\":\"running\"}]}"
       },
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"alpha \\\"one\\\" \\u0085 🧪 kept. Its computer is deleted in the cloud; its record and 2 threads leave this computer. Ask the person, then call delete again with confirm true.\"}],\"structuredContent\":{\"workspaceId\":\"ws-1\",\"name\":\"alpha \\\"one\\\" \\u0085 🧪\",\"machineId\":\"m-1\",\"threads\":2},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"alpha \\\"one\\\" \\u0085 🧪 kept. Its copy on that computer is deleted; its record and 2 threads leave this computer. Ask the person, then call delete again with confirm true.\"}],\"structuredContent\":{\"workspaceId\":\"ws-1\",\"name\":\"alpha \\\"one\\\" \\u0085 🧪\",\"machineId\":\"m-1\",\"threads\":2},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
           "op": "workspaces.resolve",
@@ -19,6 +19,9 @@
         {
           "op": "sessions.list",
           "workspaceId": "ws-1"
+        },
+        {
+          "op": "places.list"
         }
       ]
     },
@@ -41,6 +44,9 @@
         {
           "op": "sessions.list",
           "workspaceId": "ws-2"
+        },
+        {
+          "op": "places.list"
         }
       ]
     },
@@ -53,7 +59,7 @@
         "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"here\",\"id\":\"ws-2\",\"machineId\":\"here\",\"phase\":\"running\",\"kind\":\"local\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
         "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[]}"
       },
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"here kept. Its computer is left as it is; its record and 0 threads leave this computer. Ask the person, then call delete again with confirm true.\"}],\"structuredContent\":{\"workspaceId\":\"ws-2\",\"name\":\"here\",\"machineId\":\"here\",\"threads\":0},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"here kept. Its copy on that computer is deleted; its record and 0 threads leave this computer. Ask the person, then call delete again with confirm true.\"}],\"structuredContent\":{\"workspaceId\":\"ws-2\",\"name\":\"here\",\"machineId\":\"here\",\"threads\":0},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
           "op": "workspaces.resolve",
@@ -62,6 +68,9 @@
         {
           "op": "sessions.list",
           "workspaceId": "ws-2"
+        },
+        {
+          "op": "places.list"
         }
       ]
     },
@@ -83,6 +92,9 @@
         {
           "op": "sessions.list",
           "workspaceId": "ws-1"
+        },
+        {
+          "op": "places.list"
         }
       ]
     },
@@ -97,7 +109,7 @@
         "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"id\":\"s-1\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"threadId\":\"t-1\"},{\"id\":\"s-2\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"threadId\":\"t-1\"},{\"id\":\"s-3\",\"workspaceId\":\"ws-1\",\"harness\":\"codex\",\"status\":\"running\"}]}",
         "workspaces.delete": "{\"id\":1,\"ok\":true}"
       },
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"deleted alpha \\\"one\\\" \\u0085 🧪 ws-1: computer m-1 is gone in the cloud, and its record and 2 threads are gone from this computer\"}],\"structuredContent\":{\"workspaceId\":\"ws-1\",\"name\":\"alpha \\\"one\\\" \\u0085 🧪\",\"machineId\":\"m-1\",\"threads\":2}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"deleted alpha \\\"one\\\" \\u0085 🧪 ws-1: alpha \\\"one\\\" \\u0085 🧪 is deleted from that computer, and its record and 2 threads are gone from this computer\"}],\"structuredContent\":{\"workspaceId\":\"ws-1\",\"name\":\"alpha \\\"one\\\" \\u0085 🧪\",\"machineId\":\"m-1\",\"threads\":2}},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
           "op": "workspaces.resolve",
@@ -106,6 +118,9 @@
         {
           "op": "sessions.list",
           "workspaceId": "ws-1"
+        },
+        {
+          "op": "places.list"
         },
         {
           "op": "workspaces.delete",
@@ -135,6 +150,9 @@
           "workspaceId": "ws-2"
         },
         {
+          "op": "places.list"
+        },
+        {
           "op": "workspaces.delete",
           "workspaceId": "ws-2"
         }
@@ -162,8 +180,92 @@
           "workspaceId": "ws-1"
         },
         {
+          "op": "places.list"
+        },
+        {
           "op": "workspaces.delete",
           "workspaceId": "ws-1"
+        }
+      ]
+    },
+    {
+      "case": "deleted on a joined computer",
+      "arguments": {
+        "workspace": "alpha",
+        "confirm": true
+      },
+      "replies": {
+        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
+        "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"id\":\"s-1\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"threadId\":\"t-1\"},{\"id\":\"s-2\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"threadId\":\"t-1\"},{\"id\":\"s-3\",\"workspaceId\":\"ws-1\",\"harness\":\"codex\",\"status\":\"running\"}]}",
+        "places.list": "{\"id\":1,\"ok\":true,\"places\":[{\"id\":\"place-9\",\"kind\":\"computer\",\"name\":\"attic \u0085\",\"default\":false}]}",
+        "workspaces.delete": "{\"id\":1,\"ok\":true}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"deleted alpha \\\"one\\\" \\u0085 🧪 ws-1: alpha \\\"one\\\" \\u0085 🧪 is deleted from attic \\u0085, and its record and 2 threads are gone from this computer\"}],\"structuredContent\":{\"workspaceId\":\"ws-1\",\"name\":\"alpha \\\"one\\\" \\u0085 🧪\",\"machineId\":\"m-1\",\"threads\":2}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "workspaces.resolve",
+          "ref": "alpha"
+        },
+        {
+          "op": "sessions.list",
+          "workspaceId": "ws-1"
+        },
+        {
+          "op": "places.list"
+        },
+        {
+          "op": "workspaces.delete",
+          "workspaceId": "ws-1"
+        }
+      ]
+    },
+    {
+      "case": "unconfirmed, the names not read",
+      "arguments": {
+        "workspace": "alpha"
+      },
+      "replies": {
+        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
+        "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[]}",
+        "places.list": "{\"id\":1,\"ok\":false,\"error\":\"not yours to read\",\"kind\":\"auth\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"alpha \\\"one\\\" \\u0085 🧪 kept. Its copy on that computer is deleted; its record and 0 threads leave this computer. Ask the person, then call delete again with confirm true.\"}],\"structuredContent\":{\"workspaceId\":\"ws-1\",\"name\":\"alpha \\\"one\\\" \\u0085 🧪\",\"machineId\":\"m-1\",\"threads\":0},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "workspaces.resolve",
+          "ref": "alpha"
+        },
+        {
+          "op": "sessions.list",
+          "workspaceId": "ws-1"
+        },
+        {
+          "op": "places.list"
+        }
+      ]
+    },
+    {
+      "case": "unconfirmed at another provider",
+      "arguments": {
+        "workspace": "alpha"
+      },
+      "replies": {
+        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
+        "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[]}",
+        "places.list": "{\"id\":1,\"ok\":true,\"places\":[{\"id\":\"place-9\",\"kind\":\"provider\",\"name\":\"ascii\",\"default\":false}]}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"alpha \\\"one\\\" \\u0085 🧪 kept. Its computer is deleted in the cloud; its record and 0 threads leave this computer. Ask the person, then call delete again with confirm true.\"}],\"structuredContent\":{\"workspaceId\":\"ws-1\",\"name\":\"alpha \\\"one\\\" \\u0085 🧪\",\"machineId\":\"m-1\",\"threads\":0},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "workspaces.resolve",
+          "ref": "alpha"
+        },
+        {
+          "op": "sessions.list",
+          "workspaceId": "ws-1"
+        },
+        {
+          "op": "places.list"
         }
       ]
     }

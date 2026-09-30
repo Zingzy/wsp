@@ -36,6 +36,9 @@ function repoAt(from = REPO): string {
   cpSync(join(from, CUT_PATHS.record), join(dir, CUT_PATHS.record));
   execFileSync("git", ["init", "-q"], { cwd: dir });
   commitAll(dir);
+  // A branch's checkout carries its own daemon change and its note, and no version: landed first, it is the main
+  // the cases play on. On main, and on a branch with no daemon change, the cut does nothing.
+  if (from === REPO && cutDaemonVersion(dir, { note: "the branch under test" }).cut) commitAll(dir);
   return dir;
 }
 

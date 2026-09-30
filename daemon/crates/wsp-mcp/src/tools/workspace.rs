@@ -32,6 +32,8 @@ pub struct Words {
     pub agents_nothing: String,
     pub forgot_one: String,
     pub forgot_many: String,
+    /// What a delete calls a joined computer whose name the caller could not read.
+    pub unnamed_computer: String,
     pub on_delete: HashMap<String, OnDelete>,
     pub delete_notice_one: String,
     pub delete_notice_many: String,
@@ -157,6 +159,9 @@ pub struct Workspace {
     pub copy: Option<Copy>,
     #[serde(default)]
     pub wake_refused: Option<String>,
+    /// The computer somebody joined that it stands on, by that computer's id; absent everywhere else.
+    #[serde(default)]
+    pub place: Option<String>,
     pub project: ProjectRef,
 }
 
