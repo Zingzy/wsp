@@ -144,9 +144,9 @@ export const workspaceActions: ReadonlyArray<ActionEntry<WorkspaceTarget, Worksp
     id: "start-daemon",
     group: "state",
     icon: () => PlayIcon,
-    searchTerms: ["start daemon", "daemon", "start it", "restart daemon"],
+    searchTerms: ["start daemon", "daemon", "start it", "restart daemon", "reconnect"],
     title: () => WORKSPACE_WORDS.startDaemon,
-    rowLabel: target => rowVerb("Start the daemon of", target.displayName),
+    rowLabel: target => rowVerb("Reconnect", target.displayName),
     buttonWord: target => target.absent?.start ?? WORKSPACE_WORDS.startDaemon,
     hint: target => target.absent?.said ?? WORKSPACE_WORDS.startDaemon,
     // Offered off the one reading, never off the kind: a reading carries the word for this button exactly where

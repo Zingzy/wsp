@@ -102,7 +102,7 @@ export function terminalPaneTitle(pane: TerminalPaneState): string | null {
     case "reconnecting":
       return "Reconnecting to the task";
     case "reauth":
-      return "The task refused a stale daemon token; reconnecting with the one wsp holds now";
+      return "Reconnecting to the task";
     case "not-answering":
       return pane.outOfMemory ? outOfMemoryLine(pane.outOfMemory) : "The task is not answering";
     case "absent":
@@ -133,9 +133,9 @@ const REBUILD_HINT = `Rebuild it from the ${WORKSPACE_ROW}`;
 
 /** What a shell says when the daemon that was holding it is gone: the pane's overlay and the bytes written into
  * the terminal itself read one sentence, so a person who saw it in the scrollback and a person who saw the overlay
- * read the same thing. It names the daemon and not a move, because the same refusal comes back when the workspace
- * moved to another computer and when this computer's own daemon was started again under a shell. */
-export const SHELL_ENDED_LINE = "This shell ended when the daemon holding it stopped";
+ * read the same thing. It names a restart and not a move, because the same refusal comes back when the workspace
+ * moved to another computer and when this computer's own terminals were started again under a shell. */
+export const SHELL_ENDED_LINE = "This shell ended when the task that held it restarted";
 
 /** What to do once nothing has answered. The fact is in the title; this half is the one thing a person can act on,
  * and it names the thing to look at rather than leaving an "it" open. Both halves read the same name for where,
@@ -148,9 +148,9 @@ const unansweredHint = (pane: { local: boolean; where: string }): string =>
 /** What a pane says for a machine with no daemon at all. One sentence stating the fact, with no return promised and
  * nothing to wait for: a pane that read "reconnecting" for a workspace that never had a daemon road was the bug
  * (seen on a local workspace before its daemon landed).  */
-const NO_DAEMON_TITLE = "There is no daemon on this task";
-const NO_DAEMON_LINE = "There is no daemon on this task, so no terminal opens here";
-const NO_DAEMON_TYPING = "Typing is refused: there is no daemon on this task";
+const NO_DAEMON_TITLE = "No terminal runs on this task";
+const NO_DAEMON_LINE = "No terminal runs on this task, so none opens here";
+const NO_DAEMON_TYPING = "Typing is refused: no terminal runs on this task";
 
 /** What a pane says for a connection that was turned away. The fact of what happened to this window's connection,
  * then that the work on the workspace is untouched by it, with no return promised and nothing offered to do: the
@@ -204,9 +204,9 @@ export function terminalEmptyLine(pane: TerminalPaneState): string | null {
     case "unanswered":
       return `Nothing has answered on ${pane.where}, so no terminal opens yet`;
     case "reconnecting":
-      return "The daemon link is reconnecting; terminals open when it is back";
+      return "Reconnecting to the task; terminals open when it is back";
     case "reauth":
-      return "The task refused a stale daemon token; terminals open once the link carries the current one";
+      return "Reconnecting to the task; terminals open when it is back";
     case "not-answering":
       return "The task is not answering; terminals open when it does";
     case "absent":
@@ -242,7 +242,7 @@ export function terminalInputRefusal(pane: TerminalPaneState): string | null {
     case "reconnecting":
       return "Typing is refused while the task is reconnecting";
     case "reauth":
-      return "Typing is refused until the task takes the current daemon token";
+      return "Typing is refused while the task is reconnecting";
     case "not-answering":
       return "Typing is refused: the task is not answering";
     case "absent":

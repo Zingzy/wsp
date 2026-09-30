@@ -37,7 +37,7 @@ type Recorder = Pick<Api, "recordRun">;
 export const RUN_NO_LINK_LINE = "this workspace's terminal is not connected yet, so nothing can run in it; try again once it is";
 /** And where the daemon is one that would take the command for no field at all and open a bare shell. */
 export const runDaemonBehindLine = (version: number | null): string =>
-  `this workspace's daemon is version ${version ?? "unknown"}, older than ${PTY_RUN_DAEMON_VERSION}, the first that runs a reply's command; update the workspace and run it again`;
+  `wsp on this workspace is version ${version ?? "unknown"}, older than ${PTY_RUN_DAEMON_VERSION}, the first that runs a reply's command; update the workspace and run it again`;
 /** And where this host has no road to record the run on the thread. */
 export const RUN_NO_HOST_LINE = "this host keeps no record of a reply's run, so its block cannot show one; update wsp and run it again";
 

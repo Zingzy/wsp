@@ -66,7 +66,8 @@ import { PROJECT_WORDS, SECTION_WORDS } from "./words.js";
 import { SectionRow } from "./SectionRow.js";
 
 type Fold = SidebarSection | "settled";
-const FOLDS: readonly Fold[] = [...SIDEBAR_SECTIONS, "settled"];
+/** The folds a head can make: the one list has no head, so it never folds. */
+const FOLDS: readonly Fold[] = ["pinned", "needs-you", "settled"];
 /** The sections a person has folded by their heads. Settled starts folded, since it holds the tiles a person has
  * stopped looking at; every live section starts open. */
 const FOLDED_KEY = "wsp:sidebar-folded";
@@ -316,8 +317,7 @@ export function WorkspaceSidebar() {
     }
     const copyActions = above === runs.id ? [] : resolveActions(workspaceActions, workspaceTarget(runs.workspace, runs.status, places), verbs);
     const place = placeOf(runs);
-    const section = thread === null ? null : threadSection(thread);
-    const { branch, counts, why, settledWord } = tileCheckout(runs, { done: section === "done" || section === "idle", attached: editorsAttached.has(runs.id) });
+    const { branch, commit, pr, counts, why } = tileCheckout(runs, { attached: editorsAttached.has(runs.id) });
     let tile: ReactNode;
     if (thread === null) {
       tile = (
@@ -326,6 +326,8 @@ export function WorkspaceSidebar() {
           name={copyName(places, runs)}
           place={place}
           branch={branch}
+          commit={commit}
+          pr={pr}
           counts={counts}
           why={why}
           depth={depth}
@@ -351,9 +353,11 @@ export function WorkspaceSidebar() {
           {...(linksDown[thread.workspaceId] !== undefined ? { linkDown: linksDown[thread.workspaceId] } : {})}
           place={place}
           branch={branch}
+          commit={commit}
+          pr={pr}
           counts={counts}
           why={why}
-          time={settled && settledWord !== undefined ? settledWord : restingAge(thread)}
+          time={restingAge(thread)}
           depth={depth}
           active={(selectedId === thread.workspaceId && (selectedThreadId === null ? thread.threadId === null : selectedThreadId === thread.id)) || (selectedThreadId !== null && item.holds?.includes(selectedThreadId) === true)}
           settled={settled}
@@ -421,13 +425,13 @@ export function WorkspaceSidebar() {
     if (launch === undefined || (picked !== null && runs.workspace.project.id !== picked.project.id)) return [];
     return [
       <li key={`launch:${runs.id}`} data-thread-selection-safe>
-        <ThreadLaunchTile launch={launch} place={placeOf(runs)} branch={tileCheckout(runs).branch} counts={tileCheckout(runs, { attached: editorsAttached.has(runs.id) }).counts} />
+        <ThreadLaunchTile launch={launch} place={placeOf(runs)} checkout={tileCheckout(runs, { attached: editorsAttached.has(runs.id) })} />
       </li>,
     ];
   });
   const made = creations.filter(creation => picked === null || creation.project === picked.project.id);
-  /** A workspace being made files where a thread in its state does: Working while it is made, Needs you once refused. */
-  const madeIn = (id: SidebarSection): Creation[] => made.filter(creation => (creation.failed === null ? "working" : "needs-you") === id);
+  /** A workspace being made files where a thread in its state does: the list while it is made, Needs you once refused. */
+  const madeIn = (id: SidebarSection): Creation[] => made.filter(creation => (creation.failed === null ? "threads" : "needs-you") === id);
   /** A root dropped on a section or on the fold: the marks the drop writes, or the settle of its tree. */
   const drop = (rootId: string, place: SidebarSection | "settled"): void => {
     const node = tiles.live.find(root => root.thread.id === rootId);
@@ -566,18 +570,21 @@ export function WorkspaceSidebar() {
                 className={cn("min-w-0 rounded-[var(--control-radius)] transition-colors duration-150", index > 0 && "mt-3", over === section.id && "bg-sidebar-row-hover")}
                 {...dropZone(section.id)}
               >
-                <SectionRow
-                  label={SECTION_WORDS[section.id]}
-                  count={section.roots.reduce((sum, node) => sum + tileCount(node), 0) + madeIn(section.id).length}
-                  collapsed={folded.includes(section.id)}
-                  onToggle={() => toggleFold(section.id)}
-                  rowId={sectionRowId(section.id)}
-                  head={section.id}
-                />
-                {folded.includes(section.id) ? null : (
+                {/* The one list stands bare between Needs you and Settled, as T3 Code's active list. */}
+                {section.id === "threads" ? null : (
+                  <SectionRow
+                    label={SECTION_WORDS[section.id]}
+                    count={section.roots.reduce((sum, node) => sum + tileCount(node), 0) + madeIn(section.id).length}
+                    collapsed={folded.includes(section.id)}
+                    onToggle={() => toggleFold(section.id)}
+                    rowId={sectionRowId(section.id)}
+                    head={section.id}
+                  />
+                )}
+                {section.id !== "threads" && folded.includes(section.id) ? null : (
                   <ul className="flex min-w-0 flex-col">
-                    {section.roots.map(node => tileItem(node, 0, null))}
                     {madeIn(section.id).map(creationItem)}
+                    {section.roots.map(node => tileItem(node, 0, null))}
                   </ul>
                 )}
               </li>

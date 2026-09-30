@@ -425,7 +425,7 @@ describe("the body before the first list has arrived, and on a wsp with no proje
 });
 
 describe("keyboard navigation", () => {
-  it("arrows walk every section head and tile in order from the search row; a press on a tile selects it, and on a head folds its section", async () => {
+  it("arrows walk every tile of the bare list in order from the search row, and a press on a tile selects it", async () => {
     await mount(fakeApi([API, WEB], [status(API), status(WEB)], [session("s1", "ws_a", { prompt: "hello", startedAt: iso(-60_000) })]), "hello");
     const search = screen.getByRole("button", { name: "Search" });
     const at = (): string | undefined => (document.activeElement as HTMLElement | null)?.dataset["rowId"];
@@ -436,19 +436,15 @@ describe("keyboard navigation", () => {
       fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
       walked.push(at());
     }
-    expect(walked).toEqual(["section:working", rowOf("hello").dataset["rowId"], "section:idle", rowOf("web").dataset["rowId"], rowOf("web").dataset["rowId"]]);
+    expect(walked).toEqual([rowOf("hello").dataset["rowId"], rowOf("web").dataset["rowId"], rowOf("web").dataset["rowId"], rowOf("web").dataset["rowId"], rowOf("web").dataset["rowId"]]);
     fireEvent.keyDown(document.activeElement!, { key: "Home" });
-    expect(at()).toBe("section:working");
+    expect(document.activeElement).toBe(rowOf("hello"));
     fireEvent.keyDown(document.activeElement!, { key: "End" });
     expect(document.activeElement).toBe(rowOf("web"));
-    fireEvent.keyDown(document.activeElement!, { key: "ArrowUp" });
     fireEvent.keyDown(document.activeElement!, { key: "ArrowUp" });
     expect(document.activeElement).toBe(rowOf("hello"));
     fireEvent.click(document.activeElement!);
     expect(useStore.getState().selectedId).toBe("ws_a");
-    fireEvent.keyDown(document.activeElement!, { key: "ArrowUp" });
-    fireEvent.click(document.activeElement!);
-    expect(screen.queryByText("hello")).toBeNull();
   });
 
   it("ArrowDown on the head opens the menu and moves no row focus; Escape shuts it and puts focus back on the head", async () => {
@@ -983,12 +979,13 @@ describe("the creation tile", () => {
     );
     const beta = rowOf("beta");
     const gamma = rowOf("gamma");
-    // Each files where a thread in its state does, counted there: Working while it is made, Needs you once refused.
+    // Each files where a thread in its state does, newest on top: the bare list while it is made, Needs you once
+    // refused, counted under its head.
     expect(rowIds()).toEqual(["creating:2", "creating:3", "creating:1", "ws:ws_a"]);
     const sectionOf = (row: HTMLElement) => row.closest<HTMLElement>("[data-section]")!;
-    expect(sectionOf(beta).dataset["section"]).toBe("working");
+    expect(sectionOf(beta).dataset["section"]).toBe("threads");
     expect(sectionOf(gamma).dataset["section"]).toBe("needs-you");
-    expect(sectionOf(beta).querySelector("[data-group-count]")!.textContent).toBe("(1)");
+    expect(sectionOf(beta).querySelector("[data-section-head]")).toBeNull();
     expect(sectionOf(gamma).querySelector("[data-group-count]")!.textContent).toBe("(2)");
     for (const row of [beta, gamma]) {
       expect(row.className).toBe(rowOf("api").className);

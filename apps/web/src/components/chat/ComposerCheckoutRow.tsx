@@ -77,16 +77,15 @@ export function ComposerCheckoutRow({
   // A view on a turn names that turn's folder; a view about to open a thread names the one the thread will start in.
   const folder = opening ? startFolder : (cwd ?? startFolder);
   const branch = useBranch(wire, folder, true, linkWord, { running, moved: thread.view.entries.length });
-  // The counts the host read for the copy's own checkout, beside the branch only where this folder is that checkout
-  // on that branch: a folder of the thread's may be another repository altogether.
+  // What the copy's own checkout holds uncommitted, beside the branch only where this folder is that checkout on that
+  // branch: a folder of the thread's may be another repository altogether.
   const fact = useStatus(workspaceId)?.checkout;
   const checkoutPath = useStore(s => {
     const held = s.workspaces.find(w => w.id === workspaceId);
     return held?.copy?.path ?? held?.project.path;
   });
-  const pr = useStatus(workspaceId)?.pr;
   const onCheckout = fact !== undefined && branch.kind === "repo" && folder === checkoutPath && fact.branch === branch.head;
-  const counts = onCheckout ? checkoutCounts(fact, pr) : [];
+  const counts = onCheckout ? checkoutCounts(fact) : [];
 
   useEffect(() => {
     if (cwd !== null) follow(workspaceId, cwd);
@@ -143,7 +142,7 @@ export function ComposerCheckoutRow({
           </TooltipPopup>
         </Tooltip>
       ) : null}
-      {branch.kind === "repo" && onCheckout ? <PullRequestStrip workspaceId={workspaceId} branch={branch.head} /> : null}
+      {branch.kind === "repo" && onCheckout ? <PullRequestStrip workspaceId={workspaceId} /> : null}
       {branch.kind === "repo" && branch.head !== DETACHED_HEAD ? null : (
         <span className={branchSlotClass} data-composer-branch={branch.kind === "repo" ? "detached" : branch.kind} />
       )}

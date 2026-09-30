@@ -7,7 +7,7 @@
 // session id repeats across turns. Wire order is the timeline order. createdAt
 // is the wire's `at` (ms epoch) as ISO, else the caller's receipt clock, else
 // "" for unstamped history.
-import { AFTER_CUT_LINE, NOTIFY_ME, internalToolResult, subagentTaskLine, toolActivityLine, toolCallFacts, toolDoneLine, toolResultLine, type SessionEvent, type SessionHarness, type SessionRunEvent, type TurnResult } from "@wsp/protocol";
+import { AFTER_CUT_LINE, NOTIFY_ME, internalToolResult, subagentTaskLine, toolActivityLine, toolCallFacts, toolDoneLine, toolResultLine, type PlanStep, type SessionEvent, type SessionHarness, type SessionRunEvent, type TurnResult } from "@wsp/protocol";
 import type {
   ChatMessage,
   PermissionPrompt,
@@ -15,6 +15,8 @@ import type {
   SubagentRun,
   TimelineEntry,
   TurnState,
+  TaskStep,
+  TurnPlan,
   TurnSummary,
   WorkLogEntry,
 } from "./view-model.js";
@@ -35,6 +37,8 @@ export interface SessionModel {
   readonly permissionMode: string | null;
   /** Every reply block's latest run, by the block it was run from; the host records no step after a run's ending. */
   readonly runs: ReadonlyMap<string, SessionRunEvent>;
+  /** The latest turn's step list, whatever state the turn is in; null where that turn wrote none. */
+  readonly plan: TurnPlan | null;
 }
 
 export interface DeriveSessionOptions {
@@ -72,14 +76,45 @@ interface TurnBuild {
   subagents: Map<string, number>;
   /** The reply's result once session.done landed; the turn stays running until session.end applies its status. */
   reply: TurnResult | null;
-  /** Where the turn's step list and its proposed plan sit in the timeline, once each has come: a later one of either
-   * replaces the row in place, so a turn has one of each however often the agent rewrote them. */
-  todoRow: number | null;
+  /** Where the turn's proposed plan sits in the timeline once it has come: a later one replaces the row in place. */
   planRow: number | null;
+}
+
+/** A turn's step list as the agent last wrote it, and when each step was set working and how long it took to be
+ * marked done, by the step's words and which of the steps with those words it is. */
+interface PlanState {
+  steps: ReadonlyArray<TaskStep>;
+  began: Map<string, number>;
+  took: Map<string, number>;
+}
+
+/** Each step with the key it is timed under: its words, and how many steps with the same words came before it. */
+function keyedSteps(steps: ReadonlyArray<PlanStep>): { key: string; step: PlanStep }[] {
+  const seen = new Map<string, number>();
+  return steps.map(step => {
+    const n = seen.get(step.text) ?? 0;
+    seen.set(step.text, n + 1);
+    return { key: `${step.text}\n${n}`, step };
+  });
+}
+
+function nextPlan(earlier: PlanState | undefined, steps: ReadonlyArray<PlanStep>, at: string): PlanState {
+  const began = new Map(earlier?.began);
+  const took = new Map(earlier?.took);
+  const now = Date.parse(at);
+  const keyed = keyedSteps(steps);
+  for (const { key, step } of keyed) {
+    if (Number.isNaN(now)) break;
+    if (step.state === "working" && !began.has(key)) began.set(key, now);
+    const from = began.get(key);
+    if (step.state === "done" && !took.has(key) && from !== undefined) took.set(key, now - from);
+  }
+  return { began, took, steps: keyed.map(({ key, step }) => ({ ...step, key, ...(took.has(key) ? { durationMs: took.get(key)! } : {}) })) };
 }
 
 export function deriveSession(events: ReadonlyArray<SessionEvent>, options: DeriveSessionOptions = {}): SessionModel {
   const timeline: TimelineEntry[] = [];
+  const plans = new Map<string, PlanState>();
   const turns: TurnSummary[] = [];
   const runs = new Map<string, SessionRunEvent>();
   const startsBySession = new Map<string, number>();
@@ -256,7 +291,7 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
       checkpoint: null,
     };
     turns.push(summary);
-    return { summary, startCount: count, ordinal: 0, openMessage: null, openMessageId: null, sawText: false, tools: new Map(), childCalls: new Map(), openAnonymousTool: null, subagents: new Map(), reply: null, todoRow: null, planRow: null };
+    return { summary, startCount: count, ordinal: 0, openMessage: null, openMessageId: null, sawText: false, tools: new Map(), childCalls: new Map(), openAnonymousTool: null, subagents: new Map(), reply: null, planRow: null };
   };
   /** A delta, done or end whose turn never started here (history capped mid-turn) still needs a turn to hang on. */
   const turnFor = (event: SessionEvent, at: string): TurnBuild => {
@@ -365,14 +400,8 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
       case "session.plan": {
         const t = turnFor(event, at);
         const turnId = t.summary.turnId;
-        if (event.steps !== undefined) {
-          const entry: TimelineEntry = { id: `todo:${turnId}`, kind: "todo", createdAt: at, todo: { turnId, steps: event.steps } };
-          if (t.todoRow !== null) replace(t.todoRow, { ...entry, createdAt: timeline[t.todoRow]!.createdAt });
-          else {
-            closeOpenMessage(t);
-            t.todoRow = push(entry);
-          }
-        }
+        // The list never enters the transcript: the composer's edge carries it while the turn runs.
+        if (event.steps !== undefined) plans.set(turnId, nextPlan(plans.get(turnId), event.steps, at));
         if (event.text !== undefined) {
           const earlier = t.planRow === null ? undefined : timeline[t.planRow];
           const createdAt = earlier?.createdAt ?? at;
@@ -600,7 +629,10 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
     if (entry.kind === "message") messages.push(entry.message);
     else if (entry.kind === "work") workEntries.push(entry.entry);
   }
-  return { turns, messages, workEntries, timeline, latestTurn: turns[turns.length - 1] ?? null, running, model, harness, agent, permissionMode, runs };
+  const latestTurn = turns[turns.length - 1] ?? null;
+  const latestPlan = latestTurn === null ? undefined : plans.get(latestTurn.turnId);
+  const plan = latestTurn === null || latestPlan === undefined ? null : { turnId: latestTurn.turnId, steps: latestPlan.steps };
+  return { turns, messages, workEntries, timeline, latestTurn, running, model, harness, agent, permissionMode, runs, plan };
 }
 
 /** Reasoning renders as one collapsed line (preview) that opens onto the text (detail). */

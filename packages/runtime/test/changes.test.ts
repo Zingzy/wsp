@@ -16,10 +16,11 @@ const SESSION = "44444444-4444-4444-8444-444444444444";
 /** The copy's checkout on the stub's machine, whose number counts up across the file. */
 const CWD = expect.stringMatching(/^\/root\/stub-\d+$/);
 
+const BRANCH = { oid: "abc", head: "fix/cart", upstream: "origin/fix/cart", ahead: 1, behind: 0 };
 const STATUS: DaemonResponse = {
   id: 1,
   ok: true,
-  branch: { oid: "abc", head: "fix/cart", upstream: "origin/fix/cart", ahead: 1, behind: 0 },
+  branch: BRANCH,
   entries: [
     { xy: ".M", path: "a.ts" },
     { xy: "??", path: "b.ts" },
@@ -133,6 +134,16 @@ describe("the checkout fact", () => {
     const daemon = fakeDaemon({ "git.status": () => ({ ...STATUS, entries: [], editsUnread: true, countsUnknown: true }) });
     const { id } = await withWorkspace(daemon);
     expect((await rt!.workspaces.checkout(id)).checkout).toMatchObject({ changed: 0, editsUnread: true, countsUnknown: true });
+  });
+
+  it("carries the commit the head is on, and none where git has no commit yet", async () => {
+    const oid = "0123456789abcdef0123456789abcdef01234567";
+    const daemon = fakeDaemon({ "git.status": () => ({ ...STATUS, branch: { ...BRANCH, head: "(detached)", oid } }) });
+    const { id } = await withWorkspace(daemon);
+    expect((await rt!.workspaces.checkout(id)).checkout).toMatchObject({ branch: "(detached)", head: oid });
+    const fresh = fakeDaemon({ "git.status": () => ({ ...STATUS, branch: { ...BRANCH, oid: "(initial)" } }) });
+    const { id: freshId } = await withWorkspace(fresh);
+    expect((await rt!.workspaces.checkout(freshId)).checkout).not.toHaveProperty("head");
   });
 
   it("is read again when a turn ends, and never on a timer", async () => {
