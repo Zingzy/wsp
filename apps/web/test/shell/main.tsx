@@ -68,7 +68,10 @@ import { useHostNotices } from "../../src/notices/hostNotices.js";
 import { addNotice, type NoticeKind } from "../../src/notices/store.js";
 import { useWorkspaceLineNotices } from "../../src/notices/workspaceLines.js";
 import { useRightPanelStore } from "../../src/rightPanelStore";
+import { getBrowser } from "../../src/browser/model";
+import { recentsKey } from "../../src/browser/recents";
 import { useBrowserTabs } from "../../src/browser/tabs";
+import { useSshConsent } from "../../src/files/EditorConsent";
 import { parseAddress } from "../../src/browser/url";
 import { AppShell } from "../../src/shell/AppShell";
 import { useShellVersionEffect } from "../../src/shell/shellVersion";
@@ -471,6 +474,7 @@ const diagramHistory: SessionEvent[] = [
 ];
 
 const api: Api = {
+  ...(params.get("consent") === "1" ? { editorList: async () => [{ id: "vscode", name: "VS Code", remote: true }], sshInclude: async () => false } : {}),
   listWorkspaces: async () => workspaces,
   getWorkspace: async id => workspaces.find(w => w.id === id)!,
   createWorkspace: async () => workspaces[0]!,
@@ -690,6 +694,20 @@ if (params.get("panel") === "browser" && shown !== null && at !== null) {
   useRightPanelStore.setState({ byWorkspaceId: {} });
   useRightPanelStore.getState().open(shown, "preview");
   useRightPanelStore.getState().openBrowser(shown, useBrowserTabs.getState().createTab(shown, parseAddress(at)));
+}
+// ?panel=browser&list=1 opens the pane on its list of recent addresses and servers, which the address bar filters.
+if (params.get("panel") === "browser" && shown !== null && params.get("list") === "1") {
+  const ago = (m: number): number => Date.now() - m * 60_000;
+  window.localStorage.setItem(recentsKey(shown), JSON.stringify([{ url: "http://localhost:6006/?path=/story", title: "Storybook", lastVisitedAt: ago(4) }, { url: "http://localhost:5173/", title: "wsp", lastVisitedAt: ago(90) }]));
+  getBrowser(shown).syncPorts([{ port: 3000, pid: 3000, process: "node" }, { port: 5173, pid: 5173, process: "vite" }, { port: 8001, pid: 8001, process: "python3" }, { port: 9229, pid: 9229, process: "deno" }]);
+  useRightPanelStore.setState({ byWorkspaceId: {} });
+  useRightPanelStore.getState().open(shown, "preview");
+  useRightPanelStore.getState().openBrowser(shown, useBrowserTabs.getState().createTab(shown, null));
+}
+// ?consent=1 is an Open on ws_a waiting on the one question of the line in the person's ssh config.
+if (params.get("consent") === "1" && shown !== null) {
+  useStore.setState({ places: [{ id: "here", kind: "computer", name: "zingzy's MacBook Pro", default: true, present: true, takesForks: false }] });
+  useSshConsent.setState({ asking: { workspaceId: shown, run: async () => {} } });
 }
 if (params.get("panel") === "terminal" && shown !== null) {
   const surfaces: GhosttyTerminalSurface[] = [];
