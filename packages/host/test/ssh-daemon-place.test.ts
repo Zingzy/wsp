@@ -5,10 +5,10 @@
 // somebody owns must spell one that needs no root and touches nothing of
 // theirs outside one folder under their home.
 import { describe, expect, it } from "vitest";
-import { execFile, execFileSync } from "node:child_process";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { execFile, execFileSync, spawn, spawnSync } from "node:child_process";
+import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { MACHINE_LACKS_LINES, machineLacksLine, machineLacksShort, machineNeverAnswered, NO_LINGER_LINE, NO_NODE_LINE, PLACE_NEEDS_ROOT_LINE, NO_SYSTEMD_LINE, DAEMON_UNIT, shellQuote, placeDaemonPaths, WSP_WORKSPACE_APPARMOR_PATH } from "@wsp/protocol";
 import { putBytesScript } from "@wsp/engine";
@@ -66,7 +66,8 @@ describe("the place a fork keeps its daemon", () => {
   it("spells the guest's own layout: /root, a system unit, and the edge-reachable bind", () => {
     const cloud = deployScript(CLOUD_PLACE, "aabbcc");
     expect(cloud).toContain("mkdir -p /root/wsp-daemon /root/.wsp/inbox");
-    expect(cloud).toContain("tar --no-same-owner -xzf /root/wsp-daemon.tgz -C /root/wsp-daemon");
+    expect(cloud).toContain("tar --no-same-owner -xzf /root/wsp-daemon.tgz -C /root/wsp-daemon/.unpacking");
+    expect(cloud).toContain('while IFS= read -r f; do mv -f /root/wsp-daemon/.unpacking/"$f" /root/wsp-daemon/"$f"; done');
     expect(cloud).toContain(`cat > /etc/systemd/system/${DAEMON_UNIT} <<'WSP_UNIT'`);
     expect(cloud).toContain(`systemctl restart ${DAEMON_UNIT}`);
     expect(cloud).not.toContain("systemctl --user");
@@ -121,7 +122,8 @@ describe("the place a machine reached over ssh keeps its daemon", () => {
     const at = placeDaemonPaths(LOGIN.home);
     const s = script();
     expect(s).toContain(`mkdir -p '${at.dir}' '${at.inbox}' '${at.binDir}' '${at.unitDir}'`);
-    expect(s).toContain(`tar --no-same-owner -xzf '${at.bundle}' -C '${at.dir}'`);
+    expect(s).toContain(`tar --no-same-owner -xzf '${at.bundle}' -C '${at.dir}/.unpacking'`);
+    expect(s).toContain(`while IFS= read -r f; do mv -f '${at.dir}/.unpacking'/"$f" '${at.dir}'/"$f"; done`);
     // The token's value is not in this script: it lands over the byte road, which the case below pins. The path
     // the daemon reads it from is, on the unit's own line.
     expect(s).not.toContain("aabbcc");
@@ -505,5 +507,45 @@ describe("the place a computer joined over ssh keeps its agent", () => {
     // The bundle, the token and then the code, each over the byte road, before one command names any of them.
     expect(box.wrote).toEqual([place.bundle, place.tokenPath, "/home/maya/.wsp/join-code"]);
     expect(box.ran.join("\n")).not.toContain("7QK3M2VD");
+  });
+});
+
+describe("a deploy over a daemon that is still running", () => {
+  // Linux alone refuses the write this guards, and there a file's first exec pays no check, which is why every
+  // other script a test runs is a stub: this one has to be a program a process runs from this very file.
+  it.runIf(process.platform === "linux")("replaces the binary a running process was started from, which Linux refuses to write into, and leaves that process running", async () => {
+    const home = mkdtempSync(join(tmpdir(), "wsp-busy-"));
+    const stage = mkdtempSync(join(tmpdir(), "wsp-busy-bundle-"));
+    const place = sshDaemonPlace({ home, path: process.env["PATH"] ?? "/usr/bin:/bin" });
+    const binary = daemonBinaryOn(place.dir, GUEST_TARGET);
+    mkdirSync(dirname(binary), { recursive: true });
+    // Any program will do as the old daemon: what matters is that a process is running from this file. The copy
+    // keeps the program's own mode.
+    copyFileSync("/bin/sleep", binary);
+    const running = spawn(binary, ["60"], { stdio: "ignore" });
+    try {
+      await new Promise<void>((resolve, reject) => running.once("spawn", resolve).once("error", reject));
+      const fresh = "#!/bin/sh\necho the new daemon\n";
+      mkdirSync(dirname(daemonBinaryOn(stage, GUEST_TARGET)), { recursive: true });
+      writeFileSync(daemonBinaryOn(stage, GUEST_TARGET), fresh);
+      writeFileSync(join(stage, "wsp-open"), "#!/bin/sh\n");
+      mkdirSync(dirname(place.bundle), { recursive: true });
+      execFileSync("tar", ["-czf", place.bundle, "-C", stage, "."]);
+      // The deploy's own lines up to the shim it installs out of the bundle, which is where the files step ends.
+      const lines = deployScript(place, "aabbcc").split("\n");
+      const through = lines.findIndex(line => line.startsWith("install -m 0755"));
+      expect(through).toBeGreaterThan(0);
+      // The box that failed had a tar that writes over a file in place, which is what meets the busy file with
+      // `Cannot open: Text file busy`; GNU tar takes that mode from TAR_OPTIONS, and its default unlinks first.
+      const ran = spawnSync("sh", ["-c", lines.slice(0, through + 1).join("\n")], { encoding: "utf8", env: { ...process.env, TAR_OPTIONS: "--overwrite" } });
+      expect(ran.status, ran.stderr).toBe(0);
+      expect(readFileSync(binary, "utf8")).toBe(fresh);
+      expect(running.exitCode).toBeNull();
+      expect(readdirSync(place.dir).filter(name => name.startsWith("."))).toEqual([]);
+    } finally {
+      running.kill();
+      rmSync(home, { recursive: true, force: true });
+      rmSync(stage, { recursive: true, force: true });
+    }
   });
 });

@@ -483,7 +483,7 @@ describe("stageDaemonBundle", () => {
     }
     expect(script).toContain(`chmod 0755 ${GUEST_WSP_PATH}`);
     expect(GUEST_WSP_PATH).toBe("/usr/local/bin/wsp");
-    expect(script.split("\n")).toContain(`tar --no-same-owner -xzf ${GUEST_DAEMON_DIR}.tgz -C ${GUEST_DAEMON_DIR}`);
+    expect(script.split("\n")).toContain(`tar --no-same-owner -xzf ${GUEST_DAEMON_DIR}.tgz -C ${GUEST_DAEMON_DIR}/.unpacking`);
   });
 
   it("carries the wsp command whole where the place says a machine somebody owns still runs it on node", async () => {
@@ -1238,7 +1238,7 @@ describe("deployScript", () => {
   it("keeps the binary for the chip the guest says it is and drops the other, by the one word uname prints", () => {
     const script = deployScript(CLOUD_PLACE, "aabbcc");
     const lines = script.split("\n");
-    const unpack = lines.indexOf("tar --no-same-owner -xzf /root/wsp-daemon.tgz -C /root/wsp-daemon");
+    const unpack = lines.indexOf("tar --no-same-owner -xzf /root/wsp-daemon.tgz -C /root/wsp-daemon/.unpacking");
     expect(unpack).toBeGreaterThan(-1);
     expect(unpack).toBeLessThan(lines.indexOf('case "$(uname -m)" in'));
     expect(lines).toContain("  x86_64)");
