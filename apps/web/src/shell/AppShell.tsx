@@ -117,8 +117,8 @@ export function AppShell({ children }: { children: ReactNode }) {
                 </div>
               ) : (
                 <div className="ml-auto mr-px flex items-center gap-2">
-                  {workspaceId !== null ? <GitSplit workspaceId={workspaceId} /> : null}
                   {workspaceId !== null ? <ContextRing workspaceId={workspaceId} /> : null}
+                  {workspaceId !== null ? <GitSplit workspaceId={workspaceId} /> : null}
                   {workspaceId !== null ? <OpenSplit workspaceId={workspaceId} /> : null}
                   {panelInline ? null : layoutControls}
                 </div>

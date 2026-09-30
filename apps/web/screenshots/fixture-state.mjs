@@ -296,6 +296,8 @@ const replay = (thread, minutes, workspaceId = "ws_api") => {
  * and the commands two plugins named themselves in. The menu groups on the source those names carry. */
 const ANNOUNCED_COMMANDS = ["compact", "context", "cost", "init", "review", "login", "model", "unslop", "why", "wizard", "code-review:code-review", "ralph-loop:ralph-loop", "ralph-loop:cancel-ralph"];
 
+const REPLY_TOKENS = { input: 22_564, output: 1_251, cached: 18_435, cacheWrite: 4_113, context: 42_310, window: 200_000 };
+
 const REDIRECT = {
   id: "redirect",
   harness: { slashCommands: ANNOUNCED_COMMANDS },
@@ -314,6 +316,7 @@ const REDIRECT = {
     "Both forms answer 302 once.",
   ].join("\n"),
   costUsd: 0.42,
+  tokens: REPLY_TOKENS,
 };
 
 const CHART = {
@@ -1070,7 +1073,6 @@ const rewind = () => {
 /** One project on this computer with three answered threads, each carrying what a reply draws under it: the model and
  * tokens its agent counted, the files it changed, the step list it worked through, the plan it proposed, and a reply
  * holding a diagram and a formula. */
-const REPLY_TOKENS = { input: 22_564, output: 1_251, cached: 18_435, cacheWrite: 4_113, context: 42_310, window: 200_000 };
 const replies = () =>
   store({
     projects: [project("spoo-landing", HERE, 60 * 30)],

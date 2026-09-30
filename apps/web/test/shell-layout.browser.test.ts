@@ -3,7 +3,7 @@
 // search row does and the brand lockup one gap after it, the search row is a
 // plain row that opens the palette without moving a row, a thread tile's
 // title keeps its room at the default width with the agent's 12 px mark on
-// row three and the status on row one, every tile 68 px, a working title
+// row two and the status on row one, every tile 52 px, a working title
 // recedes behind the rows that call for the person, the Settled fold sits shut
 // at the foot of the bare list and opens to slim rows, a toast holds a
 // long token inside its box off the sidebar, the line for a provider out of
@@ -238,7 +238,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
     }
   }, 60_000);
 
-  it("a thread tile keeps twelve characters of a long title at the default width, the agent's 12 px mark on row three and the status on row one, every tile 68 px", async () => {
+  it("a thread tile keeps twelve characters of a long title at the default width, the agent's 12 px mark on row two and the status on row one, every tile 52 px", async () => {
     for (const theme of ["dark", "light"] as const) {
       await open(theme);
       const rows = await page!.locator("[data-row-id^='thread:']").evaluateAll(els =>
@@ -259,8 +259,8 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
             slot: slot.textContent ?? "",
             slotClipped: slot.scrollWidth > slot.clientWidth,
             slotRow: slot.parentElement === el.children[0],
-            markRow: mark.closest("[data-sidebar-row] > span") === el.children[2],
-            hover: (el.getAttribute("title") ?? "").split("\n"),
+            markRow: mark.closest("[data-sidebar-row] > span") === el.children[1],
+            hover: el.hasAttribute("title"),
             mark: mark.getAttribute("data-harness-mark"),
             markSize: [markBox.width, markBox.height],
             markColor: paint.color,
@@ -269,10 +269,11 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
         }),
       );
       console.info(`thread tiles at ${theme}: ${JSON.stringify(rows)}`);
-      expect(rows.map(r => r.hover[2])).toEqual(["Claude Code", "Claude Code", "Codex", "Claude Code"]);
+      expect(rows.map(r => r.mark)).toEqual(["claude", "claude", "codex", "claude"]);
       for (const row of rows) {
-        expect(row.hover[1]).toMatch(/^the-project @ /);
-        expect(row.height).toBe(68);
+        // The card to the right says what the tile does not; the tile keeps no native hover text.
+        expect(row.hover).toBe(false);
+        expect(row.height).toBe(52);
         expect(row.titleSize).toBe("14px");
         expect(row.titleWidth).toBeGreaterThanOrEqual(row.twelveChars);
         expect(row.slotClipped).toBe(false);
@@ -386,7 +387,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       expect(open.fold.expanded).toBe("true");
       expect(open.fold.text).toBe("Settled 2");
       const settledIds = ["thread:s5", "thread:s6"];
-      expect(new Set(open.tiles.filter(t => !settledIds.includes(t.id!)).map(t => Math.round(t.height)))).toEqual(new Set([68]));
+      expect(new Set(open.tiles.filter(t => !settledIds.includes(t.id!)).map(t => Math.round(t.height)))).toEqual(new Set([52]));
       expect(new Set(open.tiles.filter(t => settledIds.includes(t.id!)).map(t => Math.round(t.height)))).toEqual(new Set([36]));
       for (const id of settledIds) expect(open.tiles.find(t => t.id === id)!.y).toBeGreaterThan(open.fold.y);
       const openPath = join(SHOTS_DIR, `sidebar-settled-open-${theme}.png`);
@@ -1039,17 +1040,13 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
     }
   }, 60_000);
 
-  it("the sidebar's ink reads the same in light as in dark: the two tiers that carry words at AA, the whispered ones on the dark side's ink", async () => {
+  it("the sidebar's ink reads the same in light as in dark: every tier that carries words at AA", async () => {
+    // A tile draws no words in the whisper ink since its branch moved onto the card, so no tier measures it.
     const TIERS = {
       "a thread's title once it is idle": "[data-app-sidebar] .text-sidebar-muted-foreground",
       "the word on a row at rest": "[data-app-sidebar] [data-slot=sidebar-menu-button]:not([data-active=true])",
       "the state word beside a thread": "[data-sidebar-row] [data-thread-status][data-tone]",
-      "the row's meta line": "[data-app-sidebar] .text-\\[var\\(--top-row-meta\\)\\]",
     } as const;
-    // The first three carry words a person reads, so their bar is AA. The last is the whisper the
-    // rows are designed around and sits under AA in both themes on purpose, so its bar is the ink
-    // its dark twin already ships: it is the tier an alpha over a light surface loses.
-    const AT_AA = ["a thread's title once it is idle", "the word on a row at rest", "the state word beside a thread"];
     const read: Record<"dark" | "light", Record<string, number>> = { dark: {}, light: {} };
     for (const theme of ["dark", "light"] as const) {
       await open(theme);
@@ -1060,9 +1057,6 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       }
       console.info(`${theme}: ${Object.entries(read[theme]).map(([tier, ratio]) => `${tier} ${ratio.toFixed(2)}`).join(", ")} to 1`);
     }
-    for (const tier of Object.keys(TIERS)) {
-      if (AT_AA.includes(tier)) expect(read.light[tier], `${tier} reads at ${read.light[tier]} in light`).toBeGreaterThanOrEqual(4.5);
-      else expect(read.light[tier], `${tier} reads at ${read.light[tier]} in light against ${read.dark[tier]} in dark`).toBeGreaterThanOrEqual(read.dark[tier]! - 0.2);
-    }
+    for (const tier of Object.keys(TIERS)) expect(read.light[tier], `${tier} reads at ${read.light[tier]} in light`).toBeGreaterThanOrEqual(4.5);
   }, 60_000);
 });

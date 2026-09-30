@@ -90,7 +90,7 @@ Everything on 4px. Sidebar 256px, right panel 400px, top row 52px with no line
 under it.
 
 Sidebar: 8px inset. One-line rows 36px, radius 8, 8px horizontal padding. A
-thread tile is 68px: 8px padding, rows of 14 / 18 / 14 with 3px between, no
+thread tile is 52px: 8px padding, rows of 14 / 18 with 4px between, no
 gap and no line between tiles. A child list is 12px in with a 1px rail and a
 4px tick into each tile's first row at 15px. A section head is 28px, and each
 head after the first, Settled's too, has 12px above it.
@@ -176,14 +176,24 @@ got it".
 
 ### Thread tile
 
-`references/tiles-graphite.png`. 68px, three rows. Row one, 11px sans muted:
-the project's glyph in its hue at 12px, `project @ computer`, the status slot
-at the right. Row two: the title at 14px in `--sidebar-foreground`, muted when
-idle, truncated. Row three, 11px sans muted: the agent's mark at 12px, lucide
-git-branch at 12px in `--top-row-meta` (the whisper at 55%), the branch name, and the crab at the
-right end while working. Selected: `--sidebar-row-selected`, the inset ring on
-the light side, title at 500. Children hang 12px in on the rail. The agent is
-its mark alone, never its name.
+52px, two rows (the owner's ruling of 2026-09-30, after T3's sidebar). Row
+one, 11px sans muted: the project's glyph in its hue at 12px, `project @
+computer`, the status slot at the right. Row two: the agent's mark at 12px, the
+title at 14px in `--sidebar-foreground`, muted when idle, truncated, then a
+12px lucide git-pull-request in `--top-row-meta` while the workspace's pull
+request is open (no number, no colour; merged or closed draw nothing), and the
+crab at the right end while working. Selected: `--sidebar-row-selected`, the
+inset ring on the light side, title at 500. Children hang 12px in on the
+rail. The agent is its mark alone, never its name.
+
+Everything else is on the card that opens to the tile's right once the
+pointer rests on it (about 450ms, so a pass down the list opens none), as
+T3's details tooltip: the full title, the project, the computer, the branch,
+the agent's model, the pull request's number with its state as a word, the
+files changed, then what holds the thread (the question it waits on, why the
+pull request is not read, an editor attached). The tooltip skin: popover
+tier, hairline border, 13px, no arrow, fade and a 2px slide, 6px off the
+tile. The tile keeps no native hover text.
 
 ### The status mark
 
