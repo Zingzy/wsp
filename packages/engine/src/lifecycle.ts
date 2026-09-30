@@ -11,8 +11,9 @@ export interface WorkspaceHooks {
   /** Fresh fork from the golden image, for the person's rebuild or upgrade; a wake never calls it. */
   resurrect?: (spec?: Partial<MachineSpec>) => Promise<Machine>;
   /** Export durable state (vault) off a machine before it is replaced; `drop` names guest paths the archive leaves
-   * behind, so what stands at each on the replacement is left alone. */
-  vaultExport?: (m: Machine, drop?: readonly string[]) => Promise<Buffer>;
+   * behind, so what stands at each on the replacement is left alone. Undefined where the export was over the cap and
+   * the replacement goes on with no backup. */
+  vaultExport?: (m: Machine, drop?: readonly string[]) => Promise<Buffer | undefined>;
   /** Restore durable state (vault) onto a replacement machine. */
   vaultImport?: (m: Machine, payload: Buffer) => Promise<void>;
   /** Runs before every pause: keep a copy of the vault the machine may never hand back. */
