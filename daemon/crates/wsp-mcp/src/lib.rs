@@ -40,6 +40,9 @@ pub struct Args {
     pub scoped: bool,
     /// A refusal before the server runs is the failure object rather than its sentence.
     pub json: bool,
+    /// A session from inside a machine, served on this computer: a path or a folder it names is on its machine, so
+    /// it is refused rather than read here, and a tool whose work reads this computer is not listed.
+    pub guest: bool,
     /// The wsp that brings a host up when none serves the state file, and that the recipe tools run; nothing starts
     /// one when it is empty.
     pub wsp: Vec<String>,
@@ -64,7 +67,9 @@ pub fn run(args: &Args) -> i32 {
             return 1;
         }
     };
-    let host = host::Host::new(args, &env, std::env::current_dir().ok());
+    // A guest's folder is on its machine, and this process's is nothing of the guest's.
+    let cwd = if args.guest { None } else { std::env::current_dir().ok() };
+    let host = host::Host::new(args, &env, cwd);
     runtime.block_on(stdio::pump(Arc::new(host), BufReader::new(tokio::io::stdin()), tokio::io::stdout()))
 }
 

@@ -205,8 +205,7 @@ export interface ServeOptions {
 export interface GuestOpening {
   argv: readonly string[];
   cwd: string;
-  /** The pair a verb reads its host and its token off, as a turn's own launch leaves them, plus the turn's token;
-   * on a session this computer's forwarder opened, the environment its line was typed in as well. */
+  /** The pair a verb reads its host and its token off, as a turn's own launch leaves them, plus the turn's token. */
   env: Record<string, string>;
   reply(message: unknown): void;
   close(error?: string): void;
@@ -1436,6 +1435,11 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "sessions.aside":
               send({ id: msg.id, ok: true, ...(await rt.sessions.aside(msg.sessionId, msg.question, origin)) });
               return;
+            case "sessions.run": {
+              const { id: _id, op: _op, ...step } = msg;
+              send({ id: msg.id, ok: true, run: await rt.sessions.run(step, origin) });
+              return;
+            }
             case "sessions.rewind":
               send({ id: msg.id, ok: true, ...(await rt.sessions.rewind(msg.threadId, { ...(msg.turnId !== undefined ? { turnId: msg.turnId } : {}), ...(msg.files !== undefined ? { files: msg.files } : {}), ...(msg.undo !== undefined ? { undo: msg.undo } : {}) }, origin)) });
               return;

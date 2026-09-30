@@ -21,12 +21,11 @@ import { hostFolders } from "./host-folders.js";
 import { projectBundler } from "./project-bundle.js";
 import { imageExporter } from "./image.js";
 import { projectLander } from "./project-export.js";
-import { guestCli } from "./guest-cli.js";
-import { guestMcp } from "./guest-mcp.js";
+import { guestKinds } from "./guest-tools.js";
 import { guestDoor } from "./guest.js";
 import { runningWsp } from "./mcp-install.js";
 import { wspArgvOf } from "./place-report.js";
-import { sshDoor, sshFiles } from "./ssh-files.js";
+import { proxyWsp, sshDoor, sshFiles } from "./ssh-files.js";
 import { startCallbackRelay, systemOpener, type UrlOpener } from "./relay.js";
 import { NO_PROVIDER } from "./providers.js";
 import type { ReleaseWatch } from "./release.js";
@@ -420,7 +419,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
       : guestDoor({
           authorize: token => rtServer.authorize(token),
           hostUrl: () => binding.then(() => here.url),
-          kinds: { mcp: guestMcp(statePath), cli: guestCli(statePath, runningWsp()) },
+          kinds: guestKinds(statePath),
         });
   // Before the runtime socket: the app lists and stops the relay's forwards through it.
   const relay = startCallbackRelay({
@@ -599,7 +598,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
       folders: hostFolders(() => rt.workspaces.list()),
       terminalConfig: { read: scheme => readGhosttyConfig(nodeHost(), scheme) },
       editor: editorHost(),
-      ssh: opts.ssh ?? sshDoor(relay, sshFiles({ wspHome: wspHome(), personHome: homedir() }), () => wspArgvOf(runningWsp())),
+      ssh: opts.ssh ?? sshDoor(relay, sshFiles({ wspHome: wspHome(), personHome: homedir() }), () => proxyWsp(wspArgvOf(runningWsp()), opts.statePath)),
       sshHosts: async places => sshHostsIn(join(homedir(), ".ssh"), places),
       // Read at every ask rather than once at start: a sign-in taken at the terminal while the app stands open is
       // on the next read, and the read is two small files on this computer.

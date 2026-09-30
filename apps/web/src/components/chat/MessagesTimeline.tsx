@@ -33,8 +33,9 @@ import {
   type ReactNode,
 } from "react";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
-import { turnFactsParts, type ThreadWaitingOn } from "@wsp/protocol";
+import { turnFactsParts, type SessionRunEvent, type ThreadWaitingOn } from "@wsp/protocol";
 import ChatMarkdown from "../ChatMarkdown";
+import { ReplyRunContext, type ReplyRunScope } from "./InlineRun";
 import {
   BotIcon,
   BrainIcon,
@@ -138,6 +139,15 @@ interface TimelineRowSharedState {
   replyMeta: React.ReactNode;
   /** Each settled turn's model and tokens in the footer's words, by the turn's id. */
   factsByTurn: ReadonlyMap<string, readonly string[]>;
+  replyRuns: ReplyRuns | null;
+}
+
+/** What a reply's shell blocks need to run where they stand: the thread they belong to, its folder and its runs. */
+export interface ReplyRuns {
+  readonly workspaceId: string;
+  readonly threadId: string;
+  readonly cwd: string;
+  readonly runs: ReadonlyMap<string, SessionRunEvent>;
 }
 
 /** The workspace cannot run the turn right now: what the working row says instead, the wake to offer where one
@@ -233,6 +243,8 @@ export interface MessagesTimelineProps {
   footer?: React.ReactNode;
   /** Facts about the settled turn, drawn on the last reply's own row beside its time. */
   replyMeta?: React.ReactNode;
+  /** Absent where the view holds no thread yet: its replies' blocks get no Run. */
+  replyRuns?: ReplyRuns | null;
   /** Where a selection quoted out of a reply goes; absent, a selection offers no Quote. */
   onQuote?: (quote: QuotedSelection) => void;
 }
@@ -274,6 +286,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   topFadeEnabled = false,
   footer = null,
   replyMeta = null,
+  replyRuns = null,
   onQuote,
 }: MessagesTimelineProps) {
   const latestTurn = turns[turns.length - 1] ?? null;
@@ -555,6 +568,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       lastReplyId,
       replyMeta,
       factsByTurn,
+      replyRuns,
     }),
     [
       timestampFormat,
@@ -577,6 +591,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       lastReplyId,
       replyMeta,
       factsByTurn,
+      replyRuns,
     ],
   );
   const activityState = useMemo<TimelineRowActivityState>(
@@ -1097,20 +1112,28 @@ function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-
 function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
   const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
+  const runs = ctx.replyRuns;
+  const turnId = row.message.turnId;
+  const runScope = useMemo<ReplyRunScope | null>(
+    () => (runs === null || turnId === null ? null : { workspaceId: runs.workspaceId, threadId: runs.threadId, turnId, messageId: row.message.id, cwd: runs.cwd, runs: runs.runs }),
+    [runs, turnId, row.message.id],
+  );
 
   return (
     <>
       <div className="relative min-w-0 px-1 py-0.5" {...{ [QUOTE_SOURCE_ATTRIBUTE]: row.message.id }}>
-        <ChatMarkdown
-          text={messageText}
-          cwd={ctx.markdownCwd}
-          isStreaming={Boolean(row.message.streaming)}
-          lineBreaks={shouldPreserveAssistantLineBreaks(messageText)}
-          skills={ctx.skills}
-          onImageExpand={ctx.onImageExpand}
-          onOpenFile={ctx.onOpenFile}
-          resolvedTheme={ctx.resolvedTheme}
-        />
+        <ReplyRunContext value={runScope}>
+          <ChatMarkdown
+            text={messageText}
+            cwd={ctx.markdownCwd}
+            isStreaming={Boolean(row.message.streaming)}
+            lineBreaks={shouldPreserveAssistantLineBreaks(messageText)}
+            skills={ctx.skills}
+            onImageExpand={ctx.onImageExpand}
+            onOpenFile={ctx.onOpenFile}
+            resolvedTheme={ctx.resolvedTheme}
+          />
+        </ReplyRunContext>
         <AssistantChangedFilesSection
           turnSummary={ctx.turnDiffSummaryByAssistantMessageId.get(row.message.id)}
           resolvedTheme={ctx.resolvedTheme}

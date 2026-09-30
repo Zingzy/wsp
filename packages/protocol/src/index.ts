@@ -1682,6 +1682,40 @@ export const SessionCheckpointEvent = z.object({
 });
 export type SessionCheckpointEvent = z.infer<typeof SessionCheckpointEvent>;
 
+/** Where a reply's block run stands: running in its own pty, exited with its code and output, moved to a terminal
+ * tab still running, or lost, its pty gone before anybody saw it end. */
+export const RunState = z.enum(["running", "exited", "moved", "lost"]);
+export type RunState = z.infer<typeof RunState>;
+
+/** One step of a reply's shell block run where it stands, written by the host at each step a window reports, so a
+ * reload and another window draw the same block. block names the reply's message and the block's place in its text;
+ * a run that ended, moved or was lost keeps that ending whoever reports it again. output is the run's text as the
+ * terminal showed it, cut to its tail. */
+export const SessionRunEvent = z.object({
+  type: z.literal("session.run"),
+  ...sessionScope,
+  runId: z.string(),
+  block: z.string(),
+  command: z.string(),
+  state: RunState,
+  ptyId: z.string().optional(),
+  exitCode: z.number().int().optional(),
+  signal: z.number().int().optional(),
+  output: z.string().optional(),
+});
+export type SessionRunEvent = z.infer<typeof SessionRunEvent>;
+
+/** What a window reports of a run: the thread and the reply's turn it belongs to, and the step, as SessionRunEvent
+ * above carries it. */
+export const RunStep = SessionRunEvent.pick({ runId: true, block: true, command: true, state: true, ptyId: true, exitCode: true, signal: true, output: true }).extend({
+  threadId: z.string(),
+  turnId: z.string(),
+});
+export type RunStep = z.infer<typeof RunStep>;
+
+/** Why a thread's own token may not record a run: running a reply's block is the person's click. */
+export const RUN_PERSONS_LINE = "a reply's block runs on the person's click, never on a thread's token";
+
 /** The events sessions.history replays: what a chat transcript folds. */
 export const SessionEvent = z.discriminatedUnion("type", [
   SessionStartEvent,
@@ -1695,6 +1729,7 @@ export const SessionEvent = z.discriminatedUnion("type", [
   SessionCheckpointEvent,
   SessionChangesEvent,
   SessionPlanEvent,
+  SessionRunEvent,
 ]);
 export type SessionEvent = z.infer<typeof SessionEvent>;
 
@@ -3274,6 +3309,7 @@ export const EventUnion = z.discriminatedUnion("type", [
   SessionCheckpointEvent.extend(sequenced),
   SessionChangesEvent.extend(sequenced),
   SessionPlanEvent.extend(sequenced),
+  SessionRunEvent.extend(sequenced),
   SessionQueuedEvent.extend(sequenced),
   ThreadMarkedEvent.extend(sequenced),
   ThreadRewoundEvent.extend(sequenced),
@@ -3487,7 +3523,15 @@ export const GitSnapshotReply = z.object({ commit: z.string() });
 export type GitSnapshotReply = z.infer<typeof GitSnapshotReply>;
 
 /** One live or exited pty the daemon still holds; exited ones stay until pty.kill. */
-export const PtyListEntry = z.object({ id: z.string(), pid: z.number(), cols: z.number(), rows: z.number(), exited: z.boolean() });
+export const PtyListEntry = z.object({
+  id: z.string(),
+  pid: z.number(),
+  cols: z.number(),
+  rows: z.number(),
+  exited: z.boolean(),
+  /** Set on a pty that runs a reply's command and still belongs to that reply: no pane adopts it until pty.tab. */
+  reply: z.boolean().optional(),
+});
 export type PtyListEntry = z.infer<typeof PtyListEntry>;
 export const PtyListReply = z.object({ ptys: z.array(PtyListEntry) });
 export type PtyListReply = z.infer<typeof PtyListReply>;
@@ -3593,6 +3637,9 @@ export const DaemonRequest = z.discriminatedUnion("op", [
     shell: z.string().optional(),
     cwd: z.string().optional(),
     env: z.record(z.string()).optional(),
+    /** A command line the pty runs through the person's own shell and exits with: a reply's block run where it
+     * stands. Such a pty is that reply's, which pty.list marks, until pty.tab hands it to the panes. */
+    run: z.string().optional(),
     machineId: z.string().optional(),
   }),
   z.object({ id: reqId, op: z.literal("pty.attach"), ptyId: z.string(), machineId: z.string().optional() }),
@@ -3661,6 +3708,8 @@ export const DaemonRequest = z.discriminatedUnion("op", [
    * over, its mode and owner kept, never through a link standing where the file should be, and refused over
    * FS_WRITE_CAP_BYTES. The folder resolves inside a root as fs.read's path does. */
   z.object({ id: reqId, op: z.literal("fs.write"), path: z.string(), contents: z.string(), machineId: z.string().optional() }),
+  /** A reply's pty handed to the panes, still running: pty.list stops marking it, so every pane adopts it as a tab. */
+  z.object({ id: reqId, op: z.literal("pty.tab"), ptyId: z.string(), machineId: z.string().optional() }),
   /** Searches under one folder, resolved as fs.list resolves its path: files answers every file whose path below the
    * folder holds the query's letters in order, text every line of a text file there that holds the query, both
    * case-insensitive. The walk reads the folder's .gitignore and .ignore files, leaves hidden names out, never
@@ -4329,7 +4378,8 @@ export type ProcSnapshot = z.infer<typeof ProcSnapshot>;
 
 /** The content of every daemon this project has deployed, oldest first, one entry per version: the last one is
  * what a deploy installs today, so appending the sha the host's daemon-content test prints is the whole of
- * cutting a new version. The three cut before the record existed have no sha to name. */
+ * cutting a new version. An entry with no sha to name is UNRECORDED: the three cut before the record existed, and
+ * a version whose sha another change records. */
 const UNRECORDED = "";
 const DAEMON_CONTENTS = [
   UNRECORDED,
@@ -4427,6 +4477,9 @@ const DAEMON_CONTENTS = [
   "17dc947dabc1776d901352d4d681af228e620309b8b4d8b8043ac9d904788bb4",
   "eb62eb296316d8c81da569e60be2c5db173b00f00a2ef7f562db39265db49423",
   "4d9cc489a1a3cbd2b502fa2f899bfddd5bf206ae00f1a2a76b9fa8dd7aef5f60",
+  "5bc5f0d1888a8f254ffffa1bee6b77a302bf5c1164f520e5255b2f6c4a83a252",
+  "db97f7d2dba5d48e19188ea89555803e76332015c7c2daf27a3a6c42d7f49cce",
+  "297d0addb6e4b758e1f50a38516edc1eb32aa22da6894e5be52323d6b998c4fa",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -4684,7 +4737,17 @@ const DAEMON_CONTENTS = [
  * Version 94 asks the DevTools question on the person's own computer only of a listener wsp's own processes hold, the
  * daemon and everything under the host that started it, so no other server of theirs gets a request from wsp.
  * Version 95 is the deploy landing each file of the bundle by a rename over the one it replaces, so a daemon that is
- * running is replaced rather than refused as a busy file. */
+ * running is replaced rather than refused as a busy file.
+ * Version 96 reads every worktree file git.diff answers for itself, from the folder the caller may read down with no
+ * link followed: an untracked file's patch and every file's blob id come from that read, and a tracked file's hunk is
+ * diffed from the base object and the blob hashed off that read, so no content byte comes from a path a link could
+ * have redirected after git listed it.
+ * Version 97 changes nothing a guest runs: where this computer's binary carries the tool server, the host runs it for
+ * each guest session as the thread's scoped server under --guest, which refuses a file or an unnamed workspace and
+ * leaves the tools that read this computer off its list.
+ * Version 98 runs the command pty.create names through the person's own shell, as interactive and login as their
+ * terminal opens it, and the pty exits with it; such a pty is a reply's, which pty.list marks and no pane adopts, until
+ * pty.tab hands it to the panes still running. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -5928,6 +5991,10 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** Rewinds a thread to the end of one of its turns: the turns after it leave the transcript and, where the harness
    * cuts its own history, the conversation, and with files the copy's tree goes back to that turn's checkpoint after
    * the tree as it stands is checkpointed. undo instead puts back the files the thread's last rewind replaced. */
+  /** Records one step of a reply's block run on its thread and replies { run } with the step the thread now holds:
+   * the one asked for, or the ending a run already had. The window runs the command in the workspace's own pty; the
+   * host keeps what every window draws. */
+  z.object({ id: reqId, op: z.literal("sessions.run") }).extend(RunStep.shape),
   z.object({ id: reqId, op: z.literal("sessions.rewind"), threadId: z.string(), turnId: z.string().optional(), files: z.boolean().optional(), undo: z.boolean().optional() }),
   z.object({ id: reqId, op: z.literal("golden.get"), name: z.string() }),
   /** Replies with the backend's Capabilities; the UI gates features on these. */
@@ -6659,6 +6726,7 @@ export { claudeMemoryDir, claudeProjectKey, copyPathFor, folderName, folderSlug,
 export * from "./bring-back.js";
 export * from "./changes.js";
 export * from "./pull-request.js";
+export * from "./run-block.js";
 export * from "./daemon-contract.js";
 export * from "./projects.js";
 export { defaultSeedChoice, leftBehindLine, neverTravelsLine, noRemoteLine, notInTheMenuLine, SEED_DIR, SEED_MEMORY_DIR, SEED_PATCH, seedBytes, seedChoiceFrom, seedCommitsLandedLine, seedCommitsLostLine, seedConsentLines, seedingLine, seedMenuRows, seedRowWords, seedSummaryLines } from "./project-seed.js";

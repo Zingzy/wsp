@@ -20,6 +20,7 @@ use nix::fcntl::{open, openat, OFlag};
 use nix::sys::stat::Mode;
 use wsp_frames::{GitBranch, GitStatusReply};
 
+use crate::beneath::{self, dir_flags};
 use crate::git::{not_a_repo, DEFAULT_BRANCHES};
 use crate::paths::OpError;
 
@@ -74,45 +75,14 @@ impl GitDir {
         }
     }
 
-    /// The folder holding `rel` and its last name, each folder on the way opened with no link followed. None where
-    /// a folder on the way is not there.
+    /// The folder holding `rel` and its last name, as the one walk under a held folder reads it.
     fn parent_of<'a>(&self, rel: &'a str) -> Result<Option<(OwnedFd, &'a str)>, String> {
-        let parts: Vec<&str> = rel.split('/').collect();
-        if parts.iter().any(|part| part.is_empty() || *part == "." || *part == "..") {
-            return Err(format!("{rel} is not a name inside a git directory"));
-        }
-        let (leaf, folders) = parts.split_last().ok_or_else(|| "an empty name".to_owned())?;
-        let mut at = self.fd.try_clone().map_err(|e| e.to_string())?;
-        for folder in folders {
-            at = match openat(&at, *folder, dir_flags(), Mode::empty()) {
-                Ok(next) => next,
-                Err(Errno::ENOENT | Errno::ENOTDIR) => return Ok(None),
-                Err(Errno::ELOOP) => return Err(format!("a link stands at {rel}")),
-                Err(e) => return Err(format!("{rel}: {e}")),
-            };
-        }
-        Ok(Some((at, leaf)))
+        beneath::parent_of(&self.fd, rel)
     }
 
-    /// A regular file, or None where nothing or a folder stands there. Opened without blocking, so a fifo an agent
-    /// left in place of a ref cannot hold the read.
+    /// A regular file, or None where nothing or a folder stands there.
     fn file(&self, rel: &str) -> Result<Option<File>, String> {
-        let Some((parent, leaf)) = self.parent_of(rel)? else { return Ok(None) };
-        let flags = OFlag::O_RDONLY | OFlag::O_NOFOLLOW | OFlag::O_NONBLOCK | OFlag::O_CLOEXEC;
-        let file = match openat(&parent, leaf, flags, Mode::empty()) {
-            Ok(fd) => File::from(fd),
-            Err(Errno::ENOENT) => return Ok(None),
-            Err(Errno::ELOOP) => return Err(format!("a link stands at {rel}")),
-            Err(e) => return Err(format!("{rel}: {e}")),
-        };
-        let kind = file.metadata().map_err(|e| format!("{rel}: {e}"))?.file_type();
-        if kind.is_dir() {
-            return Ok(None);
-        }
-        if !kind.is_file() {
-            return Err(format!("{rel} is not a file"));
-        }
-        Ok(Some(file))
+        beneath::file(&self.fd, rel)
     }
 
     fn text(&self, rel: &str, max: u64) -> Result<Option<String>, String> {
@@ -150,10 +120,6 @@ impl GitDir {
         names.sort();
         Ok(names)
     }
-}
-
-fn dir_flags() -> OFlag {
-    OFlag::O_RDONLY | OFlag::O_DIRECTORY | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC
 }
 
 type Oid = Vec<u8>;

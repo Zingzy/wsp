@@ -12,6 +12,7 @@ import {
   MessageSquareWarningIcon,
   Minimize2Icon,
   OctagonAlertIcon,
+  PlayIcon,
   TriangleAlertIcon,
   WrapTextIcon,
 } from "lucide-react";
@@ -79,7 +80,11 @@ import { inlineCodeFilePathCandidate } from "../lib/markdownLinkParsing";
 import { classifyMarkdownImageSource } from "../lib/markdownImages";
 import { mediaKindFromPath } from "../lib/filePreview";
 import { isAbsolutePath } from "../terminal-links";
-import { cn } from "../lib/utils";
+import { cn, errorText } from "../lib/utils";
+import { RUN_WORDS, runBlockKey, runnableCommand } from "@wsp/protocol";
+import { useStore } from "../protocol/store";
+import { InlineRun, ReplyRunContext } from "./chat/InlineRun";
+import { startRun } from "./chat/replyRun";
 import { Spaced } from "./ui/spaced";
 
 interface ChatMarkdownProps {
@@ -734,14 +739,32 @@ function MarkdownCodeBlock({
   language,
   fenceTitle,
   wordWrap,
+  offset,
+  isStreaming,
   children,
 }: {
   code: string;
   language: string;
   fenceTitle: string | null;
   wordWrap: boolean;
+  /** Where the block's fence starts in the message's text, which names it on the thread's record of its runs. */
+  offset: number;
+  isStreaming: boolean;
   children: ReactNode;
 }) {
+  // A shell block in an agent's reply runs where it stands; a block still streaming is not the command yet.
+  const scope = use(ReplyRunContext);
+  const command = scope !== null && !isStreaming ? runnableCommand(language, code) : null;
+  const block = scope !== null ? runBlockKey(scope.messageId, offset) : "";
+  const run = command !== null ? scope?.runs.get(block) : undefined;
+  const api = useStore(s => s.api);
+  const [runRefusal, setRunRefusal] = useState<string | null>(null);
+  const handleRun = useCallback(() => {
+    if (api === null || scope === null || command === null) return;
+    setRunRefusal(null);
+    startRun(api, { workspaceId: scope.workspaceId, threadId: scope.threadId, turnId: scope.turnId, block, command, ...(scope.cwd !== undefined ? { cwd: scope.cwd } : {}) }).catch((cause: unknown) => setRunRefusal(errorText(cause)));
+  }, [api, block, command, scope]);
+  const runLabel = run === undefined ? RUN_WORDS.run : RUN_WORDS.runAgain;
   const [copied, setCopied] = useState(false);
   const [wrapped, setWrapped] = useState(wordWrap);
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -797,6 +820,27 @@ function MarkdownCodeBlock({
           <MarkdownCodeBlockTitleContent fenceTitle={fenceTitle} language={language} />
         </span>
         <span className="flex items-center gap-0.5" role="toolbar" aria-label="Code block actions">
+          {command !== null ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    className="chat-markdown-chrome-action"
+                    data-reply-run-button
+                    disabled={run?.state === "running"}
+                    onClick={handleRun}
+                    aria-label={runLabel}
+                  />
+                }
+              >
+                <PlayIcon className="size-3" />
+              </TooltipTrigger>
+              <TooltipPopup side="top">{runLabel}</TooltipPopup>
+            </Tooltip>
+          ) : null}
           <Tooltip>
             <TooltipTrigger
               render={
@@ -835,6 +879,12 @@ function MarkdownCodeBlock({
         </span>
       </div>
       {children}
+      {command !== null ? <InlineRun run={run} /> : null}
+      {runRefusal !== null ? (
+        <p data-reply-run-refusal className="m-0 px-3 py-1.5 text-[12px] leading-4 text-error-foreground">
+          {runRefusal}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -1758,7 +1808,7 @@ function ChatMarkdown({
         if (language === "mermaid" && !isStreaming && !restricted) {
           const source = <pre {...props}>{children}</pre>;
           return (
-            <MarkdownCodeBlock code={codeBlock.code} language={language} fenceTitle={fenceTitle} wordWrap={wordWrap}>
+            <MarkdownCodeBlock code={codeBlock.code} language={language} fenceTitle={fenceTitle} wordWrap={wordWrap} offset={node?.position?.start.offset ?? 0} isStreaming={isStreaming}>
               <RenderErrorBoundary fallback={source}>
                 <Suspense fallback={source}>
                   <MermaidBlock code={codeBlock.code} resolvedTheme={resolvedTheme} source={source} />
@@ -1773,6 +1823,8 @@ function ChatMarkdown({
             language={language}
             fenceTitle={fenceTitle}
             wordWrap={wordWrap}
+            offset={node?.position?.start.offset ?? 0}
+            isStreaming={isStreaming}
           >
             <RenderErrorBoundary fallback={<pre {...props}>{children}</pre>}>
               <Suspense fallback={<pre {...props}>{children}</pre>}>

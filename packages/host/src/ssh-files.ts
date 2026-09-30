@@ -27,6 +27,13 @@ export interface SshFiles {
 
 const quoted = (path: string): string => `"${path}"`;
 
+/** The wsp an ssh config's ProxyCommand runs, on the state the host that wrote it serves. ssh runs that line later
+ * from whatever folder the person is in, and a line naming no state resolves one of its own there, a checkout's own
+ * among them, so the state is always named, as it is on every agent's tool server line. */
+export function proxyWsp(wsp: readonly string[], statePath: string | undefined): string[] {
+  return statePath === undefined ? [...wsp] : [...wsp, "--state", statePath];
+}
+
 export function sshFiles(o: { wspHome: string; personHome: string; keygen?: string }): SshFiles {
   const dir = join(o.wspHome, "ssh");
   const key = join(dir, "id_ed25519");
@@ -59,7 +66,9 @@ export function sshFiles(o: { wspHome: string; personHome: string; keygen?: stri
       own();
       const text = [
         `Host ${SSH_ALIAS_PREFIX}*`,
-        `  ProxyCommand ${shellLine(wsp)} ssh %n`,
+        // OpenSSH expands % tokens across the whole line before a shell reads it, inside quotes too, so a % the
+        // command's own words carry is doubled; the %n after them is ssh's.
+        `  ProxyCommand ${shellLine(wsp).replaceAll("%", "%%")} ssh %n`,
         "  User root",
         `  IdentityFile ${quoted(key)}`,
         "  IdentitiesOnly yes",

@@ -9,6 +9,8 @@ import type { TerminalWire } from "../terminal/link.js";
 
 export interface DaemonHello {
   root: string;
+  /** The daemon's protocol version as its hello named it; absent on a hello that named none. */
+  version?: number;
 }
 
 const wires = new Map<string, TerminalWire>();
@@ -33,6 +35,11 @@ export function provideDaemonHello(workspaceId: string, hello: DaemonHello | nul
 
 export function getDaemonWire(workspaceId: string): TerminalWire | null {
   return wires.get(workspaceId) ?? null;
+}
+
+/** The protocol version the workspace's daemon named in its hello, or null before one arrived or where it named none. */
+export function getDaemonVersion(workspaceId: string): number | null {
+  return hellos.get(workspaceId)?.version ?? null;
 }
 
 export function getDaemonRoot(workspaceId: string): string | null {

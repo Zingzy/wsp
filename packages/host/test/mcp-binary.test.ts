@@ -15,7 +15,7 @@ import { promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { CLOUD_ENV, EXIT_CODES, jsonLine, scopedNoPairLine } from "@wsp/protocol";
+import { CLOUD_ENV, EXIT_CODES, HOST_TOKEN_ENV, HOST_URL_ENV, jsonLine, scopedNoPairLine } from "@wsp/protocol";
 import { copyKey, createRuntime, memoryStore, type PlaceWiring } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cli, localWiring, serve } from "../src/cli.js";
@@ -45,13 +45,14 @@ const callOf = (id: number, name: string, args: Record<string, unknown> = {}) =>
 
 /** This package's server in one state of WSP_CLOUD: what it lists, the tools its verb table holds, and the line it
  * greets with on stdio. The flag is read once as each module loads, so the modules are loaded afresh under it. */
-async function hereIn(cloud: boolean): Promise<{ listed: Record<string, unknown>[]; table: string[]; greeting: string }> {
+async function hereIn(cloud: boolean, guest = false): Promise<{ listed: Record<string, unknown>[]; table: string[]; greeting: string }> {
   vi.resetModules();
   vi.stubEnv(CLOUD_ENV, cloud ? "1" : "");
   try {
     const { mcpServer: fresh } = await import("../src/mcp.js");
+    const { GUEST_SERVED } = await import("../src/guest-mcp.js");
     const verbs = await import("../src/verbs.js");
-    const server = fresh("/nonexistent/state.json", { env: {} });
+    const server = fresh("/nonexistent/state.json", { env: {}, ...(guest ? GUEST_SERVED : {}) });
     const [toClient, toServer] = InMemoryTransport.createLinkedPair();
     const client = new Client({ name: "binary", version: "0" });
     await server.connect(toServer);
@@ -275,6 +276,17 @@ suite(`the tool server in the daemon binary${MCP_BIN === undefined ? " (set WSP_
     }
     // Both ways: a tool this package lists that the binary does not is one every agent on the binary loses.
     expect(tools.map(t => t["name"]).sort()).toEqual(here.listed.map(t => t["name"]).sort());
+  });
+
+  it.each([false, true])("lists what a session from inside a machine is served, as this package's guest kind serves it (cloud on: %s)", async cloud => {
+    const here = await hereIn(cloud, true);
+    const launch = { [HOST_URL_ENV]: "http://127.0.0.1:9", [HOST_TOKEN_ENV]: "thread-token" };
+    const { out, code } = await served([MCP_BIN!, "mcp", "--state", statePath, "--scoped", "--guest"], { ...env, ...launch, [CLOUD_ENV]: cloud ? "1" : "" }, [INITIALIZE, INITIALIZED, { jsonrpc: "2.0", id: 1, method: "tools/list" }]);
+    expect(code).toBe(0);
+    const tools = (JSON.parse(out[1]!) as { result: { tools: Record<string, unknown>[] } }).result.tools;
+    expect(tools.map(t => t["name"]).sort()).toEqual(here.listed.map(t => t["name"]).sort());
+    for (const tool of tools) expect(tool, String(tool["name"])).toEqual(here.listed.find(t => t["name"] === tool["name"]));
+    expect(tools.map(t => t["name"])).not.toContain("recipe");
   });
 
   it("answers a call with nothing serving the state file in the bytes this package's server answers it with", async () => {

@@ -19,7 +19,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { LATEST_PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS } from "@modelcontextprotocol/sdk/types.js";
 import { CATALOG, agentName } from "@wsp/catalog";
 import { SEAL_REFUSAL } from "@wsp/keys";
-import { CLOUD_ENV, cloudFromEnv, EXIT_CODES, HERE_PLACE_ID, HOST_CLOSED_LINE, HOST_KEY_ENV, HOST_STOPPING_CLOSE, HOST_STOPPING_LINE, HOST_TOKEN_ENV, HOST_URL_ENV, KIND_CLASS, LAUNCHED_WITH, LOOPBACK, SKILL_PREVIEW_BYTES, WS_PATH, isLoopback, isUrl, isWildcard, servedHostname, wsUrlOf, hostNoKeyLine, jsonLine, NEWER_TURN_LINE, noMessagesLine, noReplyLine, NO_TERMINAL_CONFIG_LINE, refusalLine, scopedNoPairLine, commandWords, authRefusal, deviceAuthOldHostLine, noSuchPlaceRefusal, pairKeyRefusal, SEAL_CLIENT, unclosedQuoteRefusal, validatorRefusal, type PlaceSpend, type PlaceView, type ServerToolsAnswer } from "@wsp/protocol";
+import { CLOUD_ENV, cloudFromEnv, EXIT_CODES, HERE_PLACE_ID, HOST_CLOSED_LINE, HOST_KEY_ENV, HOST_STOPPING_CLOSE, HOST_STOPPING_LINE, HOST_TOKEN_ENV, HOST_URL_ENV, KIND_CLASS, TURN_TOKEN_ENV, LAUNCHED_WITH, LOOPBACK, SKILL_PREVIEW_BYTES, WS_PATH, isLoopback, isUrl, isWildcard, servedHostname, wsUrlOf, hostNoKeyLine, jsonLine, NEWER_TURN_LINE, noMessagesLine, noReplyLine, NO_TERMINAL_CONFIG_LINE, refusalLine, scopedNoPairLine, commandWords, authRefusal, deviceAuthOldHostLine, noSuchPlaceRefusal, pairKeyRefusal, SEAL_CLIENT, unclosedQuoteRefusal, validatorRefusal, type PlaceSpend, type PlaceView, type ServerToolsAnswer } from "@wsp/protocol";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { hostExitedLine, noHostAnsweredLine, startingHostLine, upArgs } from "../src/host-start.js";
 import { hostLogPath, hostTokenPath, lockPathFor, POLL_MS, SERVICE_WAIT_MS, STARTED_BY_ENV } from "../src/host-lock.js";
@@ -27,6 +27,7 @@ import { deviceKeyPath, relayRecordPath } from "../src/account.js";
 import { PROBE_MS } from "../src/service.js";
 import { defaultHomeIn } from "../src/serving-home.js";
 import { addressNotPairedLine, aliasOk, deviceRefusedLine, dialWindowMs, hostsDir, NAME_ONE_HOST, noAnswerRefusal, noAnswerWithin, noSuchHostAmong, READ_THE_HOSTS, severalAccountHostsLine } from "../src/hosts.js";
+import { GUEST_SERVED } from "../src/guest-mcp.js";
 import { mcpServer, type Dialer } from "../src/mcp.js";
 import { recipeCases, TURN_ANSWERED, turnWords, type TurnCase } from "./mcp-record-turns.js";
 import { agentCopyWords, aimedBothLine, aimedUsage, c1Escaped, CLOSE_GRACE_MS, goneFromLine, hasTool, hostTokenMissingLine, isInAlsoLine, isInLine, noHostServingLine, noSkillHitsLine, notHeaderLine, otherVersion, PLACES_FIX, previewCutLine, projectOffComputerLine, projectScopeLine, projectUnnamedLine, SERVER_TOOL_COLUMNS, SKILL_HIT_COLUMNS, skillsShPlacelessLine, threadOf, toolLines, toolName, toolsAddedLine, toolsProjectBareLine, turnedInLine, turnedLine, UNAUTHORIZED_CLOSE, unsetVariableLine, VERBS, workspaceOf, type HostClient } from "../src/verbs.js";
@@ -329,7 +330,7 @@ async function answeredLine(
   tool: string,
   args: Record<string, unknown>,
   replies: Record<string, string>,
-  extra: Pick<TurnCase, "pushed" | "closes" | "env" | "cloud"> & { result?: Record<string, unknown>; refused?: Error } = {},
+  extra: Pick<TurnCase, "pushed" | "closes" | "env" | "cloud"> & { result?: Record<string, unknown>; refused?: Error; guest?: boolean } = {},
 ): Promise<{ line: string; asked: Record<string, unknown>[] }> {
   const { mcpServer, c1Escaped } = await modulesIn(extra.cloud === true);
   const asked: Record<string, unknown>[] = [];
@@ -342,9 +343,13 @@ async function answeredLine(
     },
     { close: async () => {} },
   ) as Dialer;
-  const answered = extra.result;
   const verb = VERBS.filter(hasTool).find(v => toolName(v.name) === tool);
-  const server = mcpServer("/nonexistent/state.json", { env: extra.env ?? {}, dial, ...(answered !== undefined ? { skip: v => v === verb } : {}) });
+  // A session from inside a machine is served as the host's guest kind serves it, on the launch's own variables alone.
+  const guest = extra.guest === true;
+  const answered = guest && verb !== undefined && GUEST_SERVED.skip(verb) ? undefined : extra.result;
+  const env = guest ? Object.fromEntries(Object.entries(extra.env ?? {}).filter(([key]) => GUEST_ENV.includes(key))) : (extra.env ?? {});
+  const skip = (v: (typeof VERBS)[number]): boolean => (answered !== undefined && v === verb) || (guest && GUEST_SERVED.skip(v));
+  const server = mcpServer("/nonexistent/state.json", { env, dial, skip, ...(guest ? { elsewhere: GUEST_SERVED.elsewhere } : {}) });
   if (answered !== undefined && verb !== undefined) {
     server.registerTool(tool, { description: verb.tool.description, inputSchema: verb.tool.input, outputSchema: verb.tool.output }, async () => answered as never);
   }
@@ -357,6 +362,14 @@ async function answeredLine(
   for (let waited = 0; !written.includes("\n") && waited < 5_000; waited += 10) await new Promise(r => setTimeout(r, 10));
   await server.close();
   return { line: written.slice(0, written.indexOf("\n")), asked };
+}
+
+/** What a guest session's tools read their values off: the pair its launch carries and the turn's token. */
+const GUEST_ENV: readonly string[] = [HOST_URL_ENV, HOST_TOKEN_ENV, TURN_TOKEN_ENV];
+
+/** A case answered as a session from inside a machine is answered, kept only where it is not the host road's answer. */
+function withGuest<T extends { line: string; asked: Record<string, unknown>[] }>(answer: T, guest: { line: string; asked: Record<string, unknown>[] }): T | (T & { guest: typeof guest }) {
+  return guest.line === answer.line && JSON.stringify(guest.asked) === JSON.stringify(answer.asked) ? answer : { ...answer, guest };
 }
 
 /** Rows that carry what a byte compare has to survive: a C1 control and DEL, a quote, a backslash, a newline, text
@@ -527,12 +540,15 @@ async function recorded<T>(make: () => Promise<T>): Promise<T> {
   }
 }
 
-const regenerated = (): Promise<Files> => recorded(regeneratedHere);
+/** Written once for both cases: every answer is recorded twice, on the host's road and as a guest's. */
+let written: Promise<Files> | undefined;
+const regenerated = (): Promise<Files> => (written ??= recorded(regeneratedHere));
 
 async function regeneratedHere(): Promise<Files> {
   const files: Files = new Map();
   const [off, on] = [await servedIn(false), await servedIn(true)];
-  files.set("record/server.json", fileText({ name: "wsp", version: VERSION, instructions: { cloudOff: off.instructions, cloudOn: on.instructions }, protocolVersions: SUPPORTED_PROTOCOL_VERSIONS, latestProtocolVersion: LATEST_PROTOCOL_VERSION }));
+  const readsHere = VERBS.filter(hasTool).filter(GUEST_SERVED.skip).map(v => toolName(v.name));
+  files.set("record/server.json", fileText({ name: "wsp", version: VERSION, instructions: { cloudOff: off.instructions, cloudOn: on.instructions }, protocolVersions: SUPPORTED_PROTOCOL_VERSIONS, latestProtocolVersion: LATEST_PROTOCOL_VERSION, readsHere }));
   files.set("record/exit.json", fileText({ codes: EXIT_CODES, kinds: KIND_CLASS }));
   files.set("record/words.json", fileText({ ...(await words()), workspaces: await workspaceWords(answeredLine, replies => answeringHost(replies, [])) }));
   files.set("record/host.json", fileText(host()));
@@ -546,12 +562,12 @@ async function regeneratedHere(): Promise<Files> {
   files.set("record/turns.json", fileText(await turnWords()));
   for (const [tool, cases] of Object.entries(ANSWERED)) {
     const answered = [];
-    for (const c of cases) answered.push({ ...c, ...(await answeredLine(tool, c.arguments, c.replies, c)) });
+    for (const c of cases) answered.push(withGuest({ ...c, ...(await answeredLine(tool, c.arguments, c.replies, c)) }, await answeredLine(tool, c.arguments, c.replies, { ...c, guest: true })));
     files.set(`tests/answers/${tool}.json`, fileText({ tool, cases: answered }));
   }
   for (const [tool, cases] of Object.entries(recipeCases())) {
     const answered = [];
-    for (const { result, ...c } of cases) answered.push({ ...c, replies: {}, ...(await answeredLine(tool, c.arguments, {}, result !== undefined ? { result } : {})) });
+    for (const { result, ...c } of cases) answered.push(withGuest({ ...c, replies: {}, ...(await answeredLine(tool, c.arguments, {}, result !== undefined ? { result } : {})) }, await answeredLine(tool, c.arguments, {}, { ...(result !== undefined ? { result } : {}), guest: true })));
     files.set(`tests/answers/${tool}.json`, fileText({ tool, cases: answered }));
   }
   return files;
