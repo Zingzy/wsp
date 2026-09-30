@@ -109,7 +109,7 @@ describe("procTable with this workspace's threads", () => {
 describe("procLabel", () => {
   const titles = new Map([["pty_1", "zsh"]]);
   it("names the daemon, a pty shell by its tab and the harness by its comm", () => {
-    expect(procLabel(procs[1]!, 40, titles)).toBe("daemon");
+    expect(procLabel(procs[1]!, 40, titles)).toBe("wsp");
     expect(procLabel(procs[2]!, 40, titles)).toBe("terminal zsh");
     expect(procLabel(procs[2]!, 40, new Map())).toBe("terminal");
     expect(procLabel(procs[3]!, 40, titles)).toBe("agent");

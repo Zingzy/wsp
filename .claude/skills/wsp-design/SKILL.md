@@ -198,12 +198,12 @@ in one slot, gap 4, tabular, weight 500 when toned.
 | Failed | circle-alert | Failed | | `--status-failed` |
 | Done, until opened | circle-check | Done | | `--status-done` |
 | Waiting | hourglass | Waiting | | muted, no tone |
-| Idle, read | | | age: `14m`, `3h`, `2d` | the row's muted ink |
-| Settled | | Merged or Closed as text, else the age | | muted |
+| Read | | | age: `14m`, `3h`, `2d` | the row's muted ink |
+| Settled | | | the age, on a slim row | muted |
 | Snoozed, threads working | alarm-clock | `N working` | | the row's muted ink, weight 400, no crab |
 
 The snoozed state lives on the tile alone: a snoozed tree whose threads run
-keeps its root, folded, at the foot of Idle, and the THREADS list and the
+keeps its root, folded, at the foot of the list, and the THREADS list and the
 palette keep each thread's own mark. A child that asks for the person or fails
 ends the snooze; a finished turn does not (ruling of 2026-09-28).
 
@@ -216,16 +216,30 @@ paused machine adds nothing to a tile: no word, no tone, no line. Its thread
 reads Done until opened and its age after; the open thread says Paused, one
 quiet word in the rule line under the last turn, with Wake beside it.
 
+### The sidebar's three parts
+
+The live sidebar is three parts (the owner's ruling of 2026-09-30, after T3's
+own list). On top, Needs you, and Pinned above it while anything is pinned,
+each under its head. Then one list of every other live tree, newest first,
+standing bare with no head over it, as T3's active list; it never folds, and
+it stands 12px under the part above it. Each row says for itself where it
+stands in its status slot: the elapsed time ticking while it works (the word
+Working is for screen readers alone), Done until opened, its age once read.
+Then the Settled fold. Working, Done and Idle are not sections. A row that
+calls for the person (Needs you, Failed, a Done nobody has opened) keeps the
+foreground ink; a working or read row's title recedes unless it is open, as
+T3's `shouldRecede`, and its label keeps its hue.
+
 ### Sidebar section heads
 
-Every section in the sidebar (Pinned, Needs you, Working, Done, Idle, Settled,
-Forwarded ports) opens with one head, T3's: the name and its count in
+Every headed section (Pinned, Needs you, Settled, Forwarded ports) opens with
+one head, T3's: the name and its count in
 parentheses, `Settled (9)`, 12px sans in the sidebar's muted ink, a 1px
 hairline in `--sidebar-border` filling the rest of the row, and a 14px
 chevron at the end that folds the section. The head is 28px with 8px sides,
 has no fill at rest or on hover (its ink brightens), and keeps its count
 while folded. Each section's fold is remembered in the window on its own;
-live sections start open, Settled starts shut. Folding takes away only the
+Pinned and Needs you start open, Settled starts shut. Folding takes away only the
 section's tiles: the head and everything above it stay where they are.
 
 The hairline is the one divider the app draws inside a list, an exception to
@@ -247,8 +261,10 @@ quiet two hours, or settled by hand: Settle on a root tile's menu or
 mod+shift+E takes the root and every thread under it, and the fold row's own
 menu holds Settle all read. A Done nobody has opened, any Failed and the
 thread open in the centre never fold by time; they wait for a hand. Inside
-the fold every tile rests whatever its state: its age in the row's ink, no
-tone, no glyph, the title muted. Any new turn or message brings a tree back.
+the fold every thread is one slim 36px row, as T3's settled rows: the
+project's glyph dimmed, the title muted, the pull request's `#N` in its
+state's ink, and the age in the row's ink, no tone and no glyph, whatever its
+state. Any new turn or message brings a tree back.
 The list scrolls under a hard edge, never a fade: a faded tile part way
 under the head reads as a tile with no first row.
 
@@ -278,7 +294,8 @@ project picker's exact grammar: the monitor glyph where projects has the
 folder, the same 36px row and chevron, the same menu (search field with a
 line under it, All computers with its check, a 36px row per computer with a
 gear, Add a computer at the foot over a line). Popover: radius 12, `--popover`
-at 96% with 8px blur, `--popover-edge`, `--popover-shadow`.
+whole on the Mac, where the window's glass is macOS's and the page draws no blur of its own (96% with 8px blur
+elsewhere), `--popover-edge`, `--popover-shadow`.
 
 ### Settings list rows
 

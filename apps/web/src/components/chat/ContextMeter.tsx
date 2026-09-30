@@ -1,30 +1,70 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// What the model held at the thread's latest turn, in the composer's footer:
-// the design's one meter grammar, a 56 by 4 track at foreground 10% with its
-// fill at 55%, and the figure beside it. Where the agent reports no limit
-// there is nothing to fill, so the figure stands alone; the strip under the
-// one-line composer drops the track when it is too narrow to hold the folder too.
+// What the model held at the thread's latest turn, as a small ring in the
+// thread's top bar beside Open, after T3 Code's context window meter: the
+// ring fills with the share of the window, and its hover says the numbers
+// and the percentage. The thread's view publishes its reading, since the
+// top bar stands outside it; a thread whose agent reports no limit draws an
+// empty ring and says the count alone.
+import { useEffect } from "react";
+import { create } from "zustand";
 import type { TurnSummary } from "../../adapt";
-import { cn } from "../../lib/utils";
-import { contextFigure, contextSnapshot, contextTitle } from "./contextMeter.logic";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { contextSnapshot, contextTitle, type ContextSnapshot } from "./contextMeter.logic";
 
-export function ContextMeter({ turns, agentLabel, tight = false }: { turns: ReadonlyArray<Pick<TurnSummary, "tokens">>; agentLabel: string; tight?: boolean }) {
+interface ContextReading {
+  readonly snapshot: ContextSnapshot;
+  readonly agentLabel: string;
+}
+
+const useContextStore = create<{ byWorkspaceId: Record<string, ContextReading | undefined> }>(() => ({ byWorkspaceId: {} }));
+
+/** Puts the thread on screen's reading where the top bar reads it, and takes it away as the thread leaves. */
+export function usePublishContext(workspaceId: string, turns: ReadonlyArray<Pick<TurnSummary, "tokens">>, agentLabel: string): void {
   const snapshot = contextSnapshot(turns);
-  if (snapshot === null) return null;
+  const used = snapshot?.used;
+  const max = snapshot?.max;
+  useEffect(() => {
+    const reading = snapshot === null ? undefined : { snapshot, agentLabel };
+    useContextStore.setState(s => ({ byWorkspaceId: { ...s.byWorkspaceId, [workspaceId]: reading } }));
+    return () => useContextStore.setState(s => ({ byWorkspaceId: { ...s.byWorkspaceId, [workspaceId]: undefined } }));
+    // The reading is its numbers; a new array of the same turns is the same reading.
+  }, [workspaceId, used, max, agentLabel]);
+}
+
+const RADIUS = 9.75;
+const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
+
+export function ContextRing({ workspaceId }: { workspaceId: string }) {
+  const reading = useContextStore(s => s.byWorkspaceId[workspaceId]);
+  if (reading === undefined) return null;
+  const { snapshot, agentLabel } = reading;
+  const title = contextTitle(snapshot, agentLabel);
+  const share = snapshot.share ?? 0;
   return (
-    <span data-context-meter title={contextTitle(snapshot, agentLabel)} className="inline-flex shrink-0 items-center gap-2">
-      {snapshot.share !== null ? (
-        <span data-context-track aria-hidden className={cn("block h-1 w-14 overflow-hidden rounded-full bg-[color-mix(in_srgb,var(--foreground)_10%,transparent)]", tight && "@max-lg/strip:hidden")}>
-          <span
-            data-context-fill
-            className="block h-full rounded-full bg-[color-mix(in_srgb,var(--foreground)_55%,transparent)] transition-[width] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none"
-            style={{ width: `${Math.round(snapshot.share * 1000) / 10}%` }}
+    <Tooltip>
+      <TooltipTrigger
+        render={<button type="button" data-context-ring aria-label={title} className="inline-flex size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors duration-150 hover:bg-accent [-webkit-app-region:no-drag]" />}
+      >
+        <svg viewBox="0 0 24 24" aria-hidden className="size-5 -rotate-90">
+          <circle cx="12" cy="12" r={RADIUS} fill="none" stroke="color-mix(in srgb, var(--foreground) 10%, transparent)" strokeWidth="3" />
+          <circle
+            data-context-used
+            cx="12"
+            cy="12"
+            r={RADIUS}
+            fill="none"
+            stroke="color-mix(in srgb, var(--foreground) 55%, transparent)"
+            strokeWidth="3"
+            strokeLinecap="round"
+            strokeDasharray={CIRCUMFERENCE}
+            strokeDashoffset={CIRCUMFERENCE * (1 - share)}
+            className="transition-[stroke-dashoffset] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none"
           />
-        </span>
-      ) : null}
-      <span data-context-figure className="font-mono text-[12px] text-muted-foreground tabular-nums">
-        {contextFigure(snapshot)}
-      </span>
-    </span>
+        </svg>
+      </TooltipTrigger>
+      <TooltipPopup side="bottom" align="end" className="max-w-72">
+        {title}
+      </TooltipPopup>
+    </Tooltip>
   );
 }

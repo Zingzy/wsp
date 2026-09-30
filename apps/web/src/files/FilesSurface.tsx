@@ -25,7 +25,7 @@ import { usePinned, useRoot, useRootStore } from "./root.js";
 import { useDaemonWire } from "./wire.js";
 
 /** What the Files pane says in place of a tree while there is no daemon to list one over. */
-export const FILES_NOT_RUNNING = "Files are read over the thread's daemon; wake it to read them.";
+export const FILES_NOT_RUNNING = "Files are read on the thread's computer; wake it to read them.";
 
 export function FilesSurface({ workspaceId, theme }: { workspaceId: string; theme: "light" | "dark" }) {
   const workspace = useWorkspace(workspaceId);

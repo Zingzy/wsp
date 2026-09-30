@@ -220,23 +220,40 @@ export function editorHost(o: EditorHostOptions = {}): HostEditor {
   /** Whether the editor can open an ssh remote now: a road of its own, and the extension that road needs where it needs one. */
   const remoteReady = (row: EditorRow, app: string): boolean =>
     row.remote !== undefined && (row.remoteExtension === undefined || hasExtension(extensionsOf(row.remoteExtension, app), row.remoteExtension.ids));
+  /** The installed editor named, else the first installed; where there is none, the line saying so. */
+  const pickOf = (editor: EditorId | undefined): { row: EditorRow; app: string } | string => {
+    const here = installed();
+    const pick = editor === undefined ? here[0] : here.find(({ row }) => row.id === editor);
+    if (pick !== undefined) return pick;
+    const named = EDITORS.find(row => row.id === editor);
+    return named === undefined ? NO_EDITOR_LINE : editorMissingLine(named.name);
+  };
+  /** That editor's road into the named workspace's files on another computer, or the line saying why it has none. */
+  const remoteRoadOf = (pick: { row: EditorRow; app: string }, name: string): { road: NonNullable<EditorRow["remote"]> } | { refused: string } => {
+    const road = pick.row.remote;
+    if (road === undefined) return { refused: editorOpensHereLine(name) };
+    const needs = pick.row.remoteExtension;
+    if (needs !== undefined && !remoteReady(pick.row, pick.app)) return { refused: remoteExtensionLine(pick.row.name, `${needs.cli} --install-extension ${needs.ids[0]}`) };
+    return { road };
+  };
   return {
     list: async (): Promise<EditorChoice[]> => installed().map(({ row, app }) => ({ id: row.id, name: row.name, ...(remoteReady(row, app) ? { remote: true as const } : {}) })),
+    remoteRefusal: async ({ editor, name }) => {
+      const pick = pickOf(editor);
+      if (typeof pick === "string") return pick;
+      const reached = remoteRoadOf(pick, name);
+      return "refused" in reached ? reached.refused : undefined;
+    },
     open: async ({ path, line, inside, editor, remote }) => {
       // A workspace on another computer holds its files there, so its path is held to the folder by its words alone.
       const opening = remote === undefined ? openablePath(path, inside) : remotePath(path, remote.folder);
-      const here = installed();
-      const pick = editor === undefined ? here[0] : here.find(({ row }) => row.id === editor);
-      if (pick === undefined) {
-        const named = EDITORS.find(row => row.id === editor);
-        throw new Error(named === undefined ? NO_EDITOR_LINE : editorMissingLine(named.name));
-      }
+      const pick = pickOf(editor);
+      if (typeof pick === "string") throw new Error(pick);
       if (remote !== undefined) {
-        if (pick.row.remote === undefined) throw new Error(editorOpensHereLine(remote.name));
-        const needs = pick.row.remoteExtension;
-        if (needs !== undefined && !remoteReady(pick.row, pick.app)) throw new Error(remoteExtensionLine(pick.row.name, `${needs.cli} --install-extension ${needs.ids[0]}`));
+        const reached = remoteRoadOf(pick, remote.name);
+        if ("refused" in reached) throw new Error(reached.refused);
         const folder = posix.resolve(remote.folder);
-        await run(pick.row.remote(pick.app, remote.alias, folder, opening === folder ? undefined : opening, line));
+        await run(reached.road(pick.app, remote.alias, folder, opening === folder ? undefined : opening, line));
         return pick.row.id;
       }
       const folder = statSync(opening).isDirectory();

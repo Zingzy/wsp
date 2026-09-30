@@ -256,7 +256,7 @@ describe("composer checkout row", () => {
     // The wire is there from the first paint and the link is up a moment later; asked once, the row kept the
     // refusal from that first read for the whole of a session, on a folder it could read fine.
     let up = false;
-    const wire = fakeWire({ "fs.list": LISTING, "git.status": () => (up ? STATUS : new Error("daemon unreachable")) });
+    const wire = fakeWire({ "fs.list": LISTING, "git.status": () => (up ? STATUS : new Error("not answering")) });
     provideDaemonWire(WS, wire);
     const terminals = new WorkspaceTerminals(wire);
     provideTerminals(WS, terminals);

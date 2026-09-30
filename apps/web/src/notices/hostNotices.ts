@@ -2,7 +2,9 @@
 // The host's events that become notices, one rule per event type. A notice is
 // for what happened away from where the person is looking: an event whose home
 // is on screen (that thread open, that computer's row showing, that build's
-// rows drawn) is the panel's to show and says nothing here. A wait (a build's
+// rows drawn) is the panel's to show and says nothing here. A computer going
+// quiet is the machine's life and never a notice: the thread on screen and the
+// computer's row say it where it matters. A wait (a build's
 // need, a thread's prompt) is keyed and stands until the event that closes it,
 // and a build's need is said when its rows leave the screen with it standing.
 // The need, the prompt, a machine that came up and a finished turn also go out
@@ -21,9 +23,6 @@ import { releaseAhead, shellVersions } from "../shell/shellVersion.js";
 import { copyName } from "../sidebar/workspaceRows.js";
 import { addNotice, useNotices, type NoticeAction } from "./store.js";
 
-/** How long a computer stays quiet before it is said: a box that relinks inside this was a blip, not news. */
-export const ABSENT_NOTICE_MS = 30_000;
-
 /** Where this page's storage keeps the last release version the update notice has said, so a reload says it no more. */
 export const RELEASE_SAID_KEY = "wsp:release-said";
 const VERSION_SHAPE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
@@ -37,7 +36,6 @@ export const HOST_NOTICE_WORDS = {
   notSetUp: (name: string, said: string): string => `${name} not set up: ${said}`,
   setUp: (name: string): string => `${name} is set up`,
   rowsFailed: (name: string, failed: number): string => `${name}: ${failed === 1 ? "1 row" : `${failed} rows`} of the recipe failed`,
-  away: (name: string): string => `${name} stopped answering`,
   aThread: "A thread",
   threadStopped: (title: string, said: string | undefined): string => `${title} stopped before it replied${said === undefined ? "" : `: ${said}`}`,
   threadFinished: threadFinishedLine,
@@ -106,11 +104,6 @@ const openComputer = (placeId: string | undefined): NoticeAction => ({
   },
 });
 
-interface Absence {
-  said?: string;
-  timer?: ReturnType<typeof setTimeout>;
-}
-
 /** What the rules keep between events, for one mounted effect. */
 interface Held {
   road: NeedsYouRoad | null;
@@ -121,8 +114,6 @@ interface Held {
   /** Whether the build's rows were in front of the person at the last change, so leaving them with a need standing
    * says it and coming back to them ends it. */
   shown: boolean;
-  /** Computers gone quiet, by place id, until they come back: a said one stays with no timer so the same absence is said once. */
-  absences: Map<string, Absence>;
   /** The jobs whose end has been said. */
   jobsEnded: Set<string>;
   /** The last release version said, read from this page's storage on mount. */
@@ -153,19 +144,6 @@ function settleShown(held: Held): void {
     held.need = undefined;
     useNotices.getState().end(NEED_KEY);
   } else if (job?.needsYou !== undefined && held.need === undefined) sayNeed(held, job.needsYou.what, job.place?.id);
-}
-
-function sayAbsence(placeId: string, said: string | undefined): void {
-  const place = useStore.getState().places.find(p => p.id === placeId);
-  if (place === undefined || place.present || computerOnScreen(placeId)) return;
-  const name = placeName(place);
-  addNotice({ kind: "error", text: said ?? HOST_NOTICE_WORDS.away(name), where: name, action: openComputer(placeId) });
-}
-
-function forgetAbsence(held: Held, placeId: string): void {
-  const absence = held.absences.get(placeId);
-  if (absence?.timer !== undefined) clearTimeout(absence.timer);
-  held.absences.delete(placeId);
 }
 
 function endAsks(workspaceId: string, threadId: string | undefined): void {
@@ -218,21 +196,6 @@ const RULES: { [T in ProtocolEvent["type"]]?: Rule<T> } = {
     }
     addNotice({ kind: "done", text: e.step === "join" ? HOST_NOTICE_WORDS.joined(name) : HOST_NOTICE_WORDS.setUp(name), ...where, action: openComputer(e.placeId) });
   },
-  "place.absent": (e, held) => {
-    const standing = held.absences.get(e.placeId);
-    if (standing !== undefined) {
-      if (e.said !== undefined) standing.said = e.said;
-      return;
-    }
-    const absence: Absence = e.said === undefined ? {} : { said: e.said };
-    absence.timer = setTimeout(() => {
-      delete absence.timer;
-      sayAbsence(e.placeId, absence.said);
-    }, ABSENT_NOTICE_MS);
-    held.absences.set(e.placeId, absence);
-  },
-  "place.present": (e, held) => forgetAbsence(held, e.placeId),
-  "place.removed": (e, held) => forgetAbsence(held, e.placeId),
   "session.done": (e, held) => {
     if (e.turnId === undefined) return;
     held.results.set(e.turnId, e.result);
@@ -310,7 +273,7 @@ export function useHostNotices(): void {
   const needed = useStore(s => s.initJob?.needsYou !== undefined || Object.values(s.sessions).some(rows => rows.some(row => row.asking !== undefined)));
   // Counted where the rows land, so a window showing a thread, which moves its read stamp, takes it off the dock.
   const waiting = useStore(s => needsYouCount(Object.values(s.sessions).flat()));
-  const held = useRef<Held>({ road: null, opens: () => openComputer(undefined).run(), need: undefined, shown: false, absences: new Map(), jobsEnded: new Set(), released: undefined, results: new Map() });
+  const held = useRef<Held>({ road: null, opens: () => openComputer(undefined).run(), need: undefined, shown: false, jobsEnded: new Set(), released: undefined, results: new Map() });
   useEffect(() => {
     const h = held.current;
     const built = needsYouRoad(() => h.opens());
@@ -318,8 +281,6 @@ export function useHostNotices(): void {
     return () => {
       built.close();
       h.road = null;
-      for (const absence of h.absences.values()) if (absence.timer !== undefined) clearTimeout(absence.timer);
-      h.absences.clear();
     };
   }, []);
   useEffect(() => {

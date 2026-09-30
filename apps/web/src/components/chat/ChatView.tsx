@@ -14,12 +14,12 @@ import { HeroAtmosphere, HeroMark } from "./EmptyHero.js";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowDownIcon } from "lucide-react";
 import type { LegendListRef } from "@legendapp/list/react";
-import { everyModel, isLocalWorkspace, LIST_PRICE_WORD, turnSettledParts, workspaceWord } from "@wsp/protocol";
+import { workspaceWord } from "@wsp/protocol";
 import { Button } from "../ui/button";
 import { useCapabilities, useHarnessCatalog, usePlaces, useSidebarProjects, useStore, useThreadSessions, useWorkspace, useWorkspaceState } from "../../protocol/store";
 import { Facts } from "../Facts.js";
 import { ThreadRows } from "../threads/ThreadRows.js";
-import { PullRequestRow } from "../../pull-request/PullRequestRow.js";
+import { useMachineLine } from "../../notices/workspaceLines.js";
 import { openNamedFile } from "../../files/open";
 import { threadFolderOf } from "../../files/root";
 import { cn } from "../../lib/utils";
@@ -114,17 +114,9 @@ export function ChatView({
     const folder = cwd ?? threadFolderOf(workspaceId);
     return thread.thread === undefined || folder === null ? null : { workspaceId, threadId: thread.thread, cwd: folder, runs: view.runs };
   }, [cwd, thread.thread, view.runs, workspaceId]);
-  // What the footer's figure is: on this computer the turn ran on the person's own sign-in, so the number is the
-  // agent's own list price and nobody is billed for it. The word goes on the figure from the record alone, which
-  // the page has before it draws the footer at all; a word that arrived a moment after the figure would be the
-  // change this ticket took off the sidebar's line. The sentence the model menu's foot carries rides the figure's
-  // title once the catalog holding the agent's own name is in, since nobody opens that menu before sending.
-  const onThisComputer = workspace !== null && isLocalWorkspace(workspace);
   const turnRows = useThreadSessions(workspaceId, threadKey);
   useReadStamp(turnRows);
   const catalog = useHarnessCatalog(turnRows.at(-1)?.harness ?? DEFAULT_HARNESS, workspaceId);
-  // A reply names its model the way the picker does; one the catalog does not list is named by its id.
-  const modelLabel = useCallback((model: string) => (catalog === null ? undefined : everyModel(catalog).find(m => m.value === model.replace(/\[1m\]$/, ""))?.label), [catalog]);
   // What each turn changed hangs under that turn's last reply, and opens the Changes pane on the turn's own range.
   // Keyed on what it draws rather than on the entries, so a streamed chunk hands the timeline the same map.
   const diffPlaces = view.turns.flatMap(turn => {
@@ -213,17 +205,15 @@ export function ChatView({
     },
     [workspaceId],
   );
-  // A turn that completed says so by its reply standing, so its facts join that reply's row; any other ending keeps
-  // its own line, since the state word is the news.
+  // A turn that completed says so by its reply standing; any other ending keeps its own line, since the state word
+  // is the news.
   const settledOnReply = view.settled?.state === "completed";
-  const replyMeta = settledOnReply ? (
-    <SettledFacts parts={turnSettledParts(view.settled!, openedSpend(opened), onThisComputer ? LIST_PRICE_WORD : undefined)} />
-  ) : null;
+  // What the machine needs from the person, said here on the thread they are reading and nowhere else.
+  const machine = useMachineLine(workspaceId);
   const footer = thread.hydrated ? (
     <div className="mx-auto w-full min-w-0 max-w-3xl">
       {opened.length > 0 ? <OpenedThreads opened={opened} /> : null}
-      <PullRequestRow workspaceId={workspaceId} />
-      {view.settled !== null && !settledOnReply ? <SettledFooter turn={view.settled} openedCostUsd={openedSpend(opened)} onThisComputer={onThisComputer} /> : null}
+      {view.settled !== null && !settledOnReply ? <SettledFooter turn={view.settled} /> : null}
       {paused !== null ? (
         <TimelineRuleLine data-workspace-paused line={paused}>
           <Button size="xs" variant="outline" className="font-sans text-[13px] font-medium" onClick={() => void wake(workspaceId)}>
@@ -231,6 +221,7 @@ export function ChatView({
           </Button>
         </TimelineRuleLine>
       ) : null}
+      {machine !== null ? <TimelineRuleLine data-machine-line line={machine} /> : null}
     </div>
   ) : null;
 
@@ -257,7 +248,6 @@ export function ChatView({
             listRef={listRef}
             timelineEntries={view.entries}
             turns={view.turns}
-            modelLabel={modelLabel}
             turnDiffSummaryByAssistantMessageId={turnDiffs}
             onOpenTurnDiff={onOpenTurnDiff}
             threadKey={threadId === null ? workspaceId : `${workspaceId}/${threadId}`}
@@ -266,7 +256,6 @@ export function ChatView({
             onOpenFile={onOpenFile}
             onIsAtEndChange={onIsAtEndChange}
             footer={footer}
-            replyMeta={replyMeta}
             markdownCwd={cwd}
             workspaceRoot={cwd}
             resolvedTheme={appDark ? "dark" : "light"}
@@ -303,7 +292,7 @@ function ScrollToEnd({ hidden, onClick }: { hidden: boolean; onClick: () => void
         tabIndex={hidden ? -1 : 0}
         onClick={onClick}
         className={cn(
-          "inline-flex h-7 items-center gap-1.5 rounded-full border border-border bg-popover/95 px-3 text-xs text-muted-foreground shadow-[0_8px_20px_-8px_rgb(0_0_0/45%),0_2px_4px_-2px_rgb(0_0_0/30%)] glass-backdrop transition-[opacity,translate,color] duration-200 ease-out hover:text-foreground motion-reduce:transition-none",
+          "inline-flex h-7 items-center gap-1.5 rounded-full border border-border bg-popover/95 px-3 text-xs text-muted-foreground shadow-[0_8px_20px_-8px_rgb(0_0_0/45%),0_2px_4px_-2px_rgb(0_0_0/30%)] off-mac:glass-backdrop transition-[opacity,translate,color] duration-200 ease-out hover:text-foreground motion-reduce:transition-none",
           hidden ? "pointer-events-none translate-y-1 opacity-0" : "pointer-events-auto translate-y-0 opacity-100",
         )}
       >
@@ -328,21 +317,11 @@ export function EmptyThread({ name, projectId, picker }: { name: string; project
   );
 }
 
-/** What the threads this one opened have spent between them, as each thread's own rows add up; zero where none of
- * them reported a figure, which the footer then says nothing about. */
-function openedSpend(opened: ReadonlyArray<ThreadOnWorkspace>): number {
-  return opened.reduce((sum, { thread }) => sum + (thread.costUsd ?? 0), 0);
-}
-
 /** The threads this thread's agent opened, wherever each runs, one line each under the reply, so a person reading the
  * opener can reach every thread it started without hunting the sidebar for it. */
 function OpenedThreads({ opened }: { opened: ReadonlyArray<ThreadOnWorkspace> }) {
   const places = usePlaces();
   return <ThreadRows label="Threads" className="mt-2" rows={opened.map(({ thread, runs }) => ({ thread, place: computerName(places, runs) }))} />;
-}
-
-function SettledFacts({ parts }: { parts: ReadonlyArray<string> }) {
-  return <Facts data-testid="settled-footer" parts={parts} className="flex-wrap gap-x-3.5 text-[13px] text-muted-foreground tabular-nums" />;
 }
 
 const TURN_STATUS: Record<TurnSummary["state"], string> = {
@@ -352,19 +331,14 @@ const TURN_STATUS: Record<TurnSummary["state"], string> = {
   error: "failed",
 };
 
-/** Duration and cost of the turn that just settled, with what the threads it opened spent beside its own figure;
- * its error, when it has one, is already a row in the thread. The line carries facts and a state word, so it wears
- * the type ladder's 11 px mono, the size the rule lines above it and the row meta in the sidebar read at. A narrow
- * window breaks the line between facts and never inside one: a duration or a price split over two lines is a
- * figure a person has to reassemble before they can read it. */
-function SettledFooter({ turn, openedCostUsd, onThisComputer }: { turn: TurnSummary; openedCostUsd: number; onThisComputer: boolean }) {
-  const failed = turn.state !== "completed";
-  const parts = turnSettledParts(turn, openedCostUsd, onThisComputer ? LIST_PRICE_WORD : undefined);
+/** A turn that ended any way but completed says how, in one word: the fold above it says how long it worked, and a
+ * price is not the line's to say. */
+function SettledFooter({ turn }: { turn: TurnSummary }) {
   return (
     <Facts
       data-testid="settled-footer"
-      parts={[TURN_STATUS[turn.state], ...parts]}
-      className={cn("w-full flex-wrap px-1 pb-2 font-mono text-[11px] tabular-nums", failed ? "text-destructive" : "text-muted-foreground")}
+      parts={[TURN_STATUS[turn.state]]}
+      className={cn("w-full px-1 pb-2 font-mono text-[11px] tabular-nums", turn.state !== "completed" ? "text-destructive" : "text-muted-foreground")}
     />
   );
 }

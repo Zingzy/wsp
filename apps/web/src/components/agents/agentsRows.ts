@@ -13,12 +13,20 @@ import { agentOfRow, type AgentRow, type AgentsProject, type AgentsReport, type 
  * acts are that box's page's. */
 export type AgentsWhere = "here" | "box" | "fork" | "provider" | "box-task";
 
+/** How long a computer is silent before the panel calls it not answering: a link that drops and comes straight back
+ * never reads as one. */
+export const NOT_ANSWERING_AFTER_MS = 30_000;
+
+/** Whether a silence of this long is one the panel says; a silence of no known length already is. */
+export const saysNotAnswering = (awayMs: number | null): boolean => awayMs === null || awayMs >= NOT_ANSWERING_AFTER_MS;
+
 export const AGENTS_LIST_WORDS = {
   section: "Agents, MCP servers and skills",
   readAgain: "Read again",
   readAgo: (span: string): string => `read ${span} ago`,
   paused: "paused",
-  away: "away",
+  notAnswering: "not answering",
+  retry: "Retry",
   back: (to: string): string => `Back to ${to}`,
   groupAndSort: "Group and sort",
   groupBy: "Group by",

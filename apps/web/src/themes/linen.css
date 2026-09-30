@@ -41,4 +41,5 @@
   --status-working: #be185d;
   --status-failed: #c10007;
   --status-done: #007a55;
+  --pr-merged: #7c3aed;
 }

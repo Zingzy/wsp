@@ -41,6 +41,7 @@ const bridge: DesktopBridge & OnboardingBridge = {
     return () => ipcRenderer.off("shell:chord", listen);
   },
   setTheme: (theme: ThemePreference): void => ipcRenderer.send("theme:set", theme),
+  setGlass: (glass: boolean): void => ipcRenderer.send("glass:set", glass),
   sayOutside: (line: OutsideLine): void => ipcRenderer.send("outside:say", line),
   setBadge: (count: number): void => ipcRenderer.send("badge:set", count),
   onOpen: (handler: (target: LinkTarget) => void): (() => void) => {

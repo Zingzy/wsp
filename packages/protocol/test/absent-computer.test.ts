@@ -54,11 +54,11 @@ describe("the one state of this computer's own daemon while it is not running", 
   const reading = ownDaemonDown("this Mac");
 
   it("says the same thing in every slot that has to hold it, and the ticket's sentence where there is room", () => {
-    expect(reading.said).toBe("this Mac's daemon is not running");
-    expect(reading.sentence).toBe("this Mac's daemon is not running");
-    expect(reading.word).toBe("No daemon");
-    expect(reading.away).toBe("no daemon");
-    expect(reading.line).toBe("daemon not running, start it");
+    expect(reading.said).toBe("this Mac's terminals and files stopped");
+    expect(reading.sentence).toBe("this Mac's terminals and files stopped");
+    expect(reading.word).toBe("Stopped");
+    expect(reading.away).toBe("stopped");
+    expect(reading.line).toBe("stopped, start again");
   });
 
   it("never says Unreachable about the computer the app is drawn on", () => {

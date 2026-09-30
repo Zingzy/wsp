@@ -599,6 +599,10 @@ export interface HostEditor {
   /** Opens the path in the editor named, else the first installed, and answers which one; refused where the path
    * does not resolve inside one of the folders given. */
   open(req: { path: string; line?: number; inside: readonly string[]; editor?: EditorId; remote?: EditorRemote }): Promise<EditorId>;
+  /** The line open would refuse a workspace on another computer with, in the editor named or else the first
+   * installed; nothing where that editor can open one. Asked before anything reaches that computer, and `name` is the
+   * workspace's. */
+  remoteRefusal(req: { editor?: EditorId; name: string }): Promise<string | undefined>;
 }
 
 /** Where a workspace on another computer opens from: its ssh alias on this computer and its folder there. */
@@ -3561,7 +3565,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const ownDaemonChannel = async (entry: LiveWorkspace, onEvent: (event: Record<string, unknown>) => void): Promise<DaemonChannel> =>
     channelOver(await moduleOf(entry.record.kind).daemonRoad(entry), entry.record.name, onEvent);
   const channelOver = (reach: DaemonReachView, name: string, onEvent: (event: Record<string, unknown>) => void): Promise<DaemonChannel> => {
-    if (reach.daemonToken === undefined) throw new Error(`${name} has no daemon answering yet`);
+    if (reach.daemonToken === undefined) throw new Error(`${name} is not answering yet`);
     return openChannel({ url: reach.url, token: reach.daemonToken, onEvent });
   };
 
@@ -4238,6 +4242,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           changed: said.entries.filter(e => e.xy !== "!!").length,
           ...(said.editsUnread === true ? { editsUnread: true } : {}),
           ...(said.countsUnknown === true ? { countsUnknown: true } : {}),
+          ...(/^[0-9a-f]{7,40}$/.test(said.branch.oid) ? { head: said.branch.oid } : {}),
           readAt: clock.now(),
         };
         await statusNow(entry);

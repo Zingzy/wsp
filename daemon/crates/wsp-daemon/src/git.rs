@@ -381,10 +381,56 @@ struct Listing {
 /// The blob id git names `bytes` by at `path`, the repository's own hash over them after its attributes for that
 /// path, written into the object store so a tracked file's hunk can be diffed from it. A hash-object that fails
 /// leaves the file without one, which is a file that cannot be marked viewed, never a diff that cannot be read.
-async fn blob_of<R: Runs>(runner: &R, top: &Path, path: &str, bytes: &[u8]) -> Result<Option<String>, OpError> {
+/// Called once per tracked file whose worktree hunk `rebuilt_patch` diffs from the object, never per untracked file:
+/// a checkout with tens of thousands of untracked files would spawn one git and write one loose object for each.
+async fn written_blob<R: Runs>(runner: &R, top: &Path, path: &str, bytes: &[u8]) -> Result<Option<String>, OpError> {
     let res = run_git(runner, top, &["hash-object", "-w", "--stdin", "--path", path], Some(bytes), None).await?;
     let id = stdout_text(&res).trim().to_owned();
     Ok((res.code == Some(0) && !id.is_empty()).then_some(id))
+}
+
+/// The object format a repository names its blobs in; sha1 unless it was made with `--object-format=sha256`.
+enum ObjectFormat {
+    Sha1,
+    Sha256,
+}
+
+/// Read from the repository, never inferred: a format wrong by a byte hashes every blob wrong, so anything but the
+/// two git names, or a call that failed, fails the op rather than falling back to sha1.
+async fn object_format<R: Runs>(runner: &R, cwd: &Path) -> Result<ObjectFormat, OpError> {
+    let res = run_git(runner, cwd, &["rev-parse", "--show-object-format"], None, None).await?;
+    check(&res, "rev-parse --show-object-format")?;
+    match stdout_text(&res).trim() {
+        "sha1" => Ok(ObjectFormat::Sha1),
+        "sha256" => Ok(ObjectFormat::Sha256),
+        other => Err(OpError::plain(format!("git names an object format this daemon cannot hash: {other:?}"))),
+    }
+}
+
+/// The blob id git names `bytes` by, hashed here in this daemon's own process: the repository's hash over the git
+/// object header `blob <len>\0` and the bytes. No git process is spawned and nothing is written, so a folder of
+/// untracked files costs one hash each and no loose objects. The id is over the bytes as this side read them, which
+/// is git's own where no attribute rewrites the file; the blob only marks a file viewed, and an untracked file has
+/// no committed side an attribute could disagree with.
+fn read_blob(format: &ObjectFormat, bytes: &[u8]) -> String {
+    let header = format!("blob {}\0", bytes.len());
+    let hex = |digest: &[u8]| digest.iter().map(|b| format!("{b:02x}")).collect::<String>();
+    match format {
+        ObjectFormat::Sha1 => {
+            use sha1::{Digest, Sha1};
+            let mut h = Sha1::new();
+            h.update(header.as_bytes());
+            h.update(bytes);
+            hex(&h.finalize())
+        }
+        ObjectFormat::Sha256 => {
+            use sha2::{Digest, Sha256};
+            let mut h = Sha256::new();
+            h.update(header.as_bytes());
+            h.update(bytes);
+            hex(&h.finalize())
+        }
+    }
 }
 
 /// How long git writes a blob id in this repository's patches: as long as it cuts HEAD to, which grows with the
@@ -541,6 +587,9 @@ async fn diff_listed<R: Runs>(
         Some(path) => vec![path],
         None => whole_bound.iter().map(String::as_str).collect(),
     };
+    // The object format is the repository's own, read before the listing so it is git's real answer, not one a link
+    // swapped in over the top mid-read could turn into a failure; a broken answer here fails the diff.
+    let format = if worktree && with_blobs { Some(object_format(runner, cwd).await?) } else { None };
     let mut list_args: Vec<&str> = vec!["diff"];
     list_args.extend(args.iter().map(String::as_str));
     list_args.extend(["-M", "--name-status", "-z"]);
@@ -632,9 +681,11 @@ async fn diff_listed<R: Runs>(
             (true, Some(at), Some(rel)) => crate::fs::blocking(move || Ok(untracked::seen(&at, &rel))).await?,
             _ => None,
         };
-        let blob = match (&seen, worktree) {
-            (Some(Seen::File { bytes, .. }), _) => blob_of(runner, &top, &file.path, bytes).await?,
-            (_, false) => blobs.get(&file.path).cloned(),
+        // The blob id is hashed here from the bytes this side read, so a listing of many untracked files spawns no
+        // git and writes no object; the object itself is written below only for the tracked hunks that diff from it.
+        let mut blob = match (&seen, worktree, &format) {
+            (Some(Seen::File { bytes, .. }), _, Some(format)) => Some(read_blob(format, bytes)),
+            (_, false, _) => blobs.get(&file.path).cloned(),
             _ => None,
         };
         if matches!(seen, Some(Seen::TooLarge)) {
@@ -675,14 +726,22 @@ async fn diff_listed<R: Runs>(
                 res.stdout
             } else if let Some(Seen::File { bytes, exec }) = &seen {
                 // The post-image is the worktree: the header is git's, the hunk is built from this side's read.
-                let Some(dst) = blob.as_deref() else {
-                    files.push(bare(file.path, file.kind, None));
-                    continue;
-                };
                 if is_added(&res.stdout) {
+                    // A file added in this scope is rendered whole from the read, so its object is never needed.
+                    let Some(dst) = blob.as_deref() else {
+                        files.push(bare(file.path, file.kind, None));
+                        continue;
+                    };
                     untracked::patch_of(&file.path, bytes, *exec, Some(dst), abbrev)
                 } else {
-                    match rebuilt_patch(runner, cwd, &res.stdout, dst, abbrev, whole, remaining).await? {
+                    // The hunk diffs from the object, so this one tracked file's blob is written now and named by
+                    // git's own id, which the repository's attributes may make differ from the read hash.
+                    let Some(dst) = written_blob(runner, &top, &file.path, bytes).await? else {
+                        files.push(bare(file.path, file.kind, None));
+                        continue;
+                    };
+                    blob = Some(dst.clone());
+                    match rebuilt_patch(runner, cwd, &res.stdout, &dst, abbrev, whole, remaining).await? {
                         Some(patch) => patch,
                         None => {
                             files.push(bare(file.path, file.kind, None));
@@ -1187,16 +1246,73 @@ mod tests {
         assert_eq!(reply.files[0].blob.as_deref(), Some(inside.as_str()), "{said}");
     }
 
+    /// Real git, counting the hash-object processes it is asked to spawn.
+    struct Counting {
+        inner: Here,
+        hashes: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl Runs for Counting {
+        async fn run(
+            &self,
+            cwd: &Path,
+            program: &str,
+            args: &[&str],
+            input: Option<&[u8]>,
+            max_bytes: Option<usize>,
+        ) -> Result<GitResult, OpError> {
+            if args.first() == Some(&"hash-object") {
+                self.hashes.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+            self.inner.run(cwd, program, args, input, max_bytes).await
+        }
+        async fn on_path(&self, program: &str) -> Result<bool, OpError> {
+            self.inner.on_path(program).await
+        }
+        fn on_this_side(&self, folder: &Path) -> Option<OnThisSide> {
+            self.inner.on_this_side(folder)
+        }
+    }
+
     #[tokio::test]
-    async fn an_untracked_file_carries_the_blob_git_names_it_under_its_attributes_and_in_a_sha256_repo() {
+    async fn many_untracked_files_cost_no_hash_object_spawn_and_carry_the_blob_git_names() {
         let dir = committed(&["kept.txt"]);
-        std::fs::write(dir.path().join(".gitattributes"), "*.txt text eol=lf\n").unwrap();
-        git_in(dir.path(), &["add", ".gitattributes"]);
-        git_in(dir.path(), &["-c", "commit.gpgsign=false", "commit", "-q", "-m", "attributes"]);
-        std::fs::write(dir.path().join("crlf.txt"), "a\r\nb\r\n").unwrap();
+        let mut names: Vec<String> = (0..40).map(|i| format!("u{i}.txt")).collect();
+        for name in &names {
+            std::fs::write(dir.path().join(name), format!("file {name}\n")).unwrap();
+        }
+        // An empty file and an executable one hash by content alone: read_blob is git's over zero bytes and over a
+        // file the mode bit does not touch, so both are named the same as git names them.
+        std::fs::write(dir.path().join("empty.txt"), "").unwrap();
+        names.push("empty.txt".to_owned());
+        let run = dir.path().join("run.sh");
+        std::fs::write(&run, "#!/bin/sh\necho hi\n").unwrap();
+        std::fs::set_permissions(&run, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        names.push("run.sh".to_owned());
+
+        let objects = || git_in(dir.path(), &["count-objects"]).split_whitespace().next().unwrap_or_default().to_owned();
+        let before = objects();
+        let hashes = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let runner = Counting { inner: here(), hashes: hashes.clone() };
+        let reply = git_diff(&runner, dir.path(), Path::new("/"), GitDiffScope::Head, None, &[], false, CAP).await.unwrap();
+        assert_eq!(reply.files.len(), names.len());
+        // Not one git hash-object was spawned for any untracked file, and no loose object was written.
+        assert_eq!(hashes.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert_eq!(objects(), before);
+        // Every blob id is the one git would name the file by, the empty and the executable one included.
+        for name in &names {
+            let file = reply.files.iter().find(|f| &f.path == name).unwrap();
+            assert_eq!(file.blob.as_deref(), Some(git_in(dir.path(), &["hash-object", name]).trim()), "{name}");
+        }
+    }
+
+    #[tokio::test]
+    async fn an_untracked_files_blob_is_git_s_in_a_sha1_and_a_sha256_repo() {
+        let dir = committed(&["kept.txt"]);
+        std::fs::write(dir.path().join("new.txt"), "fresh\n").unwrap();
         let reply =
-            git_diff(&here(), dir.path(), Path::new("/"), GitDiffScope::Head, None, &["crlf.txt".to_owned()], false, CAP).await.unwrap();
-        assert_eq!(reply.files[0].blob.as_deref(), Some(git_in(dir.path(), &["hash-object", "crlf.txt"]).trim()));
+            git_diff(&here(), dir.path(), Path::new("/"), GitDiffScope::Head, None, &["new.txt".to_owned()], false, CAP).await.unwrap();
+        assert_eq!(reply.files[0].blob.as_deref(), Some(git_in(dir.path(), &["hash-object", "new.txt"]).trim()));
 
         let sha256 = tempfile::tempdir().unwrap();
         git_in(sha256.path(), &["init", "-q", "--object-format=sha256", "-b", "main"]);
@@ -1210,10 +1326,53 @@ mod tests {
     async fn an_untracked_file_past_the_read_cap_is_listed_with_no_patch_and_no_blob() {
         let dir = committed(&["kept.txt"]);
         std::fs::File::create(dir.path().join("huge.bin")).unwrap().set_len(untracked::READ_MAX as u64 + 1).unwrap();
+        let hashes = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let runner = Counting { inner: here(), hashes: hashes.clone() };
         let reply =
-            git_diff(&here(), dir.path(), Path::new("/"), GitDiffScope::Head, None, &["huge.bin".to_owned()], false, CAP).await.unwrap();
+            git_diff(&runner, dir.path(), Path::new("/"), GitDiffScope::Head, None, &["huge.bin".to_owned()], false, CAP).await.unwrap();
         assert_eq!((reply.files[0].patch.as_str(), reply.files[0].blob.as_deref()), ("", None));
         assert!(reply.truncated);
+        // A file past the cap is never read to the end and never hashed, in process or out.
+        assert_eq!(hashes.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    /// Real git, but the object format it names is whatever the test hands back.
+    struct Formatted {
+        inner: Here,
+        says: &'static str,
+    }
+
+    impl Runs for Formatted {
+        async fn run(
+            &self,
+            cwd: &Path,
+            program: &str,
+            args: &[&str],
+            input: Option<&[u8]>,
+            max_bytes: Option<usize>,
+        ) -> Result<GitResult, OpError> {
+            if args.first() == Some(&"rev-parse") && args.get(1) == Some(&"--show-object-format") {
+                return Ok(GitResult { code: Some(0), stdout: self.says.as_bytes().to_vec(), stderr: String::new(), truncated: false });
+            }
+            self.inner.run(cwd, program, args, input, max_bytes).await
+        }
+        async fn on_path(&self, program: &str) -> Result<bool, OpError> {
+            self.inner.on_path(program).await
+        }
+        fn on_this_side(&self, folder: &Path) -> Option<OnThisSide> {
+            self.inner.on_this_side(folder)
+        }
+    }
+
+    #[tokio::test]
+    async fn an_object_format_that_is_not_git_s_two_fails_the_diff_rather_than_hashing_wrong() {
+        let dir = committed(&["kept.txt"]);
+        std::fs::write(dir.path().join("new.txt"), "fresh\n").unwrap();
+        for says in ["", "sha512", "sha1\nextra"] {
+            let runner = Formatted { inner: here(), says };
+            let err = git_diff(&runner, dir.path(), Path::new("/"), GitDiffScope::Head, None, &[], false, CAP).await;
+            assert!(err.is_err(), "object format {says:?} should fail the op, not fall back to sha1");
+        }
     }
 
     #[tokio::test]
