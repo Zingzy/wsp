@@ -318,6 +318,29 @@
         "type:open a pull request once they pass",
         "key:Enter"
       ],
+      "wait": "composer-queue",
+      "settleMs": 800
+    },
+    {
+      "name": "composer-queue-several-open",
+      "at": "/",
+      "fixture": "tiles",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:cart",
+        "390:key:Escape",
+        "390:key:Escape",
+        "testid=composer-editor",
+        "type:and check the rounding on refunds",
+        "file:refund-cases.md:640",
+        "key:Enter",
+        "type:then run the cart tests",
+        "key:Enter",
+        "type:open a pull request once they pass",
+        "key:Enter",
+        "composer-queue=true"
+      ],
       "wait": "queued-id",
       "settleMs": 800
     },

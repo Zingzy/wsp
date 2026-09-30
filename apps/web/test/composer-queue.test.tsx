@@ -18,6 +18,7 @@ import { WorkspaceThread } from "../src/shell/WorkspaceThread.js";
 import { requestNewThread } from "../src/shell/shellRequests.js";
 import { useComposerDraftStore } from "../src/components/chat/composerDraftStore.js";
 import { COMPOSER_WORDS } from "../src/components/chat/composerWords.js";
+import { QUEUE_WORDS } from "../src/components/chat/ComposerQueue.js";
 import { clearNotices, lastNotice } from "./notice-text.js";
 import { CHAT_STREAM, CHAT_TURN, CHAT_WS } from "./fixtures/chat-stream.js";
 import { caps } from "./caps.js";
@@ -139,7 +140,7 @@ async function editThenSend(text: string) {
 }
 
 describe("composer queue", () => {
-  it("enter during a turn queues the message as a card above the box, with no line, and the turn's end sends it", async () => {
+  it("enter during a turn queues the message as one quiet row above the box, with no line, and the turn's end sends it", async () => {
     const { api, started, emit } = fixtureApi();
     const turn = { ...scope, threadId: "thr_0001" };
     await setup(api);
@@ -152,11 +153,11 @@ describe("composer queue", () => {
     expect(draft()).toBe("");
     expect(composerEditor().textContent).toBe("");
     expect(queued()).toEqual(["what model are you?"]);
-    expect(rowFor("what model are you?").textContent).toContain("Queued");
+    expect(rowFor("what model are you?").querySelector("[data-queued-word]")?.textContent).toBe(QUEUE_WORDS.waiting(1));
     expect(within(rowFor("what model are you?"), "Edit queued message")).not.toBeNull();
-    expect(within(rowFor("what model are you?"), "Remove queued message")).not.toBeNull();
-    // A card is content in the column, not an overlay: a flat fill with a hairline at a row's radius, never a menu's glass.
-    expect([...rowFor("what model are you?").classList].filter(c => /^(rounded|border|bg-|shadow|dropdown-glass)/.test(c)).sort()).toEqual(["bg-card", "border", "border-border", "rounded-md"]);
+    expect(within(rowFor("what model are you?"), "Cancel queued message")).not.toBeNull();
+    // A quiet row in the column: no box, no fill, no shadow, never a menu's glass.
+    expect([...rowFor("what model are you?").classList].filter(c => /^(rounded|border|bg-|shadow|dropdown-glass)/.test(c))).toEqual([]);
     noLineAbove();
     expect(screen.queryByText(/Turn in flight/)).toBeNull();
 
@@ -190,7 +191,7 @@ describe("composer queue", () => {
     expect(queued()).toEqual([]);
   });
 
-  it("a card's Edit puts its words back in the box and takes it off the queue; Remove drops a card", async () => {
+  it("a message's Edit puts its words back in the box and takes it off the queue; Cancel drops it", async () => {
     const { api, started, emit } = fixtureApi();
     await setup(api);
     emit({ type: "session.start", ...scope, prompt: "go" });
@@ -202,7 +203,7 @@ describe("composer queue", () => {
     await typeInto(composerEditor(), ", in tokens");
     await press(composerEditor(), "Enter");
     await waitFor(() => expect(queued()).toEqual(["one", "two, in tokens"]));
-    fireEvent.click(within(rowFor("one"), "Remove queued message")!);
+    fireEvent.click(within(rowFor("one"), "Cancel queued message")!);
     expect(queued()).toEqual(["two, in tokens"]);
     emit(done("completed"));
     emit(end());
@@ -246,7 +247,7 @@ describe("composer queue", () => {
     expect(screen.getByTestId("settled-footer").textContent).toContain("interrupted");
   });
 
-  it("while that stop is out the message's card reads next; a refused stop raises a flyout and the card stays first", async () => {
+  it("while that stop is out the queue says the message is sending now; a refused stop raises a flyout and it stays first", async () => {
     const { api, started, interrupted, emit } = fixtureApi({}, [runningRow], [catalog(false)]);
     await setup(api);
     emit({ type: "session.start", ...scope, prompt: "go" });
@@ -260,11 +261,12 @@ describe("composer queue", () => {
     api.interruptSession = async id => { interrupted.push(id); await held; throw new Error("runtime is busy"); };
     await ctrlEnter("two");
     await waitFor(() => expect(queued()).toEqual(["two", "one"]));
-    expect(rowFor("two").textContent).toContain("Next");
+    const word = () => document.querySelector("[data-composer-queue] summary [data-queued-word]")?.textContent;
+    expect(word()).toBe(QUEUE_WORDS.sending);
     noLineAbove();
     await act(async () => { release(); await held.catch(() => {}); });
     await waitFor(() => expect(lastNotice()).toBe(COMPOSER_WORDS.stopRefused("runtime is busy")));
-    expect(rowFor("two").textContent).not.toContain("Next");
+    expect(word()).toBe(QUEUE_WORDS.waiting(2));
     expect(queued()).toEqual(["two", "one"]);
     expect(started).toHaveLength(0);
     emit(done("completed"));
