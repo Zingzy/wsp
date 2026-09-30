@@ -105,7 +105,8 @@ export function AgentsManager({ shell, head, report, reading, error = null, on, 
   const paused = pausedReport(report);
   const held = given.heldWhy ?? (paused ? W.paused : null);
   const ctx: RowsContext = { ...given, on, ...(held === null ? {} : { heldWhy: held }), ...(report?.reach === undefined ? {} : { reach: report.reach }) };
-  const staleWord = paused ? W.paused : given.heldWhy !== null && given.heldWhy !== undefined ? W.away : undefined;
+  const silent = !paused && given.heldWhy !== null && given.heldWhy !== undefined;
+  const staleWord = paused ? W.paused : silent ? W.notAnswering : undefined;
   const dim = reading || held !== null;
   const page = shell === "page";
 
@@ -224,6 +225,13 @@ export function AgentsManager({ shell, head, report, reading, error = null, on, 
 
   function readAgain() {
     if (onRefresh === undefined) return null;
+    if (silent && !reading) {
+      return (
+        <Button data-k="agents-retry" size="xs" variant="outline" onClick={onRefresh}>
+          {W.retry}
+        </Button>
+      );
+    }
     if (reading) {
       return (
         <span className="flex size-6 items-center justify-center">
