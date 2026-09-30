@@ -764,6 +764,25 @@ export function stopDaemonScript(place: DaemonPlace = CLOUD_PLACE): string {
   ].join("\n");
 }
 
+/** The bundle into the place's folder, each file renamed over the one it replaces. The daemon being replaced runs
+ * from this folder until its unit restarts it, and a tar that writes over a file in place meets that binary with
+ * `Text file busy` (a Boat box, 2026-09-30); unpacked into an empty folder there is nothing to write over, and a
+ * rename over a running binary is allowed and leaves the process its old file. The empty folder sits inside the
+ * place's own, so every move is a rename on one filesystem and what takes that folder off a machine takes it too. */
+function unpackBundle(place: DaemonPlace): string[] {
+  const into = sh(place, place.dir);
+  const fresh = sh(place, `${place.dir}/.unpacking`);
+  return [
+    `rm -rf ${fresh}`,
+    `mkdir -p ${fresh}`,
+    // A root tar keeps the owner the Mac packed the bundle under, which names nobody on that computer.
+    `tar --no-same-owner -xzf ${sh(place, place.bundle)} -C ${fresh}`,
+    `(cd ${fresh} && find . -mindepth 1 -type d) | while IFS= read -r d; do mkdir -p ${into}/"$d"; done`,
+    `(cd ${fresh} && find . ! -type d) | while IFS= read -r f; do mv -f ${fresh}/"$f" ${into}/"$f"; done`,
+    `rm -rf ${fresh}`,
+  ];
+}
+
 /** What the deploy prints the bound port under, for a place that let the machine pick one. */
 export const DAEMON_PORT_LINE = "DAEMON_PORT";
 
@@ -782,8 +801,7 @@ export function deployScript(place: DaemonPlace, token: string, previewHostSuffi
     ...place.exportEnv,
     ...stepMark(place, "files"),
     `mkdir -p ${place.make.map(dir => sh(place, dir)).join(" ")}`,
-    // A root tar keeps the owner the Mac packed the bundle under, which names nobody on that computer.
-    `tar --no-same-owner -xzf ${sh(place, place.bundle)} -C ${sh(place, place.dir)}`,
+    ...unpackBundle(place),
     // Both names: only some tools read BROWSER; the rest exec xdg-open by name, and the place's bin folder is first on PATH.
     `install -m 0755 ${sh(place, `${place.dir}/wsp-open`)} ${sh(place, place.openShim)}`,
     `ln -sfn ${sh(place, place.openShim)} ${sh(place, `${place.binDir}/xdg-open`)}`,
