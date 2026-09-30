@@ -100,8 +100,7 @@ import { attachmentOf, fileFromStash, recordOf, releaseFiles, stashedOf, useComp
 import { COMPOSER_WORDS } from "./composerWords";
 import { partitionStashFiles, usePromptStashStore, type PromptStashEntry } from "./promptStashStore";
 import { ComposerStashMenu, stashedWord } from "./ComposerStashMenu";
-import { ComposerModeToggles } from "./ComposerModeToggles";
-import { ContextMeter } from "./ContextMeter";
+import { usePublishContext } from "./ContextMeter";
 import { useComposerModesStore } from "./composerModesStore";
 import { nextPastedTextName, pastesAsFile } from "./pastedText";
 import { buildComposerPromptHistoryEntries, stepComposerPromptHistory, type ComposerPromptHistoryPosition } from "./composerPromptHistory";
@@ -117,6 +116,8 @@ import { ComposerSurface } from "./ComposerSurface";
 import { useAnimatedHeight, useFlip, useTallDraft } from "./composerMotion";
 import { Button } from "../ui/button";
 import type { ChatThreadHandle } from "./useChatThread";
+import { ComposerTasks } from "./ComposerTasks";
+import { asksThePerson, composerTasks } from "./composerTasks.logic";
 
 const noop = () => {};
 
@@ -236,6 +237,9 @@ export function ChatComposer({
   const opening = opensThread(thread);
   const folderStart = useMemo(() => (opening ? nextStart : viewCwd !== null ? { cwd: viewCwd } : {}), [nextStart, opening, viewCwd]);
   const { harness: harnessId, startOptions, pinned, latestRow, catalog: harnessCatalog, model: pickedModel, picks } = useComposerPicks(workspaceId, thread);
+  const latestTurnId = thread.view.latestTurn?.turnId ?? null;
+  const prompts = thread.view.entries.flatMap(e => (e.kind === "permission" && e.permission.turnId === latestTurnId ? [e.permission] : []));
+  const tasks = composerTasks({ latestTurn: thread.view.latestTurn, running: thread.view.running, plan: thread.view.plan, asking: asksThePerson(prompts, latestRow?.waitingOn !== undefined) });
   const launching = useStore(s => s.launching);
   const launched = useStore(s => s.launched);
   const harnessCatalogs = useHarnessCatalogs(workspaceId);
@@ -339,8 +343,8 @@ export function ChatComposer({
   // The harness's own row decides whether the pick moves the running turn, and it is the same row the menu reads
   // to say so before the pick.
   const accessPick = useAccessPick(workspaceId, pickTarget, thread.threadKey, movesRunningAccess(harnessCatalog));
-  // Fast is the thread's own: a hand toggle on this thread, else what its latest turn ran at. It rides only where the
-  // model in front of the person offers it, which is also the only place the toggle shows.
+  // Fast is the thread's own: a hand pick on this thread, else what its latest turn ran at. It rides only where the
+  // model in front of the person offers it, which is also the only place the options menu offers it.
   const fastPicked = useComposerModesStore(s => s.fast[threadKey]);
   const setFast = useComposerModesStore(s => s.setFast);
   const fastOffered = pickedModel?.fast === true;
@@ -844,9 +848,8 @@ export function ChatComposer({
   // A home's thread carries a history-unavailable row and no message, so the count is of messages alone.
   const compact = thread.view.running || thread.view.entries.some(entry => entry.kind === "message");
   const access = <ComposerAccessPicker workspaceId={workspaceId} thread={thread} onPickAccess={accessPick.pick} refused={accessPick.line} />;
-  const modes = <ComposerModeToggles fast={fastOffered ? { on: fastOn, toggle: () => setFast(threadKey, !fastOn) } : null} tight={compact} held={waits} />;
   const home = useStore(s => s.projects.find(p => projectHomeKey(p.id) === workspaceId));
-  const meter = (tight: boolean) => <ContextMeter turns={thread.view.turns} agentLabel={harnessCatalog?.label ?? harnessId} tight={tight} />;
+  usePublishContext(workspaceId, thread.view.turns, harnessCatalog?.label ?? harnessId);
   const heightRef = useRef<HTMLDivElement | null>(null);
   const surfaceRef = useRef<HTMLDivElement | null>(null);
   const mirrorRef = useRef<HTMLDivElement | null>(null);
@@ -927,6 +930,7 @@ export function ChatComposer({
     <div className="relative w-full px-3 pt-1.5 pb-4 sm:px-5 sm:pt-2 sm:pb-5" data-chat-composer>
       <ComposerQueue rows={queue} files={queuedFiles} next={next} waiting={waiting?.line ?? null} onEdit={editCard} onRemove={removeCard} />
       <ComposerSurface.Shell contextStrip>
+        {tasks !== null ? <ComposerTasks tasks={tasks} /> : null}
         <ComposerSurface.Host>
           <form
             className="mx-auto w-full min-w-0 max-w-3xl"
@@ -1014,9 +1018,8 @@ export function ChatComposer({
                           compact={compact}
                           workspaceId={workspaceId}
                           thread={thread}
+                          fast={fastOffered ? { on: fastOn, set: on => setFast(threadKey, on), held: waits } : null}
                         />
-                        {compact ? null : modes}
-                        {compact ? null : <span className="ms-auto flex items-center ps-2">{meter(false)}</span>}
                       </div>
                       <div data-chat-composer-actions="right" className={cn("col-start-3 flex shrink-0 items-center justify-self-end", compact && !tall ? "row-start-1" : "row-start-2 self-end")}>
                         {actions}
@@ -1036,18 +1039,8 @@ export function ChatComposer({
           <ComposerCheckoutRow
           workspaceId={workspaceId}
           thread={thread}
-          access={
-            <>
-              {access}
-              {compact ? modes : null}
-            </>
-          }
-          stash={
-            <>
-              {compact ? meter(true) : null}
-              {stashWord}
-            </>
-          }
+          access={access}
+          stash={stashWord}
           />
         )}
         {under !== undefined ? <ComposerSurface.ContextStrip data-composer-under>{under}</ComposerSurface.ContextStrip> : null}

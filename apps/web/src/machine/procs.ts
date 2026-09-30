@@ -52,13 +52,13 @@ export class WorkspaceProcs {
 
   async inspect(pid: number): Promise<ProcInspectReply> {
     const wire = getDaemonWire(this.#workspaceId);
-    if (!wire) throw new Error("daemon unreachable");
+    if (!wire) throw new Error("not answering");
     return ProcInspectReply.parse(await wire.request("proc.inspect", { pid }));
   }
 
   async kill(pid: number, signal: ProcSignal): Promise<void> {
     const wire = getDaemonWire(this.#workspaceId);
-    if (!wire) throw new Error("daemon unreachable");
+    if (!wire) throw new Error("not answering");
     await wire.request("proc.kill", { pid, signal });
   }
 

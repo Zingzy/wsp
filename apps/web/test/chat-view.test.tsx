@@ -7,7 +7,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { installFakeLayout } from "./fake-layout.js";
 import type { EventUnion, HarnessCatalog, SessionEvent, SessionView, WorkspaceView } from "@wsp/protocol";
-import { LIST_PRICE_WORD, QUESTION_TOOL, pickedOptionId, questionOptions } from "@wsp/protocol";
+import { QUESTION_TOOL, pickedOptionId, questionOptions } from "@wsp/protocol";
 import { useStore } from "../src/protocol/store.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
@@ -123,17 +123,14 @@ describe("ChatView", () => {
     expect(screen.queryByTestId("settled-footer")).toBeNull();
   });
 
-  it("replays the persisted transcript on mount and shows the settled footer", async () => {
+  it("replays the persisted transcript on mount and settles it on the reply's own time", async () => {
     const { api } = fixtureApi([workspace], { [WS]: settledTurn(WS, "add a health route", "Added GET /health.") });
     await setup(api);
     await screen.findByText("Added GET /health.");
     expect(screen.getByText("add a health route")).toBeDefined();
     expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
-    const footer = screen.getByTestId("settled-footer");
-    expect(footer.textContent).toContain("Worked for");
-    expect(footer.textContent).toContain("Worked for 900ms");
-    // Every spend figure a person reads is in cents, whatever its size: a tenth of one reads $0.00, not $0.0010.
-    expect(footer.textContent).toContain("$0.00");
+    expect(screen.queryByTestId("settled-footer")).toBeNull();
+    expect(document.querySelector("[data-reply-time]")).not.toBeNull();
   });
 
   it("renders the live fixture stream: grouped tool calls, collapsed thinking, highlighted code", async () => {
@@ -175,9 +172,7 @@ describe("ChatView", () => {
     expect(within(group).getAllByText(/curl returned the greeting/)).toHaveLength(1);
     expect(within(group).queryByRole("button", { name: /curl returned the greeting/ })).toBeNull();
 
-    const footer = screen.getByTestId("settled-footer");
-    expect(footer.textContent).toContain("Worked for 10s");
-    expect(footer.textContent).toContain("$0.02");
+    expect(screen.queryByTestId("settled-footer")).toBeNull();
   });
 
   it("draws a fenced block in the side the page is drawing, and follows it when the computer's side changes", async () => {
@@ -199,31 +194,14 @@ describe("ChatView", () => {
     }
   });
 
-  it("says a figure on this computer is a list price, with no sentence behind it", async () => {
+  it("prices no turn under its reply, on this computer or a cloud", async () => {
     const here: WorkspaceView = { ...workspace, id: "ws_here", name: "this computer", kind: "local", provider: undefined };
     const { api } = fixtureApi([here], { ws_here: settledTurn("ws_here", "add a health route", "Added GET /health.") });
     await setup(api, "ws_here");
-    const figureNow = () => [...screen.getByTestId("settled-footer").querySelectorAll("span")].find(el => el.textContent?.includes(LIST_PRICE_WORD));
-
-    // The word rides the figure from the first paint, off the workspace record alone: the catalog is not in the
-    // store yet here, and a figure that stood bare and gained its word a moment later would be the change this
-    // ticket took off the sidebar's cost line.
-    const bare = await waitFor(() => {
-      const found = figureNow();
-      expect(found).toBeDefined();
-      return found!;
-    });
-    expect(bare.textContent).toContain(`$0.00 ${LIST_PRICE_WORD}`);
-    expect(bare.getAttribute("title")).toBeNull();
-
-    // The catalog arriving adds nothing to the figure: no title rides it.
-    act(() => useStore.setState({ harnesses: [CATALOG] }));
-    await act(async () => {
-      await new Promise(r => setTimeout(r, 0));
-    });
-    const figure = figureNow()!;
-    expect(figure.textContent).toContain(`$0.00 ${LIST_PRICE_WORD}`);
-    expect(figure.getAttribute("title")).toBeNull();
+    await screen.findByText("Added GET /health.");
+    const meta = await waitFor(() => document.querySelector<HTMLElement>("[data-reply-meta]")!);
+    expect(meta.textContent).not.toMatch(/\$|list price/);
+    expect(screen.queryByTestId("settled-footer")).toBeNull();
   });
 
   it("shows the working row while a turn runs and an error when it exits without a result", async () => {
@@ -949,27 +927,13 @@ describe("the threads a thread opened", () => {
     expect(document.querySelectorAll("[data-thread-rows]")).toHaveLength(0);
   });
 
-  it("are totalled beside the turn's own figure in the footer, each figure saying what it counts", async () => {
+  it("price nothing under the reply, the turn's own work or theirs", async () => {
     const { api } = fixtureApi([workspace, BENCH], { [WS]: lead }, rows);
     await setup(api);
     await screen.findByText("Three workspaces are up.");
-    const footer = await waitFor(() => {
-      const found = screen.getByTestId("settled-footer");
-      expect(found.textContent).toContain("in threads it opened");
-      return found;
-    });
-    expect(footer.textContent).toBe("Worked for 2m 58s $1.14 this turn $2.30 in threads it opened");
-    // The facts sit on the reply's row beside its time, in the time's own type, one gap between every piece of it.
-    expect(footer.className).toContain("text-[13px]");
-    expect(footer.className).toContain("gap-x-3.5");
-    expect(footer.parentElement!.className).toContain("gap-x-3.5");
-    expect(footer.parentElement!.className).toContain("text-[13px]");
-    // A narrow window breaks the line between facts, never inside one.
-    expect(footer.className).toContain("flex-wrap");
-    for (const part of footer.querySelectorAll("span")) {
-      if (part.getAttribute("aria-hidden") === "true") continue;
-      expect(part.className).toContain("whitespace-nowrap");
-    }
+    const meta = await waitFor(() => document.querySelector<HTMLElement>("[data-reply-meta]")!);
+    expect(meta.textContent).not.toMatch(/\$|this turn|in threads it opened/);
+    expect(screen.queryByTestId("settled-footer")).toBeNull();
   });
 
   it("a send whose turn dies before it announces itself draws the words above the line that answered them", async () => {
@@ -995,15 +959,5 @@ describe("the threads a thread opened", () => {
     expect(at(words)).toBeGreaterThanOrEqual(0);
     expect(at(words)).toBe(at(line) - 1);
     expect(screen.getAllByText("have another look")).toHaveLength(1);
-  });
-
-  it("says nothing about a total on a thread that opened none, and leaves its own figure unqualified", async () => {
-    const { api } = fixtureApi([workspace], { [WS]: lead });
-    await setup(api);
-    await screen.findByText("Three workspaces are up.");
-    const footer = screen.getByTestId("settled-footer");
-    expect(footer.textContent).toBe("Worked for 2m 58s $1.14");
-    expect(footer.textContent).not.toContain("in threads it opened");
-    expect(footer.textContent).not.toContain("this turn");
   });
 });

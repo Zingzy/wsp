@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The lines a workspace's row used to carry reach the notices stack with the same words: the daemon note, a daemon
-// that is not there, a drop with memory near full, and what a bring back answered.
+// A machine's life never reaches the notices stack; the thread on screen says, in plain words, only what the person
+// must act on. What a bring back answered is still said once.
 import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { DAEMON_UPDATING, type BringBackResult, type WorkspaceView } from "@wsp/protocol";
+import { DAEMON_RESTART_FAILED, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, NO_NODE_LINE, type BringBackResult, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { getLive, resetLive } from "../src/machine/live.js";
 import { useNotices } from "../src/notices/store.js";
-import { broughtBackLine, useWorkspaceLineNotices } from "../src/notices/workspaceLines.js";
+import { broughtBackLine, machineLine, useWorkspaceLineNotices } from "../src/notices/workspaceLines.js";
 import { useStore } from "../src/protocol/store.js";
 import { statusOf } from "./workspace-status.js";
 
@@ -34,66 +34,54 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-describe("a workspace's lines on the notices stack", () => {
-  it("says what the runtime is doing to a machine's daemon while it does it, keyed, and ends it once it clears", () => {
-    const api = view("ws_a", "api");
-    useStore.setState({ workspaces: [api], statuses: { ws_a: statusOf(api, { daemonNote: DAEMON_UPDATING }) } } as never);
-    render(<Harness />);
-    const notice = useNotices.getState().notices.find(n => n.text === DAEMON_UPDATING)!;
-    expect(notice).toMatchObject({ kind: "note", where: "api", key: "line:ws_a:daemon" });
-    act(() => useStore.setState({ statuses: { ws_a: statusOf(api, { daemonNote: DAEMON_UPDATING }) } } as never));
-    expect(texts().filter(t => t === DAEMON_UPDATING)).toHaveLength(1);
-    act(() => useStore.setState({ statuses: { ws_a: statusOf(api) } } as never));
-    expect(texts()).not.toContain(DAEMON_UPDATING);
-  });
-
-  it("says a running machine that is not answering in plain words, about this computer by its name and never its host name", () => {
-    const mac = view("ws_m", "zingzys-MacBook-Pro.local", { kind: "local", machineId: "local" });
-    const places = [{ id: "here", kind: "computer", name: "zingzys-MacBook-Pro.local", label: "zingzy's MacBook Pro", default: true }];
-    useStore.setState({ places, workspaces: [mac], statuses: { ws_m: statusOf(mac, { reach: { state: "no-daemon" } }) } } as never);
-    render(<Harness />);
-    expect(useNotices.getState().notices.find(n => n.key === "line:ws_m:daemon-gone")).toMatchObject({ kind: "error", text: "Running but not answering", where: "zingzy's MacBook Pro" });
-  });
-
-  it("says nothing for a machine that is paused or pausing, whatever its daemon reads, since a pause is expected", () => {
+describe("a machine's life never pops as a notice", () => {
+  it("says nothing on the stack while the helper updates or fails to, while a machine runs and does not answer, or while memory runs near full", () => {
     const GiB = 1024 ** 3;
     resetLive();
-    const pausing = view("ws_p", "api", { phase: "pausing" });
-    const napping = view("ws_n", "web", { phase: "napping" });
-    const pausedAtProvider = view("ws_s", "docs");
+    const api = view("ws_a", "api");
+    const mac = view("ws_m", "mac", { kind: "local", machineId: "local" });
+    const box = view("ws_b", "box");
     useStore.setState({
-      workspaces: [pausing, napping, pausedAtProvider],
+      workspaces: [api, mac, box],
       statuses: {
-        ws_p: statusOf(pausing, { reach: { state: "no-daemon" }, daemonNote: DAEMON_UPDATING }),
-        ws_n: statusOf(napping, { reach: { state: "no-daemon" } }),
-        ws_s: statusOf(pausedAtProvider, { machineState: "paused", reach: { state: "no-daemon" } }),
+        ws_a: statusOf(api, { daemonNote: DAEMON_UPDATING }),
+        ws_m: statusOf(mac, { reach: { state: "no-daemon" }, daemonNote: DAEMON_RESTART_FAILED }),
+        ws_b: statusOf(box, { reach: { state: "unsupported" }, daemonRefusedAt: { machineId: "m_ws_b", at: "2026-09-30T10:00:00Z", why: NO_NODE_LINE } }),
       },
     } as never);
     render(<Harness />);
     act(() => {
-      getLive("ws_p").feedSample({ type: "sys.sample", cpu: 99, load1: 6.4, mem: { used: 3.59 * GiB, total: 3.94 * GiB }, disk: { used: 1, total: 10 }, at: 1 });
-      getLive("ws_p").feedStatus("connecting");
+      getLive("ws_a").feedStatus("live");
+      getLive("ws_a").feedSample({ type: "sys.sample", cpu: 99, load1: 6.4, mem: { used: 3.59 * GiB, total: 3.94 * GiB }, disk: { used: 1, total: 10 }, at: 1 });
+      getLive("ws_a").feedStatus("connecting");
     });
     expect(useNotices.getState().notices).toEqual([]);
   });
+});
 
-  it("says a drop with memory near full in the row's own short form, and ends it when the link is back", () => {
-    const GiB = 1024 ** 3;
-    resetLive();
-    const api = view("ws_a", "api");
-    useStore.setState({ workspaces: [api], statuses: { ws_a: statusOf(api, { reach: { state: "unreachable" } }) } } as never);
-    render(<Harness />);
-    act(() => {
-      getLive("ws_a").feedStatus("live");
-      getLive("ws_a").feedSample({ type: "sys.sample", cpu: 99, load1: 6.4, mem: { used: 3.59 * GiB, total: 3.94 * GiB }, disk: { used: 1, total: 10 }, at: 1 });
-    });
-    expect(texts()).toEqual([]);
-    act(() => getLive("ws_a").feedStatus("connecting"));
-    expect(useNotices.getState().notices.find(n => n.key === "line:ws_a:memory")).toMatchObject({ kind: "error", text: "out of memory, 3.6 of 3.9 GB", where: "api" });
-    act(() => getLive("ws_a").feedStatus("live"));
-    expect(texts()).toEqual([]);
+describe("the one line the thread on screen says about its machine", () => {
+  const GiB = 1024 ** 3;
+  const project = (status: Partial<WorkspaceStatus>, over: Partial<WorkspaceView> = {}) => {
+    const workspace = view("ws_a", "api", over);
+    const st = statusOf(workspace, status);
+    return { id: "ws_a", workspace, status: st, reach: st.reach.state };
+  };
+
+  it("says what a machine lacks for wsp in plain words, since only the person can put it there", () => {
+    expect(machineLine(project({ reach: { state: "unsupported" }, daemonRefusedAt: { machineId: "m_ws_a", at: "2026-09-30T10:00:00Z", why: NO_NODE_LINE } }, { kind: "local" }), undefined)).toBe("This machine has no Node 22");
   });
 
+  it("says a drop with memory near full", () => {
+    expect(machineLine(project({ reach: { state: "unreachable" } }), { used: 3.59 * GiB, total: 3.94 * GiB } as never)).toBe("Out of memory, 3.6 of 3.9 GB");
+  });
+
+  it("says nothing the person cannot act on: the helper updating or failing to, a machine that runs and does not answer, a paused one", () => {
+    for (const status of [{ daemonNote: DAEMON_UPDATING }, { daemonNote: DAEMON_UPDATE_FAILED }, { reach: { state: "no-daemon" as const } }]) expect(machineLine(project(status), undefined), JSON.stringify(status)).toBeNull();
+    expect(machineLine(project({ reach: { state: "unsupported" }, daemonRefusedAt: { machineId: "m_ws_a", at: "2026-09-30T10:00:00Z", why: NO_NODE_LINE } }, { kind: "local", phase: "pausing" }), undefined)).toBeNull();
+  });
+});
+
+describe("what a bring back answered", () => {
   it("says what a bring back answered once, when the answer arrives, with the host's note for a push that opened no pull request", () => {
     const api = view("ws_a", "api");
     useStore.setState({ workspaces: [api], statuses: { ws_a: statusOf(api) } } as never);

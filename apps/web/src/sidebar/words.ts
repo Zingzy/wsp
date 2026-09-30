@@ -6,7 +6,7 @@
 // Nothing here says what a workspace is made of: that pair of words is the
 // protocol's table (madeOfWord, portsWord), so a row in the app and a cell in
 // the command line's table cannot say two things about one workspace.
-import { threadStateWord, type ThreadSection } from "@wsp/protocol";
+import { threadStateWord } from "@wsp/protocol";
 import { onceNamed } from "../settings/format.js";
 
 /** The one word for the act, read by the plus on a project, the palette row and the dialog's own title: three
@@ -88,12 +88,9 @@ export const ADD_PROJECT_WORDS = {
 } as const;
 
 /** The live list's section heads and the Settled fold's. */
-export const SECTION_WORDS: Record<"pinned" | ThreadSection | "settled", string> = {
+export const SECTION_WORDS: Record<"pinned" | "needs-you" | "settled", string> = {
   pinned: "Pinned",
   "needs-you": threadStateWord("waiting"),
-  working: threadStateWord("running"),
-  done: threadStateWord("done"),
-  idle: threadStateWord("completed"),
   settled: "Settled",
 };
 

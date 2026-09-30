@@ -928,7 +928,7 @@ describe("the agent's plan", () => {
   const scoped = { workspaceId: "ws_p", sessionId: "sess_p" };
   const first = [{ text: "read", state: "working" as const }, { text: "write", state: "pending" as const }];
   const second = [{ text: "read", state: "done" as const }, { text: "write", state: "working" as const }];
-  it("is one step list per turn, a later list replacing the earlier where it stood", () => {
+  it("never enters the transcript: the latest turn's step list is the model's, a later list replacing the earlier", () => {
     const model = deriveSession([
       { type: "session.start", ...scoped, turnId: "t1", at: 1_000, prompt: "go" },
       { type: "session.plan", ...scoped, turnId: "t1", at: 2_000, steps: first },
@@ -939,9 +939,17 @@ describe("the agent's plan", () => {
       { type: "session.start", ...scoped, turnId: "t2", at: 5_000, prompt: "again" },
       { type: "session.plan", ...scoped, turnId: "t2", at: 6_000, steps: first },
     ]);
-    const todos = model.timeline.filter(e => e.kind === "todo");
-    expect(todos.map(e => e.kind === "todo" && [e.todo.turnId, e.todo.steps])).toEqual([["t1", second], ["t2", first]]);
-    expect(model.timeline.map(e => e.kind)).toEqual(["message", "todo", "message", "message", "todo"]);
+    expect(model.timeline.map(e => e.kind)).toEqual(["message", "message", "message"]);
+    expect(model.plan).toEqual({ turnId: "t2", steps: first.map(step => ({ ...step, key: `${step.text}\n0` })) });
+  });
+
+  it("times each step from the list that set it working to the one that marked it done", () => {
+    const model = deriveSession([
+      { type: "session.start", ...scoped, turnId: "t1", at: 1_000, prompt: "go" },
+      { type: "session.plan", ...scoped, turnId: "t1", at: 2_000, steps: first },
+      { type: "session.plan", ...scoped, turnId: "t1", at: 9_500, steps: second },
+    ]);
+    expect(model.plan).toEqual({ turnId: "t1", steps: [{ text: "read", key: "read\n0", state: "done", durationMs: 7_500 }, { text: "write", key: "write\n0", state: "working" }] });
   });
 
   it("takes the plan the agent proposed as the turn's plan card, a later one replacing it", () => {

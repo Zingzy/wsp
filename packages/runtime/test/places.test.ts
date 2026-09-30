@@ -3000,7 +3000,7 @@ describe("a fork on a computer you joined", () => {
   it("is served by that computer's daemon: the create says nothing of a daemon inside, the bring back's frames go up its link with the workspace named, and nothing is dialled", async () => {
     // Found on spoo, 2026-09-18: a workspace on a computer somebody owns runs no daemon of its own, so the create
     // printed "Daemon did not answer.", the row read Unreachable while exec answered from inside, and every bring
-    // back died at "has no daemon answering yet" before a byte left the box.
+    // back died at "is not answering yet" before a byte left the box.
     const backend = stubBackend();
     const hostKey = newPlaceKeyPair();
     runtime = createRuntime({ backend, store: memoryStore(), adapters: {}, placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }) });

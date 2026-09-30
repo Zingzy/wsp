@@ -306,9 +306,6 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
     case "proposed-plan":
       return a.proposedPlan === (b as typeof a).proposedPlan;
 
-    case "todo":
-      return a.todo === (b as typeof a).todo;
-
     case "permission": {
       const bp = b as typeof a;
       return a.permission === bp.permission && a.asker === bp.asker;
