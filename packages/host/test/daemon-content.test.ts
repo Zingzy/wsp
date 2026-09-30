@@ -2,11 +2,10 @@
 // The version in the hello is the only thing that tells a host a machine's
 // daemon is behind, so content that changes under an unchanged version reaches
 // no machine already running. This hashes what a deploy installs and holds it
-// against the last sha in the protocol's DAEMON_CONTENTS. Sources, not the
-// built binary: a build differs by toolchain and machine, and the sources are
-// what a version stands for.
-import { createHash } from "node:crypto";
-import { cpSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+// against the last sha in the protocol's DAEMON_CONTENTS, by the one rule the
+// landing's cut appends it with. A branch carries no version of its own: the
+// landing cuts it, so only main is held to the sha.
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,6 +14,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { CLOUD_PLACE, daemonUnit, deployScript, openShimScript } from "../src/doctor.js";
 import { GUEST_DAEMON_TARGETS } from "../src/daemon-binary.js";
 import { contentGateEnforced } from "./content-gate.js";
+import { daemonContentSha as contentSha, DEPLOYED_PATH, readDeployed, type Deployed } from "../../protocol/scripts/daemon-content.mjs";
 
 const DAEMON_TREE = fileURLToPath(new URL("../../../daemon/", import.meta.url));
 // A fixed hex token: the deploy writes the token it is given, and which one cannot be what moves the sha.
@@ -24,63 +24,31 @@ const SUFFIX = ".preview.example.com";
 // One chip a guest can be: the unit names the binary by a path that carries the chip's target triple.
 const GUEST_TARGET = GUEST_DAEMON_TARGETS[0]!;
 
-/** Every file under a folder, relative and sorted, so the walk reads the same whatever the folder's own path is. */
-function relPaths(dir: string, keep: (name: string) => boolean, prefix = ""): string[] {
-  return readdirSync(dir, { withFileTypes: true })
-    .flatMap(e => (e.isDirectory() ? relPaths(join(dir, e.name), keep, `${prefix}${e.name}/`) : keep(e.name) ? [`${prefix}${e.name}`] : []))
-    .sort();
-}
-
-const isSource = (name: string): boolean => name.endsWith(".rs") || name === "Cargo.toml";
-const isFixture = (name: string): boolean => name.endsWith(".json");
-/** A crate's tests/ folder is built for a test run and never linked into the binary, so nothing under it reaches a
- * guest and a change there must not cut a version. An inline #[cfg(test)] module stays hashed: the file holding it
- * ships, and reading past it would cost a Rust parser here. */
-const underTests = (rel: string): boolean => /(^|\/)tests\//.test(rel);
-/** The tool server for an agent on the host's own computer: a feature the guest build leaves off, so no deploy
- * carries a line of it and a change to it must not cut a version. */
-const hostOnly = (rel: string): boolean => rel.startsWith("wsp-mcp/");
-
-/** A file's text as the sha reads it. Two files carry the version itself, in Rust and in the fixture the Rust is
- * held to, and a sha over the version would move the moment it was recorded: the line and the key that hold it
- * are taken out, and every cap and default beside them stays in, so a changed cap moves the version and the
- * version never chases its own hash. */
-function hashed(rel: string, text: string): string {
-  if (rel.endsWith("/numbers.rs")) return text.split("\n").filter(line => !line.includes("DAEMON_VERSION")).join("\n");
-  if (rel.endsWith("/numbers.json")) {
-    const { daemonVersion: _version, ...numbers } = JSON.parse(text) as Record<string, unknown>;
-    return JSON.stringify(numbers);
-  }
-  return text;
-}
-
-/** What a deploy leaves on a guest and this can hash: the Rust sources the binary is built from, each crate's
- * manifest and none of its tests/ folder nor of the crate only the host's own build links, the lock that pins every
- * dependency, the C library the Linux builds link and the release it is pinned to, the contract fixtures the
- * binary's words, numbers and frames are held to, DAEMON_ROOTS_PATH and the work-score line the daemon reads through
- * that contract, and the scripts the host writes beside the binary, whose content outlives the deploy that wrote it. */
-function daemonContentSha(daemonTree: string, scripts: string[]): string {
-  const h = createHash("sha256");
-  const crates = join(daemonTree, "crates");
-  for (const rel of relPaths(crates, isSource).filter(rel => !underTests(rel) && !hostOnly(rel))) h.update(`crates/${rel}\n${hashed(`crates/${rel}`, readFileSync(join(crates, rel), "utf8"))}\n`);
-  for (const file of ["Cargo.toml", "Cargo.lock", "scripts/libseccomp-archive.sh"]) h.update(`${file}\n${readFileSync(join(daemonTree, file), "utf8")}\n`);
-  const contract = join(daemonTree, "fixtures", "contract");
-  for (const rel of relPaths(contract, isFixture)) h.update(`fixtures/contract/${rel}\n${hashed(`fixtures/contract/${rel}`, readFileSync(join(contract, rel), "utf8"))}\n`);
-  h.update(`${DAEMON_ROOTS_PATH}\n`);
-  h.update(`${workScoreLine()}\n`);
-  for (const s of scripts) h.update(`${s}\n`);
-  return h.digest("hex");
-}
-
 // A fork's place, which is what a golden is built under: the sha pins what lands on a guest, and a
 // machine somebody owns carries its own place and no golden.
 const deployedScripts = (): string[] => [openShimScript(CLOUD_PLACE), deployScript(CLOUD_PLACE, TOKEN, SUFFIX), daemonUnit(CLOUD_PLACE, GUEST_TARGET)];
 
+/** The pieces of a deploy as the host renders them today. */
+const deployedHere = (scripts: string[] = deployedScripts()): Deployed => ({ rootsPath: DAEMON_ROOTS_PATH, workScoreLine: workScoreLine(), scripts });
+
+const daemonContentSha = (tree: string, scripts: string[]): string => contentSha(tree, deployedHere(scripts));
+
+/** The line that cuts the next version, which the landing runs on the tree it squashes. */
+const CUT = "node packages/protocol/scripts/cut-daemon-version.mjs";
+
 describe("the daemon version names the content the host deploys", () => {
-  it("holds the recorded sha, so a changed daemon cannot ship under a version no machine reads as behind", () => {
+  it("records the deploy the host renders today, which is what the landing's cut hashes", () => {
+    const here = deployedHere();
+    if (existsSync(join(DAEMON_TREE, DEPLOYED_PATH)) && JSON.stringify(readDeployed(DAEMON_TREE)) === JSON.stringify(here)) return;
+    const out = join(mkdtempSync(join(tmpdir(), "wsp-deployed-")), "deployed.json");
+    writeFileSync(out, `${JSON.stringify(here, null, 2)}\n`);
+    expect.fail(`what the host writes beside the daemon changed and daemon/${DEPLOYED_PATH} is behind it: cp ${out} daemon/${DEPLOYED_PATH} and commit it`);
+  });
+
+  it("holds the recorded sha on the tree that lands, so a changed daemon cannot ship under a version no machine reads as behind", () => {
     const sha = daemonContentSha(DAEMON_TREE, deployedScripts());
-    const ask = `what a deploy installs on a guest changed. Append ${sha} to DAEMON_CONTENTS in packages/protocol/src/index.ts, which cuts the next DAEMON_VERSION; leave it at v${DAEMON_VERSION} and every machine already running keeps the daemon it has`;
-    // Where the line cannot be carried yet, the run says which sha the landing will ask for and goes on.
+    const ask = `what a deploy installs on a guest changed, and v${DAEMON_VERSION} names what it installed before: ${CUT} appends ${sha} as the next version`;
+    // A branch carries no version: the landing cuts it after main is merged in, so here the run says so and goes on.
     if (sha !== DAEMON_CONTENT_SHA && !contentGateEnforced()) console.log(`::notice::${ask}`);
     else expect(sha, ask).toBe(DAEMON_CONTENT_SHA);
     // The version is the count of recorded contents, so the current one is a sha and not a placeholder.
