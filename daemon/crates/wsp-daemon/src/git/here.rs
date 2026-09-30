@@ -9,7 +9,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 use wsp_frames::numbers;
 
-use super::{GitResult, Runs, GIT_ENV};
+use super::{GitResult, OnThisSide, Runs, GIT_ENV};
 use crate::paths::OpError;
 
 /// This computer, and the PATH programs are looked up on: the daemon's own environment, or the one a caller names,
@@ -84,6 +84,12 @@ impl Runs for Here {
 
     async fn on_path(&self, program: &str) -> Result<bool, OpError> {
         Ok(on_path(&self.path, program).is_some())
+    }
+
+    /// The folder as named: on this computer it is one of the daemon's own roots, or a folder inside one, and a
+    /// writer inside that folder cannot swap the folder itself.
+    fn on_this_side(&self, folder: &Path) -> Option<OnThisSide> {
+        Some(OnThisSide { open: folder.to_path_buf(), walk: PathBuf::new() })
     }
 }
 
