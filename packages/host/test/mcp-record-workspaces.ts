@@ -123,6 +123,7 @@ export async function workspaceWords(line: LineOf, host: HostOf): Promise<Record
     onDelete: {
       ...Object.fromEntries(Object.keys(WORKSPACE_KIND_WORDS).map(kind => [kind, { asked: onDeleteOf(kind as never, undefined, "{machine}").asked, done: onDeleteOf(kind as never, undefined, "{machine}").done("{machine}") }])),
       copy: { asked: onDeleteOf("local", { path: "{path}" }, "{machine}").asked, done: onDeleteOf("local", { path: "{path}" }, "{machine}").done("{machine}") },
+      place: { asked: onDeleteOf("cloud", undefined, "{machine}", { name: "{name}", computer: "{computer}" }).asked, done: onDeleteOf("cloud", undefined, "{machine}", { name: "{name}", computer: "{computer}" }).done("{machine}") },
       none: { asked: onDeleteOf("cloud", undefined, "").asked, done: onDeleteOf("cloud", undefined, "").done("") },
     },
     deleteNoticeOne: slot(deleteNotice(1, "cloud", undefined, "{machine}"), cloud.asked, "asked"),

@@ -7,7 +7,7 @@
 // through the same dialog, naming how many go. The row leaves on
 // workspace.deleted, which the store already applies.
 import { useState } from "react";
-import { deleteCopiesNotice, deleteNotice, forgetNotice, workspaceKind, type WorkspaceView } from "@wsp/protocol";
+import { deleteCopiesNotice, deleteNotice, forgetNotice, placeName, placeOf, workspaceKind, type StandsOn, type WorkspaceView } from "@wsp/protocol";
 import { CLIENT_CANNOT_DELETE, CLIENT_CANNOT_FORGET } from "../actions/format.js";
 import { errorText } from "../lib/utils.js";
 import { useStore } from "../protocol/store.js";
@@ -37,8 +37,12 @@ export function ForgetWorkspaceDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const api = useStore(s => s.api);
+  const places = useStore(s => s.places);
   const road = ROADS[act];
   const [workspace] = workspaces;
+  // A workspace on a computer somebody joined is deleted from that computer, named as the app names it.
+  const joined = workspace?.place === undefined ? undefined : placeOf(places, workspace);
+  const on: StandsOn | undefined = workspace === undefined || joined === undefined ? undefined : { name: workspace.name, computer: placeName(joined) };
   const many = workspaces.length > 1;
   const [busy, setBusy] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
@@ -75,7 +79,7 @@ export function ForgetWorkspaceDialog({
                   workspaces.map(w => ({ name: w.name, kind: workspaceKind(w), ...(w.copy !== undefined ? { copy: w.copy } : {}) })),
                   threads,
                 )
-              : act === "delete" ? deleteNotice(threads, workspaceKind(workspace), workspace.copy) : forgetNotice(threads)}
+              : act === "delete" ? deleteNotice(threads, workspaceKind(workspace), workspace.copy, undefined, on) : forgetNotice(threads)}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <div className="px-5 pt-2">

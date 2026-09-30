@@ -238,6 +238,15 @@ describe("what a workspace's kind changes about its words", () => {
     expect(WORKSPACE_KIND_WORDS.local.onDelete.done("m_2")).not.toContain("m_2");
   });
 
+  it("a copy on a computer somebody joined is deleted from that computer, by the copy's name and the computer's", () => {
+    // A box is no cloud, and the machine's own id is wsp's: the person knows the copy and the computer by name.
+    const on = { name: "fix-login", computer: "spoo" };
+    expect(deleteNotice(1, "cloud", undefined, "wsp-workspace-ws_fix", on)).toBe("Its copy on spoo is deleted; its record and 1 thread leave this computer.");
+    expect(onDeleteOf("cloud", undefined, "wsp-workspace-ws_fix", on).done("wsp-workspace-ws_fix")).toBe("fix-login is deleted from spoo");
+    // A create that made no machine there has none to delete, wherever it stood.
+    expect(onDeleteOf("cloud", undefined, "", on).asked).toBe("create failed before any computer was made, so there is none to delete");
+  });
+
   it("the delete sentence for a copy of a project folder says the copy is removed and the folder it came from stays", () => {
     const copy = { path: "/Users/dev/app-fix" };
     expect(deleteNotice(1, "local", copy)).toBe("Its copy at /Users/dev/app-fix is removed and the project folder is left as it is; its record and 1 thread leave this computer.");

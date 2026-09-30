@@ -152,6 +152,7 @@ import {
   fmtSize,
   kindWords,
   type MachineOnDelete,
+  type StandsOn,
   machineWord,
   needsRebuild,
   noAdapterLine,
@@ -1479,17 +1480,28 @@ export function renameLine(renamed: Renamed): string {
 
 /** What a delete does to this workspace's machine, in its kind's own words: both lines about what a delete takes
  * read the one entry, so neither can say the other kind's sentence. */
-const onDelete = (workspace: WorkspaceView): MachineOnDelete => onDeleteOf(workspaceKind(workspace), workspace.copy, workspace.machineId);
+const onDelete = (d: Dropping): MachineOnDelete => onDeleteOf(workspaceKind(d.workspace), d.workspace.copy, d.workspace.machineId, d.on);
 
 /** What dropping a workspace takes off this computer, counted before anyone is asked: its record and its threads. */
 export interface Dropping {
   workspace: WorkspaceView;
   threads: number;
+  /** The computer somebody joined that it stands on, by the names a person reads; absent everywhere else, and where
+   * the caller may not read the computers' names. */
+  on?: StandsOn;
 }
 
 export async function dropping(client: HostClient, ref: string): Promise<Dropping> {
   const workspace = await workspaceOf(client, ref);
   return { workspace, threads: (await threads(client, workspace.id)).length };
+}
+
+/** What a delete takes, with the computer somebody joined that the workspace stands on named, which is what its two
+ * lines say is deleted from: a forget names no computer, so only a delete reads the computers' names. */
+export async function deleting(client: HostClient, ref: string): Promise<Dropping> {
+  const d = await dropping(client, ref);
+  const computer = d.workspace.place === undefined ? undefined : (await placeNames(client).catch(() => new Map<string, string>())).get(d.workspace.place);
+  return computer === undefined ? d : { ...d, on: { name: d.workspace.name, computer } };
 }
 
 /** The one confirmation a forget asks, naming what goes; the first line is the question, the second its hint. */
@@ -1508,7 +1520,7 @@ export function forgotLine(f: Dropping): string {
 
 /** The one confirmation a delete asks, in the words every client shows: what a forget takes, and the machine too. */
 export function deleteQuestion(d: Dropping): string {
-  return `Delete ${d.workspace.name}?\n${deleteNotice(d.threads, workspaceKind(d.workspace), d.workspace.copy, d.workspace.machineId)}`;
+  return `Delete ${d.workspace.name}?\n${deleteNotice(d.threads, workspaceKind(d.workspace), d.workspace.copy, d.workspace.machineId, d.on)}`;
 }
 
 /** The one confirmation a project image's removal asks: the id, and what goes with it. */
@@ -1522,7 +1534,7 @@ export async function deleteWorkspace(client: HostClient, d: Dropping): Promise<
 }
 
 export function deletedLine(d: Dropping): string {
-  return `deleted ${d.workspace.name} ${d.workspace.id}: ${onDelete(d.workspace).done(d.workspace.machineId)}, and its record and ${fmtThreads(d.threads)} are gone from this computer`;
+  return `deleted ${d.workspace.name} ${d.workspace.id}: ${onDelete(d).done(d.workspace.machineId)}, and its record and ${fmtThreads(d.threads)} are gone from this computer`;
 }
 
 /** The most characters a folder cell holds before its front is cut: the end of a path is what a person recognises. */
@@ -4570,7 +4582,7 @@ export const ALL_VERBS: readonly Verb[] = [
       const [ref] = ctx.args;
       if (ref === undefined || ctx.args.length !== 1) throw usageRefusal("wsp delete takes one workspace.", usageIs(ctx));
       const client = await ctx.client();
-      const d = await dropping(client, ref);
+      const d = await deleting(client, ref);
       if (!(await confirmed(ctx, deleteQuestion(d), d.workspace.name))) return 1;
       await deleteWorkspace(client, d);
       ctx.out.emit({ workspaceId: d.workspace.id, name: d.workspace.name, machineId: d.workspace.machineId, threads: d.threads }, deletedLine(d));
@@ -4583,12 +4595,12 @@ export const ALL_VERBS: readonly Verb[] = [
       output: { workspaceId: z.string(), name: z.string(), machineId: z.string(), threads: z.number().int() },
       call: async ({ workspace: ref, confirm }, deps) => {
         const client = await deps.client();
-        const d = await dropping(client, ref);
+        const d = await deleting(client, ref);
         const going = { workspaceId: d.workspace.id, name: d.workspace.name, machineId: d.workspace.machineId, threads: d.threads };
         // The command line asks a person before this and the app will; over MCP the second call is that step, so a
         // machine is never killed by one tool call the caller made on its own.
         if (confirm !== true) {
-          return { ...asText(`${d.workspace.name} kept. ${deleteNotice(d.threads, workspaceKind(d.workspace), d.workspace.copy, d.workspace.machineId)} Ask the person, then call delete again with confirm true.`, going), isError: true };
+          return { ...asText(`${d.workspace.name} kept. ${deleteNotice(d.threads, workspaceKind(d.workspace), d.workspace.copy, d.workspace.machineId, d.on)} Ask the person, then call delete again with confirm true.`, going), isError: true };
         }
         await deleteWorkspace(client, d);
         return asText(deletedLine(d), going);

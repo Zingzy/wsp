@@ -108,6 +108,9 @@ pub struct Options {
     pub ssh_programs: Option<ssh::Programs>,
     /// How long a server with no session open stands before it and all it started is ended.
     pub ssh_idle_ms: Option<u64>,
+    /// The workspace AppArmor profile a leave run as root takes off; the one a root install writes where unset. A
+    /// test names a file under its own temp home, since a leave there would otherwise take the machine's own.
+    pub apparmor_profile: Option<PathBuf>,
 }
 
 impl Options {
@@ -150,6 +153,7 @@ impl Options {
             runtime_helper: None,
             ssh_programs: None,
             ssh_idle_ms: None,
+            apparmor_profile: None,
         }
     }
 }

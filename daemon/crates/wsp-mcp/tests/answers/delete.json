@@ -19,6 +19,9 @@
         {
           "op": "sessions.list",
           "workspaceId": "ws-1"
+        },
+        {
+          "op": "places.list"
         }
       ]
     },
@@ -41,6 +44,9 @@
         {
           "op": "sessions.list",
           "workspaceId": "ws-2"
+        },
+        {
+          "op": "places.list"
         }
       ]
     },
@@ -62,6 +68,9 @@
         {
           "op": "sessions.list",
           "workspaceId": "ws-2"
+        },
+        {
+          "op": "places.list"
         }
       ]
     },
@@ -83,6 +92,9 @@
         {
           "op": "sessions.list",
           "workspaceId": "ws-1"
+        },
+        {
+          "op": "places.list"
         }
       ]
     },
@@ -106,6 +118,9 @@
         {
           "op": "sessions.list",
           "workspaceId": "ws-1"
+        },
+        {
+          "op": "places.list"
         },
         {
           "op": "workspaces.delete",
@@ -135,6 +150,9 @@
           "workspaceId": "ws-2"
         },
         {
+          "op": "places.list"
+        },
+        {
           "op": "workspaces.delete",
           "workspaceId": "ws-2"
         }
@@ -160,6 +178,9 @@
         {
           "op": "sessions.list",
           "workspaceId": "ws-1"
+        },
+        {
+          "op": "places.list"
         },
         {
           "op": "workspaces.delete",

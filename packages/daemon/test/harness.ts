@@ -59,6 +59,8 @@ export interface DaemonArgs {
   linkBackoffMs?: number;
   /** Where a place's daemon keeps the layers and the workspaces it runs. */
   runtimeRoot?: string;
+  /** The workspace profile a leave run as root takes off; a case names one under its own home, never the machine's. */
+  apparmorProfile?: string;
 }
 
 type Flag = { readonly flag: string; readonly key: keyof DaemonArgs; readonly takes: "word" | "int" | "words" | "pairs" };
@@ -97,6 +99,7 @@ const FLAGS: readonly Flag[] = [
   { flag: "--link-refused-retry-ms", key: "linkRefusedRetryMs", takes: "int" },
   { flag: "--link-backoff-ms", key: "linkBackoffMs", takes: "int" },
   { flag: "--runtime-root", key: "runtimeRoot", takes: "word" },
+  { flag: "--apparmor-profile", key: "apparmorProfile", takes: "word" },
 ];
 
 /** The argv that names these args, so a deploy script and this harness spell a daemon the same way. */

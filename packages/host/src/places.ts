@@ -444,11 +444,11 @@ export const boxSignedInLine = (name: string, agent: string, detail?: string): s
 export const boxNotSignedInLine = (name: string, agent: string, said?: string): string =>
   `${agentName(agent)} is not signed in on ${name}${said === undefined ? "" : `: ${said}`}. wsp add ${name} --sign-in ${agent} runs it again.`;
 
-/** What a person is told when they say not now, or when nobody is at this keyboard: what threads there read in the
- * meantime, which is the key the vault holds on this computer, and the line that signs it in later. */
+/** What a person is told when they say not now, or when nobody is at this keyboard: what threads there use in the
+ * meantime, which is the key they saved on this computer, and the line that signs it in later. */
 export const boxSignInLaterLine = (name: string, agent: string): string => {
   const key = keyEnvOf(loginSignIn(agent) ?? NO_SIGN_IN);
-  const until = key === undefined ? "" : ` Threads there read ${key} from this computer's vault until it is.`;
+  const until = key === undefined ? "" : ` Until it is, threads there use the ${key} saved on this computer.`;
   return `${agentName(agent)} is not signed in on ${name}.${until} wsp add ${name} --sign-in ${agent} signs it in.`;
 };
 
@@ -1979,7 +1979,12 @@ export async function joinCommand(io: CliIO, args: readonly string[], flags: Joi
   return 0;
 }
 
-export async function leaveCommand(io: CliIO, args: readonly string[], deps: { home: string; run: ServiceRunner; platform: string } = { home: process.env["HOME"] ?? "", run: systemRunner, platform: platform() }): Promise<number> {
+export async function leaveCommand(
+  io: CliIO,
+  args: readonly string[],
+  /** The workspace profile the sweep takes off as root is the one every install writes unless a caller names another. */
+  deps: { home: string; run: ServiceRunner; platform: string; apparmorProfile?: string } = { home: process.env["HOME"] ?? "", run: systemRunner, platform: platform() },
+): Promise<number> {
   if (args.length !== 0) throw usageRefusal("wsp leave takes no positional arguments.", "Run wsp leave on its own; it takes wsp off the computer you are sitting at.");
   const home = deps.home;
   if (home === "") throw new Error("wsp leave needs this login's home folder, and this process has none");
@@ -1992,7 +1997,7 @@ export async function leaveCommand(io: CliIO, args: readonly string[], deps: { h
   const manager = serviceManagerFor(deps.platform);
   // The agent is another process from this one, so the sweep stops it before taking its unit file, and the lines
   // below say so.
-  const swept = await sweepPlace({ home, ...(manager !== undefined ? { manager } : {}), run: deps.run });
+  const swept = await sweepPlace({ home, ...(manager !== undefined ? { manager } : {}), run: deps.run, ...(deps.apparmorProfile === undefined ? {} : { apparmorProfile: deps.apparmorProfile }) });
   io.log("broken" in standing ? brokenPlaceLeftLine(standing.broken) : `${standing.joined.name} left the wsp at ${standing.joined.hostUrls.join(", ")}; removed:`);
   for (const line of swept.removed) io.log(sweptLine(line));
   for (const line of swept.kept) io.log(line);

@@ -92,7 +92,7 @@ import { removeScript } from "../src/project-landing.js";
 import { COPY_RECIPE, dfOk, recipeWith } from "./image-fixtures.js";
 import { HANDSHAKE, MCP_READ_MARK, NoProviderBackend, SERVER_MARK, keyFingerprint, type Machine, type MachineBackend, type ProvisionPlan } from "@wsp/engine";
 import { freshEphemeral, makeSeal, sealKeys, sharedSecret } from "@wsp/keys";
-import { NO_PLACE_UPDATER, PROVISION_HOST_STOPPED, PlaceAddTakenBackError, PlaceLoginRefusedError, PlaceProvisioningError, type PlaceBackHolder, type PlaceRecord, newPlaceKeyPair, signInsOf, placeLoginRoadLine, placeSweptOverLinkLine, placeSweptOverSshLine, type PlaceDialler, type PlaceInstallRequest, type PlaceKeyPair, type PlaceLeaveRequest, type PlaceLeaver, type PlaceLogin, type PlaceProvisioner, type PlaceUpdateRequest, type PlaceUpdater, type PlaceWiring } from "../src/places.js";
+import { NO_PLACE_UPDATER, PROVISION_HOST_STOPPED, PlaceAddTakenBackError, PlaceLoginRefusedError, PlaceProvisioningError, type PlaceBackHolder, type PlaceRecord, newPlaceKeyPair, signInsOf, placeLoginRoadLine, placeSweptOverLinkLine, type PlaceDialler, type PlaceInstallRequest, type PlaceKeyPair, type PlaceLeaveRequest, type PlaceLeaver, type PlaceLogin, type PlaceProvisioner, type PlaceUpdateRequest, type PlaceUpdater, type PlaceWiring } from "../src/places.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { NO_AGENTS_READER, type AgentsActs, type AgentsOn, type AgentsReader, type ServerIcons, type ServersActs, type SkillsActs } from "../src/agents-read.js";
 import { memoryStore, type Store } from "../src/store.js";
@@ -1369,7 +1369,7 @@ describe("taking a place back out over the login the install used", () => {
     // The line that runs wsp on that computer rides with it, off the last thing it said about itself.
     expect(asked[0]!.report.wsp).toEqual(report("vps").wsp);
     expect(removed.swept).toEqual(took);
-    expect(removed.note).toBe(placeSweptOverSshLine("vps", "root@65.21.4.12"));
+    expect(removed.note).toBe("wsp and the service that kept it running are removed from vps");
     expect(await store.get("places", placeId)).toBeUndefined();
   });
 
@@ -1458,7 +1458,7 @@ describe("taking a place back out over the login the install used", () => {
     // the box's own leave would be a second copy of what came off.
     expect(askedOverLink).toEqual([]);
     expect(removed.swept).toEqual(took);
-    expect(removed.note).toBe(placeSweptOverSshLine("vps", "root@65.21.4.12", true));
+    expect(removed.note).toBe("wsp and the service that kept it running are removed from vps");
     expect((await placesOf()).some(p => p.id === placeId)).toBe(false);
   });
 
@@ -1486,7 +1486,7 @@ describe("taking a place back out over the login the install used", () => {
     }, box);
     const removed = await runtime!.places!.remove(placeId);
     expect(removed.swept).toEqual(took);
-    expect(removed.note).toBe(placeSweptOverSshLine("vps", "root@65.21.4.12", true));
+    expect(removed.note).toBe("wsp and the service that kept it running are removed from vps");
     expect(askedOverLink).toEqual([]);
     // The record goes and stays gone: the link's own close handler writes the row it last saw, and a write that
     // landed after the removal would put a place this host no longer holds back in the list.

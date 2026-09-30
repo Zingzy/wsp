@@ -151,6 +151,9 @@ pub struct Workspace {
     pub copy: Option<Copy>,
     #[serde(default)]
     pub wake_refused: Option<String>,
+    /// The computer somebody joined that it stands on, by that computer's id; absent everywhere else.
+    #[serde(default)]
+    pub place: Option<String>,
     pub project: ProjectRef,
 }
 

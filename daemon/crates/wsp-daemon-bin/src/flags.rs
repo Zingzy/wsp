@@ -12,7 +12,7 @@ use wsp_frames::numbers;
 
 use crate::verbs::Verb;
 
-pub(crate) const USAGE: &str = "usage: wsp-daemon [--host <addr>] [--port <n>] [--token-path <file>] [--root <dir>] [--roots-path <file>] [--kind cloud|local|place] [--work-folder <dir>] [--inbox <dir>] [--inbox-quiet-ms <n>] [--inbox-poll-ms <n>] [--manifest <file>] [--run-dir <dir>] [--log-dir <dir>] [--open-socket <path>] [--port-file <file>] [--proc-root <dir>] [--passwd <file>] [--ports-interval-ms <n>] [--sys-interval-ms <n>] [--proc-interval-ms <n>] [--mode-interval-ms <n>] [--auth-deadline-ms <n>] [--place-file <file>] [--home <dir>] [--wsp-argv <word>]... [--agents id=bin,...] [--link-connect-ms <n>] [--link-quiet-ms <n>] [--link-refused-retry-ms <n>] [--link-backoff-ms <n>] [--runtime-root <dir>]";
+pub(crate) const USAGE: &str = "usage: wsp-daemon [--host <addr>] [--port <n>] [--token-path <file>] [--root <dir>] [--roots-path <file>] [--kind cloud|local|place] [--work-folder <dir>] [--inbox <dir>] [--inbox-quiet-ms <n>] [--inbox-poll-ms <n>] [--manifest <file>] [--run-dir <dir>] [--log-dir <dir>] [--open-socket <path>] [--port-file <file>] [--proc-root <dir>] [--passwd <file>] [--ports-interval-ms <n>] [--sys-interval-ms <n>] [--proc-interval-ms <n>] [--mode-interval-ms <n>] [--auth-deadline-ms <n>] [--place-file <file>] [--home <dir>] [--wsp-argv <word>]... [--agents id=bin,...] [--link-connect-ms <n>] [--link-quiet-ms <n>] [--link-refused-retry-ms <n>] [--link-backoff-ms <n>] [--runtime-root <dir>] [--apparmor-profile <file>]";
 
 #[derive(Debug, Parser)]
 #[command(name = "wsp-daemon", disable_version_flag = true, override_usage = USAGE)]
@@ -93,6 +93,9 @@ pub(crate) struct Flags {
     /// are made from; /wsp when absent.
     #[arg(long, value_name = "dir")]
     pub(crate) runtime_root: Option<PathBuf>,
+    /// The workspace profile a leave run as root takes off; the one a root install writes when absent.
+    #[arg(long, value_name = "file")]
+    pub(crate) apparmor_profile: Option<PathBuf>,
 }
 
 impl Flags {
@@ -158,6 +161,7 @@ impl Flags {
             // The image's own OpenSSH at its usual paths, stopped after the contract's quiet; only a case names others.
             ssh_programs: None,
             ssh_idle_ms: None,
+            apparmor_profile: self.apparmor_profile,
         }
     }
 }
@@ -250,6 +254,8 @@ mod tests {
             "9",
             "--runtime-root",
             "/wsp-test",
+            "--apparmor-profile",
+            "/aa",
         ])
         .unwrap();
         let o = f.into_options();
@@ -261,6 +267,7 @@ mod tests {
         assert_eq!((o.link_connect_ms, o.link_quiet_ms, o.link_refused_retry_ms, o.link_backoff_ms), (Some(6), Some(7), Some(8), Some(9)));
         assert_eq!(o.open_socket_path, Some(PathBuf::from("/o.sock")));
         assert_eq!(o.runtime_root, Some(PathBuf::from("/wsp-test")));
+        assert_eq!(o.apparmor_profile, Some(PathBuf::from("/aa")));
         // No flag names the helper the workspace runtime runs, so a daemon on a machine runs this binary as it
         // always has: what names one is a test that opened a daemon inside its own process.
         assert_eq!(o.runtime_helper, None);

@@ -284,6 +284,10 @@
         "asked": "copy at {path} is removed and the project folder is left as it is",
         "done": "its copy at {path} is removed and the project folder is left as it is"
       },
+      "place": {
+        "asked": "copy on {computer} is deleted",
+        "done": "{name} is deleted from {computer}"
+      },
       "none": {
         "asked": "create failed before any computer was made, so there is none to delete",
         "done": "its create had made no computer"

@@ -19,7 +19,7 @@ import { HELP, agentPage, cli, commandPage, COMMANDS_FOR_HELP, localWiring, loca
 import { hostKeyHere, placeWiring } from "../src/places.js";
 import { hostTokenPath, lockPathFor } from "../src/host-lock.js";
 import type { HostHandle } from "../src/server.js";
-import { awake, BUILT_IN_LIST_CLAUSE, BUILT_IN_TABLE_CLAUSE, CLI_VERBS, hasTool, VERBS, runVerb, PLAN_ONLY, ANSWER_IN_THE_APP, answerKeysLine, answerVerbsLine, answeredLine, noSuchAnswerLine, deleteQuestion, deletedLine, dialHost, firstEnded, messageTo, napAfterDeadLaunch, noHostServingLine, noOpenAskLine, threadRows, threadTree, threadsOf, workspaceLine, type HostClient } from "../src/verbs.js";
+import { awake, BUILT_IN_LIST_CLAUSE, BUILT_IN_TABLE_CLAUSE, CLI_VERBS, hasTool, VERBS, runVerb, PLAN_ONLY, ANSWER_IN_THE_APP, answerKeysLine, answerVerbsLine, answeredLine, noSuchAnswerLine, deleteQuestion, deletedLine, deleting, dialHost, firstEnded, messageTo, napAfterDeadLaunch, noHostServingLine, noOpenAskLine, threadRows, threadTree, threadsOf, workspaceLine, type HostClient } from "../src/verbs.js";
 import { HOST_RESTARTING_LINE, HOST_SIDE_VAULT, SSH_PIPES_HERE_LINE, hostAgain, hostPlatform, hostRestartedLine, THREAD_PREFIX_WORD } from "../src/verbs.js";
 import { restartRoads, type RestartRoad } from "../src/restart.js";
 import { hostSideOnlyFix, hostSideOnlyLine } from "../src/hosts.js";
@@ -1256,6 +1256,16 @@ describe("wsp verbs over the host", () => {
     expect(deletedLine({ workspace: copied, threads: 1 })).toBe("deleted box ws_mine: its copy at /Users/dev/api-fix is removed and the project folder is left as it is, and its record and 1 thread are gone from this computer");
     // A fork is wsp's to take away, and its line still names the machine that goes.
     expect(deletedLine({ workspace, threads: 0 })).toBe("deleted box ws_mine: computer m_ab12 is gone in the cloud, and its record and 0 threads are gone from this computer");
+  });
+
+  it("a copy on a computer somebody joined is deleted from that computer by the names a person knows, never the cloud or the machine's id", async () => {
+    const onSpoo = { id: "ws_fix", name: "fix-login", machineId: "wsp-workspace-ws_fix", phase: "running", kind: "cloud", place: "p_spoo", golden: "", createdAt: "2026-09-27T00:00:00.000Z", project: { id: "pr_1", name: "api", path: "/root/api", computer: "p_spoo" } };
+    const spoo = { id: "p_spoo", kind: "computer", name: "spoo", default: false };
+    const answers: Record<string, unknown> = { "workspaces.resolve": { workspace: onSpoo }, "sessions.list": { sessions: [] }, "places.list": { places: [spoo] } };
+    const client = { request: async (op: string) => (answers[op] ?? Promise.reject(new Error(`no ${op}`))) as never } as unknown as HostClient;
+    const d = await deleting(client, "fix-login");
+    expect(deleteQuestion(d)).toBe("Delete fix-login?\nIts copy on spoo is deleted; its record and 0 threads leave this computer.");
+    expect(deletedLine(d)).toBe("deleted fix-login ws_fix: fix-login is deleted from spoo, and its record and 0 threads are gone from this computer");
   });
 
   it("delete asks once in the words the app shows, kills the machine at the provider, and drops the record and its threads", async () => {

@@ -185,8 +185,8 @@ export function machineWord(kind: WorkspaceKind): string {
 /** What deleting a workspace takes, the one sentence every client's confirmation shows: what the delete does to
  * this kind's machine, in that kind's own words, and either way the record and the threads go from here. It sits
  * with the kind table rather than with the other notices, since the machine half is a kind's word. */
-export function deleteNotice(threads: number, kind: WorkspaceKind, copy?: Pick<ProjectCopy, "path">, machineId?: string): string {
-  return `Its ${onDeleteOf(kind, copy, machineId).asked}; its record and ${fmtThreads(threads)} leave this computer.`;
+export function deleteNotice(threads: number, kind: WorkspaceKind, copy?: Pick<ProjectCopy, "path">, machineId?: string, on?: StandsOn): string {
+  return `Its ${onDeleteOf(kind, copy, machineId, on).asked}; its record and ${fmtThreads(threads)} leave this computer.`;
 }
 
 /** One of the copies Keep this one deletes, as its row names it and as its kind decides what a delete does to it. */
@@ -211,10 +211,18 @@ export function deleteCopiesNotice(copies: readonly CopyToDelete[], threads: num
 /** What a delete does to a create that failed before any machine was made, which is the one record with no machine id. */
 const NO_MACHINE_MADE: MachineOnDelete = { asked: "create failed before any computer was made, so there is none to delete", done: () => "its create had made no computer" };
 
+/** A workspace on a computer somebody joined, as a person reads the two: the copy's name and that computer's. */
+export interface StandsOn {
+  name: string;
+  computer: string;
+}
+
 /** What a delete does to a workspace that is a copy of a project folder: the copy goes and the folder it was copied
- * from stays. Every other workspace takes its kind's words. */
-export function onDeleteOf(kind: WorkspaceKind, copy?: Pick<ProjectCopy, "path">, machineId?: string): MachineOnDelete {
+ * from stays. One on a computer somebody joined is deleted from that computer, by the names the person knows, since
+ * a box is no cloud and the machine's own id is wsp's. Every other workspace takes its kind's words. */
+export function onDeleteOf(kind: WorkspaceKind, copy?: Pick<ProjectCopy, "path">, machineId?: string, on?: StandsOn): MachineOnDelete {
   if (machineId === "") return NO_MACHINE_MADE;
+  if (copy === undefined && on !== undefined) return { asked: `copy on ${on.computer} is deleted`, done: () => `${on.name} is deleted from ${on.computer}` };
   if (copy === undefined) return WORKSPACE_KIND_WORDS[kind].onDelete;
   const removed = `copy at ${copy.path} is removed and the project folder is left as it is`;
   return { asked: removed, done: () => `its ${removed}` };
