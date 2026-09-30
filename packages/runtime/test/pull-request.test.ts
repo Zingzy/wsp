@@ -368,7 +368,17 @@ describe("settling on merge", () => {
 
 describe("the acts on a pull request", () => {
   it("reads the page over this computer's daemon, never kept", async () => {
-    const page = { title: "t", body: "b", commits: [], reviews: [], comments: [], reviewComments: [], files: [] };
+    const page = {
+      title: "t",
+      body: "b",
+      author: "octocat",
+      updatedAt: "2026-09-30T12:00:00Z",
+      commits: [{ oid: HEAD, subject: "Set .ci-status to 1", at: "2026-09-30T11:00:00Z", author: "octocat" }],
+      reviews: [],
+      comments: [],
+      reviewComments: [],
+      files: [],
+    };
     const merge = { methods: ["squash", "merge"], defaultMethod: "squash", autoMerge: true };
     const daemons = fakeDaemons({ here: { "git.prView": () => ({ id: 1, ok: true, ...page }), "git.repoRead": () => ({ id: 1, ok: true, ...merge }) } });
     const { id, remote } = await withWorkspace(daemons);

@@ -1512,7 +1512,35 @@
         "row-id=thread:redirect",
         "surface-launch=pr"
       ],
-      "wait": "pr-comment",
+      "wait": "pr-body",
+      "settleMs": 1200
+    },
+    {
+      "name": "pr-pane-commits",
+      "at": "/",
+      "fixture": "pull-request",
+      "widths": [1440],
+      "reason": "The Commits tab of the pull request pane: the rail, one dot per commit and the merge commit's dot hollow, at the same panel width as pr-pane.",
+      "steps": [
+        "row-id=thread:redirect",
+        "surface-launch=pr",
+        "segment=commits"
+      ],
+      "wait": "pr-commit",
+      "settleMs": 1200
+    },
+    {
+      "name": "pr-pane-files",
+      "at": "/",
+      "fixture": "pull-request",
+      "widths": [1440],
+      "reason": "The Files tab of the pull request pane: the changed-files tree with its additions green and deletions red, at the same panel width as pr-pane.",
+      "steps": [
+        "row-id=thread:redirect",
+        "surface-launch=pr",
+        "segment=files"
+      ],
+      "wait": "pr-files",
       "settleMs": 1200
     },
     {

@@ -585,7 +585,9 @@ const REPLIES: Record<string, { schema: ZodTypeAny; samples: unknown[] }> = {
       {
         title: "Set .ci-status back to 0",
         body: "The check failed on \"exit 1\"…",
-        commits: [{ oid: "abc", subject: "Set ci status", at: "2026-09-28T10:00:00Z" }],
+        author: "ana",
+        updatedAt: "2026-09-28T12:00:00Z",
+        commits: [{ oid: "abc", subject: "Set ci status", at: "2026-09-28T10:00:00Z", author: "ana" }],
         reviews: [{ author: "ana", state: "changes_requested", body: "see line 3", at: "2026-09-28T11:00:00Z" }],
         comments: [{ author: "bo", body: "thanks", at: "2026-09-28T12:00:00Z" }],
         reviewComments: [
@@ -594,7 +596,7 @@ const REPLIES: Record<string, { schema: ZodTypeAny; samples: unknown[] }> = {
         ],
         files: [{ path: "check.sh", additions: 2, deletions: 1 }],
       },
-      { title: "", body: "", commits: [], reviews: [], comments: [], reviewComments: [], files: [] },
+      { title: "", body: "", author: "", updatedAt: "", commits: [], reviews: [], comments: [], reviewComments: [], files: [] },
     ],
   },
   GitRunLogReply: {

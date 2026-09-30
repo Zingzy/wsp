@@ -26,8 +26,13 @@ export const DiffStatLabel = memo(function DiffStatLabel(props: {
   className?: string;
   showParentheses?: boolean;
   layout?: "aligned" | "inline";
+  /** Neutral in the turn's card, where the count is a fact at rest; the diff tone gives the add its green and the
+   * delete its red where a diff is what the reader is looking at, as the pull request pane and the code view do. */
+  tone?: "neutral" | "diff";
 }) {
-  const { additions, deletions, className, showParentheses = false, layout = "aligned" } = props;
+  const { additions, deletions, className, showParentheses = false, layout = "aligned", tone = "neutral" } = props;
+  const addInk = tone === "diff" ? "text-success" : "text-muted-foreground";
+  const delInk = tone === "diff" ? "text-error-foreground" : "text-muted-foreground";
   return (
     <>
       {showParentheses && <span className="text-muted-foreground/70">(</span>}
@@ -41,10 +46,10 @@ export const DiffStatLabel = memo(function DiffStatLabel(props: {
           className,
         )}
       >
-        <span aria-hidden="true" className="font-mono text-muted-foreground">
+        <span aria-hidden="true" className={cn("font-mono", addInk)}>
           +{formatCompactDiffCount(additions)}
         </span>
-        <span aria-hidden="true" className="font-mono text-muted-foreground">
+        <span aria-hidden="true" className={cn("font-mono", delInk)}>
           -{formatCompactDiffCount(deletions)}
         </span>
       </span>
