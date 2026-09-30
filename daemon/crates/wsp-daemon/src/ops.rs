@@ -231,12 +231,12 @@ pub(crate) async fn handle(conn: &Arc<Conn>, ctx: &Arc<Ctx>, raw: &str) -> Outgo
         match op {
             Some("place.leave") => {
                 let home = crate::place::place_home(ctx.options.home.as_deref());
+                let profile = ctx.options.apparmor_profile.clone().unwrap_or_else(|| wsp_frames::numbers::WORKSPACE_APPARMOR_PATH.into());
                 let swept = fs::blocking(move || {
                     let mut swept = crate::place::sweep_place_home(&home, &crate::place::sh_stdout);
                     // Only root's install loaded the profile, and only root can take it off.
                     if nix::unistd::geteuid().is_root() {
-                        let profile = std::path::Path::new(wsp_frames::numbers::WORKSPACE_APPARMOR_PATH);
-                        swept.extend(crate::place::sweep_workspace_profile(profile, &crate::place::sh_stdout));
+                        swept.extend(crate::place::sweep_workspace_profile(&profile, &crate::place::sh_stdout));
                     }
                     Ok(swept)
                 })
@@ -1491,16 +1491,30 @@ mod tests {
         std::fs::create_dir_all(&at.wsp).unwrap();
         std::fs::write(&at.place_file, "{}").unwrap();
         std::fs::write(&at.token_path, "t\n").unwrap();
+        // The profile a root leave takes off is this case's own, and names no profile the kernel holds: the unload and
+        // the removal run for real as root, and the machine's own profile is never theirs to take.
+        let profile = home.path().join("apparmor.d").join("wsp-workspace");
+        std::fs::create_dir_all(profile.parent().unwrap()).unwrap();
+        std::fs::write(&profile, "not a profile\n").unwrap();
+        let machines = std::path::Path::new(wsp_frames::numbers::WORKSPACE_APPARMOR_PATH);
+        let machines_before = std::fs::read(machines).ok();
         let mut options = Options::new(b._token.path());
         options.home = Some(home.path().to_path_buf());
+        options.apparmor_profile = Some(profile.clone());
         let ctx = Arc::new(Ctx::new(options, Box::new(|_| {}), 0).unwrap());
         let out = handle(&link, &ctx, &json!({"id": 21, "op": "place.leave"}).to_string()).await;
         let Outgoing::Leave(text) = &out else { panic!("a leave stops the daemon after its reply") };
         // Each part of wsp's own folder is named for the line it puts in front of a person, and the folder itself
-        // goes last, so nothing under it is left on a computer the person joined.
-        let swept = json!([at.place_file.to_string_lossy(), at.token_path.to_string_lossy(), at.wsp.to_string_lossy()]);
+        // goes last, so nothing under it is left on a computer the person joined; a root leave then takes the profile.
+        let root = nix::unistd::geteuid().is_root();
+        let mut swept = vec![at.place_file.to_string_lossy(), at.token_path.to_string_lossy(), at.wsp.to_string_lossy()];
+        if root {
+            swept.push(profile.to_string_lossy());
+        }
         assert_eq!(serde_json::from_str::<Value>(text).unwrap(), json!({"id": 21, "ok": true, "swept": swept}));
         assert!(!at.place_file.exists() && !at.token_path.exists() && !at.wsp.exists());
+        assert_eq!(profile.exists(), !root);
+        assert_eq!(std::fs::read(machines).ok(), machines_before, "the leave touched this machine's own profile");
     }
 
     #[tokio::test]

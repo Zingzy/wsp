@@ -38,7 +38,8 @@ function placeFile(hostUrls: string[], hostPublicKey: string, keyPem: string): {
 
 /** The daemon a place runs, dialling out on the file under its home; the token is what its own loopback door takes. */
 async function placeDaemon(place: { home: string; file: string }, args: DaemonUnderTestArgs = {}): Promise<DaemonUnderTest> {
-  const d = await daemonUnderTest({ host: "127.0.0.1", port: 0, token: "link-token", kind: "place", root: place.home, home: place.home, placeFile: place.file, rootsPath: placeDaemonPaths(place.home).rootsPath, ...args });
+  // A leave run as root takes the workspace profile off, so the one it reads is under this case's home.
+  const d = await daemonUnderTest({ host: "127.0.0.1", port: 0, token: "link-token", kind: "place", root: place.home, home: place.home, placeFile: place.file, rootsPath: placeDaemonPaths(place.home).rootsPath, apparmorProfile: join(place.home, "etc-apparmor.d", "wsp-workspace"), ...args });
   daemons.push(d);
   return d;
 }

@@ -323,6 +323,9 @@ async fn place_daemon(place: &Place, tune: impl FnOnce(&mut Options)) -> Running
     options.place_file = Some(place.file.clone());
     options.runtime_root = Some(place.home.path().join("runtime"));
     options.roots_path = Some(place_daemon_paths(place.home.path()).roots_path);
+    // A leave run as root takes the workspace profile off, so the one it reads is under this case's home, never the
+    // machine's own.
+    options.apparmor_profile = Some(place.home.path().join("apparmor.d").join("wsp-workspace"));
     tune(&mut options);
     let lines = Arc::new(Mutex::new(Vec::new()));
     let sink = Arc::clone(&lines);
@@ -756,6 +759,8 @@ async fn answers_place_leave_with_what_the_sweep_took_and_then_ends_the_daemon()
     let at = place_daemon_paths(place.home.path());
     // What a join and a daemon leave under the home: the token file beside the place file and its key.
     std::fs::write(&at.token_path, "a-token\n").unwrap();
+    let machines = std::path::Path::new(wsp_frames::numbers::WORKSPACE_APPARMOR_PATH);
+    let machines_before = std::fs::read(machines).ok();
     let d = place_daemon(&place, |_| {}).await;
     let mut ws = host.held().await;
     let mut events = Vec::new();
@@ -768,6 +773,7 @@ async fn answers_place_leave_with_what_the_sweep_took_and_then_ends_the_daemon()
     for path in [&at.place_file, &at.place_key, &at.token_path, &at.wsp] {
         assert!(!path.exists(), "{}", path.display());
     }
+    assert_eq!(std::fs::read(machines).ok(), machines_before, "the leave touched this machine's own profile");
     // The daemon ends after the reply is on the wire, and nothing dials again: the sweep took what would bring it back.
     let run = &d.run;
     let ended = tokio::time::timeout(Duration::from_secs(5), async {

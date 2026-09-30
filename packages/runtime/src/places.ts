@@ -506,14 +506,9 @@ export const NO_PLACE_UPDATER = "this runtime carries no daemon to put on a comp
 export const placeUpdateSlowLine = (name: string, seconds: number): string =>
   `${name} took the daemon and had not dialled back on it within ${seconds}s; its row reads the new version once it does`;
 
-/** What a remove says about the road the sweep took, which is the one thing a person cannot see from here. Two
- * wordings of the one fact: a computer that was dialling this host was swept over the login all the same, since
- * the agent answering on the link is the one the service restarts and cannot take that service with it, and a
- * computer that was holding no link had nothing but the login to reach it by. */
-export const placeSweptOverSshLine = (name: string, at: string, linked = false): string =>
-  linked
-    ? `${name} was connected, and wsp logged in at ${at} over ssh to run the leave there: what answers on the link takes the files it owns and not the service that restarts it`
-    : `${name} was holding no link, so wsp logged in at ${at} over ssh and ran the leave there`;
+/** What a remove that ran over the login says: what changed on that computer, which is that wsp and the service that
+ * starts it are gone, and never the road it took there. */
+export const placeSweptOverSshLine = (name: string): string => `wsp and the service that kept it running are removed from ${name}`;
 
 /** Why the leave over the login on the record did not finish it, which is two different things and never one: the
  * login itself would not stand, or that computer took the leave, ran it and stopped before it was done, in which
@@ -2070,7 +2065,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         } else {
           try {
             swept = [...(await leaver({ placeId, name: held.name, report: held.report, ssh: login }))];
-            note = placeSweptOverSshLine(held.name, login.ssh, reach !== undefined);
+            note = placeSweptOverSshLine(held.name);
           } catch (e) {
             // Two different things, and the line a person reads says which: the login would not stand, or that
             // computer took the leave, ran it and stopped, whose own last words ride with it.
