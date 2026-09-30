@@ -29,7 +29,7 @@ fn lock(map: &Mutex<HashMap<String, (u64, Writes)>>) -> std::sync::MutexGuard<'_
 }
 
 /// 127.0.0.1 first, then ::1: a Node 22 tool listening on "localhost" binds [::1] only (measured, wrangler).
-async fn connect_loopback(port: u16) -> Result<TcpStream, String> {
+pub(crate) async fn connect_loopback(port: u16) -> Result<TcpStream, String> {
     if let Ok(stream) = TcpStream::connect(("127.0.0.1", port)).await {
         return Ok(stream);
     }
@@ -58,10 +58,18 @@ fn room_for(map: &HashMap<String, (u64, Writes)>, tunnel_id: &str) -> Result<(),
 }
 
 impl Tunnels {
-    /// Dials the port and starts the pump; refused by name when the id is taken or the socket holds the cap.
-    pub(crate) async fn open(conn: &Arc<Conn>, tunnel_id: String, port: u16) -> Result<(), OpError> {
+    /// Dials the port and starts the pump; refused by name when the id is taken or the socket holds the cap. A
+    /// tunnel into a workspace names it on every frame it sends back, and a session into an ssh server is held for
+    /// as long as the tunnel stands.
+    pub(crate) async fn open(
+        conn: &Arc<Conn>,
+        tunnel_id: String,
+        dial: impl std::future::Future<Output = Result<TcpStream, String>>,
+        machine_id: Option<String>,
+        session: Option<crate::ssh::Session>,
+    ) -> Result<(), OpError> {
         room_for(&lock(&conn.tunnels.open), &tunnel_id)?;
-        let stream = connect_loopback(port).await.map_err(OpError::plain)?;
+        let stream = dial.await.map_err(OpError::plain)?;
         if conn.is_closed() {
             return Err(OpError::plain("client went away while the guest port was dialled"));
         }
@@ -72,7 +80,7 @@ impl Tunnels {
             room_for(&map, &tunnel_id)?;
             map.insert(tunnel_id.clone(), (generation, tx));
         }
-        tokio::spawn(pump(Arc::clone(conn), tunnel_id, generation, stream, rx));
+        tokio::spawn(pump(Arc::clone(conn), tunnel_id, generation, stream, rx, machine_id, session));
         Ok(())
     }
 
@@ -100,7 +108,15 @@ impl Tunnels {
 
 /// Bytes from the port to the socket as tunnel.data, bytes from the socket to the port, until either side ends or
 /// the tunnel is closed; then the entry goes, if it is still this pump's, and tunnel.end is said.
-async fn pump(conn: Arc<Conn>, tunnel_id: String, generation: u64, stream: TcpStream, mut writes: mpsc::UnboundedReceiver<Vec<u8>>) {
+async fn pump(
+    conn: Arc<Conn>,
+    tunnel_id: String,
+    generation: u64,
+    stream: TcpStream,
+    mut writes: mpsc::UnboundedReceiver<Vec<u8>>,
+    machine_id: Option<String>,
+    session: Option<crate::ssh::Session>,
+) {
     let (mut reader, mut writer) = stream.into_split();
     let mut buf = vec![0u8; 16 * 1024];
     loop {
@@ -109,7 +125,7 @@ async fn pump(conn: Arc<Conn>, tunnel_id: String, generation: u64, stream: TcpSt
                 Ok(0) | Err(_) => break,
                 Ok(n) => {
                     let data = base64::engine::general_purpose::STANDARD.encode(&buf[..n]);
-                    if !conn.out.send_event(&DaemonEvent::TunnelData { tunnel_id: tunnel_id.clone(), data }) {
+                    if !conn.out.send_event(&DaemonEvent::TunnelData { tunnel_id: tunnel_id.clone(), data, machine_id: machine_id.clone() }) {
                         break;
                     }
                 }
@@ -130,7 +146,8 @@ async fn pump(conn: Arc<Conn>, tunnel_id: String, generation: u64, stream: TcpSt
             map.remove(&tunnel_id);
         }
     }
-    conn.out.send_event(&DaemonEvent::TunnelEnd { tunnel_id });
+    drop(session);
+    conn.out.send_event(&DaemonEvent::TunnelEnd { tunnel_id, machine_id });
 }
 
 #[cfg(test)]

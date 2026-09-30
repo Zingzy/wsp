@@ -41,7 +41,8 @@ const ok: ExecResult = { exitCode: 0, stdout: "", stderr: "" };
 
 /** Every floor row answering at the version its own row pins, so the floor installs nothing and the run under test
  * is the recipe's rows alone. Built off the catalog, never from a list typed here. */
-const FLOOR_READ = BASE_FLOOR.flatMap(e => [`VERSION ${e.bin}: ${e.bin} ${e.major === undefined ? "9.9.9" : `${e.major.version}.0`}`, ...(e.brings ?? []).map(b => `VERSION ${b.bin}: 9.9.9`)]).join("\n");
+/** A computer that already has the whole floor, and an ssh server of its own as a box added over ssh has. */
+const FLOOR_READ = [...BASE_FLOOR.flatMap(e => [`VERSION ${e.bin}: ${e.bin} ${e.major === undefined ? "9.9.9" : `${e.major.version}.0`}`, ...(e.brings ?? []).map(b => `VERSION ${b.bin}: 9.9.9`)]), "VERSION sshd: OpenSSH_9.6p1"].join("\n");
 
 /** A folder on this computer with one script per command a test wants to answer, so a presence read run under bash
  * finds the commands it looks for. */

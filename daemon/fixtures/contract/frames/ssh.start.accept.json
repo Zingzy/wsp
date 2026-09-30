@@ -1,0 +1,13 @@
+[
+  {
+    "id": 1,
+    "op": "ssh.start",
+    "authorizedKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMdk8rPQwJx5kMq0bD8xg1d0i7wYcU6r3Jc4oYy4S2Qm you@zingzys-mac"
+  },
+  {
+    "id": 2,
+    "op": "ssh.start",
+    "authorizedKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMdk8rPQwJx5kMq0bD8xg1d0i7wYcU6r3Jc4oYy4S2Qm you@zingzys-mac",
+    "machineId": "wsp-925c75ec3d5db653"
+  }
+]

@@ -134,6 +134,12 @@ pub enum Status {
     Gone,
 }
 
+/// A command left running inside a workspace: the helper holding it, and the tenant's pid on this computer.
+pub struct Spawned {
+    pub helper: tokio::process::Child,
+    pub pid: u32,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Exec {
     pub exit_code: i32,
@@ -357,6 +363,43 @@ impl Runtime {
                 Err(e)
             }
         }
+    }
+
+    /// A command inside the workspace that runs on until something ends it, held by a helper this daemon keeps:
+    /// the helper's stderr piped for the reason it may end early, and this computer's own pid for the tenant, off
+    /// the file the library writes the moment the tenant is made. What a server inside a workspace is started by.
+    pub async fn spawn(&self, id: &str, args: &[String]) -> Result<Spawned, Error> {
+        let at = self.ptys.fetch_add(1, Ordering::Relaxed);
+        let pid_file = self.layout.workspace(id).join(format!("spawn-{at}.pid"));
+        let _ = fs::remove_file(&pid_file);
+        let line = crate::pty::helper_argv(self.layout.root(), id, &pid_file, args);
+        let mut cmd = Command::new(&self.exe);
+        cmd.args(&line).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
+        // Its own group, so a stop of this daemon's does not reach it: what it runs is ended by whoever holds it.
+        cmd.process_group(0);
+        let mut helper = cmd.spawn().map_err(|e| Error::Helper { verb: "exec", detail: e.to_string() })?;
+        let named = async {
+            loop {
+                if let Some(pid) = fs::read_to_string(&pid_file).ok().and_then(|held| held.trim().parse::<u32>().ok()) {
+                    return pid;
+                }
+                tokio::time::sleep(PID_POLL).await;
+            }
+        };
+        let why = tokio::select! {
+            pid = named => {
+                let _ = fs::remove_file(&pid_file);
+                return Ok(Spawned { helper, pid });
+            }
+            ended = helper.wait() => match ended {
+                Ok(status) => format!("the helper ended {status} before the command started"),
+                Err(e) => format!("the helper could not be waited for: {e}"),
+            },
+            () = tokio::time::sleep(CONSOLE_WAIT) => format!("the command did not start in {} s", CONSOLE_WAIT.as_secs()),
+        };
+        let _ = fs::remove_file(&pid_file);
+        let _ = helper.start_kill();
+        Err(Error::Helper { verb: "exec", detail: format!("{why}; {}", helper_said(&mut helper).await) })
     }
 
     /// The pid the broker runs under on this computer, off the file the library writes the moment the tenant is

@@ -77,6 +77,10 @@ import {
   RUNTIME_OPS,
   EDITOR_TICKET_REFUSAL,
   editorOpensHereLine,
+  sshAlias,
+  sshCopyHereLine,
+  sshIncludeLine,
+  SSH_TICKET_REFUSAL,
   isLocalWorkspace,
   type AccountDevice,
   type AccountView,
@@ -102,7 +106,7 @@ import type { DaemonChannel } from "./daemon-channel.js";
 import { NO_DEVICE_DOOR, safeEqual, threadOf, type DeviceDoor, type HeldDevice } from "./devices.js";
 import { NO_PLACE_DOOR, type PlaceDoor } from "./places.js";
 import { keyFingerprint, openFrame, verifyPlaceBytes, type Seal } from "@wsp/keys";
-import type { HostEditor, HostFolders, HostTerminalConfig, InitDoor, ProjectBundler, ProjectLander, Runtime } from "./runtime.js";
+import type { HostEditor, HostFolders, HostSsh, HostTerminalConfig, InitDoor, ProjectBundler, ProjectLander, Runtime } from "./runtime.js";
 
 /** The port forwards a host holds, as the app lists and stops them. The
  * runtime keeps none itself: the host that owns the daemon links supplies this. */
@@ -172,6 +176,9 @@ export interface ServeOptions {
   /** The editors on this computer and how a workspace's file opens in one, for editor.list and editor.open; without it
    * both are refused. */
   editor?: HostEditor;
+  /** How an editor's ssh reaches a workspace on another computer, for ssh.port and ssh.include; without it both are
+   * refused. */
+  ssh?: HostSsh;
   /** The init job the host runs on this computer, for the init.* ops and the init.job events; without it the ops are refused. */
   init?: InitDoor;
   /** The doctor's computer road as this host runs it, for places.doctor and the doctor.line events; without it the
@@ -354,6 +361,13 @@ function editorFrom(opts: ServeOptions): () => HostEditor {
   };
 }
 
+function sshFrom(opts: ServeOptions): () => HostSsh {
+  return () => {
+    if (opts.ssh === undefined) throw new Error("this runtime cannot carry an editor's ssh from this computer");
+    return opts.ssh;
+  };
+}
+
 function terminalConfigFrom(opts: ServeOptions): () => HostTerminalConfig {
   return () => {
     if (opts.terminalConfig === undefined) throw new Error("this runtime cannot read the terminal config on this computer");
@@ -392,6 +406,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
   const folders = foldersFrom(opts);
   const terminalConfig = terminalConfigFrom(opts);
   const editor = editorFrom(opts);
+  const ssh = sshFrom(opts);
   const release = releaseFrom(opts);
   const init = initFrom(opts);
   const imageExport = imageExportFrom(opts);
@@ -1706,11 +1721,41 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 return;
               }
               const workspace = await rt.workspaces.get(msg.workspaceId, origin);
-              if (!isLocalWorkspace(workspace)) throw new Error(editorOpensHereLine(workspace.name));
+              const picked = msg.editor ?? (await rt.preferences.get()).editor;
+              if (!isLocalWorkspace(workspace)) {
+                if (opts.ssh === undefined) throw new Error(editorOpensHereLine(workspace.name));
+                if (!(await opts.ssh.include())) {
+                  send({ id: msg.id, ok: false, error: sshIncludeLine(workspace.name), kind: "sshInclude" });
+                  return;
+                }
+                // Before the editor runs, so a workspace with no ssh server says so here rather than in the editor's log.
+                await opts.ssh.port({ id: workspace.id, name: workspace.name });
+                const remote = { alias: sshAlias(workspace.name), folder: workspace.copy?.path ?? workspace.project.path, name: workspace.name };
+                const opened = await editor().open({ path: msg.path, inside: [], remote, ...(msg.line !== undefined ? { line: msg.line } : {}), ...(picked !== undefined ? { editor: picked } : {}) });
+                send({ id: msg.id, ok: true, editor: opened });
+                return;
+              }
               const inside = [workspace.copy?.path, workspace.project.path].filter((folder): folder is string => folder !== undefined);
-              const { editor: picked } = await rt.preferences.get();
               const opened = await editor().open({ path: msg.path, inside, ...(msg.line !== undefined ? { line: msg.line } : {}), ...(picked !== undefined ? { editor: picked } : {}) });
               send({ id: msg.id, ok: true, editor: opened });
+              return;
+            }
+            case "ssh.port":
+            case "ssh.include": {
+              if (!ownRoad()) {
+                send({ id: msg.id, ok: false, error: SSH_TICKET_REFUSAL, kind: "ticket" });
+                return;
+              }
+              if (msg.op === "ssh.include") {
+                send({ id: msg.id, ok: true, sshInclude: msg.on === undefined ? await ssh().include() : await ssh().setInclude(msg.on) });
+                return;
+              }
+              const door = ssh();
+              const held = await rt.workspaces.get(msg.workspaceId, origin);
+              if (isLocalWorkspace(held)) throw new Error(sshCopyHereLine(held.name));
+              // An editor reconnecting after a nap asks here first, and a reconnect is what brings the workspace back.
+              const workspace = held.phase === "running" ? held : await rt.workspaces.wake(held.id, origin);
+              send({ id: msg.id, ok: true, port: await door.port({ id: workspace.id, name: workspace.name }) });
               return;
             }
             case "init.get":

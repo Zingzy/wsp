@@ -865,6 +865,38 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for Counted<S> {
     }
 }
 
+/// A port on a workspace's own loopback, dialled from inside its network namespace, whose init is the pid given.
+pub async fn dial_inside(pid: i32, port: u16) -> io::Result<TcpStream> {
+    let ns_path = format!("/proc/{pid}/ns/net");
+    let dialled = tokio::task::spawn_blocking(move || -> io::Result<std::net::TcpStream> {
+        let ns = fs::File::open(&ns_path)?;
+        inside_with(ns, move || {
+            std::net::TcpStream::connect((Ipv4Addr::LOCALHOST, port)).map_err(at(format!("dialling 127.0.0.1:{port} inside")))
+        })
+        .map_err(|e| io::Error::other(e.to_string()))
+    })
+    .await
+    .map_err(io::Error::other)??;
+    dialled.set_nonblocking(true)?;
+    TcpStream::from_std(dialled)
+}
+
+/// A port nothing listens on at this moment on that workspace's loopback, read by binding port 0 inside it and
+/// letting go: what a server started there next is told to listen on.
+pub async fn free_port_inside(pid: i32) -> io::Result<u16> {
+    let ns_path = format!("/proc/{pid}/ns/net");
+    tokio::task::spawn_blocking(move || -> io::Result<u16> {
+        let ns = fs::File::open(&ns_path)?;
+        inside_with(ns, move || {
+            let bound = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).map_err(at("binding a port inside"))?;
+            bound.local_addr().map(|a| a.port()).map_err(at("reading that port"))
+        })
+        .map_err(|e| io::Error::other(e.to_string()))
+    })
+    .await
+    .map_err(io::Error::other)?
+}
+
 /// Where a listener sends what it accepts.
 enum Dial {
     /// A port inside the workspace, dialled from inside its own network namespace: a service bound to 127.0.0.1
@@ -888,20 +920,7 @@ impl Dial {
                 Err(io::Error::new(io::ErrorKind::NotConnected, "this workspace is stopped, so its published port dials nothing"))
             }
             Dial::Box(addr) => TcpStream::connect(addr).await,
-            Dial::Inside { pid, port } => {
-                let ns_path = format!("/proc/{pid}/ns/net");
-                let dialled = tokio::task::spawn_blocking(move || -> io::Result<std::net::TcpStream> {
-                    let ns = fs::File::open(&ns_path)?;
-                    inside_with(ns, move || {
-                        std::net::TcpStream::connect((Ipv4Addr::LOCALHOST, port)).map_err(at(format!("dialling 127.0.0.1:{port} inside")))
-                    })
-                    .map_err(|e| io::Error::other(e.to_string()))
-                })
-                .await
-                .map_err(io::Error::other)??;
-                dialled.set_nonblocking(true)?;
-                TcpStream::from_std(dialled)
-            }
+            Dial::Inside { pid, port } => dial_inside(pid, port).await,
         }
     }
 }

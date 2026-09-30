@@ -6,7 +6,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { REPO } from "../scripts/bundles.mjs";
-import { refusal, runRefusal, sharedLibrariesNamed } from "../scripts/daemon-binary.mjs";
+import { refusal, runRefusal, sharedLibrariesNamed, toolServerRefusal } from "../scripts/daemon-binary.mjs";
+import { daemonFeatures } from "../scripts/daemon-features.mjs";
 import { writeStub } from "../../protocol/test/stub-script.js";
 
 const repo = fileURLToPath(new URL("../../..", import.meta.url));
@@ -17,10 +18,13 @@ const OTHER = "0".repeat(40);
 /** A triple the host names no target for, so what a case stages lands where nothing else in this checkout reads it. */
 const TRIPLE = "riscv64gc-unknown-linux-gnu";
 const staged = join(repo, "packages", "wspx", "daemon", TRIPLE);
+/** A Mac triple the host names no target for, for the same reason. */
+const MAC_TRIPLE = "riscv64gc-apple-darwin";
+const stagedMac = join(repo, "packages", "wspx", "daemon", MAC_TRIPLE);
 const made: string[] = [];
 
 afterEach(() => {
-  for (const dir of [...made.splice(0), staged]) rmSync(dir, { recursive: true, force: true });
+  for (const dir of [...made.splice(0), staged, stagedMac]) rmSync(dir, { recursive: true, force: true });
 });
 
 /** A folder with one artifact in it, as a download leaves it. */
@@ -212,5 +216,68 @@ describe("the run a daemon binary staged outside a workflow run comes from", () 
     expect(ran.ok, ran.said).toBe(true);
     expect(gh.calls()).toContain(`run download 42 -R ${SLUG} --pattern wsp-daemon-* --dir`);
     expect(readFileSync(join(staged, "wsp-daemon"), "utf8")).toBe("a binary of its own\n");
+  });
+});
+
+/** A daemon of its own: one whose `mcp` answers, or one built without the tool server, which clap refuses. */
+function daemonStub(answers: boolean): string {
+  const dir = mkdtempSync(join(tmpdir(), "wsp-daemon-stub-"));
+  made.push(dir);
+  const refused = ["echo \"error: unrecognized subcommand 'mcp'\" >&2", "exit 2"];
+  return writeStub(join(dir, "wsp-daemon"), ["#!/bin/sh", ...(answers ? ['[ "$1" = mcp ] && exit 0', "exit 2"] : refused), ""].join("\n"));
+}
+
+describe("the daemon a Mac is given carries the tool server", () => {
+  it("names the tool server's feature for a Mac target and none for a Linux one, the one place every build reads", () => {
+    expect(daemonFeatures("aarch64-apple-darwin")).toEqual(["--features", "mcp"]);
+    expect(daemonFeatures("x86_64-apple-darwin")).toEqual(["--features", "mcp"]);
+    expect(daemonFeatures("x86_64-unknown-linux-musl")).toEqual([]);
+    expect(daemonFeatures("aarch64-unknown-linux-musl")).toEqual([]);
+  });
+
+  it("refuses a Mac binary whose mcp is an unrecognized subcommand, naming what it said and how to build it", () => {
+    const bin = daemonStub(false);
+    expect(toolServerRefusal(bin, "aarch64-apple-darwin", "darwin")).toBe(
+      `${bin} has no tool server (wsp-daemon mcp said: error: unrecognized subcommand 'mcp'), and a Mac's daemon carries it: build it in daemon/ with cargo build --release -p wsp-daemon-bin --features mcp, the flags node packages/wspx/scripts/daemon-features.mjs prints`,
+    );
+  });
+
+  it("takes a Mac binary whose mcp answers, and reads no Linux binary at all", () => {
+    expect(toolServerRefusal(daemonStub(true), "aarch64-apple-darwin", "darwin")).toBeUndefined();
+    expect(toolServerRefusal("/nonexistent/wsp-daemon", "x86_64-unknown-linux-musl")).toBeUndefined();
+  });
+
+  it("answers null off a Mac without running it, and on a Mac that cannot start it, so staging says it went unchecked", () => {
+    expect(toolServerRefusal(daemonStub(false), "aarch64-apple-darwin", "linux")).toBeNull();
+    expect(toolServerRefusal("/nonexistent/wsp-daemon", "aarch64-apple-darwin", "darwin")).toBeNull();
+  });
+
+  it("is built by every workflow that ships or stages a daemon with the features the flag script names, never its own", () => {
+    const workflow = (name: string): string => readFileSync(join(repo, ".github", "workflows", name), "utf8");
+    const artifacts = workflow("daemon.yml").slice(workflow("daemon.yml").indexOf("  daemon-artifacts:"));
+    for (const [name, text] of [["release.yml", workflow("release.yml")], ["desktop-smoke.yml", workflow("desktop-smoke.yml")], ["daemon.yml daemon-artifacts", artifacts]] as const) {
+      const builds = text.split("\n").filter(line => /cargo build .*-p wsp-daemon-bin/.test(line));
+      expect(builds.length, name).toBeGreaterThan(0);
+      for (const line of builds) expect(line, name).toMatch(/daemon-features\.mjs|\$FEATURES$/);
+      expect(text, name).not.toContain("--features mcp");
+    }
+    expect(workflow("release.yml")).toContain('FEATURES=$(node ../packages/wspx/scripts/daemon-features.mjs "$TARGET")');
+  });
+
+  it("stages nothing for a Mac target from a binary with no tool server on a Mac, and says it went unchecked elsewhere", () => {
+    const bin = daemonStub(false);
+    const ran = run("", "--triple", MAC_TRIPLE, "--from", bin);
+    if (process.platform === "darwin") {
+      expect(ran.ok).toBe(false);
+      expect(ran.said).toBe(toolServerRefusal(bin, MAC_TRIPLE));
+      expect(existsSync(stagedMac)).toBe(false);
+    } else {
+      expect(ran.ok, ran.said).toBe(true);
+      expect(ran.said).toContain(`${MAC_TRIPLE}: this computer cannot run it, so its tool server is checked where it can`);
+      rmSync(stagedMac, { recursive: true, force: true });
+    }
+    const good = run("", "--triple", MAC_TRIPLE, "--from", daemonStub(true));
+    expect(good.ok, good.said).toBe(true);
+    expect(existsSync(join(stagedMac, "wsp-daemon"))).toBe(true);
   });
 });

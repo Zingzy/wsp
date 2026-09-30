@@ -1265,6 +1265,46 @@ impl Ops {
         self.inside(&record, cmd, stdin, timeout).await
     }
 
+    /// A server started inside a running workspace, held by a helper: the one road a process that outlives its
+    /// ask is started by. Work, as an exec is.
+    pub async fn spawn_in(&self, id: &str, args: &[String]) -> Result<runtime::Spawned, OpError> {
+        let record = self.running(id)?;
+        self.net.touched(&record.id);
+        Ok(self.runtime.spawn(&record.id, args).await?)
+    }
+
+    /// The files of an editor's ssh server inside a running workspace, written by the one rule every write inside
+    /// is held to, so a link the workspace planted there reaches nothing of this computer's.
+    pub fn write_ssh_files_in(&self, id: &str, authorized_keys: &[u8], config: &[u8]) -> Result<(), OpError> {
+        let record = self.running(id)?;
+        bundle::write_ssh_files_inside(&self.layout.inside_of(&record.id), authorized_keys, config)
+            .map_err(|e| OpError::plain(e.to_string()))
+    }
+
+    /// That server's host key inside a running workspace, read by the same rule; nothing where none is made yet.
+    pub fn ssh_host_key_in(&self, id: &str) -> Result<Option<String>, OpError> {
+        let record = self.running(id)?;
+        bundle::ssh_host_key_inside(&self.layout.inside_of(&record.id)).map_err(|e| OpError::plain(e.to_string()))
+    }
+
+    /// The cgroup a running workspace's processes live in, under which a server of its own is given one.
+    pub fn cgroup_of_running(&self, id: &str) -> Result<PathBuf, OpError> {
+        let record = self.running(id)?;
+        Ok(self.layout.cgroup_dir(&record.id))
+    }
+
+    /// A port on a running workspace's own loopback, dialled inside its network namespace.
+    pub async fn dial_in(&self, id: &str, port: u16) -> Result<tokio::net::TcpStream, OpError> {
+        let record = self.running(id)?;
+        net::dial_inside(record.init.pid, port).await.map_err(|e| OpError::plain(e.to_string()))
+    }
+
+    /// A port free right now on that loopback.
+    pub async fn free_port_in(&self, id: &str) -> Result<u16, OpError> {
+        let record = self.running(id)?;
+        net::free_port_inside(record.init.pid).await.map_err(|e| OpError::plain(e.to_string()))
+    }
+
     /// The same command, read rather than run: a pane asking a workspace what its files and its checkout hold
     /// leaves the quiet clock where it was, however often it asks. A workspace nobody is working in is one this
     /// computer may stop, and a person with a pane open is not working in it.

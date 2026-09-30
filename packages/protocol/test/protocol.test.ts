@@ -896,6 +896,8 @@ describe("runtime wire types", () => {
       "image.export", "host.folders", "agents.read", "servers.tools", "servers.icon", "agents.signIn", "servers.signIn", "agents.signInCode", "agents.signInStop", "agents.signInLine", "agents.key", "agents.addTools", "skills.search", "skills.get", "skills.preview", "skills.add", "skills.remove", "skills.toggle", "servers.add", "servers.remove", "servers.toggle", "project.seed.plan", "project.plan", "project.import", "project.export",
       "pair.issue", "pair.redeem", "seal.open", "device.auth", "place.join", "place.auth", "place.prove", "host.restart",
       "editor.list", "editor.open",
+      // A port on this computer's loopback into a workspace's ssh, and a line in the person's own ssh config.
+      "ssh.port", "ssh.include",
       // A commit runs the copy's hooks, a draft runs its agent and spends on a model, and a discard throws work away.
       "workspaces.commit", "workspaces.commitDraft", "workspaces.discard",
       // A fix starts the agent's turn and spends on a model, an update runs git in the copy, and a merge acts on the

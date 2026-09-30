@@ -686,3 +686,13 @@ pub struct GitUpdateReply {
     pub commits: u64,
     pub conflicts: Vec<String>,
 }
+
+/// Where a machine's own ssh server listens on its loopback, and the host key it proves itself with, one OpenSSH
+/// public key line.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct SshStartReply {
+    pub port: u16,
+    pub host_key: String,
+}

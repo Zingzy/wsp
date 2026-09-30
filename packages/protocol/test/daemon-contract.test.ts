@@ -96,6 +96,7 @@ import {
   GitPushReply,
   GuestCliMessage,
   GuestOpenReply,
+  SshStartReply,
   HostFolderListing,
   HTTP_URL_MAX,
   NOT_ON_A_BRANCH,
@@ -121,6 +122,8 @@ import {
   OPEN_SHIM_PATH,
   OPEN_SOCKET_PATH,
   PID_MAX,
+  SSH_IDLE_MS,
+  SSH_KEY_MAX,
   PLACE_LINK_NONCE_BYTES,
   PORT_COMMAND_BYTES,
   PRE_AUTH_MAX_BYTES,
@@ -334,6 +337,8 @@ const numbers = (): Record<string, number | string | readonly string[]> => ({
   portCommandBytes: PORT_COMMAND_BYTES,
   procCap: PROC_CAP,
   pidMax: PID_MAX,
+  sshKeyMax: SSH_KEY_MAX,
+  sshIdleMs: SSH_IDLE_MS,
   openBodyMax: HTTP_URL_MAX,
   daemonDefaultHost: DAEMON_DEFAULT_HOST,
   daemonDefaultPort: DAEMON_DEFAULT_PORT,
@@ -642,6 +647,7 @@ const REPLIES: Record<string, { schema: ZodTypeAny; samples: unknown[] }> = {
   GitSnapshotReply: { schema: GitSnapshotReply, samples: [{ commit: "0123456789abcdef0123456789abcdef01234567" }] },
   FsFilesReply: { schema: FsFilesReply, samples: [{ files: ["README.md", "src/ChatView.tsx"], truncated: false }, { files: [], truncated: true }] },
   GuestOpenReply: { schema: GuestOpenReply, samples: [{ session: "g1" }] },
+  SshStartReply: { schema: SshStartReply, samples: [{ port: 42022, hostKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOvWlEn2x0cQO0mTu7nV9VbWSm5aXQ3u2QYqZ2mGHcbS" }] },
   HostFolderListing: {
     schema: HostFolderListing,
     samples: [

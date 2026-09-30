@@ -50,6 +50,10 @@ jobs:
         working-directory: daemon
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The build reads its features off the flag script.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
       - name: Toolchain from rust-toolchain.toml
         run: |
           rustup toolchain install
@@ -67,8 +71,8 @@ jobs:
             daemon-release-${{ matrix.target }}-
       # Each Linux binary is a static musl build on its own chip's runner: ring carries C, which musl-tools compiles
       # for the musl target, and libcontainer links a libseccomp built against musl by the script, from its pinned
-      # release. The darwin builds link no C library of their own, and carry the tool server: a Mac is never a guest,
-      # so the feature costs no guest a byte, and an agent's wsp tools run from this binary with no node process.
+      # release. The darwin builds link no C library of their own. The features each target takes are the flag
+      # script's, the one place every road that builds a daemon reads them.
       - name: C compiler for the musl target, and libseccomp built against musl
         if: runner.os == 'Linux'
         run: |
@@ -78,10 +82,11 @@ jobs:
         env:
           TARGET: ${{ matrix.target }}
         run: |
+          FEATURES=$(node ../packages/wspx/scripts/daemon-features.mjs "$TARGET")
           if [ "$RUNNER_OS" = "Linux" ]; then
-            LIBSECCOMP_LIB_PATH="$PWD/target/libseccomp/musl" cargo build --locked --release --target "$TARGET" -p wsp-daemon-bin
+            LIBSECCOMP_LIB_PATH="$PWD/target/libseccomp/musl" cargo build --locked --release --target "$TARGET" -p wsp-daemon-bin $FEATURES
           else
-            cargo build --locked --release --target "$TARGET" -p wsp-daemon-bin --features mcp
+            cargo build --locked --release --target "$TARGET" -p wsp-daemon-bin $FEATURES
           fi
           cp "target/$TARGET/release/wsp-daemon" "wsp-daemon-$TARGET"
           ls -l "wsp-daemon-$TARGET"

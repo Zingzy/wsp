@@ -40,8 +40,39 @@ export function baseInstalls(carried: ReadonlySet<string> = new Set(), path: str
     if (!("cmd" in step)) throw new Error(`${e.id}: ${step.note}`);
     out.push({ id: stepId(e.id), label: e.name, manager: e.installRoad.road, ...step, cmd: withEnv(step.cmd), ...(waits !== undefined ? { after: stepId(waits) } : {}), bin: e.bin });
   }
+  if (!carried.has(SSH_SERVER)) out.push(sshServerStep(path, prefix, out.some(t => t.id === APT_STEP)));
   return out;
 }
+
+/** The ssh server wsp's daemon starts on a workspace's loopback when an editor opens it, on every golden and on every
+ * box the floor runs on, whose forks run its own /usr: a machine that has one keeps its own and its own units as they
+ * stand, and the step is not in its plan at all. Where this step installs it, the package's own
+ * service would answer on port 22, through ssh.socket on Ubuntu 24.04 whatever ssh.service says, so both are
+ * turned off here and nowhere else. It waits on the floor's index read, and reads its own where the plan has none. */
+const SSH_SERVER = "ssh-server";
+const sshServerStep = (path: string, prefix: string | undefined, indexed: boolean): ToolInstall => ({
+  id: stepId(SSH_SERVER),
+  label: "OpenSSH server",
+  manager: "apt",
+  check: SSHD_THERE,
+  // The guard is the step's own first line, beside the read that left the step out: on a machine with an sshd of
+  // its own the units below are that machine's and not this step's to turn off. The policy file keeps the package
+  // from opening port 22 while it installs, and comes off only where this step put it there.
+  cmd: withEnv(
+    [
+      pathLine(path, prefix),
+      `if ${SSHD_THERE}; then exit 0; fi`,
+      ...(indexed ? [] : [APT_UPDATE]),
+      `if [ ! -e ${POLICY_RC} ]; then printf '#!/bin/sh\\nexit 101\\n' >${POLICY_RC}; chmod 755 ${POLICY_RC}; trap 'rm -f ${POLICY_RC}' EXIT; fi`,
+      "apt-get install -y -qq openssh-server",
+      "(systemctl disable --now ssh.socket ssh.service >/dev/null 2>&1 || true)",
+    ].join("\n"),
+  ),
+  shown: "apt-get install openssh-server",
+  ...(indexed ? { after: APT_STEP } : {}),
+});
+const SSHD_THERE = "test -x /usr/sbin/sshd";
+const POLICY_RC = "/usr/sbin/policy-rc.d";
 
 interface VersionCheck {
   /** The name the line and the machine context show. */
@@ -51,7 +82,11 @@ interface VersionCheck {
   id?: string;
 }
 
-const VERSION_CHECKS: readonly VersionCheck[] = BASE_FLOOR.flatMap(e => [{ name: e.bin, cmd: smokeOf(e), id: e.id }, ...(e.brings ?? []).map(b => ({ name: b.bin, cmd: b.version }))]);
+/** The ssh server the base stage installs where the image has none, read with the floor: sshd prints its version
+ * on stderr, which the read drops, so its own shell sends it to stdout. */
+const SSHD_VERSION: VersionCheck = { name: "sshd", cmd: "sh -c 'sshd -V 2>&1'" };
+
+const VERSION_CHECKS: readonly VersionCheck[] = [...BASE_FLOOR.flatMap(e => [{ name: e.bin, cmd: smokeOf(e), id: e.id }, ...(e.brings ?? []).map(b => ({ name: b.bin, cmd: b.version }))]), SSHD_VERSION];
 
 /** The number a version line has to carry to be worth reading, as the read and the parse below each spell it in
  * their own language: two runs of digits with a dot between them. The read keeps the first line carrying one rather
@@ -94,6 +129,7 @@ export function carriedByImage(versions: readonly GoldenBaseTool[]): Set<string>
     if (major !== undefined && read.get(e.bin)!.split(".").slice(0, major.version.split(".").length).join(".") !== major.version) continue;
     out.add(e.id);
   }
+  if (read.has(SSHD_VERSION.name)) out.add(SSH_SERVER);
   return out;
 }
 

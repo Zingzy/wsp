@@ -104,10 +104,23 @@ pub enum DaemonEvent {
     },
     #[serde(rename = "callback.port")]
     CallbackPort { port: RelayPort },
+    /// Bytes from a tunnel's port; machineId names the workspace the tunnel dials inside, on a computer answering
+    /// for several, so the host hands them to that workspace's channel alone.
     #[serde(rename = "tunnel.data", rename_all = "camelCase")]
-    TunnelData { tunnel_id: String, data: String },
+    TunnelData {
+        tunnel_id: String,
+        data: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        machine_id: Option<String>,
+    },
     #[serde(rename = "tunnel.end", rename_all = "camelCase")]
-    TunnelEnd { tunnel_id: String },
+    TunnelEnd {
+        tunnel_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        machine_id: Option<String>,
+    },
     #[serde(rename = "localhost.url")]
     LocalhostUrl { port: RelayPort },
     #[serde(rename = "sys.sample")]

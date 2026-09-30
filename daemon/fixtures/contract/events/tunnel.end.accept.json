@@ -2,5 +2,10 @@
   {
     "type": "tunnel.end",
     "tunnelId": "t1"
+  },
+  {
+    "type": "tunnel.end",
+    "tunnelId": "e7",
+    "machineId": "wsp-925c75ec3d5db653"
   }
 ]

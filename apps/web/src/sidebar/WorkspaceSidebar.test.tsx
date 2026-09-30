@@ -13,6 +13,7 @@ import { useStore } from "../protocol/store.js";
 import { provideTerminals, WorkspaceTerminals, type TerminalWire } from "../terminal/link.js";
 import { WorkspaceSidebar } from "./WorkspaceSidebar.js";
 import { PROJECT_WORDS } from "./words.js";
+import { EDITOR_SSH_WORDS } from "../files/EditorConsent.js";
 
 // The triggers keep their elements and no popup mounts: Base UI's positioning against jsdom's zero-size rects
 // costs seconds per open, and this file reads rows rather than popups.
@@ -202,6 +203,30 @@ describe("the sidebar's list of thread tiles", () => {
     const three = (id: string): HTMLElement => document.querySelector<HTMLElement>(`[data-row-id='ws:${id}']`)!.children[2] as HTMLElement;
     const counts = (id: string): string[] => [...three(id).querySelectorAll("[data-tile-count]")].map(n => n.textContent ?? "");
     const fact: Checkout = { branch: "fix/cart-rounding", ahead: 1, behind: 0, changed: 3, readAt: 1 };
+
+    it("says an editor is attached, first, while one is connected over ssh, and stops saying it when it goes", async () => {
+      mount({ projects: [project("pr_1", "spoo")], workspaces: [fork] });
+      await waitFor(() => expect(rowIds()).toEqual(["ws:ws_f"]));
+      act(() => useStore.setState({ statuses: { ws_f: statusOf(fork, fact) } } as never));
+      await waitFor(() => expect(counts("ws_f")).toEqual(["1 ahead", "3 changed"]));
+      const editor = { workspaceId: "ws_f", port: 51022, startedAt: "2026-09-29T10:00:00Z", name: "cart rounding", kind: "editor" as const };
+      act(() => useStore.setState({ forwards: [editor, { ...editor, workspaceId: "ws_other" }] } as never));
+      await waitFor(() => expect(counts("ws_f")).toEqual([EDITOR_SSH_WORDS.attached, "1 ahead", "3 changed"]));
+      // Nor is it a port of the forwarded list: nothing but wsp ssh dials it.
+      expect(rowIds()).toEqual(["ws:ws_f"]);
+      act(() => useStore.setState({ forwards: [] } as never));
+      await waitFor(() => expect(counts("ws_f")).toEqual(["1 ahead", "3 changed"]));
+    });
+
+    it("says an editor is attached on a tile whose branch the host has not read yet, with no branch glyph beside it", async () => {
+      const { copy: _c, ...unread } = fork;
+      mount({ projects: [project("pr_1", "spoo")], workspaces: [{ ...unread, copy: undefined } as WorkspaceView] });
+      await waitFor(() => expect(rowIds()).toEqual(["ws:ws_f"]));
+      act(() => useStore.setState({ forwards: [{ workspaceId: "ws_f", port: 51022, startedAt: "2026-09-29T10:00:00Z", name: "cart rounding", kind: "editor" }] } as never));
+      await waitFor(() => expect(counts("ws_f")).toEqual([EDITOR_SSH_WORDS.attached]));
+      expect(three("ws_f").querySelector(".lucide-git-branch")).toBeNull();
+      act(() => useStore.setState({ forwards: [] } as never));
+    });
 
     it("draws the branch and each count the host's fact carries, spaced and never joined, a zero left out", async () => {
       mount({ projects: [project("pr_1", "spoo")], workspaces: [fork] });

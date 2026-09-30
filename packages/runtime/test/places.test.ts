@@ -2629,10 +2629,15 @@ function forks(
         return void client.say({ id, ok: false, error: "a container serves no signed URL" });
       case "tunnel.open":
         seen.tunnels.push({ tunnelId: String(frame["tunnelId"]), port: Number(frame["port"]) });
+        seen.frames.push(frame);
         return say({});
       case "tunnel.write":
       case "tunnel.close":
+        seen.frames.push(frame);
         return say({});
+      case "ssh.start":
+        seen.frames.push(frame);
+        return say({ port: 40022, hostKey: "ssh-ed25519 AAAAC3Nz the-fork" });
       case "exec":
         return say({ exitCode: 0, stdout: "", stderr: "", truncated: false });
       // The workspace's own git, answered by this computer's daemon for the workspace the frame names, which is
@@ -3214,6 +3219,8 @@ describe("a fork on a computer you joined", () => {
   const PTY = ["pty.create", "pty.attach", "pty.detach", "pty.write", "pty.resize", "pty.kill", "pty.list"];
   const FILES_AND_GIT = ["fs.list", "fs.files", "fs.read", "fs.write", "fs.search", "git.status", "git.diff", "git.snapshot", "git.range", "git.push", "git.pr", "git.prList"];
   const HOST_GUESTS = ["guest.watch", "guest.reply", "guest.close"];
+  /** The host's own road to an editor's ssh server inside the fork: its start and the tunnel that carries to it. */
+  const HOST_TUNNELS = ["ssh.start", "tunnel.open", "tunnel.write", "tunnel.close"];
   const REFUSED = [
     "ports.watch",
     "sys.watch",
@@ -3238,9 +3245,6 @@ describe("a fork on a computer you joined", () => {
     "git.prMerge",
     "git.repoRead",
     "git.update",
-    "tunnel.open",
-    "tunnel.write",
-    "tunnel.close",
     "exec",
     "place.leave",
     "place.update",
@@ -3250,11 +3254,11 @@ describe("a fork on a computer you joined", () => {
 
   it.each([
     { road: "a client's", open: (id: string) => runtime!.workspaces.daemonChannel(id, () => {}), carried: [...PTY, ...FILES_AND_GIT, "ping"] },
-    { road: "the host's guest road's", open: (id: string) => runtime!.workspaces.guestChannel(id, () => {}), carried: [...PTY, ...FILES_AND_GIT, "ping", ...HOST_GUESTS] },
+    { road: "the host's guest road's", open: (id: string) => runtime!.workspaces.guestChannel(id, () => {}), carried: [...PTY, ...FILES_AND_GIT, "ping", ...HOST_GUESTS, ...HOST_TUNNELS] },
   ])("places every op the computer's daemon serves on $road channel into a fork: carried naming that fork, or refused before it leaves", async ({ open, carried }) => {
     const ops = daemonOps();
     const machineOps = ops.filter(o => o.op.startsWith("machine.")).map(o => o.op);
-    expect(ops.map(o => o.op).sort()).toEqual([...PTY, ...FILES_AND_GIT, "ping", ...HOST_GUESTS, ...REFUSED, ...machineOps].sort());
+    expect(ops.map(o => o.op).sort()).toEqual([...PTY, ...FILES_AND_GIT, "ping", ...HOST_GUESTS, ...HOST_TUNNELS, ...REFUSED, ...machineOps].sort());
     const { place, machineId, id } = await servedFork();
     const channel = await open(id);
     for (const { op, scoped } of ops) {
@@ -3262,7 +3266,7 @@ describe("a fork on a computer you joined", () => {
       const reply = await channel.send({ op, ptyId: "p1", path: "/root/work", cwd: "/root/work", session: "g1", message: {} });
       if (carried.includes(op)) {
         // ping reads nothing of any workspace's; the guest road's three answer a session by the id the computer gave it.
-        expect(scoped || op === "ping" || HOST_GUESTS.includes(op), op).toBe(true);
+        expect(scoped || op === "ping" || HOST_GUESTS.includes(op) || HOST_TUNNELS.includes(op), op).toBe(true);
         expect(reply, op).toMatchObject({ ok: true });
         expect(place.frames.filter(f => f["op"] === op).at(-1), op).toMatchObject({ machineId });
       } else {
@@ -3271,6 +3275,26 @@ describe("a fork on a computer you joined", () => {
       }
     }
     channel.close();
+  });
+
+  it("carries an editor's ssh into a fork on the host's own road with the fork named, and hands that road the fork's tunnel frames alone", async () => {
+    const { place, machineId, id } = await servedFork();
+    const heard: Record<string, unknown>[] = [];
+    const road = await runtime!.workspaces.guestChannel(id, e => heard.push(e));
+    expect(await road.send({ op: "ssh.start", authorizedKey: "ssh-ed25519 AAAAC3Nz the-mac" })).toMatchObject({ ok: true });
+    expect(place.frames.at(-1)).toMatchObject({ op: "ssh.start", machineId });
+    expect(await road.send({ op: "tunnel.open", tunnelId: "t1", port: 40022 })).toMatchObject({ ok: true });
+    expect(place.frames.at(-1)).toMatchObject({ op: "tunnel.open", tunnelId: "t1", port: 40022, machineId });
+    // Every fork on that computer rides the one link, and its tunnel ids are nobody's but this road's.
+    place.push({ type: "tunnel.data", tunnelId: "t1", data: "b3RoZXI=", machineId: "another-workspace" });
+    place.push({ type: "tunnel.data", tunnelId: "t1", data: "U1NILTIuMA==", machineId });
+    place.push({ type: "tunnel.end", tunnelId: "t1", machineId });
+    await until(() => heard.some(e => e["type"] === "tunnel.end"));
+    expect(heard.filter(e => String(e["type"]).startsWith("tunnel."))).toEqual([
+      { type: "tunnel.data", tunnelId: "t1", data: "U1NILTIuMA==", machineId },
+      { type: "tunnel.end", tunnelId: "t1", machineId },
+    ]);
+    road.close();
   });
 
   it("opens no channel at all on a computer whose daemon is older than the one this wsp deploys", async () => {
