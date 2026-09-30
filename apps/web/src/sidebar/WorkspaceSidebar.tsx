@@ -66,7 +66,8 @@ import { PROJECT_WORDS, SECTION_WORDS } from "./words.js";
 import { SectionRow } from "./SectionRow.js";
 
 type Fold = SidebarSection | "settled";
-const FOLDS: readonly Fold[] = [...SIDEBAR_SECTIONS, "settled"];
+/** The folds a head can make: the one list has no head, so it never folds. */
+const FOLDS: readonly Fold[] = ["pinned", "needs-you", "settled"];
 /** The sections a person has folded by their heads. Settled starts folded, since it holds the tiles a person has
  * stopped looking at; every live section starts open. */
 const FOLDED_KEY = "wsp:sidebar-folded";
@@ -429,8 +430,8 @@ export function WorkspaceSidebar() {
     ];
   });
   const made = creations.filter(creation => picked === null || creation.project === picked.project.id);
-  /** A workspace being made files where a thread in its state does: Working while it is made, Needs you once refused. */
-  const madeIn = (id: SidebarSection): Creation[] => made.filter(creation => (creation.failed === null ? "working" : "needs-you") === id);
+  /** A workspace being made files where a thread in its state does: the list while it is made, Needs you once refused. */
+  const madeIn = (id: SidebarSection): Creation[] => made.filter(creation => (creation.failed === null ? "threads" : "needs-you") === id);
   /** A root dropped on a section or on the fold: the marks the drop writes, or the settle of its tree. */
   const drop = (rootId: string, place: SidebarSection | "settled"): void => {
     const node = tiles.live.find(root => root.thread.id === rootId);
@@ -569,18 +570,21 @@ export function WorkspaceSidebar() {
                 className={cn("min-w-0 rounded-[var(--control-radius)] transition-colors duration-150", index > 0 && "mt-3", over === section.id && "bg-sidebar-row-hover")}
                 {...dropZone(section.id)}
               >
-                <SectionRow
-                  label={SECTION_WORDS[section.id]}
-                  count={section.roots.reduce((sum, node) => sum + tileCount(node), 0) + madeIn(section.id).length}
-                  collapsed={folded.includes(section.id)}
-                  onToggle={() => toggleFold(section.id)}
-                  rowId={sectionRowId(section.id)}
-                  head={section.id}
-                />
-                {folded.includes(section.id) ? null : (
+                {/* The one list stands bare between Needs you and Settled, as T3 Code's active list. */}
+                {section.id === "threads" ? null : (
+                  <SectionRow
+                    label={SECTION_WORDS[section.id]}
+                    count={section.roots.reduce((sum, node) => sum + tileCount(node), 0) + madeIn(section.id).length}
+                    collapsed={folded.includes(section.id)}
+                    onToggle={() => toggleFold(section.id)}
+                    rowId={sectionRowId(section.id)}
+                    head={section.id}
+                  />
+                )}
+                {section.id !== "threads" && folded.includes(section.id) ? null : (
                   <ul className="flex min-w-0 flex-col">
-                    {section.roots.map(node => tileItem(node, 0, null))}
                     {madeIn(section.id).map(creationItem)}
+                    {section.roots.map(node => tileItem(node, 0, null))}
                   </ul>
                 )}
               </li>

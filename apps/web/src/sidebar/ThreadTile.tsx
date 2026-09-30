@@ -203,8 +203,9 @@ export function ThreadTile({
 }) {
   const snoozed = snoozedWorking !== undefined;
   const status = settled || snoozed ? RESTING : threadStatusOf(thread);
-  // Only a resting thread steps back; a failed one or one waiting on the person keeps the foreground ink.
-  const idle = status === RESTING;
+  // A working or read row recedes unless it is the one open, as T3 Code's shouldRecede; a row that calls for the
+  // person keeps the foreground ink, and the label keeps its hue either way.
+  const recede = !active && (status === RESTING || status.id === "working");
   if (settled)
     return (
       <SidebarMenuButton
@@ -254,7 +255,7 @@ export function ThreadTile({
         status={
           snoozed ? (
             <SnoozedWorking count={snoozedWorking} />
-          ) : idle && linkDown !== undefined ? (
+          ) : status === RESTING && linkDown !== undefined ? (
             <span data-thread-status="link-down" title={linkDown.sentence} className="inline-flex shrink-0 items-center whitespace-nowrap">
               {linkDown.word}
             </span>
@@ -268,7 +269,7 @@ export function ThreadTile({
               <RowNameInput name={thread.title} label={THREAD_WORDS.rename} saving={saving} onRename={onRename} onCancel={onRenameCancel} />
             </span>
           ) : (
-            <Title text={label ?? thread.title} idle={idle} active={active} onDoubleClick={onRenameOpen} />
+            <Title text={label ?? thread.title} idle={recede} active={active} onDoubleClick={onRenameOpen} />
           )
         }
         harness={thread.harness}

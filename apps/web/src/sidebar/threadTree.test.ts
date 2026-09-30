@@ -132,7 +132,7 @@ describe("the sidebar's tiles", () => {
       row("ws_b", "pr_1", [done("stale", "ws_b", 40), thread("busy-child", "ws_b", "stale"), done("failed", "ws_b", 5, null, { status: "failed" })]),
     ];
     const { live, settled } = sidebarTiles(rows, { picked: null, nowMs: NOW });
-    expect(shape(live)).toEqual(["failed", ["stale", ["busy-child"]], "recent"]);
+    expect(shape(live)).toEqual(["failed", "recent", ["stale", ["busy-child"]]]);
     expect(shape(settled)).toEqual([["quiet", ["quiet-child"]]]);
   });
 
@@ -207,7 +207,7 @@ const sections = (rows: SidebarProjectSnapshot[], o: Partial<Parameters<typeof s
   sidebarTiles(rows, { picked: null, nowMs: NOW, ...o }).sections.map(section => [section.id, shape(section.roots)]);
 
 describe("the sections the live list is drawn in", () => {
-  it("files each root tree under Needs you, Working, Done or Idle by the most pressing thread in it, newest first inside each, and the live list reads them in that order", () => {
+  it("files a tree waiting on the person under Needs you and every other live tree in one list, newest first, whatever it is doing", () => {
     const rows = [
       row("ws_a", "pr_1", [
         thread("asks", "ws_a", null, { asking: "Permission for Bash", needsYou: true, startedAt: ago(0.1) }),
@@ -222,11 +222,9 @@ describe("the sections the live list is drawn in", () => {
     ];
     expect(sections(rows)).toEqual([
       ["needs-you", ["asks", "broke"]],
-      ["working", ["works", ["lead", ["builder"]]]],
-      ["done", ["unseen"]],
-      ["idle", ["read", "ws:ws_b"]],
+      ["threads", ["works", "unseen", "read", ["lead", ["builder"]], "ws:ws_b"]],
     ]);
-    expect(shape(sidebarTiles(rows, { picked: null, nowMs: NOW }).live)).toEqual(["asks", "broke", "works", ["lead", ["builder"]], "unseen", "read", "ws:ws_b"]);
+    expect(shape(sidebarTiles(rows, { picked: null, nowMs: NOW }).live)).toEqual(["asks", "broke", "works", "unseen", "read", ["lead", ["builder"]], "ws:ws_b"]);
   });
 
   it("puts pinned trees first whatever their state, the latest pin on top; a pinned tree never folds by time, and a settle by hand folds it all the same", () => {
@@ -241,36 +239,49 @@ describe("the sections the live list is drawn in", () => {
     const { settled } = sidebarTiles(rows, { picked: null, nowMs: NOW });
     expect(sections(rows)).toEqual([
       ["pinned", ["old", "works"]],
-      ["idle", ["other"]],
+      ["threads", ["other"]],
     ]);
     expect(shape(settled)).toEqual(["put-away"]);
   });
 
   it("holds a tree where it was dragged while its state is the one it was dragged in, and files it by its state again once that moves", () => {
     const working = thread("works", "ws_a");
-    const placed = placementFor(sidebarTiles([row("ws_a", "pr_1", [working])], { picked: null, nowMs: NOW }).live[0]!, "done");
-    expect(sections([row("ws_a", "pr_1", [{ ...working, section: placed }])])).toEqual([["done", ["works"]]]);
-    // The turn ended: a new state, so the placement no longer holds and the finish nobody saw reads as Done anyway.
+    const placed = placementFor(sidebarTiles([row("ws_a", "pr_1", [working])], { picked: null, nowMs: NOW }).live[0]!, "needs-you");
+    expect(sections([row("ws_a", "pr_1", [{ ...working, section: placed }])])).toEqual([["needs-you", ["works"]]]);
+    // The turn ended: a new state, so the placement no longer holds.
     const ended = done("works", "ws_a", 0.1, null, { section: placed });
-    expect(sections([row("ws_a", "pr_1", [ended])])).toEqual([["idle", ["works"]]]);
-    // A new turn on the thread is a new state too, even back in the section it was dragged out of.
+    expect(sections([row("ws_a", "pr_1", [ended])])).toEqual([["threads", ["works"]]]);
+    // A new turn on the thread is a new state too.
     const again = thread("works", "ws_a", null, { sessionId: "s_again", section: placed });
-    expect(sections([row("ws_a", "pr_1", [again])])).toEqual([["working", ["works"]]]);
+    expect(sections([row("ws_a", "pr_1", [again])])).toEqual([["threads", ["works"]]]);
+    // A placement an older sidebar wrote into Working, Done or Idle draws in the one list.
+    expect(sections([row("ws_a", "pr_1", [{ ...working, section: { name: "done", whileState: "working:s_works" } }])])).toEqual([["threads", ["works"]]]);
   });
 
   it("a drop on another section places the tree there, a drop on Pinned pins it, a pinned tree dropped elsewhere loses its pin, and a drop on its own section clears a placement", () => {
-    const [works, pinned, placed, idle] = sidebarTiles(
-      [row("ws_a", "pr_1", [thread("works", "ws_a"), done("pinned", "ws_a", 0.2, null, { pinnedAt: ago(1) }), thread("placed", "ws_a", null, { section: { name: "done", whileState: "working:s_placed" } }), done("idle", "ws_a", 0.3)])],
+    const order = ["works", "pinned", "placed", "idle", "asks"];
+    const [works, pinned, placed, idle, asks] = sidebarTiles(
+      [
+        row("ws_a", "pr_1", [
+          thread("works", "ws_a"),
+          done("pinned", "ws_a", 0.2, null, { pinnedAt: ago(1) }),
+          thread("placed", "ws_a", null, { section: { name: "needs-you", whileState: "working:s_placed" } }),
+          done("idle", "ws_a", 0.3),
+          thread("asks", "ws_a", null, { asking: "Permission for Bash", needsYou: true }),
+        ]),
+      ],
       { picked: null, nowMs: NOW },
-    ).live.sort((a, b) => ["works", "pinned", "placed", "idle"].indexOf(a.thread.id) - ["works", "pinned", "placed", "idle"].indexOf(b.thread.id));
-    expect(dropMarks(works!, "done")).toEqual({ section: { name: "done", whileState: "working:s_works" } });
+    ).live.sort((a, b) => order.indexOf(a.thread.id) - order.indexOf(b.thread.id));
+    expect(dropMarks(works!, "needs-you")).toEqual({ section: { name: "needs-you", whileState: "working:s_works" } });
     expect(dropMarks(works!, "pinned")).toEqual({ pinned: true });
-    expect(dropMarks(works!, "working")).toBeNull();
+    expect(dropMarks(works!, "threads")).toBeNull();
     expect(dropMarks(pinned!, "pinned")).toBeNull();
-    expect(dropMarks(pinned!, "idle")).toEqual({ pinned: false, section: null });
+    expect(dropMarks(pinned!, "threads")).toEqual({ pinned: false, section: null });
     expect(dropMarks(pinned!, "needs-you")).toEqual({ pinned: false, section: { name: "needs-you", whileState: "idle:s_pinned" } });
-    expect(dropMarks(placed!, "working")).toEqual({ section: null });
-    expect(dropMarks(idle!, "idle")).toBeNull();
+    expect(dropMarks(placed!, "threads")).toEqual({ section: null });
+    expect(dropMarks(idle!, "threads")).toBeNull();
+    // A tree that asks, dropped on the list, is held there while it asks.
+    expect(dropMarks(asks!, "threads")).toEqual({ section: { name: "idle", whileState: "needs-you:s_asks" } });
   });
 
   it("leaves a snoozed tree out of the list and the fold, and brings it back early when a thread in it needs the person", () => {
@@ -282,11 +293,11 @@ describe("the sections the live list is drawn in", () => {
     expect(sections(asked)).toEqual([["needs-you", [["away", ["child"]]]]]);
   });
 
-  it("keeps a snoozed tree reachable while a thread in it runs: its root alone at the foot of Idle, folded, carrying how many work", () => {
+  it("keeps a snoozed tree reachable while a thread in it runs: its root alone at the foot of the list, folded, carrying how many work", () => {
     const snoozedUntil = new Date(NOW + 3_600_000).toISOString();
     const running = [row("ws_a", "pr_1", [done("away", "ws_a", 30, null, { snoozedUntil }), thread("child", "ws_a", "away"), thread("grandchild", "ws_a", "child"), done("here", "ws_a", 0.1)])];
     const tiles = sidebarTiles(running, { picked: null, nowMs: NOW });
-    expect(sections(running)).toEqual([["idle", ["here", "away"]]]);
+    expect(sections(running)).toEqual([["threads", ["here", "away"]]]);
     const away = tiles.live.find(node => node.thread.id === "away")!;
     expect(away.children).toEqual([]);
     expect(away.thread.snoozedWorking).toBe(2);

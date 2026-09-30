@@ -1431,7 +1431,7 @@
         "390:key:Escape",
         "390:sidebar=trigger"
       ],
-      "wait": "tile-count",
+      "wait": "tile-branch",
       "settleMs": 1200
     },
     {
@@ -1647,7 +1647,7 @@
         "1440:row-id=thread:cart",
         "390:key:Escape",
         "390:sidebar=trigger",
-        "section-head=done",
+        "section-head=needs-you",
         "row-id=settled"
       ],
       "wait": "row-id=settled",

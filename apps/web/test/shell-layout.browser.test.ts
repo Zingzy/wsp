@@ -3,10 +3,9 @@
 // search row does and the brand lockup one gap after it, the search row is a
 // plain row that opens the palette without moving a row, a thread tile's
 // title keeps its room at the default width with the agent's 12 px mark on
-// row three and the status on row one, every tile 68 px, an idle title sits
-// closer to the ground than a working one, the Settled fold sits shut at the
-// foot of the list and opens to tiles of the same height, a section folds by
-// its head without moving what stands above it, a toast holds a
+// row three and the status on row one, every tile 68 px, a working title
+// recedes behind the rows that call for the person, the Settled fold sits shut
+// at the foot of the bare list and opens to slim rows, a toast holds a
 // long token inside its box off the sidebar, the line for a provider out of
 // reach is one muted mono line under the search row at AA, collapsing the
 // sidebar leaves the page header's left padding alone, a send refusal above
@@ -293,7 +292,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
     }
   }, 30_000);
 
-  it("an idle title sits closer to the background than a working one, in both themes", async () => {
+  it("a working title recedes behind the rows that call for the person, as T3 Code's shouldRecede, in both themes", async () => {
     for (const theme of ["dark", "light"] as const) {
       await open(theme);
       const titles = await page!.locator("[data-row-id^='thread:']").evaluateAll(rows => {
@@ -334,12 +333,13 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
         });
       });
       console.info(`thread titles at ${theme}: ${JSON.stringify(titles)}`);
-      const [working, ...idles] = [...titles].sort((a, b) => Number(b.working) - Number(a.working));
+      // The resting rows here are finishes nobody has opened yet, which stay bright; the working one steps back.
+      const [working, ...unseen] = [...titles].sort((a, b) => Number(b.working) - Number(a.working));
       expect(titles.filter(t => t.working)).toHaveLength(1);
-      expect(idles).toHaveLength(3);
-      for (const idle of idles) {
-        expect(idle.color).not.toBe(working!.color);
-        expect(idle.gap).toBeLessThan(working!.gap);
+      expect(unseen).toHaveLength(3);
+      for (const done of unseen) {
+        expect(done.color).not.toBe(working!.color);
+        expect(working!.gap).toBeLessThan(done.gap);
       }
       const path = join(SHOTS_DIR, `sidebar-idle-${theme}.png`);
       await page!.locator("[data-slot=sidebar]").first().screenshot({ path });
@@ -347,7 +347,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
     }
   }, 30_000);
 
-  it("the Settled fold sits shut at the foot of the list, 28 px like every section head, no fill and no border, and opens to tiles of the same height under it; a live section folds by its head and nothing above it moves, in both themes", async () => {
+  it("the Settled fold sits shut at the foot of the list, 28 px like every section head, no fill and no border, and opens to slim one-line rows under it, and the list above it stands bare, in both themes", async () => {
     const read = () =>
       page!.evaluate(() => {
         const fold = document.querySelector<HTMLElement>("[data-row-id='settled']")!;
@@ -366,7 +366,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       console.info(`settled fold ${theme} shut: ${JSON.stringify(shut)}`);
       expect(shut.fold.expanded).toBe("false");
       expect(shut.fold.text).toBe("Settled 2");
-      expect(shut.tiles.map(t => t.id)).toEqual(["thread:s1", "thread:s2", "thread:s3", "thread:s4", "ws:ws_c"]);
+      expect(shut.tiles.map(t => t.id)).toEqual(["thread:s2", "thread:s1", "thread:s3", "thread:s4", "ws:ws_c"]);
       for (const tile of shut.tiles) expect(tile.y).toBeLessThan(shut.fold.y);
       expect(shut.fold.height).toBe(28);
       expect(Math.round(shut.fold.above)).toBe(12);
@@ -385,8 +385,10 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       console.info(`settled fold ${theme} open: ${JSON.stringify(open)}`);
       expect(open.fold.expanded).toBe("true");
       expect(open.fold.text).toBe("Settled 2");
-      expect(new Set(open.tiles.map(t => Math.round(t.height)))).toEqual(new Set([68]));
-      for (const id of ["thread:s5", "thread:s6"]) expect(open.tiles.find(t => t.id === id)!.y).toBeGreaterThan(open.fold.y);
+      const settledIds = ["thread:s5", "thread:s6"];
+      expect(new Set(open.tiles.filter(t => !settledIds.includes(t.id!)).map(t => Math.round(t.height)))).toEqual(new Set([68]));
+      expect(new Set(open.tiles.filter(t => settledIds.includes(t.id!)).map(t => Math.round(t.height)))).toEqual(new Set([36]));
+      for (const id of settledIds) expect(open.tiles.find(t => t.id === id)!.y).toBeGreaterThan(open.fold.y);
       const openPath = join(SHOTS_DIR, `sidebar-settled-open-${theme}.png`);
       await page!.locator("[data-slot=sidebar]").first().screenshot({ path: openPath });
       console.info(`sidebar settled open screenshot: ${openPath}`);
@@ -398,24 +400,8 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
             return { id: head.dataset["sectionHead"], y: box.y, height: box.height, rule: rule.height, ruleWidth: rule.width, tiles: head.parentElement!.querySelectorAll("[data-row-id^='thread:'], [data-row-id^='ws:']").length };
           }),
         );
-      const before = await heads();
-      expect(before.length).toBeGreaterThan(1);
-      for (const head of before) {
-        expect(head.height, head.id).toBe(28);
-        expect(head.rule, head.id).toBe(1);
-        expect(head.ruleWidth, head.id).toBeGreaterThan(40);
-      }
-      const last = before.at(-1)!;
-      await page!.locator(`[data-section-head='${last.id}']`).click();
-      await page!.waitForFunction(id => document.querySelector(`[data-section-head='${id}']`)!.parentElement!.querySelectorAll("[data-row-id^='thread:'], [data-row-id^='ws:']").length === 0, last.id);
-      const after = await heads();
-      expect(after.map(head => [head.id, head.y])).toEqual(before.map(head => [head.id, head.y]));
-      await page!.mouse.move(640, 760);
-      await page!.waitForTimeout(200);
-      const foldedPath = join(SHOTS_DIR, `sidebar-section-folded-${theme}.png`);
-      await page!.locator("[data-slot=sidebar]").first().screenshot({ path: foldedPath });
-      console.info(`sidebar section folded screenshot: ${foldedPath}`);
-      await page!.locator(`[data-section-head='${last.id}']`).click();
+      // The live list here is the one bare list: no head stands over it, so nothing of it folds.
+      expect(await heads()).toEqual([]);
     }
   }, 60_000);
 

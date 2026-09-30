@@ -572,50 +572,65 @@ describe("the sidebar's list of thread tiles", () => {
       { ws: "ws_a", id: "th_away", prompt: "snoozed away", status: "completed", startedAgo: 40 * 60_000, endedAgo: 39 * 60_000, snoozed: true },
     ];
 
-    it("draws the live list under Pinned, Needs you, Working, Done and Idle, leaves a snoozed tree out, and a finish nobody opened reads Done", async () => {
+    it("draws Pinned and Needs you under their heads, then one bare list newest first whose rows say their time or Done, and leaves a snoozed tree out", async () => {
       mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
       await act(async () => useStore.setState({ sessions: sessions(all) } as never));
       await waitFor(() => expect(screen.getByText("kept on top")).toBeDefined());
-      expect(heads()).toEqual(["pinned", "needs-you", "working", "done", "idle"]);
-      expect([...document.querySelectorAll("[data-section-head]")].map(head => head.textContent)).toEqual(["Pinned (1)", "Needs you (1)", "Working (1)", "Done (1)", "Idle (1)"]);
+      expect(heads()).toEqual(["pinned", "needs-you"]);
+      expect([...document.querySelectorAll("[data-section-head]")].map(head => head.textContent)).toEqual(["Pinned (1)", "Needs you (1)"]);
       expect(rowIds()).toEqual(["thread:th_pinned", "thread:th_asks", "thread:th_works", "thread:th_done", "thread:th_idle", "settled"]);
-      expect(walkIds()).toEqual(["section:pinned", "thread:th_pinned", "section:needs-you", "thread:th_asks", "section:working", "thread:th_works", "section:done", "thread:th_done", "section:idle", "thread:th_idle", "settled"]);
+      expect(walkIds()).toEqual(["section:pinned", "thread:th_pinned", "section:needs-you", "thread:th_asks", "thread:th_works", "thread:th_done", "thread:th_idle", "settled"]);
       expect(screen.queryByText("snoozed away")).toBeNull();
-      expect(rowOf("finished unseen").querySelector("[data-thread-status]")!.textContent).toBe("Done");
+      const slot = (title: string): HTMLElement => rowOf(title).querySelector<HTMLElement>("[data-thread-status]")!;
+      // A working row's word is for a screen reader; the time ticking is what it shows.
+      expect(slot("still going").querySelector(".sr-only")?.textContent).toBe("Working");
+      expect(slot("still going").textContent).toBe("Working6m");
+      expect(slot("finished unseen").textContent).toBe("Done");
+      expect(slot("read already").textContent).toBe("11m");
     });
 
-    it("folds each section by its head, one at a time, and remembers the fold per section; the head keeps its count and its place", async () => {
+    it("keeps the rows that call for the person bright and lets working and read rows recede, as T3 Code's shouldRecede", async () => {
+      mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
+      await act(async () => useStore.setState({ sessions: sessions(all) } as never));
+      await waitFor(() => expect(screen.getByText("kept on top")).toBeDefined());
+      const ink = (title: string): string => rowOf(title).querySelector<HTMLElement>("[data-thread-title]")!.className.includes("text-sidebar-muted-foreground") ? "recedes" : "bright";
+      expect(["wants an answer", "still going", "finished unseen", "read already"].map(ink)).toEqual(["bright", "recedes", "bright", "recedes"]);
+      // The label keeps its hue while the row recedes.
+      expect(rowOf("still going").querySelector<HTMLElement>("[data-thread-status]")!.dataset["tone"]).toBe("working");
+    });
+
+    it("folds each headed section by its head, one at a time, and remembers the fold per section; the bare list never folds", async () => {
       mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
       await act(async () => useStore.setState({ sessions: sessions(all) } as never));
       await waitFor(() => expect(screen.getByText("kept on top")).toBeDefined());
       const head = (id: string): HTMLElement => document.querySelector<HTMLElement>(`[data-section-head=${id}]`)!;
-      for (const id of ["pinned", "needs-you", "working", "done", "idle", "settled"]) {
+      for (const id of ["pinned", "needs-you", "settled"]) {
         const at = id === "settled" ? document.querySelector<HTMLElement>("[data-row-id=settled]")! : head(id);
         expect(at.tagName, id).toBe("BUTTON");
         expect(at.className, id).toContain("h-7");
         expect(at.querySelector("[data-section-rule]"), id).not.toBeNull();
         expect(at.querySelector("svg.lucide-chevron-down"), id).not.toBeNull();
       }
-      expect(head("working").getAttribute("aria-expanded")).toBe("true");
-      fireEvent.click(head("working"));
-      await waitFor(() => expect(screen.queryByText("still going")).toBeNull());
-      expect(head("working").getAttribute("aria-expanded")).toBe("false");
-      expect(head("working").textContent).toBe("Working (1)");
-      expect(screen.getByText("wants an answer")).toBeDefined();
-      expect(screen.getByText("finished unseen")).toBeDefined();
-      expect(JSON.parse(window.localStorage.getItem("wsp:sidebar-folded") ?? "null")).toEqual(["settled", "working"]);
-      fireEvent.click(head("idle"));
-      await waitFor(() => expect(screen.queryByText("read already")).toBeNull());
-      expect(JSON.parse(window.localStorage.getItem("wsp:sidebar-folded") ?? "null")).toEqual(["settled", "working", "idle"]);
+      expect(head("threads")).toBeNull();
+      expect(head("needs-you").getAttribute("aria-expanded")).toBe("true");
+      fireEvent.click(head("needs-you"));
+      await waitFor(() => expect(screen.queryByText("wants an answer")).toBeNull());
+      expect(head("needs-you").getAttribute("aria-expanded")).toBe("false");
+      expect(head("needs-you").textContent).toBe("Needs you (1)");
+      expect(screen.getByText("still going")).toBeDefined();
+      expect(JSON.parse(window.localStorage.getItem("wsp:sidebar-folded") ?? "null")).toEqual(["settled", "needs-you"]);
+      fireEvent.click(head("pinned"));
+      await waitFor(() => expect(screen.queryByText("kept on top")).toBeNull());
+      expect(JSON.parse(window.localStorage.getItem("wsp:sidebar-folded") ?? "null")).toEqual(["settled", "needs-you", "pinned"]);
       cleanup();
       mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
       await act(async () => useStore.setState({ sessions: sessions(all) } as never));
-      await waitFor(() => expect(screen.getByText("kept on top")).toBeDefined());
-      expect(screen.queryByText("still going")).toBeNull();
-      expect(screen.queryByText("read already")).toBeNull();
-      fireEvent.click(head("working"));
       await waitFor(() => expect(screen.getByText("still going")).toBeDefined());
-      expect(JSON.parse(window.localStorage.getItem("wsp:sidebar-folded") ?? "null")).toEqual(["settled", "idle"]);
+      expect(screen.queryByText("kept on top")).toBeNull();
+      expect(screen.queryByText("wants an answer")).toBeNull();
+      fireEvent.click(head("needs-you"));
+      await waitFor(() => expect(screen.getByText("wants an answer")).toBeDefined());
+      expect(JSON.parse(window.localStorage.getItem("wsp:sidebar-folded") ?? "null")).toEqual(["settled", "pinned"]);
     });
 
     it("a root's menu pins, unpins and snoozes it, and a folded root's menu restores its tree", async () => {
@@ -649,20 +664,20 @@ describe("the sidebar's list of thread tiles", () => {
 
     it("a tile dropped on another section holds there by a mark, one dropped on Pinned pins, one dropped back on its own section clears the mark, and one dropped on Settled settles its tree", async () => {
       const { markThreads, settleThreads } = mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
-      await act(async () => useStore.setState({ sessions: sessions([...all, { ws: "ws_a", id: "th_moved", prompt: "moved by hand", startedAgo: 7 * 60_000, section: { name: "done", whileState: "working:s_th_moved" } }]) } as never));
+      await act(async () => useStore.setState({ sessions: sessions([...all, { ws: "ws_a", id: "th_moved", prompt: "moved by hand", startedAgo: 7 * 60_000, section: { name: "needs-you", whileState: "working:s_th_moved" } }]) } as never));
       await waitFor(() => expect(screen.getByText("still going")).toBeDefined());
-      expect(document.querySelector("[data-section=done]")!.textContent).toContain("moved by hand");
+      expect(document.querySelector("[data-section=needs-you]")!.textContent).toContain("moved by hand");
       const section = (id: string): HTMLElement => document.querySelector<HTMLElement>(`[data-section=${id}]`)!;
-      drag(rowOf("still going"), section("done"));
-      await waitFor(() => expect(markThreads).toHaveBeenCalledWith(["th_works"], { section: { name: "done", whileState: "working:s_th_works" } }));
+      drag(rowOf("still going"), section("needs-you"));
+      await waitFor(() => expect(markThreads).toHaveBeenCalledWith(["th_works"], { section: { name: "needs-you", whileState: "working:s_th_works" } }));
       drag(rowOf("read already"), section("pinned"));
       await waitFor(() => expect(markThreads).toHaveBeenLastCalledWith(["th_idle"], { pinned: true }));
-      drag(rowOf("kept on top"), section("working"));
-      await waitFor(() => expect(markThreads).toHaveBeenLastCalledWith(["th_pinned"], { pinned: false, section: { name: "working", whileState: "idle:s_th_pinned" } }));
-      drag(rowOf("moved by hand"), section("working"));
+      drag(rowOf("kept on top"), section("threads"));
+      await waitFor(() => expect(markThreads).toHaveBeenLastCalledWith(["th_pinned"], { pinned: false, section: null }));
+      drag(rowOf("moved by hand"), section("threads"));
       await waitFor(() => expect(markThreads).toHaveBeenLastCalledWith(["th_moved"], { section: null }));
       const calls = markThreads.mock.calls.length;
-      drag(rowOf("finished unseen"), section("done"));
+      drag(rowOf("finished unseen"), section("threads"));
       expect(markThreads.mock.calls).toHaveLength(calls);
       drag(rowOf("read already"), document.querySelector<HTMLElement>("[data-row-id=settled]")!);
       await waitFor(() => expect(settleThreads).toHaveBeenCalledWith(["th_idle"]));
@@ -683,11 +698,14 @@ describe("the sidebar's list of thread tiles", () => {
     it("while a tile is dragged every section stands as a place to drop it, even one holding nothing", async () => {
       mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
       await act(async () => useStore.setState({ sessions: sessions([all[1]!]) } as never));
-      await waitFor(() => expect(heads()).toEqual(["working"]));
+      const places = (): string[] => [...document.querySelectorAll<HTMLElement>("[data-section]")].map(section => section.dataset["section"] ?? "");
+      await waitFor(() => expect(places()).toEqual(["threads"]));
+      expect(heads()).toEqual([]);
       fireEvent.dragStart(rowOf("still going"), { dataTransfer: { setData: () => {}, effectAllowed: "move" } });
-      expect(heads()).toEqual(["pinned", "needs-you", "working", "done", "idle"]);
+      expect(places()).toEqual(["pinned", "needs-you", "threads"]);
+      expect(heads()).toEqual(["pinned", "needs-you"]);
       fireEvent.dragEnd(rowOf("still going"));
-      expect(heads()).toEqual(["working"]);
+      expect(places()).toEqual(["threads"]);
     });
   });
 
