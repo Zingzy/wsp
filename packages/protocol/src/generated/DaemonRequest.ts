@@ -12,6 +12,12 @@ import type { RequestId } from "./RequestId.js";
  */
 export type DaemonRequest = { id: RequestId, } & ({ "op": "pty.create", cols?: number, rows?: number, shell?: string, cwd?: string, env?: { [key in string]: string }, 
 /**
+ * A command line this pty runs through the person's own shell and exits with, for a reply's block run
+ * where it stands. Such a pty is that reply's: pty.list marks it, a pane adopts none, and pty.tab hands it
+ * to the panes.
+ */
+run?: string, 
+/**
  * The workspace this pty is for, on a daemon that runs workspaces: the shell opens inside that
  * workspace's namespaces, in the folder the frame names, which is absolute and is asked for, since this
  * daemon has no working directory inside a workspace. Without one the shell is the daemon's own
@@ -35,6 +41,10 @@ machineId?: string, } | { "op": "pty.resize", ptyId: string, cols: number, rows:
  * The workspace whose pty this is, as on pty.create above.
  */
 machineId?: string, } | { "op": "pty.kill", ptyId: string, 
+/**
+ * The workspace whose pty this is, as on pty.create above.
+ */
+machineId?: string, } | { "op": "pty.tab", ptyId: string, 
 /**
  * The workspace whose pty this is, as on pty.create above.
  */

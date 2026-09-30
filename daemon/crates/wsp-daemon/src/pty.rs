@@ -96,6 +96,7 @@ pub(crate) struct PtyCreateOpts {
     pub(crate) shell: Option<String>,
     pub(crate) cwd: Option<String>,
     pub(crate) env: Option<Env>,
+    pub(crate) run: Option<String>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -112,7 +113,8 @@ pub(crate) struct PtyLaunch {
 pub(crate) fn pty_launch(opts: &PtyCreateOpts, base: &Env, me: Option<&PasswdRow>) -> PtyLaunch {
     let mut env = pty_env(base, opts.env.as_ref(), me);
     if let Some(shell) = &opts.shell {
-        let (file, args) = work_argv(shell, &[]);
+        let run: Vec<&str> = opts.run.as_deref().map_or_else(Vec::new, |run| vec!["-c", run]);
+        let (file, args) = work_argv(shell, &run);
         return PtyLaunch { file, args, env };
     }
     let shell = me.and_then(|m| m.shell.as_deref());
@@ -121,7 +123,10 @@ pub(crate) fn pty_launch(opts: &PtyCreateOpts, base: &Env, me: Option<&PasswdRow
             env.insert("SHELL".to_owned(), shell.to_owned());
         }
     }
-    let (file, args) = work_argv(shell.unwrap_or("bash"), &["-l"]);
+    // A run goes through the shell as the person's own terminal opens it, interactive as well as login, so the PATH
+    // and the aliases their rc file sets are the ones the command meets; the shell exits with the command.
+    let args: Vec<&str> = opts.run.as_deref().map_or_else(|| vec!["-l"], |run| vec!["-l", "-i", "-c", run]);
+    let (file, args) = work_argv(shell.unwrap_or("bash"), &args);
     PtyLaunch { file, args, env }
 }
 
@@ -231,6 +236,8 @@ pub(crate) struct Session {
     /// The workspace this pty was opened inside, on a daemon that runs workspaces; none for this computer's own.
     /// Every op on it names the same workspace, and one that names another is told there is no such pty.
     pub(crate) machine: Option<String>,
+    /// A pty that runs a reply's command belongs to that reply, and no pane adopts it, until pty.tab.
+    pub(crate) reply: bool,
     scrollback: Scrollback,
     listeners: Vec<Listener>,
     exit_listeners: Vec<Listener>,
@@ -317,6 +324,7 @@ impl Session {
             rows,
             exited: None,
             machine: None,
+            reply: opts.run.is_some(),
             scrollback: Scrollback::default(),
             listeners: Vec::new(),
             exit_listeners: Vec::new(),
@@ -404,6 +412,7 @@ fn spawn_inside(
     cols: u16,
     rows: u16,
     mut running: wsp_runtime::runtime::PtyInsideRunning,
+    reply: bool,
 ) -> (Session, Spawned) {
     let pid = running.pid();
     let pipes = running.pipes();
@@ -445,6 +454,7 @@ fn spawn_inside(
         rows,
         exited: None,
         machine: Some(machine.to_owned()),
+        reply,
         scrollback: Scrollback::default(),
         listeners: Vec::new(),
         exit_listeners: Vec::new(),
@@ -475,10 +485,17 @@ impl PtyManager {
 
     /// One pty inside a workspace this computer runs, taken over from the runtime and held beside the rest.
     #[cfg(target_os = "linux")]
-    pub(crate) fn take_inside(&mut self, machine: &str, cols: u16, rows: u16, running: wsp_runtime::runtime::PtyInsideRunning) -> Spawned {
+    pub(crate) fn take_inside(
+        &mut self,
+        machine: &str,
+        cols: u16,
+        rows: u16,
+        running: wsp_runtime::runtime::PtyInsideRunning,
+        reply: bool,
+    ) -> Spawned {
         self.next_id += 1;
         let id = format!("pty_{}", self.next_id);
-        let (session, spawned) = spawn_inside(id.clone(), machine, cols, rows, running);
+        let (session, spawned) = spawn_inside(id.clone(), machine, cols, rows, running, reply);
         self.sessions.insert(id, session);
         spawned
     }
@@ -501,7 +518,14 @@ impl PtyManager {
         entries.sort_by_key(|s| s.id.trim_start_matches("pty_").parse::<u64>().unwrap_or(0));
         entries
             .into_iter()
-            .map(|s| PtyListEntry { id: s.id.clone(), pid: s.pid, cols: s.cols, rows: s.rows, exited: s.exited.is_some() })
+            .map(|s| PtyListEntry {
+                id: s.id.clone(),
+                pid: s.pid,
+                cols: s.cols,
+                rows: s.rows,
+                exited: s.exited.is_some(),
+                reply: s.reply.then_some(true),
+            })
             .collect()
     }
 
@@ -510,6 +534,17 @@ impl PtyManager {
     /// computer too, the broker that opened it.
     pub(crate) fn labels(&self) -> Vec<(u32, String)> {
         self.sessions.values().filter(|s| s.exited.is_none()).map(|s| (s.pid, s.id.clone())).collect()
+    }
+
+    /// A reply's pty handed to the panes where it runs: false where the machine holds no such pty.
+    pub(crate) fn tab(&mut self, id: &str, machine: Option<&str>) -> bool {
+        match self.of(id, machine) {
+            Some(session) => {
+                session.reply = false;
+                true
+            }
+            None => false,
+        }
     }
 
     pub(crate) fn destroy(&mut self, id: &str) {
@@ -703,6 +738,32 @@ mod tests {
         let launch = pty_launch(&opts, &env(&[("SHELL", "/inherited/sh")]), Some(&me()));
         assert_eq!(launch.args, ["-c", &wrap(), "/bin/dash"]);
         assert_eq!((launch.env["SHELL"].as_str(), launch.env["PS1"].as_str()), ("/inherited/sh", ""));
+    }
+
+    #[test]
+    fn a_run_goes_through_the_persons_own_shell_as_their_terminal_opens_it_and_exits_with_the_command() {
+        let opts = PtyCreateOpts { run: Some("kill 60082 60083".to_owned()), ..Default::default() };
+        let launch = pty_launch(&opts, &env(&[]), Some(&me()));
+        assert_eq!(launch.args, ["-c", &wrap(), "/usr/bin/zsh", "-l", "-i", "-c", "kill 60082 60083"]);
+        assert_eq!(launch.env["SHELL"], "/usr/bin/zsh");
+        let named = PtyCreateOpts { shell: Some("/bin/dash".to_owned()), run: Some("true".to_owned()), ..Default::default() };
+        assert_eq!(pty_launch(&named, &env(&[]), Some(&me())).args, ["-c", &wrap(), "/bin/dash", "-c", "true"]);
+    }
+
+    #[test]
+    fn a_ptys_run_marks_it_the_replys_until_it_is_handed_to_the_panes() {
+        let mut ptys = PtyManager::default();
+        let run = PtyCreateOpts { shell: Some("/bin/sh".to_owned()), run: Some("sleep 5".to_owned()), ..Default::default() };
+        let tab = PtyCreateOpts { shell: Some("/bin/sh".to_owned()), ..Default::default() };
+        let home = env(&[("HOME", "/tmp")]);
+        let (ran, plain) = (ptys.create(&run, &home, None).unwrap(), ptys.create(&tab, &home, None).unwrap());
+        let reply = |ptys: &PtyManager, id: &str| ptys.list(None).into_iter().find(|e| e.id == id).unwrap().reply;
+        assert_eq!((reply(&ptys, &ran.id), reply(&ptys, &plain.id)), (Some(true), None));
+        assert!(ptys.tab(&ran.id, None));
+        assert_eq!(reply(&ptys, &ran.id), None);
+        assert!(!ptys.tab("pty_404", None));
+        ptys.destroy(&ran.id);
+        ptys.destroy(&plain.id);
     }
 
     #[test]

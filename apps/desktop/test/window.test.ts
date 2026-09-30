@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { bundleHover } from "../src/get-bundle.js";
 import { shellArgFrom } from "../src/shell-args.js";
-import { windowOptions } from "../src/window.js";
+import { vibrancyFor, windowOptions } from "../src/window.js";
 
 const htmlClassFrom = (argv: readonly string[]): string | undefined => shellArgFrom(argv, "html-class");
 
@@ -49,6 +49,16 @@ describe("windowOptions", () => {
     expect(hoverOn("darwin")).toMatch(/disk image/);
     expect(hoverOn("linux")).toMatch(/AppImage/);
     expect(hoverOn("win32")).toBeUndefined();
+  });
+
+  it("frosts a Mac window with the system's own glass while the page draws glass, and takes it off while every surface is solid", () => {
+    expect(windowOptions("darwin", "0.1.5").vibrancy).toBe(vibrancyFor("darwin", true));
+    expect(vibrancyFor("darwin", true)).toBe("sidebar");
+    expect(vibrancyFor("darwin", false)).toBeNull();
+    for (const platform of ["linux", "win32"] as const) {
+      expect(vibrancyFor(platform, true)).toBeUndefined();
+      expect(vibrancyFor(platform, false)).toBeUndefined();
+    }
   });
 
   it("enables no native tabs on any platform, so ctrl+tab and the digit chords reach the page", () => {

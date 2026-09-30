@@ -20,7 +20,7 @@ import { pagePreviews } from "./previews.js";
 import { QUIT_WORD, quitChoice, quitPrompt } from "./quit.js";
 import { installShim, shimText } from "./shim.js";
 import { trayModel, trayNotice, type TrayAct, type TrayModel, type TrayRow } from "./tray.js";
-import { windowOptions } from "./window.js";
+import { vibrancyFor, windowOptions } from "./window.js";
 import { isShellZoomChord, shellChordOf } from "./zoom.js";
 
 const here = (rel: string): string => fileURLToPath(new URL(rel, import.meta.url));
@@ -112,6 +112,13 @@ listen("terminal:focus", (event, focused) => {
 listen("theme:set", (_event, theme) => {
   const parsed = ThemePreference.safeParse(theme);
   if (parsed.success) nativeTheme.themeSource = parsed.data;
+});
+
+// The window's glass follows the page's: off while Transparency is off or the computer asks for less of it, so macOS
+// draws no material under a page whose every surface is solid.
+listen("glass:set", (event, glass) => {
+  const vibrancy = vibrancyFor(process.platform, glass === true);
+  if (vibrancy !== undefined) BrowserWindow.fromWebContents(event.sender)?.setVibrancy(vibrancy);
 });
 
 /** Whether the window's page is up and which host serves it; nothing until the app window's first page has loaded. */

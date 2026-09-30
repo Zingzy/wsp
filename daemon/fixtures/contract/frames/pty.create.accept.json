@@ -21,5 +21,20 @@
     "rows": 40,
     "cwd": "/root/project",
     "machineId": "wsp-a"
+  },
+  {
+    "id": 4,
+    "op": "pty.create",
+    "cols": 100,
+    "rows": 20,
+    "cwd": "/root/project",
+    "run": "kill 60082 60083"
+  },
+  {
+    "id": 5,
+    "op": "pty.create",
+    "cwd": "/root/project",
+    "run": "npm test",
+    "machineId": "wsp-a"
   }
 ]

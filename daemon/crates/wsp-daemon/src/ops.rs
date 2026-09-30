@@ -277,6 +277,7 @@ async fn handle_op(conn: &Arc<Conn>, ctx: &Arc<Ctx>, frame: &Value, id: Option<R
             | "pty.write"
             | "pty.resize"
             | "pty.kill"
+            | "pty.tab"
             | "pty.list"
             | "exec"
             | "fs.list"
@@ -562,25 +563,27 @@ fn in_copy(root: &str, cwd: &str) -> bool {
     !cwd.components().any(|part| matches!(part, std::path::Component::ParentDir)) && cwd.starts_with(root)
 }
 
+/// What a frame asks of a pty inside a workspace: its size, a shell it names, the folder, and a reply's command.
+struct InsideAsk {
+    cols: Option<NonZeroU16>,
+    rows: Option<NonZeroU16>,
+    shell: Option<String>,
+    cwd: String,
+    run: Option<String>,
+}
+
 /// A pty inside one workspace this computer runs: the shell opens in the folder the frame names, which is
 /// absolute and is asked for, since this daemon has no working directory inside a workspace and a pty without one
 /// would open a shell in the computer's own home, which every workspace has bound in. The pty is held beside this
 /// daemon's own and every op on it names the same workspace.
 #[cfg(target_os = "linux")]
-async fn pty_inside(
-    ctx: &Arc<Ctx>,
-    id: Option<RequestId>,
-    machine: &str,
-    cols: Option<NonZeroU16>,
-    rows: Option<NonZeroU16>,
-    shell: Option<String>,
-    cwd: String,
-) -> String {
+async fn pty_inside(ctx: &Arc<Ctx>, id: Option<RequestId>, machine: &str, ask: InsideAsk) -> String {
+    let InsideAsk { cols, rows, shell, cwd, run } = ask;
     let opened = async {
         let ops = workspaces_of(ctx, machine)?;
         let (cols, rows) = (cols.map_or(80, NonZeroU16::get), rows.map_or(24, NonZeroU16::get));
-        let running = ops.pty_in(machine, cols, rows, &cwd, shell.as_deref()).await.map_err(from_runtime)?;
-        let spawned = ctx.ptys.lock().unwrap_or_else(|e| e.into_inner()).take_inside(machine, cols, rows, running);
+        let running = ops.pty_in(machine, cols, rows, &cwd, shell.as_deref(), run.as_deref()).await.map_err(from_runtime)?;
+        let spawned = ctx.ptys.lock().unwrap_or_else(|e| e.into_inner()).take_inside(machine, cols, rows, running, run.is_some());
         let reply = PtyCreateReply { pty_id: spawned.id.clone(), pid: spawned.pid };
         tokio::spawn(pump(Arc::clone(ctx), spawned));
         Ok(reply)
@@ -591,15 +594,7 @@ async fn pty_inside(
 /// And on a computer whose daemon runs no workspace at all, which is every machine this daemon is inside: the
 /// missing refusal, the same one a workspace that is gone answers.
 #[cfg(not(target_os = "linux"))]
-async fn pty_inside(
-    _ctx: &Arc<Ctx>,
-    id: Option<RequestId>,
-    machine: &str,
-    _cols: Option<NonZeroU16>,
-    _rows: Option<NonZeroU16>,
-    _shell: Option<String>,
-    _cwd: String,
-) -> String {
+async fn pty_inside(_ctx: &Arc<Ctx>, id: Option<RequestId>, machine: &str, _ask: InsideAsk) -> String {
     answer::<Empty>(id, Err(no_such_workspace(machine)))
 }
 
@@ -662,7 +657,7 @@ async fn workspace_road(_ctx: &Ctx, machine: &str, _requested: &str, _asked: git
 
 async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &str, op: DaemonOp) -> String {
     match op {
-        DaemonOp::PtyCreate { cols, rows, shell, cwd, env, machine_id } => {
+        DaemonOp::PtyCreate { cols, rows, shell, cwd, env, run, machine_id } => {
             if let Some(machine) = machine_id {
                 // The folder is the frame's and absolute, whatever workspace it named and whether this computer
                 // runs one: a pty for a workspace with no folder would open a shell in the computer's own home,
@@ -671,9 +666,9 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
                 if !Path::new(&cwd).is_absolute() {
                     return refuse(id, DaemonErrorCode::BadRequest, not_absolute(&cwd, &machine));
                 }
-                return pty_inside(ctx, id, &machine, cols, rows, shell, cwd).await;
+                return pty_inside(ctx, id, &machine, InsideAsk { cols, rows, shell, cwd, run }).await;
             }
-            let opts = PtyCreateOpts { cols: cols.map(NonZeroU16::get), rows: rows.map(NonZeroU16::get), shell, cwd, env };
+            let opts = PtyCreateOpts { cols: cols.map(NonZeroU16::get), rows: rows.map(NonZeroU16::get), shell, cwd, env, run };
             let spawned = ctx.ptys.lock().unwrap_or_else(|e| e.into_inner()).create(&opts, &process_env(), passwd_row().as_ref());
             match spawned {
                 Ok(spawned) => {
@@ -750,6 +745,12 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
             }
             ctx.modes.remove(&pty_id);
             ptys.destroy(&pty_id);
+            ok(id)
+        }
+        DaemonOp::PtyTab { pty_id, machine_id } => {
+            if !ctx.ptys.lock().unwrap_or_else(|e| e.into_inner()).tab(&pty_id, machine_id.as_deref()) {
+                return fail(id, no_such_pty(&pty_id));
+            }
             ok(id)
         }
         DaemonOp::PtyList { machine_id } => {
@@ -1303,6 +1304,7 @@ mod tests {
             "pty.write",
             "pty.resize",
             "pty.kill",
+            "pty.tab",
             "pty.list",
             "exec",
             "fs.list",

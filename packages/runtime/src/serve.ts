@@ -1441,6 +1441,11 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "sessions.aside":
               send({ id: msg.id, ok: true, ...(await rt.sessions.aside(msg.sessionId, msg.question, origin)) });
               return;
+            case "sessions.run": {
+              const { id: _id, op: _op, ...step } = msg;
+              send({ id: msg.id, ok: true, run: await rt.sessions.run(step, origin) });
+              return;
+            }
             case "sessions.rewind":
               send({ id: msg.id, ok: true, ...(await rt.sessions.rewind(msg.threadId, { ...(msg.turnId !== undefined ? { turnId: msg.turnId } : {}), ...(msg.files !== undefined ? { files: msg.files } : {}), ...(msg.undo !== undefined ? { undo: msg.undo } : {}) }, origin)) });
               return;

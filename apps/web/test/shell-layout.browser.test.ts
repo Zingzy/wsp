@@ -440,6 +440,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
     await page!.evaluate(() => document.documentElement.classList.remove("solid"));
     const cdp = await page!.context().newCDPSession(page!);
     await cdp.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-transparency", value: "reduce" }] });
+    await page!.waitForFunction(() => document.documentElement.classList.contains("solid"));
     const reduced = await read();
     await cdp.send("Emulation.setEmulatedMedia", { features: [] });
     await cdp.detach();
@@ -471,6 +472,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       await page!.evaluate(() => document.documentElement.classList.remove("solid"));
       const cdp = await page!.context().newCDPSession(page!);
       await cdp.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-transparency", value: "reduce" }] });
+      await page!.waitForFunction(() => document.documentElement.classList.contains("solid"));
       const reduced = await read();
       await cdp.send("Emulation.setEmulatedMedia", { features: [] });
       await cdp.detach();

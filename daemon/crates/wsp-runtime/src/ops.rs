@@ -1235,6 +1235,7 @@ impl Ops {
         rows: u16,
         cwd: &str,
         shell: Option<&str>,
+        run: Option<&str>,
     ) -> Result<runtime::PtyInsideRunning, OpError> {
         self.running(id)?;
         // Over the workspace's own boot environment, which the broker starts from as every tenant does: the
@@ -1247,10 +1248,15 @@ impl Ops {
         ]);
         // A login shell, as a person's terminal on any other machine opens: the workspace's own profile and the
         // person's own rc file, which are the computer's home bound inside.
-        let args = match shell {
-            Some(shell) => vec![shell.to_owned()],
-            None => vec![SHELL_INSIDE.to_owned(), "-l".to_owned()],
+        // A reply's run goes through the same shell, interactive as well as login, and the pty exits with it.
+        let mut args = match (shell, run) {
+            (Some(shell), _) => vec![shell.to_owned()],
+            (None, Some(_)) => vec![SHELL_INSIDE.to_owned(), "-l".to_owned(), "-i".to_owned()],
+            (None, None) => vec![SHELL_INSIDE.to_owned(), "-l".to_owned()],
         };
+        if let Some(run) = run {
+            args.extend(["-c".to_owned(), run.to_owned()]);
+        }
         let opts = runtime::PtyInside { cols, rows, cwd: cwd.to_owned(), args, env };
         self.runtime.pty(id, &opts).await.map_err(|e| OpError::plain(e.to_string()))
     }

@@ -74,6 +74,7 @@ const view: ChatThreadView = {
   model: null,
   agent: null,
   permissionMode: null,
+  runs: new Map(),
 };
 
 const handle = { view, hydrated: true, busy: false, sending: false, fresh: true, thread: "t1", threadKey: "t1", named: null } as unknown as ChatThreadHandle;

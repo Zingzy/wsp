@@ -158,6 +158,7 @@ These decide whether work on a machine goes fast or stalls, and they hold on eve
 - Restarting the host cuts every turn running on every workspace. Finish or stop the running turns before `wsp down` and `wsp up`.
 - Pause a workspace nobody is using with `wsp pause <workspace>`: a sleeping machine costs nothing beyond its disk<!-- cloud --> and gives back one of the two machines the account runs at once<!-- /cloud -->, and the next thread or command wakes it.
 - The person's app and the command line read the same host, so every thread opened here shows in their sidebar and they read its reply there. Name each one with `--title` and keep the reply short and complete.
+- A command you mean the person to run goes in a fenced block labelled `sh`, which the app shows with Run: the person runs it with one click, in this thread's folder, and sees its output under the block.
 
 ## The contract
 

@@ -278,7 +278,8 @@ project picker's exact grammar: the monitor glyph where projects has the
 folder, the same 36px row and chevron, the same menu (search field with a
 line under it, All computers with its check, a 36px row per computer with a
 gear, Add a computer at the foot over a line). Popover: radius 12, `--popover`
-at 96% with 8px blur, `--popover-edge`, `--popover-shadow`.
+whole on the Mac, where the window's glass is macOS's and the page draws no blur of its own (96% with 8px blur
+elsewhere), `--popover-edge`, `--popover-shadow`.
 
 ### Settings list rows
 
