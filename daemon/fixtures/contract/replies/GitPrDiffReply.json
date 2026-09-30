@@ -1,0 +1,14 @@
+[
+  {
+    "diff": "diff --git a/status.txt b/status.txt\n--- a/status.txt\n+++ b/status.txt\n@@ -1 +1 @@\n-ok\n+okay\n",
+    "truncated": false,
+    "left": []
+  },
+  {
+    "diff": "",
+    "truncated": true,
+    "left": [
+      "big.json"
+    ]
+  }
+]

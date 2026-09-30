@@ -3,7 +3,7 @@
 // contract components code against.
 import { useEffect, useMemo } from "react";
 import { create } from "zustand";
-import { applyPreferencesPatch, kindForComputer, threadsFollowed, workspaceAccess, type AbsentComputer, type BringBackResult, foldThreads, goldenHead, threadKeyOf, workspaceStateOf, type AppAddress, type Capabilities, copyBuildOf, type GoldenStageEvent, type HarnessCatalog, type InitJob, type InitSetup, type PlaceView, type PortForward, type ProjectView, type Preferences, type PreferencesPatch, type ReleaseView, type SessionView, type ThreadMarks, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceProject, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView, type PlaceDial, type WorkspaceLanding } from "@wsp/protocol";
+import { applyPreferencesPatch, kindForComputer, threadsFollowed, workspaceAccess, type AbsentComputer, type BringBackResult, foldThreads, goldenHead, threadKeyOf, workspaceStateOf, type AppAddress, type Capabilities, copyBuildOf, type GoldenStageEvent, type HarnessCatalog, type InitJob, type InitSetup, type PlaceView, type PortForward, type ProjectView, type Preferences, type PreferencesPatch, type ReleaseView, type SessionView, type ThreadMarks, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceProject, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView, type PlaceDial, type WorkspaceLanding, type ReviewDraft } from "@wsp/protocol";
 import { noSuchThreadLine, renameNotTakenLine } from "../actions/format.js";
 import { readAddress, readProjectHome, writeAddress, writeProjectHome } from "./address.js";
 import { deriveSidebarProjects, sidebarWorkspaceOrder } from "../adapt/workspaces.js";
@@ -124,6 +124,10 @@ interface State {
   broughtBack: Record<string, BringBackResult>;
   /** Each workspace's viewed marks by path against the blob the file had then, as the host last said them. */
   viewed: Record<string, Readonly<Record<string, string>>>;
+  /** Each review workspace's draft as the host last answered it. */
+  reviews: Record<string, ReviewDraft>;
+  /** Reads a review workspace's draft from the host. */
+  loadReview(workspaceId: string): Promise<void>;
   /** Where a workspace of each project would land, by the project's id: asked once per project, and the one home of
    * the flags a row's words about its copy's ports and its state word are read off. A key with null under it is a
    * project the runtime refused a landing for, which is what keeps that refusal from being asked again on every
@@ -582,6 +586,19 @@ export const useStore = create<State>((set, get) => {
     projects: [],
     broughtBack: {},
     viewed: {},
+    reviews: {},
+    async loadReview(workspaceId) {
+      const read = get().api?.reviewDraft;
+      if (read === undefined) return;
+      const { review } = await read(workspaceId).catch(() => ({}) as { review?: ReviewDraft });
+      set(s => {
+        if (review === undefined) {
+          const { [workspaceId]: _gone, ...rest } = s.reviews;
+          return { reviews: rest };
+        }
+        return { reviews: { ...s.reviews, [workspaceId]: review } };
+      });
+    },
     landings: {},
     projectsRead: false,
     placesRead: false,
@@ -1114,6 +1131,9 @@ export const useStore = create<State>((set, get) => {
           return;
         case "workspace.viewed":
           set(s => ({ viewed: { ...s.viewed, [e.workspaceId]: e.viewed } }));
+          return;
+        case "workspace.review":
+          void get().loadReview(e.workspaceId);
           return;
         case "workspace.cost":
           set(s => ({

@@ -455,6 +455,23 @@ pub struct PullRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub behind_base: Option<u64>,
+    /// Who opened it, by the host's own login.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub author: Option<String>,
+    /// The fork its head lives on, where that is not the repository itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub fork: Option<PullRequestFork>,
+}
+
+/// A pull request's head on someone's fork: whose, and whether its author let the repository's maintainers push there.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestFork {
+    pub owner: String,
+    pub pushable: bool,
 }
 
 /// One check on a pull request's head: its name, the workflow it runs in, its state, and for a job the host runs
@@ -570,6 +587,65 @@ pub struct GitPrReadReply {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub pr: Option<PullRequest>,
+}
+
+/// An issue, or a pull request read as the issue it also is: its text and its conversation, each body cut as a page
+/// cuts it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct IssueRead {
+    pub number: u64,
+    pub url: String,
+    pub title: String,
+    pub body: String,
+    pub state: String,
+    pub comments: Vec<IssueComment>,
+}
+
+/// One comment of an issue's conversation, by its author's login, with when as an ISO time.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct IssueComment {
+    pub author: String,
+    pub body: String,
+    pub at: String,
+}
+
+/// What a git.issueRead read.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct GitIssueReadReply {
+    pub issue: IssueRead,
+}
+
+/// The branch a git.prCheckout left the copy on, which tracks the pull request's head.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct GitPrCheckoutReply {
+    pub branch: String,
+}
+
+/// A pull request's diff, cut on a file's boundary at REVIEW_DIFF_MAX_BYTES, with every file the cut left out.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct GitPrDiffReply {
+    pub diff: String,
+    pub truncated: bool,
+    pub left: Vec<String>,
+}
+
+/// A posted review's page, and the ids of the comments that went into its body because their line is outside the diff.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct GitPrReviewReply {
+    pub url: String,
+    pub folded: Vec<String>,
 }
 
 /// One commit of a pull request: its id, its subject, when it was made as an ISO time, and its author.

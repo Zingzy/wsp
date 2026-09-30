@@ -13,11 +13,11 @@ use serde_json::Value;
 use wsp_frames::{
     guest_wsp_shim, landed_files_script, numbers, place_owned_paths, probe_path, words, BackendFacts, CopyReport, DaemonAuthRequest,
     DaemonErrorResponse, DaemonEvent, DaemonRequest, FsFilesReply, GitBranchCompareReply, GitCheckpointReply, GitCommitReply,
-    GitDiscardReply, GitMergeInReply, GitPrListReply, GitPrMergeReply, GitPrReadReply, GitPrReply, GitPrViewReply, GitPushReply,
-    GitRepoReadReply, GitRestoreReply, GitRunLogReply, GitSnapshotReply, GitStartOnReply, GitUpdateReply, GuestCliMessage, GuestOpenReply,
-    HostFolderListing, MachineAnswersReply, MachineExecReply, MachineHandleReply, MachineLinkRequest, MachineListReply, MachineReachReply,
-    MachineReadingReply, MachineShapeReply, MachineStateReply, PlaceAuthRequest, PlaceCapacity, PlaceProveRequest, SshStartReply,
-    DAEMON_OPS, MACHINE_OPS,
+    GitDiscardReply, GitIssueReadReply, GitMergeInReply, GitPrCheckoutReply, GitPrDiffReply, GitPrListReply, GitPrMergeReply,
+    GitPrReadReply, GitPrReply, GitPrReviewReply, GitPrViewReply, GitPushReply, GitRepoReadReply, GitRestoreReply, GitRunLogReply,
+    GitSnapshotReply, GitStartOnReply, GitUpdateReply, GuestCliMessage, GuestOpenReply, HostFolderListing, MachineAnswersReply,
+    MachineExecReply, MachineHandleReply, MachineLinkRequest, MachineListReply, MachineReachReply, MachineReadingReply, MachineShapeReply,
+    MachineStateReply, PlaceAuthRequest, PlaceCapacity, PlaceProveRequest, SshStartReply, DAEMON_OPS, MACHINE_OPS,
 };
 
 fn fixtures() -> PathBuf {
@@ -253,6 +253,18 @@ fn every_reply_fixture_round_trips_through_the_reply_types() {
                 "GitRestoreReply" => {
                     round_trip::<GitRestoreReply>(&sample, &at);
                 }
+                "GitIssueReadReply" => {
+                    round_trip::<GitIssueReadReply>(&sample, &at);
+                }
+                "GitPrCheckoutReply" => {
+                    round_trip::<GitPrCheckoutReply>(&sample, &at);
+                }
+                "GitPrDiffReply" => {
+                    round_trip::<GitPrDiffReply>(&sample, &at);
+                }
+                "GitPrReviewReply" => {
+                    round_trip::<GitPrReviewReply>(&sample, &at);
+                }
                 "FsFilesReply" => {
                     round_trip::<FsFilesReply>(&sample, &at);
                 }
@@ -297,6 +309,10 @@ fn every_reply_fixture_round_trips_through_the_reply_types() {
         "GitRunLogReply",
         "GitSnapshotReply",
         "GitStartOnReply",
+        "GitIssueReadReply",
+        "GitPrCheckoutReply",
+        "GitPrDiffReply",
+        "GitPrReviewReply",
         "GitUpdateReply",
         "GuestCliMessage",
         "GuestOpenReply",
@@ -403,6 +419,7 @@ fn rendered_numbers() -> BTreeMap<&'static str, Value> {
     m.insert("gitPrListCap", Value::from(numbers::GIT_PR_LIST_CAP));
     m.insert("gitPrListBodyCap", Value::from(numbers::GIT_PR_LIST_BODY_CAP));
     m.insert("checkLogLines", Value::from(numbers::CHECK_LOG_LINES));
+    m.insert("reviewDiffMaxBytes", Value::from(numbers::REVIEW_DIFF_MAX_BYTES));
     m.insert("fsSearchCapFiles", Value::from(numbers::FS_SEARCH_CAP_FILES));
     m.insert("fsSearchCapHits", Value::from(numbers::FS_SEARCH_CAP_HITS));
     m.insert("gitDiffCapBytes", Value::from(numbers::GIT_DIFF_CAP_BYTES));

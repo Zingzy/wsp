@@ -302,6 +302,10 @@ import {
   updatedLine,
   isProviderPlace,
   providerKeyName,
+  ReviewPostResult,
+  START_WORDS,
+  StartResult,
+  type ReviewVerdict,
 } from "@wsp/protocol";
 import type { CliIO } from "./cli.js";
 import { relaySignIn, targetLink, type BoxSignedIn } from "./place-signin.js";
@@ -1360,6 +1364,35 @@ function fixLine(workspace: string, asked: FixResult): string {
   if (asked.child !== undefined) return fixMergeChildLine(workspace, agent, asked.child);
   return asked.check !== undefined ? fixAskedLine(workspace, agent, asked.check) : fixConflictsLine(workspace, agent, asked.base);
 }
+
+/** A workspace started off a link, as the host answers it: the workspace in the host's own bytes, as a create's. */
+async function startedFrom(client: HostClient, o: { url: string; project?: string; agent?: string; model?: string; effort?: string; access?: string }): Promise<StartResult> {
+  const asked = Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined));
+  const { workspace, threadId, sessionId } = await client.request<StartResult>("workspaces.start", asked);
+  return { workspace, threadId, sessionId };
+}
+
+/** A reviewer thread on a pull request, off a link or a workspace's own pull request. */
+async function reviewStarted(client: HostClient, o: { url?: string; workspaceId?: string; agent?: string; model?: string; effort?: string }): Promise<StartResult> {
+  const asked = Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined));
+  const { workspace, threadId, sessionId } = await client.request<StartResult>("workspaces.review", asked);
+  return { workspace, threadId, sessionId };
+}
+
+/** A review posted, its draft edited first where a verdict or a summary is named. */
+async function reviewPosted(client: HostClient, workspaceId: string, edits: { verdict?: ReviewVerdict; summary?: string }): Promise<ReviewPostResult> {
+  if (edits.verdict !== undefined || edits.summary !== undefined) await client.request("workspaces.reviewDraft", { workspaceId, ...edits });
+  return ReviewPostResult.parse(await client.request("workspaces.reviewPost", { workspaceId }));
+}
+
+/** The two lines a start or a review prints: what was made from what, then the thread as the command line's detached
+ * run prints it, or as the run tool answers it. */
+function startedLines(started: StartResult, thread: (threadId: string) => string = id => openedThreadSaid(id, undefined)): string {
+  return `${START_WORDS.made(started.workspace.name, started.workspace.from)}\n${thread(started.threadId)}`;
+}
+
+/** The verdict a line names, in the command line's dashed spelling or the host's own. */
+const VERDICTS: Record<string, ReviewVerdict> = { comment: "comment", approve: "approve", "request-changes": "request_changes", request_changes: "request_changes" };
 
 /** A merge asked of the host, one road for the command line and the tool. */
 async function mergedPr(client: HostClient, workspaceId: string, method: MergeMethod | undefined, whenChecksPass: boolean): Promise<MergeResult> {
@@ -4423,6 +4456,104 @@ export const ALL_VERBS: readonly Verb[] = [
     }),
   },
   {
+    name: "start",
+    usage: "wsp start <link> [--project <name>] [--agent <id>] [--model, --effort, --access <word>]",
+    about: "a workspace off a GitHub issue or pull request link, with a thread on its task; a pull request's copy stands on its branch",
+    page: "agent",
+    options: { project: { type: "string" }, agent: { type: "string" }, ...PICK_OPTIONS },
+    run: async ctx => {
+      const [url] = ctx.args;
+      if (url === undefined || ctx.args.length !== 1) throw usageRefusal("wsp start takes one link.", usageIs(ctx));
+      const client = await ctx.client();
+      const started = await startedFrom(client, { url, project: flag(ctx.flags, "project"), agent: flag(ctx.flags, "agent"), model: flag(ctx.flags, "model"), effort: flag(ctx.flags, "effort"), access: flag(ctx.flags, "access") });
+      ctx.out.emit({ ...started }, startedLines(started));
+      return 0;
+    },
+    tool: tool({
+      description:
+        "Starts a workspace off a GitHub issue or pull request link and opens a thread on it, returning as soon as the thread is started. The link names the repository, and the project here whose remote is that repository is the one used (project names one where two computers hold it); a link no project matches is refused naming the repository and the add line. The issue's or pull request's title, description, comments and link are the thread's task, and an issue's thread is asked to have its pull request close the issue. A pull request's copy is put on its head branch through the git host's own command line, so bringing the work back updates the same pull request, and a pull request from a fork whose author allowed no edits is refused at bring back. A thread's own token is refused: starting work from a link is the person's act.",
+      input: {
+        link: z.string().describe("a GitHub issue or pull request link, https://github.com/<owner>/<repo>/issues/<n> or /pull/<n>"),
+        project: z.string().optional().describe("the project by name or id where two projects hold the repository; absent is this computer's"),
+        agent: AgentIn,
+        ...PICK_INPUTS,
+      },
+      output: StartResult.shape,
+      call: async ({ link, project, agent, model, effort, access }, deps) => {
+        const started = await startedFrom(await deps.client(), { url: link, project, agent, model, effort, access });
+        return asText(startedLines(started, id => openedThreadLine(id, undefined)), { ...started });
+      },
+    }),
+  },
+  {
+    name: "review",
+    usage: "wsp review <link|workspace> [--agent <id>] [--model, --effort <word>]",
+    about: "a reviewer thread on a pull request, read-only, whose review waits in wsp until you post it",
+    page: "agent",
+    options: { agent: { type: "string" }, model: { type: "string" }, effort: { type: "string" } },
+    run: async ctx => {
+      const [target] = ctx.args;
+      if (target === undefined || ctx.args.length !== 1) throw usageRefusal("wsp review takes one pull request link or workspace.", usageIs(ctx));
+      const client = await ctx.client();
+      const on = /^https?:\/\//.test(target) ? { url: target } : { workspaceId: (await workspaceOf(client, target)).id };
+      const started = await reviewStarted(client, { ...on, agent: flag(ctx.flags, "agent"), model: flag(ctx.flags, "model"), effort: flag(ctx.flags, "effort") });
+      ctx.out.emit({ ...started }, startedLines(started));
+      return 0;
+    },
+    tool: tool({
+      description:
+        "Starts a reviewer thread on a pull request, off its link or off a workspace's own pull request, and returns as soon as the thread is started. The reviewer works in a fresh copy at the pull request's head, at its agent's read-only access (Codex unless another is named; an agent with no read-only access is refused naming the ones that have one), with the description, the diff against the base and the repository's own review rules in its task. Its reply ends in a review the host keeps as the workspace's draft; nothing reaches the git host until review_post. A thread's own token is refused.",
+      input: {
+        target: z.string().describe("a GitHub pull request link, or the workspace whose pull request to review"),
+        agent: z.string().optional().describe("the reviewing agent, codex or claude; absent is codex"),
+        model: PICK_INPUTS.model,
+        effort: PICK_INPUTS.effort,
+      },
+      output: StartResult.shape,
+      call: async ({ target, agent, model, effort }, deps) => {
+        const client = await deps.client();
+        const on = /^https?:\/\//.test(target) ? { url: target } : { workspaceId: (await workspaceOf(client, target)).id };
+        const started = await reviewStarted(client, { ...on, agent, model, effort });
+        return asText(startedLines(started, id => openedThreadLine(id, undefined)), { ...started });
+      },
+    }),
+  },
+  {
+    name: "review post",
+    usage: 'wsp review post <workspace> [--verdict comment|approve|request-changes] [--summary "<text>"]',
+    about: "posts a review workspace's review on its pull request as you, its ticked comments on their lines",
+    page: "agent",
+    options: { verdict: { type: "string" }, summary: { type: "string" } },
+    run: async ctx => {
+      const [ref] = ctx.args;
+      if (ref === undefined || ctx.args.length !== 1) throw usageRefusal("wsp review post takes one workspace.", usageIs(ctx));
+      const named = flag(ctx.flags, "verdict");
+      const verdict = named === undefined ? undefined : VERDICTS[named];
+      if (named !== undefined && verdict === undefined) throw usageRefusal(`--verdict takes comment, approve or request-changes, and got ${named}.`, usageIs(ctx));
+      const client = await ctx.client();
+      const workspace = await workspaceOf(client, ref);
+      const posted = await reviewPosted(client, workspace.id, { ...(verdict !== undefined ? { verdict } : {}), ...(flag(ctx.flags, "summary") !== undefined ? { summary: flag(ctx.flags, "summary")! } : {}) });
+      ctx.out.emit({ ...posted }, START_WORDS.posted(workspace.name, posted.number, posted.comments, posted.folded));
+      return 0;
+    },
+    tool: tool({
+      description:
+        "Posts a review workspace's review on its pull request as the person, in one call: the verdict, the summary and every ticked comment on its line, pinned to the head the review was written against. verdict and summary edit the draft first. A comment on a line outside the diff goes into the summary, since the git host takes none there. Refused in one line where the workspace has no review yet, and with the git host's own reason where it refused, approving one's own pull request included. A thread's own token is refused: posting under the person's name is the person's act.",
+      input: {
+        workspace: WorkspaceIn,
+        verdict: z.enum(["comment", "approve", "request_changes"]).optional().describe("comment, approve or request_changes; absent is the draft's"),
+        summary: z.string().optional().describe("the review's summary; absent is the draft's"),
+      },
+      output: ReviewPostResult.shape,
+      call: async ({ workspace: ref, verdict, summary }, deps) => {
+        const client = await deps.client();
+        const workspace = await workspaceOf(client, ref);
+        const posted = await reviewPosted(client, workspace.id, { ...(verdict !== undefined ? { verdict } : {}), ...(summary !== undefined ? { summary } : {}) });
+        return asText(START_WORDS.posted(workspace.name, posted.number, posted.comments, posted.folded), { ...posted });
+      },
+    }),
+  },
+  {
     name: "update",
     usage: "wsp update <workspace>",
     about: "merges the latest commits of the workspace's base into its branch, or names the files that conflict",
@@ -5280,6 +5411,10 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   "fix child": "a child of the workspace whose merge into it stopped on conflicts, by name or id; its agent is asked to merge it and resolve them, and nothing is updated",
   "merge method": "merge, squash or rebase; the repository's own default without one",
   "merge when-checks-pass": "merge once the checks pass rather than now, where the repository allows it",
+  "start project": "the project by name or id where two computers hold the link's repository; this computer's without it",
+  "review agent": "the reviewing agent, codex or claude, each at its read-only access; codex without it",
+  "review post verdict": "comment, approve or request-changes; the draft's own, the reviewer's word unless you changed it, without it",
+  "review post summary": "the review's summary, written over the draft's",
   tree: "indent the threads an agent opened under the one that opened them",
   watch: "draw the table again every second where it stands, until Ctrl-C; it needs a terminal to redraw on",
   why: "what the rows this line adds are for, in your own words; the rows say an agent added them without it",

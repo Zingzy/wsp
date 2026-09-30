@@ -55,6 +55,10 @@ export const PullRequest = z.object({
   changedFiles: count,
   commits: count,
   behindBase: count.optional(),
+  /** Who opened it, by the host's login. */
+  author: z.string().optional(),
+  /** The fork its head lives on where that is not the repository itself, and whether its author let maintainers push. */
+  fork: z.object({ owner: z.string(), pushable: z.boolean() }).optional(),
 });
 export type PullRequest = z.infer<typeof PullRequest>;
 

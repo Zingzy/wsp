@@ -1,0 +1,79 @@
+{
+  "tool": "start",
+  "cases": [
+    {
+      "case": "an issue",
+      "arguments": {
+        "link": "https://github.com/o/r/issues/5"
+      },
+      "replies": {
+        "workspaces.start": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\",\"from\":{\"kind\":\"issue\",\"repo\":\"o/r\",\"number\":5,\"url\":\"https://github.com/o/r/issues/5\",\"title\":\"Add a line \u0085 🧪\"}},\"threadId\":\"t-1\",\"sessionId\":\"s-1\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"made alpha \\\"one\\\" \\u0085 🧪 from issue #5\\nthread t-1\"}],\"structuredContent\":{\"workspace\":{\"name\":\"alpha \\\"one\\\" \\u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\",\"from\":{\"kind\":\"issue\",\"repo\":\"o/r\",\"number\":5,\"url\":\"https://github.com/o/r/issues/5\",\"title\":\"Add a line \\u0085 🧪\"}},\"threadId\":\"t-1\",\"sessionId\":\"s-1\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "workspaces.start",
+          "url": "https://github.com/o/r/issues/5"
+        }
+      ]
+    },
+    {
+      "case": "a pull request, at the picks named",
+      "arguments": {
+        "link": "https://github.com/o/r/pull/7",
+        "project": "alpha",
+        "agent": "claude",
+        "model": "opus",
+        "effort": "high",
+        "access": "acceptEdits"
+      },
+      "replies": {
+        "workspaces.start": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\",\"from\":{\"kind\":\"pull_request\",\"repo\":\"o/r\",\"number\":7,\"url\":\"https://github.com/o/r/pull/7\",\"title\":\"Rename\",\"base\":\"main\",\"head\":{\"branch\":\"lab/review-me\"}}},\"threadId\":\"t-2\",\"sessionId\":\"s-2\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"made alpha \\\"one\\\" \\u0085 🧪 from pull request #7\\nthread t-2\"}],\"structuredContent\":{\"workspace\":{\"name\":\"alpha \\\"one\\\" \\u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\",\"from\":{\"kind\":\"pull_request\",\"repo\":\"o/r\",\"number\":7,\"url\":\"https://github.com/o/r/pull/7\",\"title\":\"Rename\",\"base\":\"main\",\"head\":{\"branch\":\"lab/review-me\"}}},\"threadId\":\"t-2\",\"sessionId\":\"s-2\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "workspaces.start",
+          "url": "https://github.com/o/r/pull/7",
+          "project": "alpha",
+          "agent": "claude",
+          "model": "opus",
+          "effort": "high",
+          "access": "acceptEdits"
+        }
+      ]
+    },
+    {
+      "case": "a workspace answered with no origin",
+      "arguments": {
+        "link": "https://github.com/o/r/issues/6"
+      },
+      "replies": {
+        "workspaces.start": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"},\"threadId\":\"t-3\",\"sessionId\":\"s-3\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"made alpha \\\"one\\\" \\u0085 🧪\\nthread t-3\"}],\"structuredContent\":{\"workspace\":{\"name\":\"alpha \\\"one\\\" \\u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"},\"threadId\":\"t-3\",\"sessionId\":\"s-3\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "workspaces.start",
+          "url": "https://github.com/o/r/issues/6"
+        }
+      ]
+    },
+    {
+      "case": "no project for the repository",
+      "arguments": {
+        "link": "https://github.com/x/y/issues/1"
+      },
+      "replies": {
+        "workspaces.start": "{\"id\":1,\"ok\":false,\"error\":\"no project here is a checkout of x/y; add one with wsp add https://github.com/x/y\",\"kind\":\"usage\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"no project here is a checkout of x/y; add one with wsp add https://github.com/x/y\"}],\"structuredContent\":{\"error\":\"no project here is a checkout of x/y; add one with wsp add https://github.com/x/y\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "workspaces.start",
+          "url": "https://github.com/x/y/issues/1"
+        }
+      ]
+    }
+  ]
+}

@@ -23,7 +23,7 @@ import { NO_FINDER_CHOOSER, PASTE_THIS, homeOf, keptLog, labLines, launchDiesLin
 
 describe("the fixtures a lab serves", () => {
   it("has one per kind of person the testers play", () => {
-    expect(FIXTURE_NAMES).toEqual(["mac-in-use", "mac-only", "mac-and-laptop", "mac-and-vps", "ascii-only", "solari-only", "both-providers", "no-sign-in", "mac-and-boxes", "orchestrator", "thread-states", "tiles", "tiles-marks", "tiles-snoozed", "tiles-attempt", "image-built", "long-prompt", "changes", "pull-request", "pull-request-conflict", "tree", "tree-conflict", "rewind", "replies"]);
+    expect(FIXTURE_NAMES).toEqual(["mac-in-use", "mac-only", "mac-and-laptop", "mac-and-vps", "ascii-only", "solari-only", "both-providers", "no-sign-in", "mac-and-boxes", "orchestrator", "thread-states", "tiles", "tiles-marks", "tiles-snoozed", "tiles-attempt", "image-built", "long-prompt", "changes", "pull-request", "pull-request-conflict", "tree", "tree-conflict", "review-draft", "review-posted", "rewind", "replies"]);
   });
 
   it("gives the two personas who have this computer and nothing else the first run, with no project added", () => {
@@ -279,6 +279,8 @@ describe("the fixtures a lab serves", () => {
       "pull-request-conflict": "no cloud",
       tree: "no cloud",
       "tree-conflict": "no cloud",
+      "review-draft": "no cloud",
+      "review-posted": "no cloud",
       rewind: "no cloud",
       replies: "no cloud",
     });
@@ -438,6 +440,8 @@ describe("the provider a fixture's host runs under", () => {
       "pull-request-conflict": "none",
       tree: "none",
       "tree-conflict": "none",
+      "review-draft": "none",
+      "review-posted": "none",
       rewind: "none",
       replies: "fake",
     });

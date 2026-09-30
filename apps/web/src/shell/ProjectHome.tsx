@@ -8,11 +8,14 @@
 // queue drains only in a composer on screen and one copy at most is on screen;
 // the computer's free room is read first, and a send it has no room for is
 // refused before any copy is made.
-import { HERE_PLACE_ID, kindForComputer, placeRoom, plural, workspaceAccess, type ProjectView } from "@wsp/protocol";
+import { HERE_PLACE_ID, START_WORDS, githubLinkOf, kindForComputer, placeRoom, plural, workspaceAccess, type ProjectView } from "@wsp/protocol";
+import { ownerRepoOf } from "@wsp/catalog";
+import { Button } from "../components/ui/button.js";
+import { RefusalSlot } from "../settings/sheetParts.js";
 import { EmptyThread } from "../components/chat/ChatView.js";
 import { HeroAtmosphere } from "../components/chat/EmptyHero.js";
 import { ChatComposer } from "../components/chat/ChatComposer.js";
-import { newId, useComposerDraftStore } from "../components/chat/composerDraftStore.js";
+import { newId, useComposerDraft, useComposerDraftStore } from "../components/chat/composerDraftStore.js";
 import { attachmentOf, useComposerFilesStore } from "../components/chat/composerFiles.js";
 import { useMultiPickStore, type ModelPick } from "../components/chat/composerMultiPick.js";
 import { useComposerOptions, useComposerOptionsStore } from "../components/chat/composerOptionsStore.js";
@@ -58,9 +61,36 @@ export function ProjectHome({ projectId }: { projectId: string }) {
   const thread = useChatThread(key, null, true);
   const catalogs = useHarnessCatalogs(key);
   const picked = useComposerOptions(key);
+  // A link in the box names a project of its own, whichever home it was typed in: the send starts on that project.
+  const link = githubLinkOf(useComposerDraft(key).prompt);
+  const linked = useStore(s => (link === undefined ? undefined : s.projects.find(p => ownerRepoOf(p.remote)?.toLowerCase() === link.repo.toLowerCase())));
   if (project === undefined) return null;
 
+  /** A start or a review off the link, through the host, which opens the thread it made. */
+  const fromLink = async (url: string, kind: "start" | "review"): Promise<string | null> => {
+    const { api, select, preferences } = useStore.getState();
+    const go = kind === "start" ? api?.start : api?.review;
+    if (go === undefined) return null;
+    const access = preferences.access[key];
+    try {
+      const made = await go({
+        url,
+        ...(kind === "start" && picked.harness !== undefined ? { agent: picked.harness } : {}),
+        ...(picked.model !== undefined && kind === "start" ? { model: picked.model } : {}),
+        ...(picked.effort !== undefined ? { effort: picked.effort } : {}),
+        ...(kind === "start" && access !== undefined && access !== null ? { access } : {}),
+      });
+      useComposerDraftStore.getState().setDraft(key, { prompt: "", cursor: 0 });
+      select(made.workspace.id, made.threadId);
+      return null;
+    } catch (e) {
+      return e instanceof Error ? e.message : String(e);
+    }
+  };
+
   const start = async (prompt: string): Promise<string | null> => {
+    const asked = githubLinkOf(prompt);
+    if (asked !== undefined) return fromLink(asked.url, "start");
     const picks = useMultiPickStore.getState().byKey[key];
     if (picks !== undefined) return startSeveral(prompt, picks);
     const workspaceId = await createWorkspace(project.id, nameOfTask(prompt));
@@ -108,7 +138,24 @@ export function ProjectHome({ projectId }: { projectId: string }) {
     <div data-k="project-home" className="relative isolate flex min-h-0 flex-1 flex-col justify-center gap-10 pb-[8vh]">
       <HeroAtmosphere projectId={project.id} />
       <EmptyThread name={project.name} projectId={project.id} picker={<HomeProjectPicker project={project} />} />
-      <ChatComposer key={key} workspaceId={key} thread={thread} onStart={start} where={<WhereItRuns project={project} />} />
+      <ChatComposer
+        key={key}
+        workspaceId={key}
+        thread={thread}
+        onStart={start}
+        where={<WhereItRuns project={project} />}
+        {...(link !== undefined && linked !== undefined ? { sendLabel: START_WORDS.startOn(link.number) } : {})}
+        {...(link?.kind === "pull_request" && linked !== undefined
+          ? {
+              beside: (
+                <Button type="button" size="sm" variant="outline" data-k="start-review" onClick={() => void fromLink(link.url, "review").then(said => (said === null ? undefined : noticeFailure(new Error(said))))}>
+                  {START_WORDS.review(link.number)}
+                </Button>
+              ),
+            }
+          : {})}
+        {...(link !== undefined && linked === undefined ? { under: <RefusalSlot k="start-refusal" said={START_WORDS.noProjectForRepo(link.repo)} /> } : {})}
+      />
     </div>
   );
 }

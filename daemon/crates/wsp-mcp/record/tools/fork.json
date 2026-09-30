@@ -360,6 +360,197 @@
             "portBase": {
               "type": "integer",
               "exclusiveMinimum": 0
+            },
+            "from": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "issue",
+                    "pull_request",
+                    "review"
+                  ]
+                },
+                "repo": {
+                  "type": "string"
+                },
+                "number": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "url": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "base": {
+                  "type": "string"
+                },
+                "head": {
+                  "type": "object",
+                  "properties": {
+                    "branch": {
+                      "type": "string"
+                    },
+                    "oid": {
+                      "type": "string"
+                    },
+                    "fork": {
+                      "type": "object",
+                      "properties": {
+                        "owner": {
+                          "type": "string"
+                        },
+                        "pushable": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "owner",
+                        "pushable"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "branch"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "kind",
+                "repo",
+                "number",
+                "url",
+                "title"
+              ],
+              "additionalProperties": false
+            },
+            "review": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "verdict": {
+                      "type": "string",
+                      "enum": [
+                        "comment",
+                        "approve",
+                        "request_changes"
+                      ]
+                    },
+                    "summary": {
+                      "type": "string"
+                    },
+                    "comments": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "path": {
+                            "type": "string"
+                          },
+                          "line": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0
+                          },
+                          "side": {
+                            "type": "string",
+                            "enum": [
+                              "LEFT",
+                              "RIGHT"
+                            ]
+                          },
+                          "body": {
+                            "type": "string"
+                          },
+                          "on": {
+                            "type": "boolean"
+                          },
+                          "inSummary": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "path",
+                          "line",
+                          "side",
+                          "body",
+                          "on"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "headOid": {
+                      "type": "string"
+                    },
+                    "threadId": {
+                      "type": "string"
+                    },
+                    "at": {
+                      "type": "number"
+                    },
+                    "posted": {
+                      "type": "object",
+                      "properties": {
+                        "url": {
+                          "type": "string"
+                        },
+                        "at": {
+                          "type": "number"
+                        },
+                        "folded": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "url",
+                        "at",
+                        "folded"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "verdict",
+                    "summary",
+                    "comments",
+                    "headOid",
+                    "threadId",
+                    "at"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "note": {
+                      "type": "string"
+                    },
+                    "at": {
+                      "type": "number"
+                    },
+                    "reasked": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "note",
+                    "at"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
             }
           },
           "required": [

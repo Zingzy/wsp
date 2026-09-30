@@ -63,7 +63,13 @@ const PULL_REQUEST_FRAMES = {
   "git.repoRead": { methods: ["merge", "squash", "rebase"], defaultMethod: "squash", autoMerge: true },
   "git.prMerge": { merged: true, autoArmed: false },
   "git.update": { base: "main", merged: true, commits: 2, conflicts: [] },
+  "git.issueRead": { issue: { number: 3, url: "https://github.com/dev/alpha/pull/3", title: "Do the work", body: "Rounds the total once.", state: "OPEN", comments: [] } },
+  "git.prDiff": { diff: "diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-one\n+two\n", truncated: false, left: [] },
+  "git.prCheckout": { branch: "work" },
+  "git.prReview": { url: "https://github.com/dev/alpha/pull/3#pullrequestreview-1", folded: [] },
 };
+/** What the scripted reviewer's reply ends with: one comment on the diff's one line. */
+const REVIEW_BLOCK = `Read it.\n\n\`\`\`json\n${JSON.stringify({ verdict: "comment", summary: "Rounds once.", comments: [{ path: "a.ts", line: 1, side: "RIGHT", body: "two reads well." }] })}\n\`\`\``;
 
 /** This computer's own Host over a fixture home, with the fixture's agents on its PATH. */
 function fixtureHost(at: AgentHome): Host {
@@ -166,7 +172,7 @@ describe("the agent contract on the command line and the tool door", () => {
     backend = stubBackend();
     store = memoryStore();
     await store.put("goldens", copyKey("default", "default"), SEALED_GOLDEN);
-    const claude = scriptedAgent(prompt => (prompt === "die" ? "" : `re: ${prompt}`), () => ({ kind: "written" }));
+    const claude = scriptedAgent(prompt => (prompt === "die" ? "" : prompt.startsWith("Review pull request") ? REVIEW_BLOCK : `re: ${prompt}`), () => ({ kind: "written" }));
     // The confirming read a gone verdict waits for runs on the same tick: this backend's 404 is the whole truth, so
     // the wait only buys the contract a five second pause on the road to a rebuild.
     const agents = agentHome(join(dir, "agents"));
@@ -322,6 +328,19 @@ describe("the agent contract on the command line and the tool door", () => {
     await rt!.workspaces.create({ project: "alpha", golden: "snap_g", name: "beta", parent: alpha });
     backend.create = make;
     expect(await last("merge in", "merge", "in", "alpha", "beta")).toEqual({ lead: "alpha", child: "beta", branch: "work", merged: true, commits: 1, conflicts: [] });
+    // A start and a review make workspaces of their own, whose machines answer their daemons at the same route.
+    const routed = rt.events.on("workspace.created", e => {
+      if (e.type !== "workspace.created") return;
+      const made = backend.machines.find(m => m.id === e.workspace.machineId);
+      if (made !== undefined) made.previewUrl = machine.previewUrl;
+    });
+    const started = (await last("start", "start", "https://github.com/dev/alpha/issues/3", "--agent", "claude")) as { workspace: { name: string; from: { kind: string } } };
+    expect(started.workspace).toMatchObject({ name: "#3 Do the work", from: { kind: "issue" } });
+    const reviewing = (await last("review", "review", "https://github.com/dev/alpha/pull/3", "--agent", "claude")) as { workspace: { id: string } };
+    const drafted = async (): Promise<boolean> => "verdict" in ((await rt.workspaces.reviewDraft({ workspaceId: reviewing.workspace.id })).review ?? {});
+    for (let tries = 0; tries < 200 && !(await drafted()); tries++) await new Promise(r => setTimeout(r, 10));
+    expect(await last("review post", "review", "post", reviewing.workspace.id)).toEqual({ url: "https://github.com/dev/alpha/pull/3#pullrequestreview-1", number: 3, comments: 1, folded: 0 });
+    routed();
     // The route goes again with the guest that answered for it: a machine wearing one has every later verb wait on
     // a daemon that is not there, which is the rest of this run.
     machine.previewUrl = noRoute;

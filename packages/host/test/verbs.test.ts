@@ -2313,7 +2313,7 @@ describe("wsp verbs over the host", () => {
     expect(claude.starts.at(-1)).toMatchObject({ resume: thread!.claudeSessionId, model: "claude-fable-5-1", effort: "max", permissionMode: access });
     const named = await run("send", thread!.threadId!, "--access", "acceptEdits", "and now");
     expect(named.code).toBe(3);
-    expect(named.io.errors).toEqual(['--access belongs to wsp fork and wsp run; wsp send does not read it. usage: wsp send <thread> [--model, --effort <value>] [--fast] [--file <path>] [--detach] "<message>"']);
+    expect(named.io.errors).toEqual(['--access belongs to wsp fork, wsp start and wsp run; wsp send does not read it. usage: wsp send <thread> [--model, --effort <value>] [--fast] [--file <path>] [--detach] "<message>"']);
 
     withDaemonRoads(backend);
     const forked = await run("fork", "alpha", "--name", "worker", "--send", "build it", "--model", "claude-sonnet-5", "--access", "bypassPermissions");
@@ -3949,7 +3949,7 @@ describe("wsp verbs over the host", () => {
     // A flag another verb reads is refused naming that verb, so the caller is told where it lives: run's --agent on send, threads' --tree on stop.
     const foreign = await run("send", "row_1", "--agent", "claude", "hello");
     expect(foreign.code).toBe(3);
-    expect(foreign.io.errors).toEqual(['--agent belongs to wsp skills add, wsp servers signin, wsp servers tools, wsp servers add, wsp servers remove, wsp servers disable, wsp servers enable, wsp fork and wsp run; wsp send does not read it. usage: wsp send <thread> [--model, --effort <value>] [--fast] [--file <path>] [--detach] "<message>"']);
+    expect(foreign.io.errors).toEqual(['--agent belongs to wsp skills add, wsp servers signin, wsp servers tools, wsp servers add, wsp servers remove, wsp servers disable, wsp servers enable, wsp fork, wsp start, wsp review and wsp run; wsp send does not read it. usage: wsp send <thread> [--model, --effort <value>] [--fast] [--file <path>] [--detach] "<message>"']);
     const within = await run("stop", "row_1", "--tree");
     expect(within.io.errors[0]).toContain("--tree belongs to wsp threads; wsp stop does not read it");
     // A flag wsp used to read is nobody's now: the parser's own line, with the verb's usage under it.

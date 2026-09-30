@@ -166,6 +166,25 @@
             },
             "behindBase": {
               "$ref": "#/properties/pr/properties/number"
+            },
+            "author": {
+              "type": "string"
+            },
+            "fork": {
+              "type": "object",
+              "properties": {
+                "owner": {
+                  "type": "string"
+                },
+                "pushable": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "owner",
+                "pushable"
+              ],
+              "additionalProperties": false
             }
           },
           "required": [
@@ -377,6 +396,25 @@
             },
             "behindBase": {
               "$ref": "#/properties/pr/properties/number"
+            },
+            "author": {
+              "type": "string"
+            },
+            "fork": {
+              "type": "object",
+              "properties": {
+                "owner": {
+                  "type": "string"
+                },
+                "pushable": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "owner",
+                "pushable"
+              ],
+              "additionalProperties": false
             }
           },
           "required": [

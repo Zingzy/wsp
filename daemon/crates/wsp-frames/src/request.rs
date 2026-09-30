@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::validate::{bounded, bounded_opt, capped_list, exec_timeout, sha256_hex, upload_word};
-use crate::{FsReadEncoding, FsSearchMode, GitDiffScope, GuestKind, MergeMethod, ProcSignal, RequestId};
+use crate::{FsReadEncoding, FsSearchMode, GitDiffScope, GuestKind, MergeMethod, ProcSignal, RequestId, ReviewEvent, ReviewSide};
 
 /// One request on an authed socket: the id the reply echoes and the op with its parameters.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -374,6 +374,55 @@ pub enum DaemonOp {
         #[ts(optional)]
         machine_id: Option<String>,
     },
+    /// An issue, or a pull request read as the issue it also is, by number in the repository the remote names: its text
+    /// and its conversation.
+    #[serde(rename = "git.issueRead", rename_all = "camelCase")]
+    GitIssueRead {
+        cwd: String,
+        remote: String,
+        number: u64,
+        /// The workspace this frame is for, as on fs.list above.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        machine_id: Option<String>,
+    },
+    /// Puts the copy on a pull request's head branch through the git host's own command line, tracking where it lives.
+    #[serde(rename = "git.prCheckout", rename_all = "camelCase")]
+    GitPrCheckout {
+        cwd: String,
+        number: u64,
+        /// The workspace this frame is for, as on fs.list above.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        machine_id: Option<String>,
+    },
+    /// A pull request's diff against its base, cut on a file's boundary at REVIEW_DIFF_MAX_BYTES.
+    #[serde(rename = "git.prDiff", rename_all = "camelCase")]
+    GitPrDiff {
+        cwd: String,
+        remote: String,
+        number: u64,
+        /// The workspace this frame is for, as on fs.list above.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        machine_id: Option<String>,
+    },
+    /// Posts one review in one call, its verdict, its body and its comments on lines, pinned to the head named; a
+    /// comment whose line is outside the diff goes into the body.
+    #[serde(rename = "git.prReview", rename_all = "camelCase")]
+    GitPrReview {
+        cwd: String,
+        remote: String,
+        number: u64,
+        head_oid: String,
+        event: ReviewEvent,
+        body: String,
+        comments: Vec<ReviewComment>,
+        /// The workspace this frame is for, as on fs.list above.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        machine_id: Option<String>,
+    },
     /// How the repository lets a pull request land: its merge methods, the default one and whether it merges by itself.
     #[serde(rename = "git.repoRead", rename_all = "camelCase")]
     GitRepoRead {
@@ -576,7 +625,19 @@ pub enum DaemonOp {
 
 /// The op names above, in the protocol's order; the daemon's switch reads this to tell an op it knows from one it
 /// does not.
-pub const DAEMON_OPS: [&str; 58] = [
+/// One comment of a review on a line: an id the caller knows it by, where it is and what it says.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewComment {
+    pub id: String,
+    pub path: String,
+    pub line: u64,
+    pub side: ReviewSide,
+    pub body: String,
+}
+
+pub const DAEMON_OPS: [&str; 62] = [
     "pty.create",
     "pty.attach",
     "pty.detach",
@@ -635,6 +696,10 @@ pub const DAEMON_OPS: [&str; 58] = [
     "git.startOn",
     "git.branchCompare",
     "git.mergeIn",
+    "git.issueRead",
+    "git.prCheckout",
+    "git.prDiff",
+    "git.prReview",
 ];
 
 /// The five of those that belong to the road a client of this machine dials in on: a guest process's two and the

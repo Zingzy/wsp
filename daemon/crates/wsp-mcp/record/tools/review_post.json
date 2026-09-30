@@ -1,0 +1,126 @@
+{
+  "cloudOff": {
+    "name": "review_post",
+    "description": "Posts a review workspace's review on its pull request as the person, in one call: the verdict, the summary and every ticked comment on its line, pinned to the head the review was written against. verdict and summary edit the draft first. A comment on a line outside the diff goes into the summary, since the git host takes none there. Refused in one line where the workspace has no review yet, and with the git host's own reason where it refused, approving one's own pull request included. A thread's own token is refused: posting under the person's name is the person's act.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "workspace": {
+          "type": "string",
+          "description": "the workspace's name, or its id when two share a name"
+        },
+        "verdict": {
+          "type": "string",
+          "enum": [
+            "comment",
+            "approve",
+            "request_changes"
+          ],
+          "description": "comment, approve or request_changes; absent is the draft's"
+        },
+        "summary": {
+          "type": "string",
+          "description": "the review's summary; absent is the draft's"
+        }
+      },
+      "required": [
+        "workspace"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string"
+        },
+        "number": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "comments": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "folded": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "url",
+        "number",
+        "comments",
+        "folded"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  "cloudOn": {
+    "name": "review_post",
+    "description": "Posts a review workspace's review on its pull request as the person, in one call: the verdict, the summary and every ticked comment on its line, pinned to the head the review was written against. verdict and summary edit the draft first. A comment on a line outside the diff goes into the summary, since the git host takes none there. Refused in one line where the workspace has no review yet, and with the git host's own reason where it refused, approving one's own pull request included. A thread's own token is refused: posting under the person's name is the person's act.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "workspace": {
+          "type": "string",
+          "description": "the workspace's name, or its id when two share a name"
+        },
+        "verdict": {
+          "type": "string",
+          "enum": [
+            "comment",
+            "approve",
+            "request_changes"
+          ],
+          "description": "comment, approve or request_changes; absent is the draft's"
+        },
+        "summary": {
+          "type": "string",
+          "description": "the review's summary; absent is the draft's"
+        }
+      },
+      "required": [
+        "workspace"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string"
+        },
+        "number": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "comments": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "folded": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "url",
+        "number",
+        "comments",
+        "folded"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  }
+}

@@ -147,6 +147,25 @@ pub enum MergeMethod {
     Rebase,
 }
 
+/// What a posted review says of the pull request: a comment, an approval, or changes asked for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewEvent {
+    Comment,
+    Approve,
+    RequestChanges,
+}
+
+/// Which side of a diff a comment on a line is on: the old file's, or the new file's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum ReviewSide {
+    Left,
+    Right,
+}
+
 /// Which of a git host's two open lists an item came off.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]

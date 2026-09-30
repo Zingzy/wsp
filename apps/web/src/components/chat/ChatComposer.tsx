@@ -207,6 +207,9 @@ export function ChatComposer({
   onStart,
   waiting,
   where,
+  sendLabel: sendGiven,
+  beside,
+  under,
 }: {
   workspaceId: string;
   thread: ChatThreadHandle;
@@ -214,6 +217,12 @@ export function ChatComposer({
   waiting?: { line: string; folder: string };
   /** New thread's where it runs: the row's first item, the computer, a picker where several hold the repo. */
   where?: ReactNode;
+  /** The send button's word where the send is something other than a message: Start on #12. */
+  sendLabel?: string;
+  /** One more button beside the send, for a second act on the same text: Review #12. */
+  beside?: ReactNode;
+  /** One line under the row, where what is typed is refused before any send: a link no project matches. */
+  under?: ReactNode;
 }) {
   const api = useStore(s => s.api);
   const waits = waiting !== undefined;
@@ -904,6 +913,7 @@ export function ChatComposer({
           event.target.value = "";
         }}
       />
+      {beside}
       <ComposerPrimaryActions
         compact={false}
         pendingAction={null}
@@ -913,7 +923,7 @@ export function ChatComposer({
         promptHasText={hasText}
         isSendBusy={thread.busy}
         wakesFirst={wakesFirst}
-        sendLabel={onStart !== undefined && multiPicks.length > 0 ? `Send to ${multiPicks.length}` : undefined}
+        sendLabel={sendGiven ?? (onStart !== undefined && multiPicks.length > 0 ? `Send to ${multiPicks.length}` : undefined)}
         sendDisabledReason={sendDisabledReason}
         isConnecting={false}
         isEnvironmentUnavailable={false}
@@ -1021,7 +1031,15 @@ export function ChatComposer({
                           fast={fastOffered ? { on: fastOn, set: on => setFast(threadKey, on), held: waits } : null}
                         />
                       </div>
-                      <div data-chat-composer-actions="right" className={cn("col-start-3 flex shrink-0 items-center justify-self-end", compact && !tall ? "row-start-1" : "row-start-2 self-end")}>
+                      <div
+                        data-chat-composer-actions="right"
+                        className={cn(
+                          "col-start-3 flex shrink-0 items-center justify-self-end",
+                          compact && !tall ? "row-start-1" : "row-start-2 self-end",
+                          // A second button leaves the pickers no room on a phone, so the buttons take a row of their own.
+                          beside !== undefined && !compact && "max-sm:col-span-full max-sm:col-start-1 max-sm:row-start-3 max-sm:mt-1",
+                        )}
+                      >
                         {actions}
                       </div>
                     </div>
@@ -1043,6 +1061,7 @@ export function ChatComposer({
           stash={stashWord}
           />
         )}
+        {under !== undefined ? <ComposerSurface.ContextStrip data-composer-under>{under}</ComposerSurface.ContextStrip> : null}
       </ComposerSurface.Shell>
     </div>
   );
