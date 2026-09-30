@@ -84,6 +84,9 @@ import {
   GitRunLogReply,
   GitPrMergeReply,
   GitRepoReadReply,
+  GitStartOnReply,
+  GitBranchCompareReply,
+  GitMergeInReply,
   GitUpdateReply,
   CHECK_LOG_LINES,
   GitPrListReply,
@@ -607,6 +610,15 @@ const REPLIES: Record<string, { schema: ZodTypeAny; samples: unknown[] }> = {
     samples: [
       { methods: ["merge", "squash", "rebase"], defaultMethod: "merge", autoMerge: false },
       { methods: ["squash"], defaultMethod: "squash", autoMerge: true },
+    ],
+  },
+  GitStartOnReply: { schema: GitStartOnReply, samples: [{ branch: "tree/lead", oid: "4b825dc642cb6eb9a060e54bf8d69288fbee4904" }] },
+  GitBranchCompareReply: { schema: GitBranchCompareReply, samples: [{ pushed: true, aheadBy: 2, behindBy: 1, status: "diverged" }, { pushed: false }] },
+  GitMergeInReply: {
+    schema: GitMergeInReply,
+    samples: [
+      { branch: "child/one", merged: true, commits: 3, oid: "4b825dc642cb6eb9a060e54bf8d69288fbee4904", head: "9daeafb9864cf43055ae93beb0afd6c7d144bfa4", conflicts: [] },
+      { branch: "child/two", merged: false, commits: 0, conflicts: ["lead.txt", "src/a b.ts"] },
     ],
   },
   GitUpdateReply: {

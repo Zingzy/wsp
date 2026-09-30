@@ -12,6 +12,10 @@
         "check": {
           "type": "string",
           "description": "the failed check's name as the pull request lists it; without it the copy is updated from its base and any conflict is sent"
+        },
+        "child": {
+          "type": "string",
+          "description": "a child of this workspace whose merge into it stopped on conflicts: its agent is asked to fetch the child's branch, merge it with a merge commit and resolve them; never with check"
         }
       },
       "required": [
@@ -36,6 +40,9 @@
           "type": "string"
         },
         "check": {
+          "type": "string"
+        },
+        "child": {
           "type": "string"
         },
         "base": {
@@ -69,6 +76,10 @@
         "check": {
           "type": "string",
           "description": "the failed check's name as the pull request lists it; without it the copy is updated from its base and any conflict is sent"
+        },
+        "child": {
+          "type": "string",
+          "description": "a child of this workspace whose merge into it stopped on conflicts: its agent is asked to fetch the child's branch, merge it with a merge commit and resolve them; never with check"
         }
       },
       "required": [
@@ -93,6 +104,9 @@
           "type": "string"
         },
         "check": {
+          "type": "string"
+        },
+        "child": {
           "type": "string"
         },
         "base": {

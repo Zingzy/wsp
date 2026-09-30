@@ -24,6 +24,8 @@ import {
   fixAskedLine,
   fixConflictsLine,
   fixNothingLine,
+  fixMergeChildLine,
+  FIX_CHECK_OR_CHILD,
   mergedLine,
   updateConflictsLine,
   updatedLine,
@@ -40,6 +42,9 @@ import {
   thisComputer,
   workspaceStateLine,
   type WorkspaceState,
+  mergeConflictsLine,
+  mergedInLine,
+  nothingToMergeLine,
 } from "@wsp/protocol";
 import { absoluteFolder, agentsToolAskedNothing, broughtBackLine, deletedLine, forgotLine, imageMovedLine, otherVersion, projectGoldenOf, NO_DRAFT_FIX, noDraftLine, rebuiltLine, renamedWorkspaceLine, theProject, type HostClient } from "../src/verbs.js";
 import type { TurnCase } from "./mcp-record-turns.js";
@@ -176,6 +181,8 @@ export async function workspaceWords(line: LineOf, host: HostOf): Promise<Record
     fixConflicts: fixConflictsLine("{name}", "{agent}", "{base}"),
     fixNothing: fixNothingLine("{name}", "{base}"),
     fixAgentDefault: agentName(DEFAULT_AGENT.id),
+    fixMergeChild: fixMergeChildLine("{name}", "{agent}", "{child}"),
+    fixCheckOrChild: FIX_CHECK_OR_CHILD,
     merged: slot(mergedLine("{name}", { number: 7, method: "{method}" as never, merged: true }), "7", "number"),
     mergeArmed: slot(mergedLine("{name}", { number: 7, method: "merge", merged: false }), "7", "number"),
     updatedNone: updatedLine("{name}", "{base}", 0),
@@ -183,6 +190,10 @@ export async function workspaceWords(line: LineOf, host: HostOf): Promise<Record
     updatedMany: slot(updatedLine("{name}", "{base}", 2), "2", "count"),
     updateConflicts: updateConflictsLine("{name}", "{base}", ["{files}"]),
     updateConflictsJoin: after(updateConflictsLine("{name}", "{base}", ["{a}", "{b}"]), updateConflictsLine("{name}", "{base}", ["{a}"])).replace("{b}", ""),
+    mergedInOne: mergedInLine("{lead}", "{branch}", "{child}", 1),
+    mergedInMany: slot(mergedInLine("{lead}", "{branch}", "{child}", 2), "2", "count"),
+    mergeConflicts: mergeConflictsLine("{lead}", "{branch}", ["{paths}"]),
+    nothingToMerge: nothingToMergeLine("{lead}", "{child}"),
     firstTurnFailed,
   };
 }
@@ -374,6 +385,26 @@ export const WORKSPACE_ANSWERED: Record<string, TurnCase[]> = {
     { case: "refused", arguments: { source: "/nowhere" }, replies: { "projects.add": refused("/nowhere is not a git repo", "usage") } },
   ],
   projects_remove: [{ case: "removed", arguments: { project: "alpha" }, replies: { "projects.resolve": reply({ project: PROJECT }), "projects.remove": reply({ said: "alpha 'quoted' is no longer a project here \u0085" }) } }],
+  merge_in: [
+    {
+      case: "merged from a napping lead",
+      arguments: { lead: "alpha", child: "beta \u0085" },
+      replies: {
+        "workspaces.resolve": reply({ workspace: NAPPING }),
+        "workspaces.wake": reply({ workspace: WORKSPACE }),
+        "workspaces.mergeIn": reply({ conflicts: [], child: "beta \u0085", lead: "alpha \"one\"", branch: "child/caf\u00e9", merged: true, commits: 3 }),
+      },
+    },
+    { case: "one commit", arguments: { lead: "alpha", child: "beta" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.wake": reply({ workspace: WORKSPACE }), "workspaces.mergeIn": reply({ lead: "alpha", child: "beta", branch: "b", merged: true, commits: 1, conflicts: [] }) } },
+    { case: "nothing to take", arguments: { lead: "alpha", child: "beta" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.wake": reply({ workspace: WORKSPACE }), "workspaces.mergeIn": reply({ lead: "alpha", child: "beta", branch: "child/one", merged: true, commits: 0, conflicts: [] }) } },
+    {
+      case: "conflicts",
+      arguments: { lead: "alpha", child: "beta" },
+      replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.wake": reply({ workspace: WORKSPACE }), "workspaces.mergeIn": reply({ lead: "alpha", child: "beta", branch: "child/two", merged: false, commits: 0, conflicts: ["lead.txt", "src/a b \u0085.ts"] }) },
+    },
+    { case: "refused", arguments: { lead: "alpha", child: "beta" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.wake": reply({ workspace: WORKSPACE }), "workspaces.mergeIn": refused("the lead is working") } },
+    { case: "gone", arguments: { lead: "alpha", child: "beta" }, replies: { "workspaces.resolve": reply({ workspace: GONE }) } },
+  ],
   bring_back: [
     { case: "pr", arguments: { workspace: "alpha", title: "Fix it", body: "because" }, replies: { "workspaces.resolve": reply({ workspace: NAPPING }), "workspaces.wake": reply({ workspace: WORKSPACE }), "workspaces.bringBack": reply({ stat: [" a.ts | 2 +-", " b \u0085 | 1 +"], branch: "work", base: "main", ahead: 3, uncommitted: 2, pr: { url: "https://github.com/dev/alpha/pull/3", number: 3, checks: [{ state: "fail", name: "ci \u0085", run: { jobId: 2, runId: 1 }, workflow: "ci" }], state: "open", host: "github.com", draft: false, base: "main", branch: "work", headSubject: "Fix it, caf\u00e9 again", headOid: "abc1234", mergeable: "conflicting", mergeState: "dirty", review: "changes_asked", additions: 10, deletions: 0, changedFiles: 1, commits: 2, behindBase: 3 } }) } },
     { case: "note", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.wake": reply({ workspace: WORKSPACE }), "workspaces.bringBack": reply({ branch: "work", base: "main", ahead: 1, uncommitted: 1, stat: [], note: "no signed-in gh on the machine" }) } },
@@ -407,6 +438,8 @@ export const WORKSPACE_ANSWERED: Record<string, TurnCase[]> = {
     { case: "an agent the catalog does not name", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.wake": reply({ workspace: WORKSPACE }), "workspaces.fix": reply({ outcome: "queued", threadId: "t-3", base: "develop", agent: "someone-else" }) } },
     { case: "updated clean, nothing sent", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.wake": reply({ workspace: WORKSPACE }), "workspaces.fix": reply({ outcome: "updated", base: "main \u0085 🧪" }) } },
     { case: "refused", arguments: { workspace: "alpha", check: "lint" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.fix": refused("lint has not failed on #4", "usage") } },
+    { case: "a child to merge", arguments: { workspace: "alpha", child: "beta \u0085 🧪" }, replies: { "workspaces.resolve": reply({ workspace: NAPPING }), "workspaces.wake": reply({ workspace: WORKSPACE }), "workspaces.fix": reply({ outcome: "started", threadId: "t-4", child: "beta \u0085 🧪", base: "tree/lead", agent: "claude" }) } },
+    { case: "a check and a child", arguments: { workspace: "alpha", check: "lint", child: "beta" }, replies: {} },
     { case: "gone", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: GONE }) } },
   ],
   merge: [

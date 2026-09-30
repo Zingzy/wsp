@@ -1,0 +1,19 @@
+[
+  {
+    "id": 1,
+    "op": "git.mergeIn",
+    "cwd": "repo"
+  },
+  {
+    "id": 1,
+    "op": "git.mergeIn",
+    "branch": "child/one"
+  },
+  {
+    "id": 1,
+    "op": "git.mergeIn",
+    "cwd": "repo",
+    "branch": "child/one",
+    "from": 4
+  }
+]

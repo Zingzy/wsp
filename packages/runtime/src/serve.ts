@@ -1231,7 +1231,11 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, ...(await rt.workspaces.pullRequestView({ workspaceId: msg.workspaceId }, origin)) });
               return;
             case "workspaces.fix":
-              send({ id: msg.id, ok: true, ...(await rt.workspaces.fix({ workspaceId: msg.workspaceId, ...(msg.check !== undefined ? { check: msg.check } : {}) }, origin)) });
+              send({
+                id: msg.id,
+                ok: true,
+                ...(await rt.workspaces.fix({ workspaceId: msg.workspaceId, ...(msg.check !== undefined ? { check: msg.check } : {}), ...(msg.child !== undefined ? { child: msg.child } : {}) }, origin)),
+              });
               return;
             case "workspaces.merge":
               send({
@@ -1250,6 +1254,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               return;
             case "workspaces.update":
               send({ id: msg.id, ok: true, ...(await rt.workspaces.update({ workspaceId: msg.workspaceId }, origin)) });
+              return;
+            case "workspaces.mergeIn":
+              send({ id: msg.id, ok: true, ...(await rt.workspaces.mergeIn({ workspaceId: msg.workspaceId, child: msg.child }, origin)) });
               return;
             case "workspaces.delete":
               await rt.workspaces.delete(msg.workspaceId, origin);

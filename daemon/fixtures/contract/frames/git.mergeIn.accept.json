@@ -1,0 +1,22 @@
+[
+  {
+    "id": 1,
+    "op": "git.mergeIn",
+    "cwd": "repo",
+    "branch": "child/one"
+  },
+  {
+    "id": 2,
+    "op": "git.mergeIn",
+    "cwd": "/Users/p/app-lead",
+    "branch": "child/one",
+    "from": "/Users/p/app-child"
+  },
+  {
+    "id": 3,
+    "op": "git.mergeIn",
+    "cwd": "/root/wsp-boat",
+    "branch": "child/one",
+    "machineId": "wsp-a"
+  }
+]

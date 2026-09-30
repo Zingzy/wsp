@@ -227,6 +227,7 @@ const CALLED: readonly Called[] = [
   { tool: "threads_wait", argv: ["threads", "wait", "nope"], arguments: { threads: ["nope"] }, refused: true },
   { tool: "send", argv: ["send", "nope", "m"], arguments: { thread: "nope", message: "m" }, refused: true },
   { tool: "run", argv: ["run", "nope", "t"], arguments: { workspace: "nope", task: "t" }, refused: true },
+  { tool: "merge_in", argv: ["merge", "in", "nope", "beta"], arguments: { lead: "nope", child: "beta" }, refused: true },
   { tool: "exec", argv: ["exec", "nope"], after: ["--", "true"], arguments: { workspace: "nope", argv: ["true"] }, refused: true },
   ...WORKSPACE_CALLED,
 ];

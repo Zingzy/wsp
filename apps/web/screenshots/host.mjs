@@ -191,7 +191,7 @@ export function writeHereLabel(home) {
 export function writeHereGh(home, items) {
   const bin = join(home, ".wsp-gh");
   mkdirSync(bin, { recursive: true });
-  writeFileSync(join(bin, "items.json"), JSON.stringify({ pr: items.pr, issue: items.issue, pulls: items.pulls ?? [] }));
+  writeFileSync(join(bin, "items.json"), JSON.stringify({ pr: items.pr, issue: items.issue, pulls: items.pulls ?? [], compares: items.compares ?? {} }));
   writeScript(join(bin, "gh"), `#!${process.execPath}
 ${ghScript}
 `);
@@ -216,6 +216,13 @@ if (a === "pr" && b === "view") {
 }
 if (a === "pr" && b === "checks") say((pull(repo, c) ?? none()).checks);
 if (a === "repo" && b === "view") say((items.pulls.find(p => p.repo === c) ?? none()).settings);
+if (a === "api" && process.argv.includes("{ahead_by,behind_by,status}")) {
+  const [repo, span] = b.replace(/^repos\\//, "").split("/compare/");
+  const head = decodeURIComponent(span.slice(span.indexOf("...") + 3));
+  const answer = (items.compares[repo] ?? {})[head];
+  if (answer === undefined || answer === 404) (process.stderr.write("gh: Not Found (HTTP 404)\\n"), process.exit(1));
+  say(answer);
+}
 if (a === "api") {
   const path = b.split("?")[0].replace(/^repos\\//, "");
   const byRepo = items.pulls.find(p => path === p.repo || path.startsWith(p.repo + "/")) ?? none();

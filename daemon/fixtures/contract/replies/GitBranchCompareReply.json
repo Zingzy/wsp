@@ -1,0 +1,11 @@
+[
+  {
+    "pushed": true,
+    "aheadBy": 2,
+    "behindBy": 1,
+    "status": "diverged"
+  },
+  {
+    "pushed": false
+  }
+]

@@ -46,7 +46,7 @@ import { serveRuntime } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { keyFingerprint } from "@wsp/engine";
 import { newPlaceKeyPair } from "../src/places.js";
-import { stubBackend, copyingFake, createOn, projectOn, tempRepo, testPlatform } from "./stub-backend.js";
+import { branchDaemons, stubBackend, copyingFake, createOn, projectOn, tempRepo, testPlatform, withDaemonRoads } from "./stub-backend.js";
 import { until } from "./until.js";
 import { WsClient, createOverWire } from "./ws-client.js";
 
@@ -100,12 +100,19 @@ describe("agents spawning agents", () => {
   /** The pair this host proves itself with, as every host a person starts holds one: the launch hands a turn its
    * fingerprint, and the wsp inside that turn refuses any host that proves another key. */
   const hostKey = newPlaceKeyPair();
-  const runtimeWith = (adapters: Record<string, HarnessAdapterFactory>, agents?: { here?: { url?: string }; wspMcp?: McpServerSpec }, backend: MachineBackend = stubBackend()): Runtime =>
+  const runtimeWith = (
+    adapters: Record<string, HarnessAdapterFactory>,
+    agents?: { here?: { url?: string }; wspMcp?: McpServerSpec },
+    backend: MachineBackend = withDaemonRoads(stubBackend()),
+    daemons: ReturnType<typeof branchDaemons> = branchDaemons(),
+  ): Runtime =>
     createRuntime({
       backend,
       store,
       adapters,
-      local: localWiring,
+      daemonToken: "cafef00d".repeat(3),
+      daemonChannel: daemons.open,
+      local: { ...localWiring, daemonRoad: async () => ({ url: "ws://this-computer", expiresAt: Number.MAX_SAFE_INTEGER, daemonToken: "cafef00d".repeat(3) }) },
       placeLinks: { hostKey, provider: () => undefined, here: () => ({ name: "this-mac" }), hostName: () => "this-mac" },
       ...(agents !== undefined ? { agents } : {}),
     });
@@ -177,9 +184,9 @@ describe("agents spawning agents", () => {
 
   it("a thread's fork is a child of its own workspace, holding its project and starting on the branch it is on", async () => {
     const held = heldAdapter();
-    const backend = stubBackend();
-    backend.execImpl = (_m, cmd) => (cmd.includes("rev-parse --abbrev-ref HEAD") ? { exitCode: 0, stdout: "pricing-page\norigin/pricing-page\n", stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
-    const rt = runtimeWith({ claude: held.factory }, undefined, backend);
+    const backend = withDaemonRoads(stubBackend());
+    const daemons = branchDaemons({ branchOf: () => "pricing-page" });
+    const rt = runtimeWith({ claude: held.factory }, undefined, backend, daemons);
     const project = await projectOn(rt);
     const ws = await createOn(rt, { project: project.id, golden: "snap_g", name: "lead", agents: AGENTS_ON });
     const opener = await rt.sessions.start(ws.id, { prompt: "lead" });
@@ -188,15 +195,15 @@ describe("agents spawning agents", () => {
     const child = await createOn(rt, { project: project.id, name: "helper" }, asThread(scope));
     expect(child.parentWorkspaceId).toBe(ws.id);
     expect(child.project.id).toBe(project.id);
-    // The clone inside the child starts where its parent stands now, not where the project starts.
-    expect(backend.machines[1]!.execLog.find(cmd => cmd.includes("git clone"))).toContain("--branch pricing-page");
+    // The child's copy is put on the branch its parent stands on now, not left where the project starts.
+    expect(daemons.frames.filter(f => f.op === "git.startOn").map(f => [f.machine, f["branch"]])).toEqual([[backend.machines[1]!.id, "pricing-page"]]);
     held.end(0);
     await rt.close();
   });
 
   it("a thread's fork takes the image its own workspace runs, and one it names is refused before any machine is asked for", async () => {
     const held = heldAdapter();
-    const backend = stubBackend();
+    const backend = withDaemonRoads(stubBackend());
     const rt = runtimeWith({ claude: held.factory }, undefined, backend);
     const ws = await createOn(rt, { golden: "snap_g", name: "lead", agents: AGENTS_ON });
     const opener = await rt.sessions.start(ws.id, { prompt: "lead" });
@@ -216,24 +223,24 @@ describe("agents spawning agents", () => {
 
   it("a thread's fork is a child of its own workspace whatever parent it names, and no other machine is read", async () => {
     const held = heldAdapter();
-    const backend = stubBackend();
+    const backend = withDaemonRoads(stubBackend());
     // Each machine says which branch its checkout is on, so a read of the wrong one shows up in the child's base.
-    backend.execImpl = (m, cmd) => (cmd.includes("rev-parse --abbrev-ref HEAD") ? { exitCode: 0, stdout: `${m.id}-branch\norigin/${m.id}-branch\n`, stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
-    const rt = runtimeWith({ claude: held.factory }, undefined, backend);
+    const daemons = branchDaemons({ branchOf: m => `${m}-branch` });
+    const rt = runtimeWith({ claude: held.factory }, undefined, backend, daemons);
     const project = await projectOn(rt);
     const ws = await createOn(rt, { project: project.id, golden: "snap_g", name: "lead", agents: AGENTS_ON });
     const theirs = await createOn(rt, { project: project.id, golden: "snap_g", name: "theirs" });
     const opener = await rt.sessions.start(ws.id, { prompt: "lead" });
     const rootThread = opener.view().threadId!;
     const scope: ThreadScope = { kind: "thread", threadId: rootThread, workspaceId: ws.id, rootThreadId: rootThread };
-    const foreign = backend.machines.find(m => m.id === theirs.machineId)!;
-    const readsBefore = foreign.execLog.filter(cmd => cmd.includes("rev-parse")).length;
+    const reads = (machine: string): number => daemons.frames.filter(f => f.op === "git.status" && f.machine === machine).length;
+    const readsBefore = reads(theirs.machineId);
     const child = await createOn(rt, { project: project.id, name: "ours", parent: theirs.id }, asThread(scope));
     expect(child.parentWorkspaceId).toBe(ws.id);
     // The branch the child starts on is its own workspace's, and the workspace it named was never asked.
-    expect(backend.machines.find(m => m.id === ws.machineId)!.execLog.some(cmd => cmd.includes("rev-parse"))).toBe(true);
-    expect(foreign.execLog.filter(cmd => cmd.includes("rev-parse")).length).toBe(readsBefore);
-    expect(backend.machines.at(-1)!.execLog.find(cmd => cmd.includes("git clone"))).toContain(`--branch ${ws.machineId}-branch`);
+    expect(reads(ws.machineId)).toBeGreaterThan(0);
+    expect(reads(theirs.machineId)).toBe(readsBefore);
+    expect(daemons.frames.filter(f => f.op === "git.startOn").map(f => f["branch"])).toEqual([`${ws.machineId}-branch`]);
     held.end(0);
     await rt.close();
   });
@@ -1287,7 +1294,8 @@ describe("agents spawning agents", () => {
 
   it("a line held for a napping workspace keeps the road that tells the person, and falls away to them on the wake", async () => {
     const held = heldAdapter();
-    const rt = runtimeWith({ claude: held.factory });
+    // No daemon road on the machine: the wake this case waits on is the provider's, not a daemon's.
+    const rt = runtimeWith({ claude: held.factory }, undefined, stubBackend());
     const ws = await createOn(rt, { golden: "snap_g", name: "lead", agents: { spawn: true, maxMachines: 2, maxDepth: 2 } });
     const opener = await rt.sessions.start(ws.id, { prompt: "lead" });
     const rootThread = opener.view().threadId!;

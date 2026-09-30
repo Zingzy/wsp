@@ -32,9 +32,13 @@ import type { GitPrMergeReply as WireGitPrMergeReply } from "./generated/GitPrMe
 import type { GitRepoReadReply as WireGitRepoReadReply } from "./generated/GitRepoReadReply.js";
 import type { GitUpdateReply as WireGitUpdateReply } from "./generated/GitUpdateReply.js";
 import type { SshStartReply as WireSshStartReply } from "./generated/SshStartReply.js";
+import type { GitStartOnReply as WireGitStartOnReply } from "./generated/GitStartOnReply.js";
+import type { GitBranchCompareReply as WireGitBranchCompareReply } from "./generated/GitBranchCompareReply.js";
+import type { GitMergeInReply as WireGitMergeInReply } from "./generated/GitMergeInReply.js";
 import { HERE_PLACE_ID, namesPlace } from "./place-word.js";
 import { threadNeedsYou } from "./thread-state.js";
 import { Checkout } from "./changes.js";
+import { GitBranchCompareReply, GitMergeInReply, GitStartOnReply, TreeFact } from "./tree.js";
 import { GitPrReadReply, GitPrViewReply, GitPrMergeReply, GitRepoReadReply, GitRunLogReply, GitUpdateReply, MergeMethod, PullRequest, PullRequestSeen } from "./pull-request.js";
 import { placeAtLimitLine, placeFullLine } from "./place-state.js";
 import type { AbsentComputer } from "./workspace-state.js";
@@ -761,6 +765,9 @@ export const WorkspaceStatus = WorkspaceView.extend({
   /** The workspace's pull request as the host last read it through the git host's command line on this computer, or
    * the one sentence saying why it could not; absent where its branch has none. */
   pr: PullRequestSeen.optional(),
+  /** The workspace's children as the host last read them, at each child's turn end, after a child's bring back or a
+   * merge into this workspace and when its thread opens, never on a timer; absent on a workspace with none. */
+  tree: TreeFact.optional(),
 });
 export type WorkspaceStatus = z.infer<typeof WorkspaceStatus>;
 
@@ -3514,6 +3521,10 @@ export const SSH_HOST_KEY_LINE = /^ssh-ed25519 [A-Za-z0-9+/]+={0,2}( [!-~]+)?$/;
 export const SshStartReply = z.object({ port: z.number().int().min(1).max(65535), hostKey: z.string().min(1).max(SSH_KEY_MAX).regex(SSH_HOST_KEY_LINE) });
 export type SshStartReply = WireSshStartReply;
 type SshStartReplyHeld = Held<Same<z.infer<typeof SshStartReply>, SshStartReply>>;
+// The tree's three replies live beside its words; each is held to the type the daemon's crate writes.
+type GitStartOnReplyHeld = Held<Same<GitStartOnReply, WireGitStartOnReply>>;
+type GitBranchCompareReplyHeld = Held<Same<GitBranchCompareReply, WireGitBranchCompareReply>>;
+type GitMergeInReplyHeld = Held<Same<GitMergeInReply, WireGitMergeInReply>>;
 /** base is the ref the branch scope diffed against (null for other scopes);
  * truncated means the 2 MiB patch budget cut files or a patch short. */
 export const GitDiffReply = z.object({ base: z.string().nullable(), files: z.array(GitDiffFile), truncated: z.boolean() });
@@ -3792,6 +3803,17 @@ export const DaemonRequest = z.discriminatedUnion("op", [
    * checkout with changes no commit holds is refused with the files named; a merge that conflicts is taken back at
    * once and answered with the files, the checkout left as it was. */
   z.object({ id: reqId, op: z.literal("git.update"), cwd: z.string(), base: z.string().optional(), machineId: z.string().optional() }),
+  /** Puts the checkout on a branch as the remote holds it, fetched and reset with every untracked file dropped, and
+   * answers a GitStartOnReply: what a child's copy starts on, the branch its lead pushed. */
+  z.object({ id: reqId, op: z.literal("git.startOn"), cwd: z.string(), branch: z.string(), machineId: z.string().optional() }),
+  /** How far one branch is from a base, a branch or a commit, on the git host, through this computer's own command
+   * line with the repository named off the remote given, answered as a GitBranchCompareReply; a head the host lacks
+   * is not pushed. */
+  z.object({ id: reqId, op: z.literal("git.branchCompare"), cwd: z.string(), remote: z.string(), base: z.string(), head: z.string() }),
+  /** Merges another branch into the checkout's with a merge commit, from the remote or from a copy's folder on this
+   * computer, and answers a GitMergeInReply; refused over changes no commit holds, and a merge that conflicts is
+   * taken back and answered with the files. A folder is refused on any daemon but this computer's own. */
+  z.object({ id: reqId, op: z.literal("git.mergeIn"), cwd: z.string(), branch: z.string(), from: z.string().optional(), machineId: z.string().optional() }),
   /** The repository's open pull requests and issues through that same command line, answered as a GitPrListReply.
    * No command line for the host, or one nobody signed in, is an empty list with the note saying so. */
   z.object({ id: reqId, op: z.literal("git.prList"), cwd: z.string(), machineId: z.string().optional() }),
@@ -4324,6 +4346,8 @@ export const DaemonErrorCode = z.enum([
   /** No command line for the git host the remote names is on the machine, so the pull request waits; the push
    * itself landed, which is why a client reads this one as a note beside the push and not as a failure. */
   "no-host-cli",
+  /** Git refused a fetch or a push for want of a credential on the computer it ran on, so nothing moved. */
+  "no-git-credential",
 ]);
 export type DaemonErrorCode = z.infer<typeof DaemonErrorCode>;
 
@@ -4486,6 +4510,7 @@ const DAEMON_CONTENTS = [
   UNRECORDED,
   "fdfe7e8214a09e7c6e73ddea88aa9c167869ef0e02436b4c1ce7df85c7fdaa72",
   "4b81b5dc48a8d5472532d2c900a0247233533c19da9516bbb8ee2c17cfe4c9c1",
+  "f2efbe27af183ea59d6f6875831f6263b013d6a179d94ba977075c5478172e5a",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -4760,7 +4785,12 @@ const DAEMON_CONTENTS = [
  * Version 103 asks the DevTools question only of a listener whose holder goes by a browser's or Electron's name
  * (Chrome and its helpers, Chromium, headless_shell, Edge, Brave, Arc, Electron and its helpers), so a node server a
  * thread's tests start gets no request. It reverses the rule of version 92, which asked every listener by what it
- * answers, on the owner's ruling. */
+ * answers, on the owner's ruling.
+ * Version 104: git.startOn puts a checkout on a branch as the remote holds it, git.branchCompare counts a branch
+ * against a base branch or commit through the git host's command line on this computer, and git.mergeIn merges a
+ * child's branch in with a merge commit and answers with the child's commit it took, fetched from the remote or from a
+ * copy's folder on this computer under overrides that stop a served repository's configured commands. A fetch or a push
+ * refused for want of a credential carries the code no-git-credential. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -5859,7 +5889,7 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** Asks the workspace's agent to fix a failed check, named, with its log's failed steps; with no check, updates the
    * copy from its base first and asks it to fix the conflicts where the merge had any. Answered as a FixResult at
    * once, the turn going on without the caller. */
-  z.object({ id: reqId, op: z.literal("workspaces.fix"), workspaceId: z.string(), check: z.string().optional() }),
+  z.object({ id: reqId, op: z.literal("workspaces.fix"), workspaceId: z.string(), check: z.string().optional(), child: z.string().optional() }),
   /** Merges the workspace's pull request by the method named, or the repository's default, only while its head is
    * the commit named in head, which a window sends as the one it drew; absent is the head the host holds, never a
    * fresh read. whenChecksPass arms it to merge once they do. Answered as a MergeResult. */
@@ -5867,6 +5897,10 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** Merges the base's latest commits into the copy's branch, answered as a GitUpdateReply: the files that conflict
    * where it could not, the copy left as it was. */
   z.object({ id: reqId, op: z.literal("workspaces.update"), workspaceId: z.string() }),
+  /** Merges a child's branch into the lead's copy with a merge commit through the lead's own daemon, answered as a
+   * MergeInResult: merged with the commits it brought, merged nothing, or the files it stopped on with the copy left as
+   * it was. Refused for a workspace that is not the lead's child and while a turn runs on the lead. */
+  z.object({ id: reqId, op: z.literal("workspaces.mergeIn"), workspaceId: z.string(), child: z.string() }),
   z.object({ id: reqId, op: z.literal("workspaces.delete"), workspaceId: z.string() }),
   /** Turns the workspace's agents switch on or off and names its caps. Every key left out keeps what the record
    * holds, so the two flags a person gives on one line never clear the third. */
@@ -6364,6 +6398,9 @@ export const THREAD_OPS: readonly string[] = [
   "workspaces.pullRequestView",
   "workspaces.fix",
   "workspaces.update",
+  // A lead merges a child's branch into its own copy under the tree rule and the guard, and only into its own
+  // workspace: a child may not merge into its lead.
+  "workspaces.mergeIn",
   "harnesses.list",
   "sessions.start",
   "sessions.list",
@@ -6740,6 +6777,7 @@ export * from "./bring-back.js";
 export * from "./changes.js";
 export * from "./pull-request.js";
 export * from "./run-block.js";
+export * from "./tree.js";
 export * from "./daemon-contract.js";
 export * from "./projects.js";
 export { defaultSeedChoice, leftBehindLine, neverTravelsLine, noRemoteLine, notInTheMenuLine, SEED_DIR, SEED_MEMORY_DIR, SEED_PATCH, seedBytes, seedChoiceFrom, seedCommitsLandedLine, seedCommitsLostLine, seedConsentLines, seedingLine, seedMenuRows, seedRowWords, seedSummaryLines } from "./project-seed.js";
