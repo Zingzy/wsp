@@ -19,6 +19,8 @@ use crate::paths::OpError;
 
 pub(crate) mod checkpoint;
 pub(crate) mod here;
+pub(crate) mod untracked;
+use untracked::Seen;
 #[cfg(target_os = "linux")]
 pub(crate) mod inside;
 pub(crate) mod stored;
@@ -62,6 +64,18 @@ pub(crate) trait Runs {
     /// Whether that program is on the PATH this way of running finds programs on: a computer with no gh and a
     /// workspace with no gh read the same to whoever asked for a pull request, and neither is a failure.
     fn on_path(&self, program: &str) -> impl Future<Output = Result<bool, OpError>> + Send;
+    /// Where this daemon opens `folder`, the folder a caller may read as the program names it, on its own side:
+    /// every way of running says so itself, since a folder opened by a path a writer can reach is a folder a writer
+    /// can swap. None where this side cannot open it.
+    fn on_this_side(&self, folder: &Path) -> Option<OnThisSide>;
+}
+
+/// A folder a program named, as this daemon opens it: `open` opened as it is, then `walk` below it a folder at a
+/// time with no link followed and no way up.
+#[derive(Clone)]
+pub(crate) struct OnThisSide {
+    pub(crate) open: PathBuf,
+    pub(crate) walk: PathBuf,
 }
 
 /// The environment every git and every host command line of ours runs with, as shell exports: one line, so the two
@@ -318,7 +332,12 @@ pub(crate) async fn git_diff<R: Runs>(
         GitDiffScope::Unstaged => {}
         GitDiffScope::Head => args.push(if rev_exists(runner, cwd, "HEAD").await? { "HEAD" } else { EMPTY_TREE }.to_owned()),
     }
-    let listing = Listing { untracked: matches!(scope, GitDiffScope::Head | GitDiffScope::Branch), blobs: true, whole };
+    let listing = Listing {
+        untracked: matches!(scope, GitDiffScope::Head | GitDiffScope::Branch),
+        blobs: true,
+        whole,
+        worktree: scope != GitDiffScope::Staged,
+    };
     diff_listed(runner, cwd, bound, &args, path, paths, listing, cap, base).await
 }
 
@@ -343,7 +362,7 @@ pub(crate) async fn git_range<R: Runs>(
             return Err(OpError::coded(DaemonErrorCode::NotFound, format!("the snapshot {sha} is gone")));
         }
     }
-    let listing = Listing { untracked: false, blobs: false, whole: false };
+    let listing = Listing { untracked: false, blobs: false, whole: false, worktree: false };
     diff_listed(runner, cwd, bound, &[from.to_owned(), to.to_owned()], path, &[], listing, cap, None).await
 }
 
@@ -354,6 +373,142 @@ struct Listing {
     untracked: bool,
     blobs: bool,
     whole: bool,
+    /// The post-image is the worktree, which git reads at whatever stands at each path, so a swap can point it
+    /// outside the root. Every worktree file is then read on this side instead and its hunk built from that read.
+    worktree: bool,
+}
+
+/// The blob id git names `bytes` by at `path`, the repository's own hash over them after its attributes for that
+/// path, written into the object store so a tracked file's hunk can be diffed from it. A hash-object that fails
+/// leaves the file without one, which is a file that cannot be marked viewed, never a diff that cannot be read.
+async fn blob_of<R: Runs>(runner: &R, top: &Path, path: &str, bytes: &[u8]) -> Result<Option<String>, OpError> {
+    let res = run_git(runner, top, &["hash-object", "-w", "--stdin", "--path", path], Some(bytes), None).await?;
+    let id = stdout_text(&res).trim().to_owned();
+    Ok((res.code == Some(0) && !id.is_empty()).then_some(id))
+}
+
+/// How long git writes a blob id in this repository's patches: as long as it cuts HEAD to, which grows with the
+/// objects it holds, and seven where nothing is committed yet.
+async fn abbrev_of<R: Runs>(runner: &R, cwd: &Path) -> Result<usize, OpError> {
+    let res = run_git(runner, cwd, &["rev-parse", "--short", "HEAD"], None, None).await?;
+    let short = stdout_text(&res).trim().len();
+    Ok(if res.code == Some(0) && short >= 4 { short } else { 7 })
+}
+
+/// A tracked worktree file's patch, built so no content byte comes from git's own read of the worktree: git's diff
+/// gives the header (the paths, the mode, a rename and its score), and the hunk body is a diff of two objects this
+/// daemon holds, the base blob from history and `dst`, the blob hashed from this side's one read. So a file, or a
+/// folder above it, swapped for a link after git listed it changes nothing in the reply. None where the base cannot
+/// be read off git's header, which then leaves the file listed with no patch.
+async fn rebuilt_patch<R: Runs>(
+    runner: &R,
+    cwd: &Path,
+    git_worktree: &[u8],
+    dst: &str,
+    abbrev: usize,
+    whole: bool,
+    cap: usize,
+) -> Result<Option<Vec<u8>>, OpError> {
+    let Some(cut) = body_start(git_worktree) else {
+        // No hunk and no binary line: a rename or a mode change with no content, whose header git read from the
+        // objects and the stat, not from the worktree's bytes.
+        return Ok(Some(git_worktree.to_vec()));
+    };
+    let header = &git_worktree[..cut];
+    let Some(base) = index_pre_image(header) else { return Ok(None) };
+    let mut args = vec!["diff", "--no-color", "--no-ext-diff"];
+    if whole {
+        args.push(WHOLE);
+    }
+    args.extend([base, dst]);
+    let res = run_git(runner, cwd, &args, None, Some(cap)).await?;
+    check(&res, "diff")?;
+    let mut out = with_post_image(header, dst, abbrev);
+    match body_of(&res.stdout) {
+        Some(Body::Binary) => out.extend(binary_line(header)),
+        Some(Body::Text(hunks)) => out.extend_from_slice(hunks),
+        None => {}
+    }
+    Ok(Some(out))
+}
+
+/// Whether git's worktree diff is of a file added in this scope, which has no pre-image object to diff its worktree
+/// read against and is built as a new file instead.
+fn is_added(patch: &[u8]) -> bool {
+    patch.split(|&b| b == b'\n').take_while(|line| !line.starts_with(b"@@ ")).any(|line| line.starts_with(b"new file mode "))
+}
+
+/// Whether git's diff is of a file deleted in this scope, whose post-image is /dev/null so no worktree byte was read
+/// for it: its header says so, and a modification a swap slipped in its place does not.
+fn is_deletion(patch: &[u8]) -> bool {
+    patch.split(|&b| b == b'\n').take_while(|line| !line.starts_with(b"@@ ")).any(|line| line.starts_with(b"deleted file mode "))
+}
+
+/// Where a worktree diff's body begins, which is what a swap can point git at: the first hunk or the one binary line.
+/// None where the diff is a header alone.
+fn body_start(patch: &[u8]) -> Option<usize> {
+    let mut at = 0;
+    for line in patch.split_inclusive(|&b| b == b'\n') {
+        if line.starts_with(b"@@ ") || line.starts_with(b"Binary files ") {
+            return Some(at);
+        }
+        at += line.len();
+    }
+    None
+}
+
+/// The base blob id off an `index <base>..<post> <mode>` line, the pre-image git read from its objects and not from
+/// the worktree.
+fn index_pre_image(header: &[u8]) -> Option<&str> {
+    header
+        .split(|&b| b == b'\n')
+        .find_map(|line| line.strip_prefix(b"index "))
+        .and_then(|rest| std::str::from_utf8(rest).ok())
+        .and_then(|rest| rest.split("..").next())
+        .map(str::trim)
+        .filter(|base| !base.is_empty())
+}
+
+/// The header with the post-image of its `index` line set to `dst`, this side's own blob, in place of the one git
+/// hashed from the worktree.
+fn with_post_image(header: &[u8], dst: &str, abbrev: usize) -> Vec<u8> {
+    let mut out = Vec::with_capacity(header.len());
+    for line in header.split_inclusive(|&b| b == b'\n') {
+        if let Some((pre, tail)) =
+            line.strip_prefix(b"index ").and_then(|r| std::str::from_utf8(r).ok()).and_then(|r| r.trim_end().split_once(".."))
+        {
+            let mode = tail.split_whitespace().nth(1).map(|m| format!(" {m}")).unwrap_or_default();
+            out.extend(format!("index {}..{}{}\n", pre.trim(), &dst[..abbrev.min(dst.len())], mode).into_bytes());
+        } else {
+            out.extend_from_slice(line);
+        }
+    }
+    out
+}
+
+/// The one line git prints for a binary change, named by the paths in `header` rather than by the object ids the
+/// blob-to-blob diff names.
+fn binary_line(header: &[u8]) -> Vec<u8> {
+    let names = header.split(|&b| b == b'\n').find_map(|line| line.strip_prefix(b"diff --git ")).unwrap_or(b"");
+    let mut out = b"Binary files ".to_vec();
+    out.extend_from_slice(names);
+    out.extend_from_slice(b" differ\n");
+    out
+}
+
+/// A blob-to-blob diff's body: the text hunks from the first `@@`, or that it is binary.
+enum Body<'a> {
+    Text(&'a [u8]),
+    Binary,
+}
+
+fn body_of(patch: &[u8]) -> Option<Body<'_>> {
+    let start = body_start(patch)?;
+    if patch[start..].starts_with(b"Binary files ") {
+        Some(Body::Binary)
+    } else {
+        Some(Body::Text(&patch[start..]))
+    }
 }
 
 /// One name-status pass picks the files and one numstat pass counts them, then one diff per file spends the budget.
@@ -365,7 +520,7 @@ async fn diff_listed<R: Runs>(
     args: &[String],
     path: Option<&str>,
     paths: &[String],
-    Listing { untracked: with_untracked, blobs: with_blobs, whole }: Listing,
+    Listing { untracked: with_untracked, blobs: with_blobs, whole, worktree }: Listing,
     cap: usize,
     base: Option<String>,
 ) -> Result<GitDiffReply, OpError> {
@@ -428,7 +583,27 @@ async fn diff_listed<R: Runs>(
             )
         }));
     }
-    let blobs = if with_blobs {
+    // A worktree post-image is read on this side, from the folder the caller may read held open: the files' own
+    // names below the top where the top sits inside it, or below that folder's place in the repository where it
+    // sits above. Its blobs come from those reads, so blobs_of, which hashes worktree paths git could read through
+    // a link, is left to the scopes whose post-image is an object (staged, a commit range).
+    let held = if worktree { runner.on_this_side(bound) } else { None };
+    let top_below: Option<String> = match (&within, worktree) {
+        (Some(_), _) | (_, false) => None,
+        (None, true) => {
+            Some(top.strip_prefix(bound).map_err(|_| crate::paths::outside_root(&cwd.to_string_lossy()))?.to_string_lossy().into_owned())
+        }
+    };
+    let below = |path: &str| -> Option<String> {
+        match (&within, &top_below) {
+            (Some(w), _) => path.strip_prefix(w.as_str()).and_then(|rest| rest.strip_prefix('/')).map(str::to_owned),
+            (None, Some(t)) if t.is_empty() => Some(path.to_owned()),
+            (None, Some(t)) => Some(format!("{t}/{path}")),
+            (None, None) => None,
+        }
+    };
+    let abbrev = if worktree { abbrev_of(runner, cwd).await? } else { 7 };
+    let blobs = if with_blobs && !worktree {
         let hashed = listed_files.iter().filter(|(f, u)| f.kind != "deleted" && *u != Untracked::NotRegular).map(|(f, _)| f.path.as_str());
         blobs_of(runner, &top, hashed.collect()).await?
     } else {
@@ -438,40 +613,48 @@ async fn diff_listed<R: Runs>(
     let mut remaining = cap;
     let mut truncated = false;
     for (file, untracked) in listed_files {
-        let blob = blobs.get(&file.path).cloned();
         let (additions, deletions) = counts.get(&file.path).copied().unwrap_or((0, 0));
-        let bare = |file: ListedFile, blob: Option<String>| GitDiffFile {
-            path: file.path,
-            kind: file.kind.to_owned(),
+        let bare = |path: String, kind: &str, blob: Option<String>| GitDiffFile {
+            path,
+            kind: kind.to_owned(),
             additions,
             deletions,
             patch: String::new(),
             blob,
         };
         if untracked == Untracked::NotRegular {
-            files.push(bare(file, blob));
+            files.push(bare(file.path, file.kind, None));
+            continue;
+        }
+        // This side's own read of a worktree file, and the blob git names it by from that read: never git's read of
+        // whatever stands at the path when it gets there.
+        let seen = match (worktree && file.kind != "deleted", held.clone(), below(&file.path)) {
+            (true, Some(at), Some(rel)) => crate::fs::blocking(move || Ok(untracked::seen(&at, &rel))).await?,
+            _ => None,
+        };
+        let blob = match (&seen, worktree) {
+            (Some(Seen::File { bytes, .. }), _) => blob_of(runner, &top, &file.path, bytes).await?,
+            (_, false) => blobs.get(&file.path).cloned(),
+            _ => None,
+        };
+        if matches!(seen, Some(Seen::TooLarge)) {
+            truncated = true;
+            files.push(bare(file.path, file.kind, None));
             continue;
         }
         if remaining == 0 {
             truncated = true;
-            files.push(bare(file, blob));
+            files.push(bare(file.path, file.kind, blob));
             continue;
         }
-        let res = if untracked == Untracked::File {
-            let mut diff_args = vec!["diff", "--no-index", "--no-color", "--no-ext-diff"];
-            if whole {
-                diff_args.push(WHOLE);
-            }
-            diff_args.extend(["--", "/dev/null", file.path.as_str()]);
-            let res = run_git(runner, &top, &diff_args, None, Some(remaining)).await?;
-            // A file swapped for a link to a folder since the listing is read as <folder>/null, which the patch's
-            // own name then says; what git read is checked rather than what the listing saw.
-            let read_through = format!("{}/null", file.path);
-            if stdout_text(&res).lines().any(|l| l.starts_with("+++ ") && l.trim_end_matches('"').ends_with(&read_through)) {
-                files.push(bare(file, None));
+        let patch = if untracked == Untracked::File {
+            // git listed it; this side reads and renders it, so a link swapped in after the listing is read as no
+            // file rather than followed.
+            let (Some(Seen::File { bytes, exec }), Some(dst)) = (&seen, blob.as_deref()) else {
+                files.push(bare(file.path, file.kind, None));
                 continue;
-            }
-            res
+            };
+            untracked::patch_of(&file.path, bytes, *exec, Some(dst), abbrev)
         } else {
             let specs: Vec<String> = file.orig_path.iter().chain([&file.path]).map(|p| format!(":(top,literal){p}")).collect();
             let mut diff_args: Vec<&str> = vec!["diff"];
@@ -482,11 +665,45 @@ async fn diff_listed<R: Runs>(
             }
             diff_args.push("--");
             diff_args.extend(specs.iter().map(String::as_str));
-            run_git(runner, cwd, &diff_args, None, Some(remaining)).await?
+            let res = run_git(runner, cwd, &diff_args, None, Some(remaining)).await?;
+            check(&res, "diff")?;
+            if !worktree {
+                // The staged scope and a commit range diff objects, so git read no worktree bytes a swap could aim.
+                if res.truncated {
+                    truncated = true;
+                }
+                res.stdout
+            } else if let Some(Seen::File { bytes, exec }) = &seen {
+                // The post-image is the worktree: the header is git's, the hunk is built from this side's read.
+                let Some(dst) = blob.as_deref() else {
+                    files.push(bare(file.path, file.kind, None));
+                    continue;
+                };
+                if is_added(&res.stdout) {
+                    untracked::patch_of(&file.path, bytes, *exec, Some(dst), abbrev)
+                } else {
+                    match rebuilt_patch(runner, cwd, &res.stdout, dst, abbrev, whole, remaining).await? {
+                        Some(patch) => patch,
+                        None => {
+                            files.push(bare(file.path, file.kind, None));
+                            continue;
+                        }
+                    }
+                }
+            } else if file.kind == "deleted" && is_deletion(&res.stdout) {
+                // A deletion's post-image is /dev/null, so git read no worktree bytes; a name listed gone that a
+                // swap made stand again reads back as a modification and is dropped here.
+                if res.truncated {
+                    truncated = true;
+                }
+                res.stdout
+            } else {
+                files.push(bare(file.path, file.kind, None));
+                continue;
+            }
         };
-        check(&res, "diff")?;
-        let mut bytes = res.stdout.as_slice();
-        if res.truncated || bytes.len() > remaining {
+        let mut bytes = patch.as_slice();
+        if bytes.len() > remaining {
             truncated = true;
             bytes = cut_at_line(bytes, remaining);
             remaining = 0;
@@ -570,10 +787,10 @@ async fn blobs_of<R: Runs>(runner: &R, top: &Path, paths: Vec<&str>) -> Result<s
 /// what the halves above hand a runner without a git, a gh or a workspace anywhere.
 #[cfg(test)]
 pub(crate) mod recorded {
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
     use std::sync::Mutex;
 
-    use super::{GitResult, Runs};
+    use super::{GitResult, OnThisSide, Runs};
     use crate::paths::OpError;
 
     /// One call a way of running was asked to make: where it was to run, the program, its arguments and its stdin.
@@ -645,6 +862,10 @@ pub(crate) mod recorded {
 
         async fn on_path(&self, program: &str) -> Result<bool, OpError> {
             Ok(self.has.iter().any(|held| held == program))
+        }
+
+        fn on_this_side(&self, folder: &Path) -> Option<OnThisSide> {
+            Some(OnThisSide { open: folder.to_path_buf(), walk: PathBuf::new() })
         }
     }
 }
@@ -808,28 +1029,191 @@ mod tests {
 
     const CAP: usize = 1024 * 1024;
 
+    /// Real git, except the per-file worktree diff (the one with a `--` pathspec) answers a patch this test hands
+    /// it, standing in for what git prints when it reads the worktree through a link swapped in mid-read. The
+    /// blob-to-blob diff the rebuild runs (two object ids, no `--`) still reaches real git.
+    struct ReadThrough {
+        inner: Here,
+        patch: String,
+    }
+
+    impl Runs for ReadThrough {
+        async fn run(
+            &self,
+            cwd: &Path,
+            program: &str,
+            args: &[&str],
+            input: Option<&[u8]>,
+            max_bytes: Option<usize>,
+        ) -> Result<GitResult, OpError> {
+            if args.first() == Some(&"diff") && args.contains(&"--") {
+                return Ok(GitResult { code: Some(0), stdout: self.patch.clone().into_bytes(), stderr: String::new(), truncated: false });
+            }
+            self.inner.run(cwd, program, args, input, max_bytes).await
+        }
+
+        async fn on_path(&self, program: &str) -> Result<bool, OpError> {
+            self.inner.on_path(program).await
+        }
+
+        fn on_this_side(&self, folder: &Path) -> Option<OnThisSide> {
+            self.inner.on_this_side(folder)
+        }
+    }
+
+    /// Real git, with one path swapped for a link to an outside folder the moment the listing it names answers.
+    struct Swapping {
+        inner: Here,
+        swapped: PathBuf,
+        outside: PathBuf,
+        after: fn(&[&str]) -> bool,
+    }
+
+    fn tracked_listing(args: &[&str]) -> bool {
+        args.first() == Some(&"diff") && args.contains(&"--name-status")
+    }
+
+    impl Swapping {
+        fn untracked(swapped: PathBuf, outside: PathBuf) -> Swapping {
+            Swapping { inner: here(), swapped, outside, after: |a| a.first() == Some(&"ls-files") }
+        }
+        fn undo(&self) {
+            std::fs::remove_file(&self.swapped).unwrap();
+            std::fs::rename(self.swapped.with_extension("aside"), &self.swapped).unwrap();
+        }
+    }
+
+    impl Runs for Swapping {
+        async fn run(
+            &self,
+            cwd: &Path,
+            program: &str,
+            args: &[&str],
+            input: Option<&[u8]>,
+            max_bytes: Option<usize>,
+        ) -> Result<GitResult, OpError> {
+            let res = self.inner.run(cwd, program, args, input, max_bytes).await;
+            if (self.after)(args) && !self.swapped.is_symlink() {
+                std::fs::rename(&self.swapped, self.swapped.with_extension("aside")).unwrap();
+                std::os::unix::fs::symlink(&self.outside, &self.swapped).unwrap();
+            }
+            res
+        }
+        async fn on_path(&self, program: &str) -> Result<bool, OpError> {
+            self.inner.on_path(program).await
+        }
+        fn on_this_side(&self, folder: &Path) -> Option<OnThisSide> {
+            self.inner.on_this_side(folder)
+        }
+    }
+
     #[tokio::test]
-    async fn an_untracked_file_swapped_for_a_linked_folder_after_the_listing_is_answered_with_no_patch() {
-        let runner = super::recorded::Recorded::new(&[]).answering(vec![
-            (0, ""),
-            (0, "/repo\n"),
-            (0, ""),
-            (0, ""),
-            (0, "i/      w/lf    attr/                 \tnotes\0"),
-            (0, "abc\n"),
-            (1, "diff --git a/notes/null b/notes/null\nnew file mode 100644\n--- /dev/null\n+++ b/notes/null\n@@ -0,0 +1 @@\n+secret\n"),
-        ]);
-        let reply = git_diff(&runner, Path::new("/repo"), Path::new("/"), GitDiffScope::Head, None, &[], false, CAP).await.unwrap();
-        let bare = GitDiffFile {
-            path: "notes".to_owned(),
-            kind: "added".to_owned(),
-            additions: 0,
-            deletions: 0,
-            patch: String::new(),
-            blob: None,
-        };
-        assert_eq!(reply.files, vec![bare]);
-        assert!(runner.asked().last().unwrap().args.contains(&"--no-index".to_owned()));
+    async fn an_untracked_file_or_folder_swapped_for_a_link_after_the_listing_is_never_read_through() {
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("a.txt"), "OUTSIDE-SECRET\n").unwrap();
+        std::fs::write(outside.path().join("null"), "NULL-SECRET\n").unwrap();
+        let dir = committed(&["kept.txt"]);
+        std::fs::create_dir_all(dir.path().join("dir")).unwrap();
+        std::fs::write(dir.path().join("dir/a.txt"), "inside\n").unwrap();
+        std::fs::write(dir.path().join("caf\u{e9}"), "inside\n").unwrap();
+        for (swapped, path) in [("dir", "dir/a.txt"), ("caf\u{e9}", "caf\u{e9}")] {
+            let runner = Swapping::untracked(dir.path().join(swapped), outside.path().to_path_buf());
+            let reply =
+                git_diff(&runner, dir.path(), Path::new("/"), GitDiffScope::Head, None, &[path.to_owned()], false, CAP).await.unwrap();
+            let said = format!("{:?}", reply.files);
+            assert!(!said.contains("SECRET"), "{said}");
+            assert_eq!((reply.files[0].patch.as_str(), reply.files[0].blob.as_deref()), ("", None), "{said}");
+            runner.undo();
+        }
+    }
+
+    #[tokio::test]
+    async fn a_repository_whose_top_turns_into_a_link_after_the_listing_is_not_read_through_it() {
+        let bound = tempfile::tempdir().unwrap();
+        let bound = bound.path().canonicalize().unwrap();
+        let repo = bound.join("sub");
+        std::fs::create_dir_all(&repo).unwrap();
+        git_in(&repo, &["init", "-q", "-b", "main"]);
+        std::fs::write(repo.join("a.txt"), "inside\n").unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("a.txt"), "OUTSIDE-SECRET\n").unwrap();
+        let runner = Swapping::untracked(repo.clone(), outside.path().to_path_buf());
+        let reply = git_diff(&runner, &repo, &bound, GitDiffScope::Head, None, &[], false, CAP).await.unwrap();
+        let said = format!("{:?}", reply.files);
+        assert!(!said.contains("SECRET"), "{said}");
+        assert_eq!((reply.files[0].patch.as_str(), reply.files[0].blob.as_deref()), ("", None), "{said}");
+    }
+
+    #[tokio::test]
+    async fn a_tracked_file_or_its_folder_swapped_after_the_listing_carries_nothing_read_through_the_link() {
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("t.txt"), "OUTSIDE-SECRET\n").unwrap();
+        let outside_blob = git_in(outside.path(), &["hash-object", "t.txt"]).trim().to_owned();
+        let dir = committed(&["dir/t.txt", "t.txt"]);
+        std::fs::write(dir.path().join("dir/t.txt"), "changed\n").unwrap();
+        std::fs::write(dir.path().join("t.txt"), "changed\n").unwrap();
+        for (swapped, path, to) in [("dir", "dir/t.txt", outside.path().to_path_buf()), ("t.txt", "t.txt", outside.path().join("t.txt"))] {
+            let runner = Swapping { inner: here(), swapped: dir.path().join(swapped), outside: to, after: tracked_listing };
+            let reply =
+                git_diff(&runner, dir.path(), Path::new("/"), GitDiffScope::Head, None, &[path.to_owned()], false, CAP).await.unwrap();
+            let said = format!("{:?}", reply.files);
+            assert!(!said.contains("SECRET") && !said.contains(&outside_blob), "{said}");
+            runner.undo();
+        }
+    }
+
+    /// Isolates git's worktree body on its own, the shape the attributes hole let through: an eol rule makes the old
+    /// line check stand down, and git's diff carries outside content under an index line whose post-image is the
+    /// honest blob. The reply's hunk must be this side's own read.
+    #[tokio::test]
+    async fn a_worktree_files_hunk_is_this_sides_read_even_when_gits_body_names_the_honest_blob() {
+        let dir = committed(&["t.txt"]);
+        std::fs::write(dir.path().join(".gitattributes"), "*.txt text eol=lf\n").unwrap();
+        git_in(dir.path(), &["add", ".gitattributes"]);
+        git_in(dir.path(), &["-c", "commit.gpgsign=false", "commit", "-q", "-m", "attributes"]);
+        std::fs::write(dir.path().join("t.txt"), "changed\r\n").unwrap();
+        let old = git_in(dir.path(), &["rev-parse", "HEAD:t.txt"]).trim().to_owned();
+        let inside = git_in(dir.path(), &["hash-object", "t.txt"]).trim().to_owned();
+        let patch = format!(
+            "diff --git a/t.txt b/t.txt\nindex {}..{} 100644\n--- a/t.txt\n+++ b/t.txt\n@@ -1,2 +1 @@\n-one\n-two\n+OUTSIDE-SECRET\n",
+            &old[..7],
+            &inside[..7]
+        );
+        let runner = ReadThrough { inner: here(), patch };
+        let reply = git_diff(&runner, dir.path(), Path::new("/"), GitDiffScope::Head, None, &[], true, CAP).await.unwrap();
+        let said = format!("{:?}", reply.files);
+        assert!(!said.contains("OUTSIDE-SECRET"), "{said}");
+        assert!(reply.files[0].patch.contains("+changed"), "{said}");
+        assert_eq!(reply.files[0].blob.as_deref(), Some(inside.as_str()), "{said}");
+    }
+
+    #[tokio::test]
+    async fn an_untracked_file_carries_the_blob_git_names_it_under_its_attributes_and_in_a_sha256_repo() {
+        let dir = committed(&["kept.txt"]);
+        std::fs::write(dir.path().join(".gitattributes"), "*.txt text eol=lf\n").unwrap();
+        git_in(dir.path(), &["add", ".gitattributes"]);
+        git_in(dir.path(), &["-c", "commit.gpgsign=false", "commit", "-q", "-m", "attributes"]);
+        std::fs::write(dir.path().join("crlf.txt"), "a\r\nb\r\n").unwrap();
+        let reply =
+            git_diff(&here(), dir.path(), Path::new("/"), GitDiffScope::Head, None, &["crlf.txt".to_owned()], false, CAP).await.unwrap();
+        assert_eq!(reply.files[0].blob.as_deref(), Some(git_in(dir.path(), &["hash-object", "crlf.txt"]).trim()));
+
+        let sha256 = tempfile::tempdir().unwrap();
+        git_in(sha256.path(), &["init", "-q", "--object-format=sha256", "-b", "main"]);
+        git_in(sha256.path(), &["-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "first"]);
+        std::fs::write(sha256.path().join("new.txt"), "fresh\n").unwrap();
+        let reply = git_diff(&here(), sha256.path(), Path::new("/"), GitDiffScope::Head, None, &[], false, CAP).await.unwrap();
+        assert_eq!(reply.files[0].blob.as_deref(), Some(git_in(sha256.path(), &["hash-object", "new.txt"]).trim()));
+    }
+
+    #[tokio::test]
+    async fn an_untracked_file_past_the_read_cap_is_listed_with_no_patch_and_no_blob() {
+        let dir = committed(&["kept.txt"]);
+        std::fs::File::create(dir.path().join("huge.bin")).unwrap().set_len(untracked::READ_MAX as u64 + 1).unwrap();
+        let reply =
+            git_diff(&here(), dir.path(), Path::new("/"), GitDiffScope::Head, None, &["huge.bin".to_owned()], false, CAP).await.unwrap();
+        assert_eq!((reply.files[0].patch.as_str(), reply.files[0].blob.as_deref()), ("", None));
+        assert!(reply.truncated);
     }
 
     #[tokio::test]

@@ -469,6 +469,14 @@ impl git::Runs for Runner {
             Runner::Inside(inside) => inside.on_path(program).await,
         }
     }
+
+    fn on_this_side(&self, folder: &Path) -> Option<git::OnThisSide> {
+        match self {
+            Runner::Here(here) => here.on_this_side(folder),
+            #[cfg(target_os = "linux")]
+            Runner::Inside(inside) => inside.on_this_side(folder),
+        }
+    }
 }
 
 /// The workspace a frame names, on the daemon of the computer holding it: a workspace on a computer somebody owns

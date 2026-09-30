@@ -14,7 +14,7 @@ use std::time::Duration;
 use wsp_frames::numbers;
 use wsp_runtime::ops::Ops;
 
-use super::{Asked, GitResult, Runs, GIT_ENV};
+use super::{Asked, GitResult, OnThisSide, Runs, GIT_ENV};
 use crate::paths::OpError;
 
 /// One workspace of this computer's, and how long a command in it may run: the daemon's own exec ceiling rather
@@ -65,6 +65,13 @@ impl Runs for Inside {
     async fn on_path(&self, program: &str) -> Result<bool, OpError> {
         let read = format!("command -v {} >/dev/null 2>&1", quoted(program));
         Ok(self.ran(&read, None).await?.exit_code == 0)
+    }
+
+    /// The workspace's rootfs on this computer, opened as it is, and the folder as the workspace names it walked
+    /// below it: every name in that path is the workspace's to write, so none of it is followed.
+    fn on_this_side(&self, folder: &Path) -> Option<OnThisSide> {
+        let rootfs = self.runtime.rootfs_of_running(&self.machine).ok()?;
+        Some(OnThisSide { open: rootfs, walk: folder.to_path_buf() })
     }
 }
 
