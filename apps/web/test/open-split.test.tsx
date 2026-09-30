@@ -8,7 +8,7 @@
 // line in their ssh config.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_PREFERENCES, sshIncludeLine, type EditorChoice, type EditorId } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, SSH_BEHIND_KIND, sshBehindLine, sshIncludeLine, type EditorChoice, type EditorId } from "@wsp/protocol";
 import { EDITOR_SSH_WORDS } from "../src/files/EditorConsent.js";
 import { RequestError } from "../src/protocol/client.js";
 import { DEFAULT_KEYBINDINGS } from "../src/keybindingDefaults.js";
@@ -32,13 +32,15 @@ function setUp({
   refuse,
   included = true,
   memMb = 8192,
-}: { editors?: EditorChoice[]; editor?: EditorId; kind?: "local" | "cloud"; phase?: "running" | "napping"; refuse?: string; included?: boolean; memMb?: number } = {}) {
+  behind = false,
+}: { editors?: EditorChoice[]; editor?: EditorId; kind?: "local" | "cloud"; phase?: "running" | "napping"; refuse?: string; included?: boolean; memMb?: number; behind?: boolean } = {}) {
   const calls: string[] = [];
   let include = included;
   const openInEditor = vi.fn(async (_ws: string, path: string) => {
     calls.push(`open ${path}`);
     if (refuse !== undefined) throw new Error(refuse);
     if (kind === "cloud" && !include) throw new RequestError(sshIncludeLine("Delete compatibility and duplicates"), "sshInclude");
+    if (behind) throw new RequestError(sshBehindLine("Delete compatibility and duplicates"), SSH_BEHIND_KIND);
     return "zed" as const;
   });
   const sshInclude = vi.fn(async (on?: boolean) => {
@@ -60,6 +62,7 @@ function setUp({
       statuses: { [WS]: { ...view, size: { cpu: 2, memMb } } } as never,
       api: { openInEditor, editorList, setPreferences, sshInclude } as never,
       preferences: { ...DEFAULT_PREFERENCES, ...(editor === undefined ? {} : { editor }) },
+      places: [{ id: "here", kind: "computer", name: "zingzy's MacBook Pro", default: true, takesForks: false }] as never,
     }),
   );
   return { openInEditor, editorList, setPreferences, sshInclude, calls };
@@ -128,14 +131,40 @@ describe("the Open split button", () => {
     const main = await screen.findByRole("button", { name: OPEN_WORDS.openIn("VS Code") });
     await act(async () => void fireEvent.click(main));
     const sheet = await screen.findByRole("dialog");
-    expect(within(sheet).getByText(EDITOR_SSH_WORDS.title)).toBeDefined();
-    expect(sheet.textContent).toContain("~/.ssh/config");
-    // What an attached editor opens toward this computer is said before the yes, not after.
-    expect(sheet.textContent).toContain(EDITOR_SSH_WORDS.reach);
+    // The owner's words of 2026-09-30, and no workspace name: the line is for every workspace, not this one. The
+    // computer the editor runs on is named, as every computer in the app is.
+    expect(within(sheet).getByRole("heading").textContent).toBe("Open in your editor over SSH");
+    expect([...sheet.querySelectorAll("p")].map(p => p.textContent)).toEqual([
+      "wsp adds one line to ~/.ssh/config. It covers only hosts named wsp-*, and nothing else in the file changes.",
+      "While your editor is connected, the workspace can reach zingzy's MacBook Pro through it: ports it forwards, files it asks to open, and your editor's git sign-in.",
+      "Remove it any time in Settings, General.",
+    ]);
+    expect(sheet.textContent).not.toContain("Delete compatibility and duplicates");
+    expect(sheet.textContent).not.toMatch(/this Mac|this computer/);
+    expect(within(sheet).getAllByRole("button").map(b => b.textContent)).toEqual(expect.arrayContaining(["Cancel", "Add to SSH config"]));
     await act(async () => void fireEvent.click(within(sheet).getByRole("button", { name: EDITOR_SSH_WORDS.add })));
     await waitFor(() => expect(calls).toEqual(["open /root", "include true", "open /root"]));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(useNotices.getState().notices).toEqual([]);
+  });
+
+  it("says a computer that runs an older wsp as a wait, not a failure", async () => {
+    setUp({ kind: "cloud", behind: true });
+    render(<OpenSplit workspaceId={WS} />);
+    const main = await screen.findByRole("button", { name: OPEN_WORDS.openIn("VS Code") });
+    await act(async () => void fireEvent.click(main));
+    await waitFor(() => expect(useNotices.getState().notices.map(n => [n.kind, n.text])).toEqual([["waiting", sshBehindLine("Delete compatibility and duplicates")]]));
+  });
+
+  it("says it as a wait after a yes in the sheet as well", async () => {
+    const line = sshBehindLine("Delete compatibility and duplicates");
+    setUp({ kind: "cloud", included: false, behind: true });
+    render(<OpenSplit workspaceId={WS} />);
+    const main = await screen.findByRole("button", { name: OPEN_WORDS.openIn("VS Code") });
+    await act(async () => void fireEvent.click(main));
+    const sheet = await screen.findByRole("dialog");
+    await act(async () => void fireEvent.click(within(sheet).getByRole("button", { name: EDITOR_SSH_WORDS.add })));
+    await waitFor(() => expect(useNotices.getState().notices.map(n => [n.kind, n.text])).toEqual([["waiting", line]]));
   });
 
   it("adds nothing and opens nothing when the person cancels the sheet", async () => {
@@ -183,7 +212,8 @@ describe("the Open split button", () => {
     const { editorList } = setUp({ editors: [] });
     const { container } = render(<OpenSplit workspaceId={WS} />);
     await waitFor(() => expect(editorList).toHaveBeenCalled());
-    expect(container.textContent).toBe("");
+    // The slot is held, hidden, until the list answers; empty only once the answer is none.
+    await waitFor(() => expect(container.textContent).toBe(""));
   });
 
   it("says the host's refusal as a notice", async () => {

@@ -353,14 +353,6 @@ function drainedNotice(event: Record<string, unknown>): boolean {
   return answeredNothing(normalizeResult(event, undefined));
 }
 
-/** A reply whose process was cut while the agent's background tasks still ran: the CLI kills them with itself, so
- * the turn ended before the work it started did. The reply stays; the error says why. A reply given while they run
- * holds the turn open instead, so this is the word of a turn stopped from outside, the wall among the causes. */
-function endedEarly(result: TurnResult, backgroundTasks: number): TurnResult {
-  if (result.status !== "completed" || backgroundTasks === 0) return result;
-  return { ...result, status: "failed", error: backgroundTasksLine(backgroundTasks) };
-}
-
 /** The turn's plan as its calls so far built it. */
 interface PlanBook {
   /** The ids of the calls read as the plan, whose results are bookkeeping and draw nothing either. */
@@ -641,9 +633,14 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
 
     /** A held reply with one line under it per task that finished after it: the road where the CLI reported the
      * exits and never woke its agent, so these lines are the turn's own report of them. Where it did wake the agent,
-     * that reply is the turn's and none of this is added. */
-    const heldWithFinished = (result: TurnResult): TurnResult =>
-      finishedAfter.length === 0 ? result : { ...result, text: [result.text ?? "", "", ...finishedAfter].join("\n") };
+     * that reply is the turn's and none of this is added. `running` is the tasks still going when the process
+     * ended, a server the agent started among them, which never exits and so never wakes it: the agent replied and
+     * the turn went as it should, so the reply stays done and the last line names that work, the line a thread's row
+     * reads. */
+    const heldWithFinished = (result: TurnResult, running = 0): TurnResult => {
+      const lines = [...finishedAfter, ...(running > 0 && result.status === "completed" ? [backgroundTasksLine(running)] : [])];
+      return lines.length === 0 ? result : { ...result, text: [result.text ?? "", "", ...lines].join("\n") };
+    };
 
     /** A reply given after a held one, timed from the turn's launch: the CLI times each result from what started
      * it (the prompt, the wake, a message), so the held reply's figure and the wall time since it are the whole turn.
@@ -803,17 +800,15 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       const exitLine = (): string =>
         streamError ?? harnessExitLine("claude", exitCode, env["PATH"], { reached: sawInit, ...(stream.signalled !== undefined ? { signal: stream.signalled } : {}) });
       if (turnResult === undefined && heldReply !== undefined) {
-        // The hold ended with the process. Tasks still in the set were cut with it, which is the wall and every stop
-        // from outside; the words the agent gave stand whichever it was. A woken agent was cut before its own reply,
-        // so the turn reads what ended it: the idle rule, the wall, or the process going.
+        // The hold ended with the process. The words the agent gave stand, done, with any task still in the set named
+        // under them. A woken agent was cut before its own reply, so the turn reads what ended it: the idle rule, the
+        // wall, or the process going.
         sawResult = true;
         turnResult = interruptRequested
           ? { ...heldReply, status: "interrupted" }
           : woken
             ? { ...heldReply, status: "failed", error: exitLine() }
-            : backgroundTasks > 0
-              ? endedEarly(heldReply, backgroundTasks)
-              : heldWithFinished(heldReply);
+            : heldWithFinished(heldReply, backgroundTasks);
         anchorOnce(claudeSessionId);
         onEvent({ type: "turn.done", sessionId: claudeSessionId, result: turnResult });
       }

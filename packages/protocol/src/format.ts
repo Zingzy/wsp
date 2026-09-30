@@ -1370,9 +1370,8 @@ export function execFolderLine(cwd: string | undefined): string {
   return `ran in ${cwd ?? "the home folder"}`;
 }
 
-/** The turn's error when its process was cut while the agent's own background tasks were still running: the harness
- * kills them with its process, so the turn ended before the work it started did. A reply given while they run holds
- * the turn open instead, so these are the words of a turn stopped from outside, the six hour wall among the causes. */
+/** The last line of a reply whose process ended while the agent's own background tasks were still running: the turn
+ * reads done, since the work left running is not its failure, and this names that work. */
 export function backgroundTasksLine(running: number): string {
   return `ended with ${plural(running, "background task")} running`;
 }

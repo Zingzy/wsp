@@ -2065,16 +2065,20 @@ export type EditorChoice = z.infer<typeof EditorChoice>;
 
 /** What Open in editor says for a workspace whose files are on another machine, named as the person reads it. */
 export const editorOpensHereLine = (name: string): string => `These files are on ${name}, so they open here.`;
-/** The refusal for editor.list and editor.open on a socket let in on a ticket: a program starts only for this computer's
- * own window, and the list of what could start is read on the same terms. */
 /** editor.open on a workspace on another computer before the person's ssh config reads wsp's: the window asks them
  * for that one line with the refusal's kind, and opens again once it stands. */
 export const sshIncludeLine = (name: string): string => `${name} opens in your editor over ssh, which needs one line at the top of ~/.ssh/config.`;
 /** ssh.port on a copy on this computer: its folder is right here, so an editor opens it with no ssh at all. */
 export const sshCopyHereLine = (name: string): string => `${name} is a copy on this computer, so its folder opens here with no ssh.`;
+/** The kind an Open carries when the workspace's computer runs a daemon from before ssh.start: a wait for that
+ * daemon's update, which a running turn there holds back, and not a failure. */
+export const SSH_BEHIND_KIND = "sshBehind";
+export const sshBehindLine = (name: string): string => `${name}'s computer runs an older wsp; it updates when its running turn ends, then Open works.`;
 /** The refusal for ssh.port and ssh.include on a socket let in on a ticket: the port is on this computer's loopback,
  * and the Include is in the person's own ssh config. */
 export const SSH_TICKET_REFUSAL = "a socket let in on a ticket cannot reach a workspace's ssh; use the wsp command or the app on the computer the host runs on";
+/** The refusal for editor.list and editor.open on a socket let in on a ticket: a program starts only for this computer's
+ * own window, and the list of what could start is read on the same terms. */
 export const EDITOR_TICKET_REFUSAL = "a socket let in on a ticket cannot list or open the editors on this computer; use the app on the computer the host runs on";
 
 export const Preferences = z.object({
@@ -4419,6 +4423,7 @@ const DAEMON_CONTENTS = [
   "fcbf00c4e8075aea8eec9513751ad6412db3feae36f2a1e78d2465eca51b86a4",
   "9468bfd7e5cd26a8458b328ef1f01634bbd12954c7b2d4dc13711adb7f19ae95",
   "17dc947dabc1776d901352d4d681af228e620309b8b4d8b8043ac9d904788bb4",
+  "eb62eb296316d8c81da569e60be2c5db173b00f00a2ef7f562db39265db49423",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -4672,7 +4677,9 @@ const DAEMON_CONTENTS = [
  * tunnel.data and tunnel.end carry it back. The server and every process it started are stopped five minutes after
  * its last tunnel closes, and when the daemon ends; one an ended daemon left behind goes before another starts. A
  * daemon answering for a computer somebody owns starts none on that computer itself, and inside a workspace the
- * server's files are written with no link of the workspace's followed. */
+ * server's files are written with no link of the workspace's followed.
+ * Version 94 asks the DevTools question on the person's own computer only of a listener wsp's own processes hold, the
+ * daemon and everything under the host that started it, so no other server of theirs gets a request from wsp. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary

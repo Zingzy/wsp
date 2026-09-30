@@ -12,7 +12,7 @@ import { spawn } from "node:child_process";
 import { createServer, type Server, type Socket } from "node:net";
 import { platform } from "node:os";
 import { PassThrough } from "node:stream";
-import { DaemonEvent, LOOPBACK, SshStartReply, callbackPortOf, hostOf, isHttpUrl, isJoinedComputer, isLoopback, type AgentsTarget, type DaemonReachView, type ForwardEvent, type GoldenBuilderView, type PortForward } from "@wsp/protocol";
+import { DaemonEvent, LOOPBACK, SSH_BEHIND_KIND, SshStartReply, sshBehindLine, unknownOpLine, callbackPortOf, hostOf, isHttpUrl, isJoinedComputer, isLoopback, type AgentsTarget, type DaemonReachView, type ForwardEvent, type GoldenBuilderView, type PortForward } from "@wsp/protocol";
 import { plumbTunnel, realClock, tunnelFrame, type Clock, type DaemonChannel, type EventUnion, type Runtime, type SignInForward } from "@wsp/runtime";
 import { DAEMON_CONNECT_TIMEOUT_MS, connectDaemonSocket, type ConnectOptions, type DaemonSocket } from "./doctor.js";
 import type { GuestDoor } from "./guest.js";
@@ -228,6 +228,21 @@ function badGateway(sentence: string): string {
 
 /** An ssh road asked of a workspace this relay holds no link to yet: one just woken has none for a moment. */
 export class NoSshLinkError extends Error {}
+
+/** A daemon's answer to ssh.start, read in the order that says the most: a daemon from before the op, which updates
+ * once its running turn ends; any other refusal in its own words; an answer of another shape; and only then a key
+ * that is not one ed25519 line. */
+function sshStarted(name: string, reply: unknown): SshStartReply {
+  const said = reply as { ok?: unknown; error?: unknown };
+  if (said.ok === false) {
+    if (said.error === unknownOpLine("ssh.start")) throw Object.assign(new Error(sshBehindLine(name)), { kind: SSH_BEHIND_KIND });
+    throw new Error(`${name}: ${String(said.error)}`);
+  }
+  const read = SshStartReply.safeParse(reply);
+  if (read.success) return read.data;
+  const keyBroke = read.error.issues.every(issue => issue.path[0] === "hostKey" && issue.code !== "invalid_type");
+  throw new Error(keyBroke ? `${name}: the ssh server answered a host key that is not one ed25519 line` : `${name}: its daemon answered ssh.start with no port and host key`);
+}
 
 /** What a guest session is answered with when the link it rode went between the ask and the answer. */
 export const linkDownLine = (workspace: string): string => `${workspace}: the daemon link is down`;
@@ -631,9 +646,7 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
   const sshPort = async (workspaceId: string, authorizedKey: string): Promise<{ port: number; hostKey: string }> => {
     const link = links.get(workspaceId);
     if (link === undefined || !link.target.guests) throw new NoSshLinkError(`${workspaceId}: this host holds no link to that workspace`);
-    const read = SshStartReply.safeParse(await downward(link, "ssh.start", { authorizedKey }));
-    if (!read.success) throw new Error(`${link.target.name}: the ssh server answered a host key that is not one ed25519 line`);
-    const { port: far, hostKey } = read.data;
+    const { port: far, hostKey } = sshStarted(link.target.name, await downward(link, "ssh.start", { authorizedKey }));
     const held = sshRoads.get(workspaceId);
     if (held !== undefined && held.far === far) {
       held.hostKey = hostKey;
