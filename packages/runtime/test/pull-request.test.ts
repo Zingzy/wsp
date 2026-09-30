@@ -255,6 +255,14 @@ describe("reading the pull request", () => {
     await until(async () => (await prOf(id))?.pr?.["state"] === "merged");
   });
 
+  it.each(["merged", "closed"] as const)("reads %s as GitHub says it, merged where the pull request merged and closed where it closed without a merge, onto the status the tile reads", async state => {
+    const daemons = fakeDaemons({ here: { "git.prRead": () => ({ id: 1, ok: true, pr: open({ state }) }) } });
+    const { id } = await withWorkspace(daemons);
+    await rt!.workspaces.checkout(id);
+    await until(async () => (await prOf(id))?.pr?.["state"] === state);
+    expect((await prOf(id))?.pr).toMatchObject({ number: 12, state });
+  });
+
   it("reads an open one again on its timer whatever its checks say, so a merge made on the host's own page is seen, and never again once merged", async () => {
     // Just after a push the host answers the old head with no checks at all, and once checks pass nothing is pending:
     // neither is the last word on an open pull request.

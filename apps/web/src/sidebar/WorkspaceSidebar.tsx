@@ -316,8 +316,7 @@ export function WorkspaceSidebar() {
     }
     const copyActions = above === runs.id ? [] : resolveActions(workspaceActions, workspaceTarget(runs.workspace, runs.status, places), verbs);
     const place = placeOf(runs);
-    const section = thread === null ? null : threadSection(thread);
-    const { branch, counts, why, settledWord } = tileCheckout(runs, { done: section === "done" || section === "idle", attached: editorsAttached.has(runs.id) });
+    const { branch, commit, pr, counts, why } = tileCheckout(runs, { attached: editorsAttached.has(runs.id) });
     let tile: ReactNode;
     if (thread === null) {
       tile = (
@@ -326,6 +325,8 @@ export function WorkspaceSidebar() {
           name={copyName(places, runs)}
           place={place}
           branch={branch}
+          commit={commit}
+          pr={pr}
           counts={counts}
           why={why}
           depth={depth}
@@ -351,9 +352,11 @@ export function WorkspaceSidebar() {
           {...(linksDown[thread.workspaceId] !== undefined ? { linkDown: linksDown[thread.workspaceId] } : {})}
           place={place}
           branch={branch}
+          commit={commit}
+          pr={pr}
           counts={counts}
           why={why}
-          time={settled && settledWord !== undefined ? settledWord : restingAge(thread)}
+          time={restingAge(thread)}
           depth={depth}
           active={(selectedId === thread.workspaceId && (selectedThreadId === null ? thread.threadId === null : selectedThreadId === thread.id)) || (selectedThreadId !== null && item.holds?.includes(selectedThreadId) === true)}
           settled={settled}
@@ -421,7 +424,7 @@ export function WorkspaceSidebar() {
     if (launch === undefined || (picked !== null && runs.workspace.project.id !== picked.project.id)) return [];
     return [
       <li key={`launch:${runs.id}`} data-thread-selection-safe>
-        <ThreadLaunchTile launch={launch} place={placeOf(runs)} branch={tileCheckout(runs).branch} counts={tileCheckout(runs, { attached: editorsAttached.has(runs.id) }).counts} />
+        <ThreadLaunchTile launch={launch} place={placeOf(runs)} checkout={tileCheckout(runs, { attached: editorsAttached.has(runs.id) })} />
       </li>,
     ];
   });

@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement, createContext, useContext, type ReactElement, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CHECKOUT_WORDS, DEFAULT_PREFERENCES, PULL_REQUEST_WORDS, type Capabilities, type Checkout, type PlaceView, type ProjectView, type PullRequestFact, type PullRequestSeen, type WorkspaceLanding, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, type Capabilities, type Checkout, type PlaceView, type ProjectView, type PullRequestFact, type PullRequestSeen, type WorkspaceLanding, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { THREAD_TREE_WORKING } from "../actions/format.js";
 import { workspaceActions } from "../actions/workspaceActions.js";
 import { clearNotices, lastNotice } from "../../test/notice-text.js";
@@ -202,71 +202,44 @@ describe("the sidebar's list of thread tiles", () => {
       ({ ...w, machineState: "running", reach: { state: "reachable" }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0, ...(checkout !== undefined ? { checkout } : {}) }) as WorkspaceStatus;
     const three = (id: string): HTMLElement => document.querySelector<HTMLElement>(`[data-row-id='ws:${id}']`)!.children[2] as HTMLElement;
     const counts = (id: string): string[] => [...three(id).querySelectorAll("[data-tile-count]")].map(n => n.textContent ?? "");
-    const fact: Checkout = { branch: "fix/cart-rounding", ahead: 1, behind: 0, changed: 3, readAt: 1 };
+    const fact: Checkout = { branch: "fix/cart-rounding", ahead: 1, behind: 4, changed: 3, head: "0123456789abcdef0123456789abcdef01234567", readAt: 1 };
 
-    it("says an editor is attached, first, while one is connected over ssh, and stops saying it when it goes", async () => {
-      mount({ projects: [project("pr_1", "spoo")], workspaces: [fork] });
-      await waitFor(() => expect(rowIds()).toEqual(["ws:ws_f"]));
-      act(() => useStore.setState({ statuses: { ws_f: statusOf(fork, fact) } } as never));
-      await waitFor(() => expect(counts("ws_f")).toEqual(["1 ahead", "3 changed"]));
-      const editor = { workspaceId: "ws_f", port: 51022, startedAt: "2026-09-29T10:00:00Z", name: "cart rounding", kind: "editor" as const };
-      act(() => useStore.setState({ forwards: [editor, { ...editor, workspaceId: "ws_other" }] } as never));
-      await waitFor(() => expect(counts("ws_f")).toEqual([EDITOR_SSH_WORDS.attached, "1 ahead", "3 changed"]));
-      // Nor is it a port of the forwarded list: nothing but wsp ssh dials it.
-      expect(rowIds()).toEqual(["ws:ws_f"]);
-      act(() => useStore.setState({ forwards: [] } as never));
-      await waitFor(() => expect(counts("ws_f")).toEqual(["1 ahead", "3 changed"]));
-    });
-
-    it("says an editor is attached on a tile whose branch the host has not read yet, with no branch glyph beside it", async () => {
-      const { copy: _c, ...unread } = fork;
-      mount({ projects: [project("pr_1", "spoo")], workspaces: [{ ...unread, copy: undefined } as WorkspaceView] });
-      await waitFor(() => expect(rowIds()).toEqual(["ws:ws_f"]));
-      act(() => useStore.setState({ forwards: [{ workspaceId: "ws_f", port: 51022, startedAt: "2026-09-29T10:00:00Z", name: "cart rounding", kind: "editor" }] } as never));
-      await waitFor(() => expect(counts("ws_f")).toEqual([EDITOR_SSH_WORDS.attached]));
-      expect(three("ws_f").querySelector(".lucide-git-branch")).toBeNull();
-      act(() => useStore.setState({ forwards: [] } as never));
-    });
-
-    it("draws the branch and each count the host's fact carries, spaced and never joined, a zero left out", async () => {
+    it("draws the agent's mark and the branch alone, no count of what changed or how far it is ahead or behind", async () => {
       mount({ projects: [project("pr_1", "spoo")], workspaces: [fork] });
       await waitFor(() => expect(rowIds()).toEqual(["ws:ws_f"]));
       act(() => useStore.setState({ statuses: { ws_f: statusOf(fork, fact) } } as never));
       await waitFor(() => expect(three("ws_f").querySelector("[data-tile-branch]")?.textContent).toBe("fix/cart-rounding"));
-      expect(counts("ws_f")).toEqual(["1 ahead", "3 changed"]);
-      // The branch and each count stand 12 px apart on the 4 px grid: each count's own start margin, since a count that
-      // does not fit wraps onto the line the row hides and a gap would stay behind it.
-      const branch = three("ws_f").querySelector<HTMLElement>("[data-tile-branch]")!;
-      expect([...three("ws_f").querySelectorAll("[data-tile-count]")].map(n => n.className.split(" ").includes("ms-3"))).toEqual([true, true]);
-      expect([...branch.parentElement!.querySelectorAll("*")].map(n => n.getAttribute("class") ?? "").join(" ")).not.toMatch(/\bm[se]?-\[/);
-      expect(three("ws_f").textContent).not.toContain("\u00b7");
+      expect(counts("ws_f")).toEqual([]);
+      expect(three("ws_f").textContent).not.toMatch(/ahead|behind|changed/);
       expect(three("ws_f").querySelector(".lucide-git-branch")).not.toBeNull();
     });
 
-    it("leaves out behind and a detached head, which tell a tile's reader nothing, and keeps the counts that do", async () => {
+    it("says an editor is attached while one is connected over ssh, and stops saying it when it goes", async () => {
       mount({ projects: [project("pr_1", "spoo")], workspaces: [fork] });
       await waitFor(() => expect(rowIds()).toEqual(["ws:ws_f"]));
-      act(() => useStore.setState({ statuses: { ws_f: statusOf(fork, { ...fact, behind: 4 }) } } as never));
-      await waitFor(() => expect(counts("ws_f")).toEqual(["1 ahead", "3 changed"]));
-      act(() => useStore.setState({ statuses: { ws_f: statusOf(fork, { ...fact, branch: "(detached)", behind: 4 }) } } as never));
-      await waitFor(() => expect(three("ws_f").querySelector("[data-tile-branch]")).toBeNull());
-      expect(counts("ws_f")).toEqual(["1 ahead", "3 changed"]);
-      expect(three("ws_f").textContent).not.toMatch(/detached|behind/);
+      act(() => useStore.setState({ statuses: { ws_f: statusOf(fork, fact) } } as never));
+      const editor = { workspaceId: "ws_f", port: 51022, startedAt: "2026-09-29T10:00:00Z", name: "cart rounding", kind: "editor" as const };
+      act(() => useStore.setState({ forwards: [editor, { ...editor, workspaceId: "ws_other" }] } as never));
+      await waitFor(() => expect(counts("ws_f")).toEqual([EDITOR_SSH_WORDS.attached]));
+      // Nor is it a port of the forwarded list: nothing but wsp ssh dials it.
+      expect(rowIds()).toEqual(["ws:ws_f"]);
+      act(() => useStore.setState({ forwards: [] } as never));
+      await waitFor(() => expect(counts("ws_f")).toEqual([]));
     });
 
-    it("counts a thread's commits ahead while it works and drops them once it is done", async () => {
+    it("shows the head's short commit in the branch's place on a copy with no branch", async () => {
       mount({ projects: [project("pr_1", "spoo")], workspaces: [fork] });
-      const turn = { ws: "ws_f", id: "th_cart", prompt: "round the cart", startedAgo: 6 * 60_000 };
-      const tile = (): HTMLElement => document.querySelector<HTMLElement>("[data-row-id='thread:th_cart']")!;
-      const shown = (): string[] => [...tile().children[2]!.querySelectorAll("[data-tile-count]")].map(n => n.textContent ?? "");
-      await act(async () => useStore.setState({ sessions: sessions([turn]), statuses: { ws_f: statusOf(fork, fact) } } as never));
-      await waitFor(() => expect(shown()).toEqual(["1 ahead", "3 changed"]));
-      await act(async () => useStore.setState({ sessions: sessions([{ ...turn, status: "completed", endedAgo: 5 * 60_000, readAgo: HOUR }]) } as never));
-      await waitFor(() => expect(tile().querySelector("[data-thread-status]")!.textContent).toBe("Done"));
-      expect(shown()).toEqual(["3 changed"]);
-      await act(async () => useStore.setState({ sessions: sessions([{ ...turn, status: "completed", endedAgo: 5 * 60_000 }]) } as never));
-      await waitFor(() => expect(tile().querySelector("[data-thread-status]")!.textContent).toBe("5m"));
-      expect(shown()).toEqual(["3 changed"]);
+      await waitFor(() => expect(rowIds()).toEqual(["ws:ws_f"]));
+      act(() => useStore.setState({ statuses: { ws_f: statusOf(fork, { ...fact, branch: "(detached)" }) } } as never));
+      await waitFor(() => expect(three("ws_f").querySelector("[data-tile-commit]")?.textContent).toBe("0123456"));
+      expect(three("ws_f").querySelector("[data-tile-branch]")).toBeNull();
+      expect(three("ws_f").textContent).not.toMatch(/detached/);
+    });
+
+    it("shows the commit a copy was made at while the host has read no branch for it", async () => {
+      const onBase = { ...workspace("ws_b", "no branch", "pr_1"), copy: { ...workspace("ws_b", "no branch", "pr_1").copy!, branch: "", base: "fedcba9876543210fedcba9876543210fedcba98" } } as WorkspaceView;
+      mount({ projects: [project("pr_1", "spoo")], workspaces: [onBase] });
+      await waitFor(() => expect(three("ws_b").querySelector("[data-tile-commit]")?.textContent).toBe("fedcba9"));
     });
 
     const pr = (over: Partial<PullRequestFact> = {}): PullRequestFact => ({
@@ -292,34 +265,32 @@ describe("the sidebar's list of thread tiles", () => {
     });
     const withPr = (seen: PullRequestSeen): WorkspaceStatus => ({ ...statusOf(fork, fact), pr: seen }) as WorkspaceStatus;
 
-    it("says the pull request's one word beside the branch, muted like the counts, and counts behind against its base", async () => {
+    it("marks the pull request #N beside the branch in its state's ink, never as a word and never in the status slot", async () => {
       mount({ projects: [project("pr_1", "spoo")], workspaces: [fork] });
       await waitFor(() => expect(rowIds()).toEqual(["ws:ws_f"]));
-      act(() => useStore.setState({ statuses: { ws_f: withPr(pr({ behindBase: 3, checks: [{ name: "ci", state: "fail" }, { name: "e2e", state: "pending" }] })) } } as never));
-      await waitFor(() => expect(counts("ws_f")).toEqual(["checks failed", "1 ahead", "3 behind main", "3 changed"]));
-      act(() => useStore.setState({ statuses: { ws_f: withPr(pr({ mergeable: "conflicting", checks: [{ name: "ci", state: "fail" }] })) } } as never));
-      await waitFor(() => expect(counts("ws_f")[0]).toBe("conflicts with main"));
-      act(() => useStore.setState({ statuses: { ws_f: withPr(pr({ review: "approved" })) } } as never));
-      await waitFor(() => expect(counts("ws_f")[0]).toBe("approved"));
-      // A word alone, never a chip: the same span the counts take.
-      const word = three("ws_f").querySelector<HTMLElement>("[data-tile-count]")!;
-      expect(word.className).toBe("ms-3 shrink-0 whitespace-nowrap");
+      const mark = (): HTMLElement | null => three("ws_f").querySelector<HTMLElement>("[data-tile-pr]");
+      act(() => useStore.setState({ statuses: { ws_f: withPr(pr({ checks: [{ name: "ci", state: "fail" }] })) } } as never));
+      await waitFor(() => expect(mark()?.textContent).toBe("#12"));
+      expect(mark()!.dataset["prState"]).toBe("open");
+      expect(mark()!.className).toContain("text-pr-open");
+      expect(three("ws_f").textContent).not.toMatch(/checks failed|open/);
+      act(() => useStore.setState({ statuses: { ws_f: withPr(pr({ state: "merged" })) } } as never));
+      await waitFor(() => expect(mark()!.dataset["prState"]).toBe("merged"));
+      expect(mark()!.className).toContain("text-pr-merged");
+      act(() => useStore.setState({ statuses: { ws_f: withPr({ number: 12, url: "https://github.com/o/r/pull/12", state: "closed", base: "main", closedAt: 1, readAt: 1 }) } } as never));
+      await waitFor(() => expect(mark()!.dataset["prState"]).toBe("closed"));
+      expect(mark()!.className).toContain("text-pr-closed");
+      expect(document.querySelector<HTMLElement>("[data-row-id='ws:ws_f']")!.children[0]!.textContent).not.toContain("#12");
     });
 
-    it("says not read with the reason on the tile's hover where the pull request could not be read", async () => {
+    it("marks nothing where the pull request could not be read, and keeps the reason on the tile's hover", async () => {
       mount({ projects: [project("pr_1", "spoo")], workspaces: [fork] });
       await waitFor(() => expect(rowIds()).toEqual(["ws:ws_f"]));
       const why = "no signed-in command line for github.com is on this computer and cart rounding is stopped, so the pull request is not read";
       act(() => useStore.setState({ statuses: { ws_f: withPr({ why, readAt: 1 }) } } as never));
-      await waitFor(() => expect(counts("ws_f")[0]).toBe(PULL_REQUEST_WORDS.unread));
-      expect(document.querySelector<HTMLElement>("[data-row-id='ws:ws_f']")!.title).toContain(why);
-    });
-
-    it("says the changes were not read on a stopped copy whose edits git could not read", async () => {
-      mount({ projects: [project("pr_1", "spoo")], workspaces: [fork] });
-      await waitFor(() => expect(rowIds()).toEqual(["ws:ws_f"]));
-      act(() => useStore.setState({ statuses: { ws_f: statusOf(fork, { ...fact, changed: 0, editsUnread: true }) } } as never));
-      await waitFor(() => expect(counts("ws_f")).toEqual(["1 ahead", CHECKOUT_WORDS.unread]));
+      await waitFor(() => expect(document.querySelector<HTMLElement>("[data-row-id='ws:ws_f']")!.title).toContain(why));
+      expect(three("ws_f").querySelector("[data-tile-pr]")).toBeNull();
+      expect(counts("ws_f")).toEqual([]);
     });
 
     it("asks the host for each workspace's fact once as the sidebar mounts, and reads no daemon of its own", async () => {
@@ -327,7 +298,7 @@ describe("the sidebar's list of thread tiles", () => {
       mount({ projects: [project("pr_1", "spoo")], workspaces: [fork, workspace("ws_a", "pricing page", "pr_1")] }, { workspaceCheckout: async (id: string) => (asked.push(id), {}) });
       await waitFor(() => expect(asked.sort()).toEqual(["ws_a", "ws_f"]));
       act(() => useStore.setState({ statuses: { ws_f: statusOf(fork, fact) } } as never));
-      await waitFor(() => expect(counts("ws_f")).toEqual(["1 ahead", "3 changed"]));
+      await waitFor(() => expect(three("ws_f").querySelector("[data-tile-branch]")?.textContent).toBe("fix/cart-rounding"));
       expect(asked).toHaveLength(2);
     });
 
@@ -505,7 +476,7 @@ describe("the sidebar's list of thread tiles", () => {
     }
   });
 
-  it("reads Merged or Closed in a settled tile's slot where its workspace's pull request merged or closed, else its age", async () => {
+  it("draws a settled thread as one slim row: its title, the pull request's #N and its age, never Merged in its slot", async () => {
     const ws = workspace("ws_a", "pricing page", "pr_1");
     mount({ projects: [project("pr_1", "spoo")], workspaces: [ws] });
     const done = { ws: "ws_a", id: "th_done", prompt: "shipped it", status: "completed", startedAgo: 30 * HOUR, endedAgo: 29 * HOUR, readAgo: 28 * HOUR, settledAgo: HOUR };
@@ -513,15 +484,16 @@ describe("the sidebar's list of thread tiles", () => {
     await waitFor(() => expect(rowIds()).toEqual(["settled"]));
     fireEvent.click(document.querySelector<HTMLElement>("[data-row-id=settled]")!);
     await waitFor(() => expect(rowIds()).toEqual(["settled", "thread:th_done"]));
-    const slot = (): HTMLElement => rowOf("shipped it").querySelector<HTMLElement>("[data-thread-status]")!;
-    expect(slot().textContent).toBe("1d");
+    const row = (): HTMLElement => document.querySelector<HTMLElement>("[data-row-id='thread:th_done']")!;
+    expect(row().dataset["slim"]).toBe("true");
+    expect(row().querySelector("[data-thread-title]")!.textContent).toBe("shipped it");
+    expect(row().querySelector("[data-thread-status]")!.textContent).toBe("1d");
+    expect(row().querySelector("[data-tile-where]")).toBeNull();
     const kept = { number: 12, url: "https://github.com/o/r/pull/12", state: "merged" as const, base: "main", mergedAt: 1, readAt: 1 };
     const status = { ...ws, machineState: "running", reach: { state: "reachable" }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0, pr: kept } as WorkspaceStatus;
     act(() => useStore.setState({ statuses: { ws_a: status } } as never));
-    await waitFor(() => expect(slot().textContent).toBe("Merged"));
-    expect(slot().dataset["tone"]).toBeUndefined();
-    act(() => useStore.setState({ statuses: { ws_a: { ...status, pr: { ...kept, state: "closed" } } } } as never));
-    await waitFor(() => expect(slot().textContent).toBe("Closed"));
+    await waitFor(() => expect(row().querySelector("[data-tile-pr]")?.textContent).toBe("#12"));
+    expect(row().querySelector("[data-thread-status]")!.textContent).toBe("1d");
   });
 
   it("keeps a failure on the list however long ago it was read, and folds it muted once settled by hand", async () => {

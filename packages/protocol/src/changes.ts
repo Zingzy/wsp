@@ -16,6 +16,8 @@ export const Checkout = z.object({
   changed: z.number().int(),
   editsUnread: z.boolean().optional(),
   countsUnknown: z.boolean().optional(),
+  /** The commit the checkout is on, which a tile shows where the head is on no branch. */
+  head: z.string().optional(),
   readAt: z.number(),
 });
 export type Checkout = z.infer<typeof Checkout>;
