@@ -212,7 +212,8 @@ describe("the Open split button", () => {
     const { editorList } = setUp({ editors: [] });
     const { container } = render(<OpenSplit workspaceId={WS} />);
     await waitFor(() => expect(editorList).toHaveBeenCalled());
-    expect(container.textContent).toBe("");
+    // The slot is held, hidden, until the list answers; empty only once the answer is none.
+    await waitFor(() => expect(container.textContent).toBe(""));
   });
 
   it("says the host's refusal as a notice", async () => {

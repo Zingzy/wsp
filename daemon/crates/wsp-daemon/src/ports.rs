@@ -2,9 +2,10 @@
 //! This machine's listening TCP ports, one road per platform: Linux reads /proc/net/tcp and finds each socket's
 //! holder through the /proc/[pid]/fd tables (pgrep is not on every guest); macOS asks lsof. The watcher diffs one
 //! snapshot against the next and says what opened and what closed. A browser's DevTools debugging port is no server
-//! and is dropped here, where every reader of the ports gets them, once it has answered as one.
+//! and is dropped here, where every reader of the ports gets them, once it has answered as one. On the person's own
+//! computer only a listener of wsp's own processes is asked: their other servers get no request from wsp.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
@@ -14,6 +15,7 @@ use std::time::Duration;
 
 use wsp_frames::{numbers, DaemonEvent, ListeningPort, RelayPort};
 
+use crate::sys_local::host_command;
 use crate::{clock, Ctx, Listener};
 
 const TCP_LISTEN: &str = "0A";
@@ -309,6 +311,54 @@ fn pid_alive(pid: u32) -> bool {
 /// Each listener's answer to the DevTools question, by port and holder; None while the ask is out.
 type DevtoolsAnswers = Arc<Mutex<HashMap<(u16, Option<u32>), Option<bool>>>>;
 
+/// How a listener is asked the DevTools question, by its port.
+type Asker = Arc<dyn Fn(u16) -> Pin<Box<dyn Future<Output = bool> + Send>> + Send + Sync>;
+
+/// The processes whose listeners may be asked the DevTools question, read when a reading holds one not yet asked.
+pub(crate) type OwnPids = Arc<dyn Fn() -> Pin<Box<dyn Future<Output = HashSet<u32>> + Send>> + Send + Sync>;
+
+/// wsp's own processes on the person's computer: this daemon and everything under the process that started it,
+/// which is the host, whose children are the agents and theirs the servers and browsers they start. Init is never
+/// taken for that process, so a daemon whose host is gone asks only its own tree. A ps that fails asks nobody.
+pub(crate) fn own_tree() -> OwnPids {
+    Arc::new(|| {
+        Box::pin(async {
+            let read = tokio::task::spawn_blocking(|| host_command("ps", &["-A", "-o", "pid=,ppid="]).output()).await;
+            let rows = match read {
+                Ok(Ok(out)) if out.status.success() => parse_parents(&String::from_utf8_lossy(&out.stdout)),
+                _ => Vec::new(),
+            };
+            let parent = std::os::unix::process::parent_id();
+            let roots: Vec<u32> = std::iter::once(std::process::id()).chain((parent > 1).then_some(parent)).collect();
+            tree_under(&rows, &roots)
+        })
+    })
+}
+
+/// Each process and its parent, off ps's `pid= ppid=` columns.
+fn parse_parents(text: &str) -> Vec<(u32, u32)> {
+    text.lines()
+        .filter_map(|line| {
+            let mut words = line.split_whitespace();
+            Some((words.next()?.parse().ok()?, words.next()?.parse().ok()?))
+        })
+        .collect()
+}
+
+/// The roots and every process under them.
+fn tree_under(rows: &[(u32, u32)], roots: &[u32]) -> HashSet<u32> {
+    let mut tree: HashSet<u32> = roots.iter().copied().collect();
+    let mut next: Vec<u32> = roots.to_vec();
+    while let Some(parent) = next.pop() {
+        for &(pid, ppid) in rows {
+            if ppid == parent && tree.insert(pid) {
+                next.push(pid);
+            }
+        }
+    }
+    tree
+}
+
 pub(crate) struct PortWatcher {
     source: PortSource,
     alive: Box<dyn Fn(u32) -> bool + Send + Sync>,
@@ -319,6 +369,9 @@ pub(crate) struct PortWatcher {
     primed: bool,
     /// Kept while a listener lives, so each is asked once.
     devtools: DevtoolsAnswers,
+    /// Whose listeners are asked; none where the machine is the workspace's and every listener is.
+    own: Option<OwnPids>,
+    ask: Asker,
 }
 
 impl PortWatcher {
@@ -331,7 +384,22 @@ impl PortWatcher {
         alive: Box<dyn Fn(u32) -> bool + Send + Sync>,
         now: Box<dyn Fn() -> u64 + Send + Sync>,
     ) -> PortWatcher {
-        PortWatcher { source, alive, now, known: Vec::new(), primed: false, devtools: Arc::new(Mutex::new(HashMap::new())) }
+        PortWatcher {
+            source,
+            alive,
+            now,
+            known: Vec::new(),
+            primed: false,
+            devtools: Arc::new(Mutex::new(HashMap::new())),
+            own: None,
+            ask: Arc::new(|port| Box::pin(is_devtools(port))),
+        }
+    }
+
+    /// Asks only the listeners these processes hold; every other one is a server and hears nothing from wsp.
+    pub(crate) fn asking_only(mut self, own: OwnPids) -> PortWatcher {
+        self.own = Some(own);
+        self
     }
 
     pub(crate) fn current(&self) -> Vec<ListeningPort> {
@@ -343,16 +411,29 @@ impl PortWatcher {
     /// the reading after its answer.
     async fn servers(&mut self) -> Vec<ListeningPort> {
         let read = (self.source)().await;
+        let unasked = {
+            let answers = self.devtools.lock().unwrap_or_else(|e| e.into_inner());
+            read.iter().any(|r| !answers.contains_key(&(r.port, r.pid)))
+        };
+        let mine = match &self.own {
+            Some(own) if unasked => Some(own().await),
+            _ => None,
+        };
         let mut answers = self.devtools.lock().unwrap_or_else(|e| e.into_inner());
         answers.retain(|(port, pid), _| read.iter().any(|r| r.port == *port && r.pid == *pid));
         for key in read.iter().map(|r| (r.port, r.pid)) {
             if answers.contains_key(&key) {
                 continue;
             }
+            if mine.as_ref().is_some_and(|mine| !key.1.is_some_and(|pid| mine.contains(&pid))) {
+                answers.insert(key, Some(false));
+                continue;
+            }
             answers.insert(key, None);
             let devtools = Arc::clone(&self.devtools);
+            let asked = (self.ask)(key.0);
             tokio::spawn(async move {
-                let answer = is_devtools(key.0).await;
+                let answer = asked.await;
                 if let Some(slot) = devtools.lock().unwrap_or_else(|e| e.into_inner()).get_mut(&key) {
                     *slot = Some(answer);
                 }
@@ -417,9 +498,13 @@ pub(crate) struct PortWatch {
 }
 
 impl PortWatch {
-    pub(crate) fn new(source: PortSource, interval: Duration) -> PortWatch {
+    pub(crate) fn new(source: PortSource, interval: Duration, own: Option<OwnPids>) -> PortWatch {
+        let watcher = PortWatcher::new(source);
         PortWatch {
-            watcher: tokio::sync::Mutex::new(PortWatcher::new(source)),
+            watcher: tokio::sync::Mutex::new(match own {
+                Some(own) => watcher.asking_only(own),
+                None => watcher,
+            }),
             interval,
             subscribers: Mutex::new(Vec::new()),
             started: AtomicBool::new(false),
@@ -549,6 +634,65 @@ mod tests {
             }
         });
         port
+    }
+
+    fn only(pids: &[u32]) -> OwnPids {
+        let pids: HashSet<u32> = pids.iter().copied().collect();
+        Arc::new(move || {
+            let pids = pids.clone();
+            Box::pin(async move { pids })
+        })
+    }
+
+    #[tokio::test]
+    async fn a_listener_outside_wsps_own_processes_is_never_asked_and_stays_a_server() {
+        // Counted at the asker, since any other wsp on this computer may connect to a test's listener on its own.
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        let count = Arc::clone(&asked);
+        let snapshot = Arc::new(Mutex::new(vec![row(4100, Some(700), 1, 0, true), row(4200, Some(1234), 2, 0, true)]));
+        let mut w = PortWatcher::new(fixed(Arc::clone(&snapshot))).asking_only(only(&[1234]));
+        w.ask = Arc::new(move |port| {
+            count.lock().unwrap().push(port);
+            Box::pin(async { false })
+        });
+        assert!(w.poll().await.is_empty());
+        snapshot.lock().unwrap().push(row(4101, Some(701), 3, 0, true));
+        assert_eq!(w.poll().await, [DaemonEvent::PortOpen { port: 4101, pid: Some(701), process: None, loopback: Some(true) }]);
+        assert!(w.poll().await.is_empty());
+        assert_eq!(w.current().iter().map(|p| p.port).collect::<Vec<_>>(), [4100, 4200, 4101]);
+        assert_eq!(*asked.lock().unwrap(), [4200], "only wsp's own listener is asked, and once");
+    }
+
+    #[tokio::test]
+    async fn a_browser_wsps_own_processes_started_still_drops_while_their_plain_server_stays() {
+        let devtools = answering(r#"{"Browser":"HeadlessChrome/140.0.7339.16","Protocol-Version":"1.3"}"#).await;
+        let server = answering("<!doctype html><title>dev</title>").await;
+        let snapshot = Arc::new(Mutex::new(vec![row(devtools, Some(900), 1, 0, true), row(server, Some(901), 2, 0, true)]));
+        let mut w = PortWatcher::new(fixed(Arc::clone(&snapshot))).asking_only(only(&[900, 901]));
+        assert!(w.poll().await.is_empty());
+        let dropped = next_change(&mut w).await;
+        assert!(matches!(dropped.as_slice(), [DaemonEvent::PortClose { port, .. }] if *port == devtools), "{dropped:?}");
+        assert_eq!(w.current().iter().map(|p| p.port).collect::<Vec<_>>(), [server]);
+    }
+
+    #[test]
+    fn the_tree_is_the_roots_and_everything_under_them_and_nothing_beside() {
+        let rows = parse_parents("  1     0\n 50     1\n 60    50\n 61    60\n 70     1\n 71    70\nnot a row\n");
+        assert_eq!(rows.len(), 6);
+        let mut tree: Vec<u32> = tree_under(&rows, &[50]).into_iter().collect();
+        tree.sort_unstable();
+        assert_eq!(tree, [50, 60, 61]);
+    }
+
+    #[tokio::test]
+    async fn wsps_own_processes_here_hold_this_daemon_and_what_it_started_and_never_init() {
+        let mut child = std::process::Command::new("sleep").arg("5").spawn().unwrap();
+        let tree = own_tree()().await;
+        let _ = child.kill();
+        let _ = child.wait();
+        assert!(tree.contains(&std::process::id()));
+        assert!(tree.contains(&child.id()), "a process this daemon started is its own");
+        assert!(!tree.contains(&1), "init is no process of wsp's");
     }
 
     /// A listener that takes the connection and never says a word, as postgres, redis and ssh do to an HTTP ask.

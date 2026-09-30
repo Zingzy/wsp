@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createClaudeAdapter } from "@wsp/adapter-claude";
 import { LocalBackend } from "@wsp/engine";
-import { HERE_PLACE_ID } from "@wsp/protocol";
+import { HERE_PLACE_ID, backgroundTasksLine, notifyTail } from "@wsp/protocol";
 import { writeStub } from "../../protocol/test/stub-script.js";
 import { createRuntime, type LocalWiring, type Runtime } from "../src/runtime.js";
 import { localExecStream } from "../src/local-exec.js";
@@ -61,6 +61,23 @@ cat >/dev/null
 `;
 }
 
+/** The stand-in `claude` for a turn that leaves a server running: the agent starts it in the background and replies,
+ * and the process ends with the server still in the set, as a nohup'd node server does that never exits. */
+function serverLeftRunning(): string {
+  return `#!/bin/sh
+for a; do [ "$prev" = --session-id ] && sid=$a; prev=$a; done
+[ -n "$sid" ] || exit 0
+read -r _
+cat <<EOF
+{"type":"system","subtype":"init","cwd":"$PWD","session_id":"$sid","tools":["Bash"],"model":"claude-opus-5-5"}
+{"type":"assistant","message":{"model":"claude-opus-5-5","id":"msg_1","type":"message","role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"nohup node server.js","run_in_background":true}}]},"parent_tool_use_id":null,"session_id":"$sid"}
+{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"b1","task_type":"local_bash","description":"nohup node server.js"}],"session_id":"$sid"}
+{"type":"system","subtype":"task_started","task_id":"b1","tool_use_id":"toolu_1","description":"nohup node server.js","is_backgrounded":true,"task_type":"local_bash","session_id":"$sid"}
+{"type":"result","subtype":"success","is_error":false,"duration_ms":4000,"total_cost_usd":0.1,"result":"The screenshots are in shots/; the preview server is still up on :4173.","num_turns":2,"result_index":0,"session_id":"$sid","usage":{"input_tokens":4,"output_tokens":90}}
+EOF
+`;
+}
+
 describe("a turn whose background work ends and wakes its agent", () => {
   let root: string;
   let rt: Runtime | undefined;
@@ -68,10 +85,10 @@ describe("a turn whose background work ends and wakes its agent", () => {
 
   /** A runtime whose claude is the stand-in, its woken agent silent for `silentS` seconds; `idleMs` is the quiet a
    * turn is cut after, the real limit where absent. */
-  const runtime = (silentS: number, idleMs?: number): Runtime => {
+  const runtime = (silentS: number, idleMs?: number, script = standIn(mark, silentS)): Runtime => {
     const bin = join(root, "bin");
     mkdirSync(bin);
-    writeStub(join(bin, "claude"), standIn(mark, silentS));
+    writeStub(join(bin, "claude"), script);
     const wiring: LocalWiring = {
       backend: new LocalBackend({ root }),
       execStream: o => localExecStream({ root, runDir: join(root, "runs"), ...o, ...(idleMs !== undefined ? { idleMs } : {}) }),
@@ -133,5 +150,18 @@ describe("a turn whose background work ends and wakes its agent", () => {
     expect(result.error).toMatch(/^stopped after .* with no output for /);
     expect(result.text).toBe("Waiting on the gate.");
     expect((await rt.sessions.list(ws.id))[0]!.status).toBe("failed");
+  }, 10_000);
+
+  it("a turn whose process ends with a server it started still running reads done, its last line naming that work", async () => {
+    const rt = runtime(0, undefined, serverLeftRunning());
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
+    const handle = await rt.sessions.start(ws.id, { prompt: "start the preview server and take the screenshots" });
+
+    const result = await handle.finished;
+    expect(result.status).toBe("completed");
+    expect(result.error).toBeUndefined();
+    expect(result.text?.split("\n")).toEqual(["The screenshots are in shots/; the preview server is still up on :4173.", "", backgroundTasksLine(1)]);
+    expect(notifyTail(result)).toBe(backgroundTasksLine(1));
+    expect((await rt.sessions.list(ws.id))[0]!.status).toBe("completed");
   }, 10_000);
 });

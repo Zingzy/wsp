@@ -280,7 +280,9 @@ impl Ctx {
         let manifest_path = options.manifest_path.clone().unwrap_or_else(|| PathBuf::from(numbers::DEFAULT_MANIFEST_PATH));
         let manifest = manifest::ProcessManifest::load(Some(manifest_path), options.run_dir.as_deref(), options.log_dir.as_deref())?;
         let interval = options.ports_interval_ms.map_or(ports::DEFAULT_INTERVAL, Duration::from_millis);
-        let ports = ports::PortWatch::new(ports::source_for(options.proc_root.as_deref()), interval);
+        // A cloud machine is the workspace's whole; on the person's own computer only wsp's processes are its.
+        let own = (options.kind != "cloud").then(ports::own_tree);
+        let ports = ports::PortWatch::new(ports::source_for(options.proc_root.as_deref()), interval, own);
         let guest_unwatched = Duration::from_millis(options.guest_unwatched_ms.unwrap_or(numbers::GUEST_UNWATCHED_MS));
         #[cfg(target_os = "linux")]
         let (runtime, runtime_refusal) = open_runtime(&options, &log, daemon_port);

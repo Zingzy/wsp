@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
-import { signInRefusalLine } from "@wsp/protocol";
+import { backgroundTasksLine, notifyTail, signInRefusalLine } from "@wsp/protocol";
 import type { AdapterEvent, ExecStream, ExecStreamFactory, TurnResult } from "@wsp/protocol";
 import { createClaudeAdapter, type ClaudeSession } from "../src/adapter.js";
 import { CLAUDE_SCREEN_COMMANDS } from "../src/catalog.js";
@@ -1167,16 +1167,45 @@ describe("a reply given while the agent's background work runs", () => {
     ]);
   });
 
-  it("cut with its process reads failed with the count and keeps the reply", async () => {
+  it("ended with a server it started still running reads done, keeps the reply, and names the running work as its last line", async () => {
+    // A server the agent started for its screenshots never exits, so no wake ever comes: the turn itself went fine.
+    const serving = `{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"${TASK}","task_type":"local_bash","description":"nohup node server.js"}],"session_id":"${SID}"}`;
     const { m, events, session } = held();
-    for (const line of [init, running, startedTask, reply]) m.push(line);
+    for (const line of [init, serving, startedTask, reply]) m.push(line);
     await drained();
     expect(dones(events)).toEqual([]);
     m.end(null);
     const result = await session.finished;
-    expect(result).toMatchObject({ status: "failed", error: "ended with 1 background task running", text: "Waiting for the background sleep to finish." });
+    expect(result.status).toBe("completed");
+    expect(result.error).toBeUndefined();
+    expect(result.text?.split("\n")).toEqual(["Waiting for the background sleep to finish.", "", backgroundTasksLine(1)]);
+    // The line a thread's row and a wait read.
+    expect(notifyTail(result)).toBe(backgroundTasksLine(1));
     expect(dones(events)).toHaveLength(1);
     expect(events.at(-1)).toMatchObject({ type: "session.end", sawResult: true });
+  });
+
+  it("a held reply that failed stays failed with its own error, and names no running work", async () => {
+    const errored = `{"type":"result","subtype":"success","is_error":true,"result":"API Error: 529 overloaded","duration_ms":40,"session_id":"${SID}"}`;
+    const { m, events, session } = held();
+    for (const line of [init, running, startedTask, errored]) m.push(line);
+    await drained();
+    expect(dones(events)).toEqual([]);
+    m.end(null);
+    const result = await session.finished;
+    expect(result).toMatchObject({ status: "failed", error: "API Error: 529 overloaded" });
+    expect(result.text).toBeUndefined();
+  });
+
+  it("ended with one task still running after another finished names both, the running work last", async () => {
+    const { m, events, session } = held();
+    for (const line of [init, two, reply, notified, onlyB]) m.push(line);
+    await drained();
+    expect(dones(events)).toEqual([]);
+    m.end(null);
+    const result = await session.finished;
+    expect(result.status).toBe("completed");
+    expect(result.text?.split("\n").slice(2)).toEqual([expect.stringMatching(/^`Sleep 20 seconds then echo done` completed, \d+m?s after the reply$/) as unknown as string, backgroundTasksLine(1)]);
   });
 
   it("stopped by the person reads interrupted and keeps the reply", async () => {
