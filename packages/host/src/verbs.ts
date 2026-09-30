@@ -903,6 +903,8 @@ export interface CliVerb {
   run(ctx: VerbContext): Promise<number>;
   tool: Tool;
   readsHere?: string;
+  /** Why this line dials only a host already up and never starts one: with none serving its state it refuses. */
+  startsNoHost?: string;
   /** Only means something on a cloud: with none registered the line prints on no page, its tool is not served, and
    * typing it is refused by the flag. */
   cloud?: true;
@@ -4822,6 +4824,7 @@ export const ALL_VERBS: readonly Verb[] = [
     page: "agent",
     options: {},
     cliOnly: "a proxy for an ssh client on the computer the host runs on, piping raw bytes; an agent has no ssh client there to hand it to",
+    startsNoHost: "a proxy for one connection to a host already up: a host it started would serve a state no config named, find no such workspace and stay up after ssh gave up",
     run: async ctx => {
       const [ref, ...rest] = ctx.args;
       if (ref === undefined || rest.length > 0) throw usageRefusal("wsp ssh takes one workspace.", usageIs(ctx));
@@ -5314,7 +5317,8 @@ export async function runVerb(verb: CliVerb | CliOnlyVerb, argv: ReadonlyArray<s
         io.error(stateNote);
       }
       if (client !== undefined && again === undefined) return client;
-      client = await (deps.dial ?? dialHost)(statePath, { aim, say: line => io.error(line), ...(again !== undefined ? { deadlineMs: again.withinMs } : deps.start !== undefined ? { start: deps.start } : {}) });
+      const start = verb.startsNoHost === undefined ? deps.start : undefined;
+      client = await (deps.dial ?? dialHost)(statePath, { aim, say: line => io.error(line), ...(again !== undefined ? { deadlineMs: again.withinMs } : start !== undefined ? { start } : {}) });
       return client;
     },
   };

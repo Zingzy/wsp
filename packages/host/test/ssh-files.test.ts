@@ -3,11 +3,12 @@
 // its own ssh config, and the one line in the person's ~/.ssh/config that points at it. Every case works in a
 // throwaway home and runs the real ssh-keygen.
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { NoSshLinkError } from "../src/relay.js";
-import { sshDoor, sshFiles } from "../src/ssh-files.js";
+import { shellLine } from "@wsp/protocol";
+import { proxyWsp, sshDoor, sshFiles } from "../src/ssh-files.js";
 
 let root: string;
 let files: ReturnType<typeof sshFiles>;
@@ -97,6 +98,29 @@ describe("the one line in the person's ssh config", () => {
     expect(statSync(personConfig()).mode & 0o777).toBe(0o600);
     expect(await files.setInclude(false)).toBe(false);
     expect(readFileSync(personConfig(), "utf8")).toBe("");
+  });
+});
+
+describe("the command wsp's ssh config runs", () => {
+  it("names the state the host serves, so ssh from any folder reaches the host that wrote it", async () => {
+    const served = join(root, "ui-home", "state.json");
+    await files.writeConfig(proxyWsp(["/usr/local/bin/wsp"], served));
+    expect(readFileSync(join(wspHome(), "ssh_config"), "utf8")).toContain(`  ProxyCommand ${shellLine(["/usr/local/bin/wsp", "--state", served])} ssh %n\n`);
+  });
+
+  it("doubles every % the command's words carry, which OpenSSH would expand even inside quotes, and keeps its own %n", async () => {
+    await files.writeConfig(["/opt/100%h/wsp", "--state", "/tmp/a%qb/state.json"]);
+    const line = readFileSync(join(wspHome(), "ssh_config"), "utf8").split("\n").find(l => l.includes("ProxyCommand"))!;
+    expect(line).toContain("100%%h");
+    expect(line).toContain("a%%qb");
+    expect(line.replaceAll("%%", "")).not.toMatch(/%[^n]/);
+    expect(line.endsWith(" ssh %n")).toBe(true);
+  });
+
+  it("names the default state too, since a line run inside a checkout would read that checkout's own, and none where the host names none", () => {
+    const served = join(homedir(), ".wsp", "state.json");
+    expect(proxyWsp(["/usr/local/bin/wsp"], served)).toEqual(["/usr/local/bin/wsp", "--state", served]);
+    expect(proxyWsp(["/usr/local/bin/wsp"], undefined)).toEqual(["/usr/local/bin/wsp"]);
   });
 });
 
