@@ -26,11 +26,11 @@ export const DiffStatLabel = memo(function DiffStatLabel(props: {
   className?: string;
   showParentheses?: boolean;
   layout?: "aligned" | "inline";
-  /** Neutral in the turn's card, where the count is a fact at rest; the diff tone gives the add its green and the
-   * delete its red where a diff is what the reader is looking at, as the pull request pane and the code view do. */
+  /** The add in green and the delete in red wherever a line count shows (the owner's ruling on #1560); neutral only
+   * where a caller asks for a count at rest. */
   tone?: "neutral" | "diff";
 }) {
-  const { additions, deletions, className, showParentheses = false, layout = "aligned", tone = "neutral" } = props;
+  const { additions, deletions, className, showParentheses = false, layout = "aligned", tone = "diff" } = props;
   const addInk = tone === "diff" ? "text-success" : "text-muted-foreground";
   const delInk = tone === "diff" ? "text-error-foreground" : "text-muted-foreground";
   return (

@@ -17,7 +17,8 @@ vi.mock("../src/components/ui/tooltip.js", () => ({
   Tooltip: ({ children }: { children: ReactNode }) => <>{children}</>,
   TooltipTrigger: ({ render: element, children }: { render?: ReactElement<{ children?: ReactNode }>; children?: ReactNode }) =>
     element === undefined ? <>{children}</> : children === undefined ? element : cloneElement(element, {}, children),
-  TooltipPopup: ({ children }: { children: ReactNode }) => <span role="tooltip">{children}</span>,
+  // A tile's card opens on a hover, which no case here makes, and would repeat the tile's own words.
+  TooltipPopup: ({ children, ...rest }: { children: ReactNode }) => ("data-tile-card" in rest ? null : <span role="tooltip">{children}</span>),
 }));
 vi.mock("../src/components/ui/popover.js", () => ({
   Popover: ({ children }: { children: ReactNode }) => <>{children}</>,

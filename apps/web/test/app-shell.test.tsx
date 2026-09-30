@@ -11,6 +11,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("../src/components/DiffWorkerPoolProvider.js", () => ({
   DiffWorkerPoolProvider: ({ children }: { children?: ReactNode }) => children,
 }));
+// The header's three parts stand in as marks, so the order they sit in is what a case reads, whatever each reads.
+vi.mock("../src/components/chat/ContextMeter.js", async importOriginal => ({ ...(await importOriginal<object>()), ContextRing: () => <span data-header-part="context-ring" /> }));
+vi.mock("../src/pull-request/GitSplit.js", async importOriginal => ({ ...(await importOriginal<object>()), GitSplit: () => <span data-header-part="git-split" /> }));
+vi.mock("../src/files/OpenSplit.js", async importOriginal => ({ ...(await importOriginal<object>()), OpenSplit: () => <span data-header-part="open-split" /> }));
 
 import { DEFAULT_PREFERENCES, HOST_ASLEEP_LINE, type WorkspaceView } from "@wsp/protocol";
 import { App } from "../src/App.js";
@@ -414,6 +418,13 @@ describe("the header row", () => {
     expect(banner().querySelector("[data-thread-breadcrumb]")!.textContent).toBe("make me a simple server");
     act(() => useStore.getState().select(null));
     expect(banner().querySelector("[data-thread-breadcrumb]")!.textContent).toBe("No task selected");
+  });
+
+  it("carries, left to right, the context ring, the pull request split, the Open split and the panel toggles", async () => {
+    await mountShell();
+    fireEvent.click(screen.getByRole("button", { name: "Toggle right panel" }));
+    const parts = [...banner().querySelectorAll<HTMLElement>("[data-header-part], button[aria-label='Toggle right panel']")].map(el => el.dataset["headerPart"] ?? "panel-toggle");
+    expect(parts).toEqual(["context-ring", "git-split", "open-split", "panel-toggle"]);
   });
 
   it("the pane header carries the one thread state a person has to act on, and nothing for a thread that is working or settled", async () => {

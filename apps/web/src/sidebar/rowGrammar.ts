@@ -26,12 +26,13 @@ const LIFTED_ROW_CLASS = "data-[active=true]:inset-ring data-[active=true]:inset
 const ROW_BODY_CLASS = `rounded-[var(--control-radius)] text-left ${ROW_TEXT_CLASS} ${ROW_FADE_CLASS} ${LIFTED_ROW_CLASS}`;
 /** A one-line row: the search row, the switcher head, a settings row. 36 px whatever its words. */
 export const ONE_LINE_ROW_CLASS = `h-9 gap-2.5 px-2 py-0 ${ROW_BODY_CLASS}`;
-/** A thread tile: 68 px, 8 px in, rows of 14, 18 and 14 px with 3 px between. The selected tile's weight is its
- * title's alone, so the kit's medium on the whole button is put back. */
-export const TILE_CLASS = `h-[68px] flex-col items-stretch justify-start gap-[3px] p-2 data-[active=true]:font-normal ${ROW_BODY_CLASS}`;
+/** A thread tile: 52 px, 8 px in, rows of 14 and 18 px with 4 px between. The selected tile's weight is its title's
+ * alone, so the kit's medium on the whole button is put back. */
+export const TILE_CLASS = `h-[52px] flex-col items-stretch justify-start gap-1 p-2 data-[active=true]:font-normal ${ROW_BODY_CLASS}`;
 export const TILE_ROW_ONE_CLASS = "flex h-3.5 min-w-0 items-center gap-1.5 text-[11px] leading-[14px] text-sidebar-muted-foreground";
 export const TILE_TITLE_CLASS = "block h-[18px] min-w-0 truncate text-sm leading-[18px]";
-export const TILE_ROW_THREE_CLASS = "flex h-3.5 min-w-0 items-center gap-[5px] text-[11px] leading-[14px] text-sidebar-muted-foreground";
+/** Row two: the agent's 12 px mark, the title, then an open pull request's icon and the crab at its end. */
+export const TILE_ROW_TWO_CLASS = "flex h-[18px] min-w-0 items-center gap-1.5";
 /** A row whose frame puts glyphs beside it on hover keeps its text running to its own inset: the glyphs land in the
  * slot at the row's right edge, where the word or the count yields to them, rather than taking room off the row. */
 export const GLYPH_ROW_CLASS = "group-has-data-[sidebar=menu-action]/menu-item:pe-2";

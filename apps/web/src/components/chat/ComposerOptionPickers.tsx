@@ -41,6 +41,7 @@ import { useComposerOptions, useComposerOptionsStore, type ComposerOptionKey, ty
 import { effectivePicks, pickedFor, resolveModel, startOptionsFrom, threadPicks, type ComposerStart, type ResolvedPicks } from "./composerPicks";
 import { ACCESS_WORD, accessLabel, REASONING_WORD, reasoningLabel } from "./format";
 import type { ChatThreadHandle } from "./useChatThread";
+import { ROW_ITEM_CLASS } from "./ComposerCheckoutRow";
 
 export const DEFAULT_HARNESS = DEFAULT_AGENT.id;
 
@@ -283,7 +284,6 @@ function AccessPicker({
   modes,
   picks,
   refused,
-  className,
   /** What a pick does to the turn running now, over the access list; nothing while no turn runs and the pick only starts one. */
   note,
   onPickAccess,
@@ -293,7 +293,6 @@ function AccessPicker({
   refused: string | null;
   note: string | null;
   onPickAccess: (mode: string) => void;
-  className?: string;
 }) {
   const shown = picks.permissionMode;
   const access = modes.find(o => o.value === shown);
@@ -303,15 +302,15 @@ function AccessPicker({
     <Menu>
       <MenuTrigger
         render={<Button type="button" variant="ghost" size="xs" />}
-        className={cn(triggerClass, className, refused !== null && "text-error-foreground hover:text-error-foreground")}
+        className={cn(ROW_ITEM_CLASS, "hover:text-foreground", refused !== null && "text-error-foreground hover:text-error-foreground")}
         aria-label={`${ACCESS_WORD}: ${label}`}
         data-composer-picker="access"
         data-access={shown ?? undefined}
         {...(refused !== null ? { "data-access-refused": refused, title: refused } : {})}
       >
-        <Icon className="size-4 shrink-0" aria-hidden />
+        <Icon className="size-3 shrink-0" aria-hidden />
         <span className="truncate">{label}</span>
-        <ChevronDownIcon className="size-3.5 shrink-0 opacity-60" />
+        <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
       </MenuTrigger>
       <MenuPopup align="start" side="top" className="w-64">
         <MenuGroup>
@@ -442,7 +441,6 @@ export function ComposerAccessPicker({ workspaceId, thread, onPickAccess, refuse
       refused={refused}
       note={thread.view.running ? accessReachLine(movesRunningAccess(catalog)) : null}
       onPickAccess={onPickAccess}
-      className="h-7 gap-1.5 px-2 text-sm text-muted-foreground sm:h-6 sm:text-xs [&_svg]:size-3"
     />
   );
 }

@@ -238,23 +238,20 @@ describe("tiles from the fixture wire", () => {
     const asking = "Permission for Bash: Check wsp version";
     await mount(fakeApi([API], [status(API)], [session("s1", "ws_a", { prompt: "fix the port list", startedAt: iso(-3 * 60_000), asking })]), "fix the port list");
     expect(threadState(rowOf("fix the port list"))).toBe("Needs you");
-    expect(rowOf("fix the port list").getAttribute("title")).toContain(asking);
     act(() => useStore.setState({ sessions: { ws_a: [session("s1", "ws_a", { prompt: "fix the port list", startedAt: iso(-3 * 60_000) })] } }));
     await waitFor(() => expect(threadState(rowOf("fix the port list"))).toBe("Working"));
   });
 
-  it("every tile's row three leads with the agent's own mark in its colour at 12 px, and its hover names the title, where it runs and the agent", async () => {
+  it("every tile's row two leads with the agent's own mark in its colour at 12 px, before the title", async () => {
     await mount(
       fakeApi([API], [status(API)], [session("s1", "ws_a", { prompt: "fix the port list", startedBy: "cli", startedAt: iso(-60_000) }), session("s2", "ws_a", { prompt: "upgrade node", harness: "codex", startedAt: iso(-120_000) })]),
       "fix the port list",
     );
-    const markOf = (title: string) => rowOf(title).children[2]!.querySelector("[data-harness-mark]")!;
+    const markOf = (title: string) => rowOf(title).children[1]!.firstElementChild!;
     expect(markOf("fix the port list").getAttribute("data-harness-mark")).toBe("claude");
     expect([...markOf("fix the port list").classList]).toContain("size-3");
     expect([...markOf("fix the port list").classList]).toContain("text-(--ink-0)");
     expect(markOf("upgrade node").getAttribute("data-harness-mark")).toBe("codex");
-    expect(rowOf("fix the port list").getAttribute("title")).toBe(`fix the port list\nthe-project @ ${BOX_NAME}\nClaude Code`);
-    expect(rowOf("upgrade node").getAttribute("title")).toBe(`upgrade node\nthe-project @ ${BOX_NAME}\nCodex`);
     // The agent is its mark alone on the face, never its name, and no opener word.
     expect(rowOf("fix the port list").textContent).not.toMatch(/Claude Code|cli|you/);
   });
@@ -336,7 +333,7 @@ describe("new thread", () => {
     expect(statusSlot(launched)!.querySelector("[aria-hidden]")!.textContent).toBe("0s");
     expect(launched.querySelector('svg[data-harness-mark="claude"]')).not.toBeNull();
     expect(launched.querySelector("canvas[data-crab]")).not.toBeNull();
-    expect(launched.className).toContain("h-[68px]");
+    expect(launched.className).toContain("h-[52px]");
     expect(document.querySelectorAll("[data-thread-launch]")).toHaveLength(1);
   });
 });
@@ -997,21 +994,17 @@ describe("the creation tile", () => {
     expect([starting.dataset.threadStatus, starting.textContent, starting.dataset.tone]).toEqual(["starting", "Starting", "working"]);
     expect(starting.className).toContain("text-status-working");
     expect(starting.className).toContain("font-medium");
-    // The step takes the branch's place on row three in the step words' table, the runtime's sentence left out, and
-    // the crab walks at that row's end as it does on a working thread's tile.
-    const line = beta.querySelector<HTMLElement>("[data-creation-line]")!;
-    expect(line.textContent).toBe(CREATE_STEP_WORDS["fork-requested"]);
+    // The step is its card's, in the step words' table, the runtime's sentence left out, and the crab walks at the
+    // end of row two as it does on a working thread's tile.
+    expect(beta.dataset["creationLine"]).toBe(CREATE_STEP_WORDS["fork-requested"]);
     expect(beta.textContent).not.toContain(long);
-    expect(line.className).toContain("truncate");
-    expect(line.parentElement!.querySelector("[data-crab]")).not.toBeNull();
-    expect(beta.getAttribute("title")).toContain(CREATE_STEP_WORDS["fork-requested"]);
+    expect(beta.children).toHaveLength(2);
+    expect(beta.children[1]!.lastElementChild!.matches("[data-crab]")).toBe(true);
     expect(gamma.querySelector("[data-crab]")).toBeNull();
     expect(gamma.getAttribute("aria-busy")).toBeNull();
     expect(threadState(gamma)).toBe("Failed");
-    // Refused before any step, row three says so alone, in the status red, and never the name the row above holds.
-    expect(gamma.querySelector("[data-creation-line]")!.textContent).toBe(CREATE_STEP_WORDS.failed);
-    expect(gamma.querySelector("[data-creation-line]")!.className).toContain("text-status-failed");
-    // Refused on a step, row three names that step.
-    expect(rowOf("delta").querySelector("[data-creation-line]")!.textContent).toBe(CREATE_STEP_WORDS["fork-requested"]);
+    // Refused before any step, the card says so alone; refused on a step, it names that step.
+    expect(gamma.dataset["creationLine"]).toBe(CREATE_STEP_WORDS.failed);
+    expect(rowOf("delta").dataset["creationLine"]).toBe(CREATE_STEP_WORDS["fork-requested"]);
   });
 });

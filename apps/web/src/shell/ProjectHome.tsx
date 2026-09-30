@@ -108,7 +108,7 @@ export function ProjectHome({ projectId }: { projectId: string }) {
     <div data-k="project-home" className="relative isolate flex min-h-0 flex-1 flex-col justify-center gap-10 pb-[8vh]">
       <HeroAtmosphere projectId={project.id} />
       <EmptyThread name={project.name} projectId={project.id} picker={<HomeProjectPicker project={project} />} />
-      <ChatComposer key={key} workspaceId={key} thread={thread} onStart={start} under={<WhereItRuns project={project} />} />
+      <ChatComposer key={key} workspaceId={key} thread={thread} onStart={start} where={<WhereItRuns project={project} />} />
     </div>
   );
 }

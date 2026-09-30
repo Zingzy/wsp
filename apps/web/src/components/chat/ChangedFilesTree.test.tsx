@@ -5,87 +5,50 @@ import { describe, expect, it } from "vitest";
 import { ChangedFilesCard, ChangedFilesTree } from "./ChangedFilesTree";
 
 describe("ChangedFilesCard", () => {
-  it("keeps its compact header sticky while preserving singular labels", () => {
-    const markup = renderToStaticMarkup(
+  const card = (files: ReadonlyArray<{ path: string; kind: string; additions: number; deletions: number }>, allDirectoriesExpanded = false) =>
+    renderToStaticMarkup(
       <ChangedFilesCard
         turnId={"turn-1"}
-        files={[{ path: "README.md", kind: "modified", additions: 2, deletions: 1 }]}
-        expanded
-        showCompactPreview={false}
-        allDirectoriesExpanded
+        files={files}
+        allDirectoriesExpanded={allDirectoriesExpanded}
         resolvedTheme="light"
-        onExpandedChange={() => {}}
         onToggleAllDirectories={() => {}}
         onOpenTurnDiff={() => {}}
       />,
     );
 
-    expect(markup).toContain('data-changed-files-state="expanded"');
-    expect(markup).toContain('aria-expanded="true"');
-    expect(markup).toContain('aria-label="Collapse all folders"');
-    expect(markup).toContain('aria-label="Open changes"');
-    expect(markup).toContain('role="group" aria-label="2 additions, 1 deletions"');
+  it("is a header over the tree, the header the count, the additions in green, the deletions in red and a borderless Open diff", () => {
+    const markup = card([{ path: "README.md", kind: "modified", additions: 2, deletions: 1 }]);
+    expect(markup).toContain('data-changed-files-state="tree"');
     expect(markup).toContain("1 changed file");
     expect(markup).not.toContain("1 changed files");
+    const header = markup.slice(markup.indexOf("data-changed-files-header"), markup.indexOf("data-changed-file="));
+    expect(header).toMatch(/text-success[^"]*">\+2</);
+    expect(header).toMatch(/text-error-foreground[^"]*">-1</);
+    expect(header).toContain('aria-label="Open diff"');
+    expect(header).not.toMatch(/Show files|Hide files|aria-expanded/);
+    expect(markup).toContain('data-changed-file="README.md"');
   });
 
-  it("renders a scope and representative-file preview for a large latest change", () => {
-    const markup = renderToStaticMarkup(
-      <ChangedFilesCard
-        turnId={"turn-1"}
-        files={[
-          { path: "apps/web/src/App.tsx", kind: "modified", additions: 120, deletions: 20 },
-          { path: "apps/web/src/App.test.tsx", kind: "modified", additions: 30, deletions: 2 },
-          {
-            path: "packages/shared/src/git.ts",
-            kind: "modified",
-            additions: 15,
-            deletions: 4,
-          },
-          { path: "README.md", kind: "modified", additions: 3, deletions: 0 },
-        ]}
-        expanded={false}
-        showCompactPreview
-        allDirectoriesExpanded={false}
-        resolvedTheme="light"
-        onExpandedChange={() => {}}
-        onToggleAllDirectories={() => {}}
-        onOpenTurnDiff={() => {}}
-      />,
-    );
+  it("offers expand-all only where the files sit in folders", () => {
+    expect(card([{ path: "README.md", kind: "modified", additions: 2, deletions: 1 }])).not.toContain("all folders");
+    expect(card([{ path: "src/a.ts", kind: "modified", additions: 2, deletions: 1 }])).toContain('aria-label="Expand all folders"');
+    expect(card([{ path: "src/a.ts", kind: "modified", additions: 2, deletions: 1 }], true)).toContain('aria-label="Collapse all folders"');
+  });
 
-    expect(markup).toContain('data-changed-files-state="preview"');
-    expect(markup).toContain('aria-expanded="false"');
-    expect(markup).toContain("apps");
-    expect(markup).toContain("2 files");
-    expect(markup).toContain("packages");
-    expect(markup).toContain("root");
-    expect(markup).toContain("App.tsx");
-    expect(markup).toContain("git.ts");
+  it("lists a large turn as its top-level rows, with no chips and no Show all", () => {
+    const files = [
+      ...Array.from({ length: 30 }, (_, n) => ({ path: `apps/web/src/f${n}.ts`, kind: "modified", additions: 3, deletions: 1 })),
+      ...Array.from({ length: 19 }, (_, n) => ({ path: `packages/protocol/src/p${n}.ts`, kind: "modified", additions: 1, deletions: 1 })),
+      { path: "README.md", kind: "modified", additions: 3, deletions: 0 },
+    ];
+    const markup = card(files);
+    expect(markup).toContain("50 changed files");
+    expect(markup).toContain("apps/web/src");
+    expect(markup).toContain("packages/protocol/src");
     expect(markup).toContain("README.md");
-    expect(markup).toContain("Show all 4 files");
-    expect(markup).not.toContain("App.test.tsx");
-  });
-
-  it("keeps older collapsed changes to a one-line receipt", () => {
-    const markup = renderToStaticMarkup(
-      <ChangedFilesCard
-        turnId={"turn-1"}
-        files={[{ path: "apps/web/src/App.tsx", kind: "modified", additions: 120, deletions: 20 }]}
-        expanded={false}
-        showCompactPreview={false}
-        allDirectoriesExpanded={false}
-        resolvedTheme="light"
-        onExpandedChange={() => {}}
-        onToggleAllDirectories={() => {}}
-        onOpenTurnDiff={() => {}}
-      />,
-    );
-
-    expect(markup).toContain('data-changed-files-state="collapsed"');
-    expect(markup).toContain("1 changed file");
-    expect(markup).not.toContain("Show all");
-    expect(markup).not.toContain("App.tsx");
+    expect(markup).not.toContain("f0.ts");
+    expect(markup).not.toMatch(/Show all|2 files|root/);
   });
 });
 

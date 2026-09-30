@@ -212,6 +212,12 @@ describe("the composer's reasoning and access buttons", () => {
     expect(within(second).getAllByText("default").length).toBe(1);
   });
 
+  it("draws the access button in the row's grammar under the box: 12px words at every width, 12px glyphs", () => {
+    draw();
+    expect(access().className.split(" ").filter(c => /^(\w+:)*text-(\[\d|xs|sm|base)/.test(c))).toEqual(["text-xs"]);
+    expect([...access().querySelectorAll("svg")].every(svg => svg.getAttribute("class")!.split(" ").includes("size-3"))).toBe(true);
+  });
+
   it("leaves the reasoning button out for a model with no effort and no window, and keeps the access button", () => {
     draw({ catalogs: [{ ...CLAUDE, efforts: [], contextWindows: [], models: [{ value: "claude-opus-5", label: "Opus 5", isDefault: true, contextWindows: [] }] }] });
     expect(document.querySelector('[data-composer-picker="reasoning"]')).toBeNull();

@@ -94,6 +94,10 @@ describe("diff surface", () => {
     expect(container.querySelector("[data-diff-repo]")?.textContent).toBe("main");
     expect(container.querySelector("[data-diff-repo-state]")?.getAttribute("data-diff-repo-state")).toBe("repo");
     expect(screen.getByRole("group", { name: "2 additions, 2 deletions" })).toBeTruthy();
+    // The pane's counts take the one tone the card under a reply draws: additions green, deletions red, every row too.
+    const tones = [...container.querySelectorAll('[role="group"][aria-label$="deletions"]')].map(group => [...group.children].map(c => c.className.split(" ").find(k => k.startsWith("text-"))));
+    expect(tones.length).toBeGreaterThan(1);
+    for (const tone of tones) expect(tone).toEqual(["text-success", "text-error-foreground"]);
     const tree = container.querySelector("[data-changed-files]")!;
     expect(tree.textContent).toContain("2 changed files");
     expect(tree.textContent).toContain("a.ts");

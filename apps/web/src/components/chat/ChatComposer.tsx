@@ -88,7 +88,7 @@ import { hostItemText, serializeComposerMention, splitPromptIntoComposerSegments
 import { ComposerPromptEditor, type ComposerCommandKey, type ComposerPromptEditorHandle } from "../ComposerPromptEditor";
 import { asideQuestion, catalogFromHarness, composerPlaceholder, offersSlashCommands, slashHoldLine } from "./adapt";
 import { useAsideStore } from "./asideStore";
-import { opensThread, ComposerCheckoutRow, HomeCheckoutRow } from "./ComposerCheckoutRow";
+import { opensThread, ComposerCheckoutRow, HomeCheckoutRow, ROW_ITEM_CLASS } from "./ComposerCheckoutRow";
 import { ComposerCommandMenu, type ComposerCommandItem } from "./ComposerCommandMenu";
 import type { ComposerCommandGroup } from "./composerCommandGroups";
 import { fileGroups, referenceGroups, skillGroups, slashGroups } from "./composerMenuItems";
@@ -206,14 +206,14 @@ export function ChatComposer({
   thread,
   onStart,
   waiting,
-  under,
+  where,
 }: {
   workspaceId: string;
   thread: ChatThreadHandle;
   onStart?: (prompt: string) => Promise<string | null>;
   waiting?: { line: string; folder: string };
-  /** One more line under the checkout row: New thread's where it runs. */
-  under?: ReactNode;
+  /** New thread's where it runs: the row's first item, the computer, a picker where several hold the repo. */
+  where?: ReactNode;
 }) {
   const api = useStore(s => s.api);
   const waits = waiting !== undefined;
@@ -873,7 +873,7 @@ export function ChatComposer({
         aria-expanded={stashOpen}
         title="Stashed prompts: Cmd or Ctrl with S stashes a draft, and brings one back into an empty box"
         onClick={() => setStashOpen(open => !open)}
-        className="shrink-0 cursor-pointer rounded-sm px-1 font-mono text-[11px] text-muted-foreground tabular-nums transition-colors duration-150 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+        className={cn(ROW_ITEM_CLASS, "cursor-pointer tabular-nums transition-colors duration-150 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring")}
       >
         {stashedWord(stashed.length)}
       </button>
@@ -1032,9 +1032,9 @@ export function ChatComposer({
           </form>
         </ComposerSurface.Host>
         {home !== undefined ? (
-          <HomeCheckoutRow path={home.path} branch={home.defaultBranch} access={access} />
+          <HomeCheckoutRow path={home.path} branch={home.defaultBranch} where={where} access={access} />
         ) : waiting !== undefined ? (
-          <HomeCheckoutRow path={waiting.folder} branch="" access={access} />
+          <HomeCheckoutRow path={waiting.folder} branch="" where={where} access={access} />
         ) : (
           <ComposerCheckoutRow
           workspaceId={workspaceId}
@@ -1043,7 +1043,6 @@ export function ChatComposer({
           stash={stashWord}
           />
         )}
-        {under !== undefined ? <ComposerSurface.ContextStrip data-composer-under>{under}</ComposerSurface.ContextStrip> : null}
       </ComposerSurface.Shell>
     </div>
   );

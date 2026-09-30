@@ -904,7 +904,7 @@ describe("what a turn changed", () => {
       { type: "session.start", ...scoped, turnId: "t2", at: 4_000, prompt: "again" },
       { type: "session.changes", ...scoped, turnId: "t1", at: 4_100, from, to, files, shared: true },
     ]);
-    expect(model.turns.map(t => t.changes)).toEqual([{ from, to, files, shared: true }, null]);
+    expect(model.turns.map(t => t.changes)).toEqual([{ from, to, files }, null]);
   });
 
   it("stays on a turn whose reply lands after it", () => {
@@ -914,7 +914,7 @@ describe("what a turn changed", () => {
       { type: "session.done", ...scoped, turnId: "t1", at: 3_000, result: { status: "completed", text: "edited" } },
       { type: "session.end", ...scoped, turnId: "t1", at: 3_100, exitCode: 0, sawResult: true },
     ]);
-    expect(model.turns[0]!.changes).toEqual({ from, to, files, shared: false });
+    expect(model.turns[0]!.changes).toEqual({ from, to, files });
   });
 
   it("opens no turn when it names none the thread holds", () => {

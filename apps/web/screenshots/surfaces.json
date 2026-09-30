@@ -1460,16 +1460,15 @@
       "settleMs": 2500
     },
     {
-      "name": "tiles-checkout",
+      "name": "tile-card",
       "at": "/",
-      "fixture": "changes",
-      "widths": [1440, 390],
-      "reason": "The sidebar is 256px at every desktop width, so 1280 draws these tiles as 1440 does; 390 opens it over the page, which is shot here.",
+      "fixture": "pull-request",
+      "widths": [1440],
+      "reason": "A tile's card opens on a pointer's hover, which a touch at 390 has no form of; the sidebar is 256px at every desktop width, so 1280 draws it as 1440 does.",
       "steps": [
-        "390:key:Escape",
-        "390:sidebar=trigger"
+        "hover:row-id=thread:redirect"
       ],
-      "wait": "tile-branch",
+      "wait": "tile-card-line=pr",
       "settleMs": 1200
     },
     {
@@ -1499,7 +1498,7 @@
       "widths": [1440],
       "reason": "The sidebar is 256px at every desktop width, so 1280 draws these tiles as 1440 does. Judged against the mockup's 1440 render; the sidebar at 390 is shot in sidebar and tiles-sections.",
       "steps": [],
-      "wait": "composer-pr-number",
+      "wait": "tile-pr",
       "settleMs": 1200
     },
     {
@@ -1960,6 +1959,18 @@
         "390:sidebar=trigger",
         "row-id=thread:replies",
         "390:key:Escape"
+      ],
+      "wait": "changed-files-state",
+      "settleMs": 800
+    },
+    {
+      "name": "reply-changes-many",
+      "at": "/",
+      "fixture": "replies",
+      "widths": [1440],
+      "reason": "The card is the transcript's width, 768px at most, so 1280 draws it as 1440 does; the card at 390 is shot in reply-changes.",
+      "steps": [
+        "row-id=thread:sweep"
       ],
       "wait": "changed-files-state",
       "settleMs": 800
