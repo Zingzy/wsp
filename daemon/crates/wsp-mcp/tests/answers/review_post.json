@@ -1,0 +1,87 @@
+{
+  "tool": "review_post",
+  "cases": [
+    {
+      "case": "posted as drafted",
+      "arguments": {
+        "workspace": "alpha"
+      },
+      "replies": {
+        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
+        "workspaces.reviewPost": "{\"id\":1,\"ok\":true,\"url\":\"https://github.com/o/r/pull/7#pullrequestreview-9\",\"number\":7,\"comments\":2,\"folded\":1}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"alpha \\\"one\\\" \\u0085 🧪: review posted on #7 (2 comments, 1 in the summary)\"}],\"structuredContent\":{\"url\":\"https://github.com/o/r/pull/7#pullrequestreview-9\",\"number\":7,\"comments\":2,\"folded\":1}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "workspaces.resolve",
+          "ref": "alpha"
+        },
+        {
+          "op": "workspaces.reviewPost",
+          "workspaceId": "ws-1"
+        }
+      ]
+    },
+    {
+      "case": "one comment, the verdict and summary edited first",
+      "arguments": {
+        "workspace": "alpha",
+        "verdict": "approve",
+        "summary": "Fine \u0085 🧪"
+      },
+      "replies": {
+        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
+        "workspaces.reviewDraft": "{\"id\":1,\"ok\":true,\"review\":{\"note\":\"x\",\"at\":1}}",
+        "workspaces.reviewPost": "{\"id\":1,\"ok\":true,\"url\":\"https://github.com/o/r/pull/12#pullrequestreview-3\",\"number\":12,\"comments\":1,\"folded\":0}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"alpha \\\"one\\\" \\u0085 🧪: review posted on #12 (1 comment, 0 in the summary)\"}],\"structuredContent\":{\"url\":\"https://github.com/o/r/pull/12#pullrequestreview-3\",\"number\":12,\"comments\":1,\"folded\":0}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "workspaces.resolve",
+          "ref": "alpha"
+        },
+        {
+          "op": "workspaces.reviewDraft",
+          "workspaceId": "ws-1",
+          "verdict": "approve",
+          "summary": "Fine \u0085 🧪"
+        },
+        {
+          "op": "workspaces.reviewPost",
+          "workspaceId": "ws-1"
+        }
+      ]
+    },
+    {
+      "case": "no review yet",
+      "arguments": {
+        "workspace": "alpha"
+      },
+      "replies": {
+        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
+        "workspaces.reviewPost": "{\"id\":1,\"ok\":false,\"error\":\"alpha has no review to post yet\",\"kind\":\"usage\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"alpha has no review to post yet\"}],\"structuredContent\":{\"error\":\"alpha has no review to post yet\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "workspaces.resolve",
+          "ref": "alpha"
+        },
+        {
+          "op": "workspaces.reviewPost",
+          "workspaceId": "ws-1"
+        }
+      ]
+    },
+    {
+      "case": "a verdict off the list",
+      "arguments": {
+        "workspace": "alpha",
+        "verdict": "lgtm"
+      },
+      "replies": {},
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"MCP error -32602: Input validation error: Invalid arguments for tool review_post: Invalid enum value. Expected 'comment' | 'approve' | 'request_changes', received 'lgtm' at verdict\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": []
+    }
+  ]
+}

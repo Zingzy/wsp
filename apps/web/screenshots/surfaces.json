@@ -1568,6 +1568,45 @@
       "settleMs": 1200
     },
     {
+      "name": "home-link-buttons",
+      "at": "/#p/pr_spoo",
+      "fixture": "pull-request",
+      "widths": [1440, 390],
+      "reason": "The composer is capped at 48rem, so 1280 draws the home as 1440 does; 390 is where its footer, holding the two buttons, reflows, which is shot here.",
+      "steps": [
+        "testid=composer-editor",
+        "type:https://github.com/you/spoo/pull/42"
+      ],
+      "wait": "k=start-review",
+      "settleMs": 1200
+    },
+    {
+      "name": "pr-pane-review-draft",
+      "at": "/",
+      "fixture": "review-draft",
+      "widths": [1440],
+      "reason": "The right panel is min(42vw, 28rem), which is 28rem at both 1280 and 1440, so 1280 draws this pane as 1440 does; the panel at 390 is shot in files-tree.",
+      "steps": [
+        "row-id=thread:redirect",
+        "surface-launch=pr"
+      ],
+      "wait": "pr-draft-comment=c3",
+      "settleMs": 1200
+    },
+    {
+      "name": "pr-pane-review-posted",
+      "at": "/",
+      "fixture": "review-posted",
+      "widths": [1440],
+      "reason": "The right panel is min(42vw, 28rem), which is 28rem at both 1280 and 1440, so 1280 draws this pane as 1440 does; the panel at 390 is shot in files-tree.",
+      "steps": [
+        "row-id=thread:redirect",
+        "surface-launch=pr"
+      ],
+      "wait": "pr-draft-posted",
+      "settleMs": 1200
+    },
+    {
       "name": "long-prompt",
       "at": "/",
       "fixture": "long-prompt",

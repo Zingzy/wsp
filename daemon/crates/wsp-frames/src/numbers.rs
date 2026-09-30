@@ -2,7 +2,7 @@
 //! The numbers and paths the protocol and the node daemon own, as the contract fixture pins them.
 
 /// The daemon's protocol version, carried in its hello: the length of the protocol's DAEMON_CONTENTS record.
-pub const DAEMON_VERSION: u32 = 106;
+pub const DAEMON_VERSION: u32 = 107;
 
 pub const DEFAULT_HOST: &str = "0.0.0.0";
 pub const DEFAULT_PORT: u16 = 7070;
@@ -117,6 +117,8 @@ pub const GIT_PR_LIST_CAP: usize = 50;
 pub const GIT_PR_LIST_BODY_CAP: usize = 4000;
 /// Lines of a failed job's log a git.runLog carries, counted from its end, where the failure is.
 pub const CHECK_LOG_LINES: usize = 300;
+/// The most of a pull request's diff a reviewer's task carries, cut on a file's boundary.
+pub const REVIEW_DIFF_MAX_BYTES: usize = 96 * 1024;
 /// Paths one fs.search in files mode carries, and hits one in text mode carries; truncated says the walk stopped there.
 pub const FS_SEARCH_CAP_FILES: usize = 5_000;
 pub const FS_SEARCH_CAP_HITS: usize = 500;

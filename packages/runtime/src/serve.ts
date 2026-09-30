@@ -63,6 +63,7 @@ import {
   WS_PATH,
   WorkspaceListing,
   WorkspaceOut,
+  type StartResult,
   threadOpRefusal,
   deviceHeldRefusal,
   isObjectFrame,
@@ -398,6 +399,7 @@ function refusedLine(frame: unknown, payload: Record<string, unknown>, said?: st
  * the provider minted for a desktop machine, and this door answers a relayed machine and an agent's transcript as
  * well as the app; the app reads that stream off the status its own socket subscribes to, which is untouched. */
 const handed = (workspace: WorkspaceView): WorkspaceOut => WorkspaceOut.parse(workspace);
+const startedOut = (made: StartResult): StartResult => ({ ...made, workspace: handed(made.workspace) });
 
 export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<RuntimeServer> {
   const bundler = bundlerFrom(opts);
@@ -1257,6 +1259,57 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               return;
             case "workspaces.mergeIn":
               send({ id: msg.id, ok: true, ...(await rt.workspaces.mergeIn({ workspaceId: msg.workspaceId, child: msg.child }, origin)) });
+              return;
+            case "workspaces.start":
+              send({
+                id: msg.id,
+                ok: true,
+                ...startedOut(await rt.workspaces.start(
+                  {
+                    url: msg.url,
+                    ...(msg.project !== undefined ? { project: msg.project } : {}),
+                    ...(msg.agent !== undefined ? { agent: msg.agent } : {}),
+                    ...(msg.model !== undefined ? { model: msg.model } : {}),
+                    ...(msg.effort !== undefined ? { effort: msg.effort } : {}),
+                    ...(msg.access !== undefined ? { access: msg.access } : {}),
+                  },
+                  origin,
+                )),
+              });
+              return;
+            case "workspaces.review":
+              send({
+                id: msg.id,
+                ok: true,
+                ...startedOut(await rt.workspaces.review(
+                  {
+                    ...(msg.url !== undefined ? { url: msg.url } : {}),
+                    ...(msg.workspaceId !== undefined ? { workspaceId: msg.workspaceId } : {}),
+                    ...(msg.agent !== undefined ? { agent: msg.agent } : {}),
+                    ...(msg.model !== undefined ? { model: msg.model } : {}),
+                    ...(msg.effort !== undefined ? { effort: msg.effort } : {}),
+                  },
+                  origin,
+                )),
+              });
+              return;
+            case "workspaces.reviewDraft":
+              send({
+                id: msg.id,
+                ok: true,
+                ...(await rt.workspaces.reviewDraft(
+                  {
+                    workspaceId: msg.workspaceId,
+                    ...(msg.summary !== undefined ? { summary: msg.summary } : {}),
+                    ...(msg.verdict !== undefined ? { verdict: msg.verdict } : {}),
+                    ...(msg.on !== undefined ? { on: msg.on } : {}),
+                  },
+                  origin,
+                )),
+              });
+              return;
+            case "workspaces.reviewPost":
+              send({ id: msg.id, ok: true, ...(await rt.workspaces.reviewPost({ workspaceId: msg.workspaceId }, origin)) });
               return;
             case "workspaces.delete":
               await rt.workspaces.delete(msg.workspaceId, origin);

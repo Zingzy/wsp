@@ -1,0 +1,21 @@
+[
+  {
+    "id": 1,
+    "op": "git.issueRead",
+    "cwd": "/Users/p",
+    "remote": "git@github.com:Zingzy/wsp-pr-lab.git"
+  },
+  {
+    "id": 1,
+    "op": "git.issueRead",
+    "cwd": "/Users/p",
+    "number": 5
+  },
+  {
+    "id": 1,
+    "op": "git.issueRead",
+    "cwd": "/Users/p",
+    "remote": "git@github.com:Zingzy/wsp-pr-lab.git",
+    "number": -1
+  }
+]

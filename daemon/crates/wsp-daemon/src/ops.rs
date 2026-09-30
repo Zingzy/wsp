@@ -300,6 +300,10 @@ async fn handle_op(conn: &Arc<Conn>, ctx: &Arc<Ctx>, frame: &Value, id: Option<R
             | "git.startOn"
             | "git.branchCompare"
             | "git.mergeIn"
+            | "git.issueRead"
+            | "git.prCheckout"
+            | "git.prDiff"
+            | "git.prReview"
             | "git.prList"
             | "git.discard"
             | "git.commit"
@@ -944,6 +948,36 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
             };
             answer(id, merged.await)
         }
+        DaemonOp::GitIssueRead { cwd, remote, number, machine_id } => {
+            let read = async {
+                let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Reads).await?;
+                hosts::issue(&runner, &hosts::Ask { cwd: &at, remote_url: &remote }, number).await
+            };
+            answer(id, read.await)
+        }
+        // The one git host line run inside a copy rather than beside it: the copy is the one just made from a project
+        // the person added, and the host is read off its own remote.
+        DaemonOp::GitPrCheckout { cwd, number, machine_id } => {
+            let checked = async {
+                let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Works).await?;
+                hosts::checkout(&runner, &at, number).await
+            };
+            answer(id, checked.await)
+        }
+        DaemonOp::GitPrDiff { cwd, remote, number, machine_id } => {
+            let read = async {
+                let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Reads).await?;
+                hosts::diff(&runner, &hosts::Ask { cwd: &at, remote_url: &remote }, number).await
+            };
+            answer(id, read.await)
+        }
+        DaemonOp::GitPrReview { cwd, remote, number, head_oid, event, body, comments, machine_id } => {
+            let posted = async {
+                let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Works).await?;
+                hosts::review(&runner, &hosts::Ask { cwd: &at, remote_url: &remote }, number, &head_oid, event, &body, &comments).await
+            };
+            answer(id, posted.await)
+        }
         DaemonOp::GitRepoRead { cwd, remote, machine_id } => {
             let read = async {
                 let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Reads).await?;
@@ -1375,6 +1409,10 @@ mod tests {
             "git.startOn",
             "git.branchCompare",
             "git.mergeIn",
+            "git.issueRead",
+            "git.prCheckout",
+            "git.prDiff",
+            "git.prReview",
             "git.prList",
             "git.discard",
             "git.commit",

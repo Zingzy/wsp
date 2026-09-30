@@ -27,6 +27,10 @@ import {
   PullRequestPage,
   GitUpdateReply,
   MergeResult,
+  ReviewDraft,
+  ReviewPostResult,
+  type ReviewVerdict,
+  StartResult,
   type MergeMethod,
   CLOUD_SETUP_WORDS,
   DeviceView,
@@ -430,6 +434,14 @@ export interface Api {
   /** Merges the workspace's pull request by the method named, or the repository's default, or once its checks pass, only while
    * its head is the one the window drew. */
   merge?(id: string, o: { method?: MergeMethod; whenChecksPass?: boolean; head: string }): Promise<MergeResult>;
+  /** A workspace off a GitHub issue or pull request link, with a thread on its task. */
+  start?(o: { url: string; project?: string; agent?: string; model?: string; effort?: string; access?: string }): Promise<StartResult>;
+  /** A reviewer thread on a pull request, off its link or a workspace's own pull request. */
+  review?(o: { url?: string; workspaceId?: string; agent?: string; model?: string; effort?: string }): Promise<StartResult>;
+  /** A review workspace's draft, edited first where edits are given. */
+  reviewDraft?(id: string, edits?: { summary?: string; verdict?: ReviewVerdict; on?: { id: string; on: boolean }[] }): Promise<{ review?: ReviewDraft }>;
+  /** Posts a review workspace's draft on its pull request as the person. */
+  reviewPost?(id: string): Promise<ReviewPostResult>;
   /** Merges the base's latest commits into the copy's branch, or names the files that conflict. */
   update?(id: string): Promise<GitUpdateReply>;
   /** Drops a workspace whose machine is gone from the host's store; the row leaves on workspace.deleted. The host refuses
@@ -796,6 +808,13 @@ export function makeApi(c: ProtocolClient): Api {
     fix: async (id, check, child) => FixResult.parse(await c.request("workspaces.fix", { workspaceId: id, ...(check !== undefined ? { check } : {}), ...(child !== undefined ? { child } : {}) })),
     mergeIn: async (id, child) => MergeInResult.parse(await c.request("workspaces.mergeIn", { workspaceId: id, child })),
     merge: async (id, o) => MergeResult.parse(await c.request("workspaces.merge", { workspaceId: id, ...o })),
+    start: async o => StartResult.parse(await c.request("workspaces.start", o)),
+    review: async o => StartResult.parse(await c.request("workspaces.review", o)),
+    reviewDraft: async (id, edits) => {
+      const read = await c.request<{ review?: unknown }>("workspaces.reviewDraft", { workspaceId: id, ...edits });
+      return read.review === undefined ? {} : { review: ReviewDraft.parse(read.review) };
+    },
+    reviewPost: async id => ReviewPostResult.parse(await c.request("workspaces.reviewPost", { workspaceId: id })),
     update: async id => GitUpdateReply.parse(await c.request("workspaces.update", { workspaceId: id })),
     renameWorkspace: async (id, name) => (await c.request<{ workspace: WorkspaceView }>("workspaces.rename", { workspaceId: id, name })).workspace,
     setWorkspaceLook: async (id, look) => (await c.request<{ workspace: WorkspaceView }>("workspaces.look", { workspaceId: id, ...look })).workspace,

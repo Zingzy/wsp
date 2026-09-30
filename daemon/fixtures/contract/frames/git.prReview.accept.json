@@ -1,0 +1,51 @@
+[
+  {
+    "id": 1,
+    "op": "git.prReview",
+    "cwd": "/Users/p",
+    "remote": "git@github.com:Zingzy/wsp-pr-lab.git",
+    "number": 7,
+    "headOid": "ec5c10de663bd1860925ad42e9580bab4eb1d377",
+    "event": "comment",
+    "body": "One wrong word.",
+    "comments": [
+      {
+        "id": "c1",
+        "path": "check.sh",
+        "line": 4,
+        "side": "RIGHT",
+        "body": "unused is never read."
+      },
+      {
+        "id": "c2",
+        "path": "status.txt",
+        "line": 1,
+        "side": "LEFT",
+        "body": "the old word was right"
+      }
+    ]
+  },
+  {
+    "id": 2,
+    "op": "git.prReview",
+    "cwd": "/Users/p",
+    "remote": "git@github.com:Zingzy/wsp-pr-lab.git",
+    "number": 7,
+    "headOid": "ec5c10de663bd1860925ad42e9580bab4eb1d377",
+    "event": "request_changes",
+    "body": "",
+    "comments": []
+  },
+  {
+    "id": 3,
+    "op": "git.prReview",
+    "cwd": "/Users/p",
+    "remote": "git@github.com:Zingzy/wsp-pr-lab.git",
+    "number": 7,
+    "headOid": "ec5c",
+    "event": "approve",
+    "body": "ok",
+    "comments": [],
+    "machineId": "wsp-a"
+  }
+]

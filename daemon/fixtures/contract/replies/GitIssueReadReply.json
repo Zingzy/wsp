@@ -1,0 +1,28 @@
+[
+  {
+    "issue": {
+      "number": 5,
+      "url": "https://github.com/Zingzy/wsp-pr-lab/issues/5",
+      "title": "Add a greeting line to notes.txt",
+      "body": "The first line should say hello.",
+      "state": "OPEN",
+      "comments": [
+        {
+          "author": "maya",
+          "body": "Keep it one line.",
+          "at": "2026-09-29T10:00:00Z"
+        }
+      ]
+    }
+  },
+  {
+    "issue": {
+      "number": 7,
+      "url": "https://github.com/Zingzy/wsp-pr-lab/pull/7",
+      "title": "Rename the status word",
+      "body": "",
+      "state": "OPEN",
+      "comments": []
+    }
+  }
+]

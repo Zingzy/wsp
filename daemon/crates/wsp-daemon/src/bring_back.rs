@@ -23,6 +23,19 @@ async fn remote_name<R: Runs>(runner: &R, cwd: &Path) -> Result<Option<String>, 
     Ok(first.map(|one| if text.lines().any(|n| n.trim() == "origin") { "origin".to_owned() } else { one }))
 }
 
+/// The remote a branch's own configuration pushes it to: its pushRemote, then the remote it tracks. A branch the git
+/// host's command line checked out off someone's fork tracks that fork, and pushes there.
+async fn configured_remote<R: Runs>(runner: &R, cwd: &Path, branch: &str) -> Result<Option<String>, OpError> {
+    for key in [format!("branch.{branch}.pushRemote"), format!("branch.{branch}.remote")] {
+        let read = run_git(runner, cwd, &["config", "--get", &key], None, None).await?;
+        let named = stdout_text(&read).trim().to_owned();
+        if read.code == Some(0) && !named.is_empty() && named != "." {
+            return Ok(Some(named));
+        }
+    }
+    Ok(None)
+}
+
 /// That remote and where it points, which is what says which git host this project lives on; none for a project
 /// with no remote at all.
 pub(crate) async fn remote_if_any<R: Runs>(runner: &R, cwd: &Path) -> Result<Option<(String, String)>, OpError> {
@@ -143,6 +156,7 @@ pub(crate) async fn push<R: Runs>(runner: &R, cwd: &Path, named: Option<&str>) -
     }
     let left = uncommitted(runner, cwd).await?;
     let stat = stat_over(runner, cwd, from.as_deref()).await?;
+    let remote = configured_remote(runner, cwd, &branch).await?.unwrap_or(remote);
     let pushed = run_git(runner, cwd, &["push", "-u", &remote, &branch], None, None).await?;
     if pushed.code != Some(0) {
         if let Some(refusal) = no_credential(runner, cwd, &remote, &pushed.stderr, words::no_git_credential).await? {
@@ -218,6 +232,27 @@ mod tests {
             git(&self.at(), &["add", name]);
             git(&self.at(), &["commit", "-q", "-m", name]);
         }
+    }
+
+    #[tokio::test]
+    async fn a_branch_pushes_where_its_own_config_points_then_to_its_remote_then_to_origin() {
+        let repo = Repo::new();
+        let fork = repo.dir.path().join("fork.git");
+        git(repo.dir.path(), &["init", "-q", "--bare", "-b", "main", fork.to_str().unwrap()]);
+        git(&repo.at(), &["remote", "add", "waldyrious", fork.to_str().unwrap()]);
+        git(&repo.at(), &["checkout", "-q", "-b", "fix/typo"]);
+        assert_eq!(configured_remote(&here(), &repo.at(), "fix/typo").await.unwrap(), None);
+        git(&repo.at(), &["config", "branch.fix/typo.remote", "waldyrious"]);
+        assert_eq!(configured_remote(&here(), &repo.at(), "fix/typo").await.unwrap().as_deref(), Some("waldyrious"));
+        git(&repo.at(), &["config", "branch.fix/typo.remote", "origin"]);
+        git(&repo.at(), &["config", "branch.fix/typo.pushRemote", "waldyrious"]);
+        assert_eq!(configured_remote(&here(), &repo.at(), "fix/typo").await.unwrap().as_deref(), Some("waldyrious"));
+        // The push itself goes there: the fork gets the branch and origin never sees it.
+        repo.commit("typo.txt");
+        let pushed = push(&here(), &repo.at(), Some("main")).await.unwrap();
+        assert_eq!(pushed.remote, "waldyrious");
+        assert!(git(&fork, &["branch", "--list", "fix/typo"]).contains("fix/typo"));
+        assert!(!git(&repo.origin(), &["branch", "--list", "fix/typo"]).contains("fix/typo"));
     }
 
     #[tokio::test]
@@ -308,6 +343,8 @@ mod tests {
             (0, "2\n"),                                           // commits ahead
             (0, "# branch.head work\0"),                          // nothing uncommitted
             (0, " README.md | 2 +-\n"),                           // the diffstat
+            (1, ""),                                              // no pushRemote for the branch
+            (1, ""),                                              // and no remote it tracks yet
             (0, "branch 'work' set up to track 'origin/work'\n"), // the push itself
         ]);
         let reply = push(&runner, Path::new("/private/tmp/proof/repo"), None).await.unwrap();
@@ -322,12 +359,12 @@ mod tests {
         );
         // And nothing was fed on stdin: a push carries its words and reads nothing from this end.
         assert!(calls.iter().all(|call| call.stdin.is_none()), "a git call was fed stdin");
-        assert_eq!(calls.len(), 9);
+        assert_eq!(calls.len(), 11);
     }
 
     /// The answers a push reads before it pushes, in order, with the push's own answer and whatever comes after it
     /// handed in: the remote, the base and that it is here, the branch, the base ref, the count ahead, the status,
-    /// the diffstat, then the push.
+    /// the diffstat, the branch's own remote asked twice, then the push.
     fn push_answering(after: Vec<(i32, &str, &str)>) -> Recorded {
         let mut answers = vec![
             (0, "origin\n", ""),
@@ -338,6 +375,8 @@ mod tests {
             (0, "2\n", ""),
             (0, "# branch.head work\0", ""),
             (0, " README.md | 2 +-\n", ""),
+            (1, "", ""),
+            (1, "", ""),
         ];
         answers.extend(after);
         Recorded::new(&[]).answering_said(answers)
@@ -357,9 +396,9 @@ mod tests {
         // The words a person reads name the host and the commands only they can run, and say nothing landed.
         assert!(refused.message.contains("gh auth login"), "{}", refused.message);
         assert!(refused.message.contains("nothing was pushed"), "{}", refused.message);
-        // The remote's url is read only where the push was refused for a credential: the happy road runs nine.
-        assert_eq!(runner.asked().len(), 10);
-        assert_eq!(runner.asked()[9].args, ["remote", "get-url", "origin"]);
+        // The remote's url is read only where the push was refused for a credential: the happy road runs eleven.
+        assert_eq!(runner.asked().len(), 12);
+        assert_eq!(runner.asked()[11].args, ["remote", "get-url", "origin"]);
 
         // The other two sentences a host with no credential on the request answers with read the same way.
         for said in [
@@ -396,7 +435,7 @@ mod tests {
             let refused = push(&runner, Path::new("/private/tmp/proof/repo"), None).await.unwrap_err();
             assert_eq!(refused.message, format!("git push failed: {said}"));
             // Nothing beyond the push was asked: the url is read for the credential sentence alone.
-            assert_eq!(runner.asked().len(), 9);
+            assert_eq!(runner.asked().len(), 11);
         }
     }
 

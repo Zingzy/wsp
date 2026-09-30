@@ -1,0 +1,18 @@
+[
+  {
+    "id": 1,
+    "op": "git.prCheckout",
+    "cwd": "/Users/p"
+  },
+  {
+    "id": 1,
+    "op": "git.prCheckout",
+    "number": 7
+  },
+  {
+    "id": 1,
+    "op": "git.prCheckout",
+    "cwd": "/Users/p",
+    "number": "7"
+  }
+]

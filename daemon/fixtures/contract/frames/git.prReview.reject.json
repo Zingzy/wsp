@@ -1,0 +1,42 @@
+[
+  {
+    "id": 1,
+    "op": "git.prReview",
+    "cwd": "/Users/p",
+    "remote": "git@github.com:Zingzy/wsp-pr-lab.git",
+    "number": 7,
+    "headOid": "ec5c",
+    "event": "merge",
+    "body": "",
+    "comments": []
+  },
+  {
+    "id": 1,
+    "op": "git.prReview",
+    "cwd": "/Users/p",
+    "remote": "git@github.com:Zingzy/wsp-pr-lab.git",
+    "number": 7,
+    "headOid": "ec5c",
+    "event": "comment",
+    "body": "",
+    "comments": [
+      {
+        "id": "c1",
+        "path": "a",
+        "line": 1,
+        "side": "BOTH",
+        "body": "x"
+      }
+    ]
+  },
+  {
+    "id": 1,
+    "op": "git.prReview",
+    "cwd": "/Users/p",
+    "remote": "git@github.com:Zingzy/wsp-pr-lab.git",
+    "number": 7,
+    "event": "comment",
+    "body": "",
+    "comments": []
+  }
+]

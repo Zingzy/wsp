@@ -1,0 +1,15 @@
+[
+  {
+    "id": 1,
+    "op": "git.prCheckout",
+    "cwd": "/Users/p/wsp-pr-lab-review-7",
+    "number": 7
+  },
+  {
+    "id": 2,
+    "op": "git.prCheckout",
+    "cwd": "/root/r",
+    "number": 7,
+    "machineId": "wsp-a"
+  }
+]

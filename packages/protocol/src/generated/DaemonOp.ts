@@ -5,6 +5,8 @@ import type { GitDiffScope } from "./GitDiffScope.js";
 import type { GuestKind } from "./GuestKind.js";
 import type { MergeMethod } from "./MergeMethod.js";
 import type { ProcSignal } from "./ProcSignal.js";
+import type { ReviewComment } from "./ReviewComment.js";
+import type { ReviewEvent } from "./ReviewEvent.js";
 
 /**
  * Every op the protocol's DaemonRequest names, keyed on `op` as the zod discriminated union is.
@@ -144,6 +146,22 @@ machineId?: string, } | { "op": "git.runLog", cwd: string, remote: string, runId
  * The workspace this frame is for, as on fs.list above.
  */
 machineId?: string, } | { "op": "git.prMerge", cwd: string, remote: string, number: number, method: MergeMethod, auto: boolean, headOid: string, 
+/**
+ * The workspace this frame is for, as on fs.list above.
+ */
+machineId?: string, } | { "op": "git.issueRead", cwd: string, remote: string, number: number, 
+/**
+ * The workspace this frame is for, as on fs.list above.
+ */
+machineId?: string, } | { "op": "git.prCheckout", cwd: string, number: number, 
+/**
+ * The workspace this frame is for, as on fs.list above.
+ */
+machineId?: string, } | { "op": "git.prDiff", cwd: string, remote: string, number: number, 
+/**
+ * The workspace this frame is for, as on fs.list above.
+ */
+machineId?: string, } | { "op": "git.prReview", cwd: string, remote: string, number: number, headOid: string, event: ReviewEvent, body: string, comments: Array<ReviewComment>, 
 /**
  * The workspace this frame is for, as on fs.list above.
  */
