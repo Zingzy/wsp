@@ -420,3 +420,128 @@ describe("the nap of a workspace on a computer that keeps no image", () => {
     }
   });
 });
+
+describe("the nap and rebuild of a workspace whose pause keeps the disk", () => {
+  // A box keeps its image and its pause is a stop that snapshots the disk; a wake resumes that disk, so the nap
+  // reads nothing of the home. The vault is taken off the running machine only where it is read: a rebuild.
+  const boxlike = (): { backend: StubBackend; tars: string[]; untars: string[]; store: Store } => {
+    const made = guestBackend();
+    made.backend.capabilities.pauseMode = "disk";
+    return { ...made, store: memoryStore() };
+  };
+
+  it("naps with no export: it syncs the disk, reads no home, writes no archive, and stores no vault", async () => {
+    const { backend, tars, untars, store } = boxlike();
+    const rt = createRuntime({ backend, store, adapters: {} });
+    try {
+      const ws = await createOn(rt, { golden: "snap_g", name: "x" });
+      const m = backend.machines[0]!;
+      const napped = await rt.workspaces.nap(ws.id);
+      expect(napped.phase).toBe("napping");
+      expect(m.paused).toBe(true);
+      // The disk is still flushed before the stop snapshots it, but nothing of the home is read or archived.
+      expect(commands(backend).some(c => c.startsWith("sync &&"))).toBe(true);
+      expect(commands(backend).some(c => c.includes(".wsp-upgraded"))).toBe(false);
+      expect(commands(backend).some(c => c.includes("ls -A /root"))).toBe(false);
+      expect(tars).toEqual([]);
+      expect(await store.getBlob("vaults", ws.id)).toBeUndefined();
+      const record = await rt.workspaces.get(ws.id);
+      expect(record.vaultedAt).toBeUndefined();
+      expect(record.vaultRefused).toBeUndefined();
+      const woken = await rt.workspaces.wake(ws.id);
+      expect(woken.phase).toBe("running");
+      expect(backend.machines[0]!.resumes).toBe(1);
+      expect(untars).toEqual([]);
+    } finally {
+      await rt.close();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("a rebuild takes the vault off the running machine and carries it onto the replacement", async () => {
+    const { backend, tars, untars, store } = boxlike();
+    const rt = createRuntime({ backend, store, adapters: {} });
+    try {
+      const ws = await createOn(rt, { golden: "snap_g", name: "x" });
+      await rt.workspaces.nap(ws.id);
+      await rt.workspaces.wake(ws.id);
+      expect(tars).toEqual([]);
+      const rebuilt = await rt.workspaces.rebuild(ws.id);
+      expect(rebuilt.machineId).toBe("m2");
+      // The archive was read off the running machine at the rebuild, not at any nap, and landed on the fork.
+      expect(tars).toEqual(["m1"]);
+      expect(untars).toEqual(["m2"]);
+    } finally {
+      await rt.close();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("a rebuild whose home is over the cap says so before it touches the machine, and replaces it without a backup", async () => {
+    const { backend, tars, untars, store } = boxlike();
+    const base = backend.execImpl;
+    backend.execImpl = (m, cmd) => (cmd.startsWith("wc -c <") ? { exitCode: 0, stdout: `${300 * 1024 * 1024}\n`, stderr: "" } : base(m, cmd));
+    const rt = createRuntime({ backend, store, adapters: {} });
+    const overCap: number[] = [];
+    const warned = vi.spyOn(console, "warn").mockImplementation((...args: unknown[]) => {
+      if (/over the .* cap/.test(String(args[0]))) overCap.push(backend.machines.length);
+    });
+    try {
+      const ws = await createOn(rt, { golden: "snap_g", name: "x" });
+      const rebuilt = await rt.workspaces.rebuild(ws.id);
+      expect(rebuilt.machineId).toBe("m2");
+      // The over-cap line was said while only the old machine stood, before the replacement was forked.
+      expect(overCap).toEqual([1]);
+      expect(warned.mock.calls.map(c => String(c[0]))).toContainEqual(expect.stringMatching(/300 MB.*over the 200 MB cap/));
+      // The home was read off the running machine, and nothing was carried onto the fork.
+      expect(tars).toEqual(["m1"]);
+      expect(untars).toEqual([]);
+    } finally {
+      warned.mockRestore();
+      await rt.close();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("a rebuild of a napped workspace wakes it and takes the vault off the woken machine, not the one a nap stored", async () => {
+    const { backend, tars, untars, store } = boxlike();
+    const rt = createRuntime({ backend, store, adapters: {} });
+    try {
+      const ws = await createOn(rt, { golden: "snap_g", name: "x" });
+      await rt.workspaces.nap(ws.id);
+      expect(tars).toEqual([]);
+      const rebuilt = await rt.workspaces.rebuild(ws.id);
+      expect(rebuilt.machineId).toBe("m2");
+      // The napped machine was resumed so the vault came off it live, then the fork carried it.
+      expect(backend.machines[0]!.resumes).toBe(1);
+      expect(tars).toEqual(["m1"]);
+      expect(untars).toEqual(["m2"]);
+    } finally {
+      await rt.close();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("a rebuild refuses in one line when a napped workspace cannot be woken, and keeps the machine", async () => {
+    const { backend, tars, untars, store } = boxlike();
+    const { port, close: closePort } = await droppingPort();
+    onTestFinished(closePort);
+    const rt = createRuntime({ backend, store, adapters: {} });
+    try {
+      backend.lifecycle.budgets.daemonAnswersMs = 300;
+      backend.lifecycle.budgets.wakeAttempts = 1;
+      const ws = await createOn(rt, { golden: "snap_g", name: "x" });
+      backend.machines[0]!.previewUrl = async () => ({ url: `ws://127.0.0.1:${port}`, token: "e", expiresAt: Date.now() + 3_600_000 });
+      await rt.workspaces.nap(ws.id);
+      await expect(rt.workspaces.rebuild(ws.id)).rejects.toThrow(/could not be woken to back up before the rebuild/);
+      // Nothing was replaced or read off the machine: the workspace keeps m1 and its disk.
+      expect(backend.machines).toHaveLength(1);
+      expect(backend.machines[0]!.killed).toBe(false);
+      expect(tars).toEqual([]);
+      expect(untars).toEqual([]);
+    } finally {
+      await rt.close();
+      vi.unstubAllGlobals();
+    }
+  });
+});
