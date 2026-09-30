@@ -8,9 +8,8 @@
 import { execFile } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
-import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -31,13 +30,11 @@ import type { HostHandle } from "../src/server.js";
 import { c1Escaped } from "../src/verbs.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { WORKSPACE_CALLED } from "./mcp-binary-workspaces.js";
-import { ownEnv, served } from "./stdio-session.js";
+import { mcpBinNamed, ownEnv, served } from "./stdio-session.js";
 import { stubBackend } from "./stub-backend.js";
 import { captured, copyingFake, fakeDaemonStart, PAGE } from "./verbs-fixture.js";
 
-const REPO = fileURLToPath(new URL("../../../", import.meta.url));
-const named = process.env["WSP_MCP_BIN"];
-const MCP_BIN = named === undefined || named === "" ? undefined : resolve(REPO, named);
+const MCP_BIN = mcpBinNamed(process.env["WSP_MCP_BIN"]);
 
 const INITIALIZE = { jsonrpc: "2.0", id: 0, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "binary", version: "0" } } };
 const INITIALIZED = { jsonrpc: "2.0", method: "notifications/initialized" };
