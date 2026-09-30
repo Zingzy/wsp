@@ -12,6 +12,7 @@ import { useSelectedThreadId, useStore } from "../src/protocol/store.js";
 import type { Api, ProtocolEvent, StartSessionOptions } from "../src/protocol/client.js";
 import { WorkspaceThread } from "../src/shell/WorkspaceThread.js";
 import { useComposerDraftStore } from "../src/components/chat/composerDraftStore.js";
+import { ContextRing } from "../src/components/chat/ContextMeter.js";
 import { useDiffStore } from "../src/diffs/store.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
 import { requestNewThread } from "../src/shell/shellRequests.js";
@@ -131,10 +132,17 @@ describe("chat tab rendering", () => {
     });
     expect(document.querySelector("[data-reply-facts]")).toBeNull();
     expect(meta.textContent).not.toMatch(/Sonnet 4\.5|22\.6k in|251 out/);
-    // The composer's meter reads what the model held at that turn's end, out of its window.
-    expect(document.querySelector("[data-context-meter]")?.textContent).toBe("4.3k / 200k");
-    expect(document.querySelectorAll("[data-context-meter]")).toHaveLength(1);
-    expect(document.querySelector("[data-context-track]")).not.toBeNull();
+    // The composer holds no meter; the thread's top bar draws a ring of what the model held at that turn's end, the
+    // numbers and the percentage said on its hover.
+    expect(document.querySelector("[data-chat-composer] [data-context-meter], [data-context-track]")).toBeNull();
+    render(<ContextRing workspaceId={WS} />);
+    const ring = await waitFor(() => {
+      const found = document.querySelector<HTMLElement>("[data-context-ring]");
+      expect(found).not.toBeNull();
+      return found!;
+    });
+    expect(ring.getAttribute("aria-label")).toBe("Context: 2.1% used, 4.3k of 200k tokens");
+    expect(ring.querySelector("svg circle[data-context-used]")).not.toBeNull();
   });
 
   it("draws what a turn changed under its reply, says when another thread shared the folder, and opens the Changes pane on that turn", async () => {

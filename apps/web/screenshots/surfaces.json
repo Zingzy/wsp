@@ -1854,7 +1854,7 @@
       "settleMs": 800
     },
     {
-      "name": "context-meter",
+      "name": "context-ring",
       "at": "/",
       "fixture": "replies",
       "steps": [
@@ -1863,7 +1863,21 @@
         "row-id=thread:replies",
         "390:key:Escape"
       ],
-      "wait": "context-meter",
+      "wait": "context-ring",
+      "settleMs": 800
+    },
+    {
+      "name": "context-ring-hover",
+      "at": "/",
+      "fixture": "replies",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:replies",
+        "390:key:Escape",
+        "hover:context-ring"
+      ],
+      "wait": "slot=tooltip-positioner",
       "settleMs": 800
     },
     {
