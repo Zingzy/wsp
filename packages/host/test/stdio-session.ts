@@ -38,6 +38,8 @@ export function mcpBinNamed(named: string | undefined): string | undefined {
  * the session at once with its code. */
 export async function served(argv: readonly string[], env: NodeJS.ProcessEnv, lines: readonly Record<string, unknown>[], cwd?: string): Promise<{ out: string[]; code: number | null }> {
   const child = spawn(argv[0]!, argv.slice(1), { env, stdio: ["pipe", "pipe", "inherit"], ...(cwd !== undefined ? { cwd } : {}) });
+  // A write to a server that already exited is EPIPE; the exit is what the session reports, below.
+  child.stdin.on("error", () => {});
   const out: string[] = [];
   let held = "";
   child.stdout.on("data", (chunk: Buffer) => {
