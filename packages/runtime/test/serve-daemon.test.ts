@@ -196,7 +196,7 @@ describe("daemon.open refusals name what shut the door", () => {
     const { workspaceId } = await served("ws://127.0.0.1:1", { execImpl: noDaemonGuest });
     const c = await client();
     const refused = await c.request("daemon.open", { workspaceId });
-    expect(refused).toMatchObject({ ok: false, error: expect.stringMatching(/no daemon/) });
+    expect(refused).toMatchObject({ ok: false, error: expect.stringMatching(/is not answering yet/) });
     expect(refused["kind"]).toBeUndefined();
     c.close();
   });

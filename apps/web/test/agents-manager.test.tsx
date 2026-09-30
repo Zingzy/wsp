@@ -11,7 +11,7 @@ import { ScrollTextIcon } from "lucide-react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentsReport, SealedImage, ServerToolsAnswer } from "@wsp/protocol";
 import { AgentsManager, type AgentsManagerProps } from "../src/components/agents/AgentsManager.js";
-import { AGENTS_LIST_WORDS as W, imageAgentsReport, recipeMissLines, refusedLines, type RowsContext, type ServerTools, type ToolsState } from "../src/components/agents/agentsRows.js";
+import { AGENTS_LIST_WORDS as W, imageAgentsReport, NOT_ANSWERING_AFTER_MS, recipeMissLines, refusedLines, saysNotAnswering, type RowsContext, type ServerTools, type ToolsState } from "../src/components/agents/agentsRows.js";
 import { kind, type KindModule } from "../src/components/agents/kinds/kind.js";
 import { foldServers, rowState } from "../src/components/agents/kinds/servers.js";
 import { AGENTS_REPORT, SERVER_TOOLS } from "./fixtures/agents-report.js";
@@ -794,15 +794,27 @@ describe("the states", () => {
     expect(document.querySelector("[data-refused-line]")?.textContent).toBe("Solari keeps no computer to read");
   });
 
-  it("holds every act and Read again with the away word over the last report, and says away in the head", () => {
-    draw({ ctx: { where: "box", heldWhy: "away 5 min" } });
+  it("says not answering in the head with a Retry that reads again, and holds every act with the reason on its hover", () => {
+    const onRefresh = vi.fn();
+    draw({ ctx: { where: "box", heldWhy: "no answer 5m" }, onRefresh });
     for (const row of rows()) expect(row.className).toContain("opacity-50");
-    expect(document.querySelector("[data-k=agents-stale]")?.textContent).toBe("away");
-    expect(document.querySelector("[data-k=agents-stale]")?.getAttribute("title")).toBe("away 5 min");
-    expect(screen.getByRole("button", { name: "Read again" }).hasAttribute("disabled")).toBe(true);
-    expect(rowEl("agent-codex").querySelector("[data-act-hover=sign-in]")?.getAttribute("title")).toBe("away 5 min");
+    expect(document.querySelector("[data-k=agents-stale]")?.textContent).toBe("not answering");
+    expect(document.querySelector("[data-k=agents-stale]")?.getAttribute("title")).toBe("no answer 5m");
+    expect(document.body.textContent).not.toMatch(/\baway\b/);
+    const retry = screen.getByRole("button", { name: "Retry" });
+    expect(retry.hasAttribute("disabled")).toBe(false);
+    fireEvent.click(retry);
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: "Read again" })).toBeNull();
+    expect(rowEl("agent-codex").querySelector("[data-act-hover=sign-in]")?.getAttribute("title")).toBe("no answer 5m");
     tab("Skills");
-    expect(document.querySelector("[data-k=agents-add]")?.parentElement?.getAttribute("title")).toBe("away 5 min");
+    expect(document.querySelector("[data-k=agents-add]")?.parentElement?.getAttribute("title")).toBe("no answer 5m");
+  });
+
+  it("calls a computer not answering only once it has been silent a while", () => {
+    expect(saysNotAnswering(null)).toBe(true);
+    expect(saysNotAnswering(NOT_ANSWERING_AFTER_MS - 1)).toBe(false);
+    expect(saysNotAnswering(NOT_ANSWERING_AFTER_MS)).toBe(true);
   });
 
   it("says paused on a paused task's last report and holds what it offers", () => {

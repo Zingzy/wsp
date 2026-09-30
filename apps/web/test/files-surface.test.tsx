@@ -254,9 +254,9 @@ describe("files surface", () => {
   });
 
   it("shows the listing error with the last good tree gone", async () => {
-    provideDaemonWire(WS, fakeWire({ "fs.list": () => { throw new Error("daemon unreachable"); } }));
+    provideDaemonWire(WS, fakeWire({ "fs.list": () => { throw new Error("not answering"); } }));
     render(<FilesSurface workspaceId={WS} theme="dark" />);
-    await waitFor(() => expect(screen.getByText("daemon unreachable")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("not answering")).toBeTruthy());
   });
 
   it("shows a refusal of the root as itself", async () => {
@@ -286,7 +286,7 @@ describe("files surface", () => {
       }),
     );
     render(<FilesSurface workspaceId={WS} theme="dark" />);
-    expect(document.body.textContent).toContain("zingzy's MacBook Pro's daemon is not running");
+    expect(document.body.textContent).toContain("zingzy's MacBook Pro's terminals and files stopped");
     expect(document.body.textContent).not.toContain("wake it");
     await act(async () => void fireEvent.click(document.querySelector('[data-k="start-daemon"]')!));
     expect(asked).toEqual([WS]);
@@ -309,7 +309,7 @@ describe("files surface", () => {
     await waitFor(() => expect(treeRows(container).length).toBeGreaterThan(0));
 
     act(() => useStore.setState({ statuses: { [WS]: { ...up, reach: { state: "no-daemon" } } as never } }));
-    await waitFor(() => expect(document.body.textContent).toContain("daemon is not running"));
+    await waitFor(() => expect(document.body.textContent).toContain("terminals and files stopped"));
     expect(treeRows(container)).toEqual([]);
   });
 

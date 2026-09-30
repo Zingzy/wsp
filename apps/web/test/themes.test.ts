@@ -58,13 +58,15 @@ const TOKENS = [
   "--status-working",
   "--status-failed",
   "--status-done",
+  "--pr-merged",
 ] as const;
 /** What a dark theme names besides: the Mac's dark window stands on the glass, and these are its grounds there. */
 const DARK_TOKENS = ["--glass-ink", "--material-ground", "--material-raised", "--material-edge"] as const;
 /** The tokens allowed a hue: the primary and the status inks. Everything else is a neutral. */
-const HUED = new Set(["--primary", "--success", "--warning", "--error-foreground", "--warning-foreground", "--success-foreground", "--info-foreground", "--update-foreground", "--status-input", "--status-working", "--status-failed", "--status-done"]);
-/** The inks a thread's status is drawn in, on the sidebar's rows and every list a thread shows in. */
-const STATUS_INKS = ["--status-input", "--status-working", "--status-failed", "--status-done"] as const;
+const HUED = new Set(["--primary", "--success", "--warning", "--error-foreground", "--warning-foreground", "--success-foreground", "--info-foreground", "--update-foreground", "--status-input", "--status-working", "--status-failed", "--status-done", "--pr-merged"]);
+/** The inks a thread's status is drawn in, on the sidebar's rows and every list a thread shows in, and a merged pull
+ * request's number on a tile. */
+const STATUS_INKS = ["--status-input", "--status-working", "--status-failed", "--status-done", "--pr-merged"] as const;
 
 const sheet = (id: string): string => readFileSync(join(DIR, `${id}.css`), "utf8");
 const tokensOf = (id: string): Map<string, string> => new Map(declarations(blockBody(sheet(id), new RegExp(`\\[data-theme="${id}"\\][^{]*\\{`))!));

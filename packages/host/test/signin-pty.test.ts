@@ -15,10 +15,12 @@ import { daemonBinaryHere } from "../src/assets.js";
 import { LocalDaemon } from "../src/local-daemon.js";
 import { watchPty, type PtyLink } from "../src/signin-relay.js";
 import { writeStub } from "../../protocol/test/stub-script.js";
+import { spawnedDaemons } from "./spawned-daemons.js";
 
 let root: string;
 let stubs: string;
 let daemon: LocalDaemon | undefined;
+const daemons = spawnedDaemons();
 let link: PtyLink;
 let close: () => void = () => {};
 
@@ -38,7 +40,7 @@ beforeAll(async () => {
   stub("../sbin/runuser", `echo "$2" > "${join(root, "runuser-as")}"; while [ "$1" != "--" ]; do shift; done; shift; exec "$@"`);
   const wrapper = join(root, "daemon.sh");
   writeStub(wrapper, `#!/bin/sh\nexec /usr/bin/env -i PATH=${shellQuote(join(root, "sbin"))}:/usr/bin:/bin HOME=${shellQuote(join(root, "daemon-home"))} ${shellQuote(daemonBinaryHere())} "$@"\n`);
-  daemon = await LocalDaemon.start({ root, workFolder: root, rootsPath: join(root, "roots"), inboxDir: join(root, "inbox"), binary: wrapper, say: () => {} });
+  daemon = await LocalDaemon.start({ root, workFolder: root, rootsPath: join(root, "roots"), inboxDir: join(root, "inbox"), binary: wrapper, say: () => {}, spawned: daemons.record });
   const listeners = new Set<(e: Record<string, unknown>) => void>();
   const reach = daemon.link(e => listeners.forEach(fn => fn(e as unknown as Record<string, unknown>)));
   await reach.ready;
@@ -55,6 +57,7 @@ beforeAll(async () => {
 afterAll(async () => {
   close();
   await daemon?.close();
+  await daemons.stop();
   rmSync(root, { recursive: true, force: true });
 });
 

@@ -138,7 +138,7 @@ describe("composer stop", () => {
     };
     fireEvent.click(stopButton());
     expect(sock.frames("sessions.interrupt")).toHaveLength(1);
-    await waitFor(() => expect(footer()).toContain("Worked for"));
+    await waitFor(() => expect(sendButton().getAttribute("aria-label")).toBe("Send message"));
     await settle();
     expect(document.querySelector("[data-composer-refusal]")).toBeNull();
     expect(screen.queryByRole("button", { name: /Stop generation|Stopping/ })).toBeNull();
