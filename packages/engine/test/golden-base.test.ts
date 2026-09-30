@@ -77,11 +77,35 @@ describe("the base floor's plan", () => {
       ["base/zip", "apt", "base/apt-index", "zip"],
       ["base/xz", "apt", "base/apt-index", "xz"],
       ["base/rsync", "apt", "base/apt-index", "rsync"],
+      ["base/ssh-server", "apt", "base/apt-index", undefined],
     ]);
-    expect(plan.map(t => t.label)).toEqual(["login shell PATH", "apt index", "curl", "uv", "Python 3.12", "git", "jq", "ripgrep", "C toolchain with cmake and ninja", "fd", "sqlite3", "wget", "zip and unzip", "xz", "rsync"]);
+    expect(plan.map(t => t.label)).toEqual(["login shell PATH", "apt index", "curl", "uv", "Python 3.12", "git", "jq", "ripgrep", "C toolchain with cmake and ninja", "fd", "sqlite3", "wget", "zip and unzip", "xz", "rsync", "OpenSSH server"]);
     // Node is not on the floor: a recipe row that runs on it brings it in the tools stage instead.
     expect(plan.some(t => t.cmd.includes("nodejs.org/dist"))).toBe(false);
     expect(BASE_FLOOR.map(e => `base/${e.id}`)).toEqual(plan.filter(t => t.bin !== undefined).map(t => t.id));
+  });
+
+  it("installs an ssh server on every golden, whatever its recipe, with the package's own port 22 closed while it installs and turned off only where it installed it", () => {
+    const step = baseInstalls(new Set(BASE_FLOOR.map(e => e.id))).find(t => t.id === "base/ssh-server")!;
+    // An image that has an sshd leaves the step before anything is installed, so its own units are never touched.
+    const lines = step.cmd.split("\n");
+    const guard = lines.indexOf("if test -x /usr/sbin/sshd; then exit 0; fi");
+    expect(guard).toBeGreaterThan(-1);
+    expect(guard).toBeLessThan(lines.findIndex(l => l.startsWith("apt-get")));
+    // With the whole floor carried the plan reads no index, so the step reads its own; with the floor's it waits on that.
+    const install = lines.indexOf("apt-get install -y -qq openssh-server");
+    expect(lines.indexOf("apt-get update -qq")).toBeLessThan(install);
+    // A policy that refuses every start holds the package's socket shut until the line that turns it off, and a
+    // policy the machine already had is left as it was.
+    const policy = lines.indexOf(`if [ ! -e /usr/sbin/policy-rc.d ]; then printf '#!/bin/sh\\nexit 101\\n' >/usr/sbin/policy-rc.d; chmod 755 /usr/sbin/policy-rc.d; trap 'rm -f /usr/sbin/policy-rc.d' EXIT; fi`);
+    expect(policy).toBeGreaterThan(guard);
+    expect(policy).toBeLessThan(install);
+    expect(step.after).toBeUndefined();
+    const waiting = baseInstalls().find(t => t.id === "base/ssh-server")!;
+    expect(waiting.after).toBe("base/apt-index");
+    expect(waiting.cmd).not.toContain("apt-get update");
+    expect(lines.at(-1)).toBe("(systemctl disable --now ssh.socket ssh.service >/dev/null 2>&1 || true)");
+    expect(step.check).toBe("test -x /usr/sbin/sshd");
   });
 
   it("writes the login shell's PATH before the floor, on every golden, so a thread's terminal finds what the stages install", () => {
@@ -159,7 +183,9 @@ describe("the versions read", () => {
     expect(BASE_VERSIONS_CMD).toContain(`echo "VERSION rg: $(rg --version 2>/dev/null | ${first})"`);
     expect(BASE_VERSIONS_CMD).toContain(`echo "VERSION unzip: $(unzip -v 2>/dev/null | ${first})"`);
     expect(BASE_VERSIONS_CMD).toContain(`echo "VERSION git: $(git --version 2>/dev/null | ${first})"`);
-    expect(BASE_VERSIONS_CMD.split("\n").filter((l: string) => l.startsWith("echo \"VERSION"))).toHaveLength(16);
+    // sshd prints its version on stderr, which the read drops, so its own shell sends it to stdout.
+    expect(BASE_VERSIONS_CMD).toContain(`echo "VERSION sshd: $(sh -c 'sshd -V 2>&1' 2>/dev/null | ${first})"`);
+    expect(BASE_VERSIONS_CMD.split("\n").filter((l: string) => l.startsWith("echo \"VERSION"))).toHaveLength(17);
   });
 
   it("keeps the first line of a read that carries a version, so zip reads carried and the floor has no apt index to run", () => {
@@ -172,6 +198,8 @@ describe("the versions read", () => {
         writeStub(join(dir, c.bin), `#!/bin/sh\necho "${c.bin} ${c.version}"\n`);
       }
     }
+    // sshd as OpenSSH prints it: on stderr, which the read's own shell turns round.
+    writeStub(join(dir, "sshd"), "#!/bin/sh\necho 'OpenSSH_9.6p1 Ubuntu-3ubuntu13.16, OpenSSL 3.0.13 30 Jan 2024' >&2\nexit 1\n");
     writeStub(join(dir, "zip"), ["#!/bin/sh", "echo \"Copyright (c) 1990-2008 Info-ZIP - Type 'zip \\\"-L\\\"' for software license.\"", "echo 'This is Zip 3.0 (July 5th 2008), by Info-ZIP.'", ""].join("\n"));
     // The scratch folder goes ahead of the tools PATH the read exports, which itself carries /usr/bin: this Mac's
     // own zip would answer otherwise, and what is under test is the read, not this machine.
@@ -183,7 +211,8 @@ describe("the versions read", () => {
     // With every row of the floor on the machine, nothing of it installs and no apt index is read for it: the
     // index runs before the first row that waits on it and no row is left to wait.
     const carried = carriedByImage(versions);
-    expect([...carried].sort()).toEqual(BASE_FLOOR.map(e => e.id).sort());
+    expect(versions).toContainEqual({ name: "sshd", version: "9.6" });
+    expect([...carried].sort()).toEqual([...BASE_FLOOR.map(e => e.id), "ssh-server"].sort());
     expect(baseInstalls(carried).map(t => t.id)).toEqual(["base/login-path"]);
   });
 
@@ -235,14 +264,16 @@ describe("installBase", () => {
     }, () => mb(free));
     const { stages, stage } = recorder();
     const out = await installBase(g.machine, stage);
-    expect(stages[0]).toBe("deploying-daemon:login shell PATH (1/15)");
-    expect(stages).toContain("deploying-daemon:uv (4/15)");
-    expect(stages).toContain("deploying-daemon:C toolchain with cmake and ninja (9/15)");
-    expect(stages).toContain("deploying-daemon:rsync (15/15)");
+    expect(stages[0]).toBe("deploying-daemon:login shell PATH (1/16)");
+    expect(stages).toContain("deploying-daemon:uv (4/16)");
+    expect(stages).toContain("deploying-daemon:C toolchain with cmake and ninja (9/16)");
+    expect(stages).toContain("deploying-daemon:rsync (15/16)");
+    expect(stages).toContain("deploying-daemon:OpenSSH server (16/16)");
     expect(stages.every(s => s.startsWith("deploying-daemon"))).toBe(true);
     expect(out.tools.map(t => [t.id, t.outcome, t.bytes])).toEqual([
       ["base/login-path", "installed", 0],
       ["base/apt-index", "installed", 0],
+      ["base/ssh-server", "installed", 0],
       ["base/curl", "installed", 0],
       ["base/uv", "installed", 0],
       ["base/python", "installed", 0],
@@ -260,7 +291,7 @@ describe("installBase", () => {
     expect(out.line).toBe("uv 0.12.9, python3 3.12.13, git 2.43.0, jq 1.7.1, rg 14.1.0, curl 8.5.0, cc 12.2.0 (400 MB)");
     // Once against the image as it arrives, once after the floor ran: the first says what there is nothing to do for.
     expect(g.cmds.filter(c => c.includes("VERSION curl:"))).toHaveLength(2);
-    expect(g.ran).toHaveLength(16);
+    expect(g.ran).toHaveLength(17);
   });
 
   it("reads df once between installs, and sizes an install after the rescue from the reading the cleanup left", async () => {
@@ -282,6 +313,7 @@ describe("installBase", () => {
     expect(out.tools.map(t => [t.id, t.outcome, t.bytes])).toEqual([
       ["base/login-path", "installed", 0],
       ["base/apt-index", "installed", 0],
+      ["base/ssh-server", "installed", 0],
       ["base/curl", "installed", 0],
       ["base/uv", "installed", 0],
       ["base/python", "installed", 0],
@@ -297,8 +329,8 @@ describe("installBase", () => {
       ["base/rsync", "installed", 0],
     ]);
     // One read before the loop; the rescue's sweep reads before and after itself and the loop reads once more after
-    // it; one after each of the fifteen installs; the closing sweep and line read three more.
-    expect(g.cmds.filter(c => c === FREE_KB_CMD)).toHaveLength(22);
+    // it; one after each of the sixteen installs; the closing sweep and line read three more.
+    expect(g.cmds.filter(c => c === FREE_KB_CMD)).toHaveLength(23);
   });
 
   it("a step that fails is named on the stage and in the line, and what waited on it is skipped by its name", async () => {
@@ -310,6 +342,7 @@ describe("installBase", () => {
     expect(out.tools.map(t => [t.id, t.outcome, t.note])).toEqual([
       ["base/login-path", "installed", undefined],
       ["base/apt-index", "failed", "E: Could not get lock /var/lib/apt/lists/lock"],
+      ["base/ssh-server", "skipped", "apt index did not install"],
       ["base/curl", "skipped", "apt index did not install"],
       ["base/uv", "skipped", "curl did not install"],
       ["base/python", "skipped", "uv did not install"],
@@ -324,8 +357,8 @@ describe("installBase", () => {
       ["base/xz", "skipped", "apt index did not install"],
       ["base/rsync", "skipped", "apt index did not install"],
     ]);
-    expect(out.line).toBe("uv 0.12.9, python3 3.12.13; curl skipped (apt index did not install); uv skipped (curl did not install); Python 3.12 skipped (uv did not install); git skipped (apt index did not install); jq skipped (apt index did not install); ripgrep skipped (apt index did not install); C toolchain with cmake and ninja skipped (apt index did not install); fd skipped (apt index did not install); sqlite3 skipped (apt index did not install); wget skipped (apt index did not install); zip and unzip skipped (apt index did not install); xz skipped (apt index did not install); rsync skipped (apt index did not install)");
-    expect(stages).toContain("deploying-daemon:1 installed, 1 failed: apt index (E: Could not get lock /var/lib/apt/lists/lock), 13 skipped: curl, git, jq, ripgrep, C toolchain with cmake and ninja, fd, sqlite3, wget, zip and unzip, xz, rsync (apt index did not install); uv (curl did not install); Python 3.12 (uv did not install); caches swept; 2.9 GB free");
+    expect(out.line).toBe("uv 0.12.9, python3 3.12.13; OpenSSH server skipped (apt index did not install); curl skipped (apt index did not install); uv skipped (curl did not install); Python 3.12 skipped (uv did not install); git skipped (apt index did not install); jq skipped (apt index did not install); ripgrep skipped (apt index did not install); C toolchain with cmake and ninja skipped (apt index did not install); fd skipped (apt index did not install); sqlite3 skipped (apt index did not install); wget skipped (apt index did not install); zip and unzip skipped (apt index did not install); xz skipped (apt index did not install); rsync skipped (apt index did not install)");
+    expect(stages).toContain("deploying-daemon:1 installed, 1 failed: apt index (E: Could not get lock /var/lib/apt/lists/lock), 14 skipped: curl, git, jq, ripgrep, C toolchain with cmake and ninja, fd, sqlite3, wget, zip and unzip, xz, rsync, OpenSSH server (apt index did not install); uv (curl did not install); Python 3.12 (uv did not install); caches swept; 2.9 GB free");
   });
 
   it("a floor step that fails is recorded by the last line its installer wrote, not a generic one", async () => {
@@ -353,7 +386,7 @@ describe("installBase", () => {
     expect(row("base/uv")).toMatchObject({ outcome: "installed" });
     expect(g.ran.some(script => script.includes("astral-sh/uv/releases"))).toBe(true);
     // The floor keeps its catalog order whether a row ran or the image had it, and the line says which were there.
-    expect(out.tools.map(t => t.id)).toEqual(["base/login-path", "base/apt-index", ...BASE_FLOOR.map(e => `base/${e.id}`)]);
+    expect(out.tools.map(t => t.id)).toEqual(["base/login-path", "base/apt-index", "base/ssh-server", ...BASE_FLOOR.map(e => `base/${e.id}`)]);
     // The words are true whichever road put the tool there: the provider's image, or an earlier run of this stage.
     expect(out.line).toContain("already on the machine: curl, git, zip and unzip");
     expect(stages.some(s => s.includes("zip and unzip ("))).toBe(false);

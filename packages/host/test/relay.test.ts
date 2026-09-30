@@ -13,7 +13,7 @@ import { fakeProcTree } from "../../daemon/test/fake-proc.js";
 import { daemonUnderTest, machineDaemonToken, type DaemonUnderTest } from "../../daemon/test/harness.js";
 import { CLOUD_PLACE, DAEMON_CONNECT_TIMEOUT_MS, OPEN_SHIM_PATH, connectDaemonSocket, openShimScript, type ConnectOptions, type DaemonSocket } from "../src/doctor.js";
 import { guestDoor } from "../src/guest.js";
-import { CALLBACK_HOLD_MAX_BYTES, CALLBACK_HOLD_MAX_CONNS, CALLBACK_HOLD_MS, FORWARD_IDLE_MS, FORWARD_MAX_PER_TARGET, REDIAL_CEILING_MS, RELAY_CAP_MS, RELAY_MIN_PORT, RELAY_WINDOW_MS, startCallbackRelay, type CallbackRelay } from "../src/relay.js";
+import { CALLBACK_HOLD_MAX_BYTES, CALLBACK_HOLD_MAX_CONNS, CALLBACK_HOLD_MS, EDITOR_AWAKE_MS, FORWARD_IDLE_MS, FORWARD_MAX_PER_TARGET, REDIAL_CEILING_MS, RELAY_CAP_MS, RELAY_MIN_PORT, RELAY_WINDOW_MS, startCallbackRelay, type CallbackRelay } from "../src/relay.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
 import { createOn, projectOn } from "./verbs-fixture.js";
@@ -63,6 +63,8 @@ interface FakeLink extends DaemonSocket {
   ports: number[];
   /** When set, tunnel.open is refused the way a guest with nothing listening refuses it. */
   refuseTunnels: boolean;
+  /** What ssh.start answers as the server's host key, where a case wants other than one plain line. */
+  hostKey?: string;
   emit(event: Record<string, unknown>): void;
   drop(): void;
 }
@@ -114,6 +116,7 @@ function fakeConnect(): {
             return { ok: true, ports: link.ports.map(port => ({ port, pid: null, inode: port, uid: 0, loopback: true })) };
           }
           if (op === "guest.watch" && fake.slowGuestWatch) await fake.slowGuestWatch();
+          if (op === "ssh.start") return { ok: true, port: 40022, hostKey: link.hostKey ?? "ssh-ed25519 AAAAC3Nz the-workspace" };
           return { ok: true };
         },
         close() {
@@ -764,6 +767,76 @@ describe("callback relay over a fake daemon link", () => {
     await until(() => link.ops.some(x => x.op === "tunnel.close" && x.extra["tunnelId"] === tunnelId));
     // The URL stays out of every line.
     expect(lines.join("\n")).not.toContain("dash.example.com");
+  });
+
+  it("starts the workspace's ssh server over its link, and carries a connection on a loopback port of its own to the port that server answered on", async () => {
+    const { link, ws } = await setup();
+    const key = "ssh-ed25519 AAAAC3Nz the-mac";
+    const road = await relay!.sshPort(ws.id, key);
+    expect(road.hostKey).toBe("ssh-ed25519 AAAAC3Nz the-workspace");
+    expect(link.ops.find(x => x.op === "ssh.start")!.extra).toEqual({ authorizedKey: key });
+    // The same road again: the server answers where it listens, and nothing here binds a second port.
+    expect(await relay!.sshPort(ws.id, key)).toEqual(road);
+    const c = await dial(road.port);
+    await until(() => link.ops.some(x => x.op === "tunnel.open"));
+    const open = link.ops.find(x => x.op === "tunnel.open")!;
+    expect(open.extra["port"]).toBe(40022);
+    const tunnelId = open.extra["tunnelId"] as string;
+    c.write("SSH-2.0-OpenSSH_9.6\r\n");
+    await until(() => link.ops.some(x => x.op === "tunnel.write"));
+    expect(Buffer.from(link.ops.find(x => x.op === "tunnel.write")!.extra["data"] as string, "base64").toString()).toBe("SSH-2.0-OpenSSH_9.6\r\n");
+    const got: Buffer[] = [];
+    c.on("data", d => got.push(d));
+    const ended = new Promise<void>(r => c.once("end", () => r()));
+    link.emit({ type: "tunnel.data", tunnelId, data: Buffer.from("SSH-2.0-OpenSSH_9.6 workspace\r\n").toString("base64") });
+    link.emit({ type: "tunnel.end", tunnelId });
+    await ended;
+    expect(Buffer.concat(got).toString()).toBe("SSH-2.0-OpenSSH_9.6 workspace\r\n");
+  });
+
+  it("refuses a host key that is not one ed25519 line, since what it answers is what this computer's ssh trusts", async () => {
+    const { link, ws } = await setup();
+    for (const hostKey of [
+      "ssh-ed25519 AAAAC3Nz the-workspace\n@cert-authority wsp-* ssh-ed25519 AAAAattacker",
+      "ssh-rsa AAAAB3Nza the-workspace",
+      "ssh-ed25519 AAAA not one word",
+      "",
+    ]) {
+      link.hostKey = hostKey;
+      await expect(relay!.sshPort(ws.id, "ssh-ed25519 AAAAC3Nz the-mac"), JSON.stringify(hostKey)).rejects.toThrow("task-1: the ssh server answered a host key that is not one ed25519 line");
+    }
+    expect(relay!.list()).toEqual([]);
+  });
+
+  it("keeps the workspace awake while an editor is connected and says one is, and lets both go with the last connection", async () => {
+    const { rt, clock, ws } = await setup();
+    const touched: string[] = [];
+    const touch = rt.workspaces.touch.bind(rt.workspaces);
+    rt.workspaces.touch = async id => {
+      touched.push(id);
+      await touch(id);
+    };
+    const events: ForwardEvent[] = [];
+    relay!.on(e => events.push(e));
+    const road = await relay!.sshPort(ws.id, "ssh-ed25519 AAAAC3Nz the-mac");
+    expect(relay!.list()).toEqual([]);
+    const first = await dial(road.port);
+    const second = await dial(road.port);
+    await until(() => relay!.list().length === 1);
+    expect(relay!.list()).toEqual([expect.objectContaining({ workspaceId: ws.id, port: road.port, kind: "editor", name: "task-1" })]);
+    expect(events.filter(e => e.type === "forward.open")).toHaveLength(1);
+    await until(() => touched.length === 1);
+    clock.advance(EDITOR_AWAKE_MS);
+    await until(() => touched.length === 2);
+    first.destroy();
+    await new Promise(r => setTimeout(r, 50));
+    expect(relay!.list()).toHaveLength(1);
+    second.destroy();
+    await until(() => relay!.list().length === 0);
+    expect(events.at(-1)).toEqual({ type: "forward.close", workspaceId: ws.id, port: road.port });
+    clock.advance(EDITOR_AWAKE_MS * 3);
+    await new Promise(r => setTimeout(r, 50));
+    expect(touched).toHaveLength(2);
   });
 
   it("callback.port after a portless open forwards that port", async () => {

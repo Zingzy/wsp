@@ -13,7 +13,8 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { closeSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { parseArgs, type ParseArgsConfig } from "node:util";
-import { Transform, type Writable } from "node:stream";
+import { connect as connectTcp } from "node:net";
+import { Transform, type Readable, type Writable } from "node:stream";
 import { StringDecoder } from "node:string_decoder";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import WebSocket from "ws";
@@ -23,6 +24,9 @@ import { nodeHost, readGhosttyConfig, type Platform } from "@wsp/collect";
 import { freshEphemeral, keyFingerprint, makeSeal, openFrame, sealKeys, sharedSecret, signPlaceBytes, verifyPlaceBytes, SEAL_REFUSAL, type PlaceKeyPair, type Seal } from "@wsp/keys";
 import {
   AFTER_CUT_LINE,
+  LOOPBACK,
+  SSH_ALIAS_PREFIX,
+  sshAlias,
   COORDINATOR_HANDOFF,
   EMPTY_TASK_LINE,
   EXIT_CODES,
@@ -1194,6 +1198,36 @@ function imageLines(view: SealedImageView): string[] {
 /** Why an export runs at its own host's terminal: the bytes it writes are the person's sign-ins, so the file lands
  * on the computer whose terminal asked for it and the passphrase never crosses to another. */
 export const HOST_SIDE_VAULT = "The vault leaves the host only as a sealed file on the computer that typed the line.";
+
+/** wsp ssh on a line with no stdin and stdout of this computer's: carried from a machine, it has nothing to pipe. */
+export const SSH_PIPES_HERE_LINE = "wsp ssh pipes the stdin and stdout of the ssh client that runs it, on the computer the host runs on; there is none here.";
+
+/** The workspace an ssh alias names, by the one rule the host pins its key under, else the workspace a person
+ * names as they do on any line. */
+async function sshWorkspaceOf(client: HostClient, ref: string): Promise<{ id: string }> {
+  if (ref.startsWith(SSH_ALIAS_PREFIX)) {
+    const hits = (await workspaces(client)).filter(w => sshAlias(w.name) === ref);
+    if (hits.length > 1) throw usageRefusal(`${hits.length} workspaces go by ${ref}: ${hits.map(w => `${w.name} (${w.id})`).join(", ")}`, "Rename one with wsp rename and open it again.");
+    if (hits.length === 1) return hits[0]!;
+  }
+  return workspaceOf(client, ref);
+}
+
+/** Bytes both ways between this process's own streams and a port on this computer's loopback, until that side ends. */
+function pipeBytes(port: number, bytes: { input: Readable; output: Writable }): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const socket = connectTcp(port, LOOPBACK);
+    socket.once("error", reject);
+    socket.once("connect", () => {
+      bytes.input.pipe(socket);
+      socket.pipe(bytes.output, { end: false });
+    });
+    socket.once("close", () => {
+      bytes.input.unpipe(socket);
+      resolve();
+    });
+  });
+}
 
 /** The passphrase an export is sealed to: typed twice at a terminal, read from the environment where there is none,
  * and never taken from the command line, which every process on this computer can read. */
@@ -4780,6 +4814,25 @@ export const ALL_VERBS: readonly Verb[] = [
         return asText(stopLine(stopped), { ...stopped });
       },
     }),
+  },
+  {
+    name: "ssh",
+    usage: "wsp ssh <workspace>",
+    about: "carries one ssh connection to the workspace's own ssh server, starting it there, over this computer's stdin and stdout: the ProxyCommand wsp's ssh config gives every wsp- alias, so `ssh wsp-<name>` and an editor's remote window land inside the workspace",
+    page: "agent",
+    options: {},
+    cliOnly: "a proxy for an ssh client on the computer the host runs on, piping raw bytes; an agent has no ssh client there to hand it to",
+    run: async ctx => {
+      const [ref, ...rest] = ctx.args;
+      if (ref === undefined || rest.length > 0) throw usageRefusal("wsp ssh takes one workspace.", usageIs(ctx));
+      const bytes = ctx.io.bytes;
+      if (bytes === undefined || ctx.elsewhere === true) throw usageRefusal(SSH_PIPES_HERE_LINE, "Run it from an ssh client on that computer, as wsp's ssh config does.");
+      const client = await ctx.client();
+      const workspace = await sshWorkspaceOf(client, ref);
+      const { port } = await client.request<{ port: number }>("ssh.port", { workspaceId: workspace.id });
+      await pipeBytes(port, bytes);
+      return 0;
+    },
   },
   {
     name: "exec",

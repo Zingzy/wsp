@@ -63,9 +63,12 @@ export interface SettingsReads {
   readonly spend: ReadonlyArray<PlaceSpend>;
   /** The editors installed on the computer the host runs on; null before an answer. */
   readonly editors: ReadonlyArray<EditorChoice> | null;
+  /** Whether the person's ~/.ssh/config reads wsp's own ssh config; null before an answer and where the host carries
+   * no editor's ssh. */
+  readonly sshInclude: boolean | null;
 }
 
-export const NO_READS: SettingsReads = { setup: null, file: null, account: null, devices: null, devicesRefused: false, image: null, spend: [], editors: null };
+export const NO_READS: SettingsReads = { setup: null, file: null, account: null, devices: null, devicesRefused: false, image: null, spend: [], editors: null, sshInclude: null };
 
 export interface SettingsState {
   readonly at: SettingsAt;

@@ -21,6 +21,7 @@ import {
   type GoldenRecipe,
   type GoldenVersion,
   type HarnessAdapterFactory,
+  type HostSsh,
   type LocalWiring,
   type Machine,
   type PlaceWiring,
@@ -179,6 +180,9 @@ export interface CliIO {
   redraw?: Redraw;
   /** The same text, standing back from the reply it sits beside, as far as the stream's colours go; absent leaves it plain. */
   muted?(text: string): string;
+  /** This process's own stdin and stdout as bytes, for a line that pipes them; absent on a line carried here from
+   * a machine, which has no stream of this computer's to hand over. */
+  bytes?: { input: Readable; output: Writable };
   /** A yes-or-no question; resolves to "yes" or "no". */
   ask(question: string): Promise<string>;
   /** A person is at the keyboard (stdin and stdout are terminals); absent means an agent or a pipe, and nothing is asked. */
@@ -238,6 +242,7 @@ export function terminalIO(input: Stream<Readable> = process.stdin, output: Stre
     log: line => console.log(line),
     error: line => console.error(line),
     stream: text => process.stderr.write(text),
+    bytes: { input, output },
     ...(isTTY(output) ? { redraw: { write: (text: string) => void output.write(text), columns: () => widthOf(output, Infinity) } } : {}),
     muted: text => muted(text, colourDepth(isTTY(process.stderr))),
     isTTY: screen,
@@ -1291,6 +1296,8 @@ export interface ServeOptions {
   startedBy?: HostStarted;
   /** How this host restarts itself where no command line road brought it up. */
   restart?: RestartRoad;
+  /** How an editor's ssh reaches a workspace; the host's own road through its relay when absent. */
+  ssh?: HostSsh;
   /** Filled with the loopback address a turn on this computer dials once the host binds. A caller that hands in its
    * own runtime hands in the cell that runtime's reach reads; absent, the host makes one for the runtime it builds. */
   here?: HereAt;
@@ -1381,6 +1388,7 @@ async function hostFor(
     links?: PlaceWiring;
     /** The restart road the caller holds, which stands above the one the command line road names. */
     restart?: RestartRoad;
+    ssh?: HostSsh;
     /** The cell the runtime's reach reads the loopback address from, filled once the host binds. */
     here?: HereAt;
   },
@@ -1431,6 +1439,7 @@ async function hostFor(
       listen: address,
       ...(opts.advertise !== undefined ? { advertise: opts.advertise } : {}),
       ...(opts.here !== undefined ? { here: opts.here } : {}),
+      ...(opts.ssh !== undefined ? { ssh: opts.ssh } : {}),
       door: joined ? "open" : "closed",
       doorLine: line => io.log(line),
       ...(links.back !== undefined ? { back: links.back } : {}),

@@ -321,6 +321,7 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
       "mcp install",
       "remove",
       "servers signin",
+      "ssh",
       "status",
       "up",
     ].filter(words => CLOUD_ON || words !== "image export"));

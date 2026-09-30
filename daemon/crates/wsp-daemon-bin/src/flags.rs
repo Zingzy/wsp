@@ -155,6 +155,9 @@ impl Flags {
             runtime_root: self.runtime_root,
             // This binary is the helper the workspace runtime runs, which is what current_exe answers for it.
             runtime_helper: None,
+            // The image's own OpenSSH at its usual paths, stopped after the contract's quiet; only a case names others.
+            ssh_programs: None,
+            ssh_idle_ms: None,
         }
     }
 }
