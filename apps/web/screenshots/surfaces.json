@@ -201,7 +201,7 @@
       "settleMs": 700
     },
     {
-      "name": "composer-modes",
+      "name": "composer-fast",
       "at": "/",
       "steps": [
         "390:key:Escape",
@@ -209,11 +209,26 @@
         "row-id=ws:ws_web",
         "390:key:Escape",
         "390:key:Escape",
-        "composer-mode=fast",
+        "composer-picker=reasoning",
+        "composer-fast=on",
         "testid=composer-editor",
         "type:move the billing api over"
       ],
-      "wait": "composer-mode=fast",
+      "wait": "composer-fast-bolt",
+      "settleMs": 700
+    },
+    {
+      "name": "composer-fast-menu",
+      "at": "/",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=ws:ws_web",
+        "390:key:Escape",
+        "390:key:Escape",
+        "composer-picker=reasoning"
+      ],
+      "wait": "composer-fast=on",
       "settleMs": 700
     },
     {
@@ -1454,7 +1469,7 @@
         "390:key:Escape",
         "390:sidebar=trigger"
       ],
-      "wait": "tile-count",
+      "wait": "tile-branch",
       "settleMs": 1200
     },
     {
@@ -1494,15 +1509,15 @@
       "settleMs": 1200
     },
     {
-      "name": "footer-pr-row",
+      "name": "header-git-button",
       "at": "/",
       "fixture": "pull-request",
       "widths": [1440],
-      "reason": "Pins the pull request's row in the composer's footer; the composer at 1280 and 390 is shot in composer-thread.",
+      "reason": "Pins the thread header's git button on a branch with an open pull request; the header at 1280 and 390 is shot in composer-thread.",
       "steps": [
         "row-id=thread:redirect"
       ],
-      "wait": "pr-row",
+      "wait": "git-split",
       "settleMs": 1200
     },
     {
@@ -1670,7 +1685,7 @@
         "1440:row-id=thread:cart",
         "390:key:Escape",
         "390:sidebar=trigger",
-        "section-head=done",
+        "section-head=needs-you",
         "row-id=settled"
       ],
       "wait": "row-id=settled",
@@ -1848,7 +1863,7 @@
       "height": 3400
     },
     {
-      "name": "reply-facts",
+      "name": "reply-footer",
       "at": "/",
       "fixture": "replies",
       "steps": [
@@ -1858,11 +1873,11 @@
         "390:key:Escape",
         "hover:message-role=assistant"
       ],
-      "wait": "reply-facts",
+      "wait": "reply-time",
       "settleMs": 800
     },
     {
-      "name": "context-meter",
+      "name": "context-ring",
       "at": "/",
       "fixture": "replies",
       "steps": [
@@ -1871,7 +1886,21 @@
         "row-id=thread:replies",
         "390:key:Escape"
       ],
-      "wait": "context-meter",
+      "wait": "context-ring",
+      "settleMs": 800
+    },
+    {
+      "name": "context-ring-hover",
+      "at": "/",
+      "fixture": "replies",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:replies",
+        "390:key:Escape",
+        "hover:context-ring"
+      ],
+      "wait": "slot=tooltip-positioner",
       "settleMs": 800
     },
     {
@@ -1888,16 +1917,30 @@
       "settleMs": 800
     },
     {
-      "name": "todo-card",
+      "name": "composer-tasks",
       "at": "/",
       "fixture": "replies",
       "steps": [
         "390:key:Escape",
         "390:sidebar=trigger",
-        "row-id=thread:replies",
+        "row-id=thread:tasks",
         "390:key:Escape"
       ],
-      "wait": "todo-card",
+      "wait": "composer-tasks",
+      "settleMs": 800
+    },
+    {
+      "name": "composer-tasks-open",
+      "at": "/",
+      "fixture": "replies",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:tasks",
+        "390:key:Escape",
+        "composer-tasks-row"
+      ],
+      "wait": "composer-tasks-list",
       "settleMs": 800
     },
     {

@@ -24,7 +24,7 @@
 // mode change mid-turn it reaches the turn in front of the person too, the
 // prompt it is stopped on included, and the menu says which of the two a pick
 // will do while a turn runs, over the list, before the pick is made.
-import { BrainIcon, ChevronDownIcon, CircleSlashIcon, HandIcon, LockIcon, LockOpenIcon, PenLineIcon, PencilRulerIcon, ShieldIcon, SparklesIcon, type LucideIcon } from "lucide-react";
+import { BrainIcon, ChevronDownIcon, CircleSlashIcon, HandIcon, LockIcon, LockOpenIcon, PenLineIcon, PencilRulerIcon, ShieldIcon, SparklesIcon, ZapIcon, type LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { DEFAULT_AGENT } from "@wsp/catalog";
 import { ACCESS_REFUSED_LINE, accessReachLine, kindForComputer, workspaceAccess, contextWindowsFor, effortsFor, movesRunningAccess, type HarnessCatalog, type HarnessModel, type HarnessOption, type ProjectView, type SessionView } from "@wsp/protocol";
@@ -173,7 +173,26 @@ function OptionRows({ options }: { options: ReadonlyArray<HarnessOption> }) {
  * a person reads the row for the agent, the model and the folder, and these three are what an agent already has a
  * default for. The effort and the window belong to the thread they are picked on; the access goes onto the host's
  * record and, where the harness takes one mid-turn, into the turn in front of the person. */
-/** The reasoning effort and the context window, one menu: both are how hard and how far the model reads. */
+/** Fast, where the model in front of the person offers it: the thread's own, and held for a composer whose thread
+ * does not exist yet. */
+export interface FastPick {
+  readonly on: boolean;
+  readonly set: (on: boolean) => void;
+  readonly held: boolean;
+}
+
+export const FAST_WORDS = {
+  group: "Fast mode",
+  on: "On",
+  off: "Off",
+  note: "The same model answering sooner, billed at its fast rate.",
+  normal: "Normal",
+  fast: "Fast",
+  bolt: "Fast mode on",
+} as const;
+
+/** The reasoning effort, the context window and Fast, one menu, as T3 Code's traits picker: how hard, how far and how
+ * fast the model reads. The button wears a bolt while Fast is on and nothing of it while off. */
 function ReasoningPicker({
   workspaceId,
   /** The thread an effort or a window pick belongs to: each is something the thread already runs at, so a pick here
@@ -182,15 +201,19 @@ function ReasoningPicker({
   efforts,
   contextWindows,
   picks,
+  fast,
 }: {
   workspaceId: string;
   threadKey: string;
   efforts: HarnessOption[];
   contextWindows: HarnessOption[];
   picks: ResolvedPicks;
+  fast: FastPick | null;
 }) {
   const pick = useComposerOptionsStore(s => s.pick);
-  const label = reasoningLabel(efforts.find(o => o.value === picks.effort), contextWindows.find(o => o.value === picks.contextWindow));
+  const reads = efforts.length > 0 || contextWindows.length > 0;
+  // A menu that holds Fast alone says which it is in words, since a bare bolt or nothing would say nothing.
+  const label = reads ? reasoningLabel(efforts.find(o => o.value === picks.effort), contextWindows.find(o => o.value === picks.contextWindow)) : fast?.on === true ? FAST_WORDS.fast : FAST_WORDS.normal;
   const onPick = (key: ComposerOptionKey) => (next: unknown) => {
     if (typeof next === "string") pick(workspaceId, key, next, threadKey);
   };
@@ -204,8 +227,14 @@ function ReasoningPicker({
         data-effort={picks.effort ?? undefined}
         data-context-window={picks.contextWindow ?? undefined}
       >
-        <BrainIcon className="size-4 shrink-0" aria-hidden />
+        {reads ? <BrainIcon className="size-4 shrink-0" aria-hidden /> : null}
         <span className="truncate">{label}</span>
+        {fast?.on === true ? (
+          <>
+            <ZapIcon data-composer-fast-bolt className="size-3.5 shrink-0 fill-current opacity-80" aria-hidden />
+            <span className="sr-only">{FAST_WORDS.bolt}</span>
+          </>
+        ) : null}
         <ChevronDownIcon className="size-3.5 shrink-0 opacity-60" />
       </MenuTrigger>
       <MenuPopup align="start" side="top" className="w-64">
@@ -223,6 +252,23 @@ function ReasoningPicker({
             <MenuGroupLabel>Context window</MenuGroupLabel>
             <MenuRadioGroup value={picks.contextWindow} onValueChange={onPick("contextWindow")}>
               <OptionRows options={contextWindows} />
+            </MenuRadioGroup>
+          </MenuGroup>
+        ) : null}
+        {fast !== null && reads ? <MenuSeparator /> : null}
+        {fast !== null ? (
+          <MenuGroup>
+            <MenuGroupLabel>{FAST_WORDS.group}</MenuGroupLabel>
+            <MenuRadioGroup value={fast.on ? "on" : "off"} onValueChange={next => fast.set(next === "on")}>
+              <MenuRadioItem value="on" data-composer-fast="on" disabled={fast.held} className="items-start py-1.5">
+                <span className="flex min-w-0 flex-col">
+                  <span>{FAST_WORDS.on}</span>
+                  <span className="hidden text-xs leading-4 text-muted-foreground sm:block">{FAST_WORDS.note}</span>
+                </span>
+              </MenuRadioItem>
+              <MenuRadioItem value="off" data-composer-fast="off" disabled={fast.held}>
+                {FAST_WORDS.off}
+              </MenuRadioItem>
             </MenuRadioGroup>
           </MenuGroup>
         ) : null}
@@ -332,11 +378,13 @@ export function ComposerOptionPickers({
   workspaceId,
   thread,
   compact = false,
+  fast = null,
 }: {
   /** The one-line composer's pickers, with no rule between them. */
   compact?: boolean;
   workspaceId: string;
   thread: ChatThreadHandle;
+  fast?: FastPick | null;
 }) {
   useMachineCatalogs(workspaceId);
   const pick = useComposerOptionsStore(s => s.pick);
@@ -373,10 +421,10 @@ export function ComposerOptionPickers({
             }
           : {})}
       />
-      {efforts.length > 0 || contextWindows.length > 0 ? (
+      {efforts.length > 0 || contextWindows.length > 0 || fast !== null ? (
         <>
           {compact ? null : <BarRule />}
-          <ReasoningPicker workspaceId={workspaceId} threadKey={thread.threadKey} efforts={efforts} contextWindows={contextWindows} picks={picks} />
+          <ReasoningPicker workspaceId={workspaceId} threadKey={thread.threadKey} efforts={efforts} contextWindows={contextWindows} picks={picks} fast={fast} />
         </>
       ) : null}
     </>

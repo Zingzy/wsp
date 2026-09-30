@@ -47,7 +47,7 @@ function fakeLink({ refuseCreate = false, ptys = [], holdList = false }: { refus
     request: async (op, params = {}) => {
       ops.push({ op, params });
       if (op === "pty.create") {
-        if (refuseCreate) throw new Error("daemon unreachable");
+        if (refuseCreate) throw new Error("not answering");
         const ptyId = `p${next++}`;
         held.add(ptyId);
         return { ok: true, ptyId };
@@ -215,7 +215,7 @@ describe("terminal as a right-panel surface", () => {
     await new Promise(r => setTimeout(r, 50));
     expect(count("pty.create")).toBe(0);
     expect(lastNotice()).toBeNull();
-    expect(document.body.textContent).not.toContain("daemon unreachable");
+    expect(document.body.textContent).not.toContain("No terminal on");
   });
 
   it("asks for no pty on an absent computer from the shortcut, the split or the panel's own button either, so nothing toasts", async () => {
@@ -430,7 +430,7 @@ describe("drawer resilience", () => {
     wt.feedStatus("connecting");
     useTerminalDrawerStore.getState().setOpen(WS, true);
     render(<WorkspaceTerminalDrawer workspaceId={WS} />);
-    await screen.findByText(/The daemon link is reconnecting; terminals open when it is back/);
+    await screen.findByText(/Reconnecting to the task; terminals open when it is back/);
     expect(screen.queryByRole("button", { name: /^New Terminal/ })).toBeNull();
     expect(count("pty.create")).toBe(0);
     act(() => wt.feedStatus("live"));
@@ -444,16 +444,16 @@ describe("drawer resilience", () => {
     useTerminalDrawerStore.getState().setOpen(WS, true);
     render(<WorkspaceTerminalDrawer workspaceId={WS} />);
     await screen.findByText(/No terminals open/);
-    await waitFor(() => expect(lastNotice()).toBe("No terminal on api: daemon unreachable"));
+    await waitFor(() => expect(lastNotice()).toBe("No terminal on api: not answering"));
     expect(count("pty.create")).toBe(1);
 
     clearNotices();
     fireEvent.click(screen.getByRole("button", { name: /^New Terminal/ }));
-    await waitFor(() => expect(lastNotice()).toBe("No terminal on api: daemon unreachable"));
+    await waitFor(() => expect(lastNotice()).toBe("No terminal on api: not answering"));
 
     clearNotices();
     await act(() => openPanelTerminal(WS));
-    await waitFor(() => expect(lastNotice()).toBe("No terminal on api: daemon unreachable"));
+    await waitFor(() => expect(lastNotice()).toBe("No terminal on api: not answering"));
     expect(selectWorkspaceRightPanelState(useRightPanelStore.getState().byWorkspaceId, WS).surfaces).toEqual([]);
     act(() => useStore.setState({ workspaces: [] }));
     clearNotices();
@@ -528,7 +528,7 @@ describe("panes on a workspace that is not running", () => {
     );
     useTerminalDrawerStore.getState().setOpen(WS, true);
     render(<WorkspaceTerminalDrawer workspaceId={WS} />);
-    await screen.findByText("zingzy's MacBook Pro's daemon is not running");
+    await screen.findByText("zingzy's MacBook Pro's terminals and files stopped");
     await act(() => openPanelTerminal(WS));
     expect(lastNotice()).toBeNull();
   });
@@ -548,11 +548,11 @@ describe("panes on a workspace that is not running", () => {
     );
     useTerminalDrawerStore.getState().setOpen(WS, true);
     render(<WorkspaceTerminalDrawer workspaceId={WS} />);
-    await screen.findByText("zingzy's MacBook Pro's daemon is not running");
+    await screen.findByText("zingzy's MacBook Pro's terminals and files stopped");
     // One line and one button: no second sentence saying in words what the button already says.
     expect(document.body.textContent).not.toContain("Unreachable");
     expect(document.body.textContent).not.toContain("wake it");
-    const start = await screen.findByRole("button", { name: "Start it" });
+    const start = await screen.findByRole("button", { name: "Start again" });
     await act(async () => void fireEvent.click(start));
     expect(asked).toEqual([WS]);
   }, 20_000);
@@ -718,7 +718,7 @@ describe("panes on a workspace that is not running", () => {
     act(() => wt.feedStatus("connecting"));
     act(() => wt.feedStatus("live"));
     await waitFor(() => expect(overlay()?.dataset["terminalOverlay"]).toBe("shell-gone"));
-    expect(overlay()!.textContent).toContain("This shell ended when the daemon holding it stopped");
+    expect(overlay()!.textContent).toContain("This shell ended when the task that held it restarted");
     expect(overlay()!.className).toContain("bg-(--terminal-background)/70");
     fireEvent.click(within(overlay()!).getByRole("button", { name: /^New Terminal/ }));
     await waitFor(() => expect(wt.tabs().map(t => t.ptyId)).toEqual(["p1", "p2"]));

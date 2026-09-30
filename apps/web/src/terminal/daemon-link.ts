@@ -12,7 +12,7 @@ import { errorText } from "../lib/utils.js";
 import { NOT_OPENED_YET, type TerminalWire } from "./link.js";
 
 /** What a refusal reads as when the daemon sent no sentence with it; every op this page drives sends one. */
-export const UNWORDED_REFUSAL = "daemon error";
+export const UNWORDED_REFUSAL = "refused";
 
 /** The daemon refused a request; code is set when the op sends a typed one (files and diff ops do). */
 export class DaemonRequestError extends Error {
@@ -135,7 +135,7 @@ export function connectDaemonLink(opts: DaemonLinkOptions): DaemonLink {
 
   function request(op: string, params: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
     const on = proven;
-    if (on === null) return Promise.reject(new Error("daemon unreachable"));
+    if (on === null) return Promise.reject(new Error("not answering"));
     return sendOn(on, { ...params, op });
   }
 

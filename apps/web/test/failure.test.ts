@@ -19,7 +19,7 @@ describe("failureOf", () => {
   });
 
   it("marks a request no socket carried as disconnected", () => {
-    expect(failureOf(new DisconnectedError("lost"))).toEqual({ said: "runtime connection lost", fix: undefined, kind: undefined, disconnected: true });
+    expect(failureOf(new DisconnectedError("lost"))).toEqual({ said: "the connection to wsp was lost", fix: undefined, kind: undefined, disconnected: true });
   });
 
   it("reads a plain Error and anything thrown that is not one", () => {

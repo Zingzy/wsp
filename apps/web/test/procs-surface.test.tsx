@@ -110,7 +110,7 @@ describe("processes surface", () => {
     expect(indent(DAEMON)).toBe("20px");
     expect(indent(42)).toBe("32px");
     const label = (pid: number) => row(pid).querySelector("[data-proc-label]")?.textContent ?? null;
-    expect(label(DAEMON)).toBe("daemon");
+    expect(label(DAEMON)).toBe("wsp");
     expect(label(41)).toBe("terminal");
     expect(label(42)).toBe("agent");
     expect(label(50)).toBeNull();
@@ -345,10 +345,10 @@ describe("processes surface", () => {
     render(<ProcessesSurface workspaceId={WS} />);
     await flush();
     const said = document.querySelector("[data-procs-unavailable]")!;
-    expect(said.textContent).toContain("zingzy's MacBook Pro's daemon is not running");
+    expect(said.textContent).toContain("zingzy's MacBook Pro's terminals and files stopped");
     expect(said.textContent).not.toContain("Unreachable");
     // The slot beside the filter reads the same reading, so the header and the sentence under it agree.
-    expect(document.querySelector("[data-procs-count]")!.textContent).toBe("no daemon");
+    expect(document.querySelector("[data-procs-count]")!.textContent).toBe("stopped");
     expect(document.body.textContent).not.toContain("unreachable");
     await act(async () => void fireEvent.click(document.querySelector('[data-k="start-daemon"]')!));
     expect(asked).toEqual([WS]);

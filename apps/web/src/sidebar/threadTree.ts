@@ -152,10 +152,13 @@ export interface TileItem {
 
 export type TileNode = ThreadNode<TileItem>;
 
-/** The sections of the live list, in the order they are drawn: the pinned trees, then every other tree under the
- * most pressing state in it. */
-export type SidebarSection = "pinned" | ThreadSection;
-export const SIDEBAR_SECTIONS: readonly SidebarSection[] = ["pinned", ...ThreadSection.options];
+/** The sections of the live list, in the order they are drawn: the pinned trees, the trees waiting on the person,
+ * then every other live tree in one list, each row saying for itself whether it works or is done. */
+export type SidebarSection = "pinned" | "needs-you" | "threads";
+export const SIDEBAR_SECTIONS: readonly SidebarSection[] = ["pinned", "needs-you", "threads"];
+
+/** The section a tree's state, or a placement's name, is drawn in. */
+const listOf = (section: ThreadSection): SidebarSection => (section === "needs-you" ? "needs-you" : "threads");
 
 /** One section of the live list and the roots it holds, each with its tree. */
 export interface TileSection {
@@ -167,7 +170,7 @@ export interface TileSection {
  * it, parted into the live list and the Settled fold, which holds every root whose whole tree is settled threads.
  * The live list is drawn in sections, and `live` is every root of them in the order they are drawn. A snoozed tree
  * is in neither until its snooze ends or a thread of it needs the person, but while a thread of it runs its root
- * stands alone at the foot of Idle carrying how many work. Under a picked project only that project's
+ * stands alone at the foot of the list carrying how many work. Under a picked project only that project's
  * roots are listed, children kept wherever they run. */
 export function sidebarTiles(
   projects: ReadonlyArray<SidebarProjectSnapshot>,
@@ -190,9 +193,9 @@ export function sidebarTiles(
     }
     const pinned = node.thread.thread?.pinnedAt != null;
     if (everyTile(node, thread => isThreadSettled(thread, nowMs, pinned || thread.id === open))) settled.push(node);
-    else filed.get(pinned ? "pinned" : sectionOf(node))!.push(node);
+    else filed.get(pinned ? "pinned" : listOf(sectionOf(node)))!.push(node);
   }
-  filed.get("idle")!.push(...snoozedWorking);
+  filed.get("threads")!.push(...snoozedWorking);
   filed.get("pinned")!.sort((a, b) => b.thread.thread!.pinnedAt!.localeCompare(a.thread.thread!.pinnedAt!));
   const sections = SIDEBAR_SECTIONS.map(id => ({ id, roots: filed.get(id)! })).filter(section => section.roots.length > 0);
   const bySettle = new Map(settled.map(node => [node.thread.thread!, node]));
@@ -240,16 +243,16 @@ export function placementFor(node: TileNode, name: ThreadSection): ThreadPlaceme
 }
 
 /** What dropping a root tree on a section writes: a pin for Pinned; for any other the pin taken off where it had one,
- * and a placement there, or the placement taken off where the section is its state's own. Null for a drop that
- * changes nothing. */
+ * and a placement there, or the placement taken off where the section is its state's own. A tree that asks, dropped
+ * on the list, is placed in Idle, which the list draws. Null for a drop that changes nothing. */
 export function dropMarks(node: TileNode, section: SidebarSection): ThreadMarks | null {
   const thread = node.thread.thread;
   if (thread === null) return null;
   const pinned = thread.pinnedAt != null;
   if (section === "pinned") return pinned ? null : { pinned: true };
-  const own = treeSection(node) === section;
+  const own = listOf(treeSection(node)) === section;
   if (own && !pinned && thread.section == null) return null;
-  return { ...(pinned ? { pinned: false } : {}), section: own ? null : placementFor(node, section) };
+  return { ...(pinned ? { pinned: false } : {}), section: own ? null : placementFor(node, section === "needs-you" ? "needs-you" : "idle") };
 }
 
 /** The section a root tree is drawn in: where the person dragged it while that still holds, else its state's. */

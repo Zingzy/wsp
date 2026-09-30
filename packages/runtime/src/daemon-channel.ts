@@ -156,7 +156,8 @@ export function openDaemonChannel(o: DaemonChannelOptions): Promise<DaemonChanne
       settled = true;
       if (refusal !== undefined) reject(refusal);
       else if (code === 4401) reject(new DaemonTokenError(reason));
-      else reject(new Error(`the daemon link ended before it opened (${code}${reason === "" ? "" : ` ${reason}`})`));
+      // The close code is for the log, never for the person's eyes.
+      else reject(new Error("the link to the computer ended before it opened", { cause: { code, reason } }));
     });
   });
 }

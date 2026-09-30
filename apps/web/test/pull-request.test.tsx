@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The pull request in the app: the pane's rows off the page the host reads and the fact it pushes, a failed check's
 // fix button, a line comment's Send to thread writing the quote into the composer, Merge offered only where the pull
-// request can land with a menu of the repository's methods, the conflict's fix, the thread's own row, and the
-// composer's branch line with Update from the base.
+// request can land with a menu of the repository's methods, the conflict's fix, the thread header's git button, and
+// the composer's branch line, and Update from the base in the pane while the branch is behind.
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fixAskedLine, updateConflictsLine, type PullRequestFact, type PullRequestPage, type WorkspaceStatus } from "@wsp/protocol";
+import { fixAskedLine, updateConflictsLine, type Checkout, type PullRequestFact, type PullRequestPage, type WorkspaceStatus } from "@wsp/protocol";
 import { useComposerDraftStore } from "../src/components/chat/composerDraftStore.js";
 import { useNotices } from "../src/notices/store.js";
 import { useStore } from "../src/protocol/store.js";
-import { PullRequestRow } from "../src/pull-request/PullRequestRow.js";
+import { useDiffStore } from "../src/diffs/store.js";
+import { GitSplit } from "../src/pull-request/GitSplit.js";
 import { PullRequestStrip } from "../src/pull-request/PullRequestStrip.js";
 import { PullRequestSurface } from "../src/pull-request/PullRequestSurface.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
@@ -74,22 +75,28 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("the Pull request pane", () => {
-  it("reads the title as the link with its number, the word, the counts, then checks, review, comments and the timeline", async () => {
+  it("says the title once, the number in its state's ink as the link, the state and the stats as quiet facts, then checks, review, comments and the timeline", async () => {
     const api = withApi(fact());
     const { container } = render(<PullRequestSurface workspaceId={WS} />);
     await waitFor(() => expect(container.querySelector("[data-pr-title]")?.textContent).toBe("Set .ci-status back to 0"));
     expect(api.pullRequestView).toHaveBeenCalledWith(WS);
-    expect(container.querySelector("[data-pr-title]")!.getAttribute("href")).toBe("https://github.com/o/r/pull/12");
-    expect(container.querySelector("[data-pr-head]")!.textContent).toContain("#12");
-    expect(container.querySelector("[data-pr-word]")!.textContent).toBe("checks failed");
-    expect([...container.querySelectorAll("[data-pr-counts] span")].map(n => n.textContent)).toEqual(["+120 -30", "9 files", "4 commits"]);
+    const head = container.querySelector<HTMLElement>("[data-pr-head]")!;
+    expect(head.textContent!.split("Set .ci-status back to 0")).toHaveLength(2);
+    expect(head.textContent!.split("#12")).toHaveLength(2);
+    const number = container.querySelector<HTMLAnchorElement>("[data-pr-number]")!;
+    expect([number.textContent, number.getAttribute("href"), number.dataset["prState"]]).toEqual(["#12", "https://github.com/o/r/pull/12", "open"]);
+    expect(number.className).toContain("text-pr-open");
+    expect([...container.querySelectorAll("[data-pr-facts] > span")].map(n => n.textContent)).toEqual(["Checks failed", "+120 -30", "9 files", "4 commits"]);
     const checks = [...container.querySelectorAll<HTMLElement>("[data-pr-check]")];
-    expect(checks.map(c => [c.dataset["prCheck"], c.querySelector("[data-pr-check-state]")!.textContent])).toEqual([
-      ["ci", "Failed"],
-      ["lint", "Passed"],
+    // The mark is the state; the word stands only on the failure, which is the row that opens.
+    expect(checks.map(c => [c.dataset["prCheck"], c.querySelector("[data-pr-check-state]")?.textContent ?? null, c.querySelector("[data-pr-check-mark]")!.getAttribute("aria-label"), c.dataset["open"] ?? null])).toEqual([
+      ["ci", "Failed", null, "true"],
+      ["lint", null, "Passed", null],
     ]);
-    // The fix stands under the failed check alone.
+    // Each check wears its mark; only the failure opens, with its fix under it.
+    expect(checks.every(c => c.querySelector("[data-pr-check-mark] svg, svg[data-pr-check-mark]") !== null)).toBe(true);
     expect(container.querySelectorAll("[data-pr-fix]")).toHaveLength(1);
+    expect(checks[0]!.querySelector("[data-pr-fix]")).not.toBeNull();
     expect(container.querySelector("[data-pr-review]")!.textContent).toContain("Changes requested");
     expect(container.querySelector("[data-pr-comment='7']")!.textContent).toContain("check.sh:3");
     expect([...container.querySelectorAll("[data-pr-event]")].map(n => n.textContent)).toEqual(["abc1234committedSet ci status", "bocommentedthanks"]);
@@ -147,7 +154,7 @@ describe("the Pull request pane", () => {
     const { container } = render(<PullRequestSurface workspaceId={WS} />);
     await waitFor(() => expect(container.querySelector("[data-pr-title]")?.textContent).toBe(PAGE.title));
     await waitFor(() => expect(container.querySelector("[data-pr-fix-conflicts]")).not.toBeNull());
-    expect(container.querySelector("[data-pr-word]")!.textContent).toBe("conflicts with main");
+    expect(container.querySelector("[data-pr-word]")!.textContent).toBe("Conflicts with main");
     expect(container.querySelector("[data-pr-merge]")).toBeNull();
     fireEvent.click(container.querySelector("[data-pr-fix-conflicts]")!);
     await waitFor(() => expect(api.fix).toHaveBeenCalledWith(WS, undefined));
@@ -165,36 +172,84 @@ describe("the Pull request pane", () => {
   });
 });
 
-describe("the thread's pull request row and the composer's branch line", () => {
-  it("names the pull request under the thread with its word, opens the pane, and carries the fix where a check failed", async () => {
-    const api = withApi(fact());
-    const { container } = render(<PullRequestRow workspaceId={WS} />);
-    expect(container.querySelector("[data-pr-row-open]")!.textContent).toBe("Pull request #12");
-    expect(container.querySelector("[data-pr-row-word]")!.textContent).toBe("checks failed");
-    fireEvent.click(container.querySelector("[data-pr-row-open]")!);
+describe("the thread header's git button", () => {
+  const withGit = (checkout: Partial<Checkout>, pr: WorkspaceStatus["pr"], draft: string | null = "Round the cart once") => {
+    const api = {
+      ...withApi(pr),
+      bringBack: vi.fn(async () => ({ branch: "fix/ci", base: "main", ahead: 1, uncommitted: 0, stat: [], pr: fact() })),
+      commitDraft: vi.fn(async () => (draft === null ? { message: null, note: "No agent is signed in to draft it." } : { message: draft })),
+      commit: vi.fn(async () => ({ oid: "5f1c0e2b9a7d4c3e8f6a1b2c3d4e5f60718293a4", subject: "Round the cart once", filesChanged: 2, insertions: 3, deletions: 1 })),
+    };
+    act(() => useStore.setState({ api: api as never, statuses: { [WS]: { ...statusWith(pr), checkout: { branch: "fix/ci", ahead: 0, behind: 0, changed: 0, readAt: 1, ...checkout } } } }));
+    return api;
+  };
+  const quick = (): HTMLButtonElement => document.querySelector<HTMLButtonElement>("[data-git-quick]")!;
+
+  it("names the act the checkout calls for, and View PR opens the Pull request pane", () => {
+    withGit({}, fact({ checks: [] }));
+    render(<GitSplit workspaceId={WS} />);
+    expect(quick().textContent).toBe("View PR");
+    fireEvent.click(quick());
     expect(useRightPanelStore.getState().byWorkspaceId[WS]?.activeSurfaceId).toBe("pr");
-    fireEvent.click(container.querySelector("[data-pr-row-fix]")!);
-    await waitFor(() => expect(api.fix).toHaveBeenCalledWith(WS, "ci"));
-    cleanup();
-    withApi(undefined);
-    expect(render(<PullRequestRow workspaceId={WS} />).container.innerHTML).toBe("");
   });
 
-  it("says the number as the link after the counts with its word on hover, and Update from the base names the files that conflict with the fix beside them", async () => {
-    const api = withApi(fact({ checks: [] }));
-    const { container } = render(<PullRequestStrip workspaceId={WS} branch="fix/ci" />);
+  it("commits every changed file with the agent's draft, then pushes and opens the pull request", async () => {
+    const api = withGit({ changed: 2 }, undefined);
+    render(<GitSplit workspaceId={WS} />);
+    expect(quick().textContent).toBe("Commit, push and PR");
+    fireEvent.click(quick());
+    await waitFor(() => expect(api.bringBack).toHaveBeenCalledWith(WS));
+    expect(api.commitDraft).toHaveBeenCalledWith(WS);
+    expect(api.commit).toHaveBeenCalledWith(WS, "Round the cart once");
+  });
+
+  it("opens the Changes pane on the uncommitted files where no draft comes back, and pushes nothing", async () => {
+    const api = withGit({ changed: 2 }, undefined, null);
+    render(<GitSplit workspaceId={WS} />);
+    fireEvent.click(quick());
+    await waitFor(() => expect(useRightPanelStore.getState().byWorkspaceId[WS]?.activeSurfaceId).toBe("diff"));
+    expect(useDiffStore.getState().scopeByWorkspaceId[WS]).toBe("head");
+    expect(api.commit).not.toHaveBeenCalled();
+    expect(api.bringBack).not.toHaveBeenCalled();
+  });
+
+  it("draws nothing where the checkout is not read", () => {
+    withApi(fact());
+    expect(render(<GitSplit workspaceId={WS} />).container.innerHTML).toBe("");
+  });
+});
+
+describe("the composer's branch line", () => {
+  it("says the number as the link with its word on hover, and never offers Update or the fix, which live in the Pull request pane", () => {
+    withApi(fact({ checks: [], mergeable: "conflicting" }));
+    const { container } = render(<PullRequestStrip workspaceId={WS} />);
     const link = container.querySelector<HTMLAnchorElement>("[data-composer-pr-number]")!;
-    expect([link.textContent, link.getAttribute("href"), link.title]).toEqual(["#12", "https://github.com/o/r/pull/12", "open"]);
-    fireEvent.click(screen.getByText("Update from main"));
+    expect([link.textContent, link.getAttribute("href"), link.title]).toEqual(["#12", "https://github.com/o/r/pull/12", "conflicts with main"]);
+    expect(screen.queryByText("Update from main")).toBeNull();
+    expect(screen.queryByText("Ask your agent to fix")).toBeNull();
+    cleanup();
+    withApi(undefined);
+    render(<PullRequestStrip workspaceId={WS} />);
+    expect(screen.queryByText("Update from main")).toBeNull();
+  });
+});
+
+describe("Update from the base in the Pull request pane", () => {
+  it("is offered only while the branch is behind its base, and names the files that conflict with the fix beside them", async () => {
+    const api = withApi(fact({ checks: [], behindBase: 2 }));
+    render(<PullRequestSurface workspaceId={WS} />);
+    fireEvent.click(await screen.findByText("Update from main"));
     await waitFor(() => expect(api.update).toHaveBeenCalledWith(WS));
     await waitFor(() => expect(useNotices.getState().notices[0]?.text).toBe(updateConflictsLine("api", "main", ["README.md"])));
     const notice = useNotices.getState().notices[0]!;
     expect(notice.action?.word).toBe("Ask your agent to fix");
     notice.action!.run();
     await waitFor(() => expect(api.fix).toHaveBeenCalledWith(WS, undefined));
-    // On the base itself there is nothing to update from.
-    cleanup();
-    render(<PullRequestStrip workspaceId={WS} branch="main" />);
+    act(() => useStore.setState({ statuses: { [WS]: statusWith(fact({ checks: [], behindBase: 0 })) } }));
+    await waitFor(() => expect(screen.queryByText("Update from main")).toBeNull());
+    // A conflict with the base is the fix's, which tries the same update first.
+    act(() => useStore.setState({ statuses: { [WS]: statusWith(fact({ checks: [], behindBase: 2, mergeable: "conflicting" })) } }));
+    await waitFor(() => expect(document.querySelector("[data-pr-fix-conflicts]")).not.toBeNull());
     expect(screen.queryByText("Update from main")).toBeNull();
   });
 });

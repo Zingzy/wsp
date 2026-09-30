@@ -139,7 +139,7 @@ describe("the Diff header's branch", () => {
     let up = false;
     const late = {
       request: async (op: string) => {
-        if (!up) throw new Error("daemon unreachable");
+        if (!up) throw new Error("not answering");
         return op === "git.diff" ? DIFF : op === "git.status" ? STATUS : {};
       },
       onEvent: () => () => {},

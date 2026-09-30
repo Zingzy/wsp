@@ -25,7 +25,7 @@ function refusing(e: unknown): { asked: string[] } {
 
 async function startOnce(): Promise<string | null> {
   render(<DaemonDown absent={ownDaemonDown("this Mac")} workspaceId={WS} />);
-  await act(async () => void fireEvent.click(screen.getByRole("button", { name: "Start it" })));
+  await act(async () => void fireEvent.click(screen.getByRole("button", { name: "Start again" })));
   return document.querySelector("[data-k=start-daemon-refused]")?.textContent ?? null;
 }
 
@@ -61,7 +61,7 @@ describe("a daemon start the host refused", () => {
     refusing(new RequestError("wsp-daemon exited at once"));
     expect(await startOnce()).toBe("wsp-daemon exited at once. Start again.");
     act(() => useStore.setState({ api: { subscribe: () => () => {}, restartDaemon: () => new Promise<void>(() => {}) } as unknown as Api }));
-    await act(async () => void fireEvent.click(screen.getByRole("button", { name: "Start it" })));
+    await act(async () => void fireEvent.click(screen.getByRole("button", { name: "Start again" })));
     expect(document.querySelector("[data-k=start-daemon-refused]")).toBeNull();
   });
 });

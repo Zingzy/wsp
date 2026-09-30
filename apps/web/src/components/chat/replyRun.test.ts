@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { PTY_RUN_DAEMON_VERSION, type RunStep, type SessionRunEvent } from "@wsp/protocol";
 import type { RunExit, RunOpts } from "../../terminal/link.js";
 import { useTerminalDrawerStore } from "../../terminal/drawerStore.js";
-import { heldPty, moveRun, resumeRun, startRun, takeFocus, type RunDeps, type RunTarget } from "./replyRun.js";
+import { heldPty, moveRun, resumeRun, runDaemonBehindLine, startRun, takeFocus, type RunDeps, type RunTarget } from "./replyRun.js";
 
 /** A terminal model for one workspace that runs nothing: each run's exit and output are the test's to give. */
 function fakeTerminals() {
@@ -67,7 +67,7 @@ describe("a reply block's run, as this window drives it", () => {
     const t = fakeTerminals();
     const { api, steps } = recorder();
     const deps: RunDeps = { terminals: () => t.wt as never, version: () => PTY_RUN_DAEMON_VERSION - 1, runId: () => "run-1" };
-    await expect(startRun(api, TARGET, deps)).rejects.toThrow(/daemon/);
+    await expect(startRun(api, TARGET, deps)).rejects.toThrow(runDaemonBehindLine(PTY_RUN_DAEMON_VERSION - 1));
     expect(t.runs).toEqual([]);
     expect(steps).toEqual([]);
   });

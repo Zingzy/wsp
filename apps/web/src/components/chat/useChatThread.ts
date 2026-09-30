@@ -20,7 +20,7 @@ import { isSessionEvent } from "@wsp/protocol";
 import type { AttachmentRecord, SessionEvent, SessionHarness, SessionRunEvent, SessionView } from "@wsp/protocol";
 import { useProtocolEvents, useStore } from "../../protocol/store";
 import type { ProtocolEvent } from "../../protocol/client";
-import { deriveSession, entryTurnId, type TimelineEntry, type TurnSummary } from "./adapt";
+import { deriveSession, entryTurnId, type TimelineEntry, type TurnPlan, type TurnSummary } from "./adapt";
 
 export interface ChatThreadView {
   readonly entries: ReadonlyArray<TimelineEntry>;
@@ -45,6 +45,8 @@ export interface ChatThreadView {
   readonly permissionMode: string | null;
   /** Every reply block's latest run, by block, as the thread records it. */
   readonly runs: ReadonlyMap<string, SessionRunEvent>;
+  /** The latest turn's step list, which the composer's edge carries while that turn runs. */
+  readonly plan: TurnPlan | null;
 }
 
 export interface ChatThreadHandle {
@@ -447,7 +449,6 @@ function sameEntry(a: TimelineEntry, b: TimelineEntry): boolean {
   if (a.kind === "message" && b.kind === "message") return shallowEqual(a.message, b.message);
   if (a.kind === "work" && b.kind === "work") return shallowEqual(a.entry, b.entry);
   if (a.kind === "proposed-plan" && b.kind === "proposed-plan") return shallowEqual(a.proposedPlan, b.proposedPlan);
-  if (a.kind === "todo" && b.kind === "todo") return shallowEqual(a.todo, b.todo);
   return false;
 }
 
@@ -520,6 +521,7 @@ export function deriveChatThread(state: ThreadState, previous: ReadonlyArray<Tim
     agent: model.agent,
     permissionMode: model.permissionMode,
     runs: model.runs,
+    plan: model.plan,
   };
 }
 

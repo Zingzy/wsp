@@ -634,7 +634,7 @@ describe("composer queue", () => {
     emit({ type: "session.start", ...B, prompt: "hello b" });
     emit({ type: "session.done", ...B, result: { status: "completed", durationMs: 500 } });
     emit({ type: "session.end", ...B, exitCode: 0, sawResult: true });
-    await waitFor(() => expect(screen.getByTestId("settled-footer").textContent).toContain("Worked for"));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Send message" })).not.toBeNull());
     expect(started).toHaveLength(1);
     expect(queued()).toEqual([]);
 
@@ -681,7 +681,7 @@ describe("composer queue", () => {
     history[WS] = CHAT_STREAM.map(e => ({ ...e, sessionId: "sess_a", threadId: "thr_a" }));
     view.rerender(<WorkspaceThread workspaceId={WS} threadId="thr_a" />);
     await screen.findByText(/Server is live at :3000\./);
-    await waitFor(() => expect(screen.getByTestId("settled-footer").textContent).toContain("Worked for"));
+    await waitFor(() => expect(document.querySelector("[data-reply-time]")).not.toBeNull());
     expect(started).toHaveLength(1);
     expect(queued()).toEqual([]);
     expect(useComposerDraftStore.getState().queues["thr_a"]).toBeUndefined();
@@ -711,7 +711,7 @@ describe("composer queue", () => {
     const { api, started, emit } = fixtureApi({ [WS]: CHAT_STREAM.slice() });
     await setup(api);
     await screen.findByText(/Server is live at :3000\./);
-    await waitFor(() => expect(screen.getByTestId("settled-footer").textContent).toContain("Worked for"));
+    await waitFor(() => expect(document.querySelector("[data-reply-time]")).not.toBeNull());
     expect(started).toHaveLength(0);
     expect(queued()).toEqual(["and the context window?", "and the cost?"]);
     await enter("what model are you?");

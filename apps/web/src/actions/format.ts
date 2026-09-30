@@ -24,7 +24,7 @@ export const WORKSPACE_WORDS = {
   copyId: "Copy computer id",
   delete: "Delete task",
   forget: "Forget task",
-  startDaemon: "Start the daemon",
+  startDaemon: "Reconnect",
 } as const;
 
 /** The word a creation row's slot carries once the create was refused: the state table's own, so a thread that
@@ -120,7 +120,7 @@ export function phaseRefusal(state: WorkspaceState): string | null {
 
 export const CLIENT_CANNOT_REBUILD = "This client cannot rebuild tasks";
 export const CLIENT_CANNOT_FORGET = "This client cannot forget tasks";
-export const CLIENT_CANNOT_START_DAEMON = "This client cannot start a daemon";
+export const CLIENT_CANNOT_START_DAEMON = "This window cannot reconnect it";
 export const NEW_THREAD_WAITS = "New threads wait for the rebuild";
 export const PROJECTS_WAIT = "Projects wait for the rebuild";
 export const CLIENT_CANNOT_EXPORT = "This client cannot export projects";
