@@ -16,7 +16,8 @@ import { guestKinds } from "../src/guest-tools.js";
 import { guestDoor, type GuestDoor, type GuestLink } from "../src/guest.js";
 import type { HostHandle } from "../src/server.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
-import { stubBackend } from "./stub-backend.js";
+import { stubBackend, withDaemonRoads } from "./stub-backend.js";
+import { branchDaemons } from "../../runtime/test/stub-backend.js";
 import { PAGE, captured, copyingFake, fakeDaemonStart, heldAgent, type Captured } from "./verbs-fixture.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
 
@@ -48,7 +49,8 @@ describe("the wsp command on a thread's machine", () => {
     // A host on loopback that names no address and is linked to no relay: a fork's wsp rides the link this host
     // holds to its daemon, so nothing about where this host answers may stand between its turns and a token.
     rt = createRuntime({
-      backend: stubBackend(),
+      backend: withDaemonRoads(stubBackend()),
+      daemonChannel: branchDaemons().open,
       store,
       adapters: { claude: ctx => ({ ...held.adapter(ctx), mcpServers: true as const }) },
       local: localWiring(join(dir, "user")),
@@ -165,7 +167,8 @@ describe("the wsp command a thread on this computer runs", () => {
     // through the same reach a real host hands it.
     const here: { url?: string } = {};
     rt = createRuntime({
-      backend: stubBackend(),
+      backend: withDaemonRoads(stubBackend()),
+      daemonChannel: branchDaemons().open,
       store: memoryStore(),
       adapters: { claude: held.adapter },
       local: localWiring(join(dir, "user"), process.env, fakeDaemonStart, undefined, copyingFake()),

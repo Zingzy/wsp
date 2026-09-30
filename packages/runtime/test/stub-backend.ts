@@ -7,16 +7,77 @@ import type { AddressInfo } from "node:net";
 import { gzipSync } from "node:zlib";
 import { fakeCopier, LocalBackend, NotFirstLifeError, SNAPSHOT_STORAGE } from "@wsp/engine";
 import type { ExecResult, Lifecycle, Machine, MachineBackend, MachineLife, MachineShape, MachineSpec, MachineState, RunOptions, SnapshotRow, TemplateRow } from "@wsp/engine";
-import { DAEMON_TOKEN_PATH, HERE_PLACE_ID, scopeOf, type Caller, type ProjectView } from "@wsp/protocol";
+import { DAEMON_TOKEN_PATH, HERE_PLACE_ID, scopeOf, type Caller, type DaemonResponse, type ProjectView } from "@wsp/protocol";
+import type { DaemonChannel, DaemonChannelOptions } from "../src/daemon-channel.js";
 import type { CreatedWorkspace, CreateWorkspaceOptions, LocalWiring, Runtime } from "../src/runtime.js";
 import { localExecStream } from "../src/local-exec.js";
 import { memoryStore, type Store } from "../src/store.js";
-import { DAEMON_TOKEN_SET } from "../src/daemon-token.js";
+import { DAEMON_TOKEN_SET, daemonTokenFor } from "../src/daemon-token.js";
 
 /** The branch the stub guest's checkout is on, and the remote's copy of it: what a workspace forked from such a
  * guest starts on, and what a bring back from it measures against. A guest that answered nothing to the branch
  * read would be a machine that did not say, which a fork refuses. */
 export const GUEST_BRANCH = "work";
+
+/** Daemons for every machine and for this computer, as every workspace has one: a lead's checkout reads as on
+ * GUEST_BRANCH (or the branch `branchOf` names for that machine), tracked and level with its upstream, and a child's
+ * copy is put on whatever branch it is asked. What a fork under a lead reads and asks through the lead's and the
+ * child's own daemons; every frame is kept with the machine it went to, read off the dial's token. */
+export function branchDaemons(o: { seed?: string; branchOf?: (machineId: string) => string } = {}): {
+  open: (dial: DaemonChannelOptions) => Promise<DaemonChannel>;
+  frames: (Record<string, unknown> & { machine: string })[];
+} {
+  const seed = o.seed ?? "cafef00d".repeat(3);
+  const frames: (Record<string, unknown> & { machine: string })[] = [];
+  const machineOf = (dial: DaemonChannelOptions): string => {
+    for (let n = 1; n < 40; n++) if (dial.token === daemonTokenFor(seed, `m${n}`)) return `m${n}`;
+    return "here";
+  };
+  const answer = (machine: string, frame: Record<string, unknown>): Record<string, unknown> => {
+    switch (frame["op"]) {
+      case "git.status": {
+        const head = o.branchOf?.(machine) ?? GUEST_BRANCH;
+        return { ok: true, branch: { oid: "abc", head, upstream: `origin/${head}`, ahead: 0, behind: 0 }, entries: [], root: String(frame["cwd"]) };
+      }
+      case "git.startOn":
+        return { ok: true, branch: String(frame["branch"]), oid: "c0ffee" };
+      default:
+        return { ok: false, error: `${String(frame["op"])} was not answered` };
+    }
+  };
+  return {
+    frames,
+    open: async dial => {
+      const machine = machineOf(dial);
+      return {
+        send: async frame => {
+          const held = frame as unknown as Record<string, unknown>;
+          frames.push({ ...held, machine });
+          return { id: 1, ...answer(machine, held) } as DaemonResponse;
+        },
+        close: () => {},
+        closed: new Promise(() => {}),
+      };
+    },
+  };
+}
+
+/** Every machine the stub makes has its daemon's road from the moment it exists, as a fork's has once its create ran:
+ * a child's copy is put on its branch inside the create that made it. The daemon answers when asked, so nothing dials
+ * the route itself, which points at a port nothing listens on: a run never leans on a daemon this computer happens to
+ * run. */
+export function withDaemonRoads(backend: StubBackend): StubBackend {
+  const answer = backend.execImpl;
+  backend.execImpl = (m, cmd) => (cmd.includes(DAEMON_TOKEN_PATH) ? { exitCode: 0, stdout: `${DAEMON_TOKEN_SET}\n`, stderr: "" } : answer(m, cmd));
+  const make = backend.create.bind(backend);
+  backend.create = async spec => {
+    const m = (await make(spec)) as StubMachine;
+    m.previewUrl ??= async () => ({ url: "http://127.0.0.1:9", token: "e", expiresAt: Date.now() + 3_600_000 });
+    m.daemonAnswers ??= async () => true;
+    return m;
+  };
+  return backend;
+}
 
 /** What every stub guest answers whatever else it is told: the branch read, since a create with a parent makes it
  * before it mints anything. Written once here so a test that wants another answer overrides that one line. */

@@ -16,9 +16,9 @@ import { ArrowDownIcon } from "lucide-react";
 import type { LegendListRef } from "@legendapp/list/react";
 import { workspaceWord } from "@wsp/protocol";
 import { Button } from "../ui/button";
-import { useCapabilities, useHarnessCatalog, usePlaces, useSidebarProjects, useStore, useThreadSessions, useWorkspace, useWorkspaceState } from "../../protocol/store";
+import { useCapabilities, useHarnessCatalog, usePlaces, useSidebarProjects, useStatus, useStore, useThreadSessions, useWorkspace, useWorkspaceState } from "../../protocol/store";
+import { TreeRows } from "../../tree/TreeRows.js";
 import { Facts } from "../Facts.js";
-import { ThreadRows } from "../threads/ThreadRows.js";
 import { useMachineLine } from "../../notices/workspaceLines.js";
 import { openNamedFile } from "../../files/open";
 import { threadFolderOf } from "../../files/root";
@@ -212,7 +212,7 @@ export function ChatView({
   const machine = useMachineLine(workspaceId);
   const footer = thread.hydrated ? (
     <div className="mx-auto w-full min-w-0 max-w-3xl">
-      {opened.length > 0 ? <OpenedThreads opened={opened} /> : null}
+      {opened.length > 0 ? <OpenedThreads workspaceId={workspaceId} opened={opened} /> : null}
       {view.settled !== null && !settledOnReply ? <SettledFooter turn={view.settled} /> : null}
       {paused !== null ? (
         <TimelineRuleLine data-workspace-paused line={paused}>
@@ -318,10 +318,13 @@ export function EmptyThread({ name, projectId, picker }: { name: string; project
 }
 
 /** The threads this thread's agent opened, wherever each runs, one line each under the reply, so a person reading the
- * opener can reach every thread it started without hunting the sidebar for it. */
-function OpenedThreads({ opened }: { opened: ReadonlyArray<ThreadOnWorkspace> }) {
+ * opener can reach every thread it started without hunting the sidebar for it; each with its workspace's branch against
+ * this workspace's where the host read this workspace's children. */
+function OpenedThreads({ workspaceId, opened }: { workspaceId: string; opened: ReadonlyArray<ThreadOnWorkspace> }) {
   const places = usePlaces();
-  return <ThreadRows label="Threads" className="mt-2" rows={opened.map(({ thread, runs }) => ({ thread, place: computerName(places, runs) }))} />;
+  const tree = useStatus(workspaceId)?.tree;
+  const name = useWorkspace(workspaceId)?.name ?? workspaceId;
+  return <TreeRows lead={{ id: workspaceId, name }} tree={tree} className="mt-2" rows={opened.map(({ thread, runs }) => ({ thread, place: computerName(places, runs) }))} />;
 }
 
 const TURN_STATUS: Record<TurnSummary["state"], string> = {

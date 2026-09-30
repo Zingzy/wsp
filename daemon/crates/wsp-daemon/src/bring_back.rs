@@ -4,7 +4,7 @@
 
 use std::path::Path;
 
-use wsp_frames::{words, GitPushReply};
+use wsp_frames::{words, DaemonErrorCode, GitPushReply};
 
 use crate::git::{check, default_branch, parse_porcelain_v2, rev_exists, run_git, stdout_text, Runs};
 use crate::paths::OpError;
@@ -146,7 +146,7 @@ pub(crate) async fn push<R: Runs>(runner: &R, cwd: &Path, named: Option<&str>) -
     let pushed = run_git(runner, cwd, &["push", "-u", &remote, &branch], None, None).await?;
     if pushed.code != Some(0) {
         if let Some(refusal) = no_credential(runner, cwd, &remote, &pushed.stderr, words::no_git_credential).await? {
-            return Err(OpError::plain(refusal));
+            return Err(OpError::coded(DaemonErrorCode::NoGitCredential, refusal));
         }
         let said = pushed.stderr.trim();
         return Err(OpError::plain(format!("git push failed: {}", if said.is_empty() { stdout_text(&pushed) } else { said.to_owned() })));
@@ -352,6 +352,8 @@ mod tests {
         let refused = push(&runner, Path::new("/private/tmp/proof/repo"), None).await.unwrap_err();
         let fix = crate::hosts::host_for("https://github.com/o/r.git").unwrap().credential_fix();
         assert_eq!(refused.message, words::no_git_credential("github.com", Some(fix)));
+        // The host knows it by the code stamped here, never by the sentence.
+        assert_eq!(refused.code, Some(DaemonErrorCode::NoGitCredential));
         // The words a person reads name the host and the commands only they can run, and say nothing landed.
         assert!(refused.message.contains("gh auth login"), "{}", refused.message);
         assert!(refused.message.contains("nothing was pushed"), "{}", refused.message);
@@ -381,7 +383,9 @@ mod tests {
         assert!(!refused.message.contains("gh"), "{}", refused.message);
         // A remote that is a folder beside the checkout has no host and no credential to want.
         let folder = push_answering(vec![(128, "", NO_USERNAME), (0, "/srv/mirrors/r.git\n", "")]);
-        assert!(push(&folder, Path::new("/private/tmp/proof/repo"), None).await.unwrap_err().message.starts_with("git push failed: "));
+        let failed = push(&folder, Path::new("/private/tmp/proof/repo"), None).await.unwrap_err();
+        assert!(failed.message.starts_with("git push failed: "));
+        assert_eq!(failed.code, None);
     }
 
     #[tokio::test]

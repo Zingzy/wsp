@@ -4,6 +4,8 @@ import type { AddressInfo } from "node:net";
 import { gzipSync } from "node:zlib";
 import { NODE_RELEASES } from "@wsp/catalog";
 import { MCP_READ_MARK, NotFirstLifeError, SNAPSHOT_STORAGE } from "@wsp/engine";
+import { DAEMON_TOKEN_PATH } from "@wsp/protocol";
+import { DAEMON_TOKEN_SET } from "@wsp/runtime";
 import type { ExecResult, Lifecycle, Machine, MachineBackend, MachineLife, MachineSpec, MachineState, RunOptions, SnapshotRow, TemplateRow } from "@wsp/engine";
 
 export interface StubMachine extends Machine {
@@ -112,6 +114,29 @@ export function guestAnswer(cmd: string, configs?: (file: string) => string | un
   // on. A guest that answered nothing here would be a machine that did not say, which the fork refuses.
   if (cmd.includes("rev-parse --abbrev-ref HEAD")) return { exitCode: 0, stdout: `${GUEST_BRANCH}\norigin/${GUEST_BRANCH}\n`, stderr: "" };
   return { exitCode: 0, stdout: "", stderr: "" };
+}
+
+/** Every machine the stub makes has its daemon's road from the moment it exists and takes the host's token, as a fork's
+ * does once its create has run: a fork with a source reads the source's branch through its daemon and puts the new
+ * copy on it through the new machine's own. */
+export function withDaemonRoads(backend: StubBackend): StubBackend {
+  const answer = backend.execImpl;
+  backend.execImpl = (m, cmd) => (cmd.includes(DAEMON_TOKEN_PATH) ? { exitCode: 0, stdout: `${DAEMON_TOKEN_SET}\n`, stderr: "" } : answer(m, cmd));
+  // The daemon answers when asked, so nothing dials the route, which points at a port nothing listens on.
+  // A machine a case already gave a route of its own keeps it, and whatever that route answers.
+  const road = (m: StubMachine & { previewUrl?: Machine["previewUrl"]; daemonAnswers?: Machine["daemonAnswers"] }): void => {
+    if (m.previewUrl !== undefined) return;
+    m.previewUrl = async () => ({ url: "http://127.0.0.1:9", token: "e", expiresAt: Date.now() + 3_600_000 });
+    m.daemonAnswers ??= async () => true;
+  };
+  for (const m of backend.machines) road(m);
+  const make = backend.create.bind(backend);
+  backend.create = async spec => {
+    const m = (await make(spec)) as StubMachine;
+    road(m);
+    return m;
+  };
+  return backend;
 }
 
 export function stubBackend(): StubBackend {

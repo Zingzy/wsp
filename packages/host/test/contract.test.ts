@@ -13,7 +13,7 @@ import { type AddressInfo } from "node:net";
 import { promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { CLOUD_ENV, DAEMON_TOKEN_PATH, EXIT_CODES, SCOPED_MCP_ARG, scopedNoPairLine, HERE_PLACE_ID, shellQuote, TURN_TOKEN_ENV, VerbFailure, WS_PATH } from "@wsp/protocol";
+import { CLOUD_ENV, DAEMON_TOKEN_PATH, pushedForChildLine, EXIT_CODES, SCOPED_MCP_ARG, scopedNoPairLine, HERE_PLACE_ID, shellQuote, TURN_TOKEN_ENV, VerbFailure, WS_PATH } from "@wsp/protocol";
 import { CLOUD_ON } from "../src/cloud.js";
 import { copyKey, createRuntime, DAEMON_TOKEN_SET, localExecStream, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import { LocalBackend } from "@wsp/engine";
@@ -195,6 +195,10 @@ describe("the agent contract on the command line and the tool door", () => {
             ? { id: 1, ok: true, ...PULL_REQUEST_FRAMES[frame.op as keyof typeof PULL_REQUEST_FRAMES] }
             : frame.op === "git.push"
             ? { id: 1, ok: true, branch: "work", base: "main", remote: "origin", ahead: 1, uncommitted: 0, stat: [" a.ts | 2 +-"] }
+            : frame.op === "git.startOn"
+            ? { id: 1, ok: true, branch: frame.branch, oid: "c0ffee" }
+            : frame.op === "git.mergeIn"
+            ? { id: 1, ok: true, branch: frame.branch, merged: true, commits: 1, oid: "d00dfeed", conflicts: [] }
             : frame.op === "git.commit"
               ? { id: 1, ok: true, oid: "5f1c0e2b9a7d4c3e8f6a1b2c3d4e5f60718293a4", subject: "Round the cart total once", filesChanged: 1, insertions: 1, deletions: 1 }
               : frame.op === "git.discard"
@@ -307,6 +311,17 @@ describe("the agent contract on the command line and the tool door", () => {
     expect(await last("update", "update", "alpha")).toEqual({ base: "main", merged: true, commits: 2, conflicts: [] });
     expect(await last("fix", "fix", "alpha")).toEqual({ outcome: "updated", base: "main" });
     expect(await last("merge", "merge", "alpha", "--method", "squash")).toEqual({ number: 3, method: "squash", merged: true, autoArmed: false });
+    // A child of alpha, made as a thread's fork makes one, with a road to its own daemon from the moment it exists:
+    // its copy is put on the branch alpha pushed inside the create that made it.
+    const make = backend.create.bind(backend);
+    backend.create = async spec => {
+      const m = await make(spec);
+      Object.assign(m, { previewUrl: machine.previewUrl, daemonAnswers: async () => true });
+      return m;
+    };
+    await rt!.workspaces.create({ project: "alpha", golden: "snap_g", name: "beta", parent: alpha });
+    backend.create = make;
+    expect(await last("merge in", "merge", "in", "alpha", "beta")).toEqual({ lead: "alpha", child: "beta", branch: "work", merged: true, commits: 1, conflicts: [] });
     // The route goes again with the guest that answered for it: a machine wearing one has every later verb wait on
     // a daemon that is not there, which is the rest of this run.
     machine.previewUrl = noRoute;
@@ -399,15 +414,30 @@ describe("the agent contract on the command line and the tool door", () => {
     expect(objects(ran.io)).toEqual([{ type: "exec.output", execId: expect.any(String), text: "ok" }, { exitCode: 0, cwd: "/root/alpha" }]);
     covered.set("exec", objects(ran.io).at(-1));
     if (CLOUD_ON) {
+      // A fork reads its source's branch through the source's daemon and puts the child's copy on it through the
+      // child's, so both roads stand while the forks run.
+      machine.previewUrl = async () => ({ url: "http://127.0.0.1:7070", token: "e", expiresAt: Date.now() + 3_600_000 });
+      const guestNow = backend.execImpl;
+      backend.execImpl = (m, cmd) => (cmd.includes(DAEMON_TOKEN_PATH) ? { exitCode: 0, stdout: `${DAEMON_TOKEN_SET}\n`, stderr: "" } : guestNow(m, cmd));
+      const make = backend.create.bind(backend);
+      backend.create = async spec => {
+        const m = await make(spec);
+        Object.assign(m, { previewUrl: machine.previewUrl, daemonAnswers: async () => true });
+        return m;
+      };
       const forked = await run("fork", "alpha", "--name", "worker", "--send", "build it", "--json");
       expect(forked.code).toBe(0);
       const forkLines = objects(forked.io) as Record<string, unknown>[];
-      expect(forkLines.filter(o => "workspace" in o)).toEqual([{ workspace: expect.objectContaining({ name: "worker" }) }]);
+      // alpha's branch holds a commit the remote lacks, so the fork pushed it first and says so beside the workspace.
+      expect(forkLines.filter(o => "workspace" in o)).toEqual([{ workspace: expect.objectContaining({ name: "worker" }), notice: expect.stringContaining(pushedForChildLine("work", "worker")) }]);
       expect(forkLines.at(-1)).toEqual({ turn: expect.objectContaining({ text: "re: build it", outcome: "started" }) });
       covered.set("fork", forkLines.at(-1));
       const plain = await run("fork", "alpha", "--name", "sibling", "--json");
       expect(plain.code).toBe(0);
-      expect(objects(plain.io).at(-1)).toEqual({ workspace: expect.objectContaining({ name: "sibling" }) });
+      expect(objects(plain.io).at(-1)).toEqual({ workspace: expect.objectContaining({ name: "sibling" }), notice: expect.stringContaining(pushedForChildLine("work", "sibling")) });
+      backend.create = make;
+      backend.execImpl = guestNow;
+      machine.previewUrl = noRoute;
     } else {
       expect((await run("new", "worker")).code).toBe(0);
       // The rebuild below is the cloud's, so with none the delete runs on a machine that still answers.

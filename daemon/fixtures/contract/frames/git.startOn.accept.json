@@ -1,0 +1,15 @@
+[
+  {
+    "id": 1,
+    "op": "git.startOn",
+    "cwd": "repo",
+    "branch": "tree/lead"
+  },
+  {
+    "id": 2,
+    "op": "git.startOn",
+    "cwd": "/root/wsp-boat",
+    "branch": "tree/lead",
+    "machineId": "wsp-a"
+  }
+]
