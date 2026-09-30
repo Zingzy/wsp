@@ -165,6 +165,9 @@ describe("chat tab rendering", () => {
     expect(useDiffStore.getState().turnByWorkspaceId[WS]).toEqual({ turnId: CHAT_TURN, cwd: expect.any(String), from, to, path: "server.js" });
     const panel = useRightPanelStore.getState().byWorkspaceId[WS];
     expect([panel?.isOpen, panel?.activeSurfaceId]).toEqual([true, "diff"]);
+    // A reload keeps the pane on that turn's own range, never the branch's whole diff against its base.
+    const kept = JSON.parse(window.localStorage.getItem(useDiffStore.persist.getOptions().name!) ?? "null") as { state: { turnByWorkspaceId?: Record<string, unknown> } } | null;
+    expect(kept?.state.turnByWorkspaceId?.[WS]).toMatchObject({ turnId: CHAT_TURN, from, to });
   });
 
   it("carries the agent's step list on the composer's edge while its turn runs, never in the transcript", async () => {
