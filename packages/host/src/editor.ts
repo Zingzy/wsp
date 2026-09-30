@@ -8,8 +8,8 @@
 import { spawn } from "node:child_process";
 import { realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
-import type { EditorChoice, EditorId } from "@wsp/protocol";
+import { isAbsolute, join, posix, resolve } from "node:path";
+import { editorOpensHereLine, type EditorChoice, type EditorId } from "@wsp/protocol";
 import type { HostEditor } from "@wsp/runtime";
 import { under } from "./init-import.js";
 
@@ -25,6 +25,9 @@ interface EditorRow {
   /** The app bundles it installs as; the first one found is the one run. */
   readonly apps: readonly string[];
   command(app: string, path: string, line: number | undefined, folder: boolean): EditorCommand;
+  /** The same over ssh into a workspace on another computer: the workspace's folder, and the file at its line where
+   * one was asked for. Absent on an editor with no remote road of its own. */
+  remote?(app: string, alias: string, folder: string, file: string | undefined, line: number | undefined): EditorCommand;
 }
 
 const OPEN = "/usr/bin/open";
@@ -35,6 +38,10 @@ const vscodeRow = (id: EditorId, name: string, app: string, bin: string): Editor
   name,
   apps: [app],
   command: (found, path, line) => ({ file: join(found, "Contents/Resources/app/bin", bin), args: line === undefined ? [path] : ["-g", `${path}:${line}`] }),
+  remote: (found, alias, folder, file, line) => ({
+    file: join(found, "Contents/Resources/app/bin", bin),
+    args: ["--remote", `ssh-remote+${alias}`, folder, ...(file === undefined ? [] : ["--goto", line === undefined ? file : `${file}:${line}`])],
+  }),
 });
 
 /** A JetBrains IDE through the Mac's own opener, which hands the arguments to the running instance, `--line` included. */
@@ -55,6 +62,11 @@ export const EDITORS: readonly EditorRow[] = [
     name: "Zed",
     apps: ["Zed.app"],
     command: (found, path, line) => ({ file: join(found, "Contents/MacOS/cli"), args: [line === undefined ? path : `${path}:${line}`] }),
+    // The folder first: the file alone opens as a worktree of one file, which Zed asks to be trusted apart.
+    remote: (found, alias, folder, file, line) => ({
+      file: join(found, "Contents/MacOS/cli"),
+      args: [`ssh://${alias}${folder}`, ...(file === undefined ? [] : [`ssh://${alias}${file}${line === undefined ? "" : `:${line}`}`])],
+    }),
   },
   jetbrainsRow("idea", "IntelliJ IDEA", ["IntelliJ IDEA.app", "IntelliJ IDEA Ultimate.app", "IntelliJ IDEA CE.app", "IntelliJ IDEA Community Edition.app"]),
   jetbrainsRow("webstorm", "WebStorm", ["WebStorm.app"]),
@@ -130,6 +142,16 @@ export function openablePath(path: string, inside: readonly string[]): string {
   return asked;
 }
 
+/** A path inside a workspace's folder on another computer, by its words: absolute, and under that folder once every
+ * way up is taken. */
+function remotePath(path: string, folder: string): string {
+  if (!posix.isAbsolute(path)) throw new Error(editorOutsideLine(path));
+  const asked = posix.resolve(path);
+  const root = posix.resolve(folder);
+  if (asked !== root && !asked.startsWith(`${root}/`)) throw new Error(editorOutsideLine(path));
+  return asked;
+}
+
 export function editorHost(o: EditorHostOptions = {}): HostEditor {
   const platform = o.platform ?? process.platform;
   const home = o.home ?? homedir();
@@ -149,14 +171,21 @@ export function editorHost(o: EditorHostOptions = {}): HostEditor {
       return app === undefined ? [] : [{ row, app }];
     });
   return {
-    list: async (): Promise<EditorChoice[]> => installed().map(({ row }) => ({ id: row.id, name: row.name })),
-    open: async ({ path, line, inside, editor }) => {
-      const opening = openablePath(path, inside);
+    list: async (): Promise<EditorChoice[]> => installed().map(({ row }) => ({ id: row.id, name: row.name, ...(row.remote !== undefined ? { remote: true as const } : {}) })),
+    open: async ({ path, line, inside, editor, remote }) => {
+      // A workspace on another computer holds its files there, so its path is held to the folder by its words alone.
+      const opening = remote === undefined ? openablePath(path, inside) : remotePath(path, remote.folder);
       const here = installed();
       const pick = editor === undefined ? here[0] : here.find(({ row }) => row.id === editor);
       if (pick === undefined) {
         const named = EDITORS.find(row => row.id === editor);
         throw new Error(named === undefined ? NO_EDITOR_LINE : editorMissingLine(named.name));
+      }
+      if (remote !== undefined) {
+        if (pick.row.remote === undefined) throw new Error(editorOpensHereLine(remote.name));
+        const folder = posix.resolve(remote.folder);
+        await run(pick.row.remote(pick.app, remote.alias, folder, opening === folder ? undefined : opening, line));
+        return pick.row.id;
       }
       const folder = statSync(opening).isDirectory();
       await run(pick.row.command(pick.app, opening, folder ? undefined : line, folder));

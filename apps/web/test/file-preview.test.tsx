@@ -25,6 +25,9 @@ vi.mock("@pierre/diffs/react", () => ({
   }),
 }));
 
+import { sshIncludeLine } from "@wsp/protocol";
+import { useSshConsent } from "../src/files/EditorConsent.js";
+import { RequestError } from "../src/protocol/client.js";
 import { FilePreviewSurface } from "../src/files/FilePreviewSurface.js";
 import { useRootStore } from "../src/files/root.js";
 import { provideDaemonWire } from "../src/files/wire.js";
@@ -119,9 +122,31 @@ describe("open in editor, from the file tab", () => {
     expect(openInEditor).toHaveBeenCalledWith(WS, "/root/src/a.ts", 12);
   });
 
-  it("says in place of the button where a fork's files are, naming it, and asks the host nothing", async () => {
+  it("asks the host to open a running fork's file at its line, over its ssh", async () => {
     const openInEditor = vi.fn(async () => "zed" as const);
     act(() => useStore.setState({ workspaces: [{ ...view, kind: "cloud", name: "Delete compatibility and duplicates" }], api: { openInEditor } as never }));
+    provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "fs.read": { content: "x\n", size: 2, truncated: false } }));
+    render(<FilePreviewSurface workspaceId={WS} surface={fileSurface("/root/wsp-boat/README.md", 12)} theme="dark" />);
+    await act(async () => void fireEvent.click(screen.getByRole("button", { name: "Open in editor" })));
+    expect(openInEditor).toHaveBeenCalledWith(WS, "/root/wsp-boat/README.md", 12);
+  });
+
+  it("hands the question of the line in the person's ssh config to the one sheet, and says nothing in place of the button", async () => {
+    const openInEditor = vi.fn(async () => {
+      throw new RequestError(sshIncludeLine("Delete compatibility and duplicates"), "sshInclude");
+    });
+    act(() => useStore.setState({ workspaces: [{ ...view, kind: "cloud", name: "Delete compatibility and duplicates" }], api: { openInEditor } as never }));
+    provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "fs.read": { content: "x\n", size: 2, truncated: false } }));
+    const { container } = render(<FilePreviewSurface workspaceId={WS} surface={fileSurface("/root/wsp-boat/README.md", 12)} theme="dark" />);
+    await act(async () => void fireEvent.click(screen.getByRole("button", { name: "Open in editor" })));
+    expect(useSshConsent.getState().asking).toMatchObject({ workspaceId: WS, name: "Delete compatibility and duplicates" });
+    expect(container.querySelector("[data-open-in-editor-said]")).toBeNull();
+    act(() => useSshConsent.setState({ asking: null }));
+  });
+
+  it("says in place of the button where a napping fork's files are, naming it, and asks the host nothing", async () => {
+    const openInEditor = vi.fn(async () => "zed" as const);
+    act(() => useStore.setState({ workspaces: [{ ...view, kind: "cloud", phase: "napping", name: "Delete compatibility and duplicates" }], api: { openInEditor } as never }));
     provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "fs.read": { content: "x\n", size: 2, truncated: false } }));
     const { container } = render(<FilePreviewSurface workspaceId={WS} surface={fileSurface("/root/wsp-boat/README.md")} theme="dark" />);
     fireEvent.click(screen.getByRole("button", { name: "Open in editor" }));

@@ -57,7 +57,8 @@ pub use reply::{
     GitSnapshotReply, GitStatusEntry, GitStatusReply, GitUpdateReply, HostFolder, HostFolderListing, HostItem, InboxRescanReply,
     ListeningPort, ManifestEntry, ManifestGetReply, ManifestRecordReply, ManifestRestartScriptReply, PlaceLeaveReply, PlaceUpdateReply,
     PortsWatchReply, ProcInspectReply, PtyAttachReply, PtyCreateReply, PtyListEntry, PtyListReply, PullRequest, PullRequestCheck,
-    PullRequestCheckRun, PullRequestComment, PullRequestCommit, PullRequestFile, PullRequestReview, PullRequestReviewComment, Reply, True,
+    PullRequestCheckRun, PullRequestComment, PullRequestCommit, PullRequestFile, PullRequestReview, PullRequestReviewComment, Reply,
+    SshStartReply, True,
 };
 pub use request::{DaemonOp, DaemonRequest, DAEMON_OPS, GUEST_OPS};
 pub use shell::shell_quote;

@@ -270,3 +270,14 @@ pub fn no_git_credential(host: &str, fix: Option<&str>) -> String {
     };
     format!("this computer has no git credential for {host}, so nothing was pushed{said}")
 }
+
+/// What an ssh.start is refused with on a machine whose image carries no OpenSSH server: an editor reaches a
+/// workspace through one, and nothing of wsp's stands in for it.
+pub const NO_SSHD: &str = "this workspace's image has no ssh server (/usr/sbin/sshd), so an editor cannot open it; seal a new image, which installs openssh-server";
+
+/// What an ssh.start naming no workspace is refused with on a daemon that answers for the workspaces on a computer
+/// somebody owns: it runs as that computer's root, and starts no ssh server there for anybody's editor.
+pub const SSH_NOT_ON_A_PLACE: &str = "this daemon starts an ssh server inside a workspace on this computer, never on the computer itself; name the workspace the editor is for";
+
+/// What an ssh.start is refused with where the key is not one ed25519 public key line.
+pub const SSH_KEY_SHAPE: &str = "the key is not one ssh-ed25519 public key line";

@@ -12,7 +12,7 @@ export type DaemonEvent = { "type": "daemon.hello", root: string, version: numbe
 /**
  * When the close was seen, as the node daemon stamps it: an ISO date, never a number.
  */
-at?: string, } | { "type": "inbox.file", path: string, bytes: number, } | { "type": "pty.mode", ptyId: string, mode: PtyMode, echo: boolean, foreground: string, } | { "type": "browser.open", url: string, port?: RelayPort, } | { "type": "callback.port", port: RelayPort, } | { "type": "tunnel.data", tunnelId: string, data: string, } | { "type": "tunnel.end", tunnelId: string, } | { "type": "localhost.url", port: RelayPort, } | { "type": "sys.sample", cpu: number, load1: number, mem: Usage, disk: Usage, at: number, } | { "type": "proc.snapshot", at: number, daemon: number, total: number, procs: Array<ProcEntry>, } | { "type": "guest.opened", session: string, 
+at?: string, } | { "type": "inbox.file", path: string, bytes: number, } | { "type": "pty.mode", ptyId: string, mode: PtyMode, echo: boolean, foreground: string, } | { "type": "browser.open", url: string, port?: RelayPort, } | { "type": "callback.port", port: RelayPort, } | { "type": "tunnel.data", tunnelId: string, data: string, machineId?: string, } | { "type": "tunnel.end", tunnelId: string, machineId?: string, } | { "type": "localhost.url", port: RelayPort, } | { "type": "sys.sample", cpu: number, load1: number, mem: Usage, disk: Usage, at: number, } | { "type": "proc.snapshot", at: number, daemon: number, total: number, procs: Array<ProcEntry>, } | { "type": "guest.opened", session: string, 
 /**
  * The workspace the session was opened inside, on a daemon that runs workspaces: the listener the frame
  * arrived on is what names it, never anything the guest said. Absent on a daemon inside a machine, where

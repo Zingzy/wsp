@@ -26,7 +26,7 @@ use crate::paths::OpError;
 use crate::proc::{kill_process, ProcSampler, ProtectedPids};
 use crate::pty::{passwd_row, process_env, pump, PtyCreateOpts};
 use crate::tunnel::Tunnels;
-use crate::{bring_back, frame_text as text, fs, git, hosts, paths, Ctx, Listener, Outbound, Outgoing};
+use crate::{bring_back, frame_text as text, fs, git, hosts, paths, ssh, tunnel, Ctx, Listener, Outbound, Outgoing};
 
 type Detach = Box<dyn FnOnce() + Send>;
 
@@ -309,6 +309,7 @@ async fn handle_op(conn: &Arc<Conn>, ctx: &Arc<Ctx>, frame: &Value, id: Option<R
             | "inbox.watch"
             | "inbox.rescan"
             | "tunnel.open"
+            | "ssh.start"
             | "tunnel.write"
             | "tunnel.close"
             | "sys.watch"
@@ -592,6 +593,43 @@ async fn pty_inside(
     _cwd: String,
 ) -> String {
     answer::<Empty>(id, Err(no_such_workspace(machine)))
+}
+
+/// The port a tunnel carries to: on this machine's own loopback, or on one workspace's inside its namespace.
+async fn dial_port(ctx: &Arc<Ctx>, machine: Option<String>, port: u16) -> Result<tokio::net::TcpStream, String> {
+    let Some(machine) = machine else { return tunnel::connect_loopback(port).await };
+    dial_inside(ctx, &machine, port).await
+}
+
+#[cfg(target_os = "linux")]
+async fn dial_inside(ctx: &Arc<Ctx>, machine: &str, port: u16) -> Result<tokio::net::TcpStream, String> {
+    let ops = workspaces_of(ctx, machine).map_err(|e| e.message)?;
+    ops.dial_in(machine, port).await.map_err(|e| from_runtime(e).message)
+}
+
+#[cfg(not(target_os = "linux"))]
+async fn dial_inside(_ctx: &Arc<Ctx>, machine: &str, _port: u16) -> Result<tokio::net::TcpStream, String> {
+    Err(no_such_workspace(machine).message)
+}
+
+/// The ssh server of this machine, or of the workspace named.
+async fn ssh_start(ctx: &Arc<Ctx>, machine: Option<&str>, key: &str) -> Result<wsp_frames::SshStartReply, OpError> {
+    match machine {
+        None if ctx.options.place_file.is_some() => Err(OpError::coded(DaemonErrorCode::BadRequest, words::SSH_NOT_ON_A_PLACE)),
+        None => ctx.sshd.start(ssh::Machine::Here, key).await,
+        Some(machine) => ssh_inside(ctx, machine, key).await,
+    }
+}
+
+#[cfg(target_os = "linux")]
+async fn ssh_inside(ctx: &Arc<Ctx>, machine: &str, key: &str) -> Result<wsp_frames::SshStartReply, OpError> {
+    let ops = workspaces_of(ctx, machine)?;
+    ctx.sshd.start(ssh::Machine::Inside { ops: &ops, id: machine }, key).await
+}
+
+#[cfg(not(target_os = "linux"))]
+async fn ssh_inside(_ctx: &Arc<Ctx>, machine: &str, _key: &str) -> Result<wsp_frames::SshStartReply, OpError> {
+    Err(no_such_workspace(machine))
 }
 
 /// What a path for a workspace that is not absolute is refused with, wherever a frame names one: this daemon has
@@ -977,7 +1015,14 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
         }
         DaemonOp::GuestReply { session, message } => answer(id, ctx.guests.reply(conn, &session, message).map(|()| Empty {})),
         DaemonOp::GuestClose { session, error } => answer(id, ctx.guests.close(conn, &session, error).map(|()| Empty {})),
-        DaemonOp::TunnelOpen { tunnel_id, port } => answer(id, Tunnels::open(conn, tunnel_id, port.get()).await.map(|()| Empty {})),
+        DaemonOp::TunnelOpen { tunnel_id, port, machine_id } => {
+            let port = port.get();
+            // A tunnel to a machine's ssh server is a session into it, held for as long as the tunnel stands.
+            let session = ctx.sshd.session(machine_id.as_deref().unwrap_or_default(), port);
+            let dial = dial_port(ctx, machine_id.clone(), port);
+            answer(id, Tunnels::open(conn, tunnel_id, dial, machine_id, session).await.map(|()| Empty {}))
+        }
+        DaemonOp::SshStart { authorized_key, machine_id } => answer(id, ssh_start(ctx, machine_id.as_deref(), &authorized_key).await),
         DaemonOp::TunnelWrite { tunnel_id, data } => answer(id, conn.tunnels.write(&tunnel_id, lenient_base64(&data)).map(|()| Empty {})),
         DaemonOp::TunnelClose { tunnel_id } => {
             conn.tunnels.close(&tunnel_id);
@@ -1091,6 +1136,111 @@ mod tests {
         serde_json::from_str(handle(conn, &bench.ctx, raw).await.text()).unwrap()
     }
 
+    /// A daemon whose ssh programs are the stand-ins: a python listener for sshd and a keygen that writes a line.
+    fn ssh_bench(dir: &std::path::Path) -> Bench {
+        let mut token = tempfile::NamedTempFile::new().unwrap();
+        writeln!(token, "t").unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let mut options = Options::new(token.path());
+        options.root = Some(root.path().to_path_buf());
+        options.roots_path = Some(root.path().join("roots"));
+        options.manifest_path = Some(root.path().join("manifest.json"));
+        options.ssh_programs = Some(crate::ssh::tests::stand_ins(dir));
+        options.ssh_idle_ms = Some(300);
+        Bench { ctx: Arc::new(Ctx::new(options, Box::new(|_| {}), 0).unwrap()), _token: token, root }
+    }
+
+    #[tokio::test]
+    async fn ssh_start_answers_the_port_and_the_host_key_and_a_tunnel_to_that_port_is_a_session_the_server_outlives_by_the_idle_window() {
+        let dir = tempfile::tempdir().unwrap();
+        let b = ssh_bench(dir.path());
+        let (c, mut rx) = conn(None);
+        let started = reply(&b, &c, json!({"id": 1, "op": "ssh.start", "authorizedKey": crate::ssh::tests::KEY})).await;
+        assert_eq!(started["ok"], true, "{started}");
+        let port = started["port"].as_u64().unwrap();
+        assert_eq!(started["hostKey"], "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHostKeyHostKeyHostKeyHostKeyHostKeyHostKey1 wsp");
+        let opened = reply(&b, &c, json!({"id": 2, "op": "tunnel.open", "tunnelId": "s1", "port": port})).await;
+        assert_eq!(opened, json!({"id": 2, "ok": true}));
+        // The stand-in's banner comes back as the tunnel's first bytes, naming no workspace on this machine's own.
+        let first = loop {
+            let out = tokio::time::timeout(Duration::from_secs(5), rx.recv()).await.unwrap().unwrap();
+            let v: Value = serde_json::from_str(out.text()).unwrap();
+            if v["type"] == "tunnel.data" {
+                break v;
+            }
+        };
+        assert_eq!(first, json!({"type": "tunnel.data", "tunnelId": "s1", "data": "U1NILTIuMC1zdGFuZC1pbg0K"}));
+        tokio::time::sleep(Duration::from_millis(700)).await;
+        assert!(tokio::net::TcpStream::connect(("127.0.0.1", port as u16)).await.is_ok(), "the server went while a session stood");
+        reply(&b, &c, json!({"id": 3, "op": "tunnel.close", "tunnelId": "s1"})).await;
+        tokio::time::sleep(Duration::from_millis(1200)).await;
+        assert!(tokio::net::TcpStream::connect(("127.0.0.1", port as u16)).await.is_err(), "the server outlived its idle window");
+    }
+
+    /// The dial is the op's to choose (this machine's loopback, or inside a fork); what the tunnel says back names
+    /// the workspace the dial was for on every frame, so the host hands each frame to that workspace's road alone.
+    #[tokio::test]
+    async fn a_tunnel_opened_for_a_workspace_names_it_on_every_frame_it_sends_back_and_one_for_this_machine_names_none() {
+        for (machine, named) in [(Some("fk_1".to_owned()), json!("fk_1")), (None, Value::Null)] {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let port = listener.local_addr().unwrap().port();
+            tokio::spawn(async move {
+                let (mut s, _) = listener.accept().await.unwrap();
+                tokio::io::AsyncWriteExt::write_all(&mut s, b"SSH-2.0-fork\r\n").await.unwrap();
+            });
+            let (c, mut rx) = conn(None);
+            let dial = async move { tokio::net::TcpStream::connect(("127.0.0.1", port)).await.map_err(|e| e.to_string()) };
+            Tunnels::open(&c, "t1".to_owned(), dial, machine.clone(), None).await.unwrap();
+            let mut said = Vec::new();
+            while said.len() < 2 {
+                let out = tokio::time::timeout(Duration::from_secs(5), rx.recv()).await.unwrap().unwrap();
+                let v: Value = serde_json::from_str(out.text()).unwrap();
+                if v["type"] == "tunnel.data" || v["type"] == "tunnel.end" {
+                    said.push(v);
+                }
+            }
+            assert_eq!(said[0]["type"], "tunnel.data");
+            assert_eq!(said[0]["data"], "U1NILTIuMC1mb3JrDQo=");
+            assert_eq!(said[1]["type"], "tunnel.end");
+            for frame in &said {
+                assert_eq!(frame["machineId"], named, "{frame}");
+                assert_eq!(frame.get("machineId").is_some(), machine.is_some(), "{frame}");
+            }
+        }
+    }
+
+    /// A daemon that answers for the workspaces on a computer somebody owns runs as root there, and an ssh server
+    /// with no workspace named would let the person's editor key in as that computer's root.
+    #[tokio::test]
+    async fn a_place_daemon_starts_no_ssh_server_on_its_own_computer() {
+        let b = place_bench();
+        let (c, _rx) = conn(None);
+        assert_eq!(
+            reply(&b, &c, json!({"id": 1, "op": "ssh.start", "authorizedKey": crate::ssh::tests::KEY})).await,
+            json!({"id": 1, "ok": false, "code": "bad-request", "error": words::SSH_NOT_ON_A_PLACE})
+        );
+    }
+
+    #[tokio::test]
+    async fn ssh_start_refuses_a_key_that_is_not_one_ed25519_line_and_a_workspace_this_daemon_does_not_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let b = ssh_bench(dir.path());
+        let (c, _rx) = conn(None);
+        assert_eq!(
+            reply(&b, &c, json!({"id": 1, "op": "ssh.start", "authorizedKey": "ssh-rsa AAAAB3 you@mac"})).await,
+            json!({"id": 1, "ok": false, "code": "bad-request", "error": words::SSH_KEY_SHAPE})
+        );
+        assert_eq!(reply(&b, &c, json!({"id": 1, "op": "ssh.start", "authorizedKey": ""})).await["code"], "bad-request");
+        assert_eq!(
+            reply(&b, &c, json!({"id": 1, "op": "ssh.start", "authorizedKey": crate::ssh::tests::KEY, "machineId": "wsp-x"})).await,
+            json!({"id": 1, "ok": false, "code": "not-found", "error": "no such workspace: wsp-x"})
+        );
+        assert_eq!(
+            reply(&b, &c, json!({"id": 1, "op": "tunnel.open", "tunnelId": "t", "port": 22, "machineId": "wsp-x"})).await,
+            json!({"id": 1, "ok": false, "error": "no such workspace: wsp-x"})
+        );
+    }
+
     #[tokio::test]
     async fn ping_answers_the_bare_ok_envelope() {
         let b = bench();
@@ -1179,6 +1329,7 @@ mod tests {
             "tunnel.open",
             "tunnel.write",
             "tunnel.close",
+            "ssh.start",
             "sys.watch",
             "proc.watch",
             "proc.unwatch",

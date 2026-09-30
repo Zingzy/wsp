@@ -1909,7 +1909,7 @@ describe("golden import stages", () => {
     expect(at("brew cleanup -s --prune=all")).toBeLessThan(sweepsAt[2]!);
     expect(sweepsAt[2]).toBeLessThan(cmds.indexOf("echo ok"));
     // Each closing line carries what the sweep gave back and the df reading the stage left.
-    expect(stages).toContain("deploying-daemon:15 installed; caches swept, 700 MB back; 3.6 GB free");
+    expect(stages).toContain("deploying-daemon:16 installed; caches swept, 700 MB back; 3.6 GB free");
     expect(stages).toContain("installing-harness:Claude Code, Codex installed; caches swept, 700 MB back; 4.3 GB free");
     expect(stages).toContain("installing-tools:3 installed; caches swept, 700 MB back; 5 GB free");
     // A sweep that fails is named, and the build goes on to the next stage.

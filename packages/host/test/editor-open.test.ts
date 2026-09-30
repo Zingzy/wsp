@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { EditorId } from "@wsp/protocol";
+import { EditorId, editorOpensHereLine } from "@wsp/protocol";
 import { writeStub } from "../../protocol/test/stub-script.js";
 import { EDITORS, editorHost, editorMissingLine, editorOutsideLine, NO_EDITOR_LINE, type EditorCommand } from "../src/editor.js";
 
@@ -45,7 +45,7 @@ describe("the editor table", () => {
   it("lists only what is installed, from /Applications or the home's own, and nothing on a computer that is not a Mac", async () => {
     const { host } = mac(["/Applications/Cursor.app", "/Users/dev/Applications/IntelliJ IDEA Ultimate.app", "/System/Library/CoreServices/Finder.app"]);
     expect(await host.list()).toEqual([
-      { id: "cursor", name: "Cursor" },
+      { id: "cursor", name: "Cursor", remote: true },
       { id: "idea", name: "IntelliJ IDEA" },
       { id: "finder", name: "Finder" },
     ]);
@@ -120,5 +120,49 @@ describe("opening a path", () => {
     await expect.poll(() => (existsSync(said) ? readFileSync(said, "utf8") : "")).toBe(`${weird}:4\n`);
     expect(existsSync("PWNED")).toBe(false);
     expect(existsSync(join(work, "PWNED"))).toBe(false);
+  });
+});
+
+describe("opening a path inside a workspace on another computer", () => {
+  const remote = { alias: "wsp-cart-rounding", folder: "/root/wsp-boat", name: "Cart rounding" };
+  const all = [
+    "/Applications/Visual Studio Code.app",
+    "/Applications/Cursor.app",
+    "/Applications/Visual Studio Code - Insiders.app",
+    "/Applications/Zed.app",
+    "/Applications/WebStorm.app",
+    "/System/Library/CoreServices/Finder.app",
+  ];
+
+  it("hands each editor with a remote road the alias and the workspace's folder, the file at its line beside it", async () => {
+    const { host, ran } = mac(all);
+    const file = "/root/wsp-boat/src/cart.ts";
+    for (const editor of ["vscode", "cursor", "vscode-insiders", "zed"] as const) expect(await host.open({ path: file, line: 12, inside: [], editor, remote })).toBe(editor);
+    const code = (app: string, bin: string) => `/Applications/${app}/Contents/Resources/app/bin/${bin}`;
+    expect(ran).toEqual([
+      { file: code("Visual Studio Code.app", "code"), args: ["--remote", "ssh-remote+wsp-cart-rounding", "/root/wsp-boat", "--goto", `${file}:12`] },
+      { file: code("Cursor.app", "cursor"), args: ["--remote", "ssh-remote+wsp-cart-rounding", "/root/wsp-boat", "--goto", `${file}:12`] },
+      { file: code("Visual Studio Code - Insiders.app", "code"), args: ["--remote", "ssh-remote+wsp-cart-rounding", "/root/wsp-boat", "--goto", `${file}:12`] },
+      { file: "/Applications/Zed.app/Contents/MacOS/cli", args: ["ssh://wsp-cart-rounding/root/wsp-boat", `ssh://wsp-cart-rounding${file}:12`] },
+    ]);
+  });
+
+  it("opens the folder alone when the folder is what was asked for", async () => {
+    const { host, ran } = mac(all);
+    await host.open({ path: "/root/wsp-boat", line: 3, inside: [], editor: "vscode", remote });
+    await host.open({ path: "/root/wsp-boat/", inside: [], editor: "zed", remote });
+    expect(ran).toEqual([
+      { file: "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code", args: ["--remote", "ssh-remote+wsp-cart-rounding", "/root/wsp-boat"] },
+      { file: "/Applications/Zed.app/Contents/MacOS/cli", args: ["ssh://wsp-cart-rounding/root/wsp-boat"] },
+    ]);
+  });
+
+  it("keeps the sentence for an editor with no remote road, and opens nothing outside the workspace's folder", async () => {
+    const { host, ran } = mac(all);
+    for (const editor of ["webstorm", "finder"] as const) await expect(host.open({ path: "/root/wsp-boat/a.ts", inside: [], editor, remote })).rejects.toThrow(editorOpensHereLine("Cart rounding"));
+    for (const path of ["/root/other/a.ts", "/root/wsp-boat/../x", "src/a.ts", "/root/wsp-boat-sibling/a.ts"]) {
+      await expect(host.open({ path, inside: [], editor: "vscode", remote }), path).rejects.toThrow(editorOutsideLine(path));
+    }
+    expect(ran).toEqual([]);
   });
 });

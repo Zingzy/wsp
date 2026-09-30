@@ -435,7 +435,28 @@ pub enum DaemonOp {
         projects: Option<Vec<String>>,
     },
     #[serde(rename = "tunnel.open", rename_all = "camelCase")]
-    TunnelOpen { tunnel_id: String, port: NonZeroU16 },
+    TunnelOpen {
+        tunnel_id: String,
+        port: NonZeroU16,
+        /// The workspace whose own loopback the port is on, dialled inside that workspace's network namespace; this
+        /// machine's own loopback without one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        machine_id: Option<String>,
+    },
+    /// Starts the ssh server of this machine, or of the workspace named, on its own loopback where none runs, with
+    /// the one public key given as the whole of what it lets in, and answers the port it listens on and the host
+    /// key it proves itself with.
+    #[serde(rename = "ssh.start", rename_all = "camelCase")]
+    SshStart {
+        /// One OpenSSH public key line, `ssh-ed25519 <base64> [comment]`.
+        #[serde(deserialize_with = "bounded::<_, 1, { crate::numbers::SSH_KEY_MAX }>")]
+        authorized_key: String,
+        /// The workspace this frame is for, as on fs.list above.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        machine_id: Option<String>,
+    },
     #[serde(rename = "tunnel.write", rename_all = "camelCase")]
     TunnelWrite { tunnel_id: String, data: String },
     #[serde(rename = "tunnel.close", rename_all = "camelCase")]
@@ -507,7 +528,7 @@ pub enum DaemonOp {
 
 /// The op names above, in the protocol's order; the daemon's switch reads this to tell an op it knows from one it
 /// does not.
-pub const DAEMON_OPS: [&str; 53] = [
+pub const DAEMON_OPS: [&str; 54] = [
     "pty.create",
     "pty.attach",
     "pty.detach",
@@ -544,6 +565,7 @@ pub const DAEMON_OPS: [&str; 53] = [
     "tunnel.open",
     "tunnel.write",
     "tunnel.close",
+    "ssh.start",
     "exec",
     "place.leave",
     "guest.open",
