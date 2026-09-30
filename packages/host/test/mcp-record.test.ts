@@ -20,7 +20,7 @@ import { LATEST_PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS } from "@modelcont
 import { CATALOG, agentName } from "@wsp/catalog";
 import { SEAL_REFUSAL } from "@wsp/keys";
 import { CLOUD_ENV, cloudFromEnv, EXIT_CODES, HERE_PLACE_ID, HOST_CLOSED_LINE, HOST_KEY_ENV, HOST_STOPPING_CLOSE, HOST_STOPPING_LINE, HOST_TOKEN_ENV, HOST_URL_ENV, KIND_CLASS, LAUNCHED_WITH, LOOPBACK, SKILL_PREVIEW_BYTES, WS_PATH, isLoopback, isUrl, isWildcard, servedHostname, wsUrlOf, hostNoKeyLine, jsonLine, NEWER_TURN_LINE, noMessagesLine, noReplyLine, NO_TERMINAL_CONFIG_LINE, refusalLine, scopedNoPairLine, commandWords, authRefusal, deviceAuthOldHostLine, noSuchPlaceRefusal, pairKeyRefusal, SEAL_CLIENT, unclosedQuoteRefusal, validatorRefusal, type PlaceSpend, type PlaceView, type ServerToolsAnswer } from "@wsp/protocol";
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { hostExitedLine, noHostAnsweredLine, startingHostLine, upArgs } from "../src/host-start.js";
 import { hostLogPath, hostTokenPath, lockPathFor, POLL_MS, SERVICE_WAIT_MS, STARTED_BY_ENV } from "../src/host-lock.js";
 import { deviceKeyPath, relayRecordPath } from "../src/account.js";
@@ -569,8 +569,14 @@ const committedUnder = (dir: string, prefix: string): string[] => {
 };
 
 describe("the record the daemon binary's tool server serves from", () => {
+  // Every recorded answer is a call through this package's server, seconds on a CI runner: made once, with room, so
+  // a case below only compares and a tool added to the record cannot push it past the per-test budget.
+  let files: Files;
+  beforeAll(async () => {
+    files = await regenerated();
+  }, 60_000);
+
   it("equals its regeneration: the handshake, every listed tool, the sentences, the exit classes and each recorded answer", async () => {
-    const files = await regenerated();
     const out = mkdtempSync(join(tmpdir(), "wsp-mcp-record-"));
     for (const [rel, text] of files) {
       mkdirSync(join(out, rel, ".."), { recursive: true });
@@ -582,7 +588,6 @@ describe("the record the daemon binary's tool server serves from", () => {
   });
 
   it("records an answer the server would print for every case, the refusal as the tool error its class names", async () => {
-    const files = await regenerated();
     const { cases } = JSON.parse(files.get("tests/answers/computers.json")!) as { cases: { case: string; line: string }[] };
     const byCase = new Map(cases.map(c => [c.case, JSON.parse(c.line) as { result: { isError?: boolean; structuredContent: Record<string, unknown> } }]));
     expect(byCase.get("rows")!.result.isError).toBeUndefined();

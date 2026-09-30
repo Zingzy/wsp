@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { REPO } from "./bundles.mjs";
+import { daemonFeatures, tripleHere } from "./daemon-features.mjs";
 
 const repo = fileURLToPath(new URL("../../..", import.meta.url));
 const folder = fileURLToPath(new URL("../daemon", import.meta.url));
@@ -27,14 +28,6 @@ const PT_DYNAMIC = 2;
 const DT_NULL = 0;
 const DT_NEEDED = 1;
 const DT_STRTAB = 5;
-
-/** The triple the toolchain on this machine builds for. Linux is spelled musl: the one Linux daemon wsp ships is
- * the static one, so a plain `cargo build` on a Linux box builds the wrong flavour and --triple names the right one. */
-function tripleHere() {
-  const host = execFileSync("rustc", ["-vV"], { encoding: "utf8" }).split("\n").find(line => line.startsWith("host: "));
-  if (host === undefined) throw new Error("rustc -vV named no host");
-  return host.slice("host: ".length).trim().replace(/-linux-gnu$/, "-linux-musl");
-}
 
 /** The shared libraries a 64-bit little-endian ELF binary names, read the way the loader reads them: the dynamic
  * segment off the program headers and its string table through DT_STRTAB, never the section headers, which a
@@ -76,10 +69,29 @@ export function refusal(from, triple, bytes) {
   return `${from} names shared libraries (${named.join(", ")}) and the Linux daemon is one static binary that loads none: build it in daemon/, where libseccomp links statically`;
 }
 
+/** Why a binary built with the tool server's feature for its triple lacks it, or nothing: read by running its `mcp`,
+ * which a build without the feature refuses as an unrecognized subcommand. Null where this computer cannot run it:
+ * off a Mac, where execvp hands a file it cannot load to /bin/sh and the shell's failure would read as the binary's,
+ * and on a Mac that cannot start it at all. */
+export function toolServerRefusal(from, triple, platform = process.platform) {
+  const flags = daemonFeatures(triple);
+  if (!flags.includes("mcp")) return undefined;
+  if (platform !== "darwin") return null;
+  try {
+    execFileSync(from, ["mcp", "--help"], { stdio: ["ignore", "ignore", "pipe"], timeout: 30_000 });
+    return undefined;
+  } catch (e) {
+    if (typeof e.status !== "number") return null;
+    const said = String(e.stderr ?? "").split("\n").find(line => line.trim() !== "") ?? `exit ${e.status}`;
+    return `${from} has no tool server (wsp-daemon mcp said: ${said.trim()}), and a Mac's daemon carries it: build it in daemon/ with cargo build --release -p wsp-daemon-bin ${flags.join(" ")}, the flags node packages/wspx/scripts/daemon-features.mjs prints`;
+  }
+}
+
 function place(from, triple) {
   if (!existsSync(from)) throw new Error(`no daemon binary at ${from}; build it in daemon/ first`);
-  const why = refusal(from, triple, readFileSync(from));
-  if (why !== undefined) throw new Error(why);
+  const why = refusal(from, triple, readFileSync(from)) ?? toolServerRefusal(from, triple);
+  if (typeof why === "string") throw new Error(why);
+  if (why === null) console.log(`${triple}: this computer cannot run it, so its tool server is checked where it can`);
   const to = join(folder, triple, "wsp-daemon");
   mkdirSync(join(folder, triple), { recursive: true });
   cpSync(from, to);
