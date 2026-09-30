@@ -170,4 +170,17 @@ machineId?: string, } | { "op": "fs.folders", dir?: string, hidden?: boolean,
 /**
  * Every repo under the roots instead of one level.
  */
-repos?: boolean, projects?: Array<string>, } | { "op": "tunnel.open", tunnelId: string, port: number, } | { "op": "tunnel.write", tunnelId: string, data: string, } | { "op": "tunnel.close", tunnelId: string, } | { "op": "exec", cmd: string, timeoutMs?: number, stdin?: string, } | { "op": "place.leave" } | { "op": "guest.open", kind: GuestKind, token: string, turnToken?: string, argv: Array<string>, cwd: string, } | { "op": "guest.send", message: unknown, } | { "op": "guest.watch" } | { "op": "guest.reply", session: string, message: unknown, } | { "op": "guest.close", session: string, error?: string, } | { "op": "place.update", uploadId: string, seq: number, last: boolean, data: string, sha256: string, });
+repos?: boolean, projects?: Array<string>, } | { "op": "tunnel.open", tunnelId: string, port: number, 
+/**
+ * The workspace whose own loopback the port is on, dialled inside that workspace's network namespace; this
+ * machine's own loopback without one.
+ */
+machineId?: string, } | { "op": "ssh.start", 
+/**
+ * One OpenSSH public key line, `ssh-ed25519 <base64> [comment]`.
+ */
+authorizedKey: string, 
+/**
+ * The workspace this frame is for, as on fs.list above.
+ */
+machineId?: string, } | { "op": "tunnel.write", tunnelId: string, data: string, } | { "op": "tunnel.close", tunnelId: string, } | { "op": "exec", cmd: string, timeoutMs?: number, stdin?: string, } | { "op": "place.leave" } | { "op": "guest.open", kind: GuestKind, token: string, turnToken?: string, argv: Array<string>, cwd: string, } | { "op": "guest.send", message: unknown, } | { "op": "guest.watch" } | { "op": "guest.reply", session: string, message: unknown, } | { "op": "guest.close", session: string, error?: string, } | { "op": "place.update", uploadId: string, seq: number, last: boolean, data: string, sha256: string, });

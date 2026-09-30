@@ -3,11 +3,14 @@
 // the default editor with its mark, the menu lists the editors the host found
 // installed with their marks, Finder's too, a pick opens in it and makes it the
 // default, mod+o opens in the default, the slot is held while the host lists
-// its editors, and a workspace whose files are on another machine draws
-// nothing: its sentence stays on the file tab.
+// its editors, and a running workspace on another computer opens over ssh in
+// the editors that have a road there, once the person has said yes to the one
+// line in their ssh config.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_PREFERENCES, type EditorChoice, type EditorId } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, sshIncludeLine, type EditorChoice, type EditorId } from "@wsp/protocol";
+import { EDITOR_SSH_WORDS } from "../src/files/EditorConsent.js";
+import { RequestError } from "../src/protocol/client.js";
 import { DEFAULT_KEYBINDINGS } from "../src/keybindingDefaults.js";
 import { OPEN_WORDS, OpenSplit } from "../src/files/OpenSplit.js";
 import { useNotices } from "../src/notices/store.js";
@@ -16,17 +19,34 @@ import { runShellCommand } from "../src/shell/shellCommands.js";
 import { view, WS } from "./surface-harness.js";
 
 const EDITORS: EditorChoice[] = [
-  { id: "vscode", name: "VS Code" },
-  { id: "zed", name: "Zed" },
+  { id: "vscode", name: "VS Code", remote: true },
+  { id: "zed", name: "Zed", remote: true },
   { id: "finder", name: "Finder" },
 ];
 
-function setUp({ editors = EDITORS, editor, kind = "local" as const, refuse }: { editors?: EditorChoice[]; editor?: EditorId; kind?: "local" | "cloud"; refuse?: string } = {}) {
+function setUp({
+  editors = EDITORS,
+  editor,
+  kind = "local" as const,
+  phase = "running" as "running" | "napping",
+  refuse,
+  included = true,
+  memMb = 8192,
+}: { editors?: EditorChoice[]; editor?: EditorId; kind?: "local" | "cloud"; phase?: "running" | "napping"; refuse?: string; included?: boolean; memMb?: number } = {}) {
   const calls: string[] = [];
+  let include = included;
   const openInEditor = vi.fn(async (_ws: string, path: string) => {
     calls.push(`open ${path}`);
     if (refuse !== undefined) throw new Error(refuse);
+    if (kind === "cloud" && !include) throw new RequestError(sshIncludeLine("Delete compatibility and duplicates"), "sshInclude");
     return "zed" as const;
+  });
+  const sshInclude = vi.fn(async (on?: boolean) => {
+    if (on !== undefined) {
+      calls.push(`include ${on}`);
+      include = on;
+    }
+    return include;
   });
   const editorList = vi.fn(async () => editors);
   const setPreferences = vi.fn(async (patch: { editor?: EditorId }) => {
@@ -36,12 +56,13 @@ function setUp({ editors = EDITORS, editor, kind = "local" as const, refuse }: {
   });
   act(() =>
     useStore.setState({
-      workspaces: [{ ...view, kind, name: kind === "local" ? "api" : "Delete compatibility and duplicates" }],
-      api: { openInEditor, editorList, setPreferences } as never,
+      workspaces: [{ ...view, kind, phase, name: kind === "local" ? "api" : "Delete compatibility and duplicates" }],
+      statuses: { [WS]: { ...view, size: { cpu: 2, memMb } } } as never,
+      api: { openInEditor, editorList, setPreferences, sshInclude } as never,
       preferences: { ...DEFAULT_PREFERENCES, ...(editor === undefined ? {} : { editor }) },
     }),
   );
-  return { openInEditor, editorList, setPreferences, calls };
+  return { openInEditor, editorList, setPreferences, sshInclude, calls };
 }
 
 beforeEach(() => act(() => useNotices.getState().clear()));
@@ -88,8 +109,55 @@ describe("the Open split button", () => {
     expect(await screen.findByRole("button", { name: OPEN_WORDS.openIn("VS Code") })).toBeDefined();
   });
 
-  it("draws nothing for a fork, neither the button nor its sentence, and asks the host nothing", async () => {
-    const { openInEditor, editorList } = setUp({ kind: "cloud" });
+  it("opens a running workspace on another computer in the editors with a road there, at its folder there", async () => {
+    const { openInEditor } = setUp({ kind: "cloud", editor: "finder" });
+    render(<OpenSplit workspaceId={WS} />);
+    // Finder has no road into a workspace elsewhere, so the default falls to the first editor that has one.
+    const main = await screen.findByRole("button", { name: OPEN_WORDS.openIn("VS Code") });
+    fireEvent.click(screen.getByRole("button", { name: OPEN_WORDS.choose }));
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).getAllByRole("menuitem").map(item => item.querySelector("[data-editor-name]")?.textContent)).toEqual(["VS Code", "Zed"]);
+    expect(menu.textContent).not.toContain(EDITOR_SSH_WORDS.small);
+    await act(async () => void fireEvent.click(main));
+    expect(openInEditor).toHaveBeenCalledWith(WS, "/root", undefined, "vscode");
+  });
+
+  it("asks once for the line in the person's ssh config in a sheet, and opens as soon as they add it", async () => {
+    const { calls } = setUp({ kind: "cloud", included: false });
+    render(<OpenSplit workspaceId={WS} />);
+    const main = await screen.findByRole("button", { name: OPEN_WORDS.openIn("VS Code") });
+    await act(async () => void fireEvent.click(main));
+    const sheet = await screen.findByRole("dialog");
+    expect(within(sheet).getByText(EDITOR_SSH_WORDS.title)).toBeDefined();
+    expect(sheet.textContent).toContain("~/.ssh/config");
+    // What an attached editor opens toward this computer is said before the yes, not after.
+    expect(sheet.textContent).toContain(EDITOR_SSH_WORDS.reach);
+    await act(async () => void fireEvent.click(within(sheet).getByRole("button", { name: EDITOR_SSH_WORDS.add })));
+    await waitFor(() => expect(calls).toEqual(["open /root", "include true", "open /root"]));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(useNotices.getState().notices).toEqual([]);
+  });
+
+  it("adds nothing and opens nothing when the person cancels the sheet", async () => {
+    const { calls } = setUp({ kind: "cloud", included: false });
+    render(<OpenSplit workspaceId={WS} />);
+    const main = await screen.findByRole("button", { name: OPEN_WORDS.openIn("VS Code") });
+    await act(async () => void fireEvent.click(main));
+    const sheet = await screen.findByRole("dialog");
+    await act(async () => void fireEvent.click(within(sheet).getByRole("button", { name: "Cancel" })));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(calls).toEqual(["open /root"]);
+  });
+
+  it("says on a small workspace elsewhere, in the menu, that an editor there costs about another thread", async () => {
+    setUp({ kind: "cloud", memMb: 4096 });
+    render(<OpenSplit workspaceId={WS} />);
+    fireEvent.click(await screen.findByRole("button", { name: OPEN_WORDS.choose }));
+    expect((await screen.findByRole("menu")).textContent).toContain(EDITOR_SSH_WORDS.small);
+  });
+
+  it("draws nothing for a napping workspace elsewhere, and asks the host nothing", async () => {
+    const { openInEditor, editorList } = setUp({ kind: "cloud", phase: "napping" });
     const { container } = render(<OpenSplit workspaceId={WS} />);
     await waitFor(() => expect(editorList).toHaveBeenCalled());
     expect(container.innerHTML).toBe("");

@@ -16,7 +16,7 @@ use wsp_frames::{
     GitPrMergeReply, GitPrReadReply, GitPrReply, GitPrViewReply, GitPushReply, GitRepoReadReply, GitRestoreReply, GitRunLogReply,
     GitSnapshotReply, GitUpdateReply, GuestCliMessage, GuestOpenReply, HostFolderListing, MachineAnswersReply, MachineExecReply,
     MachineHandleReply, MachineLinkRequest, MachineListReply, MachineReachReply, MachineReadingReply, MachineShapeReply, MachineStateReply,
-    PlaceAuthRequest, PlaceCapacity, PlaceProveRequest, DAEMON_OPS, MACHINE_OPS,
+    PlaceAuthRequest, PlaceCapacity, PlaceProveRequest, SshStartReply, DAEMON_OPS, MACHINE_OPS,
 };
 
 fn fixtures() -> PathBuf {
@@ -258,6 +258,9 @@ fn every_reply_fixture_round_trips_through_the_reply_types() {
                 "HostFolderListing" => {
                     round_trip::<HostFolderListing>(&sample, &at);
                 }
+                "SshStartReply" => {
+                    round_trip::<SshStartReply>(&sample, &at);
+                }
                 other => panic!("{at}: no reply type here reads {other}"),
             }
         }
@@ -295,6 +298,7 @@ fn every_reply_fixture_round_trips_through_the_reply_types() {
         "MachineReadingReply",
         "MachineShapeReply",
         "MachineStateReply",
+        "SshStartReply",
     ];
     expected.sort_unstable();
     assert_eq!(seen, expected, "every reply this daemon answers has its fixture");
@@ -378,6 +382,8 @@ fn rendered_numbers() -> BTreeMap<&'static str, Value> {
     m.insert("authDeadlineMs", Value::from(numbers::AUTH_DEADLINE_MS));
     m.insert("tunnelCap", Value::from(numbers::TUNNEL_CAP));
     m.insert("fsReadCapBytes", Value::from(numbers::FS_READ_CAP_BYTES));
+    m.insert("sshKeyMax", Value::from(numbers::SSH_KEY_MAX));
+    m.insert("sshIdleMs", Value::from(numbers::SSH_IDLE_MS));
     m.insert("fsWriteCapBytes", Value::from(numbers::FS_WRITE_CAP_BYTES));
     m.insert("fsListCapEntries", Value::from(numbers::FS_LIST_CAP_ENTRIES));
     m.insert("fsFilesCapEntries", Value::from(numbers::FS_FILES_CAP_ENTRIES));

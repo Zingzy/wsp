@@ -78,6 +78,10 @@ export const AUTH_DEADLINE_MS = 5_000;
 export const TUNNEL_CAP = 64;
 /** How much of one file fs.read carries; the whole size travels beside it. */
 export const FS_READ_CAP_BYTES = 2 * 1024 * 1024;
+/** The longest public key line an ssh.start carries. */
+export const SSH_KEY_MAX = 1024;
+/** How long an editor's ssh server stands once its last session closed, before it and all it started is ended. */
+export const SSH_IDLE_MS = 5 * 60_000;
 /** The most one fs.write replaces a file with, the read cap's twin: a file a pane could not read whole it does not write. */
 export const FS_WRITE_CAP_BYTES = 2 * 1024 * 1024;
 /** Entries one fs.list carries; total counts the rest. */

@@ -31,6 +31,7 @@ import type { GitRunLogReply as WireGitRunLogReply } from "./generated/GitRunLog
 import type { GitPrMergeReply as WireGitPrMergeReply } from "./generated/GitPrMergeReply.js";
 import type { GitRepoReadReply as WireGitRepoReadReply } from "./generated/GitRepoReadReply.js";
 import type { GitUpdateReply as WireGitUpdateReply } from "./generated/GitUpdateReply.js";
+import type { SshStartReply as WireSshStartReply } from "./generated/SshStartReply.js";
 import { HERE_PLACE_ID, namesPlace } from "./place-word.js";
 import { threadNeedsYou } from "./thread-state.js";
 import { Checkout } from "./changes.js";
@@ -39,6 +40,7 @@ import { placeAtLimitLine, placeFullLine } from "./place-state.js";
 import type { AbsentComputer } from "./workspace-state.js";
 import type { LinkTarget } from "./app-address.js";
 import { rootsPathIn } from "./project-path.js";
+import { SSH_KEY_MAX } from "./daemon-contract.js";
 import { ReleaseChangedEvent } from "./release.js";
 import { shellQuote } from "./shell-quote.js";
 import { WorkspaceGlyph, WorkspaceLook, WorkspaceTheme } from "./workspace-look.js";
@@ -186,7 +188,7 @@ export function callbackPortOf(url: string): number | undefined {
  * port is open: url, a link the workspace printed, which the app offers to
  * open; callback, a sign-in flow's redirect, which the app names and never
  * dials (a bare request would end the flow). */
-export const PortForward = z.object({ workspaceId: z.string(), port: RelayPort, startedAt: z.string(), name: z.string(), kind: z.enum(["url", "callback"]) });
+export const PortForward = z.object({ workspaceId: z.string(), port: RelayPort, startedAt: z.string(), name: z.string(), kind: z.enum(["url", "callback", "editor"]) });
 export type PortForward = z.infer<typeof PortForward>;
 
 // --- backend capabilities ----------------------------------------------------
@@ -2056,13 +2058,23 @@ const THEME_PICK_DEFAULTS = { lightTheme: "paper", darkTheme: "graphite" } as co
  * Finder is the Mac's own and reveals the file rather than opening it. */
 export const EditorId = z.enum(["vscode", "cursor", "vscode-insiders", "zed", "idea", "webstorm", "pycharm", "goland", "rustrover", "clion", "phpstorm", "rubymine", "rider", "finder"]);
 export type EditorId = z.infer<typeof EditorId>;
-export const EditorChoice = z.object({ id: EditorId, name: z.string() });
+/** One editor installed on the computer the host runs on; `remote` where it also opens a workspace on another
+ * computer over ssh. */
+export const EditorChoice = z.object({ id: EditorId, name: z.string(), remote: z.literal(true).optional() });
 export type EditorChoice = z.infer<typeof EditorChoice>;
 
 /** What Open in editor says for a workspace whose files are on another machine, named as the person reads it. */
 export const editorOpensHereLine = (name: string): string => `These files are on ${name}, so they open here.`;
 /** The refusal for editor.list and editor.open on a socket let in on a ticket: a program starts only for this computer's
  * own window, and the list of what could start is read on the same terms. */
+/** editor.open on a workspace on another computer before the person's ssh config reads wsp's: the window asks them
+ * for that one line with the refusal's kind, and opens again once it stands. */
+export const sshIncludeLine = (name: string): string => `${name} opens in your editor over ssh, which needs one line at the top of ~/.ssh/config.`;
+/** ssh.port on a copy on this computer: its folder is right here, so an editor opens it with no ssh at all. */
+export const sshCopyHereLine = (name: string): string => `${name} is a copy on this computer, so its folder opens here with no ssh.`;
+/** The refusal for ssh.port and ssh.include on a socket let in on a ticket: the port is on this computer's loopback,
+ * and the Include is in the person's own ssh config. */
+export const SSH_TICKET_REFUSAL = "a socket let in on a ticket cannot reach a workspace's ssh; use the wsp command or the app on the computer the host runs on";
 export const EDITOR_TICKET_REFUSAL = "a socket let in on a ticket cannot list or open the editors on this computer; use the app on the computer the host runs on";
 
 export const Preferences = z.object({
@@ -3452,6 +3464,14 @@ type GitRunLogReplyHeld = Held<Same<GitRunLogReply, WireGitRunLogReply>>;
 type GitPrMergeReplyHeld = Held<Same<GitPrMergeReply, WireGitPrMergeReply>>;
 type GitRepoReadReplyHeld = Held<Same<GitRepoReadReply, WireGitRepoReadReply>>;
 type GitUpdateReplyHeld = Held<Same<GitUpdateReply, WireGitUpdateReply>>;
+/** A workspace's ssh host key as this computer pins it: one `ssh-ed25519 <base64> [comment]` line and nothing
+ * more. The key is the daemon's word, and a root inside the workspace can answer in its place, so a second line or
+ * a marker (`@cert-authority`) would be a key this computer's ssh trusts for every wsp- alias. */
+export const SSH_HOST_KEY_LINE = /^ssh-ed25519 [A-Za-z0-9+/]+={0,2}( [!-~]+)?$/;
+/** Where a machine's own ssh server listens on its loopback, and its host key as one OpenSSH public key line. */
+export const SshStartReply = z.object({ port: z.number().int().min(1).max(65535), hostKey: z.string().min(1).max(SSH_KEY_MAX).regex(SSH_HOST_KEY_LINE) });
+export type SshStartReply = WireSshStartReply;
+type SshStartReplyHeld = Held<Same<z.infer<typeof SshStartReply>, SshStartReply>>;
 /** base is the ref the branch scope diffed against (null for other scopes);
  * truncated means the 2 MiB patch budget cut files or a patch short. */
 export const GitDiffReply = z.object({ base: z.string().nullable(), files: z.array(GitDiffFile), truncated: z.boolean() });
@@ -3741,7 +3761,13 @@ export const DaemonRequest = z.discriminatedUnion("op", [
    * callback forward. The daemon dials 127.0.0.1 then ::1 (a Node 22 tool
    * binds [::1] only). data is base64; the reply to tunnel.open comes after
    * the guest accepted. */
-  z.object({ id: reqId, op: z.literal("tunnel.open"), tunnelId: z.string(), port: z.number().int().min(1).max(65535) }),
+  /** machineId dials the port inside that workspace's own network namespace, on a daemon that runs workspaces. */
+  z.object({ id: reqId, op: z.literal("tunnel.open"), tunnelId: z.string(), port: z.number().int().min(1).max(65535), machineId: z.string().optional() }),
+  /** Starts the machine's own ssh server, or the named workspace's, on its loopback where none runs, with the one
+   * ed25519 public key given as all it lets in, and answers an SshStartReply. Refused in one sentence where the image
+   * has no /usr/sbin/sshd. The server and everything its sessions started are ended once its last session has been
+   * closed for SSH_IDLE_MS. */
+  z.object({ id: reqId, op: z.literal("ssh.start"), authorizedKey: z.string().min(1).max(SSH_KEY_MAX), machineId: z.string().optional() }),
   z.object({ id: reqId, op: z.literal("tunnel.write"), tunnelId: z.string(), data: z.string() }),
   z.object({ id: reqId, op: z.literal("tunnel.close"), tunnelId: z.string() }),
   DaemonExecRequest,
@@ -4392,6 +4418,7 @@ const DAEMON_CONTENTS = [
   "1796fa8ef2dcd4c907e1314205bdca852b06c8fb807c5580b517c7ee389a188a",
   "fcbf00c4e8075aea8eec9513751ad6412db3feae36f2a1e78d2465eca51b86a4",
   "9468bfd7e5cd26a8458b328ef1f01634bbd12954c7b2d4dc13711adb7f19ae95",
+  "17dc947dabc1776d901352d4d681af228e620309b8b4d8b8043ac9d904788bb4",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -4638,7 +4665,14 @@ const DAEMON_CONTENTS = [
  * and git.range, the diff between two such commits by their full shas, held to the daemon's root as git.diff is;
  * every git.diff file gains its kind and its line counts, and a checkpoint starts no fsmonitor.
  * Version 92 opens a new listener on the reading that finds it and asks it once, beside the reading, whether it is a
- * browser's DevTools port; one that answers as one closes on the next reading and is left out of every one after. */
+ * browser's DevTools port; one that answers as one closes on the next reading and is left out of every one after.
+ * Version 93 starts an ssh server for an editor: ssh.start writes the one key it is handed as the only authorized key,
+ * starts the image's own sshd on a free loopback port inside the workspace (inside the fork where it names a
+ * machine) and answers that port and the server's host key; tunnel.open names the machine it dials inside, and
+ * tunnel.data and tunnel.end carry it back. The server and every process it started are stopped five minutes after
+ * its last tunnel closes, and when the daemon ends; one an ended daemon left behind goes before another starts. A
+ * daemon answering for a computer somebody owns starts none on that computer itself, and inside a workspace the
+ * server's files are written with no link of the workspace's followed. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -4855,9 +4889,9 @@ export const DaemonEvent = z.discriminatedUnion("type", [
   /** A loopback listener appeared around a browser.open whose URL named no
    * port: the flow's callback, for the host to forward. */
   z.object({ type: z.literal("callback.port"), port: RelayPort }),
-  z.object({ type: z.literal("tunnel.data"), tunnelId: z.string(), data: z.string() }),
+  z.object({ type: z.literal("tunnel.data"), tunnelId: z.string(), data: z.string(), machineId: z.string().optional() }),
   /** The guest side closed; the laptop connection ends after any data before it. */
-  z.object({ type: z.literal("tunnel.end"), tunnelId: z.string() }),
+  z.object({ type: z.literal("tunnel.end"), tunnelId: z.string(), machineId: z.string().optional() }),
   /** A pty printed, or a tool asked to open, a plain http URL on a local host
    * with an explicit port (http://localhost:8123/, 127.0.0.1:8123): the port a
    * person would click. Only the port travels; the host forwards it here. */
@@ -5962,12 +5996,24 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * ask, as with editor.open below. */
   z.object({ id: reqId, op: z.literal("editor.list") }),
   /** Opens a file or a folder of one workspace in the person's editor on the computer running the host and replies
-   * with { editor }, the one it opened in: the preference's, else the first installed. The path must resolve inside
-   * that workspace's copy or its project folder on this computer, a link included; a workspace whose files are on
-   * another machine is refused with editorOpensHereLine. `line`, from 1, lands the editor on that line where it
-   * takes one. The command is the host's own table's, run with the path as one argument and never through a shell.
-   * Only this computer's own window may ask. */
-  z.object({ id: reqId, op: z.literal("editor.open"), workspaceId: z.string(), path: z.string(), line: z.number().int().positive().optional() }),
+   * with { editor }, the one it opened in: `editor` where the window names one, else the preference's, else the
+   * first installed. The path must resolve inside
+   * that workspace's copy or its project folder on this computer, a link included. A workspace whose files are on
+   * another computer opens over ssh, by its alias, once its ssh road is ready: refused with kind sshInclude and
+   * sshIncludeLine until the person's ssh config reads wsp's, and with editorOpensHereLine by an editor with no
+   * remote road or a host that carries no ssh. `line`, from 1, lands the editor on that line where it takes one. The
+   * command is the host's own table's, run with the path as one argument and never through a shell. Only this
+   * computer's own window may ask. */
+  z.object({ id: reqId, op: z.literal("editor.open"), workspaceId: z.string(), path: z.string(), line: z.number().int().positive().optional(), editor: EditorId.optional() }),
+  /** Replies with { port }: a port on this computer's loopback that carries to the workspace's own ssh server,
+   * started there first with this computer's key allowed and its host key pinned under the workspace's alias before
+   * the answer. A copy on this computer has none, since its folder opens here; a napping workspace is woken first.
+   * What `wsp ssh` pipes an editor's ssh through. Only this computer's own window and the wsp command may ask. */
+  z.object({ id: reqId, op: z.literal("ssh.port"), workspaceId: z.string() }),
+  /** Puts the one Include line for wsp's own ssh config at the top of the person's ~/.ssh/config, or takes it out,
+   * or with `on` absent only reads it, and replies with { sshInclude }, whether it stands. Only this computer's own
+   * window may ask. */
+  z.object({ id: reqId, op: z.literal("ssh.include"), on: z.boolean().optional() }),
   /** Replies with { report: AgentsReport }: the agents, skills and MCP servers standing on one computer or workspace,
    * read as the login the computer was added with and never as root. Nothing is started: no server is spawned and no
    * login file is read, only whether one is there. A napping workspace is not woken; it answers the last report read
@@ -6597,7 +6643,7 @@ export {
   type Rgb,
   type ThemePreset,
 } from "./workspace-look.js";
-export { claudeMemoryDir, claudeProjectKey, copyPathFor, folderName, folderSlug, hiddenFolder, parentFolderName, placeDaemonPaths, placeOwnedPaths, placeProvisionPaths, probePath, rootsPathIn, standInMachinePath, standInRecordsPath, underProject, workFolderIn, type FolderMachine } from "./project-path.js";
+export { claudeMemoryDir, claudeProjectKey, copyPathFor, folderName, folderSlug, hiddenFolder, parentFolderName, placeDaemonPaths, placeOwnedPaths, placeProvisionPaths, probePath, rootsPathIn, SSH_ALIAS_PREFIX, sshAlias, standInMachinePath, standInRecordsPath, underProject, workFolderIn, type FolderMachine } from "./project-path.js";
 export * from "./bring-back.js";
 export * from "./changes.js";
 export * from "./pull-request.js";

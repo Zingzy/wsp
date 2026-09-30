@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Open in editor, on a file's tab: the file at its line, in the editor the
-// person picked, on the computer the host runs on. A workspace
-// whose files are on another machine asks nothing of the host: the button
-// gives way to the one sentence naming that machine, and a refusal from the
-// host takes its place the same way.
-import { editorOpensHereLine, isLocalWorkspace } from "@wsp/protocol";
+// person picked, on the computer the host runs on, and a running workspace's on
+// another computer over its ssh, the question of the line in the person's ssh
+// config going to the one sheet. A napping one asks nothing of the host: the
+// button gives way to the one sentence naming that machine, and a refusal from
+// the host takes its place the same way.
+import { editorOpensHereLine } from "@wsp/protocol";
 import { SquareArrowOutUpRightIcon } from "lucide-react";
 import { useState } from "react";
 import { cn, errorText } from "../lib/utils.js";
@@ -12,6 +13,9 @@ import { usePlaces, useStatus, useStore, useWorkspace } from "../protocol/store.
 import { copyName } from "../sidebar/workspaceRows.js";
 import { Button } from "../components/ui/button.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
+import { RequestError } from "../protocol/client.js";
+import { useSshConsent } from "./EditorConsent.js";
+import { opensInEditor } from "./openCopy.js";
 
 export const OPEN_IN_EDITOR = "Open in editor";
 
@@ -30,11 +34,15 @@ export function OpenInEditor({ workspaceId, path, line }: { workspaceId: string;
     );
   }
   const onClick = () => {
-    if (!isLocalWorkspace(workspace)) {
+    if (!opensInEditor(workspace)) {
       setSaid({ line: editorOpensHereLine(copyName(places, { workspace, status, displayName: workspace.name })), refused: false });
       return;
     }
-    open(workspaceId, path, line ?? undefined).catch((e: unknown) => setSaid({ line: errorText(e), refused: true }));
+    const run = async (): Promise<void> => void (await open(workspaceId, path, line ?? undefined));
+    run().catch((e: unknown) => {
+      if (e instanceof RequestError && e.kind === "sshInclude") useSshConsent.setState({ asking: { workspaceId, name: workspace.name, run } });
+      else setSaid({ line: errorText(e), refused: true });
+    });
   };
   return (
     <Tooltip>

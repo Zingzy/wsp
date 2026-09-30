@@ -598,7 +598,26 @@ export interface HostEditor {
   list(): Promise<EditorChoice[]>;
   /** Opens the path in the editor named, else the first installed, and answers which one; refused where the path
    * does not resolve inside one of the folders given. */
-  open(req: { path: string; line?: number; inside: readonly string[]; editor?: EditorId }): Promise<EditorId>;
+  open(req: { path: string; line?: number; inside: readonly string[]; editor?: EditorId; remote?: EditorRemote }): Promise<EditorId>;
+}
+
+/** Where a workspace on another computer opens from: its ssh alias on this computer and its folder there. */
+export interface EditorRemote {
+  alias: string;
+  folder: string;
+  /** The workspace's name, for the sentence an editor with no remote road answers with. */
+  name: string;
+}
+
+/** An editor's ssh into a workspace on another computer, as the host on this computer carries it. */
+export interface HostSsh {
+  /** A port on this computer's loopback that carries to the workspace's own ssh server, started there with this
+   * computer's key allowed, its host key pinned under the workspace's alias before this answers. */
+  port(workspace: { id: string; name: string }): Promise<number>;
+  /** Whether the person's ~/.ssh/config reads wsp's own ssh config. */
+  include(): Promise<boolean>;
+  /** Puts that one line in or takes it out, and answers whether it stands. */
+  setInclude(on: boolean): Promise<boolean>;
 }
 
 /** The init job on the computer running the host: wsp init's run, read and driven from the app over the wire. The
@@ -3624,9 +3643,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   };
   const copyBlocked = (entry: LiveWorkspace): Promise<void> => placeRefuses(entry.record.place);
 
-  /** The three frames a place daemon stamps with the workspace a session was opened inside, which is the listener
-   * it arrived on and never anything the guest said. */
-  const GUEST_EVENTS = ["guest.opened", "guest.message", "guest.closed"];
+  /** The frames a place daemon stamps with the workspace they are of: a guest session's, by the listener it arrived
+   * on and never anything the guest said, and a tunnel's, by the workspace it was opened inside. */
+  const GUEST_EVENTS = ["guest.opened", "guest.message", "guest.closed", "tunnel.data", "tunnel.end"];
   /** What a pty pushes, each naming the pty it is of; a computer answering for many workspaces pushes every
    * workspace's up the one link. */
   const PTY_EVENTS = ["pty.data", "pty.exit", "pty.mode"];
@@ -3640,8 +3659,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * computer's daemon runs every other op on the computer itself, so a deny list would let an op added later reach it.
    * Each of these names the workspace it is for, and the daemon answers it inside that workspace. */
   const WORKSPACE_FRAMES = ["pty.create", "pty.attach", "pty.detach", "pty.write", "pty.resize", "pty.kill", "pty.list", "fs.list", "fs.files", "fs.read", "fs.write", "fs.search", "git.status", "git.diff", "git.snapshot", "git.range", "git.push", "git.pr", "git.prList", "ping"];
-  /** And the host's own guest road, which answers the sessions that computer relays by the id it gave them. */
-  const GUEST_ROAD_FRAMES = [...WORKSPACE_FRAMES, "guest.watch", "guest.reply", "guest.close"];
+  /** And the host's own guest road, which answers the sessions that computer relays by the id it gave them, and
+   * carries an editor's ssh to the server it starts inside the workspace. A client's channel carries neither: a
+   * tunnel reaches any port inside the workspace, and only this host's relay listens for one. */
+  const GUEST_ROAD_FRAMES = [...WORKSPACE_FRAMES, "guest.watch", "guest.reply", "guest.close", "ssh.start", "tunnel.open", "tunnel.write", "tunnel.close"];
 
   /** The channel a client of this host drives a served workspace's daemon over: every frame it carries goes up that
    * computer's link with the workspace named on it, and the events that come back are the ones this workspace's,

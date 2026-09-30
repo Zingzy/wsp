@@ -6,11 +6,13 @@
 import { useEffect } from "react";
 import { capitalised, checkoutCounts, DETACHED_HEAD, isPullRequestNamed, pullRequestWord } from "@wsp/protocol";
 import type { SidebarProjectSnapshot } from "../adapt/index.js";
+import { EDITOR_SSH_WORDS } from "../files/EditorConsent.js";
 import { useStore } from "../protocol/store.js";
 import { branchLine } from "./workspaceRows.js";
 
 /** What a workspace's tiles show on row three: the branch, empty where none is known or the head is on none, the
- * counts beside it that say something at a glance, and the pull request's word first; why that word is not read, for
+ * counts beside it that say something at a glance, the word for an editor attached over ssh first while one is,
+ * since it is also what keeps the workspace awake, and the pull request's word next; why that word is not read, for
  * the hover; and the word a settled tile's slot reads in place of its age where the pull request merged or closed.
  * Ahead is left out once the tile's thread is done, since the work it counts is over. */
 export interface TileCheckout {
@@ -20,16 +22,16 @@ export interface TileCheckout {
   settledWord?: string;
 }
 
-export function tileCheckout(runs: Pick<SidebarProjectSnapshot, "workspace" | "status">, done = false): TileCheckout {
+export function tileCheckout(runs: Pick<SidebarProjectSnapshot, "workspace" | "status">, o: { done?: boolean; attached?: boolean } = {}): TileCheckout {
   const fact = runs.status?.checkout;
   const pr = runs.status?.pr;
-  const word = pr === undefined ? [] : [pullRequestWord(pr)];
+  const word = [...(o.attached === true ? [EDITOR_SSH_WORDS.attached] : []), ...(pr === undefined ? [] : [pullRequestWord(pr)])];
   // The word stands next to the branch, ahead of the counts: a tile is too narrow for all of them, and the pull
   // request's state is the one a person scans the list for.
   const shown =
     fact === undefined
       ? { branch: branchLine(runs), counts: word }
-      : { branch: fact.branch === DETACHED_HEAD ? "" : fact.branch, counts: [...word, ...checkoutCounts({ ...fact, ...(done ? { ahead: 0 } : {}) }, pr)] };
+      : { branch: fact.branch === DETACHED_HEAD ? "" : fact.branch, counts: [...word, ...checkoutCounts({ ...fact, ...(o.done === true ? { ahead: 0 } : {}) }, pr)] };
   return {
     ...shown,
     ...(pr !== undefined && "why" in pr ? { why: pr.why } : {}),

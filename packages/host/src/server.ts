@@ -8,7 +8,7 @@ import { extname, join, resolve as resolvePath, sep } from "node:path";
 import { CREATED_AT_LABEL, HOST_LABEL, SMOKE_LABEL, WSP_LABEL, agentHomes, type ProvisionPlan } from "@wsp/engine";
 import { BOOT_SCRIPT, DEFAULT_PORT, PAIR_CODE_TTL_MS, PLACES_WORDS, PLACE_PORT_OFFSET, WILDCARD, WS_PATH, authority, doorPortHeldLine, isLoopback, joinAddressOf, servedHostname, noSuchPlaceRefusal, recordRestoredLine, peerAddress, relayUrlOf, scopeOf, type BootPayload, type DoctorLineEvent, type Caller, type PlaceDoorView, type ProjectImportResult, type ProjectPlan, type ProjectView, type WorkspaceView, kindForComputer, nameTheProjectLine, copiesFolder } from "@wsp/protocol";
 import { sshHostsIn } from "./ssh-hosts.js";
-import { LOOPBACK, describeAge, goldenHead, serveRuntime, tokenDigest, type AdmittedDevices, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type InitDoor, type PlaceBackHolder, type PlaceDoctor, type PlaceDoorControl, type ProjectBundler, type ProjectImportOptions, type ReapedMachine, type RestartDoor, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
+import { LOOPBACK, describeAge, goldenHead, serveRuntime, tokenDigest, type AdmittedDevices, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type HostSsh, type InitDoor, type PlaceBackHolder, type PlaceDoctor, type PlaceDoorControl, type ProjectBundler, type ProjectImportOptions, type ReapedMachine, type RestartDoor, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
 import { computerDoctor } from "./doctor.js";
 import { advertiseWord, hereUrl, reachAddresses, type HereAt } from "./pairing.js";
 import { NO_PROJECT_YET } from "./verbs.js";
@@ -25,6 +25,8 @@ import { guestCli } from "./guest-cli.js";
 import { guestMcp } from "./guest-mcp.js";
 import { guestDoor } from "./guest.js";
 import { runningWsp } from "./mcp-install.js";
+import { wspArgvOf } from "./place-report.js";
+import { sshDoor, sshFiles } from "./ssh-files.js";
 import { startCallbackRelay, systemOpener, type UrlOpener } from "./relay.js";
 import { NO_PROVIDER } from "./providers.js";
 import type { ReleaseWatch } from "./release.js";
@@ -70,6 +72,8 @@ export interface HostOptions {
   statePath?: string;
   /** The init job on this computer, served to the app as the init.* ops and the init.job events; absent, they are refused. */
   init?: InitDoor;
+  /** How an editor's ssh reaches a workspace; the relay below and this computer's own ssh files when absent. */
+  ssh?: HostSsh;
   /** Whether the door a computer you own dials is bound as this host starts. Open when a joined computer is on
    * record: it dials the port its place file names, and a laptop coming back must find that port there. */
   door?: "closed" | "open";
@@ -595,6 +599,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
       folders: hostFolders(() => rt.workspaces.list()),
       terminalConfig: { read: scheme => readGhosttyConfig(nodeHost(), scheme) },
       editor: editorHost(),
+      ssh: opts.ssh ?? sshDoor(relay, sshFiles({ wspHome: wspHome(), personHome: homedir() }), () => wspArgvOf(runningWsp())),
       sshHosts: async places => sshHostsIn(join(homedir(), ".ssh"), places),
       // Read at every ask rather than once at start: a sign-in taken at the terminal while the app stands open is
       // on the next read, and the read is two small files on this computer.

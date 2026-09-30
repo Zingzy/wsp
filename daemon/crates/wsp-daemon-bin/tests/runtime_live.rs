@@ -591,6 +591,62 @@ async fn a_service_bound_to_the_loopback_inside_answers_at_the_published_port() 
     w.close().await;
 }
 
+/// The road an editor's ssh takes into a fork on a box, against a real one: a port free on the fork's own loopback,
+/// a server the helper starts there, reached from the box inside the fork's namespace, held in the fork's cgroup;
+/// and the server's files, where an absolute link the fork's root plants at their folder is refused rather than
+/// followed onto the box's own directory.
+#[tokio::test]
+#[ignore = "drives the kernel as root: run the live executable on a box with --ignored"]
+async fn an_editors_ssh_road_reaches_a_server_on_the_forks_own_loopback_and_its_files_follow_no_planted_link() {
+    assert!(root_here(), "{LIVE_REASON}");
+    let mut w = World::open().await;
+    let id = w.create(spec(json!({}))).await;
+    let port = w.ops.free_port_in(&id).await.unwrap();
+    let serve = format!(
+        "exec perl -MIO::Socket::INET -e '$s = IO::Socket::INET->new(LocalAddr => \"{LOOPBACK_INSIDE}\", LocalPort => {port}, Listen => 5, ReuseAddr => 1) or die $!; while ($c = $s->accept) {{ print $c \"SSH-2.0-inside\\r\\n\"; close $c }}'"
+    );
+    let mut spawned = w.ops.spawn_in(&id, &["/bin/sh".to_owned(), "-c".to_owned(), serve]).await.unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let banner = loop {
+        if let Ok(mut s) = w.ops.dial_in(&id, port).await {
+            let mut said = String::new();
+            tokio::io::AsyncReadExt::read_to_string(&mut s, &mut said).await.unwrap();
+            if !said.is_empty() {
+                break said;
+            }
+        }
+        assert!(Instant::now() < deadline, "nothing answered on {port} inside {id}");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    };
+    assert_eq!(banner, "SSH-2.0-inside\r\n");
+    let cgroup = fs::read_to_string(format!("/proc/{}/cgroup", spawned.pid)).unwrap();
+    assert!(cgroup.contains(&format!("/{id}")), "the server is not in {id}'s cgroup: {cgroup}");
+    assert!(w.ops.cgroup_of_running(&id).unwrap().exists());
+
+    // The box's own folder a planted link would reach, holding a key file of its own.
+    let outside = root().join(format!("ssh-outside-{id}"));
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(outside.join("authorized_keys"), "the box's own").unwrap();
+    let (code, _, err) = w.exec(&id, &format!("mkdir -p /var/lib && ln -s '{}' /var/lib/wsp-ssh", outside.display())).await;
+    assert_eq!((code, err.as_str()), (0, ""));
+    assert!(w.ops.write_ssh_files_in(&id, b"ssh-ed25519 AAAAlive the-mac\n", b"UsePAM yes\n").is_err());
+    assert!(w.ops.ssh_host_key_in(&id).is_err());
+    assert_eq!(fs::read_to_string(outside.join("authorized_keys")).unwrap(), "the box's own");
+    assert_eq!(fs::read_dir(&outside).unwrap().count(), 1);
+
+    let (code, _, err) = w.exec(&id, "rm /var/lib/wsp-ssh").await;
+    assert_eq!((code, err.as_str()), (0, ""));
+    w.ops.write_ssh_files_in(&id, b"ssh-ed25519 AAAAlive the-mac\n", b"UsePAM yes\n").unwrap();
+    let (code, out, err) = w.exec(&id, "stat -c %a /var/lib/wsp-ssh /var/lib/wsp-ssh/authorized_keys /var/lib/wsp-ssh/sshd_config; cat /var/lib/wsp-ssh/authorized_keys").await;
+    assert_eq!((code, err.as_str()), (0, ""));
+    assert_eq!(out, "700\n600\n600\nssh-ed25519 AAAAlive the-mac\n");
+    assert_eq!(w.ops.ssh_host_key_in(&id).unwrap(), None);
+
+    let _ = spawned.helper.start_kill();
+    fs::remove_dir_all(&outside).unwrap();
+    w.close().await;
+}
+
 /// What the box keeps of its own that a turn inside a workspace may not read: the password hashes, the keys it
 /// answers ssh on and the keys that open other computers. Each of them is the workspace's own empty file or
 /// directory, and what the box holds is untouched.

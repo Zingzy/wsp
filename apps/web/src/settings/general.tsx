@@ -1,15 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Settings > General: the editor Open in editor opens a file in, picked from
-// the editors installed on the computer the host runs on, and whether the
-// desktop app keeps this computer awake while a thread works on it.
+// the editors installed on the computer the host runs on, whether they open a
+// workspace on another computer over ssh, and whether the desktop app keeps
+// this computer awake while a thread works on it.
 import type { EditorId } from "@wsp/protocol";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../components/ui/select.js";
 import { Switch } from "../components/ui/switch.js";
+import { EDITOR_SSH_WORDS } from "../files/EditorConsent.js";
 import { EditorGlyph } from "../files/EditorGlyph.js";
 import { AWAKE_WORDS, GENERAL_WORDS } from "./format.js";
 import { hereName } from "./places.js";
 import type { SettingsCardData } from "./rows.js";
 import type { SettingsContext } from "./settingsContext.js";
+import { useSettingsStore } from "./settingsStore.js";
 
 export function generalCards(ctx: SettingsContext): SettingsCardData[] {
   const editors = ctx.reads.editors ?? [];
@@ -51,6 +54,24 @@ export function generalCards(ctx: SettingsContext): SettingsCardData[] {
               </Select>
             ),
         },
+        ...(ctx.reads.sshInclude === null
+          ? []
+          : [
+              {
+                kind: "row" as const,
+                id: "editor-ssh",
+                title: EDITOR_SSH_WORDS.setting,
+                description: EDITOR_SSH_WORDS.settingNote,
+                control: (
+                  <Switch
+                    data-k="editor-ssh"
+                    aria-label={EDITOR_SSH_WORDS.setting}
+                    checked={ctx.reads.sshInclude}
+                    onCheckedChange={on => void ctx.api?.sshInclude?.(on).then(sshInclude => useSettingsStore.getState().setReads({ sshInclude }), ctx.failed)}
+                  />
+                ),
+              },
+            ]),
         {
           kind: "row",
           id: "keep-awake",
