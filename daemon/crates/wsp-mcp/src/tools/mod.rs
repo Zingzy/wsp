@@ -116,13 +116,22 @@ pub const TOOLS: &[Tool] = &[
 
 /// The tool of that name the state lists, with its entry there; none where that state lists no such tool, which the
 /// TypeScript server does not register.
-pub fn named(name: &str, cloud: bool) -> Option<(&'static Tool, &'static str)> {
-    TOOLS.iter().filter(|tool| tool.name == name).find_map(|tool| Some((tool, entry_in(tool.listed, cloud)?)))
+pub fn named(name: &str, cloud: bool, guest: bool) -> Option<(&'static Tool, &'static str)> {
+    TOOLS.iter().filter(|tool| tool.name == name && served(tool, guest)).find_map(|tool| Some((tool, entry_in(tool.listed, cloud)?)))
 }
 
 /// Every tool the state lists, by its entry there.
-pub fn listed(cloud: bool) -> impl Iterator<Item = &'static str> {
-    TOOLS.iter().filter_map(move |tool| entry_in(tool.listed, cloud))
+pub fn listed(cloud: bool, guest: bool) -> impl Iterator<Item = &'static str> {
+    TOOLS.iter().filter(move |tool| served(tool, guest)).filter_map(move |tool| entry_in(tool.listed, cloud))
+}
+
+/// The variable a turn's own token rides in, which a guest's tools may read.
+pub(crate) fn turn_token_env() -> &'static String {
+    &said::turns().turn_token_env
+}
+
+fn served(tool: &Tool, guest: bool) -> bool {
+    !guest || !crate::record::server().reads_here.iter().any(|name| name == tool.name)
 }
 
 /// A recorded file's entry for one state of WSP_CLOUD, in the bytes it was recorded in.

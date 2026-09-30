@@ -114,6 +114,22 @@ async fn a_verb_missing_its_required_flag_names_it_on_the_first_line() {
     }
 }
 
+#[cfg(feature = "mcp")]
+#[tokio::test]
+async fn a_guest_line_is_refused_unless_it_runs_under_a_thread_scope() {
+    // A guest's server outside a thread's scope would aim at the lock beside the person's state and act on the
+    // host's own token.
+    let out = Command::new(BIN)
+        .args(["mcp", "--state", "/nonexistent/state.json", "--guest"])
+        .stdin(std::process::Stdio::null())
+        .output()
+        .await
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(stderr.lines().next(), Some("error: the following required arguments were not provided: --scoped"), "{stderr}");
+}
+
 #[tokio::test]
 async fn runtime_ask_names_its_root_on_purpose_or_not_at_all() {
     // A frame that is not JSON, so nothing past the flags could run whatever the root: the refusal is the flag's.

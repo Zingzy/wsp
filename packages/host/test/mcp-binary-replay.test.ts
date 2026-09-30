@@ -11,7 +11,9 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
-import { describe, expect, it } from "vitest";
+import { CLOUD_ENV, escapeC1, HOST_TOKEN_ENV, HOST_URL_ENV } from "@wsp/protocol";
+import { describe, expect, it, vi } from "vitest";
+import { guestTools } from "../src/guest-tools.js";
 import { mcpServerSpec, toolServerLine, type RunningWsp } from "../src/mcp-install.js";
 import { ownEnv, served } from "./stdio-session.js";
 import { writeStub } from "../../protocol/test/stub-script.js";
@@ -36,6 +38,8 @@ interface Case {
   wsp?: { argv: string[]; stdout: string; stderr: string; exit: number };
   line: string;
   asked: Record<string, unknown>[];
+  /** The answer a session from inside a machine gets, where it is not the one above. */
+  guest?: { line: string; asked: Record<string, unknown>[] };
 }
 
 /** A host on loopback that takes the token and answers as the recording's host did: each op with its frame under the
@@ -107,6 +111,39 @@ suite(`every recorded answer through the line wsp mcp runs${MCP_BIN === undefine
           expect(ran, `${recorded.tool} ${c.case}: the words wsp was run with`).toEqual(c.wsp.argv.map(w => w.replace("{state}", state)));
         }
       } finally {
+        await host.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
+  it.each(files)("%s, as a session from inside a machine through this host's guest kind", async file => {
+    const recorded = JSON.parse(readFileSync(join(ANSWERS, file), "utf8")) as { tool: string; cases: Case[] };
+    const platform = process.platform === "darwin" ? "darwin" : "linux";
+    for (const c of recorded.cases.filter(c => c.platform === undefined || c.platform === platform)) {
+      const expected = c.guest ?? { line: c.line, asked: c.asked };
+      const dir = mkdtempSync(join(tmpdir(), "wsp-mcp-guest-replay-"));
+      const host = await hostFor(c);
+      vi.stubEnv(CLOUD_ENV, c.cloud === true ? "1" : "");
+      // The record's clocks were written in UTC, and a guest's times are printed in this host's zone.
+      vi.stubEnv("TZ", "UTC");
+      try {
+        const replies: unknown[] = [];
+        const session = guestTools(join(dir, "state.json"), MCP_BIN!).open({
+          argv: ["mcp"],
+          cwd: "/root",
+          env: { [HOST_URL_ENV]: `http://127.0.0.1:${host.port}`, [HOST_TOKEN_ENV]: TOKEN },
+          reply: message => replies.push(message),
+          close: () => {},
+        });
+        session.message({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: recorded.tool, arguments: c.arguments } });
+        await vi.waitFor(() => expect(replies.length).toBeGreaterThan(0), { timeout: 15_000, interval: 10 });
+        session.close();
+        // The message goes down the link as the host serializes it; on stdio it is that line, escaped.
+        expect(escapeC1(JSON.stringify(replies[0])), `${recorded.tool} ${c.case}`).toBe(expected.line);
+        expect(sorted(host.asked), `${recorded.tool} ${c.case}: what the host was asked`).toEqual(sorted(expected.asked));
+      } finally {
+        vi.unstubAllEnvs();
         await host.close();
         rmSync(dir, { recursive: true, force: true });
       }

@@ -205,8 +205,7 @@ export interface ServeOptions {
 export interface GuestOpening {
   argv: readonly string[];
   cwd: string;
-  /** The pair a verb reads its host and its token off, as a turn's own launch leaves them, plus the turn's token;
-   * on a session this computer's forwarder opened, the environment its line was typed in as well. */
+  /** The pair a verb reads its host and its token off, as a turn's own launch leaves them, plus the turn's token. */
   env: Record<string, string>;
   reply(message: unknown): void;
   close(error?: string): void;

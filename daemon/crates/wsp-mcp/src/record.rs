@@ -27,6 +27,8 @@ pub struct Server {
     pub instructions: Instructions,
     pub protocol_versions: Vec<String>,
     pub latest_protocol_version: String,
+    /// The tools whose work reads this computer, which a guest is not served: its caller means the machine it is on.
+    pub reads_here: Vec<String>,
 }
 
 /// What the server greets with, with WSP_CLOUD off and on: the TypeScript server words it for the state it runs in.
