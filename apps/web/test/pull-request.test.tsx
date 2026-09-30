@@ -45,7 +45,12 @@ const fact = (over: Partial<PullRequestFact> = {}): PullRequestFact => ({
 const PAGE: PullRequestPage = {
   title: "Set .ci-status back to 0",
   body: "The check failed.",
-  commits: [{ oid: "abc1234def", subject: "Set ci status", at: "2026-09-28T10:00:00Z" }],
+  author: "cass",
+  updatedAt: "2026-09-28T12:00:00Z",
+  commits: [
+    { oid: "abc1234def", subject: "Set ci status", at: "2026-09-28T10:00:00Z", author: "cass" },
+    { oid: "def5678abc", subject: "Merge branch 'main' into fix", at: "2026-09-28T10:30:00Z", author: "cass" },
+  ],
   reviews: [{ author: "ana", state: "changes_requested", body: "see line 3", at: "2026-09-28T11:00:00Z" }],
   comments: [{ author: "bo", body: "thanks", at: "2026-09-28T12:00:00Z" }],
   reviewComments: [{ id: 7, path: "check.sh", line: 3, side: "RIGHT", author: "ana", body: "exit 1 here\nnot 0", url: "https://github.com/o/r/pull/12#discussion_r7", at: "2026-09-28T11:00:00Z" }],
@@ -75,7 +80,7 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("the Pull request pane", () => {
-  it("says the title once, the number in its state's ink as the link, the state and the stats as quiet facts, then checks, review, comments and the timeline", async () => {
+  it("heads with the number in its state's ink, the state, author and stats, then Overview holds the body, checks, review and comments", async () => {
     const api = withApi(fact());
     const { container } = render(<PullRequestSurface workspaceId={WS} />);
     await waitFor(() => expect(container.querySelector("[data-pr-title]")?.textContent).toBe("Set .ci-status back to 0"));
@@ -86,22 +91,75 @@ describe("the Pull request pane", () => {
     const number = container.querySelector<HTMLAnchorElement>("[data-pr-number]")!;
     expect([number.textContent, number.getAttribute("href"), number.dataset["prState"]]).toEqual(["#12", "https://github.com/o/r/pull/12", "open"]);
     expect(number.className).toContain("text-pr-open");
-    expect([...container.querySelectorAll("[data-pr-facts] > span")].map(n => n.textContent)).toEqual(["Checks failed", "+120 -30", "9 files", "4 commits"]);
+    // The state word, the author and the stats sit as quiet facts; the updated time is there and reads as some age.
+    expect(container.querySelector("[data-pr-word]")!.textContent).toBe("Checks failed");
+    expect(container.querySelector("[data-pr-author]")!.textContent).toBe("cass");
+    expect(container.querySelector("[data-pr-updated]")!.textContent).not.toBe("");
+    expect([...container.querySelectorAll("[data-pr-facts] span")].map(n => n.textContent)).toEqual(expect.arrayContaining(["+120 -30", "9 files", "4 commits"]));
+    // Overview is the tab that opens; the body renders and the checks stand, the failure first and open with its fix.
+    expect(container.querySelector("[data-pr-body]")!.textContent).toContain("The check failed.");
     const checks = [...container.querySelectorAll<HTMLElement>("[data-pr-check]")];
     // The mark is the state; the word stands only on the failure, which is the row that opens.
-    expect(checks.map(c => [c.dataset["prCheck"], c.querySelector("[data-pr-check-state]")?.textContent ?? null, c.querySelector("[data-pr-check-mark]")!.getAttribute("aria-label"), c.dataset["open"] ?? null])).toEqual([
-      ["ci", "Failed", null, "true"],
-      ["lint", null, "Passed", null],
+    expect(checks.map(c => [c.dataset["prCheck"], c.querySelector("[data-pr-check-state]")?.textContent ?? null, c.dataset["open"] ?? null])).toEqual([
+      ["ci", "Failed", "true"],
+      ["lint", null, null],
     ]);
-    // Each check wears its mark; only the failure opens, with its fix under it.
     expect(checks.every(c => c.querySelector("[data-pr-check-mark] svg, svg[data-pr-check-mark]") !== null)).toBe(true);
     expect(container.querySelectorAll("[data-pr-fix]")).toHaveLength(1);
     expect(checks[0]!.querySelector("[data-pr-fix]")).not.toBeNull();
     expect(container.querySelector("[data-pr-review]")!.textContent).toContain("Changes requested");
+    // The conversation is its own group, and a comment on a line keeps its own.
+    expect(container.querySelector("[data-pr-conversation]")!.textContent).toContain("bo");
+    expect(container.querySelector("[data-pr-conversation]")!.textContent).toContain("thanks");
     expect(container.querySelector("[data-pr-comment='7']")!.textContent).toContain("check.sh:3");
-    expect([...container.querySelectorAll("[data-pr-event]")].map(n => n.textContent)).toEqual(["abc1234committedSet ci status", "bocommentedthanks"]);
-    // No section is ruled off, and no word is a chip.
-    expect(container.innerHTML).not.toMatch(/border-b|rounded-full/);
+    // No section is ruled off in the pane's own chrome.
+    expect(container.querySelector("[data-pr-head]")!.innerHTML).not.toMatch(/border-b|rounded-full/);
+  });
+
+  it("shows the commits on a rail, a merge commit's dot hollow, with author and a relative time", async () => {
+    withApi(fact());
+    const { container } = render(<PullRequestSurface workspaceId={WS} />);
+    await waitFor(() => expect(container.querySelector("[data-pr-tabs]")).not.toBeNull());
+    fireEvent.click(container.querySelector('[data-segment="commits"]')!);
+    const commits = await waitFor(() => {
+      const rows = [...container.querySelectorAll<HTMLElement>("[data-pr-commit]")];
+      expect(rows).toHaveLength(2);
+      return rows;
+    });
+    expect(commits.map(c => c.dataset["prCommit"])).toEqual(["abc1234def", "def5678abc"]);
+    expect(commits[0]!.textContent).toContain("Set ci status");
+    expect(commits[0]!.textContent).toContain("cass");
+    // Only the merge commit's dot is hollow.
+    expect(commits[0]!.querySelector("[data-pr-commit-merge]")).toBeNull();
+    expect(commits[1]!.querySelector("[data-pr-commit-merge]")).not.toBeNull();
+  });
+
+  it("shows the changed files as the tree, with the additions green and the deletions red", async () => {
+    withApi(fact());
+    const { container } = render(<PullRequestSurface workspaceId={WS} />);
+    await waitFor(() => expect(container.querySelector("[data-pr-tabs]")).not.toBeNull());
+    fireEvent.click(container.querySelector('[data-segment="files"]')!);
+    const files = await waitFor(() => {
+      const el = container.querySelector<HTMLElement>("[data-pr-files]");
+      expect(el).not.toBeNull();
+      return el!;
+    });
+    // The colors are on the rows themselves, not the header alone: the file's own count is green and red.
+    const row = files.querySelector<HTMLElement>("[data-changed-file='check.sh']")!;
+    expect(row).not.toBeNull();
+    expect(row.querySelector(".text-success")).not.toBeNull();
+    expect(row.querySelector(".text-error-foreground")).not.toBeNull();
+  });
+
+  it("clamps a long body with the fade and Show more, and a press lifts the fade", async () => {
+    withApi(fact(), { ...PAGE, body: "word ".repeat(200) });
+    const { container } = render(<PullRequestSurface workspaceId={WS} />);
+    await waitFor(() => expect(container.querySelector("[data-pr-body]")).not.toBeNull());
+    expect(container.querySelector("[data-pr-body-fade]")).not.toBeNull();
+    const toggle = container.querySelector<HTMLButtonElement>("[data-pr-show-more]")!;
+    expect(toggle).not.toBeNull();
+    fireEvent.click(toggle);
+    expect(container.querySelector("[data-pr-body-fade]")).toBeNull();
   });
 
   it("sends a failed check to the agent in one press and says so with the command line's line", async () => {
