@@ -4480,6 +4480,11 @@ const DAEMON_CONTENTS = [
   "5bc5f0d1888a8f254ffffa1bee6b77a302bf5c1164f520e5255b2f6c4a83a252",
   "db97f7d2dba5d48e19188ea89555803e76332015c7c2daf27a3a6c42d7f49cce",
   "297d0addb6e4b758e1f50a38516edc1eb32aa22da6894e5be52323d6b998c4fa",
+  // 99 to 101 are held by daemon changes still in review, whose entries land with them.
+  UNRECORDED,
+  UNRECORDED,
+  UNRECORDED,
+  "fdfe7e8214a09e7c6e73ddea88aa9c167869ef0e02436b4c1ce7df85c7fdaa72",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -4747,7 +4752,10 @@ const DAEMON_CONTENTS = [
  * leaves the tools that read this computer off its list.
  * Version 98 runs the command pty.create names through the person's own shell, as interactive and login as their
  * terminal opens it, and the pty exits with it; such a pty is a reply's, which pty.list marks and no pane adopts, until
- * pty.tab hands it to the panes still running. */
+ * pty.tab hands it to the panes still running.
+ * Version 102 hashes an untracked file's blob id in this daemon's own process, in the repository's object format,
+ * from the bytes it read, so a checkout of tens of thousands of untracked files spawns no git and writes no object;
+ * git hash-object is run, with -w, only for the tracked hunks git.diff rebuilds from the object. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
