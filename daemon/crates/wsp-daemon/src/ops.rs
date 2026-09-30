@@ -26,7 +26,7 @@ use crate::paths::OpError;
 use crate::proc::{kill_process, ProcSampler, ProtectedPids};
 use crate::pty::{passwd_row, process_env, pump, PtyCreateOpts};
 use crate::tunnel::Tunnels;
-use crate::{bring_back, frame_text as text, fs, git, hosts, paths, ssh, tunnel, Ctx, Listener, Outbound, Outgoing};
+use crate::{bring_back, frame_text as text, fs, git, hosts, paths, readings, ssh, tunnel, Ctx, Listener, Outbound, Outgoing};
 
 type Detach = Box<dyn FnOnce() + Send>;
 
@@ -321,6 +321,7 @@ async fn handle_op(conn: &Arc<Conn>, ctx: &Arc<Ctx>, frame: &Value, id: Option<R
             | "tunnel.write"
             | "tunnel.close"
             | "sys.watch"
+            | "sys.history"
             | "proc.watch"
             | "proc.unwatch"
             | "proc.inspect"
@@ -1119,6 +1120,23 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
             };
             answer(id, watched.await)
         }
+        DaemonOp::SysHistory { from, to, step_ms } => {
+            let read = async {
+                // A kind that reads no readings keeps none, and says so in the watch's own words.
+                readings::readings_for(&ctx.options.kind, std::env::consts::OS)?;
+                if step_ms == 0 || to <= from {
+                    return Err(OpError::coded(
+                        DaemonErrorCode::BadRequest,
+                        "sys.history takes a from before its to and a step above zero",
+                    ));
+                }
+                let history = Arc::clone(&ctx.history);
+                tokio::task::spawn_blocking(move || history.read(from, to, step_ms, numbers::READINGS_POINTS_CAP))
+                    .await
+                    .map_err(|e| OpError::plain(e.to_string()))
+            };
+            answer(id, read.await)
+        }
         DaemonOp::ProcWatch => {
             let watched = async {
                 let sampler = ctx.proc_sampler()?;
@@ -1431,6 +1449,7 @@ mod tests {
             "tunnel.close",
             "ssh.start",
             "sys.watch",
+            "sys.history",
             "proc.watch",
             "proc.unwatch",
             "proc.inspect",

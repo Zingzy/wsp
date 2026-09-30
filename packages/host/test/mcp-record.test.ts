@@ -521,6 +521,39 @@ const ANSWERED: Answered = {
     { case: "empty", arguments: {}, replies: { "places.list": reply({ places: [] }), "cost.spend": reply({ places: [] }) } },
     { case: "refused", arguments: {}, replies: { "places.list": JSON.stringify({ id: 1, ok: false, error: "the token this line presented is not one this host holds", kind: "auth" }), "cost.spend": reply({ places: [] }) } },
   ],
+  usage: [
+    {
+      case: "an account read and one with no reading, and a day of use by agent",
+      arguments: {},
+      replies: {
+        "usage.accounts": reply({
+          accounts: [
+            { key: "claude:vault-token", agent: "claude", label: "your Claude Code sign-in", computers: ["zingzy's MacBook Pro", "Boat"], note: "not read yet: runs a thread first" },
+            { key: "codex:acct_7f3a", agent: "codex", label: "dév@example.com", computers: ["Boat"], plan: "plus", windows: [{ kind: "session", usedPercent: 34.5, resetsAt: 1_790_700_000_000 }, { kind: "week", usedPercent: 12 }], status: "ok", readAt: 1_790_650_000_000 },
+          ],
+        }),
+        "usage.used": reply({
+          used: {
+            range: "day",
+            split: "agent",
+            rows: [
+              { key: "codex", label: "Codex \u0085 \"cli\"", tokens: { input: 1_500, output: 150, cached: 400 }, costList: 0.0123, priced: true },
+              { key: "log:claude", label: "Claude Code", tokens: { input: 7, output: 3, cached: 0 }, costReported: 0.5, priced: true, outside: true },
+            ],
+            series: [{ t: 1_790_640_000_000, tokens: 1_660 }],
+            since: 1_790_640_000_000,
+            until: 1_790_650_000_000,
+          },
+        }),
+      },
+    },
+    {
+      case: "a week by project with nothing used",
+      arguments: { range: "week", by: "project" },
+      replies: { "usage.accounts": reply({ accounts: [] }), "usage.used": reply({ used: { range: "week", split: "project", rows: [], series: [], since: 1_790_130_000_000, until: 1_790_650_000_000 } }) },
+    },
+    { case: "refused", arguments: {}, replies: { "usage.accounts": refused("usage.accounts is not a thread's to ask for", "auth"), "usage.used": reply({ used: { range: "day", split: "agent", rows: [], series: [], since: 0, until: 0 } }) } },
+  ],
   ...TURN_ANSWERED,
   ...READS,
 };

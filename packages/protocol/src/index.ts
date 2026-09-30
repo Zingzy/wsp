@@ -14,6 +14,7 @@ import { CLOUD_ENV, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, TURN_T
 import { Attachment, AttachmentRecord } from "./attachments.js";
 import { fmtBytes, fmtBytesOfTotal, isoSeconds, KNOWN_HOSTS, nameList, openingTitle, PLACE_INSTALL, PLACE_LEAVE_LINE, plural, thisComputer, THIS_COMPUTER, threadWord, titleLine } from "./format.js";
 import { InitJob, InitJobEvent, InitAgent, InitKeys, InitNeedsYou, InitNeedsYouEvent, InitRoad, InitScreenId, LoginChoice, LoginState, SIGN_IN_CODE_MAX } from "./init-job.js";
+import { UsageRange, UsageSplit } from "./usage.js";
 import type { FsListReply as WireFsListReply } from "./generated/FsListReply.js";
 import type { FsFilesReply as WireFsFilesReply } from "./generated/FsFilesReply.js";
 import type { GitPrListReply as WireGitPrListReply } from "./generated/GitPrListReply.js";
@@ -39,6 +40,8 @@ import type { SshStartReply as WireSshStartReply } from "./generated/SshStartRep
 import type { GitStartOnReply as WireGitStartOnReply } from "./generated/GitStartOnReply.js";
 import type { GitBranchCompareReply as WireGitBranchCompareReply } from "./generated/GitBranchCompareReply.js";
 import type { GitMergeInReply as WireGitMergeInReply } from "./generated/GitMergeInReply.js";
+import type { SysHistoryReply as WireSysHistoryReply } from "./generated/SysHistoryReply.js";
+import type { SysPoint as WireSysPoint } from "./generated/SysPoint.js";
 import { HERE_PLACE_ID, namesPlace } from "./place-word.js";
 import { threadNeedsYou } from "./thread-state.js";
 import { Checkout } from "./changes.js";
@@ -2175,6 +2178,9 @@ export const Preferences = z.object({
   /** Whether the host asks each agent's vendor for its newest version. On unless the person turns it off, and
    * WSP_UPDATE_CHECK=0 in the host's environment stops it whatever this says; defaulted as serverIcons is. */
   agentVersions: z.boolean().default(true),
+  /** Whether the host reads this computer's agent logs for the work done outside wsp, which the Usage page counts on
+   * rows of their own. Read here and kept here; defaulted as serverIcons is. */
+  usageLogs: z.boolean().default(true),
   /** The editor Open in editor opens a file in; absent opens the first one installed on the computer running the host. */
   editor: EditorId.optional(),
   /** Whether a system notification for a finished turn or a permission prompt makes a sound. */
@@ -2224,7 +2230,7 @@ export const PreferencesPatch = Preferences.omit({ labs: true })
   .strict();
 export type PreferencesPatch = z.infer<typeof PreferencesPatch>;
 
-export const DEFAULT_PREFERENCES: Preferences = { theme: "system", ...THEME_PICK_DEFAULTS, sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, notifySound: true, keepAwake: true, transparency: true, projectOrder: [], keybindings: {}, appFont: "", codeFont: "", labs: false };
+export const DEFAULT_PREFERENCES: Preferences = { theme: "system", ...THEME_PICK_DEFAULTS, sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, usageLogs: true, notifySound: true, keepAwake: true, transparency: true, projectOrder: [], keybindings: {}, appFont: "", codeFont: "", labs: false };
 
 /** The record as stored, over the defaults; a record that does not parse (an older or a hand-edited state file) reads as the defaults. */
 export function preferencesFrom(stored: unknown): Preferences {
@@ -2258,6 +2264,7 @@ export function applyPreferencesPatch(current: Preferences, patch: PreferencesPa
     computerLook: perWorkspace(current.computerLook, patch.computerLook),
     serverIcons: patch.serverIcons ?? current.serverIcons,
     agentVersions: patch.agentVersions ?? current.agentVersions,
+    usageLogs: patch.usageLogs ?? current.usageLogs,
     notifySound: patch.notifySound ?? current.notifySound,
     keepAwake: patch.keepAwake ?? current.keepAwake,
     transparency: patch.transparency ?? current.transparency,
@@ -3704,6 +3711,8 @@ export const DaemonRequest = z.discriminatedUnion("op", [
    * closes. One sampler serves every subscriber and stops with the last one;
    * the first sample lands one interval after the reply, since cpu is a delta. */
   z.object({ id: reqId, op: z.literal("sys.watch") }),
+  // The computer's readings the daemon kept a minute apart, between two instants, folded into steps of stepMs.
+  z.object({ id: reqId, op: z.literal("sys.history"), from: z.number().int(), to: z.number().int(), stepMs: z.number().int().nonnegative() }),
   /** Streams proc.snapshot events to this socket every two seconds until
    * proc.unwatch or the socket closes. The daemon reads /proc only while some
    * socket watches; the first snapshot lands one interval after the reply,
@@ -4431,6 +4440,19 @@ export const SysSample = z.object({
   at: z.number(),
 });
 export type SysSample = z.infer<typeof SysSample>;
+
+/** One step of a computer's kept readings: the mean cpu and load over it, the last memory and disk in it. */
+export const SysPoint = z.object({ at: z.number(), cpu: z.number(), load1: z.number(), mem: z.object({ used: z.number(), total: z.number() }), disk: z.object({ used: z.number(), total: z.number() }) });
+export type SysPoint = WireSysPoint;
+type SysPointHeld = Held<Same<z.infer<typeof SysPoint>, SysPoint>>;
+/** What a sys.history answered: the steps with a reading in them, oldest first, and whether the range held more. */
+export const SysHistoryReply = z.object({ points: z.array(SysPoint), stepMs: z.number(), truncated: z.boolean() });
+export type SysHistoryReply = WireSysHistoryReply;
+type SysHistoryReplyHeld = Held<Same<z.infer<typeof SysHistoryReply>, SysHistoryReply>>;
+
+/** A computer's readings over a range as the Usage page draws them: the kept steps and the span they are drawn over. */
+export const ReadingsAnswer = z.object({ points: z.array(SysPoint), stepMs: z.number(), from: z.number(), to: z.number() });
+export type ReadingsAnswer = z.infer<typeof ReadingsAnswer>;
 
 /** One reading of the computer the host runs on, pushed on a client's own socket rather than through the event
  * stream: it is a tick of a live figure, not a thing that happened, so nothing replays it to a socket that comes
@@ -6167,6 +6189,12 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * has taken since the first of the month and what it burns now. Refused on a socket let in on a ticket, as the
    * places list itself is: what a person's computers cost is that person's computer's to answer. */
   z.object({ id: reqId, op: z.literal("cost.spend") }),
+  // What was used over a range split one way, and what each account signed in anywhere may still use: two answers,
+  // never one figure.
+  z.object({ id: reqId, op: z.literal("usage.used"), range: UsageRange, split: UsageSplit }),
+  z.object({ id: reqId, op: z.literal("usage.accounts") }),
+  // A computer's readings over a range, off its daemon: this computer, a joined one, or a workspace's own machine.
+  z.object({ id: reqId, op: z.literal("places.readings"), placeId: z.string().optional(), workspaceId: z.string().optional(), range: UsageRange }),
   /** Moves the golden's head to a version already in its manifest; replies with a
    * SnapshotRollbackResult. A version outside the manifest fails with kind "missing". */
   z.object({ id: reqId, op: z.literal("snapshots.rollback"), version: z.number(), name: z.string().optional() }),
@@ -6588,6 +6616,10 @@ export const DEVICE_OPS: readonly string[] = [
   "snapshots.rollback",
   "cost.history",
   "cost.spend",
+  // The person's own usage and accounts: read on a paired device, never by a thread, which reads no one's accounts.
+  "usage.used",
+  "usage.accounts",
+  "places.readings",
   "forwards.list",
   "forwards.stop",
   "preferences.get",
@@ -6881,6 +6913,7 @@ export {
 export { claudeMemoryDir, claudeProjectKey, copyPathFor, folderName, folderSlug, hiddenFolder, parentFolderName, placeDaemonPaths, placeOwnedPaths, placeProvisionPaths, probePath, rootsPathIn, SSH_ALIAS_PREFIX, sshAlias, standInMachinePath, standInRecordsPath, underProject, workFolderIn, type FolderMachine } from "./project-path.js";
 export * from "./bring-back.js";
 export * from "./changes.js";
+export * from "./usage.js";
 export * from "./pull-request.js";
 export * from "./run-block.js";
 export * from "./tree.js";

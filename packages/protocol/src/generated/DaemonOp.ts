@@ -54,7 +54,7 @@ machineId?: string, } | { "op": "pty.list",
  * The workspace whose ptys are listed, as on pty.create above: with one, that workspace's alone, and
  * without one, this daemon's own alone.
  */
-machineId?: string, } | { "op": "ports.watch" } | { "op": "manifest.get" } | { "op": "manifest.record", cmd: string, cwd: string, port?: number, } | { "op": "manifest.restartScript" } | { "op": "inbox.watch" } | { "op": "inbox.rescan" } | { "op": "sys.watch" } | { "op": "proc.watch" } | { "op": "proc.unwatch" } | { "op": "proc.inspect", pid: number, } | { "op": "proc.kill", pid: number, signal: ProcSignal, } | { "op": "ping" } | { "op": "fs.list", path: string, gitignore?: boolean, 
+machineId?: string, } | { "op": "ports.watch" } | { "op": "manifest.get" } | { "op": "manifest.record", cmd: string, cwd: string, port?: number, } | { "op": "manifest.restartScript" } | { "op": "inbox.watch" } | { "op": "inbox.rescan" } | { "op": "sys.watch" } | { "op": "sys.history", from: number, to: number, stepMs: number, } | { "op": "proc.watch" } | { "op": "proc.unwatch" } | { "op": "proc.inspect", pid: number, } | { "op": "proc.kill", pid: number, signal: ProcSignal, } | { "op": "ping" } | { "op": "fs.list", path: string, gitignore?: boolean, 
 /**
  * The workspace this frame is for, on a daemon that runs workspaces: the path then names the folder as
  * that workspace sees it, and the operation is answered inside it. Without one the path is resolved under

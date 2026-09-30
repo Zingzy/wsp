@@ -938,6 +938,91 @@ const macAndBoxes = () =>
     },
   });
 
+/** Settings > Usage with a week behind it: Claude and Codex limits as their last turns printed them, a week of
+ * turns and of work the agents logged outside wsp, and this computer's readings with its nights asleep. The limits
+ * and the ledger days are what the host itself keeps; the price table is kept as read, so no shot downloads it. */
+const usageState = () => ({
+  ...store({
+    projects: [project("spoo", HERE, 60 * 20), project("box-build", "p_hetzner", 60 * 21)],
+    workspaces: [workspace("ws_here", THIS_COMPUTER, { project: "pr_spoo" })],
+    places: {
+      p_hetzner: place("p_hetzner", "hetzner", 1, { platform: "linux", os: "Ubuntu 24.04", shape: { cpu: 2, memMb: 4096 }, diskFreeBytes: 38 * 1024 ** 3, runsWorkspaces: true, engine: "docker", login: { HOME: "/root", USER: "root", PATH: "/usr/bin" }, logins: ["codex/auth.json"] }),
+    },
+  }),
+  "usage-index": { days: { days: usageDays().map(d => d.day) } },
+  limits: {
+    "claude@here": { key: "claude@here", agent: "claude", label: `Claude Code on ${THIS_COMPUTER}`, windows: [{ kind: "session", usedPercent: 100, resetsAt: Date.now() + 83 * 60_000 }, { kind: "week", usedPercent: 71, resetsAt: Date.now() + 4 * 86_400_000 }], status: "reached", readAt: Date.now() - 12 * 60_000, computers: [HERE] },
+    "codex:acct_7f3": { key: "codex:acct_7f3", agent: "codex", label: "maya@example.com", plan: "plus", windows: [{ kind: "session", usedPercent: 62, resetsAt: Date.now() + 150 * 60_000 }, { kind: "week", usedPercent: 18, resetsAt: Date.now() + 3 * 86_400_000 }], status: "ok", readAt: Date.now() - 20 * 60_000, computers: [HERE, "p_hetzner"] },
+  },
+});
+
+const dayKey = at => new Date(at - new Date(at).getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
+
+/** Seven days of the ledger, one document each, in this computer's zone as the host files them: Claude's turns on
+ * both projects with the cost Claude reported, and Codex's with none so the table prices them. */
+const usageDays = () =>
+  Array.from({ length: 7 }, (_, back) => {
+    const at = Date.now() - back * 86_400_000;
+    const day = dayKey(at);
+    const busy = [1.4, 0.6, 1.1, 0.3, 1.8, 0.9, 1.2][back];
+    const row = (o, n) => ({ day, hour: 10 + (n % 8), turns: 3 + n, costReported: undefined, ...o });
+    const tokens = (input, output, cached) => ({ input: Math.round(input * busy), output: Math.round(output * busy), cached: Math.round(cached * busy), cacheWrite: 0, reasoning: 0 });
+    const clean = r => Object.fromEntries(Object.entries(r).filter(([, v]) => v !== undefined));
+    return {
+      day,
+      rows: [
+        row({ agent: "claude", account: "claude@here", computer: HERE, project: "pr_spoo", model: "claude-opus-4-5", tokens: tokens(820_000, 41_000, 690_000), costReported: Number((2.4 * busy).toFixed(2)), source: "wsp" }, 1),
+        row({ agent: "claude", account: "claude@here", computer: HERE, project: "pr_box-build", model: "claude-sonnet-4-5", tokens: tokens(240_000, 12_000, 180_000), costReported: Number((0.4 * busy).toFixed(2)), source: "wsp" }, 2),
+        row({ agent: "codex", account: "codex:acct_7f3", computer: "p_hetzner", project: "pr_box-build", model: "gpt-5.5", tokens: tokens(510_000, 22_000, 300_000), source: "wsp" }, 3),
+      ].map(clean),
+    };
+  });
+
+const MIB = 1024 ** 2;
+const GIB = 1024 ** 3;
+
+/** A week of this computer's minute readings as its daemon keeps them, a file a UTC day, with no reading from one
+ * to seven each night while it slept, so the chart has its gaps. */
+const readingsDays = () => {
+  const now = Math.floor(Date.now() / 60_000) * 60_000;
+  const files = new Map();
+  for (let at = now - 7 * 86_400_000; at <= now; at += 60_000) {
+    const hour = new Date(at).getHours();
+    if (hour >= 1 && hour < 7) continue;
+    const t = at / 3_600_000;
+    const work = Math.max(0, Math.sin(((hour - 8) / 14) * Math.PI));
+    const cpu = Math.min(96, 6 + 38 * work + 9 * Math.abs(Math.sin(t * 3.1)) + 4 * Math.sin(t * 11.7));
+    const mem = Math.round((14 + 7 * work + 1.5 * Math.sin(t * 0.7)) * GIB);
+    const disk = Math.round(612 * GIB + ((at - (now - 7 * 86_400_000)) / 86_400_000) * 3.2 * GIB);
+    const line = JSON.stringify({ at, cpu: Number(cpu.toFixed(1)), load1: Number((cpu / 12).toFixed(2)), mem: { used: mem, total: 32 * GIB }, disk: { used: disk, total: 994 * GIB } });
+    const name = `${new Date(at).toISOString().slice(0, 10)}.jsonl`;
+    files.set(name, `${files.get(name) ?? ""}${line}\n`);
+  }
+  return [...files].map(([name, text]) => ({ path: join("readings", name), text }));
+};
+
+/** Claude Code's own log of a week of work run outside wsp, in a folder no project holds: what the host's read of
+ * this computer's logs files as outside wsp, a message a day. */
+const claudeLog = () => {
+  const lines = Array.from({ length: 7 }, (_, back) => {
+    const at = Date.now() - back * 86_400_000 - 2 * 3_600_000;
+    const usage = { input_tokens: 4_000 + back * 900, output_tokens: 6_000 + back * 400, cache_read_input_tokens: 90_000 + back * 11_000, cache_creation_input_tokens: 2_000 };
+    return JSON.stringify({ type: "assistant", timestamp: new Date(at).toISOString(), cwd: join(HOME, "notes"), message: { id: `msg_fixture_${back}`, model: "claude-opus-4-5", usage } });
+  });
+  return { path: join("..", ".claude", "projects", "-notes", `${uuidFor("usage:claude-log")}.jsonl`), text: `${lines.join("\n")}\n` };
+};
+
+const usageFiles = () => [
+  claudeLog(),
+  ...usageDays().map(d => ({ path: join("blobs", "usage-days", d.day), text: JSON.stringify(d) })),
+  { path: join("blobs", "prices", "litellm"), text: JSON.stringify({ fetchedAt: Date.now(), table: { "gpt-5.5": { input: 1.25e-6, output: 1e-5, cacheRead: 1.25e-7, provider: "openai" } } }) },
+  ...readingsDays(),
+];
+
+/** This computer's agents for the Usage fixture: the ones every fixture has, and OpenCode signed in with a key of
+ * its own, which prints no limits. */
+const USAGE_AGENTS = { ...HERE_AGENTS, agents: { ...HERE_AGENTS.agents, opencode: { version: "1.18.18", status: "1 credentials" } }, latest: { ...HERE_AGENTS.latest, opencode: "1.18.18" } };
+
 /** A person whose image is sealed and built in two places: what Settings > Image reads when there is a record to
  * read. One copy stands on the record as it is now and one was built from the record before it, so the table shows
  * both standing words. One workspace, for macInUse's reason: this computer is one machine. */
@@ -1337,6 +1422,7 @@ const FIXTURES = {
   "review-posted": { build: inReview(true), changes: ["spoo"], pulls: "failed" },
   rewind: { build: rewind },
   replies: { build: replies },
+  usage: { build: usageState, files: usageFiles, agents: () => USAGE_AGENTS },
 };
 
 export const FIXTURE_NAMES = Object.keys(FIXTURES);
@@ -1356,6 +1442,13 @@ export const fixturePulls = name => {
   const named = name === undefined ? undefined : fixtureRow(name).pulls;
   return named === undefined ? [] : FIXTURE_PULLS[named];
 };
+
+/** The files a fixture's host keeps beside its state file, each a path under that folder: blobs and a daemon's
+ * readings. None for a fixture that names none. */
+export const fixtureFiles = name => (name === undefined ? [] : (fixtureRow(name).files?.() ?? []));
+
+/** This computer's agents as a fixture's host reads them: every fixture's, unless it names its own. */
+export const fixtureAgents = name => (name === undefined ? HERE_AGENTS : (fixtureRow(name).agents?.() ?? HERE_AGENTS));
 
 const fixtureRow = name => {
   const row = FIXTURES[name];

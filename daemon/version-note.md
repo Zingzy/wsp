@@ -1,0 +1,1 @@
+the daemon keeps its computer's readings, one point a minute folded from its samples, in a file a day beside its token or in the folder --readings-dir names, 14 days under 8 MiB with the oldest day dropped first, and sys.history answers them folded into the step asked for.

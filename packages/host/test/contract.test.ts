@@ -351,6 +351,7 @@ describe("the agent contract on the command line and the tool door", () => {
     await last("workspaces agents", "workspaces", "agents", "alpha", "--spawn", "off");
     await last("threads", "threads");
     await last("computers", "computers");
+    expect(await last("usage", "usage", "--range", "week", "--by", "project")).toMatchObject({ accounts: expect.any(Array), used: { range: "week", split: "project", rows: [] } });
     await last("setup", "setup");
     // One level of this computer's own folders: the home folder this test stubbed, with a folder inside it to list.
     mkdirSync(join(dir, "user", "code"), { recursive: true });

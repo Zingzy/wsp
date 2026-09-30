@@ -11,7 +11,7 @@ import { basename, delimiter, dirname, join, resolve } from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { parseArgs, type ParseArgsConfig } from "node:util";
 import { isCancel } from "@clack/prompts";
-import { collect, computeRecipe, expand, nodeHost, scanProject, seedMenu, type Manifest, type Platform, type Rung } from "@wsp/collect";
+import { collect, computeRecipe, expand, fileUsageCache, nodeHost, readLogUsage, scanProject, seedMenu, type Manifest, type Platform, type Rung } from "@wsp/collect";
 import {
   HARNESS_ADAPTERS,
   createRuntime,
@@ -31,8 +31,8 @@ import {
   type Store,
 } from "@wsp/runtime";
 import { writeOwn } from "@wsp/own-file";
-import { GOLDEN_SETUP, GOLDEN_SMOKE, GUEST_HOME, MCP_AGENT_IDS, THREAD_AGENTS, serverValuesOf } from "@wsp/catalog";
-import { authRefusal, cloudOffRefusal, holdsNothing, type McpServerSpec, hostFromEnv, jsonLine, SCOPED_MCP_ARG, scopedNoPairLine, imageHomeKeptLine, isJoinedComputer, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, loopbackThreadsLine, LOOPBACK, PERSON_HOME_ENV, portInsteadLine, PORT_TAKEN_REFUSAL, portsAsked, portsPickedLine, portTakenLine, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, namesPlace, noSuchPlaceRefusal, type PlaceView, unknownWordLine, usageRefusal, verbFailure, foreignFlagLine } from "@wsp/protocol";
+import { CATALOG_AGENTS, GOLDEN_SETUP, GOLDEN_SMOKE, GUEST_HOME, MCP_AGENT_IDS, THREAD_AGENTS, serverValuesOf } from "@wsp/catalog";
+import { authRefusal, cloudOffRefusal, PRICES_URL, holdsNothing, type McpServerSpec, hostFromEnv, jsonLine, SCOPED_MCP_ARG, scopedNoPairLine, imageHomeKeptLine, isJoinedComputer, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, loopbackThreadsLine, LOOPBACK, PERSON_HOME_ENV, portInsteadLine, PORT_TAKEN_REFUSAL, portsAsked, portsPickedLine, portTakenLine, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, namesPlace, noSuchPlaceRefusal, type PlaceView, unknownWordLine, usageRefusal, verbFailure, foreignFlagLine } from "@wsp/protocol";
 import { agentHome, agentHomes, checkProviderKey, type Copier, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, providerSlot, type ProviderSlot, verbCopier } from "@wsp/engine";
 import { CLOUD_ON } from "./cloud.js";
 import { noMachinesLine, providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerKeyRows, providerKeySet, providerModule, providerPlaces, wiredPlaceRow, wiredProviderId, type ProviderEnv } from "./providers.js";
@@ -65,7 +65,7 @@ import { buildBesideHost } from "./init-beside.js";
 import { hereAnswering, hereLines, openHere, type HereWatch } from "./place-here.js";
 import { watchBlock, watchOn, type Redraw, type WatchSignals } from "./watch.js";
 import { startCallbackRelay, systemOpener, type UrlOpener } from "./relay.js";
-import { addressLines, hostInboxDir, hostLogPath, hostRootsPath, hostRunDir, hostTokenPath, lockPathFor, heldOrStarted, refuseIfServed, rewriteLock, SERVICE_WAIT_MS, servingHost, startedByEnv, STARTED_BY_ENV, takeLock, type HostLock, type HostStarted } from "./host-lock.js";
+import { addressLines, hostInboxDir, hostLogPath, hostReadingsDir, hostRootsPath, hostRunDir, hostTokenPath, lockPathFor, heldOrStarted, refuseIfServed, rewriteLock, SERVICE_WAIT_MS, servingHost, startedByEnv, STARTED_BY_ENV, takeLock, type HostLock, type HostStarted } from "./host-lock.js";
 import type { LocalDaemon, LocalDaemonOptions } from "./local-daemon.js";
 import { startOnce } from "./start-once.js";
 import {
@@ -552,7 +552,7 @@ export function localWiring(
   // Started on the first dial and kept: a host nobody opens a pane on starts no process, binds no port on this
   // computer and writes none of the daemon's own files under the person's home.
   const daemon = startOnce(
-    () => startDaemon({ root: home, workFolder: backend.workFolder(), rootsPath, inboxDir: hostInboxDir(statePath), say }),
+    () => startDaemon({ root: home, workFolder: backend.workFolder(), rootsPath, inboxDir: hostInboxDir(statePath), readingsDir: hostReadingsDir(statePath), say }),
     why => {
       const last = why.split("\n").map(l => l.trim()).filter(l => l !== "").at(-1) ?? why;
       return cappedLine(`the daemon for this computer's workspace did not start, so its terminal, files and processes have nothing to dial: ${last}`);
@@ -791,6 +791,15 @@ export function makeRuntime(
     // Read at every launch, never copied: a token minted after this host started is in the next turn, and nothing
     // of it is written to a machine.
     vault: () => vaultNow(statePath),
+    // What this computer's agents used outside wsp, off their own logs here, counts and a model name alone; the cache
+    // beside the state file keeps a daily read to the files that changed.
+    // LiteLLM's price table off GitHub, once a day, nothing sent: the one read the usage ledger makes of the network.
+    pricesFetch: async () => {
+      const res = await fetch(PRICES_URL, { signal: AbortSignal.timeout(30_000) });
+      if (!res.ok) throw new Error(`GitHub answered ${res.status}`);
+      return (await res.json()) as unknown;
+    },
+    logUsage: () => readLogUsage(nodeHost(), CATALOG_AGENTS, { cache: fileUsageCache(join(dirname(statePath), "usage-cache.json")) }),
     // The same vault stands behind the sign-in word of an agent whose own login is not on the computer read.
     // Each agent's newest version is asked of its vendor from this host, never from a machine, and kept a day.
     agentsReader: agentsReader({ vault: () => vaultNow(statePath), loginEnv, latest: agentLatest({ statePath, running: VERSION }).read }),

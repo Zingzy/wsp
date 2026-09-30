@@ -28,6 +28,7 @@ mod thread;
 mod threads;
 mod tree;
 mod turn;
+mod usage;
 mod wait;
 pub(crate) mod workspace;
 mod workspaces;
@@ -57,6 +58,7 @@ pub type Call = Pin<Box<dyn Future<Output = Result<Answer, Refused>> + Send>>;
 
 pub const TOOLS: &[Tool] = &[
     computers::TOOL,
+    usage::TOOL,
     skills::SEARCH,
     skills::SHOW,
     skills::ADD,

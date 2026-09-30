@@ -62,7 +62,8 @@ export const groupBlurbs = (here: string) => ({
   projects: "The repos wsp makes tasks from, each on one computer.",
   devices: "The phones and other computers paired with this wsp.",
   account: "Your sign-in, which lets your other devices find this wsp.",
-  privacy: "What wsp asks of services outside your computers.",
+  usage: "What each account may still use, what your threads used, and how busy each computer was.",
+  privacy: "What wsp asks of services outside your computers, and what it reads on this one.",
   keybindings: "The keys wsp answers to.",
   about: "Which wsp this is.",
 });
@@ -212,6 +213,8 @@ export const PRIVACY_WORDS = {
   agentVersions: "Newest agent versions",
   agentVersionsDescription: "wsp asks npm, GitHub and each agent's maker for every agent's newest version, once a day.",
   agentVersionsHeld: "Off on the host: WSP_UPDATE_CHECK is 0.",
+  usageLogs: "Agent logs",
+  usageLogsDescription: (here: string): string => `Usage counts the work Claude Code, Codex and OpenCode logged on ${here === "" ? "this computer" : here} outside wsp. The logs are read there and never sent anywhere.`,
 } as const;
 
 /** Settings > Appearance's Notifications: the one switch over the sound a notification makes. */
@@ -247,6 +250,28 @@ export const DEVICES_WORDS = {
   none: "Nothing is paired with this wsp yet.",
   /** A page served on a ticket socket is refused the list. */
   refused: "Who is paired is read on the computer running wsp.",
+} as const;
+
+/** Settings > Usage: its title and the words the lists carry beyond the wire's own in USAGE_WORDS. */
+export const USAGE_PAGE_WORDS = {
+  title: "Usage",
+  accounts: "Account",
+  session: "Session",
+  week: "Week",
+  plan: "Plan",
+  used: "Used",
+  tokens: "Tokens",
+  in: "In",
+  out: "Out",
+  cached: "Cached",
+  price: "Price",
+  computers: "Computer",
+  cpu: "CPU",
+  memory: "Memory",
+  disk: "Disk",
+  noAccounts: "No agent is signed in on any computer.",
+  ranges: { day: "Day", week: "Week", month: "Month" },
+  splits: { agent: "Agent", account: "Account", computer: "Computer", project: "Project" },
 } as const;
 
 /** Settings > Projects: the list, a project's own page and its one act. */
