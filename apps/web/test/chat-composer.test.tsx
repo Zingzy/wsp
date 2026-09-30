@@ -1045,7 +1045,7 @@ describe("composer while the workspace is not live", () => {
       act(() => useStore.setState({ statuses: { [WS]: { ...here, machineState: "running", reach: { state: "unreachable" }, size: { cpu: 8, memMb: 16384 }, rateUsdPerHour: 0 } as never } }));
       act(() => useStore.getState().setConn("reconnecting"));
       await waitFor(() => expect(heldHover()).toBe(HOST_ASLEEP_SEND));
-      expect(heldHover() ?? "").not.toContain("daemon is not running");
+      expect(heldHover() ?? "").not.toContain("terminals and files stopped");
     } finally {
       delete (window as unknown as { __WSP__?: unknown }).__WSP__;
     }

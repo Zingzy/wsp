@@ -126,9 +126,9 @@ const ICON_DATA_URL = /^data:image\/(?:png|x-icon|gif|webp);base64,[A-Za-z0-9+/]
 
 export type DisconnectReason = "lost" | "closed" | "unauthorized";
 const DISCONNECT_MESSAGE: Record<DisconnectReason, string> = {
-  lost: "runtime connection lost",
-  closed: "runtime client closed",
-  unauthorized: "runtime refused the token",
+  lost: "the connection to wsp was lost",
+  closed: "this window closed its connection to wsp",
+  unauthorized: "wsp refused this window's token",
 };
 
 /** What every request settles with when no live socket can carry it. */

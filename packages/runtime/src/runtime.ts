@@ -3565,7 +3565,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const ownDaemonChannel = async (entry: LiveWorkspace, onEvent: (event: Record<string, unknown>) => void): Promise<DaemonChannel> =>
     channelOver(await moduleOf(entry.record.kind).daemonRoad(entry), entry.record.name, onEvent);
   const channelOver = (reach: DaemonReachView, name: string, onEvent: (event: Record<string, unknown>) => void): Promise<DaemonChannel> => {
-    if (reach.daemonToken === undefined) throw new Error(`${name} has no daemon answering yet`);
+    if (reach.daemonToken === undefined) throw new Error(`${name} is not answering yet`);
     return openChannel({ url: reach.url, token: reach.daemonToken, onEvent });
   };
 

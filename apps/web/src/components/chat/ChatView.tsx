@@ -19,6 +19,7 @@ import { Button } from "../ui/button";
 import { useCapabilities, useHarnessCatalog, usePlaces, useSidebarProjects, useStore, useThreadSessions, useWorkspace, useWorkspaceState } from "../../protocol/store";
 import { Facts } from "../Facts.js";
 import { ThreadRows } from "../threads/ThreadRows.js";
+import { useMachineLine } from "../../notices/workspaceLines.js";
 import { openNamedFile } from "../../files/open";
 import { threadFolderOf } from "../../files/root";
 import { cn } from "../../lib/utils";
@@ -207,6 +208,8 @@ export function ChatView({
   // A turn that completed says so by its reply standing; any other ending keeps its own line, since the state word
   // is the news.
   const settledOnReply = view.settled?.state === "completed";
+  // What the machine needs from the person, said here on the thread they are reading and nowhere else.
+  const machine = useMachineLine(workspaceId);
   const footer = thread.hydrated ? (
     <div className="mx-auto w-full min-w-0 max-w-3xl">
       {opened.length > 0 ? <OpenedThreads opened={opened} /> : null}
@@ -218,6 +221,7 @@ export function ChatView({
           </Button>
         </TimelineRuleLine>
       ) : null}
+      {machine !== null ? <TimelineRuleLine data-machine-line line={machine} /> : null}
     </div>
   ) : null;
 

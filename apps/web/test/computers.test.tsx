@@ -142,7 +142,7 @@ describe("the Computers list", () => {
     const silent = { id: mine.id, phase: "running", machineState: "running", reach: { state: "unreachable" }, machineId: "local", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, kind: "local", size: { cpu: 8, memMb: 16384 }, name: mine.name, golden: "", createdAt: mine.createdAt } as unknown as WorkspaceStatus;
     useStore.setState({ places: [here], workspaces: [mine], statuses: { [mine.id]: silent } });
     await mountComputers(computersApi().api);
-    expect(stateOf("here")).toBe("No daemon");
+    expect(stateOf("here")).toBe("Stopped");
     expect(listRow("here").textContent).not.toContain("Unreachable");
   });
 

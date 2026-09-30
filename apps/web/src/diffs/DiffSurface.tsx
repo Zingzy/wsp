@@ -385,7 +385,7 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
     setRevealNote(revealFile(turnPath) ? null : noDiffLine(baseName(turnPath), TURN_NOUN));
   }, [model, revealFile, turnPath]);
 
-  if (!wire || root === null) return <NotRunning workspaceId={workspaceId} line="Changes are read over the thread's daemon; wake it to read them." />;
+  if (!wire || root === null) return <NotRunning workspaceId={workspaceId} line="Changes are read on the thread's computer; wake it to read them." />;
 
   const isPending = load.kind === "pending";
   const scopeLabel = turn === undefined ? SCOPE_LABELS[scope] : TURN_SCOPE;

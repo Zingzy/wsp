@@ -1,33 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The lines a workspace's own row carried before the sidebar drew threads, said
-// as notices with the same words: what the runtime is doing to a machine's
-// daemon, a daemon that is not there, a drop with memory near full, and what a
-// bring back answered. A standing line is keyed and stands until it clears; a
-// bring back is said once, when its answer arrives. A paused or pausing machine
-// stands on no line: a pause is expected, often because the work is done.
-import { kindWords, machineLacksShort, outOfMemoryRowLine, pausedOrPausing, workspaceKind, workspaceStateOf, type BringBackResult, type MemoryReading, type ReachState, type WorkspaceKindWords } from "@wsp/protocol";
-import { useEffect, useRef } from "react";
+// What a workspace's machine says to the person, and what a bring back
+// answered. A machine's life (its helper updating, a machine running and not
+// answering, a link that ended) never pops as a notice: the host mends those on
+// its own. The thread on screen says one line about its machine, in plain
+// words, and only where the person has to act: the machine lacks something wsp
+// needs, or its memory ran near full. A bring back is said once, when its
+// answer arrives.
+import { capitalised, kindWords, machineLacksShort, outOfMemoryRowLine, pausedOrPausing, workspaceKind, workspaceStateOf, type BringBackResult, type MemoryReading } from "@wsp/protocol";
+import { useEffect, useMemo, useRef } from "react";
 import { broughtBackRowLine } from "../actions/format.js";
 import type { SidebarProjectSnapshot } from "../adapt/index.js";
 import { useOutOfMemoryReadings } from "../machine/live.js";
 import { useSidebarProjects, useStore } from "../protocol/store.js";
 import { copyName } from "../sidebar/workspaceRows.js";
-import { addNotice, useNotices, type NoticeKind } from "./store.js";
-
-/** The line for a daemon that is not there: no-daemon is a machine that answers with nothing on the daemon's port,
- * unsupported one with no daemon road at all, which says only what that machine said it lacks. Nothing on a kind
- * whose machines serve no daemon. */
-export function daemonGoneLine(reach: ReachState | null, kind: WorkspaceKindWords, lacks?: string): string | undefined {
-  if (!kind.daemon) return undefined;
-  if (reach === "no-daemon") return "Running but not answering";
-  if (reach !== "unsupported" || kind.driven || lacks === undefined) return undefined;
-  return machineLacksShort(lacks);
-}
-
-/** What the runtime is doing to a machine's daemon, or why its last attempt failed; the live status leads. */
-export function daemonNote(project: Pick<SidebarProjectSnapshot, "status" | "workspace">): string | undefined {
-  return project.status !== null ? project.status.daemonNote : project.workspace.daemonNote;
-}
+import { addNotice } from "./store.js";
 
 /** What a bring back answered, with the host's own sentence for a push that opened no pull request after it. */
 export function broughtBackLine(back: Pick<BringBackResult, "branch" | "pr" | "note">): string {
@@ -35,36 +21,29 @@ export function broughtBackLine(back: Pick<BringBackResult, "branch" | "pr" | "n
   return back.note === undefined ? line : `${line}: ${back.note}`;
 }
 
-export interface StandingLine {
-  readonly key: string;
-  readonly kind: NoticeKind;
-  readonly text: string;
+/** The line the open thread says about its machine, or null where the person has nothing to do: a machine that
+ * lacks what wsp needs to run there, in the first clause of what it said it lacks, or a drop with memory near
+ * full. Nothing while it is paused or pausing, which is expected. */
+export function machineLine(project: Pick<SidebarProjectSnapshot, "status" | "workspace" | "reach">, memory: MemoryReading | undefined): string | null {
+  if (pausedOrPausing(workspaceStateOf(project.workspace, project.status))) return null;
+  const kind = kindWords(workspaceKind(project.workspace));
+  const lacks = (project.status ?? project.workspace).daemonRefusedAt?.why;
+  if (kind.daemon && !kind.driven && project.reach === "unsupported" && lacks !== undefined) return capitalised(machineLacksShort(lacks));
+  return memory === undefined ? null : capitalised(outOfMemoryRowLine(memory));
 }
 
-/** The lines one workspace stands on now, each under a key of its own so it is said once and ends when it clears. */
-export function standingLines(project: Pick<SidebarProjectSnapshot, "id" | "status" | "workspace" | "reach">, memory: MemoryReading | undefined): StandingLine[] {
-  if (pausedOrPausing(workspaceStateOf(project.workspace, project.status))) return [];
-  const gone = daemonGoneLine(project.reach, kindWords(workspaceKind(project.workspace)), (project.status ?? project.workspace).daemonRefusedAt?.why);
-  const note = daemonNote(project);
-  return [
-    ...(note === undefined ? [] : [{ key: `line:${project.id}:daemon`, kind: "note" as const, text: note }]),
-    ...(gone === undefined ? [] : [{ key: `line:${project.id}:daemon-gone`, kind: "error" as const, text: gone }]),
-    ...(memory === undefined ? [] : [{ key: `line:${project.id}:memory`, kind: "error" as const, text: outOfMemoryRowLine(memory) }]),
-  ];
+/** That line for one workspace, for the thread on screen. */
+export function useMachineLine(workspaceId: string): string | null {
+  const projects = useSidebarProjects();
+  const project = projects.find(p => p.id === workspaceId);
+  const watched = useMemo(() => (project === undefined ? [] : [project]), [project]);
+  const memory = useOutOfMemoryReadings(watched);
+  return project === undefined ? null : machineLine(project, memory[workspaceId]);
 }
 
 export function useWorkspaceLineNotices(): void {
   const projects = useSidebarProjects();
-  const memory = useOutOfMemoryReadings(projects);
   const places = useStore(s => s.places);
-  const said = useRef(new Map<string, string>());
-  useEffect(() => {
-    const now = new Map(projects.flatMap(p => standingLines(p, memory[p.id]).map(line => [line.key, { ...line, where: copyName(places, p) }] as const)));
-    for (const key of said.current.keys()) if (!now.has(key)) useNotices.getState().end(key);
-    for (const [key, line] of now) if (said.current.get(key) !== line.text) addNotice({ kind: line.kind, text: line.text, where: line.where, key });
-    said.current = new Map([...now].map(([key, line]) => [key, line.text]));
-  }, [projects, memory, places]);
-
   const broughtBack = useStore(s => s.broughtBack);
   const heard = useRef(broughtBack);
   useEffect(() => {

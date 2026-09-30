@@ -58,11 +58,11 @@ describe("terminalPaneState", () => {
   it("this computer's own daemon refuses in the one sentence the pane already shows, with no second line to fill the button's place", () => {
     const absent = ownDaemonDown("zingzy's MacBook Pro");
     const pane = { kind: "absent", absent } as const;
-    expect(terminalPaneTitle(pane)).toBe("zingzy's MacBook Pro's daemon is not running");
+    expect(terminalPaneTitle(pane)).toBe("zingzy's MacBook Pro's terminals and files stopped");
     // The button is what happens next, so nothing under the title says it in words the button already says.
     expect(terminalPaneHints(pane, null, null)).toEqual([]);
-    expect(terminalEmptyLine(pane)).toBe("zingzy's MacBook Pro's daemon is not running");
-    expect(terminalInputRefusal(pane)).toBe("Typing is refused: zingzy's MacBook Pro's daemon is not running");
+    expect(terminalEmptyLine(pane)).toBe("zingzy's MacBook Pro's terminals and files stopped");
+    expect(terminalInputRefusal(pane)).toBe("Typing is refused: zingzy's MacBook Pro's terminals and files stopped");
     for (const line of [terminalPaneTitle(pane), terminalEmptyLine(pane), terminalInputRefusal(pane)]) {
       expect(line).not.toContain("Unreachable");
       expect(line).not.toContain("terminal:");
@@ -77,10 +77,10 @@ describe("terminalPaneState", () => {
     expect(terminalPaneTitle({ kind: "paused", pausing: true })).toBe("Pausing. The shell is kept; wake the task to continue");
     expect(terminalPaneTitle({ kind: "reconnecting" })).toBe("Reconnecting to the task");
     expect(terminalPaneTitle({ kind: "not-answering" })).toBe("The task is not answering");
-    expect(terminalPaneTitle({ kind: "reauth" })).toBe("The task refused a stale daemon token; reconnecting with the one wsp holds now");
-    expect(terminalEmptyLine({ kind: "reauth" })).toBe("The task refused a stale daemon token; terminals open once the link carries the current one");
-    expect(terminalInputRefusal({ kind: "reauth" })).toBe("Typing is refused until the task takes the current daemon token");
-    expect(terminalEmptyLine({ kind: "reconnecting" })).toBe("The daemon link is reconnecting; terminals open when it is back");
+    expect(terminalPaneTitle({ kind: "reauth" })).toBe("Reconnecting to the task");
+    expect(terminalEmptyLine({ kind: "reauth" })).toBe("Reconnecting to the task; terminals open when it is back");
+    expect(terminalInputRefusal({ kind: "reauth" })).toBe("Typing is refused while the task is reconnecting");
+    expect(terminalEmptyLine({ kind: "reconnecting" })).toBe("Reconnecting to the task; terminals open when it is back");
     expect(terminalEmptyLine({ kind: "paused", pausing: false })).toBe("Task is paused; wake it to open a terminal");
     expect(terminalInputRefusal({ kind: "paused", pausing: false })).toBe("Typing is refused: the task is paused");
     expect(terminalInputRefusal({ kind: "reconnecting" })).toBe("Typing is refused while the task is reconnecting");
@@ -135,9 +135,9 @@ describe("a drop with memory near full", () => {
     // The runtime's own word for a machine it has no daemon road to; nothing is reconnecting.
     const pane = terminalPaneState({ state: "running", reach: "unsupported", socket: "connecting" });
     expect(pane).toEqual({ kind: "no-daemon" });
-    expect(terminalPaneTitle(pane)).toBe("There is no daemon on this task");
-    expect(terminalEmptyLine(pane)).toBe("There is no daemon on this task, so no terminal opens here");
-    expect(terminalInputRefusal(pane)).toBe("Typing is refused: there is no daemon on this task");
+    expect(terminalPaneTitle(pane)).toBe("No terminal runs on this task");
+    expect(terminalEmptyLine(pane)).toBe("No terminal runs on this task, so none opens here");
+    expect(terminalInputRefusal(pane)).toBe("Typing is refused: no terminal runs on this task");
     expect(terminalPaneHints(pane, size, sizes)).toEqual([]);
     // Nothing about it promises a return, which is what the reconnecting copy did for a kind that had no daemon.
     for (const line of [terminalPaneTitle(pane), terminalEmptyLine(pane)]) {

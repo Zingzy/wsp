@@ -107,7 +107,7 @@ export function procTable(procs: readonly ProcEntry[], sort: ProcSort, filter: s
 
 /** The harness pieces the daemon can name: itself, the shells behind its ptys (by the tab's title) and an agent by the command its catalog entry puts on PATH. */
 export function procLabel(p: ProcEntry, daemonPid: number, terminalTitles: ReadonlyMap<string, string>): string | null {
-  if (p.pid === daemonPid) return "daemon";
+  if (p.pid === daemonPid) return "wsp";
   if (p.pty !== undefined) {
     const title = terminalTitles.get(p.pty);
     return title !== undefined ? `terminal ${title}` : "terminal";

@@ -534,13 +534,12 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
     }
   }, 60_000);
 
-  it("a running machine with no daemon is said by name in plain words, and the napping one beside it says nothing, in both themes", async () => {
+  it("a running machine that does not answer pops no notice, nor does the napping one beside it, in both themes", async () => {
     for (const theme of ["dark", "light"] as const) {
       await page!.goto(`${base}?theme=${theme}&silent=1`);
-      await page!.locator("[data-notice]").first().waitFor();
+      await page!.locator("[data-sidebar-row]").first().waitFor();
       await page!.waitForTimeout(800);
-      const said = await page!.locator("[data-notice]").evaluateAll(els => els.map(el => [el.querySelector("[data-notice-title]")?.textContent, el.querySelector("[data-notice-where]")?.textContent]));
-      expect(said).toEqual([["Running but not answering", "api"]]);
+      expect(await page!.locator("[data-notice]").count()).toBe(0);
       const path = join(SHOTS_DIR, `notice-silent-${theme}.png`);
       await page!.screenshot({ path });
       console.info(`silent machine screenshot: ${path}`);
