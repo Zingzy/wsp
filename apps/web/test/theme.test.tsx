@@ -6,7 +6,7 @@ import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_PREFERENCES } from "@wsp/protocol";
 import { useStore } from "../src/protocol/store.js";
-import { SOLID_CLASS, SYSTEM_DARK_QUERY, applyTheme, useThemeEffect, useTransparencyEffect } from "../src/settings/theme.js";
+import { REDUCED_TRANSPARENCY_QUERY, SOLID_CLASS, SYSTEM_DARK_QUERY, applyTheme, useThemeEffect, useTransparencyEffect } from "../src/settings/theme.js";
 import { SIDE_DEFAULT } from "../src/themes/index.js";
 
 const isDark = () => document.documentElement.classList.contains("dark");
@@ -130,5 +130,26 @@ describe("transparency", () => {
     expect(document.documentElement.classList.contains(SOLID_CLASS)).toBe(true);
     act(() => useStore.setState(s => ({ preferences: { ...s.preferences, transparency: true } })));
     expect(document.documentElement.classList.contains(SOLID_CLASS)).toBe(false);
+  });
+
+  it("the computer's Reduce transparency makes the page solid and takes the window's glass off, whatever the record says", () => {
+    let reduced = true;
+    const listeners = new Set<() => void>();
+    vi.spyOn(window, "matchMedia").mockImplementation(query => {
+      expect(query).toBe(REDUCED_TRANSPARENCY_QUERY);
+      return { get matches() { return reduced; }, media: query, addEventListener: (_: string, fn: () => void) => listeners.add(fn), removeEventListener: (_: string, fn: () => void) => listeners.delete(fn) } as unknown as MediaQueryList;
+    });
+    const setGlass = vi.fn();
+    window.wsp = { setGlass };
+    const solid = () => document.documentElement.classList.contains(SOLID_CLASS);
+    renderHook(() => useTransparencyEffect());
+    expect([solid(), setGlass.mock.lastCall]).toEqual([true, [false]]);
+    act(() => {
+      reduced = false;
+      for (const fn of listeners) fn();
+    });
+    expect([solid(), setGlass.mock.lastCall]).toEqual([false, [true]]);
+    act(() => useStore.setState(s => ({ preferences: { ...s.preferences, transparency: false } })));
+    expect([solid(), setGlass.mock.lastCall]).toEqual([true, [false]]);
   });
 });

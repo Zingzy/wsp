@@ -18,5 +18,10 @@
     "id": 1,
     "op": "pty.create",
     "machineId": 1
+  },
+  {
+    "id": 1,
+    "op": "pty.create",
+    "run": 1
   }
 ]

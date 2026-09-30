@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -53,16 +54,47 @@ describe("index.css", () => {
     expect(scope).toContain("--muted-foreground: var(--sidebar-quiet);");
   });
 
+  it("draws no blur of the page's own on the Mac, where the window's glass is macOS's: each pane's blur is written for the other platforms alone, and no rule turns one off", () => {
+    // Each blur declaration with the blocks it sits in, outermost first. A block's head is the text before its brace.
+    const blurs: string[][] = [];
+    const heads: string[] = [];
+    let head = "";
+    for (const ch of css.replace(/\/\*[\s\S]*?\*\//g, "")) {
+      if (ch === "{") {
+        heads.push(head.trim());
+        head = "";
+      } else if (ch === "}") {
+        heads.pop();
+        head = "";
+      } else if (ch === ";") {
+        if (/^(-webkit-)?backdrop-filter:\s*blur\(/.test(head.trim())) blurs.push([...heads]);
+        head = "";
+      } else head += ch;
+    }
+    expect(blurs.length).toBeGreaterThan(0);
+    // A dialog's scrim is the one blur the window's glass cannot stand in for: it blurs the page under the dialog. The
+    // frost utility carries its blur bare, and every use of it names the condition.
+    const onMac = blurs.filter(within => !within.includes("@variant off-mac") && !within.includes("@utility dialog-backdrop") && within.join() !== "@utility glass-backdrop");
+    expect(onMac).toEqual([]);
+    expect(css).not.toMatch(/backdrop-filter:\s*none/);
+    const applied = [...css.matchAll(/@variant off-mac \{\s*@apply glass-backdrop;/g)].length;
+    expect(applied).toBe([...css.matchAll(/@apply glass-backdrop;/g)].length);
+    const uses = execFileSync("git", ["grep", "-hoE", "[^ \"'`]*glass-backdrop", "--", "src", ":!*.css", ":!*.test.*"], { cwd: join(__dirname, ".."), encoding: "utf8" }).trim().split("\n");
+    expect(uses.length).toBeGreaterThan(0);
+    expect(uses.filter(use => !use.startsWith("off-mac:"))).toEqual([]);
+  });
+
   it("pins the sidebar glass utility added after the upstream set", () => {
     const additions = css.slice(css.indexOf("/* wsp additions below this line. */"));
     expect(additions).toMatchInlineSnapshot(`
       "/* wsp additions below this line. */
 
-      /* A backdrop blur lays its blurred copy over the page it sampled, so on the Mac's transparent page the sharp text
-         shows through it unless the copy stands on a ground: --glass-ground, the filter GlassGround renders. */
+      /* The page's own frost, taken only off the Mac (off-mac: in markup, @variant off-mac here): the Mac's glass is
+         macOS's, which the window draws once for the whole window, and a pane there stands on its material whole. The
+         condition sits at each use, since a variant inside this utility cannot follow a ::before it is used under. */
       @utility glass-backdrop {
-        -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation)) var(--glass-ground,);
-        backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation)) var(--glass-ground,);
+        -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+        backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
       }
 
       /* The shell's sidebar floats over the app background, so it takes the same
@@ -70,7 +102,9 @@ describe("index.css", () => {
          palette instead of the popover, and its border joins the sidebar tokens. */
       @utility sidebar-glass {
         background: color-mix(in srgb, var(--sidebar) var(--glass-opacity), transparent);
-        @apply glass-backdrop;
+        @variant off-mac {
+          @apply glass-backdrop;
+        }
         border-color: var(--sidebar-border);
 
         @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
@@ -164,8 +198,27 @@ describe("index.css", () => {
         background-color: color-mix(in srgb, var(--sidebar) var(--sidebar-veil), transparent);
       }
 
-      /* Transparency off in Appearance, or the computer's Reduce transparency on: every glass takes its solid ground, each
-         region its theme's material at full share. The doubled root outweighs the Mac's dark block above. */
+      /* The Mac's glass shows what is behind the window, never the page under a pane, so a pane that frosts what scrolls
+         under it elsewhere (the composer, a pill, a banner) stands on its material whole here. A dialog's and a sheet's
+         scrim keep their blur: they stand only while open, and a sharp page under a dim scrim reads busier. */
+      .desktop-mac {
+        --glass-opacity: 100%;
+      }
+
+      /* The composer's ground there is the card, and in the dark the raised material the chrome's panes stand on: its tint
+         elsewhere is the ink at a few percent over a blur, which whole would be a slab of the ink. */
+      .desktop-mac [data-slot="composer-shell"] {
+        --chat-composer-glass-surface: var(--card);
+        --chat-composer-glass-opacity: 100%;
+      }
+
+      .desktop-mac.dark [data-slot="composer-shell"] {
+        --chat-composer-glass-surface: var(--material-raised);
+      }
+
+      /* The page drawing no glass (Transparency off in Appearance, or the computer's Reduce transparency on, read in
+         settings/theme.ts): every glass takes its solid ground, each region its theme's material at full share. The
+         doubled root outweighs the Mac's dark block above. */
       :root:root.solid {
         --glass-opacity: 100%;
         --material-centre: 100%;
@@ -180,21 +233,6 @@ describe("index.css", () => {
         --chat-composer-glass-opacity: 100%;
       }
 
-      @media (prefers-reduced-transparency: reduce) {
-        :root:root {
-          --glass-opacity: 100%;
-          --material-centre: 100%;
-          --material-panel: 100%;
-          --material-sidebar: 100%;
-          --sidebar-veil: 100%;
-        }
-
-        :root:root [data-slot="composer-shell"] {
-          --chat-composer-glass-surface: var(--card);
-          --chat-composer-glass-opacity: 100%;
-        }
-      }
-
       /* The window paints the glass behind the page, so the page's own canvas is
          clear and only the main column paints a background. The frame row's toggle
          sits one header gap after the third traffic light, centre to centre: with
@@ -204,8 +242,13 @@ describe("index.css", () => {
         background: transparent;
       }
 
+      /* A solid page takes the window's glass away with it, so the page paints the ground the glass stood in for. */
+      :root:root.solid.desktop-mac,
+      :root:root.solid.desktop-mac body {
+        background: var(--background);
+      }
+
       .desktop-mac {
-        --glass-ground: url(#glass-ground);
         --header-frame-inset: calc(69px + var(--header-gap) - var(--workspace-titlebar-control-size) / 2);
       }
 

@@ -131,6 +131,10 @@ pub struct PtyListEntry {
     pub cols: u16,
     pub rows: u16,
     pub exited: bool,
+    /// Set on a pty that runs a reply's command and still belongs to that reply: no pane adopts it until pty.tab.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub reply: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]

@@ -5,6 +5,8 @@
 @custom-variant light (&:not(.dark, .dark *));
 /* Window Controls Overlay: active when Electron exposes native titlebar control geometry. */
 @custom-variant wco (&:is(.wco, .wco *));
+/* Anywhere but the Mac's window, whose glass is macOS's own. */
+@custom-variant off-mac (&:not(.desktop-mac, .desktop-mac *));
 
 /* On mobile, morph the expanded hero composer into the compact docked
    composer while it moves; the rest of the app remains visually stationary. */
@@ -304,7 +306,9 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
 
 @utility surface-glass {
   background: color-mix(in srgb, var(--background) var(--glass-opacity), transparent);
-  @apply glass-backdrop;
+  @variant off-mac {
+    @apply glass-backdrop;
+  }
 
   @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
     background: var(--background) !important;
@@ -322,15 +326,18 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
 }
 
 @utility dropdown-glass {
-  /* Near solid, so the rows under a menu never read through it; the blur only softens what little shows. */
-  background: color-mix(in srgb, var(--popover) 96%, transparent);
-  -webkit-backdrop-filter: blur(8px) var(--glass-ground,);
-  backdrop-filter: blur(8px) var(--glass-ground,);
+  background: var(--popover);
   border: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
   box-shadow: 0 12px 32px -12px rgb(0 0 0 / 45%), 0 2px 6px -2px rgb(0 0 0 / 25%);
 
-  @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
-    background: var(--popover) !important;
+  /* Off the Mac, near solid, so the rows under a menu never read through it; the blur only softens what little
+     shows. On the Mac a menu stands on its popover ground whole. */
+  @variant off-mac {
+    @supports (-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px)) {
+      background: color-mix(in srgb, var(--popover) 96%, transparent);
+      -webkit-backdrop-filter: blur(8px);
+      backdrop-filter: blur(8px);
+    }
   }
 }
 
@@ -1388,11 +1395,12 @@ code {
 
 /* wsp additions below this line. */
 
-/* A backdrop blur lays its blurred copy over the page it sampled, so on the Mac's transparent page the sharp text
-   shows through it unless the copy stands on a ground: --glass-ground, the filter GlassGround renders. */
+/* The page's own frost, taken only off the Mac (off-mac: in markup, @variant off-mac here): the Mac's glass is
+   macOS's, which the window draws once for the whole window, and a pane there stands on its material whole. The
+   condition sits at each use, since a variant inside this utility cannot follow a ::before it is used under. */
 @utility glass-backdrop {
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation)) var(--glass-ground,);
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation)) var(--glass-ground,);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
 }
 
 /* The shell's sidebar floats over the app background, so it takes the same
@@ -1400,7 +1408,9 @@ code {
    palette instead of the popover, and its border joins the sidebar tokens. */
 @utility sidebar-glass {
   background: color-mix(in srgb, var(--sidebar) var(--glass-opacity), transparent);
-  @apply glass-backdrop;
+  @variant off-mac {
+    @apply glass-backdrop;
+  }
   border-color: var(--sidebar-border);
 
   @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
@@ -1494,8 +1504,27 @@ html.desktop-mac.dark [data-preview-panel-mode="inline"]:has([data-terminal-tran
   background-color: color-mix(in srgb, var(--sidebar) var(--sidebar-veil), transparent);
 }
 
-/* Transparency off in Appearance, or the computer's Reduce transparency on: every glass takes its solid ground, each
-   region its theme's material at full share. The doubled root outweighs the Mac's dark block above. */
+/* The Mac's glass shows what is behind the window, never the page under a pane, so a pane that frosts what scrolls
+   under it elsewhere (the composer, a pill, a banner) stands on its material whole here. A dialog's and a sheet's
+   scrim keep their blur: they stand only while open, and a sharp page under a dim scrim reads busier. */
+.desktop-mac {
+  --glass-opacity: 100%;
+}
+
+/* The composer's ground there is the card, and in the dark the raised material the chrome's panes stand on: its tint
+   elsewhere is the ink at a few percent over a blur, which whole would be a slab of the ink. */
+.desktop-mac [data-slot="composer-shell"] {
+  --chat-composer-glass-surface: var(--card);
+  --chat-composer-glass-opacity: 100%;
+}
+
+.desktop-mac.dark [data-slot="composer-shell"] {
+  --chat-composer-glass-surface: var(--material-raised);
+}
+
+/* The page drawing no glass (Transparency off in Appearance, or the computer's Reduce transparency on, read in
+   settings/theme.ts): every glass takes its solid ground, each region its theme's material at full share. The
+   doubled root outweighs the Mac's dark block above. */
 :root:root.solid {
   --glass-opacity: 100%;
   --material-centre: 100%;
@@ -1510,21 +1539,6 @@ html.desktop-mac.dark [data-preview-panel-mode="inline"]:has([data-terminal-tran
   --chat-composer-glass-opacity: 100%;
 }
 
-@media (prefers-reduced-transparency: reduce) {
-  :root:root {
-    --glass-opacity: 100%;
-    --material-centre: 100%;
-    --material-panel: 100%;
-    --material-sidebar: 100%;
-    --sidebar-veil: 100%;
-  }
-
-  :root:root [data-slot="composer-shell"] {
-    --chat-composer-glass-surface: var(--card);
-    --chat-composer-glass-opacity: 100%;
-  }
-}
-
 /* The window paints the glass behind the page, so the page's own canvas is
    clear and only the main column paints a background. The frame row's toggle
    sits one header gap after the third traffic light, centre to centre: with
@@ -1534,8 +1548,13 @@ html.desktop-mac.dark [data-preview-panel-mode="inline"]:has([data-terminal-tran
   background: transparent;
 }
 
+/* A solid page takes the window's glass away with it, so the page paints the ground the glass stood in for. */
+:root:root.solid.desktop-mac,
+:root:root.solid.desktop-mac body {
+  background: var(--background);
+}
+
 .desktop-mac {
-  --glass-ground: url(#glass-ground);
   --header-frame-inset: calc(69px + var(--header-gap) - var(--workspace-titlebar-control-size) / 2);
 }
 
