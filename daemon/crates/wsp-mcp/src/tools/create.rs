@@ -342,10 +342,16 @@ async fn fork(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     }
     let picks = Picks { model, effort, access, fast: None };
     let client = host.client().await?;
-    let source = workspace_of(&client, &workspace).await?;
-    if let Some(task) = &task {
-        turn::checked_start(&client, task, agent.as_deref(), &picks, &source.id).await?;
+    let read = async {
+        let source = workspace_of(&client, &workspace).await?;
+        if let Some(task) = &task {
+            turn::checked_start(&client, task, agent.as_deref(), &picks, &source.id).await?;
+        }
+        Ok(source)
     }
+    .await;
+    // A fork with a task sends a message, and a host that stops under these reads took none.
+    let source = if task.is_some() { turn::before_sending(&client, read)? } else { read? };
     let agents = agents_asked(spawn.as_deref(), max_machines.as_ref(), max_depth.as_ref());
     let project = project_of(&client, &source.project.id).await?;
     let name = name.unwrap_or_else(|| format!("{}-fork", source.name));

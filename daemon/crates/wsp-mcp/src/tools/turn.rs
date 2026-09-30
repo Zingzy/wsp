@@ -443,12 +443,13 @@ pub(super) struct Turn {
 const SESSION_STATUSES: [&str; 4] = ["running", "completed", "interrupted", "failed"];
 const START_OUTCOMES: [&str; 3] = ["started", "steered", "queued"];
 
-/// Starts the turn as the agent's and answers with it the moment the runtime names it.
-async fn begin(client: &Client, start: &Map<String, Value>) -> Result<Turn, Failure> {
+/// Starts the turn as the agent's under `request_id`, which every send of this start carries, and answers with it the
+/// moment the runtime names it.
+async fn begin(client: &Client, start: &Map<String, Value>, request_id: &str) -> Result<Turn, Failure> {
     client.events().await?;
     let mut asked = start.clone();
     asked.insert("startedBy".to_owned(), Value::from("agent"));
-    asked.insert("requestId".to_owned(), Value::from(request_id()));
+    asked.insert("requestId".to_owned(), Value::from(request_id));
     let answer: Value = client.request("sessions.start", asked).await?;
     let str_at = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).map(str::to_owned);
     let session =
@@ -501,23 +502,57 @@ fn start_wait() -> Duration {
     Duration::from_millis(record::host().start_wait_ms)
 }
 
+/// The socket to send a start again on, after `failure` ended the try before the host answered it: a host that stopped
+/// under it is dialled again, and the host that comes back knows the start by its request id and answers with the turn
+/// it already opened where it took the message, so whether a message landed is the host's to say. Any other failure is
+/// the start's own, and a host that did not come back in time is a message nobody took: the failure says so rather
+/// than that a turn goes on.
+async fn redial_unanswered(host: &Host, socket: &Client, failure: Failure) -> Result<Arc<Client>, Failure> {
+    if !socket.stopped_under() {
+        return Err(failure);
+    }
+    host.back_within(start_wait()).await.map_err(|_| Failure::new(record::words().not_delivered))
+}
+
+/// A start whose caller does not stay for the reply, sent again to the host that comes back when one stops before it
+/// answers.
+async fn begin_through(host: &Host, client: Arc<Client>, start: &Map<String, Value>) -> Result<Turn, Failure> {
+    let id = request_id();
+    let mut socket = client;
+    loop {
+        match begin(&socket, start, &id).await {
+            Ok(turn) => return Ok(turn),
+            Err(failure) => socket = redial_unanswered(host, &socket, failure).await?,
+        }
+    }
+}
+
+/// A send's reads before its start, which send nothing: a host that stops under them took no message, so the failure
+/// says it was not delivered rather than that a turn goes on.
+pub(super) fn before_sending<T>(client: &Client, read: Result<T, Failure>) -> Result<T, Failure> {
+    read.map_err(|failure| if client.stopped_under() { Failure::new(record::words().not_delivered) } else { failure })
+}
+
 /// Starts the turn and follows it to its end, which is the turn's done, or its end where the runtime ended it. A host
 /// that stops under the follow once the turn is named is dialled again, and the follow goes on from the host that
 /// comes back: an end its transcript already holds is read off it, the rest arrive as they come. `started` holds the
-/// turn from the moment it is named, for a caller whose launch died after it.
+/// turn from the moment it is named, for a caller whose launch died after it. A host that stops before it answers the
+/// start is dialled again the same way and sent the same start, which it answers with the turn it opened where it
+/// took it; none back in time is a message not delivered.
 pub(super) async fn follow(
     host: &Host,
     client: Arc<Client>,
     start: &Map<String, Value>,
     started: &mut Option<Turn>,
 ) -> Result<Turn, Failure> {
+    let id = request_id();
     let mut socket = client.clone();
     loop {
         let mut frames = socket.frames();
         let attempt: Result<Turn, Failure> = async {
             let mut turn = match started.clone() {
                 None => {
-                    let turn = begin(&socket, start).await?;
+                    let turn = begin(&socket, start, &id).await?;
                     *started = Some(turn.clone());
                     turn
                 }
@@ -552,7 +587,8 @@ pub(super) async fn follow(
         .await;
         match attempt {
             Ok(turn) => return Ok(turn),
-            Err(failure) if started.is_none() || !socket.stopped_under() => return Err(failure),
+            Err(failure) if started.is_none() => socket = redial_unanswered(host, &socket, failure).await?,
+            Err(failure) if !socket.stopped_under() => return Err(failure),
             Err(_) => socket = host.back_within(start_wait()).await?,
         }
     }
@@ -682,15 +718,20 @@ fn opened_thread(thread_id: &str, opened: Option<&Opened>) -> String {
 async fn run(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     let RunIn { workspace, task, agent, model, effort, access, fast, cwd, notify, title, files, detach } = input("run", arguments)?;
     let client = host.client().await?;
-    let (found, inferred) = thread_target(&client, workspace.as_deref(), host.cwd(), host.args().guest).await?;
     let picks = Picks { model, effort, access, fast };
-    checked_start(&client, &task, agent.as_deref(), &picks, &found.id).await?;
+    let read = async {
+        let (found, inferred) = thread_target(&client, workspace.as_deref(), host.cwd(), host.args().guest).await?;
+        checked_start(&client, &task, agent.as_deref(), &picks, &found.id).await?;
+        let woken = awake(&client, &found, "send").await?;
+        let notify = notify_of(&client, notify.as_deref().unwrap_or_default()).await?;
+        Ok((found, inferred, woken, notify))
+    }
+    .await;
+    let (found, inferred, woken, notify) = before_sending(&client, read)?;
     let opened = inferred.then(|| Opened {
         workspace: found.name.clone(),
         folder: home_shortened(cwd.as_deref().unwrap_or(&found.project.path), found.home.as_deref()),
     });
-    let woken = awake(&client, &found, "send").await?;
-    let notify = notify_of(&client, notify.as_deref().unwrap_or_default()).await?;
     let folder = absolute_folder(cwd.as_deref())?;
     let attachments = files_from(files.as_deref().unwrap_or_default(), host.args().guest)?;
     let mut start = opening(&host, &woken.workspace.id, &task, agent, folder, notify);
@@ -703,7 +744,9 @@ async fn run(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     picks.wire(&mut start);
     let mut started = None;
     let answered = if detach == Some(true) {
-        begin(&client, &start).await.map(|turn| Answer::text(opened_thread(&turn.thread_id, opened.as_ref()), &turn_out(&turn)))
+        begin_through(&host, client.clone(), &start)
+            .await
+            .map(|turn| Answer::text(opened_thread(&turn.thread_id, opened.as_ref()), &turn_out(&turn)))
     } else {
         match follow(&host, client.clone(), &start, &mut started).await {
             Ok(turn) => match turn_refusal(&turn) {
@@ -729,10 +772,15 @@ async fn run(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
 async fn send(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     let SendIn { thread, message, model, effort, fast, files, detach } = input("send", arguments)?;
     let client = host.client().await?;
-    let thread: Thread = thread_of(&client, &thread).await?;
     let picks = Picks { model, effort, access: None, fast };
-    checked_start(&client, &message, Some(&thread.harness), &picks, &thread.workspace_id).await?;
-    awake(&client, &workspace_of(&client, &thread.workspace_id).await?, "send").await?;
+    let read = async {
+        let thread: Thread = thread_of(&client, &thread).await?;
+        checked_start(&client, &message, Some(&thread.harness), &picks, &thread.workspace_id).await?;
+        awake(&client, &workspace_of(&client, &thread.workspace_id).await?, "send").await?;
+        Ok(thread)
+    }
+    .await;
+    let thread = before_sending(&client, read)?;
     let attachments = files_from(files.as_deref().unwrap_or_default(), host.args().guest)?;
     let mut start = params([
         ("workspaceId", Value::from(thread.workspace_id.as_str())),
@@ -745,7 +793,7 @@ async fn send(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     }
     picks.wire(&mut start);
     if detach == Some(true) {
-        let turn = begin(&client, &start).await?;
+        let turn = begin_through(&host, client, &start).await?;
         return Ok(Answer::text(opened_thread(&turn.thread_id, None), &turn_out(&turn)));
     }
     let turn = follow(&host, client, &start, &mut None).await?;

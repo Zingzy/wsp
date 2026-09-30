@@ -12,7 +12,7 @@ import { PassThrough } from "node:stream";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 
 /** A seam between a join's key and its place file, where another process's leave or a crash would land. */
 const fsHooks = vi.hoisted(() => ({ beforeLink: undefined as (() => void) | undefined }));
@@ -40,7 +40,7 @@ import { daemonBinaryIn, GUEST_DAEMON_TARGETS, noGuestDaemonLine, noPlaceSystemL
 import { ADD_FOUND_END, ADD_TAKEN_LINE, DAEMON_GONE_LINE, addFound, addFoundScript, addUndoScript, daemonFlags, joinedAddWrites, joinedLine, joinedPlace, loginFilesStep, PLACE_JOINED_LINE, profileSourceLine, sshDaemonPlace, WSP_READY_LINE } from "../src/doctor.js";
 import { BoxBackend, type KeyCheck, type MachineBackend } from "@wsp/engine";
 import { computerLines, hostPlatform, placeLines, placeNames } from "../src/verbs.js";
-import { namesPlace } from "@wsp/protocol";
+import { namesPlace, WSP_WORKSPACE_APPARMOR_PATH } from "@wsp/protocol";
 import { pinnedDroppingPort, refusedPort } from "../../runtime/test/held-port.js";
 import {
   ADD_FLAGS_REFUSAL,
@@ -70,7 +70,7 @@ import {
   preparePlaceHome,
   joinPlace,
   addableProviders,
-  leaveCommand,
+  leaveCommand as leaveCommandHere,
   leavePlace,
   placeHere,
   macKindOf,
@@ -107,7 +107,7 @@ import {
   placeRootHomeRefusal,
 } from "../src/places.js";
 import { BackCutError, backBindLine, heldPlaceScript } from "../src/place-back.js";
-import { placeFilePath, placeKeyPath, placeLogPath, placeReport, placeService, readPlaceFile, sweepPlace, sweptLine, sweptSaid, writePlaceFile } from "../src/place-report.js";
+import { placeFilePath, placeKeyPath, placeLogPath, placeReport, placeService, readPlaceFile, sweepPlace as sweepPlaceHere, sweptLine, sweptSaid, writePlaceFile, type PlaceSweepOptions } from "../src/place-report.js";
 import { captured } from "./verbs-fixture.js";
 import { SERVICE_MANAGERS, type RunResult, type ServiceAddress, type ServiceManager, type ServiceRunner, type ServiceUnit } from "../src/service.js";
 import { addedBy, addedProviders } from "../src/providers.js";
@@ -117,6 +117,21 @@ import { writeStub } from "../../protocol/test/stub-script.js";
 import { CLOUD_ON } from "../src/cloud.js";
 
 runsFromItsOwnFolder();
+
+/** The leave as a case runs it: the workspace profile it takes off is one under the case's own home unless the case
+ * names another, since a suite run as root otherwise takes the machine's own profile off it. */
+const sweepPlace = (opts: PlaceSweepOptions = {}): ReturnType<typeof sweepPlaceHere> =>
+  sweepPlaceHere({ ...(opts.home === undefined ? {} : { apparmorProfile: join(opts.home, "etc-apparmor.d", "wsp-workspace") }), ...opts });
+
+/** `wsp leave` as a case runs it, with the same profile under the case's own home. */
+const leaveCommand = (io: Parameters<typeof leaveCommandHere>[0], args: readonly string[], deps: NonNullable<Parameters<typeof leaveCommandHere>[2]>): ReturnType<typeof leaveCommandHere> =>
+  leaveCommandHere(io, args, { apparmorProfile: join(deps.home, "etc-apparmor.d", "wsp-workspace"), ...deps });
+
+/** The machine's own profile as the file found it, which every case leaves exactly as it was. */
+const MACHINES_PROFILE = existsSync(WSP_WORKSPACE_APPARMOR_PATH) ? readFileSync(WSP_WORKSPACE_APPARMOR_PATH) : undefined;
+afterAll(() => {
+  expect(existsSync(WSP_WORKSPACE_APPARMOR_PATH) ? readFileSync(WSP_WORKSPACE_APPARMOR_PATH) : undefined, "a case touched this machine's own workspace profile").toEqual(MACHINES_PROFILE);
+});
 
 const dirs: string[] = [];
 const servers: WebSocketServer[] = [];
@@ -1191,7 +1206,8 @@ describe("taking wsp off the computer it is typed on", () => {
     // A space in the folder: the path is one word to the shell or the removal takes two files that are not it.
     const profile = join(tmp("leave-apparmor-etc"), "apparmor d", "wsp-workspace");
     mkdirSync(dirname(profile));
-    writeFileSync(profile, "profile wsp-workspace {}\n");
+    // A name no kernel holds: the unload runs for real as root, and the machine's own wsp-workspace must stay loaded.
+    writeFileSync(profile, "profile wsp-test-never-loaded {}\n");
     const ran: string[] = [];
     const sh = (script: string): string => {
       ran.push(script);
@@ -1496,7 +1512,9 @@ describe("wsp add on a computer reached over ssh", () => {
     expect(await addCommand(quiet, opts(tmp("add-quiet")), ["root@10.0.0.9"], {}, deps)).toBe(0);
     expect(signedIn).toHaveLength(1);
     expect(quiet.lines.join("\n")).toContain(boxSignInLaterLine("box", "codex"));
-    expect(quiet.lines.join("\n")).toContain("OPENAI_API_KEY");
+    // In the person's words: the key they saved here, and nothing of where wsp keeps it.
+    expect(quiet.lines).toContain("Codex is not signed in on box. Until it is, threads there use the OPENAI_API_KEY saved on this computer. wsp add box --sign-in codex signs it in.");
+    expect(quiet.lines.join("\n")).not.toMatch(/vault/);
   });
 
   it("asks about the key of a computer this one has never dialled, sends the one it was answered with, and sends nothing off a terminal", async () => {

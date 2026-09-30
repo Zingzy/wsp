@@ -5,6 +5,7 @@
   "noAnswerWithin": "the host at {where} did not answer: nothing came back within {ms} ms",
   "hostClosed": "the host closed the connection",
   "hostStopping": "the host is restarting; the turn goes on and its reply lands in the thread",
+  "notDelivered": "the host stopped before it took the message, so it was not delivered; send it again",
   "noSuchHostNone": "no host named {alias} is connected; this computer holds none, and wsp login puts the hosts on your account here. Run wsp hosts for the list.",
   "noSuchHostSome": "no host named {alias} is connected; this computer holds {known}, and wsp login puts the hosts on your account here. Run wsp hosts for the list.",
   "severalHosts": "this computer can reach {count} hosts on your account ({aliases}) and none of them is the one every line takes. Name one on the line with --host <name>.\n\nRun wsp hosts for the list.",
@@ -272,6 +273,7 @@
     "agentsNothing": "workspaces_agents takes spawn, max_machines or max_depth. Name at least one; with none of them there is nothing to change.",
     "forgotOne": "forgot {name} {id}: its record and 1 thread are gone from this computer",
     "forgotMany": "forgot {name} {id}: its record and {count} threads are gone from this computer",
+    "unnamedComputer": "that computer",
     "onDelete": {
       "cloud": {
         "asked": "computer is deleted in the cloud",
@@ -284,6 +286,10 @@
       "copy": {
         "asked": "copy at {path} is removed and the project folder is left as it is",
         "done": "its copy at {path} is removed and the project folder is left as it is"
+      },
+      "place": {
+        "asked": "copy on {computer} is deleted",
+        "done": "{name} is deleted from {computer}"
       },
       "none": {
         "asked": "create failed before any computer was made, so there is none to delete",

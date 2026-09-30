@@ -1307,6 +1307,10 @@ export const RUN_GONE_LINE = "the machine no longer holds this turn's run, so no
  * so it goes on and its reply lands in the thread whether or not this command is still there to see it. */
 export const HOST_STOPPING_LINE = "the host is restarting; the turn goes on and its reply lands in the thread";
 
+/** What a send is told when the host stopped before it took the message and no host took it after: no turn runs and
+ * nothing waits in the thread, so the person has to send it again. */
+export const NOT_DELIVERED_LINE = "the host stopped before it took the message, so it was not delivered; send it again";
+
 /** What a machine is called when the provider reports it running and the road every command takes is dead: whose
  * machine it is, which one, and the guest's own words, so the failure reads as the provider's and not as wsp's. */
 export function guestUnusableLine(provider: string, machineId: string, detail: string): string {
