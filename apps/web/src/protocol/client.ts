@@ -35,6 +35,8 @@ import {
   SessionAnswerOutcome,
   SessionAsideResult,
   SessionRewindResult,
+  SessionRunEvent,
+  type RunStep,
   SessionInterruptOutcome,
   SessionRenameResult,
   SessionSearchResult,
@@ -556,6 +558,8 @@ export interface Api {
   /** Rewinds a thread to the end of one of its turns, with the files or the conversation alone. Optional so fixtures
    * that never rewind need not fake it; a client without it offers no Rewind to here. */
   rewindThread?(threadId: string, turnId: string, files: boolean): Promise<SessionRewindResult>;
+  /** Records one step of a reply block's run on its thread; answers the step the thread now holds. */
+  recordRun?(step: RunStep): Promise<SessionRunEvent>;
   /** Puts back the files the thread's last rewind replaced. */
   undoRewind?(threadId: string): Promise<SessionRewindResult>;
   /** What each harness's CLI takes at launch; the composer's pickers render from it, and every start rides the model,
@@ -829,6 +833,8 @@ export function makeApi(c: ProtocolClient): Api {
     askAside: async (sessionId, question) => SessionAsideResult.parse(await c.request<Record<string, unknown>>("sessions.aside", { sessionId, question })),
     rewindThread: async (threadId, turnId, files) => SessionRewindResult.parse(await c.request<Record<string, unknown>>("sessions.rewind", { threadId, turnId, files })),
     undoRewind: async threadId => SessionRewindResult.parse(await c.request<Record<string, unknown>>("sessions.rewind", { threadId, undo: true })),
+    // Parsed, not trusted: the block draws the step the thread holds, which a newer host may have widened.
+    recordRun: async step => SessionRunEvent.parse((await c.request<{ run?: unknown }>("sessions.run", { ...step })).run),
     // Parsed, not trusted: a picker renders only values the wire type vouches for.
     listHarnesses: async workspaceId =>
       HarnessCatalog.array().parse((await c.request<{ harnesses?: unknown }>("harnesses.list", workspaceId !== undefined ? { workspaceId } : {})).harnesses),

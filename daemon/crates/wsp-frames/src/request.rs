@@ -39,6 +39,12 @@ pub enum DaemonOp {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
         env: Option<BTreeMap<String, String>>,
+        /// A command line this pty runs through the person's own shell and exits with, for a reply's block run
+        /// where it stands. Such a pty is that reply's: pty.list marks it, a pane adopts none, and pty.tab hands it
+        /// to the panes.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        run: Option<String>,
         /// The workspace this pty is for, on a daemon that runs workspaces: the shell opens inside that
         /// workspace's namespaces, in the folder the frame names, which is absolute and is asked for, since this
         /// daemon has no working directory inside a workspace. Without one the shell is the daemon's own
@@ -88,6 +94,16 @@ pub enum DaemonOp {
     },
     #[serde(rename = "pty.kill", rename_all = "camelCase")]
     PtyKill {
+        pty_id: String,
+        /// The workspace whose pty this is, as on pty.create above.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        machine_id: Option<String>,
+    },
+    /// A reply's pty handed to the panes, still running: pty.list stops marking it, so every pane adopts it as a
+    /// tab. A pty that is no reply's is answered as it stands.
+    #[serde(rename = "pty.tab", rename_all = "camelCase")]
+    PtyTab {
         pty_id: String,
         /// The workspace whose pty this is, as on pty.create above.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -528,7 +544,7 @@ pub enum DaemonOp {
 
 /// The op names above, in the protocol's order; the daemon's switch reads this to tell an op it knows from one it
 /// does not.
-pub const DAEMON_OPS: [&str; 54] = [
+pub const DAEMON_OPS: [&str; 55] = [
     "pty.create",
     "pty.attach",
     "pty.detach",
@@ -583,6 +599,7 @@ pub const DAEMON_OPS: [&str; 54] = [
     "git.prMerge",
     "git.repoRead",
     "git.update",
+    "pty.tab",
 ];
 
 /// The five of those that belong to the road a client of this machine dials in on: a guest process's two and the

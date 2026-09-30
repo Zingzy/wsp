@@ -7,4 +7,8 @@ export type PtyListEntry = { id: string,
 /**
  * The same number `PtyCreateReply` answered for this terminal, and the same reading.
  */
-pid: number, cols: number, rows: number, exited: boolean, };
+pid: number, cols: number, rows: number, exited: boolean, 
+/**
+ * Set on a pty that runs a reply's command and still belongs to that reply: no pane adopts it until pty.tab.
+ */
+reply?: boolean, };

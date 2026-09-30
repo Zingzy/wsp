@@ -17,7 +17,7 @@
 import { isProjectHomeKey } from "../../protocol/store";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { isSessionEvent } from "@wsp/protocol";
-import type { AttachmentRecord, SessionEvent, SessionHarness, SessionView } from "@wsp/protocol";
+import type { AttachmentRecord, SessionEvent, SessionHarness, SessionRunEvent, SessionView } from "@wsp/protocol";
 import { useProtocolEvents, useStore } from "../../protocol/store";
 import type { ProtocolEvent } from "../../protocol/client";
 import { deriveSession, entryTurnId, type TimelineEntry, type TurnSummary } from "./adapt";
@@ -43,6 +43,8 @@ export interface ChatThreadView {
    * thread longer. Null before a start carried them. */
   readonly agent: string | null;
   readonly permissionMode: string | null;
+  /** Every reply block's latest run, by block, as the thread records it. */
+  readonly runs: ReadonlyMap<string, SessionRunEvent>;
 }
 
 export interface ChatThreadHandle {
@@ -171,6 +173,8 @@ function ownPlace(e: SessionEvent): string | undefined {
       return `session.notify:${e.turnId}:${e.notify}`;
     case "session.checkpoint":
       return `session.checkpoint:${e.turnId}`;
+    case "session.run":
+      return `session.run:${e.runId}:${e.state}`;
     default: {
       const _exhaustive: never = e;
       return undefined;
@@ -515,6 +519,7 @@ export function deriveChatThread(state: ThreadState, previous: ReadonlyArray<Tim
     model: model.model,
     agent: model.agent,
     permissionMode: model.permissionMode,
+    runs: model.runs,
   };
 }
 

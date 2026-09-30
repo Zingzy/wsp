@@ -2,7 +2,7 @@
 // The wsp skill for agents on this computer: one file in the repo, read as
 // text at build time, that names every verb and tool and gives the MCP server
 // its instructions.
-import { thisComputerLine } from "@wsp/protocol";
+import { RUN_BLOCK_WORDS, thisComputerLine } from "@wsp/protocol";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { CATALOG_AGENTS, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
@@ -279,12 +279,14 @@ describe("the wsp skill", () => {
     expect(INSTRUCTIONS).not.toContain("## ");
   });
 
-  it("the rules for running work on a machine are twelve lines stated as facts about machines, eleven with no cloud, and the instructions carry the same lines", () => {
+  it("the rules for running work on a machine are thirteen lines stated as facts about machines, twelve with no cloud, and the instructions carry the same lines", () => {
     const from = WSP_SKILL.indexOf(`\n${RULES_HEADING}\n`);
     expect(from, RULES_HEADING).toBeGreaterThan(-1);
     const section = WSP_SKILL.slice(from, WSP_SKILL.indexOf("\n## ", from + 1));
     const rules = section.split("\n").filter(line => line.startsWith("- "));
-    expect(rules).toHaveLength(CLOUD_ON ? 12 : 11);
+    expect(rules).toHaveLength(CLOUD_ON ? 13 : 12);
+    // A command meant for the person closes the section, in the one sentence the launch context quotes too.
+    expect(rules.at(-1)).toBe(`- ${RUN_BLOCK_WORDS}.`);
     // The two roads to a child's end open the section: which one holds is the first thing a caller has to decide.
     expect(rules[0]).toContain(NOTIFY_CALLER);
     expect(rules[1]).toContain(COORDINATOR_HANDOFF);
@@ -298,7 +300,8 @@ describe("the wsp skill", () => {
       expect(rule, rule.slice(0, 40)).not.toMatch(/#\d|\bticket\b|\b20\d\d\b/);
     }
     // The rest, each by the fact it turns on: which kind of workspace the work goes on, the golden, the count, the
-    // worktree, long work in the background, the send, the restart, the pause, the person reading along.
+    // worktree, long work in the background, the send, the restart, the pause, the person reading along, and the
+    // block a person runs.
     expect(section).toContain("the one `wsp add <folder>` and `wsp new \"<what you are working on>\"` make");
     expect(section).toContain("a quick subtask or a second harness");
     if (CLOUD_ON) {
