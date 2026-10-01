@@ -88,6 +88,9 @@ export interface SettingsState {
   readonly addAsked: { readonly road: AddRoad | null; readonly n: number } | null;
   /** The Usage page's tab, kept while the window is open so coming back finds the same one. */
   readonly usageTab: UsageTab;
+  /** The Agents page's tab and the computer it reads, kept while the window is open. Null reads the one wsp runs on. */
+  readonly agentsTab: AgentsTab;
+  readonly agentsPlace: string | null;
   go(at: SettingsAt): void;
   setSearch(search: string): void;
   setReads(patch: Partial<SettingsReads>): void;
@@ -99,9 +102,12 @@ export interface SettingsState {
   askRecipe(placeId: string | null): void;
   askAdd(road: AddRoad | null): void;
   pickUsageTab(tab: UsageTab): void;
+  pickAgentsTab(tab: AgentsTab): void;
+  pickAgentsPlace(placeId: string | null): void;
 }
 
 export type UsageTab = "used" | "limits";
+export type AgentsTab = "agents" | "servers" | "skills";
 
 export const useSettingsStore = create<SettingsState>(set => ({
   at: typeof window === "undefined" ? FIRST_PAGE : readStored(),
@@ -113,6 +119,8 @@ export const useSettingsStore = create<SettingsState>(set => ({
   recipeAsked: null,
   addAsked: null,
   usageTab: "used",
+  agentsTab: "agents",
+  agentsPlace: null,
   go(at) {
     set({ at, search: "", recipeAsked: null, addAsked: null });
     try {
@@ -120,8 +128,15 @@ export const useSettingsStore = create<SettingsState>(set => ({
     } catch {
       // A browser that refuses storage keeps the page for this window alone.
     }
-  },  pickUsageTab(usageTab) {
+  },
+  pickUsageTab(usageTab) {
     set({ usageTab });
+  },
+  pickAgentsTab(agentsTab) {
+    set({ agentsTab });
+  },
+  pickAgentsPlace(agentsPlace) {
+    set({ agentsPlace });
   },
 
   setSearch(search) {

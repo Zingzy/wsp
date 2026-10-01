@@ -16,15 +16,11 @@ import { openContextMenu } from "../actions/contextMenu.js";
 import { resolveActions } from "../actions/registry.js";
 import type { SidebarProjectSnapshot } from "../adapt/index.js";
 import { ActButton, LeadMark } from "../components/agents/agentsParts.js";
-import { imageAgentsReport, recipeMissLines, refusedLines, type FlowView, type RefusedLine, type RowAct, type RowsContext } from "../components/agents/agentsRows.js";
+import { imageAgentsReport, type FlowView, type RowAct, type RowsContext } from "../components/agents/agentsRows.js";
 import { AGENTS_KIND } from "../components/agents/kinds/agents.js";
 import type { KindModule, Lead } from "../components/agents/kinds/kind.js";
 import { SERVERS_KIND } from "../components/agents/kinds/servers.js";
 import { SignInFlowView } from "../components/agents/SignInFlowView.js";
-import { useAgentActs } from "../components/agents/useAgentActs.js";
-import { useAgentsReport } from "../components/agents/useAgentsReport.js";
-import { useServerActs } from "../components/agents/useServerActs.js";
-import { useServerTools } from "../components/agents/useServerTools.js";
 import { NEEDS_YOU } from "../components/status/kinds/needs-you.js";
 import { WORKING } from "../components/status/kinds/working.js";
 import { threadStatusOf } from "../components/status/threadStatusOf.js";
@@ -35,7 +31,7 @@ import { useSidebarProjects, useStore } from "../protocol/store.js";
 import { DialButton, useDialPlace } from "./AbsentRoad.js";
 import { AddComputer } from "./AddComputer.js";
 import { ComputerGlyph, useComputerIcon } from "./ComputerGlyph.js";
-import { ADD_COMPUTER_WORDS, PLACE_STATE_WORDS, VALUE, WHERE_WORDS, capitalised } from "./format.js";
+import { ADD_COMPUTER_WORDS, AGENTS_PAGE_WORDS, PLACE_STATE_WORDS, VALUE, WHERE_WORDS, capitalised } from "./format.js";
 import { Chevron, GlyphFrame, Grid, GridHead, GridName, GridRow, LIST_COLUMNS, Num, PAGE_COLUMNS, StateCell, type HeadCell } from "./grid.js";
 import { copyOn } from "./image.js";
 import { ImageCard, useImageStanding } from "./ImageCard.js";
@@ -43,10 +39,10 @@ import { openImageRecipe } from "./openAt.js";
 import { NOTHING_HELD, absenceOf, absentOf, hereName, isProviderPlace, placeName, placeOf, placeStateCell, type PlaceHolding, type PlaceStateCell } from "./places.js";
 import { cloudsOffered, keyHeld } from "./providers.js";
 import { RemoveComputerDialog } from "./RemoveComputerDialog.js";
-import { CARD_SURFACE, HeadRow, type SettingsCardData, type SettingsRowData } from "./rows.js";
+import { CARD_SURFACE, Card, HeadRow, Row, type SettingsCardData, type SettingsRowData } from "./rows.js";
 import { cn } from "../lib/utils.js";
 import type { SettingsContext } from "./settingsContext.js";
-import type { SettingsAt } from "./settingsStore.js";
+import { useSettingsStore, type SettingsAt } from "./settingsStore.js";
 import { RefusalSlot } from "./sheetParts.js";
 import { CARD_INSET, ROW_FLOOR } from "./layout.js";
 
@@ -368,26 +364,6 @@ function KindGrid({ id, head, lines }: { id: string; head: string; lines: readon
   );
 }
 
-/** What the lists cannot show, one quiet line each: a reader that could not answer, and a recipe row that did not land. */
-function MissLines({ lines }: { lines: readonly RefusedLine[] }) {
-  if (lines.length === 0) return null;
-  return (
-    <div data-k="agents-misses" className="flex flex-col gap-1">
-      {lines.map(line => (
-        <p key={line.id} data-refused-line className="flex min-w-0 gap-3 text-xs leading-4 text-muted-foreground">
-          <span data-refused-label className="shrink-0 text-foreground">
-            {line.label}
-          </span>
-          {line.value === undefined ? null : (
-            <span data-refused-value className="min-w-0 truncate" title={line.value}>
-              {line.value}
-            </span>
-          )}
-        </p>
-      ))}
-    </div>
-  );
-}
 
 /** The agents installed there and the MCP servers set up there, off one report. */
 function ReportLists({ report, ctx }: { report: AgentsReport; ctx: RowsContext }) {
@@ -406,35 +382,6 @@ function ReportLists({ report, ctx }: { report: AgentsReport; ctx: RowsContext }
   );
 }
 
-/** What a computer reports of its agents and servers, read when its page opens. Every act is held with the page's
- * away word while the computer is not answering, over the last report this window read. */
-function ComputerLists({ place, here, ctx }: { place: PlaceView; here: boolean; ctx: SettingsContext }) {
-  const target = { placeId: place.id };
-  const { report, error } = useAgentsReport(target);
-  const tools = useServerTools(target);
-  const acts = useAgentActs(target);
-  const servers = useServerActs(target);
-  const away = absentOf(place, ctx.now);
-  const misses = recipeMissLines(place.provision?.rows ?? []);
-  if (report === null) return <MissLines lines={[...misses, ...(error === null || away !== null ? [] : [{ id: "read-refused", label: error }])]} />;
-  const name = placeName(place);
-  const rows: RowsContext = {
-    where: here ? "here" : "box",
-    ...(here ? {} : { computer: name }),
-    on: name,
-    heldWhy: away?.away ?? null,
-    ...(report.reach === undefined ? {} : { reach: report.reach }),
-    ...(tools === undefined ? {} : { tools }),
-    ...(acts === undefined ? {} : { acts }),
-    ...(servers === undefined ? {} : { servers }),
-  };
-  return (
-    <>
-      <ReportLists report={report} ctx={rows} />
-      <MissLines lines={[...refusedLines(report.refused), ...misses]} />
-    </>
-  );
-}
 
 const RUNNING_HERE = new Set([WORKING.id, NEEDS_YOU.id]);
 
@@ -498,6 +445,25 @@ function RunningHere({ place, ctx }: { place: PlaceView; ctx: SettingsContext })
   );
 }
 
+/** A computer's agents, tool servers and skills live on the Agents page; its own page links there with it picked. */
+function AgentsLink({ place, ctx }: { place: PlaceView; ctx: SettingsContext }) {
+  const name = placeName(place);
+  return (
+    <Card id="computer-agents">
+      <Row
+        id="agents-on"
+        title={AGENTS_PAGE_WORDS.onComputer(name)}
+        description={AGENTS_PAGE_WORDS.onComputerDescription}
+        open={() => {
+          useSettingsStore.getState().pickAgentsPlace(place.id);
+          ctx.go({ kind: "group", group: "agents" });
+        }}
+        attrs={{ "data-k": "agents-on" }}
+      />
+    </Card>
+  );
+}
+
 export function ComputerPage({ place, ctx }: { place: PlaceView; ctx: SettingsContext }) {
   const here = place.id === HERE_PLACE_ID;
   const cloud = isProviderPlace(place);
@@ -516,7 +482,7 @@ export function ComputerPage({ place, ctx }: { place: PlaceView; ctx: SettingsCo
         </div>
         <PlaceStateLine place={place} ctx={ctx} />
       </section>
-      {cloud ? image === null ? null : <ReportLists report={imageAgentsReport(image, place.id)} ctx={{ where: "provider", on: name, editImage: () => openImageRecipe(place.id) }} /> : <ComputerLists place={place} here={here} ctx={ctx} />}
+      {cloud ? image === null ? null : <ReportLists report={imageAgentsReport(image, place.id)} ctx={{ where: "provider", on: name, editImage: () => openImageRecipe(place.id) }} /> : <AgentsLink place={place} ctx={ctx} />}
       {standing === undefined || !held ? null : <ImageCard place={place} name={standing.name} state={standing.state} view={standing.view} ctx={ctx} row />}
       <ThreadsHere place={place} ctx={ctx} />
       {here ? null : <RemoveLine place={place} ctx={ctx} onRemoved={onRemoved} />}

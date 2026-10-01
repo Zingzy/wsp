@@ -22,6 +22,7 @@ export const SETTINGS_WORDS = {
   nothingMatches: "Nothing matches.",
   back: "Back",
   restore: "Restore defaults",
+  resetRow: "Back to the default",
   appearance: "Appearance",
   theme: "Theme",
   mode: "Mode",
@@ -260,6 +261,16 @@ export const DEVICES_WORDS = {
   none: "Nothing is paired with this wsp yet.",
   /** A page served on a ticket socket is refused the list. */
   refused: "Who is paired is read on the computer running wsp.",
+} as const;
+
+/** Settings > Agents: its title, the computer it reads and its three lists. */
+export const AGENTS_PAGE_WORDS = {
+  title: "Agents",
+  computer: "Computer",
+  tab: "Show",
+  tabs: { agents: "Agents", servers: "Tool servers", skills: "Skills" },
+  onComputer: (name: string): string => `Agents, tool servers and skills on ${name}`,
+  onComputerDescription: "Installed agents, their sign-ins, and the tools and skills they get.",
 } as const;
 
 /** Settings > Usage: its title and the words the lists carry beyond the wire's own in USAGE_WORDS. */

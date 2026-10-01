@@ -68,10 +68,10 @@ afterEach(() => {
 });
 
 describe("the settings sidebar", () => {
-  it("lists the nine groups in order with Appearance the one lifted row on a fresh open", async () => {
+  it("lists the ten groups in order with Appearance the one lifted row on a fresh open", async () => {
     mountSettings({ api: settingsApi().api });
     await settle();
-    expect(sidebarRowIds()).toEqual(["group:general", "group:appearance", "section:mode", "section:theme", "section:glass", "section:fonts", "group:computers", "group:usage", "group:projects", "group:devices", "group:account", "group:privacy", "group:keybindings"]);
+    expect(sidebarRowIds()).toEqual(["group:general", "group:appearance", "section:mode", "section:theme", "section:glass", "section:fonts", "group:agents", "group:computers", "group:projects", "group:usage", "group:keybindings", "group:privacy", "group:devices", "group:account"]);
     expect(liftedRowIds()).toEqual(["group:appearance"]);
     // The field over the groups and Back at the foot with the chord that does the same.
     expect(field().getAttribute("placeholder")).toBe(SETTINGS_WORDS.search);
@@ -89,7 +89,7 @@ describe("the settings sidebar", () => {
     expect(pageAt()).toBe("computers");
     expect(crumb()).toBe("Settings/Computers");
     expect(liftedRowIds()).toEqual(["group:computers"]);
-    expect(sidebarRowIds()).toEqual(["group:general", "group:appearance", "group:computers", "computer:here", "computer:p_spoo", "group:usage", "group:projects", "group:devices", "group:account", "group:privacy", "group:keybindings"]);
+    expect(sidebarRowIds()).toEqual(["group:general", "group:appearance", "group:agents", "group:computers", "computer:here", "computer:p_spoo", "group:projects", "group:usage", "group:keybindings", "group:privacy", "group:devices", "group:account"]);
     fireEvent.click(document.querySelector("[data-row-id='computer:p_spoo']")!);
     expect(pageAt()).toBe("computer:p_spoo");
     expect(crumb()).toBe("Settings/Computers/spoo");
@@ -124,15 +124,18 @@ describe("the settings sidebar", () => {
     mountSettings({ api: settingsApi().api });
     await settle();
     // Appearance is open on a fresh open, so its sections stand under it; a group with pages lists those instead.
-    const groups = ["group:general", "group:appearance", "section:mode", "section:theme", "section:glass", "section:fonts", "group:computers", "group:usage", "group:projects", "group:devices", "group:account", "group:privacy", "group:keybindings"];
+    const groups = ["group:general", "group:appearance", "section:mode", "section:theme", "section:glass", "section:fonts", "group:agents", "group:computers", "group:projects", "group:usage", "group:keybindings", "group:privacy", "group:devices", "group:account"];
     expect(sidebarRowIds()).toEqual(groups);
     fireEvent.click(document.querySelector("[data-k=settings-computers]")!);
-    const computersOpen = ["group:general", "group:appearance", "group:computers", "computer:here", "computer:p_spoo", "group:usage", "group:projects", "group:devices", "group:account", "group:privacy", "group:keybindings"];
+    const computersOpen = ["group:general", "group:appearance", "group:agents", "group:computers", "computer:here", "computer:p_spoo", "group:projects", "group:usage", "group:keybindings", "group:privacy", "group:devices", "group:account"];
     expect(sidebarRowIds()).toEqual(computersOpen);
     fireEvent.click(document.querySelector("[data-row-id='computer:p_spoo']")!);
     expect(sidebarRowIds()).toEqual(computersOpen);
+    // The Agents page is one list under its top bar, so no section stands under its row.
+    fireEvent.click(document.querySelector("[data-k=settings-agents]")!);
+    expect(sidebarRowIds()).toEqual(["group:general", "group:appearance", "group:agents", "group:computers", "group:projects", "group:usage", "group:keybindings", "group:privacy", "group:devices", "group:account"]);
     fireEvent.click(document.querySelector("[data-k=settings-projects]")!);
-    expect(sidebarRowIds()).toEqual(["group:general", "group:appearance", "group:computers", "group:usage", "group:projects", "project:pr_spoo", "group:devices", "group:account", "group:privacy", "group:keybindings"]);
+    expect(sidebarRowIds()).toEqual(["group:general", "group:appearance", "group:agents", "group:computers", "group:projects", "project:pr_spoo", "group:usage", "group:keybindings", "group:privacy", "group:devices", "group:account"]);
   });
 
   it("ArrowDown and ArrowUp walk the sidebar's rows in visual order, from the field into the groups and their sub-rows", async () => {
@@ -145,13 +148,22 @@ describe("the settings sidebar", () => {
     fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
     expect((document.activeElement as HTMLElement).dataset["rowId"]).toBe("group:appearance");
     fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
+    expect((document.activeElement as HTMLElement).dataset["rowId"]).toBe("group:agents");
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
     expect((document.activeElement as HTMLElement).dataset["rowId"]).toBe("group:computers");
     fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
     expect((document.activeElement as HTMLElement).dataset["rowId"]).toBe("computer:here");
     fireEvent.keyDown(document.activeElement!, { key: "End" });
-    expect((document.activeElement as HTMLElement).dataset["rowId"]).toBe("group:keybindings");
+    expect((document.activeElement as HTMLElement).dataset["rowId"]).toBe("group:account");
     fireEvent.keyDown(document.activeElement!, { key: "ArrowUp" });
-    expect((document.activeElement as HTMLElement).dataset["rowId"]).toBe("group:privacy");
+    expect((document.activeElement as HTMLElement).dataset["rowId"]).toBe("group:devices");
+    // An open page's sections are rows of the walk too, between its group and the next.
+    fireEvent.click(document.querySelector("[data-k=settings-appearance]")!);
+    document.querySelector<HTMLElement>("[data-row-id='group:general']")!.focus();
+    for (const id of ["group:appearance", "section:mode", "section:theme", "section:glass", "section:fonts", "group:agents"]) {
+      fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
+      expect((document.activeElement as HTMLElement).dataset["rowId"]).toBe(id);
+    }
   });
 
   it("Back closes Settings as Escape does", async () => {
@@ -178,7 +190,7 @@ describe("search", () => {
     expect(rowTitles()).toEqual([]);
     expect(document.querySelector("[data-k=search-group-general]")?.textContent).toBe("General");
     const dimmed = [...document.querySelectorAll<HTMLElement>("[data-slot=sidebar] [data-sidebar-row][data-dimmed]")].map(row => row.dataset["rowId"]);
-    expect(dimmed).toEqual(["group:appearance", "group:computers", "group:usage", "group:projects", "group:devices", "group:account", "group:privacy", "group:keybindings"]);
+    expect(dimmed).toEqual(["group:appearance", "group:agents", "group:computers", "group:projects", "group:usage", "group:keybindings", "group:privacy", "group:devices", "group:account"]);
     // Standing back is an opacity, never another ink: the sidebar's rest ink is darker than its muted ink on the
     // dark side, so an ink swap read brighter there and did nothing at all on light.
     expect(document.querySelector<HTMLElement>("[data-row-id='group:appearance']")?.className).toContain("opacity-50");
@@ -389,6 +401,22 @@ describe("Appearance", () => {
     expect(document.querySelector("[data-k=sidebar-width]")).toBeNull();
     expect(document.querySelector("[data-k=terminal-size-row]")).toBeNull();
     expect(within(group(SETTINGS_WORDS.mode)).queryByText(/whatever this Mac/)).toBeNull();
+  });
+
+  it("a row off its default carries one reset arrow beside its title, and the arrow puts that row back alone", async () => {
+    const { api, sets } = settingsApi();
+    mountSettings({ api });
+    await settle();
+    const arrow = (): HTMLElement | null => document.querySelector<HTMLElement>("[data-settings-row=transparency] [data-k=row-reset]");
+    expect(document.querySelectorAll("[data-settings-page] [data-k=row-reset]")).toHaveLength(0);
+    fireEvent.click(document.querySelector("[data-k=transparency]")!);
+    await waitFor(() => expect(arrow()).not.toBeNull());
+    expect(document.querySelectorAll("[data-settings-page] [data-k=row-reset]")).toHaveLength(1);
+    expect(arrow()!.getAttribute("aria-label")).toBe(SETTINGS_WORDS.resetRow);
+    fireEvent.click(arrow()!);
+    await waitFor(() => expect(arrow()).toBeNull());
+    await settle();
+    expect(sets.at(-1)).toEqual({ transparency: true });
   });
 
   it("Restore defaults is absent on the defaults, stands once any pick is off them, writes the one patch, and is absent on every other group", async () => {

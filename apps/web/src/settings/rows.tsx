@@ -7,13 +7,17 @@
 // A line is a label and its value or its keycaps. Below 640 px what stood
 // beside the words stands under them, so nothing is cut for want of room.
 import { Chips, type ChipItem } from "../components/ui/chips.js";
-import { ChevronRightIcon } from "lucide-react";
+import { ChevronRightIcon, RotateCcwIcon } from "lucide-react";
+import { Button } from "../components/ui/button.js";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
 import { Children, type ReactNode } from "react";
 import { Kbd, KbdGroup } from "../components/ui/kbd.js";
 import { Skeleton } from "../components/ui/skeleton.js";
 import { Spaced } from "../components/ui/spaced.js";
 import { cn } from "../lib/utils.js";
-import { FACT, VALUE } from "./format.js";
+import { FACT, SETTINGS_WORDS, VALUE } from "./format.js";
+
+const RESET_WORD = SETTINGS_WORDS.resetRow;
 import { CARD_INSET, LINE_FLOOR, LIST_TITLE, NOTE, ROW_FLOOR, SECTION_HEAD, SETTING_TITLE } from "./layout.js";
 
 /** Which mono a word in a slot wears: the foreground for a value a person reads, the muted for a state. */
@@ -47,6 +51,8 @@ export interface SettingsRowData {
   readonly control?: ReactNode;
   /** A row that opens a page: the whole row is the button and the slot ends in the chevron. */
   readonly open?: () => void;
+  /** Present only while the row is off its default: an arrow beside the title puts that one row back. */
+  readonly reset?: () => void;
   /** Extra attributes the tests and the screenshot list reach the row by. */
   readonly attrs?: Record<string, string>;
 }
@@ -128,7 +134,7 @@ export function Card({ id, head, lede, under, body, children }: { id: string; he
 }
 
 /** One row: the title over its sentence, and beside them the slot, which stands under them below 640 px. */
-export function Row({ id, title, lead, mark, description, chips, mono = false, word, wordClass = "value", wordK, control, open, attrs }: Omit<SettingsRowData, "kind">) {
+export function Row({ id, title, lead, mark, description, chips, mono = false, word, wordClass = "value", wordK, control, open, reset, attrs }: Omit<SettingsRowData, "kind">) {
   const slot =
     word === undefined && control === undefined && open === undefined ? null : (
       <div data-settings-slot className="flex min-w-0 items-center gap-3 sm:justify-end">
@@ -153,6 +159,14 @@ export function Row({ id, title, lead, mark, description, chips, mono = false, w
             <span data-settings-mark className={cn(FACT, "shrink-0")}>
               {mark}
             </span>
+          )}
+          {reset === undefined ? null : (
+            <Tooltip>
+              <TooltipTrigger render={<Button variant="ghost" size="icon-xs" data-k="row-reset" aria-label={RESET_WORD} onClick={reset} />}>
+                <RotateCcwIcon aria-hidden className="size-3.5" />
+              </TooltipTrigger>
+              <TooltipPopup side="top">{RESET_WORD}</TooltipPopup>
+            </Tooltip>
           )}
         </span>
         {chips === undefined ? (

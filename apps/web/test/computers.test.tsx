@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Settings > Computers: the list off the host's own rows, which it draws and
 // which it leaves out, each row's facts and state word; a computer's own page
-// with its lines, its connection, the agents on it and what the recipe put
-// beside them, the workspaces standing on it and the two acts; the cloud's
-// page with the image behind its row; and the one-field sheet that adds
-// another computer.
+// with its lines, its connection, the row to its agents, the workspaces
+// standing on it and the two acts; the Agents page with a computer picked;
+// the cloud's page with the image behind its row; and the one-field sheet
+// that adds another computer.
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type InitJob, COPY_CURRENT, DEFAULT_PREFERENCES, PLACES_TICKET_REFUSAL, PLACES_WORDS, PLACE_CONNECTS, PLACE_LOGIN_REFUSED_KIND, PlaceAddStep, absentRoad, fmtBytes, fmtMemGb, fmtSize, imageCopyStaysLine, placeAddSheetWord, placeDaemonBehind, placeNoDialLine, provisionWord, type AgentsReport, type AgentsTarget, type EventUnion, type InitSetup, type PlaceAddJob, type PlaceProvision, type PlaceView, type SealedImage, type SessionView, type WorkspaceStatus, type WorkspaceView, PLACE_INSTALL, PROVIDER_KEY_WORDS } from "@wsp/protocol";
@@ -341,10 +341,6 @@ describe("a computer's own page", () => {
       sessions: { ws_b: [session("s1", "ws_b"), session("s2", "ws_b")] },
     });
   };
-  const gridHeads = (): string[] => [...document.querySelectorAll("[data-settings-page] [data-grid] [data-grid-head] span:first-child")].map(s => s.textContent ?? "");
-  const kindRows = (grid: string): string[] => [...document.querySelectorAll(`[data-settings-page] [data-grid='${grid}'] [data-grid-row] [data-grid-name]`)].map(n => n.textContent ?? "");
-  const noteOf = (grid: string, name: string): string | undefined =>
-    [...document.querySelectorAll(`[data-settings-page] [data-grid='${grid}'] [data-grid-row]`)].find(r => r.querySelector("[data-grid-name]")?.textContent === name)?.querySelector("[data-grid-note]")?.textContent ?? undefined;
 
   it("opens the page on the computer itself, its facts of one kind on one line and what runs there, its state under it, and no crumbs of its own", async () => {
     useStore.setState({ places: [here, { ...box, os: "Ubuntu 24.04", joinedAt: AT, copies: "reflink" }] });
@@ -357,72 +353,6 @@ describe("a computer's own page", () => {
     expect(document.querySelector("[data-k='page-crumbs']")).toBeNull();
     expect(document.querySelector("[data-settings-page] h1")).toBeNull();
     for (const k of ["system", "size", "disk-free", "joined", "address", "answered", "copies", "ports", "computer-icon", "workspace-line"]) expect(document.querySelector(`[data-settings-page] [data-k='${k}']`)).toBeNull();
-  });
-
-  it("lists the agents with their version and sign-in, and the MCP servers with their state, off the computer's own report", async () => {
-    const asked: AgentsTarget[] = [];
-    useStore.setState({ places: [here] });
-    await mountComputers(computersApi({ agentsRead: async (target: AgentsTarget) => (asked.push(target), AGENTS_REPORT) }).api, { kind: "computer", id: "here" });
-    expect(asked).toEqual([{ placeId: "here" }]);
-    const installed = AGENTS_REPORT.agents.filter(a => a.installed);
-    expect(kindRows("agents")).toEqual(installed.map(a => a.name));
-    expect(gridHeads().slice(0, 2)).toEqual(["Agents", "MCP servers"]);
-    const claude = installed.find(a => a.id === "claude")!;
-    const row = [...document.querySelectorAll("[data-grid='agents'] [data-grid-row]")].find(r => r.querySelector("[data-grid-name]")?.textContent === claude.name)!;
-    expect(row.querySelector("[data-k='lead-tile'] svg")).not.toBeNull();
-    if (claude.version !== undefined) expect(row.textContent).toContain(claude.version);
-    // The sign-in is the quiet note, in sentence case, never a dot.
-    expect(noteOf("agents", claude.name)).toMatch(/^[A-Z]/);
-    expect(document.querySelector("[data-settings-page] [data-grid='agents'] .rounded-full")).toBeNull();
-    expect(kindRows("servers").length).toBeGreaterThan(0);
-    // No manager shell, tabs or search on the page.
-    expect(document.querySelector("[data-settings-page] [role='radiogroup']")).toBeNull();
-    for (const k of ["remove", "update", "dial"]) expect(document.querySelector(`[data-settings-page] [data-k='${k}']`)).toBeNull();
-  });
-
-  it("offers Sign in on an agent that needs one there, and draws its flow under the row once it starts", async () => {
-    const report: AgentsReport = { ...EMPTY_REPORT, agents: [{ id: "claude", name: "Claude Code", installed: true, version: "2.1.283", road: "wsp", signIn: "none", signInRoad: "device", wspTools: false }] };
-    const started: string[] = [];
-    const agentsSignIn = async (_target: AgentsTarget, agent: string, _server: unknown, step: (e: { state: string; url?: string }) => void) => {
-      started.push(agent);
-      step({ state: "waiting", url: "https://example.test/login" });
-      return { stop: () => {} };
-    };
-    useStore.setState({ places: [here, box] });
-    await mountComputers(computersApi({ agentsRead: async () => report, agentsSignIn } as unknown as Partial<Api>).api, { kind: "computer", id: "p_2" });
-    expect(noteOf("agents", "Claude Code")).toBe("Needs sign-in");
-    const signIn = document.querySelector<HTMLElement>("[data-grid='agents'] [data-k='act-sign-in']")!;
-    expect(signIn.textContent).toBe("Sign in");
-    fireEvent.click(signIn);
-    await settle();
-    expect(started).toEqual(["claude"]);
-    expect(document.querySelector("[data-grid='agents'] [data-k='sign-in-flow']")).not.toBeNull();
-    // While the flow waits on the person its own controls are the step, and the note says so.
-    expect(document.querySelector("[data-grid='agents'] [data-k='act-sign-in']")).toBeNull();
-    expect(noteOf("agents", "Claude Code")).toBe(capitalised(AGENTS_LIST_WORDS.waitingOnYou));
-  });
-
-  it("puts the recipe's rows that did not land and the report's refusals under the lists as quiet lines", async () => {
-    const provision: PlaceProvision = {
-      state: "done",
-      addId: "a_1",
-      recipeAt: AT,
-      startedAt: AT,
-      finishedAt: AT,
-      rows: [
-        { id: "agents/claude", label: "Claude Code", outcome: "installed" },
-        { id: "agents/codex", label: "Codex", outcome: "failed", note: "npm exited 1" },
-        { id: "tools/gh", label: "GitHub CLI", outcome: "failed" },
-        { id: "agents/mcp/linear", label: "linear", outcome: "skipped", kind: "server", note: "waited on GitHub CLI" },
-      ],
-    };
-    useStore.setState({ places: [here, { ...laptop, present: true, name: "spoo", provision }] });
-    await mountComputers(computersApi({ agentsRead: async () => ({ ...EMPTY_REPORT, refused: ["skills: the folder is not readable"] }) }).api, { kind: "computer", id: "p_1" });
-    expect([...document.querySelectorAll("[data-k='agents-misses'] [data-refused-line]")].map(l => [l.querySelector("[data-refused-label]")?.textContent, l.querySelector("[data-refused-value]")?.textContent])).toEqual([
-      ["Skills", "the folder is not readable"],
-      ["Codex", "failed: npm exited 1"],
-      ["linear", "set aside: waited on GitHub CLI"],
-    ]);
   });
 
   it("says a computer that is not answering in the state line with the dial beside it, whose answer takes the sentence's place", async () => {
@@ -576,6 +506,121 @@ describe("a computer's own page", () => {
 function dialling(line = "vps answered in 12 ms."): Partial<Api> {
   return { dialPlace: async (placeId: string) => ({ dialled: { at: "2026-09-12T12:00:00.000Z", answered: true, roundTripMs: 12 }, line, place: { ...laptop, id: placeId } }) } as unknown as Partial<Api>;
 }
+
+describe("the Agents page on a computer", () => {
+  const manager = (): HTMLElement => document.querySelector<HTMLElement>("[data-settings-page] [data-agents-manager]")!;
+  const rowEl = (key: string): HTMLElement => manager().querySelector<HTMLElement>(`[data-agents-row="${key}"]`)!;
+  const rowKeys = (): string[] => [...manager().querySelectorAll<HTMLElement>("[data-agents-row]")].map(r => r.dataset["agentsRow"] ?? "");
+  const subtext = (key: string): string | undefined => rowEl(key).querySelector("[data-row-subtext]")?.textContent ?? undefined;
+  const stateLine = (key: string): string | undefined => rowEl(key).querySelector("[data-row-status] [data-status-word]")?.textContent ?? undefined;
+  const topBarTab = (tab: "agents" | "servers" | "skills"): void => void fireEvent.click(document.querySelector(`[data-k=agents-tabs] [data-segment=${tab}]`)!);
+  const picked = (): string | undefined => document.querySelector("[data-k=agents-tabs] [data-checked]")?.getAttribute("data-segment") ?? undefined;
+  const computerPick = (): HTMLElement => document.querySelector<HTMLElement>("[data-k=agents-picker]")!;
+  const mountAgents = async (api: Api, placeId: string | null): Promise<void> => {
+    useSettingsStore.getState().pickAgentsPlace(placeId);
+    await mountComputers(api, { kind: "group", group: "agents" });
+  };
+
+  it("lists the agents with their version and sign-in, and the MCP servers with their state, off the picked computer's own report", async () => {
+    const asked: AgentsTarget[] = [];
+    useStore.setState({ places: [here, box] });
+    await mountAgents(computersApi({ agentsRead: async (target: AgentsTarget) => (asked.push(target), AGENTS_REPORT) }).api, "p_2");
+    expect(asked).toEqual([{ placeId: "p_2" }]);
+    expect(computerPick().textContent).toBe("hetzner");
+    const installed = AGENTS_REPORT.agents.filter(a => a.installed);
+    expect(rowKeys().slice(0, installed.length)).toEqual(installed.map(a => `agent-${a.id}`));
+    const claude = installed.find(a => a.id === "claude")!;
+    expect(rowEl("agent-claude").querySelector("[data-row-title]")?.textContent).toBe(claude.name);
+    expect(rowEl("agent-claude").querySelector("[data-k='lead-tile'] svg")).not.toBeNull();
+    expect(subtext("agent-claude")).toBe(claude.version);
+    expect(stateLine("agent-claude")).toBe(AGENTS_LIST_WORDS.signedIn);
+    // The page draws one kind at a time: the top bar holds the tabs, so the manager draws none of its own.
+    expect(manager().querySelector("[role='radiogroup']")).toBeNull();
+    expect(rowKeys().some(k => k.startsWith("server-"))).toBe(false);
+    topBarTab("servers");
+    expect(picked()).toBe("servers");
+    expect(rowKeys().length).toBeGreaterThan(0);
+    expect(rowKeys().every(k => k.startsWith("server-"))).toBe(true);
+    expect(stateLine(rowKeys()[0]!)).not.toBe("");
+    for (const k of ["remove", "update", "dial"]) expect(document.querySelector(`[data-settings-page] [data-k='${k}']`)).toBeNull();
+  });
+
+  it("offers Sign in on an agent that needs one there, and draws its flow under the row once it starts", async () => {
+    const report: AgentsReport = { ...EMPTY_REPORT, agents: [{ id: "claude", name: "Claude Code", installed: true, version: "2.1.283", road: "wsp", signIn: "none", signInRoad: "device", wspTools: false }] };
+    const started: [AgentsTarget, string][] = [];
+    const agentsSignIn = async (target: AgentsTarget, agent: string, _server: unknown, step: (e: { state: string; url?: string }) => void) => {
+      started.push([target, agent]);
+      step({ state: "waiting", url: "https://example.test/login" });
+      return { stop: () => {} };
+    };
+    useStore.setState({ places: [here, box] });
+    await mountAgents(computersApi({ agentsRead: async () => report, agentsSignIn } as unknown as Partial<Api>).api, "p_2");
+    expect(stateLine("agent-claude")).toBe(AGENTS_LIST_WORDS.needsSignIn);
+    const signIn = rowEl("agent-claude").querySelector<HTMLElement>("[data-row-slot] [data-k='act-sign-in']")!;
+    expect(signIn.textContent).toBe("Sign in");
+    fireEvent.click(signIn);
+    await settle();
+    expect(started).toEqual([[{ placeId: "p_2" }, "claude"]]);
+    expect(manager().querySelector("[data-agents-detail] [data-k='sign-in-flow']")).not.toBeNull();
+    // While the flow waits on the person its own controls are the step, and the row says so.
+    fireEvent.click(manager().querySelector<HTMLElement>("[data-agents-detail] [data-k=agents-back]")!);
+    expect(rowEl("agent-claude").querySelector("[data-row-slot] [data-k='act-sign-in']")).toBeNull();
+    expect(stateLine("agent-claude")).toBe(AGENTS_LIST_WORDS.waitingOnYou);
+  });
+
+  it("puts the report's refusals under the list as quiet lines", async () => {
+    const provision: PlaceProvision = {
+      state: "done",
+      addId: "a_1",
+      recipeAt: AT,
+      startedAt: AT,
+      finishedAt: AT,
+      rows: [
+        { id: "agents/claude", label: "Claude Code", outcome: "installed" },
+        { id: "agents/codex", label: "Codex", outcome: "failed", note: "npm exited 1" },
+        { id: "tools/gh", label: "GitHub CLI", outcome: "failed" },
+        { id: "agents/mcp/linear", label: "linear", outcome: "skipped", kind: "server", note: "waited on GitHub CLI" },
+      ],
+    };
+    useStore.setState({ places: [here, { ...laptop, present: true, name: "spoo", provision }] });
+    await mountAgents(computersApi({ agentsRead: async () => ({ ...EMPTY_REPORT, refused: ["skills: the folder is not readable"] }) }).api, "p_1");
+    // The report's refusals, then the recipe's rows that did not land there, one quiet line each under the list.
+    expect([...manager().querySelectorAll("[data-agents-refused] [data-refused-line]")].map(l => [l.querySelector("[data-refused-label]")?.textContent, l.querySelector("[data-refused-value]")?.textContent])).toEqual([
+      ["Skills", "the folder is not readable"],
+      ["Codex", "failed: npm exited 1"],
+      ["linear", "set aside: waited on GitHub CLI"],
+    ]);
+  });
+
+  it("opens from a computer's own page with that computer picked, and the top bar's tabs switch the manager's one kind", async () => {
+    const asked: AgentsTarget[] = [];
+    useStore.setState({ places: [here, box] });
+    await mountComputers(computersApi({ agentsRead: async (target: AgentsTarget) => (asked.push(target), AGENTS_REPORT) }).api, { kind: "computer", id: "p_2" });
+    // The computer's page draws no list of its own: one row hands it to the Agents page.
+    expect(document.querySelector("[data-settings-page] [data-agents-manager]")).toBeNull();
+    expect(document.querySelector("[data-settings-page] [data-grid='agents']")).toBeNull();
+    expect(asked).toEqual([]);
+    const row = document.querySelector<HTMLElement>("[data-settings-page] [data-k=agents-on]")!;
+    expect(row.querySelector("[data-settings-title]")?.textContent).toBe("Agents, tool servers and skills on hetzner");
+    fireEvent.click(row);
+    await settle();
+    expect(useSettingsStore.getState().agentsPlace).toBe("p_2");
+    expect(pageAt()).toBe("agents");
+    expect(computerPick().textContent).toBe("hetzner");
+    expect(asked).toEqual([{ placeId: "p_2" }]);
+    expect(picked()).toBe("agents");
+    expect(rowKeys().every(k => k.startsWith("agent-"))).toBe(true);
+    topBarTab("servers");
+    expect(useSettingsStore.getState().agentsTab).toBe("servers");
+    expect(rowKeys().length).toBeGreaterThan(0);
+    expect(rowKeys().every(k => k.startsWith("server-"))).toBe(true);
+    topBarTab("skills");
+    expect(picked()).toBe("skills");
+    expect(rowKeys().length).toBeGreaterThan(0);
+    expect(rowKeys().every(k => k.startsWith("skill-"))).toBe(true);
+    expect(manager().querySelector("[role='radiogroup']")).toBeNull();
+  });
+});
 
 describe("a computer's icon", () => {
   it("draws each computer's own icon on its Settings sidebar row, the size and edge of the group's glyph: this Mac the model it is, a joined computer a server, a cloud its provider's mark", async () => {

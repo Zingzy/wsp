@@ -5,17 +5,18 @@
 // breadcrumb and Restore defaults all read this table; adding a group is one
 // id in groupIds.ts, one entry here and its page module. A group marked empty
 // is not drawn.
-import { FolderIcon, GaugeIcon, KeyboardIcon, MonitorIcon, PaletteIcon, ShieldIcon, SlidersHorizontalIcon, SmartphoneIcon, UserIcon, type LucideIcon } from "lucide-react";
+import { BotIcon, FolderIcon, GaugeIcon, KeyboardIcon, MonitorIcon, PaletteIcon, ShieldIcon, SlidersHorizontalIcon, SmartphoneIcon, UserIcon, type LucideIcon } from "lucide-react";
 import { PLACES_WORDS } from "@wsp/protocol";
 import type { ComponentType } from "react";
 import type { Preferences, PreferencesPatch } from "@wsp/protocol";
 import { versionCards, versionMeta } from "./about.js";
 import { accountCards } from "./account.js";
+import { AgentsTopBar, agentsCards } from "./agents.js";
 import { APPEARANCE_DEFAULTS, appearanceCards, appearanceOffDefaults } from "./appearance.js";
 import { computerSubPages, computersCards } from "./computers.js";
 import { devicesCards } from "./devices.js";
 import { generalCards } from "./general.js";
-import { ACCOUNT_WORDS, DEVICES_WORDS, KEYBINDINGS_WORDS, PRIVACY_WORDS, PROJECTS_WORDS, SETTINGS_WORDS, USAGE_PAGE_WORDS } from "./format.js";
+import { ACCOUNT_WORDS, AGENTS_PAGE_WORDS, DEVICES_WORDS, KEYBINDINGS_WORDS, PRIVACY_WORDS, PROJECTS_WORDS, SETTINGS_WORDS, USAGE_PAGE_WORDS } from "./format.js";
 import { SETTINGS_GROUP_IDS, type SettingsGroupId } from "./groupIds.js";
 import { KEYBINDING_DEFAULTS, keybindingsCards, keybindingsOffDefaults } from "./keybindings.js";
 import { PRIVACY_DEFAULTS, privacyCards, privacyOffDefaults } from "./privacy.js";
@@ -49,6 +50,7 @@ const TABLE: Record<SettingsGroupId, Omit<SettingsGroup, "id">> = {
   general: { name: "General", glyph: SlidersHorizontalIcon, cards: ctx => [...generalCards(ctx), ...versionCards(ctx)], meta: versionMeta },
   appearance: { name: SETTINGS_WORDS.appearance, glyph: PaletteIcon, restore: { off: appearanceOffDefaults, patch: APPEARANCE_DEFAULTS }, cards: appearanceCards },
   computers: { name: PLACES_WORDS.section, glyph: MonitorIcon, cards: computersCards, sub: computerSubPages },
+  agents: { name: AGENTS_PAGE_WORDS.title, glyph: BotIcon, cards: agentsCards, head: AgentsTopBar },
   usage: { name: USAGE_PAGE_WORDS.title, glyph: GaugeIcon, cards: usageCards, head: UsageTabs },
   projects: { name: PROJECTS_WORDS.title, glyph: FolderIcon, cards: projectsCards, sub: projectSubPages },
   devices: { name: DEVICES_WORDS.title, glyph: SmartphoneIcon, cards: devicesCards },

@@ -450,7 +450,7 @@ export function AgentsManager({ shell, head, report, reading, error = null, on, 
       <div data-agents-top className={cn("flex flex-col pb-1", !page && "flex-none pt-4")}>
         {headRow}
         <div className="flex flex-col gap-3">
-          {tabs}
+          {kinds.length > 1 ? tabs : null}
           {tabLine}
           {toolbar}
         </div>

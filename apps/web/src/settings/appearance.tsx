@@ -107,6 +107,7 @@ export function appearanceCards(ctx: SettingsContext): SettingsCardData[] {
           title: TRANSPARENCY_WORDS.title,
           description: TRANSPARENCY_WORDS.description,
           control: <Switch data-k="transparency" aria-label={TRANSPARENCY_WORDS.title} checked={preferences.transparency} onCheckedChange={transparency => setPreferences({ transparency })} />,
+          ...(preferences.transparency === DEFAULT_PREFERENCES.transparency ? {} : { reset: () => setPreferences({ transparency: DEFAULT_PREFERENCES.transparency }) }),
         },
       ],
     },
@@ -116,10 +117,10 @@ export function appearanceCards(ctx: SettingsContext): SettingsCardData[] {
       lede: FONT_WORDS.lede,
       body: <TypeSample />,
       items: [
-        { kind: "row", id: "app-font", title: FONT_WORDS.app, description: FONT_WORDS.appDescription, control: <FontPicker id="app-font" label={FONT_WORDS.app} value={preferences.appFont} onChange={appFont => setPreferences({ appFont })} /> },
-        { kind: "row", id: "text-size", title: FONT_WORDS.textSize, description: FONT_WORDS.textSizeDescription, control: <SizePicker id="text-size" label={FONT_WORDS.textSize} sizes={TEXT_SIZES} value={preferences.textSize} onChange={textSize => setPreferences({ textSize })} /> },
-        { kind: "row", id: "code-font", title: FONT_WORDS.code, description: FONT_WORDS.codeDescription, control: <FontPicker id="code-font" label={FONT_WORDS.code} value={preferences.codeFont} onChange={codeFont => setPreferences({ codeFont })} /> },
-        { kind: "row", id: "code-size", title: FONT_WORDS.codeSize, description: FONT_WORDS.codeSizeDescription, control: <SizePicker id="code-size" label={FONT_WORDS.codeSize} sizes={CODE_SIZES} value={preferences.codeSize} onChange={codeSize => setPreferences({ codeSize })} /> },
+        { kind: "row", id: "app-font", title: FONT_WORDS.app, description: FONT_WORDS.appDescription, control: <FontPicker id="app-font" label={FONT_WORDS.app} value={preferences.appFont} onChange={appFont => setPreferences({ appFont })} />, ...(preferences.appFont === DEFAULT_PREFERENCES.appFont ? {} : { reset: () => setPreferences({ appFont: DEFAULT_PREFERENCES.appFont }) }) },
+        { kind: "row", id: "text-size", title: FONT_WORDS.textSize, description: FONT_WORDS.textSizeDescription, control: <SizePicker id="text-size" label={FONT_WORDS.textSize} sizes={TEXT_SIZES} value={preferences.textSize} onChange={textSize => setPreferences({ textSize })} />, ...(preferences.textSize === undefined ? {} : { reset: () => setPreferences({ textSize: null }) }) },
+        { kind: "row", id: "code-font", title: FONT_WORDS.code, description: FONT_WORDS.codeDescription, control: <FontPicker id="code-font" label={FONT_WORDS.code} value={preferences.codeFont} onChange={codeFont => setPreferences({ codeFont })} />, ...(preferences.codeFont === DEFAULT_PREFERENCES.codeFont ? {} : { reset: () => setPreferences({ codeFont: DEFAULT_PREFERENCES.codeFont }) }) },
+        { kind: "row", id: "code-size", title: FONT_WORDS.codeSize, description: FONT_WORDS.codeSizeDescription, control: <SizePicker id="code-size" label={FONT_WORDS.codeSize} sizes={CODE_SIZES} value={preferences.codeSize} onChange={codeSize => setPreferences({ codeSize })} />, ...(preferences.codeSize === undefined ? {} : { reset: () => setPreferences({ codeSize: null }) }) },
       ],
     },
   ];

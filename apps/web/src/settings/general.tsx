@@ -4,6 +4,7 @@
 // workspace on another computer over ssh, whether the desktop app keeps this
 // computer awake while a thread works on it, and whether a notification makes a
 // sound, with a play beside it where the shell can.
+import { DEFAULT_PREFERENCES } from "@wsp/protocol";
 import type { EditorId } from "@wsp/protocol";
 import { Play } from "lucide-react";
 import { Button } from "../components/ui/button.js";
@@ -45,6 +46,7 @@ export function generalCards(ctx: SettingsContext): SettingsCardData[] {
               <Switch data-k="notify-sound" aria-label={NOTIFY_WORDS.sound} checked={ctx.preferences.notifySound} onCheckedChange={notifySound => ctx.setPreferences({ notifySound })} />
             </span>
           ),
+          ...(ctx.preferences.notifySound === DEFAULT_PREFERENCES.notifySound ? {} : { reset: () => ctx.setPreferences({ notifySound: DEFAULT_PREFERENCES.notifySound }) }),
         },
       ],
     },
@@ -113,6 +115,7 @@ export function generalCards(ctx: SettingsContext): SettingsCardData[] {
           title: keepAwake,
           description: AWAKE_WORDS.keepAwakeDescription,
           control: <Switch data-k="keep-awake" aria-label={keepAwake} checked={ctx.preferences.keepAwake} onCheckedChange={keepAwake => ctx.setPreferences({ keepAwake })} />,
+          ...(ctx.preferences.keepAwake === DEFAULT_PREFERENCES.keepAwake ? {} : { reset: () => ctx.setPreferences({ keepAwake: DEFAULT_PREFERENCES.keepAwake }) }),
         },
       ],
     },
