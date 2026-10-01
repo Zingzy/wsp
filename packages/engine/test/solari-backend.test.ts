@@ -409,12 +409,15 @@ describe("SolariBackend create from a snapshot the provider answers not found", 
     const clock = movingClock();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      const m = await new SolariBackend({ apiKey: "k", fetch: f, clock }).create(spec);
+      const waited: number[] = [];
+      const m = await new SolariBackend({ apiKey: "k", fetch: f, clock }).create(spec, { onWait: ms => void waited.push(ms) });
       expect(m.id).toBe("sbx_1");
       expect(keys[0]).toBe("ws/1:k");
       expect(new Set(keys).size).toBe(3);
       const [every] = clock.waits;
       expect(warn.mock.calls.map(c => String(c[0]))).toEqual([snapshotListedWaitLine("snap_1", every!, 0), snapshotListedWaitLine("snap_1", every!, every!)]);
+      // The caller hears each wait too, so the create a person watches can say it.
+      expect(waited).toEqual([0, every]);
     } finally {
       warn.mockRestore();
     }

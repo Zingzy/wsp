@@ -1426,6 +1426,11 @@ export function snapshotListedWaitLine(snapshotId: string, waitMs: number, waite
   return `the provider lists snapshot ${snapshotId} yet answered "Snapshot not found"; asking again in ${fmtDuration(waitMs)} (${fmtDuration(waitedMs)} so far)`;
 }
 
+/** That wait as a step of the create a person watches, named by the place the fork lands at. */
+export function imageListedWaitLine(where: string, waitedMs: number): string {
+  return `waiting for ${where} to find the image it lists, ${fmtDuration(waitedMs)} so far`;
+}
+
 /** The same refusal once the wait for it has run out: the snapshot is listed, so it is not gone. */
 export function snapshotListedRefusedLine(snapshotId: string, waitedMs: number): string {
   return `the provider lists snapshot ${snapshotId} yet answered "Snapshot not found" for ${fmtDuration(waitedMs)}; it is not gone, so ask again in a minute`;

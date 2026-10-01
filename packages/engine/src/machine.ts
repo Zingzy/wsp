@@ -64,6 +64,11 @@ export interface SnapshotOptions {
   onProgress?: (progress: SnapshotProgress) => void;
 }
 
+export interface CreateOptions {
+  /** Told how long the create has waited so far, each time the provider holds it back and it is asked again. */
+  onWait?: (waitedMs: number) => void;
+}
+
 /** What a road that cuts the bytes up to get them onto a machine says about the trip: the pieces it sent, each
  * one call of its own. A road that lands them in one call says nothing. */
 export interface BytesLanded {
@@ -200,7 +205,7 @@ export interface MachineBackend {
    * provider has no computer of theirs to run anything on. Nothing of wsp is installed on the computer by it: the
    * commands are its own folders' making and taking. */
   onComputer?(cmd: string, opts?: { timeoutMs?: number }): Promise<ExecResult>;
-  create(spec: MachineSpec): Promise<Machine>;
+  create(spec: MachineSpec, opts?: CreateOptions): Promise<Machine>;
   /** Optional: only backends the person holds a key for. One cheap authenticated read that boots nothing and touches
    * no machine's idle clock, so a key the provider refuses is known before anything is saved or billed. Rejects with
    * the provider's own WspError; `checkProviderKey` is what reads that answer. */
