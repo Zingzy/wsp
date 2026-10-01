@@ -4,6 +4,8 @@
 import { describe, expect, it } from "vitest";
 import {
   accessRefusal,
+  agentEnvRefusal,
+  configDirRefusal,
   accessWordsLine,
   applyPreferencesPatch,
   DEFAULT_PREFERENCES,
@@ -239,5 +241,31 @@ describe("an agent's setup on a computer", () => {
     expect(RuntimeRequest.safeParse({ ...set, env: { FOO: "bar" } }).success).toBe(true);
     expect(RuntimeRequest.safeParse({ ...set, env: { "FOO BAR": "x" } }).success).toBe(false);
     expect(RuntimeRequest.safeParse({ ...set, threads: 3 }).success).toBe(false);
+  });
+});
+
+describe("what an agent's setup may not set", () => {
+  it("refuses a variable that decides how the process starts or what it loads, whatever its case, and every one of wsp's own", () => {
+    for (const name of ["PATH", "path", "HOME", "SHELL", "USER", "LOGNAME", "IFS", "TMPDIR", "LD_PRELOAD", "ld_library_path", "DYLD_INSERT_LIBRARIES", "NODE_OPTIONS", "NODE_PATH", "PYTHONPATH", "PYTHONSTARTUP", "PYTHONHOME", "RUBYOPT", "RUBYLIB", "PERL5OPT", "PERL5LIB", "BASH_ENV", "ENV", "ZDOTDIR", "PROMPT_COMMAND", "GIT_SSH", "GIT_SSH_COMMAND", "GIT_EXEC_PATH", "WSP_HOST_TOKEN", "wsp_turn"]) {
+      expect(agentEnvRefusal(name, "Codex"), name).not.toBeNull();
+    }
+    expect(agentEnvRefusal("NODE_OPTIONS", "Codex")).toBe("NODE_OPTIONS decides how Codex starts or what it loads, so an agent's setup does not set it");
+    expect(agentEnvRefusal("WSP_HOST_TOKEN", "Codex")).toBe("WSP_HOST_TOKEN is wsp's own, so an agent's setup does not set it");
+    for (const name of ["FOO", "ANTHROPIC_BASE_URL", "PATHS", "HOMEBREW_NO_AUTO_UPDATE", "NODE_ENV"]) expect(agentEnvRefusal(name, "Codex"), name).toBeNull();
+  });
+
+  it("refuses what the agent's own launch drops, in its own words", () => {
+    expect(agentEnvRefusal("CLAUDE_CODE_USE_BEDROCK", "Claude Code", [/^CLAUDE_CODE_/])).toBe("CLAUDE_CODE_USE_BEDROCK never reaches Claude Code: its launch drops every variable of that kind");
+  });
+
+  it("keeps a config folder under the home of the computer it is on, and out of wsp's own folders", () => {
+    const real = (folder: string) => ({ folder, home: "/Users/ada", kept: ["/Users/ada/.wsp", "/Users/ada/state"] });
+    expect(configDirRefusal("Claude Code", "/Users/ada/claude-wsp", real("/Users/ada/claude-wsp"))).toBeNull();
+    expect(configDirRefusal("Claude Code", "/Users/ada", real("/Users/ada"))).toBe("Claude Code's config folder cannot be the home folder itself; name a folder under it");
+    expect(configDirRefusal("Claude Code", "/tmp/x", real("/private/tmp/x"))).toBe("Claude Code's config folder has to be under the home folder /Users/ada, and /tmp/x is not");
+    expect(configDirRefusal("Claude Code", "/Users/ada/link/x", real("/etc/x"))).toBe("Claude Code's config folder has to be under the home folder /Users/ada, and /Users/ada/link/x is not");
+    expect(configDirRefusal("Claude Code", "/Users/adam/x", real("/Users/adam/x"))).not.toBeNull();
+    expect(configDirRefusal("Claude Code", "/Users/ada/.wsp/c", real("/Users/ada/.wsp/c"))).toBe("/Users/ada/.wsp/c is inside wsp's own folder, so it is no agent's config folder");
+    expect(configDirRefusal("Claude Code", "/Users/ada/state", real("/Users/ada/state"))).not.toBeNull();
   });
 });

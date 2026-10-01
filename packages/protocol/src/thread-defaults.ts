@@ -290,6 +290,51 @@ export const noConfigDirLine = (agent: string): string => `${agent} takes no con
 /** Why a variable was refused: the agent's own launch drops it, so it would never reach the agent. */
 export const droppedEnvLine = (agent: string, name: string): string => `${name} never reaches ${agent}: its launch drops every variable of that kind`;
 
+/** The variables that decide how a process starts or what it loads: the program search, the shell and its startup
+ * files, the dynamic loader, and each language runtime's preload and search paths. A setup naming one would hand that
+ * computer's agent a different program than the one its launch names. */
+const PROCESS_ENV = new Set(["PATH", "HOME", "SHELL", "USER", "LOGNAME", "IFS", "TMPDIR", "NODE_OPTIONS", "NODE_PATH", "PYTHONPATH", "PYTHONSTARTUP", "PYTHONHOME", "RUBYOPT", "RUBYLIB", "PERL5OPT", "PERL5LIB", "BASH_ENV", "ENV", "ZDOTDIR", "PROMPT_COMMAND", "GIT_SSH", "GIT_SSH_COMMAND", "GIT_EXEC_PATH"]);
+const PROCESS_ENV_PREFIXES = ["LD_", "DYLD_"];
+
+export const processEnvLine = (name: string, agent: string): string => `${name} decides how ${agent} starts or what it loads, so an agent's setup does not set it`;
+export const wspEnvLine = (name: string): string => `${name} is wsp's own, so an agent's setup does not set it`;
+/** The fix under a refused variable, on the command line. */
+export const ENV_REFUSED_FIX = "Name another variable; this one is the computer's to say.";
+
+/**
+ * Why a variable cannot be part of an agent's setup, or null where it may: one that decides how the process starts
+ * or what it loads, any of wsp's own, and one the agent's own launch drops (`dropped`, its adapter's patterns). The one
+ * home of the rule: the command line asks it before a value is typed, the host before anything is kept, and every
+ * launch again, so a variable kept before the rule stood is left off.
+ */
+export function agentEnvRefusal(name: string, agent: string, dropped: readonly RegExp[] = []): string | null {
+  const upper = name.toUpperCase();
+  if (upper.startsWith("WSP_")) return wspEnvLine(name);
+  if (PROCESS_ENV.has(upper) || PROCESS_ENV_PREFIXES.some(prefix => upper.startsWith(prefix))) return processEnvLine(name, agent);
+  return dropped.some(pattern => pattern.test(name)) ? droppedEnvLine(agent, name) : null;
+}
+
+/** A config folder as the computer it is on resolved it: the folder with every link on its way followed, that
+ * computer's home the same way, and the folders wsp keeps its own state in there. */
+export interface ResolvedFolder {
+  folder: string;
+  home: string;
+  kept: readonly string[];
+}
+
+const within = (path: string, folder: string): boolean => path === folder || path.startsWith(`${folder.replace(/\/+$/, "")}/`);
+
+/** Why a config folder cannot stand: it is the home itself, outside the home once its links are followed, or inside
+ * one of wsp's own folders. `given` is the path as the person named it, which the sentence names back. */
+export function configDirRefusal(agent: string, given: string, real: ResolvedFolder): string | null {
+  const home = real.home.replace(/\/+$/, "");
+  const folder = real.folder.replace(/\/+$/, "");
+  if (folder === home) return configDirIsHomeLine(agent);
+  if (!within(folder, home)) return `${agent}'s config folder has to be under the home folder ${home}, and ${given} is not`;
+  if (real.kept.some(kept => within(folder, kept.replace(/\/+$/, "")))) return `${given} is inside wsp's own folder, so it is no agent's config folder`;
+  return null;
+}
+
 /** What a config folder change asks of the person: a login kept under the old folder does not follow it. */
 export const configDirSignInLine = (agent: string): string => `${agent} keeps its sign-in under its config folder, so sign it in again there before its next thread`;
 

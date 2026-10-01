@@ -28,6 +28,8 @@ import {
   ThreadDefaults,
   accessRefusal,
   accessWordsLine,
+  agentEnvRefusal,
+  ENV_REFUSED_FIX,
   configDirSignInLine,
   EnvName,
   AgentDefaults,
@@ -4026,6 +4028,10 @@ export const ALL_VERBS: readonly Verb[] = [
       if (agent === undefined || rest.length > 0) throw usageRefusal("wsp agents setup takes one agent.", usageIs(ctx));
       if (ctx.flags["enable"] === true && ctx.flags["disable"] === true) throw usageRefusal("--enable and --disable say two things.", "Name one.");
       const names = flagList(ctx.flags, "env").map(name => envNameOf(name, "--env"));
+      for (const name of names) {
+        const refused = agentEnvRefusal(name, agentName(agent));
+        if (refused !== null) throw usageRefusal(`${refused}.`, ENV_REFUSED_FIX);
+      }
       if (names.length > 0 && ctx.io.isTTY !== true) throw usageRefusal("nobody is at this terminal to type a variable's value.", "Run it in a terminal on the computer the host runs on.");
       const values: Record<string, string> = {};
       for (const name of names) values[name] = await ctx.io.askSecret(`${name} for ${agentName(agent)}`);
@@ -4049,7 +4055,7 @@ export const ALL_VERBS: readonly Verb[] = [
       return 0;
     },
     tool: tool({
-      description: `Sets how one agent runs on one computer, this computer without on: whether it is offered there at all (off, the app's lists drop it there and a start naming it is refused naming the computer), the program run in its place, the folder it keeps its config, sessions and sign-in in (an agent with no variable for one is refused, and a folder that is the home itself; a login kept under the old folder does not follow, so sign it in again there), words added to every turn's launch, and variables taken off its launch. A variable's value is never taken here: the person types it at wsp agents setup --env, where nothing echoes it. Answers the agent's row as that computer's read now gives it, its variables by name alone. reset puts back the agent's own program, config or args.`,
+      description: `Sets how one agent runs on one computer, this computer without on: whether it is offered there at all (off, the app's lists drop it there and a start naming it is refused naming the computer), the program run in its place, the folder it keeps its config, sessions and sign-in in (an agent with no variable for one is refused, and a folder that is not under that computer's home once its links are followed, the home itself, or wsp's own folder; a login kept under the old folder does not follow, so sign it in again there), words added to every turn's launch, and variables taken off its launch. A variable that decides how the process starts or what it loads (PATH, HOME, LD_ and DYLD_ ones, NODE_OPTIONS and the like) is never set, nor one of wsp's own. A variable's value is never taken here: the person types it at wsp agents setup --env, where nothing echoes it. Answers the agent's row as that computer's read now gives it, its variables by name alone. reset puts back the agent's own program, config or args.`,
       input: {
         agent: z.string().describe("the catalog id of the agent, as agents lists it"),
         on: z.string().optional().describe("the computer it runs on, by the name computers lists; absent is the computer the app runs on"),
@@ -5902,9 +5908,9 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   "agents setup enable": "offer the agent there again",
   "agents setup disable": "take the agent off that computer: the app's lists drop it there and a start naming it is refused",
   "agents setup program": "the program run in the agent's place there, a path or a word on its PATH",
-  "agents setup config": "the folder there the agent keeps its config, sessions and sign-in in, absolute; sign it in again there",
+  "agents setup config": "the folder there the agent keeps its config, sessions and sign-in in, absolute and under that computer's home; sign it in again there",
   "agents setup arg": "a word added to every turn's launch there; repeats, and replaces any set before",
-  "agents setup env": "a variable every launch there carries, by name; its value is asked for where nothing echoes it; repeats",
+  "agents setup env": "a variable every launch there carries, by name, never one that decides how the process starts (PATH, LD_*, NODE_OPTIONS and the like); its value is asked for where nothing echoes it; repeats",
   "agents setup unset-env": "a variable to take off its launch there, by name; repeats",
   "agents setup reset": "put a field back on the agent's own: program, config or args; repeats",
   "projects set agent": `the agent a new thread on it runs (${THREAD_AGENTS.join(", ")})`,

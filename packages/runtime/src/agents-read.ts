@@ -180,9 +180,8 @@ export interface AgentsReadOptions<Caller> {
   log?: (line: string) => void;
   /** How the person set an agent to run on a computer, names only; nothing for an agent wsp runs no thread of. */
   setupOf?: (placeId: string, agent: string) => AgentSetupView | undefined;
-  /** Writes a change to how an agent runs on a computer, checked first; `home` is a joined computer's home folder as
-   * it reported it, absent for this computer. */
-  setupWrite?: (placeId: string, agent: string, change: AgentSetupSet, home: string | undefined) => Promise<void>;
+  /** Writes a change to how an agent runs on a computer, checked first, a config folder on the computer it names. */
+  setupWrite?: (placeId: string, agent: string, change: AgentSetupSet) => Promise<void>;
 }
 
 /** How many hits a search asks skills.sh for where the asker names no number. */
@@ -360,7 +359,7 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
       const write = o.setupWrite;
       const on = await onOf({ placeId }, origin);
       if ("napping" in on) throw usage(nappingAgentsRefusal(on.napping));
-      await written({ placeId }, () => write(placeId, agent, change, on.kind === "box" ? on.login["HOME"] : undefined));
+      await written({ placeId }, () => write(placeId, agent, change));
       const row = (await reads.read({ placeId }, origin)).agents.find(a => a.id === agent);
       if (row === undefined) throw usage(`there is no agent ${agent} in the catalog`);
       return row;

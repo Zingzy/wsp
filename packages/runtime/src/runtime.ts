@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { homedir, hostname, tmpdir } from "node:os";
-import { isAbsolute, join, posix, resolve as resolvePathOn } from "node:path";
+import { dirname, isAbsolute, join, posix, resolve as resolvePathOn } from "node:path";
 import { CATALOG_AGENTS, DEFAULT_AGENT, GUEST_HOME, type ThreadAgent, PATH_BOUND_DIR_NAMES, TOOL_PREFIX, catalogIdOfRow, gitHostOf, ownerRepoOf, remoteHost, serverValuesOf, guestEnv, installEnv, installHomes, sharedOn } from "@wsp/catalog";
 import {
   BUILDER_IDLE_MS,
@@ -238,8 +238,8 @@ import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
 import { isNoProvider, isPlaceAbsent, projectStateKey, putFiles, type Copier } from "@wsp/engine";
 import { boxFullLine, DISK_FULL_PCT, diskFullLine, stopRefusedLine, threadMessages, threadSeed, workspaceMemMb } from "@wsp/protocol";
-import { accessMode, accessRefusal, agentOffLine, markedFor, openDefaults, resolveThreadDefaults, setupView, shapeModels, withCustomModels, type AccessChoice, type AgentLaunch, type AgentRow, type AgentSetupSet, type ProjectOverrides, type ThreadDefaults } from "@wsp/protocol";
-import { agentSetups } from "./agent-setup.js";
+import { accessMode, accessRefusal, agentOffLine, markedFor, openDefaults, resolveThreadDefaults, setupView, shapeModels, withCustomModels, type AccessChoice, type AgentLaunch, type AgentRow, type AgentSetupSet, type ProjectOverrides, type ResolvedFolder, type ThreadDefaults } from "@wsp/protocol";
+import { agentSetups, realFolderHere, realFolderScript } from "./agent-setup.js";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
 import { assertTokenShape, daemonTokenFor, daemonTokenPathOf, rotateDaemonToken } from "./daemon-token.js";
@@ -7641,6 +7641,22 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   };
   const agentLabel = (agent: string): string => harnessCatalog(agent)?.label ?? agent;
 
+  /** A config folder as the computer it names resolves it, links followed: this one off its own disk, a joined one
+   * over its link, each with its home and the folders wsp keeps its own state in there. */
+  const configFolderOn = async (placeId: string, path: string): Promise<ResolvedFolder> => {
+    if (placeId === HERE_PLACE_ID) {
+      const home = await realFolderHere(local?.homeDir ?? homedir());
+      const kept = [await realFolderHere(join(home, ".wsp")), ...(opts.statePath !== undefined ? [await realFolderHere(dirname(resolvePathOn(opts.statePath)))] : [])];
+      return { folder: await realFolderHere(path), home, kept };
+    }
+    const door = placeDoorOf();
+    const read = await door.exec(placeId, realFolderScript(path), { timeoutMs: INLINE_EXEC_MS });
+    if (read.exitCode === 3) throw Object.assign(new Error(read.stderr.trim()), { kind: "usage" });
+    const [folder, home] = read.stdout.trim().split("\n");
+    if (read.exitCode !== 0 || folder === undefined || home === undefined || !home.startsWith("/")) throw new Error(`${door.nameOf(placeId)} did not say where ${path} is: ${read.stderr.trim() || `exit ${read.exitCode}`}`);
+    return { folder: posix.normalize(folder), home, kept: [join(home, ".wsp")] };
+  };
+
   /** The agent a new thread runs when its start names none: the project's, then the person's default, then the
    * catalog's first, each only where it runs on that workspace's computer. The marks, the start and the drafter all
    * read this one answer. */
@@ -11388,9 +11404,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
     changed: target => bus.emit({ type: "agents.changed", ...(target !== undefined ? { target } : {}) }),
     setupOf: (placeId, agent) => (adapters[agent] === undefined ? undefined : setupView(setups.get(placeId, agent))),
-    setupWrite: async (placeId, agent, change, home) => {
+    setupWrite: async (placeId, agent, change) => {
       if (adapters[agent] === undefined) throw Object.assign(new Error(noAdapterLine(agent, Object.keys(adapters))), { kind: "usage" });
-      await setups.set(placeId, agent, change, { home: placeId === HERE_PLACE_ID ? (local?.homeDir ?? homedir()) : home, agentName: agentLabel(agent) });
+      await setups.set(placeId, agent, change, { folder: path => configFolderOn(placeId, path), agentName: agentLabel(agent) });
     },
     relayed: () => backend.capabilities.callbackRelay,
     now: () => clock.now(),

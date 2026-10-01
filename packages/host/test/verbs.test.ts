@@ -2422,6 +2422,13 @@ describe("wsp verbs over the host", () => {
     expect(piped.code).toBe(3);
     const named = await run("agents", "setup", "claude", "--env", "BAR=baz");
     expect(named.code).toBe(3);
+    // A variable that decides how the agent's process starts is refused before its value is asked for.
+    const guarded = captured();
+    guarded.isTTY = true;
+    guarded.askSecret = async q => (prompts.push(q), "/evil");
+    expect(await cli(["agents", "setup", "claude", "--env", "LD_PRELOAD", "--state", statePath], guarded, undefined, env)).toBe(3);
+    expect(guarded.errors[0]).toBe("wsp agents setup: LD_PRELOAD decides how Claude Code starts or what it loads, so an agent's setup does not set it. Name another variable; this one is the computer's to say.");
+    expect(prompts).toEqual(["FOO for Claude Code"]);
   });
 
   it("an agent turned off on this computer leaves its lists, and a run naming it is refused naming the computer", async () => {

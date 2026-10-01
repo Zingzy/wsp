@@ -4,7 +4,8 @@
 // person's defaults, then the catalog; the lists harnesses.list hands the
 // composer, marked the same way; and each agent's setup on a computer, which
 // reaches the launch whole and every reader as names alone.
-import { mkdtempSync, rmSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -13,6 +14,7 @@ import { HERE_PLACE_ID, PLACES_TICKET_REFUSAL, markedDefault, type AgentLaunch, 
 import { createRuntime, serveRuntime, type AgentsReader, type HarnessAdapterFactory, type LocalWiring, type Runtime, type RuntimeServer } from "../src/index.js";
 import { localExecStream } from "../src/local-exec.js";
 import { memoryStore, type Store } from "../src/store.js";
+import { realFolderScript } from "../src/agent-setup.js";
 import { copyingFake, createOn, stubBackend, testPlatform } from "./stub-backend.js";
 import { until } from "./until.js";
 import { WsClient } from "./ws-client.js";
@@ -145,6 +147,18 @@ describe("what a new thread starts on", () => {
   });
 });
 
+/** This computer as the runtime is wired with it, its home a folder of the case's own. */
+const localWiringOf = (root: string): LocalWiring => ({
+  backend: new LocalBackend({ root }),
+  execStream: o => localExecStream({ root, runDir: join(root, "runs"), ...o }),
+  home: id => join(root, `.${id}`),
+  homeDir: root,
+  rootsPath: join(root, "roots"),
+  env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
+  platform: testPlatform(),
+  copier: copyingFake(),
+});
+
 describe("an agent's setup on a computer", () => {
   let root: string;
   let launched: Launched[];
@@ -157,17 +171,7 @@ describe("an agent's setup on a computer", () => {
     root = mkdtempSync(join(tmpdir(), "wsp-setup-"));
     launched = [];
     store = memoryStore();
-    const localWiring: LocalWiring = {
-      backend: new LocalBackend({ root }),
-      execStream: o => localExecStream({ root, runDir: join(root, "runs"), ...o }),
-      home: id => join(root, `.${id}`),
-      homeDir: root,
-      rootsPath: join(root, "roots"),
-      env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
-      platform: testPlatform(),
-      copier: copyingFake(),
-    };
-    rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: recorder("claude", launched), codex: recorder("codex", launched) }, local: localWiring, agentsReader: reader });
+    rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: recorder("claude", launched), codex: recorder("codex", launched) }, local: localWiringOf(root), agentsReader: reader });
   });
   afterEach(async () => {
     for (const c of clients.splice(0)) c.close();
@@ -207,6 +211,50 @@ describe("an agent's setup on a computer", () => {
     await expect(rt.agents.setup(HERE_PLACE_ID, "gemini", { on: false })).rejects.toMatchObject({ kind: "usage" });
     await expect(rt.agents.setup("p_nowhere", "claude", { on: false })).rejects.toThrow();
     expect(await store.list("agentSetups")).toEqual([]);
+  });
+
+  it("refuses a variable that decides how the process starts or what it loads before anything is kept, and skips one kept before", async () => {
+    for (const name of ["PATH", "ld_preload", "DYLD_INSERT_LIBRARIES", "NODE_OPTIONS", "WSP_HOST_TOKEN"]) {
+      await expect(rt.agents.setup(HERE_PLACE_ID, "codex", { env: { [name]: "/evil" } }), name).rejects.toMatchObject({ kind: "usage" });
+    }
+    expect(await store.list("agentSetups")).toEqual([]);
+    // Taking one away stays open, so a name kept before this rule can still be cleared.
+    await rt.agents.setup(HERE_PLACE_ID, "codex", { env: { PATH: null, FOO: "bar" } });
+    await store.put("agentSetups", "here:codex", { env: { PATH: "/evil", NODE_OPTIONS: "--require /evil.js", FOO: "bar" } });
+    const kept = createRuntime({ backend: stubBackend(), store, adapters: { claude: recorder("claude", launched), codex: recorder("codex", launched) }, local: localWiringOf(root), agentsReader: reader });
+    const ws = await createOn(kept, { on: HERE_PLACE_ID, name: "mac" });
+    await (await kept.sessions.start(ws.id, { prompt: "one", harness: "codex" })).finished;
+    expect(launched.at(-1)!.env).toMatchObject({ FOO: "bar" });
+    expect(launched.at(-1)!.env["PATH"]).not.toBe("/evil");
+    expect(launched.at(-1)!.env).not.toHaveProperty("NODE_OPTIONS");
+  });
+
+  it("keeps a config folder under this computer's home after the path is normalised and its links followed, and out of wsp's own", async () => {
+    mkdirSync(join(root, "real"));
+    symlinkSync(tmpdir(), join(root, "out"));
+    symlinkSync(join(root, "real"), join(root, "in"));
+    symlinkSync("/etc/wsp-not-made", join(root, "later"));
+    symlinkSync("loop", join(root, "loop"));
+    for (const dir of ["/tmp/x", "/etc/x", `${root}/../x`, join(root, "out", "x"), join(root, "later"), join(root, "later", "x"), join(root, "loop", "x"), join(root, ".wsp", "claude"), root]) {
+      await expect(rt.agents.setup(HERE_PLACE_ID, "claude", { configDir: dir }), dir).rejects.toMatchObject({ kind: "usage" });
+    }
+    expect(await store.list("agentSetups")).toEqual([]);
+    expect((await rt.agents.setup(HERE_PLACE_ID, "claude", { configDir: join(root, "in", "claude-wsp") })).setup?.configDir).toBe(join(root, "in", "claude-wsp"));
+  });
+
+  it("reads a folder on another computer the same way, on that computer: links followed, the part not made yet kept", () => {
+    mkdirSync(join(root, "a"));
+    symlinkSync(join(root, "a"), join(root, "b"));
+    symlinkSync("/etc/wsp-not-made", join(root, "a", "later"));
+    symlinkSync("../a/later", join(root, "a", "near"));
+    const read = (path: string): string[] => execFileSync("/bin/bash", ["-c", realFolderScript(path)], { env: { HOME: root, PATH: "/usr/bin:/bin" }, encoding: "utf8" }).trim().split("\n");
+    const real = execFileSync("/bin/bash", ["-c", "pwd -P"], { cwd: root, encoding: "utf8" }).trim();
+    expect(read(join(root, "b", "not", "yet"))).toEqual([join(real, "a", "not", "yet"), real]);
+    expect(read(join(root, "b", "later", "x"))).toEqual([join(realpathSync("/etc"), "wsp-not-made", "x"), real]);
+    expect(read(join(root, "b", "near"))).toEqual([join(realpathSync("/etc"), "wsp-not-made"), real]);
+    symlinkSync("loop", join(root, "loop"));
+    const looped = spawnSync("/bin/bash", ["-c", realFolderScript(join(root, "loop", "x"))], { env: { HOME: root, PATH: "/usr/bin:/bin" }, encoding: "utf8" });
+    expect([looped.status, looped.stderr.trim()]).toEqual([3, `${join(root, "loop", "x")} goes round a loop of links`]);
   });
 
   it("is the host's own road over the wire, and a value crosses only on a socket holding the host's own token", async () => {
