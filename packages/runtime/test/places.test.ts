@@ -1101,6 +1101,36 @@ describe("whether agents may start agents, as a place's default", () => {
   });
 });
 
+describe("a computer that runs an older wsp than this host", () => {
+  it("says so on its row with what brings it level: wsp add <name> --update on a joined one, this wsp's own road on this one, and nothing on a level one or where no daemon runs here", async () => {
+    const root = mkdtempSync(joinPath(tmpdir(), "wsp-behind-"));
+    try {
+      const hostKey = newPlaceKeyPair();
+      let held: number | undefined = DAEMON_VERSION - 1;
+      runtime = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {}, placeLinks: wiring(hostKey), local: { ...fakeLocal(root), hereDaemon: { version: async () => held ?? DAEMON_VERSION, held: () => held, fix: "updating the wsp app" } } });
+      srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+      const old = await join(hostKey, { code: await code(), report: report("spoo", { daemonVersion: DAEMON_VERSION - 1 }) });
+      sockets.push(old.client.ws);
+      const level = await join(hostKey, { code: await code(), report: report("box", { daemonVersion: DAEMON_VERSION }) });
+      sockets.push(level.client.ws);
+      const word = placeDaemonBehind({ daemonVersion: DAEMON_VERSION - 1 })!;
+      const rows = await placesOf();
+      expect(rows.find(p => p.id === old.placeId)).toMatchObject({ daemonVersion: DAEMON_VERSION - 1, behind: { word, fix: "wsp add spoo --update" } });
+      expect(rows.find(p => p.id === level.placeId)!.behind).toBeUndefined();
+      expect(rows.find(p => p.id === HERE_PLACE_ID)).toMatchObject({ daemonVersion: DAEMON_VERSION - 1, behind: { word, fix: "updating the wsp app" } });
+      held = DAEMON_VERSION;
+      const levelled = (await placesOf()).find(p => p.id === HERE_PLACE_ID)!;
+      expect(levelled.daemonVersion).toBe(DAEMON_VERSION);
+      expect(levelled.behind).toBeUndefined();
+      // No daemon started here yet is a version this host does not know, not one it guesses.
+      held = undefined;
+      expect((await placesOf()).find(p => p.id === HERE_PLACE_ID)!.daemonVersion).toBeUndefined();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("a cloud's spend per day", () => {
   const HOUR = 3_600_000;
 

@@ -3242,6 +3242,10 @@ export const PlaceView = z.object({
   joinedAt: z.string().optional(),
   lastSeenAt: z.string().optional(),
   daemonVersion: z.number().int().optional(),
+  /** Set while this computer runs an older daemon than this wsp deploys: the word placeDaemonBehind says it in, and
+   * what brings it level, `wsp add <name> --update` on a joined computer and the road this wsp was installed by on
+   * the computer the host runs on. */
+  behind: z.object({ word: z.string(), fix: z.string() }).optional(),
   /** The catalog ids of the agents that computer found on itself, as it last reported them. */
   agents: z.array(z.string()).optional(),
   /** What each of those agents answered its own version flag with, as that computer last reported it. */

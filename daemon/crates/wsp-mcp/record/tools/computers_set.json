@@ -142,6 +142,22 @@
             "daemonVersion": {
               "type": "integer"
             },
+            "behind": {
+              "type": "object",
+              "properties": {
+                "word": {
+                  "type": "string"
+                },
+                "fix": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "word",
+                "fix"
+              ],
+              "additionalProperties": false
+            },
             "agents": {
               "type": "array",
               "items": {
@@ -672,6 +688,22 @@
             },
             "daemonVersion": {
               "type": "integer"
+            },
+            "behind": {
+              "type": "object",
+              "properties": {
+                "word": {
+                  "type": "string"
+                },
+                "fix": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "word",
+                "fix"
+              ],
+              "additionalProperties": false
             },
             "agents": {
               "type": "array",

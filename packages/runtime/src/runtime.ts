@@ -966,6 +966,8 @@ export interface LocalWiring {
  * replace it; the runtime reads them before it runs that binary and says nothing else about it. */
 export interface HereDaemon {
   version(): Promise<number>;
+  /** The version of the daemon running here now, read without starting one; nothing while none runs. */
+  held?(): number | undefined;
   fix: string;
 }
 
@@ -3111,6 +3113,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       onStage: event => bus.emit(event),
       copyBuild: placeId => copyRows.get(placeId),
       napMs: defaultIdleWindowMs,
+      ...(opts.local?.hereDaemon !== undefined ? { hereDaemon: opts.local.hereDaemon } : {}),
       // Armed from now under the new window, on every workspace there whose window is its place's.
       napChanged: placeId => {
         for (const e of live.values()) if (e.record.phase === "running" && e.record.idleWindowMs === undefined && placeIdOf(e.record) === placeId) idle.touch(e.record.id);

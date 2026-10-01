@@ -91,6 +91,7 @@ import {
   twoPlacesRefusal,
   placeBehindLine,
   placeDaemonBehind,
+  placeUpdateLine,
   buildsImages,
   linkedOver,
   type PlaceProveRequest,
@@ -101,7 +102,7 @@ import { CATALOG_AGENTS, keyEnvOf, mintsToken, sharedFileIn, sharedOn } from "@w
 import type { WebSocket } from "ws";
 import type { DeviceDoor } from "./devices.js";
 import { openPlaceForward, type PlaceForward } from "./place-forward.js";
-import type { PlaceBackends } from "./runtime.js";
+import type { HereDaemon, PlaceBackends } from "./runtime.js";
 import type { DaemonChannel } from "./daemon-channel.js";
 import { connectDaemon, type DaemonReach } from "./reach.js";
 import { freshEphemeral, makeSeal, newPlaceKeyPair, sealKeys, sharedSecret, signPlaceBytes, verifyPlaceBytes, type PlaceKeyPair, type Seal } from "@wsp/keys";
@@ -363,6 +364,8 @@ export interface PlaceDoorOptions {
   copyBuild?: (placeId: string) => { line: string; stopped: boolean } | undefined;
   /** How long a quiet workspace runs before it naps where its place names no window: the runtime's own default. */
   napMs?: number;
+  /** The daemon this host runs for the computer it runs on, whose version its own row carries. */
+  hereDaemon?: HereDaemon;
   /** A person changed the nap after on one place: the runtime arms its workspaces there again under the new window. */
   napChanged?: (placeId: string) => void;
   /** How long a computer has to dial back after its join before an install gives up on it. */
@@ -1363,6 +1366,10 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       joinedAt: record.joinedAt,
       lastSeenAt: record.lastSeenAt,
       daemonVersion: record.report.daemonVersion,
+      ...((): Pick<PlaceView, "behind"> => {
+        const word = placeDaemonBehind(record.report);
+        return word === undefined ? {} : { behind: { word, fix: placeUpdateLine(record.name) } };
+      })(),
       agents: record.report.agents,
       ...(record.report.agentVersions !== undefined ? { agentVersions: record.report.agentVersions } : {}),
       // One word per agent for whether a turn there needs a sign-in first, worked out from what that computer listed
@@ -1453,6 +1460,8 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
   /** The row of the computer the host runs on, off what it says about itself now. */
   const hereRow = (marked: string): PlaceView => {
     const here = wiring.here();
+    const daemonVersion = opts.hereDaemon?.held?.();
+    const behind = daemonVersion === undefined ? undefined : placeDaemonBehind({ daemonVersion });
     return {
       id: HERE_PLACE_ID,
       kind: "computer",
@@ -1464,6 +1473,8 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       ...(here.shape !== undefined ? { shape: here.shape } : {}),
       ...(here.diskFreeBytes !== undefined ? { diskFreeBytes: here.diskFreeBytes } : {}),
       ...(here.engine !== undefined ? { engine: here.engine } : {}),
+      ...(daemonVersion !== undefined ? { daemonVersion } : {}),
+      ...(behind !== undefined && opts.hereDaemon !== undefined ? { behind: { word: behind, fix: opts.hereDaemon.fix } } : {}),
       present: true,
       // This computer is where the person's own agents run, never something the host forks into: a copy of the
       // image on a runtime here is that place's own row, which is the one that says it forks.
