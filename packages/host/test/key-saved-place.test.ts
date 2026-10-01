@@ -6,12 +6,14 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { goldenRecipe, makeRuntime, optsFor, swapProvider } from "../src/cli.js";
+import { goldenRecipe, makeRuntime, swapProvider } from "../src/cli.js";
 import { envFileFor, savedEnv, writeEnvFile } from "../src/env-keys.js";
 import { placeWiring } from "../src/places.js";
-import { providerKeySet } from "../src/providers.js";
+import { providerEnvWith, providerKeySet, providerTable } from "../src/providers.js";
 import type { Runtime } from "@wsp/runtime";
-import { CLOUD_ON } from "../src/cloud.js";
+
+/** The providers these keys are for are the cloud's, handed in, so every case runs whatever the process's cloud is. */
+const CLOUD = providerTable(true);
 
 const homes: string[] = [];
 const runtimes: Runtime[] = [];
@@ -20,18 +22,22 @@ afterEach(async () => {
   for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true });
 });
 
+/** The environment a fresh run picks its provider out of, read off the .env beside the state file alone: a checkout's
+ * own .env with the owner's keys in it, or a shell's, is not this case's. */
+const providerEnvAt = (statePath: string) => providerEnvWith({}, {}, [savedEnv(statePath)], CLOUD);
+
 /** A host serving this state file as a fresh run reads it: the provider picked out of the .env beside it alone. */
 function hostOn(statePath: string): Runtime {
-  const { providerEnv } = optsFor({ state: statePath }, {});
-  const rt = makeRuntime({}, statePath, goldenRecipe({}), providerEnv, undefined, undefined, placeWiring(statePath));
+  const providerEnv = providerEnvAt(statePath);
+  const rt = makeRuntime({}, statePath, goldenRecipe({}), providerEnv, undefined, undefined, placeWiring(statePath), undefined, undefined, CLOUD);
   runtimes.push(rt);
   return rt;
 }
 
 /** What the keys step does once the provider took the key: write it beside the state, then swap the saved record in. */
 function saveKey(rt: Runtime, statePath: string, provider: string, key: string): void {
-  const { providerEnv } = optsFor({ state: statePath }, {});
-  writeEnvFile(envFileFor(statePath), providerKeySet(providerEnv, key, provider)!);
+  const providerEnv = providerEnvAt(statePath);
+  writeEnvFile(envFileFor(statePath), providerKeySet(providerEnv, key, provider, CLOUD)!);
   swapProvider(rt, savedEnv(statePath));
 }
 
@@ -48,7 +54,7 @@ describe("a provider key saved from the app", () => {
     ["box", "ascii_live_fake"],
     ["solari", "slr_live_fake"],
   ] as const) {
-    it.runIf(CLOUD_ON)(`makes ${provider} a computer on the host that saved it and on a fresh read of the same home`, async () => {
+    it(`makes ${provider} a computer on the host that saved it and on a fresh read of the same home`, async () => {
       const statePath = freshState();
       const rt = hostOn(statePath);
       expect(await computers(rt)).toEqual([]);
@@ -58,7 +64,7 @@ describe("a provider key saved from the app", () => {
     });
   }
 
-  it.runIf(CLOUD_ON)("makes both providers computers once both keys are saved", async () => {
+  it("makes both providers computers once both keys are saved", async () => {
     const statePath = freshState();
     const rt = hostOn(statePath);
     saveKey(rt, statePath, "box", "ascii_live_fake");

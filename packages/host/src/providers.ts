@@ -84,9 +84,10 @@ const CLOUD_MODULES: readonly ProviderModule[] = [
   },
 ];
 
-/** The providers this process answers for: with the cloud off the clouds are not among them, and everything read off
- * this table (the words `wsp add` takes, the keys, the places, the Add a cloud sheet) goes with them. The one gate. */
-export const PROVIDER_MODULES: readonly ProviderModule[] = [
+/** The providers a process answers for, by whether its cloud is on: with it off the clouds are not among them, and
+ * everything read off the table (the words `wsp add` takes, the keys, the places, the Add a cloud sheet) goes with
+ * them. A test hands in the table it means rather than turning the process's cloud on. */
+export const providerTable = (cloud: boolean): readonly ProviderModule[] => [
   {
     id: "fake",
     // No way of being added, so `wsp add` takes neither the word nor a key for it: a provider that answers out of
@@ -113,7 +114,7 @@ export const PROVIDER_MODULES: readonly ProviderModule[] = [
       return new FakeBackend({ records, ...(root === undefined ? {} : { guest: fakeGuestAt(root) }) });
     },
   },
-  ...(CLOUD_ON ? CLOUD_MODULES : []),
+  ...(cloud ? CLOUD_MODULES : []),
   {
     id: NO_PROVIDER,
     // No machine behind it, so no place to add and none to show: it is the row that refuses every road in one line.
@@ -122,6 +123,9 @@ export const PROVIDER_MODULES: readonly ProviderModule[] = [
     build: () => new NoProviderBackend(noMachinesLine()),
   },
 ];
+
+/** The providers this process answers for, off its own cloud reading. The one gate. */
+export const PROVIDER_MODULES: readonly ProviderModule[] = providerTable(CLOUD_ON);
 
 /** What a road that needs a machine says where nothing here starts one: how to add a provider where one can be
  * added, else how to join a computer. Read off the registered rows, so the line never names a road the table lacks. */
@@ -183,8 +187,8 @@ export function wiredProviderId(env: ProviderEnv, modules: readonly ProviderModu
   return placeIdOf(providerModule(env, modules), env);
 }
 
-export function providerBackendFor(env: ProviderEnv): MachineBackend {
-  return providerModule(env).build(env);
+export function providerBackendFor(env: ProviderEnv, modules: readonly ProviderModule[] = PROVIDER_MODULES): MachineBackend {
+  return providerModule(env, modules).build(env);
 }
 
 /** Whether this row is somewhere work can stand: a row somebody has added, or a stand-in wearing the cloud it is
@@ -206,8 +210,8 @@ export function isPlace(m: ProviderModule, env: ProviderEnv): boolean {
 
 /** The provider this environment wires, as a place row priced off the backend it forks on; nothing where that row
  * is nowhere work can stand. The row wears the word its machines wear, so a stand-in shows the cloud it serves. */
-export function wiredPlaceRow(env: ProviderEnv, backend: MachineBackend): { id: string; rateUsdPerHour: number } | undefined {
-  const module = providerModule(env);
+export function wiredPlaceRow(env: ProviderEnv, backend: MachineBackend, modules: readonly ProviderModule[] = PROVIDER_MODULES): { id: string; rateUsdPerHour: number } | undefined {
+  const module = providerModule(env, modules);
   if (!isPlace(module, env)) return undefined;
   const { pricing } = backend;
   return { id: placeIdOf(module, env), rateUsdPerHour: pricing.rateUsdPerHour(pricing.defaultSize) };
@@ -231,9 +235,9 @@ const providerReading = (m: ProviderModule, env: ProviderEnv): string =>
  * built at the first ask and kept while what it reads stands, since a module that holds its machines in memory
  * would lose them if this handed out a fresh one each time. Only the places a person can name are listed: a host
  * whose own module is no place lists the others and still answers for its own. */
-export function providerPlaces(wired: () => string, backend: MachineBackend, env: () => ProviderEnv): PlaceBackends {
+export function providerPlaces(wired: () => string, backend: MachineBackend, env: () => ProviderEnv, modules: readonly ProviderModule[] = PROVIDER_MODULES): PlaceBackends {
   const built = new Map<string, { reading: string; backend: MachineBackend }>();
-  const rows = (): ProviderModule[] => placeProviders(env());
+  const rows = (): ProviderModule[] => placeProviders(env(), modules);
   return {
     get wired() {
       return wired();
@@ -311,8 +315,9 @@ export function providerEnvWith(
   flags: { provider?: string },
   env: ProviderEnv = process.env,
   layers: readonly ProviderEnv[] = [env],
+  modules: readonly ProviderModule[] = PROVIDER_MODULES,
 ): ProviderEnv {
-  const keys = providerKeyEnvs().flatMap(name => {
+  const keys = providerKeyEnvs(modules).flatMap(name => {
     const value = layers.map(l => keyIn(l, name)).find(v => v !== undefined);
     return value !== undefined ? [[name, value] as const] : [];
   });
