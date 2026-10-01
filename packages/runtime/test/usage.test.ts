@@ -105,12 +105,13 @@ describe("what an account draws right now", () => {
     expect(accounts.find(a => a.key === "claude:vault-token")?.burn).toEqual({ tokensPerMinute: 3_000, threads: 1 });
   });
 
-  it("files each call at the moment it was made, so a run re-read after a host restart does not count its old calls again", async () => {
-    const old = Date.now() - 20 * 60_000;
-    const { rt, ws } = await runtimeWith(turning({ status: "completed", text: "done", tokens: { input: 10, output: 1 } }, sessionId => [{ type: "limit", sessionId, limit: window }, { type: "turn.usage", sessionId, tokens: 30_000, at: old }, { type: "turn.usage", sessionId, tokens: 1_500, at: Date.now() - 60_000 }]));
+  it("files a live call when the host receives it, whatever the clock of the machine it ran on says", async () => {
+    const behind = Date.now() - 20 * 60_000;
+    const ahead = Date.now() + 20 * 60_000;
+    const { rt, ws } = await runtimeWith(turning({ status: "completed", text: "done", tokens: { input: 10, output: 1 } }, sessionId => [{ type: "limit", sessionId, limit: window }, { type: "turn.usage", sessionId, tokens: 1_500, at: behind }, { type: "turn.usage", sessionId, tokens: 3_000, at: ahead }]));
     await (await rt.sessions.start(ws.id, { prompt: "go" })).finished;
     const { accounts } = await rt.usage.accounts();
-    expect(accounts.find(a => a.key === "claude:vault-token")?.burn).toEqual({ tokensPerMinute: 100, threads: 1 });
+    expect(accounts.find(a => a.key === "claude:vault-token")?.burn).toEqual({ tokensPerMinute: 300, threads: 1 });
   });
 });
 

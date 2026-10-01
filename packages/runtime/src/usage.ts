@@ -413,15 +413,38 @@ export function createUsageLedger(o: { store: Store; clock: Clock; timeZone?: st
 /** How far back an account's draw right now reaches. */
 export const BURN_WINDOW_MS = 15 * 60_000;
 
+/** A call a run re-read after a host restart replayed: the run it came from and the moment the agent's machine
+ * stamped on it, on that machine's clock. */
+export interface ReplayedStamp {
+  run: string;
+  at: number;
+}
+
 /** What each account's running threads drew over the last fifteen minutes, off the calls their turns reported. Kept in
- * memory alone: a reading this old is gone by the time a host has restarted. */
-export function createBurn(clock: Clock): { add(o: { account: string; threadId: string; tokens: number; at?: number }): void; of(account: string): AccountRow["burn"] } {
-  let calls: { at: number; account: string; threadId: string; tokens: number }[] = [];
-  const recent = () => (calls = calls.filter(c => c.at > clock.now() - BURN_WINDOW_MS));
+ * memory alone: a reading this old is gone by the time a host has restarted. A call is filed when this host received
+ * it. A run re-read after a restart hands its old calls over all at once, so each of its calls is filed by its age
+ * against the newest stamp that run has given, counted back from when that newest one arrived: two stamps of one
+ * machine are compared, never a machine's clock against this host's. */
+export function createBurn(clock: Clock): { add(o: { account: string; threadId: string; tokens: number; replayed?: ReplayedStamp }): void; of(account: string): AccountRow["burn"] } {
+  let calls: { receivedAt: number; account: string; threadId: string; tokens: number; replayed?: ReplayedStamp }[] = [];
+  /** Each re-read run's newest stamp and when it arrived. */
+  const newest = new Map<string, { at: number; receivedAt: number }>();
+  const filedAt = (c: (typeof calls)[number]): number => {
+    const top = c.replayed === undefined ? undefined : newest.get(c.replayed.run);
+    return c.replayed === undefined || top === undefined ? c.receivedAt : Math.min(c.receivedAt, top.receivedAt - (top.at - c.replayed.at));
+  };
+  const recent = () => {
+    const since = clock.now() - BURN_WINDOW_MS;
+    calls = calls.filter(c => filedAt(c) > since);
+    const runs = new Set(calls.flatMap(c => (c.replayed !== undefined ? [c.replayed.run] : [])));
+    for (const run of newest.keys()) if (!runs.has(run)) newest.delete(run);
+    return calls;
+  };
   return {
-    add: ({ at, ...o }) => {
-      // A machine's clock ahead of this one's never files a call in the future.
-      recent().push({ at: Math.min(at ?? clock.now(), clock.now()), ...o });
+    add: o => {
+      const receivedAt = clock.now();
+      if (o.replayed !== undefined && o.replayed.at >= (newest.get(o.replayed.run)?.at ?? -Infinity)) newest.set(o.replayed.run, { at: o.replayed.at, receivedAt });
+      recent().push({ receivedAt, ...o });
     },
     of: account => {
       const on = recent().filter(c => c.account === account);
