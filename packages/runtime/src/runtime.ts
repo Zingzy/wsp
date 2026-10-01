@@ -10281,12 +10281,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   };
 
-  /** The sizes a place's provider reports for the snapshots named, keyed by id; empty where it has no listing or
-   * would not answer, since a size nobody read is left absent rather than guessed. */
+  /** The sizes a place's provider reports the snapshots named restore to, keyed by id; empty where it has no listing
+   * or would not answer, and none for a snapshot it reports only the stored size of, since a size nobody read is left
+   * absent rather than guessed. */
   const snapshotSizes = async (at: MachineBackend, ids: readonly string[]): Promise<Map<string, number>> => {
     if (ids.length === 0 || !at.capabilities.snapshotListing || at.listSnapshots === undefined) return new Map();
     const rows = await at.listSnapshots().catch(() => []);
-    return new Map(rows.filter(r => ids.includes(r.id)).map(r => [r.id, r.sizeBytes]));
+    return new Map(rows.flatMap(r => (ids.includes(r.id) && r.restoredBytes !== undefined ? [[r.id, r.restoredBytes] as const] : [])));
   };
 
   /** The copy each place holds of this golden, newest version per place, with the record's hash it was built at. */

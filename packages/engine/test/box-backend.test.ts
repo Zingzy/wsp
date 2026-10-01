@@ -926,7 +926,7 @@ describe("BoxBackend against a fake Box API", () => {
     expect(api.calls().filter(c => c.startsWith("POST"))).toEqual([]);
   });
 
-  it("lists every snapshot with its size: the named ones under their names, and the provider's own history nameless", async () => {
+  it("lists every snapshot with the size storage holds, and the size it restores to only where the provider says it", async () => {
     const api = new FakeBox()
       .on("GET", "/named-snapshots", { status: 200, body: { ok: true, snapshots: [NAMED("wsp-mac-default-v1", "ready")] } })
       .on("GET", "/snapshots", seen => {
@@ -937,16 +937,18 @@ describe("BoxBackend against a fake Box API", () => {
             ok: true,
             type: "snapshot.list",
             snapshots: first
-              ? [{ id: "866f04de-8e8a-4401-9e29-cf58e1738213", boxId: "bx_tumrjngm", status: "completed", kind: "incremental", generation: 4, chainId: "d9365279-5b40-4860-85b4-4a168a878da1", createdAt: "2026-09-11T06:32:52.039Z", completedAt: "2026-09-11T06:32:53.272Z", sizeBytes: 343, fileCount: 2 }]
+              ? [{ id: "866f04de-8e8a-4401-9e29-cf58e1738213", boxId: "bx_tumrjngm", status: "completed", kind: "incremental", generation: 4, chainId: "d9365279-5b40-4860-85b4-4a168a878da1", createdAt: "2026-09-11T06:32:52.039Z", completedAt: "2026-09-11T06:32:53.272Z", sizeBytes: 343, contentSizeBytes: 7_838_315_315, fileCount: 2 }]
               : [{ id: "1826c6c1-6f77-4beb-8406-93f9e27281a2", boxId: "bx_tumrjngm", status: "completed", kind: "noop", generation: null, chainId: null, createdAt: "2026-09-11T06:55:43.354Z", completedAt: "2026-09-11T06:55:43.547Z", sizeBytes: null }],
             pageInfo: { nextCursor: first ? "c2" : null, hasMore: first, limit: 200 },
           },
         };
       });
     const { backend } = backendOn(api);
+    // A history row says what it restores to beside the change it stores; a named one says no such size, so none is put
+    // on it and no image reads its stored figure as its size.
     expect(await backend.listSnapshots()).toEqual([
       { id: "wsp-mac-default-v1", name: "wsp-mac-default-v1", sizeBytes: 1255755776, createdAt: "2026-09-11T06:47:23.959Z" },
-      { id: "866f04de-8e8a-4401-9e29-cf58e1738213", sizeBytes: 343, createdAt: "2026-09-11T06:32:53.272Z", parent: "d9365279-5b40-4860-85b4-4a168a878da1" },
+      { id: "866f04de-8e8a-4401-9e29-cf58e1738213", sizeBytes: 343, restoredBytes: 7_838_315_315, createdAt: "2026-09-11T06:32:53.272Z", parent: "d9365279-5b40-4860-85b4-4a168a878da1" },
       { id: "1826c6c1-6f77-4beb-8406-93f9e27281a2", sizeBytes: 0, createdAt: "2026-09-11T06:55:43.547Z", parent: null },
     ]);
     expect(api.seen.filter(s => s.path === "/snapshots").map(s => s.query.get("cursor"))).toEqual([null, "c2"]);

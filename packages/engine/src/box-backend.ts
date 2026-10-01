@@ -255,7 +255,10 @@ interface SnapshotView {
   chainId?: string | null;
   createdAt?: string;
   completedAt?: string | null;
+  /** What changed since the snapshot before it in the chain, which is what storage holds. */
   sizeBytes?: number | null;
+  /** What the snapshot restores to. */
+  contentSizeBytes?: number | null;
 }
 
 interface Paged {
@@ -571,7 +574,8 @@ export class BoxBackend implements MachineBackend {
   }
 
   /** The named snapshots, which are wsp's versions, and the provider's own per-minute history with what each
-   * increment holds; a delete that finds nothing left is done. */
+   * increment holds; a delete that finds nothing left is done. A history row says what it restores to; a named one
+   * says no such size (it listed 62 B for a 7.3 GB image), so its image size is left unknown. */
   async listSnapshots(): Promise<SnapshotRow[]> {
     const named = await this.namedSnapshots();
     const history = (await this.pages<SnapshotPage>("/snapshots", p => p.snapshots, p => p.pageInfo?.nextCursor)) as SnapshotView[];
@@ -580,6 +584,7 @@ export class BoxBackend implements MachineBackend {
       ...history.map(s => ({
         id: s.id,
         sizeBytes: s.sizeBytes ?? 0,
+        ...(typeof s.contentSizeBytes === "number" ? { restoredBytes: s.contentSizeBytes } : {}),
         ...(s.completedAt ?? s.createdAt ? { createdAt: (s.completedAt ?? s.createdAt)! } : {}),
         ...(s.chainId !== undefined ? { parent: s.chainId } : {}),
       })),

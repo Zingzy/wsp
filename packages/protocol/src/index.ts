@@ -4072,6 +4072,10 @@ export const SnapshotRow = z.object({
    * listing carries none. */
   name: z.string().optional(),
   sizeBytes: z.number(),
+  /** The size the snapshot restores to, which is an image's size, where the provider reports one. A provider that
+   * stores a snapshot as what changed since another bills on that change, so sizeBytes is not this; absent, the
+   * image's size is unknown and nothing stands in for it. */
+  restoredBytes: z.number().optional(),
   createdAt: z.string().optional(),
   /** The snapshot this one was taken under, as the provider chains them; null at a root. */
   parent: z.string().nullable().optional(),
