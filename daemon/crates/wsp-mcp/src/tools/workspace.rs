@@ -293,13 +293,28 @@ pub async fn thread_count(client: &Client, workspace_id: &str) -> Result<u64, Fa
 
 /// What the agents arguments ask of the host: nothing when none was named, and a cap named alone tightens the switch
 /// as it stands. The schema has already held the caps to whole numbers at their least.
-pub fn agents_asked(spawn: Option<&str>, max_machines: Option<&Number>, max_depth: Option<&Number>) -> Option<Map<String, Value>> {
+/// A spawn word as the switch it names: on or off, and any other word handed back unread.
+pub fn spawn_word(word: &str) -> Result<bool, String> {
+    match word {
+        "on" => Ok(true),
+        "off" => Ok(false),
+        other => Err(other.to_owned()),
+    }
+}
+
+/// What a spawn word and its caps ask for, nothing where none was named; a word that is neither on nor off is
+/// handed back unread.
+pub fn agents_asked(
+    spawn: Option<&str>,
+    max_machines: Option<&Number>,
+    max_depth: Option<&Number>,
+) -> Result<Option<Map<String, Value>>, String> {
     if spawn.is_none() && max_machines.is_none() && max_depth.is_none() {
-        return None;
+        return Ok(None);
     }
     let mut asked = Map::new();
     if let Some(spawn) = spawn {
-        asked.insert("spawn".to_owned(), Value::from(spawn == "on"));
+        asked.insert("spawn".to_owned(), Value::from(spawn_word(spawn)?));
     }
     if let Some(n) = max_machines {
         asked.insert("maxMachines".to_owned(), Value::Number(n.clone()));
@@ -307,7 +322,7 @@ pub fn agents_asked(spawn: Option<&str>, max_machines: Option<&Number>, max_dept
     if let Some(n) = max_depth {
         asked.insert("maxDepth".to_owned(), Value::Number(n.clone()));
     }
-    Some(asked)
+    Ok(Some(asked))
 }
 
 /// The switch as one line: off, or on with the machines it may hold.
@@ -447,6 +462,13 @@ pub fn fmt_rate(usd: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_spawn_word_is_on_or_off_and_any_other_is_handed_back() {
+        assert_eq!(spawn_word("on"), Ok(true));
+        assert_eq!(spawn_word("off"), Ok(false));
+        assert_eq!(spawn_word("yes"), Err("yes".to_owned()));
+    }
 
     #[test]
     fn to_fixed_rounds_as_javascript_does() {

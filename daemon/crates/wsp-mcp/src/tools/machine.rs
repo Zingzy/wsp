@@ -7,7 +7,7 @@ use serde_json::value::RawValue;
 use serde_json::{Number, Value};
 
 use super::workspace::{self, agents_asked, agents_line, awake, params, read, rebuilt_line, state_of, workspace_of, Agents, Phase};
-use super::{input, Answer, Refused, Tool};
+use super::{input, refused_field, Answer, Refused, Tool};
 use crate::failure::Failure;
 use crate::host::Host;
 use crate::record::fill;
@@ -173,11 +173,9 @@ async fn rename(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
 
 const AGENTS_NAME: &str = "workspaces_agents";
 
-pub const AGENTS: Tool = Tool {
-    name: AGENTS_NAME,
-    listed: include_str!("../../record/tools/workspaces_agents.json"),
-    call: |host, args| Box::pin(set_agents(host, args)),
-};
+const AGENTS_LISTED: &str = include_str!("../../record/tools/workspaces_agents.json");
+
+pub const AGENTS: Tool = Tool { name: AGENTS_NAME, listed: AGENTS_LISTED, call: |host, args| Box::pin(set_agents(host, args)) };
 
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
@@ -196,6 +194,7 @@ pub struct AgentsIn {
 async fn set_agents(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     let AgentsIn { workspace, spawn, max_machines, max_depth } = input(AGENTS_NAME, arguments)?;
     let asked = agents_asked(spawn.as_deref(), max_machines.as_ref(), max_depth.as_ref())
+        .map_err(|word| refused_field(AGENTS_NAME, AGENTS_LISTED, host.cloud(), "spawn", Value::from(word)))?
         .ok_or_else(|| Failure::usage(workspace::words().agents_nothing))?;
     let client = host.client().await?;
     let source = workspace_of(&client, &workspace).await?;

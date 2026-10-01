@@ -7,8 +7,6 @@
 
 import { realClock, type Clock } from "./clock.js";
 
-export const DEFAULT_IDLE_WINDOW_MS = 20 * 60_000;
-
 /** Backstop for a workspace whose auto-nap is off: long enough that the
  * provider never naps a person who chose "never", short enough that a crashed
  * runtime still stops the bill. Six hours is the longest timeoutMs the provider

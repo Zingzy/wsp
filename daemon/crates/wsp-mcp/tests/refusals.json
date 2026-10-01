@@ -72,6 +72,38 @@
     "text": "MCP error -32602: Input validation error: Invalid arguments for tool delete: Expected boolean, received string at confirm"
   },
   {
+    "tool": "computers_set",
+    "arguments": {
+      "computer": "attic",
+      "nap": 2.5
+    },
+    "text": "MCP error -32602: Input validation error: Invalid arguments for tool computers_set: Expected integer, received float at nap"
+  },
+  {
+    "tool": "computers_set",
+    "arguments": {
+      "computer": "attic",
+      "nap": -1
+    },
+    "text": "MCP error -32602: Input validation error: Invalid arguments for tool computers_set: Number must be greater than or equal to 0 at nap"
+  },
+  {
+    "tool": "computers_set",
+    "arguments": {
+      "computer": "attic",
+      "nap": 181
+    },
+    "text": "MCP error -32602: Input validation error: Invalid arguments for tool computers_set: Number must be less than or equal to 180 at nap"
+  },
+  {
+    "tool": "computers_set",
+    "arguments": {
+      "computer": "attic",
+      "spawn": "yes"
+    },
+    "text": "MCP error -32602: Input validation error: Invalid arguments for tool computers_set: Invalid enum value. Expected 'on' | 'off', received 'yes' at spawn"
+  },
+  {
     "tool": "new",
     "arguments": {
       "name": "n",
