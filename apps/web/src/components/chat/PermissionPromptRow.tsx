@@ -56,7 +56,7 @@ export function PermissionPromptRow({
   // already holds one, and a second would push it right of the lines the same agent wrote above it.
   const gutter = asker === undefined ? " px-1" : "";
   return (
-    <div className={`min-w-0 border-b border-border/60 pb-2 pt-1${gutter}`} data-permission-prompt={permission.askId} data-permission-open={open ? "true" : "false"}>
+    <div className={`min-w-0 pb-2 pt-1${gutter}`} data-permission-prompt={permission.askId} data-permission-open={open ? "true" : "false"}>
       <div className="flex min-w-0 flex-col gap-1">
         {asker === undefined ? null : (
           <span className="font-mono text-[11px] leading-4 text-muted-foreground" data-permission-asker="">
