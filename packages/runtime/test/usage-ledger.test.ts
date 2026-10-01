@@ -217,6 +217,53 @@ describe("what each account may still use", () => {
   });
 });
 
+describe("an account's banked resets", () => {
+  const reading = (credits?: HarnessLimit["credits"], keyed?: boolean): HarnessLimit => ({ windows: [{ kind: "session", usedPercent: 40 }], ...(credits !== undefined ? { credits } : {}), ...(keyed !== undefined ? { keyed } : {}) });
+  const full = { count: 2, credits: [{ id: "rc_1", status: "available" as const, expiresAt: NOON + 21 * DAY }, { id: "rc_2", status: "available" as const, expiresAt: NOON + 30 * DAY }] };
+  const file = (usage: ReturnType<typeof ledger>["usage"], limit: HarnessLimit) => usage.limit({ key: "codex:acct_1", agent: "codex", label: "dev@example.com", road: "named", computer: "here", limit });
+  const held = async (usage: ReturnType<typeof ledger>["usage"]) => (await usage.limits())[0]?.credits;
+
+  it("keeps a full reading's resets with when they were read in full, and a count-only reading of the same count keeps them", async () => {
+    const { usage, advance } = ledger();
+    await file(usage, reading(full));
+    expect(await held(usage)).toEqual({ ...full, readAt: NOON, detailAt: NOON });
+    advance(60_000);
+    await file(usage, reading({ count: 2 }));
+    expect(await held(usage)).toEqual({ ...full, readAt: NOON + 60_000, detailAt: NOON });
+  });
+
+  it("drops the details a count-only reading no longer matches, so the next full read is due", async () => {
+    const { usage, advance } = ledger();
+    await file(usage, reading(full));
+    advance(60_000);
+    await file(usage, reading({ count: 1 }));
+    expect(await held(usage)).toEqual({ count: 1, readAt: NOON + 60_000 });
+  });
+
+  it("leaves what it holds alone for a reading that carries no resets at all, as a rolling update and a sign-in's answer are", async () => {
+    const { usage, advance } = ledger();
+    await file(usage, reading(full));
+    advance(60_000);
+    await file(usage, reading());
+    expect(await held(usage)).toEqual({ ...full, readAt: NOON, detailAt: NOON });
+  });
+
+  it("holds none for an account signed in by key", async () => {
+    const { usage } = ledger();
+    await file(usage, reading({ count: 2 }, true));
+    expect(await held(usage)).toBeUndefined();
+  });
+
+  it("puts the resets on the account's row with the soonest an available one lapses", () => {
+    const credits = { count: 2, credits: [{ id: "rc_0", status: "redeeming" as const, expiresAt: NOON + DAY }, ...full.credits], readAt: NOON, detailAt: NOON };
+    const codex = { key: "codex:acct_1", agent: "codex", label: "dev@example.com", road: "named" as const, plan: "plus", windows: [{ kind: "session" as const, usedPercent: 34 }], readAt: NOON, computers: ["here"], credits };
+    const [row] = accountRows({ limits: [codex], places: [], nameOf: id => id, agentName: () => "Codex", printsLimits: () => true, vaulted: () => undefined });
+    expect(row?.credits).toEqual({ ...credits, nextExpiresAt: NOON + 21 * DAY });
+    const [bare] = accountRows({ limits: [{ ...codex, credits: { count: 2, readAt: NOON } }], places: [], nameOf: id => id, agentName: () => "Codex", printsLimits: () => true, vaulted: () => undefined });
+    expect(bare?.credits).toEqual({ count: 2, readAt: NOON });
+  });
+});
+
 describe("the rate table", () => {
   it("is read once a day and kept for when the network is gone", async () => {
     const { clock, advance } = fakeClock(NOON);

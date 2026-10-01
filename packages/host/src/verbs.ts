@@ -333,6 +333,7 @@ import {
   USAGE_SPLITS,
   USAGE_WORDS,
   accountState,
+  creditsWord,
   fmtTokens,
   freshIn,
   usedPrice,
@@ -815,8 +816,8 @@ export function usageTableLines(read: { accounts: readonly AccountRow[]; used: U
     read.accounts.length === 0
       ? ["No agent is signed in on any computer."]
       : table([
-          ["AGENT", "ACCOUNT", "COMPUTERS", "SESSION", "WEEK", "PLAN", "STATE"],
-          ...read.accounts.map(row => [agentName(row.agent), row.label, row.computers.join(", "), window(row, "session"), window(row, "week"), row.plan ?? "", accountState(row)]),
+          ["AGENT", "ACCOUNT", "COMPUTERS", "SESSION", "WEEK", "RESETS", "PLAN", "STATE"],
+          ...read.accounts.map(row => [agentName(row.agent), row.label, row.computers.join(", "), window(row, "session"), window(row, "week"), row.credits === undefined ? "" : creditsWord(row.credits, now), row.plan ?? "", accountState(row)]),
         ]);
   const used =
     read.used.rows.length === 0

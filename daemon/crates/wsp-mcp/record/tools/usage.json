@@ -119,6 +119,57 @@
                   "threads"
                 ],
                 "additionalProperties": false
+              },
+              "credits": {
+                "type": "object",
+                "properties": {
+                  "count": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "credits": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "available",
+                            "redeeming",
+                            "redeemed",
+                            "unknown"
+                          ]
+                        },
+                        "expiresAt": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "status"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "nextExpiresAt": {
+                    "type": "number"
+                  },
+                  "readAt": {
+                    "type": "number"
+                  },
+                  "detailAt": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "count",
+                  "readAt"
+                ],
+                "additionalProperties": false
               }
             },
             "required": [
@@ -427,6 +478,57 @@
                 "required": [
                   "tokensPerMinute",
                   "threads"
+                ],
+                "additionalProperties": false
+              },
+              "credits": {
+                "type": "object",
+                "properties": {
+                  "count": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "credits": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "available",
+                            "redeeming",
+                            "redeemed",
+                            "unknown"
+                          ]
+                        },
+                        "expiresAt": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "status"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "nextExpiresAt": {
+                    "type": "number"
+                  },
+                  "readAt": {
+                    "type": "number"
+                  },
+                  "detailAt": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "count",
+                  "readAt"
                 ],
                 "additionalProperties": false
               }

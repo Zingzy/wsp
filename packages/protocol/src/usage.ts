@@ -70,6 +70,8 @@ export const AccountLimit = z.object({
   keyed: z.boolean().optional(),
   readAt: z.number(),
   computers: z.array(z.string()),
+  /** The banked resets as last read, when, and when each was last read in full, where they ever were. */
+  credits: BankedResets.extend({ readAt: z.number(), detailAt: z.number().optional() }).optional(),
 });
 export type AccountLimit = z.infer<typeof AccountLimit>;
 
@@ -102,6 +104,8 @@ export const AccountRow = z.object({
   /** What the account's running threads are drawing on it now: tokens a minute over the last fifteen minutes, and how
    * many threads. Absent where nothing ran on it in that time. */
   burn: z.object({ tokensPerMinute: z.number(), threads: z.number().int() }).optional(),
+  /** The resets the plan has banked, with the soonest one that can still be spent lapses. */
+  credits: BankedResets.extend({ nextExpiresAt: z.number().optional(), readAt: z.number(), detailAt: z.number().optional() }).optional(),
 });
 export type AccountRow = z.infer<typeof AccountRow>;
 
@@ -302,6 +306,17 @@ export function resetsWord(resetsAt: number, now: number, timeZone?: string): st
   if (left < 86_400_000) return `resets in ${Math.floor(left / 3_600_000)} h`;
   const weekday = new Intl.DateTimeFormat("en-US", { weekday: "short", ...(timeZone !== undefined ? { timeZone } : {}) }).format(resetsAt);
   return `resets on ${weekday}`;
+}
+
+/** How long until a moment, as a row's quiet word: minutes under an hour, hours under a day, then days. */
+const spanWord = (left: number): string => (left < 3_600_000 ? `${Math.max(1, Math.round(left / 60_000))} min` : left < 86_400_000 ? `${Math.floor(left / 3_600_000)} h` : `${Math.floor(left / 86_400_000)} d`);
+
+/** The resets a plan has banked, as a row's word: how many, and when the first one lapses where the agent said. */
+export function creditsWord(credits: { count: number; nextExpiresAt?: number | undefined }, now: number): string {
+  if (credits.count === 0) return "none banked";
+  const banked = `${credits.count} banked`;
+  if (credits.nextExpiresAt === undefined || credits.nextExpiresAt <= now) return banked;
+  return `${banked}, ${credits.count === 1 ? "expires" : "first expires"} in ${spanWord(credits.nextExpiresAt - now)}`;
 }
 
 /** When a limit was last read, as the row's quiet word: the time today, else the weekday and time. */
