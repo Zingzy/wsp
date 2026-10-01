@@ -136,9 +136,9 @@ export function SettingsSidebar() {
     const open = openGroup === group.id;
     const dimmed = matches !== null && (matches.get(group.id)?.length ?? 0) === 0;
     const Glyph = group.glyph;
-    // The pages under a group stand whether it is open or not: a list that grew when a row was picked moved every
-    // group under it, and a sidebar whose rows change place between states is the one thing the eye cannot forgive.
-    const under = group.sub?.(ctx) ?? [];
+    // A group's pages stand only while it is open: computers and projects grow without bound, and listing them all
+    // under a closed group buried every group below.
+    const under = open ? (group.sub?.(ctx) ?? []) : [];
     const meta = group.meta?.(ctx);
     return (
       <li key={group.id} className="flex flex-col">

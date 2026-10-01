@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CODE_SIZES, DEFAULT_PREFERENCES, TEXT_SIZES, type PlaceView, type ProjectView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
 import { useStore } from "../src/protocol/store.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
-import { ABOUT_WORDS, FONT_WORDS, GLASS_WORDS, NOTIFY_WORDS, THEME_SECTION_WORDS, THEME_WORDS, TRANSPARENCY_WORDS, SETTINGS_WORDS, groupBlurbs } from "../src/settings/format.js";
+import { ABOUT_WORDS, FONT_WORDS, GLASS_WORDS, NOTIFY_WORDS, THEME_SECTION_WORDS, THEME_WORDS, TRANSPARENCY_WORDS, SETTINGS_WORDS } from "../src/settings/format.js";
 import { SETTINGS_GROUPS } from "../src/settings/groups.js";
 import { useSettingsStore } from "../src/settings/settingsStore.js";
 import { SYSTEM_DARK_QUERY, useFontEffect, useThemeEffect } from "../src/settings/theme.js";
@@ -102,20 +102,19 @@ describe("the settings sidebar", () => {
     expect(SETTINGS_GROUPS.filter(group => group.sub !== undefined).map(group => group.id)).toEqual(["computers", "projects"]);
   });
 
-  it("holds the room for every computer and project whichever group is open, so picking one moves no row below it", async () => {
+  it("lists a group's computers or projects only while that group is open, so a long list never buries the groups under it", async () => {
     useStore.setState({ places: [here, box], projects: [project("pr_spoo", "spoo")] });
     mountSettings({ api: settingsApi().api });
     await settle();
-    // Appearance is open and the two computers and the one project are already rows: the sub-rows are the
-    // sidebar's shape, not a state of it.
-    const before = ["group:general", "group:appearance", "group:computers", "computer:here", "computer:p_spoo", "group:usage", "group:projects", "project:pr_spoo", "group:devices", "group:account", "group:privacy", "group:keybindings", "group:about"];
-    expect(sidebarRowIds()).toEqual(before);
+    const groups = ["group:general", "group:appearance", "group:computers", "group:usage", "group:projects", "group:devices", "group:account", "group:privacy", "group:keybindings", "group:about"];
+    expect(sidebarRowIds()).toEqual(groups);
     fireEvent.click(document.querySelector("[data-k=settings-computers]")!);
-    expect(sidebarRowIds()).toEqual(before);
+    const computersOpen = ["group:general", "group:appearance", "group:computers", "computer:here", "computer:p_spoo", "group:usage", "group:projects", "group:devices", "group:account", "group:privacy", "group:keybindings", "group:about"];
+    expect(sidebarRowIds()).toEqual(computersOpen);
     fireEvent.click(document.querySelector("[data-row-id='computer:p_spoo']")!);
-    expect(sidebarRowIds()).toEqual(before);
+    expect(sidebarRowIds()).toEqual(computersOpen);
     fireEvent.click(document.querySelector("[data-k=settings-projects]")!);
-    expect(sidebarRowIds()).toEqual(before);
+    expect(sidebarRowIds()).toEqual(["group:general", "group:appearance", "group:computers", "group:usage", "group:projects", "project:pr_spoo", "group:devices", "group:account", "group:privacy", "group:keybindings", "group:about"]);
   });
 
   it("ArrowDown and ArrowUp walk the sidebar's rows in visual order, from the field into the groups and their sub-rows", async () => {
@@ -157,13 +156,11 @@ describe("search", () => {
     expect(lineLabels()).toEqual([ABOUT_WORDS.host]);
     expect(rowTitles()).toEqual([]);
     expect(document.querySelector("[data-k=search-group-about]")?.textContent).toBe(ABOUT_WORDS.title);
-    // A computer or a project under a dimmed group dims with it: left lit under a dimmed head it would read as
-    // the one row that matched.
     const dimmed = [...document.querySelectorAll<HTMLElement>("[data-slot=sidebar] [data-sidebar-row][data-dimmed]")].map(row => row.dataset["rowId"]);
-    expect(dimmed).toEqual(["group:general", "group:appearance", "group:computers", "computer:here", "group:usage", "group:projects", "project:pr_spoo", "group:devices", "group:account", "group:privacy", "group:keybindings"]);
+    expect(dimmed).toEqual(["group:general", "group:appearance", "group:computers", "group:usage", "group:projects", "group:devices", "group:account", "group:privacy", "group:keybindings"]);
     // Standing back is an opacity, never another ink: the sidebar's rest ink is darker than its muted ink on the
     // dark side, so an ink swap read brighter there and did nothing at all on light.
-    expect(document.querySelector<HTMLElement>("[data-row-id='computer:here']")?.className).toContain("opacity-50");
+    expect(document.querySelector<HTMLElement>("[data-row-id='group:general']")?.className).toContain("opacity-50");
     expect(document.querySelector<HTMLElement>("[data-row-id='group:computers']")?.className).not.toContain("text-sidebar-muted-foreground");
     // No row is the page while the results stand in the centre, so none is lifted.
     expect(liftedRowIds()).toEqual([]);
@@ -353,13 +350,11 @@ describe("Appearance", () => {
     expect(sets).toEqual([{ darkTheme: "pitch" }]);
   });
 
-  it("is the page's head over the mode, the themes of the side drawn, the Transparency switch and the type rows, each section under a head and one sentence, with no line under the pictures", async () => {
+  it("is the mode, the themes of the side drawn, the Transparency switch and the type rows, each section under a head and one sentence, with no page head over them and no line under the pictures", async () => {
     const { api } = settingsApi();
     mountSettings({ api });
     await settle();
-    const head = document.querySelector<HTMLElement>("[data-settings-page] [data-k=settings-page-head]")!;
-    expect(head.querySelector("h1")!.textContent).toBe(SETTINGS_WORDS.appearance);
-    expect(head.querySelector("p")!.textContent).toBe(groupBlurbs("").appearance);
+    expect(document.querySelector("[data-settings-page] [data-k=settings-page-head]")).toBeNull();
     expect(rowTitles()).toEqual([TRANSPARENCY_WORDS.title, FONT_WORDS.app, FONT_WORDS.textSize, FONT_WORDS.code, FONT_WORDS.codeSize]);
     const sections = [...document.querySelectorAll<HTMLElement>("[data-settings-page] [data-settings-card]")];
     expect(sections.map(c => [c.querySelector("[data-settings-head]")?.textContent, c.querySelector("[data-settings-lede]")?.textContent])).toEqual([

@@ -231,7 +231,7 @@ describe("Usage: what it is", () => {
     const { readings } = await mount();
     expect($("[data-usage-section=computers]")).toBeNull();
     expect(readings).toEqual([]);
-    expect(document.querySelector("[data-settings-page] header")?.textContent).not.toMatch(/busy/);
+    expect(document.querySelector("[data-settings-page]")?.textContent).not.toMatch(/busy/);
   });
 });
 

@@ -74,21 +74,6 @@ export const onceNamed = (here: string, sentence: (here: string) => string): str
  * is left ending on a dangling "on". */
 export const onName = (name: string): string => onceNamed(name, n => ` on ${n}`);
 
-/** The sentence under each settings page's name: what the page is for, before any row. `here` is the name of the
- * computer the host runs on. */
-export const groupBlurbs = (here: string) => ({
-  general: onceNamed(here, h => `How wsp behaves on ${h}.`),
-  appearance: "How wsp looks, on every screen that opens it.",
-  computers: "The computers your threads run on, and the clouds that lend them machines.",
-  projects: "The repos wsp makes tasks from, each on one computer.",
-  devices: "The phones and other computers paired with this wsp.",
-  account: "Your sign-in, which lets your other devices find this wsp.",
-  usage: "What each account may still use, and the tokens your agents used and what they cost.",
-  privacy: "What wsp asks of services outside your computers, and what it reads on this one.",
-  keybindings: "The keys wsp answers to.",
-  about: "Which wsp this is.",
-});
-
 /** What the Computers pages say beyond the words the wire already carries in PLACES_WORDS: the list row, a
  * computer's own page, its agents and the Remove dialog, which are this build's and are drawn nowhere else. No
  * word is in both. */
@@ -337,6 +322,7 @@ export const PROJECTS_WORDS = {
 /** Settings > Keybindings: the four cards' heads and the three keys that are not rules. */
 export const KEYBINDINGS_WORDS = {
   title: "Keybindings",
+  windowAndPanels: "Window and panels",
   workspacesAndThreads: "Tasks and threads",
   terminal: "Terminal, while it has focus",
   fixed: "Fixed",

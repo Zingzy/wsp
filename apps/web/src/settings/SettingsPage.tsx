@@ -12,10 +12,8 @@ import { useIsMobile } from "../hooks/useMediaQuery.js";
 import { useStore } from "../protocol/store.js";
 import { AddProjectDialog } from "../sidebar/AddProjectDialog.js";
 import { ComputerPage } from "./computers.js";
-import { SETTINGS_WORDS, groupBlurbs } from "./format.js";
-import { PageHead } from "./grid.js";
+import { SETTINGS_WORDS } from "./format.js";
 import { drawnGroups, groupById, searchGroup } from "./groups.js";
-import { hereName } from "./places.js";
 import { ProjectPage } from "./projects.js";
 import { Card, Cards, Line, Row } from "./rows.js";
 import { useSettingsAt, useSettingsContext, type SettingsContext } from "./settingsContext.js";
@@ -65,14 +63,7 @@ function SearchPage({ ctx, query }: { ctx: SettingsContext; query: string }) {
 function Page({ at, ctx }: { at: SettingsAt; ctx: SettingsContext }) {
   if (at.kind === "group") {
     const group = groupById(at.group);
-    return (
-      <>
-        <PageHead title={group.name}>
-          <p className="text-[13px] text-muted-foreground">{groupBlurbs(hereName(ctx.places))[at.group]}</p>
-        </PageHead>
-        <Cards cards={group.cards(ctx)} />
-      </>
-    );
+    return <Cards cards={group.cards(ctx)} />;
   }
   if (at.kind === "computer") {
     const place = ctx.places.find(p => p.id === at.id);

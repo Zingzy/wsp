@@ -7,6 +7,7 @@
 // and otherwise asks first and lands the runtime's answer as the toast.
 import { HueSelect, IconSelect } from "../projects/LookPicker.js";
 import { ProjectGlyph } from "../projects/look.js";
+import { GlyphFrame } from "./grid.js";
 import { useState } from "react";
 import { agentName } from "@wsp/catalog";
 import { HERE_PLACE_ID, fmtBytes, plural, projectInUseRefusal, type ProjectLook, type ProjectSource, type ProjectView } from "@wsp/protocol";
@@ -77,7 +78,11 @@ export function projectsCards(ctx: SettingsContext): SettingsCardData[] {
           kind: "row" as const,
           id: project.id,
           title: project.name,
-          lead: <ProjectGlyph projectId={project.id} />,
+          lead: (
+            <GlyphFrame>
+              <ProjectGlyph projectId={project.id} />
+            </GlyphFrame>
+          ),
           description: [computer, sourceWord(project.source)],
           mono: true,
           // A project nothing stands on reads 0: the count is loaded, and a blank where a sibling reads 3 is a

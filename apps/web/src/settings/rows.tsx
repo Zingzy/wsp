@@ -137,8 +137,8 @@ export function Row({ id, title, lead, mark, description, chips, mono = false, w
       </div>
     );
   const text = (
-    <div className="flex min-w-0 items-start gap-3">
-      {lead === undefined ? null : <span className="flex min-h-5 shrink-0 items-center">{lead}</span>}
+    <div className="flex min-w-0 items-center gap-3">
+      {lead === undefined ? null : <span className="flex shrink-0 items-center">{lead}</span>}
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <span className="flex min-h-5 min-w-0 flex-wrap items-center gap-x-2">
           <span data-settings-title className={cn(TITLE_CLASS, "min-w-0 break-words")}>

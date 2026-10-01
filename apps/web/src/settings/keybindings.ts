@@ -78,7 +78,7 @@ function fixedLines(read: KeybindingsRead): SettingsLineData[] {
 
 export function keybindingCards(rules: ReadonlyArray<KeybindingRule>, read: KeybindingsRead, edit?: KeybindingsEdit): SettingsCardData[] {
   return [
-    { id: "shell", items: linesOf(rules, SHELL, read, edit) },
+    { id: "shell", head: KEYBINDINGS_WORDS.windowAndPanels, items: linesOf(rules, SHELL, read, edit) },
     { id: "work", head: KEYBINDINGS_WORDS.workspacesAndThreads, items: linesOf(rules, WORK, read, edit) },
     { id: "terminal", head: KEYBINDINGS_WORDS.terminal, items: linesOf(rules, TERMINAL, read, edit) },
     { id: "fixed", head: KEYBINDINGS_WORDS.fixed, items: fixedLines(read) },
