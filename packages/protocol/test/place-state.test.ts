@@ -12,6 +12,9 @@ import {
   placeCapOf,
   placeSetRefusal,
   placeSettingsLine,
+  placeTakes,
+  settingFor,
+  napMsOf,
   placeRoom,
   placeSpendLimit,
   placeStateOf,
@@ -68,13 +71,38 @@ describe("what a place's settings read as in a line", () => {
   it("says each setting its kind takes at the value it runs at, with the default beside one the person set", () => {
     expect(placeSettingsLine({ ...spoo, capDefault: { threads: 2 } })).toBe("spoo: 2 threads at once (the default)");
     expect(placeSettingsLine({ ...spoo, cap: { threads: 1 }, capDefault: { threads: 2 }, settings: { threads: 1 } })).toBe("spoo: 1 thread at once (2 by default)");
-    expect(placeSettingsLine({ ...spoo, takesForks: true, capDefault: { threads: 2 }, napMs: NAP_AFTER_MS })).toBe("spoo: 2 threads at once (the default), naps after 20m (the default)");
-    expect(placeSettingsLine({ ...spoo, takesForks: true, capDefault: { threads: 2 }, napMs: null, settings: { napMs: null } })).toBe("spoo: 2 threads at once (the default), never naps (20m by default)");
-    expect(placeSettingsLine({ ...spoo, takesForks: true, capDefault: { threads: 2 }, napMs: 5 * 60_000, settings: { napMs: 5 * 60_000 } })).toBe("spoo: 2 threads at once (the default), naps after 5m (20m by default)");
+    const nap = { takesForks: true, napDefault: NAP_AFTER_MS };
+    expect(placeSettingsLine({ ...spoo, ...nap, capDefault: { threads: 2 }, napMs: NAP_AFTER_MS })).toBe("spoo: 2 threads at once (the default), naps after 20m (the default)");
+    expect(placeSettingsLine({ ...spoo, ...nap, capDefault: { threads: 2 }, napMs: null, settings: { napMs: null } })).toBe("spoo: 2 threads at once (the default), never naps (20m by default)");
+    expect(placeSettingsLine({ ...spoo, ...nap, capDefault: { threads: 2 }, napMs: 5 * 60_000, settings: { napMs: 5 * 60_000 } })).toBe("spoo: 2 threads at once (the default), naps after 5m (20m by default)");
+    // The default beside a set value is the one the row carries, which is the host's own and not a constant here.
+    expect(placeSettingsLine({ ...spoo, takesForks: true, napDefault: 60 * 60_000, capDefault: { threads: 2 }, napMs: 5 * 60_000, settings: { napMs: 5 * 60_000 } })).toBe("spoo: 2 threads at once (the default), naps after 5m (60m by default)");
     expect(placeSettingsLine({ ...solari, cap: { machines: 5, spendPerDayUsd: 2.5 }, capDefault: CLOUD_CAP_DEFAULT, settings: { machines: 5, spendPerDayUsd: 2.5 } })).toBe("solari: 5 machines at once (3 by default), $2.50 a day ($10 by default)");
     expect(NAP_AFTER_MS).toBe(20 * 60_000);
-    expect(placeSettingsLine({ ...spoo, capDefault: { threads: 2 }, spawn: AGENTS_ON })).toBe("spoo: 2 threads at once (the default), agents may spawn: up to 3 workspaces (the default)");
-    expect(placeSettingsLine({ ...spoo, capDefault: { threads: 2 }, spawn: { ...AGENTS_ON, spawn: false }, settings: { spawn: { ...AGENTS_ON, spawn: false } } })).toBe("spoo: 2 threads at once (the default), agents may not spawn (on, up to 3 by default)");
+    expect(placeSettingsLine({ ...spoo, capDefault: { threads: 2 }, spawn: AGENTS_ON, spawnDefault: AGENTS_ON })).toBe("spoo: 2 threads at once (the default), agents may spawn: up to 3 workspaces (the default)");
+    expect(placeSettingsLine({ ...spoo, capDefault: { threads: 2 }, spawn: { ...AGENTS_ON, spawn: false }, spawnDefault: AGENTS_ON, settings: { spawn: { ...AGENTS_ON, spawn: false } } })).toBe("spoo: 2 threads at once (the default), agents may not spawn (on, up to 3 by default)");
+  });
+});
+
+describe("one rule for each setting", () => {
+  it("runs a workspace under its own value, else its place's, else the default, a value that is off included", () => {
+    expect(settingFor(5, 10, 20)).toBe(5);
+    expect(settingFor(null, 10, 20)).toBeNull();
+    expect(settingFor(undefined, null, 20)).toBeNull();
+    expect(settingFor(undefined, 10, 20)).toBe(10);
+    expect(settingFor<number | null>(undefined, undefined, 20)).toBe(20);
+  });
+
+  it("turns the minutes a person names into the window, none of them never napping", () => {
+    expect(napMsOf(0)).toBeNull();
+    expect(napMsOf(45)).toBe(2_700_000);
+  });
+
+  it("says which settings a place takes, the nap only where it forks", () => {
+    expect(placeTakes({ kind: "computer", takesForks: false }, "nap")).toBe(false);
+    expect(placeTakes({ kind: "computer", takesForks: true }, "nap")).toBe(true);
+    expect(placeTakes({ kind: "computer", takesForks: false }, "spawn")).toBe(true);
+    expect(placeTakes({ kind: "provider", takesForks: true }, "threads")).toBe(false);
   });
 });
 

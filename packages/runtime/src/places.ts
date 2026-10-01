@@ -31,6 +31,8 @@ import {
   type PlaceSettingWord,
   AGENTS_ON,
   agentsFrom,
+  placeTakes,
+  settingFor,
   placeLinkTranscript,
   placeRefusalTranscript,
   isPlainPath,
@@ -857,13 +859,15 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     const settings = await settingsOf(row.id);
     const cap = placeCapOf(row, settings);
     const capDefault = placeCapOf(row);
+    const napDefault = opts.napMs ?? NAP_AFTER_MS;
     return {
       ...row,
       ...(cap !== undefined ? { cap } : {}),
       ...(capDefault !== undefined ? { capDefault } : {}),
       ...(Object.keys(settings).length > 0 ? { settings } : {}),
-      ...(row.takesForks === true ? { napMs: settings.napMs !== undefined ? settings.napMs : (opts.napMs ?? NAP_AFTER_MS) } : {}),
-      spawn: settings.spawn ?? AGENTS_ON,
+      ...(placeTakes(row, "nap") ? { napMs: settingFor(undefined, settings.napMs, napDefault), napDefault } : {}),
+      spawn: settingFor(undefined, settings.spawn, AGENTS_ON),
+      spawnDefault: AGENTS_ON,
       running: await recording.runningOn(row.id, ids),
     };
   };
@@ -1368,7 +1372,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       daemonVersion: record.report.daemonVersion,
       ...((): Pick<PlaceView, "behind"> => {
         const word = placeDaemonBehind(record.report);
-        return word === undefined ? {} : { behind: { word, fix: placeUpdateLine(record.name) } };
+        return word === undefined ? {} : { behind: { word, fix: placeUpdateLine(record.name), act: "update" } };
       })(),
       agents: record.report.agents,
       ...(record.report.agentVersions !== undefined ? { agentVersions: record.report.agentVersions } : {}),
@@ -1474,7 +1478,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       ...(here.diskFreeBytes !== undefined ? { diskFreeBytes: here.diskFreeBytes } : {}),
       ...(here.engine !== undefined ? { engine: here.engine } : {}),
       ...(daemonVersion !== undefined ? { daemonVersion } : {}),
-      ...(behind !== undefined && opts.hereDaemon !== undefined ? { behind: { word: behind, fix: opts.hereDaemon.fix } } : {}),
+      ...(behind !== undefined && opts.hereDaemon !== undefined ? { behind: { word: behind, fix: opts.hereDaemon.fix, act: "install" as const } } : {}),
       present: true,
       // This computer is where the person's own agents run, never something the host forks into: a copy of the
       // image on a runtime here is that place's own row, which is the one that says it forks.

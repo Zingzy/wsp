@@ -3248,7 +3248,15 @@ export const PlaceView = z.object({
   /** Set while this computer runs an older daemon than this wsp deploys: the word placeDaemonBehind says it in, and
    * what brings it level, `wsp add <name> --update` on a joined computer and the road this wsp was installed by on
    * the computer the host runs on. */
-  behind: z.object({ word: z.string(), fix: z.string() }).optional(),
+  behind: z
+    .object({
+      word: z.string(),
+      fix: z.string(),
+      /** update where the host can run the fix itself (places.update on a joined computer), install where the
+       * person runs it, so a page draws a button or a sentence without asking which kind of computer this is. */
+      act: z.enum(["update", "install"]),
+    })
+    .optional(),
   /** The catalog ids of the agents that computer found on itself, as it last reported them. */
   agents: z.array(z.string()).optional(),
   /** What each of those agents answered its own version flag with, as that computer last reported it. */
@@ -3312,9 +3320,14 @@ export const PlaceView = z.object({
   /** How long a workspace here with no window of its own runs quiet before it naps, the person's or the default;
    * null where it never naps. Absent on the computer the host runs on, whose workspaces are folders. */
   napMs: z.number().int().nullable().optional(),
+  /** The nap window this host gives a place nobody set one on: what a reset of `napMs` goes back to. Present where
+   * `napMs` is. */
+  napDefault: z.number().int().optional(),
   /** What the agents on a workspace here may ask of this host where it holds no switch of its own: the person's
-   * setting for this place, else AGENTS_ON. */
+   * setting for this place, else `spawnDefault`. */
   spawn: WorkspaceAgents.optional(),
+  /** The switch a place nobody set one on gives its workspaces: what a reset of `spawn` goes back to. */
+  spawnDefault: WorkspaceAgents.optional(),
   /** What its cap counts, at list time: threads running on a computer, machines holding a slot on a cloud. */
   running: z.number().int().nonnegative().optional(),
 });
@@ -6955,7 +6968,7 @@ export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
 export { hereName, isHere, isProviderPlace, placeName, placeOf, workspaceComputerName } from "./place-name.js";
 export { needsYouLine, threadNeedsYou, threadState, threadStateWord, threadUnread, threadUnseenAt, threadWordOf, waitingLine, type ThreadState } from "./thread-state.js";
-export { AGENTS_ON, CLOUD_CAP_DEFAULT, NAP_AFTER_MAX_MS, NAP_AFTER_MS, phaseHoldsSlot, placeAtLimitLine, placeCapOf, placeFullLine, placeSetRefusal, placeSettingKey, placeSettingsLine, placeRoom, placeSpendLimit, runningOn, THREAD_MEM_MB, threadsAtOnce, workspacePlace, workspacePlaceId, type PlacedThread, type PlacedWorkspace } from "./place-state.js";
+export { AGENTS_ON, CLOUD_CAP_DEFAULT, NAP_AFTER_MAX_MS, NAP_AFTER_MS, phaseHoldsSlot, placeAtLimitLine, placeCapOf, placeFullLine, placeSetRefusal, placeSettingKey, placeSettingsLine, placeTakes, settingFor, napMsOf, placeRoom, placeSpendLimit, runningOn, THREAD_MEM_MB, threadsAtOnce, workspacePlace, workspacePlaceId, type PlacedThread, type PlacedWorkspace } from "./place-state.js";
 export { MCP_SERVER_NAME, threadsFollowed, WSP_TOOL_TIMEOUT_SEC } from "./wsp-tools.js";
 export { type AbsentComputer, type AwayWord, absentComputer, actionRefusal, daemonSilent, ownDaemonDown, START_DAEMON_WORD, agentsKindRefusal, agentsMayDrive, awayMsOf, composerHeldLine, type CopyToDelete, deleteCopiesNotice, deleteNotice, unpushedLine, onDeleteOf, type StandsOn, UNNAMED_COMPUTER, goneRefusal, COMPUTER_LEFT, pausedOrPausing, notAnsweringYet, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, turnSpendWord, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, FORGET_NEEDS_GONE, goneRoadRefusal, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, workspaceAccess, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, whereWord, workspaceStateLine, workspaceStateOf, workspaceWord, type AbsentRoad, type AbsentRoadInput, absentRoad, BACK_OVER_SSH, backUrl, dialsBackWord, linkedOver, lastKnown, REPORTED_WORD, placeDialLine, placeNoDialLine, placeDialRoad, sshRoadOf, type PlaceDialRoad } from "./workspace-state.js";
 export * from "./agents-report.js";

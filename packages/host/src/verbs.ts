@@ -98,6 +98,7 @@ import {
   PlaceSettingWord,
   placeSettingsLine,
   NAP_AFTER_MAX_MS,
+  napMsOf,
   type PlaceSettingsAsk,
   ProjectPlan,
   RECIPE_TICKS,
@@ -778,9 +779,9 @@ export function computerLines(places: readonly PlaceView[], platform: "darwin" |
 }
 
 /** A flag that takes one word of a set, or nothing where it was left off. */
-function oneOf<T extends string>(name: string, words: readonly T[], value: string | undefined): T | undefined {
+function oneOf<T extends string>(name: string, words: readonly T[], value: string | undefined, on?: string): T | undefined {
   if (value === undefined) return undefined;
-  if (!(words as readonly string[]).includes(value)) throw usageRefusal(`--${name} takes one of ${words.join(", ")}, and got ${JSON.stringify(value)}.`, "Name one of those.");
+  if (!(words as readonly string[]).includes(value)) throw usageRefusal(`${flagFor(`--${name}`, on)} takes one of ${words.join(", ")}, and got ${JSON.stringify(value)}.`, "Name one of those.");
   return value as T;
 }
 
@@ -833,18 +834,23 @@ async function setComputer(client: HostClient, ref: string, set: PlaceSettingsAs
   return (await client.request<{ place: PlaceView }>("places.set", { placeId: place.id, ...set, ...(reset.length > 0 ? { reset } : {}) })).place;
 }
 
-/** A --nap word: whole minutes up to the longest window, or off, which never naps. */
-function napAsked(word: string): number | null {
-  if (word === "off") return null;
+/** A flag as a refusal names it: with the computer it was set for, where the line names one. */
+function flagFor(flagName: string, on: string | undefined): string {
+  return on === undefined ? flagName : `${flagName} for ${on}`;
+}
+
+/** A --nap word as minutes: whole ones up to the longest window, or off, which is none. */
+function napAsked(word: string, on: string): number {
+  if (word === "off") return 0;
   const minutes = Number(word);
-  if (!/^\d+$/.test(word) || minutes < 1 || minutes * 60_000 > NAP_AFTER_MAX_MS) throw usageRefusal(`--nap takes whole minutes from 1 to ${NAP_AFTER_MAX_MS / 60_000}, or off, and got ${JSON.stringify(word)}.`, "Write it as --nap 20 or --nap off.");
-  return minutes * 60_000;
+  if (!/^\d+$/.test(word) || minutes < 1 || minutes * 60_000 > NAP_AFTER_MAX_MS) throw usageRefusal(`${flagFor("--nap", on)} takes whole minutes from 1 to ${NAP_AFTER_MAX_MS / 60_000}, or off, and got ${JSON.stringify(word)}.`, "Write it as --nap 20 or --nap off.");
+  return minutes;
 }
 
 /** A --spend figure: dollars, zero or more. */
-function dollarsAsked(word: string): number {
+function dollarsAsked(word: string, on: string): number {
   const usd = Number(word);
-  if (word.trim() === "" || !Number.isFinite(usd) || usd < 0) throw usageRefusal(`--spend takes dollars a day, zero or more, and got ${JSON.stringify(word)}.`, "Write it as --spend 10.");
+  if (word.trim() === "" || !Number.isFinite(usd) || usd < 0) throw usageRefusal(`${flagFor("--spend", on)} takes dollars a day, zero or more, and got ${JSON.stringify(word)}.`, "Write it as --spend 10.");
   return usd;
 }
 
@@ -1891,24 +1897,24 @@ async function projectsHere(client: HostClient): Promise<Pick<ProjectView, "id" 
 
 /** What a --spawn line and its caps ask for, the one reading of them: nothing when none was named, so a workspace
  * made without them takes the default, and a cap named alone tightens the switch as it stands, on or off. */
-export function agentsAsked(spawn: string | boolean | undefined, maxMachines?: string | number, maxDepth?: string | number): Partial<WorkspaceAgents> | undefined {
-  const on = typeof spawn === "string" ? onOffWord(spawn) : spawn;
-  const machines = maxMachines === undefined ? undefined : countAsked("--max-machines", maxMachines, 0);
+export function agentsAsked(spawn: string | boolean | undefined, maxMachines?: string | number, maxDepth?: string | number, computer?: string): Partial<WorkspaceAgents> | undefined {
+  const on = typeof spawn === "string" ? onOffWord(spawn, computer) : spawn;
+  const machines = maxMachines === undefined ? undefined : countAsked("--max-machines", maxMachines, 0, computer);
   // One level is the least a switch that is on can mean; none of them is what --spawn off already says.
-  const depth = maxDepth === undefined ? undefined : countAsked("--max-depth", maxDepth, 1);
+  const depth = maxDepth === undefined ? undefined : countAsked("--max-depth", maxDepth, 1, computer);
   if (on === undefined && machines === undefined && depth === undefined) return undefined;
   return { ...(on !== undefined ? { spawn: on } : {}), ...(machines !== undefined ? { maxMachines: machines } : {}), ...(depth !== undefined ? { maxDepth: depth } : {}) };
 }
 
-function onOffWord(word: string): boolean {
+function onOffWord(word: string, computer?: string): boolean {
   if (word === "on") return true;
   if (word === "off") return false;
-  throw usageRefusal(`--spawn takes on or off, and got ${JSON.stringify(word)}.`, "Write --spawn on or --spawn off.");
+  throw usageRefusal(`${flagFor("--spawn", computer)} takes on or off, and got ${JSON.stringify(word)}.`, "Write --spawn on or --spawn off.");
 }
 
-function countAsked(flagName: string, word: string | number, least: number): number {
+function countAsked(flagName: string, word: string | number, least: number, computer?: string): number {
   const n = Number(word);
-  if (!Number.isInteger(n) || n < least) throw usageRefusal(`${flagName} takes a whole number of ${least === 0 ? "zero" : "one"} or more, and got ${JSON.stringify(String(word))}.`, `Write it as ${flagName} <n>.`);
+  if (!Number.isInteger(n) || n < least) throw usageRefusal(`${flagFor(flagName, computer)} takes a whole number of ${least === 0 ? "zero" : "one"} or more, and got ${JSON.stringify(String(word))}.`, `Write it as ${flagName} <n>.`);
   return n;
 }
 
@@ -3490,14 +3496,14 @@ export const ALL_VERBS: readonly Verb[] = [
       const machines = flag(ctx.flags, "machines");
       const spend = flag(ctx.flags, "spend");
       const nap = flag(ctx.flags, "nap");
-      const spawn = agentsAsked(flag(ctx.flags, "spawn"), flag(ctx.flags, "max-machines"), flag(ctx.flags, "max-depth"));
+      const spawn = agentsAsked(flag(ctx.flags, "spawn"), flag(ctx.flags, "max-machines"), flag(ctx.flags, "max-depth"), ref);
       const computer = await setComputer(await ctx.client(), ref, {
-        ...(threads !== undefined ? { threads: countAsked("--threads", threads, 1) } : {}),
-        ...(machines !== undefined ? { machines: countAsked("--machines", machines, 1) } : {}),
-        ...(spend !== undefined ? { spendPerDayUsd: dollarsAsked(spend) } : {}),
-        ...(nap !== undefined ? { napMs: napAsked(nap) } : {}),
+        ...(threads !== undefined ? { threads: countAsked("--threads", threads, 1, ref) } : {}),
+        ...(machines !== undefined ? { machines: countAsked("--machines", machines, 1, ref) } : {}),
+        ...(spend !== undefined ? { spendPerDayUsd: dollarsAsked(spend, ref) } : {}),
+        ...(nap !== undefined ? { napMs: napMsOf(napAsked(nap, ref)) } : {}),
         ...(spawn !== undefined ? { spawn } : {}),
-      }, flagList(ctx.flags, "reset").map(word => oneOf("reset", SETTING_RESETS, word)!));
+      }, flagList(ctx.flags, "reset").map(word => oneOf("reset", SETTING_RESETS, word, ref)!));
       ctx.out.emit({ computer }, placeSettingsLine(computer));
       return 0;
     },
@@ -3522,7 +3528,7 @@ export const ALL_VERBS: readonly Verb[] = [
           ...(threads !== undefined ? { threads } : {}),
           ...(machines !== undefined ? { machines } : {}),
           ...(spend !== undefined ? { spendPerDayUsd: spend } : {}),
-          ...(nap !== undefined ? { napMs: nap === 0 ? null : nap * 60_000 } : {}),
+          ...(nap !== undefined ? { napMs: napMsOf(nap) } : {}),
           ...(spawn !== undefined ? { spawn } : {}),
         }, reset ?? []);
         return asJson({ computer });

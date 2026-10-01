@@ -8,7 +8,7 @@ use serde_json::{Map, Number, Value};
 
 use super::target::place_id;
 use super::workspace::agents_asked;
-use super::{input, Answer, Refused, Tool};
+use super::{entry_in, held_field, input, input_refusal, refused_field, Answer, Refused, Tool};
 use crate::host::Host;
 use crate::record;
 
@@ -46,8 +46,9 @@ async fn call(host: std::sync::Arc<Host>, arguments: serde_json::Value) -> Resul
 
 const SET_NAME: &str = "computers_set";
 
-pub const SET: Tool =
-    Tool { name: SET_NAME, listed: include_str!("../../record/tools/computers_set.json"), call: |host, args| Box::pin(set(host, args)) };
+const SET_LISTED: &str = include_str!("../../record/tools/computers_set.json");
+
+pub const SET: Tool = Tool { name: SET_NAME, listed: SET_LISTED, call: |host, args| Box::pin(set(host, args)) };
 
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
@@ -100,11 +101,13 @@ async fn set(host: std::sync::Arc<Host>, arguments: Value) -> Result<Answer, Ref
             frame.insert(key.to_owned(), Value::Number(n));
         }
     }
-    if let Some(minutes) = nap.and_then(|n| n.as_u64()) {
-        let window = if minutes == 0 { Value::Null } else { Value::from(minutes * 60_000) };
+    if let Some(minutes) = &nap {
+        let window = nap_asked(entry_in(SET_LISTED, host.cloud()).unwrap_or_default(), minutes).map_err(Refused::Input)?;
         frame.insert("napMs".to_owned(), window);
     }
-    if let Some(asked) = agents_asked(spawn.as_deref(), max_machines.as_ref(), max_depth.as_ref()) {
+    if let Some(asked) = agents_asked(spawn.as_deref(), max_machines.as_ref(), max_depth.as_ref())
+        .map_err(|word| refused_field(SET_NAME, SET_LISTED, host.cloud(), "spawn", Value::from(word)))?
+    {
         frame.insert("spawn".to_owned(), Value::Object(asked));
     }
     if let Some(reset) = reset.filter(|r| !r.is_empty()) {
@@ -114,8 +117,53 @@ async fn set(host: std::sync::Arc<Host>, arguments: Value) -> Result<Answer, Ref
     Ok(Answer::json(&SetOut { computer: place }))
 }
 
+/// The nap window a call names in minutes, held to the entry's range in its own words: none of them never naps, the
+/// rule napMsOf keeps on the host's side.
+fn nap_asked(entry: &str, minutes: &Number) -> Result<Value, String> {
+    held_field(SET_NAME, entry, "nap", &Value::Number(minutes.clone()))?;
+    let Some(m) = minutes.as_u64() else { return Err(input_refusal(SET_NAME, &format!("nap cannot be read as {minutes}"))) };
+    Ok(if m == 0 { Value::Null } else { Value::from(m * 60_000) })
+}
+
 #[cfg(test)]
 mod tests {
+    use serde_json::{json, Number, Value};
+
+    use super::super::{entry_in, held_field};
+    use super::{nap_asked, SET};
+
+    fn minutes(v: Value) -> Number {
+        v.as_number().unwrap().clone()
+    }
+
+    /// What the TypeScript server refused this call with, off the record.
+    fn recorded(arguments: Value) -> String {
+        let all: Vec<Value> = serde_json::from_str(include_str!("../../tests/refusals.json")).unwrap();
+        let found = all.iter().find(|r| r["tool"] == "computers_set" && r["arguments"] == arguments).expect("a recorded refusal");
+        found["text"].as_str().unwrap().to_owned()
+    }
+
+    #[test]
+    fn a_nap_is_whole_minutes_in_range_or_none_and_anything_else_is_refused_in_the_inputs_words() {
+        let entry = entry_in(SET.listed, false).unwrap();
+        assert_eq!(nap_asked(entry, &minutes(json!(0))).unwrap(), Value::Null);
+        assert_eq!(nap_asked(entry, &minutes(json!(45))).unwrap(), json!(2_700_000));
+        for given in [json!(2.5), json!(-1), json!(181)] {
+            let refused = nap_asked(entry, &minutes(given.clone())).expect_err(&format!("{given} was taken"));
+            assert_eq!(refused, recorded(json!({ "computer": "attic", "nap": given })));
+        }
+    }
+
+    #[test]
+    fn a_spawn_word_past_the_check_is_refused_in_the_inputs_words() {
+        let entry = entry_in(SET.listed, false).unwrap();
+        assert_eq!(
+            held_field("computers_set", entry, "spawn", &json!("yes")).unwrap_err(),
+            recorded(json!({ "computer": "attic", "spawn": "yes" }))
+        );
+        assert_eq!(held_field("computers_set", entry, "spawn", &json!("on")), Ok(()));
+    }
+
     #[test]
     fn its_structs_are_the_recorded_schemas() {
         super::super::held::to_the_record::<super::In, super::Out>(super::TOOL.listed);

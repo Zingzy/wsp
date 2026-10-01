@@ -102,11 +102,19 @@
                   },
                   "fix": {
                     "type": "string"
+                  },
+                  "act": {
+                    "type": "string",
+                    "enum": [
+                      "update",
+                      "install"
+                    ]
                   }
                 },
                 "required": [
                   "word",
-                  "fix"
+                  "fix",
+                  "act"
                 ],
                 "additionalProperties": false
               },
@@ -459,7 +467,13 @@
                   }
                 ]
               },
+              "napDefault": {
+                "type": "integer"
+              },
               "spawn": {
+                "$ref": "#/properties/computers/items/properties/settings/properties/spawn"
+              },
+              "spawnDefault": {
                 "$ref": "#/properties/computers/items/properties/settings/properties/spawn"
               },
               "running": {
@@ -618,11 +632,19 @@
                   },
                   "fix": {
                     "type": "string"
+                  },
+                  "act": {
+                    "type": "string",
+                    "enum": [
+                      "update",
+                      "install"
+                    ]
                   }
                 },
                 "required": [
                   "word",
-                  "fix"
+                  "fix",
+                  "act"
                 ],
                 "additionalProperties": false
               },
@@ -975,7 +997,13 @@
                   }
                 ]
               },
+              "napDefault": {
+                "type": "integer"
+              },
               "spawn": {
+                "$ref": "#/properties/computers/items/properties/settings/properties/spawn"
+              },
+              "spawnDefault": {
                 "$ref": "#/properties/computers/items/properties/settings/properties/spawn"
               },
               "running": {

@@ -62,9 +62,9 @@
       },
       "replies": {
         "places.list": "{\"id\":1,\"ok\":true,\"places\":[{\"id\":\"place-9\",\"kind\":\"computer\",\"name\":\"attic\",\"label\":\"zingzy's \u0085box\u007f \\\"one\\\" \\\\ two\\nthree 🧪\",\"default\":false,\"os\":\"linux\",\"shape\":{\"cpu\":8,\"memMb\":16384},\"diskFreeBytes\":123456789012,\"present\":true,\"agentVersions\":{\"2\":\"an index key\",\"claude\":\"2.1.0\"},\"forks\":{\"running\":1,\"room\":2}},{\"id\":\"place-solari\",\"kind\":\"provider\",\"name\":\"solari\",\"default\":true,\"rateUsdPerHour\":0.30000000000000004}]}",
-        "places.set": "{\"id\":1,\"ok\":false,\"error\":\"solari takes machines at once and spend per day, not threads at once\",\"kind\":\"usage\"}"
+        "places.set": "{\"id\":1,\"ok\":false,\"error\":\"solari takes machines at once, spend per day, nap after and agents may start agents, not threads at once\",\"kind\":\"usage\"}"
       },
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"solari takes machines at once and spend per day, not threads at once\"}],\"structuredContent\":{\"error\":\"solari takes machines at once and spend per day, not threads at once\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"solari takes machines at once, spend per day, nap after and agents may start agents, not threads at once\"}],\"structuredContent\":{\"error\":\"solari takes machines at once, spend per day, nap after and agents may start agents, not threads at once\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
           "op": "places.list"
@@ -159,9 +159,9 @@
       },
       "replies": {
         "places.list": "{\"id\":1,\"ok\":true,\"places\":[{\"id\":\"place-9\",\"kind\":\"computer\",\"name\":\"attic\",\"label\":\"zingzy's \u0085box\u007f \\\"one\\\" \\\\ two\\nthree 🧪\",\"default\":false,\"os\":\"linux\",\"shape\":{\"cpu\":8,\"memMb\":16384},\"diskFreeBytes\":123456789012,\"present\":true,\"agentVersions\":{\"2\":\"an index key\",\"claude\":\"2.1.0\"},\"forks\":{\"running\":1,\"room\":2}},{\"id\":\"place-solari\",\"kind\":\"provider\",\"name\":\"solari\",\"default\":true,\"rateUsdPerHour\":0.30000000000000004}]}",
-        "places.set": "{\"id\":1,\"ok\":false,\"error\":\"nothing to set on attic: it takes threads at once\",\"kind\":\"usage\"}"
+        "places.set": "{\"id\":1,\"ok\":false,\"error\":\"nothing to set on attic: it takes threads at once, nap after and agents may start agents\",\"kind\":\"usage\"}"
       },
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"nothing to set on attic: it takes threads at once\"}],\"structuredContent\":{\"error\":\"nothing to set on attic: it takes threads at once\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"nothing to set on attic: it takes threads at once, nap after and agents may start agents\"}],\"structuredContent\":{\"error\":\"nothing to set on attic: it takes threads at once, nap after and agents may start agents\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
           "op": "places.list"

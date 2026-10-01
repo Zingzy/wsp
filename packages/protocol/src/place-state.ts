@@ -55,6 +55,15 @@ export const NAP_AFTER_MS = 20 * 60_000;
  * six hours is the longest it has accepted. */
 export const NAP_AFTER_MAX_MS = 3 * 60 * 60_000;
 
+/** The nap window a person names in minutes: none of them never naps. */
+export const napMsOf = (minutes: number): number | null => (minutes === 0 ? null : minutes * 60_000);
+
+/** What a workspace runs under for one setting: its own, else its place's, else the default. Null is a value (a nap
+ * that is off), so only an absent one falls through. The one chain the host's row and its idle and spawn rules read. */
+export function settingFor<T>(own: T | undefined, placed: T | undefined, fallback: T): T {
+  return own !== undefined ? own : placed !== undefined ? placed : fallback;
+}
+
 /** Whether a machine in this phase holds one of its cloud's slots: a napping machine holds none and a gone one is
  * not there, while one creating or waking already does. Phase alone, so a refusal can read it without asking the
  * provider about every machine. */
@@ -74,7 +83,7 @@ const dollars = (usd: number): string => (Number.isInteger(usd) ? `$${usd}` : fm
 const capNumber = (cap: PlaceCap | undefined, key: "threads" | "machines" | "spendPerDayUsd"): number | undefined =>
   cap !== undefined && key in cap ? (cap as Record<string, number>)[key] : undefined;
 
-type SettingView = Pick<PlaceView, "cap" | "capDefault" | "napMs" | "spawn">;
+type SettingView = Pick<PlaceView, "cap" | "capDefault" | "napMs" | "napDefault" | "spawn" | "spawnDefault">;
 /** What a row says a setting runs at: the whole phrase, and the figure alone that a default beside it takes. */
 type SettingSaid = { long: string; short: string };
 
@@ -95,7 +104,7 @@ const SETTINGS: Record<PlaceSettingWord, { key: keyof PlaceSettings; words: stri
     key: "napMs",
     words: "nap after",
     reads: (p, fallback) => {
-      const ms = fallback ? NAP_AFTER_MS : p.napMs;
+      const ms = fallback ? p.napDefault : p.napMs;
       if (ms === undefined) return undefined;
       return ms === null ? { long: "never naps", short: "never" } : { long: `naps after ${fmtDuration(ms)}`, short: fmtDuration(ms) };
     },
@@ -104,7 +113,7 @@ const SETTINGS: Record<PlaceSettingWord, { key: keyof PlaceSettings; words: stri
     key: "spawn",
     words: "agents may start agents",
     reads: (p, fallback) => {
-      const agents = fallback ? AGENTS_ON : p.spawn;
+      const agents = fallback ? p.spawnDefault : p.spawn;
       if (agents === undefined) return undefined;
       return { long: agentsLine(agents), short: agents.spawn ? `on, up to ${agents.maxMachines}` : "off" };
     },
@@ -179,7 +188,12 @@ export function placeSetRefusal(place: Pick<PlaceView, "kind" | "name" | "takesF
 /** The settings a place takes: its kind's, less the nap on a place that forks nothing, whose workspaces are
  * folders on the computer itself and never nap. */
 function settingsOn(place: Pick<PlaceView, "kind" | "takesForks">): readonly PlaceSettingWord[] {
-  return PLACE_CAPS[place.kind].keys.filter(word => word !== "nap" || place.takesForks === true);
+  return PLACE_CAPS[place.kind].keys.filter(word => placeTakes(place, word));
+}
+
+/** Whether a place takes one setting: its kind's, less the nap where it forks nothing. */
+export function placeTakes(place: Pick<PlaceView, "kind" | "takesForks">, word: PlaceSettingWord): boolean {
+  return PLACE_CAPS[place.kind].keys.includes(word) && (word !== "nap" || place.takesForks === true);
 }
 
 const andList = (words: readonly string[]): string => (words.length < 2 ? words.join("") : `${words.slice(0, -1).join(", ")} and ${words.at(-1)}`);

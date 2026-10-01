@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type WebSocket from "ws";
 import {
   AGENTS_ON,
+  placeSettingsLine,
   dayStart,
   spendCapRefusal,
   NO_PLACE_INSTALLER,
@@ -1037,9 +1038,12 @@ describe("a place's nap after", () => {
       await until(async () => (await idleAt(first.id)) !== undefined);
       expect(await idleAt(first.id)).toBe(fc.clock.now() + 60 * MIN);
       const c = await WsClient.connect(srv.port, { token: "host-token" });
-      expect((await placesOf()).find(p => p.id === "solari")).toMatchObject({ napMs: 60 * MIN });
+      expect((await placesOf()).find(p => p.id === "solari")).toMatchObject({ napMs: 60 * MIN, napDefault: 60 * MIN });
       fc.advance(MIN);
-      expect(await c.request("places.set", { placeId: "solari", napMs: 5 * MIN })).toMatchObject({ ok: true, place: { napMs: 5 * MIN, settings: { napMs: 5 * MIN } } });
+      const fiveMin = (await c.request("places.set", { placeId: "solari", napMs: 5 * MIN })) as { place: PlaceView };
+      expect(fiveMin).toMatchObject({ ok: true, place: { napMs: 5 * MIN, napDefault: 60 * MIN, settings: { napMs: 5 * MIN } } });
+      // The line says the default this host runs, which is the row's own.
+      expect(placeSettingsLine(fiveMin.place)).toContain("naps after 5m (60m by default)");
       // A new window counts from when the person set it, on every workspace there that has none of its own.
       expect(await idleAt(first.id)).toBe(fc.clock.now() + 5 * MIN);
       expect(await idleAt(own.id)).toBe(Date.parse("2026-09-16T12:00:00.000Z") + 30 * MIN);
@@ -1078,7 +1082,7 @@ describe("whether agents may start agents, as a place's default", () => {
       runtime = createRuntime({ backend, places: wiredPlace("solari", backend), store: memoryStore(), adapters: {}, placeLinks: wiring(newPlaceKeyPair(), { id: "solari", rateUsdPerHour: 0.11 }), local: fakeLocal(root) });
       srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
       const c = await WsClient.connect(srv.port, { token: "host-token" });
-      expect((await placesOf()).find(p => p.id === "solari")!.spawn).toEqual(AGENTS_ON);
+      expect((await placesOf()).find(p => p.id === "solari")).toMatchObject({ spawn: AGENTS_ON, spawnDefault: AGENTS_ON });
       const before = await createOn(runtime, { on: "solari", golden: "snap_g", name: "before" });
       expect(await c.request("places.set", { placeId: "solari", spawn: { spawn: false } })).toMatchObject({ ok: true, place: { spawn: { ...AGENTS_ON, spawn: false }, settings: { spawn: { ...AGENTS_ON, spawn: false } } } });
       expect(await c.request("places.set", { placeId: HERE_PLACE_ID, spawn: { maxMachines: 1 } })).toMatchObject({ ok: true, place: { spawn: { ...AGENTS_ON, maxMachines: 1 } } });
@@ -1115,9 +1119,9 @@ describe("a computer that runs an older wsp than this host", () => {
       sockets.push(level.client.ws);
       const word = placeDaemonBehind({ daemonVersion: DAEMON_VERSION - 1 })!;
       const rows = await placesOf();
-      expect(rows.find(p => p.id === old.placeId)).toMatchObject({ daemonVersion: DAEMON_VERSION - 1, behind: { word, fix: "wsp add spoo --update" } });
+      expect(rows.find(p => p.id === old.placeId)).toMatchObject({ daemonVersion: DAEMON_VERSION - 1, behind: { word, fix: "wsp add spoo --update", act: "update" } });
       expect(rows.find(p => p.id === level.placeId)!.behind).toBeUndefined();
-      expect(rows.find(p => p.id === HERE_PLACE_ID)).toMatchObject({ daemonVersion: DAEMON_VERSION - 1, behind: { word, fix: "updating the wsp app" } });
+      expect(rows.find(p => p.id === HERE_PLACE_ID)).toMatchObject({ daemonVersion: DAEMON_VERSION - 1, behind: { word, fix: "updating the wsp app", act: "install" } });
       held = DAEMON_VERSION;
       const levelled = (await placesOf()).find(p => p.id === HERE_PLACE_ID)!;
       expect(levelled.daemonVersion).toBe(DAEMON_VERSION);

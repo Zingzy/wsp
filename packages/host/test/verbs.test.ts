@@ -4015,7 +4015,7 @@ describe("wsp verbs over the host", () => {
       expect(here.io.errors[0]).toContain("not nap after");
       const long = await run("computers", "set", forks.id, "--nap", "181");
       expect(long.code).toBe(EXIT_CODES.usage);
-      expect(long.io.errors[0]).toBe('wsp computers set: --nap takes whole minutes from 1 to 180, or off, and got "181". Write it as --nap 20 or --nap off.');
+      expect(long.io.errors[0]).toBe(`wsp computers set: --nap for ${forks.id} takes whole minutes from 1 to 180, or off, and got "181". Write it as --nap 20 or --nap off.`);
     });
 
     it("sets whether agents there may start agents for every workspace that says nothing of its own, and a workspace reads it", async () => {
@@ -4030,7 +4030,7 @@ describe("wsp verbs over the host", () => {
       expect((await rt.workspaces.list()).find(w => w.name === "mine")!.agents).toEqual({ spawn: true, maxMachines: 1, maxDepth: 1 });
       const wrong = await run("computers", "set", HERE_PLACE_ID, "--spawn", "yes");
       expect(wrong.code).toBe(EXIT_CODES.usage);
-      expect(wrong.io.errors[0]).toContain("--spawn takes on or off");
+      expect(wrong.io.errors[0]).toContain("--spawn for here takes on or off");
       expect((await run("computers", "set", HERE_PLACE_ID, "--reset", "spawn")).code).toBe(0);
       expect((await rt.workspaces.list()).find(w => w.name === "mine")!.agents).toEqual(AGENTS_ON);
     });
@@ -4038,10 +4038,13 @@ describe("wsp verbs over the host", () => {
     it("refuses a count that is not a whole number of one or more, a word reset does not take, and a line that sets nothing, as usage", async () => {
       const zero = await run("computers", "set", HERE_PLACE_ID, "--threads", "0");
       expect(zero.code).toBe(EXIT_CODES.usage);
-      expect(zero.io.errors[0]).toBe('wsp computers set: --threads takes a whole number of one or more, and got "0". Write it as --threads <n>.');
+      expect(zero.io.errors[0]).toBe('wsp computers set: --threads for here takes a whole number of one or more, and got "0". Write it as --threads <n>.');
+      // Every refusal of a flag's shape names the computer, as the host's own refusals on this verb do.
+      const depth = await run("computers", "set", HERE_PLACE_ID, "--max-depth", "0");
+      expect(depth.io.errors[0]).toContain('--max-depth for here takes a whole number of one or more, and got "0"');
       const wrong = await run("computers", "set", HERE_PLACE_ID, "--reset", "everything");
       expect(wrong.code).toBe(EXIT_CODES.usage);
-      expect(wrong.io.errors[0]).toContain("--reset takes one of threads");
+      expect(wrong.io.errors[0]).toContain("--reset for here takes one of threads");
       const nothing = await run("computers", "set", HERE_PLACE_ID);
       expect(nothing.code).toBe(EXIT_CODES.usage);
       expect(nothing.io.errors[0]).toContain("nothing to set on");
