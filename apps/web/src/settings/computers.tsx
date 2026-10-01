@@ -35,7 +35,7 @@ import { useSidebarProjects, useStore } from "../protocol/store.js";
 import { DialButton, useDialPlace } from "./AbsentRoad.js";
 import { AddComputer } from "./AddComputer.js";
 import { ComputerGlyph, useComputerIcon } from "./ComputerGlyph.js";
-import { ADD_COMPUTER_WORDS, PLACE_STATE_WORDS, VALUE, WHERE_WORDS, capitalised } from "./format.js";
+import { ADD_COMPUTER_WORDS, PLACE_STATE_WORDS, WHERE_WORDS, capitalised } from "./format.js";
 import { Chevron, GlyphFrame, Grid, GridHead, GridName, GridRow, LIST_COLUMNS, Num, PAGE_COLUMNS, PageCrumbs, PageHead, StateCell, type HeadCell } from "./grid.js";
 import { copyOn } from "./image.js";
 import { ImageCard, useImageStanding } from "./ImageCard.js";
@@ -102,7 +102,7 @@ const COMPUTER_HEAD: readonly HeadCell[] = [
   { word: WHERE_WORDS.heads.computer },
   { word: WHERE_WORDS.heads.cores, num: true, wideOnly: true },
   { word: WHERE_WORDS.heads.memory, num: true, wideOnly: true },
-  { word: WHERE_WORDS.heads.threads },
+  { word: WHERE_WORDS.heads.threads, num: true },
 ];
 
 /** A row as the search reads and draws it: the name a person types to find a computer, over its state. */
@@ -144,9 +144,9 @@ export function computersCards(ctx: SettingsContext): SettingsCardData[] {
   const cloudsBody = (
     <div className="flex flex-col gap-2">
       {clouds.length === 0 ? null : (
-        <Grid id="clouds" head={<GridHead columns={LIST_COLUMNS} cells={[{ word: H.cloud }]} />}>
+        <Grid id="clouds" head={<GridHead columns={LIST_COLUMNS} cells={[{ word: H.cloud }, { word: "", wideOnly: true }, { word: "", wideOnly: true }, { word: H.threads, num: true }]} />}>
           {clouds.map(place => (
-            <CloudListRow key={place.id} place={place} cell={stateCellAt(ctx, place)} open={go(place)} ctx={ctx} />
+            <CloudListRow key={place.id} place={place} running={running[place.id] ?? 0} cell={stateCellAt(ctx, place)} open={go(place)} ctx={ctx} />
           ))}
         </Grid>
       )}
@@ -192,22 +192,21 @@ export function ComputerListRow({ place, running, cell, open, ctx }: { place: Pl
       <Num k="memory" wideOnly>
         {place.shape === undefined ? undefined : fmtMemGb(place.shape.memMb)}
       </Num>
-      <span data-k="threads" className={VALUE}>
-        {running}
-      </span>
+      <Num k="threads">{running}</Num>
       <PlaceState place={place} cell={cell} {...(open === undefined ? {} : { onSignIn: open })} />
       {open === undefined ? <span /> : <Chevron />}
     </GridRow>
   );
 }
 
-/** One cloud on the list: its name and its state. What runs there and its room wait on the host reading them. */
-function CloudListRow({ place, cell, open, ctx }: { place: PlaceView; cell: PlaceStateCell; open: () => void; ctx: SettingsContext }) {
+/** One cloud on the list: its name, the threads running on its machines and its state. */
+function CloudListRow({ place, running, cell, open, ctx }: { place: PlaceView; running: number; cell: PlaceStateCell; open: () => void; ctx: SettingsContext }) {
   const menu = useRowMenu(place, ctx);
   return (
     <GridRow columns={LIST_COLUMNS} open={open} onContextMenu={menu} {...(cell.why === undefined ? {} : { title: cell.why })} attrs={{ "data-place-row": place.id }}>
       <GridName glyph={placeGlyph(place)} name={placeName(place)} />
-      <span className="col-span-3 max-md:col-auto" />
+      <span className="col-span-2 max-md:hidden" />
+      <Num k="threads">{running}</Num>
       <PlaceState place={place} cell={cell} onSignIn={open} />
       <Chevron />
     </GridRow>

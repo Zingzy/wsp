@@ -7,14 +7,13 @@
 // with what it says.
 import { ChevronRightIcon } from "lucide-react";
 import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
-import { GROUP_LABEL } from "../lib/microLabel.js";
 import { cn } from "../lib/utils.js";
 import { VALUE } from "./format.js";
 import { CARD_SURFACE } from "./rows.js";
 
 /** The Computers page's template, shared by its two lists so the state column is one line across both. Below
  * 768 px the name, one load, the state and the chevron stand. */
-export const LIST_COLUMNS = "grid-cols-[minmax(0,1fr)_48px_64px_140px_100px_14px] max-md:grid-cols-[minmax(0,1fr)_auto_100px_14px]";
+export const LIST_COLUMNS = "grid-cols-[minmax(0,1fr)_56px_72px_64px_100px_14px] max-md:grid-cols-[minmax(0,1fr)_auto_100px_14px]";
 /** A computer's or a cloud's page: the name, a version, and the action at the right. */
 export const PAGE_COLUMNS = "grid-cols-[minmax(0,1fr)_64px_280px] max-md:grid-cols-[minmax(0,1fr)_auto]";
 
@@ -37,12 +36,13 @@ export interface HeadCell {
   readonly wideOnly?: boolean;
 }
 
-/** The header row, on the list's template, or on its own where the section's rows are not grid rows. */
+/** The header row, on the list's template, or on its own where the section's rows are not grid rows. The section's
+ * name stands on the card's outer edge like every settings head; the column words sit over their values. */
 export function GridHead({ columns, cells }: { columns?: string; cells: readonly HeadCell[] }) {
   return (
-    <div data-grid-head className={cn("mb-2.5 min-h-7 items-end gap-x-4 border-x border-transparent px-4", columns === undefined ? "flex" : cn("grid", columns))}>
+    <div data-grid-head className={cn("mb-4 min-h-7 items-end gap-x-4 border-x border-transparent px-4", columns === undefined ? "flex" : cn("grid", columns))}>
       {cells.map((cell, at) => (
-        <span key={`${at}-${cell.word}`} className={cn("whitespace-nowrap", at === 0 ? "text-sm leading-5 font-normal text-foreground/70" : cn(GROUP_LABEL, "text-muted-foreground"), cell.num === true && "text-right", cell.wideOnly === true && WIDE_ONLY)}>
+        <span key={`${at}-${cell.word}`} className={cn("whitespace-nowrap text-sm leading-5 font-normal", at === 0 ? "-ml-[17px] text-foreground/70" : "text-muted-foreground", cell.num === true && "text-right", cell.wideOnly === true && WIDE_ONLY)}>
           {cell.word}
         </span>
       ))}

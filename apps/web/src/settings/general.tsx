@@ -1,14 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Settings > General: the editor Open in editor opens a file in, picked from
 // the editors installed on the computer the host runs on, whether they open a
-// workspace on another computer over ssh, and whether the desktop app keeps
-// this computer awake while a thread works on it.
+// workspace on another computer over ssh, whether the desktop app keeps this
+// computer awake while a thread works on it, and whether a notification makes a
+// sound, with a play beside it where the shell can.
 import type { EditorId } from "@wsp/protocol";
+import { Play } from "lucide-react";
+import { Button } from "../components/ui/button.js";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../components/ui/select.js";
 import { Switch } from "../components/ui/switch.js";
 import { EDITOR_SSH_WORDS } from "../files/EditorConsent.js";
 import { EditorGlyph } from "../files/EditorGlyph.js";
-import { AWAKE_WORDS, GENERAL_WORDS } from "./format.js";
+import { desktopBridge } from "../lib/desktopShell.js";
+import { AWAKE_WORDS, GENERAL_WORDS, NOTIFY_WORDS } from "./format.js";
 import { hereName } from "./places.js";
 import type { SettingsCardData } from "./rows.js";
 import type { SettingsContext } from "./settingsContext.js";
@@ -19,6 +23,7 @@ export function generalCards(ctx: SettingsContext): SettingsCardData[] {
   const picked = editors.find(editor => editor.id === ctx.preferences.editor) ?? editors[0];
   const nameOf = (id: EditorId): string => editors.find(editor => editor.id === id)?.name ?? id;
   const keepAwake = AWAKE_WORDS.keepAwake(hereName(ctx.places));
+  const play = desktopBridge()?.playNoticeSound;
   return [
     {
       id: "editor",
@@ -78,6 +83,29 @@ export function generalCards(ctx: SettingsContext): SettingsCardData[] {
           title: keepAwake,
           description: AWAKE_WORDS.keepAwakeDescription,
           control: <Switch data-k="keep-awake" aria-label={keepAwake} checked={ctx.preferences.keepAwake} onCheckedChange={keepAwake => ctx.setPreferences({ keepAwake })} />,
+        },
+      ],
+    },
+    {
+      id: "notifications",
+      head: NOTIFY_WORDS.head,
+      lede: NOTIFY_WORDS.lede,
+      items: [
+        {
+          kind: "row",
+          id: "notify-sound",
+          title: NOTIFY_WORDS.sound,
+          description: NOTIFY_WORDS.soundDescription,
+          control: (
+            <span className="flex items-center gap-3">
+              {play === undefined ? null : (
+                <Button data-k="notify-play" variant="ghost" size="icon" aria-label={NOTIFY_WORDS.play} title={NOTIFY_WORDS.play} disabled={!ctx.preferences.notifySound} onClick={() => play()}>
+                  <Play />
+                </Button>
+              )}
+              <Switch data-k="notify-sound" aria-label={NOTIFY_WORDS.sound} checked={ctx.preferences.notifySound} onCheckedChange={notifySound => ctx.setPreferences({ notifySound })} />
+            </span>
+          ),
         },
       ],
     },

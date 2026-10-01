@@ -183,7 +183,7 @@ describe("the Computers list", () => {
     await mountComputers(computersApi().api);
     const grids = [...document.querySelectorAll<HTMLElement>("[data-settings-page] [data-grid]")];
     expect(grids.map(g => g.dataset["grid"])).toEqual(["computers", "clouds"]);
-    expect(grids.map(g => [...g.querySelectorAll("[data-grid-head] span")].map(c => c.textContent))).toEqual([["Computer", "Cores", "Memory", "Threads"], ["Cloud"]]);
+    expect(grids.map(g => [...g.querySelectorAll("[data-grid-head] span")].map(c => c.textContent))).toEqual([["Computer", "Cores", "Memory", "Threads"], ["Cloud", "", "", "Threads"]]);
     // The two lists share one column template, so the state column is one line down the page.
     expect(new Set(grids.map(g => g.querySelector("[data-grid-row]")?.className.match(/grid-cols-\[[^\s]+\]/)?.[0])).size).toBe(1);
     expect(nameOf("solari")).toBe("Solari");

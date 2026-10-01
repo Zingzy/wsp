@@ -24,6 +24,7 @@ export const SETTINGS_WORDS = {
   restore: "Restore defaults",
   appearance: "Appearance",
   theme: "Theme",
+  mode: "Mode",
   /** The grid of one side's themes, named by the side's word. */
   themesOf: (side: string) => `${side} themes`,
 } as const;
@@ -48,7 +49,8 @@ export const FONT_WORDS = {
 
 /** Settings > Appearance's theme section. */
 export const THEME_SECTION_WORDS = {
-  lede: "The side wsp draws, and the theme on each side. Point at a theme to see this window in it.",
+  lede: "Point at a theme to see this window in it.",
+  modeLede: "Light, dark, or whichever side your Mac is on.",
 } as const;
 
 /** Settings > Appearance's glass section, which holds the Transparency switch. */
@@ -77,7 +79,7 @@ export const onName = (name: string): string => onceNamed(name, n => ` on ${n}`)
 export const groupBlurbs = (here: string) => ({
   general: onceNamed(here, h => `How wsp behaves on ${h}.`),
   appearance: "How wsp looks, on every screen that opens it.",
-  computers: onceNamed(here, h => `The computers your threads run on, and the clouds that lend them machines. ${h} is the first one.`),
+  computers: "The computers your threads run on, and the clouds that lend them machines.",
   projects: "The repos wsp makes tasks from, each on one computer.",
   devices: "The phones and other computers paired with this wsp.",
   account: "Your sign-in, which lets your other devices find this wsp.",
