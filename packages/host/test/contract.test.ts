@@ -13,7 +13,7 @@ import { type AddressInfo } from "node:net";
 import { promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { CLOUD_ENV, DAEMON_TOKEN_PATH, pushedForChildLine, EXIT_CODES, SCOPED_MCP_ARG, scopedNoPairLine, HERE_PLACE_ID, shellQuote, TURN_TOKEN_ENV, VerbFailure, WS_PATH } from "@wsp/protocol";
+import { CLOUD_ENV, DAEMON_TOKEN_PATH, noSuchAccountLine, pushedForChildLine, EXIT_CODES, SCOPED_MCP_ARG, scopedNoPairLine, HERE_PLACE_ID, shellQuote, TURN_TOKEN_ENV, VerbFailure, WS_PATH } from "@wsp/protocol";
 import { CLOUD_ON } from "../src/cloud.js";
 import { copyKey, createRuntime, DAEMON_TOKEN_SET, localExecStream, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import { LocalBackend } from "@wsp/engine";
@@ -554,6 +554,12 @@ describe("the agent contract on the command line and the tool door", () => {
     expect(missing.code).toBe(EXIT_CODES.usage);
     expect(missing.io.lines).toEqual([]);
     expect(failure(missing.io)).toEqual({ error: "no workspace nope", class: "usage", exit: 3 });
+
+    // A spend names an account the host holds, or is refused before anything is asked or spent.
+    const account = await run("usage", "reset", "nope", "--yes", "--json");
+    expect(account.code).toBe(EXIT_CODES.usage);
+    expect(account.io.lines).toEqual([]);
+    expect(failure(account.io)).toEqual({ error: noSuchAccountLine("nope"), class: "usage", exit: 3 });
   });
 
   it("an auth refusal exits 2: the host refusing the token, or no token file to read", async () => {

@@ -905,6 +905,8 @@ describe("runtime wire types", () => {
       "workspaces.fix", "workspaces.update", "workspaces.merge", "workspaces.mergeIn",
       // A start and a review make a copy and start an agent, and a post writes on the git host as the person.
       "workspaces.start", "workspaces.review", "workspaces.reviewPost",
+      // A reset spends what the person's plan has banked, with no undo.
+      "usage.reset",
     ];
     for (const op of held) {
       expect(wire.RUNTIME_OPS, op).toContain(op);

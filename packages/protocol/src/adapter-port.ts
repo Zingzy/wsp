@@ -378,3 +378,34 @@ export type SessionAsker = (question: AsideQuestion) => Promise<AsideAnswer>;
  * (resumesAt) or cannot cut at all.
  */
 export type SessionReverter = (o: { session: string; beforeTurn: string; cwd?: string }) => Promise<void>;
+
+/** Where a reset script runs: the agent's own home on that computer, the variables its launch exports (the PATH it
+ * finds the binary on among them), and the person's program in place of the agent's word. */
+export interface ResetRoad {
+  home: string;
+  env?: Readonly<Record<string, string | undefined>>;
+  launch?: AgentLaunch;
+}
+
+/** The sign-in and the plan's limits as a reset script read them: keyed is a sign-in by API key, which banks none, and
+ * limit carries the account the agent named and the resets in full. */
+export interface ResetReading {
+  keyed: boolean;
+  limit?: HarnessLimit;
+}
+
+/** What a spend came back with: no answer to the spend at all, which may still have landed; an outcome in the agent's
+ * own word with the limits read after it; or a refusal in its words, tooOld where the agent has no such request. */
+export type ResetSpend = { answered: false } | { answered: true; outcome: string; limit?: HarnessLimit } | { answered: true; refused: string; tooOld: boolean };
+
+/** The banked resets of an agent whose plan keeps them, read and spent outside any turn on the computer the login
+ * lives on: one script reads them in full with the sign-in they belong to, the other spends one under a key the
+ * caller keeps until an answer comes back and then reads them again. tooOld finishes the sentence "<agent> on
+ * <computer> ..." for a build that answers no resets. */
+export interface PlanResets {
+  readCommand(road: ResetRoad): string;
+  parseRead(stdout: string): ResetReading | undefined;
+  spendCommand(road: ResetRoad & { idempotencyKey: string; creditId?: string }): string;
+  parseSpend(stdout: string): ResetSpend;
+  tooOld: string;
+}

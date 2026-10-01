@@ -7,7 +7,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { asideWallLine, codexKeyRefusedLine, codexMissingEnvLine, codexNotSignedInLine, codexReconnectLine, PERMISSION_ALLOW, PERMISSION_DENY } from "@wsp/protocol";
 import type { AdapterEvent, ExecStream, ExecStreamFactory } from "@wsp/protocol";
-import { createCodexAdapter, type CodexSession } from "../src/adapter.js";
+import { createCodexAdapter, creditsOf, type CodexSession } from "../src/adapter.js";
 
 const THREAD_ID = "01a0e2c1-5d10-7b42-9a6e-3f1c2d4b5a60";
 const TURN_ID = "01a0e2c1-5e02-7c11-8d3f-9b2a1c0d4e71";
@@ -907,5 +907,86 @@ describe("a Codex account's plan limits on the app server", () => {
     const { events, onEvent } = collect();
     await adapterOver(launch).start({ prompt: "hi", onEvent }).finished;
     expect(limitsOf(events)).toEqual([{ windows: [], keyed: true }]);
+  });
+
+  const banked = (credits: Json | null) => ({ availableCount: 2, credits });
+  const read = (s: Json, extra: Json) => JSON.stringify({ id: "wsp-rate-limits", result: { ordinaryUsageAllowed: true, rateLimits: s, rateLimitsByLimitId: null, rateLimitResetCredits: null, accountId: "acct_7f3a", rateLimitUpsell: null, ...extra } });
+
+  it("asks for each banked reset in full on a turn the runtime says is due for it, and for the count alone otherwise", async () => {
+    const paramsOf = async (limitDetails?: boolean) => {
+      const launch = launcher(scripted([completed("completed")]));
+      await adapterOver(launch).start({ prompt: "hi", onEvent: () => {}, ...(limitDetails !== undefined ? { limitDetails } : {}) }).finished;
+      return (launch.calls[0]!.input ?? []).map(line => JSON.parse(line) as Json).find(m => m.method === "account/rateLimits/read")?.params;
+    };
+    expect(await paramsOf(true)).toEqual({});
+    expect(await paramsOf()).toEqual({ excludeResetCreditDetails: true });
+  });
+
+  it("reads how many resets the plan has banked off the turn's read, where the details were left out", async () => {
+    const launch = launcher(scripted([read(snapshot({ primary: window(34.5, 300, 1_790_700_000) }), { rateLimitResetCredits: banked(null) }), completed("completed")]));
+    const { events, onEvent } = collect();
+    await adapterOver(launch).start({ prompt: "hi", onEvent }).finished;
+    expect(limitsOf(events).map(l => l.credits)).toEqual([{ count: 2 }]);
+  });
+
+  it("keeps the banked resets off a rolling update, which never carries them, so the last read stands", async () => {
+    const launch = launcher(
+      scripted([read(snapshot({ primary: window(34.5, 300, 1_790_700_000) }), { rateLimitResetCredits: banked(null) }), updated(snapshot({ primary: window(40, 300, 1_790_700_000) })), completed("completed")]),
+    );
+    const { events, onEvent } = collect();
+    await adapterOver(launch).start({ prompt: "hi", onEvent }).finished;
+    expect(limitsOf(events).map(l => "credits" in l)).toEqual([true, false]);
+  });
+
+  it("reads the windows off the codex bucket where the answer names buckets, and merges no update for another bucket", async () => {
+    const other = { ...snapshot({ primary: window(90, 300, 1_790_700_000) }), limitId: "codex_other" };
+    const launch = launcher(
+      scripted([
+        read(snapshot({ primary: window(70, 300, 1_790_700_000) }), { rateLimitsByLimitId: { codex: snapshot({ primary: window(10, 300, 1_790_700_000) }), codex_other: other } }),
+        updated(other),
+        completed("completed"),
+      ]),
+    );
+    const { events, onEvent } = collect();
+    await adapterOver(launch).start({ prompt: "hi", onEvent }).finished;
+    expect(limitsOf(events).map(l => l.windows.map(w => w.usedPercent))).toEqual([[10]]);
+  });
+});
+
+describe("creditsOf", () => {
+  const credit = (o: Json = {}) => ({ id: "rc_1", resetType: "codexRateLimits", status: "available", grantedAt: 1_790_000_000, expiresAt: 1_792_000_000, title: null, description: null, ...o });
+
+  it("reads nothing where the answer has no reset field, as a codex older than resets answers", () => {
+    expect(creditsOf({ rateLimits: {} })).toBeUndefined();
+    expect(creditsOf({ rateLimitResetCredits: null })).toBeUndefined();
+  });
+
+  it("reads the count alone where the details are null or not a list", () => {
+    expect(creditsOf({ rateLimitResetCredits: { availableCount: 2, credits: null } })).toEqual({ count: 2 });
+    expect(creditsOf({ rateLimitResetCredits: { availableCount: 2, credits: "two" } })).toEqual({ count: 2 });
+  });
+
+  it("reads each credit's id, status and expiry, seconds made ms, and an empty list as details read with none left", () => {
+    expect(creditsOf({ rateLimitResetCredits: { availableCount: 2, credits: [credit(), credit({ id: "rc_2", expiresAt: null })] } })).toEqual({
+      count: 2,
+      credits: [
+        { id: "rc_1", status: "available", expiresAt: 1_792_000_000_000 },
+        { id: "rc_2", status: "available" },
+      ],
+    });
+    expect(creditsOf({ rateLimitResetCredits: { availableCount: 0, credits: [] } })).toEqual({ count: 0, credits: [] });
+  });
+
+  it("fails closed: a count that is not a whole number at or above zero reads the whole field absent", () => {
+    for (const availableCount of [1.5, -1, "2", null, Number.NaN]) expect(creditsOf({ rateLimitResetCredits: { availableCount, credits: [credit()] } }), String(availableCount)).toBeUndefined();
+  });
+
+  it("never reads a credit of another kind, or one in a state it does not know, as available, and skips one with no id", () => {
+    const read = creditsOf({ rateLimitResetCredits: { availableCount: 3, credits: [credit({ resetType: "unknown" }), credit({ id: "rc_2", status: "pending" }), credit({ id: undefined }), credit({ id: "rc_4", status: "redeeming" })] } });
+    expect(read?.credits?.map(c => [c.id, c.status])).toEqual([
+      ["rc_1", "unknown"],
+      ["rc_2", "unknown"],
+      ["rc_4", "redeeming"],
+    ]);
   });
 });

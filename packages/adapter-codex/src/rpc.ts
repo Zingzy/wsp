@@ -29,8 +29,11 @@ export const INITIALIZED_LINE = line({ method: "initialized" });
 /** The sign-in the server runs on, whose answer names a ChatGPT account's email and plan, or a key. */
 export const ACCOUNT_READ_LINE = line({ id: REQUEST.account, method: "account/read", params: {} });
 
-/** The account's plan windows as they stand; later changes arrive as account/rateLimits/updated. */
-export const RATE_LIMITS_READ_LINE = line({ id: REQUEST.rateLimits, method: "account/rateLimits/read", params: { excludeResetCreditDetails: true } });
+/** The account's plan windows as they stand, with the banked resets' count; later changes arrive as
+ * account/rateLimits/updated. `details` asks for each reset in full too, which costs the backend one more lookup. */
+export function rateLimitsReadLine(details: boolean): string {
+  return line({ id: REQUEST.rateLimits, method: "account/rateLimits/read", params: details ? {} : { excludeResetCreditDetails: true } });
+}
 
 export interface ThreadOptions {
   cwd?: string;

@@ -5,6 +5,7 @@ import {
   REQUEST,
   decisionLine,
   initializeLine,
+  rateLimitsReadLine,
   readMessage,
   refuseRequestLine,
   threadForkLine,
@@ -24,6 +25,11 @@ const parsed = (line: string): unknown => {
 };
 
 describe("the lines wsp writes to codex app-server", () => {
+  it("reads the plan's limits with the banked resets' count alone on a turn, and with each reset in full where asked", () => {
+    expect(parsed(rateLimitsReadLine(false))).toEqual({ id: REQUEST.rateLimits, method: "account/rateLimits/read", params: { excludeResetCreditDetails: true } });
+    expect(parsed(rateLimitsReadLine(true))).toEqual({ id: REQUEST.rateLimits, method: "account/rateLimits/read", params: {} });
+  });
+
   it("opens with initialize under wsp's own name, then the initialized notification, neither carrying a jsonrpc field", () => {
     expect(parsed(initializeLine())).toEqual({ id: REQUEST.initialize, method: "initialize", params: { clientInfo: { name: "wsp", title: "wsp", version: "1" } } });
     expect(parsed(INITIALIZED_LINE)).toEqual({ method: "initialized" });
