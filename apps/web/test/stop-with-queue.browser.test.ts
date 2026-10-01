@@ -4,7 +4,7 @@
 // run of exactly that (fixtures/stop-with-queue.json): the thread's history, every event with its timing, every
 // session list the host answered and when, and how long the stop and the send took to answer. What is read is what a
 // person sees once it settles: the queued message on the page, the turn it started answered, and nothing still
-// working. Runs only when asked for (WSP_RENDER=1) and skips without Playwright's Chromium.
+// working. Runs only when asked for (WSP_RENDER=1) and skips where no browser is installed.
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
