@@ -455,11 +455,8 @@ const SETTINGS_SCREENS = [
   ["settings-add-computer", "[data-k=add-computer] [data-k=road-ssh] [data-k=login]"],
   ["settings-remove-computer", "[data-k=remove-sentence]"],
 ] as const;
-const ROW = 64;
-const NARROW_ROW = 72;
-const NARROW_DROPPED_ROW = 96;
-const LINE = 44;
-const NARROW_LINE = 56;
+/** A row or a line grows with what it says; the least it stands at is one 20 px line between its 12 px pads. */
+const LEAST_ROW = 44;
 /** The computers whose page is photographed to its foot, in a window tall enough to hold the whole of it. */
 const FOOT_SCREENS = ["settings-computer", "settings-computer-failed", "settings-this-mac"] as const;
 const FOOT_SIZES = [
@@ -469,7 +466,7 @@ const FOOT_SIZES = [
 
 /** Every row, line and sidebar row of a settings screen, with its height and what it holds. */
 interface SettingsRead {
-  rows: { id: string; height: number; card: string; fill: string; spills: boolean; drops: boolean; chips: boolean; chipsCut: string[] }[];
+  rows: { id: string; height: number; card: string; fill: string; spills: boolean; chips: boolean; chipsCut: string[] }[];
   lines: { id: string; height: number; spills: boolean }[];
   sidebarRows: { id: string; height: number; active: boolean; dimmed: boolean; opacity: number }[];
   cutSegments: string[];
@@ -525,8 +522,6 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
         card: el.closest<HTMLElement>("[data-settings-card]")?.dataset["settingsCard"] ?? "?",
         fill: getComputedStyle(el).backgroundColor,
         spills: spills(el),
-        // A card drops its slots below 640 px where one of its rows needs the width, and then every row of it does.
-        drops: el.hasAttribute("data-settings-drops"),
         chips: el.querySelector("[data-chips]") !== null,
         // A chip cut by its own ellipsis, or standing past the row's edge.
         chipsCut: [...el.querySelectorAll<HTMLElement>("[data-chip]")]
@@ -545,7 +540,7 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
       }));
       // A word cut is one whose own box cannot hold it: sideways where it stands on one line, or below the last
       // line it is allowed where it wraps.
-      const cutWords = [...document.querySelectorAll<HTMLElement>("[data-settings-page] [data-settings-word], [data-settings-page] [data-settings-description], [data-settings-page] [data-settings-label]")]
+      const cutWords = [...document.querySelectorAll<HTMLElement>("[data-settings-page] [data-settings-word], [data-settings-page] [data-settings-description], [data-settings-page] [data-settings-label], [data-settings-page] [data-grid-name], [data-settings-page] [data-grid-note]")]
         .filter(el => el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1)
         .map(el => `${(el.textContent ?? "").trim()} [${el.scrollWidth}/${el.clientWidth} ${el.scrollHeight}/${el.clientHeight}]`);
       const opacity = (selector: string): number[] => [...document.querySelectorAll<HTMLElement>(selector)].map(el => Number(getComputedStyle(el).opacity));
@@ -579,20 +574,19 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
       };
     });
 
-  const expectGrammar = (got: SettingsRead, where: string, narrow: boolean): void => {
-    // One height per kind at each width: a row is 64, 72 below 640 px, or 96 there where its slot has moved under a
-    // description holding two lines; a line is 44, or 56 there where its value stands under its label. A row
-    // carrying chips grows until no chip is cut, so it is held to that rather than to a height.
+  const expectGrammar = (got: SettingsRead, where: string): void => {
+    // A row and a line grow with what they say, at every width, so nothing in one is cut for want of room.
     for (const row of got.rows) {
       expect(row.fill, `${row.id} at ${where} carries no fill of its own`).toBe("rgba(0, 0, 0, 0)");
       if (row.chips) expect(row.chipsCut, `chips cut in ${row.id} at ${where}`).toEqual([]);
-      else expect(row.height, `a row of ${row.card} at ${where}`).toBe(narrow ? (row.drops ? NARROW_DROPPED_ROW : NARROW_ROW) : ROW);
+      expect(row.height, `a row of ${row.card} at ${where}`).toBeGreaterThanOrEqual(LEAST_ROW);
       expect(row.spills, `${row.id} at ${where} holds what it says`).toBe(false);
     }
     for (const line of got.lines) {
-      expect(line.height, `${line.id} at ${where}`).toBe(narrow ? NARROW_LINE : LINE);
+      expect(line.height, `${line.id} at ${where}`).toBeGreaterThanOrEqual(LEAST_ROW);
       expect(line.spills, `${line.id} at ${where} holds what it says`).toBe(false);
     }
+    expect(got.cutWords, `words cut at ${where}`).toEqual([]);
     for (const row of got.sidebarRows) expect(row.height, `${row.id} at ${where}`).toBe(ONE_LINE);
     expect(got.cutSegments, `segments cut at ${where}`).toEqual([]);
     expect(got.dressed, `caps or tracking at ${where}`).toEqual([]);
@@ -604,15 +598,13 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
     for (const row of got.sidebarRows) expect(row.opacity, `${row.id} at ${where}`).toBe(row.dimmed ? 0.5 : 1);
   };
 
-  it("every row is 64 px and every line 44, a row of chips whole whatever its height, the sidebar rows 36 with exactly one lifted, no caps but the small mono labels, no fill on a row, no cut segment and no sideways scroll, on every screen in both themes at 1280, photographed", async () => {
+  it("every row and line as tall as what it says and nothing in one cut, a row of chips whole, the sidebar rows 36 with exactly one lifted, no caps but the small mono labels, no fill on a row, no cut segment and no sideways scroll, on every screen in both themes at 1280, photographed", async () => {
     for (const theme of THEMES) {
       for (const [screen, waitFor] of SETTINGS_SCREENS) {
         await open(screen, theme, waitFor);
         const got = await read();
-        // At this width a description is cut with the whole on its hover, which is the grammar; the log names the
-        // ones that are, so a judge reading the shots and a reader of the report see the same list.
         console.info(`${screen} ${theme}: rows ${JSON.stringify(got.rows.map(r => [r.id, r.height]))}, lines ${JSON.stringify(got.lines.map(l => [l.id, l.height]))}, cut ${JSON.stringify(got.cutWords)}`);
-        expectGrammar(got, `${screen} ${theme} 1280`, false);
+        expectGrammar(got, `${screen} ${theme} 1280`);
         // While the results stand in the centre no row is the page, so the search screen lifts none.
         expect(got.sidebarRows.filter(row => row.active).length, `lifted rows on ${screen} ${theme}`).toBe(screen === "settings-search" ? 0 : 1);
         // The muted words read at AA on both sides: descriptions, state words and the sub-heads.
@@ -623,15 +615,13 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
     }
   }, 300_000);
 
-  it("at 390 a card holding a value stands its rows at 96 with the slot under a two-line description and every other card at 72, a row of chips grows until no chip is cut, every line at 56 with its right side under its label, nothing cut, and the settings sidebar is the sheet with the groups", async () => {
+  it("at 390 every row and line stands what it holds under its words, nothing cut, and the settings sidebar is the sheet with the groups", async () => {
     for (const theme of THEMES) {
       for (const [screen, waitFor] of SETTINGS_SCREENS) {
         if (screen === "settings-search") continue;
         await open(screen, theme, waitFor, { width: 390, height: 844 });
         const got = await read();
-        expectGrammar(got, `${screen} ${theme} 390`, true);
-        // Nothing a person reads is cut at a width with no hover to read the whole on.
-        expect(got.cutWords, `words cut at ${screen} ${theme} 390`).toEqual([]);
+        expectGrammar(got, `${screen} ${theme} 390`);
         await shot(`${screen}-390-${theme}`);
       }
       // The sheet: the groups at 36 px, one lifted; then the field's results in the sheet, a tap landing on the row.

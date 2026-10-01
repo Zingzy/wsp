@@ -208,10 +208,10 @@ export function ImageCard({ place, name, state, view, ctx, row: asRow = false }:
         : (row.description ?? row.chips?.map(chip => chip.text).join(", ") ?? row.title);
   // Here the build is one line on the row; its whole view stands under it only while it needs the person.
   const buildBoxed = buildHere && job !== null && (!building || initSignInWaitedOn(job) !== undefined);
-  const note = [standingNote, ...(image?.recipe === undefined ? [] : [recipeNames(image.recipe)])].filter(part => part !== "").join("; ");
+  const sentence = (part: string): string => (/[.!?]$/.test(part) ? part : `${part}.`);
+  const note = [standingNote, ...(image?.recipe === undefined ? [] : [`${IMAGE_WORDS.holds}: ${recipeNames(image.recipe)}`])].filter(part => part !== "").map(sentence).join(" ");
   const list = (
-    <Grid id="image">
-      <GridHead columns={PAGE_COLUMNS} cells={[{ word: WHERE_WORDS.heads.image }]} />
+    <Grid id="image" head={<GridHead columns={PAGE_COLUMNS} cells={[{ word: WHERE_WORDS.heads.image }]} />}>
       {open ? null : (
         <GridRow columns={PAGE_COLUMNS} tight attrs={{ "data-k": "image-state", "data-state": state.kind }}>
           <GridName glyph={<GlyphFrame><FileIcon aria-hidden className="size-4 text-foreground/80" /></GlyphFrame>} name={WHERE_WORDS.yourImage} note={note} />
@@ -224,8 +224,8 @@ export function ImageCard({ place, name, state, view, ctx, row: asRow = false }:
   return (
     <div className="flex flex-col gap-3">
       {asRow ? list : stepOpen && holds === undefined ? null : (
-        <div className={cn(CARD_SURFACE, "flex flex-col divide-y divide-border")}>
-          {stepOpen ? null : <Row {...stateRow} drops={row.cost !== undefined && press !== undefined} />}
+        <div className={cn(CARD_SURFACE, "flex flex-col [&>*+*]:border-t [&>*+*]:border-border/50")}>
+          {stepOpen ? null : <Row {...stateRow} />}
           {holds === undefined ? null : <Row {...holds} />}
         </div>
       )}

@@ -655,7 +655,7 @@ describe("the cloud's page", () => {
     const image = document.querySelector("[data-k='image-state']")!;
     expect(image.getAttribute("data-state")).toBe("ready");
     expect(image.querySelector("[data-grid-name]")?.textContent).toBe(WHERE_WORDS.yourImage);
-    expect(image.querySelector("[data-grid-note]")?.textContent).toMatch(/^built .*; Claude Code$/);
+    expect(image.querySelector("[data-grid-note]")?.textContent).toMatch(/^built .*\. On your image: Claude Code\.$/);
     // The locked row carries neither a version nor a build's time beside its press.
     expect(image.textContent).not.toContain("v2");
     expect(image.querySelector("[data-k='image-cost']")).toBeNull();
@@ -706,7 +706,7 @@ describe("the cloud's page", () => {
     act(() => useSettingsStore.getState().go({ kind: "computer", id: "box" }));
     await settle();
     expect(document.querySelector("[data-k='image-state']")?.getAttribute("data-state")).toBe("building");
-    expect(document.querySelector("[data-k='image-state'] [data-grid-note]")?.textContent).toBe("1 of 5 steps done; Claude Code");
+    expect(document.querySelector("[data-k='image-state'] [data-grid-note]")?.textContent).toBe("1 of 5 steps done. On your image: Claude Code.");
   });
 });
 

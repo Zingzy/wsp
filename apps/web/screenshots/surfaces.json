@@ -730,6 +730,17 @@
       "wait": "settings-at=devices"
     },
     {
+      "name": "settings-privacy",
+      "at": "/",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "k=settings-row",
+        "k=settings-privacy"
+      ],
+      "wait": "settings-at=privacy"
+    },
+    {
       "name": "settings-keybindings",
       "at": "/",
       "steps": [
