@@ -163,6 +163,15 @@ describe("what each account may still use", () => {
     expect(await usage.days()).toEqual([]);
   });
 
+  it("answers each reading with the one it replaced, so the plan alerts compare two readings no write came between", async () => {
+    const { usage } = ledger();
+    const first = await usage.limit({ key: "codex:acct_1", agent: "codex", label: "dev@example.com", road: "named", computer: "here", limit: reading });
+    expect(first.before).toBeUndefined();
+    const second = await usage.limit({ key: "codex:acct_1", agent: "codex", label: "dev@example.com", road: "named", computer: "here", limit: { ...reading, windows: [{ kind: "session", usedPercent: 75 }] } });
+    expect(second.before).toEqual(first.after);
+    expect(second.after.windows).toEqual([{ kind: "session", usedPercent: 75 }]);
+  });
+
   it("keeps what a reading leaves out: the plan a later reading does not name stays", async () => {
     const { usage } = ledger();
     await usage.limit({ key: "codex:acct_1", agent: "codex", label: "dev@example.com", road: "named", computer: "here", limit: reading });

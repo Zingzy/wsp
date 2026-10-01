@@ -438,3 +438,34 @@ describe("a turn that finished while the person looked away", () => {
     expect(badge.at(-1)).toBe(0);
   });
 });
+
+describe("an account's plan running low", () => {
+  const LOW = { type: "usage.alert" as const, key: "claude:acct_1", agent: "claude", label: "Claude Max", alert: { kind: "low" as const, window: "week" as const, step: 70 } };
+
+  it("is a notice that opens Usage and a notification with no sound while the person looks away", () => {
+    const emit = bindEvents();
+    render(<Harness />);
+    const focus = vi.spyOn(window, "focus").mockImplementation(() => {});
+    act(() => emit(LOW));
+    expect(lastNotice()).toBe("Claude Max has used 70% of its week");
+    expect(FakeNotification.built).toEqual([{ title: "Claude Max has used 70% of its week", body: "", silent: true }]);
+    FakeNotification.last!.onclick!();
+    expect(useStore.getState().settingsOpen).toBe(true);
+    expect(useSettingsStore.getState().at).toEqual({ kind: "group", group: "usage" });
+    focus.mockRestore();
+  });
+
+  it("says a block and a comeback the same way, and nothing at all once the switch is off", () => {
+    const emit = bindEvents();
+    render(<Harness />);
+    act(() => emit({ ...LOW, alert: { kind: "blocked" } }));
+    expect(lastNotice()).toBe("Claude Max reached its plan limit");
+    act(() => emit({ ...LOW, alert: { kind: "back" } }));
+    expect(lastNotice()).toBe("Claude Max can run again: its plan limit reset");
+    clearNotices();
+    act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, planAlerts: false } }));
+    act(() => emit(LOW));
+    expect(lastNotice()).toBeNull();
+    expect(FakeNotification.built).toHaveLength(2);
+  });
+});

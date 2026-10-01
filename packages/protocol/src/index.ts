@@ -16,6 +16,7 @@ import { fmtBytes, fmtBytesOfTotal, isoSeconds, KNOWN_HOSTS, nameList, openingTi
 import { InitJob, InitJobEvent, InitAgent, InitKeys, InitNeedsYou, InitNeedsYouEvent, InitRoad, InitScreenId, LoginChoice, LoginState, SIGN_IN_CODE_MAX } from "./init-job.js";
 import { UsageRange, UsageSplit } from "./usage.js";
 import { GENERAL_DEFAULTS, GENERAL_FIELDS, patchedGeneral } from "./general-prefs.js";
+import { UsageAlertEvent } from "./plan-alerts.js";
 import type { FsListReply as WireFsListReply } from "./generated/FsListReply.js";
 import type { FsFilesReply as WireFsFilesReply } from "./generated/FsFilesReply.js";
 import type { GitPrListReply as WireGitPrListReply } from "./generated/GitPrListReply.js";
@@ -3411,6 +3412,7 @@ export const EventUnion = z.discriminatedUnion("type", [
   PlaceAbsentEvent.extend(sequenced),
   PlaceRemovedEvent.extend(sequenced),
   AgentsChangedEvent.extend(sequenced),
+  UsageAlertEvent.extend(sequenced),
 ]);
 export type EventUnion = z.infer<typeof EventUnion>;
 
@@ -6981,6 +6983,7 @@ export * from "./bring-back.js";
 export * from "./changes.js";
 export * from "./usage.js";
 export * from "./general-prefs.js";
+export * from "./plan-alerts.js";
 export * from "./pull-request.js";
 export * from "./run-block.js";
 export * from "./tree.js";

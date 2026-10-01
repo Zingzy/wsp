@@ -12,8 +12,10 @@
 // the person, each as the person chose for its kind on General: a need and a
 // prompt as one that needs them, a finish or a failure as a finish, and a
 // machine that came up shown as a need is but never sounding, since it is no
-// alarm. The dock's badge counts the threads waiting on the person.
-import { GET_THE_APP_WORD, NEEDS_YOU, NOTIFY_ME, askingLine, exitLine, foldThreads, initJobBuilding, initNeedsYouLine, needsYouCount, notifyBy, oneLine, threadFinishedLine, threadKeyOf, threadStoppedLine, titleWithNeed, workspaceAwakeLine, type NotifyChoice, type OutsideLine, type ReleaseView, type TurnResult } from "@wsp/protocol";
+// alarm. An account's plan running low, blocked or back is a notice and a
+// notification with no sound while the person keeps that switch on. The
+// dock's badge counts the threads waiting on the person.
+import { GET_THE_APP_WORD, NEEDS_YOU, NOTIFY_ME, askingLine, exitLine, foldThreads, initJobBuilding, initNeedsYouLine, needsYouCount, notifyBy, oneLine, planAlertLine, threadFinishedLine, threadKeyOf, threadStoppedLine, titleWithNeed, workspaceAwakeLine, type NotifyChoice, type OutsideLine, type ReleaseView, type TurnResult } from "@wsp/protocol";
 import { useCallback, useEffect, useRef } from "react";
 import type { ProtocolEvent } from "../protocol/client.js";
 import { threadRows, useProtocolEvents, useStore } from "../protocol/store.js";
@@ -100,6 +102,14 @@ function computerOnScreen(placeId: string | undefined): boolean {
   const at = useSettingsStore.getState().at;
   return s.addComputerOpen || (at.kind === "group" && at.group === "computers") || (at.kind === "computer" && at.id === placeId);
 }
+
+const openUsage: NoticeAction = {
+  word: HOST_NOTICE_WORDS.open,
+  run: () => {
+    useSettingsStore.getState().go({ kind: "group", group: "usage" });
+    useStore.getState().openSettings();
+  },
+};
 
 const aboutOnScreen = (): boolean => {
   const at = useSettingsStore.getState().at;
@@ -270,6 +280,12 @@ const RULES: { [T in ProtocolEvent["type"]]?: Rule<T> } = {
     const name = workspaceNamed(e.workspaceId);
     if (name === undefined || workspaceOnScreen(e.workspaceId)) return;
     addNotice({ kind: "error", text: HOST_NOTICE_WORDS.gone(name, e.reason), where: name, action: openThread(e.workspaceId, undefined) });
+  },
+  "usage.alert": (e, held) => {
+    if (!useStore.getState().preferences.planAlerts) return;
+    const text = planAlertLine(e.label, e.alert);
+    addNotice({ kind: e.alert.kind === "back" ? "done" : "note", text, action: openUsage });
+    sayOutside(held, openUsage.run, { title: text, body: "", show: true, sound: false });
   },
   "workspace.woken": (e, held) => {
     const name = workspaceNamed(e.workspaceId);

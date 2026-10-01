@@ -116,7 +116,7 @@ describe("the menu bar's model", () => {
 describe("what the menu bar says over the system while no window is open", () => {
   const sessions = [row({ id: "s1", threadId: "t1", prompt: "fix login" }), row({ id: "s2", threadId: "t_agent", prompt: "sub task", startedBy: "agent" })];
 
-  const loud = { notifyNeeds: "notify-sound", notifyDone: "notify-sound" } as const;
+  const loud = { notifyNeeds: "notify-sound", notifyDone: "notify-sound", planAlerts: true } as const;
 
   it("a finished turn says the thread finished and where, as the person chose for a finish, and nothing by default", () => {
     const done = { type: "session.done", workspaceId: "ws_mac", sessionId: "s1", threadId: "t1", result: { status: "completed" } } as const;
@@ -156,6 +156,13 @@ describe("what the menu bar says over the system while no window is open", () =>
     expect(trayNotice({ type: "session.end", workspaceId: "ws_mac", sessionId: "s1", threadId: "t1", exitCode: 0, sawResult: true }, rows, loud)).toBeUndefined();
     expect(trayNotice({ type: "session.done", workspaceId: "ws_mac", sessionId: "s2", threadId: "t_agent", result: { status: "failed", error: "x" } }, rows, loud)).toBeUndefined();
     expect(trayNotice({ type: "session.done", workspaceId: "ws_mac", sessionId: "s1", threadId: "t1", result: { status: "interrupted" } }, rows, loud)).toBeUndefined();
+  });
+
+  it("an account's plan running low is said with no sound while the switch is on, and nothing once it is off", () => {
+    const low = { type: "usage.alert", key: "claude:acct_1", agent: "claude", label: "Claude Max", alert: { kind: "low", window: "week", step: 90 } } as const;
+    expect(trayNotice(low, { sessions, workspaces, places }, DEFAULT_PREFERENCES)).toEqual({ title: "Claude Max has used 90% of its week", body: "", show: true, sound: false });
+    expect(trayNotice({ ...low, alert: { kind: "blocked" } }, { sessions, workspaces, places }, DEFAULT_PREFERENCES)?.title).toBe("Claude Max reached its plan limit");
+    expect(trayNotice(low, { sessions, workspaces, places }, { ...DEFAULT_PREFERENCES, planAlerts: false })).toBeUndefined();
   });
 
   it("a prompt says what the thread asks", () => {

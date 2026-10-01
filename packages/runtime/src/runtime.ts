@@ -275,6 +275,7 @@ import {
 } from "@wsp/protocol";
 import { secretsOf } from "./adapters.js";
 import { accountOf, accountOnComputer, accountRows, createPriceTable, createUsageLedger, usageComputerName, type Vaulted } from "./usage.js";
+import { planAlerts } from "./plan-alerts.js";
 
 // --- adapter port -------------------------------------------------------------
 
@@ -8399,6 +8400,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           const account = usageAccountOf(entry, view.harness, turnAccount);
           void ledger
             .limit({ key: account.key, agent: view.harness, label: account.label, road: account.road, computer: usageComputerOf(entry.record), limit: event.limit })
+            .then(({ before, after }) => alerts.read(before, after))
             .catch((e: unknown) => console.warn(`the limits of ${account.key} were not kept: ${e instanceof Error ? e.message : String(e)}`));
           return;
         }
@@ -11008,6 +11010,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   const prices = createPriceTable({ store, clock, fetch: opts.pricesFetch ?? (async () => ({})) });
   const ledger = createUsageLedger({ store, clock, prices: () => prices.get() });
+  const alerts = planAlerts({ clock, emit: e => bus.emit(e), limits: () => ledger.limits() });
+  void alerts.resume().catch((e: unknown) => console.warn(`the plan alerts were not armed: ${e instanceof Error ? e.message : String(e)}`));
 
   /** A usage split value as a person reads it: the agent's name, the account's label, the computer's, the project's. */
   const usageLabel = (places: readonly PlaceView[], accounts: ReadonlyMap<string, string>) => (split: UsageSplit, value: string): string => {
@@ -11430,6 +11434,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
     close: async () => {
       idle.close();
+      alerts.close();
       // An agent's version or sign-in command that never answers would otherwise outlive this process.
       opts.agentsReader?.close?.();
       // What this host started on a machine finishes before it lets that machine go: the boot fires a daemon sync

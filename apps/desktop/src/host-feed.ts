@@ -18,6 +18,7 @@ export interface FeedState {
   keepAwake: boolean;
   notifyNeeds: NotifyChoice;
   notifyDone: NotifyChoice;
+  planAlerts: boolean;
   lost: boolean;
 }
 
@@ -65,7 +66,7 @@ const text = (e: unknown): string => (e instanceof Error ? e.message : String(e)
 export function hostFeed(deps: FeedDeps): HostFeed {
   const settleMs = deps.settleMs ?? 150;
   const retryMs = deps.retryMs ?? 3_000;
-  let state: FeedState = { sessions: [], workspaces: [], places: [], asks: new Map(), keepAwake: DEFAULT_PREFERENCES.keepAwake, notifyNeeds: DEFAULT_PREFERENCES.notifyNeeds, notifyDone: DEFAULT_PREFERENCES.notifyDone, lost: false };
+  let state: FeedState = { sessions: [], workspaces: [], places: [], asks: new Map(), keepAwake: DEFAULT_PREFERENCES.keepAwake, notifyNeeds: DEFAULT_PREFERENCES.notifyNeeds, notifyDone: DEFAULT_PREFERENCES.notifyDone, planAlerts: DEFAULT_PREFERENCES.planAlerts, lost: false };
   let client: HostClient | undefined;
   let dialing = false;
   let closed = false;
@@ -76,7 +77,7 @@ export function hostFeed(deps: FeedDeps): HostFeed {
     state = { ...state, ...next };
     deps.changed(state);
   };
-  const switches = (p: Pick<Preferences, "keepAwake" | "notifyNeeds" | "notifyDone">): Partial<FeedState> => ({ keepAwake: p.keepAwake, notifyNeeds: p.notifyNeeds, notifyDone: p.notifyDone });
+  const switches = (p: Pick<Preferences, "keepAwake" | "notifyNeeds" | "notifyDone" | "planAlerts">): Partial<FeedState> => ({ keepAwake: p.keepAwake, notifyNeeds: p.notifyNeeds, notifyDone: p.notifyDone, planAlerts: p.planAlerts });
 
   const reread = async (on: HostClient): Promise<void> => {
     const [{ sessions }, { workspaces }, { places }] = await Promise.all([

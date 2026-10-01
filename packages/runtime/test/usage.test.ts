@@ -85,6 +85,27 @@ describe("an account's limits", () => {
   });
 });
 
+describe("plan alerts off the readings turns print", () => {
+  it("tells every client once a reading crosses 70% of a window, and not again for a reading no worse", async () => {
+    let used = 40;
+    const { rt, ws } = await runtimeWith(turning({ status: "completed", text: "done" }, sessionId => [{ type: "limit", sessionId, limit: { windows: [{ kind: "session", usedPercent: used, resetsAt: Date.now() + 3_600_000 }], status: "ok" } }]));
+    const said: unknown[] = [];
+    rt.events.on("*", e => void (e.type === "usage.alert" && said.push(e)));
+    const turn = async (): Promise<void> => {
+      await (await rt.sessions.start(ws.id, { prompt: "go" })).finished;
+      await new Promise(resolve => setTimeout(resolve, 20));
+    };
+    await turn();
+    expect(said).toEqual([]);
+    used = 74;
+    await turn();
+    expect(said).toEqual([expect.objectContaining({ type: "usage.alert", key: "claude:vault-token", agent: "claude", label: "Claude Code with your sign-in", alert: { kind: "low", window: "session", step: 70 } })]);
+    used = 75;
+    await turn();
+    expect(said).toHaveLength(1);
+  });
+});
+
 describe("this computer's own sign-ins", () => {
   it("lists each agent signed in here off this computer's own read, before any turn has reported a limit", async () => {
     const asked: unknown[] = [];
