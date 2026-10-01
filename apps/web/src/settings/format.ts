@@ -333,7 +333,14 @@ export const KEYBINDINGS_WORDS = {
 
 /** Settings > About: the two halves of one release, and the road to the next. */
 export const ABOUT_WORDS = {
-  title: "About",
+  title: "Version",
+  wsp: "wsp",
+  upToDate: "Up to date",
+  available: (version: string): string => `${version} is out`,
+  checking: "Checking for updates",
+  checksOff: "Update checks are off",
+  notChecked: "Not checked yet",
+  whatsNew: "What's new",
   app: "App",
   appHover: "The desktop shell holding this window.",
   host: "Host",

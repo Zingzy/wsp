@@ -90,9 +90,9 @@ function computerOnScreen(placeId: string | undefined): boolean {
   return s.addComputerOpen || (at.kind === "group" && at.group === "computers") || (at.kind === "computer" && at.id === placeId);
 }
 
-const aboutOnScreen = (): boolean => {
+const versionOnScreen = (): boolean => {
   const at = useSettingsStore.getState().at;
-  return useStore.getState().settingsOpen && at.kind === "group" && at.group === "about";
+  return useStore.getState().settingsOpen && at.kind === "group" && at.group === "general";
 };
 
 const openThread = (workspaceId: string, threadId: string | undefined): NoticeAction => ({ word: HOST_NOTICE_WORDS.open, run: () => useStore.getState().select(workspaceId, threadId ?? null) });
@@ -170,7 +170,7 @@ function sayRelease(held: Held, release: ReleaseView | null): void {
   } catch {
     // A storage that refuses only means the next page says it again.
   }
-  if (aboutOnScreen()) return;
+  if (versionOnScreen()) return;
   addNotice({ kind: "note", text: HOST_NOTICE_WORDS.released(ahead.version), action: { word: GET_THE_APP_WORD, run: () => void window.open(ahead.url, "_blank", "noopener,noreferrer") } });
 }
 

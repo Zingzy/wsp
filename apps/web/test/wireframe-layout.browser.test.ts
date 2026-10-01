@@ -450,7 +450,7 @@ const SETTINGS_SCREENS = [
   ["settings-devices", "[data-settings-at=devices] [data-device-row=d_3]"],
   ["settings-account", "[data-settings-at=account] [data-k=account-action]"],
   ["settings-keybindings", "[data-settings-at=keybindings] [data-slot=kbd]"],
-  ["settings-about", "[data-settings-at=about] [data-k=app-version]"],
+  ["settings-version", "[data-settings-at=general] [data-k=version]"],
   ["settings-usage", "[data-settings-at=usage] [data-used-row=codex]"],
   ["settings-search", "[data-settings-at=search] [data-settings-row=server-icons]"],
   ["settings-over-panel", "[data-settings-at=appearance]"],
@@ -659,33 +659,33 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
     }
   }, 300_000);
 
-  it("About while behind in the app on its own host: Get, Downloading held, then Quit and open, nothing cut, photographed", async () => {
+  it("General's Version card while behind in the app on its own host: Get, Downloading held, then Quit and open, nothing cut, photographed", async () => {
     for (const theme of THEMES) {
-      await open("settings-about-behind", theme, "[data-settings-at=about] [data-k=latest-version]");
+      await open("settings-version-behind", theme, "[data-settings-at=general] [data-k=version]");
       const get = page!.locator("[data-k=get-release]");
       await page!.waitForFunction(() => document.querySelector<HTMLElement>("[data-k=get-release]")?.title !== "");
       expect(await get.textContent()).toBe("Get 0.3.0");
-      expect((await read()).cutWords, `words cut at settings-about-behind ${theme}`).toEqual([]);
-      await shot(`settings-about-behind-1280-${theme}`);
+      expect((await read()).cutWords, `words cut at settings-version-behind ${theme}`).toEqual([]);
+      await shot(`settings-version-behind-1280-${theme}`);
       await get.click();
       await page!.waitForSelector("[data-k=get-release]:disabled");
       expect(await get.textContent()).toBe("Downloading");
-      expect((await read()).cutWords, `words cut at settings-about-downloading ${theme}`).toEqual([]);
-      await shot(`settings-about-downloading-1280-${theme}`);
+      expect((await read()).cutWords, `words cut at settings-version-downloading ${theme}`).toEqual([]);
+      await shot(`settings-version-downloading-1280-${theme}`);
       await page!.evaluate(() => (window as unknown as { finishBundle: () => void }).finishBundle());
       await page!.waitForSelector("[data-k=get-release]:not(:disabled)");
       expect(await get.textContent()).toBe("Quit and open");
-      expect((await read()).cutWords, `words cut at settings-about-kept ${theme}`).toEqual([]);
-      await shot(`settings-about-kept-1280-${theme}`);
+      expect((await read()).cutWords, `words cut at settings-version-kept ${theme}`).toEqual([]);
+      await shot(`settings-version-kept-1280-${theme}`);
     }
   }, 120_000);
 
-  it("About with newer files under the running host: Restart host in Get's place, nothing cut, photographed", async () => {
+  it("General's Version card with newer files under the running host: Restart host in Get's place, nothing cut, photographed", async () => {
     for (const theme of THEMES) {
-      await open("settings-about-restart", theme, "[data-settings-at=about] [data-k=restart-host]");
-      expect(await page!.locator("[data-settings-card=about] button").allTextContents()).toEqual(["Restart host", "Releases"]);
-      expect((await read()).cutWords, `words cut at settings-about-restart ${theme}`).toEqual([]);
-      await shot(`settings-about-restart-1280-${theme}`);
+      await open("settings-version-restart", theme, "[data-settings-at=general] [data-k=restart-host]");
+      expect(await page!.locator("[data-settings-card=version] button").allTextContents()).toEqual(["Restart host", "What's new"]);
+      expect((await read()).cutWords, `words cut at settings-version-restart ${theme}`).toEqual([]);
+      await shot(`settings-version-restart-1280-${theme}`);
     }
   }, 120_000);
 

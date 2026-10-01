@@ -5,17 +5,17 @@
 // breadcrumb and Restore defaults all read this table; adding a group is one
 // id in groupIds.ts, one entry here and its page module. A group marked empty
 // is not drawn.
-import { FolderIcon, GaugeIcon, InfoIcon, KeyboardIcon, MonitorIcon, PaletteIcon, ShieldIcon, SlidersHorizontalIcon, SmartphoneIcon, UserIcon, type LucideIcon } from "lucide-react";
+import { FolderIcon, GaugeIcon, KeyboardIcon, MonitorIcon, PaletteIcon, ShieldIcon, SlidersHorizontalIcon, SmartphoneIcon, UserIcon, type LucideIcon } from "lucide-react";
 import { PLACES_WORDS } from "@wsp/protocol";
 import type { ComponentType } from "react";
 import type { Preferences, PreferencesPatch } from "@wsp/protocol";
-import { aboutCards, aboutMeta } from "./about.js";
+import { versionCards, versionMeta } from "./about.js";
 import { accountCards } from "./account.js";
 import { APPEARANCE_DEFAULTS, appearanceCards, appearanceOffDefaults } from "./appearance.js";
 import { computerSubPages, computersCards } from "./computers.js";
 import { devicesCards } from "./devices.js";
 import { generalCards } from "./general.js";
-import { ABOUT_WORDS, ACCOUNT_WORDS, DEVICES_WORDS, KEYBINDINGS_WORDS, PRIVACY_WORDS, PROJECTS_WORDS, SETTINGS_WORDS, USAGE_PAGE_WORDS } from "./format.js";
+import { ACCOUNT_WORDS, DEVICES_WORDS, KEYBINDINGS_WORDS, PRIVACY_WORDS, PROJECTS_WORDS, SETTINGS_WORDS, USAGE_PAGE_WORDS } from "./format.js";
 import { SETTINGS_GROUP_IDS, type SettingsGroupId } from "./groupIds.js";
 import { KEYBINDING_DEFAULTS, keybindingsCards, keybindingsOffDefaults } from "./keybindings.js";
 import { PRIVACY_DEFAULTS, privacyCards, privacyOffDefaults } from "./privacy.js";
@@ -46,7 +46,7 @@ export interface SettingsGroup {
 }
 
 const TABLE: Record<SettingsGroupId, Omit<SettingsGroup, "id">> = {
-  general: { name: "General", glyph: SlidersHorizontalIcon, cards: generalCards },
+  general: { name: "General", glyph: SlidersHorizontalIcon, cards: ctx => [...generalCards(ctx), ...versionCards(ctx)], meta: versionMeta },
   appearance: { name: SETTINGS_WORDS.appearance, glyph: PaletteIcon, restore: { off: appearanceOffDefaults, patch: APPEARANCE_DEFAULTS }, cards: appearanceCards },
   computers: { name: PLACES_WORDS.section, glyph: MonitorIcon, cards: computersCards, sub: computerSubPages },
   usage: { name: USAGE_PAGE_WORDS.title, glyph: GaugeIcon, cards: usageCards, head: UsageTabs },
@@ -55,7 +55,6 @@ const TABLE: Record<SettingsGroupId, Omit<SettingsGroup, "id">> = {
   account: { name: ACCOUNT_WORDS.title, glyph: UserIcon, cards: accountCards },
   privacy: { name: PRIVACY_WORDS.title, glyph: ShieldIcon, restore: { off: privacyOffDefaults, patch: PRIVACY_DEFAULTS }, cards: privacyCards },
   keybindings: { name: KEYBINDINGS_WORDS.title, glyph: KeyboardIcon, restore: { off: keybindingsOffDefaults, patch: KEYBINDING_DEFAULTS }, cards: keybindingsCards },
-  about: { name: ABOUT_WORDS.title, glyph: InfoIcon, cards: aboutCards, meta: aboutMeta },
 };
 
 export const SETTINGS_GROUPS: ReadonlyArray<SettingsGroup> = SETTINGS_GROUP_IDS.map(id => ({ id, ...TABLE[id] }));

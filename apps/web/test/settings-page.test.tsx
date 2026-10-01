@@ -64,13 +64,14 @@ afterEach(() => {
   vi.restoreAllMocks();
   document.body.innerHTML = "";
   delete window.wsp;
+  delete (window as unknown as { __WSP__?: unknown }).__WSP__;
 });
 
 describe("the settings sidebar", () => {
-  it("lists the ten groups in order with Appearance the one lifted row on a fresh open", async () => {
+  it("lists the nine groups in order with Appearance the one lifted row on a fresh open", async () => {
     mountSettings({ api: settingsApi().api });
     await settle();
-    expect(sidebarRowIds()).toEqual(["group:general", "group:appearance", "group:computers", "group:usage", "group:projects", "group:devices", "group:account", "group:privacy", "group:keybindings", "group:about"]);
+    expect(sidebarRowIds()).toEqual(["group:general", "group:appearance", "group:computers", "group:usage", "group:projects", "group:devices", "group:account", "group:privacy", "group:keybindings"]);
     expect(liftedRowIds()).toEqual(["group:appearance"]);
     // The field over the groups and Back at the foot with the chord that does the same.
     expect(field().getAttribute("placeholder")).toBe(SETTINGS_WORDS.search);
@@ -88,7 +89,7 @@ describe("the settings sidebar", () => {
     expect(pageAt()).toBe("computers");
     expect(crumb()).toBe("Settings/Computers");
     expect(liftedRowIds()).toEqual(["group:computers"]);
-    expect(sidebarRowIds()).toEqual(["group:general", "group:appearance", "group:computers", "computer:here", "computer:p_spoo", "group:usage", "group:projects", "group:devices", "group:account", "group:privacy", "group:keybindings", "group:about"]);
+    expect(sidebarRowIds()).toEqual(["group:general", "group:appearance", "group:computers", "computer:here", "computer:p_spoo", "group:usage", "group:projects", "group:devices", "group:account", "group:privacy", "group:keybindings"]);
     fireEvent.click(document.querySelector("[data-row-id='computer:p_spoo']")!);
     expect(pageAt()).toBe("computer:p_spoo");
     expect(crumb()).toBe("Settings/Computers/spoo");
@@ -106,15 +107,15 @@ describe("the settings sidebar", () => {
     useStore.setState({ places: [here, box], projects: [project("pr_spoo", "spoo")] });
     mountSettings({ api: settingsApi().api });
     await settle();
-    const groups = ["group:general", "group:appearance", "group:computers", "group:usage", "group:projects", "group:devices", "group:account", "group:privacy", "group:keybindings", "group:about"];
+    const groups = ["group:general", "group:appearance", "group:computers", "group:usage", "group:projects", "group:devices", "group:account", "group:privacy", "group:keybindings"];
     expect(sidebarRowIds()).toEqual(groups);
     fireEvent.click(document.querySelector("[data-k=settings-computers]")!);
-    const computersOpen = ["group:general", "group:appearance", "group:computers", "computer:here", "computer:p_spoo", "group:usage", "group:projects", "group:devices", "group:account", "group:privacy", "group:keybindings", "group:about"];
+    const computersOpen = ["group:general", "group:appearance", "group:computers", "computer:here", "computer:p_spoo", "group:usage", "group:projects", "group:devices", "group:account", "group:privacy", "group:keybindings"];
     expect(sidebarRowIds()).toEqual(computersOpen);
     fireEvent.click(document.querySelector("[data-row-id='computer:p_spoo']")!);
     expect(sidebarRowIds()).toEqual(computersOpen);
     fireEvent.click(document.querySelector("[data-k=settings-projects]")!);
-    expect(sidebarRowIds()).toEqual(["group:general", "group:appearance", "group:computers", "group:usage", "group:projects", "project:pr_spoo", "group:devices", "group:account", "group:privacy", "group:keybindings", "group:about"]);
+    expect(sidebarRowIds()).toEqual(["group:general", "group:appearance", "group:computers", "group:usage", "group:projects", "project:pr_spoo", "group:devices", "group:account", "group:privacy", "group:keybindings"]);
   });
 
   it("ArrowDown and ArrowUp walk the sidebar's rows in visual order, from the field into the groups and their sub-rows", async () => {
@@ -131,9 +132,9 @@ describe("the settings sidebar", () => {
     fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
     expect((document.activeElement as HTMLElement).dataset["rowId"]).toBe("computer:here");
     fireEvent.keyDown(document.activeElement!, { key: "End" });
-    expect((document.activeElement as HTMLElement).dataset["rowId"]).toBe("group:about");
-    fireEvent.keyDown(document.activeElement!, { key: "ArrowUp" });
     expect((document.activeElement as HTMLElement).dataset["rowId"]).toBe("group:keybindings");
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowUp" });
+    expect((document.activeElement as HTMLElement).dataset["rowId"]).toBe("group:privacy");
   });
 
   it("Back closes Settings as Escape does", async () => {
@@ -147,6 +148,9 @@ describe("the settings sidebar", () => {
 describe("search", () => {
   it("draws the matching rows under their group's name and nothing else, dims the groups with no match, says so for no match, and the field's Escape clears it without closing Settings", async () => {
     useStore.setState({ places: [here], projects: [project("pr_spoo", "spoo")] });
+    // The app and the host apart, so the Host line stands.
+    (window as unknown as { __WSP__?: unknown }).__WSP__ = { tokenHash: "a".repeat(64), wsPath: "/ws", paired: true, version: "0.1.5" };
+    window.wsp = { version: "0.1.3" };
     mountSettings({ api: settingsApi().api });
     await settle();
     // A line matches by its hover sentence too.
@@ -155,12 +159,12 @@ describe("search", () => {
     expect(crumb()).toBe("Settings/Search");
     expect(lineLabels()).toEqual([ABOUT_WORDS.host]);
     expect(rowTitles()).toEqual([]);
-    expect(document.querySelector("[data-k=search-group-about]")?.textContent).toBe(ABOUT_WORDS.title);
+    expect(document.querySelector("[data-k=search-group-general]")?.textContent).toBe("General");
     const dimmed = [...document.querySelectorAll<HTMLElement>("[data-slot=sidebar] [data-sidebar-row][data-dimmed]")].map(row => row.dataset["rowId"]);
-    expect(dimmed).toEqual(["group:general", "group:appearance", "group:computers", "group:usage", "group:projects", "group:devices", "group:account", "group:privacy", "group:keybindings"]);
+    expect(dimmed).toEqual(["group:appearance", "group:computers", "group:usage", "group:projects", "group:devices", "group:account", "group:privacy", "group:keybindings"]);
     // Standing back is an opacity, never another ink: the sidebar's rest ink is darker than its muted ink on the
     // dark side, so an ink swap read brighter there and did nothing at all on light.
-    expect(document.querySelector<HTMLElement>("[data-row-id='group:general']")?.className).toContain("opacity-50");
+    expect(document.querySelector<HTMLElement>("[data-row-id='group:appearance']")?.className).toContain("opacity-50");
     expect(document.querySelector<HTMLElement>("[data-row-id='group:computers']")?.className).not.toContain("text-sidebar-muted-foreground");
     // No row is the page while the results stand in the centre, so none is lifted.
     expect(liftedRowIds()).toEqual([]);
@@ -232,6 +236,7 @@ describe("the row grammar", () => {
     const api = settingsApi({
       account: async () => ({ signedIn: false }),
       devicesList: async () => devices,
+      editorList: async () => [{ id: "cursor", name: "Cursor" }],
       image: async () => ({ image: null, copies: [], projects: [] }),
       initGet: async () => ({ keys: { solari: true }, home: "/Users/dev", agents: [{ id: "claude", name: "Claude Code", configured: false, takesTools: true }], pricing: null, job: null }),
       hostTerminalConfig: async () => FILE,
@@ -242,7 +247,7 @@ describe("the row grammar", () => {
     window.wsp = { version: "0.2.0" };
     mountSettings({ api });
     await settle();
-    for (const groupId of ["appearance", "computers", "projects", "devices", "account", "privacy", "keybindings", "about"]) {
+    for (const groupId of ["general", "appearance", "computers", "projects", "devices", "account", "privacy", "keybindings"]) {
       fireEvent.click(document.querySelector(`[data-k=settings-${groupId}]`)!);
       await settle();
       expect(pageAt()).toBe(groupId);
@@ -376,7 +381,7 @@ describe("Appearance", () => {
     expect(restore()).toBeNull();
     fireEvent.click(within(group(SETTINGS_WORDS.mode)).getByRole("radio", { name: "Light" }));
     await waitFor(() => expect(restore()).not.toBeNull());
-    fireEvent.click(document.querySelector("[data-k=settings-about]")!);
+    fireEvent.click(document.querySelector("[data-k=settings-general]")!);
     expect(restore()).toBeNull();
     fireEvent.click(document.querySelector("[data-k=settings-appearance]")!);
     fireEvent.click(restore()!);
@@ -541,7 +546,7 @@ describe("the doors and the memory", () => {
   it("Add a computer opens Settings on Computers with the sheet over it whatever was remembered", async () => {
     useStore.setState({ places: [here, solari] });
     const api = settingsApi({ initGet: async () => ({ keys: { solari: true }, home: "/Users/dev", agents: [], pricing: null, job: null }), image: async () => ({ image: null, copies: [], projects: [] }) } as Partial<Api>).api;
-    useSettingsStore.getState().go({ kind: "group", group: "about" });
+    useSettingsStore.getState().go({ kind: "group", group: "general" });
     useStore.setState({ api });
     useStore.getState().openAddComputer();
     expect(useStore.getState().settingsOpen).toBe(true);

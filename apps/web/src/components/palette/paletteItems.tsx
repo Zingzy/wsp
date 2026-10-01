@@ -5,7 +5,8 @@
 // whose title holds the typed query and every other one whose messages hold
 // it, as the host found them. Pure apart from the callbacks it is handed, so
 // the list is testable without the dialog.
-import { ArrowDownIcon, ArrowUpIcon, ChevronDownIcon, ChevronUpIcon, FileTextIcon, FolderIcon, FolderPlusIcon, MonitorIcon, PanelLeftIcon, PanelRightIcon, PlusIcon, SettingsIcon } from "lucide-react";
+import { ArrowDownIcon, ArrowUpIcon, BookOpenIcon, BugIcon, ChevronDownIcon, ChevronUpIcon, FileTextIcon, FolderIcon, FolderPlusIcon, GithubIcon, MonitorIcon, PanelLeftIcon, PanelRightIcon, PlusIcon, SettingsIcon } from "lucide-react";
+import { REPO } from "../../../../../packages/wspx/scripts/bundles.mjs";
 import { agentName } from "@wsp/catalog";
 import { PLACES_WORDS, type PlaceView, type SessionSearchHit } from "@wsp/protocol";
 import { THREAD_WORDS } from "../../actions/format.js";
@@ -70,6 +71,13 @@ export interface PaletteItems {
   readonly threadSearchItems: ReadonlyArray<CommandPaletteActionItem>;
   readonly messageSearchItems: ReadonlyArray<CommandPaletteActionItem>;
 }
+
+/** The pages about wsp itself, reached from here since Settings has no About page. */
+const LINKS = [
+  { value: "action:github", title: "wsp on GitHub", terms: ["github", "source", "repo", "about", "licence", "license"], Icon: GithubIcon, url: REPO },
+  { value: "action:docs", title: "wsp docs", terms: ["docs", "documentation", "help", "manual"], Icon: BookOpenIcon, url: "https://wsp.apidocumentation.com" },
+  { value: "action:report-bug", title: "Report a bug", terms: ["bug", "issue", "report", "feedback", "help"], Icon: BugIcon, url: `${REPO}/issues/new` },
+];
 
 const sync = (fn: () => void) => async (): Promise<void> => {
   fn();
@@ -211,6 +219,15 @@ function actionItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
       shortcutCommand: "settings.toggle",
       run: sync(handlers.openSettings),
     },
+    ...LINKS.map(({ value, title, terms, Icon, url }) => ({
+      kind: "action" as const,
+      value,
+      searchTerms: terms,
+      icon: <Icon className={ITEM_ICON_CLASS} />,
+      title,
+      description: url.replace("https://", ""),
+      run: sync(() => void window.open(url, "_blank", "noopener,noreferrer")),
+    })),
     {
       kind: "action",
       value: "action:toggle-right-panel",

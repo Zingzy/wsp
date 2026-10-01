@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The five groups beside Appearance and Computers: Projects with each
 // project's page and its one act, Devices with Revoke, Account's one row,
-// Keybindings as lines per platform, and About's lines with the newest release.
+// Keybindings as lines per platform, and General's Version card with the
+// newest release.
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import { DEFAULT_KEYBINDINGS, parseKeybindingShortcut } from "../src/keybindingDefaults.js";
@@ -31,7 +32,7 @@ const project = (id: string, name: string, computer = "here", over: Partial<Proj
 const view = (id: string, name: string, projectId: string): WorkspaceView => ({ id, name, machineId: `m_${id}`, kind: "local", project: { id: projectId, name: "spoo", path: "/Users/dev/spoo", computer: "here" }, phase: "running", golden: "", createdAt: AT });
 const device = (id: string, name: string, over: Partial<DeviceView> = {}): DeviceView => ({ id, name, createdAt: "2026-09-01T00:00:00Z", lastSeenAt: new Date(Date.now() - 12 * 60_000).toISOString(), ...over });
 
-const mount = async (over: Partial<Api>, group: "projects" | "devices" | "account" | "keybindings" | "about"): Promise<void> => {
+const mount = async (over: Partial<Api>, group: "general" | "projects" | "devices" | "account" | "keybindings"): Promise<void> => {
   mountSettings({ api: settingsApi(over).api, at: { kind: "group", group } });
   await settle();
 };
@@ -284,7 +285,7 @@ describe("General", () => {
     const { api, sets } = settingsApi({ editorList: async () => editors } as Partial<Api>);
     mountSettings({ api, at: { kind: "group", group: "general" } });
     await settle();
-    expect(rowTitles()).toEqual([GENERAL_WORDS.editor, AWAKE_WORDS.keepAwake(""), NOTIFY_WORDS.sound]);
+    expect(rowTitles()).toEqual([GENERAL_WORDS.editor, AWAKE_WORDS.keepAwake(""), NOTIFY_WORDS.sound, ABOUT_WORDS.wsp]);
     expect(descriptionOf("editor")).toBe(GENERAL_WORDS.editorDescription);
     const select = document.querySelector<HTMLElement>("[data-settings-page] [data-k=editor]")!;
     expect(select.textContent).toBe("Cursor");
@@ -553,37 +554,7 @@ describe("Keybindings", () => {
   });
 });
 
-describe("About", () => {
-  it("says the app's half and the host's in the shell, the host's alone in a tab, unknown where the shell names none, and Releases opens the releases page", async () => {
-    (window as unknown as { __WSP__?: unknown }).__WSP__ = { tokenHash: "a".repeat(64), wsPath: "/ws", paired: true, version: "0.1.5" };
-    window.wsp = { version: "0.1.3" };
-    await mount({}, "about");
-    expect(lineLabels()).toEqual([ABOUT_WORDS.app, ABOUT_WORDS.host]);
-    expect(document.querySelector("[data-k=app-version] [data-settings-word]")?.textContent).toBe("0.1.3");
-    expect(document.querySelector("[data-k=host-version] [data-settings-word]")?.textContent).toBe("0.1.5");
-    expect(document.querySelector("[data-k=host-version] [data-settings-word]")?.className).toContain("font-mono");
-    expect(rowTitles()).toEqual([]);
-    let opened: string | undefined;
-    window.open = ((url: string) => {
-      opened = url;
-      return null;
-    }) as typeof window.open;
-    fireEvent.click(screen.getByRole("button", { name: ABOUT_WORDS.releases }));
-    expect(opened).toMatch(/\/releases$/);
-    document.body.innerHTML = "";
-    resetSettings();
-    delete window.wsp;
-    await mount({}, "about");
-    expect(lineLabels()).toEqual([ABOUT_WORDS.host]);
-    document.body.innerHTML = "";
-    resetSettings();
-    window.wsp = {};
-    await mount({}, "about");
-    expect(document.querySelector("[data-k=app-version] [data-settings-word]")?.textContent).toBe(ABOUT_WORDS.unknown);
-  });
-});
-
-describe("About and the newest release", () => {
+describe("General's Version card", () => {
   const DAY = 24 * 60 * 60_000;
   const read = (version: string, over: Partial<ReleaseView> = {}): ReleaseView => ({
     state: "read",
@@ -593,87 +564,27 @@ describe("About and the newest release", () => {
     triedAt: new Date(Date.now() - 3 * DAY - 60 * 60_000).toISOString(),
     ...over,
   });
-  const shell = (app: string | undefined, host: string): void => {
-    (window as unknown as { __WSP__?: unknown }).__WSP__ = { tokenHash: "a".repeat(64), wsPath: "/ws", paired: true, version: host };
+  const shell = (app: string | undefined, host: string | undefined): void => {
+    if (host === undefined) delete (window as unknown as { __WSP__?: unknown }).__WSP__;
+    else (window as unknown as { __WSP__?: unknown }).__WSP__ = { tokenHash: "a".repeat(64), wsPath: "/ws", paired: true, version: host };
     if (app === undefined) delete window.wsp;
     else window.wsp = { version: app };
   };
-  const latest = (): HTMLElement | null => document.querySelector<HTMLElement>("[data-k=latest-version]");
-  const latestWord = (): string | undefined => latest()?.querySelector("[data-settings-word]")?.textContent ?? undefined;
-  const inks = (): string[] => (latest()?.querySelector("[data-settings-word]")?.className ?? "").split(" ");
+  const remount = async (release: ReleaseView | null = null): Promise<void> => {
+    document.body.innerHTML = "";
+    resetSettings();
+    useStore.setState({ release });
+    await mount({}, "general");
+  };
+  const mark = (): string | undefined => rowOf("version")?.querySelector("[data-settings-mark]")?.textContent ?? undefined;
+  const stateLine = (): string | undefined => descriptionOf("version");
+  const whatsNew = (): HTMLElement => document.querySelector<HTMLElement>("[data-k=whats-new]")!;
   const show = async (release: ReleaseView | null): Promise<void> => {
     act(() => useStore.setState({ release }));
     await settle();
   };
-  const buttons = (): string[] => [...document.querySelectorAll("[data-settings-card=about] button")].map(b => b.textContent ?? "");
-  const aboutMeta = (): string | undefined => document.querySelector("[data-k=settings-about] [data-settings-meta]")?.textContent ?? undefined;
-
-  it("says the number in the value ink while it is above the app or the host, in the fact ink when level or ahead, and the state word only while nothing was ever read", async () => {
-    shell("0.2.0", "0.2.0");
-    await mount({}, "about");
-    // A host with no reading to give draws no line rather than a word it never said.
-    expect(lineLabels()).toEqual([ABOUT_WORDS.app, ABOUT_WORDS.host]);
-    await show(read("0.3.0"));
-    expect(lineLabels()).toEqual([ABOUT_WORDS.app, ABOUT_WORDS.host, ABOUT_WORDS.latest]);
-    expect(latestWord()).toBe("0.3.0");
-    expect(inks()).toContain("text-foreground");
-    expect(latest()?.title).toBe(ABOUT_WORDS.readHover("3 d ago"));
-    // Ahead of the page's minute clock, as a reading the opening itself asked for is.
-    await show(read("0.3.0", { checkedAt: new Date(Date.now() + 5_000).toISOString() }));
-    expect(latest()?.title).toBe(ABOUT_WORDS.readHover("just now"));
-    await show(read("0.2.0"));
-    expect(latestWord()).toBe("0.2.0");
-    expect(inks()).toContain("text-muted-foreground");
-    // A reading kept through a failed ask stands, with the failure in the hover rather than in the slot.
-    const tried = new Date(Date.now() - 5 * 60_000).toISOString();
-    await show(read("0.3.0", { state: "unreached", triedAt: tried }));
-    expect(latestWord()).toBe("0.3.0");
-    expect(latest()?.title).toBe(ABOUT_WORDS.missedHover("3 d ago", builtWhen(tried)));
-    for (const [state, word] of [["checking", "checking"], ["unreached", "unreached"], ["off", "off"]] as const) {
-      await show({ state, ...(state === "unreached" ? { triedAt: tried } : {}) });
-      expect(latestWord()).toBe(word);
-      expect(inks()).toContain("text-muted-foreground");
-    }
-    expect(latest()?.title).toBe(ABOUT_WORDS.offHover);
-  });
-
-  it("reads the app's half as behind too, and a tab with no shell reads the host alone", async () => {
-    shell("0.2.0", "0.3.0");
-    useStore.setState({ release: read("0.3.0") });
-    await mount({}, "about");
-    expect(inks()).toContain("text-foreground");
-    expect(buttons()).toContain(ABOUT_WORDS.get("0.3.0"));
-    document.body.innerHTML = "";
-    resetSettings();
-    shell(undefined, "0.3.0");
-    useStore.setState({ release: read("0.3.0") });
-    await mount({}, "about");
-    expect(inks()).toContain("text-muted-foreground");
-    expect(buttons()).not.toContain(ABOUT_WORDS.get("0.3.0"));
-  });
-
-  it("offers Get with the release's page while behind, keeps Releases on the releases list, and offers nothing new when level", async () => {
-    shell("0.2.0", "0.2.0");
-    useStore.setState({ release: read("0.3.0") });
-    await mount({}, "about");
-    const opened: string[] = [];
-    window.open = ((url: string) => {
-      opened.push(url);
-      return null;
-    }) as typeof window.open;
-    expect(buttons()).toEqual([ABOUT_WORDS.get("0.3.0"), ABOUT_WORDS.releases]);
-    fireEvent.click(screen.getByRole("button", { name: ABOUT_WORDS.get("0.3.0") }));
-    fireEvent.click(screen.getByRole("button", { name: ABOUT_WORDS.releases }));
-    expect(opened).toEqual(["https://github.com/Zingzy/wsp/releases/tag/v0.3.0", "https://github.com/Zingzy/wsp/releases"]);
-    await show(read("0.2.0"));
-    expect(buttons()).toEqual([ABOUT_WORDS.releases]);
-    fireEvent.click(screen.getByRole("button", { name: ABOUT_WORDS.releases }));
-    expect(opened.at(-1)).toMatch(/\/releases$/);
-    // Under the switch no number stands, so nothing is offered off a stale one.
-    await show({ state: "off" });
-    expect(buttons()).toEqual([ABOUT_WORDS.releases]);
-  });
-
+  const buttons = (): string[] => [...document.querySelectorAll("[data-settings-card=version] button, [data-settings-card=version-parts] button")].map(b => b.textContent ?? "");
+  const generalMeta = (): string | undefined => document.querySelector("[data-k=settings-general] [data-settings-meta]")?.textContent ?? undefined;
   const opens = (): string[] => {
     const opened: string[] = [];
     window.open = ((url: string) => {
@@ -682,6 +593,105 @@ describe("About and the newest release", () => {
     }) as typeof window.open;
     return opened;
   };
+
+  it("is one row under General's last head, marked with the host's version, the app's where the host names none, unknown where neither does, and What's new opens the releases list before any reading", async () => {
+    shell("0.1.3", "0.1.5");
+    await mount({}, "general");
+    expect([...document.querySelectorAll("[data-settings-page] [data-settings-head]")].at(-1)?.textContent).toBe(ABOUT_WORDS.title);
+    expect(rowTitles().at(-1)).toBe(ABOUT_WORDS.wsp);
+    expect(mark()).toBe("0.1.5");
+    const opened = opens();
+    fireEvent.click(whatsNew());
+    expect(opened).toHaveLength(1);
+    expect(opened[0]).toMatch(/\/releases$/);
+    shell("0.1.3", undefined);
+    await remount();
+    expect(mark()).toBe("0.1.3");
+    shell(undefined, undefined);
+    window.wsp = {};
+    await remount();
+    expect(mark()).toBe(ABOUT_WORDS.unknown);
+  });
+
+  it("draws the App and Host lines, each in mono, only while the shell's app and the host run different versions", async () => {
+    shell("0.1.3", "0.1.5");
+    await mount({}, "general");
+    expect(lineLabels()).toEqual([ABOUT_WORDS.app, ABOUT_WORDS.host]);
+    expect(wordOf("app-version")).toBe("0.1.3");
+    expect(wordOf("host-version")).toBe("0.1.5");
+    expect(lineOf("host-version")?.querySelector("[data-settings-word]")?.className).toContain("font-mono");
+    shell("0.1.5", "0.1.5");
+    await remount();
+    expect(lineLabels()).toEqual([]);
+    expect(mark()).toBe("0.1.5");
+    // A browser tab has no app half to differ from.
+    shell(undefined, "0.1.5");
+    await remount();
+    expect(lineLabels()).toEqual([]);
+  });
+
+  it("says under the version whether a newer release waits, as the host last read it, with when it read it on What's new", async () => {
+    shell("0.2.0", "0.2.0");
+    await mount({}, "general");
+    expect(stateLine()).toBe(ABOUT_WORDS.checking);
+    expect(whatsNew().title).toBe("");
+    await show(read("0.3.0"));
+    expect(stateLine()).toBe(ABOUT_WORDS.available("0.3.0"));
+    expect(whatsNew().title).toBe(ABOUT_WORDS.readHover("3 d ago"));
+    // Ahead of the page's minute clock, as a reading the opening itself asked for is.
+    await show(read("0.3.0", { checkedAt: new Date(Date.now() + 5_000).toISOString() }));
+    expect(whatsNew().title).toBe(ABOUT_WORDS.readHover("just now"));
+    await show(read("0.2.0"));
+    expect(stateLine()).toBe(ABOUT_WORDS.upToDate);
+    await show(read("0.1.0"));
+    expect(stateLine()).toBe(ABOUT_WORDS.upToDate);
+    // A reading kept through a failed ask stands, with the failure on the hover.
+    const tried = new Date(Date.now() - 5 * 60_000).toISOString();
+    await show(read("0.3.0", { state: "unreached", triedAt: tried }));
+    expect(stateLine()).toBe(ABOUT_WORDS.available("0.3.0"));
+    expect(whatsNew().title).toBe(ABOUT_WORDS.missedHover("3 d ago", builtWhen(tried)));
+    await show({ state: "checking" });
+    expect(stateLine()).toBe(ABOUT_WORDS.checking);
+    await show({ state: "unreached", triedAt: tried });
+    expect(stateLine()).toBe(ABOUT_WORDS.notChecked);
+    expect(whatsNew().title).toBe(ABOUT_WORDS.unreachedHover(builtWhen(tried)));
+    await show({ state: "off" });
+    expect(stateLine()).toBe(ABOUT_WORDS.checksOff);
+    expect(whatsNew().title).toBe(ABOUT_WORDS.offHover);
+  });
+
+  it("reads the app's half as behind too, and a tab with no shell reads the host alone", async () => {
+    shell("0.2.0", "0.3.0");
+    useStore.setState({ release: read("0.3.0") });
+    await mount({}, "general");
+    expect(stateLine()).toBe(ABOUT_WORDS.available("0.3.0"));
+    expect(buttons()).toContain(ABOUT_WORDS.get("0.3.0"));
+    shell(undefined, "0.3.0");
+    await remount(read("0.3.0"));
+    expect(stateLine()).toBe(ABOUT_WORDS.upToDate);
+    expect(buttons()).not.toContain(ABOUT_WORDS.get("0.3.0"));
+  });
+
+  it("offers Get with the release's page while behind, What's new opens the release read, and level or under the switch offers What's new alone", async () => {
+    shell("0.2.0", "0.2.0");
+    useStore.setState({ release: read("0.3.0") });
+    await mount({}, "general");
+    const opened = opens();
+    expect(buttons()).toEqual([ABOUT_WORDS.get("0.3.0"), ABOUT_WORDS.whatsNew]);
+    fireEvent.click(screen.getByRole("button", { name: ABOUT_WORDS.get("0.3.0") }));
+    fireEvent.click(whatsNew());
+    expect(opened).toEqual(["https://github.com/Zingzy/wsp/releases/tag/v0.3.0", "https://github.com/Zingzy/wsp/releases/tag/v0.3.0"]);
+    await show(read("0.2.0"));
+    expect(buttons()).toEqual([ABOUT_WORDS.whatsNew]);
+    fireEvent.click(whatsNew());
+    expect(opened.at(-1)).toBe("https://github.com/Zingzy/wsp/releases/tag/v0.2.0");
+    // Under the switch no number stands, so nothing is offered off a stale one and the notes are the whole list.
+    await show({ state: "off" });
+    expect(buttons()).toEqual([ABOUT_WORDS.whatsNew]);
+    fireEvent.click(whatsNew());
+    expect(opened.at(-1)).toMatch(/\/releases$/);
+  });
+
   const HOVER = "Downloads the disk image and checks its sha256.";
   const shellOn = (current: string | null, bundle: Pick<DesktopBridge, "getBundle" | "quitAndOpen">, app = "0.2.0", host = "0.2.0"): void => {
     shell(app, host);
@@ -694,16 +704,16 @@ describe("About and the newest release", () => {
     const quitAndOpen = vi.fn(async (): Promise<BundleOutcome> => ({ ok: true }));
     shellOn(null, { getBundle, quitAndOpen });
     useStore.setState({ release: read("0.3.0") });
-    await mount({}, "about");
+    await mount({}, "general");
     const opened = opens();
     const get = screen.getByRole("button", { name: ABOUT_WORDS.get("0.3.0") });
     await waitFor(() => expect(get.title).toBe(HOVER));
     fireEvent.click(get);
     expect(getBundle).toHaveBeenCalledWith({ version: "0.3.0" });
-    await waitFor(() => expect(buttons()).toEqual([ABOUT_WORDS.downloading, ABOUT_WORDS.releases]));
+    await waitFor(() => expect(buttons()).toEqual([ABOUT_WORDS.downloading, ABOUT_WORDS.whatsNew]));
     expect(screen.getByRole("button", { name: ABOUT_WORDS.downloading }).hasAttribute("disabled")).toBe(true);
     await act(async () => done({ ok: true }));
-    await waitFor(() => expect(buttons()).toEqual([ABOUT_WORDS.quitAndOpen, ABOUT_WORDS.releases]));
+    await waitFor(() => expect(buttons()).toEqual([ABOUT_WORDS.quitAndOpen, ABOUT_WORDS.whatsNew]));
     fireEvent.click(screen.getByRole("button", { name: ABOUT_WORDS.quitAndOpen }));
     await waitFor(() => expect(quitAndOpen).toHaveBeenCalledTimes(1));
     expect(opened).toEqual([]);
@@ -713,23 +723,23 @@ describe("About and the newest release", () => {
     const getBundle = vi.fn(async (): Promise<BundleOutcome> => ({ ok: false, error: "wsp-0.3.0-mac.dmg did not match the release's sha256 and was deleted" }));
     shellOn(null, { getBundle, quitAndOpen: vi.fn() });
     useStore.setState({ release: read("0.3.0") });
-    await mount({}, "about");
+    await mount({}, "general");
     await waitFor(() => expect(screen.getByRole("button", { name: ABOUT_WORDS.get("0.3.0") }).title).toBe(HOVER));
     fireEvent.click(screen.getByRole("button", { name: ABOUT_WORDS.get("0.3.0") }));
     await waitFor(() => expect(useNotices.getState().notices.slice(0, 1).map(n => [n.kind, n.text])).toEqual([["error", "wsp-0.3.0-mac.dmg did not match the release's sha256 and was deleted"]]));
-    expect(buttons()).toEqual([ABOUT_WORDS.get("0.3.0"), ABOUT_WORDS.releases]);
+    expect(buttons()).toEqual([ABOUT_WORDS.get("0.3.0"), ABOUT_WORDS.whatsNew]);
   });
 
   it("an open the shell refuses lands its line as an error notice and puts Get back", async () => {
     const quitAndOpen = vi.fn(async (): Promise<BundleOutcome> => ({ ok: false, error: "wsp-0.3.0-mac.dmg changed after it was checked and was not opened" }));
     shellOn(null, { getBundle: vi.fn(async (): Promise<BundleOutcome> => ({ ok: true })), quitAndOpen });
     useStore.setState({ release: read("0.3.0") });
-    await mount({}, "about");
+    await mount({}, "general");
     await waitFor(() => expect(screen.getByRole("button", { name: ABOUT_WORDS.get("0.3.0") }).title).toBe(HOVER));
     fireEvent.click(screen.getByRole("button", { name: ABOUT_WORDS.get("0.3.0") }));
     fireEvent.click(await screen.findByRole("button", { name: ABOUT_WORDS.quitAndOpen }));
     await waitFor(() => expect(useNotices.getState().notices.slice(0, 1).map(n => n.text)).toEqual(["wsp-0.3.0-mac.dmg changed after it was checked and was not opened"]));
-    await waitFor(() => expect(buttons()).toEqual([ABOUT_WORDS.get("0.3.0"), ABOUT_WORDS.releases]));
+    await waitFor(() => expect(buttons()).toEqual([ABOUT_WORDS.get("0.3.0"), ABOUT_WORDS.whatsNew]));
   });
 
   it("where only the host is behind, Get is the link to the release's page and the shell downloads nothing", async () => {
@@ -738,7 +748,7 @@ describe("About and the newest release", () => {
     shellOn(null, { getBundle, quitAndOpen: vi.fn() }, "0.3.0", "0.2.0");
     window.wsp = { ...window.wsp, hosts };
     useStore.setState({ release: read("0.3.0") });
-    await mount({}, "about");
+    await mount({}, "general");
     const opened = opens();
     await waitFor(() => expect(hosts).toHaveBeenCalled());
     await settle();
@@ -755,7 +765,7 @@ describe("About and the newest release", () => {
     shellOn("spoo", { getBundle, quitAndOpen: vi.fn() });
     window.wsp = { ...window.wsp, hosts };
     useStore.setState({ release: read("0.3.0") });
-    await mount({}, "about");
+    await mount({}, "general");
     const opened = opens();
     await waitFor(() => expect(hosts).toHaveBeenCalled());
     await settle();
@@ -766,14 +776,15 @@ describe("About and the newest release", () => {
     expect(getBundle).not.toHaveBeenCalled();
   });
 
-  const hostHover = (): string | undefined => document.querySelector<HTMLElement>("[data-k=host-version]")?.title;
+  const hostHover = (): string | undefined => lineOf("host-version")?.title;
 
+  // The app already on the release and the host still on the one before it, so the Host line stands to carry its hover.
   it("offers Restart host in place of Get once the installed files are newer and a restart brings the host back, and the click asks the host", async () => {
-    shell("0.2.0", "0.2.0");
+    shell("0.3.0", "0.2.0");
     const hostRestart = vi.fn(async () => undefined);
     useStore.setState({ release: read("0.3.0", { installed: "0.3.0", update: "npm i -g @zingzy/wsp@0.3.0" }) });
-    await mount({ hostRestart } as Partial<Api>, "about");
-    expect(buttons()).toEqual([ABOUT_WORDS.restartHost, ABOUT_WORDS.releases]);
+    await mount({ hostRestart } as Partial<Api>, "general");
+    expect(buttons()).toEqual([ABOUT_WORDS.restartHost, ABOUT_WORDS.whatsNew]);
     const restart = screen.getByRole("button", { name: ABOUT_WORDS.restartHost });
     expect(restart.title).toBe(ABOUT_WORDS.restartHover);
     for (const dropped of ["terminal panes", "localhost forwards", "sign-in in progress"]) expect(restart.title).toContain(dropped);
@@ -789,63 +800,63 @@ describe("About and the newest release", () => {
       throw new RequestError("a socket let in on a ticket cannot restart this host");
     });
     useStore.setState({ release: read("0.3.0", { installed: "0.3.0" }) });
-    await mount({ hostRestart } as Partial<Api>, "about");
+    await mount({ hostRestart } as Partial<Api>, "general");
     fireEvent.click(screen.getByRole("button", { name: ABOUT_WORDS.restartHost }));
     await waitFor(() => expect(useNotices.getState().notices.slice(0, 1).map(n => n.text)).toEqual(["a socket let in on a ticket cannot restart this host"]));
   });
 
   it("draws no Restart where a restart would not bring the host back, and the Host hover says the terminal's line instead", async () => {
-    shell("0.2.0", "0.2.0");
+    shell("0.3.0", "0.2.0");
     useStore.setState({ release: read("0.3.0", { shape: "up", installed: "0.3.0", restartRefusal: UP_RESTART_LINE }) });
-    await mount({}, "about");
-    expect(buttons()).toEqual([ABOUT_WORDS.get("0.3.0"), ABOUT_WORDS.releases]);
+    await mount({}, "general");
+    expect(buttons()).toEqual([ABOUT_WORDS.get("0.3.0"), ABOUT_WORDS.whatsNew]);
     expect(hostHover()).toBe(ABOUT_WORDS.hostInstalledHover("0.3.0", UP_RESTART_LINE));
   });
 
   it("shows the host's own refusal as it arrives, whatever road it names, and draws no Restart", async () => {
-    shell("0.2.0", "0.2.0");
+    shell("0.3.0", "0.2.0");
     useStore.setState({ release: read("0.3.0", { installed: "0.3.0", restartRefusal: HOST_NO_RESTART_LINE }) });
-    await mount({}, "about");
-    expect(buttons()).toEqual([ABOUT_WORDS.get("0.3.0"), ABOUT_WORDS.releases]);
+    await mount({}, "general");
+    expect(buttons()).toEqual([ABOUT_WORDS.get("0.3.0"), ABOUT_WORDS.whatsNew]);
     expect(hostHover()).toBe(ABOUT_WORDS.hostInstalledHover("0.3.0", HOST_NO_RESTART_LINE));
   });
 
   it("draws no Restart on a page served to another computer, whose restart the host refuses", async () => {
-    shell("0.2.0", "0.2.0");
+    shell("0.3.0", "0.2.0");
     (window as unknown as { __WSP__?: unknown }).__WSP__ = { tokenHash: "a".repeat(64), wsPath: "/ws", paired: false, version: "0.2.0" };
     useStore.setState({ release: read("0.3.0", { installed: "0.3.0" }) });
-    await mount({}, "about");
+    await mount({}, "general");
     expect(buttons()).not.toContain(ABOUT_WORDS.restartHost);
     expect(hostHover()).toBe(ABOUT_WORDS.hostInstalledHover("0.3.0", ABOUT_WORDS.restartThere));
   });
 
   it("the Host hover names the line that moves the host onto the release while it is behind, and the plain words otherwise", async () => {
-    shell("0.2.0", "0.2.0");
+    shell("0.3.0", "0.2.0");
     useStore.setState({ release: read("0.3.0", { update: "npm i -g @zingzy/wsp@0.3.0" }) });
-    await mount({}, "about");
+    await mount({}, "general");
     expect(hostHover()).toBe(ABOUT_WORDS.hostUpdateHover("npm i -g @zingzy/wsp@0.3.0", "0.3.0"));
     await show(read("0.2.0"));
     expect(hostHover()).toBe(ABOUT_WORDS.hostHover);
   });
 
-  it("the About row in the sidebar carries the newer version as its one mono word, and nothing while level", async () => {
+  it("the General row in the sidebar carries the newer version as its one mono word, and nothing while level", async () => {
     shell("0.2.0", "0.2.0");
     useStore.setState({ release: read("0.3.0") });
     await mount({}, "devices");
-    expect(aboutMeta()).toBe("0.3.0");
+    expect(generalMeta()).toBe("0.3.0");
     expect(document.querySelectorAll("[data-slot=sidebar] [data-settings-meta]").length).toBe(1);
     await show(read("0.2.0"));
-    expect(aboutMeta()).toBeUndefined();
+    expect(generalMeta()).toBeUndefined();
     await show({ state: "unreached" });
-    expect(aboutMeta()).toBeUndefined();
+    expect(generalMeta()).toBeUndefined();
   });
 
   it("counts the computers whose daemon is behind in one line, naming them on hover, and draws none while every one is current", async () => {
     shell("0.2.0", "0.2.0");
     const behind = (id: string, name: string): PlaceView => ({ ...box, id, name, daemonVersion: DAEMON_VERSION - 3 });
     useStore.setState({ places: [here, behind("p_spoo", "spoo"), behind("p_dev4", "dev4"), solari, { ...box, id: "p_new", name: "new", daemonVersion: DAEMON_VERSION }] });
-    await mount({}, "about");
-    expect(lineLabels()).toEqual([ABOUT_WORDS.app, ABOUT_WORDS.host, ABOUT_WORDS.computersBehind]);
+    await mount({}, "general");
+    expect(lineLabels()).toEqual([ABOUT_WORDS.computersBehind]);
     expect(wordOf("computers-behind")).toBe("2");
     expect(lineOf("computers-behind")?.querySelector("[data-settings-word]")?.className.split(" ")).toContain("text-muted-foreground");
     expect(lineOf("computers-behind")?.title).toBe("spoo, dev4: wsp add <name> --update");
@@ -858,14 +869,14 @@ describe("About and the newest release", () => {
     expect(lineOf("computers-behind")).toBeNull();
   });
 
-  it("opening About asks the host to check, which its floor keeps to one ask, and the answer lands on the page", async () => {
+  it("opening General asks the host to check, which its floor keeps to one ask, and the answer lands on the card", async () => {
     shell("0.2.0", "0.2.0");
     const releaseCheck = vi.fn(async () => read("0.3.0"));
     await mount({ releaseCheck } as Partial<Api>, "devices");
     expect(releaseCheck).not.toHaveBeenCalled();
-    act(() => useSettingsStore.getState().go({ kind: "group", group: "about" }));
+    act(() => useSettingsStore.getState().go({ kind: "group", group: "general" }));
     await settle();
     expect(releaseCheck).toHaveBeenCalledTimes(1);
-    expect(latestWord()).toBe("0.3.0");
+    expect(stateLine()).toBe(ABOUT_WORDS.available("0.3.0"));
   });
 });

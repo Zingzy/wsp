@@ -19,7 +19,7 @@ export function useSettingsReads(): void {
   const addComputerOpen = useStore(s => s.addComputerOpen);
   const devicesAsked = useSettingsStore(s => s.devicesAsked);
   const setReads = useSettingsStore(s => s.setReads);
-  const onAbout = groupOf(useSettingsAt()) === "about";
+  const onAbout = groupOf(useSettingsAt()) === "general";
   const asking = useRef(false);
   /** Set when this window may not read the money at all, so it stops asking at every tick. Only that refusal sets
    * it: a read dropped while the socket reconnects is asked again at the next tick. */

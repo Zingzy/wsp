@@ -787,15 +787,15 @@
       "wait": "k=chord-refused"
     },
     {
-      "name": "settings-about",
+      "name": "settings-version",
       "at": "/",
       "steps": [
         "390:key:Escape",
         "390:sidebar=trigger",
         "k=settings-row",
-        "k=settings-about"
+        "k=settings-general"
       ],
-      "wait": "settings-at=about"
+      "wait": "settings-at=general"
     },
     {
       "name": "new-workspace",

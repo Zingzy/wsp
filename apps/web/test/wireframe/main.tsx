@@ -51,10 +51,10 @@
 //   settings-devices      three devices paired, one of them this browser
 //   settings-account      the one Account row, not signed in
 //   settings-keybindings  the chords, in a desktop shell
-//   settings-about        the two halves of the release, in a desktop shell
-//   settings-about-behind the same with 0.3.0 out, the app on its own host, whose
+//   settings-version      General with its Version card, app and host on one release, in a desktop shell
+//   settings-version-behind the same with 0.3.0 out, the app on its own host, whose
 //                         shell holds the bundle's download until the test lets it go
-//   settings-about-restart 0.3.0 installed under the running 0.2.0 host, which a restart brings back
+//   settings-version-restart 0.3.0 installed under the running 0.2.0 host, which a restart brings back
 //   settings-search       "icons" typed in the field
 //   settings-over-panel   a workspace's panel open, then Settings over it
 //   settings-add-computer Computers scrolled to Add a computer, the ssh road open
@@ -394,9 +394,9 @@ const SETTINGS_SCREENS: Record<string, SettingsAt> = {
   "settings-privacy": { kind: "group", group: "privacy" },
   "settings-usage": { kind: "group", group: "usage" },
   "settings-keybindings": { kind: "group", group: "keybindings" },
-  "settings-about": { kind: "group", group: "about" },
-  "settings-about-behind": { kind: "group", group: "about" },
-  "settings-about-restart": { kind: "group", group: "about" },
+  "settings-version": { kind: "group", group: "general" },
+  "settings-version-behind": { kind: "group", group: "general" },
+  "settings-version-restart": { kind: "group", group: "general" },
   "settings-search": { kind: "group", group: "appearance" },
   "settings-over-panel": { kind: "group", group: "appearance" },
   "settings-add-computer": { kind: "group", group: "computers" },
@@ -684,11 +684,11 @@ const api = {
 if (screen === "sidebar-hosts") {
   window.wsp = { hosts: async () => ({ here: hereWord(true), current: null, hosts: [{ alias: "spoo", url: "wss://spoo.example/ws" }] }) };
 }
-if (screen === "settings-keybindings" || screen === "settings-about" || screen === "settings-about-behind" || screen === "settings-about-restart") {
+if (screen === "settings-keybindings" || screen === "settings-version" || screen === "settings-version-behind" || screen === "settings-version-restart") {
   window.wsp = { version: "0.2.0" };
   (window as unknown as { __WSP__?: { paired: boolean; version: string } }).__WSP__ = { paired: true, version: "0.2.0" };
 }
-if (screen === "settings-about-behind") {
+if (screen === "settings-version-behind") {
   const held = window as unknown as { finishBundle?: () => void };
   window.wsp = {
     ...window.wsp,
@@ -714,9 +714,9 @@ useStore.setState({
   settingsOpen: settings,
   addComputerOpen: screen === "settings-add-computer" || screen === "settings-add-computer-failed" || screen === "settings-computers-refused" || ADD_SCREENS.includes(screen),
   release:
-    screen === "settings-about-behind"
+    screen === "settings-version-behind"
       ? { state: "read", latest: { version: "0.3.0", tag: "v0.3.0", url: "https://github.com/Zingzy/wsp/releases/tag/v0.3.0", publishedAt: AT }, checkedAt: AT, triedAt: AT }
-      : screen === "settings-about-restart"
+      : screen === "settings-version-restart"
         ? { state: "read", latest: { version: "0.3.0", tag: "v0.3.0", url: "https://github.com/Zingzy/wsp/releases/tag/v0.3.0", publishedAt: AT }, checkedAt: AT, triedAt: AT, installed: "0.3.0", update: "npm i -g @zingzy/wsp@0.3.0", shape: "service" }
         : null,
   projects: drawsSidebar ? RECORDED : [],
