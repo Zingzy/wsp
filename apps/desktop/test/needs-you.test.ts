@@ -1,22 +1,26 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The shell's road out of the app, against a stubbed Notification: a window
 // the person is looking at says nothing, one they are not says the page's line
-// with a sound only where the line asks for one, and a click raises the window
+// as the line asks, shown, sounding, or a sound alone, and a click raises the window
 // and tells its page to open what it was about. The dock's badge takes a count
 // and nothing else.
 import { NEEDS_YOU } from "@wsp/protocol";
 import { describe, expect, it } from "vitest";
-import { SOUND_SAMPLE, sayOutside, showBadge, soundSample, type Notifier, type SystemNotification } from "../src/needs-you.js";
+import { sayOutside, showBadge, type Notifier, type SystemNotification } from "../src/needs-you.js";
 
-const NEED = { title: NEEDS_YOU, body: "sign in to GitHub CLI login", sound: false };
+const NEED = { title: NEEDS_YOU, body: "sign in to GitHub CLI login", show: true, sound: false };
 
 /** A Notification that records what it was built with and what it did, and hands its click back to the test. */
 function stub(supported = true) {
   const shown: { title: string; body: string; silent: boolean }[] = [];
   const clicks: (() => void)[] = [];
   let displayed = 0;
+  let beeps = 0;
   const notifier: Notifier = {
     supported: () => supported,
+    beep: () => {
+      beeps += 1;
+    },
     make: o => {
       shown.push(o);
       const note: SystemNotification = {
@@ -28,7 +32,7 @@ function stub(supported = true) {
       return note;
     },
   };
-  return { notifier, shown, clicks, displayed: () => displayed };
+  return { notifier, shown, clicks, displayed: () => displayed, beeps: () => beeps };
 }
 
 function fakeWindow(focused: boolean) {
@@ -54,12 +58,14 @@ describe("the shell's system notification for something the person should hear a
     expect(did).toEqual([]);
   });
 
-  it("plays the sound Settings asks for with its sound on, focused or not, and nothing where the computer shows none", () => {
-    const { notifier, shown, displayed } = stub();
-    expect(soundSample(notifier)).toBe(true);
-    expect(shown).toEqual([{ ...SOUND_SAMPLE, silent: false }]);
-    expect(displayed()).toBe(1);
-    expect(soundSample(stub(false).notifier)).toBe(false);
+  it("a line the person chose to hear and not see plays the system's alert and shows nothing, and none while the window has focus", () => {
+    const { notifier, shown, beeps } = stub();
+    expect(sayOutside({ ...NEED, show: false, sound: true }, fakeWindow(false).win, notifier)).toBe(true);
+    expect(beeps()).toBe(1);
+    expect(shown).toEqual([]);
+    expect(sayOutside({ ...NEED, show: false, sound: true }, fakeWindow(true).win, notifier)).toBe(false);
+    expect(sayOutside({ ...NEED, show: false, sound: false }, fakeWindow(false).win, notifier)).toBe(false);
+    expect(beeps()).toBe(1);
   });
 
   it("a click raises the window and tells its page to open the build screen", () => {
@@ -82,7 +88,7 @@ describe("the shell's system notification for something the person should hear a
   it("a line that asks for a sound makes one, and one that does not stays silent", () => {
     const { notifier, shown } = stub();
     const { win } = fakeWindow(false);
-    sayOutside({ title: "Fix the redirect finished", body: "spoo-landing", sound: true }, win, notifier);
+    sayOutside({ title: "Fix the redirect finished", body: "spoo-landing", show: true, sound: true }, win, notifier);
     sayOutside({ ...NEED, sound: false }, win, notifier);
     expect(shown.map(o => o.silent)).toEqual([false, true]);
     expect(shown[0]).toEqual({ title: "Fix the redirect finished", body: "spoo-landing", silent: false });

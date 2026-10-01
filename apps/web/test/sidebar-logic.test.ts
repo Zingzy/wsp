@@ -3,7 +3,7 @@
 // pill rollup over wsp thread snapshots, plus our row labels and the
 // new-workspace helpers.
 import { describe, expect, it } from "vitest";
-import { THREAD_SETTLE_MS, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { SETTLE_MS, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot } from "../src/adapt/index.js";
 import { DisconnectedError, RequestError } from "../src/protocol/client.js";
 import { openedBy, threadTree, threadsOpenedBy, workspaceOf } from "../src/sidebar/threadTree.js";
@@ -73,7 +73,9 @@ describe("the Settled fold's rule", () => {
     ...over,
   });
 
-  it("a thread a person has read settles once it has been quiet THREAD_SETTLE_MS, two hours, and not a minute sooner", () => {
+  const THREAD_SETTLE_MS = SETTLE_MS["2h"]!;
+
+  it("a thread a person has read settles once it has been quiet two hours by default, and not a minute sooner", () => {
     expect(THREAD_SETTLE_MS).toBe(2 * 60 * 60_000);
     expect(isThreadSettled(quietFor(THREAD_SETTLE_MS - 60_000), NOW)).toBe(false);
     expect(isThreadSettled(quietFor(THREAD_SETTLE_MS), NOW)).toBe(true);
@@ -85,6 +87,14 @@ describe("the Settled fold's rule", () => {
     // The thread open in the centre stays however long it has been read, and still folds when settled by hand.
     expect(isThreadSettled(quietFor(day, { readAt: at(THREAD_SETTLE_MS) }), NOW, true)).toBe(false);
     expect(isThreadSettled(quietFor(day, { settledAt: at(60_000) }), NOW, true)).toBe(true);
+  });
+
+  it("settles after the quiet the person picked on General, and never by time on never, though a hand still settles it", () => {
+    expect(isThreadSettled(quietFor(16 * 60_000), NOW, false, SETTLE_MS["15m"])).toBe(true);
+    expect(isThreadSettled(quietFor(14 * 60_000), NOW, false, SETTLE_MS["15m"])).toBe(false);
+    expect(isThreadSettled(quietFor(3 * THREAD_SETTLE_MS), NOW, false, SETTLE_MS["1d"])).toBe(false);
+    expect(isThreadSettled(quietFor(365 * 24 * 60 * 60_000), NOW, false, SETTLE_MS.never)).toBe(false);
+    expect(isThreadSettled(quietFor(60_000, { settledAt: at(30_000) }), NOW, false, SETTLE_MS.never)).toBe(true);
   });
 
   it("a finish nobody has seen never settles by time until it is opened, and a failure never does at all", () => {

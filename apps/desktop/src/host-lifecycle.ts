@@ -2,7 +2,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { STARTED_BY_ENV, accountAim, claudeKeyOnlyInThisShell, aimedAlias, aimedHost, computerNameHere, defaultHomeIn, devCheckoutState, dialAddress, dialHost, downCommand, homeNamed, hostLogPath, hostTokenFor, httpProbe, installService, keyOnlyInThisShell, lockPathFor, logTail, noManagerLine, ownPid, readHost, runAll, runFailureLine, serviceAddressHere, serviceEnv, servingHost, severalAccountHostsLine, stopService, type CliIO, type HostLock, type HostRecord, type HostProbe, type RunFailure, type ServiceDeps, type ServicePlan } from "@wsp/host";
+import { STARTED_BY_ENV, accountAim, claudeKeyOnlyInThisShell, aimedAlias, aimedHost, computerNameHere, defaultHomeIn, devCheckoutState, dialAddress, dialHost, downCommand, homeNamed, hostLogPath, hostTokenFor, httpProbe, installService, keyOnlyInThisShell, lockPathFor, logTail, noManagerLine, ownPid, readHost, runAll, runFailureLine, serviceAddressHere, serviceEnv, serviceStartsAtLogin, servingHost, severalAccountHostsLine, stopService, type CliIO, type HostLock, type HostRecord, type HostProbe, type RunFailure, type ServiceDeps, type ServicePlan } from "@wsp/host";
 import { LOOPBACK, authority, bootLineOf, fmtDuration, holdsNothing, isLocalWorkspace, isLoopback, type BootPayload, type GoldenManifest, type SessionView, type WorkspaceView } from "@wsp/protocol";
 import { safeEqual, tokenDigest } from "@wsp/runtime";
 
@@ -193,7 +193,8 @@ const answersAsOwn =
 /** Makes this computer's own manager serve the state file with the shim, and waits until wsp answers. A unit that
  * runs another program (another app's shim, the node a terminal's wsp up --service named) is stopped and written
  * again; one that runs this shim is kept as it stands, whatever words a terminal gave it, and loaded where the
- * manager has let it go. Read only when nothing serves, so a rewrite never restarts wsp under a window on it. */
+ * manager has let it go. A unit the person set not to start at login is loaded all the same and left that way.
+ * Read only when nothing serves, so a rewrite never restarts wsp under a window on it. */
 export async function ensureService(opts: Pick<OpenHostOptions, "statePath" | "home" | "shim" | "service" | "io">): Promise<void> {
   const { manager, run } = opts.service;
   if (manager === undefined) throw new Error(noManagerLine(opts.service.platform));
@@ -205,6 +206,8 @@ export async function ensureService(opts: Pick<OpenHostOptions, "statePath" | "h
   const unit = manager.unit(plan);
   const written = existsSync(unit.path) ? readFileSync(unit.path, "utf8") : undefined;
   const held = async (): Promise<boolean> => (await run(manager.holds(plan))).code === 0;
+  // A load starts the unit at login too, so a unit set to start only when asked is set back once it is loaded.
+  const offAtLogin = written !== undefined && (await serviceStartsAtLogin(manager, plan, run)) === false;
   if (written === undefined || !manager.runs(written, opts.shim)) {
     if (written !== undefined) {
       const stopped = await stopService(manager, plan, run);
@@ -222,10 +225,30 @@ export async function ensureService(opts: Pick<OpenHostOptions, "statePath" | "h
     const failure = await runAll(manager.load(plan), run);
     if (failure !== undefined && !(await held())) throw refused(failure);
   }
+  if (offAtLogin) {
+    const failure = await runAll(manager.atLogin(plan, false), run);
+    if (failure !== undefined) opts.io.error(runFailureLine(failure));
+  }
   const started = Date.now();
   if ((await untilAttachable(opts.statePath, opts.service.waitMs)) === undefined) {
     throw new StartTimeout([`wsp did not start within ${fmtDuration(Date.now() - started)}; its log is ${plan.logPath}`, ...logTail(plan.logPath)].join("\n"));
   }
+}
+
+/** Whether the service serving this state file starts at every login, or only when the app or a line asks for it;
+ * null where no service is registered for it or the manager's answer said neither. */
+export async function loginStart(statePath: string, service: ServiceRoad): Promise<boolean | null> {
+  return (await serviceStartsAtLogin(service.manager, serviceAddressHere(statePath), service.run)) ?? null;
+}
+
+/** Sets that, leaving the service running either way, and answers the reading after it; a refusal is the manager's
+ * own line. */
+export async function setLoginStart(statePath: string, on: boolean, service: ServiceRoad): Promise<boolean | null> {
+  const { manager, run } = service;
+  if (manager === undefined) throw new Error(noManagerLine(service.platform));
+  const failure = await runAll(manager.atLogin(serviceAddressHere(statePath), on), run);
+  if (failure !== undefined) throw refused(failure);
+  return loginStart(statePath, service);
 }
 
 /** The service's host did not answer within the start's wait, which already covered a host still binding. */

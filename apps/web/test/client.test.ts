@@ -3,7 +3,7 @@
 // dispatches and unwraps the field its reply carries. The same socket plays a
 // runtime that dies and comes back for the reconnect tests.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { PLACE_ADD_WORDS, RuntimeRequest } from "@wsp/protocol";
+import { GENERAL_DEFAULTS, PLACE_ADD_WORDS, RuntimeRequest } from "@wsp/protocol";
 import { DisconnectedError, makeApi, ProtocolClient, type ConnStatus, type ProtocolClientOptions } from "../src/protocol/client.js";
 import { ScriptedSocket, type Frame } from "./scripted-socket.js";
 import { caps } from "./caps.js";
@@ -110,16 +110,16 @@ describe("makeApi wrappers", () => {
 
   it("preferences and setPreferences send the two preferences ops and unwrap the record the wire type vouches for", async () => {
     const { api, lastSent } = await connect();
-    const record = { theme: "light", sidebarMode: "spaces", sidebarWidth: 312, terminalSize: "app", terminalZoom: { ws_a: 2 }, access: { ws_a: "bypassPermissions" }, target: { workspace: "ws_a" }, projectLook: { pr_1: { icon: "rocket", hue: "teal" } }, notifySound: false, projectOrder: ["pr_1"], labs: false };
+    const record = { theme: "light", sidebarMode: "spaces", sidebarWidth: 312, terminalSize: "app", terminalZoom: { ws_a: 2 }, access: { ws_a: "bypassPermissions" }, target: { workspace: "ws_a" }, projectLook: { pr_1: { icon: "rocket", hue: "teal" } }, projectOrder: ["pr_1"], labs: false };
     ScriptedSocket.reply = f => ({ id: f["id"], ok: true, preferences: record });
     // A record from a host that kept no computer icons or theme picks reads as none and the side defaults rather than
     // failing the whole record.
-    expect(await api.preferences!()).toEqual({ ...record, computerLook: {}, serverIcons: true, agentVersions: true, usageLogs: true, keepAwake: true, transparency: true, keybindings: {}, appFont: "", codeFont: "", agentDefaults: {}, projectDefaults: {}, lightTheme: "paper", darkTheme: "graphite" });
+    expect(await api.preferences!()).toEqual({ ...record, computerLook: {}, serverIcons: true, agentVersions: true, usageLogs: true, keepAwake: true, transparency: true, keybindings: {}, appFont: "", codeFont: "", agentDefaults: {}, projectDefaults: {}, lightTheme: "paper", darkTheme: "graphite", ...GENERAL_DEFAULTS });
     expect(lastSent()).toEqual({ id: expect.any(Number), op: "preferences.get" });
-    expect(await api.setPreferences!({ theme: "light", sidebarWidth: null })).toEqual({ ...record, computerLook: {}, serverIcons: true, agentVersions: true, usageLogs: true, keepAwake: true, transparency: true, keybindings: {}, appFont: "", codeFont: "", agentDefaults: {}, projectDefaults: {}, lightTheme: "paper", darkTheme: "graphite" });
+    expect(await api.setPreferences!({ theme: "light", sidebarWidth: null })).toEqual({ ...record, computerLook: {}, serverIcons: true, agentVersions: true, usageLogs: true, keepAwake: true, transparency: true, keybindings: {}, appFont: "", codeFont: "", agentDefaults: {}, projectDefaults: {}, lightTheme: "paper", darkTheme: "graphite", ...GENERAL_DEFAULTS });
     expect(lastSent()).toEqual({ id: expect.any(Number), op: "preferences.set", patch: { theme: "light", sidebarWidth: null } });
     ScriptedSocket.reply = f => ({ id: f["id"], ok: true, preferences: record, notice: "Server icons are off, but ~/.wsp/icons could not be deleted: permission denied. Delete it by hand." });
-    expect(await api.setPreferences!({ serverIcons: false })).toEqual({ ...record, computerLook: {}, serverIcons: true, agentVersions: true, usageLogs: true, keepAwake: true, transparency: true, keybindings: {}, appFont: "", codeFont: "", agentDefaults: {}, projectDefaults: {}, lightTheme: "paper", darkTheme: "graphite", notice: "Server icons are off, but ~/.wsp/icons could not be deleted: permission denied. Delete it by hand." });
+    expect(await api.setPreferences!({ serverIcons: false })).toEqual({ ...record, computerLook: {}, serverIcons: true, agentVersions: true, usageLogs: true, keepAwake: true, transparency: true, keybindings: {}, appFont: "", codeFont: "", agentDefaults: {}, projectDefaults: {}, lightTheme: "paper", darkTheme: "graphite", ...GENERAL_DEFAULTS, notice: "Server icons are off, but ~/.wsp/icons could not be deleted: permission denied. Delete it by hand." });
     ScriptedSocket.reply = f => ({ id: f["id"], ok: true, preferences: { ...record, computerLook: { pl_1: { icon: "server" } } } });
     expect((await api.preferences!()).computerLook).toEqual({ pl_1: { icon: "server" } });
     // A record the wire type does not vouch for is not applied: the page would paint a theme it never checked.

@@ -174,7 +174,7 @@ export interface TileSection {
  * roots are listed, children kept wherever they run. */
 export function sidebarTiles(
   projects: ReadonlyArray<SidebarProjectSnapshot>,
-  { picked, nowMs, open = null }: { picked: string | null; nowMs: number; /** The thread open in the centre, by fold key. */ open?: string | null },
+  { picked, nowMs, open = null, settleMs }: { picked: string | null; nowMs: number; /** The thread open in the centre, by fold key. */ open?: string | null; /** How long a read thread sits quiet before it settles, null for never; absent, the record's default. */ settleMs?: number | null },
 ): { live: TileNode[]; settled: TileNode[]; sections: TileSection[] } {
   const items = projects.flatMap((runs): TileItem[] => {
     const forkedBy = runs.workspace.parentThreadId ?? null;
@@ -192,7 +192,7 @@ export function sidebarTiles(
       continue;
     }
     const pinned = node.thread.thread?.pinnedAt != null;
-    if (everyTile(node, thread => isThreadSettled(thread, nowMs, pinned || thread.id === open))) settled.push(node);
+    if (everyTile(node, thread => isThreadSettled(thread, nowMs, pinned || thread.id === open, settleMs))) settled.push(node);
     else filed.get(pinned ? "pinned" : listOf(sectionOf(node)))!.push(node);
   }
   filed.get("threads")!.push(...snoozedWorking);

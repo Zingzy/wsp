@@ -97,7 +97,8 @@ export interface UsageLedger {
   used(query: UsedQuery): Promise<UsedAnswer>;
   day(day: string): Promise<UsageDay | undefined>;
   days(): Promise<string[]>;
-  limit(reading: LimitReading): Promise<void>;
+  /** Keeps a reading over the account's last, answering both, so a reader compares them with no write between. */
+  limit(reading: LimitReading): Promise<{ before: AccountLimit | undefined; after: AccountLimit }>;
   limits(): Promise<AccountLimit[]>;
   /** Every account a row or a limit was filed under, by key, with what it reads as. */
   accountLabels(): Promise<Map<string, string>>;
@@ -342,7 +343,7 @@ export function createUsageLedger(o: { store: Store; clock: Clock; timeZone?: st
     };
   };
 
-  const limit = (r: LimitReading): Promise<void> =>
+  const limit = (r: LimitReading): Promise<{ before: AccountLimit | undefined; after: AccountLimit }> =>
     inTurn(async () => {
       const heldRaw = await o.store.get(LIMITS, r.key);
       const held = heldRaw === undefined ? undefined : AccountLimit.safeParse(heldRaw).data;
@@ -363,6 +364,7 @@ export function createUsageLedger(o: { store: Store; clock: Clock; timeZone?: st
         computers: [...new Set([...(held?.computers ?? []), r.computer])],
       };
       await o.store.put(LIMITS, r.key, next);
+      return { before: held, after: next };
     });
 
   const limits = async (): Promise<AccountLimit[]> =>

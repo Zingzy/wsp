@@ -36,7 +36,7 @@ export {
   type ServiceDeps,
   type StopProcess,
 } from "./cli.js";
-export { SERVICE_MANAGERS, httpProbe, installService, logTail, noManagerLine, runAll, runFailureLine, serviceAddressHere, serviceEnv, serviceManagerFor, serviceTag, stopService, systemRunner, untilServing, type HostProbe, type RunFailure, type ServiceManager, type ServicePlan, type ServiceRunner } from "./service.js";
+export { SERVICE_MANAGERS, httpProbe, installService, logTail, noManagerLine, runAll, runFailureLine, serviceAddressHere, serviceEnv, serviceManagerFor, serviceStartsAtLogin, serviceTag, stopService, systemRunner, untilServing, type HostProbe, type RunFailure, type ServiceManager, type ServicePlan, type ServiceRunner } from "./service.js";
 export { LAUNCHD_PATH, adoptLoginPath, needsLoginPath, takeLoginPath, type LoginShellDeps } from "./login-path.js";
 export { SECTION_BEGIN, SECTION_END, sectionText } from "./agents-md.js";
 export { runBin } from "./entry.js";

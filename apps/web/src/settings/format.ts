@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The words the settings page and its palette row say, one place, keyed by the
 // preference value where a value has words of its own.
-import { fmtPx, listWords, offlineFor, placeUpdateLine, type PlaceDialRoad, type PlaceProvisionRow, type TerminalSizeSource, type ThemePreference } from "@wsp/protocol";
+import { fmtPx, listWords, offlineFor, placeUpdateLine, type MidTurn, type NotifyChoice, type OnQuit, type PlaceDialRoad, type PlaceProvisionRow, type SendKey, type SettleAfter, type TerminalSizeSource, type ThemePreference } from "@wsp/protocol";
 
 /** The muted mono a state word or a description of machine words wears, and the foreground mono a value a person
  * reads wears: an address, a size, a path, a time, a version. Two class strings the page, the sheet and the first
@@ -220,9 +220,37 @@ export const ACCOUNT_WORDS = {
 /** Settings > Privacy: what this wsp asks of a service outside the person's computers. */
 /** Settings > General. */
 export const GENERAL_WORDS = {
-  editor: "Editor",
-  editorDescription: "Where Open in editor opens a file or a thread's folder.",
+  composer: "Composer",
+  sendWith: "Send with",
+  sendWithDescription: "The other key makes a new line. Keys read as this computer's: ⌘ on a Mac, Ctrl elsewhere.",
+  sendKeys: (mac: boolean): Record<SendKey, string> => ({ enter: "Enter", "mod-enter": mac ? "⌘ Enter" : "Ctrl Enter" }),
+  midTurn: "A message while a thread works",
+  midTurnDescription: "Queue waits for the turn to end; steer hands it to the agent now.",
+  midTurnChoices: { queue: "Queue", steer: "Steer" } satisfies Record<MidTurn, string>,
+  notifications: "Notifications",
+  notifyNeeds: "When a thread needs you",
+  notifyNeedsDescription: "A question, a permission prompt, a sign-in.",
+  notifyDone: "When a thread finishes",
+  notifyDoneDescription: "Off keeps ten running threads from pinging you ten times.",
+  notifyChoices: { off: "Off", notify: "Notify", sound: "Sound", "notify-sound": "Notify and sound" } satisfies Record<NotifyChoice, string>,
+  planAlerts: "When a plan window runs low",
+  planAlertsDescription: "At 70% and 90% of a window, once each, and when an account is blocked.",
+  threads: "Threads",
+  settleAfter: "Settle a thread after",
+  settleAfterDescription: "A read thread moves to Settled once it has been quiet this long.",
+  settleChoices: { "15m": "15 minutes", "1h": "1 hour", "2h": "2 hours", "1d": "1 day", never: "Never" } satisfies Record<SettleAfter, string>,
+  askDelete: "Ask before deleting",
+  askDeleteDescription: "A workspace with unpushed work always asks.",
+  openIn: "Open in",
+  editor: "Open files in",
+  editorDescription: "Where Open in editor goes, for a file in a thread or a whole workspace.",
   noEditor: "No editor wsp opens files in is installed: VS Code, Cursor, Zed or a JetBrains IDE.",
+  startup: "Startup and quit",
+  onQuit: "When you quit",
+  onQuitDescription: (here: string): string => `Quitting the window leaves threads running on ${here === "" ? "this computer" : here}; quit and stop ends them too.`,
+  onQuitChoices: { ask: "Ask each time", keep: "Keep threads running", stop: "Stop wsp too" } satisfies Record<OnQuit, string>,
+  loginStart: "Start wsp at login",
+  loginStartDescription: (here: string): string => `wsp keeps running on ${here === "" ? "this computer" : here} with no window open, so threads carry on.`,
 } as const;
 
 export const PRIVACY_WORDS = {
@@ -234,15 +262,6 @@ export const PRIVACY_WORDS = {
   agentVersionsHeld: "Off on the host: WSP_UPDATE_CHECK is 0.",
   usageLogs: "Agent logs",
   usageLogsDescription: (here: string): string => `Usage counts what Claude Code, Codex and OpenCode logged on ${here === "" ? "this computer" : here}, wsp's own threads there included. wsp reads the logs there and shows what they count on the Usage page alone, never to an agent.`,
-} as const;
-
-/** Settings > Appearance's Notifications: the one switch over the sound a notification makes. */
-export const NOTIFY_WORDS = {
-  head: "Notifications",
-  lede: "What wsp says while you are in another app.",
-  play: "Play the sound",
-  sound: "Sound",
-  soundDescription: "A finished turn and a permission prompt make a sound while wsp is not in front.",
 } as const;
 
 /** Settings > Appearance's switch over the app's glass. */
