@@ -99,18 +99,18 @@ export function itemWords(item: SettingsItem): string[] {
   return item.kind === "row" ? [item.title, wordsLine(item.description)] : [item.label, ...(item.hover === undefined ? [] : [item.hover])];
 }
 
-export const CARD_SURFACE = "overflow-hidden rounded-xl border border-border/60 bg-card/40";
+export const CARD_SURFACE = "overflow-hidden rounded-[11px] border border-border/60 bg-card/40 group-data-[locked]/settings:rounded-xl";
 const TITLE_CLASS = SETTING_TITLE;
 const LABEL_CLASS = "text-sm leading-5 text-foreground";
 const DESCRIPTION_CLASS = "max-w-xl text-[13px] leading-[1.45] text-muted-foreground";
 /** The text and what acts on it, each in a column of its own from 640 px, one over the other under it. */
-const SPLIT_CLASS = "flex flex-col gap-3 sm:grid sm:grid-cols-[minmax(0,1fr)_minmax(10rem,auto)] sm:items-center sm:gap-8";
+const SPLIT_CLASS = "flex flex-col gap-3 sm:grid sm:grid-cols-[minmax(0,1fr)_minmax(10rem,auto)] sm:items-center sm:gap-5";
 /** The hover a row that opens a page takes: the sidebar rows' step, in the same 150 ms. */
 const OPENS_CLASS = "w-full cursor-pointer text-left transition-colors duration-150 hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset";
 
 export function Card({ id, head, lede, under, body, children }: { id: string; head?: ReactNode; /** One sentence under the head, for a card whose rows need the why. */ lede?: string; under?: ReactNode; body?: ReactNode; children?: ReactNode }) {
   return (
-    <section data-settings-card={id} {...(typeof head === "string" ? { "aria-label": head } : {})} className="flex flex-col gap-4">
+    <section data-settings-card={id} {...(typeof head === "string" ? { "aria-label": head } : {})} className="flex flex-col gap-3 group-data-[locked]/settings:gap-4">
       {head === undefined && lede === undefined ? null : (
         <div className="flex flex-col gap-1">
           {head === undefined ? null : (
@@ -150,7 +150,7 @@ export function Row({ id, title, lead, mark, description, chips, mono = false, w
   const text = (
     <div className="flex min-w-0 items-center gap-3">
       {lead === undefined ? null : <span className="flex shrink-0 items-center">{lead}</span>}
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="flex min-h-5 min-w-0 flex-wrap items-center gap-x-2">
           <span data-settings-title className={cn(TITLE_CLASS, "min-w-0 break-words")}>
             {title}

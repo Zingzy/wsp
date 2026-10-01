@@ -84,9 +84,11 @@ export function SettingsPage() {
   const isMobile = useIsMobile();
   // At a phone's width the results are in the sheet the field is in, so the centre keeps its page.
   const searching = search !== "" && !isMobile;
+  // Usage keeps the sizes it was locked at; every other page is drawn to the locked settings design.
+  const usage = !searching && at.kind === "group" && at.group === "usage";
   return (
     <ScrollArea className="min-h-0 flex-1">
-      <div data-settings-page data-settings-at={searching ? "search" : atId(at)} className={cn("mx-auto flex w-full flex-col gap-12 px-8 pt-14 pb-12 max-sm:px-4 max-sm:pt-6", !searching && at.kind === "group" && at.group === "usage" ? "max-w-[1080px]" : "max-w-[760px]")}>
+      <div data-settings-page data-settings-at={searching ? "search" : atId(at)} {...(usage ? { "data-locked": "" } : {})} className={cn("group/settings mx-auto flex w-full flex-col px-8 pb-12 max-sm:px-4 max-sm:pt-6", usage ? "max-w-[1080px] gap-12 pt-14" : "max-w-[760px] gap-[30px] pt-7")}>
         {searching ? <SearchPage ctx={ctx} query={search} /> : <Page key={atId(at)} at={at} ctx={ctx} />}
       </div>
       {addProjectAt === null ? null : (
