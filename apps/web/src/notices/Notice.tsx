@@ -56,7 +56,7 @@ function Notice({ notice }: { notice: NoticeRecord }) {
       )}
       <Button
         size="icon-xs"
-        variant="ghost-muted"
+        variant="ghost"
         className="shrink-0 opacity-0 transition-opacity duration-150 group-hover/toast:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100"
         aria-label={CLOSE_NOTICE_LABEL}
         onClick={() => dismiss(notice.id)}

@@ -4,7 +4,7 @@ import { memo, type PointerEventHandler } from "react";
 import { ChevronDownIcon, ChevronLeftIcon } from "lucide-react";
 import { COMPOSER_STATE_WORDS } from "../../composer-state-words.js";
 import { cn } from "../../lib/utils";
-import { Button, HELD_SURFACE } from "../ui/button";
+import { Button, OUTLINE_SURFACE } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Spinner } from "../ui/spinner";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -130,7 +130,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
         {pendingAction.questionIndex > 0 ? (
           compact ? (
             <Button
-              size="icon-sm"
+              size="icon"
               variant="outline"
               className="rounded-full"
               {...pointerFocusProps}
@@ -142,7 +142,6 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
             </Button>
           ) : (
             <Button
-              size="sm"
               variant="outline"
               className="rounded-full"
               {...pointerFocusProps}
@@ -155,7 +154,6 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
         ) : null}
         <Button
           type="submit"
-          size="sm"
           className={cn(
             "rounded-full bg-message-action text-message-action-foreground hover:bg-message-action-hover",
             compact ? "px-3" : "px-4",
@@ -183,15 +181,14 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
       return (
         <Button
           type="submit"
-          size="sm"
           className={cn(
             "rounded-full bg-message-action text-message-action-foreground hover:bg-message-action-hover",
-            compact ? "h-9 px-3 sm:h-8" : "h-9 px-4 sm:h-8",
+            compact ? "px-3" : "px-4",
           )}
           {...pointerFocusProps}
           disabled={isSendBusy || isSendDisabled || isConnecting || isEnvironmentUnavailable}
         >
-          {isConnecting || isSendBusy ? "Sending..." : "Refine"}
+          {isConnecting || isSendBusy ? "Sending…" : "Refine"}
         </Button>
       );
     }
@@ -200,20 +197,18 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
       <div data-chat-composer-implement-actions="true" className="flex items-center justify-end">
         <Button
           type="submit"
-          size="sm"
-          className="h-9 rounded-l-full rounded-r-none bg-message-action px-4 text-message-action-foreground hover:bg-message-action-hover sm:h-8"
+          className="rounded-l-full rounded-r-none bg-message-action px-4 text-message-action-foreground hover:bg-message-action-hover"
           {...pointerFocusProps}
           disabled={isSendBusy || isSendDisabled || isConnecting || isEnvironmentUnavailable}
         >
-          {isConnecting || isSendBusy ? "Sending..." : "Implement"}
+          {isConnecting || isSendBusy ? "Sending…" : "Implement"}
         </Button>
         <Menu>
           <MenuTrigger
             render={
               <Button
-                size="sm"
                 variant="default"
-                className="h-9 rounded-l-none rounded-r-full border-l-message-action-foreground/20 bg-message-action px-2 text-message-action-foreground hover:bg-message-action-hover sm:h-8"
+                className="rounded-l-none rounded-r-full border-l-message-action-foreground/20 bg-message-action px-2 text-message-action-foreground hover:bg-message-action-hover"
                 aria-label="Implementation actions"
                 {...pointerFocusProps}
                 disabled={isSendBusy || isSendDisabled || isConnecting || isEnvironmentUnavailable}
@@ -245,7 +240,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
         // same slot and the accent back the moment the block lifts. An empty box is not held, it is simply empty,
         // and stays the fainter accent it has always been.
         isSendDisabled
-          ? `${HELD_SURFACE} text-muted-foreground`
+          ? `${OUTLINE_SURFACE} text-muted-foreground`
           : "bg-foreground text-background hover:bg-foreground/90 disabled:opacity-30",
       )}
       {...pointerFocusProps}

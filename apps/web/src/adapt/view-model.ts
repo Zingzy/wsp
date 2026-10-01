@@ -161,6 +161,8 @@ export interface TurnChanges {
   readonly from: string;
   readonly to: string;
   readonly files: ReadonlyArray<TurnChangedFile>;
+  /** Each HEAD move the turn did not write, as one line, no files of its own. */
+  readonly moved: ReadonlyArray<string>;
 }
 
 /** One wsp session run is one turn; the chat's footer and folds read this. */

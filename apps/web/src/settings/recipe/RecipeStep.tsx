@@ -87,7 +87,7 @@ export function RecipeStep({
               key={link.k}
               data-k={`${root}-${link.k}`}
               size="xs"
-              variant={link.confirm === true ? "destructive" : "ghost-muted"}
+              variant={link.confirm === true ? "destructive" : "ghost"}
               disabled={link.disabled === true || (busy && link.k !== "close" && link.whileBusy !== true)}
               onClick={link.onPress}
               className={cn(link.destructive === true && link.confirm !== true && "transition-colors duration-150 hover:text-destructive-foreground focus-visible:text-destructive-foreground")}
@@ -104,7 +104,7 @@ export function RecipeStep({
           </span>
         )}
         {primary === undefined ? null : (
-          <Button data-k={`${root}-primary`} size="xs" variant="default" held={primary.disabled === true} disabled={busy} onClick={primary.onPress}>
+          <Button data-k={`${root}-primary`} size="xs" variant="outline" held={primary.disabled === true} disabled={busy} onClick={primary.onPress}>
             {primary.word}
           </Button>
         )}

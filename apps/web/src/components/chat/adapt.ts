@@ -40,4 +40,6 @@ export interface TurnDiffFileChange {
 export interface TurnDiffSummary {
   readonly turnId: TurnId;
   readonly files: ReadonlyArray<TurnDiffFileChange>;
+  /** Each HEAD move the turn did not write, as one line, no files of its own. */
+  readonly moved: ReadonlyArray<string>;
 }

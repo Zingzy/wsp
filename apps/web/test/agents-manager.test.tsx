@@ -790,8 +790,8 @@ describe("the states", () => {
       ["linear", "set aside: waited on GitHub CLI"],
       ["~/.claude.json", `set aside: ${left}`],
     ]);
-    // Label and reason in the one mono, the label in the foreground.
-    for (const l of document.querySelectorAll<HTMLElement>("[data-refused-line]")) expect(l.querySelector("[data-refused-label]")!.className).toContain("font-mono");
+    // Label and reason in the one sans, sentences both, the label in the foreground.
+    for (const l of document.querySelectorAll<HTMLElement>("[data-refused-line]")) expect(l.querySelector("[data-refused-label]")!.className).not.toContain("font-mono");
     expect(document.querySelector("[data-refused-line] [data-refused-label]")!.className).toContain("text-foreground");
   });
 

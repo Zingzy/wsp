@@ -92,7 +92,12 @@ export function fsWrite(wire: TerminalWire, path: string, contents: string): Pro
   return call(wire, "fs.write", { path, contents }, FsWriteReply);
 }
 
-/** What changed between two snapshot commits, each named by its full sha. */
+/** What changed between two snapshot commits, each named by its full sha: a pure diff of the two trees. */
 export function gitRange(wire: TerminalWire, cwd: string, from: string, to: string): Promise<GitDiffReply> {
   return call(wire, "git.range", { cwd, from, to }, GitDiffReply);
+}
+
+/** What a turn changed between its two snapshots: the agent's own work, with the HEAD moves it did not write on `moved`. */
+export function gitTurn(wire: TerminalWire, cwd: string, from: string, to: string): Promise<GitDiffReply> {
+  return call(wire, "git.turn", { cwd, from, to }, GitDiffReply);
 }

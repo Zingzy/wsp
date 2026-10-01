@@ -1649,16 +1649,18 @@ export type SessionNotifyEvent = z.infer<typeof SessionNotifyEvent>;
 export const TurnChangedFile = z.object({ path: z.string(), kind: z.string(), additions: z.number(), deletions: z.number() });
 export type TurnChangedFile = z.infer<typeof TurnChangedFile>;
 
-/** What one turn changed in the folder it ran in: every file between the snapshot taken as it launched and the one
- * taken as it ended, with the two commits' shas, off which the Changes pane reads the patches. shared: another
- * thread's turn ran in the same folder between the two, so some of these changes may be that thread's. A turn that
- * changed nothing records none. */
+/** What one turn changed in the folder it ran in: the files the agent itself changed, its own commits and its end
+ * worktree edits, with the two snapshot shas off which the Changes pane reads the patches. moved names each HEAD move
+ * the turn did not write (a checkout, pull, merge, rebase or reset) as one line, with no files of its own. shared:
+ * another thread's turn ran in the same folder between the two, so some of these changes may be that thread's. A turn
+ * that changed nothing and moved HEAD no way records none. */
 export const SessionChangesEvent = z.object({
   type: z.literal("session.changes"),
   ...sessionScope,
   from: z.string(),
   to: z.string(),
   files: z.array(TurnChangedFile),
+  moved: z.array(z.string()),
   shared: z.literal(true).optional(),
 });
 export type SessionChangesEvent = z.infer<typeof SessionChangesEvent>;
@@ -3579,7 +3581,7 @@ type GitBranchCompareReplyHeld = Held<Same<GitBranchCompareReply, WireGitBranchC
 type GitMergeInReplyHeld = Held<Same<GitMergeInReply, WireGitMergeInReply>>;
 /** base is the ref the branch scope diffed against (null for other scopes);
  * truncated means the 2 MiB patch budget cut files or a patch short. */
-export const GitDiffReply = z.object({ base: z.string().nullable(), files: z.array(GitDiffFile), truncated: z.boolean() });
+export const GitDiffReply = z.object({ base: z.string().nullable(), files: z.array(GitDiffFile), truncated: z.boolean(), moved: z.array(z.string()).default([]) });
 export type GitDiffReply = z.infer<typeof GitDiffReply>;
 /** The commit a git.snapshot recorded, by its full sha. */
 export const GitSnapshotReply = z.object({ commit: z.string() });
@@ -3807,6 +3809,9 @@ export const DaemonRequest = z.discriminatedUnion("op", [
   /** The diff between two commits, each its full 40 character sha or the frame is refused before git runs; answers
    * a GitDiffReply. */
   z.object({ id: reqId, op: z.literal("git.range"), cwd: z.string(), from: z.string(), to: z.string(), path: z.string().optional(), machineId: z.string().optional() }),
+  /** What a turn changed between two of its snapshots, the agent's own work alone, each snapshot its full sha; answers
+   * a GitDiffReply with the moves it did not write on `moved`. git.range stays the pure diff of the two trees. */
+  z.object({ id: reqId, op: z.literal("git.turn"), cwd: z.string(), from: z.string(), to: z.string(), path: z.string().optional(), machineId: z.string().optional() }),
   /** Pushes the branch the checkout is on to its remote and answers a GitPushReply. The base branch itself is
    * refused: wsp makes no branch and pushes none of the branch the work started from. Without a base the
    * checkout's own default branch is read, which is what a project recorded without one was cloned at. */
@@ -4611,6 +4616,7 @@ const DAEMON_CONTENTS = [
   "3cfade0dea7b54831d65ec361226fb95958f457ad08a3aa6003e67da5581ada8",
   "9a59b1daa92807a07d52f8d1ee0a3b3d3d5680202be1da20498b093b5b1daa71",
   "29eeb80d015c5099f6991b2acc3a0457f26aa1636b66f8751d6734cdb1a0639d",
+  "ad16ee01ba69b4bd8339c8aa4753c2f3e46aa80c8d9f1ceeab9ca1038482f062",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -4902,7 +4908,12 @@ const DAEMON_CONTENTS = [
  * given.
  * Version 108: the daemon keeps its computer's readings, one point a minute folded from its samples, in a file a day
  * beside its token or in the folder --readings-dir names, 14 days under 8 MiB with the oldest day dropped first, and
- * sys.history answers them folded into the step asked for. */
+ * sys.history answers them folded into the step asked for.
+ * Version 109: A turn's changed-files range is now what the agent itself changed: each commit it wrote contributes its
+ * own files, collected one by one over the turn's reflog window whatever moved HEAD after them, together with the edits
+ * standing in its end worktree and the files it resolved by hand in a merge, while a HEAD move it did not write (a
+ * checkout, pull, merge, rebase or reset) is named on a line with no files of its own. A rebase is one such line plus
+ * the edits standing at the end; the commits it replayed and any conflict it resolved mid-rebase are not listed. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary

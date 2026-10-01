@@ -197,12 +197,11 @@ export const GALLERY_SECTIONS: ReadonlyArray<{
         <Button variant="link">Versions</Button>
         <Button variant="glass">Glass</Button>
         <Button size="xs">xs</Button>
-        <Button size="sm">sm</Button>
-        <Button size="lg">lg</Button>
+        <Button>default</Button>
         <Button size="icon" aria-label="Terminal">
           <TerminalIcon />
         </Button>
-        <Button size="icon-sm" variant="ghost-muted" aria-label="More">
+        <Button size="icon" variant="ghost" aria-label="More">
           <MoreHorizontalIcon />
         </Button>
         <Button disabled>Disabled</Button>
@@ -379,7 +378,7 @@ export const GALLERY_SECTIONS: ReadonlyArray<{
     render: () => (
       <div className="flex flex-wrap items-center gap-2">
         <Dialog>
-          <DialogTrigger render={<Button variant="outline" size="sm" />}>
+          <DialogTrigger render={<Button variant="outline" />}>
             Dialog
           </DialogTrigger>
           <DialogPopup>
@@ -401,7 +400,7 @@ export const GALLERY_SECTIONS: ReadonlyArray<{
           </DialogPopup>
         </Dialog>
         <AlertDialog>
-          <AlertDialogTrigger render={<Button variant="outline" size="sm" />}>
+          <AlertDialogTrigger render={<Button variant="outline" />}>
             Alert dialog
           </AlertDialogTrigger>
           <AlertDialogPopup>
@@ -422,7 +421,7 @@ export const GALLERY_SECTIONS: ReadonlyArray<{
           </AlertDialogPopup>
         </AlertDialog>
         <Popover>
-          <PopoverTrigger render={<Button variant="outline" size="sm" />}>
+          <PopoverTrigger render={<Button variant="outline" />}>
             Popover
           </PopoverTrigger>
           <PopoverPopup>
@@ -430,7 +429,7 @@ export const GALLERY_SECTIONS: ReadonlyArray<{
           </PopoverPopup>
         </Popover>
         <Menu>
-          <MenuTrigger render={<Button variant="outline" size="sm" />}>
+          <MenuTrigger render={<Button variant="outline" />}>
             Menu
           </MenuTrigger>
           <MenuPopup>
@@ -457,7 +456,7 @@ export const GALLERY_SECTIONS: ReadonlyArray<{
           </MenuPopup>
         </Menu>
         <Tooltip>
-          <TooltipTrigger render={<Button variant="outline" size="sm" />}>
+          <TooltipTrigger render={<Button variant="outline" />}>
             Tooltip
           </TooltipTrigger>
           <TooltipPopup>Opens the task panel</TooltipPopup>
@@ -470,7 +469,7 @@ export const GALLERY_SECTIONS: ReadonlyArray<{
     render: () => (
       <div className="flex flex-col gap-3">
         <Collapsible defaultOpen>
-          <CollapsibleTrigger render={<Button variant="ghost" size="sm" />}>
+          <CollapsibleTrigger render={<Button variant="ghost" />}>
             <ChevronRightIcon /> versions
           </CollapsibleTrigger>
           <CollapsiblePanel>

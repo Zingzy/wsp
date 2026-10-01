@@ -248,9 +248,25 @@ pub enum DaemonOp {
         machine_id: Option<String>,
     },
     /// The diff between two commits, each named by its full 40 hex characters and nothing else, answered as git.diff
-    /// answers.
+    /// answers: a pure diff of the two trees.
     #[serde(rename = "git.range", rename_all = "camelCase")]
     GitRange {
+        cwd: String,
+        from: String,
+        to: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        path: Option<String>,
+        /// The workspace this frame is for, as on fs.list above.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        machine_id: Option<String>,
+    },
+    /// What a turn changed between two of its snapshots, the agent's own work alone: its commits, the edits it left in
+    /// the end worktree, and the files it resolved by hand in a merge, with a line naming each HEAD move it did not
+    /// write. Answers a GitDiffReply, the moves on its `moved`. The snapshots are each a full 40 hex sha.
+    #[serde(rename = "git.turn", rename_all = "camelCase")]
+    GitTurn {
         cwd: String,
         from: String,
         to: String,
@@ -641,7 +657,7 @@ pub struct ReviewComment {
     pub body: String,
 }
 
-pub const DAEMON_OPS: [&str; 63] = [
+pub const DAEMON_OPS: [&str; 64] = [
     "pty.create",
     "pty.attach",
     "pty.detach",
@@ -670,6 +686,7 @@ pub const DAEMON_OPS: [&str; 63] = [
     "git.diff",
     "git.snapshot",
     "git.range",
+    "git.turn",
     "git.push",
     "git.pr",
     "git.prList",

@@ -98,8 +98,8 @@ describe("the shared Add button on the settings pages", () => {
 /** The keycap's classes that set its size: the 32 px default and nothing of the xs or of a hand-set height. */
 const keycap = (b: Element | null): void => {
   const cls = (b?.className ?? "").split(" ");
-  expect(cls).toEqual(expect.arrayContaining(["sm:h-8", "gap-1.5", "sm:text-[13px]"]));
-  expect(cls.filter(c => /^sm:h-(6|9|10)$|^h-(8|10)$|^sm:text-xs$/.test(c))).toEqual([]);
+  expect(cls).toEqual(expect.arrayContaining(["h-8", "px-3", "gap-1.5", "text-[13px]"]));
+  expect(cls.filter(c => /^(sm:)?h-(6|7|9|10)$|^(sm:)?text-xs$/.test(c))).toEqual([]);
 };
 
 /** The agents manager where it stands now, in a task's panel on this computer. */

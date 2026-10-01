@@ -67,13 +67,13 @@ describe.skipIf(renderSkipped !== undefined)("the relayed permission prompt row 
     await page!.locator(`${closed} [data-permission-body-trigger]`).click();
     expect(await page!.locator(`${closed} [data-permission-body]`).textContent()).toBe("export const health = () => ({ ok: true });\n");
 
-    // The closed one has no option left and says what closed it, in one muted mono line.
+    // The closed one has no option left and says what closed it, in one muted line.
     expect(await page!.locator(closed).getAttribute("data-permission-open")).toBe("false");
     expect(await page!.locator(`${closed} [data-permission-option]`).count()).toBe(0);
     expect(await page!.locator(`${closed} [data-permission-outcome]`).textContent()).toBe("Allowed");
     const outcome = await page!.evaluate(skinOf(`${closed} [data-permission-outcome]`));
     expect(outcome).toMatchObject({ background: "rgba(0, 0, 0, 0)", border: "0px", radius: "0px" });
-    expect(String((outcome as { font: string }).font).toLowerCase()).toMatch(/mono/);
+    expect(String((outcome as { font: string }).font).toLowerCase()).not.toMatch(/mono/);
 
     // The text the decision rests on is shown whole: every other tool row can afford to truncate, this is the row
     // where consent is given. Read off the element rather than the class: nothing is clipped, nothing is elided,

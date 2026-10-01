@@ -64,13 +64,13 @@ export function OpenSplit({ workspaceId }: { workspaceId: string }) {
   const openCurrent = (): void => void openCopyInEditor(workspaceId, undefined, here ? undefined : current?.id);
   return (
     <div data-open-split className={cn("flex shrink-0 items-center", current === null && "invisible")} {...(current === null ? { "aria-hidden": true, inert: true } : {})}>
-      <Button variant="outline" size="sm" data-k="open" aria-label={openIn} title={openIn} onClick={openCurrent} className="rounded-e-none before:rounded-e-none [-webkit-app-region:no-drag]">
+      <Button variant="outline" data-k="open" aria-label={openIn} title={openIn} onClick={openCurrent} className="rounded-e-none [-webkit-app-region:no-drag]">
         {current === null ? <span className="size-4" /> : <EditorGlyph id={current.id} />}
         {/* A phone's header has room for the mark alone; the button still says what it does to a reader. */}
         <span className="max-sm:sr-only">{OPEN_WORDS.open}</span>
       </Button>
       <Menu>
-        <MenuTrigger render={<Button variant="outline" size="icon-sm" data-k="open-choose" aria-label={OPEN_WORDS.choose} className="-ms-px rounded-s-none before:rounded-s-none [-webkit-app-region:no-drag]" />}>
+        <MenuTrigger render={<Button variant="outline" data-k="open-choose" aria-label={OPEN_WORDS.choose} className="-ms-px rounded-s-none px-2 [-webkit-app-region:no-drag]" />}>
           <ChevronDownIcon />
         </MenuTrigger>
         <MenuPopup align="end" data-k="open-menu">

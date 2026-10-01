@@ -73,7 +73,7 @@ describe("saving a plan to the workspace", () => {
     await waitFor(() => expect(refusalText()).toBe("Plan not saved: busy Try again."));
     refuse = false;
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await screen.findByRole("button", { name: "Saving..." });
+    await screen.findByRole("button", { name: "Saving…" });
     expect(refusalText()).toBe("");
     await act(async () => release());
     await waitFor(() => expect(screen.queryByLabelText("Folder")).toBeNull());

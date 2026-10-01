@@ -81,9 +81,9 @@ export function FolderBrowser({ disabled, start, onPick }: { disabled: boolean; 
 
   return (
     <div data-k="browse" className="flex flex-col gap-1">
-      <div className="flex h-7 min-w-0 items-center gap-2">
+      <div className="flex h-8 min-w-0 items-center gap-2">
         <FolderCrumbRow roots={listing?.roots ?? []} folder={listing?.dir ?? null} onPick={goTo} />
-        <Button type="button" variant="outline" size="sm" className="shrink-0" disabled={disabled || listing === null} onClick={() => listing !== null && onPick(listing.dir)} data-k="browse-pick">
+        <Button type="button" variant="outline" className="shrink-0" disabled={disabled || listing === null} onClick={() => listing !== null && onPick(listing.dir)} data-k="browse-pick">
           Use this folder
         </Button>
       </div>
@@ -93,18 +93,18 @@ export function FolderBrowser({ disabled, start, onPick }: { disabled: boolean; 
           <li key={folder.path} className="shrink-0">
             <button type="button" className={ROW} disabled={disabled} title={folder.path} data-k="browse-folder" data-folder={folder.path} onClick={() => goTo(folder.path)}>
               {folder.repo ? <FolderGitIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden /> : <FolderIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />}
-              <span className="min-w-0 truncate font-mono">{baseName(folder.path)}</span>
+              <span className="min-w-0 truncate">{baseName(folder.path)}</span>
             </button>
           </li>
         ))}
       </ul>
-      <p className="flex h-7 min-w-0 items-center gap-2 font-mono text-[11px] text-muted-foreground">
+      <p className="flex h-7 min-w-0 items-center gap-2 text-xs text-muted-foreground">
         <span data-k="browse-state" className="min-w-0 truncate" title={stateWords(listing, error, here)}>
           {stateWords(listing, error, here)}
         </span>
         {listing !== null && listing.hidden > 0 ? (
           <button type="button" className="ml-auto shrink-0 rounded-sm px-1 underline decoration-dotted outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring" data-k="browse-hidden" onClick={() => setHidden(!hidden)}>
-            {hidden ? "hide hidden" : "show hidden"}
+            {hidden ? "Hide hidden" : "Show hidden"}
           </button>
         ) : null}
       </p>

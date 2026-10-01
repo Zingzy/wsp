@@ -51,10 +51,10 @@ function QueuedRow({ row, files, word, onEdit, onRemove }: { row: QueuedMessage;
         </ul>
       ) : null}
       <span className="flex shrink-0 items-center">
-        <Button size="xs" variant="ghost-muted" aria-label={QUEUE_WORDS.editLabel} onClick={() => onEdit(row.id)}>
+        <Button size="xs" variant="ghost" aria-label={QUEUE_WORDS.editLabel} onClick={() => onEdit(row.id)}>
           {QUEUE_WORDS.edit}
         </Button>
-        <Button size="xs" variant="ghost-muted" aria-label={QUEUE_WORDS.cancelLabel} onClick={() => onRemove(row.id)}>
+        <Button size="xs" variant="ghost" aria-label={QUEUE_WORDS.cancelLabel} onClick={() => onRemove(row.id)}>
           {QUEUE_WORDS.cancel}
         </Button>
       </span>

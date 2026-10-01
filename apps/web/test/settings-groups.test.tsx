@@ -128,9 +128,9 @@ describe("Projects", () => {
     const remove = (): HTMLElement => document.querySelector<HTMLElement>("[data-k=remove-project]")!;
     expect(remove().hasAttribute("disabled")).toBe(true);
     expect(remove().hasAttribute("title")).toBe(false);
-    // Held, it is the neutral outline further down the opacity ramp, with no hue of its own anywhere.
+    // Held, it is the neutral outline at the one disabled step, with no hue of its own anywhere.
     expect(remove().className).not.toMatch(/warning|bg-destructive/);
-    expect(remove().className).toContain("disabled:opacity-50");
+    expect(remove().className).toContain("disabled:opacity-64");
     expect(remove().className).toContain("border-input");
     expect(descriptionOf("remove")).toBe(projectInUseRefusal("spoo", ["pricing page"]));
     // A project on a joined computer: the line names wsp's own clone there.
@@ -262,7 +262,7 @@ describe("Account", () => {
     expect(action().textContent).toBe(ACCOUNT_WORDS.signIn);
     expect(action().disabled).toBe(true);
     expect(action().hasAttribute("title")).toBe(false);
-    expect(action().className).toContain("disabled:opacity-50");
+    expect(action().className).toContain("disabled:opacity-64");
     document.body.innerHTML = "";
     resetSettings();
     await mount({ account: async () => ({ signedIn: true, login: "zingzy" }) } as Partial<Api>, "account");

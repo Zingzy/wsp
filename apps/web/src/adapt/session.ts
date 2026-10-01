@@ -392,7 +392,7 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
       case "session.changes": {
         const index = turns.findIndex(t => t.turnId === event.turnId);
         if (index === -1) continue;
-        const changes = { from: event.from, to: event.to, files: event.files };
+        const changes = { from: event.from, to: event.to, files: event.files, moved: event.moved };
         turns[index] = { ...turns[index]!, changes };
         if (turn !== null && turn.summary.turnId === event.turnId) turn.summary = turns[index]!;
         continue;
