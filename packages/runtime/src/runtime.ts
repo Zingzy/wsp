@@ -277,7 +277,7 @@ import {
   type WorkspaceFrom,
 } from "@wsp/protocol";
 import { PLAN_RESETS, secretsOf } from "./adapters.js";
-import { accountOf, accountOnComputer, accountRows, createBurn, createPriceTable, createUsageLedger, usageComputerName, type Vaulted } from "./usage.js";
+import { accountOf, accountOnComputer, accountRows, createBurn, createPriceTable, createUsageLedger, resetDetailsDue, usageComputerName, type Vaulted } from "./usage.js";
 import { planAlerts } from "./plan-alerts.js";
 import { usageResets, type ResetPlace } from "./usage-reset.js";
 
@@ -370,6 +370,9 @@ export interface HarnessStartOptions {
   /** On a resume: the thread so far as text, for an adapter whose CLI holds no session under `resume` to open a new one
    * with. Asked for only then. */
   seed?: () => Promise<string>;
+  /** On an agent whose plan banks resets: the turn reads each in full, since the account's last full read is missing
+   * or a day old. Absent, it reads their count alone, which costs the agent's backend nothing more. */
+  limitDetails?: true;
   onEvent: (event: AdapterEvent) => void;
 }
 
@@ -8180,6 +8183,20 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       computer: { id: usageComputerOf(entry.record), name: computerOf(entry) },
     });
 
+  /** Whether a turn of this agent on this workspace reads its account's banked resets in full: an agent whose plan
+   * banks none never does, and a ledger that cannot be read leaves the turn on the count alone. */
+  const limitDetailsDue = async (entry: LiveWorkspace, harness: string): Promise<boolean> => {
+    if (PLAN_RESETS[harness as ThreadAgent] === undefined) return false;
+    try {
+      const limits = await ledger.limits();
+      const vaulted = vaultedFor(harness, moduleOf(entry.record.kind).loginStands(entry, harness));
+      const { key } = accountOnComputer({ agent: harness, agentName: harnessCatalog(harness)?.label ?? harness, computer: { id: usageComputerOf(entry.record), name: computerOf(entry) }, limits, vaulted });
+      return resetDetailsDue(limits.find(l => l.key === key), clock.now());
+    } catch {
+      return false;
+    }
+  };
+
   const runTurn = (t: {
     entry: LiveWorkspace;
     view: SessionView;
@@ -9037,6 +9054,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         // are decided below the loop, against the session this send turns out to resume.
         picksFor(resume);
         const folder = await threadFolder(entry, o);
+        const limitDetails = await limitDetailsDue(entry, harness);
         // Two processes on one harness session corrupt its transcript, so a thread runs one turn at a time. Nothing
         // below this loop may await: the wait ends the moment no turn is running, and every line from there to
         // runTurn, which registers this one, is one synchronous run. The images land inside it for that reason, once
@@ -9125,6 +9143,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
               ...(title !== undefined ? { title } : {}),
               ...(images.length > 0 ? { images } : {}),
               ...(mcpServers !== undefined ? { mcpServers } : {}),
+              ...(limitDetails ? { limitDetails: true as const } : {}),
               // The thread's earlier turns as its transcript holds them, this one left out since its message follows.
               ...(resume !== undefined ? { seed: async () => threadSeed(threadMessages((await openTranscript(workspaceId)).filter(e => e.turnId !== turnId), threadId)) } : {}),
               onEvent,

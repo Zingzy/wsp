@@ -158,6 +158,13 @@ function creditsHeld(held: AccountLimit["credits"], read: HarnessLimit["credits"
   return held !== undefined && held.count === read.count ? { ...held, readAt: now } : { count: read.count, readAt: now };
 }
 
+/** How old an account's banked resets as last read in full may grow before a turn on it reads them in full again. */
+export const RESET_DETAILS_MS = 24 * HOUR;
+
+/** Whether a turn on the account reads its banked resets in full: they never were, or were a day ago. A key banks none. */
+export const resetDetailsDue = (held: AccountLimit | undefined, now: number): boolean =>
+  held?.keyed !== true && (held?.credits?.detailAt === undefined || now - held.credits.detailAt >= RESET_DETAILS_MS);
+
 /** The resets on a row: what the account holds, with the soonest an available one lapses. */
 function rowCredits(held: NonNullable<AccountLimit["credits"]>): AccountRow["credits"] {
   const lapses = (held.credits ?? []).flatMap(c => (c.status === "available" && c.expiresAt !== undefined ? [c.expiresAt] : []));

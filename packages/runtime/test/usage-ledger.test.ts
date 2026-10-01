@@ -4,7 +4,7 @@
 // the rate table where no harness put a cost on them, and never added together.
 import { describe, expect, it } from "vitest";
 import { parseRateTable, type AgentSignInState, type HarnessLimit, type PlaceView, type RateTable, type UsageSplit } from "@wsp/protocol";
-import { accountOf, accountRows, createBurn, createPriceTable, createUsageLedger, usageComputerName, type UsageEntry } from "../src/usage.js";
+import { accountOf, accountRows, createBurn, createPriceTable, createUsageLedger, resetDetailsDue, usageComputerName, type UsageEntry } from "../src/usage.js";
 import { memoryStore } from "../src/store.js";
 import { fakeClock } from "./fake-clock.js";
 
@@ -252,6 +252,15 @@ describe("an account's banked resets", () => {
     const { usage } = ledger();
     await file(usage, reading({ count: 2 }, true));
     expect(await held(usage)).toBeUndefined();
+  });
+
+  it("is due a read in full where the account was never read in full or was a day ago, and never on a key", () => {
+    const limit = { key: "codex:acct_1", agent: "codex", label: "dev@example.com", windows: [], readAt: NOON, computers: ["here"] };
+    expect(resetDetailsDue(undefined, NOON)).toBe(true);
+    expect(resetDetailsDue({ ...limit, credits: { count: 2, readAt: NOON } }, NOON)).toBe(true);
+    expect(resetDetailsDue({ ...limit, credits: { count: 2, readAt: NOON, detailAt: NOON - DAY + 60_000 } }, NOON)).toBe(false);
+    expect(resetDetailsDue({ ...limit, credits: { count: 2, readAt: NOON, detailAt: NOON - DAY } }, NOON)).toBe(true);
+    expect(resetDetailsDue({ ...limit, keyed: true }, NOON)).toBe(false);
   });
 
   it("puts the resets on the account's row with the soonest an available one lapses", () => {

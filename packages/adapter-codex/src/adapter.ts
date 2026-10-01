@@ -88,6 +88,8 @@ export interface CodexStartOptions {
   images?: readonly TurnImage[];
   /** MCP servers this turn gets besides the ones its config names, each rendered as a config override. */
   mcpServers?: Readonly<Record<string, McpServerSpec>>;
+  /** The turn reads each banked reset in full rather than their count alone. */
+  limitDetails?: boolean;
   onEvent: (event: AdapterEvent) => void;
 }
 
@@ -771,7 +773,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     const threadLine = options.resume === undefined ? threadStartLine(thread) : threadResumeLine({ ...thread, threadId: options.resume });
     const command = buildCommand({ ...(options.cwd !== undefined ? { cwd: options.cwd } : {}), ...(options.mcpServers !== undefined ? { mcpServers: options.mcpServers } : {}), ...(deps.launch !== undefined ? { launch: deps.launch } : {}) });
     return follow({
-      stream: deps.exec(command, { env: { ...env }, input: [initializeLine(), INITIALIZED_LINE, ACCOUNT_READ_LINE, rateLimitsReadLine(false), threadLine] }),
+      stream: deps.exec(command, { env: { ...env }, input: [initializeLine(), INITIALIZED_LINE, ACCOUNT_READ_LINE, rateLimitsReadLine(options.limitDetails === true), threadLine] }),
       localId,
       startedAt: Date.now(),
       command,

@@ -912,6 +912,16 @@ describe("a Codex account's plan limits on the app server", () => {
   const banked = (credits: Json | null) => ({ availableCount: 2, credits });
   const read = (s: Json, extra: Json) => JSON.stringify({ id: "wsp-rate-limits", result: { ordinaryUsageAllowed: true, rateLimits: s, rateLimitsByLimitId: null, rateLimitResetCredits: null, accountId: "acct_7f3a", rateLimitUpsell: null, ...extra } });
 
+  it("asks for each banked reset in full on a turn the runtime says is due for it, and for the count alone otherwise", async () => {
+    const paramsOf = async (limitDetails?: boolean) => {
+      const launch = launcher(scripted([completed("completed")]));
+      await adapterOver(launch).start({ prompt: "hi", onEvent: () => {}, ...(limitDetails !== undefined ? { limitDetails } : {}) }).finished;
+      return (launch.calls[0]!.input ?? []).map(line => JSON.parse(line) as Json).find(m => m.method === "account/rateLimits/read")?.params;
+    };
+    expect(await paramsOf(true)).toEqual({});
+    expect(await paramsOf()).toEqual({ excludeResetCreditDetails: true });
+  });
+
   it("reads how many resets the plan has banked off the turn's read, where the details were left out", async () => {
     const launch = launcher(scripted([read(snapshot({ primary: window(34.5, 300, 1_790_700_000) }), { rateLimitResetCredits: banked(null) }), completed("completed")]));
     const { events, onEvent } = collect();

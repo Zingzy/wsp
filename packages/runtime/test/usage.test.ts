@@ -296,6 +296,38 @@ describe("a computer's readings", () => {
   });
 });
 
+describe("a turn's read of the banked resets", () => {
+  it("has a turn read the account's resets in full where its last full read is missing, and not again while it is fresh", async () => {
+    const asked: (boolean | undefined)[] = [];
+    const codex: HarnessAdapterFactory = () => ({
+      steers: false,
+      start: options => {
+        asked.push(options.limitDetails);
+        const sessionId = `sess-${asked.length}`;
+        const finished = (async () => {
+          const result: TurnResult = { status: "completed", text: "done" };
+          options.onEvent({ type: "session.start", sessionId, model: "gpt-5.5" });
+          const credits = options.limitDetails === true ? { count: 2, credits: [{ id: "rc_1", status: "available" as const, expiresAt: Date.now() + 86_400_000 }] } : { count: 2 };
+          options.onEvent({ type: "limit", sessionId, limit: { windows: [{ kind: "session", usedPercent: 10 }], account: { id: "acct_7f3a", label: "dev@example.com" }, credits } });
+          options.onEvent({ type: "turn.done", sessionId, result });
+          options.onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
+          return result;
+        })();
+        return { localId: sessionId, finished, interrupt: async () => {} };
+      },
+    });
+    const backend = stubBackend();
+    backend.execImpl = tokenGuest;
+    rt = createRuntime({ backend, store: memoryStore(), adapters: { codex }, vault: () => ({}), pricesFetch: async () => ({}) });
+    const ws = await createOn(rt, { golden: "snap_g", name: "usage" });
+    await (await rt.sessions.start(ws.id, { prompt: "go", harness: "codex" })).finished;
+    await new Promise(resolve => setTimeout(resolve, 20));
+    await (await rt.sessions.start(ws.id, { prompt: "again", harness: "codex" })).finished;
+    expect(asked).toEqual([true, undefined]);
+    expect((await rt.usage.accounts()).accounts.find(a => a.key === "codex:acct_7f3a")?.credits).toMatchObject({ count: 2, nextExpiresAt: expect.any(Number) });
+  });
+});
+
 describe("spending a banked reset", () => {
   const snapshot = (used: number) => ({ limitId: "codex", primary: { usedPercent: used, windowDurationMins: 300, resetsAt: 1_790_700_000 }, secondary: null, planType: "plus", rateLimitReachedType: null });
   const limits = (used: number, availableCount: number) => ({
