@@ -433,6 +433,27 @@ describe("the sidebar's list of thread tiles", () => {
     expect(JSON.parse(window.localStorage.getItem("wsp:sidebar-folded") ?? "null")).toEqual(["settled"]);
   });
 
+  it("a fold list saved before the sidebar lost a section is read without its old ids, and Settled folds and opens on a click", async () => {
+    window.localStorage.setItem("wsp:sidebar-folded", JSON.stringify(["needs-you", "idle", "done"]));
+    mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
+    await act(async () => {
+      useStore.setState({
+        sessions: sessions([
+          { ws: "ws_a", id: "th_live", prompt: "still going" },
+          { ws: "ws_a", id: "th_quiet", prompt: "finished yesterday", status: "completed", startedAgo: 30 * HOUR, endedAgo: 29 * HOUR },
+        ]),
+      } as never);
+    });
+    await waitFor(() => expect(screen.getByText("still going")).toBeDefined());
+    const fold = (): HTMLElement => document.querySelector<HTMLElement>("[data-row-id=settled]")!;
+    expect(fold().getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(fold());
+    await waitFor(() => expect(rowIds()).not.toContain("thread:th_quiet"));
+    expect(JSON.parse(window.localStorage.getItem("wsp:sidebar-folded") ?? "null")).toEqual(["needs-you", "settled"]);
+    fireEvent.click(fold());
+    await waitFor(() => expect(rowIds()).toContain("thread:th_quiet"));
+  });
+
   it("a thread on a paused workspace reads Done until it is opened, then its age, and its tile says nothing about the machine", async () => {
     const napping = { ...workspace("ws_a", "pricing page", "pr_1"), phase: "napping" as const };
     mount({ projects: [project("pr_1", "spoo")], workspaces: [napping] });
