@@ -86,6 +86,9 @@ export const AccountRow = z.object({
   status: LimitStatus.optional(),
   readAt: z.number().optional(),
   note: AccountNote.optional(),
+  /** What the account's running threads are drawing on it now: tokens a minute over the last fifteen minutes, and how
+   * many threads. Absent where nothing ran on it in that time. */
+  burn: z.object({ tokensPerMinute: z.number(), threads: z.number().int() }).optional(),
 });
 export type AccountRow = z.infer<typeof AccountRow>;
 
@@ -142,10 +145,13 @@ export type UsageDay = z.infer<typeof UsageDay>;
 export const UsedRow = z.object({
   key: z.string(),
   label: z.string(),
-  tokens: UsageTokens.pick({ input: true, output: true, cached: true }),
+  tokens: UsageTokens.pick({ input: true, output: true, cached: true }).extend({ cacheWrite: z.number().optional(), reasoning: z.number().optional() }),
   costReported: z.number().optional(),
   costList: z.number().optional(),
   priced: z.boolean(),
+  /** The rate table's figure for every token of the row, whatever its harness reported: the API estimate. */
+  estimate: z.number().optional(),
+  turns: z.number().int().optional(),
 });
 export type UsedRow = z.infer<typeof UsedRow>;
 
@@ -159,6 +165,27 @@ export const UsedAnswer = z.object({
   until: z.number(),
   /** Whose logs the range counted and on which computer, where it counted any: the agents by their names. */
   logs: z.object({ agents: z.array(z.string()), computer: z.string() }).optional(),
+  /** Each row's own series, on the same steps as series, so a chart draws one line per split value. */
+  lines: z.array(z.object({ key: z.string(), label: z.string(), points: z.array(z.number()) })).optional(),
+  /** The range split by where it was read: the turns wsp ran, and the agents' own logs of work done outside wsp. */
+  sources: z.array(z.object({ source: z.enum(["wsp", "log"]), tokens: z.number(), estimate: z.number().optional() })).optional(),
+  /** The threads that used the most over the range, most first, five at most. */
+  threads: z
+    .array(
+      z.object({
+        threadId: z.string(),
+        workspaceId: z.string(),
+        title: z.string(),
+        agent: z.string(),
+        workspace: z.string().optional(),
+        computer: z.string().optional(),
+        tokens: z.number(),
+        estimate: z.number().optional(),
+      }),
+    )
+    .optional(),
+  /** How many threads and computers the range's use came from. */
+  counts: z.object({ threads: z.number().int(), computers: z.number().int() }).optional(),
 });
 export type UsedAnswer = z.infer<typeof UsedAnswer>;
 
