@@ -37,7 +37,7 @@ export function ForwardsList() {
                     <div className="flex h-12 min-w-0 items-center gap-2 rounded-md p-2 text-left text-sm">
                       <span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-tight">
                         <span className="truncate text-sidebar-foreground">sign-in callback for {f.name}</span>
-                        <span className="truncate text-[11px] font-normal text-sidebar-muted-foreground tabular-nums">
+                        <span className="truncate font-mono text-[11px] font-normal text-sidebar-muted-foreground tabular-nums">
                           <Spaced parts={[`localhost:${f.port}`, compactTimeLabel(f.startedAt)]} />
                         </span>
                       </span>
@@ -50,7 +50,7 @@ export function ForwardsList() {
                       data-row-id={`fwd:${f.workspaceId}:${f.port}`}
                     >
                       <span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-tight">
-                        <span className="truncate text-sidebar-foreground tabular-nums">localhost:{f.port}</span>
+                        <span className="truncate font-mono text-[13px] text-sidebar-foreground tabular-nums">localhost:{f.port}</span>
                         <span className="truncate text-[11px] font-normal text-sidebar-muted-foreground">
                           <Spaced parts={[f.name, compactTimeLabel(f.startedAt)]} />
                         </span>

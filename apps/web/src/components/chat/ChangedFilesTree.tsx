@@ -56,7 +56,7 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
                   <Button
                     type="button"
                     size="icon-xs"
-                    variant="ghost-muted"
+                    variant="ghost"
                     aria-label={allDirectoriesExpanded ? "Collapse all folders" : "Expand all folders"}
                     data-scroll-anchor-ignore
                     onClick={onToggleAllDirectories}
@@ -70,7 +70,7 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
           )}
           <Tooltip>
             <TooltipTrigger
-              render={<Button type="button" size="xs" variant="ghost-muted" aria-label="Open diff" onClick={() => onOpenTurnDiff(turnId, files[0]?.path)} />}
+              render={<Button type="button" size="xs" variant="ghost" aria-label="Open diff" onClick={() => onOpenTurnDiff(turnId, files[0]?.path)} />}
             >
               <FileDiffIcon className="size-3" />
               <span className="hidden @[24rem]/changed-files:inline">Open diff</span>
@@ -179,7 +179,7 @@ export const ChangedFilesTree = memo(function ChangedFilesTree(props: {
               {node.name}
             </span>
             {hasNonZeroStat(node.stat) && (
-              <span className="ml-auto shrink-0 font-mono text-[10px] tabular-nums">
+              <span className="ml-auto shrink-0 font-mono text-[11px] tabular-nums">
                 <DiffStatLabel additions={node.stat.additions} deletions={node.stat.deletions} tone={statTone} />
               </span>
             )}
@@ -219,7 +219,7 @@ export const ChangedFilesTree = memo(function ChangedFilesTree(props: {
           {node.name}
         </span>
         {node.stat && (
-          <span className="ml-auto shrink-0 font-mono text-[10px] tabular-nums">
+          <span className="ml-auto shrink-0 font-mono text-[11px] tabular-nums">
             <DiffStatLabel additions={node.stat.additions} deletions={node.stat.deletions} tone={statTone} />
           </span>
         )}

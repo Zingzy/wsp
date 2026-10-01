@@ -208,11 +208,10 @@ describe("ComposerPrimaryActions", () => {
   it("takes the accent off a send held for a reason and gives the accent back when it can be pressed", () => {
     const held = renderSendButton("Connecting to wsp");
     expect(held).toMatch(/<button[^>]* disabled=""/);
-    // The held tier ui/button.tsx gives a primary that cannot be pressed, in the same slot: the window's one loud
-    // thing is not loud while it refuses the press, and no amount of accent at a lower opacity reads as held.
+    // The outline keycap's surface from ui/button.tsx, in the same slot: the window's one loud thing is not loud
+    // while it refuses the press, and no amount of accent at a lower opacity reads as held.
     expect(held).toContain("border-input");
-    expect(held).toContain("bg-popover");
-    expect(held).toContain("dark:bg-input/32");
+    expect(held).toContain("bg-(--input-fill)");
     expect(held).toContain("text-muted-foreground");
     expect(held).not.toContain("bg-foreground");
     expect(held).not.toContain("disabled:opacity-64");

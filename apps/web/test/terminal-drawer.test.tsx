@@ -125,7 +125,7 @@ describe("WorkspaceTerminalDrawer", () => {
     useTerminalDrawerStore.getState().setOpen(WS, true);
     render(<WorkspaceTerminalDrawer workspaceId={WS} />);
     await waitFor(() => expect(inputs("drawer")).toHaveLength(1), { timeout: 15_000 });
-    fireEvent.click(screen.getByLabelText(/^New Terminal/));
+    fireEvent.click(screen.getByLabelText(/^New terminal/));
     await waitFor(() => expect(count("pty.create")).toBe(2));
     await waitFor(() => expect(useTerminalDrawerStore.getState().byWorkspaceId[WS]?.terminalIds).toEqual(["p1", "p2"]));
     const ui = useTerminalDrawerStore.getState().byWorkspaceId[WS]!;
@@ -134,14 +134,14 @@ describe("WorkspaceTerminalDrawer", () => {
     // Two terminals: the tab list appears with the link's titles, one surface shown.
     expect(screen.getAllByText("shell")).toHaveLength(2);
     await waitFor(() => expect(canvases("drawer")).toHaveLength(1));
-    fireEvent.click(screen.getByLabelText(/^Split Terminal Horizontally/));
+    fireEvent.click(screen.getByLabelText(/^Split terminal horizontally/));
     await waitFor(() => expect(count("pty.create")).toBe(3));
     await waitFor(() => expect(useTerminalDrawerStore.getState().byWorkspaceId[WS]?.terminalGroups.map(g => g.terminalIds)).toEqual([["p1"], ["p2", "p3"]]));
     await waitFor(() => expect(canvases("drawer")).toHaveLength(2));
     sizeViewports();
     await waitFor(() => expect(inputs("drawer")).toHaveLength(2), { timeout: 15_000 });
 
-    fireEvent.click(screen.getByLabelText(/^Close Terminal/));
+    fireEvent.click(screen.getByLabelText(/^Close terminal/));
     await waitFor(() => expect(count("pty.kill")).toBe(1));
     await waitFor(() => expect(wt.tabs().map(t => t.ptyId)).toEqual(["p1", "p2"]));
     await waitFor(() => expect(canvases("drawer")).toHaveLength(1));
@@ -152,7 +152,7 @@ describe("WorkspaceTerminalDrawer", () => {
     useTerminalDrawerStore.getState().setOpen(WS, true);
     const { container } = render(<WorkspaceTerminalDrawer workspaceId={WS} />);
     await waitFor(() => expect(inputs("drawer")).toHaveLength(1), { timeout: 15_000 });
-    fireEvent.click(screen.getByLabelText(/^Close Terminal/));
+    fireEvent.click(screen.getByLabelText(/^Close terminal/));
     await waitFor(() => expect(count("pty.kill")).toBe(1));
     await waitFor(() => expect(container.firstChild).toBeNull());
     expect(useTerminalDrawerStore.getState().byWorkspaceId[WS]?.terminalOpen ?? false).toBe(false);
@@ -161,7 +161,7 @@ describe("WorkspaceTerminalDrawer", () => {
     await screen.findByText(/No terminals open/);
     await new Promise(r => setTimeout(r, 50));
     expect(count("pty.create")).toBe(1);
-    fireEvent.click(screen.getByRole("button", { name: /^New Terminal/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^New terminal/ }));
     await waitFor(() => expect(count("pty.create")).toBe(2));
     await waitFor(() => expect(inputs("drawer")).toHaveLength(1), { timeout: 15_000 });
   }, 20_000);
@@ -256,7 +256,7 @@ describe("terminal as a right-panel surface", () => {
     render(<Panel />);
     await waitFor(() => expect(inputs("right-panel")).toHaveLength(1), { timeout: 15_000 });
 
-    fireEvent.click(screen.getByLabelText(/^Split Terminal Vertically/));
+    fireEvent.click(screen.getByLabelText(/^Split terminal vertically/));
     await waitFor(() => expect(count("pty.create")).toBe(2));
     await waitFor(() => {
       const s = selectWorkspaceRightPanelState(useRightPanelStore.getState().byWorkspaceId, WS).surfaces[0];
@@ -264,7 +264,7 @@ describe("terminal as a right-panel surface", () => {
     });
     await waitFor(() => expect(canvases("right-panel")).toHaveLength(2));
 
-    fireEvent.click(screen.getByLabelText(/^New Terminal/));
+    fireEvent.click(screen.getByLabelText(/^New terminal/));
     await waitFor(() => expect(count("pty.create")).toBe(3));
     await waitFor(() => expect(selectWorkspaceRightPanelState(useRightPanelStore.getState().byWorkspaceId, WS).surfaces.map(s => s.id)).toEqual(["terminal:p1", "terminal:p3"]));
   }, 30_000);
@@ -313,7 +313,7 @@ describe("one owner per pty", () => {
     await waitFor(() => expect(inputs("drawer")).toHaveLength(1), { timeout: 15_000 });
     expect(useTerminalDrawerStore.getState().byWorkspaceId[WS]?.terminalIds).toEqual(["p2"]);
 
-    fireEvent.click(within(document.querySelector<HTMLElement>('[data-terminal-owner="drawer"]')!).getByLabelText(/^Close Terminal/));
+    fireEvent.click(within(document.querySelector<HTMLElement>('[data-terminal-owner="drawer"]')!).getByLabelText(/^Close terminal/));
     await waitFor(() => expect(count("pty.kill")).toBe(1));
     expect(ops.find(o => o.op === "pty.kill")?.params["ptyId"]).toBe("p2");
     await waitFor(() => expect(document.querySelector('[data-terminal-owner="drawer"]')).toBeNull());
@@ -431,7 +431,7 @@ describe("drawer resilience", () => {
     useTerminalDrawerStore.getState().setOpen(WS, true);
     render(<WorkspaceTerminalDrawer workspaceId={WS} />);
     await screen.findByText(/Reconnecting to the task; terminals open when it is back/);
-    expect(screen.queryByRole("button", { name: /^New Terminal/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^New terminal/ })).toBeNull();
     expect(count("pty.create")).toBe(0);
     act(() => wt.feedStatus("live"));
     await waitFor(() => expect(count("pty.create")).toBe(1));
@@ -448,7 +448,7 @@ describe("drawer resilience", () => {
     expect(count("pty.create")).toBe(1);
 
     clearNotices();
-    fireEvent.click(screen.getByRole("button", { name: /^New Terminal/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^New terminal/ }));
     await waitFor(() => expect(lastNotice()).toBe("No terminal on api: not answering"));
 
     clearNotices();
@@ -720,7 +720,7 @@ describe("panes on a workspace that is not running", () => {
     await waitFor(() => expect(overlay()?.dataset["terminalOverlay"]).toBe("shell-gone"));
     expect(overlay()!.textContent).toContain("This shell ended when the task that held it restarted");
     expect(overlay()!.className).toContain("bg-(--terminal-background)/70");
-    fireEvent.click(within(overlay()!).getByRole("button", { name: /^New Terminal/ }));
+    fireEvent.click(within(overlay()!).getByRole("button", { name: /^New terminal/ }));
     await waitFor(() => expect(wt.tabs().map(t => t.ptyId)).toEqual(["p1", "p2"]));
     await waitFor(() => expect(overlay()).toBeNull());
   }, 20_000);

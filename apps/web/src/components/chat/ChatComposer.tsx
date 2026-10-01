@@ -891,8 +891,8 @@ export function ChatComposer({
     <div data-flip="actions" className="flex shrink-0 flex-nowrap items-center gap-2">
       <Button
         type="button"
-        size="icon-sm"
-        variant="ghost-muted"
+        size="icon"
+        variant="ghost"
         aria-label="Attach"
         title={`Add a file: paste, drop or pick one, at most ${FILES_MAX}. An image (${IMAGE_TYPE_WORDS}) goes up to ${IMAGE_MAX_WORDS}, any other file up to ${FILE_MAX_WORDS}.`}
         disabled={shut || waits}

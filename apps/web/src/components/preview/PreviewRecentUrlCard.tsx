@@ -5,6 +5,7 @@ import { X } from "lucide-react";
 import type { BrowserHistoryEntry } from "../../browser/recents";
 
 import { PreviewFaviconIcon } from "./PreviewFaviconIcon";
+import { Button } from "../ui/button";
 import { Spaced } from "../ui/spaced";
 
 interface Props {
@@ -35,14 +36,15 @@ export function PreviewRecentUrlCard({ entry, visitedLabel, onOpen, onRemove }: 
           </span>
         </div>
       </button>
-      <button
-        type="button"
+      <Button
+        variant="ghost"
+        size="icon"
         aria-label={`Remove ${label} from history`}
         onClick={onRemove}
-        className="absolute right-3 rounded p-1 text-muted-foreground opacity-0 hover:bg-accent hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100"
+        className="absolute right-2 opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
       >
-        <X className="size-3.5" />
-      </button>
+        <X />
+      </Button>
     </div>
   );
 }

@@ -32,7 +32,7 @@ export function AsideSurface({ question, answer, error, onClose, controls }: { q
     <section data-k="aside-surface" aria-label={ASIDE_WORDS.title} className="flex h-full min-h-0 flex-1 flex-col">
       <header className="flex h-[var(--workspace-topbar-height,52px)] shrink-0 items-center gap-1 ps-4 pe-2">
         <h2 className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{ASIDE_WORDS.title}</h2>
-        <Button size="icon-sm" variant="ghost-muted" aria-label={ASIDE_WORDS.close} title={ASIDE_WORDS.close} onClick={onClose}>
+        <Button size="icon" variant="ghost" aria-label={ASIDE_WORDS.close} title={ASIDE_WORDS.close} onClick={onClose}>
           <XIcon />
         </Button>
         {controls}

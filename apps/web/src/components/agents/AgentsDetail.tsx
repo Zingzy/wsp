@@ -79,7 +79,7 @@ function CopyGlyph({ value, label }: { value: string; label: string }) {
     <Button
       data-k="fact-copy"
       size="icon-xs"
-      variant="ghost-muted"
+      variant="ghost"
       aria-label={`${W.copy} ${label.toLowerCase()}`}
       className="opacity-0 transition-opacity duration-150 group-hover/fact:opacity-100 focus-visible:opacity-100"
       onClick={() =>
@@ -240,7 +240,7 @@ export function AddLevelView({ adder, level, query, typing, onQuery, onAsk, onRo
   const { headRef, onKeyDown } = useLevelKeys(back, field);
   const link =
     adder.link === undefined ? undefined : (
-      <Button data-k="add-link" size="xs" variant="ghost-muted" onClick={() => void window.open(adder.link!.href, "_blank", "noopener,noreferrer")}>
+      <Button data-k="add-link" size="xs" variant="ghost" onClick={() => void window.open(adder.link!.href, "_blank", "noopener,noreferrer")}>
         {adder.link.label}
         <ExternalLinkIcon aria-hidden className="size-3" />
       </Button>

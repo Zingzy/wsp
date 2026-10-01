@@ -29,8 +29,6 @@ export const ReplyRunContext = createContext<ReplyRunScope | null>(null);
  * surface's first fit sizes it to this box. */
 const RUN_BOX_PX = 232;
 const NO_CONFIG = {};
-/** A footer action is a quiet word until pointed at, as every ghost action in the app is. */
-const FOOTER_ACTION = "h-6 px-2 text-[12px] font-normal text-muted-foreground hover:text-foreground";
 
 export function InlineRun({ run }: { run: SessionRunEvent | undefined }) {
   if (run === undefined) return null;
@@ -79,7 +77,7 @@ function LiveRun({ run }: { run: SessionRunEvent }) {
       </div>
       <RunFooter words={RUN_WORDS.running}>
         {movable && api !== null ? (
-          <Button type="button" variant="ghost" size="compact" className={FOOTER_ACTION} data-reply-run-move onClick={() => void moveRun(api, run)}>
+          <Button type="button" variant="ghost" size="xs" data-reply-run-move onClick={() => void moveRun(api, run)}>
             {RUN_WORDS.move}
           </Button>
         ) : null}
@@ -112,12 +110,12 @@ function EndedRun({ run }: { run: SessionRunEvent }) {
       ) : null}
       <RunFooter words={runEndedWords(run)}>
         {run.state === "exited" && scope !== null ? (
-          <Button type="button" variant="ghost" size="compact" className={FOOTER_ACTION} data-reply-run-send onClick={send}>
+          <Button type="button" variant="ghost" size="xs" data-reply-run-send onClick={send}>
             {RUN_WORDS.send}
           </Button>
         ) : null}
         {run.state === "moved" ? (
-          <Button type="button" variant="ghost" size="compact" className={FOOTER_ACTION} data-reply-run-open onClick={open}>
+          <Button type="button" variant="ghost" size="xs" data-reply-run-open onClick={open}>
             {RUN_WORDS.openTab}
           </Button>
         ) : null}

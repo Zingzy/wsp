@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The one drawing of a keycap that cannot be pressed yet, which every sheet and
-// dialog reads off this component rather than spelling again: the outline
-// variant, disabled, marked, dimmed a step further than an ordinary disabled
-// control, at the size and in the slot the live one has.
+// dialog reads off this component rather than spelling again: its own variant,
+// disabled, marked, at the one disabled step, in the size and slot the live one
+// has.
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { Button } from "./button.js";
@@ -12,13 +12,12 @@ afterEach(cleanup);
 const classesOf = (word: string): string[] => screen.getByRole("button", { name: word }).className.split(" ");
 
 describe("a held keycap", () => {
-  it("is the outline variant, disabled and marked, whatever variant it was asked for", () => {
+  it("keeps the variant it was asked for, disabled and marked", () => {
     render(<Button held>Add</Button>);
     const add = screen.getByRole("button", { name: "Add" }) as HTMLButtonElement;
     expect(add.disabled).toBe(true);
     expect(add.hasAttribute("data-held")).toBe(true);
-    expect(classesOf("Add")).toEqual(expect.arrayContaining(["border-input"]));
-    expect(classesOf("Add")).not.toEqual(expect.arrayContaining(["bg-primary"]));
+    expect(classesOf("Add")).toEqual(expect.arrayContaining(["bg-primary"]));
   });
 
   it("takes the variant back and lets go the moment it is no longer held", () => {
@@ -34,15 +33,13 @@ describe("a held keycap", () => {
     expect({ size: classesOf("Add").filter(c => c.startsWith("h-") || c.startsWith("px-")), word: live.textContent }).toEqual(held);
   });
 
-  it("falls further down the opacity ramp than an ordinary disabled control, and keeps only the one step", () => {
+  it("dims to the one disabled step every control takes, and to nothing else", () => {
     render(<Button held>Add</Button>);
-    // The generic disabled step read as the live outline beside it in a row's slot, so a held control takes its
-    // own; both at once would leave the stronger one deciding and the weaker one saying nothing.
-    expect(classesOf("Add")).toEqual(expect.arrayContaining(["disabled:opacity-50"]));
-    expect(classesOf("Add")).not.toEqual(expect.arrayContaining(["disabled:opacity-64"]));
+    const held = classesOf("Add");
     cleanup();
-    render(<Button disabled>Removing…</Button>);
-    expect(classesOf("Removing…")).toEqual(expect.arrayContaining(["disabled:opacity-64"]));
+    render(<Button disabled>Add</Button>);
+    expect(held).toEqual(classesOf("Add"));
+    expect(held).toContain("disabled:opacity-64");
   });
 
   it("stays disabled when the caller disables for its own reason as well", () => {

@@ -131,7 +131,7 @@ export function ProcessesSurface({ workspaceId }: { workspaceId: string }) {
           {sectioned &&
             table.threads.map(({ thread, rows }) => (
               <div key={thread.threadId}>
-                <p className="truncate px-2 text-foreground" style={{ lineHeight: `${ROW_PX}px` }} title={thread.title} data-procs-thread={thread.threadId}>
+                <p className="truncate px-2 font-sans text-xs text-foreground" style={{ lineHeight: `${ROW_PX}px` }} title={thread.title} data-procs-thread={thread.threadId}>
                   {thread.title}
                 </p>
                 {draw(rows, 1)}
@@ -147,7 +147,7 @@ export function ProcessesSurface({ workspaceId }: { workspaceId: string }) {
               className="flex w-full cursor-pointer items-center gap-1 px-2 text-left text-muted-foreground hover:text-foreground"
             >
               <ChevronRightIcon aria-hidden className={cn("size-3 shrink-0 transition-transform duration-150", restOpen && "rotate-90")} />
-              <span className="truncate">everything else</span>
+              <span className="truncate font-sans text-xs">Everything else</span>
               <span className="tabular-nums">{table.rest.length}</span>
             </button>
           )}

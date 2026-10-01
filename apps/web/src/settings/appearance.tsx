@@ -134,7 +134,7 @@ export function appearanceCards(ctx: SettingsContext): SettingsCardData[] {
         ? {}
         : {
             under: (
-              <Button data-k="notify-play" variant="outline" size="sm" disabled={!preferences.notifySound} onClick={() => play()}>
+              <Button data-k="notify-play" variant="outline" disabled={!preferences.notifySound} onClick={() => play()}>
                 {NOTIFY_WORDS.play}
               </Button>
             ),
