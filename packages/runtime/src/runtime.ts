@@ -8824,6 +8824,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         // The row that says the thread is spoken for also says who its turns tell: a send into the thread reads the
         // opener's notify off its rows, and inside the launch window this is the only one.
         sessions.set(turnId, { view, turnId, launch, ...(notify !== undefined ? { notify } : {}), ...(notifyBy !== undefined ? { notifyBy } : {}), ...(notifyRoad !== undefined ? { notifyRoad } : {}) });
+        bus.emit({ type: "session.held", workspaceId, threadId });
       };
       hold();
       let outcome: SessionStartOutcome = "started";

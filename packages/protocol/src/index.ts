@@ -1585,6 +1585,15 @@ export const SessionQueuedEvent = z.object({
 });
 export type SessionQueuedEvent = z.infer<typeof SessionQueuedEvent>;
 
+/** Pushed once when a start holds its thread's row, before the harness has announced its session: the thread is in
+ * the listing from here, whoever started it, so a window draws it now rather than after the launch; never in history. */
+export const SessionHeldEvent = z.object({
+  type: z.literal("session.held"),
+  workspaceId: z.string(),
+  threadId: z.string(),
+});
+export type SessionHeldEvent = z.infer<typeof SessionHeldEvent>;
+
 /** The word a start's notify carries to mean the caller: the thread the request came out of when it came out of one,
  * and otherwise the person who ran it. */
 export const NOTIFY_ME = "me";
@@ -3378,6 +3387,7 @@ export const EventUnion = z.discriminatedUnion("type", [
   SessionPlanEvent.extend(sequenced),
   SessionRunEvent.extend(sequenced),
   SessionQueuedEvent.extend(sequenced),
+  SessionHeldEvent.extend(sequenced),
   ThreadMarkedEvent.extend(sequenced),
   ThreadRewoundEvent.extend(sequenced),
   PortOpenEvent.extend(sequenced),
