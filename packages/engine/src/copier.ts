@@ -8,12 +8,16 @@
 // stand-in tests drive, so nothing above here knows there is a child process.
 import { copyVerbFailedLine, CopyReport, type CopyAsk, type CopyRoad } from "@wsp/protocol";
 import { runChild } from "./child-exec.js";
+import { memoryHere, type MemoryHere } from "./local-backend.js";
 
 export interface Copier {
   /** Makes the copy and answers what the verb reported; throws the verb's own sentence when it refused. */
   make(ask: CopyAsk): Promise<CopyReport>;
   /** Takes a copy away by the road that made it, which is the road the record carries. */
   remove(from: string, to: string, road: CopyRoad): Promise<void>;
+  /** The memory of the computer the copy lands on, free and in all, read at the ask for the room check before a
+   * copy; absent, a copy is held to nothing, which is a stand-in no test handed a reading. */
+  room?(): Promise<MemoryHere | undefined>;
 }
 
 /** How long one copy has. A six gigabyte checkout clones in about five seconds and a worktree of one writes every
@@ -73,18 +77,20 @@ export function verbCopier(binary: string, run: typeof runChild = runChild): Cop
       const res = await run(binary, ["copy", "remove", "--from", from, "--to", to, "--road", road], { timeoutMs: COPY_TIMEOUT_MS });
       if (res.exitCode !== 0) throw new Error(line(res));
     },
+    room: () => memoryHere(),
   };
 }
 
 /** The stand-in every test above the daemon drives: it records what it was asked for and answers a report of the
  * road it was told to take, so the rules a copy stands on are proved once in the daemon's own tests and the roads
  * above it are proved against what a copy answers. */
-export function fakeCopier(script?: (ask: CopyAsk) => CopyReport): Copier & { asks: CopyAsk[]; removed: { from: string; to: string; road: CopyRoad }[] } {
+export function fakeCopier(script?: (ask: CopyAsk) => CopyReport, room?: () => Promise<MemoryHere | undefined>): Copier & { asks: CopyAsk[]; removed: { from: string; to: string; road: CopyRoad }[] } {
   const asks: CopyAsk[] = [];
   const removed: { from: string; to: string; road: CopyRoad }[] = [];
   return {
     asks,
     removed,
+    ...(room !== undefined ? { room } : {}),
     async make(ask) {
       asks.push(ask);
       return (

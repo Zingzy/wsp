@@ -365,6 +365,9 @@ export class SolariBackend implements MachineBackend {
       id: s.id,
       ...(s.name !== undefined && s.name !== null ? { name: s.name } : {}),
       sizeBytes: s.sizeBytes,
+      // A Solari snapshot is whole: the size it is billed on is the size it restores to (25.2 GB read off the listing
+      // matched the console's on 2026-09-05).
+      restoredBytes: s.sizeBytes,
       ...(s.createdAt !== undefined ? { createdAt: s.createdAt } : {}),
       ...(s.parent !== undefined ? { parent: s.parent } : {}),
     }));

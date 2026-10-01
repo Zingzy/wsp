@@ -4101,6 +4101,10 @@ export const SnapshotRow = z.object({
    * listing carries none. */
   name: z.string().optional(),
   sizeBytes: z.number(),
+  /** The size the snapshot restores to, which is an image's size, where the provider reports one. A provider that
+   * stores a snapshot as what changed since another bills on that change, so sizeBytes is not this; absent, the
+   * image's size is unknown and nothing stands in for it. */
+  restoredBytes: z.number().optional(),
   createdAt: z.string().optional(),
   /** The snapshot this one was taken under, as the provider chains them; null at a root. */
   parent: z.string().nullable().optional(),
@@ -4638,6 +4642,7 @@ const DAEMON_CONTENTS = [
   "29eeb80d015c5099f6991b2acc3a0457f26aa1636b66f8751d6734cdb1a0639d",
   "ad16ee01ba69b4bd8339c8aa4753c2f3e46aa80c8d9f1ceeab9ca1038482f062",
   "409fce58696aaa20c7803f7a963841e4aacc0702a153ca6f916fba64f941bd16",
+  "89e10a249a0e59670fc8fefec015f640d8f021d0b24bb34665412360cf6b999b",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -4937,7 +4942,8 @@ const DAEMON_CONTENTS = [
  * the edits standing at the end; the commits it replayed and any conflict it resolved mid-rebase are not listed.
  * Version 110: A joined Mac reports which Mac it is: its place report carries the product name its registry gives, else
  * its model identifier, so the computer's row draws that Mac rather than a server. git.status counts the stashes a
- * repository holds, running or stopped, so a delete names them. */
+ * repository holds, running or stopped, so a delete names them.
+ * Version 111: the room check's refusal is a contract word, so the Mac's copy road says the same sentence. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -5100,9 +5106,6 @@ export const provisionLandedLine = (files: number): string => `landed: ${plural(
 /** What the list beside the job holds for the servers round: one key per server wsp wrote into an agent's own
  * file there. */
 export const provisionListReadLine = (keys: number): string => `list read: ${plural(keys, "server key")}`;
-
-/** What the pack left out of the copy for a computer you own, one line per path and reason, as the job says it. */
-export const provisionSkippedLine = (path: string, note: string): string => `${path}: ${note}`;
 
 /** What the servers round wrote into the agents' own files on that computer, of the servers the recipe names. */
 export const provisionServersLine = (written: number, servers: number): string =>
@@ -6934,7 +6937,7 @@ export { compareVersions } from "./semver.mjs";
 export { attachedFilesPrompt, Attachment, attachmentBytes, attachmentLine, AttachmentRecord, attachmentRecord, FILE_MAX_BYTES, FILE_MAX_WORDS, FILES_AFTER_TURN, FILES_DIR, FILES_MAX, filePathIn, filesBlocked, filesNotLandedLine, filesRefusal, IMAGE_MAX_BYTES, IMAGE_MAX_WORDS, IMAGE_TYPES, IMAGE_TYPE_WORDS, imagePathIn, imageTypeOf, isImage, dropFilesLine, landFilesLine, noImagesLine, notAFileLine, safeFileName, sendFilesDir, threadFilesDir, threadImagesDir, turnImagesDir, UNTYPED_FILE } from "./attachments.js";
 export * from "./oom.js";
 export { accruedAt, accruedPast, appendCostPoint, COST_HISTORY_CAP, dayStart, monthStart, rateAt, spentSince } from "./cost-history.js";
-export { leadAsk, openAsk, ThreadMessage, threadMarkdown, threadMessages, threadReplyRows, threadResult, ThreadVoice } from "./thread-read.js";
+export { leadAsk, openAsk, THREAD_SEED_CHARS, ThreadMessage, threadMarkdown, threadMessages, threadReplyRows, threadResult, threadSeed, ThreadVoice } from "./thread-read.js";
 export { inFolder, shellLine, shellQuote } from "./shell-quote.js";
 export {
   DEFAULT_THEME,

@@ -11,9 +11,9 @@ import { mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fakeCopier, LocalBackend, projectStateKey } from "@wsp/engine";
+import { fakeCopier, LocalBackend, projectStateKey, type Copier } from "@wsp/engine";
 import { PATH_BOUND_DIR_NAMES } from "@wsp/catalog";
-import { copyPathFor, DAEMON_VERSION, EXIT_CODES, exitClassOf, HERE_PLACE_ID, PORT_BASE_FIRST, PORT_BASE_STEP, type AdapterEvent, type TurnResult } from "@wsp/protocol";
+import { boxFullLine, copyPathFor, DAEMON_VERSION, EXIT_CODES, exitClassOf, HERE_PLACE_ID, PORT_BASE_FIRST, PORT_BASE_STEP, type AdapterEvent, type TurnResult } from "@wsp/protocol";
 import { COPY_SIZE_LINE_BYTES, createRuntime, NO_COPIER_HERE, type HarnessAdapterContext, type HarnessAdapterFactory, type LocalWiring, type Runtime } from "../src/runtime.js";
 import { localExecStream } from "../src/local-exec.js";
 import { memoryStore } from "../src/store.js";
@@ -68,9 +68,9 @@ function telling(): { adapter: HarnessAdapterFactory; told: Told[] } {
 }
 
 /** This computer wired the way a host wires it, with the copy road handed in as the stand-in. */
-function withCopier(): { rt: Runtime; copier: ReturnType<typeof fakeCopier>; told: Told[] } {
+function withCopier(room?: Copier["room"]): { rt: Runtime; copier: ReturnType<typeof fakeCopier>; told: Told[] } {
   const root = scratch();
-  const copier = fakeCopier();
+  const copier = fakeCopier(undefined, room);
   const { adapter, told } = telling();
   const local: LocalWiring = {
     backend: new LocalBackend({ root }),
@@ -100,6 +100,23 @@ function withoutCopier(): Runtime {
   };
   return createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: adapter }, local });
 }
+
+describe("a copy on a computer short of memory", () => {
+  it("is refused before anything is copied, by the daemon's rule and in its words, and goes through once there is room", async () => {
+    let freeMb = 900;
+    const { rt, copier } = withCopier(async () => ({ freeMb, totalMb: 16_384 }));
+    const folder = repo();
+    const project = await rt.projects.add({ source: folder });
+    // A third of 16 GB is what one workspace may take, so 900 MB free is no room for one.
+    await expect(rt.workspaces.create({ project: project.id, name: "one" })).rejects.toThrow(boxFullLine(5_461, 900));
+    expect(boxFullLine(5_461, 900)).toBe("this computer has 900 MB free and a workspace needs 5461 MB, and no workspace of yours is awake to stop: what is holding it is the computer's own work");
+    expect(copier.asks).toEqual([]);
+    expect(await rt.workspaces.list()).toEqual([]);
+    freeMb = 6_000;
+    await rt.workspaces.create({ project: project.id, name: "one" });
+    expect(copier.asks.map(a => a.to)).toEqual([copyPathFor(folder, "one")]);
+  });
+});
 
 describe("a host with no copy road", () => {
   it("refuses the first workspace of a project here in one sentence naming the road, and records nothing", async () => {

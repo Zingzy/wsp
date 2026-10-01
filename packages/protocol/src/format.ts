@@ -535,6 +535,14 @@ export const noReplyLine = (threadId: string): string => `thread ${threadId.slic
  * working, so what is above is the report before this one, not the one being written. */
 export const NEWER_TURN_LINE = "a newer turn is running; the reply above is the one before it";
 
+/** The note a turn carries where the machine held no session for the thread to resume (a Boat box woke with none on
+ * 2026-09-27): the turn ran in a new session, which the thread so far was handed as its first message. */
+export const LOST_SESSION_NOTE = "the agent's session for this thread was gone from the machine, so this turn started a new one and handed it the thread so far";
+
+/** The first message of that new session: the thread so far, then the person's message as they sent it. */
+export const lostSessionPrompt = (thread: string, prompt: string): string =>
+  `Your earlier session for this thread was lost, so it continues here in a new one. The thread so far, oldest first:\n\n${thread}\n\nThe new message:\n\n${prompt}`;
+
 /** One tool call's input, as the wire's delta carries it: the JSON the harness reported, already parsed. */
 type ToolInput = Readonly<Record<string, unknown>>;
 
@@ -1332,6 +1340,23 @@ export function execFailedLine(said: string): string {
 /** A pause the provider refuses outright: its words, the cause measured on Solari (about 10 GB of memory and disk together), the road left. */
 export function napRefusedLine(said: string): string {
   return `the provider does not pause this machine (${said}): its memory and disk together are over what it pauses; it runs until you delete it`;
+}
+
+/** A stop the provider would not take while the snapshot of the machine's disk fails, which it does rather than lose
+ * what was written since the last one (Boat): its own reading, the cause seen (a full disk), and the road left. A Boat
+ * machine whose stops kept failing was dropped with its disk on 2026-10-01, so pushing comes first. */
+export function stopRefusedLine(said: string): string {
+  return `the provider will not stop this machine while the snapshot of its disk fails (${said}): push its work, then free space on its disk, since a full disk fails the snapshot and a machine left like this has been dropped with its disk`;
+}
+
+/** How full a disk may be before its row says so, said only past it: past this a build's output can fill the rest
+ * between two turns, and a stop that snapshots a full disk fails. */
+export const DISK_FULL_PCT = 90;
+
+/** A machine whose stop snapshots its disk, past DISK_FULL_PCT: said before a stop can fail. The share is cut to a
+ * tenth and never rounded up, so a disk just past the line never reads as standing on it. */
+export function diskFullLine(pct: number): string {
+  return `its disk is ${Math.floor(pct * 10) / 10}% full: a stop snapshots the disk and fails once it is full, so free space on it (build output, caches) before it naps`;
 }
 
 /** The turn's error when nothing on the machine answered a launch from this computer for the whole reach window:

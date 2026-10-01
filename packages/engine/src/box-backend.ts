@@ -10,7 +10,7 @@
 
 import { createHash, randomBytes } from "node:crypto";
 import { DAEMON_UNIT, moveTimedOutLine, providerKeyName, providerRoadRetryLine, shellQuote, type Capabilities } from "@wsp/protocol";
-import { GuestUnusableError, MoveUnansweredError, ROAD_TRIES, abort, backoffMs, classify, isMissing, realRetryClock, roadBackoffMs, roadCode, shouldRetry, type RetryClock, type WspError } from "./errors.js";
+import { GuestUnusableError, MoveUnansweredError, ROAD_TRIES, StopRefusedError, abort, backoffMs, classify, isMissing, realRetryClock, roadBackoffMs, roadCode, shouldRetry, type RetryClock, type WspError } from "./errors.js";
 import { DAEMON_ENV_FILE, DEADLINE_EXIT, INLINE_EXEC_MS, execDetached } from "./exec-detached.js";
 import { EXEC_ENV } from "./golden-import.js";
 import { BUILDER_LABEL, CREATED_AT_LABEL, DOCTOR_LABEL, GOLDEN_LABEL, HOST_LABEL, NAME_LABEL, OWNER_LABEL, SMOKE_LABEL, WORKSPACE_LABEL, WSP_LABEL } from "./labels.js";
@@ -220,7 +220,13 @@ interface BoxView {
   id: string;
   name?: string | null;
   state: string;
+  /** Why the box is stopped, failed or cancelled, in the provider's words. */
   error?: string | null;
+  /** What the box's latest snapshot attempt came to (queued, in_progress, completed, failed, cancelled), and when; with
+   * snapshotCompletedAt left behind, the provider's own sign that its snapshots keep failing. */
+  lastSnapshotStatus?: string | null;
+  lastSnapshotAttemptAt?: string | null;
+  snapshotCompletedAt?: string | null;
   type?: string;
   vcpu?: number;
   memoryGB?: number;
@@ -255,7 +261,10 @@ interface SnapshotView {
   chainId?: string | null;
   createdAt?: string;
   completedAt?: string | null;
+  /** What changed since the snapshot before it in the chain, which is what storage holds. */
   sizeBytes?: number | null;
+  /** What the snapshot restores to. */
+  contentSizeBytes?: number | null;
 }
 
 interface Paged {
@@ -263,6 +272,14 @@ interface Paged {
 }
 type BoxPage = Paged & { boxes?: BoxView[] };
 type SnapshotPage = Paged & { snapshots?: SnapshotView[] };
+
+/** Why the provider would not stop a box, in its own fields: its error for the box, else what its latest snapshot
+ * attempt came to and when the last one completed. */
+export function stopRefusalOf(v: Pick<BoxView, "error" | "lastSnapshotStatus" | "lastSnapshotAttemptAt" | "snapshotCompletedAt">): string {
+  if (typeof v.error === "string" && v.error !== "") return v.error;
+  const attempt = typeof v.lastSnapshotStatus === "string" ? `its latest snapshot ${v.lastSnapshotStatus}${typeof v.lastSnapshotAttemptAt === "string" ? ` at ${v.lastSnapshotAttemptAt}` : ""}` : "it reported no snapshot attempt";
+  return `${attempt}, and the last that completed was ${typeof v.snapshotCompletedAt === "string" ? `at ${v.snapshotCompletedAt}` : "none"}`;
+}
 
 const templateRowOf = (s: NamedSnapshotView): TemplateRow => ({
   id: s.name,
@@ -571,7 +588,8 @@ export class BoxBackend implements MachineBackend {
   }
 
   /** The named snapshots, which are wsp's versions, and the provider's own per-minute history with what each
-   * increment holds; a delete that finds nothing left is done. */
+   * increment holds; a delete that finds nothing left is done. A history row says what it restores to; a named one
+   * says no such size (it listed 62 B for a 7.3 GB image), so its image size is left unknown. */
   async listSnapshots(): Promise<SnapshotRow[]> {
     const named = await this.namedSnapshots();
     const history = (await this.pages<SnapshotPage>("/snapshots", p => p.snapshots, p => p.pageInfo?.nextCursor)) as SnapshotView[];
@@ -580,6 +598,7 @@ export class BoxBackend implements MachineBackend {
       ...history.map(s => ({
         id: s.id,
         sizeBytes: s.sizeBytes ?? 0,
+        ...(typeof s.contentSizeBytes === "number" ? { restoredBytes: s.contentSizeBytes } : {}),
         ...(s.completedAt ?? s.createdAt ? { createdAt: (s.completedAt ?? s.createdAt)! } : {}),
         ...(s.chainId !== undefined ? { parent: s.chainId } : {}),
       })),
@@ -762,7 +781,8 @@ export class BoxMachine implements Machine {
   /** Returns when the box reads archived. A stop is a 202 the provider lands in seconds to minutes, so the box is
    * read until it does; archiving is the stop under way and a box already archived needs none. A stop the
    * provider refuses is thrown as itself, and one it takes back (the snapshot behind it failing leaves the box
-   * running, which the provider does rather than lose work) ends the move as not taken; nothing here sends force. */
+   * running, which the provider does rather than lose work) is thrown with the provider's own reading of its
+   * snapshots; nothing here sends force, which would drop what was written since the last one. */
   async pause(): Promise<void> {
     const { pauseMs, pollMs } = this.backend.budgets;
     const now = this.backend.clock.now;
@@ -775,9 +795,9 @@ export class BoxMachine implements Machine {
       view = await this.backend.view(this.id);
       if (view.state === "archived") return;
       if (view.state !== "archiving") {
-        const words = `pause did not take: the provider left ${this.id} ${view.state}, which it does when the snapshot behind a stop is failing`;
-        console.warn(`${this.id}: ${words}`);
-        throw new MoveUnansweredError(words);
+        const said = stopRefusalOf(view);
+        console.warn(`${this.id}: pause did not take: the provider left it ${view.state} and refused the stop: ${said}`);
+        throw new StopRefusedError(this.id, said);
       }
       if (now() - started >= pauseMs) {
         const words = moveTimedOutLine("pause", now() - started, STATE_MAP[view.state]);

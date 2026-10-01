@@ -417,6 +417,14 @@ describe("removing a project image", () => {
     expect((await rt.image.get()).projects).toEqual([golden, second]);
   });
 
+  it("image.get gives a project image no size where the provider reports only what it stores, never that figure as the image's", async () => {
+    const { rt, backend, golden } = await taken();
+    // A provider that stores an image as what changed since the one it was made from lists that change, here 62 bytes
+    // of a 7.3 GB image, and says nothing of the size the image restores to.
+    backend.listSnapshots = async () => [{ id: golden.snapshotId, sizeBytes: 62 }];
+    expect((await rt.image.get()).projects).toEqual([golden]);
+  });
+
   it("image.get lists a project image whose place this host no longer holds without a size, beside one it can size", async () => {
     const { rt, backend, store, golden } = await taken();
     const elsewhere = { ...golden, snapshotId: "snap_elsewhere", place: "left", createdAt: "2026-09-07T00:00:00.000Z" };

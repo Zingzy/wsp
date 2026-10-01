@@ -205,6 +205,9 @@ const readable =
  * literal that reads like a reference is its value. */
 const unreadLine = (path: readonly (string | number)[]): string => `reads a variable servers.env does not hold in ${path.join(".")}, so it could not start there`;
 
+/** The refusal for a definition no reader maps: its key path alone, since the value may be the secret itself. */
+const shapeRefusal = (path: readonly (string | number)[]): Error => new Error(`${path.join(".")} is written in a shape wsp does not read, so its values cannot be written by name`);
+
 const OAUTH_SECRETS = new Set(["clientsecret", "refreshtoken", "accesstoken", "idtoken"]);
 
 /** The keys of a server's `oauth` table that hold a secret, however the file spells them. */
@@ -922,13 +925,22 @@ const wholeRef =
 /** The reference writer for a JSON file: each server's header and command variable values put in place by name,
  * every other key and comment where it was. */
 function jsonReferrer(shape: JsonShape): McpFormat["refer"] {
+  /** A server table with every entry an object; any other shape refused, since no check below reads inside it. */
+  const serversAt = (v: unknown, at: JSONPath): Tree => {
+    const servers = tree(v);
+    if (servers === undefined) throw shapeRefusal(at);
+    const odd = Object.keys(servers).find(name => tree(servers[name]) === undefined);
+    if (odd !== undefined) throw shapeRefusal([...at, odd]);
+    return servers;
+  };
   /** The file's own server table, and with `folders` each folder's under `projects`, for a format that keeps them. */
   const serverTables = (root: Tree, folders: boolean): { at: JSONPath; project?: string; servers: Tree }[] => [
-    { at: [shape.key], servers: tree(root[shape.key]) ?? {} },
+    { at: [shape.key], servers: root[shape.key] == null ? {} : serversAt(root[shape.key], [shape.key]) },
     ...(shape.projects && folders
       ? Object.entries(tree(root.projects) ?? {}).flatMap(([folder, held]) => {
-          const servers = tree(tree(held)?.[shape.key]);
-          return servers === undefined ? [] : [{ at: ["projects", folder, shape.key] as JSONPath, project: folder, servers }];
+          const at: JSONPath = ["projects", folder, shape.key];
+          const servers = tree(held)?.[shape.key];
+          return servers == null ? [] : [{ at, project: folder, servers: serversAt(servers, at) }];
         })
       : []),
   ];
@@ -956,7 +968,7 @@ function jsonReferrer(shape: JsonShape): McpFormat["refer"] {
     const defs: { at: JSONPath; name: string; def: Tree; values: Record<string, string> }[] = [];
     type Lost = { at: JSONPath; name: string; inAddress: boolean };
     const weighed: { table: (typeof tables)[number]; name: string; values: Record<string, string>; mine: JsonEdit[]; shown: Tree; unread?: string; lost: Lost[] }[] = [];
-    const asked = tables.flatMap(table => Object.entries(table.servers).flatMap(([name, raw]) => (tree(raw) === undefined || (only !== undefined && name !== only) ? [] : [{ table, name, def: tree(raw)! }])));
+    const asked = tables.flatMap(table => Object.entries(table.servers).flatMap(([name, raw]) => (only !== undefined && name !== only ? [] : [{ table, name, def: tree(raw)! }])));
     // What the file writes is read before any reference is weighed, so the order of its keys and servers decides nothing.
     const writes = new Set(asked.flatMap(({ name, def }) => literalNames(name, def)));
     const held = readable(outside, writes);
@@ -997,7 +1009,7 @@ function jsonReferrer(shape: JsonShape): McpFormat["refer"] {
         }
       };
       const oauth = def.oauth;
-      if (oauth !== undefined && oauth !== false && !isObject(oauth)) throw new Error(`${[...table.at, name].join(".")} is written in a shape wsp does not read, so its values cannot be written by name`);
+      if (oauth !== undefined && oauth !== false && !isObject(oauth)) throw shapeRefusal([...table.at, name]);
       const secrets = isObject(oauth) ? oauthSecretKeys(oauth) : [];
       const minted = headerVariables(name, [...Object.keys(dict(def.headers)), ...secrets.map(k => `oauth.${k}`)]);
       put("headers", dict(def.headers), h => minted.get(h)!, true);
@@ -1661,23 +1673,22 @@ async function referCodex(text: string, only?: string, known: readonly KnownValu
   } catch (e) {
     throw new Error(`the file is not valid TOML (${(e instanceof Error ? e.message : String(e)).split("\n")[0]})`);
   }
-  const unread = (where: string): Error => new Error(`${where} is written in a shape wsp does not read, so its values cannot be written by name`);
   const table = tree["mcp_servers"];
   if (table === undefined) return { text, servers: [], entries: [] };
-  if (!isObject(table)) throw unread("mcp_servers");
+  if (!isObject(table)) throw shapeRefusal(["mcp_servers"]);
   const servers: McpReferred["servers"] = [];
   const next: Record<string, unknown> = { ...table };
   let changed = false;
   const writes = new Set(Object.entries(table).flatMap(([name, raw]) => (!isObject(raw) || (only !== undefined && name !== only) ? [] : [...Object.keys(dict(raw["http_headers"])).map(h => mcpHeaderVariable(name, h)), ...Object.keys(dict(raw["env"]))])));
   const held = readable(outside, writes);
   for (const [name, raw] of Object.entries(table)) {
-    if (!isObject(raw)) throw unread(`mcp_servers.${name}`);
+    if (!isObject(raw)) throw shapeRefusal(["mcp_servers", name]);
     for (const key of ["http_headers", "env"]) {
       const held = raw[key];
-      if (held !== undefined && (!isObject(held) || Object.values(held).some(v => typeof v !== "string"))) throw unread(`mcp_servers.${name}`);
+      if (held !== undefined && (!isObject(held) || Object.values(held).some(v => typeof v !== "string"))) throw shapeRefusal(["mcp_servers", name]);
     }
     const oauth = raw["oauth"];
-    if (oauth !== undefined && !isObject(oauth)) throw unread(`mcp_servers.${name}`);
+    if (oauth !== undefined && !isObject(oauth)) throw shapeRefusal(["mcp_servers", name]);
     if (only !== undefined && name !== only) continue;
     const secret = oauth === undefined ? undefined : oauthSecretKeys(oauth)[0];
     if (secret !== undefined) throw new Error(`${name} keeps an OAuth secret in mcp_servers.${name}.oauth.${secret}, and Codex reads no variable there, so the file stays on this computer`);

@@ -8,9 +8,9 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { DAEMON_UNIT } from "@wsp/protocol";
+import { DAEMON_UNIT, stopRefusedLine } from "@wsp/protocol";
 import { writeStub } from "../../protocol/test/stub-script.js";
-import { GuestUnusableError, MoveUnansweredError, ROAD_TRIES, isMissing, type RetryClock } from "../src/errors.js";
+import { GuestUnusableError, MoveUnansweredError, ROAD_TRIES, StopRefusedError, isMissing, type RetryClock } from "../src/errors.js";
 import { DAEMON_ENV_FILE, DEADLINE_EXIT, INLINE_EXEC_MS } from "../src/exec-detached.js";
 import { EXEC_ENV } from "../src/golden-import.js";
 import { GONE_READS, killUntilGone } from "../src/golden.js";
@@ -36,6 +36,7 @@ import {
   boxSnapshotName,
   envLandingScript,
   sudoCommand,
+  stopRefusalOf,
 } from "../src/box-backend.js";
 import { BUILDER_LABEL, CREATED_AT_LABEL, GOLDEN_LABEL, NAME_LABEL, OWNER_LABEL, WORKSPACE_LABEL, WSP_LABEL } from "../src/labels.js";
 import { goldenName, nameOwner } from "../src/snapshot-names.js";
@@ -625,18 +626,27 @@ describe("BoxBackend against a fake Box API", () => {
     await expect(machineOn(refused).machine.pause()).rejects.toMatchObject({ code: "stop_failed", message: "Snapshot failed; the box keeps running." });
     expect(refused.calls().filter(c => c.endsWith("/stop"))).toHaveLength(1);
 
+    // The box's own fields after a stop the provider took back (the API's Sandbox schema): its latest snapshot failed
+    // while the last that completed stays behind, which is how it says its snapshots keep failing.
+    const failing = { lastSnapshotStatus: "failed", lastSnapshotAttemptAt: "2026-10-01T00:40:00Z", snapshotCompletedAt: "2026-09-30T21:02:00Z" };
     const undone = new FakeBox()
-      .on("GET", "/boxes/bx_tumrjngm", INFO("bx_tumrjngm", "idle"), INFO("bx_tumrjngm", "archiving"), INFO("bx_tumrjngm", "idle"))
+      .on("GET", "/boxes/bx_tumrjngm", INFO("bx_tumrjngm", "idle"), INFO("bx_tumrjngm", "archiving"), INFO("bx_tumrjngm", "idle", failing))
       .on("POST", "/boxes/bx_tumrjngm/stop", { status: 202, body: { ok: true, type: "box.stopping", status: "archiving", box: BOX("bx_tumrjngm", "archiving") } });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const e = await machineOn(undone).machine.pause().catch((err: unknown) => err);
-      expect(e).toBeInstanceOf(MoveUnansweredError);
-      expect((e as Error).message).toMatch(/pause did not take: the provider left bx_tumrjngm idle/);
+      const said = "its latest snapshot failed at 2026-10-01T00:40:00Z, and the last that completed was at 2026-09-30T21:02:00Z";
+      expect(e).toBeInstanceOf(StopRefusedError);
+      expect(e).toMatchObject({ machineId: "bx_tumrjngm", said, message: stopRefusedLine(said) });
+      // The line the host logs keeps the provider's reading, not a guess at it.
+      expect(warn).toHaveBeenCalledWith(`bx_tumrjngm: pause did not take: the provider left it idle and refused the stop: ${said}`);
       expect(undone.calls().filter(c => c.endsWith("/stop"))).toHaveLength(1);
     } finally {
       warn.mockRestore();
     }
+    // The box's own error, where it gives one, is the reading.
+    expect(stopRefusalOf({ error: "disk snapshot failed: no space left on device", ...failing })).toBe("disk snapshot failed: no space left on device");
+    expect(stopRefusalOf({})).toBe("it reported no snapshot attempt, and the last that completed was none");
   });
 
   it("a stop that never lands inside the budget ends the pause with the row's words, the machine still read as paused-in-progress", async () => {
@@ -926,7 +936,7 @@ describe("BoxBackend against a fake Box API", () => {
     expect(api.calls().filter(c => c.startsWith("POST"))).toEqual([]);
   });
 
-  it("lists every snapshot with its size: the named ones under their names, and the provider's own history nameless", async () => {
+  it("lists every snapshot with the size storage holds, and the size it restores to only where the provider says it", async () => {
     const api = new FakeBox()
       .on("GET", "/named-snapshots", { status: 200, body: { ok: true, snapshots: [NAMED("wsp-mac-default-v1", "ready")] } })
       .on("GET", "/snapshots", seen => {
@@ -937,16 +947,18 @@ describe("BoxBackend against a fake Box API", () => {
             ok: true,
             type: "snapshot.list",
             snapshots: first
-              ? [{ id: "866f04de-8e8a-4401-9e29-cf58e1738213", boxId: "bx_tumrjngm", status: "completed", kind: "incremental", generation: 4, chainId: "d9365279-5b40-4860-85b4-4a168a878da1", createdAt: "2026-09-11T06:32:52.039Z", completedAt: "2026-09-11T06:32:53.272Z", sizeBytes: 343, fileCount: 2 }]
+              ? [{ id: "866f04de-8e8a-4401-9e29-cf58e1738213", boxId: "bx_tumrjngm", status: "completed", kind: "incremental", generation: 4, chainId: "d9365279-5b40-4860-85b4-4a168a878da1", createdAt: "2026-09-11T06:32:52.039Z", completedAt: "2026-09-11T06:32:53.272Z", sizeBytes: 343, contentSizeBytes: 7_838_315_315, fileCount: 2 }]
               : [{ id: "1826c6c1-6f77-4beb-8406-93f9e27281a2", boxId: "bx_tumrjngm", status: "completed", kind: "noop", generation: null, chainId: null, createdAt: "2026-09-11T06:55:43.354Z", completedAt: "2026-09-11T06:55:43.547Z", sizeBytes: null }],
             pageInfo: { nextCursor: first ? "c2" : null, hasMore: first, limit: 200 },
           },
         };
       });
     const { backend } = backendOn(api);
+    // A history row says what it restores to beside the change it stores; a named one says no such size, so none is put
+    // on it and no image reads its stored figure as its size.
     expect(await backend.listSnapshots()).toEqual([
       { id: "wsp-mac-default-v1", name: "wsp-mac-default-v1", sizeBytes: 1255755776, createdAt: "2026-09-11T06:47:23.959Z" },
-      { id: "866f04de-8e8a-4401-9e29-cf58e1738213", sizeBytes: 343, createdAt: "2026-09-11T06:32:53.272Z", parent: "d9365279-5b40-4860-85b4-4a168a878da1" },
+      { id: "866f04de-8e8a-4401-9e29-cf58e1738213", sizeBytes: 343, restoredBytes: 7_838_315_315, createdAt: "2026-09-11T06:32:53.272Z", parent: "d9365279-5b40-4860-85b4-4a168a878da1" },
       { id: "1826c6c1-6f77-4beb-8406-93f9e27281a2", sizeBytes: 0, createdAt: "2026-09-11T06:55:43.547Z", parent: null },
     ]);
     expect(api.seen.filter(s => s.path === "/snapshots").map(s => s.query.get("cursor"))).toEqual([null, "c2"]);

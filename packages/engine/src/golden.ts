@@ -823,8 +823,8 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
   return { ledger, result };
 }
 
-/** The Node step, once: kept when the guest's major already meets the floor,
- * else the pinned release; a failed install names itself and fails only the
+/** The Node step, once: kept when the guest's major is between the floor and
+ * the pinned release's, else the pinned release; a failed install names itself and fails only the
  * agents whose floor the guest's Node does not meet. */
 async function installNode(machine: Machine, node: NodeInstall, stage: StageListener): Promise<{ haveMajor: number; failed?: string }> {
   stage("installing-harness", `Node for ${node.agents.join(", ")}`);

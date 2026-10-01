@@ -93,8 +93,8 @@ describe("SolariBackend", () => {
     const b = new SolariBackend({ apiKey: "k", fetch: f });
     // A snapshot the provider lists with a null name carries none, which is how a row with no owner reads.
     expect(await b.listSnapshots()).toEqual([
-      { id: "snap_a", name: "golden", sizeBytes: 3839352763, createdAt: "2026-08-31T22:39:02.170Z", parent: null },
-      { id: "snap_b", sizeBytes: 8_500_000_000, createdAt: "2026-09-04T10:00:00Z", parent: null },
+      { id: "snap_a", name: "golden", sizeBytes: 3839352763, restoredBytes: 3839352763, createdAt: "2026-08-31T22:39:02.170Z", parent: null },
+      { id: "snap_b", sizeBytes: 8_500_000_000, restoredBytes: 8_500_000_000, createdAt: "2026-09-04T10:00:00Z", parent: null },
     ]);
     expect(f.mock.calls.map(c => `${c[1]?.method} ${new URL(String(c[0])).pathname}`)).toEqual(["GET /snapshots"]);
   });
