@@ -20,17 +20,30 @@ export type LimitWindow = z.infer<typeof LimitWindow>;
 export const LimitStatus = z.enum(["ok", "warning", "reached"]);
 export type LimitStatus = z.infer<typeof LimitStatus>;
 
+export const RESET_CREDIT_STATUSES = ["available", "redeeming", "redeemed", "unknown"] as const;
+
+/** One reset a plan has banked, as its agent lists it: an id the agent spends it by, whether it can still be spent,
+ * and when it lapses, ms epoch, where it does. */
+export const ResetCredit = z.object({ id: z.string(), status: z.enum(RESET_CREDIT_STATUSES), expiresAt: z.number().optional() });
+export type ResetCredit = z.infer<typeof ResetCredit>;
+
+/** The resets a plan has banked: how many can be spent, and each one where the agent was asked for them in full,
+ * which it may cut short of the count. */
+export const BankedResets = z.object({ count: z.number().int().nonnegative(), credits: z.array(ResetCredit).optional() });
+export type BankedResets = z.infer<typeof BankedResets>;
+
 /** A plan's limits as a harness printed them during a turn. account is the harness's own name for the sign-in
- * where it gives one; keyed is a sign-in by API key, which has no plan window at all. */
+ * where it gives one; keyed is a sign-in by API key, which has no plan window at all. credits is absent on a reading
+ * that did not ask for them, which leaves the last one standing. */
 export const HarnessLimit = z.object({
   windows: z.array(LimitWindow),
   plan: z.string().optional(),
   status: LimitStatus.optional(),
   account: z.object({ id: z.string(), label: z.string().optional() }).optional(),
   keyed: z.boolean().optional(),
+  credits: BankedResets.optional(),
 });
 export type HarnessLimit = z.infer<typeof HarnessLimit>;
-
 
 /** A window's length in minutes as a limit kind: five hours is the session and seven days the week. */
 export function limitKindOfMinutes(minutes: number): LimitKind {

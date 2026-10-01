@@ -22,6 +22,7 @@ import {
   endAfterResult,
   endRun,
   limitKindOfMinutes,
+  RESET_CREDIT_STATUSES,
   titlePrompt,
 } from "@wsp/protocol";
 import type {
@@ -47,6 +48,7 @@ import type {
   TurnTokens,
   HarnessLimit,
   LimitWindow,
+  ResetCredit,
 } from "@wsp/protocol";
 import { catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
 import { accessParams, buildCommand, buildEnv, imagePath } from "./command.js";
@@ -54,9 +56,9 @@ import {
   INITIALIZED_LINE,
   REQUEST,
   ACCOUNT_READ_LINE,
-  RATE_LIMITS_READ_LINE,
   decisionLine,
   initializeLine,
+  rateLimitsReadLine,
   readMessage,
   refuseRequestLine,
   threadForkLine,
@@ -262,10 +264,29 @@ function turnTokensOf(seen: UsageSeen): TurnTokens {
 /** A window's reset as ms epoch: the server sends unix seconds, as the rollout's resets_at is. */
 const resetMs = (value: number): number => (value < 1e11 ? value * 1000 : value);
 
+/** The resets the plan has banked, off a rate-limits answer, read fail closed: a count that is not a whole number at
+ * or above zero reads the whole field absent, and a credit of a kind other than this plan's windows, or in a state
+ * this code does not know, reads unknown and never available. */
+export function creditsOf(answer: Record<string, unknown> | undefined): HarnessLimit["credits"] {
+  const summary = rec(answer?.rateLimitResetCredits);
+  const banked = summary?.availableCount;
+  if (typeof banked !== "number" || !Number.isInteger(banked) || banked < 0) return undefined;
+  if (!Array.isArray(summary?.credits)) return { count: banked };
+  const credits = summary.credits.flatMap((raw): ResetCredit[] => {
+    const credit = rec(raw);
+    const id = str(credit?.id);
+    if (credit === undefined || id === undefined) return [];
+    const said = RESET_CREDIT_STATUSES.find(s => s === credit.status);
+    const expiresAt = count(credit.expiresAt);
+    return [{ id, status: credit.resetType === "codexRateLimits" && said !== undefined ? said : "unknown", ...(expiresAt !== undefined ? { expiresAt: resetMs(expiresAt) } : {}) }];
+  });
+  return { count: banked, credits };
+}
+
 /** The plan's windows off a rate-limit snapshot, each read as a kind by its length (the primary is the session and the
  * secondary the week where the server names no length), with the plan and the account account/read named. A limit
  * the backend says was reached reads reached. */
-function limitOf(snapshot: Record<string, unknown>, account: { id?: string; label?: string; plan?: string }): HarnessLimit | undefined {
+function limitOf(snapshot: Record<string, unknown>, account: { id?: string; label?: string; plan?: string }, credits?: HarnessLimit["credits"]): HarnessLimit | undefined {
   const windows: LimitWindow[] = [];
   for (const [slot, fallback] of [["primary", 300], ["secondary", 10_080]] as const) {
     const w = rec(snapshot[slot]);
@@ -282,6 +303,7 @@ function limitOf(snapshot: Record<string, unknown>, account: { id?: string; labe
     ...(plan !== undefined ? { plan } : {}),
     status: snapshot.rateLimitReachedType === undefined || snapshot.rateLimitReachedType === null ? "ok" : "reached",
     ...(id !== undefined ? { account: { id, ...(account.label !== undefined ? { label: account.label } : {}) } } : {}),
+    ...(credits !== undefined ? { credits } : {}),
   };
 }
 
@@ -453,9 +475,9 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
       return { status: "failed", durationMs: Date.now() - startedAt, error: words?.line ?? message, ...(words?.cause !== undefined ? { refusal: words.cause } : {}) };
     };
 
-    const emitLimit = (): void => {
+    const emitLimit = (credits?: HarnessLimit["credits"]): void => {
       if (rateLimits === undefined) return;
-      const limit = limitOf(rateLimits, account);
+      const limit = limitOf(rateLimits, account, credits);
       if (limit !== undefined) emit({ type: "limit", sessionId: threadId, limit });
     };
 
@@ -515,8 +537,9 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
         const answer = rec(result);
         const accountId = str(answer?.accountId);
         if (accountId !== undefined) account = { ...account, id: accountId };
-        rateLimits = rec(answer?.rateLimits);
-        emitLimit();
+        // The legacy single bucket can name another meter than codex's own; the buckets by id say which is which.
+        rateLimits = rec(rec(answer?.rateLimitsByLimitId)?.codex) ?? rec(answer?.rateLimits);
+        emitLimit(creditsOf(answer));
         return;
       }
       const settle = typeof id === "string" ? steers.get(id) : undefined;
@@ -574,7 +597,9 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
         }
         case "account/rateLimits/updated": {
           // A rolling update is sparse: what it leaves out, or names null, keeps the last reading's value.
-          const update = Object.fromEntries(Object.entries(rec(params.rateLimits) ?? {}).filter(([, value]) => value !== null));
+          const snapshot = rec(params.rateLimits) ?? {};
+          if (typeof snapshot.limitId === "string" && snapshot.limitId !== "codex") break;
+          const update = Object.fromEntries(Object.entries(snapshot).filter(([, value]) => value !== null));
           rateLimits = { ...(rateLimits ?? {}), ...update };
           emitLimit();
           break;
@@ -743,7 +768,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     const threadLine = options.resume === undefined ? threadStartLine(thread) : threadResumeLine({ ...thread, threadId: options.resume });
     const command = buildCommand({ ...(options.cwd !== undefined ? { cwd: options.cwd } : {}), ...(options.mcpServers !== undefined ? { mcpServers: options.mcpServers } : {}), ...(deps.launch !== undefined ? { launch: deps.launch } : {}) });
     return follow({
-      stream: deps.exec(command, { env: { ...env }, input: [initializeLine(), INITIALIZED_LINE, ACCOUNT_READ_LINE, RATE_LIMITS_READ_LINE, threadLine] }),
+      stream: deps.exec(command, { env: { ...env }, input: [initializeLine(), INITIALIZED_LINE, ACCOUNT_READ_LINE, rateLimitsReadLine(false), threadLine] }),
       localId,
       startedAt: Date.now(),
       command,
