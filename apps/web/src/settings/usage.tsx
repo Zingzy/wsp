@@ -6,13 +6,12 @@
 // are two ledgers and are never summed.
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { agentMark, agentName } from "@wsp/catalog";
-import { ArrowUpRightIcon, BoxIcon, ChartLineIcon, CircleDashedIcon, GaugeIcon, MonitorIcon, UserRoundIcon } from "lucide-react";
+import { BoxIcon, ChartLineIcon, CircleDashedIcon, GaugeIcon, MonitorIcon, UserRoundIcon } from "lucide-react";
 import { USAGE_RANGES, USAGE_SPLITS, USAGE_WORDS, accountState, accountWords, fmtCost, fmtTokens, listWords, logsLine, resetsWord, type AccountRow, type AccountsAnswer, type LimitKind, type UsageRange, type UsageSplit, type UsedAnswer, type UsedRow } from "@wsp/protocol";
 import { HarnessMark } from "../components/chat/HarnessMark.js";
 import { SegmentedControl } from "../components/ui/segmented-control.js";
 import { cn } from "../lib/utils.js";
 import { PROJECT_HUES, ProjectGlyph } from "../projects/look.js";
-import { useStore } from "../protocol/store.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
 import { ComputerGlyph } from "./ComputerGlyph.js";
 import { ABOUT_WORDS, USAGE_PAGE_WORDS as W } from "./format.js";
@@ -476,40 +475,6 @@ function SplitRow({ row, split, share, turns, ink, sub = false, ctx }: { row: Us
   );
 }
 
-function TopThreads({ used }: { used: UsedAnswer }) {
-  const select = useStore(s => s.select);
-  const closeSettings = useStore(s => s.closeSettings);
-  if (used.threads === undefined || used.threads.length === 0) return null;
-  return (
-    <Card
-      id="usage-threads"
-      head={W.topThreads}
-      body={
-        <div className={BARE_TABLE}>
-      {used.threads.map(thread => (
-        <button
-          key={thread.threadId}
-          type="button"
-          data-usage-thread={thread.threadId}
-          onClick={() => {
-            select(thread.workspaceId, thread.threadId);
-            closeSettings();
-          }}
-          className="grid w-full grid-cols-[minmax(0,1fr)_128px_96px_120px_16px] items-center gap-x-6 py-3.5 text-left transition-colors duration-150 hover:bg-accent/40 max-sm:grid-cols-[minmax(0,1fr)_72px_16px] max-sm:gap-x-4"
-        >
-          <Identity mark={agentGlyph(thread.agent)} title={thread.title} {...(thread.workspace === undefined ? {} : { line: thread.workspace })} />
-          <span className={cn("truncate text-right text-[13px] text-muted-foreground", WIDE_ONLY)}>{thread.computer ?? ""}</span>
-          <span className={cn(NUMBER, "text-right text-foreground")}>{fmtTokens(thread.tokens)}</span>
-          <span className={cn(NUMBER, "text-right text-foreground", WIDE_ONLY)}>{thread.estimate === undefined ? "" : fmtCost(thread.estimate)}</span>
-          <ArrowUpRightIcon aria-hidden className="size-3.5 text-muted-foreground" />
-        </button>
-      ))}
-        </div>
-      }
-    />
-  );
-}
-
 /** The Usage tab while its answer is on the way, in the loaded page's own shape and heights so nothing moves when
  * it lands. */
 function UsedSkeleton({ range }: { range: UsageRange }) {
@@ -697,7 +662,6 @@ function Used({ used, models, range, split, onRange, onSplit, ctx }: { used: Use
             </h2>
             <Mix used={used} />
           </section>
-          <TopThreads used={used} />
           {used.logs === undefined ? null : (
             <p data-k="logs" className={QUIET}>
               {logsLine(used.logs)}

@@ -306,7 +306,6 @@ export const USAGE_PAGE_WORDS = {
   mix: "Where the tokens went",
   agentAndModel: "Agent and model",
   allOf: { agent: "All agents together", account: "All accounts together", computer: "All computers together", project: "All projects together", model: "All models together" },
-  topThreads: "Top threads",
 } as const;
 
 /** Settings > Projects: the list, a project's own page and its one act. */

@@ -2,8 +2,8 @@
 // Settings > Usage in the owner's shape: Claude Code with an API key on the Mac
 // and Boat, Codex with ChatGPT Plus on the Mac pooled as Codex's card, agents
 // that report no limit as one line; then what was used over a range as totals,
-// a chart of one line per split value with no fill, the split as a table, the
-// token mix, the top threads and where it was read. No computer's load stands
+// a chart of one line per split value with no fill, the split as a table
+// and the token mix. No computer's load stands
 // on the page.
 import { cleanup, fireEvent } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -361,30 +361,6 @@ describe("Usage: used", () => {
     expect(chart.querySelector("[data-line=codex]")!.getAttribute("class")).toBe("text-muted-foreground");
     await hover(chart.querySelectorAll<HTMLElement>("[data-k=point]")[2]!);
     expect([...document.querySelectorAll("[data-k=point-figure]")].map(text)).toEqual(["Claude Code30M", "Codex4M"]);
-  });
-
-  it("lists the threads that used the most, and a click opens that thread and shuts Settings", async () => {
-    await mountUsed({
-      threads: [
-        { threadId: "t-relay", workspaceId: "w-relay", title: "Fix the relay", agent: "claude", workspace: "relay-fix", computer: "Boat", tokens: 2_000_000, estimate: 4.5 },
-        { threadId: "t-chart", workspaceId: "w-chart", title: "Draw the chart", agent: "codex", tokens: 900_000 },
-      ],
-    });
-    expect(text($("[data-settings-card=usage-threads] [data-settings-head]"))).toBe(USAGE_PAGE_WORDS.topThreads);
-    expect($$("[data-usage-thread]").map(row => row.dataset["usageThread"])).toEqual(["t-relay", "t-chart"]);
-    const relay = $("[data-usage-thread=t-relay]")!;
-    expect(relay.textContent).toContain("Fix the relay");
-    expect(relay.textContent).toContain("2M");
-    expect(relay.textContent).toContain("$4.50");
-    fireEvent.click(relay);
-    await settle();
-    const state = useStore.getState();
-    expect([state.selectedId, state.selectedThreadId, state.settingsOpen]).toEqual(["w-relay", "t-relay", false]);
-  });
-
-  it("draws no threads card where the answer carries none", async () => {
-    await mount();
-    expect($("[data-settings-card=usage-threads]")).toBeNull();
   });
 
   it("says nothing was used in the chart's place, with no totals, no rows and no logs line", async () => {
