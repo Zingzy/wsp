@@ -54,12 +54,18 @@ const accounts = (): AccountRow[] => [
 const used = (range: UsageRange, split: UsageSplit, rows = true): UsedAnswer => ({
   range,
   split,
-  rows: rows
-    ? [
-        { key: "claude", label: "Claude Code", tokens: { input: 7_323_700_000, output: 7_300_000, cached: 6_874_800_000 }, costList: 4_301.74, priced: true },
-        { key: "codex", label: "Codex", tokens: { input: 22_000_000, output: 42_000, cached: 20_700_000 }, priced: false },
-      ]
-    : [],
+  rows: !rows
+    ? []
+    : split === "model"
+      ? [
+          { key: "claude-opus-5-5", label: "Opus 5.5", tokens: { input: 7_000_000_000, output: 7_000_000, cached: 6_600_000_000 }, costList: 4_100, priced: true },
+          { key: "claude-haiku-4-5", label: "Haiku 4.5", tokens: { input: 323_700_000, output: 300_000, cached: 274_800_000 }, costList: 201.74, priced: true },
+          { key: "gpt-5.6", label: "GPT-5.6", tokens: { input: 22_000_000, output: 42_000, cached: 20_700_000 }, priced: false },
+        ]
+      : [
+          { key: "claude", label: "Claude Code", tokens: { input: 7_323_700_000, output: 7_300_000, cached: 6_874_800_000 }, costList: 4_301.74, priced: true },
+          { key: "codex", label: "Codex", tokens: { input: 22_000_000, output: 42_000, cached: 20_700_000 }, priced: false },
+        ],
   series: Array.from({ length: 7 }, (_, i) => ({ t: Date.parse("2026-09-24T00:00:00Z") + i * 24 * HOUR, tokens: rows ? (i + 1) * 100_000_000 : 0 })),
   since: Date.parse("2026-09-24T00:00:00Z"),
   until: Date.parse("2026-10-01T00:00:00Z"),
@@ -93,7 +99,7 @@ const mountLimits = async (over: Partial<Api> = {}): Promise<void> => {
 };
 
 /** The page over one range's answer of the case's own, the fixture's where it names none. */
-const mountUsed = (answer: Partial<UsedAnswer>): Promise<unknown> => mount({ usageUsed: async (range: UsageRange, split: UsageSplit) => ({ ...used(range, split), ...answer }) } as Partial<Api>);
+const mountUsed = (answer: Partial<UsedAnswer>): Promise<unknown> => mount({ usageUsed: async (range: UsageRange, split: UsageSplit) => (split === "model" ? used(range, split) : { ...used(range, split), ...answer }) } as Partial<Api>);
 
 const $ = (sel: string): HTMLElement | null => document.querySelector<HTMLElement>(`[data-settings-page] ${sel}`);
 const $$ = (sel: string): HTMLElement[] => [...document.querySelectorAll<HTMLElement>(`[data-settings-page] ${sel}`)];
@@ -267,8 +273,8 @@ describe("Usage: used", () => {
     expect(stat("stat-estimate")[1]).toBe("$13.00");
     expect(stat("stat-threads")).toEqual([USAGE_PAGE_WORDS.threads, "7", USAGE_PAGE_WORDS.onComputers(2)]);
     expect(stat("stat-turns")).toEqual([USAGE_PAGE_WORDS.turns, "42", USAGE_PAGE_WORDS.turnsNote]);
-    expect($$("[data-used-row]").map(row => row.dataset["usedRow"])).toEqual(["claude", "codex"]);
-    expect([...$$("[data-k=used-head] span")].map(text)).toEqual(["Agent", "Tokens", "Cache hit", "Turns", "API estimate"]);
+    expect($$("[data-used-row]:not([data-sub])").map(row => row.dataset["usedRow"])).toEqual(["claude", "codex"]);
+    expect([...$$("[data-k=used-head] span")].map(text)).toEqual(["Agent and model", "Tokens", "Cache hit", "Turns", "API estimate"]);
     expect(text($("[data-used-row=codex] [data-k=price]"))).toBe("$10.00");
     expect(text($("[data-used-row=claude] [data-k=price]"))).toBe("$3.00");
     expect(text($("[data-used-row=codex] [data-k=turns]"))).toBe("12");
@@ -279,14 +285,16 @@ describe("Usage: used", () => {
 
   it("reads a week by agent first, and the range and split ask again for theirs", async () => {
     const { asks } = await mount();
-    expect(asks).toEqual([["week", "agent"]]);
+    expect(asks).toEqual([["week", "agent"], ["week", "model"]]);
     expect(text($("[data-settings-card=usage-chart] [data-settings-head]"))).toBe("Tokens a day");
     fireEvent.click($("[data-k=usage-range] [data-segment=day]")!);
     await settle();
     fireEvent.click($("[data-k=usage-split] [data-segment=project]")!);
     await settle();
-    expect(asks.slice(1)).toEqual([
+    // By agent the models are asked for too; by project they are not.
+    expect(asks.slice(2)).toEqual([
       ["day", "agent"],
+      ["day", "model"],
       ["day", "project"],
     ]);
     expect($("[data-k=usage-range] [data-segment=day]")!.getAttribute("aria-checked")).toBe("true");
@@ -298,9 +306,12 @@ describe("Usage: used", () => {
 
   it("draws one row per split value, most first, with its tokens, cache hit and price and no turns column where no row has turns, and a mix whose fresh, cached and out add up to the range", async () => {
     await mount();
-    expect([...$$("[data-k=used-head] span")].map(text)).toEqual(["Agent", "Tokens", "Cache hit", "API estimate"]);
+    expect([...$$("[data-k=used-head] span")].map(text)).toEqual(["Agent and model", "Tokens", "Cache hit", "API estimate"]);
     expect($("[data-k=turns]")).toBeNull();
-    expect($$("[data-used-row]").map(row => row.dataset["usedRow"])).toEqual(["claude", "codex"]);
+    expect($$("[data-used-row]:not([data-sub])").map(row => row.dataset["usedRow"])).toEqual(["claude", "codex"]);
+    // Each agent's models stand under it, most first, read off the model split of the same range.
+    expect($$("[data-used-group=claude] [data-sub]").map(row => row.dataset["usedRow"])).toEqual(["claude-opus-5-5", "claude-haiku-4-5"]);
+    expect($$("[data-used-group=codex] [data-sub]").map(row => row.dataset["usedRow"])).toEqual(["gpt-5.6"]);
     const claude = $("[data-used-row=claude]")!;
     expect(text(claude.querySelector("[data-settings-title]"))).toBe("Claude Code");
     expect([...claude.querySelectorAll("[data-k=tokens], [data-k=cache-hit], [data-k=price]")].map(text)).toEqual(["7.33B", "93.9%", "$4,301.74"]);

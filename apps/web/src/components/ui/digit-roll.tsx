@@ -9,7 +9,7 @@ import { cn } from "../../lib/utils.js";
 
 function Digit({ digit, at }: { digit: string; at: number }) {
   return (
-    <span className="relative inline-block h-[1lh] overflow-hidden">
+    <span aria-hidden className="relative inline-block h-[1lh] overflow-hidden">
       <span className="invisible">{digit}</span>
       <span aria-hidden className="digit-strip absolute inset-x-0 top-0 text-center transition-transform duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none" style={{ transform: `translateY(${-at}lh)` }} />
     </span>
@@ -27,11 +27,11 @@ export function DigitRoll({ value, className, ...rest }: { value: string; classN
   const at = [...shown];
   const offset = at.length - chars.length;
   return (
-    <span {...rest} className={cn("inline-flex tabular-nums", className)}>
+    <span {...rest} role="img" aria-label={value} className={cn("inline-flex tabular-nums", className)}>
       {chars.map((char, i) => {
         const key = chars.length - i;
         const from = at[i + offset];
-        return /\d/.test(char) ? <Digit key={key} digit={char} at={Number(from !== undefined && /\d/.test(from) ? from : char)} /> : <span key={`c${key}`}>{char}</span>;
+        return /\d/.test(char) ? <Digit key={key} digit={char} at={Number(from !== undefined && /\d/.test(from) ? from : char)} /> : <span key={`c${key}`} aria-hidden>{char}</span>;
       })}
     </span>
   );
