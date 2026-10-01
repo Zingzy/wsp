@@ -29,9 +29,9 @@ import { useSettingsStore, type AgentsTab } from "./settingsStore.js";
 
 const KIND_OF: Record<AgentsTab, AnyKind> = { agents: AGENTS, servers: SERVERS, skills: SKILLS };
 const TABS: ReadonlyArray<{ value: AgentsTab; label: React.ReactNode }> = [
-  { value: "agents", label: <><BotIcon aria-hidden className="size-4" />{W.tabs.agents}</> },
-  { value: "servers", label: <><ServerIcon aria-hidden className="size-4" />{W.tabs.servers}</> },
-  { value: "skills", label: <><ScrollTextIcon aria-hidden className="size-4" />{W.tabs.skills}</> },
+  { value: "agents", label: <><BotIcon aria-hidden className="size-3.5" />{W.tabs.agents}</> },
+  { value: "servers", label: <><ServerIcon aria-hidden className="size-3.5" />{W.tabs.servers}</> },
+  { value: "skills", label: <><ScrollTextIcon aria-hidden className="size-3.5" />{W.tabs.skills}</> },
 ];
 
 /** The computers whose own agents a person manages: this one and every computer joined to it. A cloud's agents are its
@@ -54,17 +54,17 @@ export function AgentsTopBar() {
   const pickPlace = useSettingsStore(s => s.pickAgentsPlace);
   const computers = computersOf(places);
   return (
-    <span className="flex items-center gap-2 [-webkit-app-region:no-drag]">
+    <span className="flex min-w-0 items-center gap-2 [-webkit-app-region:no-drag]">
       {place === undefined ? null : (
         <Select value={place.id} onValueChange={id => pickPlace(id as string)}>
-          <SelectTrigger size="sm" aria-label={W.computer} data-k="agents-picker" className="h-9 min-w-48">
+          <SelectTrigger size="sm" aria-label={W.computer} data-k="agents-picker" className="h-8 w-auto max-w-56 gap-2 text-[13px]">
             <SelectValue>
               {(id: string) => {
                 const shown = computers.find(p => p.id === id);
                 return shown === undefined ? null : (
-                  <span className="flex items-center gap-2">
-                    <ComputerGlyph place={shown} className="size-4 text-foreground/80" />
-                    {placeName(shown)}
+                  <span className="flex min-w-0 items-center gap-2">
+                    <ComputerGlyph place={shown} className="size-3.5 shrink-0 text-foreground/80" />
+                    <span className="truncate">{placeName(shown)}</span>
                   </span>
                 );
               }}
@@ -82,7 +82,7 @@ export function AgentsTopBar() {
           </SelectPopup>
         </Select>
       )}
-      <SegmentedControl data-k="agents-tabs" aria-label={W.tab} value={tab} segments={TABS} onChange={pickTab} className="h-9" segmentClassName="gap-2 px-3.5 text-sm" />
+      <SegmentedControl data-k="agents-tabs" aria-label={W.tab} value={tab} segments={TABS} onChange={pickTab} className="h-8" segmentClassName="gap-1.5 whitespace-nowrap px-3 text-[13px]" />
     </span>
   );
 }
