@@ -1,0 +1,660 @@
+{
+  "cloudOff": {
+    "name": "projects_set",
+    "description": "Sets what a new thread on one project starts on, over each agent's own defaults and under what a start names: its agent, model, effort and access. Nothing about a computer is a project's to set (threads at once, an agent's program, config folder, launch words, variables, or whether it is on); agents_setup sets those per computer. A model or effort kept for the project's agent drops to the agent's own on a thread that runs another agent, and an access word the project's agent maps to none of its modes is refused naming the ones it takes. Answers what a new thread there now starts on, each value with where it came from. reset puts a field back on the layer below: agent, model, effort or access.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "type": "string",
+          "description": "the project's name, or its id when two share a name"
+        },
+        "agent": {
+          "type": "string",
+          "description": "the agent a new thread on it runs, one of claude, codex, opencode, cursor"
+        },
+        "model": {
+          "type": "string",
+          "description": "the model a new thread on it starts on, by the agent's own slug"
+        },
+        "effort": {
+          "type": "string",
+          "description": "the effort a new thread on it starts at, by the agent's own word"
+        },
+        "access": {
+          "type": "string",
+          "description": "how far the agent may go without asking, in wsp's words: ask (asks about each action that needs permission), auto-edit (edits files without asking), full (every action without asking) or plan (reads and proposes, changes nothing); each is mapped to the agent's own mode and refused where the agent has none, and a harness's own spelling is refused. Absent means the project's access, else the one set for that agent, else full"
+        },
+        "reset": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "agent",
+              "model",
+              "effort",
+              "access"
+            ]
+          },
+          "description": "fields to put back on the layer below: agent, model, effort, access"
+        }
+      },
+      "required": [
+        "project"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "computer": {
+              "type": "string"
+            },
+            "source": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "folder"
+                    },
+                    "path": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "path"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "git"
+                    },
+                    "url": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "url"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "github"
+                    },
+                    "repo": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "repo"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "gitlab"
+                    },
+                    "repo": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "repo"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "path": {
+              "type": "string"
+            },
+            "remote": {
+              "type": "string"
+            },
+            "defaultBranch": {
+              "type": "string"
+            },
+            "memoryKey": {
+              "type": "string"
+            },
+            "memoryDir": {
+              "type": "string"
+            },
+            "checkout": {
+              "type": "string"
+            },
+            "seeded": {
+              "type": "object",
+              "properties": {
+                "files": {
+                  "type": "integer"
+                },
+                "bytes": {
+                  "type": "integer"
+                },
+                "memory": {
+                  "type": "string",
+                  "enum": [
+                    "landed",
+                    "kept",
+                    "none"
+                  ]
+                },
+                "memoryFiles": {
+                  "type": "integer"
+                },
+                "commits": {
+                  "type": "integer"
+                },
+                "at": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "files",
+                "bytes",
+                "memory",
+                "commits",
+                "at"
+              ],
+              "additionalProperties": false
+            },
+            "installed": {
+              "type": "object",
+              "properties": {
+                "row": {
+                  "type": "string"
+                },
+                "command": {
+                  "type": "string"
+                },
+                "at": {
+                  "type": "string"
+                },
+                "seconds": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "row",
+                "command",
+                "at",
+                "seconds"
+              ],
+              "additionalProperties": false
+            },
+            "image": {
+              "type": "object",
+              "properties": {
+                "snapshotId": {
+                  "type": "string"
+                },
+                "builtAt": {
+                  "type": "string"
+                },
+                "lockfileSha": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "snapshotId",
+                "builtAt"
+              ],
+              "additionalProperties": false
+            },
+            "base": {
+              "type": "string"
+            },
+            "createdAt": {
+              "type": "string"
+            },
+            "lastAgent": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "computer",
+            "source",
+            "path",
+            "remote",
+            "defaultBranch",
+            "memoryKey",
+            "memoryDir",
+            "createdAt"
+          ],
+          "additionalProperties": false
+        },
+        "defaults": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "type": "object",
+              "properties": {
+                "value": {
+                  "type": "string"
+                },
+                "from": {
+                  "type": "string",
+                  "enum": [
+                    "named",
+                    "project",
+                    "default",
+                    "catalog"
+                  ]
+                }
+              },
+              "required": [
+                "value",
+                "from"
+              ],
+              "additionalProperties": false
+            },
+            "model": {
+              "$ref": "#/properties/defaults/properties/agent"
+            },
+            "effort": {
+              "$ref": "#/properties/defaults/properties/agent"
+            },
+            "access": {
+              "type": "object",
+              "properties": {
+                "value": {
+                  "type": "string",
+                  "enum": [
+                    "ask",
+                    "auto-edit",
+                    "full",
+                    "plan"
+                  ]
+                },
+                "mode": {
+                  "type": "string"
+                },
+                "from": {
+                  "$ref": "#/properties/defaults/properties/agent/properties/from"
+                }
+              },
+              "required": [
+                "value",
+                "mode",
+                "from"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "agent"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "project",
+        "defaults"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  "cloudOn": {
+    "name": "projects_set",
+    "description": "Sets what a new thread on one project starts on, over each agent's own defaults and under what a start names: its agent, model, effort and access. Nothing about a computer is a project's to set (threads at once, an agent's program, config folder, launch words, variables, or whether it is on); agents_setup sets those per computer. A model or effort kept for the project's agent drops to the agent's own on a thread that runs another agent, and an access word the project's agent maps to none of its modes is refused naming the ones it takes. Answers what a new thread there now starts on, each value with where it came from. reset puts a field back on the layer below: agent, model, effort or access.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "type": "string",
+          "description": "the project's name, or its id when two share a name"
+        },
+        "agent": {
+          "type": "string",
+          "description": "the agent a new thread on it runs, one of claude, codex, opencode, cursor"
+        },
+        "model": {
+          "type": "string",
+          "description": "the model a new thread on it starts on, by the agent's own slug"
+        },
+        "effort": {
+          "type": "string",
+          "description": "the effort a new thread on it starts at, by the agent's own word"
+        },
+        "access": {
+          "type": "string",
+          "description": "how far the agent may go without asking, in wsp's words: ask (asks about each action that needs permission), auto-edit (edits files without asking), full (every action without asking) or plan (reads and proposes, changes nothing); each is mapped to the agent's own mode and refused where the agent has none, and a harness's own spelling is refused. Absent means the project's access, else the one set for that agent, else full"
+        },
+        "reset": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "agent",
+              "model",
+              "effort",
+              "access"
+            ]
+          },
+          "description": "fields to put back on the layer below: agent, model, effort, access"
+        }
+      },
+      "required": [
+        "project"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "computer": {
+              "type": "string"
+            },
+            "source": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "folder"
+                    },
+                    "path": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "path"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "git"
+                    },
+                    "url": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "url"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "github"
+                    },
+                    "repo": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "repo"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "gitlab"
+                    },
+                    "repo": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "repo"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "path": {
+              "type": "string"
+            },
+            "remote": {
+              "type": "string"
+            },
+            "defaultBranch": {
+              "type": "string"
+            },
+            "memoryKey": {
+              "type": "string"
+            },
+            "memoryDir": {
+              "type": "string"
+            },
+            "checkout": {
+              "type": "string"
+            },
+            "seeded": {
+              "type": "object",
+              "properties": {
+                "files": {
+                  "type": "integer"
+                },
+                "bytes": {
+                  "type": "integer"
+                },
+                "memory": {
+                  "type": "string",
+                  "enum": [
+                    "landed",
+                    "kept",
+                    "none"
+                  ]
+                },
+                "memoryFiles": {
+                  "type": "integer"
+                },
+                "commits": {
+                  "type": "integer"
+                },
+                "at": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "files",
+                "bytes",
+                "memory",
+                "commits",
+                "at"
+              ],
+              "additionalProperties": false
+            },
+            "installed": {
+              "type": "object",
+              "properties": {
+                "row": {
+                  "type": "string"
+                },
+                "command": {
+                  "type": "string"
+                },
+                "at": {
+                  "type": "string"
+                },
+                "seconds": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "row",
+                "command",
+                "at",
+                "seconds"
+              ],
+              "additionalProperties": false
+            },
+            "image": {
+              "type": "object",
+              "properties": {
+                "snapshotId": {
+                  "type": "string"
+                },
+                "builtAt": {
+                  "type": "string"
+                },
+                "lockfileSha": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "snapshotId",
+                "builtAt"
+              ],
+              "additionalProperties": false
+            },
+            "base": {
+              "type": "string"
+            },
+            "createdAt": {
+              "type": "string"
+            },
+            "lastAgent": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "computer",
+            "source",
+            "path",
+            "remote",
+            "defaultBranch",
+            "memoryKey",
+            "memoryDir",
+            "createdAt"
+          ],
+          "additionalProperties": false
+        },
+        "defaults": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "type": "object",
+              "properties": {
+                "value": {
+                  "type": "string"
+                },
+                "from": {
+                  "type": "string",
+                  "enum": [
+                    "named",
+                    "project",
+                    "default",
+                    "catalog"
+                  ]
+                }
+              },
+              "required": [
+                "value",
+                "from"
+              ],
+              "additionalProperties": false
+            },
+            "model": {
+              "$ref": "#/properties/defaults/properties/agent"
+            },
+            "effort": {
+              "$ref": "#/properties/defaults/properties/agent"
+            },
+            "access": {
+              "type": "object",
+              "properties": {
+                "value": {
+                  "type": "string",
+                  "enum": [
+                    "ask",
+                    "auto-edit",
+                    "full",
+                    "plan"
+                  ]
+                },
+                "mode": {
+                  "type": "string"
+                },
+                "from": {
+                  "$ref": "#/properties/defaults/properties/agent/properties/from"
+                }
+              },
+              "required": [
+                "value",
+                "mode",
+                "from"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "agent"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "project",
+        "defaults"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  }
+}

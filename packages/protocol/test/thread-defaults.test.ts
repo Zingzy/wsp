@@ -166,8 +166,13 @@ describe("the model picker's list", () => {
     expect(markedDefault(shaped.models)?.value).toBe("haiku");
   });
 
-  it("a hidden model still starts by name off the unshaped lists", () => {
+  it("a hidden model still starts by name, off the shaped lists the command line checks a start against too", () => {
     expect(startPicks(CLAUDE, { model: "opus" }, true).model).toBe("opus");
+    const shaped = shapeModels(CLAUDE, { hide: ["opus"] });
+    expect(shaped.hiddenModels?.map(m => [m.value, m.isDefault])).toEqual([["opus", undefined]]);
+    expect(startPicks(shaped, { model: "opus" }, true).model).toBe("opus");
+    expect(startPicks(shaped, {}, true).model).toBe("sonnet");
+    expect(() => startPicks(shaped, { model: "nope" }, true)).toThrow('model "nope" is not one claude takes; one of: sonnet (sonnet), haiku (haiku); legacy: opus-old (opus-old)');
   });
 
   it("no picker leaves the catalog as it is", () => {

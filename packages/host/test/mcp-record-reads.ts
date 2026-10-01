@@ -5,6 +5,8 @@
 // with. The frames carry what a byte compare has to survive, and fields out
 // of the order a parsed reply is answered in, with a field no schema names.
 
+import { DEFAULT_PREFERENCES } from "@wsp/protocol";
+
 /** One recorded call: its name, the tool's arguments, and the frame the host answers each op with. */
 interface Case {
   case: string;
@@ -35,7 +37,7 @@ const REPORT = {
   unknownTop: { anything: 1 },
   stale: "napping",
   agents: [
-    { name: "Claude Code", id: "claude", installed: true, version: "2.1.0", latest: "2.2.0", pinned: "2.1.0", road: "wsp", path: "/usr/local/bin/claude", signIn: "signed-in", signInRoad: "device", wspTools: true, notInSchema: 1 },
+    { name: "Claude Code", id: "claude", installed: true, version: "2.1.0", latest: "2.2.0", pinned: "2.1.0", road: "wsp", path: "/usr/local/bin/claude", signIn: "signed-in", signInRoad: "device", wspTools: true, notInSchema: 1, update: { command: "claude update \u0085", to: "2.2.0" }, signInDetail: "OAuth credentials", setup: { envNames: ["FOO"], on: true, program: "/opt/🧪/claude" } },
     { id: "codex", name: "Codex \u0085", installed: false, road: "none", signIn: "none", signInRoad: "code", wspTools: false },
     { id: "gemini", name: "Gemini", installed: true, version: "1.0", road: "own", path: "/opt/🧪/gemini", signIn: "unknown", signInRoad: "terminal", wspTools: false },
     { id: "amp", name: "Amp", installed: true, road: "shim", signIn: "vault-key", signInRoad: "key", wspTools: true },
@@ -155,7 +157,52 @@ const LISTING = {
   extra: "kept",
 };
 
+/** The person's record as preferences.get and preferences.set answer it, with one agent's defaults in it, its keys
+ * out of the schema's order. */
+const PREFS = (agentDefaults: Record<string, unknown>): Record<string, unknown> => ({ ...DEFAULT_PREFERENCES, agentDefaults, unknownTop: 1 });
+const SET_ROW = { ...REPORT.agents[0], setup: { envNames: ["FOO", "BAR"], on: false, args: ["--debug", "a \u0085 b"], configDir: "/Users/x/claude wsp", program: "/opt/🧪/claude" } };
+const PROJECT_REF = { id: "proj-1", name: AWKWARD, computer: "here", source: { kind: "folder", path: "/w" }, path: "/w", remote: "", defaultBranch: "main", memoryKey: "-w", memoryDir: "/m/-w", createdAt: "2026-09-27T00:00:00.000Z" };
+const RESOLVED = { "proj-1": { access: { from: "project", mode: "bypass", value: "full" }, agent: { from: "project", value: "codex", extra: 1 }, model: { value: "gpt \u0085", from: "default" }, effort: { value: "low", from: "catalog" } } };
+
+/** The four tools that set what a new thread starts on and how an agent runs on a computer. */
+const DEFAULTS_CASES: Record<string, Case[]> = {
+  agents_default: [
+    { case: "set", arguments: { agent: "codex" }, replies: { "preferences.set": reply({ preferences: PREFS({}) }) } },
+    { case: "an agent the host runs no thread of", arguments: { agent: "nope" }, replies: { "preferences.set": refused("no harness named nope; the host runs claude, codex", "usage") } },
+  ],
+  agents_set: [
+    { case: "model, effort and access", arguments: { agent: "claude", model: "opus \u0085", effort: "high", access: "ask" }, replies: { "preferences.set": reply({ preferences: PREFS({ claude: { access: "ask", effort: "high", model: "opus \u0085" } }) }) } },
+    {
+      case: "the picker's lists merged over what stands",
+      arguments: { agent: "claude", hide: ["haiku"], show: ["sonnet"], order: ["opus", "haiku"], add_model: ["custom-1", "c0"], drop_model: ["c9"] },
+      replies: { "preferences.get": reply({ preferences: PREFS({ claude: { models: { custom: ["c0", "c9"], hide: ["sonnet", "x 🧪"] } } }) }), "preferences.set": reply({ preferences: PREFS({ claude: { models: { custom: ["c0", "custom-1"], order: ["opus", "haiku"], hide: ["x 🧪", "haiku"] } } }) }) },
+    },
+    { case: "the picker's lists with none standing", arguments: { agent: "codex", hide: ["gpt"] }, replies: { "preferences.get": reply({ preferences: PREFS({}) }), "preferences.set": reply({ preferences: PREFS({ codex: { models: { hide: ["gpt"] } } }) }) } },
+    { case: "put back", arguments: { agent: "claude", reset: ["model", "models"] }, replies: { "preferences.set": reply({ preferences: PREFS({}) }) } },
+    { case: "nothing to change", arguments: { agent: "claude" }, replies: {} },
+    { case: "an agent's own spelling", arguments: { agent: "claude", access: "bypassPermissions" }, replies: {} },
+    { case: "a word the agent has no mode for", arguments: { agent: "claude", access: "plan" }, replies: { "preferences.set": refused("Claude Code takes no plan access; it takes ask, auto-edit, full", "usage") } },
+  ],
+  agents_setup: [
+    { case: "set here", arguments: { agent: "claude", enabled: false, program: "/opt/🧪/claude", config: "/Users/x/claude wsp", args: ["--debug", "a \u0085 b"], unset_env: ["OLD"] }, replies: { "agents.setup": reply({ agent: SET_ROW }) } },
+    { case: "on a computer", arguments: { agent: "claude", on: "attic", enabled: true, reset: ["program", "args"] }, replies: { "places.list": PLACES, "agents.setup": reply({ agent: REPORT.agents[1] }) } },
+    { case: "no such computer", arguments: { agent: "claude", on: "nowhere", enabled: true }, replies: { "places.list": PLACES } },
+    { case: "a config folder that is not absolute", arguments: { agent: "claude", config: "claude \"wsp\"" }, replies: {} },
+    { case: "a name a shell would not read", arguments: { agent: "claude", unset_env: ["1 BAD"] }, replies: {} },
+    { case: "nothing to change", arguments: { agent: "claude" }, replies: {} },
+    { case: "refused by the host", arguments: { agent: "claude", config: "/Users/x" }, replies: { "agents.setup": refused("Claude Code's config folder cannot be the home folder itself; name a folder under it", "usage") } },
+  ],
+  projects_set: [
+    { case: "set", arguments: { project: "wsp", agent: "codex", access: "full" }, replies: { "projects.resolve": reply({ project: PROJECT_REF }), "preferences.set": reply({ preferences: PREFS({}) }), "projects.defaults": reply({ defaults: RESOLVED }) } },
+    { case: "put back", arguments: { project: "wsp", reset: ["agent", "access"] }, replies: { "projects.resolve": reply({ project: PROJECT_REF }), "preferences.set": reply({ preferences: PREFS({}) }), "projects.defaults": reply({ defaults: { "proj-1": { agent: { value: "claude", from: "catalog" } } } }) } },
+    { case: "no defaults answered", arguments: { project: "wsp", effort: "low" }, replies: { "projects.resolve": reply({ project: PROJECT_REF }), "preferences.set": reply({ preferences: PREFS({}) }), "projects.defaults": reply({ defaults: {} }) } },
+    { case: "nothing to change", arguments: { project: "wsp" }, replies: {} },
+    { case: "no such project", arguments: { project: "nope", model: "m" }, replies: { "projects.resolve": refused('no project "nope"; you have wsp', "usage") } },
+  ],
+};
+
 export const READS: Record<string, Case[]> = {
+  ...DEFAULTS_CASES,
   agents: reportCases("agents"),
   skills: [...reportCases("skills"), { case: "no skills", arguments: {}, replies: { "agents.read": reply({ report: EMPTY_REPORT }) } }],
   servers: [...reportCases("servers"), { case: "no servers", arguments: {}, replies: { "agents.read": reply({ report: EMPTY_REPORT }) } }],
@@ -165,7 +212,15 @@ export const READS: Record<string, Case[]> = {
     { case: "refused", arguments: {}, replies: { "status.list": refused("the token this line presented is not one this host holds", "auth") } },
   ],
   projects: [
-    { case: "rows", arguments: {}, replies: { "projects.list": reply({ projects: [{ id: "proj-1", name: AWKWARD, computer: "here", source: { kind: "folder", path: "/w" }, path: "/w", remote: "", defaultBranch: "main", memoryKey: "-w", memoryDir: "/m/-w", createdAt: "2026-09-27T00:00:00.000Z", "10": 1 }] }) } },
+    {
+      case: "rows",
+      arguments: {},
+      replies: {
+        "projects.list": reply({ projects: [{ id: "proj-1", name: AWKWARD, computer: "here", source: { kind: "folder", path: "/w" }, path: "/w", remote: "", defaultBranch: "main", memoryKey: "-w", memoryDir: "/m/-w", createdAt: "2026-09-27T00:00:00.000Z", "10": 1 }] }),
+        "projects.defaults": reply({ defaults: { "proj-1": { agent: { value: "codex", from: "project" }, model: { value: "gpt \u0085", from: "default" }, access: { value: "auto-edit", mode: "acceptEdits", from: "catalog" } } } }),
+      },
+    },
+    { case: "defaults refused", arguments: {}, replies: { "projects.list": reply({ projects: [] }), "projects.defaults": refused("projects.defaults failed") } },
     { case: "refused", arguments: {}, replies: { "projects.list": refused("projects.list failed") } },
   ],
   setup: [

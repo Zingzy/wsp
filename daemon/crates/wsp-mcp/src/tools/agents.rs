@@ -120,6 +120,14 @@ struct AgentRow {
     sign_in: String,
     wsp_tools: bool,
     path: Option<String>,
+    update: Option<Update>,
+}
+
+/// The vendor's newer release and the command that installs it.
+#[derive(Deserialize)]
+struct Update {
+    to: String,
+    command: String,
 }
 
 #[derive(Deserialize)]
@@ -329,7 +337,7 @@ fn lines(facts: &Facts, own: &RawValue, rows: Rows) -> Option<Vec<String>> {
                 (true, "vault-key") => "your key",
                 (true, _) => "not signed in",
             };
-            let mut all = vec![row(&["AGENT", "VERSION", "LATEST", "SIGN-IN", "WSP TOOLS", "PATH"])];
+            let mut all = vec![row(&["AGENT", "VERSION", "LATEST", "SIGN-IN", "WSP TOOLS", "UPDATE", "PATH"])];
             all.extend(agents.iter().map(|a| {
                 let dash = |v: &Option<String>| v.clone().unwrap_or_else(|| "-".to_owned());
                 vec![
@@ -338,6 +346,7 @@ fn lines(facts: &Facts, own: &RawValue, rows: Rows) -> Option<Vec<String>> {
                     dash(&a.latest),
                     word(a).to_owned(),
                     (if a.wsp_tools { "yes" } else { "no" }).to_owned(),
+                    a.update.as_ref().map_or_else(|| "-".to_owned(), |u| format!("{}: {}", u.to, u.command)),
                     dash(&a.path),
                 ]
             }));

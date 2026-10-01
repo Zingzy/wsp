@@ -1186,6 +1186,9 @@ export const HarnessCatalog = z.object({
   /** Whether the binary's own answer names its legacy models too, as Codex's model/list does, so one a live answer
    * leaves out is one it no longer runs; absent, the answer is the binary's current set and legacy models run by name. */
   legacyListed: z.boolean().optional(),
+  /** Models the person took off this agent's picker, which the composer does not list and a start still takes by
+   * name; read with the rest through everyModel. Absent is none. */
+  hiddenModels: z.array(HarnessModel).optional(),
   efforts: z.array(HarnessOption),
   contextWindows: z.array(HarnessOption),
   permissionModes: z.array(HarnessOption),
@@ -1331,15 +1334,15 @@ export const noFastLine = (model: string): string => `${model} has no fast mode;
 
 const optionWords = (options: ReadonlyArray<HarnessOption>): string => options.map(o => `${o.label} (${o.value})`).join(", ");
 
-function listed(subject: string, word: string, options: ReadonlyArray<HarnessOption>, value: string | undefined, legacy: ReadonlyArray<HarnessOption> = []): void {
-  if (value === undefined || options.some(o => o.value === value) || legacy.some(o => o.value === value)) return;
+function listed(subject: string, word: string, options: ReadonlyArray<HarnessOption>, value: string | undefined, legacy: ReadonlyArray<HarnessOption> = [], hidden: ReadonlyArray<HarnessOption> = []): void {
+  if (value === undefined || options.some(o => o.value === value) || legacy.some(o => o.value === value) || hidden.some(o => o.value === value)) return;
   const older = legacy.length === 0 ? "" : `; legacy: ${optionWords(legacy)}`;
   const said = options.length === 0 ? `${subject} takes no ${word}` : `${word} "${value}" is not one ${subject} takes; one of: ${optionWords(options)}${older}`;
   throw Object.assign(new Error(said), { offered: options.length });
 }
 
 function checkedAgainst(catalog: HarnessCatalog, picks: StartPicks, model: string | undefined, runsOn: string | undefined): void {
-  if (catalog.models.length > 0) listed(catalog.harness, "model", catalog.models, picks.model, catalog.legacyModels);
+  if (catalog.models.length > 0) listed(catalog.harness, "model", catalog.models, picks.model, catalog.legacyModels, catalog.hiddenModels);
   const chosen = modelOf(catalog, model);
   if (catalog.efforts.length > 0) listed(chosen?.efforts !== undefined ? chosen.label : catalog.harness, "effort", effortsFor(catalog, chosen), picks.effort);
   if (catalog.permissionModes.length > 0) listed(catalog.harness, "access mode", catalog.permissionModes, picks.permissionMode);
@@ -6457,6 +6460,9 @@ const RuntimeOp = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("project.seed.plan"), source: z.string() }),
   /** Every project this host holds. Replies with { projects }. */
   z.object({ id: reqId, op: z.literal("projects.list") }),
+  /** What a new thread on each of those projects starts on, by project id, each value with where it came from, read
+   * off the runtime's table rather than any machine. Replies with { defaults }. */
+  z.object({ id: reqId, op: z.literal("projects.defaults") }),
   /** The project a word names, by id or by name. Replies with { project }. */
   z.object({ id: reqId, op: z.literal("projects.resolve"), ref: z.string() }),
   /** Drops a project's record; refused while a workspace of it stands, naming the workspaces. Replies with {}. */
@@ -6640,6 +6646,7 @@ export const DEVICE_OPS: readonly string[] = [
   // here, since posting under the person's name is the person's act.
   "workspaces.reviewDraft",
   "projects.list",
+  "projects.defaults",
   "projects.resolve",
   "projects.remove",
   "projectGoldens.list",

@@ -4,6 +4,7 @@
 //! the host pushes, dialling the host again when it stops under the turn. packages/host/src/verbs.ts `follow`,
 //! `checkedStart`, `openingOf` and `napAfterDeadLaunch` are the rules.
 
+use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -97,16 +98,29 @@ pub(super) struct Picks {
 }
 
 impl Picks {
-    /// As sessions.start carries them: access is the wire's permissionMode.
-    pub(super) fn wire(&self, into: &mut Map<String, Value>) {
-        for (key, value) in [("model", &self.model), ("effort", &self.effort), ("permissionMode", &self.access)] {
+    /// The access in wsp's own word, refused where it is none of the four: `accessWordOf`.
+    pub(super) fn access_word(&self) -> Result<Option<&str>, Failure> {
+        let picks = &turns().picks;
+        match self.access.as_deref() {
+            Some(given) if !picks.access_choices.iter().any(|word| word == given) => {
+                Err(Failure::usage(fill(&picks.access_words, &[("given", given)])))
+            }
+            word => Ok(word),
+        }
+    }
+
+    /// As sessions.start carries them: the access as wsp's word, which the agent's row maps.
+    pub(super) fn wire(&self, into: &mut Map<String, Value>) -> Result<(), Failure> {
+        let access = self.access_word()?;
+        for (key, value) in [("model", self.model.as_deref()), ("effort", self.effort.as_deref()), ("access", access)] {
             if let Some(value) = value {
-                into.insert(key.to_owned(), Value::from(value.as_str()));
+                into.insert(key.to_owned(), Value::from(value));
             }
         }
         if self.fast == Some(true) {
             into.insert("fast".to_owned(), Value::from(true));
         }
+        Ok(())
     }
 }
 
@@ -127,6 +141,8 @@ struct Choice {
 struct Catalog {
     harness: String,
     #[serde(default)]
+    label: String,
+    #[serde(default)]
     source: String,
     #[serde(default)]
     is_default: Option<bool>,
@@ -135,9 +151,35 @@ struct Catalog {
     #[serde(default)]
     legacy_models: Option<Vec<Choice>>,
     #[serde(default)]
+    hidden_models: Option<Vec<Choice>>,
+    #[serde(default)]
     efforts: Vec<Choice>,
     #[serde(default)]
     permission_modes: Vec<Choice>,
+    #[serde(default)]
+    access: Option<HashMap<String, String>>,
+}
+
+impl Catalog {
+    /// The agent's own mode for one of wsp's words, where its row maps the word to a mode it lists: `accessMode`.
+    fn access_mode(&self, word: &str) -> Option<&str> {
+        let mode = self.access.as_ref()?.get(word)?;
+        self.permission_modes.iter().any(|m| &m.value == mode).then_some(mode.as_str())
+    }
+
+    /// Why a word was refused: the agent maps it to none of its modes, naming the ones it takes: `accessRefusal`.
+    fn access_refusal(&self, word: &str) -> Option<String> {
+        if self.access_mode(word).is_some() {
+            return None;
+        }
+        let picks = &turns().picks;
+        let takes: Vec<&str> = picks.access_choices.iter().map(String::as_str).filter(|w| self.access_mode(w).is_some()).collect();
+        Some(if takes.is_empty() {
+            fill(&picks.no_access_words, &[("label", &self.label)])
+        } else {
+            fill(&picks.access_not_taken, &[("label", &self.label), ("word", word), ("takes", &takes.join(", "))])
+        })
+    }
 }
 
 /// A value the list does not carry, in the composer's words, and how many the list offered; none for a refusal that
@@ -151,9 +193,16 @@ fn choice_words(choices: &[Choice]) -> String {
     choices.iter().map(|c| format!("{} ({})", c.label, c.value)).collect::<Vec<_>>().join(", ")
 }
 
-fn listed(subject: &str, word: &str, choices: &[Choice], value: Option<&str>, legacy: &[Choice]) -> Result<(), Unlisted> {
+fn listed(
+    subject: &str,
+    word: &str,
+    choices: &[Choice],
+    value: Option<&str>,
+    legacy: &[Choice],
+    hidden: &[Choice],
+) -> Result<(), Unlisted> {
     let Some(value) = value else { return Ok(()) };
-    if choices.iter().chain(legacy).any(|c| c.value == value) {
+    if choices.iter().chain(legacy).chain(hidden).any(|c| c.value == value) {
         return Ok(());
     }
     let picks = &turns().picks;
@@ -177,12 +226,14 @@ fn listed(subject: &str, word: &str, choices: &[Choice], value: Option<&str>, le
 /// thread: a model the start names none of runs the one the catalog marks, and the efforts are that model's own.
 fn checked_against(catalog: &Catalog, picks: &Picks) -> Result<(), Unlisted> {
     let legacy = catalog.legacy_models.as_deref().unwrap_or_default();
+    let hidden = catalog.hidden_models.as_deref().unwrap_or_default();
     if !catalog.models.is_empty() {
-        listed(&catalog.harness, "model", &catalog.models, picks.model.as_deref(), legacy)?;
+        listed(&catalog.harness, "model", &catalog.models, picks.model.as_deref(), legacy, hidden)?;
     }
-    let model = picks.model.clone().or_else(|| catalog.models.iter().find(|m| m.is_default == Some(true)).map(|m| m.value.clone()));
+    let every = || catalog.models.iter().chain(legacy).chain(hidden);
+    let model = picks.model.clone().or_else(|| every().find(|m| m.is_default == Some(true)).map(|m| m.value.clone()));
     let chosen = model.map(|value| {
-        catalog.models.iter().chain(legacy).find(|m| m.value == value).cloned().unwrap_or(Choice {
+        every().find(|m| m.value == value).cloned().unwrap_or(Choice {
             label: value.clone(),
             value,
             efforts: None,
@@ -197,10 +248,7 @@ fn checked_against(catalog: &Catalog, picks: &Picks) -> Result<(), Unlisted> {
             _ => catalog.harness.as_str(),
         };
         let efforts: Vec<Choice> = catalog.efforts.iter().filter(|e| own.is_none_or(|own| own.contains(&e.value))).cloned().collect();
-        listed(subject, "effort", &efforts, picks.effort.as_deref(), &[])?;
-    }
-    if !catalog.permission_modes.is_empty() {
-        listed(&catalog.harness, "access mode", &catalog.permission_modes, picks.access.as_deref(), &[])?;
+        listed(subject, "effort", &efforts, picks.effort.as_deref(), &[], &[])?;
     }
     if let Some(chosen) = chosen.filter(|c| picks.fast == Some(true) && c.fast != Some(true)) {
         return Err(Unlisted { said: fill(&turns().picks.no_fast, &[("model", &chosen.label)]), offered: None });
@@ -227,21 +275,31 @@ pub(super) async fn checked_start(
     }
     let Listed { harnesses } = client.request("harnesses.list", params([("workspaceId", Value::from(workspace_id))])).await?;
     let table = harnesses.iter().find(|c| harness.map_or(c.is_default == Some(true), |h| c.harness == h));
-    let Some(table) = table else {
-        let Some(harness) = harness else { return Ok(()) };
-        let agents: Vec<&str> = harnesses.iter().map(|c| c.harness.as_str()).collect();
+    if let (None, Some(harness)) = (table, harness) {
+        // An agent the host runs that is off on this workspace's computer is the start's to refuse, naming it.
+        let Listed { harnesses: all } = client.request("harnesses.list", Map::new()).await?;
+        if all.iter().any(|c| c.harness == harness) {
+            return Ok(());
+        }
+        let agents: Vec<&str> = all.iter().map(|c| c.harness.as_str()).collect();
         let said = if agents.join(", ").is_empty() {
             fill(&words.no_adapter_none, &[("agent", harness)])
         } else {
             fill(&words.no_adapter, &[("agent", harness), ("agents", &agents.join(", "))])
         };
         return Err(Failure::usage(said));
-    };
+    }
+    let access = picks.access_word()?;
+    let Some(table) = table else { return Ok(()) };
     checked_against(table, picks).map_err(|Unlisted { said, offered }| {
         let clause = if offered == Some(0) { &words.picks.built_in_table } else { &words.picks.built_in_list };
         let said = if table.source == "table" { format!("{said}{clause}") } else { said };
         Failure::usage(fill(&words.picks.refused, &[("said", &said)]))
-    })
+    })?;
+    match access.and_then(|word| table.access_refusal(word)) {
+        Some(said) => Err(Failure::usage(fill(&words.picks.access_refused, &[("said", &said)]))),
+        None => Ok(()),
+    }
 }
 
 /// The folder a thread starts in when the call names no workspace: the repo the server's own folder is in.
@@ -741,7 +799,7 @@ async fn run(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     if !attachments.is_empty() {
         start.insert("attachments".to_owned(), Value::from(attachments));
     }
-    picks.wire(&mut start);
+    picks.wire(&mut start)?;
     let mut started = None;
     let answered = if detach == Some(true) {
         begin_through(&host, client.clone(), &start)
@@ -791,7 +849,7 @@ async fn send(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     if !attachments.is_empty() {
         start.insert("attachments".to_owned(), Value::from(attachments));
     }
-    picks.wire(&mut start);
+    picks.wire(&mut start)?;
     if detach == Some(true) {
         let turn = begin_through(&host, client, &start).await?;
         return Ok(Answer::text(opened_thread(&turn.thread_id, None), &turn_out(&turn)));
@@ -842,19 +900,22 @@ mod tests {
     #[test]
     fn fast_rides_the_start_and_is_refused_on_a_model_with_none() {
         let mut start = Map::new();
-        Picks { fast: Some(true), ..Picks::default() }.wire(&mut start);
-        Picks { fast: Some(false), ..Picks::default() }.wire(&mut Map::new());
+        Picks { fast: Some(true), ..Picks::default() }.wire(&mut start).unwrap();
+        Picks { fast: Some(false), ..Picks::default() }.wire(&mut Map::new()).unwrap();
         assert_eq!(Value::from(start), serde_json::json!({ "fast": true }));
         let model =
             |fast: Option<bool>| Choice { value: "m".to_owned(), label: "M one".to_owned(), efforts: None, fast, is_default: Some(true) };
         let catalog = |fast| Catalog {
             harness: "claude".to_owned(),
+            label: "Claude Code".to_owned(),
             source: String::new(),
             is_default: Some(true),
             models: vec![model(fast)],
             legacy_models: None,
+            hidden_models: None,
             efforts: vec![],
             permission_modes: vec![],
+            access: None,
         };
         let fast = Picks { fast: Some(true), ..Picks::default() };
         assert!(checked_against(&catalog(Some(true)), &fast).is_ok());

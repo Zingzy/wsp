@@ -238,7 +238,7 @@ import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
 import { isNoProvider, isPlaceAbsent, projectStateKey, putFiles, type Copier } from "@wsp/engine";
 import { boxFullLine, DISK_FULL_PCT, diskFullLine, stopRefusedLine, threadMessages, threadSeed, workspaceMemMb } from "@wsp/protocol";
-import { accessMode, accessRefusal, agentOffLine, markedFor, openDefaults, resolveThreadDefaults, setupView, shapeModels, withCustomModels, type AccessChoice, type AgentLaunch, type AgentRow, type AgentSetupSet, type ProjectOverrides } from "@wsp/protocol";
+import { accessMode, accessRefusal, agentOffLine, markedFor, openDefaults, resolveThreadDefaults, setupView, shapeModels, withCustomModels, type AccessChoice, type AgentLaunch, type AgentRow, type AgentSetupSet, type ProjectOverrides, type ThreadDefaults } from "@wsp/protocol";
 import { agentSetups } from "./agent-setup.js";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
@@ -1593,6 +1593,8 @@ export interface Runtime {
     seedPlan(source: string): Promise<SeedPlan>;
     /** Every project this host holds, oldest first. */
     list(origin?: Caller): Promise<ProjectView[]>;
+    /** What a new thread on each of those projects starts on, by project id, off the runtime's table. */
+    defaults(origin?: Caller): Promise<Record<string, ThreadDefaults>>;
     /** The computers a project can live on, by the id and the name each carries in the places table: what `add`
      * resolves `on` against, read here so a caller names one rather than guessing at the refusal. */
     computers(): Promise<{ id: string; name: string }[]>;
@@ -10944,6 +10946,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     add: projectsDoor.add,
     seedPlan: projectsDoor.seedPlan,
     list: projectsDoor.list,
+    async defaults() {
+      const prefs = await preferences.get();
+      const runs = (id: string): boolean => adapters[id] !== undefined;
+      const catalogOf = (id: string): HarnessCatalog | undefined => {
+        const table = runs(id) ? harnessCatalog(id) : undefined;
+        return table === undefined ? undefined : withCustomModels(table, prefs.agentDefaults[id]?.models);
+      };
+      const firstAgent = CATALOG_AGENTS.find(a => runs(a.id))?.id ?? DEFAULT_AGENT.id;
+      const held = await projectsDoor.list();
+      return Object.fromEntries(held.map(p => [p.id, resolveThreadDefaults({ firstAgent, catalogOf, runs, prefs, ...(prefs.projectDefaults[p.id] !== undefined ? { project: prefs.projectDefaults[p.id] } : {}) })]));
+    },
     computers: projectsDoor.computers,
     resolve: projectsDoor.resolve,
     remove: projectsDoor.remove,

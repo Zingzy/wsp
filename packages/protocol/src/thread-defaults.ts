@@ -243,25 +243,36 @@ export function withCustomModels(catalog: HarnessCatalog, picker: ModelPicker | 
   return added.length === 0 ? catalog : { ...catalog, models: [...catalog.models, ...added] };
 }
 
-/** The model picker's list: hidden models off it, the person's order first, the rest in the catalog's. Hiding the
- * marked model moves the mark to the first one shown; a start still takes a hidden model by name. */
+/** The model picker's list: hidden models off it and kept apart, the person's order first, the rest in the catalog's.
+ * Hiding the marked model moves the mark to the first one shown; a start still takes a hidden model by name. */
 export function shapeModels(catalog: HarnessCatalog, picker: ModelPicker | undefined): HarnessCatalog {
   if (picker === undefined) return catalog;
-  const hidden = new Set(picker.hide ?? []);
+  const hide = new Set(picker.hide ?? []);
   const order = picker.order ?? [];
   const rank = (m: HarnessModel): number => (order.includes(m.value) ? order.indexOf(m.value) : order.length);
-  const shown = (list: readonly HarnessModel[]): HarnessModel[] => list.filter(m => !hidden.has(m.value)).sort((a, b) => rank(a) - rank(b));
+  const shown = (list: readonly HarnessModel[]): HarnessModel[] => list.filter(m => !hide.has(m.value)).sort((a, b) => rank(a) - rank(b));
   const models = shown(catalog.models);
   const legacyModels = catalog.legacyModels === undefined ? undefined : shown(catalog.legacyModels);
+  const hiddenModels = [...catalog.models, ...(catalog.legacyModels ?? [])].filter(m => hide.has(m.value)).map(({ isDefault: _was, ...m }) => m);
   const lostMark = markedDefault(everyModel(catalog)) !== undefined && markedDefault([...models, ...(legacyModels ?? [])]) === undefined;
-  return { ...catalog, models: lostMark && models.length > 0 ? marked(models, models[0]!.value) : models, ...(legacyModels !== undefined ? { legacyModels } : {}) };
+  return {
+    ...catalog,
+    models: lostMark && models.length > 0 ? marked(models, models[0]!.value) : models,
+    ...(legacyModels !== undefined ? { legacyModels } : {}),
+    ...(hiddenModels.length > 0 ? { hiddenModels } : {}),
+  };
 }
 
-/** Why a word was refused at a set: the agent maps it to none of its own modes. */
+/** Why a word was refused: the agent maps it to none of its own modes, and these are the words it takes. */
+export const accessNotTakenLine = (label: string, word: string, takes: string): string => `${label} takes no ${word} access; it takes ${takes}`;
+/** Why a word was refused by an agent that maps none of wsp's words. */
+export const noAccessWordsLine = (label: string): string => `${label} takes no access of wsp's words`;
+
+/** Why a word was refused at a set or a start: the agent maps it to none of its own modes. */
 export function accessRefusal(catalog: Pick<HarnessCatalog, "label" | "access" | "permissionModes">, word: AccessChoice): string | null {
   if (accessMode(catalog, word) !== undefined) return null;
   const takes = ACCESS_CHOICES.filter(w => accessMode(catalog, w) !== undefined);
-  return takes.length === 0 ? `${catalog.label} takes no access of wsp's words` : `${catalog.label} takes no ${word} access; it takes ${takes.join(", ")}`;
+  return takes.length === 0 ? noAccessWordsLine(catalog.label) : accessNotTakenLine(catalog.label, word, takes.join(", "));
 }
 
 /** Why --access was refused before anything was asked: a harness's own spelling, or no word at all. */

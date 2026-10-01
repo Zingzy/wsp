@@ -25,7 +25,7 @@
         "agent": "claude",
         "model": "opus",
         "effort": "high",
-        "access": "acceptEdits"
+        "access": "auto-edit"
       },
       "replies": {
         "workspaces.start": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\",\"from\":{\"kind\":\"pull_request\",\"repo\":\"o/r\",\"number\":7,\"url\":\"https://github.com/o/r/pull/7\",\"title\":\"Rename\",\"base\":\"main\",\"head\":{\"branch\":\"lab/review-me\"}}},\"threadId\":\"t-2\",\"sessionId\":\"s-2\"}"
@@ -39,7 +39,7 @@
           "agent": "claude",
           "model": "opus",
           "effort": "high",
-          "access": "acceptEdits"
+          "access": "auto-edit"
         }
       ]
     },

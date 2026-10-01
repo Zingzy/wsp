@@ -25,9 +25,9 @@ export function effortsFor(catalog: HarnessCatalog, model: HarnessModel | null):
   return options.map(({ isDefault: _harness, ...rest }) => (rest.value === own ? { ...rest, isDefault: true } : rest));
 }
 
-/** Every model a start may name: the catalog's current ones, then its legacy ones. */
+/** Every model a start may name: the catalog's current ones, then its legacy ones, then the ones the person hid. */
 export function everyModel(catalog: HarnessCatalog): HarnessModel[] {
-  return [...catalog.models, ...(catalog.legacyModels ?? [])];
+  return [...catalog.models, ...(catalog.legacyModels ?? []), ...(catalog.hiddenModels ?? [])];
 }
 
 /** The model a pick names, as the catalog knows it; a slug the catalog does not list still counts, named by itself. */

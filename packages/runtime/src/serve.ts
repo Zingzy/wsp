@@ -1331,6 +1331,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "projects.list":
               send({ id: msg.id, ok: true, projects: await rt.projects.list(origin) });
               return;
+            case "projects.defaults":
+              send({ id: msg.id, ok: true, defaults: await rt.projects.defaults(origin) });
+              return;
             case "projects.resolve":
               send({ id: msg.id, ok: true, project: await rt.projects.resolve(msg.ref, origin) });
               return;

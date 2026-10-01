@@ -1,7 +1,7 @@
 {
   "cloudOff": {
     "name": "projects",
-    "description": "Every project this host holds: its name, the computer it lives on, where its code comes from (a folder on the computer the app runs on, or a repo a computer clones), where the checkout sits inside a workspace of it, the branch a workspace of it starts on, and how many workspaces stand on it. The name is what new takes. A project is recorded with add and is one source on one computer; a workspace is a copy of that computer with the project inside.",
+    "description": "Every project this host holds: its name, the computer it lives on, where its code comes from (a folder on the computer the app runs on, or a repo a computer clones), where the checkout sits inside a workspace of it, the branch a workspace of it starts on, and how many workspaces stand on it. The name is what new takes. A project is recorded with add and is one source on one computer; a workspace is a copy of that computer with the project inside. defaults holds, by project id, the agent, model, effort and access a new thread there starts on when its start names none, each with where it came from: the project's own (projects_set), the person's default (agents_set, agents_default) or the agent's own.",
     "inputSchema": {
       "type": "object",
       "properties": {},
@@ -217,10 +217,77 @@
             ],
             "additionalProperties": false
           }
+        },
+        "defaults": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "agent": {
+                "type": "object",
+                "properties": {
+                  "value": {
+                    "type": "string"
+                  },
+                  "from": {
+                    "type": "string",
+                    "enum": [
+                      "named",
+                      "project",
+                      "default",
+                      "catalog"
+                    ]
+                  }
+                },
+                "required": [
+                  "value",
+                  "from"
+                ],
+                "additionalProperties": false
+              },
+              "model": {
+                "$ref": "#/properties/defaults/additionalProperties/properties/agent"
+              },
+              "effort": {
+                "$ref": "#/properties/defaults/additionalProperties/properties/agent"
+              },
+              "access": {
+                "type": "object",
+                "properties": {
+                  "value": {
+                    "type": "string",
+                    "enum": [
+                      "ask",
+                      "auto-edit",
+                      "full",
+                      "plan"
+                    ]
+                  },
+                  "mode": {
+                    "type": "string"
+                  },
+                  "from": {
+                    "$ref": "#/properties/defaults/additionalProperties/properties/agent/properties/from"
+                  }
+                },
+                "required": [
+                  "value",
+                  "mode",
+                  "from"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "agent"
+            ],
+            "additionalProperties": false
+          }
         }
       },
       "required": [
-        "projects"
+        "projects",
+        "defaults"
       ],
       "additionalProperties": false,
       "$schema": "http://json-schema.org/draft-07/schema#"
@@ -231,7 +298,7 @@
   },
   "cloudOn": {
     "name": "projects",
-    "description": "Every project this host holds: its name, the computer it lives on, where its code comes from (a folder on the computer the app runs on, or a repo a computer clones), where the checkout sits inside a workspace of it, the branch a workspace of it starts on, and how many workspaces stand on it. The name is what new takes. A project is recorded with add and is one source on one computer; a workspace is a copy of that computer with the project inside.",
+    "description": "Every project this host holds: its name, the computer it lives on, where its code comes from (a folder on the computer the app runs on, or a repo a computer clones), where the checkout sits inside a workspace of it, the branch a workspace of it starts on, and how many workspaces stand on it. The name is what new takes. A project is recorded with add and is one source on one computer; a workspace is a copy of that computer with the project inside. defaults holds, by project id, the agent, model, effort and access a new thread there starts on when its start names none, each with where it came from: the project's own (projects_set), the person's default (agents_set, agents_default) or the agent's own.",
     "inputSchema": {
       "type": "object",
       "properties": {},
@@ -447,10 +514,77 @@
             ],
             "additionalProperties": false
           }
+        },
+        "defaults": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "agent": {
+                "type": "object",
+                "properties": {
+                  "value": {
+                    "type": "string"
+                  },
+                  "from": {
+                    "type": "string",
+                    "enum": [
+                      "named",
+                      "project",
+                      "default",
+                      "catalog"
+                    ]
+                  }
+                },
+                "required": [
+                  "value",
+                  "from"
+                ],
+                "additionalProperties": false
+              },
+              "model": {
+                "$ref": "#/properties/defaults/additionalProperties/properties/agent"
+              },
+              "effort": {
+                "$ref": "#/properties/defaults/additionalProperties/properties/agent"
+              },
+              "access": {
+                "type": "object",
+                "properties": {
+                  "value": {
+                    "type": "string",
+                    "enum": [
+                      "ask",
+                      "auto-edit",
+                      "full",
+                      "plan"
+                    ]
+                  },
+                  "mode": {
+                    "type": "string"
+                  },
+                  "from": {
+                    "$ref": "#/properties/defaults/additionalProperties/properties/agent/properties/from"
+                  }
+                },
+                "required": [
+                  "value",
+                  "mode",
+                  "from"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "agent"
+            ],
+            "additionalProperties": false
+          }
         }
       },
       "required": [
-        "projects"
+        "projects",
+        "defaults"
       ],
       "additionalProperties": false,
       "$schema": "http://json-schema.org/draft-07/schema#"

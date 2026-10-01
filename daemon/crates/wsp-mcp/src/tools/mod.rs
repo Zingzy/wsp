@@ -6,6 +6,7 @@ mod agents;
 mod changes;
 mod computers;
 mod create;
+pub(crate) mod defaults;
 mod dropping;
 mod exec;
 mod folders;
@@ -71,6 +72,10 @@ pub const TOOLS: &[Tool] = &[
     servers::DISABLE,
     servers::ENABLE,
     servers::ADD_TOOLS,
+    defaults::DEFAULT,
+    defaults::SET,
+    defaults::SETUP,
+    defaults::PROJECT,
     turn::RUN,
     turn::SEND,
     thread::RENAME,

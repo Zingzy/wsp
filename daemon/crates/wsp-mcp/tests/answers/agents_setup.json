@@ -1,0 +1,139 @@
+{
+  "tool": "agents_setup",
+  "cases": [
+    {
+      "case": "set here",
+      "arguments": {
+        "agent": "claude",
+        "enabled": false,
+        "program": "/opt/🧪/claude",
+        "config": "/Users/x/claude wsp",
+        "args": [
+          "--debug",
+          "a \u0085 b"
+        ],
+        "unset_env": [
+          "OLD"
+        ]
+      },
+      "replies": {
+        "agents.setup": "{\"id\":1,\"ok\":true,\"agent\":{\"name\":\"Claude Code\",\"id\":\"claude\",\"installed\":true,\"version\":\"2.1.0\",\"latest\":\"2.2.0\",\"pinned\":\"2.1.0\",\"road\":\"wsp\",\"path\":\"/usr/local/bin/claude\",\"signIn\":\"signed-in\",\"signInRoad\":\"device\",\"wspTools\":true,\"notInSchema\":1,\"update\":{\"command\":\"claude update \u0085\",\"to\":\"2.2.0\"},\"signInDetail\":\"OAuth credentials\",\"setup\":{\"envNames\":[\"FOO\",\"BAR\"],\"on\":false,\"args\":[\"--debug\",\"a \u0085 b\"],\"configDir\":\"/Users/x/claude wsp\",\"program\":\"/opt/🧪/claude\"}}}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"Claude Code is off there.\\nprogram: /opt/🧪/claude\\nconfig folder: /Users/x/claude wsp\\nlaunch words: --debug a  b\\nvariables: FOO BAR\\nClaude Code keeps its sign-in under its config folder, so sign it in again there before its next thread.\"}],\"structuredContent\":{\"agent\":{\"id\":\"claude\",\"name\":\"Claude Code\",\"installed\":true,\"version\":\"2.1.0\",\"latest\":\"2.2.0\",\"pinned\":\"2.1.0\",\"road\":\"wsp\",\"path\":\"/usr/local/bin/claude\",\"signIn\":\"signed-in\",\"signInRoad\":\"device\",\"wspTools\":true,\"signInDetail\":\"OAuth credentials\",\"update\":{\"to\":\"2.2.0\",\"command\":\"claude update \\u0085\"},\"setup\":{\"on\":false,\"program\":\"/opt/🧪/claude\",\"configDir\":\"/Users/x/claude wsp\",\"args\":[\"--debug\",\"a \\u0085 b\"],\"envNames\":[\"FOO\",\"BAR\"]}}}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "agents.setup",
+          "placeId": "here",
+          "agent": "claude",
+          "on": false,
+          "program": "/opt/🧪/claude",
+          "configDir": "/Users/x/claude wsp",
+          "args": [
+            "--debug",
+            "a \u0085 b"
+          ],
+          "env": {
+            "OLD": null
+          }
+        }
+      ]
+    },
+    {
+      "case": "on a computer",
+      "arguments": {
+        "agent": "claude",
+        "on": "attic",
+        "enabled": true,
+        "reset": [
+          "program",
+          "args"
+        ]
+      },
+      "replies": {
+        "places.list": "{\"id\":1,\"ok\":true,\"places\":[{\"id\":\"here\",\"kind\":\"computer\",\"name\":\"this mac\",\"default\":true},{\"id\":\"place-9\",\"kind\":\"computer\",\"name\":\"attic\",\"default\":false}]}",
+        "agents.setup": "{\"id\":1,\"ok\":true,\"agent\":{\"id\":\"codex\",\"name\":\"Codex \u0085\",\"installed\":false,\"road\":\"none\",\"signIn\":\"none\",\"signInRoad\":\"code\",\"wspTools\":false}}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"Codex \\u0085 is on there.\"}],\"structuredContent\":{\"agent\":{\"id\":\"codex\",\"name\":\"Codex \\u0085\",\"installed\":false,\"road\":\"none\",\"signIn\":\"none\",\"signInRoad\":\"code\",\"wspTools\":false}}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "places.list"
+        },
+        {
+          "op": "agents.setup",
+          "placeId": "place-9",
+          "agent": "claude",
+          "on": true,
+          "program": null,
+          "args": null
+        }
+      ]
+    },
+    {
+      "case": "no such computer",
+      "arguments": {
+        "agent": "claude",
+        "on": "nowhere",
+        "enabled": true
+      },
+      "replies": {
+        "places.list": "{\"id\":1,\"ok\":true,\"places\":[{\"id\":\"here\",\"kind\":\"computer\",\"name\":\"this mac\",\"default\":true},{\"id\":\"place-9\",\"kind\":\"computer\",\"name\":\"attic\",\"default\":false}]}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"no place named nowhere; you have this mac, attic. Run wsp places.\"}],\"structuredContent\":{\"error\":\"no place named nowhere; you have this mac, attic. Run wsp places.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "places.list"
+        }
+      ]
+    },
+    {
+      "case": "a config folder that is not absolute",
+      "arguments": {
+        "agent": "claude",
+        "config": "claude \"wsp\""
+      },
+      "replies": {},
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"--config is a folder on that computer, absolute, and got \\\"claude \\\\\\\"wsp\\\\\\\"\\\". Give a path that opens with /, since whoever reads it works in a folder this line cannot see.\"}],\"structuredContent\":{\"error\":\"--config is a folder on that computer, absolute, and got \\\"claude \\\\\\\"wsp\\\\\\\"\\\". Give a path that opens with /, since whoever reads it works in a folder this line cannot see.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": []
+    },
+    {
+      "case": "a name a shell would not read",
+      "arguments": {
+        "agent": "claude",
+        "unset_env": [
+          "1 BAD"
+        ]
+      },
+      "replies": {},
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"--unset-env takes a variable's name, and got \\\"1 BAD\\\". Name the variable alone; its value is asked for where nothing echoes it.\"}],\"structuredContent\":{\"error\":\"--unset-env takes a variable's name, and got \\\"1 BAD\\\". Name the variable alone; its value is asked for where nothing echoes it.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": []
+    },
+    {
+      "case": "nothing to change",
+      "arguments": {
+        "agent": "claude"
+      },
+      "replies": {},
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"wsp agents setup takes --enable or --disable, --program, --config, --arg, --env, --unset-env or --reset. Name at least one; with none of them there is nothing to change.\"}],\"structuredContent\":{\"error\":\"wsp agents setup takes --enable or --disable, --program, --config, --arg, --env, --unset-env or --reset. Name at least one; with none of them there is nothing to change.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": []
+    },
+    {
+      "case": "refused by the host",
+      "arguments": {
+        "agent": "claude",
+        "config": "/Users/x"
+      },
+      "replies": {
+        "agents.setup": "{\"id\":1,\"ok\":false,\"error\":\"Claude Code's config folder cannot be the home folder itself; name a folder under it\",\"kind\":\"usage\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"Claude Code's config folder cannot be the home folder itself; name a folder under it\"}],\"structuredContent\":{\"error\":\"Claude Code's config folder cannot be the home folder itself; name a folder under it\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "agents.setup",
+          "placeId": "here",
+          "agent": "claude",
+          "configDir": "/Users/x"
+        }
+      ]
+    }
+  ]
+}

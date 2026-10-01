@@ -1,0 +1,404 @@
+{
+  "cloudOff": {
+    "name": "agents_setup",
+    "description": "Sets how one agent runs on one computer, this computer without on: whether it is offered there at all (off, the app's lists drop it there and a start naming it is refused naming the computer), the program run in its place, the folder it keeps its config, sessions and sign-in in (an agent with no variable for one is refused, and a folder that is the home itself; a login kept under the old folder does not follow, so sign it in again there), words added to every turn's launch, and variables taken off its launch. A variable's value is never taken here: the person types it at wsp agents setup --env, where nothing echoes it. Answers the agent's row as that computer's read now gives it, its variables by name alone. reset puts back the agent's own program, config or args.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "agent": {
+          "type": "string",
+          "description": "the catalog id of the agent, as agents lists it"
+        },
+        "on": {
+          "type": "string",
+          "description": "the computer it runs on, by the name computers lists; absent is the computer the app runs on"
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "false turns the agent off on that computer, true back on"
+        },
+        "program": {
+          "type": "string",
+          "description": "the program run in the agent's place there, a path or a word on that computer's PATH"
+        },
+        "config": {
+          "type": "string",
+          "description": "the folder on that computer the agent keeps its config, sessions and sign-in in, absolute"
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "words added to every turn's launch there, each passed as one word; they replace any set before"
+        },
+        "unset_env": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "variables to take off its launch there, by name"
+        },
+        "reset": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "program",
+              "config",
+              "args"
+            ]
+          },
+          "description": "fields to put back on the agent's own: program, config, args"
+        }
+      },
+      "required": [
+        "agent"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "agent": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "installed": {
+              "type": "boolean"
+            },
+            "version": {
+              "type": "string"
+            },
+            "latest": {
+              "type": "string"
+            },
+            "pinned": {
+              "type": "string"
+            },
+            "road": {
+              "type": "string",
+              "enum": [
+                "wsp",
+                "own",
+                "shim",
+                "none"
+              ]
+            },
+            "path": {
+              "type": "string"
+            },
+            "via": {
+              "type": "string"
+            },
+            "signIn": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "signed-in",
+                    "vault-key",
+                    "none"
+                  ]
+                },
+                {
+                  "type": "string",
+                  "const": "unknown"
+                }
+              ]
+            },
+            "signInRoad": {
+              "type": "string",
+              "enum": [
+                "device",
+                "code",
+                "key",
+                "token",
+                "terminal",
+                "none"
+              ]
+            },
+            "wspTools": {
+              "type": "boolean"
+            },
+            "signInDetail": {
+              "type": "string"
+            },
+            "update": {
+              "type": "object",
+              "properties": {
+                "to": {
+                  "type": "string"
+                },
+                "command": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "to",
+                "command"
+              ],
+              "additionalProperties": false
+            },
+            "setup": {
+              "type": "object",
+              "properties": {
+                "on": {
+                  "type": "boolean"
+                },
+                "program": {
+                  "type": "string"
+                },
+                "configDir": {
+                  "type": "string"
+                },
+                "args": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "envNames": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "on",
+                "envNames"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "installed",
+            "road",
+            "signIn",
+            "signInRoad",
+            "wspTools"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "agent"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  "cloudOn": {
+    "name": "agents_setup",
+    "description": "Sets how one agent runs on one computer, this computer without on: whether it is offered there at all (off, the app's lists drop it there and a start naming it is refused naming the computer), the program run in its place, the folder it keeps its config, sessions and sign-in in (an agent with no variable for one is refused, and a folder that is the home itself; a login kept under the old folder does not follow, so sign it in again there), words added to every turn's launch, and variables taken off its launch. A variable's value is never taken here: the person types it at wsp agents setup --env, where nothing echoes it. Answers the agent's row as that computer's read now gives it, its variables by name alone. reset puts back the agent's own program, config or args.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "agent": {
+          "type": "string",
+          "description": "the catalog id of the agent, as agents lists it"
+        },
+        "on": {
+          "type": "string",
+          "description": "the computer it runs on, by the name computers lists; absent is the computer the app runs on"
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "false turns the agent off on that computer, true back on"
+        },
+        "program": {
+          "type": "string",
+          "description": "the program run in the agent's place there, a path or a word on that computer's PATH"
+        },
+        "config": {
+          "type": "string",
+          "description": "the folder on that computer the agent keeps its config, sessions and sign-in in, absolute"
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "words added to every turn's launch there, each passed as one word; they replace any set before"
+        },
+        "unset_env": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "variables to take off its launch there, by name"
+        },
+        "reset": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "program",
+              "config",
+              "args"
+            ]
+          },
+          "description": "fields to put back on the agent's own: program, config, args"
+        }
+      },
+      "required": [
+        "agent"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "agent": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "installed": {
+              "type": "boolean"
+            },
+            "version": {
+              "type": "string"
+            },
+            "latest": {
+              "type": "string"
+            },
+            "pinned": {
+              "type": "string"
+            },
+            "road": {
+              "type": "string",
+              "enum": [
+                "wsp",
+                "own",
+                "shim",
+                "none"
+              ]
+            },
+            "path": {
+              "type": "string"
+            },
+            "via": {
+              "type": "string"
+            },
+            "signIn": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "signed-in",
+                    "vault-key",
+                    "none"
+                  ]
+                },
+                {
+                  "type": "string",
+                  "const": "unknown"
+                }
+              ]
+            },
+            "signInRoad": {
+              "type": "string",
+              "enum": [
+                "device",
+                "code",
+                "key",
+                "token",
+                "terminal",
+                "none"
+              ]
+            },
+            "wspTools": {
+              "type": "boolean"
+            },
+            "signInDetail": {
+              "type": "string"
+            },
+            "update": {
+              "type": "object",
+              "properties": {
+                "to": {
+                  "type": "string"
+                },
+                "command": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "to",
+                "command"
+              ],
+              "additionalProperties": false
+            },
+            "setup": {
+              "type": "object",
+              "properties": {
+                "on": {
+                  "type": "boolean"
+                },
+                "program": {
+                  "type": "string"
+                },
+                "configDir": {
+                  "type": "string"
+                },
+                "args": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "envNames": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "on",
+                "envNames"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "installed",
+            "road",
+            "signIn",
+            "signInRoad",
+            "wspTools"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "agent"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  }
+}
