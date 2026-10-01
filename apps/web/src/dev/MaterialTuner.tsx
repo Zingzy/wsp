@@ -4,7 +4,8 @@
 import { useEffect, useState } from "react";
 import { CheckIcon, CopyIcon, RotateCcwIcon, SlidersHorizontalIcon, XIcon } from "lucide-react";
 
-type Knob = { key: string; label: string; hint: string; min: number; max: number; locked: number };
+/** unit and scale write the value as `${v / scale}${unit}`; a selector writes the variable on that element, not the root. */
+type Knob = { key: string; label: string; hint: string; min: number; max: number; locked: number; unit?: string; scale?: number; selector?: string };
 
 const KNOBS: readonly Knob[] = [
   { key: "--material-centre", label: "Chat column", hint: "#060606 over the glass", min: 0, max: 100, locked: 67 },
@@ -12,7 +13,14 @@ const KNOBS: readonly Knob[] = [
   { key: "--material-sidebar", label: "Left sidebar", hint: "#060606 over the glass", min: 0, max: 100, locked: 40 },
   { key: "--material-line", label: "Panel lines", hint: "white hairline", min: 0, max: 30, locked: 10 },
   { key: "--material-card", label: "Panel cards", hint: "white tint", min: 0, max: 15, locked: 2 },
+  { key: "--glass-blur", label: "Composer blur", hint: "what shows under it", min: 0, max: 40, locked: 16, unit: "px" },
+  { key: "--glass-saturation", label: "Composer saturation", hint: "colour in the blur", min: 100, max: 180, locked: 108, unit: "", scale: 100 },
+  { key: "--chat-composer-glass-opacity", label: "Composer tint", hint: "white film", min: 0, max: 20, locked: 3, selector: '[data-slot="composer-shell"]' },
+  { key: "--glass-ground-opacity", label: "Composer ground", hint: "0 = full desktop glass", min: 0, max: 100, locked: 100 },
 ];
+
+const written = (k: Knob, v: number): string => `${v / (k.scale ?? 1)}${k.unit ?? "%"}`;
+const SCOPED = "wsp-dev-material-scoped";
 
 const STORE = "wsp.dev.material";
 
@@ -26,10 +34,24 @@ function readSaved(): Record<string, number> {
 }
 
 function apply(values: Record<string, number>): void {
+  const scoped: string[] = [];
   for (const k of KNOBS) {
     const v = values[k.key];
-    if (v === undefined || v === k.locked) document.documentElement.style.removeProperty(k.key);
-    else document.documentElement.style.setProperty(k.key, `${v}%`);
+    const off = v === undefined || v === k.locked;
+    if (k.selector !== undefined) {
+      if (!off) scoped.push(`${k.selector} { ${k.key}: ${written(k, v)} !important; }`);
+    } else if (off) document.documentElement.style.removeProperty(k.key);
+    else document.documentElement.style.setProperty(k.key, written(k, v));
+  }
+  let el = document.getElementById(SCOPED);
+  if (scoped.length === 0) el?.remove();
+  else {
+    if (el === null) {
+      el = document.createElement("style");
+      el.id = SCOPED;
+      document.head.appendChild(el);
+    }
+    el.textContent = scoped.join("\n");
   }
 }
 
@@ -64,7 +86,7 @@ export function MaterialTuner() {
     } catch {}
   };
   const copy = (): void => {
-    const text = KNOBS.map(k => `${k.key}: ${values[k.key] ?? k.locked}%;`).join("\n");
+    const text = KNOBS.map(k => `${k.key}: ${written(k, values[k.key] ?? k.locked)};`).join("\n");
     void navigator.clipboard.writeText(text).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
@@ -90,7 +112,7 @@ export function MaterialTuner() {
               <span className="flex items-baseline gap-2">
                 <span className="text-[13px]">{k.label}</span>
                 <span className="text-[11px] text-muted-foreground">{k.hint}</span>
-                <span className="ms-auto font-mono text-xs tabular-nums">{v}%</span>
+                <span className="ms-auto font-mono text-xs tabular-nums">{written(k, v)}</span>
               </span>
               <input type="range" min={k.min} max={k.max} step={1} value={v} onChange={e => set(k.key, Number(e.target.value))} className="w-full accent-foreground" />
             </label>
