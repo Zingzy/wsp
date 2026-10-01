@@ -6,7 +6,7 @@ export function GlassGround() {
   return (
     <svg aria-hidden width="0" height="0" className="absolute">
       <filter id="glass-ground" x="0" y="0" width="1" height="1" colorInterpolationFilters="sRGB">
-        <feFlood className="[flood-color:var(--glass-ground-color,var(--background))]" />
+        <feFlood className="[flood-color:var(--glass-ground-color,var(--background))] [flood-opacity:var(--glass-ground-opacity,1)]" />
         <feComposite in="SourceGraphic" operator="over" />
       </filter>
     </svg>
