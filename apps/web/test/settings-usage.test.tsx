@@ -264,14 +264,15 @@ describe("Usage: used", () => {
     expect($("[data-k=stat-turns]")).toBeNull();
   });
 
-  it("prefers a row's own estimate over what it reported plus its list price, and counts the threads and turns where sent", async () => {
+  it("prefers a row's own estimate over what it reported plus its list price, counts the turns where sent, and draws no threads total", async () => {
     const rows: UsedRow[] = [
       { key: "codex", label: "Codex", tokens: { input: 1_000_000, output: 200_000, cached: 600_000, cacheWrite: 100_000 }, costReported: 3, costList: 4, estimate: 10, turns: 12, priced: true },
       { key: "claude", label: "Claude Code", tokens: { input: 5_000_000, output: 50_000, cached: 4_000_000 }, costReported: 2, costList: 1, turns: 30, priced: true },
     ];
-    await mountUsed({ rows, counts: { threads: 7, computers: 2 } });
+    await mountUsed({ rows });
     expect(stat("stat-estimate")[1]).toBe("$13.00");
-    expect(stat("stat-threads")).toEqual([USAGE_PAGE_WORDS.threads, "7", USAGE_PAGE_WORDS.onComputers(2)]);
+    // No threads total: a ledger cannot tell a session wsp started from one any other tool did.
+    expect($("[data-k=stat-threads]")).toBeNull();
     expect(stat("stat-turns")).toEqual([USAGE_PAGE_WORDS.turns, "42", USAGE_PAGE_WORDS.turnsNote]);
     expect($$("[data-used-row]:not([data-sub])").map(row => row.dataset["usedRow"])).toEqual(["claude", "codex"]);
     expect([...$$("[data-k=used-head] span")].map(text)).toEqual(["Agent and model", "Tokens", "Cache hit", "Turns", "API estimate"]);

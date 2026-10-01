@@ -391,7 +391,6 @@ function Totals({ used }: { used: UsedAnswer }) {
   const stats = [
     <Stat key="tokens" k="stat-tokens" label={W.tokens} value={fmtTokens(tokens)} note={W.fromCache(percent(cached, input))} />,
     ...(estimate === undefined ? [] : [<Stat key="estimate" k="stat-estimate" label={W.estimate} value={fmtCost(estimate)} note={W.atListPrice} />]),
-    ...(used.counts === undefined || used.counts.threads === 0 ? [] : [<Stat key="threads" k="stat-threads" label={W.threads} value={used.counts.threads.toLocaleString("en-US")} note={W.onComputers(used.counts.computers)} />]),
     ...(turns === undefined ? [] : [<Stat key="turns" k="stat-turns" label={W.turns} value={turns.toLocaleString("en-US")} note={W.turnsNote} />]),
     <Stat key="cache" k="stat-cache" label={W.cacheHit} value={percent(cached, input)} {...(saved === undefined ? {} : { note: W.saved(fmtCost(saved)) })} />,
   ];
