@@ -71,7 +71,7 @@ describe("the settings sidebar", () => {
   it("lists the nine groups in order with Appearance the one lifted row on a fresh open", async () => {
     mountSettings({ api: settingsApi().api });
     await settle();
-    expect(sidebarRowIds()).toEqual(["group:general", "group:appearance", "group:computers", "group:usage", "group:projects", "group:devices", "group:account", "group:privacy", "group:keybindings"]);
+    expect(sidebarRowIds()).toEqual(["group:general", "group:appearance", "section:mode", "section:theme", "section:glass", "section:fonts", "group:computers", "group:usage", "group:projects", "group:devices", "group:account", "group:privacy", "group:keybindings"]);
     expect(liftedRowIds()).toEqual(["group:appearance"]);
     // The field over the groups and Back at the foot with the chord that does the same.
     expect(field().getAttribute("placeholder")).toBe(SETTINGS_WORDS.search);
@@ -103,11 +103,28 @@ describe("the settings sidebar", () => {
     expect(SETTINGS_GROUPS.filter(group => group.sub !== undefined).map(group => group.id)).toEqual(["computers", "projects"]);
   });
 
+  it("lists an open page's sections under it, each scrolling the page to its card when pressed", async () => {
+    const { api } = settingsApi();
+    mountSettings({ api, at: { kind: "group", group: "general" } });
+    await settle();
+    const trail = [...document.querySelectorAll<HTMLElement>("[data-k=settings-trail] [data-row-id]")];
+    const heads = [...document.querySelectorAll("[data-settings-page] > section[data-settings-card] [data-settings-head]")].map(head => head.textContent);
+    expect(trail.map(row => row.textContent)).toEqual(heads);
+    const target = document.querySelector<HTMLElement>(`[data-settings-page] > section[data-settings-card="${trail.at(-1)!.dataset["rowId"]!.slice("section:".length)}"]`)!;
+    let scrolled = false;
+    target.scrollIntoView = () => {
+      scrolled = true;
+    };
+    fireEvent.click(trail.at(-1)!);
+    expect(scrolled).toBe(true);
+  });
+
   it("lists a group's computers or projects only while that group is open, so a long list never buries the groups under it", async () => {
     useStore.setState({ places: [here, box], projects: [project("pr_spoo", "spoo")] });
     mountSettings({ api: settingsApi().api });
     await settle();
-    const groups = ["group:general", "group:appearance", "group:computers", "group:usage", "group:projects", "group:devices", "group:account", "group:privacy", "group:keybindings"];
+    // Appearance is open on a fresh open, so its sections stand under it; a group with pages lists those instead.
+    const groups = ["group:general", "group:appearance", "section:mode", "section:theme", "section:glass", "section:fonts", "group:computers", "group:usage", "group:projects", "group:devices", "group:account", "group:privacy", "group:keybindings"];
     expect(sidebarRowIds()).toEqual(groups);
     fireEvent.click(document.querySelector("[data-k=settings-computers]")!);
     const computersOpen = ["group:general", "group:appearance", "group:computers", "computer:here", "computer:p_spoo", "group:usage", "group:projects", "group:devices", "group:account", "group:privacy", "group:keybindings"];

@@ -11,7 +11,7 @@
 import { ProjectGlyph } from "../projects/look.js";
 import { ComputerGlyph } from "./ComputerGlyph.js";
 import { ArrowLeftIcon, SearchIcon } from "lucide-react";
-import { useRef, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Input } from "../components/ui/input.js";
 import { SidebarContent, SidebarMenuButton, useSidebar } from "../components/ui/sidebar.js";
 import { cn } from "../lib/utils.js";
@@ -35,6 +35,45 @@ function SubComputerGlyph({ id }: { id: string }) {
   return place === undefined ? null : <ComputerGlyph place={place} />;
 }
 
+/** The page's sections in view now: each top-level card the settings page draws, watched as it scrolls, so the
+ * sidebar's trail lights the ones a person is looking at. */
+function useCardsInView(page: string): ReadonlySet<string> {
+  const [seen, setSeen] = useState<ReadonlySet<string>>(new Set());
+  useEffect(() => {
+    const root = document.querySelector("[data-settings-page]");
+    if (root === null || typeof IntersectionObserver === "undefined") return;
+    const showing = new Set<string>();
+    const watch = new IntersectionObserver(entries => {
+      for (const entry of entries) {
+        const id = (entry.target as HTMLElement).dataset["settingsCard"];
+        if (id === undefined) continue;
+        if (entry.isIntersecting) showing.add(id);
+        else showing.delete(id);
+      }
+      setSeen(new Set(showing));
+    });
+    const observe = (): void => {
+      watch.disconnect();
+      showing.clear();
+      for (const card of root.querySelectorAll(":scope > section[data-settings-card]")) watch.observe(card);
+    };
+    observe();
+    const drawn = new MutationObserver(observe);
+    drawn.observe(root, { childList: true });
+    return () => {
+      watch.disconnect();
+      drawn.disconnect();
+    };
+  }, [page]);
+  return seen;
+}
+
+/** Scrolls the page to one of its sections, at once under reduced motion. */
+function revealSection(id: string): void {
+  const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+  document.querySelector(`[data-settings-page] > section[data-settings-card="${id}"]`)?.scrollIntoView({ block: "start", behavior: reduce ? "auto" : "smooth" });
+}
+
 /** Brings the row a search result names into view once its page is drawn. */
 function revealItem(id: string): void {
   let tries = 0;
@@ -56,6 +95,7 @@ export function SettingsSidebar() {
   const rootRef = useRef<HTMLDivElement>(null);
   const groups = drawnGroups();
   const openGroup = groupOf(at);
+  const inView = useCardsInView(atId(at));
   const matches = search === "" ? null : new Map(groups.map(group => [group.id, searchGroup(group, ctx, search)] as const));
   // While the results stand in the centre no row is the page, so none is lifted; on the phone the results are in
   // this sheet and the centre keeps the page it was on, which stays lifted.
@@ -139,6 +179,8 @@ export function SettingsSidebar() {
     // A group's pages stand only while it is open: computers and projects grow without bound, and listing them all
     // under a closed group buried every group below.
     const under = open ? (group.sub?.(ctx) ?? []) : [];
+    // A page with no pages under it lists its own sections instead, lit while they are on screen.
+    const trail = open && under.length === 0 && matches === null && at.kind === "group" ? group.cards(ctx).filter((card): card is typeof card & { head: string } => card.head !== undefined) : [];
     const meta = group.meta?.(ctx);
     return (
       <li key={group.id} className="flex flex-col">
@@ -163,6 +205,25 @@ export function SettingsSidebar() {
             </span>
           )}
         </SidebarMenuButton>
+        {trail.length === 0 ? null : (
+          <ul data-k="settings-trail" className="ml-[14px] flex min-w-0 flex-col">
+            {trail.map(card => (
+              <li key={card.id}>
+                <SidebarMenuButton
+                  size="sm"
+                  data-sidebar-row
+                  data-row-id={`section:${card.id}`}
+                  data-depth={1}
+                  {...(inView.has(card.id) ? { "data-in-view": "" } : {})}
+                  onClick={() => revealSection(card.id)}
+                  className={cn(ONE_LINE_ROW_CLASS, "transition-colors duration-150", inView.has(card.id) ? "text-sidebar-foreground" : "text-sidebar-muted-foreground")}
+                >
+                  <span className="min-w-0 flex-1 truncate">{card.head}</span>
+                </SidebarMenuButton>
+              </li>
+            ))}
+          </ul>
+        )}
         {under.length === 0 ? null : (
           <ul className="ml-[14px] flex min-w-0 flex-col">
             {under.map(sub => (
