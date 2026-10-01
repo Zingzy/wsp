@@ -95,7 +95,7 @@ function Chart({ label, k, samples, y, text, tone, stale, unavailable }: ChartPr
       <div className="flex items-baseline justify-between gap-2 font-mono text-[13px] tabular-nums">
         <span className="text-muted-foreground">{label}</span>
         <span
-          className={cn("truncate", word !== null ? "text-muted-foreground/60" : last !== undefined ? TONE_TEXT[tone(last)] : undefined)}
+          className={cn("truncate", word !== null ? "text-muted-foreground" : last !== undefined ? TONE_TEXT[tone(last)] : undefined)}
           data-k={k}
           {...(word === "unavailable" && unavailable !== null ? { title: unavailable } : {})}
         >
@@ -108,7 +108,7 @@ function Chart({ label, k, samples, y, text, tone, stale, unavailable }: ChartPr
         end={stale === null}
         className={cn("mt-3", stale !== null ? "text-muted-foreground/40" : last !== undefined ? TONE_LINE[tone(last)] : "text-foreground/80")}
       />
-      <div className="mt-1.5 flex justify-between font-mono text-[10px] text-muted-foreground/70">
+      <div className="mt-1.5 flex justify-between font-mono text-[10px] text-muted-foreground">
         <span>2 min</span>
         <span>now</span>
       </div>

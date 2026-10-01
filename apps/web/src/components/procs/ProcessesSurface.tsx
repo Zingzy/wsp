@@ -99,7 +99,7 @@ export function ProcessesSurface({ workspaceId }: { workspaceId: string }) {
           onChange={e => setFilter(e.target.value)}
           className="h-6 min-w-0 flex-1 bg-transparent text-foreground outline-none placeholder:text-placeholder"
         />
-        <span className={cn("shrink-0 tabular-nums", stale !== null ? "text-muted-foreground/60" : "text-muted-foreground")} data-procs-count>
+        <span className={cn("shrink-0 tabular-nums", stale !== null ? "text-muted-foreground" : "text-muted-foreground")} data-procs-count>
           {stale ?? (unavailable !== null ? "unavailable" : count)}
         </span>
       </div>
@@ -114,7 +114,7 @@ export function ProcessesSurface({ workspaceId }: { workspaceId: string }) {
         <span className="pl-2">command</span>
       </div>
       <ScrollArea className="min-h-0 flex-1">
-        <div role="table" aria-label="Processes" className={cn(stale !== null && "text-muted-foreground/60")} {...(stale !== null ? { "data-stale": stale } : {})}>
+        <div role="table" aria-label="Processes" className={cn(stale !== null && "text-muted-foreground")} {...(stale !== null ? { "data-stale": stale } : {})}>
           {absent !== null ? (
             <div className="flex flex-col items-start gap-2 px-2 py-2 font-sans text-[13px] text-muted-foreground" data-procs-unavailable>
               <p>{absent.said}</p>

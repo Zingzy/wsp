@@ -1229,7 +1229,7 @@ export default function ThreadTerminalDrawer({
                         >
                           <GroupIcon className="size-3 shrink-0" />
                           <span className="min-w-0 flex-1 truncate text-left">{groupLabel}</span>
-                          <span className="text-muted-foreground/70 text-[10px] tabular-nums">
+                          <span className="text-muted-foreground text-[10px] tabular-nums">
                             {terminalCount}
                           </span>
                         </button>

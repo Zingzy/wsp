@@ -223,7 +223,7 @@ export function AddProjectDialog({ onClose }: { onClose: () => void }) {
                 e.preventDefault();
                 addTarget();
               }}
-              className="h-8 min-w-0 flex-1 rounded-lg border border-input bg-background px-2.5 font-mono text-xs outline-none placeholder:font-sans placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring"
+              className="h-8 min-w-0 flex-1 rounded-lg border border-input bg-background px-2.5 font-mono text-xs outline-none placeholder:font-sans placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
             />
             {bridge?.pickFolder !== undefined ? (
               <button type="button" data-k="clone-into-choose" onClick={() => void pickCloneFolder()} className="flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-border px-2.5 text-xs text-muted-foreground transition-colors duration-150 hover:bg-background hover:text-foreground">
@@ -280,7 +280,7 @@ export function AddProjectDialog({ onClose }: { onClose: () => void }) {
               setRefusal(null);
             }}
             onKeyDown={keys}
-            className="min-w-0 flex-1 bg-transparent text-[15px] outline-none placeholder:text-muted-foreground/70"
+            className="min-w-0 flex-1 bg-transparent text-[15px] outline-none placeholder:text-muted-foreground"
           />
           {here && bridge?.pickFolder !== undefined ? (
             <button type="button" data-k="choose" onClick={() => void choose()} className="flex h-8 items-center gap-1.5 rounded-lg border border-border px-2.5 text-xs text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground">
@@ -311,7 +311,7 @@ export function AddProjectDialog({ onClose }: { onClose: () => void }) {
                 </button>
               );
             })}
-            <button type="button" data-k="add-computer" onClick={() => { onClose(); openAddComputer(); }} className={cn(SIDE_ROW, "text-muted-foreground/70 hover:bg-accent/60 hover:text-foreground")}>
+            <button type="button" data-k="add-computer" onClick={() => { onClose(); openAddComputer(); }} className={cn(SIDE_ROW, "text-muted-foreground hover:bg-accent/60 hover:text-foreground")}>
               <PlusIcon aria-hidden className="size-4 shrink-0" />
               <span className="truncate">{ADD_PROJECT_WORDS.addComputer}</span>
             </button>
