@@ -29,13 +29,14 @@
 // that dies before init drains nothing behind it. Rows read back from storage
 // are held too. Held rows go only after the person's next send here, never on
 // their own, and a row typed during a turn goes ahead of the held ones it
-// releases. With steer picked a send during a turn goes now: it goes to the head,
-// and when the harness's catalog says it steers and the draft carries no file,
-// into the running turn through sessions.steer, leaving the queue once the
-// runtime took it (the thread shows it from the session.steer event), while
+// releases. With steer picked, a send during a turn whose harness's catalog says
+// it steers and whose draft carries no file goes now: to the head, then into
+// the running turn through sessions.steer, leaving the queue once the runtime
+// took it (the thread shows it from the session.steer event), while
 // not-running leaves it at the head for the turn's end. A harness that does
-// not steer, or a draft with files, which a steer cannot carry, gets the turn
-// stopped first and the message goes as the next start. A card's edit puts
+// not steer, or a draft with files, which a steer cannot carry, queues the
+// message as queue does and its card says it waits: the pick never stops the
+// running turn. A card's edit puts
 // its words and files back in the box. A new thread owes nothing to the
 // turn it left behind: the runtime runs a workspace's threads side by side
 // and holds each to one turn, so the fresh composer opens at once. The slash
@@ -596,20 +597,14 @@ export function ChatComposer({
     [absent, api, blocked, computer, runningTurn, stopPending, stopTarget],
   );
 
-  /** A send during a turn with steer picked: the message goes to the head, then into the running turn where the harness
-   * steers and the message carries words alone, else the turn is stopped and the message goes as the next start. */
+  /** A send during a turn with steer picked and a harness that steers: the message goes to the head, then into the
+   * running turn. The caller has already queued anything a steer cannot carry. */
   const sendNow = useCallback(
     (row: QueuedMessage) => {
       release(threadKey);
-      if (!canStop || runningTurn === null || stopTarget === null) return;
-      const words = row.prompt.trim();
-      const withFiles = (useComposerFilesStore.getState().queued[row.id]?.length ?? 0) > 0;
       const method = api?.steerSession;
-      if (!canSteer || withFiles || method === undefined) {
-        setNext(row.id);
-        interrupt(() => setNext(null));
-        return;
-      }
+      if (!canSteer || runningTurn === null || stopTarget === null || method === undefined) return;
+      const words = row.prompt.trim();
       setNext(row.id);
       void method(stopTarget, words, newId()).then(
         outcome => {
@@ -625,13 +620,14 @@ export function ChatComposer({
         },
       );
     },
-    [api, canSteer, canStop, interrupt, release, removeQueued, runningTurn, stopTarget, threadKey],
+    [api, canSteer, release, removeQueued, runningTurn, stopTarget, threadKey],
   );
 
-  /** Sends the draft, or queues it behind a running turn; with steer picked the message goes into that turn at once. */
+  /** Sends the draft, or queues it behind a running turn; with steer picked it goes into that turn at once where the
+   * harness steers and the draft carries words alone, and is queued like any other where not: a pick never stops a turn. */
   const send = useCallback(
     () => {
-      const now = steers;
+      const now = steers && canSteer && files.length === 0;
       // The same reading the send button's hover is already wearing: an Enter that lands here leaves the draft where
       // it was typed and says why.
       if (sendHeld !== null) {
@@ -683,7 +679,7 @@ export function ChatComposer({
       if (now) sendNow({ id, prompt });
       else release(threadKey);
     },
-    [askAside, asides, busy, dismissRefused, dismissTrigger, draft, enqueue, harnessCatalog, held, onStart, queueFiles, release, restoreDraft, runningTurn, sendHeld, sendNow, sending, setDraft, start, steers, threadKey, trigger, waits, workspace, workspaceId],
+    [askAside, asides, busy, canSteer, dismissRefused, dismissTrigger, draft, enqueue, files, harnessCatalog, held, onStart, queueFiles, release, restoreDraft, runningTurn, sendHeld, sendNow, sending, setDraft, start, steers, threadKey, trigger, waits, workspace, workspaceId],
   );
 
   // The head row goes as soon as nothing blocks a send; starting flips busy, so the rest wait for the next end.

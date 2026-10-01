@@ -3,8 +3,8 @@
 // message a card above the composer with the files it goes with, going one per
 // turn end in order; a card's edit puts it back in the box and its remove drops
 // it; with steer picked in Settings a send goes now, into the turn where the
-// harness steers and by stopping the turn otherwise, and no chord stands in
-// for that pick; and the queue lives in local storage so a reload
+// harness steers and queued like any other where it does not, never by
+// stopping the turn, and no chord stands in for that pick; and the queue lives in local storage so a reload
 // still holds it: restored rows wait for the person's next send. Same fixture
 // api shape as chat.test.tsx; no live daemon.
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -234,25 +234,7 @@ describe("composer queue", () => {
     expect(started[0]!.attachments?.map(a => a.name)).toEqual(["notes.md"]);
   });
 
-  it("with steer picked, Enter sends the draft now with a harness that does not steer: the turn stops through the runtime's session id and the message goes first", async () => {
-    const { api, started, interrupted, emit, hooks } = fixtureApi({}, [runningRow], [catalog(false)]);
-    await setup(api);
-    emit({ type: "session.start", ...scope, prompt: "go" });
-    emit({ type: "session.delta", ...scope, kind: "text", text: "on it" });
-    await waitFor(() => expect(useStore.getState().sessions[WS]).toHaveLength(1));
-    await waitFor(() => expect(useStore.getState().harnessesByWorkspace[WS]).toHaveLength(1));
-    await enter("one");
-    // The runtime pushes the interrupted done and end before it answers accepted.
-    hooks.onInterrupt = () => { emit(done("interrupted")); emit(end()); };
-    await steer("two");
-    expect(interrupted).toEqual([runningRow.id]);
-    await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["two"]));
-    expect(queued()).toEqual(["one"]);
-    noLineAbove();
-    expect(screen.getByTestId("settled-footer").textContent).toContain("interrupted");
-  });
-
-  it("while that stop is out the queue says the message is sending now; a refused stop raises a flyout and it stays first", async () => {
+  it("with steer picked and a harness that takes no message mid-turn, Enter queues the draft behind the turn and never stops it; the row reads as waiting", async () => {
     const { api, started, interrupted, emit } = fixtureApi({}, [runningRow], [catalog(false)]);
     await setup(api);
     emit({ type: "session.start", ...scope, prompt: "go" });
@@ -260,25 +242,16 @@ describe("composer queue", () => {
     await waitFor(() => expect(useStore.getState().sessions[WS]).toHaveLength(1));
     await waitFor(() => expect(useStore.getState().harnessesByWorkspace[WS]).toHaveLength(1));
     await enter("one");
-    clearNotices();
-    let release: () => void = () => {};
-    const held = new Promise<void>(resolve => { release = resolve; });
-    api.interruptSession = async id => { interrupted.push(id); await held; throw new Error("runtime is busy"); };
     await steer("two");
-    await waitFor(() => expect(queued()).toEqual(["two", "one"]));
-    const word = () => document.querySelector("[data-composer-queue] summary [data-queued-word]")?.textContent;
-    expect(word()).toBe(QUEUE_WORDS.sending);
-    noLineAbove();
-    await act(async () => { release(); await held.catch(() => {}); });
-    await waitFor(() => expect(lastNotice()).toBe(COMPOSER_WORDS.stopRefused("runtime is busy")));
-    expect(word()).toBe(QUEUE_WORDS.waiting(2));
-    expect(queued()).toEqual(["two", "one"]);
+    await waitFor(() => expect(queued()).toEqual(["one", "two"]));
+    expect(interrupted).toEqual([]);
     expect(started).toHaveLength(0);
+    expect(document.querySelector("[data-composer-queue] summary [data-queued-word]")?.textContent).toBe(QUEUE_WORDS.waiting(2));
+    noLineAbove();
     emit(done("completed"));
     emit(end());
-    await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["two"]));
+    await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["one"]));
   });
-
   it("with steer picked and a harness that steers, Enter sends the draft into the running turn: one steer, no stop, no card, and it shows in the thread once recorded", async () => {
     const { api, started, interrupted, steered, emit } = fixtureApi({}, [runningRow], [catalog(true)]);
     await setup(api);
@@ -341,8 +314,8 @@ describe("composer queue", () => {
     await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["one"]));
   });
 
-  it("with steer picked, a send with a file goes by the stop road even where the harness steers, since a steer carries words alone", async () => {
-    const { api, started, interrupted, steered, emit, hooks } = fixtureApi({}, [runningRow], [catalog(true)]);
+  it("with steer picked, a send with a file queues even where the harness steers, since a steer carries words alone, and the turn is never stopped", async () => {
+    const { api, started, interrupted, steered, emit } = fixtureApi({}, [runningRow], [catalog(true)]);
     await setup(api);
     emit({ type: "session.start", ...scope, prompt: "go" });
     await waitFor(() => expect(useStore.getState().sessions[WS]).toHaveLength(1));
@@ -351,15 +324,16 @@ describe("composer queue", () => {
       fireEvent.paste(composerEditor(), { clipboardData: { files: [new File(["# notes"], "notes.md", { type: "text/markdown" })], getData: () => "" } });
     });
     await waitFor(() => expect(document.querySelector('[data-composer-files] [data-chat-file="notes.md"]')).not.toBeNull());
-    hooks.onInterrupt = () => { emit(done("interrupted")); emit(end()); };
     await steer("read the notes now");
+    await waitFor(() => expect(queued()).toEqual(["read the notes now"]));
     expect(steered).toEqual([]);
-    expect(interrupted).toEqual([runningRow.id]);
+    expect(interrupted).toEqual([]);
+    expect(rowFor("read the notes now").querySelector("[data-queued-word]")?.textContent).toBe(QUEUE_WORDS.waiting(1));
+    emit(done("completed"));
+    emit(end());
     await waitFor(() => expect(started).toHaveLength(1));
-    expect(started[0]).toMatchObject({ prompt: "read the notes now" });
     expect(started[0]!.attachments?.map(a => a.name)).toEqual(["notes.md"]);
   });
-
   it("with queue picked, the default, a send during a turn waits behind it even where the harness steers", async () => {
     const { api, started, interrupted, steered, emit } = fixtureApi({}, [runningRow], [catalog(true)]);
     await setup(api);
