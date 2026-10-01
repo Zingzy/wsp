@@ -209,3 +209,20 @@ describe("what opencode reports about itself", () => {
     expect(await adapter.probeCatalog(async () => "1.18.18\n__WSP_CATALOG_SEP__\n")).toBeNull();
   });
 });
+
+describe("a person's setup for OpenCode on a computer", () => {
+  it("runs the program in place of opencode on a turn and a probe, the launch words on the turn alone", async () => {
+    const exec = scriptedExec(fixture("turn.jsonl"));
+    const adapter = createOpenCodeAdapter({ exec: exec.factory, launch: { program: "/opt/oc", args: ["--port", "0"] } });
+    await adapter.start({ prompt: "hi", onEvent: () => {} }).finished;
+    expect(exec.calls[0]!.command).toContain(`'/opt/oc' run '--port' '0' --format json`);
+    const asked: string[] = [];
+    await adapter.probeCatalog(async command => {
+      asked.push(command);
+      return "";
+    });
+    expect(asked[0]).toContain(`'/opt/oc' --version`);
+    expect(asked[0]).toContain(`'/opt/oc' models --verbose`);
+    expect(asked[0]).not.toContain("--port");
+  });
+});

@@ -236,6 +236,7 @@ const SESSION = { id: "s-9", workspaceId: "ws-3", harness: "claude", status: "ru
 /** An agent as a machine describes itself: its models with a legacy one, the efforts, the access modes. */
 const CLAUDE = {
   harness: "claude",
+  label: "Claude Code",
   isDefault: true,
   source: "machine",
   models: [
@@ -251,9 +252,10 @@ const CLAUDE = {
     { value: "default", label: "Default", isDefault: true },
     { value: "bypass", label: "Bypass" },
   ],
+  access: { ask: "default", full: "bypass" },
   contextWindows: [],
 };
-const CODEX = { ...CLAUDE, harness: "codex", isDefault: false, source: "table" };
+const CODEX = { ...CLAUDE, harness: "codex", label: "Codex \u0085", isDefault: false, source: "table" };
 const event = (over: Record<string, unknown>): string => JSON.stringify({ workspaceId: "ws-3", sessionId: "s-9", threadId: "t-9", turnId: "turn-1", ...over });
 /** A fork's replies through its create, and the start of its first thread. */
 const forkedWith = (over: Replies): Replies => ({
@@ -462,7 +464,7 @@ export const WORKSPACE_ANSWERED: Record<string, TurnCase[]> = {
   ],
   start: [
     { case: "an issue", arguments: { link: "https://github.com/o/r/issues/5" }, replies: { "workspaces.start": reply({ workspace: { ...WORKSPACE, from: { kind: "issue", repo: "o/r", number: 5, url: "https://github.com/o/r/issues/5", title: "Add a line \u0085 🧪" } }, threadId: "t-1", sessionId: "s-1" }) } },
-    { case: "a pull request, at the picks named", arguments: { link: "https://github.com/o/r/pull/7", project: "alpha", agent: "claude", model: "opus", effort: "high", access: "acceptEdits" }, replies: { "workspaces.start": reply({ workspace: { ...WORKSPACE, from: { kind: "pull_request", repo: "o/r", number: 7, url: "https://github.com/o/r/pull/7", title: "Rename", base: "main", head: { branch: "lab/review-me" } } }, threadId: "t-2", sessionId: "s-2" }) } },
+    { case: "a pull request, at the picks named", arguments: { link: "https://github.com/o/r/pull/7", project: "alpha", agent: "claude", model: "opus", effort: "high", access: "auto-edit" }, replies: { "workspaces.start": reply({ workspace: { ...WORKSPACE, from: { kind: "pull_request", repo: "o/r", number: 7, url: "https://github.com/o/r/pull/7", title: "Rename", base: "main", head: { branch: "lab/review-me" } } }, threadId: "t-2", sessionId: "s-2" }) } },
     { case: "a workspace answered with no origin", arguments: { link: "https://github.com/o/r/issues/6" }, replies: { "workspaces.start": reply({ workspace: WORKSPACE, threadId: "t-3", sessionId: "s-3" }) } },
     { case: "no project for the repository", arguments: { link: "https://github.com/x/y/issues/1" }, replies: { "workspaces.start": refused("no project here is a checkout of x/y; add one with wsp add https://github.com/x/y", "usage") } },
   ],
@@ -538,7 +540,7 @@ export const WORKSPACE_ANSWERED: Record<string, TurnCase[]> = {
     { case: "relative folder", arguments: { workspace: "alpha", cwd: "src \"x\"" }, replies: {} },
     {
       case: "first turn",
-      arguments: { workspace: "alpha", task: "go \u0085", model: "old", effort: "low", access: "bypass", cwd: "/root/alpha", notify: [NOTIFY_ME, "t-1"] },
+      arguments: { workspace: "alpha", task: "go \u0085", model: "old", effort: "low", access: "full", cwd: "/root/alpha", notify: [NOTIFY_ME, "t-1"] },
       replies: forkedWith({ "sessions.list": reply({ sessions: SESSIONS }) }),
       pushed: {
         "sessions.start": [
@@ -565,7 +567,8 @@ export const WORKSPACE_ANSWERED: Record<string, TurnCase[]> = {
     { case: "model not offered", arguments: { workspace: "alpha", task: "go", model: "opus-9" }, replies: forkedWith({}) },
     { case: "effort not offered", arguments: { workspace: "alpha", task: "go", effort: "max" }, replies: forkedWith({}) },
     { case: "model takes no effort", arguments: { workspace: "alpha", task: "go", model: "haiku", effort: "low" }, replies: forkedWith({}) },
-    { case: "access off the built-in table", arguments: { workspace: "alpha", task: "go", agent: "codex", access: "yolo" }, replies: forkedWith({}) },
+    { case: "an access that is no word of wsp's", arguments: { workspace: "alpha", task: "go", agent: "codex", access: "yolo" }, replies: forkedWith({}) },
+    { case: "an access the agent maps to no mode", arguments: { workspace: "alpha", task: "go", agent: "codex", access: "plan" }, replies: forkedWith({}) },
     { case: "no effort off the built-in table", arguments: { workspace: "alpha", task: "go", agent: "codex", model: "haiku", effort: "low" }, replies: forkedWith({}) },
     { case: "no catalog for the agent", arguments: { workspace: "alpha", task: "go", model: "anything" }, replies: forkedWith({ "harnesses.list": reply({ harnesses: [{ ...CODEX, isDefault: false }] }) }), pushed: { "sessions.start": [event({ type: "session.done", result: { status: "completed", text: "ok" } })] } },
   ]),

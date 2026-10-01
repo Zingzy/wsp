@@ -204,6 +204,9 @@
     "skills_enable": "wsp skills enable <name> [<workspace>] [--on <computer>]",
     "servers": "wsp servers [<workspace>] [--on <computer>]",
     "agents_addtools": "wsp agents addtools <agent>",
+    "agents_default": "wsp agents default <agent>",
+    "agents_set": "wsp agents set <agent> [--model <slug>] [--effort <word>] [--access <word>] [--hide <model>]... [--show <model>]... [--order <model,model>] [--add-model <id>]... [--drop-model <id>]... [--reset <field>]...",
+    "agents_setup": "wsp agents setup <agent> [--on <computer>] [--enable | --disable] [--program <path>] [--config <folder>] [--arg <word>]... [--env <NAME>]... [--unset-env <NAME>]... [--reset <field>]...",
     "servers_tools": "wsp servers tools <name> --agent <id> [<workspace>] [--on <computer>] [--project <name>] [--refresh]",
     "servers_add": "wsp servers add <name> [<workspace>] [--on <computer>] --agent <id> (--command \"<line>\" | --url <address> [--header <name>=<VARIABLE>]...) [--env <NAME>]... [--project [<name>]]",
     "servers_remove": "wsp servers remove <name> [<workspace>] [--on <computer>] --agent <id> [--scope <user|home|project>] [--project [<name>]]",
@@ -212,6 +215,7 @@
     "workspaces": "wsp workspaces [--watch]",
     "projects": "wsp projects",
     "projects_remove": "wsp projects remove <project>",
+    "projects_set": "wsp projects set <project> [--agent <id>] [--model <slug>] [--effort <word>] [--access <word>] [--reset <field>]...",
     "threads": "wsp threads [<workspace>] [--tree] [--watch]",
     "threads_wait": "wsp threads wait <thread>... [--timeout <s>] [--tail]",
     "recipe_scan": "wsp recipe scan [--project <folder>]",
@@ -248,6 +252,43 @@
     "setup": "wsp setup",
     "terminal_config": "wsp terminal config [--scheme light|dark]",
     "export": "wsp export <workspace> <folder> [--from <path on the machine>] [--replace] [--agents <ids>]"
+  },
+  "defaults": {
+    "agentSetNothing": "wsp agents set takes --model, --effort, --access, a model to --hide, --show, --add-model or --drop-model, --order or --reset. Name at least one; with none of them there is nothing to change.",
+    "agentSetupNothing": "wsp agents setup takes --enable or --disable, --program, --config, --arg, --env, --unset-env or --reset. Name at least one; with none of them there is nothing to change.",
+    "projectSetNothing": "wsp projects set takes --agent, --model, --effort, --access or --reset. Name at least one; with none of them there is nothing to change.",
+    "defaultAgent": "A new thread that names no agent runs {agent}, where its project names none.",
+    "startsOwn": "{agent} starts on its own defaults.",
+    "startsOn": "{agent} starts on {said}.",
+    "hides": "hides {models}",
+    "listsFirst": "lists {models} first",
+    "adds": "adds {models}",
+    "envName": "{named} takes a variable's name, and got {quoted}. Name the variable alone; its value is asked for where nothing echoes it.",
+    "configAbsolute": "--config is a folder on that computer, absolute, and got {quoted}. Give a path that opens with /, since whoever reads it works in a folder this line cannot see.",
+    "setupOn": "{name} is on there.",
+    "setupOff": "{name} is off there.",
+    "setup": {
+      "program": "program",
+      "configDir": "config folder",
+      "args": "launch words",
+      "envNames": "variables"
+    },
+    "signInAgain": "{agent} keeps its sign-in under its config folder, so sign it in again there before its next thread.",
+    "newThreadsHead": "A new thread on {project} starts on:",
+    "from": {
+      "named": "named on the start",
+      "project": "this project's",
+      "default": "your default",
+      "catalog": "the catalog's"
+    },
+    "noDefaultsAnswered": "the host answered no defaults for {project}",
+    "labels": {
+      "agent": "agent",
+      "model": "model",
+      "effort": "effort",
+      "access": "access"
+    },
+    "valueLine": "{label} {value}: {from}"
   },
   "workspaces": {
     "otherVersionResolve": "the host answered workspaces.resolve in a shape this wsp does not read; it runs another version of wsp, restart it with wsp up",

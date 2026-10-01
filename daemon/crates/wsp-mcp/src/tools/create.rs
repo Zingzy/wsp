@@ -371,7 +371,7 @@ async fn fork(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     let first = async {
         let notify = turn::notify_of(&client, &notify.unwrap_or_default()).await?;
         let mut start = turn::opening(&host, &made.id, &task, agent, cwd.as_deref(), notify);
-        picks.wire(&mut start);
+        picks.wire(&mut start)?;
         turn::follow(&host, client.clone(), &start, &mut None).await
     };
     // The machine was minted before the turn failed; an error that hid it would have the agent fork a second one.

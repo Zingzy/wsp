@@ -11,8 +11,8 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { type fakeCopier, NapRefusedError, NoProviderBackend, passphraseCipher, type MachineBackend } from "@wsp/engine";
-import { AGENTS_ON, agentsWord, childStartedLine, type ProjectView, type DaemonErrorCode, noProjectImageLine, projectImageInUseRefusal, projectImageRemoveNotice, projectImageRemovedLine, DAEMON_TOKEN_PATH, noHostCliLine, napRefusedLine, copyPathFor, madeOfWord, portsWord, HERE_PLACE_ID, LIST_PRICE_WORD, goneRoadRefusal, notAnsweringYet, runForTheList, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, UP_RESTART_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, markedDefault, NO_SUCH_TURN, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, RuntimeRequest, threadStateWord, whereWord, workspaceStateOf, workspaceWord, type WorkspaceListing, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceAsleepAgainLine, workspaceKind, thisComputer, copyTakesNone, type WorkspaceOut, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, type PlaceView, localRunsOneFix, localRunsOneLine, placeForksNothingPickLine, MEMORY_KEPT_CLAUSE, projectRemovedOnComputerLine, type HarnessCatalogAnswer, noFastLine, shellLine, NOT_DELIVERED_LINE } from "@wsp/protocol";
-import { copyKey, createRuntime, DAEMON_TOKEN_SET, harnessCatalog, memoryStore, type DaemonChannel, type HarnessAdapterFactory, type HostSsh, type PlaceBackends, type Runtime, type Store } from "@wsp/runtime";
+import { AGENTS_ON, type AgentRow, agentsWord, childStartedLine, type ProjectView, type DaemonErrorCode, noProjectImageLine, projectImageInUseRefusal, projectImageRemoveNotice, projectImageRemovedLine, DAEMON_TOKEN_PATH, noHostCliLine, napRefusedLine, copyPathFor, madeOfWord, portsWord, HERE_PLACE_ID, LIST_PRICE_WORD, goneRoadRefusal, notAnsweringYet, runForTheList, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, UP_RESTART_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, markedDefault, NO_SUCH_TURN, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, RuntimeRequest, threadStateWord, whereWord, workspaceStateOf, workspaceWord, type WorkspaceListing, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceAsleepAgainLine, workspaceKind, thisComputer, copyTakesNone, type WorkspaceOut, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, type PlaceView, localRunsOneFix, localRunsOneLine, placeForksNothingPickLine, MEMORY_KEPT_CLAUSE, projectRemovedOnComputerLine, type HarnessCatalogAnswer, noFastLine, shellLine, NOT_DELIVERED_LINE } from "@wsp/protocol";
+import { copyKey, createRuntime, DAEMON_TOKEN_SET, harnessCatalog, memoryStore, type AgentsReader, type DaemonChannel, type HarnessAdapterFactory, type HostSsh, type PlaceBackends, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 import { HELP, agentPage, cli, commandPage, COMMANDS_FOR_HELP, localWiring, localWorkFolder, serve } from "../src/cli.js";
@@ -86,6 +86,13 @@ const probing =
   (factory: HarnessAdapterFactory): HarnessAdapterFactory =>
   ctx => ({ ...factory(ctx), probeCatalog: exec => exec(PROBE_CMD).then(out => (out.trim() === "" ? null : (JSON.parse(out) as HarnessCatalogAnswer))) });
 
+/** This computer's agents as a read finds them, two rows and nothing else, so a setup's answer has a row to carry. */
+const agentRowHere = (id: string, name: string): AgentRow => ({ id, name, installed: true, version: "1.0.0", road: "own", signIn: "signed-in", signInRoad: "device", wspTools: false });
+const AGENTS_HERE: AgentsReader = {
+  read: async () => ({ home: "/Users/ada", user: "ada", agents: [agentRowHere("claude", "Claude Code"), agentRowHere("codex", "Codex")], skills: [], servers: [], refused: [] }),
+  tools: async () => ({ auth: "open", readAt: "2026-10-01T12:00:00.000Z" }),
+};
+
 describe("wsp verbs over the host", () => {
   let dir: string;
   let statePath: string;
@@ -122,7 +129,7 @@ describe("wsp verbs over the host", () => {
     claude = scriptedAgent(prompt => (prompt === "die" ? "" : `re: ${prompt}`));
     codex = scriptedAgent(prompt => `codex: ${prompt}`);
     daemon = fakeGitDaemon();
-    rt = createRuntime({ backend, store, adapters: { claude: claude.adapter, codex: probing(codex.adapter) }, local: localWiring(join(dir, "user"), process.env, fakeDaemonStart, undefined, copier), placeLinks: placeWiring(statePath), daemonChannel: daemon.open });
+    rt = createRuntime({ backend, store, adapters: { claude: claude.adapter, codex: probing(codex.adapter) }, local: localWiring(join(dir, "user"), process.env, fakeDaemonStart, undefined, copier), placeLinks: placeWiring(statePath), daemonChannel: daemon.open, agentsReader: AGENTS_HERE });
     handle = await serve(captured(), { port: 0, statePath, webDir, runtime: rt });
     // A workspace is one project's copy, so every line that makes one needs a project first; one project here, so
     // wsp new takes the work alone.
@@ -2238,8 +2245,8 @@ describe("wsp verbs over the host", () => {
     expect(listed.code).toBe(0);
     expect(listed.io.errors).toEqual([]);
     const [heading, ...rows] = listed.io.lines[0]!.split("\n");
-    expect(heading!.split(/ {2,}/)).toEqual(["PROJECT", "ID", "COMPUTER", "SOURCE", "PATH", "BASE", "WORKSPACES"]);
-    expect(rows.map(r => r.split(/ {2,}/)).find(r => r[0] === "spoo")).toEqual(["spoo", spoo.id, spoo.computer, "https://github.com/dev/spoo.git", "/root/spoo", "1"]);
+    expect(heading!.split(/ {2,}/)).toEqual(["PROJECT", "ID", "COMPUTER", "SOURCE", "PATH", "BASE", "WORKSPACES", "NEW THREADS"]);
+    expect(rows.map(r => r.split(/ {2,}/)).find(r => r[0] === "spoo")).toEqual(["spoo", spoo.id, spoo.computer, "https://github.com/dev/spoo.git", "/root/spoo", "1", "claude claude-opus-5-5 full"]);
 
     // The computer's own word, never the place id: a project on the computer the host runs on reads as that
     // computer's own word, the same one the workspaces table gives its row.
@@ -2282,7 +2289,7 @@ describe("wsp verbs over the host", () => {
 
   it.runIf(CLOUD_ON)("--model, --effort and --access on run, fork --send and send reach the start as the fields the composer sends; a new thread without them runs the catalog's defaults, the ones the composer shows", async () => {
     await run("new", "alpha");
-    const picked = await run("run", "alpha", "--model", "claude-sonnet-5", "--effort", "low", "--access", "acceptEdits", "review it");
+    const picked = await run("run", "alpha", "--model", "claude-sonnet-5", "--effort", "low", "--access", "auto-edit", "review it");
     expect(picked.code).toBe(0);
     expect(claude.starts.map(s => [s.model, s.effort, s.permissionMode])).toEqual([["claude-sonnet-5", "low", "acceptEdits"]]);
 
@@ -2313,31 +2320,127 @@ describe("wsp verbs over the host", () => {
     expect(claude.starts.at(-1)).toMatchObject({ resume: thread!.claudeSessionId, model: "claude-fable-5-1", effort: "max", permissionMode: access });
     const named = await run("send", thread!.threadId!, "--access", "acceptEdits", "and now");
     expect(named.code).toBe(3);
-    expect(named.io.errors).toEqual(['--access belongs to wsp fork, wsp start and wsp run; wsp send does not read it. usage: wsp send <thread> [--model, --effort <value>] [--fast] [--file <path>] [--detach] "<message>"']);
+    expect(named.io.errors).toEqual(['--access belongs to wsp agents set, wsp projects set, wsp fork, wsp start and wsp run; wsp send does not read it. usage: wsp send <thread> [--model, --effort <value>] [--fast] [--file <path>] [--detach] "<message>"']);
 
     withDaemonRoads(backend);
-    const forked = await run("fork", "alpha", "--name", "worker", "--send", "build it", "--model", "claude-sonnet-5", "--access", "bypassPermissions");
+    const forked = await run("fork", "alpha", "--name", "worker", "--send", "build it", "--model", "claude-sonnet-5", "--access", "full");
     expect(forked.code).toBe(0);
     expect(claude.starts.at(-1)).toMatchObject({ model: "claude-sonnet-5", permissionMode: "bypassPermissions", effort: level });
   });
 
-  it("a thread on this computer runs every action without asking when the line names no access, and at the word the line names when it does", async () => {
+  it("a thread on this computer runs every action without asking when the line names no access, and at wsp's word when it names one", async () => {
     await macProject("mac");
     const bare = await run("run", "mac", "write the notes");
     expect(bare.code).toBe(0);
     // The owner's word for his own computer: a thread here does what a session he starts in his own terminal does.
     expect(claude.starts.at(-1)!.permissionMode).toBe("bypassPermissions");
-    const picked = await run("run", "mac", "--access", "acceptEdits", "edit the notes");
+    const picked = await run("run", "mac", "--access", "auto-edit", "edit the notes");
     expect(picked.code).toBe(0);
     expect(claude.starts.at(-1)!.permissionMode).toBe("acceptEdits");
+    // One vocabulary on every agent: a harness's own spelling is no word of it, and a word the agent maps to none of
+    // its modes is refused naming the ones it takes, never run looser.
+    const slug = await run("run", "mac", "--access", "acceptEdits", "edit the notes");
+    expect(slug.code).toBe(3);
+    expect(slug.io.errors[0]).toBe("wsp run: --access takes ask, auto-edit, full or plan, and got acceptEdits. Name one of those; which of its own modes each one is, is the agent's row's to say.");
     const plan = await run("run", "mac", "--access", "plan", "read the notes");
     expect(plan.code).toBe(3);
-    expect(plan.io.errors[0]).toMatch(/^wsp run: access mode "plan" is not one claude takes; one of: Default \(default\), Accept edits \(acceptEdits\), Bypass on this computer \(bypassPermissions\), Auto \(auto\), /);
+    expect(plan.io.errors[0]).toBe("wsp run: Claude Code takes no plan access; it takes ask, auto-edit, full. Name one it takes, or drop --access.");
     expect(claude.starts.at(-1)!.permissionMode).toBe("acceptEdits");
     // The command line reads it off the same catalog the app's composer draws, so neither holds a default of its own.
     const [mac] = await rt.workspaces.list();
     const shown = (await rt.harnesses.list(mac!.id)).find(c => c.harness === "claude")!;
     expect(markedDefault(shown.permissionModes)?.value).toBe("bypassPermissions");
+  });
+
+  it("an agent's defaults and its project's override decide what a thread the line names nothing for starts at, and the line's own word wins", async () => {
+    await macProject("mac");
+    const [mac] = await rt.workspaces.list();
+    const project = (await rt.projects.list()).find(p => p.id === mac!.project.id)!;
+    expect((await run("agents", "set", "claude", "--access", "ask")).code).toBe(0);
+    expect((await run("run", "mac", "run echo hi")).code).toBe(0);
+    expect(claude.starts.at(-1)!.permissionMode).toBe("default");
+    expect((await run("projects", "set", project.name, "--access", "full")).code).toBe(0);
+    await run("run", "mac", "go on");
+    expect(claude.starts.at(-1)!.permissionMode).toBe("bypassPermissions");
+    await run("run", "mac", "--access", "auto-edit", "go on");
+    expect(claude.starts.at(-1)!.permissionMode).toBe("acceptEdits");
+    // A word the agent maps to none of its modes is refused at the set, as usage, and nothing is kept.
+    const plan = await run("agents", "set", "claude", "--access", "plan");
+    expect(plan.code).toBe(3);
+    expect(plan.io.errors).toEqual(["wsp agents set: Claude Code takes no plan access; it takes ask, auto-edit, full"]);
+    expect((await rt.preferences.get()).agentDefaults["claude"]).toEqual({ access: "ask" });
+    const nothing = await run("agents", "set", "claude");
+    expect(nothing.code).toBe(3);
+  });
+
+  it("the default agent runs a thread that names none, its project's agent over it, and wsp projects --json says where each value came from", async () => {
+    await macProject("mac");
+    const [mac] = await rt.workspaces.list();
+    const project = (await rt.projects.list()).find(p => p.id === mac!.project.id)!;
+    expect((await run("agents", "default", "codex")).code).toBe(0);
+    const before = codex.starts.length;
+    expect((await run("run", "mac", "say hi")).code).toBe(0);
+    expect(codex.starts.length).toBe(before + 1);
+    const set = await run("projects", "set", project.name, "--agent", "claude", "--json");
+    expect(set.code).toBe(0);
+    expect(json(set.io).at(-1)).toMatchObject({ project: { id: project.id }, defaults: { agent: { value: "claude", from: "project" } } });
+    const ran = claude.starts.length;
+    await run("run", "mac", "say hi");
+    expect(claude.starts.length).toBe(ran + 1);
+    const listed = json((await run("projects", "--json")).io).at(-1) as { defaults: Record<string, { agent: { value: string; from: string } }> };
+    expect(listed.defaults[project.id]!.agent).toEqual({ value: "claude", from: "project" });
+    await run("projects", "set", project.name, "--reset", "agent");
+    const back = json((await run("projects", "--json")).io).at(-1) as { defaults: Record<string, { agent: { value: string; from: string } }> };
+    expect(back.defaults[project.id]!.agent).toEqual({ value: "codex", from: "default" });
+  });
+
+  it("a model hidden from an agent's picker leaves the lists the composer draws, and a run still takes it by name", async () => {
+    await macProject("mac");
+    const [mac] = await rt.workspaces.list();
+    expect((await run("agents", "set", "claude", "--hide", "claude-haiku-4-5-20251001")).code).toBe(0);
+    const listed = (await rt.harnesses.list(mac!.id)).find(c => c.harness === "claude")!;
+    expect(listed.models.map(m => m.value)).not.toContain("claude-haiku-4-5-20251001");
+    expect((await run("run", "mac", "--model", "claude-haiku-4-5-20251001", "go")).code).toBe(0);
+    expect(claude.starts.at(-1)!.model).toBe("claude-haiku-4-5-20251001");
+    await run("agents", "set", "claude", "--show", "claude-haiku-4-5-20251001");
+    expect((await rt.preferences.get()).agentDefaults["claude"]).toEqual({ models: {} });
+  });
+
+  it("an agent's setup takes each variable's value where nothing echoes it, and no answer or listing prints it", async () => {
+    const io = captured();
+    io.isTTY = true;
+    const prompts: string[] = [];
+    io.askSecret = async q => (prompts.push(q), "bar-s3cret");
+    const code = await cli(["agents", "setup", "claude", "--env", "FOO", "--json", "--state", statePath], io, undefined, env);
+    expect(code).toBe(0);
+    expect(prompts).toEqual(["FOO for Claude Code"]);
+    expect(json(io).at(-1)).toMatchObject({ agent: { id: "claude", setup: { on: true, envNames: ["FOO"] } } });
+    const listed = await run("agents", "--json");
+    for (const said of [io.screen, listed.io.screen]) expect(said).not.toContain("bar-s3cret");
+    // Nobody at the terminal to type a value: refused before anything is asked or sent.
+    const piped = await run("agents", "setup", "claude", "--env", "BAR");
+    expect(piped.code).toBe(3);
+    const named = await run("agents", "setup", "claude", "--env", "BAR=baz");
+    expect(named.code).toBe(3);
+    // A variable that decides how the agent's process starts is refused before its value is asked for.
+    const guarded = captured();
+    guarded.isTTY = true;
+    guarded.askSecret = async q => (prompts.push(q), "/evil");
+    expect(await cli(["agents", "setup", "claude", "--env", "LD_PRELOAD", "--state", statePath], guarded, undefined, env)).toBe(3);
+    expect(guarded.errors[0]).toBe("wsp agents setup: LD_PRELOAD decides how Claude Code starts or what it loads, so an agent's setup does not set it. Name another variable; this one is the computer's to say.");
+    expect(prompts).toEqual(["FOO for Claude Code"]);
+  });
+
+  it("an agent turned off on this computer leaves its lists, and a run naming it is refused naming the computer", async () => {
+    await macProject("mac");
+    expect((await run("agents", "setup", "codex", "--disable")).code).toBe(0);
+    const [mac] = await rt.workspaces.list();
+    expect((await rt.harnesses.list(mac!.id)).map(c => c.harness)).toEqual(["claude"]);
+    const off = await run("run", "mac", "--agent", "codex", "go");
+    expect(off.code).toBe(3);
+    expect(off.io.errors[0]).toMatch(/^wsp run: Codex is off on /);
+    expect((await run("agents", "setup", "codex", "--enable")).code).toBe(0);
+    expect((await run("run", "mac", "--agent", "codex", "go")).code).toBe(0);
   });
 
   it.runIf(CLOUD_ON)("a model, effort or access mode the agent's catalog does not list is refused with that list, in the composer's words, and nothing starts", async () => {
@@ -2351,7 +2454,7 @@ describe("wsp verbs over the host", () => {
     withDaemonRoads(backend);
     const access = await run("fork", "alpha", "--send", "build it", "--access", "yolo");
     expect(access.code).toBe(3);
-    expect(access.io.errors[0]).toMatch(/^wsp fork: access mode "yolo" is not one claude takes; one of: Default \(default\), Accept edits \(acceptEdits\), /);
+    expect(access.io.errors[0]).toBe("wsp fork: --access takes ask, auto-edit, full or plan, and got yolo. Name one of those; which of its own modes each one is, is the agent's row's to say.");
     // Checked against the table before the fork is minted, for the named agent or the default one.
     const other = await run("fork", "alpha", "--send", "build it", "--agent", "codex", "--effort", "minimal");
     expect(other.code).toBe(3);
@@ -3949,7 +4052,7 @@ describe("wsp verbs over the host", () => {
     // A flag another verb reads is refused naming that verb, so the caller is told where it lives: run's --agent on send, threads' --tree on stop.
     const foreign = await run("send", "row_1", "--agent", "claude", "hello");
     expect(foreign.code).toBe(3);
-    expect(foreign.io.errors).toEqual(['--agent belongs to wsp skills add, wsp servers signin, wsp servers tools, wsp servers add, wsp servers remove, wsp servers disable, wsp servers enable, wsp fork, wsp start, wsp review and wsp run; wsp send does not read it. usage: wsp send <thread> [--model, --effort <value>] [--fast] [--file <path>] [--detach] "<message>"']);
+    expect(foreign.io.errors).toEqual(['--agent belongs to wsp skills add, wsp servers signin, wsp servers tools, wsp servers add, wsp servers remove, wsp servers disable, wsp servers enable, wsp projects set, wsp fork, wsp start, wsp review and wsp run; wsp send does not read it. usage: wsp send <thread> [--model, --effort <value>] [--fast] [--file <path>] [--detach] "<message>"']);
     const within = await run("stop", "row_1", "--tree");
     expect(within.io.errors[0]).toContain("--tree belongs to wsp threads; wsp stop does not read it");
     // A flag wsp used to read is nobody's now: the parser's own line, with the verb's usage under it.

@@ -226,6 +226,13 @@ const CALLED: readonly Called[] = [
     twin: ["one", "two"],
   },
   { tool: "agents_addtools", argv: ["agents", "addtools", "claude"], arguments: { agent: "claude" }, text: "prose" },
+  // This host runs no agent, so a set is the host's refusal on both doors, and a word or a folder the line's own.
+  { tool: "agents_default", argv: ["agents", "default", "codex"], arguments: { agent: "codex" }, refused: true },
+  { tool: "agents_set", argv: ["agents", "set", "claude", "--access", "ask", "--hide", "claude-haiku-4-5-20251001"], arguments: { agent: "claude", access: "ask", hide: ["claude-haiku-4-5-20251001"] }, refused: true },
+  { tool: "agents_set", argv: ["agents", "set", "claude", "--access", "bypassPermissions"], arguments: { agent: "claude", access: "bypassPermissions" }, refused: true },
+  { tool: "agents_setup", argv: ["agents", "setup", "claude", "--program", "/opt/claude", "--arg=-v"], arguments: { agent: "claude", program: "/opt/claude", args: ["-v"] }, refused: true },
+  { tool: "agents_setup", argv: ["agents", "setup", "claude", "--config", "claude-wsp"], arguments: { agent: "claude", config: "claude-wsp" }, refused: true },
+  { tool: "projects_set", argv: ["projects", "set", "nope", "--access", "full"], arguments: { project: "nope", access: "full" }, refused: true },
   { tool: "stop", argv: ["stop", "nope"], arguments: { thread: "nope" }, refused: true },
   { tool: "thread_rename", argv: ["thread", "rename", "nope", "t"], arguments: { thread: "nope", title: "t" }, refused: true },
   { tool: "thread_forget", argv: ["thread", "forget", "nope"], arguments: { thread: "nope" }, refused: true },

@@ -9,8 +9,8 @@
 // last custom-title, so the newest record does not decide it; the person's
 // rename wins wherever in the file it sits.
 
-import { generatedTitle, shellQuote } from "@wsp/protocol";
-import type { SessionRenameWrite } from "@wsp/protocol";
+import { generatedTitle, programWord, shellQuote } from "@wsp/protocol";
+import type { AgentLaunch, SessionRenameWrite } from "@wsp/protocol";
 import { buildEnv } from "./landmines.js";
 
 const AI_TITLE = '"type":"ai-title"';
@@ -70,27 +70,27 @@ export function parseSessionTitle(stdout: string): string | null {
  * environment as a session, the login's config dir included, so the question reads the sign-in a turn there reads
  * and never runs as a nested Claude Code.
  */
-export function titleForCommand(options: { prompt: string; model?: string; baseEnv?: Readonly<Record<string, string | undefined>> }): string {
+export function titleForCommand(options: { prompt: string; model?: string; baseEnv?: Readonly<Record<string, string | undefined>>; launch?: AgentLaunch }): string {
   const env = buildEnv({ base: options.baseEnv });
   const exports = Object.entries(env).map(([k, v]) => `${k}=${shellQuote(v)}`).join(" ");
   const clean = `unset \${!CLAUDE_CODE_@} CLAUDECODE FORCE_CODE_TERMINAL; export ${exports}`;
-  return `cd ~ && ${clean}; printf '%s' ${shellQuote(options.prompt)} | ${questionLine(options.model)}`;
+  return `cd ~ && ${clean}; printf '%s' ${shellQuote(options.prompt)} | ${questionLine(options.model, options.launch)}`;
 }
 
 /** The print-mode question as the title asks it: the person's customizations off, no tool, and their sign-in read. */
-const questionLine = (model?: string): string =>
-  ["claude -p", "--safe-mode", "--output-format json", "--allowed-tools ''", ...(model === undefined ? [] : [`--model ${shellQuote(model)}`])].join(" ");
+const questionLine = (model: string | undefined, launch: AgentLaunch | undefined): string =>
+  [`${programWord("claude", launch)} -p`, "--safe-mode", "--output-format json", "--allowed-tools ''", ...(model === undefined ? [] : [`--model ${shellQuote(model)}`])].join(" ");
 
 /**
  * One shell line for the guest that asks the CLI for a commit message: the same print-mode question the title asks,
  * with no thread, no tool and the person's customizations off, reading the question from the file the runtime put on
  * the machine, since a diff is longer than any command line may be.
  */
-export function draftForCommand(options: { promptFile: string; model?: string; baseEnv?: Readonly<Record<string, string | undefined>> }): string {
+export function draftForCommand(options: { promptFile: string; model?: string; baseEnv?: Readonly<Record<string, string | undefined>>; launch?: AgentLaunch }): string {
   const env = buildEnv({ base: options.baseEnv });
   const exports = Object.entries(env).map(([k, v]) => `${k}=${shellQuote(v)}`).join(" ");
   const clean = `unset \${!CLAUDE_CODE_@} CLAUDECODE FORCE_CODE_TERMINAL; export ${exports}`;
-  return `cd ~ && ${clean}; ${questionLine(options.model)} < ${shellQuote(options.promptFile)}`;
+  return `cd ~ && ${clean}; ${questionLine(options.model, options.launch)} < ${shellQuote(options.promptFile)}`;
 }
 
 /** The message out of the print-mode answer, its result field whole; null when the CLI errored or answered nothing. */

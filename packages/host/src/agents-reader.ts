@@ -10,7 +10,7 @@ import { posix } from "node:path";
 import { CATALOG_AGENTS, MCP_AGENTS, TOOL_PREFIX, serverValuesOf, signInRoadOf, versionOf, type AgentEntry, type McpAgent, type McpServer } from "@wsp/catalog";
 import { detectSkills, expand, nodeHost, skillRoots, stdioLine, tilde, type Host } from "@wsp/collect";
 import { landedServersScript, mcpRowId, NO_DIGEST, parseLandedServers, targetLogin } from "@wsp/engine";
-import { MCP_SERVER_NAME, agentVersionWord, controlNameRefusal, hasControlChar, shellQuote, strictVersion, type AgentRow, type AgentSignInState, type AgentsProject, type McpRow } from "@wsp/protocol";
+import { MCP_SERVER_NAME, agentVersionWord, compareVersions, controlNameRefusal, hasControlChar, shellQuote, strictVersion, type AgentRow, type AgentSignInState, type AgentsProject, type McpRow } from "@wsp/protocol";
 import { projectOf, vaultSignIn, type AgentsOn, type AgentsRead, type AgentsReader } from "@wsp/runtime";
 import { machineHost, type MachineHost } from "./machine-host.js";
 import { serverTools } from "./server-tools.js";
@@ -148,6 +148,15 @@ async function recipeServers(host: Host): Promise<Set<string> | undefined> {
   return said === undefined ? undefined : new Set([...parseLandedServers(said)].filter(([, digest]) => digest !== NO_DIGEST).map(([id]) => id));
 }
 
+/** The vendor's command that brings an agent up to the newest version, where what stands is older; nothing where either
+ * version is not a plain release number, since two such words are never compared. */
+export function updateOf(row: Pick<AgentRow, "id" | "version">, latest: string | undefined): AgentRow["update"] {
+  const command = CATALOG_AGENTS.find(a => a.id === row.id)?.updateLine;
+  const have = strictVersion(row.version ?? "");
+  const to = strictVersion(latest ?? "");
+  return command !== undefined && have !== undefined && to !== undefined && compareVersions(have, to) < 0 ? { to, command } : undefined;
+}
+
 /** What a box's own report already says, which is read there once per dial and not asked again. */
 interface BoxSaid {
   signIns?: Record<string, AgentSignInState>;
@@ -183,14 +192,10 @@ export async function readAgents(host: Host, o: { user: string; vault: Readonly<
     const version = said === undefined || said.trim() === "" ? undefined : agentVersionWord(said);
     const status = i < 0 ? undefined : statuses[i];
     const pinned = a.latest === undefined ? undefined : strictVersion(versionOf(a.installRoad) ?? "");
-    const signIn: AgentRow["signIn"] =
-      box !== undefined
-        ? (box.signIns?.[a.id] ?? "unknown")
-        : status === undefined
-          ? "unknown"
-          : a.signIn.status !== undefined && a.signIn.status.signedIn(status.output, status.code)
-            ? "signed-in"
-            : vaultSignIn(a.id, o.vault);
+    const ownLogin = box === undefined && status !== undefined && a.signIn.status !== undefined && a.signIn.status.signedIn(status.output, status.code);
+    const signIn: AgentRow["signIn"] = box !== undefined ? (box.signIns?.[a.id] ?? "unknown") : status === undefined ? "unknown" : ownLogin ? "signed-in" : vaultSignIn(a.id, o.vault);
+    // The status module's own words for how the login stands, which name a variable and never hold its value.
+    const signInDetail = ownLogin ? a.signIn.status?.detail?.(status!.output, new Map()) : undefined;
     return {
       id: a.id,
       name: a.name,
@@ -203,6 +208,7 @@ export async function readAgents(host: Host, o: { user: string; vault: Readonly<
       signIn: !found ? "none" : signIn,
       signInRoad: signInRoadOf(a.signIn),
       wspTools: servers.wsp.has(a.id),
+      ...(found && signInDetail !== undefined ? { signInDetail } : {}),
     };
   });
   const serverRows = recipe === undefined ? servers.rows : servers.rows.map(r => (r.scope === "project" ? r : { ...r, inRecipe: recipe.has(mcpRowId(r.agent, r.scope === "home", r.name)) }));
@@ -265,7 +271,14 @@ export function agentsReader(o: {
       const none: Readonly<Record<string, string>> = {};
       const [read, latest] = await Promise.all([readOn(on), ask?.latest === false ? none : (o.latest?.().catch(() => none) ?? none)]);
       refuseClosed();
-      return { ...read, agents: read.agents.map(a => (latest[a.id] === undefined ? a : { ...a, latest: latest[a.id] })) };
+      return {
+        ...read,
+        agents: read.agents.map(a => {
+          if (latest[a.id] === undefined) return a;
+          const update = a.installed ? updateOf(a, latest[a.id]) : undefined;
+          return { ...a, latest: latest[a.id], ...(update !== undefined ? { update } : {}) };
+        }),
+      };
     },
     tools: async (on, ask) => {
       refuseClosed();

@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { homedir, hostname, tmpdir } from "node:os";
-import { isAbsolute, join, posix, resolve as resolvePathOn } from "node:path";
+import { dirname, isAbsolute, join, posix, resolve as resolvePathOn } from "node:path";
 import { CATALOG_AGENTS, DEFAULT_AGENT, GUEST_HOME, type ThreadAgent, PATH_BOUND_DIR_NAMES, TOOL_PREFIX, catalogIdOfRow, gitHostOf, ownerRepoOf, remoteHost, serverValuesOf, guestEnv, installEnv, installHomes, sharedOn } from "@wsp/catalog";
 import {
   BUILDER_IDLE_MS,
@@ -239,6 +239,8 @@ import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
 import { isNoProvider, isPlaceAbsent, projectStateKey, putFiles, type Copier } from "@wsp/engine";
 import { boxFullLine, DISK_FULL_PCT, diskFullLine, stopRefusedLine, threadMessages, threadSeed, workspaceMemMb } from "@wsp/protocol";
+import { accessMode, accessRefusal, agentOffLine, configDirLaunchRefusal, configDirRefusal, markedFor, openDefaults, resolveThreadDefaults, setupView, shapeModels, withCustomModels, type AccessChoice, type AgentLaunch, type AgentRow, type AgentSetupSet, type ProjectOverrides, type ResolvedFolder, type ThreadDefaults } from "@wsp/protocol";
+import { agentSetups, keyOf, realFolderHere, realFolderScript } from "./agent-setup.js";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
 import { assertTokenShape, daemonTokenFor, daemonTokenPathOf, rotateDaemonToken } from "./daemon-token.js";
@@ -312,6 +314,9 @@ export interface HarnessAdapterContext {
    * its disk, so handing one where a person signed in would bill the key and leave that sign-in unused. Where a
    * login lives differs by machine kind, which the adapter cannot know, so it is told from here. */
   loginStands: (agentId: string) => boolean;
+  /** The program the person runs in place of this agent on the workspace's computer, and the words each turn's launch
+   * adds; absent runs the agent's own command as it is. */
+  launch?: AgentLaunch;
 }
 
 /** What every machine wsp runs agents on tells them, cloud fork and ssh machine alike, and this computer never does:
@@ -1419,6 +1424,8 @@ export interface Runtime {
     serversToggle(target: AgentsTarget, ask: ServerAsk & { on: boolean }, origin?: Caller): Promise<{ file: string }>;
     /** A remote server's icon as a data url, asked of Google by this host only while the person's switch is on. */
     serversIcon(host: string, refresh?: boolean): Promise<string | null>;
+    /** Changes how one agent runs on one computer, checked first, and answers its row there, names only. */
+    setup(placeId: string, agent: string, change: AgentSetupSet, origin?: Caller): Promise<AgentRow>;
   };
   /** Every verb takes where the request reached the host from as its last argument: here, this computer's own app,
    * CLI or MCP, or relayed from a machine. Absent reads here. A workspace whose kind takes no relayed request
@@ -1535,7 +1542,7 @@ export interface Runtime {
     /** A workspace started off a GitHub issue or pull request link: the project whose remote names the link's
      * repository, the text read on this computer, the copy made and, for a pull request, put on its head branch, and
      * a thread opened with the composed task. A person's act: a thread's own token is refused. */
-    start(o: { url: string; project?: string; agent?: string; model?: string; effort?: string; access?: string }, origin?: Caller): Promise<StartResult>;
+    start(o: { url: string; project?: string; agent?: string; model?: string; effort?: string; access?: AccessChoice }, origin?: Caller): Promise<StartResult>;
     /** A reviewer thread on a pull request, off its link or a workspace's own pull request: a fresh copy at its head,
      * the agent at its harness's read-only word, Codex where none is named, the diff in its task. A person's act. */
     review(o: { url?: string; workspaceId?: string; agent?: string; model?: string; effort?: string }, origin?: Caller): Promise<StartResult>;
@@ -1590,6 +1597,8 @@ export interface Runtime {
     seedPlan(source: string): Promise<SeedPlan>;
     /** Every project this host holds, oldest first. */
     list(origin?: Caller): Promise<ProjectView[]>;
+    /** What a new thread on each of those projects starts on, by project id, off the runtime's table. */
+    defaults(origin?: Caller): Promise<Record<string, ThreadDefaults>>;
     /** The computers a project can live on, by the id and the name each carries in the places table: what `add`
      * resolves `on` against, read here so a caller names one rather than guessing at the refusal. */
     computers(): Promise<{ id: string; name: string }[]>;
@@ -1621,6 +1630,8 @@ export interface Runtime {
         model?: string;
         effort?: string;
         permissionMode?: string;
+        /** The access in wsp's own word, which the harness's row turns into its mode; a permissionMode beside it wins. */
+        access?: AccessChoice;
         contextWindow?: string;
         /** The model's faster output; refused naming the model where its catalog row offers none. */
         fast?: boolean;
@@ -2863,14 +2874,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     await store.put(PROJECTS, project.id, project);
   };
 
-  /** The agent a thread on this project last ran under, kept on the project's own record: what a start that names
-   * none takes, and what the composer shows as the default. Written only when it moves, so a second thread on the
-   * same agent writes nothing. */
-  const rememberAgent = async (project: ProjectView, harness: string): Promise<void> => {
-    if (project.lastAgent === harness) return;
-    await rememberProject({ ...project, lastAgent: harness });
-  };
-
   const rememberTarget = async (record: WorkspaceRecord): Promise<void> => {
     const current = await preferences.get();
     if (current.target?.workspace === record.id) return;
@@ -3199,6 +3202,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * joins its project off this map on every read, and the map is the one place a project's name, path and computer
    * are known without a store read. */
   const projectsHeld = new Map<string, ProjectView>();
+  const setups = agentSetups(store);
   const builders = new Map<string, LiveBuilder>();
   /** Every machine a sweep, a landing or a replacement stops, read back behind the sweep and asked again while it stays. */
   let sayStops: ((line: string) => void) | undefined;
@@ -3626,12 +3630,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * opened at its harness's prompts would quietly skip them. */
   const accessOf = (workspaceId: string, threadId: string, resume: string | undefined): string | undefined =>
     threadRecords.get(threadId)?.permissionMode ?? (resume === undefined ? undefined : resumedFact(workspaceId, resume, "permissionMode"));
-
-  /** The access a thread a send opens runs at when nothing named one: the last access picked in that workspace,
-   * kept on the preferences record rather than in one browser, so the next thread starts where the person left the
-   * last one and a send from the CLI or a second client reads the same pick. Nothing until a pick is made, and the
-   * catalog's own default then stands. */
-  const pickedAccess = async (workspaceId: string): Promise<string | undefined> => (await preferences.get()).access[workspaceId];
 
   /** What the runtime is doing to a machine's daemon, by workspace: the line its row shows while an update runs and
    * the sentence left there when one failed. Held here rather than on the record because it says what this process
@@ -5856,6 +5854,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const project = raw as ProjectView;
         projectsHeld.set(project.id, project);
       }
+      await setups.load();
       const toSync: LiveWorkspace[] = [];
       for (const raw of await store.list(WORKSPACES)) {
         const entry = await hydrateWorkspace(raw);
@@ -6427,7 +6426,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   };
 
   /** The thread a start or a review opens, detached: the turn goes on without the caller. */
-  const openWith = async (entry: LiveWorkspace, o: { prompt: string; harness?: string; model?: string; effort?: string; permissionMode?: string }, origin: Caller | undefined): Promise<StartResult> => {
+  const openWith = async (entry: LiveWorkspace, o: { prompt: string; harness?: string; model?: string; effort?: string; permissionMode?: string; access?: AccessChoice }, origin: Caller | undefined): Promise<StartResult> => {
     const handle = await sessionsApi.start(
       entry.record.id,
       {
@@ -6436,6 +6435,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         ...(o.model !== undefined ? { model: o.model } : {}),
         ...(o.effort !== undefined ? { effort: o.effort } : {}),
         ...(o.permissionMode !== undefined ? { permissionMode: o.permissionMode } : {}),
+        ...(o.access !== undefined ? { access: o.access } : {}),
       },
       origin,
     );
@@ -7021,7 +7021,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     async execStream(id, argv, cwd, origin) {
       const entry = await entryOf(id, origin);
       await copyBlocked(entry);
-      const { adapter } = adapterFor(entry);
+      const { adapter } = await launchAdapterFor(entry);
       // Only the socket or the machine going away ends a command; a build may outlive the deadline a harness turn gets.
       const ranIn = await threadFolder(entry, { cwd });
       const inner = execFactoryFor(entry, { idleMs: Number.POSITIVE_INFINITY, deadlineMs: Number.POSITIVE_INFINITY })(inFolder(ranIn, argv.map(shellQuote).join(" ")), { env: { ...adapter.env } });
@@ -7153,9 +7153,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const rows = [...sessions.values()].map(s => s.view).filter(v => v.workspaceId === workspaceId).sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0));
       const newest = rows.at(-1);
       const opening = newest?.threadId === undefined ? undefined : rows.find(v => v.threadId === newest.threadId)?.prompt;
-      const named = newest?.harness ?? DEFAULT_AGENT.id;
-      if (adapters[named] === undefined) return { message: null, note: DRAFT_NOTES.noAgent };
-      const { harness, adapter } = adapterFor(entry, named);
+      const named = newest?.harness ?? defaultAgentOf(await preferences.get(), entry);
+      if (adapters[named] === undefined || agentOff(entry, named)) return { message: null, note: DRAFT_NOTES.noAgent };
+      const { harness, adapter } = await launchAdapterFor(entry, named);
       if (adapter.draftFor === undefined) return { message: null, note: DRAFT_NOTES.noAgent };
       const diff = GitDiffReply.parse(await withDaemon(entry, ask => ask({ op: "git.diff", cwd: checkoutOf(entry.record), scope: "head", ...(paths !== undefined ? { paths } : {}) })));
       const table = harnessCatalog(harness);
@@ -7324,7 +7324,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const fact = link.kind === "pull_request" ? await pullRequestOf(project.remote, link.number) : undefined;
       const from = fromOf(link.kind, link.repo, read, fact);
       const entry = await workspaceFrom(project, from, fact, "start", origin);
-      return openWith(entry, { prompt: fromTaskPrompt(from, read), ...(agent !== undefined ? { harness: agent } : {}), ...(model !== undefined ? { model } : {}), ...(effort !== undefined ? { effort } : {}), ...(access !== undefined ? { permissionMode: access } : {}) }, origin);
+      return openWith(entry, { prompt: fromTaskPrompt(from, read), ...(agent !== undefined ? { harness: agent } : {}), ...(model !== undefined ? { model } : {}), ...(effort !== undefined ? { effort } : {}), ...(access !== undefined ? { access } : {}) }, origin);
     },
 
     async review({ url, workspaceId, agent, model, effort }, origin) {
@@ -7465,7 +7465,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const catalogs = new Map<string, { at: number; catalog: Promise<HarnessCatalog> }>();
   const catalogOn = (table: HarnessCatalog, entry: LiveWorkspace, adapter: HarnessAdapter): Promise<HarnessCatalog> => {
     const machine = entry.machine;
-    const forMachine = (c: HarnessCatalog): HarnessCatalog => workspaceAccess(c, entry.record.kind);
     const known: HarnessCatalog = {
       ...table,
       steers: adapter.steers,
@@ -7477,11 +7476,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       ...(adapter.resumesAt === true || adapter.revert !== undefined ? { rewindsConversation: true } : {}),
       ...(adapter.screenCommands !== undefined ? { screenCommands: [...adapter.screenCommands] } : {}),
     };
-    if (adapter.probeCatalog === undefined) return Promise.resolve(forMachine(known));
+    if (adapter.probeCatalog === undefined) return Promise.resolve(known);
     const key = `${machine.id}:${table.harness}`;
     const hit = catalogs.get(key);
     const now = clock.now();
-    if (hit !== undefined && now - hit.at < CATALOG_TTL_MS) return hit.catalog.then(forMachine);
+    if (hit !== undefined && now - hit.at < CATALOG_TTL_MS) return hit.catalog;
     const catalog = adapter
       .probeCatalog(command => machine.exec(command, { timeoutMs: CATALOG_PROBE_TIMEOUT_MS }).then(res => res.stdout))
       // A binary that named why it described nothing keeps the table's lists and lends the footer its words.
@@ -7494,7 +7493,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         },
       );
     catalogs.set(key, { at: now, catalog });
-    return catalog.then(forMachine);
+    return catalog;
   };
 
   /** One title read per harness session per machine per TTL, a failed one included and one in flight shared: the
@@ -7522,7 +7521,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // The read is started inside a promise and never on this stack: an adapter that refuses the id throws where it
     // builds its command (the codex guard does), and one row's store read may never cost the listing or the turn
     // that asked for it. Nothing here rejects, so both callers may leave it unawaited.
-    pending.done = Promise.resolve()
+    pending.done = confineSetup(entry, view.harness)
       .then(() => read(sessionId, command => entry.machine.exec(command, { timeoutMs: SESSION_TITLE_TIMEOUT_MS }).then(res => res.stdout)))
       // The window opens when the store answered, before the answer is kept: a row that shows the title is a read
       // that is over, so a listing that sees one waits on nothing.
@@ -7592,7 +7591,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (write === undefined) return Promise.resolve();
     // Started inside a promise and never on this stack, as the store read is: an adapter that refuses the id throws
     // where it builds its command, and naming a thread may never cost the turn that asked for it.
-    return Promise.resolve()
+    return confineSetup(entry, view.harness)
       .then(() => write(sessionId, title, command => entry.machine.exec(command, { timeoutMs: SESSION_TITLE_TIMEOUT_MS }).then(res => res.stdout)))
       .then(
         wrote => {
@@ -7617,7 +7616,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (threadId === undefined || entry === undefined || titlesAsked.has(threadId)) return;
     if (view.prompt === undefined || threadSource(threadId) !== "seed") return;
     if (workspaceState({ phase: entry.record.phase }) !== "running" || adapters[view.harness] === undefined) return;
-    const { harness, adapter } = adapterFor(entry, view.harness);
+    const { harness, adapter } = await launchAdapterFor(entry, view.harness);
     if (adapter.titleFor === undefined) return;
     titlesAsked.add(threadId);
     const table = harnessCatalog(harness);
@@ -7650,8 +7649,91 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return [...newest.values()].slice(0, SESSION_TITLE_REFRESH_MAX);
   };
 
-  /** The mark goes on the way out, never into the cache: a start and a list share one cached table. */
-  const markDefault = (c: HarnessCatalog): HarnessCatalog => ({ ...c, ...(c.harness === DEFAULT_AGENT.id ? { isDefault: true } : {}) });
+  /** The computer a workspace's agents run on, as the person's setup is keyed: this computer for a copy here, the
+   * computer a fork stands on, and none for a fork at a provider, whose image is the whole of its setup. */
+  const setupPlace = (entry: LiveWorkspace): string | undefined => (isLocalWorkspace(entry.record) ? HERE_PLACE_ID : entry.record.place);
+  /** Whether the person turned this agent off on the computer the workspace stands on. */
+  const agentOff = (entry: LiveWorkspace, agent: string): boolean => {
+    const place = setupPlace(entry);
+    return place !== undefined && setups.off(place, agent);
+  };
+  const agentLabel = (agent: string): string => harnessCatalog(agent)?.label ?? agent;
+
+  /** A config folder as the computer it names resolves it, links followed: this one off its own disk, a joined one
+   * over its link, each with its home and the folders wsp keeps its own state in there. */
+  const configFolderOn = async (placeId: string, path: string): Promise<ResolvedFolder> => {
+    if (placeId === HERE_PLACE_ID) {
+      const home = await realFolderHere(local?.homeDir ?? homedir());
+      const kept = [await realFolderHere(join(home, ".wsp")), ...(opts.statePath !== undefined ? [await realFolderHere(dirname(resolvePathOn(opts.statePath)))] : [])];
+      return { folder: await realFolderHere(path), home, kept };
+    }
+    const door = placeDoorOf();
+    const read = await door.exec(placeId, realFolderScript(path), { timeoutMs: INLINE_EXEC_MS });
+    if (read.exitCode === 3) throw Object.assign(new Error(read.stderr.trim()), { kind: "usage" });
+    const [folder, home] = read.stdout.trim().split("\n");
+    if (read.exitCode !== 0 || folder === undefined || home === undefined || !home.startsWith("/")) throw new Error(`${door.nameOf(placeId)} did not say where ${path} is: ${read.stderr.trim() || `exit ${read.exitCode}`}`);
+    return { folder: posix.normalize(folder), home, kept: [join(home, ".wsp")] };
+  };
+
+  /** The latest word on each agent's kept config folder by computer and agent, where it was refused: what a thread
+   * row of that agent there says, read off the last check rather than a new one. */
+  const setupRefusals = new Map<string, string>();
+  const keptFolder = (entry: LiveWorkspace, harness: string): { place: string; folder: string } | undefined => {
+    const place = setupPlace(entry);
+    const folder = place === undefined ? undefined : setups.get(place, harness)?.configDir;
+    return place === undefined || folder === undefined ? undefined : { place, folder };
+  };
+  /** The one check on an agent's kept config folder, read again on the computer the workspace stands on before wsp
+   * starts the agent or reads or writes under that folder: why it now leads out of that computer's home, onto it, or
+   * into wsp's own, or null where it stands. Nothing falls back to the agent's own default folder. */
+  const setupRefusal = async (entry: LiveWorkspace, named?: string): Promise<string | null> => {
+    const harness = named ?? DEFAULT_AGENT.id;
+    const kept = keptFolder(entry, harness);
+    if (kept === undefined) return null;
+    const { place, folder } = kept;
+    const why = configDirRefusal(agentLabel(harness), folder, await configFolderOn(place, folder));
+    const refused = why === null ? null : configDirLaunchRefusal(agentLabel(harness), harness, folder, why);
+    if (refused === null) setupRefusals.delete(keyOf(place, harness));
+    else setupRefusals.set(keyOf(place, harness), refused);
+    return refused;
+  };
+  /** Settles at once where no config folder is kept, so a road with nothing to check waits on nothing more than before. */
+  const confineSetup = (entry: LiveWorkspace, named?: string): Promise<void> =>
+    keptFolder(entry, named ?? DEFAULT_AGENT.id) === undefined
+      ? Promise.resolve()
+      : setupRefusal(entry, named).then(refused => {
+          if (refused !== null) throw Object.assign(new Error(refused), { kind: "usage" });
+        });
+  /** adapterFor for a road that starts the agent's process or runs under its setup, its config folder checked first. */
+  const launchAdapterFor = async (...a: Parameters<typeof adapterFor>): Promise<ReturnType<typeof adapterFor>> => {
+    await confineSetup(a[0], a[1]);
+    return adapterFor(...a);
+  };
+
+  /** The agent a new thread runs when its start names none: the project's, then the person's default, then the
+   * catalog's first, each only where it runs on that workspace's computer. The marks, the start and the drafter all
+   * read this one answer. */
+  const defaultAgentOf = (prefs: Preferences, entry: LiveWorkspace | undefined): string => {
+    const runs = (id: string): boolean => adapters[id] !== undefined && (entry === undefined || !agentOff(entry, id));
+    const project = entry === undefined ? undefined : prefs.projectDefaults[entry.record.project];
+    return resolveThreadDefaults({ firstAgent: CATALOG_AGENTS.find(a => runs(a.id))?.id ?? DEFAULT_AGENT.id, catalogOf: harnessCatalog, runs, prefs, ...(project !== undefined ? { project } : {}) }).agent.value;
+  };
+
+  /** One agent's lists with the person's own models in and the marks moved onto what a new thread on that project
+   * starts on, so the composer shows it and startPicks fills it in, with what an open list cannot mark beside them.
+   * Never cached: a start and a list share one probe. */
+  const defaultsOn = (catalog: HarnessCatalog, prefs: Preferences, project: ProjectOverrides | undefined): { catalog: HarnessCatalog; open: { model?: string; effort?: string } } => {
+    const lists = withCustomModels(catalog, prefs.agentDefaults[catalog.harness]?.models);
+    const defaults = resolveThreadDefaults({ firstAgent: catalog.harness, named: catalog.harness, catalogOf: () => lists, prefs, ...(project !== undefined ? { project } : {}) });
+    return { catalog: markedFor(lists, defaults), open: openDefaults(lists, defaults) };
+  };
+
+  /** The harness's own mode for wsp's word a start named, or the refusal naming the words it takes. */
+  const namedMode = (catalog: HarnessCatalog | undefined, harness: string, word: AccessChoice): string => {
+    const mode = catalog === undefined ? undefined : accessMode(catalog, word);
+    if (mode !== undefined) return mode;
+    throw Object.assign(new Error(accessRefusal(catalog ?? { label: agentLabel(harness), permissionModes: [] }, word)!), { kind: "usage" });
+  };
 
   /**
    * The turn's images on the road its adapter declared, filesBlocked having already turned away what cannot go. An
@@ -7734,14 +7816,18 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (!factory) throw new Error(noAdapterLine(harness, Object.keys(adapters)));
     const kind = moduleOf(entry.record.kind);
     const vault = opts.vault?.() ?? {};
+    const place = setupPlace(entry);
+    const setup = place === undefined ? undefined : setups.launchOf(place, harness);
     return {
       harness,
       adapter: factory({
         machine: entry.machine,
         workspaceId: entry.record.id,
         execStream: execFactoryFor(entry, undefined, waiting),
-        home: id => kind.home(entry, id),
-        env: { ...servers, ...kind.env(entry, harness), ...turnEnv },
+        home: id => (place === undefined ? undefined : setups.get(place, id)?.configDir) ?? kind.home(entry, id),
+        // The person's variables over the computer's own and under the turn's, which only wsp sets.
+        env: { ...servers, ...kind.env(entry, harness), ...setup?.env, ...turnEnv },
+        ...(setup?.launch !== undefined ? { launch: setup.launch } : {}),
         ...((): { projectKey?: string } => {
           const key = kind.memoryKey(entry, harness);
           return key !== undefined ? { projectKey: key } : {};
@@ -8713,6 +8799,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const sessionsApi: Runtime["sessions"] = {
     async start(workspaceId, opened, origin) {
       await ready();
+      const prefs = preferencesHeld ?? (await preferences.get());
       // A start is known by its request id, so one sent again after the host stopped under it is the same message:
       // the host that took it answers with the turn it opened or joined, on a thread the caller reaches, and starts
       // nothing. The one rule every client's road back reads, so a restart neither drops a message nor runs it twice.
@@ -8748,14 +8835,16 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // thread runs at is then read off its record below, as a send that named none has always read it.
       const carried: Pick<ThreadRecord, "harness"> | undefined = opens ? undefined : (threadRecords.get(threadId) ?? latestOn(threadId));
       if (carried !== undefined && opened.harness !== undefined && opened.harness !== carried.harness) throw new Error(threadRunsOnLine(carried.harness, opened.harness));
-      // A start that names no agent runs the one the last thread on this project used, so the command line, the
-      // composer and a tool all open the next thread on the agent the work is being done with. A remembered agent
-      // this host has no adapter for drops through to the default, as a remembered access pick does: the memory is
-      // the project's and the adapters are this host's.
-      const heldProject = projectHeld(entry.record.project);
-      const remembered = heldProject.lastAgent !== undefined && adapters[heldProject.lastAgent] !== undefined ? heldProject.lastAgent : undefined;
-      const o = { ...opened, ...(carried !== undefined ? { harness: carried.harness } : opened.harness === undefined && remembered !== undefined ? { harness: remembered } : {}) };
-      if (carried !== undefined) delete o.permissionMode;
+      // A start that names no agent runs the project's, else the person's default, else the catalog's first, so the
+      // command line, the composer and a tool all open the next thread on the same agent.
+      const overrides = prefs.projectDefaults[entry.record.project];
+      const o = { ...opened, harness: carried?.harness ?? opened.harness ?? defaultAgentOf(prefs, entry) };
+      if (carried !== undefined) {
+        delete o.permissionMode;
+        delete o.access;
+      }
+      if (agentOff(entry, o.harness)) throw Object.assign(new Error(agentOffLine(agentLabel(o.harness), computerOf(entry))), { kind: "usage" });
+      await confineSetup(entry, o.harness);
       const refuse = (): void => {
         const refusal = sendRefusal(workspaceState({ phase: entry.record.phase }), entry.record.gone, entry.record.name);
         if (refusal !== null) throw new Error(refusal);
@@ -8923,16 +9012,19 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       let failure: string | undefined;
       try {
         const table = harnessCatalog(harness);
-        // Checked against the binary's own lists, the ones the composer shows for this workspace.
-        const catalog = table === undefined ? undefined : await catalogOn(table, entry, adapter);
-        // A remembered access, the thread's own then the workspace's, read against the list in front of us: this send
-        // may be on a harness whose modes are not the ones that pick belongs to, and a mode this one does not take is
-        // a pick that does not apply here, not a send to refuse. An access this send NAMED is still refused, by
-        // startPicks, in the same words.
-        const picked = o.permissionMode === undefined && catalog !== undefined ? await pickedAccess(workspaceId) : undefined;
+        // Checked against the binary's own lists, the ones the composer shows for this workspace, with the marks on
+        // what the person's defaults resolve to here, which startPicks fills in for anything this start leaves out.
+        const resolved = table === undefined ? undefined : defaultsOn(await catalogOn(table, entry, adapter), prefs, overrides);
+        const catalog = resolved?.catalog;
+        const named = o.permissionMode ?? (o.access === undefined ? undefined : namedMode(catalog, harness, o.access));
+        // The thread's own access, read against the list in front of us: a mode this harness does not take is a pick
+        // that does not apply here, not a send to refuse. An access this send NAMED is still refused, by startPicks.
         const picksFor = (session: string | undefined): StartPicks => {
-          const access = o.permissionMode ?? (catalog === undefined ? undefined : listedPick(catalog.permissionModes, accessOf(workspaceId, threadId, session) ?? picked));
-          return startPicks(catalog, { ...o, permissionMode: access }, session === undefined, session === undefined ? undefined : resumedFact(workspaceId, session, "model"));
+          const access = named ?? (catalog === undefined ? undefined : listedPick(catalog.permissionModes, accessOf(workspaceId, threadId, session)));
+          const open = session === undefined ? (resolved?.open ?? {}) : {};
+          const model = o.model ?? open.model;
+          const effort = o.effort ?? open.effort;
+          return startPicks(catalog, { ...o, ...(model !== undefined ? { model } : {}), ...(effort !== undefined ? { effort } : {}), permissionMode: access }, session === undefined, session === undefined ? undefined : resumedFact(workspaceId, session, "model"));
         };
         // A pick the lists do not carry is refused here, before this send waits on anything; the picks themselves
         // are decided below the loop, against the session this send turns out to resume.
@@ -9041,7 +9133,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         if (filesFolder !== undefined && !(record.filesIn ?? []).includes(filesFolder)) threadRecords.set(threadId, { ...record, filesIn: [...(record.filesIn ?? []), filesFolder] });
         launched();
         // The turn is running; what the record failed to remember must not read as a start that failed.
-        await rememberAgent(heldProject, harness).catch((e: unknown) => console.warn(`the agent for ${heldProject.name} was not remembered: ${e instanceof Error ? e.message : String(e)}`));
         if (resume === undefined) await rememberTarget(entry.record).catch((e: unknown) => console.warn(`last target for ${workspaceId} not remembered: ${e instanceof Error ? e.message : String(e)}`));
         return handle;
       } catch (e: unknown) {
@@ -9096,6 +9187,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           ...s.view,
           ...(s.view.status === "running" && s.pid !== undefined ? { pid: s.pid } : {}),
           ...(behind !== undefined ? { waitingOn: behind } : {}),
+          ...((): { setupRefusal?: string } => {
+            const entry = live.get(s.view.workspaceId);
+            const place = entry === undefined ? undefined : setupPlace(entry);
+            const refused = place === undefined ? undefined : setupRefusals.get(keyOf(place, s.view.harness));
+            return refused !== undefined ? { setupRefusal: refused } : {};
+          })(),
           // A turn that ended before the stamps began reads as seen the moment it ended, not at the upgrade, so the quiet
           // the sidebar folds a thread by still counts from its end.
           readAt: marks?.readAt ?? (s.view.endedAt !== undefined && s.view.endedAt < readsSince ? s.view.endedAt : readsSince),
@@ -9172,7 +9269,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (entry === undefined) return { outcome: "not-found" };
       const refusal = sendRefusal(workspaceState({ phase: entry.record.phase }), entry.record.gone, entry.record.name);
       if (refusal !== null) throw new Error(refusal);
-      const { harness, adapter } = adapterFor(entry, s.view.harness);
+      const { harness, adapter } = await launchAdapterFor(entry, s.view.harness);
       const table = harnessCatalog(harness);
       // Checked against the list the picker showed, so a mode this CLI does not take is refused in the same words a
       // start refuses it with rather than travelling to the machine as a request it will not answer.
@@ -9214,7 +9311,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const refusal = actionRefusal(workspaceState({ phase: entry.record.phase }), "rename", entry.record.gone, entry.record.name);
       if (refusal !== null) throw new Error(refusal);
       await copyBlocked(entry);
-      const write = adapterFor(entry, s.view.harness).adapter.renameSession;
+      const write = (await launchAdapterFor(entry, s.view.harness)).adapter.renameSession;
       if (write === undefined) return { outcome: "unsupported" };
       // The store is keyed by the harness's own id, so a thread whose harness never announced one has nothing to name.
       if (harnessSessionId === undefined) return { outcome: "no-session" };
@@ -9288,7 +9385,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const refusal = sendRefusal(workspaceState({ phase: entry.record.phase }), entry.record.gone);
       if (refusal !== null) throw new Error(refusal);
       const latest = s.view.threadId === undefined ? s.view : (latestOn(s.view.threadId) ?? s.view);
-      const { harness, adapter } = adapterFor(entry, latest.harness);
+      const { harness, adapter } = await launchAdapterFor(entry, latest.harness);
       if (adapter.aside === undefined) throw new Error(asideUnsupportedLine(harness));
       if (latest.claudeSessionId === undefined) throw new Error(ASIDE_NO_SESSION_LINE);
       const answer = await adapter.aside({
@@ -9388,7 +9485,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       };
       const kept = keptOf(order[at]!);
       const latest = latestOn(threadId) ?? rows[0]?.view;
-      const { harness, adapter } = adapterFor(entry, latest?.harness ?? held?.harness);
+      const { harness, adapter } = await launchAdapterFor(entry, latest?.harness ?? held?.harness);
       const agent = harnessCatalog(harness)?.label ?? harness;
       const files = opts.files === true;
       if (files && kept?.ref === undefined) throw conflict(REWIND_NO_CHECKPOINT_LINE);
@@ -10936,6 +11033,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     add: projectsDoor.add,
     seedPlan: projectsDoor.seedPlan,
     list: projectsDoor.list,
+    async defaults() {
+      const prefs = await preferences.get();
+      const runs = (id: string): boolean => adapters[id] !== undefined;
+      const catalogOf = (id: string): HarnessCatalog | undefined => {
+        const table = runs(id) ? harnessCatalog(id) : undefined;
+        return table === undefined ? undefined : withCustomModels(table, prefs.agentDefaults[id]?.models);
+      };
+      const firstAgent = CATALOG_AGENTS.find(a => runs(a.id))?.id ?? DEFAULT_AGENT.id;
+      const held = await projectsDoor.list();
+      return Object.fromEntries(held.map(p => [p.id, resolveThreadDefaults({ firstAgent, catalogOf, runs, prefs, ...(prefs.projectDefaults[p.id] !== undefined ? { project: prefs.projectDefaults[p.id] } : {}) })]));
+    },
     computers: projectsDoor.computers,
     resolve: projectsDoor.resolve,
     remove: projectsDoor.remove,
@@ -11285,12 +11393,43 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       return serverIconsLeftLine(homeShortened(icons.folder, homedir()), said);
     }
   };
+  /** Why a change to the defaults cannot stand: an agent this host runs no thread of, a project it does not hold, or
+   * an access word the agent it lands on maps to none of its modes, which is refused here rather than run looser. */
+  const defaultsRefusal = (patch: PreferencesPatch, next: Preferences): void => {
+    const usage = (line: string): Error => Object.assign(new Error(line), { kind: "usage" });
+    const agent = (id: string): void => {
+      if (adapters[id] === undefined) throw usage(noAdapterLine(id, Object.keys(adapters)));
+    };
+    const word = (id: string, access: AccessChoice | null | undefined): void => {
+      const table = harnessCatalog(id);
+      const said = access == null ? null : accessRefusal(table ?? { label: agentLabel(id), permissionModes: [] }, access);
+      if (said !== null) throw usage(said);
+    };
+    if (patch.defaultAgent != null) agent(patch.defaultAgent);
+    for (const [id, set] of Object.entries(patch.agentDefaults ?? {})) {
+      if (set === null) continue;
+      agent(id);
+      word(id, set.access);
+    }
+    for (const [projectId, set] of Object.entries(patch.projectDefaults ?? {})) {
+      if (set === null) continue;
+      if (!projectsHeld.has(projectId)) throw usage(bareNoSuchProjectLine(projectId));
+      if (set.agent != null) agent(set.agent);
+      const kept = next.projectDefaults[projectId];
+      word(kept?.agent ?? defaultAgentOf(next, undefined), set.access);
+    }
+  };
+  /** The record as last read or written, so a start reads the defaults without a trip to the store. */
+  let preferencesHeld: Preferences | undefined;
   const preferences: Runtime["preferences"] = {
-    get: async () => ({ ...preferencesFrom(await store.get(PREFERENCES, PREFERENCES_ID)), labs }),
+    get: async () => (preferencesHeld ??= { ...preferencesFrom(await store.get(PREFERENCES, PREFERENCES_ID)), labs }),
     set: patch => {
       const write = preferenceWrites.then(async () => {
+        await ready();
         const next = applyPreferencesPatch(await preferences.get(), patch);
+        defaultsRefusal(patch, next);
         await store.put(PREFERENCES, PREFERENCES_ID, next);
+        preferencesHeld = next;
         const notice = patch.serverIcons === false ? iconsForgotten() : undefined;
         bus.emit({ type: "preferences.changed", preferences: next });
         return notice === undefined ? { preferences: next } : { preferences: next, notice };
@@ -11327,6 +11466,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       return onLink;
     },
     changed: target => bus.emit({ type: "agents.changed", ...(target !== undefined ? { target } : {}) }),
+    setupOf: (placeId, agent) => (adapters[agent] === undefined ? undefined : setupView(setups.get(placeId, agent))),
+    setupWrite: async (placeId, agent, change) => {
+      if (adapters[agent] === undefined) throw Object.assign(new Error(noAdapterLine(agent, Object.keys(adapters))), { kind: "usage" });
+      await setups.set(placeId, agent, change, { folder: path => configFolderOn(placeId, path), agentName: agentLabel(agent) });
+      setupRefusals.delete(keyOf(placeId, agent));
+    },
     relayed: () => backend.capabilities.callbackRelay,
     now: () => clock.now(),
   });
@@ -11365,14 +11510,22 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
     harnesses: {
       list: async (workspaceId, origin) => {
-        // Only a harness with an adapter can run a turn; the rest of the table waits for one.
-        const table = HARNESS_CATALOGS.filter(c => c.harness in adapters);
-        if (workspaceId === undefined) return table.map(markDefault);
-        const entry = await entryOf(workspaceId, origin);
+        const prefs = await preferences.get();
+        const entry = workspaceId === undefined ? undefined : await entryOf(workspaceId, origin);
+        // Only a harness with an adapter can run a turn, and one the person turned off on that computer runs none
+        // there; the rest of the table waits.
+        const table = HARNESS_CATALOGS.filter(c => c.harness in adapters && (entry === undefined || !agentOff(entry, c.harness)));
         // A record answers what its threads start at whether or not its machine is up; only the rest of the lists
         // waits on the binary, so a picker on a paused workspace still reads the access its next thread would run.
-        if (entry.record.phase !== "running") return table.map(c => markDefault(workspaceAccess(c, entry.record.kind)));
-        return Promise.all(table.map(c => catalogOn(c, entry, adapterFor(entry, c.harness).adapter).then(markDefault)));
+        // An agent whose kept config folder is refused, or cannot be read there, answers with why instead of its lists.
+        const listsOn = async (c: HarnessCatalog, on: LiveWorkspace): Promise<HarnessCatalog> => {
+          const refusal = await setupRefusal(on, c.harness).catch((e: unknown) => (e instanceof Error ? e.message : String(e)));
+          return refusal !== null ? { ...c, refusal } : catalogOn(c, on, adapterFor(on, c.harness).adapter);
+        };
+        const lists = entry === undefined || entry.record.phase !== "running" ? table : await Promise.all(table.map(c => listsOn(c, entry)));
+        const project = entry === undefined ? undefined : prefs.projectDefaults[entry.record.project];
+        const agent = defaultAgentOf(prefs, entry);
+        return lists.map(c => ({ ...shapeModels(defaultsOn(c, prefs, project).catalog, prefs.agentDefaults[c.harness]?.models), ...(c.harness === agent ? { isDefault: true } : {}) }));
       },
     },
     golden,

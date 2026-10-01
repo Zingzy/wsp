@@ -270,6 +270,8 @@ export function createUsageLedger(o: { store: Store; clock: Clock; timeZone?: st
     });
 
   const used = async (q: UsedQuery): Promise<UsedAnswer> => {
+    // The writes already asked for land first, so a turn's rows are read the moment its end is.
+    await writes;
     const now = o.clock.now();
     const today = dayStartOf(now, zone);
     const count = RANGE_DAYS[q.range];

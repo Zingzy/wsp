@@ -4,17 +4,18 @@
 // model as its provider/id on a line of its own and its JSON on the lines
 // under it, with the variants --variant takes. Measured on 1.18.18 under an
 // empty home: the free models it serves with no sign-in are listed, in 2.4 s.
-import { shellQuote } from "@wsp/protocol";
-import type { HarnessCatalogAnswer, HarnessCatalogModelProbe } from "@wsp/protocol";
+import { programWord, shellQuote } from "@wsp/protocol";
+import type { AgentLaunch, HarnessCatalogAnswer, HarnessCatalogModelProbe } from "@wsp/protocol";
 import { AUTO_MODE } from "./command.js";
 
 const SEP = "__WSP_CATALOG_SEP__";
 const MODEL_LINE = /^[A-Za-z0-9][\w.-]*\/\S+$/;
 
 /** The login PATH rides the line, since a host with a bare one would find no opencode. */
-export function catalogProbeCommand(options: { baseEnv?: Readonly<Record<string, string | undefined>> }): string {
+export function catalogProbeCommand(options: { baseEnv?: Readonly<Record<string, string | undefined>>; launch?: AgentLaunch }): string {
+  const opencode = programWord("opencode", options.launch);
   const path = options.baseEnv?.["PATH"];
-  return `cd ~ && ${path === undefined ? "" : `export PATH=${shellQuote(path)}; `}opencode --version; echo ${SEP}; opencode models --verbose`;
+  return `cd ~ && ${path === undefined ? "" : `export PATH=${shellQuote(path)}; `}${opencode} --version; echo ${SEP}; ${opencode} models --verbose`;
 }
 
 function rec(value: unknown): Record<string, unknown> | undefined {

@@ -67,6 +67,8 @@ struct Session {
     #[serde(default)]
     waiting_on: Option<Box<RawValue>>,
     #[serde(default)]
+    setup_refusal: Option<String>,
+    #[serde(default)]
     pid: Option<Box<RawValue>>,
     #[serde(default)]
     read_at: Option<Box<RawValue>>,
@@ -117,6 +119,8 @@ pub struct Thread {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(test, schemars(with = "Option<serde_json::Map<String, serde_json::Value>>"))]
     pub waiting_on: Option<Box<RawValue>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub setup_refusal: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(test, schemars(with = "Option<i64>"))]
     pub pid: Option<Box<RawValue>>,
@@ -252,6 +256,7 @@ fn fold(sessions: Vec<Session>) -> Vec<Thread> {
                 cwd: latest.cwd,
                 asking: latest.asking,
                 waiting_on: latest.waiting_on,
+                setup_refusal: latest.setup_refusal,
                 pid: latest.pid,
                 read_at: latest.read_at,
                 settled_at: latest.settled_at,

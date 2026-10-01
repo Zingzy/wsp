@@ -4,7 +4,8 @@
 // ops a person's own socket reaches. The signatures here are real ed25519
 // ones, so what the door verifies is what a place would send.
 import { createHash, createPrivateKey, randomBytes, randomUUID, sign } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as joinPath } from "node:path";
 import { connect as netConnect } from "node:net";
@@ -145,13 +146,13 @@ const report = (name = "old-macbook", over: Partial<PlaceReport> = {}): PlaceRep
   ...over,
 });
 
-async function serving(opts: { provider?: { id: string; rateUsdPerHour: number }; store?: Store; relinkWaitMs?: number; update?: PlaceUpdater; updateWaitMs?: number; leave?: PlaceLeaver; vault?: Record<string, string>; folders?: HostFolders; agentsReader?: AgentsReader; agentsActs?: AgentsActs; skillsActs?: SkillsActs; serversActs?: ServersActs; serverIcons?: ServerIcons } = {}, serve: { log?: (line: string) => void } = {}): Promise<{ hostKey: PlaceKeyPair; store: Store }> {
+async function serving(opts: { provider?: { id: string; rateUsdPerHour: number }; store?: Store; relinkWaitMs?: number; update?: PlaceUpdater; updateWaitMs?: number; leave?: PlaceLeaver; vault?: Record<string, string>; folders?: HostFolders; agentsReader?: AgentsReader; agentsActs?: AgentsActs; skillsActs?: SkillsActs; serversActs?: ServersActs; serverIcons?: ServerIcons; adapters?: Record<string, HarnessAdapterFactory> } = {}, serve: { log?: (line: string) => void } = {}): Promise<{ hostKey: PlaceKeyPair; store: Store }> {
   const store = opts.store ?? memoryStore();
   const hostKey = newPlaceKeyPair();
   runtime = createRuntime({
     backend: stubBackend(),
     store,
-    adapters: {},
+    adapters: opts.adapters ?? {},
     ...(opts.vault === undefined ? {} : { vault: () => opts.vault! }),
     ...(opts.agentsReader === undefined ? {} : { agentsReader: opts.agentsReader }),
     ...(opts.agentsActs === undefined ? {} : { agentsActs: opts.agentsActs }),
@@ -4940,6 +4941,97 @@ describe("the agents on a computer you own", () => {
     expect(said).toEqual(["maya"]);
     expect((await c.request("agents.read", { target: { placeId: HERE_PLACE_ID } })).ok).toBe(true);
     expect(asked.at(-1)).toEqual({ kind: "here", projects: [] });
+  });
+
+  it("keep an agent's config folder under that computer's own home, read on that computer with its links followed", async () => {
+    const boxHome = mkdtempSync(joinPath(tmpdir(), "wsp-box-home-"));
+    try {
+      symlinkSync(tmpdir(), joinPath(boxHome, "out"));
+      mkdirSync(joinPath(boxHome, ".wsp"));
+      const idle: HarnessAdapterFactory = () => ({ steers: false, start: () => ({ localId: "s", finished: new Promise(() => {}), interrupt: async () => {} }) });
+      const claude = { id: "claude", name: "Claude Code", installed: true, road: "own" as const, signIn: "signed-in" as const, signInRoad: "device" as const, wspTools: false };
+      const reader: AgentsReader = { read: async () => ({ ...READ, agents: [claude] }), tools: async () => ({ auth: "open", readAt: "2026-10-01T12:00:00.000Z" }) };
+      const { hostKey, store } = await serving({ agentsReader: reader, vault: {}, adapters: { claude: idle } });
+      const { client, placeId } = await join(hostKey, {
+        code: await code(),
+        name: "srv",
+        report: report("srv", { daemonVersion: DAEMON_VERSION }),
+        answers: c =>
+          c.onFrame(raw => {
+            const frame = raw as unknown as Record<string, unknown>;
+            if (frame["op"] !== "exec") return;
+            // The box runs the line in its own shell, under its own home.
+            const stdout = execFileSync("/bin/bash", ["-c", String(frame["cmd"])], { env: { HOME: boxHome, PATH: "/usr/bin:/bin" }, encoding: "utf8" });
+            c.say({ id: frame["id"], ok: true, exitCode: 0, stdout, stderr: "", truncated: false });
+          }),
+      });
+      sockets.push(client.ws);
+      const c = await WsClient.connect(srv!.port, { token: "host-token" });
+      sockets.push(c.ws);
+      for (const dir of ["/tmp/x", "/etc/x", `${boxHome}/../x`, joinPath(boxHome, "out", "x"), joinPath(boxHome, ".wsp", "c"), boxHome]) {
+        const refused = await c.request("agents.setup", { placeId, agent: "claude", configDir: dir });
+        expect(refused, dir).toMatchObject({ ok: false, kind: "usage" });
+      }
+      expect(await store.list("agentSetups")).toEqual([]);
+      const kept = await c.request("agents.setup", { placeId, agent: "claude", configDir: joinPath(boxHome, "claude-wsp") });
+      expect(kept, String(kept["error"])).toMatchObject({ ok: true });
+    } finally {
+      rmSync(boxHome, { recursive: true, force: true });
+    }
+  });
+
+  it("read an agent's config folder again on that computer before each launch there, and refuse one that now leads out of its home", async () => {
+    const boxHome = mkdtempSync(joinPath(tmpdir(), "wsp-box-home-"));
+    const outside = mkdtempSync(joinPath(tmpdir(), "wsp-outside-"));
+    try {
+      mkdirSync(joinPath(boxHome, "real"));
+      const starts: string[] = [];
+      const factory: HarnessAdapterFactory = ctx => ({
+        steers: false,
+        start: ({ onEvent }) => {
+          starts.push(ctx.home("claude") ?? "");
+          const result: TurnResult = { status: "completed", text: "ok" };
+          onEvent({ type: "session.start", sessionId: randomUUID() });
+          onEvent({ type: "turn.done", sessionId: "s", result });
+          return { localId: "s", finished: Promise.resolve(result), interrupt: async () => {} };
+        },
+      });
+      const claude = { id: "claude", name: "Claude Code", installed: true, road: "own" as const, signIn: "signed-in" as const, signInRoad: "device" as const, wspTools: false };
+      const reader: AgentsReader = { read: async () => ({ ...READ, agents: [claude] }), tools: async () => ({ auth: "open", readAt: "2026-10-01T12:00:00.000Z" }) };
+      const hostKey = newPlaceKeyPair();
+      runtime = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: factory }, placeLinks: wiring(hostKey), agentsReader: reader });
+      srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+      const { client, placeId } = await join(hostKey, {
+        code: await code(),
+        report: report("srv", { agents: ["claude"] }),
+        answers: c => {
+          forks(c, undefined, undefined, KEEPS_NO_IMAGE).swallow.add("exec");
+          c.onFrame(raw => {
+            const frame = raw as unknown as Record<string, unknown>;
+            if (frame["op"] !== "exec") return;
+            const stdout = execFileSync("/bin/bash", ["-c", String(frame["cmd"])], { env: { HOME: boxHome, PATH: "/usr/bin:/bin" }, encoding: "utf8" });
+            c.say({ id: frame["id"], ok: true, exitCode: 0, stdout, stderr: "", truncated: false });
+          });
+        },
+      });
+      sockets.push(client.ws);
+      const ws = await createOn(runtime, { name: "x", on: "srv" });
+      const kept = joinPath(realpathSync(boxHome), "real", "c");
+      symlinkSync(joinPath(boxHome, "real"), joinPath(boxHome, "in"));
+      expect((await runtime.agents.setup(placeId, "claude", { configDir: joinPath(boxHome, "in", "c") })).setup?.configDir).toBe(kept);
+      await (await runtime.sessions.start(ws.id, { prompt: "one", harness: "claude" })).finished;
+      expect(starts).toEqual([kept]);
+      rmSync(joinPath(boxHome, "real"), { recursive: true });
+      symlinkSync(outside, joinPath(boxHome, "real"));
+      await expect(runtime.sessions.start(ws.id, { prompt: "two", harness: "claude" })).rejects.toMatchObject({ kind: "usage", message: expect.stringContaining(`Claude Code does not start with its config folder ${kept}: Claude Code's config folder has to be under the home folder ${realpathSync(boxHome)}`) });
+      expect(starts).toHaveLength(1);
+      const row = (await runtime.sessions.list(ws.id))[0]!;
+      await expect(runtime.sessions.rename(row.id, "named")).rejects.toMatchObject({ kind: "usage", message: expect.stringContaining(`Claude Code does not start with its config folder ${kept}`) });
+      expect((await runtime.harnesses.list(ws.id)).find(c => c.harness === "claude")?.refusal).toContain(`Claude Code does not start with its config folder ${kept}`);
+    } finally {
+      rmSync(boxHome, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
   });
 
   it("hand one server's tools ask to the reader over that computer's link, its stdin riding the frame, and refuse it on a ticket", async () => {

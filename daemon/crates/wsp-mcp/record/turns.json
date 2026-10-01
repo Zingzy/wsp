@@ -91,7 +91,17 @@
     "noFast": "{model} has no fast mode; pick a model that offers it, or send without it",
     "refused": "{said}. Drop the flag, or give it a value the agent offers.",
     "builtInList": "; that list is wsp's built-in one, since no agent on that workspace described itself, and the agent on its machine may take more",
-    "builtInTable": "; wsp's built-in table says so, since no agent on that workspace described itself"
+    "builtInTable": "; wsp's built-in table says so, since no agent on that workspace described itself",
+    "accessWords": "--access takes ask, auto-edit, full or plan, and got {given}. Name one of those; which of its own modes each one is, is the agent's row's to say.",
+    "accessNotTaken": "{label} takes no {word} access; it takes {takes}",
+    "noAccessWords": "{label} takes no access of wsp's words",
+    "accessRefused": "{said}. Name one it takes, or drop --access.",
+    "accessChoices": [
+      "ask",
+      "auto-edit",
+      "full",
+      "plan"
+    ]
   },
   "noThreadTarget": "workspace is needed outside a repo: run from inside a repo one of the workspaces holds, or name the workspace. Run wsp workspaces to read the names.",
   "guestNamesWorkspace": "a line from a workspace names the workspace it means, since the folder it was typed in is not one this host can read. Name the workspace on the line.",

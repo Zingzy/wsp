@@ -183,13 +183,13 @@ describe("what a workspace's kind changes about its words", () => {
   it("a machine wsp drives has a state, a bill and an image; this computer has none of the three and its row reads its own size", () => {
     // access is what a thread here runs at when nobody names one: a fork costs a rebuild and nothing else, and this
     // computer is the person's own, so both run every action; the computers somebody owns and works on ask first.
-    expect(kindWords("cloud")).toEqual({ machine: MACHINE_WSP_FORKS, rowReadsMachine: true, cpu: "vCPU", where: "a provider", driven: true, daemon: true, metrics: "daemon", processes: "daemon", projectSources: ["git", "github", "gitlab", "folder"], copiesFolder: false, agents: true, onDelete: { asked: "computer is deleted in the cloud", done: expect.any(Function) }, panel: "Where it runs, its projects and what it costs.", access: "bypass" });
+    expect(kindWords("cloud")).toEqual({ machine: MACHINE_WSP_FORKS, rowReadsMachine: true, cpu: "vCPU", where: "a provider", driven: true, daemon: true, metrics: "daemon", processes: "daemon", projectSources: ["git", "github", "gitlab", "folder"], copiesFolder: false, agents: true, onDelete: { asked: "computer is deleted in the cloud", done: expect.any(Function) }, panel: "Where it runs, its projects and what it costs." });
     // This computer's load is read where it runs, in the host's own process, so its Live rows stand whether or not
     // the daemon its terminal and its processes ride ever started. A folder is
     // already on this computer, so an import registers its path and copies nothing, and a repo is cloned into a
     // folder the person names and worked there. Its row's second line is its
     // cores and memory in the size line a fork's row reads, in its own word for a cpu, since its cores are not virtual.
-    expect(kindWords("local")).toEqual({ machine: THIS_COMPUTER, rowReadsMachine: true, cpu: "cores", where: THIS_COMPUTER, driven: false, daemon: true, metrics: "host", processes: "daemon", projectSources: ["git", "github", "gitlab", "folder"], copiesFolder: true, agents: true, onDelete: { asked: "computer is left as it is", done: expect.any(Function) }, panel: "What this Mac is running, its projects and how it is doing.", access: "bypass" });
+    expect(kindWords("local")).toEqual({ machine: THIS_COMPUTER, rowReadsMachine: true, cpu: "cores", where: THIS_COMPUTER, driven: false, daemon: true, metrics: "host", processes: "daemon", projectSources: ["git", "github", "gitlab", "folder"], copiesFolder: true, agents: true, onDelete: { asked: "computer is left as it is", done: expect.any(Function) }, panel: "What this Mac is running, its projects and how it is doing." });
     // The machines wsp forks and this computer run agents that drive this host, each over its own road.
     expect(agentsMayDrive("cloud")).toBe(true);
     expect(agentsMayDrive("local")).toBe(true);

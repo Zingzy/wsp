@@ -233,6 +233,16 @@ const LISTS_ON_THE_COMMAND_LINE: Record<string, string> = {
   "skills add agent": "--agent",
   "servers add env": "--env",
   "servers add header": "--header",
+  "agents set hide": "--hide",
+  "agents set show": "--show",
+  "agents set order": "the models are one comma-joined value of --order",
+  "agents set add_model": "--add-model",
+  "agents set drop_model": "--drop-model",
+  "agents set reset": "--reset",
+  "agents setup args": "--arg",
+  "agents setup unset_env": "--unset-env",
+  "agents setup reset": "--reset",
+  "projects set reset": "--reset",
 };
 
 describe("the command line, the MCP tools and the skill are one contract", () => {

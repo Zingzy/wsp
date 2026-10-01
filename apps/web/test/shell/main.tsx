@@ -58,7 +58,7 @@
 // workspace-line rule, so only the running one is said.
 import { useEffect } from "react";
 import { createRoot } from "react-dom/client";
-import { DAEMON_UPDATING, DEFAULT_PREFERENCES, DEFAULT_THEME, DESKTOP_MAC_CLASS, GOLDEN_STAGE_WORDS, SIGN_IN_OPEN_STATE, workspaceAccess, THEME_PRESETS, vaultOverCapLine, type HarnessCatalog, type SessionEvent, type SessionView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
+import { DAEMON_UPDATING, DEFAULT_PREFERENCES, DEFAULT_THEME, DESKTOP_MAC_CLASS, GOLDEN_STAGE_WORDS, SIGN_IN_OPEN_STATE, THEME_PRESETS, vaultOverCapLine, type HarnessCatalog, type SessionEvent, type SessionView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
 import { statusOf } from "../workspace-status";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import type { Api, ProtocolEvent } from "../../src/protocol/client";
@@ -164,9 +164,7 @@ const sessions: SessionView[] = [
 // Two agents the composer can start a thread on, so its picker draws a coloured mark and a monochrome one. Codex
 // carries the effort lists its app-server reports, each model with the effort that model runs at, so the effort
 // picker draws its default against a pick rather than against the binary.
-// The access modes are the CLI's own list, and workspaceAccess turns it into the list the runtime hands out for a
-// workspace on this computer: the mode a thread here starts at marked, and bypass named after the machine it would
-// touch. One list serves every workspace here, which is what a fixture can do; the runtime decides per workspace.
+// The access modes are the CLI's own list as the runtime hands it out, the mode a new thread starts at marked.
 const ACCESS_MODES = [
   { value: "default", label: "Default", description: "Asks in the chat about each action that needs permission" },
   { value: "acceptEdits", label: "Accept edits", description: "Edits files without asking; asks about commands that need permission" },
@@ -179,34 +177,31 @@ const CLAUDE_EFFORTS = ["Low", "Medium", "High", "Extra high", "Max"].map(label 
 const CLAUDE_CONTEXT_WINDOWS = [{ value: "200k", label: "200k" }, { value: "1m", label: "1M", isDefault: true }];
 
 const catalogs: HarnessCatalog[] = [
-  workspaceAccess(
-    {
-      harness: "claude",
-      label: "Claude Code",
-      source: "harness",
-      version: "2.1.257",
-      models: [{ value: "claude-opus-5", label: "Opus 5", isDefault: true, contextWindows: efforts ? ["200k", "1m"] : [] }],
-      efforts: efforts ? CLAUDE_EFFORTS : [],
-      contextWindows: efforts ? CLAUDE_CONTEXT_WINDOWS : [],
-      permissionModes: ACCESS_MODES,
-      steers: true,
-      renames: true,
-      images: true,
-      movesAccess: true,
-      keptMode: "default",
-      bypassMode: "bypassPermissions",
-      // The CLI's own screens, as the runtime's table names them; the chat replay announces them beside the rest.
-      screenCommands: [
-        { name: "login", control: "sign-in" },
-        { name: "logout", control: "sign-in" },
-        { name: "model", control: "model" },
-        { name: "permissions", control: "access" },
-        { name: "config", control: "settings" },
-        { name: "help", control: "docs" },
-      ],
-    },
-    "local",
-  ),
+  {
+    harness: "claude",
+    label: "Claude Code",
+    source: "harness",
+    version: "2.1.257",
+    models: [{ value: "claude-opus-5", label: "Opus 5", isDefault: true, contextWindows: efforts ? ["200k", "1m"] : [] }],
+    efforts: efforts ? CLAUDE_EFFORTS : [],
+    contextWindows: efforts ? CLAUDE_CONTEXT_WINDOWS : [],
+    permissionModes: ACCESS_MODES.map(o => (o.value === "bypassPermissions" ? { ...o, isDefault: true } : o)),
+    steers: true,
+    renames: true,
+    images: true,
+    movesAccess: true,
+    access: { ask: "default", "auto-edit": "acceptEdits", full: "bypassPermissions" },
+    bypassMode: "bypassPermissions",
+    // The CLI's own screens, as the runtime's table names them; the chat replay announces them beside the rest.
+    screenCommands: [
+      { name: "login", control: "sign-in" },
+      { name: "logout", control: "sign-in" },
+      { name: "model", control: "model" },
+      { name: "permissions", control: "access" },
+      { name: "config", control: "settings" },
+      { name: "help", control: "docs" },
+    ],
+  },
   {
     harness: "codex",
     label: "Codex",

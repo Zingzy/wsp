@@ -283,6 +283,10 @@ describe("catalog", () => {
       expect(smokeOf(a)).toBe(`${a.bin} --version`);
     }
     expect(CATALOG_AGENTS.filter(a => a.guestStateHome !== undefined).map(a => [a.id, a.guestStateHome])).toEqual([["claude", "/root/.claude-cfg"]]);
+    // The variable a person's config folder for that agent is laid in as; an agent with none takes no config folder.
+    expect(CATALOG_AGENTS.filter(a => a.stateHomeEnv !== undefined).map(a => [a.id, a.stateHomeEnv])).toEqual([["claude", "CLAUDE_CONFIG_DIR"], ["codex", "CODEX_HOME"]]);
+    // The update an agent's row answers is the vendor's own command, shown to the person and never run by wsp.
+    expect(CATALOG_AGENTS.filter(a => a.updateLine !== undefined).map(a => [a.id, a.updateLine])).toEqual([["claude", "claude update"], ["codex", "npm i -g @openai/codex@latest"], ["opencode", "opencode upgrade"]]);
     expect(installLine(catalogEntry("codex")!)).toBe("npm install -g @openai/codex@0.155.1");
     expect(installLine(catalogEntry("pi")!)).toBe("npm install -g --ignore-scripts @earendil-works/pi-coding-agent@0.84.4");
     expect(installLine(catalogEntry("claude")!)).toBe(catalog.CLAUDE_INSTALL);

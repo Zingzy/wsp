@@ -156,6 +156,24 @@ describe("the agents report off this computer and off a workspace", () => {
     expect(off.agents.some(a => a.latest !== undefined)).toBe(false);
   });
 
+  it("an agent older than its vendor's newest carries the vendor's update command, and one current or not installed carries none", async () => {
+    const at = fixture();
+    const read = await agentsReader({ vault: () => ({}), here: () => here(at), latest: async () => ({ claude: "2.1.290", codex: "0.155.1", pi: "0.85.0" }) }).read({ kind: "here" });
+    const agent = (id: string) => read.agents.find(a => a.id === id)!;
+    expect(agent("claude").update).toEqual({ to: "2.1.290", command: "claude update" });
+    expect(agent("codex").update).toBeUndefined();
+    expect(agent("pi").update).toBeUndefined();
+  });
+
+  it("names how a login stands in the status command's own words, and holds no value", async () => {
+    const at = fixture();
+    const read = await agentsReader({ vault: () => ({ OPENAI_API_KEY: "sk-x" }), here: () => here(at) }).read({ kind: "here" });
+    const agent = (id: string) => read.agents.find(a => a.id === id)!;
+    expect(agent("claude").signInDetail).toBe("OAuth credentials");
+    expect(agent("codex").signInDetail).toBeUndefined();
+    expect(JSON.stringify(read)).not.toContain("sk-x");
+  });
+
   it("reads past a wrapper another app put first on the PATH to the binary behind it, and names the app", async () => {
     const at = fixture();
     const shims = join(at.root, "T", "cmux-cli-shims");

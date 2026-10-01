@@ -33,6 +33,7 @@ import {
   PAIR_CODE_TTL_MS,
   PAIR_ISSUE_REFUSAL,
   AGENTS_KEY_REFUSAL,
+  ENV_VALUE_REFUSAL,
   DEVICE_ACCOUNT_UNSERVED,
   DEVICE_AUTH_REFUSAL,
   DEVICE_REVOKED_REFUSAL,
@@ -1330,6 +1331,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "projects.list":
               send({ id: msg.id, ok: true, projects: await rt.projects.list(origin) });
               return;
+            case "projects.defaults":
+              send({ id: msg.id, ok: true, defaults: await rt.projects.defaults(origin) });
+              return;
             case "projects.resolve":
               send({ id: msg.id, ok: true, project: await rt.projects.resolve(msg.ref, origin) });
               return;
@@ -1441,6 +1445,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 ...(msg.model !== undefined ? { model: msg.model } : {}),
                 ...(msg.effort !== undefined ? { effort: msg.effort } : {}),
                 ...(msg.permissionMode !== undefined ? { permissionMode: msg.permissionMode } : {}),
+                ...(msg.access !== undefined ? { access: msg.access } : {}),
                 ...(msg.contextWindow !== undefined ? { contextWindow: msg.contextWindow } : {}),
                 ...(msg.fast !== undefined ? { fast: msg.fast } : {}),
                 ...(msg.startedBy !== undefined ? { startedBy: msg.startedBy } : {}),
@@ -1752,6 +1757,21 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               await rt.agents.key(msg.agent, msg.key);
               send({ id: msg.id, ok: true });
               return;
+            case "agents.setup": {
+              // How an agent runs on one of the person's computers is theirs alone, and a variable's value crosses only
+              // from a socket holding this host's own token, as a key into the vault does.
+              if (!ownRoad()) {
+                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
+                return;
+              }
+              const { id: _id, op: _op, placeId, agent, ...change } = msg;
+              if (me?.kind !== "host" && Object.values(change.env ?? {}).some(value => value !== null)) {
+                send({ id: msg.id, ok: false, error: ENV_VALUE_REFUSAL });
+                return;
+              }
+              send({ id: msg.id, ok: true, agent: await rt.agents.setup(placeId, agent, change, origin) });
+              return;
+            }
             case "agents.addTools":
               if (!ownRoad()) {
                 send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });

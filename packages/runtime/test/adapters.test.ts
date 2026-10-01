@@ -52,9 +52,9 @@ describe("the agents wsp can open a thread on", () => {
     const opencode = HARNESS_CATALOGS.find(c => c.harness === "opencode")!;
     expect(opencode.permissionModes.map(m => m.value)).toEqual(["auto"]);
     expect(opencode.permissionModes[0]!.description).toMatch(/^Runs every action without asking.*nobody to ask$/);
-    expect([opencode.keptMode, opencode.bypassMode]).toEqual(["auto", "auto"]);
+    expect([opencode.access, opencode.bypassMode]).toEqual([{ full: "auto" }, "auto"]);
     const cursor = HARNESS_CATALOGS.find(c => c.harness === "cursor")!;
-    expect(cursor).toMatchObject({ label: "Cursor", models: [], keptMode: "default", bypassMode: "force" });
+    expect(cursor).toMatchObject({ label: "Cursor", models: [], access: { full: "force", plan: "default" }, bypassMode: "force" });
     expect(cursor.permissionModes.map(m => m.value)).toEqual(["default", "force"]);
     for (const id of ["opencode", "cursor"] as const) expect(HARNESS_ADAPTERS[id]({ ...ctx, vault: {} }).steers, id).toBe(false);
     // The key the vault holds for Cursor rides the turn's environment under the variable its row names, and only where no login stands.

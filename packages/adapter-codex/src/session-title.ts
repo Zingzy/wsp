@@ -7,8 +7,8 @@
 // it has one, and a rename from here writes that same column. Measured on
 // codex-cli 0.153.0 against state_5.sqlite.
 
-import { generatedTitle, inFolder, shellQuote } from "@wsp/protocol";
-import type { SessionRenameWrite } from "@wsp/protocol";
+import { generatedTitle, inFolder, programWord, shellQuote } from "@wsp/protocol";
+import type { AgentLaunch, SessionRenameWrite } from "@wsp/protocol";
 import { buildEnv, slug } from "./command.js";
 
 const PROMPT_END = "WSP_PROMPT_END";
@@ -58,28 +58,28 @@ export function parseSessionTitle(stdout: string): string | null {
  * since a one-shot answer needs none of the app server's channel. It runs read-only rather than with the sandbox off, since the answer is one line of words and nothing it could write
  * belongs to the thread it names, and under the same CODEX_HOME as a session, which a guest exec would not carry.
  */
-export function titleForCommand(options: { home: string; prompt: string; model?: string; baseEnv?: Readonly<Record<string, string | undefined>> }): string {
+export function titleForCommand(options: { home: string; prompt: string; model?: string; baseEnv?: Readonly<Record<string, string | undefined>>; launch?: AgentLaunch }): string {
   const env = buildEnv({ base: options.baseEnv, home: options.home });
   const exports = Object.entries(env).map(([k, v]) => `${k}=${shellQuote(v)}`).join(" ");
   if (options.prompt.split("\n").includes(PROMPT_END)) throw new Error(`the prompt has a line that reads ${PROMPT_END}, which ends the prompt`);
   // The question rides a quoted heredoc on stdin, read by the `-` that ends the flags; the heredoc also closes stdin,
   // which codex exec otherwise waits on when it is not a terminal.
-  return `export ${exports}; ${inFolder(undefined, `${questionLine(options.model)} <<'${PROMPT_END}'\n${options.prompt}\n${PROMPT_END}`)}`;
+  return `export ${exports}; ${inFolder(undefined, `${questionLine(options.model, options.launch)} <<'${PROMPT_END}'\n${options.prompt}\n${PROMPT_END}`)}`;
 }
 
 /** The one-shot question a title and a draft both ask: read-only, no approval asked, on the question from stdin. */
-const questionLine = (model?: string): string =>
-  `codex exec --json --skip-git-repo-check -c sandbox_mode='"read-only"' -c approval_policy='"never"'${model === undefined ? "" : ` -m ${slug("model", model)}`} -`;
+const questionLine = (model: string | undefined, launch: AgentLaunch | undefined): string =>
+  `${programWord("codex", launch)} exec --json --skip-git-repo-check -c sandbox_mode='"read-only"' -c approval_policy='"never"'${model === undefined ? "" : ` -m ${slug("model", model)}`} -`;
 
 /**
  * One shell line for the guest that asks the CLI for a commit message: the one-shot turn the title asks, read-only and
  * under the session's CODEX_HOME, on the question in the file the runtime put on the machine, since a diff is longer
  * than any command line may be.
  */
-export function draftForCommand(options: { home: string; promptFile: string; model?: string; baseEnv?: Readonly<Record<string, string | undefined>> }): string {
+export function draftForCommand(options: { home: string; promptFile: string; model?: string; baseEnv?: Readonly<Record<string, string | undefined>>; launch?: AgentLaunch }): string {
   const env = buildEnv({ base: options.baseEnv, home: options.home });
   const exports = Object.entries(env).map(([k, v]) => `${k}=${shellQuote(v)}`).join(" ");
-  return `export ${exports}; ${inFolder(undefined, `${questionLine(options.model)} < ${shellQuote(options.promptFile)}`)}`;
+  return `export ${exports}; ${inFolder(undefined, `${questionLine(options.model, options.launch)} < ${shellQuote(options.promptFile)}`)}`;
 }
 
 /** The message out of the turn's events: the last agent message whole; null when the turn failed or said nothing. */

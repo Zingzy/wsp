@@ -127,6 +127,9 @@ fn started_lines(done: &StartOut) -> Result<String, Refused> {
 async fn start(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     let StartIn { link, project, agent, model, effort, access } = input(START_NAME, arguments)?;
     let client = host.client().await?;
+    // wsp's access word, refused before anything is asked where it is none of the four: `startedFrom`.
+    let picks = super::turn::Picks { access, ..super::turn::Picks::default() };
+    let access = picks.access_word()?.map(str::to_owned);
     let asked = named([
         ("url", Some(Value::from(link))),
         ("project", project.map(Value::from)),

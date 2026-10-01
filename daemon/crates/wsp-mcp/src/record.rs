@@ -118,6 +118,7 @@ pub struct Words {
     pub no_terminal_config: String,
     /// Each verb's usage line by the name of its tool, which a refusal of a reply this build cannot read ends with.
     pub usages: HashMap<String, String>,
+    pub defaults: crate::tools::defaults::Words,
 }
 
 pub fn words() -> Words {

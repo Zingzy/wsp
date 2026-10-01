@@ -1,0 +1,190 @@
+{
+  "tool": "agents_set",
+  "cases": [
+    {
+      "case": "model, effort and access",
+      "arguments": {
+        "agent": "claude",
+        "model": "opus \u0085",
+        "effort": "high",
+        "access": "ask"
+      },
+      "replies": {
+        "preferences.set": "{\"id\":1,\"ok\":true,\"preferences\":{\"theme\":\"system\",\"lightTheme\":\"paper\",\"darkTheme\":\"graphite\",\"sidebarMode\":\"list\",\"terminalSize\":\"app\",\"terminalZoom\":{},\"access\":{},\"projectLook\":{},\"computerLook\":{},\"serverIcons\":true,\"agentVersions\":true,\"usageLogs\":true,\"keepAwake\":true,\"transparency\":true,\"projectOrder\":[],\"keybindings\":{},\"appFont\":\"\",\"codeFont\":\"\",\"agentDefaults\":{\"claude\":{\"access\":\"ask\",\"effort\":\"high\",\"model\":\"opus \u0085\"}},\"projectDefaults\":{},\"sendWith\":\"enter\",\"midTurn\":\"queue\",\"notifyNeeds\":\"notify-sound\",\"notifyDone\":\"off\",\"planAlerts\":true,\"settleAfter\":\"2h\",\"askDelete\":true,\"onQuit\":\"ask\",\"labs\":false,\"unknownTop\":1}}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"Claude Code starts on opus \\u0085; high; ask.\"}],\"structuredContent\":{\"agent\":\"claude\",\"defaults\":{\"model\":\"opus \\u0085\",\"effort\":\"high\",\"access\":\"ask\"}}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "preferences.set",
+          "patch": {
+            "agentDefaults": {
+              "claude": {
+                "model": "opus \u0085",
+                "effort": "high",
+                "access": "ask"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "case": "the picker's lists merged over what stands",
+      "arguments": {
+        "agent": "claude",
+        "hide": [
+          "haiku"
+        ],
+        "show": [
+          "sonnet"
+        ],
+        "order": [
+          "opus",
+          "haiku"
+        ],
+        "add_model": [
+          "custom-1",
+          "c0"
+        ],
+        "drop_model": [
+          "c9"
+        ]
+      },
+      "replies": {
+        "preferences.get": "{\"id\":1,\"ok\":true,\"preferences\":{\"theme\":\"system\",\"lightTheme\":\"paper\",\"darkTheme\":\"graphite\",\"sidebarMode\":\"list\",\"terminalSize\":\"app\",\"terminalZoom\":{},\"access\":{},\"projectLook\":{},\"computerLook\":{},\"serverIcons\":true,\"agentVersions\":true,\"usageLogs\":true,\"keepAwake\":true,\"transparency\":true,\"projectOrder\":[],\"keybindings\":{},\"appFont\":\"\",\"codeFont\":\"\",\"agentDefaults\":{\"claude\":{\"models\":{\"custom\":[\"c0\",\"c9\"],\"hide\":[\"sonnet\",\"x 🧪\"]}}},\"projectDefaults\":{},\"sendWith\":\"enter\",\"midTurn\":\"queue\",\"notifyNeeds\":\"notify-sound\",\"notifyDone\":\"off\",\"planAlerts\":true,\"settleAfter\":\"2h\",\"askDelete\":true,\"onQuit\":\"ask\",\"labs\":false,\"unknownTop\":1}}",
+        "preferences.set": "{\"id\":1,\"ok\":true,\"preferences\":{\"theme\":\"system\",\"lightTheme\":\"paper\",\"darkTheme\":\"graphite\",\"sidebarMode\":\"list\",\"terminalSize\":\"app\",\"terminalZoom\":{},\"access\":{},\"projectLook\":{},\"computerLook\":{},\"serverIcons\":true,\"agentVersions\":true,\"usageLogs\":true,\"keepAwake\":true,\"transparency\":true,\"projectOrder\":[],\"keybindings\":{},\"appFont\":\"\",\"codeFont\":\"\",\"agentDefaults\":{\"claude\":{\"models\":{\"custom\":[\"c0\",\"custom-1\"],\"order\":[\"opus\",\"haiku\"],\"hide\":[\"x 🧪\",\"haiku\"]}}},\"projectDefaults\":{},\"sendWith\":\"enter\",\"midTurn\":\"queue\",\"notifyNeeds\":\"notify-sound\",\"notifyDone\":\"off\",\"planAlerts\":true,\"settleAfter\":\"2h\",\"askDelete\":true,\"onQuit\":\"ask\",\"labs\":false,\"unknownTop\":1}}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"Claude Code starts on hides x 🧪 haiku; lists opus haiku first; adds c0 custom-1.\"}],\"structuredContent\":{\"agent\":\"claude\",\"defaults\":{\"models\":{\"hide\":[\"x 🧪\",\"haiku\"],\"order\":[\"opus\",\"haiku\"],\"custom\":[\"c0\",\"custom-1\"]}}}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "preferences.get"
+        },
+        {
+          "op": "preferences.set",
+          "patch": {
+            "agentDefaults": {
+              "claude": {
+                "models": {
+                  "hide": [
+                    "x 🧪",
+                    "haiku"
+                  ],
+                  "order": [
+                    "opus",
+                    "haiku"
+                  ],
+                  "custom": [
+                    "c0",
+                    "custom-1"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "case": "the picker's lists with none standing",
+      "arguments": {
+        "agent": "codex",
+        "hide": [
+          "gpt"
+        ]
+      },
+      "replies": {
+        "preferences.get": "{\"id\":1,\"ok\":true,\"preferences\":{\"theme\":\"system\",\"lightTheme\":\"paper\",\"darkTheme\":\"graphite\",\"sidebarMode\":\"list\",\"terminalSize\":\"app\",\"terminalZoom\":{},\"access\":{},\"projectLook\":{},\"computerLook\":{},\"serverIcons\":true,\"agentVersions\":true,\"usageLogs\":true,\"keepAwake\":true,\"transparency\":true,\"projectOrder\":[],\"keybindings\":{},\"appFont\":\"\",\"codeFont\":\"\",\"agentDefaults\":{},\"projectDefaults\":{},\"sendWith\":\"enter\",\"midTurn\":\"queue\",\"notifyNeeds\":\"notify-sound\",\"notifyDone\":\"off\",\"planAlerts\":true,\"settleAfter\":\"2h\",\"askDelete\":true,\"onQuit\":\"ask\",\"labs\":false,\"unknownTop\":1}}",
+        "preferences.set": "{\"id\":1,\"ok\":true,\"preferences\":{\"theme\":\"system\",\"lightTheme\":\"paper\",\"darkTheme\":\"graphite\",\"sidebarMode\":\"list\",\"terminalSize\":\"app\",\"terminalZoom\":{},\"access\":{},\"projectLook\":{},\"computerLook\":{},\"serverIcons\":true,\"agentVersions\":true,\"usageLogs\":true,\"keepAwake\":true,\"transparency\":true,\"projectOrder\":[],\"keybindings\":{},\"appFont\":\"\",\"codeFont\":\"\",\"agentDefaults\":{\"codex\":{\"models\":{\"hide\":[\"gpt\"]}}},\"projectDefaults\":{},\"sendWith\":\"enter\",\"midTurn\":\"queue\",\"notifyNeeds\":\"notify-sound\",\"notifyDone\":\"off\",\"planAlerts\":true,\"settleAfter\":\"2h\",\"askDelete\":true,\"onQuit\":\"ask\",\"labs\":false,\"unknownTop\":1}}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"Codex starts on hides gpt.\"}],\"structuredContent\":{\"agent\":\"codex\",\"defaults\":{\"models\":{\"hide\":[\"gpt\"]}}}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "preferences.get"
+        },
+        {
+          "op": "preferences.set",
+          "patch": {
+            "agentDefaults": {
+              "codex": {
+                "models": {
+                  "hide": [
+                    "gpt"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "case": "put back",
+      "arguments": {
+        "agent": "claude",
+        "reset": [
+          "model",
+          "models"
+        ]
+      },
+      "replies": {
+        "preferences.set": "{\"id\":1,\"ok\":true,\"preferences\":{\"theme\":\"system\",\"lightTheme\":\"paper\",\"darkTheme\":\"graphite\",\"sidebarMode\":\"list\",\"terminalSize\":\"app\",\"terminalZoom\":{},\"access\":{},\"projectLook\":{},\"computerLook\":{},\"serverIcons\":true,\"agentVersions\":true,\"usageLogs\":true,\"keepAwake\":true,\"transparency\":true,\"projectOrder\":[],\"keybindings\":{},\"appFont\":\"\",\"codeFont\":\"\",\"agentDefaults\":{},\"projectDefaults\":{},\"sendWith\":\"enter\",\"midTurn\":\"queue\",\"notifyNeeds\":\"notify-sound\",\"notifyDone\":\"off\",\"planAlerts\":true,\"settleAfter\":\"2h\",\"askDelete\":true,\"onQuit\":\"ask\",\"labs\":false,\"unknownTop\":1}}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"Claude Code starts on its own defaults.\"}],\"structuredContent\":{\"agent\":\"claude\",\"defaults\":{}}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "preferences.set",
+          "patch": {
+            "agentDefaults": {
+              "claude": {
+                "model": null,
+                "models": null
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "case": "nothing to change",
+      "arguments": {
+        "agent": "claude"
+      },
+      "replies": {},
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"wsp agents set takes --model, --effort, --access, a model to --hide, --show, --add-model or --drop-model, --order or --reset. Name at least one; with none of them there is nothing to change.\"}],\"structuredContent\":{\"error\":\"wsp agents set takes --model, --effort, --access, a model to --hide, --show, --add-model or --drop-model, --order or --reset. Name at least one; with none of them there is nothing to change.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": []
+    },
+    {
+      "case": "an agent's own spelling",
+      "arguments": {
+        "agent": "claude",
+        "access": "bypassPermissions"
+      },
+      "replies": {},
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"--access takes ask, auto-edit, full or plan, and got bypassPermissions. Name one of those; which of its own modes each one is, is the agent's row's to say.\"}],\"structuredContent\":{\"error\":\"--access takes ask, auto-edit, full or plan, and got bypassPermissions. Name one of those; which of its own modes each one is, is the agent's row's to say.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": []
+    },
+    {
+      "case": "a word the agent has no mode for",
+      "arguments": {
+        "agent": "claude",
+        "access": "plan"
+      },
+      "replies": {
+        "preferences.set": "{\"id\":1,\"ok\":false,\"error\":\"Claude Code takes no plan access; it takes ask, auto-edit, full\",\"kind\":\"usage\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"Claude Code takes no plan access; it takes ask, auto-edit, full\"}],\"structuredContent\":{\"error\":\"Claude Code takes no plan access; it takes ask, auto-edit, full\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "preferences.set",
+          "patch": {
+            "agentDefaults": {
+              "claude": {
+                "access": "plan"
+              }
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

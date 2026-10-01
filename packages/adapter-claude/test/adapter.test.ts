@@ -7,6 +7,7 @@ import type { AdapterEvent, ExecStream, ExecStreamFactory, TurnResult } from "@w
 import { createClaudeAdapter, type ClaudeSession } from "../src/adapter.js";
 import { CLAUDE_SCREEN_COMMANDS } from "../src/catalog.js";
 import { userMessageLine } from "../src/landmines.js";
+import { asideCommand } from "../src/aside.js";
 import { AGENT_A_CALL, AGENT_B_CALL, subagentFixtureLines } from "./subagent-fixture.js";
 
 const FIXTURE_SESSION_ID = "e16ed170-8257-4668-879e-fe836341633c";
@@ -1468,6 +1469,37 @@ describe("ClaudeAdapter reads the plan's limits Claude Code prints", () => {
 
   it("drops an event that reads no utilization for any window", async () => {
     expect(await limits([limitLine({ status: "allowed", rateLimitType: "five_hour", resetsAt: 1_790_700_000 }), limitLine({ status: "allowed" })])).toEqual([]);
+  });
+});
+
+describe("a person's setup for Claude Code on a computer", () => {
+  const launch = { program: "/opt/my claude/bin/claude", args: ["--debug", "a b"] };
+
+  it("runs the program everywhere the CLI's own word runs, and adds the launch words to a turn alone", async () => {
+    const exec = scriptedExec(fixtureLines());
+    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg", launch });
+    await adapter.start({ prompt: "go", onEvent: () => {} }).finished;
+    expect(exec.calls[0]!.command).toContain(`'/opt/my claude/bin/claude' -p '--debug' 'a b' --input-format stream-json`);
+    const asked: string[] = [];
+    const answer = async (command: string): Promise<string> => {
+      asked.push(command);
+      return "";
+    };
+    await adapter.probeCatalog(answer);
+    await adapter.titleFor!({ opening: "fix the build", reply: "done" }, answer);
+    await adapter.draftFor!({ promptFile: "/tmp/ask" }, answer);
+    asked.push(asideCommand({ session: FIXTURE_SESSION_ID, fork: "11111111-2222-4333-8444-555555555555", configDir: "/root/.claude-cfg", launch }));
+    for (const command of asked) {
+      expect(command).toContain(`'/opt/my claude/bin/claude' -p`);
+      expect(command).not.toMatch(/(^|[;|&] *)claude /);
+      expect(command).not.toContain("--debug");
+    }
+  });
+
+  it("with no setup the line is the CLI's own", async () => {
+    const exec = scriptedExec(fixtureLines());
+    await createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" }).start({ prompt: "go", onEvent: () => {} }).finished;
+    expect(exec.calls[0]!.command).toContain("&& claude -p --input-format stream-json");
   });
 });
 

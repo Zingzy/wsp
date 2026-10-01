@@ -2,8 +2,8 @@
 // NOTICE; logic only) and measured behavior in solari-poc/RESULTS.md.
 
 import { randomUUID } from "node:crypto";
-import { inFolder, shellQuote } from "@wsp/protocol";
-import type { McpServerSpec, TurnImage } from "@wsp/protocol";
+import { inFolder, launchWords, programWord, shellQuote } from "@wsp/protocol";
+import type { AgentLaunch, McpServerSpec, TurnImage } from "@wsp/protocol";
 import { PERMISSION_PROMPT_TOOL, SKIP_PROMPTS_MODE } from "./permissions.js";
 
 // Inherited CLAUDE_CODE_*/CLAUDECODE mark the child as nested inside another
@@ -109,6 +109,8 @@ export interface BuildCommandOptions {
   /** The model's faster output. The CLI takes it as the fastMode setting, which --settings carries for this launch
    * alone; the result's fast_mode_state says whether the account served it (2.1.283, 2026-09-27). */
   fast?: boolean;
+  /** The program run in place of claude and the words added after -p, from the person's setup on that computer. */
+  launch?: AgentLaunch;
 }
 
 // Model names carry a context suffix like "claude-opus-5[1m]"; nothing else a catalog value needs is outside this set.
@@ -170,7 +172,8 @@ export function buildCommand(options: BuildCommandOptions): string {
   if (options.resumeAt !== undefined && !UUID_RE.test(options.resumeAt)) throw new Error(`a cut must name a message by its UUID, got "${options.resumeAt}"`);
   const idFlag = sessionId === undefined ? `--resume ${id}${options.resumeAt === undefined ? "" : ` --resume-session-at ${options.resumeAt}`}` : `--session-id ${id}`;
   const claude = [
-    "claude -p",
+    `${programWord("claude", options.launch)} -p`,
+    ...launchWords(options.launch),
     "--input-format stream-json",
     "--output-format stream-json",
     "--verbose",

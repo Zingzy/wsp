@@ -18,7 +18,7 @@
         },
         "model": {
           "type": "string",
-          "description": "the model the turn runs on, by the agent's own slug (claude-sonnet-5); absent on a new thread means the catalog's default, on send the thread's own"
+          "description": "the model the turn runs on, by the agent's own slug (claude-sonnet-5); absent on a new thread means the project's, else the one set for that agent, else the catalog's default, on send the thread's own"
         },
         "effort": {
           "type": "string",
@@ -26,7 +26,7 @@
         },
         "access": {
           "type": "string",
-          "description": "the access mode, by the agent's own word (Claude Code's acceptEdits or bypassPermissions, Codex's read-only or workspace-write); absent means what a thread on that workspace starts at, which on this computer and on a machine wsp forked is every action without asking, and on a computer you own is asking about each one"
+          "description": "how far the agent may go without asking, in wsp's words: ask (asks about each action that needs permission), auto-edit (edits files without asking), full (every action without asking) or plan (reads and proposes, changes nothing); each is mapped to the agent's own mode and refused where the agent has none, and a harness's own spelling is refused. Absent means the project's access, else the one set for that agent, else full"
         },
         "fast": {
           "type": "boolean",
@@ -127,7 +127,7 @@
         },
         "model": {
           "type": "string",
-          "description": "the model the turn runs on, by the agent's own slug (claude-sonnet-5); absent on a new thread means the catalog's default, on send the thread's own"
+          "description": "the model the turn runs on, by the agent's own slug (claude-sonnet-5); absent on a new thread means the project's, else the one set for that agent, else the catalog's default, on send the thread's own"
         },
         "effort": {
           "type": "string",
@@ -135,7 +135,7 @@
         },
         "access": {
           "type": "string",
-          "description": "the access mode, by the agent's own word (Claude Code's acceptEdits or bypassPermissions, Codex's read-only or workspace-write); absent means what a thread on that workspace starts at, which on this computer and on a machine wsp forked is every action without asking, and on a computer you own is asking about each one"
+          "description": "how far the agent may go without asking, in wsp's words: ask (asks about each action that needs permission), auto-edit (edits files without asking), full (every action without asking) or plan (reads and proposes, changes nothing); each is mapped to the agent's own mode and refused where the agent has none, and a harness's own spelling is refused. Absent means the project's access, else the one set for that agent, else full"
         },
         "fast": {
           "type": "boolean",

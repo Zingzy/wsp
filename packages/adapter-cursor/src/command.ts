@@ -7,7 +7,7 @@
 // headless run would stop on, for this process alone. A print run never updates
 // the binary under it: only the interactive screen starts the self-update
 // (src/run-agent.tsx), so the version the image pinned is the one that runs.
-import { inFolder, shellQuote } from "@wsp/protocol";
+import { inFolder, launchWords, programWord, shellQuote, type AgentLaunch } from "@wsp/protocol";
 
 const PROMPT_END = "WSP_PROMPT_END";
 const CHAT_RE = /^[A-Za-z0-9][A-Za-z0-9-]*$/;
@@ -39,6 +39,8 @@ export interface BuildCommandOptions {
   cwd?: string;
   model?: string;
   permissionMode?: string;
+  /** The program run in place of cursor-agent and the words added after -p, from the person's setup there. */
+  launch?: AgentLaunch;
 }
 
 export function buildCommand(options: BuildCommandOptions): string {
@@ -50,7 +52,9 @@ export function buildCommand(options: BuildCommandOptions): string {
   if (model !== undefined && (model.startsWith("-") || model.includes("\n"))) throw new Error(`model must be one model name, got "${model}"`);
   if (resume !== undefined && !CHAT_RE.test(resume)) throw new Error(`resume must be a chat id, got "${resume}"`);
   const line = [
-    "cursor-agent -p --output-format stream-json --stream-partial-output --trust",
+    `${programWord("cursor-agent", options.launch)} -p`,
+    ...launchWords(options.launch),
+    "--output-format stream-json --stream-partial-output --trust",
     ...(cwd === undefined ? [] : [`--workspace ${shellQuote(cwd)}`]),
     ...(model === undefined ? [] : [`--model ${shellQuote(model)}`]),
     ...(resume === undefined ? [] : [`--resume ${resume}`]),

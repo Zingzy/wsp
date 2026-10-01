@@ -5,6 +5,7 @@
 // line and the MCP tools. Names and states only: no value of a key, a token,
 // a header or an env variable is ever in it.
 import { z } from "zod";
+import { AgentSetupView } from "./thread-defaults.js";
 
 /** Whether an agent on a computer can run a turn there without anybody signing anything in: its own login stands on
  * that computer, the vault this host holds has the variable that agent reads, or neither. One word per agent, worked
@@ -58,6 +59,14 @@ export const AgentRow = z.object({
   signInRoad: SignInRoad,
   /** One of its MCP config files names the wsp server. */
   wspTools: z.boolean(),
+  /** How its sign-in there stands, in the status command's own terms (OAuth credentials, an API key and the variable
+   * it came from); names only, never a value. */
+  signInDetail: z.string().optional(),
+  /** The newer version its vendor publishes and the command that installs it, which the person runs in a terminal
+   * there: wsp never swaps a binary under a running thread. */
+  update: z.object({ to: z.string(), command: z.string() }).optional(),
+  /** How the person set it to run on that computer; absent on a workspace's read, whose computer's setup applies. */
+  setup: AgentSetupView.optional(),
 });
 export type AgentRow = z.infer<typeof AgentRow>;
 

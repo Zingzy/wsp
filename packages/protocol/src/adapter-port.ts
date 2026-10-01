@@ -14,7 +14,22 @@
 // why the vocabulary they share (DeltaKind, TurnResult, SessionHarness) is
 // declared once there and imported back here.
 import type { DeltaKind, PermissionOption, PermissionOutcome, PlanStep, SessionHarness, TurnResult } from "./index.js";
+import { shellQuote } from "./shell-quote.js";
 import type { HarnessLimit } from "./usage.js";
+
+/** What a person's setup changes about one agent's command on a computer: the program run in place of the agent's own
+ * word, everywhere that word is run, and words added to every launch of a turn. Each adapter takes these at its
+ * factory, so a setup reaches a probe, a title and a side question the way it reaches a turn. */
+export interface AgentLaunch {
+  program?: string;
+  args?: readonly string[];
+}
+
+/** The agent's command word as a line runs it: its own, or the program the person named, quoted as one word. */
+export const programWord = (bin: string, launch: AgentLaunch | undefined): string => (launch?.program === undefined ? bin : shellQuote(launch.program));
+
+/** The words a setup adds to a turn's launch, each quoted as one word, so none is read as shell. */
+export const launchWords = (launch: AgentLaunch | undefined): string[] => (launch?.args ?? []).map(shellQuote);
 
 /** The id every adapter's ask carries for "run this call" and for "refuse it", so the runtime's own answers (the
  * deny it sends when nobody answered in time) name an option without knowing which CLI raised the prompt. Options

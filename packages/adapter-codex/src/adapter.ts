@@ -27,6 +27,7 @@ import {
 import type {
   AdapterAttachOptions,
   AdapterEvent,
+  AgentLaunch,
   ExecStream,
   ExecStreamFactory,
   HarnessCatalogAnswer,
@@ -129,6 +130,8 @@ export interface CodexAdapterDeps {
   reconnectStallMs?: number;
   /** How long a side question may run before its process is ended; ASIDE_WALL_MS unless a test says otherwise. */
   asideWallMs?: number;
+  /** The program the person runs in place of codex on this computer, and the words every turn's launch adds. */
+  launch?: AgentLaunch;
 }
 
 export interface CodexAdapter {
@@ -738,7 +741,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     const localId = options.resume ?? randomUUID();
     const thread = { ...(options.cwd !== undefined ? { cwd: options.cwd } : {}), ...(options.model !== undefined ? { model: options.model } : {}), ...(options.fast === true ? { serviceTier: "fast" as const } : {}), access };
     const threadLine = options.resume === undefined ? threadStartLine(thread) : threadResumeLine({ ...thread, threadId: options.resume });
-    const command = buildCommand({ ...(options.cwd !== undefined ? { cwd: options.cwd } : {}), ...(options.mcpServers !== undefined ? { mcpServers: options.mcpServers } : {}) });
+    const command = buildCommand({ ...(options.cwd !== undefined ? { cwd: options.cwd } : {}), ...(options.mcpServers !== undefined ? { mcpServers: options.mcpServers } : {}), ...(deps.launch !== undefined ? { launch: deps.launch } : {}) });
     return follow({
       stream: deps.exec(command, { env: { ...env }, input: [initializeLine(), INITIALIZED_LINE, ACCOUNT_READ_LINE, RATE_LIMITS_READ_LINE, threadLine] }),
       localId,
@@ -754,7 +757,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
    * store are left as they were, and a read-only sandbox that asks nobody is the nearest a Codex turn comes to having
    * no tools. */
   const aside: SessionAsker = async o => {
-    const command = buildCommand({ ...(o.cwd !== undefined ? { cwd: o.cwd } : {}) });
+    const command = buildCommand({ ...(o.cwd !== undefined ? { cwd: o.cwd } : {}), ...(deps.launch?.program !== undefined ? { launch: { program: deps.launch.program } } : {}) });
     const fork = threadForkLine({ threadId: o.session, ...(o.cwd !== undefined ? { cwd: o.cwd } : {}), ...(o.model !== undefined ? { model: o.model } : {}), developerInstructions: ASIDE_INSTRUCTIONS });
     const result = await follow({
       stream: deps.exec(command, { env: { ...env }, input: [initializeLine(), INITIALIZED_LINE, fork] }),
@@ -772,7 +775,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
   /** The thread's own history cut before one of its turns, on a server run of its own that runs no turn: the
    * thread resumed, then thread/revert, then EOF. */
   const revert: SessionReverter = async o => {
-    const command = buildCommand({ ...(o.cwd !== undefined ? { cwd: o.cwd } : {}) });
+    const command = buildCommand({ ...(o.cwd !== undefined ? { cwd: o.cwd } : {}), ...(deps.launch?.program !== undefined ? { launch: { program: deps.launch.program } } : {}) });
     const resume = threadResumeLine({ threadId: o.session, ...(o.cwd !== undefined ? { cwd: o.cwd } : {}), access: accessParams("read-only") });
     const result = await follow({
       stream: deps.exec(command, { env: { ...env }, input: [initializeLine(), INITIALIZED_LINE, resume] }),
@@ -789,7 +792,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
   const attach = deps.exec.attach?.bind(deps.exec);
 
   const probeCatalog = (exec: (command: string) => Promise<string>): Promise<HarnessCatalogAnswer> =>
-    exec(catalogProbeCommand({ home: deps.home, baseEnv: deps.baseEnv })).then(stdout => parseCatalogProbe(stdout, deps.login));
+    exec(catalogProbeCommand({ home: deps.home, baseEnv: deps.baseEnv, ...(deps.launch !== undefined ? { launch: deps.launch } : {}) })).then(stdout => parseCatalogProbe(stdout, deps.login));
 
   return {
     start,
@@ -826,6 +829,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
           prompt: titlePrompt(turn.opening, turn.reply),
           ...(turn.model !== undefined ? { model: turn.model } : {}),
           ...(deps.baseEnv !== undefined ? { baseEnv: deps.baseEnv } : {}),
+          ...(deps.launch !== undefined ? { launch: deps.launch } : {}),
         }),
       ).then(parseTitleFor),
     draftFor: (ask, exec) =>
@@ -835,6 +839,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
           promptFile: ask.promptFile,
           ...(ask.model !== undefined ? { model: ask.model } : {}),
           ...(deps.baseEnv !== undefined ? { baseEnv: deps.baseEnv } : {}),
+          ...(deps.launch !== undefined ? { launch: deps.launch } : {}),
         }),
       ).then(parseDraftFor),
     env,
