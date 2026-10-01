@@ -1515,6 +1515,13 @@ html.desktop-mac.dark [data-preview-panel-mode="inline"]:has([data-terminal-tran
   /* A blur on the Mac's transparent page lays its copy over the page it sampled, so the sharp text shows through
      unless the copy stands on the page's own ground: the filter GlassGround renders. The composer is its one user. */
   --glass-ground: url(#glass-ground);
+  /* The ground matches what the window's glass reads as behind the page, not the theme's background, so the
+     composer keeps the look of the glass (solved 2026-10-01 against the owner's screenshot: this ground under the centre pane's material paints rgb(22 24 24)). */
+  --glass-ground-color: rgb(236 237 236);
+}
+
+.desktop-mac.dark {
+  --glass-ground-color: rgb(35 41 41);
 }
 
 /* The page drawing no glass (Transparency off in Appearance, or the computer's Reduce transparency on, read in
