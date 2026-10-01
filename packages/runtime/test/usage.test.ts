@@ -58,6 +58,29 @@ describe("a turn's end in the ledger", () => {
     expect(byAgent.rows.map(r => r.label)).toEqual(["Claude Code"]);
   });
 
+  it("files one row per model a turn used, each with its own tokens and cost, so the model split adds up", async () => {
+    const result: TurnResult = {
+      status: "completed",
+      text: "done",
+      costUsd: 1.25,
+      model: "claude-opus-5-5[1m]",
+      tokens: { input: 2_000, output: 300 },
+      models: [
+        { model: "claude-opus-5-5[1m]", tokens: { input: 2_000, output: 300, cached: 1_500, cacheWrite: 200, reasoning: 0 }, costUsd: 1 },
+        { model: "claude-haiku-4-5-20251001", tokens: { input: 900, output: 40, cached: 0, cacheWrite: 800, reasoning: 0 }, costUsd: 0.25 },
+      ],
+    };
+    const { rt, ws } = await runtimeWith(turning(result));
+    await (await rt.sessions.start(ws.id, { prompt: "go" })).finished;
+    const byModel = await rt.usage.used({ range: "day", split: "model" });
+    expect(byModel.rows.map(r => [r.key, r.label, r.tokens.input, r.costReported, r.turns])).toEqual([
+      ["claude-opus-5-5", "Opus 5.5", 2_000, 1, 1],
+      ["claude-haiku-4-5-20251001", "Haiku 4.5", 900, 0.25, 0],
+    ]);
+    const byAgent = await rt.usage.used({ range: "day", split: "agent" });
+    expect(byAgent.rows.map(r => [r.key, r.tokens.input, r.costReported, r.turns])).toEqual([["claude", 2_900, 1.25, 1]]);
+  });
+
   it("files nothing for a turn that reported no tokens and no cost", async () => {
     const { rt, ws } = await runtimeWith(turning({ status: "completed", text: "done" }));
     await (await rt.sessions.start(ws.id, { prompt: "go" })).finished;

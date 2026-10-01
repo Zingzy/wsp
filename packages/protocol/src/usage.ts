@@ -99,7 +99,7 @@ export const USAGE_RANGES = ["day", "week", "month"] as const;
 export const UsageRange = z.enum(USAGE_RANGES);
 export type UsageRange = z.infer<typeof UsageRange>;
 
-export const USAGE_SPLITS = ["agent", "account", "computer", "project"] as const;
+export const USAGE_SPLITS = ["agent", "account", "computer", "project", "model"] as const;
 export const UsageSplit = z.enum(USAGE_SPLITS);
 export type UsageSplit = z.infer<typeof UsageSplit>;
 
@@ -266,10 +266,13 @@ export function parseRateTable(document: unknown): RateTable {
   return table;
 }
 
+/** A model as its maker names it, without the context window Claude Code writes after it, as in [1m]. */
+export const baseModel = (model: string): string => model.replace(/\[[^\]]*\]$/, "");
+
 /** A model's entry as a harness names it: as it is, without a provider in front, or without a date or a context
  * window after it. */
 export function rateOf(model: string, table: RateTable): Rate | undefined {
-  const bare = (model.includes("/") ? model.slice(model.lastIndexOf("/") + 1) : model).replace(/\[[^\]]*\]$/, "");
+  const bare = baseModel(model.includes("/") ? model.slice(model.lastIndexOf("/") + 1) : model);
   return table[model] ?? table[bare] ?? table[bare.replace(/-\d{8}$/, "")];
 }
 

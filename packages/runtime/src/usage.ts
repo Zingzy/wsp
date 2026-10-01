@@ -9,6 +9,7 @@ import {
   USAGE_WORDS,
   RANGE_DAYS,
   accountWords,
+  baseModel,
   UsageDay,
   dayKeyOf,
   hourOf,
@@ -60,6 +61,8 @@ export interface UsageEntry {
   computer: string;
   project: string;
   model?: string;
+  /** The turns this entry counts: one, unless it is a second model's share of a turn already counted. */
+  turns?: number;
   tokens?: Partial<TurnTokens>;
   costUsd?: number;
   /** The harness's own session id, which a read of the logs skips once a wsp turn was filed under it. */
@@ -142,7 +145,8 @@ function dayStartOf(at: number, timeZone?: string): number {
   return at - ((part("hour") * 60 + part("minute")) * 60 + part("second")) * 1000 - (at % 1000);
 }
 
-const splitValue = (row: UsageRow, split: UsageSplit): string => row[split];
+/** A row's value for a split; a model with its context window after it is the same model. */
+const splitValue = (row: UsageRow, split: UsageSplit): string => (split === "model" ? baseModel(row.model) : row[split]);
 
 const rowKey = (row: Omit<UsageRow, "turns" | "tokens" | "costReported">): string =>
   [row.hour, row.agent, row.account, row.computer, row.project, row.model, row.source].join("\u0000");
@@ -194,12 +198,12 @@ export function createUsageLedger(o: { store: Store; clock: Clock; timeZone?: st
     if (found === undefined) {
       held.rows.push({
         ...key,
-        turns: 1,
+        turns: entry.turns ?? 1,
         tokens,
         ...(entry.costUsd !== undefined ? { costReported: entry.costUsd } : {}),
       });
     } else {
-      found.turns += 1;
+      found.turns += entry.turns ?? 1;
       for (const field of ["input", "output", "cached", "cacheWrite", "reasoning"] as const) found.tokens[field] += tokens[field];
       if (entry.costUsd !== undefined) found.costReported = (found.costReported ?? 0) + entry.costUsd;
     }

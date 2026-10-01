@@ -1,7 +1,7 @@
 {
   "cloudOff": {
     "name": "usage",
-    "description": "Two answers that are never added together. accounts: every agent account signed in on any computer, the same one on three computers once, each with how much of its plan's windows is used and when each starts again, as that agent printed them in the last turn wsp ran on it; an agent that prints none reports no plan limit, a sign-in by API key pays per token with no plan window, and an account no turn has run on yet has no reading. used: the tokens the turns used over the range (today, the last seven days or the last thirty), split by agent, account, computer or project, each row with the cost its agent reported or a list price off one table, input counting the cached tokens, and a series over the range.",
+    "description": "Two answers that are never added together. accounts: every agent account signed in on any computer, the same one on three computers once, each with how much of its plan's windows is used and when each starts again, as that agent printed them in the last turn wsp ran on it; an agent that prints none reports no plan limit, a sign-in by API key pays per token with no plan window, and an account no turn has run on yet has no reading. used: the tokens the turns used over the range (today, the last seven days or the last thirty), split by agent, account, computer, project or model, each row with the cost its agent reported, a list price off one table for every token and what the cache saved, input counting the cached and the written tokens, the turns wsp ran, and a series over the range with one line per row.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -20,9 +20,10 @@
             "agent",
             "account",
             "computer",
-            "project"
+            "project",
+            "model"
           ],
-          "description": "agent (the default), account, computer or project"
+          "description": "agent (the default), account, computer, project or model"
         }
       },
       "additionalProperties": false,
@@ -102,6 +103,22 @@
                   "pays per token, no plan limit",
                   "not read yet: shows after its next turn"
                 ]
+              },
+              "burn": {
+                "type": "object",
+                "properties": {
+                  "tokensPerMinute": {
+                    "type": "number"
+                  },
+                  "threads": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "tokensPerMinute",
+                  "threads"
+                ],
+                "additionalProperties": false
               }
             },
             "required": [
@@ -130,7 +147,8 @@
                 "agent",
                 "account",
                 "computer",
-                "project"
+                "project",
+                "model"
               ]
             },
             "rows": {
@@ -155,6 +173,12 @@
                       },
                       "cached": {
                         "type": "number"
+                      },
+                      "cacheWrite": {
+                        "type": "number"
+                      },
+                      "reasoning": {
+                        "type": "number"
                       }
                     },
                     "required": [
@@ -172,6 +196,15 @@
                   },
                   "priced": {
                     "type": "boolean"
+                  },
+                  "estimate": {
+                    "type": "number"
+                  },
+                  "saved": {
+                    "type": "number"
+                  },
+                  "turns": {
+                    "type": "integer"
                   }
                 },
                 "required": [
@@ -226,6 +259,114 @@
                 "computer"
               ],
               "additionalProperties": false
+            },
+            "lines": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string"
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "points": {
+                    "type": "array",
+                    "items": {
+                      "type": "number"
+                    }
+                  }
+                },
+                "required": [
+                  "key",
+                  "label",
+                  "points"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "sources": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "source": {
+                    "type": "string",
+                    "enum": [
+                      "wsp",
+                      "log"
+                    ]
+                  },
+                  "tokens": {
+                    "type": "number"
+                  },
+                  "estimate": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "source",
+                  "tokens"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "threads": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "threadId": {
+                    "type": "string"
+                  },
+                  "workspaceId": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "agent": {
+                    "type": "string"
+                  },
+                  "workspace": {
+                    "type": "string"
+                  },
+                  "computer": {
+                    "type": "string"
+                  },
+                  "tokens": {
+                    "type": "number"
+                  },
+                  "estimate": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "threadId",
+                  "workspaceId",
+                  "title",
+                  "agent",
+                  "tokens"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "counts": {
+              "type": "object",
+              "properties": {
+                "threads": {
+                  "type": "integer"
+                },
+                "computers": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "threads",
+                "computers"
+              ],
+              "additionalProperties": false
             }
           },
           "required": [
@@ -252,7 +393,7 @@
   },
   "cloudOn": {
     "name": "usage",
-    "description": "Two answers that are never added together. accounts: every agent account signed in on any computer, the same one on three computers once, each with how much of its plan's windows is used and when each starts again, as that agent printed them in the last turn wsp ran on it; an agent that prints none reports no plan limit, a sign-in by API key pays per token with no plan window, and an account no turn has run on yet has no reading. used: the tokens the turns used over the range (today, the last seven days or the last thirty), split by agent, account, computer or project, each row with the cost its agent reported or a list price off one table, input counting the cached tokens, and a series over the range.",
+    "description": "Two answers that are never added together. accounts: every agent account signed in on any computer, the same one on three computers once, each with how much of its plan's windows is used and when each starts again, as that agent printed them in the last turn wsp ran on it; an agent that prints none reports no plan limit, a sign-in by API key pays per token with no plan window, and an account no turn has run on yet has no reading. used: the tokens the turns used over the range (today, the last seven days or the last thirty), split by agent, account, computer, project or model, each row with the cost its agent reported, a list price off one table for every token and what the cache saved, input counting the cached and the written tokens, the turns wsp ran, and a series over the range with one line per row.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -271,9 +412,10 @@
             "agent",
             "account",
             "computer",
-            "project"
+            "project",
+            "model"
           ],
-          "description": "agent (the default), account, computer or project"
+          "description": "agent (the default), account, computer, project or model"
         }
       },
       "additionalProperties": false,
@@ -353,6 +495,22 @@
                   "pays per token, no plan limit",
                   "not read yet: shows after its next turn"
                 ]
+              },
+              "burn": {
+                "type": "object",
+                "properties": {
+                  "tokensPerMinute": {
+                    "type": "number"
+                  },
+                  "threads": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "tokensPerMinute",
+                  "threads"
+                ],
+                "additionalProperties": false
               }
             },
             "required": [
@@ -381,7 +539,8 @@
                 "agent",
                 "account",
                 "computer",
-                "project"
+                "project",
+                "model"
               ]
             },
             "rows": {
@@ -406,6 +565,12 @@
                       },
                       "cached": {
                         "type": "number"
+                      },
+                      "cacheWrite": {
+                        "type": "number"
+                      },
+                      "reasoning": {
+                        "type": "number"
                       }
                     },
                     "required": [
@@ -423,6 +588,15 @@
                   },
                   "priced": {
                     "type": "boolean"
+                  },
+                  "estimate": {
+                    "type": "number"
+                  },
+                  "saved": {
+                    "type": "number"
+                  },
+                  "turns": {
+                    "type": "integer"
                   }
                 },
                 "required": [
@@ -475,6 +649,114 @@
               "required": [
                 "agents",
                 "computer"
+              ],
+              "additionalProperties": false
+            },
+            "lines": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string"
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "points": {
+                    "type": "array",
+                    "items": {
+                      "type": "number"
+                    }
+                  }
+                },
+                "required": [
+                  "key",
+                  "label",
+                  "points"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "sources": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "source": {
+                    "type": "string",
+                    "enum": [
+                      "wsp",
+                      "log"
+                    ]
+                  },
+                  "tokens": {
+                    "type": "number"
+                  },
+                  "estimate": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "source",
+                  "tokens"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "threads": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "threadId": {
+                    "type": "string"
+                  },
+                  "workspaceId": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "agent": {
+                    "type": "string"
+                  },
+                  "workspace": {
+                    "type": "string"
+                  },
+                  "computer": {
+                    "type": "string"
+                  },
+                  "tokens": {
+                    "type": "number"
+                  },
+                  "estimate": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "threadId",
+                  "workspaceId",
+                  "title",
+                  "agent",
+                  "tokens"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "counts": {
+              "type": "object",
+              "properties": {
+                "threads": {
+                  "type": "integer"
+                },
+                "computers": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "threads",
+                "computers"
               ],
               "additionalProperties": false
             }

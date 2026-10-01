@@ -1502,6 +1502,27 @@ describe("what a turn cost, off totals the CLI keeps for the whole session", () 
     expect(done.costUsd).toBe(2.5);
   });
 
+  it("files each model a turn used with its own tokens and cost, off what each model's running totals gained", async () => {
+    const use = (o: { in: number; out: number; read: number; write: number; think?: number; cost: number }) => ({ inputTokens: o.in, outputTokens: o.out, ...(o.think !== undefined ? { thinkingTokens: o.think } : {}), cacheReadInputTokens: o.read, cacheCreationInputTokens: o.write, webSearchRequests: 0, costUSD: o.cost, contextWindow: 1_000_000, maxOutputTokens: 64_000 });
+    const before = JSON.stringify({ type: "cost-state", sessionId: FIXTURE_SESSION_ID, totalCostUSD: 10.5, modelUsage: { "claude-opus-5-5[1m]": use({ in: 100, out: 1_000, read: 50_000, write: 5_000, cost: 10 }), "claude-haiku-4-5-20251001": use({ in: 10, out: 100, read: 0, write: 2_000, cost: 0.5 }) } });
+    const after = JSON.stringify({
+      type: "result", subtype: "success", is_error: false, num_turns: 1, duration_ms: 900, result: "done", session_id: FIXTURE_SESSION_ID, total_cost_usd: 13.75,
+      usage: { input_tokens: 5, cache_read_input_tokens: 20_000, cache_creation_input_tokens: 1_000, output_tokens: 300 },
+      modelUsage: {
+        "claude-opus-5-5[1m]": use({ in: 105, out: 1_300, think: 40, read: 70_000, write: 6_000, cost: 12.5 }),
+        "claude-haiku-4-5-20251001": use({ in: 10, out: 100, read: 0, write: 2_000, cost: 0.5 }),
+        "claude-sonnet-5": use({ in: 7, out: 70, read: 3_000, write: 500, cost: 0.75 }),
+      },
+    });
+    const { done } = await run([before, init, after], FIXTURE_SESSION_ID);
+    expect(done.costUsd).toBeCloseTo(3.25, 9);
+    expect(done.model).toBe("claude-opus-5-5[1m]");
+    expect(done.models).toEqual([
+      { model: "claude-opus-5-5[1m]", tokens: { input: 21_005, output: 300, cached: 20_000, cacheWrite: 1_000, reasoning: 40 }, costUsd: 2.5 },
+      { model: "claude-sonnet-5", tokens: { input: 3_507, output: 70, cached: 3_000, cacheWrite: 500, reasoning: 0 }, costUsd: 0.75 },
+    ]);
+  });
+
   it("a new session has nothing saved: the launch reads no file and the turn cost its whole total", async () => {
     const { done, command } = await run([init, result(4.25)]);
     expect(done.costUsd).toBe(4.25);
