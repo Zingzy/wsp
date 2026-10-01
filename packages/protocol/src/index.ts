@@ -6163,8 +6163,8 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** Answers a permission prompt the session's running turn relayed into the chat, by the prompt's id and one of its
    * options; replies with a SessionAnswerResult. Takes the runtime's session id, as sessions.interrupt does. */
   z.object({ id: reqId, op: z.literal("sessions.answer"), sessionId: z.string(), askId: z.string(), optionId: z.string() }),
-  /** Puts the session's running turn into another access mode from its next tool call on; replies with a
-   * SessionAccessResult. Takes the runtime's session id, as sessions.interrupt does. */
+  /** Puts the session's thread at another access mode; replies with a SessionAccessResult. Takes the runtime's
+   * session id, as sessions.interrupt does, or the thread's own id where no row of it is left. */
   z.object({ id: reqId, op: z.literal("sessions.access"), sessionId: z.string(), permissionMode: z.string() }),
   /** Names the session's harness session in the harness's own store and keeps the name on the thread's rows; replies
    * with a SessionRenameResult. Takes the runtime's session id, as sessions.interrupt does. */

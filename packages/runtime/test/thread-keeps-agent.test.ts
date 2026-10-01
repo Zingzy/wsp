@@ -129,6 +129,20 @@ describe("the agent and the access a send into an existing thread runs on", () =
     expect(starts.map(e => [e.threadId, e.agent, e.permissionMode])).toEqual([[thread, "codex", "read-only"], [thread, "codex", "read-only"]]);
   });
 
+  it("moves the access of a thread whose rows fell off the index cap, named by the thread's own id", async () => {
+    const { workspaceId, thread } = await openThread("codex", "read-only");
+    await rt.close();
+    const doc = (await store.get("sessions", workspaceId)) as { sessions: unknown[] };
+    await store.put("sessions", workspaceId, { ...doc, sessions: [] });
+    rt = runtime();
+    // No row is left to name, so the thread is named by its id, and the pick lands on its record.
+    expect(await rt.sessions.access(thread, "danger-full-access")).toEqual({ outcome: "set" });
+    await (await rt.sessions.start(workspaceId, { prompt: "two", thread })).finished;
+    expect(codex.starts.map(s => s.permissionMode)).toEqual(["danger-full-access"]);
+    // An id that names neither a row nor a thread is still nothing.
+    expect(await rt.sessions.access("33333333-3333-4333-8333-333333333333", "read-only")).toEqual({ outcome: "not-found" });
+  });
+
   it("runs a thread the send opens on the agent and the access that send names, which is where both are picked", async () => {
     const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
     const first = await rt.sessions.start(ws.id, { prompt: "one", harness: "codex", permissionMode: "read-only" });

@@ -1660,7 +1660,8 @@ export interface Runtime {
      * into a thread names none. The thread's record takes the mode and its next turn runs at it; where a turn is
      * running and its harness takes such a change, the turn in front of the person follows it from its next tool
      * call on. unsupported is a running turn that takes none mid-turn and keeps its mode, the next turn taking the
-     * pick. The session named is any row of the thread; a thread between turns answers set. */
+     * pick. The session named is any row of the thread, or the thread's own id where no row of it is left; a thread
+     * between turns answers set. */
     access(sessionId: string, permissionMode: string, origin?: Caller): Promise<SessionAccessResult>;
     /** Names the session's harness session in the harness's own store, in the field the harness itself writes, and
      * keeps the name on every row of the thread; a harness that keeps no name of a person's, a store without that
@@ -9083,12 +9084,16 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     async access(sessionId, permissionMode, origin) {
       await ready();
       const s = sessions.get(sessionId);
-      if (!s) return { outcome: "not-found" };
-      const entry = await entryOfRow(s.view, origin);
+      // A thread whose rows all fell off the index cap has no row to name, so it is named by its own id and read off
+      // its record, which is what its next turn runs at.
+      const held = s === undefined ? threadRecords.get(sessionId) : undefined;
+      const view = s?.view ?? (held === undefined ? undefined : { threadId: sessionId, workspaceId: held.workspaceId, harness: held.harness });
+      if (view === undefined) return { outcome: "not-found" };
+      const entry = await entryOfRow(view, origin);
       if (entry === undefined) return { outcome: "not-found" };
       const refusal = sendRefusal(workspaceState({ phase: entry.record.phase }), entry.record.gone, entry.record.name);
       if (refusal !== null) throw new Error(refusal);
-      const { harness, adapter } = adapterFor(entry, s.view.harness);
+      const { harness, adapter } = adapterFor(entry, view.harness);
       const table = harnessCatalog(harness);
       // Checked against the list the picker showed, so a mode this CLI does not take is refused in the same words a
       // start refuses it with rather than travelling to the machine as a request it will not answer.
@@ -9097,15 +9102,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // changes a thread's access, and the thread's next turn runs at it. The thread's latest row says the same, as
       // every client folds the access off that row; a running turn's row moves where the harness took the pick,
       // and otherwise as the turn ends, so no row says a mode the thread's next turn will not run at.
-      const threadId = s.view.threadId;
-      const running = threadId === undefined ? (s.view.status === "running" && s.handle !== undefined ? (s as LiveSession) : undefined) : runningOn(threadId);
-      const latest = threadId === undefined ? s.view : (latestOn(threadId) ?? s.view);
+      const threadId = view.threadId;
+      const running = threadId === undefined ? (s?.view.status === "running" && s.handle !== undefined ? (s as LiveSession) : undefined) : runningOn(threadId);
+      const latest = threadId === undefined ? s?.view : (latestOn(threadId) ?? s?.view);
       const landed = (): void => {
-        if (threadId !== undefined) threadRecords.set(threadId, { ...(threadRecords.get(threadId) ?? { workspaceId: s.view.workspaceId, harness: s.view.harness }), permissionMode });
-        if (latest.status !== "running") latest.permissionMode = permissionMode;
-        void persistSessions(s.view.workspaceId);
+        if (threadId !== undefined) threadRecords.set(threadId, { ...(threadRecords.get(threadId) ?? { workspaceId: view.workspaceId, harness: view.harness }), permissionMode });
+        if (latest !== undefined && latest.status !== "running") latest.permissionMode = permissionMode;
+        void persistSessions(view.workspaceId);
       };
-      if (latest.status !== "running") {
+      if (latest?.status !== "running") {
         landed();
         return { outcome: "set" };
       }
