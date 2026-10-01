@@ -15,6 +15,8 @@ export const Checkout = z.object({
   changed: z.number().int(),
   editsUnread: z.boolean().optional(),
   countsUnknown: z.boolean().optional(),
+  /** How many stashes the copy holds, work no branch carries; absent where there are none. */
+  stashes: z.number().int().positive().optional(),
   /** The commit the checkout is on, which a tile shows where the head is on no branch. */
   head: z.string().optional(),
   readAt: z.number(),

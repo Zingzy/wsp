@@ -506,6 +506,65 @@ describe("the sidebar's list of thread tiles", () => {
     }
   });
 
+  it("Delete copies on the Settled row and on a settled tile names what each copy holds that its remote lacks before anything goes", async () => {
+    const deleteWorkspace = vi.fn(async (_id: string) => {});
+    const read = { branch: "fix/cart", ahead: 0, behind: 0, changed: 0, readAt: 1 };
+    const workspaceCheckout = vi.fn(async (id: string) => ({ checkout: id === "ws_a" ? { ...read, ahead: 3, changed: 2 } : read }));
+    mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "cart", "pr_1"), workspace("ws_b", "tidy", "pr_1")] }, { deleteWorkspace, workspaceCheckout });
+    const quiet = { status: "completed", startedAgo: 30 * HOUR, endedAgo: 29 * HOUR, readAgo: 28 * HOUR, settledAgo: HOUR };
+    await act(async () => useStore.setState({ sessions: sessions([{ ws: "ws_a", id: "th_a", prompt: "round the cart", ...quiet }, { ws: "ws_b", id: "th_b", prompt: "tidy up", ...quiet }]) } as never));
+    await waitFor(() => expect(rowIds()).toEqual(["settled"]));
+    const choose = (id: string) => (window.wsp = { contextMenu: async () => id } as never);
+    try {
+      choose("delete-copies");
+      fireEvent.contextMenu(document.querySelector<HTMLElement>("[data-row-id=settled]")!);
+      const dialog = await screen.findByRole("alertdialog");
+      await waitFor(() => expect(dialog.textContent).toContain("cart holds 3 commits not pushed and 2 uncommitted files"));
+      expect(dialog.textContent).toContain("Delete 2 copies?");
+      expect(dialog.textContent).not.toContain("tidy holds");
+      fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+      await waitFor(() => expect(deleteWorkspace.mock.calls.map(([id]) => id).sort()).toEqual(["ws_a", "ws_b"]));
+      await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+      fireEvent.click(document.querySelector<HTMLElement>("[data-row-id=settled]")!);
+      await waitFor(() => expect(rowIds()).toContain("thread:th_a"));
+      choose("delete-copies");
+      fireEvent.contextMenu(document.querySelector<HTMLElement>("[data-row-id='thread:th_a']")!);
+      const one = await screen.findByRole("alertdialog");
+      await waitFor(() => expect(one.textContent).toContain("cart holds 3 commits not pushed and 2 uncommitted files"));
+      expect(one.textContent).toContain("Delete cart?");
+    } finally {
+      delete (window as { wsp?: unknown }).wsp;
+    }
+  });
+
+  it("holds Delete until every copy's fresh read has answered, and says a read that failed rather than trusting what was held", async () => {
+    const deleteWorkspace = vi.fn(async (_id: string) => {});
+    let answer: (reply: { checkout?: never }) => void = () => {};
+    const workspaceCheckout = vi.fn(() => new Promise<{ checkout?: never }>((_resolve, reject) => (answer = () => reject(new Error("the copy's daemon did not answer")))));
+    mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "cart", "pr_1")] }, { deleteWorkspace, workspaceCheckout });
+    const clean = { branch: "fix/cart", ahead: 0, behind: 0, changed: 0, readAt: 1 };
+    const quiet = { status: "completed", startedAgo: 30 * HOUR, endedAgo: 29 * HOUR, readAgo: 28 * HOUR, settledAgo: HOUR };
+    const held = { ...workspace("ws_a", "cart", "pr_1"), machineState: "running", reach: { state: "reachable" }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0, checkout: clean } as WorkspaceStatus;
+    await act(async () => useStore.setState({ sessions: sessions([{ ws: "ws_a", id: "th_a", prompt: "round the cart", ...quiet }]), statuses: { ws_a: held } } as never));
+    await waitFor(() => expect(rowIds()).toEqual(["settled"]));
+    window.wsp = { contextMenu: async () => "delete-copies" } as never;
+    try {
+      fireEvent.contextMenu(document.querySelector<HTMLElement>("[data-row-id=settled]")!);
+      const dialog = await screen.findByRole("alertdialog");
+      const remove = screen.getByRole("button", { name: "Delete" }) as HTMLButtonElement;
+      expect(remove.disabled).toBe(true);
+      fireEvent.click(remove);
+      expect(deleteWorkspace).not.toHaveBeenCalled();
+      act(() => answer({}));
+      await waitFor(() => expect(dialog.textContent).toContain("cart: could not read what is not pushed"));
+      expect(remove.disabled).toBe(false);
+      fireEvent.click(remove);
+      await waitFor(() => expect(deleteWorkspace).toHaveBeenCalledWith("ws_a"));
+    } finally {
+      delete (window as { wsp?: unknown }).wsp;
+    }
+  });
+
   it("draws a settled thread as one slim row: its title and its age, never Merged in its slot and no mark for a merged pull request", async () => {
     const ws = workspace("ws_a", "pricing page", "pr_1");
     mount({ projects: [project("pr_1", "spoo")], workspaces: [ws] });

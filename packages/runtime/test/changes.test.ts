@@ -136,6 +136,15 @@ describe("the checkout fact", () => {
     expect((await rt!.workspaces.checkout(id)).checkout).toMatchObject({ changed: 0, editsUnread: true, countsUnknown: true });
   });
 
+  it("carries the stashes a copy holds, and none where it holds none", async () => {
+    const daemon = fakeDaemon({ "git.status": () => ({ ...STATUS, entries: [], stashes: 2 }) });
+    const { id } = await withWorkspace(daemon);
+    expect((await rt!.workspaces.checkout(id)).checkout).toMatchObject({ changed: 0, stashes: 2 });
+    const none = fakeDaemon();
+    const { id: noneId } = await withWorkspace(none);
+    expect((await rt!.workspaces.checkout(noneId)).checkout).not.toHaveProperty("stashes");
+  });
+
   it("carries the commit the head is on, and none where git has no commit yet", async () => {
     const oid = "0123456789abcdef0123456789abcdef01234567";
     const daemon = fakeDaemon({ "git.status": () => ({ ...STATUS, branch: { ...BRANCH, head: "(detached)", oid } }) });

@@ -158,13 +158,19 @@ pub(crate) fn parse_porcelain_v2(text: &str) -> (GitBranch, Vec<GitStatusEntry>)
 }
 
 pub(crate) async fn git_status<R: Runs>(runner: &R, cwd: &Path) -> Result<GitStatusReply, OpError> {
-    let res = run_git(runner, cwd, &["status", "--porcelain=v2", "--branch", "-z"], None, None).await?;
+    let res = run_git(runner, cwd, &["status", "--porcelain=v2", "--branch", "--show-stash", "-z"], None, None).await?;
     check(&res, "status")?;
     let top = run_git(runner, cwd, &["rev-parse", "--show-toplevel"], None, None).await?;
     check(&top, "rev-parse")?;
     let (mut branch, entries) = parse_porcelain_v2(&stdout_text(&res));
     counted_without_upstream(runner, cwd, &mut branch).await?;
-    Ok(GitStatusReply { branch, entries, root: stdout_text(&top).trim().to_owned(), edits_unread: false, counts_unknown: false })
+    let stashes = stashes_in(&stdout_text(&res));
+    Ok(GitStatusReply { branch, entries, root: stdout_text(&top).trim().to_owned(), edits_unread: false, counts_unknown: false, stashes })
+}
+
+/// The `# stash N` header --show-stash adds, where the repository holds any.
+fn stashes_in(porcelain: &str) -> Option<u64> {
+    porcelain.split('\0').find_map(|tok| tok.strip_prefix("# stash ")?.trim().parse().ok()).filter(|n| *n > 0)
 }
 
 /// A branch with no upstream, or one whose tracking ref is gone, is counted against the default branch, as a

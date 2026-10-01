@@ -4380,6 +4380,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           changed: said.entries.filter(e => e.xy !== "!!").length,
           ...(said.editsUnread === true ? { editsUnread: true } : {}),
           ...(said.countsUnknown === true ? { countsUnknown: true } : {}),
+          ...(said.stashes !== undefined ? { stashes: said.stashes } : {}),
           ...(/^[0-9a-f]{7,40}$/.test(said.branch.oid) ? { head: said.branch.oid } : {}),
           readAt: clock.now(),
         };

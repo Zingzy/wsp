@@ -48,6 +48,8 @@ export interface ThreadTarget {
 
 export interface RootTree {
   readonly threadIds: ReadonlyArray<string>;
+  /** The workspaces the tree's threads run in, the copies Delete copies takes. */
+  readonly workspaceIds: ReadonlyArray<string>;
   readonly working: boolean;
   readonly pinned: boolean;
   readonly settled: boolean;
@@ -100,6 +102,8 @@ export interface ThreadVerbs {
   /** Asks to delete these workspaces, the copies with them: the surface that draws the rows puts its confirmation
    * here, as it does the rename's opener, and a client with no road to the op leaves it out. */
   readonly keep?: ((workspaceIds: ReadonlyArray<string>) => void) | undefined;
+  /** Opens the one confirmation for deleting a settled tree's copies, or every settled tree's. */
+  readonly deleteCopies?: ((workspaceIds: ReadonlyArray<string>) => void) | undefined;
   /** Asks to put back the files the thread's last rewind replaced: the surface puts its confirmation here. */
   readonly undoRewind?: ((thread: { threadId: string; workspaceId: string }) => void) | undefined;
   /** Every event the host holds for a workspace, which a thread's copy folds its own out of; left out by a client
@@ -206,6 +210,16 @@ export const threadActions: ReadonlyArray<ActionEntry<ThreadTarget, ThreadVerbs>
     run: (target, verbs) => verbs.keep?.(target.others),
   },
   {
+    id: "delete-copies",
+    group: "remove",
+    icon: () => Trash2Icon,
+    destructive: true,
+    applies: target => target.root !== null && target.root.settled && target.root.workspaceIds.length > 0,
+    title: () => THREAD_WORDS.deleteCopies,
+    refusal: (_target, verbs) => (verbs.deleteCopies === undefined ? CLIENT_CANNOT_DELETE : null),
+    run: (target, verbs) => (target.root === null ? undefined : verbs.deleteCopies?.(target.root.workspaceIds)),
+  },
+  {
     id: "forget",
     group: "remove",
     icon: () => Trash2Icon,
@@ -219,6 +233,8 @@ export const threadActions: ReadonlyArray<ActionEntry<ThreadTarget, ThreadVerbs>
 /** The Settled fold's own row: what it settles is every live tree whose threads have all been read and are quiet. */
 export interface SettledFoldTarget {
   readonly threadIds: ReadonlyArray<string>;
+  /** The workspaces every settled tree runs in, the copies the fold's Delete copies takes. */
+  readonly workspaceIds: ReadonlyArray<string>;
 }
 
 export const settledFoldActions: ReadonlyArray<ActionEntry<SettledFoldTarget, ThreadVerbs>> = [
@@ -229,5 +245,15 @@ export const settledFoldActions: ReadonlyArray<ActionEntry<SettledFoldTarget, Th
     title: () => THREAD_WORDS.settleRead,
     refusal: (target, verbs) => (verbs.settle === undefined ? CLIENT_CANNOT_SETTLE : target.threadIds.length === 0 ? NOTHING_READ_TO_SETTLE : null),
     run: (target, verbs) => verbs.settle?.(target.threadIds),
+  },
+  {
+    id: "delete-copies",
+    group: "remove",
+    icon: () => Trash2Icon,
+    destructive: true,
+    applies: target => target.workspaceIds.length > 0,
+    title: () => THREAD_WORDS.deleteCopies,
+    refusal: (_target, verbs) => (verbs.deleteCopies === undefined ? CLIENT_CANNOT_DELETE : null),
+    run: (target, verbs) => verbs.deleteCopies?.(target.workspaceIds),
   },
 ];
