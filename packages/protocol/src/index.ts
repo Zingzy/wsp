@@ -4642,6 +4642,7 @@ const DAEMON_CONTENTS = [
   "29eeb80d015c5099f6991b2acc3a0457f26aa1636b66f8751d6734cdb1a0639d",
   "ad16ee01ba69b4bd8339c8aa4753c2f3e46aa80c8d9f1ceeab9ca1038482f062",
   "409fce58696aaa20c7803f7a963841e4aacc0702a153ca6f916fba64f941bd16",
+  "89e10a249a0e59670fc8fefec015f640d8f021d0b24bb34665412360cf6b999b",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -4941,7 +4942,8 @@ const DAEMON_CONTENTS = [
  * the edits standing at the end; the commits it replayed and any conflict it resolved mid-rebase are not listed.
  * Version 110: A joined Mac reports which Mac it is: its place report carries the product name its registry gives, else
  * its model identifier, so the computer's row draws that Mac rather than a server. git.status counts the stashes a
- * repository holds, running or stopped, so a delete names them. */
+ * repository holds, running or stopped, so a delete names them.
+ * Version 111: the room check's refusal is a contract word, so the Mac's copy road says the same sentence. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
