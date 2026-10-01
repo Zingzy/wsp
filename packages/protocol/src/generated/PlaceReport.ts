@@ -6,7 +6,11 @@ import type { WorkspaceSize } from "./WorkspaceSize.js";
 /**
  * What a place says about itself on every link. agents names the catalog ids found on its login PATH.
  */
-export type PlaceReport = { name: string, platform: Platform, arch: string, os: string, shape: WorkspaceSize, diskFreeBytes?: number, login: { [key in string]: string }, 
+export type PlaceReport = { name: string, platform: Platform, arch: string, os: string, shape: WorkspaceSize, diskFreeBytes?: number, 
+/**
+ * Which Mac this is, as its registry names the product, else its model identifier; absent off a Mac.
+ */
+model?: string, login: { [key in string]: string }, 
 /**
  * Whether this computer's own daemon runs workspaces here: cgroup v2 with the controllers a cap needs, an
  * overlay, and root. What decides whether the place forks at all, where the docker row once did.

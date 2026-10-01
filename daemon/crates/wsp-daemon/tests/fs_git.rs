@@ -498,6 +498,18 @@ async fn git_status_reports_ahead_and_behind_against_an_upstream() {
 }
 
 #[tokio::test]
+async fn git_status_counts_the_stashes_a_clean_checkout_still_holds() {
+    let (t, _d, mut c) = bench().await;
+    let clean = c.request("git.status", json!({ "cwd": "repo" })).await;
+    assert_eq!(clean.get("stashes"), None);
+    fs::write(t.repo().join("README.md"), "# stashed\n").unwrap();
+    git(&t.repo(), &["-c", "user.name=t", "-c", "user.email=t@example.com", "stash", "-q"]);
+    let res = c.request("git.status", json!({ "cwd": "repo" })).await;
+    assert_eq!(res["stashes"].as_u64(), Some(1));
+    git(&t.repo(), &["stash", "drop", "-q"]);
+}
+
+#[tokio::test]
 async fn git_status_works_from_a_subdirectory_reports_repo_relative_paths_and_names_the_top_level() {
     let (t, _d, mut c) = bench().await;
     let res = c.request("git.status", json!({ "cwd": "repo/src" })).await;

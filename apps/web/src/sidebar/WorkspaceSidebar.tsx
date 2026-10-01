@@ -53,7 +53,7 @@ import { COMPUTER_PICK_KEY, PROJECT_PICK_KEY, pickCodec, underPicks } from "./pi
 import { CHILD_LIST_CLASS, ONE_LINE_ROW_CLASS, RAIL_ITEM_CLASS, ROW_META_CLASS, ROW_PROSE_CLASS, SETTLED_ROW_ID, sectionRowId, threadRowId, workspaceRowId } from "./rowGrammar.js";
 import { SearchRow } from "./SearchRow.js";
 import { resolveAdjacentThreadId, threadSection, topSidebarThread } from "./Sidebar.logic.js";
-import { SIDEBAR_SECTIONS, dropMarks, settleableRoots, sidebarTiles, treeSettle, treeThreadIds, type ProjectGroup, type SidebarSection, type TileNode } from "./threadTree.js";
+import { SIDEBAR_SECTIONS, dropMarks, settleableRoots, sidebarTiles, treeSettle, treeThreadIds, treeWorkspaceIds, type ProjectGroup, type SidebarSection, type TileNode } from "./threadTree.js";
 import { SnoozeDialog } from "./SnoozeDialog.js";
 import { SidebarCorner } from "./SidebarCorner.js";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./SidebarChrome.js";
@@ -176,7 +176,7 @@ export function WorkspaceSidebar() {
   /** The root tile being dragged, by fold key, and the place under the pointer it would land in. */
   const [dragging, setDragging] = useState<string | null>(null);
   const [over, setOver] = useState<SidebarSection | "settled" | null>(null);
-  const [forgetting, setForgetting] = useState<{ workspaceIds: ReadonlyArray<string>; act: "forget" | "delete" } | null>(null);
+  const [forgetting, setForgetting] = useState<{ workspaceIds: ReadonlyArray<string>; act: "forget" | "delete"; copies?: true } | null>(null);
   /** The tile whose name is being typed, by the row id every tile carries, and whether that name is on its way; one
    * tile at a time, the tile is the only editor, and the field stays until the store has the name. */
   const [renaming, setRenaming] = useState<{ rowId: string; saving: boolean } | null>(null);
@@ -200,7 +200,12 @@ export function WorkspaceSidebar() {
       ...defaultThreadVerbs,
       ...(canRename ? { rename: (threadId: string) => setRenaming({ rowId: threadRowId(threadId), saving: false }) } : {}),
       ...(canMark ? { snooze: setSnoozing } : {}),
-      ...(canDelete ? { keep: (workspaceIds: ReadonlyArray<string>) => setForgetting({ workspaceIds, act: "delete" }) } : {}),
+      ...(canDelete
+        ? {
+            keep: (workspaceIds: ReadonlyArray<string>) => setForgetting({ workspaceIds, act: "delete" }),
+            deleteCopies: (workspaceIds: ReadonlyArray<string>) => setForgetting({ workspaceIds, act: "delete", copies: true }),
+          }
+        : {}),
     }),
     [canDelete, canMark, canRename, defaultThreadVerbs],
   );
@@ -340,7 +345,7 @@ export function WorkspaceSidebar() {
       );
     } else {
       // A settle, a restore, a pin and a snooze take a root and its whole tree; a tile under one goes where it goes.
-      const root = depth === 0 ? { ...treeSettle(node), pinned: thread.pinnedAt !== null, settled } : null;
+      const root = depth === 0 ? { ...treeSettle(node), workspaceIds: treeWorkspaceIds(node), pinned: thread.pinnedAt !== null, settled } : null;
       const catalog = catalogIn({ harnesses, harnessesByWorkspace }, thread.workspaceId, thread.harness);
       const target = threadTarget(thread, { catalog, ...machineOf(runs) }, root, group);
       const actionsOf = resolveActions(threadActions, target, threadVerbs);
@@ -464,7 +469,7 @@ export function WorkspaceSidebar() {
   });
   const settledCount = tiles.settled.reduce((sum, node) => sum + tileCount(node), 0);
   const settleable = settleableRoots(tiles.live);
-  const settledRowActions = resolveActions(settledFoldActions, { threadIds: settleable.flatMap(treeThreadIds) }, threadVerbs);
+  const settledRowActions = resolveActions(settledFoldActions, { threadIds: settleable.flatMap(treeThreadIds), workspaceIds: [...new Set(tiles.settled.flatMap(treeWorkspaceIds))] }, threadVerbs);
 
   // The body on its way out of a slide is still drawn: its rows are not the ones the keyboard walks.
   const rows = (): HTMLElement[] => Array.from(rootRef.current?.querySelectorAll<HTMLElement>("[data-sidebar-row]") ?? []);
@@ -653,6 +658,7 @@ export function WorkspaceSidebar() {
           workspaces={forgetTargets.map(target => target.workspace)}
           threads={forgetTargets.reduce((sum, target) => sum + target.threads.length, 0)}
           act={forgetting!.act}
+          copies={forgetting!.copies === true}
           open
           onOpenChange={next => {
             if (!next) setForgetting(null);

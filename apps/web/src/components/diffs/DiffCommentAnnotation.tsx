@@ -103,7 +103,7 @@ export function DiffCommentAnnotation({
         }}
       />
       <div className="mt-1.5 flex items-center gap-1">
-        <span className="mr-auto text-[11px] text-muted-foreground/70">⌘/Ctrl Enter to send</span>
+        <span className="mr-auto text-[11px] text-muted-foreground">⌘/Ctrl Enter to send</span>
         <Button
           className="text-muted-foreground hover:text-foreground"
           variant="ghost"

@@ -93,7 +93,7 @@ export interface BranchTurn {
  * turn, a folder with no answer yet, or one whose read failed, is asked again as the turn moves, since the first ask
  * can go out before a new copy's folder is there. A read in flight is kept until it settles; only a new wire, folder
  * or link word drops it, so a turn moving faster than a round trip still gets its answer and never stacks one read
- * per entry. The composer's folder row and a workspace's tiles both read this. */
+ * per entry. The composer's folder row reads this for a folder other than its workspace's own checkout. */
 export function useBranch(wire: TerminalWire | null, folder: string | null, ask: boolean, link: DaemonLinkStatus, turn?: BranchTurn): Branch {
   const [state, setState] = useState<{ folder: string | null; branch: Branch }>({ folder, branch: UNKNOWN });
   const [again, setAgain] = useState(0);

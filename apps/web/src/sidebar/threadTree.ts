@@ -297,6 +297,12 @@ export function treeThreadIds({ thread: { thread }, children }: TileNode): strin
   return [...(thread === null ? [] : [thread.id]), ...children.flatMap(treeThreadIds)];
 }
 
+/** The workspaces a tree's threads run in, each once: the copies a Delete copies takes. */
+export function treeWorkspaceIds(node: TileNode): string[] {
+  const ids = (n: TileNode): string[] => [n.thread.runs.id, ...n.children.flatMap(ids)];
+  return [...new Set(ids(node))];
+}
+
 /** What a settle of a root takes: every thread of its tree, and whether one of them is working, which holds it. */
 export function treeSettle(node: TileNode): { threadIds: string[]; working: boolean } {
   const works = ({ thread: { thread }, children }: TileNode): boolean => (thread !== null && isThreadWorking(thread)) || children.some(works);

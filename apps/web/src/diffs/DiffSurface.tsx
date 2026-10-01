@@ -578,8 +578,8 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
           )
         ) : model.raw ? (
           <div className="min-h-0 flex-1 overflow-auto p-2">
-            <p className="mb-2 text-[11px] text-muted-foreground/75">{model.raw.reason}</p>
-            <pre className="rounded-md border border-border/70 bg-background/70 p-3 font-mono text-[11px] leading-relaxed text-muted-foreground/90">{model.raw.text}</pre>
+            <p className="mb-2 text-[11px] text-muted-foreground">{model.raw.reason}</p>
+            <pre className="rounded-md border border-border/70 bg-background/70 p-3 font-mono text-[11px] leading-relaxed text-muted-foreground">{model.raw.text}</pre>
           </div>
         ) : model.changedFiles.length === 0 ? (
           <p className={PANE_LINE_CLASS}>

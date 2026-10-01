@@ -58,7 +58,7 @@ export const ComposerTasks = memo(function ComposerTasks({ tasks }: { tasks: Tas
                 <Mark state={step.state} />
               </span>
               <span className={cn("min-w-0 flex-1 truncate", step.state === "working" ? "text-foreground" : "text-muted-foreground")}>{step.text}</span>
-              <span data-composer-task-duration className="w-12 shrink-0 text-end font-mono tabular-nums text-muted-foreground/60">
+              <span data-composer-task-duration className="w-12 shrink-0 text-end font-mono tabular-nums text-muted-foreground">
                 {step.durationMs !== undefined ? fmtDuration(step.durationMs) : null}
               </span>
             </li>

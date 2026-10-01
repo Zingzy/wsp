@@ -4,10 +4,12 @@
 // a forget, which is the same road for a workspace whose machine is already
 // gone. It names the workspace and what leaves, asks the host once, and shows
 // the host's refusal in place. Keep this one ends several copies at once
-// through the same dialog, naming how many go. The row leaves on
+// through the same dialog, naming how many go, as Delete copies does a settled
+// tree's. A delete first reads each copy's checkout and names any copy that
+// holds commits not pushed or uncommitted files. The row leaves on
 // workspace.deleted, which the store already applies.
-import { useState } from "react";
-import { deleteCopiesNotice, deleteNotice, forgetNotice, isProviderPlace, placeName, placeOf, workspaceKind, type StandsOn, type WorkspaceView } from "@wsp/protocol";
+import { useEffect, useState } from "react";
+import { deleteCopiesNotice, deleteNotice, forgetNotice, isProviderPlace, placeName, placeOf, unpushedLine, workspaceKind, type Checkout, type StandsOn, type WorkspaceView } from "@wsp/protocol";
 import { CLIENT_CANNOT_DELETE, CLIENT_CANNOT_FORGET } from "../actions/format.js";
 import { errorText } from "../lib/utils.js";
 import { useStore } from "../protocol/store.js";
@@ -25,14 +27,17 @@ export function ForgetWorkspaceDialog({
   workspaces,
   threads,
   act = "forget",
+  copies = false,
   open,
   onOpenChange,
 }: {
-  /** One workspace, or the copies Keep this one ends together. */
+  /** One workspace, or the copies Keep this one or Delete copies ends together. */
   workspaces: ReadonlyArray<WorkspaceView>;
   threads: number;
   /** Which road out this dialog is for; a workspace whose machine is gone takes the forget. */
   act?: "forget" | "delete";
+  /** Delete copies, which names every copy it takes, where Keep this one names the others. */
+  copies?: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -50,6 +55,32 @@ export function ForgetWorkspaceDialog({
   const many = workspaces.length > 1;
   const [busy, setBusy] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
+  const [read, setRead] = useState<ReadonlyMap<string, Checkout | undefined> | null>(null);
+
+  // Read fresh as the dialog opens: what a copy holds is what the delete would lose, and a fact held from before can
+  // be old, so a read that fails or answers no checkout is said as such, never filled in from it.
+  useEffect(() => {
+    if (!open || act !== "delete") return;
+    let gone = false;
+    setRead(null);
+    const ask = api?.workspaceCheckout;
+    void Promise.all(
+      workspaces.map(async w => {
+        try {
+          return [w.id, ask === undefined ? undefined : (await ask(w.id)).checkout] as const;
+        } catch {
+          return [w.id, undefined] as const;
+        }
+      }),
+    ).then(pairs => {
+      if (!gone) setRead(new Map(pairs));
+    });
+    return () => {
+      gone = true;
+    };
+  }, [open, act, api, workspaces.map(w => w.id).join("\0")]);
+  const reading = act === "delete" && read === null;
+  const holding = read === null ? [] : workspaces.flatMap(w => unpushedLine(w.name, read.get(w.id)) ?? []);
 
   const change = (next: boolean): void => {
     if (!next) setRefusal(null);
@@ -76,7 +107,7 @@ export function ForgetWorkspaceDialog({
     <AlertDialog open={open} onOpenChange={change}>
       <AlertDialogPopup>
         <AlertDialogHeader>
-          <AlertDialogTitle>{many ? `${road.word} the other ${workspaces.length} copies?` : `${road.word} ${workspace.name}?`}</AlertDialogTitle>
+          <AlertDialogTitle>{many ? (copies ? `${road.word} ${workspaces.length} copies?` : `${road.word} the other ${workspaces.length} copies?`) : `${road.word} ${workspace.name}?`}</AlertDialogTitle>
           <AlertDialogDescription>
             {many
               ? deleteCopiesNotice(
@@ -88,13 +119,20 @@ export function ForgetWorkspaceDialog({
                 )
               : act === "delete" ? deleteNotice(threads, workspaceKind(workspace), workspace.copy, undefined, on) : forgetNotice(threads)}
           </AlertDialogDescription>
+          {holding.length === 0 ? null : (
+            <ul data-k="unpushed" className="mt-2 flex flex-col gap-1 text-[13px] leading-5 text-foreground">
+              {holding.map(line => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          )}
         </AlertDialogHeader>
         <div className="px-5 pt-2">
           <RefusalSlot k="forget-refusal" {...(refusal ? { said: refusal } : {})} />
         </div>
         <AlertDialogFooter>
           <AlertDialogClose render={<Button variant="outline" className={NEUTRAL_RING} />}>Cancel</AlertDialogClose>
-          <Button variant="destructive" disabled={busy} onClick={() => void forget()} data-k="end-workspace">
+          <Button variant="destructive" disabled={busy || reading} onClick={() => void forget()} data-k="end-workspace">
             {busy ? road.busy : road.word}
           </Button>
         </AlertDialogFooter>

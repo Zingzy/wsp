@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { actionRefusal, workspaceStateLine, whereWord, agentsMayDrive, type CopyToDelete, deleteCopiesNotice, deleteNotice, onDeleteOf, screenCommandLine, screenCommandTyped, screenCommandsOf, goneRefusal, isBilling, isLocalWorkspace, kindWords, MACHINE_WSP_FORKS, machineWord, needsRebuild, goneRoadRefusal, NOT_ON_THIS_KIND, providerCannotRefusal, reachShown, readingRoad, relayedRefusal, sendRefusal, servesReading, signInRefusalLine, signInRoad, stillWorkingLine, THIS_COMPUTER, undrivenRefusal, WORKSPACE_KIND_WORDS, workspaceKind, workspaceState, workspaceStateOf, workspaceWord, type ReachState, type SendBlock, type WorkspaceState } from "../src/index.js";
+import { unpushedLine, actionRefusal, workspaceStateLine, whereWord, agentsMayDrive, type CopyToDelete, deleteCopiesNotice, deleteNotice, onDeleteOf, screenCommandLine, screenCommandTyped, screenCommandsOf, goneRefusal, isBilling, isLocalWorkspace, kindWords, MACHINE_WSP_FORKS, machineWord, needsRebuild, goneRoadRefusal, NOT_ON_THIS_KIND, providerCannotRefusal, reachShown, readingRoad, relayedRefusal, sendRefusal, servesReading, signInRefusalLine, signInRoad, stillWorkingLine, THIS_COMPUTER, undrivenRefusal, WORKSPACE_KIND_WORDS, workspaceKind, workspaceState, workspaceStateOf, workspaceWord, type ReachState, type SendBlock, type WorkspaceState } from "../src/index.js";
 
 describe("workspaceState", () => {
   it("phase alone: running, pausing, napping and waking each have one word", () => {
@@ -396,5 +396,25 @@ describe("the line a verb that moved a workspace prints", () => {
 
   it("says a machine that is up and answering nothing is up and answering nothing, rather than one word for two states", () => {
     expect(workspaceStateLine("web", "unreachable")).toBe("web is up and not answering yet");
+  });
+});
+
+describe("what a copy holds that its remote lacks", () => {
+  const read = { branch: "fix/cart", ahead: 0, behind: 0, changed: 0, readAt: 1 };
+  it("names its commits not pushed and its uncommitted files, and nothing for a copy that holds neither", () => {
+    expect(unpushedLine("cart", read)).toBeUndefined();
+    expect(unpushedLine("cart", { ...read, ahead: 1 })).toBe("cart holds 1 commit not pushed");
+    expect(unpushedLine("cart", { ...read, changed: 2 })).toBe("cart holds 2 uncommitted files");
+    expect(unpushedLine("cart", { ...read, ahead: 3, changed: 1 })).toBe("cart holds 3 commits not pushed and 1 uncommitted file");
+  });
+
+  it("counts the stashes a clean copy still holds, beside its commits and files", () => {
+    expect(unpushedLine("cart", { ...read, stashes: 1 })).toBe("cart holds 1 stash");
+    expect(unpushedLine("cart", { ...read, ahead: 2, changed: 1, stashes: 3 })).toBe("cart holds 2 commits not pushed, 1 uncommitted file and 3 stashes");
+  });
+
+  it("says plainly what it could not count, and a copy never read may hold anything", () => {
+    expect(unpushedLine("cart", { ...read, countsUnknown: true, editsUnread: true })).toBe("cart holds commits it could not count and edits it could not read");
+    expect(unpushedLine("cart", undefined)).toBe("cart: could not read what is not pushed");
   });
 });

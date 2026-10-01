@@ -85,6 +85,7 @@ import { addedProjectLine, defaultSeedChoice, kindForComputer, ProjectAddEvent, 
   wsUrlOf,
   PLACE_NEEDS_ROOT_LINE,
   SignInLine,
+  macKindOf,
 } from "@wsp/protocol";
 import { MissingKnownHostsError, PlaceMachine, SshBackend, SSH_DIAL_MS, SSH_LINE_CAP, boxWord, checkProviderKey, clientWords, keyCheckLine, keyFingerprint, knownHostKey, landBytes, offeredHostKey, parseSshAddress, sshClient, sshDial, sshDialsThisComputer, sshLoginWord, sshMachineName, sshRefusalLine, sshWordReach, type KeyCheck, type MachineBackend, type SshReach, type SshTransport } from "@wsp/engine";
 import { PlaceAddTakenBackError, PlaceLoginRefusedError, freshEphemeral, makeSeal, newPlaceKeyPair, openFrame, sealKeys, sharedSecret, signPlaceBytes, verifyPlaceBytes, type Seal, type HerePlace, type PlaceDialler, type PlaceInstaller, type PlaceKeyPair, type PlaceLeaver, type PlaceLogReader, type PlaceUpdateLanded, type PlaceUpdater, type PlaceWiring, type PlaceBackHolder } from "@wsp/runtime";
@@ -212,18 +213,6 @@ export function placeLabelHere(): string | undefined {
     labelHere = undefined;
   }
   return labelHere;
-}
-
-/** Which Mac a product name ("MacBook Pro (14-inch, M5)") or a model identifier ("Macmini9,1") names. Apple
- * silicon's identifiers since 2022 ("Mac17,2") name no family, which is why the product name is read first. */
-export function macKindOf(said: string): MacKind | undefined {
-  const word = said.replace(/\s+/g, "").toLowerCase();
-  if (word.startsWith("macbook")) return "macbook";
-  if (word.startsWith("imac")) return "imac";
-  if (word.startsWith("macmini")) return "mac-mini";
-  if (word.startsWith("macstudio")) return "mac-studio";
-  if (word.startsWith("macpro")) return "mac-pro";
-  return undefined;
 }
 
 /** The product name out of `ioreg -arc IOPlatformDevice -k product-name`, whose plist carries it as base64 bytes. */

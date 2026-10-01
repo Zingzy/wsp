@@ -6,6 +6,7 @@
 import { computerWord, fmtThreads, LIST_PRICE_WORD, MACHINE_WSP_FORKS, offlineFor, THIS_COMPUTER, type CpuWord } from "./format.js";
 import type { HarnessCatalog, MachineFacts, MachineState, PauseMode, PlaceBack, ProjectCopy, ProjectSource, ReachState, ScreenCommand, ScreenControl, WorkspaceKind, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "./index.js";
 import { LOOPBACK, authority } from "./app-ports.js";
+import type { Checkout } from "./changes.js";
 
 export type WorkspaceState = "running" | "pausing" | "paused" | "waking" | "unreachable" | "gone";
 
@@ -208,6 +209,21 @@ export function deleteCopiesNotice(copies: readonly CopyToDelete[], threads: num
   if (new Set(asked).size === 1) return `Each one's ${asked[0]}; ${records}`;
   const each = copies.map((c, i) => `${c.name}: its ${asked[i]}.`).join(" ");
   return `${each} ${records.charAt(0).toUpperCase()}${records.slice(1)}`;
+}
+
+/** What a copy holds that its remote lacks, the line a delete's confirmation names before anything goes: its commits
+ * not pushed and its uncommitted files, or what could not be counted, and nothing for a copy that holds neither. */
+export function unpushedLine(name: string, checkout: Checkout | undefined): string | undefined {
+  if (checkout === undefined) return `${name}: could not read what is not pushed`;
+  const count = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
+  const parts = [
+    checkout.countsUnknown === true ? "commits it could not count" : checkout.ahead > 0 ? `${count(checkout.ahead, "commit")} not pushed` : null,
+    checkout.editsUnread === true ? "edits it could not read" : checkout.changed > 0 ? count(checkout.changed, "uncommitted file") : null,
+    checkout.stashes !== undefined && checkout.stashes > 0 ? count(checkout.stashes, "stash", "stashes") : null,
+  ].filter(part => part !== null);
+  if (parts.length === 0) return undefined;
+  const listed = parts.length === 1 ? parts[0]! : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)!}`;
+  return `${name} holds ${listed}`;
 }
 
 /** What a delete does to a create that failed before any machine was made, which is the one record with no machine id. */

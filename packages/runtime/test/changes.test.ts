@@ -136,6 +136,15 @@ describe("the checkout fact", () => {
     expect((await rt!.workspaces.checkout(id)).checkout).toMatchObject({ changed: 0, editsUnread: true, countsUnknown: true });
   });
 
+  it("carries the stashes a copy holds, and none where it holds none", async () => {
+    const daemon = fakeDaemon({ "git.status": () => ({ ...STATUS, entries: [], stashes: 2 }) });
+    const { id } = await withWorkspace(daemon);
+    expect((await rt!.workspaces.checkout(id)).checkout).toMatchObject({ changed: 0, stashes: 2 });
+    const none = fakeDaemon();
+    const { id: noneId } = await withWorkspace(none);
+    expect((await rt!.workspaces.checkout(noneId)).checkout).not.toHaveProperty("stashes");
+  });
+
   it("carries the commit the head is on, and none where git has no commit yet", async () => {
     const oid = "0123456789abcdef0123456789abcdef01234567";
     const daemon = fakeDaemon({ "git.status": () => ({ ...STATUS, branch: { ...BRANCH, head: "(detached)", oid } }) });
@@ -167,6 +176,20 @@ describe("the checkout fact", () => {
     await rt!.workspaces.nap(id);
     advance(CHECKOUT_TTL_MS + 1);
     expect((await rt!.workspaces.checkout(id)).checkout).toEqual(first);
+    expect(daemon.frames.filter(f => f["op"] === "git.status")).toHaveLength(1);
+  });
+
+  it("keeps a napped fork's last fact across a restart of the host, and asks the fork nothing", async () => {
+    const daemon = fakeDaemon();
+    const store = memoryStore();
+    const { backend, id } = await withWorkspace(daemon, { store });
+    const first = (await rt!.workspaces.checkout(id)).checkout;
+    expect(first?.branch).toBe("fix/cart");
+    await rt!.workspaces.nap(id);
+    await rt!.close();
+    rt = createRuntime({ backend, store, adapters: {}, daemonToken: DAEMON_TOKEN, daemonChannel: daemon.open });
+    expect((await rt.workspaces.checkout(id)).checkout).toEqual(first);
+    expect((await rt.workspaces.list()).find(w => w.id === id)).toBeDefined();
     expect(daemon.frames.filter(f => f["op"] === "git.status")).toHaveLength(1);
   });
 });

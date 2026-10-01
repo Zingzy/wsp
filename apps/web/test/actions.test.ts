@@ -360,7 +360,7 @@ describe("thread actions", () => {
 
   it("a root thread offers Settle on its shortcut, which takes its whole tree and is held while one of it works; a thread under a root offers none", async () => {
     const settle = vi.fn(async () => {});
-    const root = (working: boolean): ThreadTarget => ({ ...thread("completed"), root: { threadIds: ["thr_1", "thr_2"], working, pinned: false, settled: false } });
+    const root = (working: boolean): ThreadTarget => ({ ...thread("completed"), root: { threadIds: ["thr_1", "thr_2"], workspaceIds: [], working, pinned: false, settled: false } });
     const actions = resolveActions(threadActions, root(false), threadVerbs({ settle }));
     expect(actionById(actions, "settle")).toMatchObject({ title: THREAD_WORDS.settle, refusal: null, shortcutCommand: "thread.settle" });
     await actionById(actions, "settle").run();
@@ -374,7 +374,7 @@ describe("thread actions", () => {
     const mark = vi.fn(async () => {});
     const snooze = vi.fn();
     const restore = vi.fn(async () => {});
-    const root = (over: Partial<NonNullable<ThreadTarget["root"]>>): ThreadTarget => ({ ...thread("completed"), root: { threadIds: ["thr_1", "thr_2"], working: false, pinned: false, settled: false, ...over } });
+    const root = (over: Partial<NonNullable<ThreadTarget["root"]>>): ThreadTarget => ({ ...thread("completed"), root: { threadIds: ["thr_1", "thr_2"], workspaceIds: [], working: false, pinned: false, settled: false, ...over } });
     const live = resolveActions(threadActions, root({}), threadVerbs({ mark, snooze, restore, settle: vi.fn(async () => {}) }));
     expect(titles(live)).toEqual([THREAD_WORDS.stop, THREAD_WORDS.settle, THREAD_WORDS.rename, THREAD_WORDS.copyMarkdown, THREAD_WORDS.pin, THREAD_WORDS.snooze, THREAD_WORDS.copyLink, THREAD_WORDS.forget]);
     await actionById(live, "pin").run();
@@ -397,11 +397,11 @@ describe("thread actions", () => {
 
   it("the Settled row's Settle all read takes every read tree it is handed, and says so when there is none", async () => {
     const settle = vi.fn(async () => {});
-    const [all] = resolveActions(settledFoldActions, { threadIds: ["thr_1", "thr_2", "thr_3"] }, threadVerbs({ settle }));
+    const [all] = resolveActions(settledFoldActions, { threadIds: ["thr_1", "thr_2", "thr_3"], workspaceIds: [] }, threadVerbs({ settle }));
     expect(all).toMatchObject({ title: "Settle all read", refusal: null });
     await all!.run();
     expect(settle).toHaveBeenCalledWith(["thr_1", "thr_2", "thr_3"]);
-    expect(resolveActions(settledFoldActions, { threadIds: [] }, threadVerbs({ settle }))[0]!.refusal).toBe("No read thread to settle");
+    expect(resolveActions(settledFoldActions, { threadIds: [], workspaceIds: [] }, threadVerbs({ settle }))[0]!.refusal).toBe("No read thread to settle");
   });
 
   it("a settled thread refuses stop; a client without the verb says so; a thread without an id has no link", () => {

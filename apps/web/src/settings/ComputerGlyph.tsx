@@ -43,8 +43,8 @@ type Computer = Pick<PlaceView, "id" | "kind" | "label" | "name" | "mac">;
 
 export function defaultComputerIcon(place: Computer): ComputerIcon {
   if (isProviderPlace(place as PlaceView)) return "cloud";
-  if (place.id !== HERE_PLACE_ID) return "server";
-  return place.mac === undefined ? "desktop" : MAC_ICONS[place.mac];
+  if (place.mac !== undefined) return MAC_ICONS[place.mac];
+  return place.id === HERE_PLACE_ID ? "desktop" : "server";
 }
 
 const usePickedIcon = (place: Computer): ComputerIcon | undefined => useStore(s => s.preferences.computerLook[place.id]?.icon);

@@ -252,7 +252,7 @@ function workspaceItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
       icon: <FolderIcon className={ITEM_ICON_CLASS} />,
       title: project.displayName,
       description: `${absent?.word ?? project.indicator.label}${onName(computerName(input.places, project))}`,
-      ...(current ? { titleTrailingContent: <span className="shrink-0 text-muted-foreground/70 text-xs">Current task</span> } : {}),
+      ...(current ? { titleTrailingContent: <span className="shrink-0 text-muted-foreground text-xs">Current task</span> } : {}),
       ...(slot === undefined ? {} : { shortcutCommand: workspaceSelectCommand(slot) }),
       run: sync(() => input.handlers.selectWorkspace(project.id)),
     };

@@ -256,6 +256,36 @@ fn total_memory_bytes() -> u64 {
         .unwrap_or(0)
 }
 
+/// The product name in `ioreg -rc IOPlatformDevice -k product-name`, which prints it as `"product-name" = <"...">`.
+fn product_name_of(ioreg: &str) -> Option<String> {
+    let at = ioreg.find("\"product-name\" = <\"")? + "\"product-name\" = <\"".len();
+    let name = ioreg[at..].split("\">").next()?.trim_end_matches('\0').trim();
+    (!name.is_empty()).then(|| name.to_owned())
+}
+
+/// Which Mac this is, read once: the product name first, since Apple silicon's model identifiers name no family, and
+/// the model identifier where the registry names no product, as an Intel Mac's does not.
+fn mac_model() -> Option<String> {
+    static MODEL: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    MODEL
+        .get_or_init(|| {
+            if !cfg!(target_os = "macos") {
+                return None;
+            }
+            let read = |file: &str, args: &[&str]| {
+                std::process::Command::new(file)
+                    .args(args)
+                    .output()
+                    .ok()
+                    .map(|out| String::from_utf8_lossy(&out.stdout).into_owned())
+                    .unwrap_or_default()
+            };
+            product_name_of(&read("ioreg", &["-rc", "IOPlatformDevice", "-k", "product-name"]))
+                .or_else(|| Some(read("sysctl", &["-n", "hw.model"]).trim().to_owned()).filter(|model| !model.is_empty()))
+        })
+        .clone()
+}
+
 fn os_line() -> String {
     match nix::sys::utsname::uname() {
         Ok(u) => format!("{} {}", u.sysname().to_string_lossy(), u.release().to_string_lossy()),
@@ -316,6 +346,7 @@ pub(crate) fn place_report(input: &ReportInput<'_>) -> PlaceReport {
             mem_mb: (total_memory_bytes() as f64 / (1024.0 * 1024.0)).round() as u64,
         },
         disk_free_bytes: free,
+        model: mac_model(),
         login: [
             ("HOME".to_owned(), input.home.to_string_lossy().into_owned()),
             ("USER".to_owned(), user_name()),
@@ -639,6 +670,20 @@ mod tests {
     use ed25519_dalek::pkcs8::{EncodePrivateKey, EncodePublicKey};
     use ed25519_dalek::SigningKey;
     use wsp_frames::{place_link_transcript, place_refusal_transcript, LinkEphemerals, LinkRole};
+
+    #[test]
+    fn a_macs_product_name_is_read_off_the_registry_and_nothing_where_it_names_none() {
+        let ioreg = "+-o J714sAP  <class IOPlatformDevice>\n    {\n      \"product-name\" = <\"MacBook Pro (14-inch, M5)\">\n    }\n";
+        assert_eq!(product_name_of(ioreg).as_deref(), Some("MacBook Pro (14-inch, M5)"));
+        assert_eq!(product_name_of("+-o Root  <class IORegistryEntry>\n"), None);
+        assert_eq!(product_name_of("\"product-name\" = <\"\">"), None);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn this_mac_reports_the_mac_it_is() {
+        assert!(mac_model().is_some_and(|model| !model.is_empty()));
+    }
 
     fn pair() -> (String, PlacePublicKey) {
         let mut seed = [0u8; 32];

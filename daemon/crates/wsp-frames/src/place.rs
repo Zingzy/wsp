@@ -101,6 +101,10 @@ pub struct PlaceReport {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub disk_free_bytes: Option<u64>,
+    /// Which Mac this is, as its registry names the product, else its model identifier; absent off a Mac.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub model: Option<String>,
     pub login: BTreeMap<String, String>,
     /// Whether this computer's own daemon runs workspaces here: cgroup v2 with the controllers a cap needs, an
     /// overlay, and root. What decides whether the place forks at all, where the docker row once did.
