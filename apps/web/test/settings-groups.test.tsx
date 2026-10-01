@@ -288,7 +288,9 @@ describe("General", () => {
     const { api, sets } = settingsApi({ editorList: async () => editors } as Partial<Api>);
     mountSettings({ api, at: { kind: "group", group: "general" } });
     await settle();
-    expect(rowTitles()).toEqual([GENERAL_WORDS.editor, AWAKE_WORDS.keepAwake(""), NOTIFY_WORDS.sound, ABOUT_WORDS.wsp]);
+    // The locked order by how often a choice touches a day: Notifications, Open in, Startup and quit, Version last.
+    expect(rowTitles()).toEqual([NOTIFY_WORDS.sound, GENERAL_WORDS.editor, AWAKE_WORDS.keepAwake(""), ABOUT_WORDS.wsp]);
+    expect([...document.querySelectorAll("[data-settings-page] > section[data-settings-card] [data-settings-head]")].map(h => h.textContent)).toEqual([NOTIFY_WORDS.head, GENERAL_WORDS.openIn, GENERAL_WORDS.startup, ABOUT_WORDS.title]);
     expect(descriptionOf("editor")).toBe(GENERAL_WORDS.editorDescription);
     const select = document.querySelector<HTMLElement>("[data-settings-page] [data-k=editor]")!;
     expect(select.textContent).toBe("Cursor");

@@ -207,6 +207,8 @@ export const ACCOUNT_WORDS = {
 
 /** Settings > General. */
 export const GENERAL_WORDS = {
+  openIn: "Open in",
+  startup: "Startup and quit",
   editor: "Editor",
   editorDescription: "Where Open in editor opens a file or a thread's folder.",
   noEditor: "No editor wsp opens files in is installed: VS Code, Cursor, Zed or a JetBrains IDE.",

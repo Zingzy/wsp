@@ -26,7 +26,31 @@ export function generalCards(ctx: SettingsContext): SettingsCardData[] {
   const play = desktopBridge()?.playNoticeSound;
   return [
     {
-      id: "editor",
+      id: "notifications",
+      head: NOTIFY_WORDS.head,
+      lede: NOTIFY_WORDS.lede,
+      items: [
+        {
+          kind: "row",
+          id: "notify-sound",
+          title: NOTIFY_WORDS.sound,
+          description: NOTIFY_WORDS.soundDescription,
+          control: (
+            <span className="flex items-center gap-3">
+              {play === undefined ? null : (
+                <Button data-k="notify-play" variant="ghost" size="icon" aria-label={NOTIFY_WORDS.play} title={NOTIFY_WORDS.play} disabled={!ctx.preferences.notifySound} onClick={() => play()}>
+                  <Play />
+                </Button>
+              )}
+              <Switch data-k="notify-sound" aria-label={NOTIFY_WORDS.sound} checked={ctx.preferences.notifySound} onCheckedChange={notifySound => ctx.setPreferences({ notifySound })} />
+            </span>
+          ),
+        },
+      ],
+    },
+    {
+      id: "open-in",
+      head: GENERAL_WORDS.openIn,
       items: [
         {
           kind: "row",
@@ -77,35 +101,18 @@ export function generalCards(ctx: SettingsContext): SettingsCardData[] {
                 ),
               },
             ]),
+      ],
+    },
+    {
+      id: "startup",
+      head: GENERAL_WORDS.startup,
+      items: [
         {
           kind: "row",
           id: "keep-awake",
           title: keepAwake,
           description: AWAKE_WORDS.keepAwakeDescription,
           control: <Switch data-k="keep-awake" aria-label={keepAwake} checked={ctx.preferences.keepAwake} onCheckedChange={keepAwake => ctx.setPreferences({ keepAwake })} />,
-        },
-      ],
-    },
-    {
-      id: "notifications",
-      head: NOTIFY_WORDS.head,
-      lede: NOTIFY_WORDS.lede,
-      items: [
-        {
-          kind: "row",
-          id: "notify-sound",
-          title: NOTIFY_WORDS.sound,
-          description: NOTIFY_WORDS.soundDescription,
-          control: (
-            <span className="flex items-center gap-3">
-              {play === undefined ? null : (
-                <Button data-k="notify-play" variant="ghost" size="icon" aria-label={NOTIFY_WORDS.play} title={NOTIFY_WORDS.play} disabled={!ctx.preferences.notifySound} onClick={() => play()}>
-                  <Play />
-                </Button>
-              )}
-              <Switch data-k="notify-sound" aria-label={NOTIFY_WORDS.sound} checked={ctx.preferences.notifySound} onCheckedChange={notifySound => ctx.setPreferences({ notifySound })} />
-            </span>
-          ),
         },
       ],
     },
