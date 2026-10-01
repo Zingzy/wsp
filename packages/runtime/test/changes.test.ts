@@ -169,6 +169,20 @@ describe("the checkout fact", () => {
     expect((await rt!.workspaces.checkout(id)).checkout).toEqual(first);
     expect(daemon.frames.filter(f => f["op"] === "git.status")).toHaveLength(1);
   });
+
+  it("keeps a napped fork's last fact across a restart of the host, and asks the fork nothing", async () => {
+    const daemon = fakeDaemon();
+    const store = memoryStore();
+    const { backend, id } = await withWorkspace(daemon, { store });
+    const first = (await rt!.workspaces.checkout(id)).checkout;
+    expect(first?.branch).toBe("fix/cart");
+    await rt!.workspaces.nap(id);
+    await rt!.close();
+    rt = createRuntime({ backend, store, adapters: {}, daemonToken: DAEMON_TOKEN, daemonChannel: daemon.open });
+    expect((await rt.workspaces.checkout(id)).checkout).toEqual(first);
+    expect((await rt.workspaces.list()).find(w => w.id === id)).toBeDefined();
+    expect(daemon.frames.filter(f => f["op"] === "git.status")).toHaveLength(1);
+  });
 });
 
 describe("a discard and a commit", () => {

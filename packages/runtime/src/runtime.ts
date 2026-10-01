@@ -755,6 +755,8 @@ interface WorkspaceRecord extends Omit<WorkspaceView, "project"> {
   /** What the host keeps of the workspace's pull request: enough that a merged one reads merged after a restart and is
    * never read again, and nothing more of it is written under the host's folder. */
   pr?: PullRequestRecord;
+  /** The checkout git last gave, so a machine nothing can ask after a restart still shows its branch and counts. */
+  checkout?: Checkout;
   /** What a child keeps of the tree it is in: its merge into its lead, the files a merge stopped on, and why its last
    * push was refused. Absent on a workspace that is nobody's child and on one nothing has happened to yet. */
   tree?: TreeRecord;
@@ -4381,6 +4383,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           ...(/^[0-9a-f]{7,40}$/.test(said.branch.oid) ? { head: said.branch.oid } : {}),
           readAt: clock.now(),
         };
+        const { readAt: _was, ...kept } = entry.record.checkout ?? { readAt: 0 };
+        const { readAt: _now, ...read } = entry.checkout;
+        if (JSON.stringify(kept) !== JSON.stringify(read)) {
+          entry.record.checkout = entry.checkout;
+          await persist(entry.record);
+        }
         await statusNow(entry);
       } catch {
         // A copy git could not read keeps the last fact it gave; the time on it says how old it is.
@@ -5147,6 +5155,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // A merged or closed pull request reads as the record kept it and is never read again, a restart included.
     const kept = record.pr;
     if (kept !== undefined && kept.state !== "open") entry.pr = { ...kept, readAt: kept.mergedAt ?? kept.closedAt ?? 0 };
+    if (record.checkout !== undefined) entry.checkout = record.checkout;
     const at = backendFor(record);
     /** A vault carries a workspace's own home onto a fresh fork of an image. A computer that keeps no image forks
      * none: such a workspace is a copy of that computer, its files stand on that computer's own disk, and its
