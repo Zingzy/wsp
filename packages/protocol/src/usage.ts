@@ -172,8 +172,6 @@ export const UsedAnswer = z.object({
   logs: z.object({ agents: z.array(z.string()), computer: z.string() }).optional(),
   /** Each row's own series, on the same steps as series, so a chart draws one line per split value. */
   lines: z.array(z.object({ key: z.string(), label: z.string(), points: z.array(z.number()) })).optional(),
-  /** The range split by where it was read: the turns wsp ran, and the agents' own logs of work done outside wsp. */
-  sources: z.array(z.object({ source: z.enum(["wsp", "log"]), tokens: z.number(), estimate: z.number().optional() })).optional(),
   /** The threads that used the most over the range, most first, five at most. */
   threads: z
     .array(

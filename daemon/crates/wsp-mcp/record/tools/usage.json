@@ -286,32 +286,6 @@
                 "additionalProperties": false
               }
             },
-            "sources": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "source": {
-                    "type": "string",
-                    "enum": [
-                      "wsp",
-                      "log"
-                    ]
-                  },
-                  "tokens": {
-                    "type": "number"
-                  },
-                  "estimate": {
-                    "type": "number"
-                  }
-                },
-                "required": [
-                  "source",
-                  "tokens"
-                ],
-                "additionalProperties": false
-              }
-            },
             "threads": {
               "type": "array",
               "items": {
@@ -674,32 +648,6 @@
                   "key",
                   "label",
                   "points"
-                ],
-                "additionalProperties": false
-              }
-            },
-            "sources": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "source": {
-                    "type": "string",
-                    "enum": [
-                      "wsp",
-                      "log"
-                    ]
-                  },
-                  "tokens": {
-                    "type": "number"
-                  },
-                  "estimate": {
-                    "type": "number"
-                  }
-                },
-                "required": [
-                  "source",
-                  "tokens"
                 ],
                 "additionalProperties": false
               }

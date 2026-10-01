@@ -298,7 +298,6 @@ export function createUsageLedger(o: { store: Store; clock: Clock; timeZone?: st
           }))
         : starts.map(t => ({ t, tokens: 0 }));
     const points = new Map<string, number[]>();
-    const sources = new Map<"wsp" | "log", { source: "wsp" | "log"; tokens: number; estimate?: number }>();
     const threads = new Map<string, { threadId: string; workspaceId: string; agent: string; computer: string; tokens: number; estimate?: number }>();
     const computers = new Set<string>();
     for (const [at, start] of starts.entries()) {
@@ -328,10 +327,6 @@ export function createUsageLedger(o: { store: Store; clock: Clock; timeZone?: st
         else if (listed !== undefined) line.costList = (line.costList ?? 0) + listed;
         else if (row.tokens.input + row.tokens.output > 0) line.priced = false;
         const used = row.tokens.input + row.tokens.output;
-        const from = sources.get(row.source) ?? { source: row.source, tokens: 0 };
-        from.tokens += used;
-        if (listed !== undefined) from.estimate = (from.estimate ?? 0) + listed;
-        sources.set(row.source, from);
         computers.add(row.computer);
         if (row.threadId !== undefined && row.workspaceId !== undefined) {
           const thread = threads.get(row.threadId) ?? { threadId: row.threadId, workspaceId: row.workspaceId, agent: row.agent, computer: row.computer, tokens: 0 };
@@ -366,7 +361,6 @@ export function createUsageLedger(o: { store: Store; clock: Clock; timeZone?: st
       rows: ordered,
       series,
       lines,
-      sources: (["wsp", "log"] as const).flatMap(s => (sources.has(s) ? [sources.get(s)!] : [])),
       threads: top,
       counts: { threads: threads.size, computers: computers.size },
       since,

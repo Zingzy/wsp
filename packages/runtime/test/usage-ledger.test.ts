@@ -137,7 +137,7 @@ describe("the ledger of what was used", () => {
     expect(row?.saved).toBeCloseTo(6_000 * (4e-6 - 2e-7), 12);
   });
 
-  it("says how much was wsp's and how much the logs', how many threads and computers it came from, and the top five threads", async () => {
+  it("says how many threads and computers the range came from, and names the top five threads", async () => {
     const { usage } = ledger();
     const tokens = (n: number) => ({ input: n, output: 0, cached: 0 });
     for (const [i, n] of [100, 600, 300, 500, 200, 400].entries()) await usage.add(turn({ at: NOON, threadId: `t${i}`, workspaceId: `ws_${i % 2}`, computer: i === 5 ? "pl_boat" : "here", tokens: tokens(n) }));
@@ -149,10 +149,8 @@ describe("the ledger of what was used", () => {
       label: labelOf,
       threadNames: (threadId, workspaceId) => ({ title: `title of ${threadId}`, workspace: `name of ${workspaceId}` }),
     });
-    expect(used.sources).toEqual([
-      { source: "wsp", tokens: 2_550, estimate: expect.any(Number) },
-      { source: "log", tokens: 1_000, estimate: expect.any(Number) },
-    ]);
+    // Nothing in a log says which tool started its session, so the answer draws no line between wsp's and the rest.
+    expect(used).not.toHaveProperty("sources");
     expect(used.counts).toEqual({ threads: 6, computers: 2 });
     expect(used.threads).toEqual([
       { threadId: "t1", workspaceId: "ws_1", title: "title of t1", agent: "codex", workspace: "name of ws_1", computer: "computer:here", tokens: 600, estimate: 600 * 5e-6 },
