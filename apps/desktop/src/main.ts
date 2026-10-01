@@ -12,7 +12,7 @@ import { bundleShell, type BundleShell } from "./get-bundle.js";
 import { homeOf, openHost, openHostReady, statePathIn, stopWsp, userDataIn, workingHere, type HostSession, type Launch, type OpenHostOptions } from "./host-lifecycle.js";
 import { hostSwitcher, type HostSwitcher } from "./host-switch.js";
 import { offerMove, type MoveGate } from "./move.js";
-import { sayOutside, showBadge, type Notifier } from "./needs-you.js";
+import { sayOutside, showBadge, soundSample, type Notifier } from "./needs-you.js";
 import { allowed, fromAppPage, fromOnboardingPage, hostsViewFor, notForThisPage } from "./origin.js";
 import { hostFeed, type FeedEvent, type FeedState, type HostFeed } from "./host-feed.js";
 import { guardWorkers, loadHostPage } from "./page-session.js";
@@ -173,6 +173,10 @@ listen("outside:say", (event, line) => {
 });
 
 listen("badge:set", (_event, count) => showBadge(count, app));
+
+// The sound a notification makes, played when Settings asks; this computer's own host's page alone, since it is a
+// notification on this computer.
+listen("outside:sample", () => void soundSample(NOTIFIER));
 
 // The one bridge call the preload answers itself, off the shell's own webUtils: it asks here first, so a page a
 // computer this one does not own serves is handed no path from this computer's desktop.

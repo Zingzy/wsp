@@ -30,12 +30,31 @@ export const SETTINGS_WORDS = {
 
 /** Settings > Appearance, the two font rows. */
 export const FONT_WORDS = {
-  head: "Fonts",
+  head: "Type",
+  lede: "The faces and sizes the conversation and its code are read in.",
   app: "App font",
   appDescription: "The sidebar, replies and every page.",
   code: "Code font",
   codeDescription: "Code in replies, the changes and files.",
   default: "Default",
+  textSize: "Reading size",
+  textSizeDescription: "Replies, your own messages and the box you write in.",
+  codeSize: "Code size",
+  codeSizeDescription: "Code in replies, tool output, the changes and files.",
+  px: (size: number): string => `${size} px`,
+  /** What the samples under the type rows say: a reply with a line of code, in the faces and sizes picked. */
+  sample: "The total rounded each line on its own, so three lines at 0.335 came to 1.00 or 1.01. It now rounds once:\n\n```ts\nexport const total = (lines: Line[]) => round(lines.reduce((sum, l) => sum + l.price, 0));\n```",
+} as const;
+
+/** Settings > Appearance's theme section. */
+export const THEME_SECTION_WORDS = {
+  lede: "The side wsp draws, and the theme on each side. Point at a theme to see this window in it.",
+} as const;
+
+/** Settings > Appearance's glass section, which holds the Transparency switch. */
+export const GLASS_WORDS = {
+  head: "Glass",
+  lede: "How wsp's window shows what is behind it.",
 } as const;
 
 /** Each side as its segment names it. */
@@ -220,6 +239,8 @@ export const PRIVACY_WORDS = {
 /** Settings > Appearance's Notifications: the one switch over the sound a notification makes. */
 export const NOTIFY_WORDS = {
   head: "Notifications",
+  lede: "What wsp says while you are in another app.",
+  play: "Play the sound",
   sound: "Sound",
   soundDescription: "A finished turn and a permission prompt make a sound while wsp is not in front.",
 } as const;

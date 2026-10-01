@@ -8,10 +8,10 @@
 // do nothing behind the page.
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_PREFERENCES, type PlaceView, type ProjectView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
+import { CODE_SIZES, DEFAULT_PREFERENCES, TEXT_SIZES, type PlaceView, type ProjectView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
 import { useStore } from "../src/protocol/store.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
-import { ABOUT_WORDS, FONT_WORDS, NOTIFY_WORDS, TRANSPARENCY_WORDS, SETTINGS_WORDS, groupBlurbs } from "../src/settings/format.js";
+import { ABOUT_WORDS, FONT_WORDS, GLASS_WORDS, NOTIFY_WORDS, THEME_SECTION_WORDS, THEME_WORDS, TRANSPARENCY_WORDS, SETTINGS_WORDS, groupBlurbs } from "../src/settings/format.js";
 import { SETTINGS_GROUPS } from "../src/settings/groups.js";
 import { useSettingsStore } from "../src/settings/settingsStore.js";
 import { SYSTEM_DARK_QUERY, useFontEffect, useThemeEffect } from "../src/settings/theme.js";
@@ -50,6 +50,7 @@ function ThemeRule() {
   useThemeEffect();
   return null;
 }
+
 
 beforeEach(() => {
   resetSettings();
@@ -272,8 +273,8 @@ describe("Appearance", () => {
     const { api, sets } = settingsApi();
     mountSettings({ api, children: <ThemeRule /> });
     await settle();
-    expect(segments(SETTINGS_WORDS.theme)).toEqual(["Light", "Dark", "System"]);
-    expect(checked(SETTINGS_WORDS.theme)).toEqual(["false", "false", "true"]);
+    expect(segments(SETTINGS_WORDS.theme)).toEqual(["System", "Light", "Dark"]);
+    expect(checked(SETTINGS_WORDS.theme)).toEqual(["true", "false", "false"]);
     fireEvent.click(within(group(SETTINGS_WORDS.theme)).getByRole("radio", { name: "Light" }));
     expect(useStore.getState().preferences.theme).toBe("light");
     expect(document.documentElement.classList.contains("dark")).toBe(false);
@@ -292,7 +293,7 @@ describe("Appearance", () => {
     fireEvent.click(within(group(SETTINGS_WORDS.theme)).getByRole("radio", { name: "Light" }));
     expect(cellIds()).toEqual(sideIds("light"));
     for (const cell of cells()) expect(cell.querySelector("[data-theme]")?.getAttribute("data-theme")).toBe(cell.dataset["themeOption"]);
-    expect(cells().map(c => c.textContent)).toEqual(THEMES.filter(t => t.side === "light").map(t => t.word));
+    expect(cells().map(c => c.textContent)).toEqual(THEMES.filter(t => t.side === "light").map(t => `${t.word}${t.line}`));
     expect(cells().map(c => c.getAttribute("aria-checked"))).toEqual(sideIds("light").map(id => String(id === "paper")));
     fireEvent.click(cellOf("linen"));
     expect(useStore.getState().preferences.lightTheme).toBe("linen");
@@ -339,7 +340,7 @@ describe("Appearance", () => {
     const { api, sets } = settingsApi();
     mountSettings({ api });
     await settle();
-    expect(checked(SETTINGS_WORDS.theme)).toEqual(["false", "false", "true"]);
+    expect(checked(SETTINGS_WORDS.theme)).toEqual(["true", "false", "false"]);
     expect(cellIds()).toEqual(sideIds("light"));
     act(() => {
       systemDark = true;
@@ -352,14 +353,21 @@ describe("Appearance", () => {
     expect(sets).toEqual([{ darkTheme: "pitch" }]);
   });
 
-  it("is the page's head over the theme picker with the Transparency switch under it, the two font rows and the one Notifications switch, with no line under the pictures", async () => {
+  it("is the page's head over the theme picker, the Transparency switch, the type rows and the one Notifications switch, each section under a head and one sentence, with no line under the pictures", async () => {
     const { api } = settingsApi();
     mountSettings({ api });
     await settle();
     const head = document.querySelector<HTMLElement>("[data-settings-page] [data-k=settings-page-head]")!;
     expect(head.querySelector("h1")!.textContent).toBe(SETTINGS_WORDS.appearance);
     expect(head.querySelector("p")!.textContent).toBe(groupBlurbs("").appearance);
-    expect(rowTitles()).toEqual([TRANSPARENCY_WORDS.title, FONT_WORDS.app, FONT_WORDS.code, NOTIFY_WORDS.sound]);
+    expect(rowTitles()).toEqual([TRANSPARENCY_WORDS.title, FONT_WORDS.app, FONT_WORDS.textSize, FONT_WORDS.code, FONT_WORDS.codeSize, NOTIFY_WORDS.sound]);
+    const sections = [...document.querySelectorAll<HTMLElement>("[data-settings-page] [data-settings-card]")];
+    expect(sections.map(c => [c.querySelector("[data-settings-head]")?.textContent, c.querySelector("[data-settings-lede]")?.textContent])).toEqual([
+      [SETTINGS_WORDS.theme, THEME_SECTION_WORDS.lede],
+      [GLASS_WORDS.head, GLASS_WORDS.lede],
+      [FONT_WORDS.head, FONT_WORDS.lede],
+      [NOTIFY_WORDS.head, NOTIFY_WORDS.lede],
+    ]);
     expect(document.querySelectorAll("[data-settings-page] [data-settings-line]")).toHaveLength(0);
     expect(document.querySelector("[data-k=sidebar-width]")).toBeNull();
     expect(document.querySelector("[data-k=terminal-size-row]")).toBeNull();
@@ -380,7 +388,7 @@ describe("Appearance", () => {
     await waitFor(() => expect(restore()).toBeNull());
     expect(useStore.getState().preferences.theme).toBe("system");
     await settle();
-    expect(sets.at(-1)).toEqual({ theme: "system", lightTheme: "paper", darkTheme: "graphite", appFont: "", codeFont: "", transparency: true, notifySound: true });
+    expect(sets.at(-1)).toEqual({ theme: "system", lightTheme: "paper", darkTheme: "graphite", appFont: "", codeFont: "", textSize: null, codeSize: null, transparency: true, notifySound: true });
   });
 
   it("a theme picked for either side is off the defaults, and Restore defaults puts both sides back", async () => {
@@ -393,7 +401,79 @@ describe("Appearance", () => {
     await waitFor(() => expect(restore()).toBeNull());
     expect(useStore.getState().preferences.darkTheme).toBe("graphite");
     await settle();
-    expect(sets.at(-1)).toEqual({ theme: "system", lightTheme: "paper", darkTheme: "graphite", appFont: "", codeFont: "", transparency: true, notifySound: true });
+    expect(sets.at(-1)).toEqual({ theme: "system", lightTheme: "paper", darkTheme: "graphite", appFont: "", codeFont: "", textSize: null, codeSize: null, transparency: true, notifySound: true });
+  });
+});
+
+describe("Appearance's previews and new controls", () => {
+  const root = (name: string): string => document.documentElement.style.getPropertyValue(name);
+  afterEach(() => {
+    for (const name of ["--font-size-chat", "--font-size-prompt", "--font-size-code", "--diffs-font-size"]) document.documentElement.style.removeProperty(name);
+  });
+
+  it("a pointer over a theme card shows this window in that theme, and leaving the cards puts the pick back", async () => {
+    const { api, sets } = settingsApi();
+    mountSettings({ api, children: <ThemeRule /> });
+    await settle();
+    fireEvent.click(within(group(SETTINGS_WORDS.theme)).getByRole("radio", { name: "Dark" }));
+    expect(document.documentElement.dataset["theme"]).toBe("graphite");
+    fireEvent.pointerEnter(cellOf("moss"));
+    expect(document.documentElement.dataset["theme"]).toBe("moss");
+    fireEvent.pointerEnter(cellOf("denim"));
+    expect(document.documentElement.dataset["theme"]).toBe("denim");
+    fireEvent.pointerLeave(group(SETTINGS_WORDS.themesOf(THEME_WORDS.dark)));
+    expect(document.documentElement.dataset["theme"]).toBe("graphite");
+    // The window losing focus with a card under the pointer puts the pick back too, as a pointer that is cancelled does.
+    fireEvent.pointerEnter(cellOf("tungsten"));
+    expect(document.documentElement.dataset["theme"]).toBe("tungsten");
+    fireEvent.blur(window);
+    expect(document.documentElement.dataset["theme"]).toBe("graphite");
+    fireEvent.pointerEnter(cellOf("pitch"));
+    fireEvent(window, new Event("pointercancel"));
+    expect(document.documentElement.dataset["theme"]).toBe("graphite");
+    await settle();
+    expect(sets).toEqual([{ theme: "dark" }]);
+  });
+
+  it("a reading size and a code size write the record and every surface's variable, and Default takes them off", async () => {
+    const { api, sets } = settingsApi();
+    mountSettings({ api, children: <FontRule /> });
+    await settle();
+    expect(await pickOption(document.querySelector("[data-k=text-size]")!, FONT_WORDS.px(16))).toEqual([FONT_WORDS.default, ...TEXT_SIZES.map(FONT_WORDS.px)]);
+    await waitFor(() => expect(root("--font-size-chat")).toBe("16px"));
+    await settle();
+    expect(await pickOption(document.querySelector("[data-k=code-size]")!, FONT_WORDS.px(13))).toEqual([FONT_WORDS.default, ...CODE_SIZES.map(FONT_WORDS.px)]);
+    await waitFor(() => expect(root("--font-size-code")).toBe("13px"));
+    await settle();
+    expect([root("--font-size-prompt"), root("--font-size-code"), root("--diffs-font-size")]).toEqual(["16px", "13px", "13px"]);
+    await pickOption(document.querySelector("[data-k=text-size]")!, FONT_WORDS.default);
+    await settle();
+    await pickOption(document.querySelector("[data-k=code-size]")!, FONT_WORDS.default);
+    await settle();
+    await waitFor(() => expect(root("--font-size-chat")).toBe(""));
+    expect([root("--font-size-prompt"), root("--font-size-code"), root("--diffs-font-size")]).toEqual(["", "", ""]);
+    await settle();
+    expect(sets).toEqual([{ textSize: 16 }, { codeSize: 13 }, { textSize: null }, { codeSize: null }]);
+    expect(document.querySelector("[data-k=type-sample]")).not.toBeNull();
+    cleanup();
+  });
+
+  it("plays the sound from the shell that can, waits while Sound is off, and offers no button where nothing could play it", async () => {
+    const playNoticeSound = vi.fn();
+    window.wsp = { playNoticeSound };
+    const { api } = settingsApi();
+    mountSettings({ api });
+    await settle();
+    const play = screen.getByRole("button", { name: NOTIFY_WORDS.play });
+    fireEvent.click(play);
+    expect(playNoticeSound).toHaveBeenCalledTimes(1);
+    fireEvent.click(document.querySelector("[data-k=notify-sound]")!);
+    await waitFor(() => expect(screen.getByRole("button", { name: NOTIFY_WORDS.play }).hasAttribute("disabled")).toBe(true));
+    cleanup();
+    window.wsp = {};
+    mountSettings({ api: settingsApi().api });
+    await settle();
+    expect(screen.queryByRole("button", { name: NOTIFY_WORDS.play })).toBeNull();
   });
 });
 

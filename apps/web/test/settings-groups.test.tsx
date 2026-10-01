@@ -315,7 +315,7 @@ describe("Appearance", () => {
     const { api, sets } = settingsApi();
     mountSettings({ api, at: { kind: "group", group: "appearance" } });
     await settle();
-    expect(rowTitles()).toEqual([TRANSPARENCY_WORDS.title, FONT_WORDS.app, FONT_WORDS.code, NOTIFY_WORDS.sound]);
+    expect(rowTitles()).toEqual([TRANSPARENCY_WORDS.title, FONT_WORDS.app, FONT_WORDS.textSize, FONT_WORDS.code, FONT_WORDS.codeSize, NOTIFY_WORDS.sound]);
     expect(descriptionOf("notify-sound")).toBe(NOTIFY_WORDS.soundDescription);
     const toggle = (): HTMLElement => document.querySelector<HTMLElement>("[data-k=notify-sound]")!;
     expect(toggle().getAttribute("aria-checked")).toBe("true");
@@ -335,10 +335,10 @@ describe("Transparency", () => {
     const { api, sets } = settingsApi();
     mountSettings({ api, at: { kind: "group", group: "appearance" } });
     await settle();
-    // The switch is the theme's, under the picker in the Theme card, never a font's.
+    // The switch is the glass's, in its own card under the theme, never a font's.
     const row = document.querySelector("[data-settings-page] [data-settings-row=transparency]")!;
-    expect(row.closest("[data-settings-card]")?.getAttribute("data-settings-card")).toBe("theme");
-    expect(document.querySelector("[data-settings-card=theme] [data-settings-head]")?.compareDocumentPosition(row)! & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(row.closest("[data-settings-card]")?.getAttribute("data-settings-card")).toBe("glass");
+    expect(document.querySelector("[data-settings-card=glass] [data-settings-head]")?.compareDocumentPosition(row)! & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(descriptionOf("transparency")).toBe(TRANSPARENCY_WORDS.description);
     const toggle = (): HTMLElement => document.querySelector<HTMLElement>("[data-k=transparency]")!;
     expect(toggle().getAttribute("aria-checked")).toBe("true");
