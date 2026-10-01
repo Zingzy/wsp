@@ -9,6 +9,7 @@
 //! the callers. A stopped workspace has nothing to run git in, so `stored` reads its branch off the copy's files
 //! and runs no program at all.
 
+use std::collections::HashSet;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 
@@ -341,8 +342,175 @@ pub(crate) async fn git_diff<R: Runs>(
     diff_listed(runner, cwd, bound, &args, path, paths, listing, cap, base).await
 }
 
-/// The diff between two commits a git.snapshot recorded, held to bound as git.diff is. Each is taken only as its full
-/// sha, which the caller has checked, so neither reaches git as an option.
+/// The HEAD a snapshot was taken on, which git.snapshot recorded as the snapshot commit's parent; None where the
+/// checkout had no commit yet.
+async fn snapshot_head<R: Runs>(runner: &R, cwd: &Path, snapshot: &str) -> Result<Option<String>, OpError> {
+    let res = run_git(runner, cwd, &["rev-parse", "--verify", "--quiet", &format!("{snapshot}^")], None, None).await?;
+    Ok((res.code == Some(0)).then(|| stdout_text(&res).trim().to_owned()).filter(|s| !s.is_empty()))
+}
+
+/// The strip of the ref prefixes a reflog spells a branch with, so a name reads as the person typed it.
+fn short_ref(r: &str) -> String {
+    r.strip_prefix("refs/remotes/").or_else(|| r.strip_prefix("refs/heads/")).unwrap_or(r).to_owned()
+}
+
+/// The branch a merge commit named, read from its own message ("Merge branch 'main' into feature").
+fn merged_ref(message: &str) -> String {
+    if let Some((_, after)) = message.split_once('\'') {
+        if let Some((name, _)) = after.split_once('\'') {
+            return short_ref(name);
+        }
+    }
+    message.split_whitespace().last().map(short_ref).unwrap_or_default()
+}
+
+/// Whether a token is a git object id by shape: forty hex digits for sha-1, sixty-four for sha-256.
+fn is_oid(s: &str) -> bool {
+    (s.len() == 40 || s.len() == 64) && s.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// How a reflog entry moved HEAD this turn.
+enum Op {
+    /// A HEAD move the turn did not write: at most one line (a rebase names itself once, on its start step), no files.
+    Foreign(Option<String>),
+    /// A merge the turn resolved by hand: a line, and the files it resolved added back from the difference between the
+    /// no-hand merge of its parents and its own tree.
+    Resolved(String),
+    /// A commit the turn wrote: its own files are collected one by one, whatever moved HEAD after it.
+    Own,
+}
+
+/// What a reflog subject says the move was. A clean or fast-forward merge reads as a move with no files; a merge
+/// completed by `git commit` after a conflict is the hand-resolved one. A rebase names itself once, off its start
+/// step; its other steps add no line, and the commits it replayed are not the turn's own.
+fn classify(subject: &str) -> Op {
+    if let Some(rest) = subject.strip_prefix("checkout: moving from ") {
+        Op::Foreign(Some(format!("Checked out {}", short_ref(rest.rsplit_once(" to ").map_or(rest, |(_, to)| to)))))
+    } else if subject.starts_with("pull") {
+        Op::Foreign(Some("Pulled".to_owned()))
+    } else if let Some(message) = subject.strip_prefix("commit (merge): ") {
+        Op::Resolved(format!("Merged {}", merged_ref(message)))
+    } else if let Some(rest) = subject.strip_prefix("merge ") {
+        Op::Foreign(Some(format!("Merged {}", short_ref(rest.split_once(':').map_or(rest, |(what, _)| what).trim()))))
+    } else if let Some(rest) = subject.strip_prefix("rebase (start): checkout ") {
+        let onto = rest.trim();
+        let named = if is_oid(onto) { onto[..8].to_owned() } else { short_ref(onto) };
+        Op::Foreign(Some(format!("Rebased onto {named}")))
+    } else if subject.starts_with("rebase") {
+        Op::Foreign(None)
+    } else if let Some(rest) = subject.strip_prefix("reset: moving to ") {
+        Op::Foreign(Some(format!("Reset to {}", short_ref(rest.trim()))))
+    } else if subject.starts_with("clone") {
+        Op::Foreign(Some("Cloned".to_owned()))
+    } else {
+        Op::Own
+    }
+}
+
+/// How many entries HEAD's reflog holds now. git.snapshot stamps this on each snapshot, so a turn's window is the
+/// entries added between its two snapshots, read by count and never by time.
+async fn reflog_count<R: Runs>(runner: &R, cwd: &Path) -> Result<u64, OpError> {
+    let res = run_git(runner, cwd, &["reflog", "--format=%H", "HEAD"], None, None).await?;
+    if res.code != Some(0) {
+        return Ok(0);
+    }
+    Ok(stdout_text(&res).lines().filter(|l| !l.trim().is_empty()).count() as u64)
+}
+
+/// The reflog length git.snapshot stamped on a snapshot's own message, which bounds the turn's window; None on a
+/// snapshot an older daemon wrote without one.
+async fn snapshot_reflog<R: Runs>(runner: &R, cwd: &Path, snapshot: &str) -> Result<Option<u64>, OpError> {
+    let res = run_git(runner, cwd, &["show", "-s", "--format=%B", snapshot], None, None).await?;
+    if res.code != Some(0) {
+        return Ok(None);
+    }
+    Ok(stdout_text(&res).lines().find_map(|l| l.trim().strip_prefix("reflog ").and_then(|n| n.trim().parse::<u64>().ok())))
+}
+
+/// A commit's first parent, or the empty tree where it has none, so a turn's first commit in a fresh checkout still
+/// diffs against something.
+async fn first_parent_or_empty<R: Runs>(runner: &R, cwd: &Path, commit: &str) -> Result<String, OpError> {
+    Ok(snapshot_head(runner, cwd, commit).await?.unwrap_or_else(|| EMPTY_TREE.to_owned()))
+}
+
+/// The tree git writes merging two commits with no hand in it; a merge commit's own tree differs from it by exactly
+/// what the agent resolved. None where this git cannot write it.
+async fn no_hand_merge_tree<R: Runs>(runner: &R, cwd: &Path, a: &str, b: &str) -> Result<Option<String>, OpError> {
+    // merge-tree exits 1 when a path conflicts, and still writes the tree on its first line; only a real error leaves
+    // no object id there, so the id's own shape is what says it wrote one.
+    let res = run_git(runner, cwd, &["merge-tree", "--write-tree", a, b], None, None).await?;
+    let tree = stdout_text(&res).lines().next().unwrap_or("").trim().to_owned();
+    Ok(is_oid(&tree).then_some(tree))
+}
+
+/// The ops a turn made, read from HEAD's reflog over the turn's own window: the commits it wrote, the merges it
+/// resolved by hand, and the lines naming the moves it did not write. The window is the entries git.snapshot's two
+/// stamps bound, by count: in the newest-first reflog it is the slice between the length at the end snapshot and the
+/// length at the start one, so a later re-read past more turns still lands on this turn's entries, and a turn that
+/// leaves and returns to its start HEAD still has every move it made read, never matched by sha or by time.
+async fn turn_ops<R: Runs>(runner: &R, cwd: &Path, from: &str, to: &str) -> Result<(Vec<String>, Vec<String>, Vec<String>), OpError> {
+    let current = reflog_count(runner, cwd).await?;
+    let skip = snapshot_reflog(runner, cwd, to).await?.map_or(0, |end| current.saturating_sub(end));
+    let take = match snapshot_reflog(runner, cwd, from).await? {
+        Some(start) => current.saturating_sub(start).saturating_sub(skip),
+        None => current.saturating_sub(skip),
+    };
+    if take == 0 {
+        return Ok((Vec::new(), Vec::new(), Vec::new()));
+    }
+    let log = run_git(runner, cwd, &["reflog", "--format=%H %gs", "HEAD"], None, None).await?;
+    if log.code != Some(0) {
+        return Ok((Vec::new(), Vec::new(), Vec::new()));
+    }
+    let text = stdout_text(&log);
+    let mut own: Vec<String> = Vec::new();
+    let mut resolved: Vec<String> = Vec::new();
+    let mut moves: Vec<String> = Vec::new();
+    for line in text.lines().skip(skip as usize).take(take as usize) {
+        let Some((oid, subject)) = line.split_once(' ') else { continue };
+        match classify(subject) {
+            Op::Own => own.push(oid.to_owned()),
+            Op::Resolved(named) => {
+                resolved.push(oid.to_owned());
+                moves.push(named);
+            }
+            Op::Foreign(Some(named)) => moves.push(named),
+            Op::Foreign(None) => {}
+        }
+    }
+    moves.reverse();
+    moves.dedup();
+    Ok((own, resolved, moves))
+}
+
+/// Union one diff's files into the running set by path, the newest change to a path kept; a file touched twice this
+/// turn is listed once.
+fn merge_into(reply: GitDiffReply, files: &mut Vec<GitDiffFile>, seen: &mut HashSet<String>, truncated: &mut bool) {
+    *truncated |= reply.truncated;
+    for file in reply.files {
+        if seen.insert(file.path.clone()) {
+            files.push(file);
+        }
+    }
+}
+
+/// Of the paths given, those whose content differs between the two snapshots. A turn's own worktree edits are the
+/// uncommitted files it actually touched, never the ones that merely stood uncommitted before it and read the same in
+/// both snapshots. Names only and narrowed to the paths given, so it costs nothing where the uncommitted set is small.
+async fn changed_between<R: Runs>(runner: &R, cwd: &Path, from: &str, to: &str, files: &[GitDiffFile]) -> Result<HashSet<String>, OpError> {
+    if files.is_empty() {
+        return Ok(HashSet::new());
+    }
+    let mut args: Vec<String> = ["diff", "--name-only", "-z", from, to, "--"].iter().map(|s| (*s).to_owned()).collect();
+    args.extend(files.iter().map(|f| format!(":(top,literal){}", f.path)));
+    let out = run_git(runner, cwd, &args.iter().map(String::as_str).collect::<Vec<_>>(), None, None).await?;
+    check(&out, "diff --name-only")?;
+    Ok(stdout_text(&out).split('\0').filter(|s| !s.is_empty()).map(str::to_owned).collect())
+}
+
+/// The diff between two commits, each named by its full sha the caller checked: a pure diff of the two trees, as
+/// git.diff answers. The turn's own-changes rule is `git_turn`'s, never this: here the two snapshots are any two
+/// commits, and every path they differ by is listed.
 pub(crate) async fn git_range<R: Runs>(
     runner: &R,
     cwd: &Path,
@@ -352,6 +520,14 @@ pub(crate) async fn git_range<R: Runs>(
     path: Option<&str>,
     cap: usize,
 ) -> Result<GitDiffReply, OpError> {
+    range_held(runner, cwd, from, to).await?;
+    let listing = Listing { untracked: false, blobs: false, whole: false, worktree: false };
+    diff_listed(runner, cwd, bound, &[from.to_owned(), to.to_owned()], path, &[], listing, cap, None).await
+}
+
+/// Both snapshots are commits git still holds, or the range refuses: a pruned snapshot reads as gone, so the pane can
+/// say so, and a cwd that is no repository is its own refusal.
+async fn range_held<R: Runs>(runner: &R, cwd: &Path, from: &str, to: &str) -> Result<(), OpError> {
     for sha in [from, to] {
         let spec = format!("{sha}^{{commit}}");
         let held = run_git(runner, cwd, &["cat-file", "-e", &spec], None, None).await?;
@@ -362,8 +538,67 @@ pub(crate) async fn git_range<R: Runs>(
             return Err(OpError::coded(DaemonErrorCode::NotFound, format!("the snapshot {sha} is gone")));
         }
     }
+    Ok(())
+}
+
+/// A turn's changed-files card: every change the agent itself made between the snapshot taken as the turn launched and
+/// the one taken as it ended, collected one by one and unioned by path. Each commit it wrote contributes its own
+/// files, whatever moved HEAD after it; its end worktree holds the edits it left uncommitted (less any that stood
+/// uncommitted before it and it never touched); each merge it resolved by hand adds back only the files it resolved. A
+/// HEAD move it did not write (a checkout, pull, merge, rebase or reset) is one line with no files; a rebase's
+/// replayed commits and any conflict it resolved mid-rebase are not listed. Each snapshot is a full sha the caller
+/// checked, so neither reaches git as an option.
+pub(crate) async fn git_turn<R: Runs>(
+    runner: &R,
+    cwd: &Path,
+    bound: &Path,
+    from: &str,
+    to: &str,
+    path: Option<&str>,
+    cap: usize,
+) -> Result<GitDiffReply, OpError> {
+    range_held(runner, cwd, from, to).await?;
+    let start_head = snapshot_head(runner, cwd, from).await?;
+    let end_head = snapshot_head(runner, cwd, to).await?;
+    let (own, resolved, moved) = turn_ops(runner, cwd, from, to).await?;
     let listing = Listing { untracked: false, blobs: false, whole: false, worktree: false };
-    diff_listed(runner, cwd, bound, &[from.to_owned(), to.to_owned()], path, &[], listing, cap, None).await
+    let mut files: Vec<GitDiffFile> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut truncated = false;
+    // The edits standing in the turn's end worktree that the turn itself made: uncommitted against the HEAD it ended
+    // on, less the files that stood uncommitted before it and read the same in both snapshots.
+    let end_base = end_head.clone().unwrap_or_else(|| EMPTY_TREE.to_owned());
+    let uncommitted = diff_listed(runner, cwd, bound, &[end_base, to.to_owned()], path, &[], listing, cap, None).await?;
+    let touched = changed_between(runner, cwd, from, to, &uncommitted.files).await?;
+    truncated |= uncommitted.truncated;
+    for file in uncommitted.files {
+        if touched.contains(&file.path) && seen.insert(file.path.clone()) {
+            files.push(file);
+        }
+    }
+    // Each commit the turn wrote, its own files against its own first parent.
+    for commit in &own {
+        let parent = first_parent_or_empty(runner, cwd, commit).await?;
+        let own_diff = diff_listed(runner, cwd, bound, &[parent, commit.clone()], path, &[], listing, cap, None).await?;
+        merge_into(own_diff, &mut files, &mut seen, &mut truncated);
+    }
+    // Each hand-resolved merge adds the files it resolved, the difference between the no-hand merge of its parents and
+    // its own tree; nothing else of the merge is the turn's.
+    for merge in &resolved {
+        let parents = parents_of(runner, cwd, merge).await?;
+        let [a, b] = parents.as_slice() else { continue };
+        let Some(tree) = no_hand_merge_tree(runner, cwd, a, b).await? else { continue };
+        let hand = diff_listed(runner, cwd, bound, &[tree, merge.clone()], path, &[], listing, cap, None).await?;
+        merge_into(hand, &mut files, &mut seen, &mut truncated);
+    }
+    files.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(GitDiffReply { base: start_head, files, truncated, moved })
+}
+
+/// The parents of a commit, in order; a merge the turn resolved has two.
+async fn parents_of<R: Runs>(runner: &R, cwd: &Path, commit: &str) -> Result<Vec<String>, OpError> {
+    let res = run_git(runner, cwd, &["rev-list", "--parents", "-n", "1", commit], None, None).await?;
+    Ok(stdout_text(&res).split_whitespace().skip(1).map(str::to_owned).collect())
 }
 
 /// What a diff lists beyond git's own name-status: the untracked files as new ones, each file's worktree blob, and
@@ -778,7 +1013,7 @@ async fn diff_listed<R: Runs>(
         };
         files.push(GitDiffFile { path: file.path, kind: file.kind.to_owned(), additions, deletions, patch, blob });
     }
-    Ok(GitDiffReply { base, files, truncated })
+    Ok(GitDiffReply { base, files, truncated, moved: Vec::new() })
 }
 
 /// Whether a listed file is one git does not track yet, and if so whether it is a regular file or something else.
@@ -811,7 +1046,11 @@ pub(crate) async fn git_snapshot<R: Runs>(runner: &R, cwd: &Path) -> Result<wsp_
     .await?;
     let head = run_git(runner, at, &["rev-parse", "--verify", "--quiet", "HEAD^{commit}"], None, None).await?;
     let parent = (head.code == Some(0)).then(|| stdout_text(&head).trim().to_owned());
-    let mut commit_args = vec!["-c", "user.name=wsp", "-c", "user.email=wsp@localhost", "commit-tree", tree.as_str(), "-m", "wsp snapshot"];
+    // The turn range reads a turn's window off the reflog by count, so each snapshot stamps the length HEAD's reflog
+    // holds as it is taken; the two stamps bound the entries the turn added.
+    let message = format!("wsp snapshot\n\nreflog {}", reflog_count(runner, at).await?);
+    let mut commit_args =
+        vec!["-c", "user.name=wsp", "-c", "user.email=wsp@localhost", "commit-tree", tree.as_str(), "-m", message.as_str()];
     if let Some(parent) = parent.as_deref() {
         commit_args.extend(["-p", parent]);
     }
@@ -1439,5 +1678,175 @@ mod tests {
         assert_eq!(cut_at_line(b"one\ntwo\nthree\n", 7), b"one\n");
         assert_eq!(cut_at_line(b"no line end here", 5), b"no li");
         assert_eq!(cut_at_line(b"\nabc", 2), b"\na");
+    }
+
+    /// A turn that checks out another branch and edits one file: the card is that one file and the checkout line, not
+    /// the whole branch the checkout brought.
+    #[tokio::test]
+    async fn a_turn_that_checks_out_a_branch_and_edits_one_file_lists_that_file_and_the_checkout() {
+        let dir = committed(&["a.txt"]);
+        let p = dir.path();
+        git_in(p, &["checkout", "-q", "-b", "other"]);
+        std::fs::write(p.join("b.txt"), "b\n").unwrap();
+        std::fs::write(p.join("c.txt"), "c\n").unwrap();
+        git_in(p, &["add", "-A"]);
+        git_in(p, &["-c", "commit.gpgsign=false", "commit", "-q", "-m", "other work"]);
+        git_in(p, &["checkout", "-q", "main"]);
+        let from = git_snapshot(&here(), p).await.unwrap().commit;
+        git_in(p, &["checkout", "-q", "other"]);
+        std::fs::write(p.join("a.txt"), "edited\n").unwrap();
+        let to = git_snapshot(&here(), p).await.unwrap().commit;
+        let reply = git_turn(&here(), p, Path::new("/"), &from, &to, None, CAP).await.unwrap();
+        assert_eq!(paths_of(&reply), vec!["a.txt"]);
+        assert_eq!(reply.moved, vec!["Checked out other".to_owned()]);
+    }
+
+    /// A turn that pulls and edits nothing: the pull is one line and no files are its own.
+    #[tokio::test]
+    async fn a_turn_that_pulls_and_edits_nothing_shows_the_pull_line_and_no_files() {
+        let up = committed(&["a.txt"]);
+        let work = tempfile::tempdir().unwrap();
+        let dir = work.path().join("clone");
+        git_in(work.path(), &["clone", "-q", up.path().to_str().unwrap(), dir.to_str().unwrap()]);
+        let p = dir.as_path();
+        std::fs::write(up.path().join("b.txt"), "b\n").unwrap();
+        git_in(up.path(), &["add", "-A"]);
+        git_in(up.path(), &["-c", "commit.gpgsign=false", "commit", "-q", "-m", "more"]);
+        let from = git_snapshot(&here(), p).await.unwrap().commit;
+        git_in(p, &["pull", "-q"]);
+        let to = git_snapshot(&here(), p).await.unwrap().commit;
+        let reply = git_turn(&here(), p, Path::new("/"), &from, &to, None, CAP).await.unwrap();
+        assert!(reply.files.is_empty(), "{:?}", paths_of(&reply));
+        assert_eq!(reply.moved, vec!["Pulled".to_owned()]);
+    }
+
+    /// A turn that commits two edits and moves HEAD no other way: both files are its own and it names no move.
+    #[tokio::test]
+    async fn a_turn_that_commits_two_edits_lists_both_and_names_no_move() {
+        let dir = committed(&["a.txt", "b.txt"]);
+        let p = dir.path();
+        let from = git_snapshot(&here(), p).await.unwrap().commit;
+        std::fs::write(p.join("a.txt"), "edited a\n").unwrap();
+        std::fs::write(p.join("b.txt"), "edited b\n").unwrap();
+        git_in(p, &["add", "-A"]);
+        git_in(p, &["-c", "commit.gpgsign=false", "commit", "-q", "-m", "two edits"]);
+        let to = git_snapshot(&here(), p).await.unwrap().commit;
+        let reply = git_turn(&here(), p, Path::new("/"), &from, &to, None, CAP).await.unwrap();
+        assert_eq!(paths_of(&reply), vec!["a.txt", "b.txt"]);
+        assert!(reply.moved.is_empty());
+    }
+
+    /// A merge the turn resolved by hand lists the files it resolved and the merge line, and nothing else the merge
+    /// brought: the file both sides changed, not the file only the other side added.
+    #[tokio::test]
+    async fn a_turn_that_resolves_a_merge_lists_the_resolved_file_and_the_merge_line_only() {
+        let dir = committed(&["a.txt", "shared.txt"]);
+        let p = dir.path();
+        git_in(p, &["checkout", "-q", "-b", "feature"]);
+        std::fs::write(p.join("shared.txt"), "feature side\n").unwrap();
+        std::fs::write(p.join("feat.txt"), "feat\n").unwrap();
+        git_in(p, &["add", "-A"]);
+        git_in(p, &["-c", "commit.gpgsign=false", "commit", "-q", "-m", "feature"]);
+        git_in(p, &["checkout", "-q", "main"]);
+        std::fs::write(p.join("shared.txt"), "main side\n").unwrap();
+        std::fs::write(p.join("other.txt"), "other\n").unwrap();
+        git_in(p, &["add", "-A"]);
+        git_in(p, &["-c", "commit.gpgsign=false", "commit", "-q", "-m", "main moves"]);
+        git_in(p, &["checkout", "-q", "feature"]);
+        let from = git_snapshot(&here(), p).await.unwrap().commit;
+        // The merge conflicts on shared.txt, so it exits non-zero and git_in cannot run it.
+        let merge = std::process::Command::new("git")
+            .args(["-c", "commit.gpgsign=false", "merge", "main"])
+            .current_dir(p)
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@x")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@x")
+            .output()
+            .unwrap();
+        assert!(!merge.status.success(), "the merge was expected to conflict");
+        std::fs::write(p.join("shared.txt"), "resolved\n").unwrap();
+        git_in(p, &["add", "shared.txt"]);
+        git_in(p, &["-c", "commit.gpgsign=false", "commit", "-q", "--no-edit"]);
+        let to = git_snapshot(&here(), p).await.unwrap().commit;
+        let reply = git_turn(&here(), p, Path::new("/"), &from, &to, None, CAP).await.unwrap();
+        assert_eq!(paths_of(&reply), vec!["shared.txt"]);
+        assert_eq!(reply.moved, vec!["Merged main".to_owned()]);
+    }
+
+    /// A turn that leaves its start HEAD and comes back to it keeps every move line: the window is the entries the two
+    /// snapshots bound by count, not a match on the start sha that would end at the first row.
+    #[tokio::test]
+    async fn a_turn_that_leaves_and_returns_to_its_start_keeps_the_move_lines() {
+        let dir = committed(&["a.txt"]);
+        let p = dir.path();
+        git_in(p, &["branch", "other"]);
+        let from = git_snapshot(&here(), p).await.unwrap().commit;
+        git_in(p, &["checkout", "-q", "other"]);
+        git_in(p, &["checkout", "-q", "main"]);
+        std::fs::write(p.join("a.txt"), "edited\n").unwrap();
+        let to = git_snapshot(&here(), p).await.unwrap().commit;
+        let reply = git_turn(&here(), p, Path::new("/"), &from, &to, None, CAP).await.unwrap();
+        assert_eq!(paths_of(&reply), vec!["a.txt"]);
+        assert_eq!(reply.moved, vec!["Checked out other".to_owned(), "Checked out main".to_owned()]);
+    }
+
+    /// A turn that commits a file and then moves HEAD keeps the file it committed: each commit contributes its own
+    /// files, collected one by one, whatever moved HEAD after it, and the move is only a line.
+    #[tokio::test]
+    async fn a_turn_that_commits_then_checks_out_keeps_the_commit_and_names_the_checkout() {
+        let dir = committed(&["a.txt"]);
+        let p = dir.path();
+        git_in(p, &["branch", "other"]);
+        let from = git_snapshot(&here(), p).await.unwrap().commit;
+        std::fs::write(p.join("own.txt"), "own\n").unwrap();
+        git_in(p, &["add", "-A"]);
+        git_in(p, &["-c", "commit.gpgsign=false", "commit", "-q", "-m", "own work"]);
+        git_in(p, &["checkout", "-q", "other"]);
+        let to = git_snapshot(&here(), p).await.unwrap().commit;
+        let reply = git_turn(&here(), p, Path::new("/"), &from, &to, None, CAP).await.unwrap();
+        assert_eq!(paths_of(&reply), vec!["own.txt"]);
+        assert_eq!(reply.moved, vec!["Checked out other".to_owned()]);
+    }
+
+    /// A HEAD move made right before the start snapshot is not the turn's: the window is the reflog length the snapshot
+    /// stamped, so an entry below it is left out even in the same wall-clock second the turn starts in.
+    #[tokio::test]
+    async fn a_move_just_before_the_start_snapshot_is_not_the_turns() {
+        let dir = committed(&["a.txt"]);
+        let p = dir.path();
+        git_in(p, &["branch", "other"]);
+        git_in(p, &["checkout", "-q", "other"]);
+        git_in(p, &["checkout", "-q", "main"]);
+        let from = git_snapshot(&here(), p).await.unwrap().commit;
+        std::fs::write(p.join("a.txt"), "edited\n").unwrap();
+        let to = git_snapshot(&here(), p).await.unwrap().commit;
+        let reply = git_turn(&here(), p, Path::new("/"), &from, &to, None, CAP).await.unwrap();
+        assert_eq!(paths_of(&reply), vec!["a.txt"]);
+        assert!(reply.moved.is_empty(), "{:?}", reply.moved);
+    }
+
+    /// A rebase is one line and the edits standing at the turn's end, not the commits it replayed: the turn rebases
+    /// onto main and then edits a file, and the card is that file and "Rebased onto main".
+    #[tokio::test]
+    async fn a_turn_that_rebases_names_it_once_and_lists_only_the_end_edits() {
+        let dir = committed(&["a.txt"]);
+        let p = dir.path();
+        git_in(p, &["checkout", "-q", "-b", "feature"]);
+        std::fs::write(p.join("feat.txt"), "feat\n").unwrap();
+        git_in(p, &["add", "-A"]);
+        git_in(p, &["-c", "commit.gpgsign=false", "commit", "-q", "-m", "feature work"]);
+        git_in(p, &["checkout", "-q", "main"]);
+        std::fs::write(p.join("main.txt"), "main\n").unwrap();
+        git_in(p, &["add", "-A"]);
+        git_in(p, &["-c", "commit.gpgsign=false", "commit", "-q", "-m", "main work"]);
+        git_in(p, &["checkout", "-q", "feature"]);
+        let from = git_snapshot(&here(), p).await.unwrap().commit;
+        git_in(p, &["-c", "commit.gpgsign=false", "rebase", "-q", "main"]);
+        std::fs::write(p.join("after.txt"), "after\n").unwrap();
+        let to = git_snapshot(&here(), p).await.unwrap().commit;
+        let reply = git_turn(&here(), p, Path::new("/"), &from, &to, None, CAP).await.unwrap();
+        assert_eq!(paths_of(&reply), vec!["after.txt"]);
+        assert_eq!(reply.moved, vec!["Rebased onto main".to_owned()]);
     }
 }

@@ -16,7 +16,7 @@ const PATCH = [
 
 describe("toDiffModel", () => {
   it("parses patches into keyed files and lists budget-cut files in the tree only", () => {
-    const model = toDiffModel({ base: null, files: [{ path: "src/a.txt", kind: "modified", additions: 1, deletions: 1, patch: PATCH }, { path: "big.bin", kind: "modified", additions: 0, deletions: 0, patch: "" }], truncated: true }, "test");
+    const model = toDiffModel({ base: null, files: [{ path: "src/a.txt", kind: "modified", additions: 1, deletions: 1, patch: PATCH }, { path: "big.bin", kind: "modified", additions: 0, deletions: 0, patch: "" }], truncated: true, moved: [] }, "test");
     expect(model.raw).toBeNull();
     expect(model.files.map(f => f.filePath)).toEqual(["src/a.txt"]);
     expect(model.files[0]!.fileKey).toContain("src/a.txt");
@@ -28,7 +28,7 @@ describe("toDiffModel", () => {
   });
 
   it("is empty for an empty reply", () => {
-    const model = toDiffModel({ base: "main", files: [], truncated: false }, "test");
+    const model = toDiffModel({ base: "main", files: [], truncated: false, moved: [] }, "test");
     expect(model.files).toEqual([]);
     expect(model.changedFiles).toEqual([]);
   });
