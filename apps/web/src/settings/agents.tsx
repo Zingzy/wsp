@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Settings > Agents: the agents, tool servers and skills on one of the
 // person's computers, the same lists a task's right panel reads on its own
-// machine. The top bar holds the computer it reads and the tab; the page draws
+// machine. The page's head holds the computer it reads and the tab; under it
 // the agents manager for that one kind, so its details, acts and sign-ins are
 // the panel's own.
 import { BotIcon, ScrollTextIcon, ServerIcon } from "lucide-react";
@@ -45,8 +45,8 @@ function usePickedPlace(): PlaceView | undefined {
   return computers.find(place => place.id === (picked ?? HERE_PLACE_ID)) ?? computers.find(place => place.id === HERE_PLACE_ID) ?? computers[0];
 }
 
-/** The top bar on the Agents page: which computer it reads, and which list. */
-export function AgentsTopBar() {
+/** The head of the Agents page: which computer it reads, and which list. */
+function AgentsControls() {
   const places = useStore(s => s.places);
   const place = usePickedPlace();
   const tab = useSettingsStore(s => s.agentsTab);
@@ -54,7 +54,7 @@ export function AgentsTopBar() {
   const pickPlace = useSettingsStore(s => s.pickAgentsPlace);
   const computers = computersOf(places);
   return (
-    <span className="flex min-w-0 items-center gap-2 [-webkit-app-region:no-drag]">
+    <div data-k="agents-controls" className="flex flex-wrap items-center justify-between gap-3">
       {place === undefined ? null : (
         <Select value={place.id} onValueChange={id => pickPlace(id as string)}>
           <SelectTrigger size="sm" aria-label={W.computer} data-k="agents-picker" className="h-8 w-auto max-w-56 gap-2 text-[13px]">
@@ -83,7 +83,7 @@ export function AgentsTopBar() {
         </Select>
       )}
       <SegmentedControl data-k="agents-tabs" aria-label={W.tab} value={tab} segments={TABS} onChange={pickTab} className="h-8" segmentClassName="gap-1.5 whitespace-nowrap px-3 text-[13px]" />
-    </span>
+    </div>
   );
 }
 
@@ -127,7 +127,12 @@ function AgentsOn({ place, ctx }: { place: PlaceView; ctx: SettingsContext }) {
 function AgentsPage({ ctx }: { ctx: SettingsContext }) {
   const place = usePickedPlace();
   if (place === undefined) return null;
-  return <AgentsOn place={place} ctx={ctx} />;
+  return (
+    <div className="flex flex-col gap-6">
+      <AgentsControls />
+      <AgentsOn place={place} ctx={ctx} />
+    </div>
+  );
 }
 
 export function agentsCards(ctx: SettingsContext): SettingsCardData[] {

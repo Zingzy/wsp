@@ -11,7 +11,7 @@ import type { ComponentType } from "react";
 import type { Preferences, PreferencesPatch } from "@wsp/protocol";
 import { versionCards, versionMeta } from "./about.js";
 import { accountCards } from "./account.js";
-import { AgentsTopBar, agentsCards } from "./agents.js";
+import { agentsCards } from "./agents.js";
 import { APPEARANCE_DEFAULTS, appearanceCards, appearanceOffDefaults } from "./appearance.js";
 import { computerSubPages, computersCards } from "./computers.js";
 import { devicesCards } from "./devices.js";
@@ -50,7 +50,7 @@ const TABLE: Record<SettingsGroupId, Omit<SettingsGroup, "id">> = {
   general: { name: "General", glyph: SlidersHorizontalIcon, cards: ctx => [...generalCards(ctx), ...versionCards(ctx)], meta: versionMeta },
   appearance: { name: SETTINGS_WORDS.appearance, glyph: PaletteIcon, restore: { off: appearanceOffDefaults, patch: APPEARANCE_DEFAULTS }, cards: appearanceCards },
   computers: { name: PLACES_WORDS.section, glyph: MonitorIcon, cards: computersCards, sub: computerSubPages },
-  agents: { name: AGENTS_PAGE_WORDS.title, glyph: BotIcon, cards: agentsCards, head: AgentsTopBar },
+  agents: { name: AGENTS_PAGE_WORDS.title, glyph: BotIcon, cards: agentsCards },
   usage: { name: USAGE_PAGE_WORDS.title, glyph: GaugeIcon, cards: usageCards, head: UsageTabs },
   projects: { name: PROJECTS_WORDS.title, glyph: FolderIcon, cards: projectsCards, sub: projectSubPages },
   devices: { name: DEVICES_WORDS.title, glyph: SmartphoneIcon, cards: devicesCards },
