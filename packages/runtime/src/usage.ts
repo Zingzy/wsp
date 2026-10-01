@@ -281,6 +281,7 @@ export function createUsageLedger(o: { store: Store; clock: Clock; timeZone?: st
             tokens: 0,
           }))
         : starts.map(t => ({ t, tokens: 0 }));
+    const points = new Map<string, number[]>();
     for (const [at, start] of starts.entries()) {
       const held = await readDay(dayKeyOf(start + HOUR * 12, zone));
       for (const row of held?.rows ?? []) {
@@ -305,13 +306,19 @@ export function createUsageLedger(o: { store: Store; clock: Clock; timeZone?: st
         }
         rows.set(key, line);
         const step = count === 1 ? row.hour : at;
-        if (series[step] !== undefined) series[step].tokens += row.tokens.input + row.tokens.output;
+        if (series[step] !== undefined) {
+          series[step].tokens += row.tokens.input + row.tokens.output;
+          const line = points.get(key) ?? series.map(() => 0);
+          line[step]! += row.tokens.input + row.tokens.output;
+          points.set(key, line);
+        }
       }
     }
     const ordered = [...rows.values()].sort((a, b) => b.tokens.input + b.tokens.output - (a.tokens.input + a.tokens.output) || a.key.localeCompare(b.key));
     // The range ends where today does, so two reads a moment apart answer the same range.
     const logs = logged.size === 0 || q.logsOn === undefined ? {} : { logs: { agents: [...logged].map(agent => q.label("agent", agent)).sort(), computer: q.logsOn } };
-    return { range: q.range, split: q.split, rows: ordered, series, since, until: dayStartOf(today + DAY + HOUR * 12, zone), ...logs };
+    const lines = ordered.map(row => ({ key: row.key, label: row.label, points: points.get(row.key) ?? series.map(() => 0) }));
+    return { range: q.range, split: q.split, rows: ordered, series, lines, since, until: dayStartOf(today + DAY + HOUR * 12, zone), ...logs };
   };
 
   const limit = (r: LimitReading): Promise<void> =>

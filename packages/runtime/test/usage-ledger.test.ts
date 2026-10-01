@@ -82,6 +82,20 @@ describe("the ledger of what was used", () => {
     expect(week.until).toBe(Date.UTC(2026, 8, 30));
   });
 
+  it("draws each split value's own line on the series' steps, in the rows' order, so the lines add up to the series", async () => {
+    const { usage } = ledger();
+    await usage.add(turn({ at: NOON - 2 * 3_600_000, agent: "claude", tokens: { input: 100, output: 20 } }));
+    await usage.add(turn({ at: NOON, agent: "codex", tokens: { input: 30, output: 5 } }));
+    await usage.add(turn({ at: NOON - 2 * DAY, agent: "codex", tokens: { input: 40, output: 0 } }));
+    const day = await usage.used({ range: "day", split: "agent", label: labelOf });
+    expect(day.lines?.map(l => [l.key, l.label, l.points.length])).toEqual([["claude", "agent:claude", 24], ["codex", "agent:codex", 24]]);
+    expect(day.lines?.[0]?.points[10]).toBe(120);
+    expect(day.lines?.[1]?.points[12]).toBe(35);
+    const week = await usage.used({ range: "week", split: "agent", label: labelOf });
+    expect(week.lines?.map(l => l.points)).toEqual([[0, 0, 0, 0, 0, 0, 120], [0, 0, 0, 0, 40, 0, 35]]);
+    expect(week.series.map(p => p.tokens)).toEqual(week.series.map((_, i) => week.lines!.reduce((n, l) => n + l.points[i]!, 0)));
+  });
+
   it("splits by account: one sign-in across two computers is one row, a computer's own login another", async () => {
     const { usage } = ledger();
     await usage.add(turn({ at: NOON, agent: "claude", account: "claude:vault-token", computer: "here", model: "claude-opus-5", costUsd: 0.2 }));
