@@ -53,7 +53,7 @@ import { PREFERRED_HIGHLIGHTER } from "../lib/syntaxHighlighting.js";
 import { cn } from "../lib/utils.js";
 import { reviewCommentsQuote, type ReviewCommentContext } from "../reviewCommentContext.js";
 import { repoAbsence } from "../adapt/git.js";
-import { DaemonOpError, fsWrite, gitDiff, gitRange, gitStatus } from "../terminal/daemon-fs.js";
+import { DaemonOpError, fsWrite, gitDiff, gitTurn, gitStatus } from "../terminal/daemon-fs.js";
 import { editable, SCOPE_LABELS, SCOPE_NOUNS, SCOPES, toDiffModel, type DiffFile } from "./model.js";
 import { useDiffRevealStore } from "./reveal.js";
 import { DEFAULT_SCOPE, useDiffStore, type DiffRenderMode } from "./store.js";
@@ -179,7 +179,7 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
     // The last diff and the repository label stay through a refresh of the same folder and reset for a new one.
     setLoad(current => ({ kind: "pending", cwd: loadKey, last: current.cwd === loadKey ? lastReply(current) : null }));
     setRepo(current => (current.cwd === gitCwd ? current : { cwd: gitCwd, state: { kind: "unknown" } }));
-    const read = turnFrom === undefined || turnTo === undefined ? gitDiff(wire, gitCwd, scope) : gitRange(wire, gitCwd, turnFrom, turnTo);
+    const read = turnFrom === undefined || turnTo === undefined ? gitDiff(wire, gitCwd, scope) : gitTurn(wire, gitCwd, turnFrom, turnTo);
     read.then(
       reply => {
         if (!gone) setLoad({ kind: "ready", cwd: loadKey, reply });
@@ -498,7 +498,7 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
           ) : null}
           <Tooltip>
             <TooltipTrigger
-              render={<Button type="button" size="icon-sm" variant="ghost" aria-label={isPending ? "Refreshing changes" : "Refresh changes"} onClick={fetchDiff} />}
+              render={<Button type="button" size="icon" variant="ghost" aria-label={isPending ? "Refreshing changes" : "Refresh changes"} onClick={fetchDiff} />}
             >
               <RefreshCwIcon className={cn("size-3.5", isPending && "animate-spin")} />
             </TooltipTrigger>
@@ -512,7 +512,7 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
                 render={
                   <Button
                     type="button"
-                    size="icon-sm"
+                    size="icon"
                     variant="ghost"
                     className="hidden sm:inline-flex"
                     aria-label={allCollapsed ? "Expand all files" : "Collapse all files"}

@@ -651,8 +651,8 @@ describe("the terminal surface's menu", () => {
     await waitFor(() => expect(count("pty.create")).toBe(2));
     await waitFor(() => expect(menu()).toBeNull());
     // The toolbar's buttons wear the registry's words too.
-    expect(screen.getByLabelText(/^New Terminal/)).toBeDefined();
-    expect(screen.getByLabelText(/^Split Terminal Horizontally/)).toBeDefined();
+    expect(screen.getByLabelText(/^New terminal/)).toBeDefined();
+    expect(screen.getByLabelText(/^Split terminal horizontally/)).toBeDefined();
   }, 20_000);
 
   it("with labs off the row's menu offers no Colour and no Icon, and the Workspaces section's menu offers no body toggle", async () => {

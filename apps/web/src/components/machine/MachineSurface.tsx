@@ -52,9 +52,9 @@ function Charts({ samples, stale, unavailable }: { samples: SysSample[]; stale: 
   const row = { samples, stale, unavailable };
   return (
     <div className="flex flex-col gap-8">
-      <Chart {...row} label="load" k="load" y={s => s.load1 / loadTop} text={s => s.load1.toFixed(2)} tone={() => "muted"} />
-      <Chart {...row} label="memory" k="mem" y={s => share(s.mem)} text={s => fmtBytesOfTotal(s.mem.used, s.mem.total)} tone={s => diskTone(s.mem.used, s.mem.total)} />
-      <Chart {...row} label="disk" k="disk" y={s => share(s.disk)} text={s => fmtBytesOfTotal(s.disk.used, s.disk.total)} tone={s => diskTone(s.disk.used, s.disk.total)} />
+      <Chart {...row} label="Load" k="load" y={s => s.load1 / loadTop} text={s => s.load1.toFixed(2)} tone={() => "muted"} />
+      <Chart {...row} label="Memory" k="mem" y={s => share(s.mem)} text={s => fmtBytesOfTotal(s.mem.used, s.mem.total)} tone={s => diskTone(s.mem.used, s.mem.total)} />
+      <Chart {...row} label="Disk" k="disk" y={s => share(s.disk)} text={s => fmtBytesOfTotal(s.disk.used, s.disk.total)} tone={s => diskTone(s.disk.used, s.disk.total)} />
     </div>
   );
 }
@@ -93,7 +93,7 @@ function Chart({ label, k, samples, y, text, tone, stale, unavailable }: ChartPr
   return (
     <div data-chart={k} {...(stale !== null ? { "data-stale": stale } : {})} className="py-1">
       <div className="flex items-baseline justify-between gap-2 font-mono text-[13px] tabular-nums">
-        <span className="text-muted-foreground">{label}</span>
+        <span className="font-sans text-xs text-muted-foreground">{label}</span>
         <span
           className={cn("truncate", word !== null ? "text-muted-foreground" : last !== undefined ? TONE_TEXT[tone(last)] : undefined)}
           data-k={k}
@@ -108,7 +108,7 @@ function Chart({ label, k, samples, y, text, tone, stale, unavailable }: ChartPr
         end={stale === null}
         className={cn("mt-3", stale !== null ? "text-muted-foreground/40" : last !== undefined ? TONE_LINE[tone(last)] : "text-foreground/80")}
       />
-      <div className="mt-1.5 flex justify-between font-mono text-[10px] text-muted-foreground">
+      <div className="mt-1.5 flex justify-between font-mono text-[11px] text-muted-foreground">
         <span>2 min</span>
         <span>now</span>
       </div>

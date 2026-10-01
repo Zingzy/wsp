@@ -422,6 +422,10 @@ pub struct GitDiffReply {
     pub base: Option<String>,
     pub files: Vec<GitDiffFile>,
     pub truncated: bool,
+    /// A turn range names each HEAD move the turn did not write (a checkout, pull, merge, rebase or reset) as one
+    /// line, oldest first, with no files of its own; empty for a plain diff and for a turn that only wrote its own
+    /// commits and edits.
+    pub moved: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]

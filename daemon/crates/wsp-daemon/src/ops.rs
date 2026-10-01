@@ -289,6 +289,7 @@ async fn handle_op(conn: &Arc<Conn>, ctx: &Arc<Ctx>, frame: &Value, id: Option<R
             | "git.diff"
             | "git.snapshot"
             | "git.range"
+            | "git.turn"
             | "git.push"
             | "git.pr"
             | "git.prRead"
@@ -893,6 +894,18 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
             };
             answer(id, diff.await)
         }
+        DaemonOp::GitTurn { cwd, from, to, path, machine_id } => {
+            let diff = async {
+                // Refused before anything is built from them: a value git would read as an option never reaches it.
+                if !git::is_full_sha(&from) || !git::is_full_sha(&to) {
+                    return Err(OpError::coded(DaemonErrorCode::BadRequest, "from and to are each a commit's full 40 character sha"));
+                }
+                let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Reads).await?;
+                let bound = bound_of(ctx, machine_id.as_deref(), &at).await?;
+                git::git_turn(&runner, &at, &bound, &from, &to, path.as_deref(), numbers::GIT_DIFF_CAP_BYTES).await
+            };
+            answer(id, diff.await)
+        }
         DaemonOp::GitPush { cwd, base, machine_id } => {
             let pushed = async {
                 let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Works).await?;
@@ -1416,6 +1429,7 @@ mod tests {
             "git.diff",
             "git.snapshot",
             "git.range",
+            "git.turn",
             "git.push",
             "git.pr",
             "git.prRead",

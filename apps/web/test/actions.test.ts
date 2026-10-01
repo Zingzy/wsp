@@ -464,8 +464,8 @@ describe("terminal actions", () => {
     expect(enabled(actions)).toEqual(["paste", "clear", "split", "split-vertical", "new", "close"]);
     const full = resolveActions(terminalActions, { hasSelection: true, atSplitLimit: true }, verbs);
     expect(actionById(full, "copy").refusal).toBeNull();
-    expect(actionById(full, "split").refusal).toBe(`max ${MAX_TERMINALS_PER_GROUP} per group`);
-    expect(actionById(full, "split-vertical").refusal).toBe(`max ${MAX_TERMINALS_PER_GROUP} per group`);
+    expect(actionById(full, "split").refusal).toBe(`Max ${MAX_TERMINALS_PER_GROUP} per group`);
+    expect(actionById(full, "split-vertical").refusal).toBe(`Max ${MAX_TERMINALS_PER_GROUP} per group`);
     expect(actionById(resolveActions(terminalActions, { hasSelection: false, atSplitLimit: false }, terminalVerbs({ paste: undefined })), "paste").refusal).toBe("The clipboard cannot be read here");
     const toolbar = resolveActions(terminalActions, { hasSelection: true, atSplitLimit: false }, terminalVerbs({ copy: undefined, clear: undefined }));
     expect(actionById(toolbar, "copy").refusal).toBe("No terminal is active");

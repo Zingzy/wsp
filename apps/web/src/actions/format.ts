@@ -59,10 +59,10 @@ export const TERMINAL_WORDS = {
   addToChat: "Add to chat",
   paste: "Paste",
   clear: "Clear",
-  split: "Split Terminal Horizontally",
-  splitVertical: "Split Terminal Vertically",
-  new: "New Terminal",
-  close: "Close Terminal",
+  split: "Split terminal horizontally",
+  splitVertical: "Split terminal vertically",
+  new: "New terminal",
+  close: "Close terminal",
 } as const;
 
 /** Pause, wake and the stop are one slot: a machine that is up offers the pause, one the host is still asking the
@@ -214,7 +214,7 @@ export const ONLY_FILES_HAVE_DIFFS = "Only a file has changes";
 export const NOTHING_SELECTED = "Nothing is selected";
 export const NO_CLIPBOARD_READ = "The clipboard cannot be read here";
 export const NO_TERMINAL = "No terminal is active";
-export const SPLIT_LIMIT = `max ${MAX_TERMINALS_PER_GROUP} per group`;
+export const SPLIT_LIMIT = `Max ${MAX_TERMINALS_PER_GROUP} per group`;
 
 /** A thread link named a thread the workspace's list does not carry; the workspace opened instead. The thread is
  * not named: the link carried an id, and an id names no thread to the person who followed it. */

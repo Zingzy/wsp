@@ -136,7 +136,7 @@ function CardPreview({ card }: { card: WorkspaceCard }) {
   const empty = card.image === null;
   return (
     <div className={cn("mb-1 flex h-[5.5rem] items-center justify-center overflow-hidden rounded-sm bg-muted/40", empty && "ring-1 ring-border ring-inset")} data-card-preview data-card-preview-empty={empty ? "" : undefined}>
-      {empty ? <span className="font-mono text-[10px] text-muted-foreground">no capture yet</span> : <img alt="" className="h-full w-full object-cover object-top" src={card.image} />}
+      {empty ? <span className="text-[11px] text-muted-foreground">No capture yet</span> : <img alt="" className="h-full w-full object-cover object-top" src={card.image} />}
     </div>
   );
 }

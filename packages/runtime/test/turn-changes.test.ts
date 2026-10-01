@@ -18,7 +18,7 @@ const DAEMON_TOKEN = "cafef00d".repeat(3);
 const sha = (n: number): string => String(n).repeat(40).slice(0, 40);
 
 /** A daemon whose snapshots count up and whose range answers what the case gives it. */
-function fakeDaemon(o: { files?: { path: string; kind: string; additions: number; deletions: number }[]; stall?: boolean } = {}) {
+function fakeDaemon(o: { files?: { path: string; kind: string; additions: number; deletions: number }[]; moved?: string[]; stall?: boolean } = {}) {
   const frames: Record<string, unknown>[] = [];
   let snapshots = 0;
   const answer = (frame: Record<string, unknown>): Promise<DaemonResponse> => {
@@ -28,7 +28,7 @@ function fakeDaemon(o: { files?: { path: string; kind: string; additions: number
       snapshots += 1;
       return Promise.resolve({ id: 1, ok: true, commit: sha(snapshots) } as DaemonResponse);
     }
-    if (frame["op"] === "git.range") return Promise.resolve({ id: 1, ok: true, base: null, truncated: false, files: (o.files ?? []).map(f => ({ ...f, patch: "" })) } as DaemonResponse);
+    if (frame["op"] === "git.turn") return Promise.resolve({ id: 1, ok: true, base: null, truncated: false, moved: o.moved ?? [], files: (o.files ?? []).map(f => ({ ...f, patch: "" })) } as DaemonResponse);
     return Promise.resolve({ id: 1, ok: false, code: "unsupported", error: `${String(frame["op"])} is not in this case` } as DaemonResponse);
   };
   const open = async (_o: DaemonChannelOptions): Promise<DaemonChannel> => ({
@@ -109,7 +109,7 @@ describe("what a turn changed", () => {
     await handle.finished;
     await until(() => events.length > 0);
     // The turn's own snapshots and range; the checkpoint and the status read its end also makes are other roads'.
-    expect(daemon.frames.filter(f => f["op"] === "git.snapshot" || f["op"] === "git.range")).toEqual([{ op: "git.snapshot", cwd }, { op: "git.snapshot", cwd }, { op: "git.range", cwd, from: sha(1), to: sha(2) }]);
+    expect(daemon.frames.filter(f => f["op"] === "git.snapshot" || f["op"] === "git.turn")).toEqual([{ op: "git.snapshot", cwd }, { op: "git.snapshot", cwd }, { op: "git.turn", cwd, from: sha(1), to: sha(2) }]);
     expect(events).toEqual([expect.objectContaining({ type: "session.changes", turnId: turnOf.get("add a line and a file"), threadId: handle.view().threadId, from: sha(1), to: sha(2), files })]);
     expect(events[0]).not.toHaveProperty("shared");
   });
@@ -121,9 +121,20 @@ describe("what a turn changed", () => {
     const handle = await rt!.sessions.start(ws.id, { prompt: "look around" });
     agent.release(0);
     await handle.finished;
-    await until(() => daemon.frames.some(f => f["op"] === "git.range"));
+    await until(() => daemon.frames.some(f => f["op"] === "git.turn"));
     await new Promise(resolve => setTimeout(resolve, 20));
     expect(events).toEqual([]);
+  });
+
+  it("records a turn that only moved HEAD: no files of its own, the move named on the card", async () => {
+    const daemon = fakeDaemon({ files: [], moved: ["Pulled"] });
+    const agent = gated();
+    const { ws, events } = await workspaceWith(daemon, agent.factory);
+    const handle = await rt!.sessions.start(ws.id, { prompt: "pull main" });
+    agent.release(0);
+    await handle.finished;
+    await until(() => events.length > 0);
+    expect(events).toEqual([expect.objectContaining({ type: "session.changes", files: [], moved: ["Pulled"] })]);
   });
 
   it("runs the turn without a snapshot when the daemon does not answer in time, and records nothing for it", async () => {
@@ -135,7 +146,7 @@ describe("what a turn changed", () => {
     agent.release(0);
     await handle.finished;
     await new Promise(resolve => setTimeout(resolve, 60));
-    expect(daemon.frames.filter(f => f["op"] === "git.range")).toEqual([]);
+    expect(daemon.frames.filter(f => f["op"] === "git.turn")).toEqual([]);
     expect(events).toEqual([]);
   });
 
@@ -173,7 +184,7 @@ describe("what a turn changed", () => {
       const copied = await rt.sessions.start(ws.id, { prompt: "in the copy" });
       agent.release(0);
       await copied.finished;
-      await until(() => daemon.frames.some(f => f["op"] === "git.range"));
+      await until(() => daemon.frames.some(f => f["op"] === "git.turn"));
       expect(daemon.frames.some(f => f["op"] === "git.snapshot")).toBe(true);
       await rt.close();
 
@@ -187,7 +198,7 @@ describe("what a turn changed", () => {
       agent.release(1);
       await own.finished;
       await new Promise(resolve => setTimeout(resolve, 20));
-      expect(daemon.frames.filter(f => f["op"] === "git.snapshot" || f["op"] === "git.range")).toEqual([]);
+      expect(daemon.frames.filter(f => f["op"] === "git.snapshot" || f["op"] === "git.turn")).toEqual([]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

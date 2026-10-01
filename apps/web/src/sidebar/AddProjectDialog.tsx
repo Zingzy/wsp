@@ -12,6 +12,7 @@ import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import { HERE_PLACE_ID, projectNameOf, projectSourceOf, sourceKind, type HostFolder, type HostFolderListing, type PlaceView, type ProjectHue, type ProjectIcon } from "@wsp/protocol";
 import { HueSelect, IconSelect } from "../projects/LookPicker.js";
 import { AddButton } from "../components/ui/add-button.js";
+import { Button } from "../components/ui/button.js";
 import { Dialog, DialogPopup, DialogTitle } from "../components/ui/dialog.js";
 import { Kbd } from "../components/ui/kbd.js";
 import { baseName } from "../files/entries.js";
@@ -226,10 +227,10 @@ export function AddProjectDialog({ onClose }: { onClose: () => void }) {
               className="h-8 min-w-0 flex-1 rounded-lg border border-input bg-background px-2.5 font-mono text-xs outline-none placeholder:font-sans placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
             />
             {bridge?.pickFolder !== undefined ? (
-              <button type="button" data-k="clone-into-choose" onClick={() => void pickCloneFolder()} className="flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-border px-2.5 text-xs text-muted-foreground transition-colors duration-150 hover:bg-background hover:text-foreground">
-                <FolderOpenIcon aria-hidden className="size-3.5" />
+              <Button variant="outline" data-k="clone-into-choose" onClick={() => void pickCloneFolder()}>
+                <FolderOpenIcon aria-hidden />
                 {ADD_PROJECT_WORDS.choose}
-              </button>
+              </Button>
             ) : null}
           </span>
         </div>
@@ -283,10 +284,10 @@ export function AddProjectDialog({ onClose }: { onClose: () => void }) {
             className="min-w-0 flex-1 bg-transparent text-[15px] outline-none placeholder:text-muted-foreground"
           />
           {here && bridge?.pickFolder !== undefined ? (
-            <button type="button" data-k="choose" onClick={() => void choose()} className="flex h-8 items-center gap-1.5 rounded-lg border border-border px-2.5 text-xs text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground">
-              <FolderOpenIcon aria-hidden className="size-3.5" />
+            <Button variant="outline" data-k="choose" onClick={() => void choose()}>
+              <FolderOpenIcon aria-hidden />
               {ADD_PROJECT_WORDS.choose}
-            </button>
+            </Button>
           ) : null}
           <AddButton primary data-k="add" busy={adding} held={target === null || adding} onClick={addTarget}>
             {ADD_PROJECT_WORDS.add}

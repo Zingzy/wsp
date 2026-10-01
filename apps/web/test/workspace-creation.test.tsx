@@ -192,7 +192,7 @@ describe("the creation page", () => {
     expect(text.split(CREATE_STEP_WORDS.failed)).toHaveLength(2);
     expect(text).not.toMatch(/Couldn't/);
     expect(text.split(CAP_LINE)).toHaveLength(2);
-    expect(within(view).getByRole("button", { name: "Retry" }).className).toContain("bg-popover");
+    expect(within(view).getByRole("button", { name: "Retry" }).className).toContain("border-input");
     expect(within(view).getByRole("button", { name: "Dismiss" }).className).toContain("border-transparent");
   });
 

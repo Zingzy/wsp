@@ -35,7 +35,7 @@ export function QuestionPrompt({
       {questions.map(question => (
         <div className="flex min-w-0 flex-col gap-1.5" data-question-item={question.header} key={question.key}>
           {question.header === "" ? null : (
-            <span className="font-mono text-[11px] leading-4 text-muted-foreground" data-question-header="">
+            <span className="text-[11px] leading-4 text-muted-foreground" data-question-header="">
               {question.header}
             </span>
           )}
@@ -52,7 +52,7 @@ export function QuestionPrompt({
                     {option.label}
                   </Button>
                   {option.description === "" ? null : (
-                    <span className="break-words font-mono text-[11px] leading-4 text-muted-foreground" data-question-description="">
+                    <span className="break-words text-[11px] leading-4 text-muted-foreground" data-question-description="">
                       {option.description}
                     </span>
                   )}
@@ -68,7 +68,7 @@ export function QuestionPrompt({
                   <span className="flex min-w-0 flex-col gap-0.5">
                     <span className="text-sm leading-5 text-foreground/80">{option.label}</span>
                     {option.description === "" ? null : (
-                      <span className="font-mono text-[11px] leading-4 text-muted-foreground" data-question-description="">
+                      <span className="text-[11px] leading-4 text-muted-foreground" data-question-description="">
                         {option.description}
                       </span>
                     )}

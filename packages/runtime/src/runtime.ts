@@ -3768,7 +3768,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** The whole of what a client's channel into a served workspace carries, for the reason DEVICE_OPS is a list: that
    * computer's daemon runs every other op on the computer itself, so a deny list would let an op added later reach it.
    * Each of these names the workspace it is for, and the daemon answers it inside that workspace. */
-  const WORKSPACE_FRAMES = ["pty.create", "pty.attach", "pty.detach", "pty.write", "pty.resize", "pty.kill", "pty.tab", "pty.list", "fs.list", "fs.files", "fs.read", "fs.write", "fs.search", "git.status", "git.diff", "git.snapshot", "git.range", "git.push", "git.pr", "git.prList", "ping"];
+  const WORKSPACE_FRAMES = ["pty.create", "pty.attach", "pty.detach", "pty.write", "pty.resize", "pty.kill", "pty.tab", "pty.list", "fs.list", "fs.files", "fs.read", "fs.write", "fs.search", "git.status", "git.diff", "git.snapshot", "git.range", "git.turn", "git.push", "git.pr", "git.prList", "ping"];
   /** And the host's own guest road, which answers the sessions that computer relays by the id it gave them, and
    * carries an editor's ssh to the server it starts inside the workspace. A client's channel carries neither: a
    * tunnel reaches any port inside the workspace, and only this host's relay listens for one. */
@@ -8087,15 +8087,18 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       void (async () => {
         const to = await snapshotOf(entry, cwd);
         if (to === undefined) return;
-        const range = await withDaemon(entry, ask => ask({ op: "git.range", cwd, from, to })).catch((e: unknown) => {
+        const range = await withDaemon(entry, ask => ask({ op: "git.turn", cwd, from, to })).catch((e: unknown) => {
           console.warn(`what ${turnId} changed in ${cwd} was not read: ${e instanceof Error ? e.message : String(e)}`);
           return undefined;
         });
         const read = GitDiffReply.safeParse(range);
-        if (!read.success || read.data.files.length === 0) return;
+        if (!read.success) return;
         const files = read.data.files.map(({ path, kind, additions, deletions }) => ({ path, kind, additions, deletions }));
+        const moved = read.data.moved;
+        // A turn that only moved HEAD (a checkout or pull with no edit of its own) still records its line.
+        if (files.length === 0 && moved.length === 0) return;
         const shared = sharedFolder(workspaceId, threadId, cwd, startedAt, Date.now());
-        record({ type: "session.changes", workspaceId, sessionId, turnId, threadId, from, to, files, ...(shared ? { shared: true as const } : {}) });
+        record({ type: "session.changes", workspaceId, sessionId, turnId, threadId, from, to, files, moved, ...(shared ? { shared: true as const } : {}) });
       })();
     };
     // The reply and its line to the parent go together, so one gate stands for both.

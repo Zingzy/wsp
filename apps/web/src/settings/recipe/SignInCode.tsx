@@ -37,7 +37,7 @@ export function SignInCode({ label, onCode, ask, className }: { label: string; o
         }}
         className={cn(FIELD, "min-w-0 flex-1")}
       />
-      <Button data-k="code-submit" size="sm" variant="outline" className="h-7 font-mono text-xs sm:h-7 sm:text-xs" disabled={typed === ""} onClick={send}>
+      <Button data-k="code-submit" size="xs" variant="outline" disabled={typed === ""} onClick={send}>
         {words.codeSubmit}
       </Button>
     </div>

@@ -404,7 +404,7 @@ describe("processes surface", () => {
     expect(document.querySelector("[data-procs-count]")!.textContent).toBe("5 of 11");
     const toggle = document.querySelector<HTMLButtonElement>("[data-procs-rest]")!;
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
-    expect(toggle.textContent).toBe("everything else6");
+    expect(toggle.textContent).toBe("Everything else6");
 
     // Opened, the rest of the computer follows, without the threads' own processes in it a second time.
     fireEvent.click(toggle);
