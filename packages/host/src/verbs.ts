@@ -98,7 +98,7 @@ import {
   PlaceSettingWord,
   placeSettingsLine,
   NAP_AFTER_MAX_MS,
-  type PlaceSettings,
+  type PlaceSettingsAsk,
   ProjectPlan,
   RECIPE_TICKS,
   RecipeTick,
@@ -828,7 +828,7 @@ const SETTING_RESETS = PlaceSettingWord.options.filter(word => CLOUD_ON || !CLOU
 
 /** One computer's settings made and reset by the host, answered as the row it now reads: by the id off the listing,
  * since two computers may share a name and the host keys by id. The row passes through as the host wrote it. */
-async function setComputer(client: HostClient, ref: string, set: PlaceSettings, reset: readonly PlaceSettingWord[]): Promise<PlaceView> {
+async function setComputer(client: HostClient, ref: string, set: PlaceSettingsAsk, reset: readonly PlaceSettingWord[]): Promise<PlaceView> {
   const place = await placeNamed(client, ref);
   return (await client.request<{ place: PlaceView }>("places.set", { placeId: place.id, ...set, ...(reset.length > 0 ? { reset } : {}) })).place;
 }
@@ -3479,10 +3479,10 @@ export const ALL_VERBS: readonly Verb[] = [
   {
     name: "computers set",
     cloudFlags: ["machines", "spend"],
-    usage: "wsp computers set <computer> [--threads <n>] [--machines <n>] [--spend <usd>] [--nap <minutes>|off] [--reset <setting>]...",
-    about: "what you set on one of your computers: how many threads run there at once, how long a quiet workspace there runs before it naps<!-- cloud -->, and on a cloud how many machines at once and how much it spends a day<!-- /cloud -->; --reset takes a setting back to its default",
+    usage: "wsp computers set <computer> [--threads <n>] [--machines <n>] [--spend <usd>] [--nap <minutes>|off] [--spawn on|off] [--max-machines <n>] [--max-depth <n>] [--reset <setting>]...",
+    about: "what you set on one of your computers: how many threads run there at once, how long a quiet workspace there runs before it naps, whether agents there may start agents<!-- cloud -->, and on a cloud how many machines at once and how much it spends a day<!-- /cloud -->; --reset takes a setting back to its default",
     page: "agent",
-    options: { threads: { type: "string" }, machines: { type: "string" }, spend: { type: "string" }, nap: { type: "string" }, reset: { type: "string", multiple: true } },
+    options: { threads: { type: "string" }, machines: { type: "string" }, spend: { type: "string" }, nap: { type: "string" }, spawn: { type: "string" }, "max-machines": { type: "string" }, "max-depth": { type: "string" }, reset: { type: "string", multiple: true } },
     run: async ctx => {
       const [ref, ...rest] = ctx.args;
       if (ref === undefined || rest.length > 0) throw usageRefusal("wsp computers set takes one computer.", usageIs(ctx));
@@ -3490,33 +3490,40 @@ export const ALL_VERBS: readonly Verb[] = [
       const machines = flag(ctx.flags, "machines");
       const spend = flag(ctx.flags, "spend");
       const nap = flag(ctx.flags, "nap");
+      const spawn = agentsAsked(flag(ctx.flags, "spawn"), flag(ctx.flags, "max-machines"), flag(ctx.flags, "max-depth"));
       const computer = await setComputer(await ctx.client(), ref, {
         ...(threads !== undefined ? { threads: countAsked("--threads", threads, 1) } : {}),
         ...(machines !== undefined ? { machines: countAsked("--machines", machines, 1) } : {}),
         ...(spend !== undefined ? { spendPerDayUsd: dollarsAsked(spend) } : {}),
         ...(nap !== undefined ? { napMs: napAsked(nap) } : {}),
+        ...(spawn !== undefined ? { spawn } : {}),
       }, flagList(ctx.flags, "reset").map(word => oneOf("reset", SETTING_RESETS, word)!));
       ctx.out.emit({ computer }, placeSettingsLine(computer));
       return 0;
     },
     tool: tool({
       description:
-        "Sets what the person may set on one computer and answers its row as it now reads, the same row computers lists: threads, how many threads may run there at once, a new one waiting past it (one per 2.5 GB of that computer's memory up to its cores until it is set); nap, the minutes a workspace there with no window of its own runs with no turn and no work before it naps and stops costing anything, waking on the next message (20 until it is set, 0 never naps it), which every workspace there counts again from now and which the computer the app runs on does not take, since its workspaces are folders<!-- cloud -->; machines and spend on a cloud, how many machines may run there at once and the dollars a day it may spend before it starts no new machine (3 and $10 until they are set)<!-- /cloud -->. A setting left out keeps what stands, and each word under reset takes that setting back to its default. The row carries cap, what runs there now, capDefault, what it reads by default, and settings, what the person set. A setting the computer's kind does not take, and a call that sets nothing, are refused in one line.",
+        "Sets what the person may set on one computer and answers its row as it now reads, the same row computers lists: threads, how many threads may run there at once, a new one waiting past it (one per 2.5 GB of that computer's memory up to its cores until it is set); nap, the minutes a workspace there with no window of its own runs with no turn and no work before it naps and stops costing anything, waking on the next message (20 until it is set, 0 never naps it), which every workspace there counts again from now and which the computer the app runs on does not take, since its workspaces are folders; spawn, max_machines and max_depth, what the agents on a workspace there that holds no switch of its own may ask of this host, as workspaces_agents names it for one workspace (on, up to 3 machines and one level deep, until it is set), read at every ask so a workspace made before the change follows it<!-- cloud -->; machines and spend on a cloud, how many machines may run there at once and the dollars a day it may spend before it starts no new machine (3 and $10 until they are set)<!-- /cloud -->. A setting left out keeps what stands, and each word under reset takes that setting back to its default. The row carries cap, what runs there now, capDefault, what it reads by default, and settings, what the person set. A setting the computer's kind does not take, and a call that sets nothing, are refused in one line.",
       input: {
         computer: z.string().describe("the computer, by the name computers lists or its id"),
         threads: z.number().int().min(1).optional().describe("how many threads may run on that computer at once"),
         machines: z.number().int().min(1).optional().describe("how many machines may run on that cloud at once"),
         spend: z.number().min(0).optional().describe("the dollars a day that cloud may spend before it starts no new machine"),
         nap: z.number().int().min(0).max(NAP_AFTER_MAX_MS / 60_000).optional().describe("the minutes a quiet workspace there runs before it naps; 0 never naps it"),
+        spawn: z.enum(["on", "off"]).optional().describe("whether agents on a workspace there may open threads and fork machines under the thread they run in, capped, where the workspace holds no switch of its own"),
+        max_machines: z.number().int().min(0).optional().describe("how many machines may stand at once under one root thread there while spawn is on"),
+        max_depth: z.number().int().min(1).optional().describe("how many levels deep the tree under a root thread there may go while spawn is on"),
         reset: z.array(z.enum(SETTING_RESETS)).optional().describe("the settings to take back to their defaults, by the same words"),
       },
       output: { computer: PlaceView },
-      call: async ({ computer: ref, threads, machines, spend, nap, reset }, deps) => {
+      call: async ({ computer: ref, threads, machines, spend, nap, spawn: on, max_machines: maxMachines, max_depth: maxDepth, reset }, deps) => {
+        const spawn = agentsAsked(on, maxMachines, maxDepth);
         const computer = await setComputer(await deps.client(), ref, {
           ...(threads !== undefined ? { threads } : {}),
           ...(machines !== undefined ? { machines } : {}),
           ...(spend !== undefined ? { spendPerDayUsd: spend } : {}),
           ...(nap !== undefined ? { napMs: nap === 0 ? null : nap * 60_000 } : {}),
+          ...(spawn !== undefined ? { spawn } : {}),
         }, reset ?? []);
         return asJson({ computer });
       },
@@ -5539,6 +5546,7 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   machines: "how many machines may run on that cloud at once",
   spend: "the dollars a day that cloud may spend before it starts no new machine",
   nap: "the minutes a quiet workspace there runs before it naps, or off",
+  "computers set spawn": "on lets agents on a workspace there with no switch of its own open threads and fork machines, capped; off refuses them",
   reset: "a setting to take back to its default, by its flag's word; repeats",
   "max-depth": "how many levels of threads may stand under the root thread while spawning is on; defaults to 1",
   "max-machines": "how many machines may stand at once under one root thread while spawning is on; defaults to 3",

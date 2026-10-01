@@ -407,6 +407,28 @@
                         "type": "null"
                       }
                     ]
+                  },
+                  "spawn": {
+                    "type": "object",
+                    "properties": {
+                      "spawn": {
+                        "type": "boolean"
+                      },
+                      "maxMachines": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "maxDepth": {
+                        "type": "integer",
+                        "minimum": 1
+                      }
+                    },
+                    "required": [
+                      "spawn",
+                      "maxMachines",
+                      "maxDepth"
+                    ],
+                    "additionalProperties": false
                   }
                 },
                 "additionalProperties": false
@@ -420,6 +442,9 @@
                     "type": "null"
                   }
                 ]
+              },
+              "spawn": {
+                "$ref": "#/properties/computers/items/properties/settings/properties/spawn"
               },
               "running": {
                 "type": "integer",
@@ -882,6 +907,28 @@
                         "type": "null"
                       }
                     ]
+                  },
+                  "spawn": {
+                    "type": "object",
+                    "properties": {
+                      "spawn": {
+                        "type": "boolean"
+                      },
+                      "maxMachines": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "maxDepth": {
+                        "type": "integer",
+                        "minimum": 1
+                      }
+                    },
+                    "required": [
+                      "spawn",
+                      "maxMachines",
+                      "maxDepth"
+                    ],
+                    "additionalProperties": false
                   }
                 },
                 "additionalProperties": false
@@ -895,6 +942,9 @@
                     "type": "null"
                   }
                 ]
+              },
+              "spawn": {
+                "$ref": "#/properties/computers/items/properties/settings/properties/spawn"
               },
               "running": {
                 "type": "integer",

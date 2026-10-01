@@ -3990,12 +3990,12 @@ describe("wsp verbs over the host", () => {
       const fallback = (here.capDefault as { threads: number }).threads;
       const set = await run("computers", "set", HERE_PLACE_ID, "--threads", "2");
       expect(set.code, set.io.errors.join("\n")).toBe(0);
-      expect(set.io.lines).toEqual([`${here.name}: 2 threads at once (${fallback} by default)`]);
+      expect(set.io.lines).toEqual([`${here.name}: 2 threads at once (${fallback} by default), agents may spawn: up to 3 workspaces (the default)`]);
       expect((await rt.places!.rows()).find(p => p.id === HERE_PLACE_ID)).toMatchObject({ cap: { threads: 2 }, settings: { threads: 2 } });
       const asJson = await run("computers", "set", here.name, "--threads", "1", "--json");
       expect(json(asJson.io).at(-1)).toMatchObject({ computer: { id: HERE_PLACE_ID, cap: { threads: 1 }, capDefault: { threads: fallback } } });
       const back = await run("computers", "set", HERE_PLACE_ID, "--reset", "threads");
-      expect(back.io.lines).toEqual([`${here.name}: ${fallback} ${fallback === 1 ? "thread" : "threads"} at once (the default)`]);
+      expect(back.io.lines).toEqual([`${here.name}: ${fallback} ${fallback === 1 ? "thread" : "threads"} at once (the default), agents may spawn: up to 3 workspaces (the default)`]);
       expect((await rt.places!.rows()).find(p => p.id === HERE_PLACE_ID)!.settings).toBeUndefined();
     });
 
@@ -4016,6 +4016,23 @@ describe("wsp verbs over the host", () => {
       const long = await run("computers", "set", forks.id, "--nap", "181");
       expect(long.code).toBe(EXIT_CODES.usage);
       expect(long.io.errors[0]).toBe('wsp computers set: --nap takes whole minutes from 1 to 180, or off, and got "181". Write it as --nap 20 or --nap off.');
+    });
+
+    it("sets whether agents there may start agents for every workspace that says nothing of its own, and a workspace reads it", async () => {
+      await run("new", "alpha");
+      const off = await run("computers", "set", HERE_PLACE_ID, "--spawn", "off");
+      expect(off.code, off.io.errors.join("\n")).toBe(0);
+      expect(off.io.lines[0]).toContain("agents may not spawn (on, up to 3 by default)");
+      const capped = await run("computers", "set", HERE_PLACE_ID, "--spawn", "on", "--max-machines", "1", "--json");
+      expect(json(capped.io).at(-1)).toMatchObject({ computer: { spawn: { spawn: true, maxMachines: 1, maxDepth: 1 } } });
+      const mac = await macProject("mine");
+      expect(mac.code, mac.io.errors.join("\n")).toBe(0);
+      expect((await rt.workspaces.list()).find(w => w.name === "mine")!.agents).toEqual({ spawn: true, maxMachines: 1, maxDepth: 1 });
+      const wrong = await run("computers", "set", HERE_PLACE_ID, "--spawn", "yes");
+      expect(wrong.code).toBe(EXIT_CODES.usage);
+      expect(wrong.io.errors[0]).toContain("--spawn takes on or off");
+      expect((await run("computers", "set", HERE_PLACE_ID, "--reset", "spawn")).code).toBe(0);
+      expect((await rt.workspaces.list()).find(w => w.name === "mine")!.agents).toEqual(AGENTS_ON);
     });
 
     it("refuses a count that is not a whole number of one or more, a word reset does not take, and a line that sets nothing, as usage", async () => {

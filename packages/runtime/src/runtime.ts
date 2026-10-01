@@ -2971,12 +2971,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * fork carries the tree it belongs to and not a rule of its own, so turning a lead's switch off stops everything
    * its threads spawned rather than leaving a copy of the old answer standing on every machine under it. A root
    * whose workspace this host no longer holds governs nothing, so the tree under it spawns nothing more. A switch
-   * nobody set reads as the default. */
-  const agentsOf = (record: { agents?: WorkspaceAgents; rootThreadId?: string }): WorkspaceAgents | undefined => {
-    if (record.rootThreadId === undefined) return record.agents ?? AGENTS_ON;
+   * nobody set on the workspace reads as its place's, and one set on neither as the default. */
+  const agentsOf = (record: WorkspaceRecord): WorkspaceAgents | undefined => {
+    if (record.rootThreadId === undefined) return record.agents ?? placeSpawnOf(record);
     const at = rowsOn(record.rootThreadId)[0]?.workspaceId;
     const root = at === undefined ? undefined : live.get(at)?.record;
-    return root === undefined ? undefined : (root.agents ?? AGENTS_ON);
+    return root === undefined ? undefined : (root.agents ?? placeSpawnOf(root));
   };
   /** The tree a thread sits in, read off the rows: its parent, then its parent's, up to the thread a person opened.
    * The walk is bounded by the rows there are, since a chain that somehow looped would otherwise never end. */
@@ -3646,8 +3646,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * forks with. The one reading of where a machine lives, so this and `place` on one view cannot disagree. */
   const providerOf = (r: WorkspaceRecord): string | undefined =>
     r.place !== undefined ? placeDoor?.offerOf(r.place) : kindWords(r.kind).driven ? places.wired : undefined;
-  /** The row of the places list a workspace stands on: the computer its record names, else the provider it forks at. */
-  const placeIdOf = (r: WorkspaceRecord): string | undefined => r.place ?? providerOf(r);
+  /** The row of the places list a workspace stands on: this computer for a folder here, else the computer its record
+   * names, else the provider it forks at. */
+  const placeIdOf = (r: WorkspaceRecord): string | undefined => (isLocalWorkspace(r) ? HERE_PLACE_ID : (r.place ?? providerOf(r)));
+  /** The switch a place gives every workspace there that holds none of its own, else the default. */
+  const spawnAt = (placeId: string | undefined): WorkspaceAgents => (placeId === undefined ? undefined : placeDoor?.settingsAt(placeId).spawn) ?? AGENTS_ON;
+  const placeSpawnOf = (r: WorkspaceRecord): WorkspaceAgents => spawnAt(placeIdOf(r));
 
   /** The project a record names. A record whose project this host does not hold is the one shape the boot refuses,
    * so every read after the boot has one. */
@@ -6162,7 +6166,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       ...((childBase ?? project.base) !== undefined ? { base: childBase ?? project.base } : {}),
       // A fork a thread asked for stores no switch of its own: it carries the tree it belongs to, and the switch is
       // read off that tree's root wherever it is asked for, so one workspace holds the answer for the whole tree.
-      ...(spawned === undefined && o.agents !== undefined ? { agents: agentsFrom(undefined, o.agents) } : {}),
+      ...(spawned === undefined && o.agents !== undefined ? { agents: agentsFrom(spawnAt(placeId ?? places.wired), o.agents) } : {}),
     };
     // Only an asked size is checked: the golden's own is what it was built at, whatever the provider offers today.
     if (namesSize(o) && !offeredSize(at.capabilities.sizes, record.size)) {
@@ -6331,7 +6335,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       copy,
       portBase,
       ...treeOf(scopeOf(caller)),
-      ...(o.agents !== undefined ? { agents: agentsFrom(undefined, o.agents) } : {}),
+      ...(o.agents !== undefined ? { agents: agentsFrom(spawnAt(HERE_PLACE_ID), o.agents) } : {}),
       ...(o.parent !== undefined ? { parentWorkspaceId: o.parent } : {}),
       ...((start?.base ?? project.base) !== undefined ? { base: start?.base ?? project.base } : {}),
       spec: {},
@@ -6624,7 +6628,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // The same rule the create that names the switch reads, off the one table of what each kind's machines are:
       // a kind whose agents could not drive this host is refused the switch rather than given one that does nothing.
       if (patch.spawn === true && !agentsMayDrive(entry.record.kind)) throw new Error(agentsKindRefusal(entry.record.kind));
-      const next = agentsFrom(entry.record.agents, patch);
+      const next = agentsFrom(entry.record.agents ?? placeSpawnOf(entry.record), patch);
       entry.record.agents = next;
       await persist(entry.record);
       bus.emit({ type: "workspace.agents", workspaceId: id, agents: next });

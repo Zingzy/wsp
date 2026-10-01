@@ -7,6 +7,7 @@ use serde_json::value::RawValue;
 use serde_json::{Map, Number, Value};
 
 use super::target::place_id;
+use super::workspace::agents_asked;
 use super::{input, Answer, Refused, Tool};
 use crate::host::Host;
 use crate::record;
@@ -65,6 +66,14 @@ pub struct SetIn {
     #[cfg_attr(test, schemars(with = "Option<u64>"))]
     pub nap: Option<Number>,
     #[serde(default)]
+    pub spawn: Option<String>,
+    #[serde(default)]
+    #[cfg_attr(test, schemars(with = "Option<u64>"))]
+    pub max_machines: Option<Number>,
+    #[serde(default)]
+    #[cfg_attr(test, schemars(with = "Option<u64>"))]
+    pub max_depth: Option<Number>,
+    #[serde(default)]
     pub reset: Option<Vec<String>>,
 }
 
@@ -81,7 +90,7 @@ struct Placed {
 }
 
 async fn set(host: std::sync::Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
-    let SetIn { computer, threads, machines, spend, nap, reset } = input(SET_NAME, arguments)?;
+    let SetIn { computer, threads, machines, spend, nap, spawn, max_machines, max_depth, reset } = input(SET_NAME, arguments)?;
     let client = host.client().await?;
     let words = record::words();
     let mut frame = Map::new();
@@ -94,6 +103,9 @@ async fn set(host: std::sync::Arc<Host>, arguments: Value) -> Result<Answer, Ref
     if let Some(minutes) = nap.and_then(|n| n.as_u64()) {
         let window = if minutes == 0 { Value::Null } else { Value::from(minutes * 60_000) };
         frame.insert("napMs".to_owned(), window);
+    }
+    if let Some(asked) = agents_asked(spawn.as_deref(), max_machines.as_ref(), max_depth.as_ref()) {
+        frame.insert("spawn".to_owned(), Value::Object(asked));
     }
     if let Some(reset) = reset.filter(|r| !r.is_empty()) {
         frame.insert("reset".to_owned(), Value::from(reset));

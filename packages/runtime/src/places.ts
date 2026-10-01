@@ -27,7 +27,10 @@ import {
   placeSetRefusal,
   placeSettingKey,
   PlaceSettings,
+  type PlaceSettingsAsk,
   type PlaceSettingWord,
+  AGENTS_ON,
+  agentsFrom,
   placeLinkTranscript,
   placeRefusalTranscript,
   isPlainPath,
@@ -479,7 +482,7 @@ export interface PlaceDoor {
   /** Sets what a person may set on one place, each key left out keeping what stands and each word reset taking its
    * setting back to the default, and answers the row as it now reads. Refused as usage for a place this host does
    * not hold and for a setting the place's kind does not take. */
-  set(placeId: string, set: PlaceSettings, reset?: readonly PlaceSettingWord[]): Promise<{ place: PlaceView }>;
+  set(placeId: string, set: PlaceSettingsAsk, reset?: readonly PlaceSettingWord[]): Promise<{ place: PlaceView }>;
   /** The port on this computer's loopback that carries to the daemon on a linked place, opened at the first ask
    * and held with the link. Throws with the place's name when it is not connected or has said no port. */
   road(placeId: string): Promise<number>;
@@ -857,6 +860,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       ...(capDefault !== undefined ? { capDefault } : {}),
       ...(Object.keys(settings).length > 0 ? { settings } : {}),
       ...(row.takesForks === true ? { napMs: settings.napMs !== undefined ? settings.napMs : (opts.napMs ?? NAP_AFTER_MS) } : {}),
+      spawn: settings.spawn ?? AGENTS_ON,
       running: await recording.runningOn(row.id, ids),
     };
   };
@@ -2009,11 +2013,15 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       if (row === undefined) throw Object.assign(new Error(noSuchPlaceRefusal(placeId, [wiring.here().name, ...(await records()).map(r => r.name), ...providerIds()])), { kind: "usage" });
       const refused = placeSetRefusal(row, set, reset);
       if (refused !== undefined) throw Object.assign(new Error(refused), { kind: "usage" });
-      const given = Object.fromEntries(Object.entries(set).filter(([, value]) => value !== undefined));
+      const { spawn, ...rest } = set;
+      const given = Object.fromEntries(Object.entries(rest).filter(([, value]) => value !== undefined));
       const dropped = new Set<string>(reset.map(placeSettingKey));
       // Read and written in one turn, so two settings made at once on one place both stand.
       await inTurn(async () => {
-        const next = Object.fromEntries(Object.entries({ ...(await settingsOf(placeId)), ...given }).filter(([key]) => !dropped.has(key)));
+        const held = await settingsOf(placeId);
+        // The switch is a patch over the one the place holds, so a cap named alone keeps it on or off.
+        const switched = spawn === undefined ? {} : { spawn: agentsFrom(held.spawn, spawn) };
+        const next = Object.fromEntries(Object.entries({ ...held, ...given, ...switched }).filter(([key]) => !dropped.has(key)));
         await (Object.keys(next).length === 0 ? store.delete(CAPS, placeId) : store.put(CAPS, placeId, next));
         settingsHeld.set(placeId, next);
       });

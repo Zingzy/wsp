@@ -127,6 +127,32 @@
       ]
     },
     {
+      "case": "agents may not start agents",
+      "arguments": {
+        "computer": "attic",
+        "spawn": "off",
+        "max_depth": 2
+      },
+      "replies": {
+        "places.list": "{\"id\":1,\"ok\":true,\"places\":[{\"id\":\"place-9\",\"kind\":\"computer\",\"name\":\"attic\",\"label\":\"zingzy's \u0085box\u007f \\\"one\\\" \\\\ two\\nthree 🧪\",\"default\":false,\"os\":\"linux\",\"shape\":{\"cpu\":8,\"memMb\":16384},\"diskFreeBytes\":123456789012,\"present\":true,\"agentVersions\":{\"2\":\"an index key\",\"claude\":\"2.1.0\"},\"forks\":{\"running\":1,\"room\":2}},{\"id\":\"place-solari\",\"kind\":\"provider\",\"name\":\"solari\",\"default\":true,\"rateUsdPerHour\":0.30000000000000004}]}",
+        "places.set": "{\"id\":1,\"ok\":true,\"place\":{\"id\":\"place-9\",\"kind\":\"computer\",\"name\":\"attic\",\"label\":\"zingzy's \u0085box\u007f \\\"one\\\" \\\\ two\\nthree 🧪\",\"default\":false,\"os\":\"linux\",\"shape\":{\"cpu\":8,\"memMb\":16384},\"diskFreeBytes\":123456789012,\"present\":true,\"agentVersions\":{\"2\":\"an index key\",\"claude\":\"2.1.0\"},\"forks\":{\"running\":1,\"room\":2},\"cap\":{\"threads\":6},\"capDefault\":{\"threads\":6},\"settings\":{\"spawn\":{\"spawn\":false,\"maxMachines\":3,\"maxDepth\":2}},\"spawn\":{\"spawn\":false,\"maxMachines\":3,\"maxDepth\":2},\"running\":0}}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\n  \\\"computer\\\": {\\n    \\\"id\\\": \\\"place-9\\\",\\n    \\\"kind\\\": \\\"computer\\\",\\n    \\\"name\\\": \\\"attic\\\",\\n    \\\"label\\\": \\\"zingzy's \\\\u0085box\\\\u007f \\\\\\\"one\\\\\\\" \\\\\\\\ two\\\\nthree 🧪\\\",\\n    \\\"default\\\": false,\\n    \\\"os\\\": \\\"linux\\\",\\n    \\\"shape\\\": {\\n      \\\"cpu\\\": 8,\\n      \\\"memMb\\\": 16384\\n    },\\n    \\\"diskFreeBytes\\\": 123456789012,\\n    \\\"present\\\": true,\\n    \\\"agentVersions\\\": {\\n      \\\"2\\\": \\\"an index key\\\",\\n      \\\"claude\\\": \\\"2.1.0\\\"\\n    },\\n    \\\"forks\\\": {\\n      \\\"running\\\": 1,\\n      \\\"room\\\": 2\\n    },\\n    \\\"cap\\\": {\\n      \\\"threads\\\": 6\\n    },\\n    \\\"capDefault\\\": {\\n      \\\"threads\\\": 6\\n    },\\n    \\\"settings\\\": {\\n      \\\"spawn\\\": {\\n        \\\"spawn\\\": false,\\n        \\\"maxMachines\\\": 3,\\n        \\\"maxDepth\\\": 2\\n      }\\n    },\\n    \\\"spawn\\\": {\\n      \\\"spawn\\\": false,\\n      \\\"maxMachines\\\": 3,\\n      \\\"maxDepth\\\": 2\\n    },\\n    \\\"running\\\": 0\\n  }\\n}\"}],\"structuredContent\":{\"computer\":{\"id\":\"place-9\",\"kind\":\"computer\",\"name\":\"attic\",\"label\":\"zingzy's \\u0085box\\u007f \\\"one\\\" \\\\ two\\nthree 🧪\",\"default\":false,\"os\":\"linux\",\"shape\":{\"cpu\":8,\"memMb\":16384},\"diskFreeBytes\":123456789012,\"present\":true,\"agentVersions\":{\"2\":\"an index key\",\"claude\":\"2.1.0\"},\"forks\":{\"running\":1,\"room\":2},\"cap\":{\"threads\":6},\"capDefault\":{\"threads\":6},\"settings\":{\"spawn\":{\"spawn\":false,\"maxMachines\":3,\"maxDepth\":2}},\"spawn\":{\"spawn\":false,\"maxMachines\":3,\"maxDepth\":2},\"running\":0}}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "places.list"
+        },
+        {
+          "op": "places.set",
+          "placeId": "place-9",
+          "spawn": {
+            "spawn": false,
+            "maxDepth": 2
+          }
+        }
+      ]
+    },
+    {
       "case": "nothing to set",
       "arguments": {
         "computer": "attic"
