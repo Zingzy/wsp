@@ -30,6 +30,7 @@ export const CLAUDE: AgentEntry = {
   backgroundRoad: "run_in_background on the Bash tool",
   installRoad: { road: "script", script: CLAUDE_INSTALL, version: CLAUDE_CODE.version, bins: [LOCAL_BIN] },
   latest: { from: "text", url: CLAUDE_LATEST },
+  updateLine: "claude update",
   signIn: SIGN_IN_ROWS.claude,
   // https://docs.claude.com/en/docs/claude-code/mcp (user scope; project scope lives in each repo's .mcp.json)
   mcp: { format: MCP_SERVERS_JSON, files: ["~/.claude.json"], projectFiles: [".mcp.json"], scope: "user scope and your home folder", httpAuth: "its sign-in is kept with the Claude Code login", check: CLAUDE_MCP_CHECK, login: CLAUDE_MCP_LOGIN },

@@ -877,7 +877,7 @@ describe("a lab's own home", () => {
     for (const { agent, store } of rows) {
       const path = join(store, agent.mcp.files[0].replace(/^~\//, "").split("/").at(-1));
       expect([path, written.includes(path)]).toEqual([path, true]);
-      const config = JSON.parse(readFileSync(path, "utf8"));
+      const text = readFileSync(path, "utf8");
       // This lab's own wsp and nothing else. An agent's own configuration on this Mac carries the person's MCP
       // servers, one of which is their own host: a tester's agent reached it through that entry and wrote a
       // workspace record there. With none at all a tester's agent does not know it is inside wsp: one wrote
@@ -887,11 +887,15 @@ describe("a lab's own home", () => {
       // no agent opens.
       expect(path.startsWith(`${store}/`)).toBe(true);
       expect(path.slice(store.length + 1).startsWith(`${agent.stateHome}/`)).toBe(false);
-      expect(Object.keys(config.mcpServers)).toEqual(["wsp"]);
-      expect(config.mcpServers.wsp).toEqual({ command: join(binDir(home), "wsp"), args: ["mcp"] });
-      expect(config.projects).toBeUndefined();
-      // Onboarding already answered, so a turn opens on the task rather than on a wizard.
-      expect(config.hasCompletedOnboarding).toBe(true);
+      const servers = agent.mcp.format.read(text, home);
+      expect(servers.map(s => s.name)).toEqual(["wsp"]);
+      expect(servers[0].transport).toMatchObject({ kind: "stdio", command: join(binDir(home), "wsp"), args: ["mcp"] });
+      if (path.endsWith(".json")) {
+        const config = JSON.parse(text);
+        expect(config.projects).toBeUndefined();
+        // Onboarding already answered, so a turn opens on the task rather than on a wizard.
+        expect(config.hasCompletedOnboarding).toBe(true);
+      }
       // A skills folder that is there and empty: nothing of this computer's reaches a tester's thread.
       expect(statSync(join(store, "skills")).isDirectory()).toBe(true);
     }
@@ -1127,6 +1131,7 @@ describe("the environment a fixture's host is started with", () => {
       WSP_PROVIDER: "none",
       [PERSON_HOME_ENV]: home,
       CLAUDE_CONFIG_DIR: `${home}/.claude`,
+      CODEX_HOME: `${home}/.codex`,
     });
     // Nothing of the shell that started it beyond the path the agents are found on: a key or a home in the
     // tester's terminal would put the run on a real provider or on their own machines.
