@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createRoot } from "react-dom/client";
 import { BootGate } from "./BootGate.js";
+import { GlassGround } from "./components/GlassGround.js";
 import { bootPayload } from "./boot.js";
 import "./index.css";
 import "./themes/index.js";
@@ -13,6 +14,7 @@ if (import.meta.env.DEV) setInterval(() => performance.clearMeasures(), 60_000);
 
 createRoot(document.getElementById("root")!).render(
   <>
+    <GlassGround />
     <BootGate boot={cfg} at={window.location} agent={navigator.userAgent} storage={window.localStorage} />
   </>,
 );
