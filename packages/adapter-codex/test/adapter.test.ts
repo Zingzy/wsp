@@ -185,6 +185,22 @@ describe("a Codex turn's tokens and plan on the app server", () => {
     expect(result.tokens).toEqual({ input: 42_000, cached: 0, cacheWrite: 0, output: 200, reasoning: 0, context: 22_100, window: 258_400 });
   });
 
+  it("says what each model call drew as the server reports it, so the account's draw right now can be read", async () => {
+    const { events, onEvent } = collect();
+    await adapterOver(launcher(scripted([usage([50_000, 900], [20_000, 100]), usage([72_000, 1_000], [22_000, 100]), agentMessage("m1", "done"), completed("completed")]))).start({ prompt: "again", resume: THREAD_ID, onEvent }).finished;
+    expect(events.filter(e => e.type === "turn.usage")).toEqual([
+      { type: "turn.usage", sessionId: THREAD_ID, tokens: 20_100 },
+      { type: "turn.usage", sessionId: THREAD_ID, tokens: 22_100 },
+    ]);
+  });
+
+  it("carries the moment the server says it sent each call's figure, so a re-read run files old calls at their own time", async () => {
+    const stamped = usage([50_000, 900], [20_000, 100]).replace(/}$/, `,"emittedAtMs":1790521480354}`);
+    const { events, onEvent } = collect();
+    await adapterOver(launcher(scripted([stamped, agentMessage("m1", "done"), completed("completed")]))).start({ prompt: "again", resume: THREAD_ID, onEvent }).finished;
+    expect(events.filter(e => e.type === "turn.usage")).toEqual([{ type: "turn.usage", sessionId: THREAD_ID, tokens: 20_100, at: 1790521480354 }]);
+  });
+
   it("reads the plan the server updates as the turn's steps, the step under way as working", async () => {
     const plan = `{"method":"turn/plan/updated","params":{"threadId":"${THREAD_ID}","turnId":"${TURN_ID}","explanation":null,"plan":[{"step":"read","status":"completed"},{"step":"write","status":"inProgress"},{"step":"ship","status":"pending"}]}}`;
     const { events, onEvent } = collect();
@@ -236,8 +252,10 @@ describe("CodexAdapter over codex app-server", () => {
       "permission.ask",
       "permission.close",
       "delta:tool_result",
+      "turn.usage",
       "limit",
       "delta:text",
+      "turn.usage",
       "limit",
       "turn.done",
       "session.end",

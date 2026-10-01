@@ -233,10 +233,14 @@ describe("ClaudeAdapter over the recorded fixture", () => {
     expect(events.map((e) => e.type)).toEqual([
       "session.start",
       "limit",
+      "turn.usage",
+      "turn.delta",
+      "turn.usage",
       "turn.delta",
       "turn.delta",
+      "turn.usage",
       "turn.delta",
-      "turn.delta",
+      "turn.usage",
       "turn.delta",
       "turn.anchor",
       "turn.done",
@@ -846,7 +850,6 @@ describe("result classification", () => {
     expect(result).toEqual({
       status: "failed",
       durationMs: 26,
-      costUsd: 0,
       tokens: { input: 0, output: 0, cached: 0, cacheWrite: 0 },
       text: "",
       error: "claude answered with no output and no usage after 26ms: No conversation found with session ID: e16ed170\nError: transcript ended mid-turn",
@@ -1465,5 +1468,114 @@ describe("ClaudeAdapter reads the plan's limits Claude Code prints", () => {
 
   it("drops an event that reads no utilization for any window", async () => {
     expect(await limits([limitLine({ status: "allowed", rateLimitType: "five_hour", resetsAt: 1_790_700_000 }), limitLine({ status: "allowed" })])).toEqual([]);
+  });
+});
+
+describe("what a turn cost, off totals the CLI keeps for the whole session", () => {
+  // Claude Code's result carries the session's running total, and a resume starts from the total its transcript saved
+  // in a cost-state line. Two turns of one thread on 2026-10-01 reported 352.3259844 and then 370.679875.
+  const init = `{"type":"system","subtype":"init","cwd":"/w","session_id":"${FIXTURE_SESSION_ID}","model":"claude-opus-5-5"}`;
+  const saved = (total: number, session = FIXTURE_SESSION_ID) =>
+    JSON.stringify({ type: "cost-state", sessionId: session, totalCostUSD: total, modelUsage: { "claude-opus-5-5": { inputTokens: 9, outputTokens: 9, cacheReadInputTokens: 9, cacheCreationInputTokens: 9, webSearchRequests: 0, costUSD: total } } });
+  const result = (total: number) =>
+    `{"type":"result","subtype":"success","is_error":false,"num_turns":1,"duration_ms":900,"result":"done","session_id":"${FIXTURE_SESSION_ID}","total_cost_usd":${total},"usage":{"input_tokens":10,"output_tokens":4}}`;
+  const run = async (lines: string[], resume?: string) => {
+    const exec = scriptedExec(lines);
+    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
+    const { onEvent } = collect();
+    const done = await adapter.start({ prompt: "x", ...(resume !== undefined ? { resume } : {}), onEvent }).finished;
+    return { done, command: exec.calls[0]?.command ?? "" };
+  };
+
+  it("a resumed turn costs its result's total less the total the session's transcript saved before it", async () => {
+    const { done, command } = await run([saved(352.3259844), init, result(370.679875)], FIXTURE_SESSION_ID);
+    expect(done.costUsd).toBeCloseTo(18.3538906, 6);
+    // The launch prints the saved line ahead of the CLI, read from the same file the CLI restores from.
+    expect(command).toMatch(/^wsp_saved=\$\(ls -1td '\/root\/\.claude-cfg\/projects'\/\*\/'e16ed170-8257-4668-879e-fe836341633c\.jsonl'/);
+    expect(command).toContain(`grep -F '"type":"cost-state"'`);
+  });
+
+  it("a saved line of another session, as a fork's file holds, is not this session's total, so the turn's cost is not known", async () => {
+    const { done } = await run([saved(352.3259844, "11111111-2222-4333-8444-555555555555"), init, result(370.679875)], FIXTURE_SESSION_ID);
+    expect(done.costUsd).toBeUndefined();
+    expect(done.tokens).toMatchObject({ input: 10, output: 4 });
+  });
+
+  it("a resume with nothing saved leaves the turn's cost out rather than filing the session's whole total", async () => {
+    const { done } = await run([init, result(370.679875)], FIXTURE_SESSION_ID);
+    expect(done.costUsd).toBeUndefined();
+    expect(done.models).toBeUndefined();
+  });
+
+  it("a saved line that does not read leaves the turn's cost out", async () => {
+    const broken = JSON.stringify({ type: "cost-state", sessionId: FIXTURE_SESSION_ID, totalCostUSD: "352.33", modelUsage: {} });
+    expect((await run([broken, init, result(370.679875)], FIXTURE_SESSION_ID)).done.costUsd).toBeUndefined();
+    expect((await run(['{"type":"cost-state","sessionId":"e16ed170', init, result(370.679875)], FIXTURE_SESSION_ID)).done.costUsd).toBeUndefined();
+  });
+
+  it("a compaction inside the turn leaves the running total running: the turn still costs what it gained", async () => {
+    const compacted = `{"type":"system","subtype":"compact_boundary","session_id":"${FIXTURE_SESSION_ID}","compact_metadata":{"trigger":"auto","pre_tokens":180000,"post_tokens":12000}}`;
+    const { done } = await run([saved(352.3259844), init, compacted, result(370.679875)], FIXTURE_SESSION_ID);
+    expect(done.costUsd).toBeCloseTo(18.3538906, 6);
+  });
+
+  it("a total under the saved one started again from nothing, so the turn cost the whole of it", async () => {
+    const { done } = await run([saved(352.3259844), init, result(2.5)], FIXTURE_SESSION_ID);
+    expect(done.costUsd).toBe(2.5);
+  });
+
+  it("files each model a turn used with its own tokens and cost, off what each model's running totals gained", async () => {
+    const use = (o: { in: number; out: number; read: number; write: number; think?: number; cost: number }) => ({ inputTokens: o.in, outputTokens: o.out, ...(o.think !== undefined ? { thinkingTokens: o.think } : {}), cacheReadInputTokens: o.read, cacheCreationInputTokens: o.write, webSearchRequests: 0, costUSD: o.cost, contextWindow: 1_000_000, maxOutputTokens: 64_000 });
+    const before = JSON.stringify({ type: "cost-state", sessionId: FIXTURE_SESSION_ID, totalCostUSD: 10.5, modelUsage: { "claude-opus-5-5[1m]": use({ in: 100, out: 1_000, read: 50_000, write: 5_000, cost: 10 }), "claude-haiku-4-5-20251001": use({ in: 10, out: 100, read: 0, write: 2_000, cost: 0.5 }) } });
+    const after = JSON.stringify({
+      type: "result", subtype: "success", is_error: false, num_turns: 1, duration_ms: 900, result: "done", session_id: FIXTURE_SESSION_ID, total_cost_usd: 13.75,
+      usage: { input_tokens: 5, cache_read_input_tokens: 20_000, cache_creation_input_tokens: 1_000, output_tokens: 300 },
+      modelUsage: {
+        "claude-opus-5-5[1m]": use({ in: 105, out: 1_300, think: 40, read: 70_000, write: 6_000, cost: 12.5 }),
+        "claude-haiku-4-5-20251001": use({ in: 10, out: 100, read: 0, write: 2_000, cost: 0.5 }),
+        "claude-sonnet-5": use({ in: 7, out: 70, read: 3_000, write: 500, cost: 0.75 }),
+      },
+    });
+    const { done } = await run([before, init, after], FIXTURE_SESSION_ID);
+    expect(done.costUsd).toBeCloseTo(3.25, 9);
+    expect(done.model).toBe("claude-opus-5-5[1m]");
+    expect(done.models).toEqual([
+      { model: "claude-opus-5-5[1m]", tokens: { input: 21_005, output: 300, cached: 20_000, cacheWrite: 1_000, reasoning: 40 }, costUsd: 2.5 },
+      { model: "claude-sonnet-5", tokens: { input: 3_507, output: 70, cached: 3_000, cacheWrite: 500, reasoning: 0 }, costUsd: 0.75 },
+    ]);
+  });
+
+  it("says what each model call drew once per message, a subagent's included, though every block of a message repeats its usage", async () => {
+    const said = (id: string, usage: Record<string, number>, parent: string | null = null) =>
+      JSON.stringify({ type: "assistant", message: { id, role: "assistant", content: [{ type: "text", text: "x" }], usage }, parent_tool_use_id: parent, session_id: FIXTURE_SESSION_ID, timestamp: `2026-10-01T10:00:0${id.slice(-1)}.000Z` });
+    const exec = scriptedExec([
+      init,
+      said("msg_1", { input_tokens: 5, cache_read_input_tokens: 1_000, cache_creation_input_tokens: 200, output_tokens: 40 }),
+      said("msg_1", { input_tokens: 5, cache_read_input_tokens: 1_000, cache_creation_input_tokens: 200, output_tokens: 40 }),
+      said("msg_2", { input_tokens: 3, output_tokens: 7 }, "toolu_1"),
+      result(1),
+    ]);
+    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
+    const { events, onEvent } = collect();
+    await adapter.start({ prompt: "x", onEvent }).finished;
+    expect(events.filter(e => e.type === "turn.usage")).toEqual([
+      { type: "turn.usage", sessionId: FIXTURE_SESSION_ID, tokens: 1_245, at: Date.parse("2026-10-01T10:00:01.000Z") },
+      { type: "turn.usage", sessionId: FIXTURE_SESSION_ID, tokens: 10, at: Date.parse("2026-10-01T10:00:02.000Z") },
+    ]);
+  });
+
+  it("one model's totals under their saved ones while the session's total grew leaves the split by model unknown, never a model's whole total", async () => {
+    const use = (input: number, cost: number) => ({ inputTokens: input, outputTokens: 10, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, webSearchRequests: 0, costUSD: cost });
+    const before = JSON.stringify({ type: "cost-state", sessionId: FIXTURE_SESSION_ID, totalCostUSD: 10, modelUsage: { "claude-opus-5-5": use(1_000, 9), "claude-haiku-4-5-20251001": use(500, 1) } });
+    const after = JSON.stringify({ type: "result", subtype: "success", is_error: false, num_turns: 1, duration_ms: 900, result: "done", session_id: FIXTURE_SESSION_ID, total_cost_usd: 12, usage: { input_tokens: 10, output_tokens: 4 }, modelUsage: { "claude-opus-5-5": use(1_400, 11.9), "claude-haiku-4-5-20251001": use(200, 0.1) } });
+    const { done } = await run([before, init, after], FIXTURE_SESSION_ID);
+    expect(done.costUsd).toBe(2);
+    expect(done.models).toBeUndefined();
+  });
+
+  it("a new session has nothing saved: the launch reads no file and the turn cost its whole total", async () => {
+    const { done, command } = await run([init, result(4.25)]);
+    expect(done.costUsd).toBe(4.25);
+    expect(command).not.toContain("cost-state");
   });
 });

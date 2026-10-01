@@ -4,7 +4,7 @@
 // the rate table where no harness put a cost on them, and never added together.
 import { describe, expect, it } from "vitest";
 import { parseRateTable, type AgentSignInState, type HarnessLimit, type PlaceView, type RateTable, type UsageSplit } from "@wsp/protocol";
-import { accountOf, accountRows, createPriceTable, createUsageLedger, usageComputerName, type UsageEntry } from "../src/usage.js";
+import { accountOf, accountRows, createBurn, createPriceTable, createUsageLedger, usageComputerName, type UsageEntry } from "../src/usage.js";
 import { memoryStore } from "../src/store.js";
 import { fakeClock } from "./fake-clock.js";
 
@@ -35,14 +35,13 @@ const turn = (o: Partial<UsageEntry> & { at: number }): UsageEntry => ({
 });
 
 describe("the ledger of what was used", () => {
-  it("reads the rate table only for a row no harness put a cost on", async () => {
+  it("reads the rate table only for a range with a row in it, once whatever the rows", async () => {
     const { clock } = fakeClock(NOON);
     let asked = 0;
     const usage = createUsageLedger({ store: memoryStore(), clock, timeZone: TZ, prices: async () => (asked++, TABLE) });
     await usage.used({ range: "week", split: "agent", label: labelOf });
-    await usage.add(turn({ at: NOON, costUsd: 0.5 }));
-    await usage.used({ range: "week", split: "agent", label: labelOf });
     expect(asked).toBe(0);
+    await usage.add(turn({ at: NOON, costUsd: 0.5 }));
     await usage.add(turn({ at: NOON, project: "p_other" }));
     await usage.used({ range: "week", split: "agent", label: labelOf });
     expect(asked).toBe(1);
@@ -82,6 +81,20 @@ describe("the ledger of what was used", () => {
     expect(week.until).toBe(Date.UTC(2026, 8, 30));
   });
 
+  it("draws each split value's own line on the series' steps, in the rows' order, so the lines add up to the series", async () => {
+    const { usage } = ledger();
+    await usage.add(turn({ at: NOON - 2 * 3_600_000, agent: "claude", tokens: { input: 100, output: 20 } }));
+    await usage.add(turn({ at: NOON, agent: "codex", tokens: { input: 30, output: 5 } }));
+    await usage.add(turn({ at: NOON - 2 * DAY, agent: "codex", tokens: { input: 40, output: 0 } }));
+    const day = await usage.used({ range: "day", split: "agent", label: labelOf });
+    expect(day.lines?.map(l => [l.key, l.label, l.points.length])).toEqual([["claude", "agent:claude", 24], ["codex", "agent:codex", 24]]);
+    expect(day.lines?.[0]?.points[10]).toBe(120);
+    expect(day.lines?.[1]?.points[12]).toBe(35);
+    const week = await usage.used({ range: "week", split: "agent", label: labelOf });
+    expect(week.lines?.map(l => l.points)).toEqual([[0, 0, 0, 0, 0, 0, 120], [0, 0, 0, 0, 40, 0, 35]]);
+    expect(week.series.map(p => p.tokens)).toEqual(week.series.map((_, i) => week.lines!.reduce((n, l) => n + l.points[i]!, 0)));
+  });
+
   it("splits by account: one sign-in across two computers is one row, a computer's own login another", async () => {
     const { usage } = ledger();
     await usage.add(turn({ at: NOON, agent: "claude", account: "claude:vault-token", computer: "here", model: "claude-opus-5", costUsd: 0.2 }));
@@ -107,6 +120,30 @@ describe("the ledger of what was used", () => {
     expect(rows.get("codex")).toMatchObject({ priced: true });
     expect(rows.get("opencode")).toMatchObject({ priced: false });
     expect(rows.get("opencode")?.costList).toBeUndefined();
+  });
+
+  it("returns the whole token mix, wsp's own turns, and the list price of every token whatever the harness reported", async () => {
+    const table = parseRateTable({ "claude-opus-5-5": { input_cost_per_token: 4e-6, output_cost_per_token: 2e-5, cache_read_input_token_cost: 2e-7, cache_creation_input_token_cost: 5e-6 } });
+    const { usage } = ledger(NOON, table);
+    await usage.add(turn({ at: NOON, agent: "claude", model: "claude-opus-5-5[1m]", costUsd: 9, tokens: { input: 10_000, output: 100, cached: 6_000, cacheWrite: 3_000, reasoning: 40 } }));
+    await usage.add(turn({ at: NOON, agent: "claude", model: "claude-opus-5-5", source: "log", tokens: { input: 1_000, output: 10, cached: 0, cacheWrite: 0 } }));
+    const [row] = (await usage.used({ range: "day", split: "agent", label: labelOf })).rows;
+    expect(row?.tokens).toEqual({ input: 11_000, output: 110, cached: 6_000, cacheWrite: 3_000, reasoning: 40 });
+    // A turn is one wsp ran; the logs keep sessions, not turns.
+    expect(row?.turns).toBe(1);
+    expect(row?.costReported).toBe(9);
+    expect(row?.costList).toBeCloseTo(1_000 * 4e-6 + 10 * 2e-5, 12);
+    expect(row?.estimate).toBeCloseTo(1_000 * 4e-6 + 6_000 * 2e-7 + 3_000 * 5e-6 + 100 * 2e-5 + 1_000 * 4e-6 + 10 * 2e-5, 12);
+    expect(row?.saved).toBeCloseTo(6_000 * (4e-6 - 2e-7), 12);
+  });
+
+  it("names no threads and counts none: only the turns wsp ran from now on would carry one, so no ranking of them is true", async () => {
+    const { usage } = ledger();
+    await usage.add(turn({ at: NOON, tokens: { input: 600, output: 0, cached: 0 } }));
+    await usage.add(turn({ at: NOON, source: "log", session: "s-log", tokens: { input: 1_000, output: 0, cached: 0 } }));
+    const used = await usage.used({ range: "day", split: "agent", label: labelOf });
+    expect(used).not.toHaveProperty("threads");
+    expect(used).not.toHaveProperty("counts");
   });
 
   it("counts work read from the logs in the same row as wsp's own turns, and says once whose logs it counted and where", async () => {
@@ -278,5 +315,24 @@ describe("the account rows", () => {
       ["Codex with ChatGPT Plus", ["zingzy's MacBook Pro"], undefined],
       ["OpenCode signed in on zingzy's MacBook Pro", ["zingzy's MacBook Pro"], "reports no plan limit"],
     ]);
+  });
+});
+
+describe("what an account draws right now", () => {
+  it("is the tokens its running threads drew over the last fifteen minutes, a minute, and how many threads drew them", () => {
+    const { clock, advance } = fakeClock(NOON);
+    const burn = createBurn(clock);
+    burn.add({ account: "claude:vault-token", threadId: "t1", tokens: 9_000 });
+    advance(10 * 60_000);
+    burn.add({ account: "claude:vault-token", threadId: "t2", tokens: 6_000 });
+    burn.add({ account: "claude:vault-token", threadId: "t1", tokens: 15_000 });
+    burn.add({ account: "codex:acct_1", threadId: "t3", tokens: 1_500 });
+    expect(burn.of("claude:vault-token")).toEqual({ tokensPerMinute: 2_000, threads: 2 });
+    expect(burn.of("codex:acct_1")).toEqual({ tokensPerMinute: 100, threads: 1 });
+    expect(burn.of("claude:vault-key")).toBeUndefined();
+    advance(6 * 60_000);
+    expect(burn.of("claude:vault-token")).toEqual({ tokensPerMinute: 1_400, threads: 2 });
+    advance(10 * 60_000);
+    expect(burn.of("claude:vault-token")).toBeUndefined();
   });
 });

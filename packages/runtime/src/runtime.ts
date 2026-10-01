@@ -249,7 +249,7 @@ import { makeDevices, type DeviceDoor, type ScopedRoad } from "./devices.js";
 import { makePlaceDoor, PlaceForksNowhereError, PlaceProvisioningError, type PlaceDoor, type PlaceRecord, type PlaceWiring } from "./places.js";
 import type { BlobMark, Store } from "./store.js";
 import { RANGE_DAYS, READINGS_STEP_MS, SysHistoryReply, type ReadingsAnswer, type PlaceView, type AccountsAnswer, type UsageRange, type UsageSplit, type UsedAnswer } from "@wsp/protocol";
-import { HARNESS_CATALOGS, catalogFromProbe, harnessCatalog, smallestModel } from "./harness-catalog.js";
+import { HARNESS_CATALOGS, catalogFromProbe, harnessCatalog, modelLabel, smallestModel } from "./harness-catalog.js";
 import {
   GitIssueReadReply,
   GitPrDiffReply,
@@ -274,7 +274,7 @@ import {
   type WorkspaceFrom,
 } from "@wsp/protocol";
 import { secretsOf } from "./adapters.js";
-import { accountOf, accountOnComputer, accountRows, createPriceTable, createUsageLedger, usageComputerName, type Vaulted } from "./usage.js";
+import { accountOf, accountOnComputer, accountRows, createBurn, createPriceTable, createUsageLedger, usageComputerName, type Vaulted } from "./usage.js";
 
 // --- adapter port -------------------------------------------------------------
 
@@ -8389,21 +8389,27 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           // What the turn used, filed in the ledger under the sign-in it ran on; a turn that counted nothing files nothing.
           if (result.tokens !== undefined || result.costUsd !== undefined) {
             const account = usageAccountOf(entry, view.harness, turnAccount);
-            void ledger
-              .add({
-                at: clock.now(),
-                agent: view.harness,
-                account: account.key,
-                accountLabel: account.label,
-                computer: usageComputerOf(entry.record),
-                project: entry.record.project,
-                ...((result.model ?? view.model) !== undefined ? { model: (result.model ?? view.model)! } : {}),
-                ...(result.tokens !== undefined ? { tokens: result.tokens } : {}),
-                ...(result.costUsd !== undefined ? { costUsd: result.costUsd } : {}),
-                ...((view.claudeSessionId ?? sessionId) !== undefined ? { session: view.claudeSessionId ?? sessionId } : {}),
-                source: "wsp",
-              })
-              .catch((e: unknown) => console.warn(`the use of turn ${turnId} was not filed: ${e instanceof Error ? e.message : String(e)}`));
+            const model = result.model ?? view.model;
+            // An agent that names each model a turn used files a row for each; the turn counts once, under its own model.
+            const uses = result.models !== undefined && result.models.length > 0 ? result.models : [{ model, tokens: result.tokens, costUsd: result.costUsd }];
+            const counted = uses.some(u => u.model === model) ? model : uses[0]!.model;
+            for (const use of uses)
+              void ledger
+                .add({
+                  at: clock.now(),
+                  agent: view.harness,
+                  account: account.key,
+                  accountLabel: account.label,
+                  computer: usageComputerOf(entry.record),
+                  project: entry.record.project,
+                  turns: use.model === counted ? 1 : 0,
+                  ...(use.model !== undefined ? { model: use.model } : {}),
+                  ...(use.tokens !== undefined ? { tokens: use.tokens } : {}),
+                  ...(use.costUsd !== undefined ? { costUsd: use.costUsd } : {}),
+                  ...((view.claudeSessionId ?? sessionId) !== undefined ? { session: view.claudeSessionId ?? sessionId } : {}),
+                  source: "wsp",
+                })
+                .catch((e: unknown) => console.warn(`the use of turn ${turnId} was not filed: ${e instanceof Error ? e.message : String(e)}`));
           }
           void persistSessions(workspaceId);
           if (notify !== undefined) notifyEnd({ view, turnId }, notify, tellAs(t), result);
@@ -8422,6 +8428,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             .catch((e: unknown) => console.warn(`the limits of ${account.key} were not kept: ${e instanceof Error ? e.message : String(e)}`));
           return;
         }
+        case "turn.usage":
+          // Only a run re-read after a restart reads the agent's stamp, and only against its own other stamps.
+          burn.add({ account: usageAccountOf(entry, view.harness, turnAccount).key, threadId, tokens: event.tokens, ...(t.written !== undefined && event.at !== undefined ? { replayed: { run: turnId, at: event.at } } : {}) });
+          return;
         case "turn.plan":
           record({ type: "session.plan", workspaceId, sessionId, turnId, threadId, ...(event.steps !== undefined ? { steps: event.steps } : {}), ...(event.text !== undefined ? { text: event.text } : {}) });
           return;
@@ -11028,6 +11038,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   const prices = createPriceTable({ store, clock, fetch: opts.pricesFetch ?? (async () => ({})) });
   const ledger = createUsageLedger({ store, clock, prices: () => prices.get() });
+  const burn = createBurn(clock);
 
   /** A usage split value as a person reads it: the agent's name, the account's label, the computer's, the project's. */
   const usageLabel = (places: readonly PlaceView[], accounts: ReadonlyMap<string, string>) => (split: UsageSplit, value: string): string => {
@@ -11040,6 +11051,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         return usageComputerName(places, value);
       case "account":
         return accounts.get(value) ?? value;
+      case "model":
+        return modelLabel(value);
       default: {
         const _exhaustive: never = split;
         return value;
@@ -11122,6 +11135,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           planBrand: agent => CATALOG_AGENTS.find(a => a.id === agent)?.planBrand,
           vaulted: agent => vaultedFor(agent),
           printsLimits: agent => CATALOG_AGENTS.find(a => a.id === agent)?.printsLimits === true,
+          burn: burn.of,
         }),
       };
     },

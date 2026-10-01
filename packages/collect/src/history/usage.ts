@@ -14,12 +14,12 @@ import { type HistoryFile, isRecord, jsonlFiles, stampOf, stem, tryJson } from "
 const Tokens = z.object({ input: z.number(), output: z.number(), cached: z.number(), cacheWrite: z.number(), reasoning: z.number() });
 type Tokens = z.infer<typeof Tokens>;
 
-/** One session's use on one day under one model, as its agent's own store counted it. */
+/** One session's use in one half hour under one model, as its agent's own store counted it. */
 export interface LogUsage {
   agent: string;
   session: string;
   day: string;
-  /** The newest moment the store counted any of it, ms epoch. */
+  /** The newest moment of that half hour the store counted any of it, ms epoch. */
   at: number;
   model: string;
   folder?: string;
@@ -39,8 +39,9 @@ interface UsageReader {
 
 const HALF_HOUR = 1_800_000;
 const count = (value: unknown): number => (typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0);
+const FIELDS = ["input", "output", "cached", "cacheWrite", "reasoning"] as const;
 const addTo = (into: Tokens, t: Tokens): void => {
-  for (const k of ["input", "output", "cached", "cacheWrite", "reasoning"] as const) into[k] += t[k];
+  for (const k of FIELDS) into[k] += t[k];
 };
 
 /** Pieces summed by session, model, folder and half hour, the newest moment of each kept. */
@@ -76,7 +77,8 @@ const claudeUsage: UsageReader = {
       const usage = message["usage"];
       const id = typeof message["id"] === "string" ? message["id"] : undefined;
       const at = typeof row["timestamp"] === "string" ? Date.parse(row["timestamp"]) : NaN;
-      if (!isRecord(usage) || id === undefined || seen.has(id) || !Number.isFinite(at)) continue;
+      // Claude Code files its own error lines as messages of a model it calls <synthetic>, which no model wrote.
+      if (!isRecord(usage) || id === undefined || seen.has(id) || !Number.isFinite(at) || message["model"] === "<synthetic>") continue;
       seen.add(id);
       const cached = count(usage["cache_read_input_tokens"]);
       const cacheWrite = count(usage["cache_creation_input_tokens"]);
@@ -92,15 +94,17 @@ const claudeUsage: UsageReader = {
   },
 };
 
-/** A Codex rollout's token_count lines carry the thread's running total, so the last one is the rollout's whole use.
- * The thread is the id session_meta names, which is what wsp's own row keeps for a Codex thread. */
+/** A Codex rollout's token_count lines carry the thread's running total, so each one's use is what the total gained
+ * since the one before, under the model the last turn_context named. The thread is the id session_meta names, which
+ * is what wsp's own row keeps for a Codex thread. */
 const codexUsage: UsageReader = {
   files: (host, root) => jsonlFiles(host, root, stem),
   async pieces(host, _root, file) {
     let session = stem(file);
     let folder: string | undefined;
     let model = "";
-    let last: { at: number; total: Record<string, unknown> } | undefined;
+    let before: Tokens = { input: 0, output: 0, cached: 0, cacheWrite: 0, reasoning: 0 };
+    const pieces: Omit<Piece, "session" | "folder">[] = [];
     for await (const line of host.fs.lines(file)) {
       if (!line.includes('"session_meta"') && !line.includes('"turn_context"') && !line.includes('"token_count"')) continue;
       const row = tryJson(line);
@@ -113,20 +117,18 @@ const codexUsage: UsageReader = {
         if (typeof payload["model"] === "string") model = payload["model"];
       } else if (payload["type"] === "token_count" && isRecord(payload["info"]) && isRecord(payload["info"]["total_token_usage"])) {
         const at = typeof row["timestamp"] === "string" ? Date.parse(row["timestamp"]) : NaN;
-        if (Number.isFinite(at)) last = { at, total: payload["info"]["total_token_usage"] };
+        if (!Number.isFinite(at)) continue;
+        const t = payload["info"]["total_token_usage"];
+        const total: Tokens = { input: count(t["input_tokens"]), output: count(t["output_tokens"]), cached: count(t["cached_input_tokens"]), cacheWrite: count(t["cache_write_input_tokens"]), reasoning: count(t["reasoning_output_tokens"]) };
+        // A total under the last one started again from nothing, so all of it is new.
+        const restarted = total.input < before.input || total.output < before.output;
+        const gained = { ...total };
+        if (!restarted) for (const k of FIELDS) gained[k] = Math.max(0, total[k] - before[k]);
+        before = total;
+        if (gained.input + gained.output > 0) pieces.push({ at, model, tokens: gained });
       }
     }
-    if (last === undefined) return [];
-    const t = last.total;
-    return [
-      {
-        session,
-        at: last.at,
-        model,
-        ...(folder !== undefined ? { folder } : {}),
-        tokens: { input: count(t["input_tokens"]), output: count(t["output_tokens"]), cached: count(t["cached_input_tokens"]), cacheWrite: 0, reasoning: count(t["reasoning_output_tokens"]) },
-      },
-    ];
+    return folded(pieces.map(p => ({ ...p, session, ...(folder !== undefined ? { folder } : {}) })));
   },
 };
 
@@ -189,7 +191,7 @@ export interface UsageCache {
   save(): void;
 }
 
-const UsageCacheFile = z.object({ version: z.literal(1), files: z.record(z.object({ stamp: z.string(), pieces: z.array(Piece) })) });
+const UsageCacheFile = z.object({ version: z.literal(2), files: z.record(z.object({ stamp: z.string(), pieces: z.array(Piece) })) });
 type UsageCacheFile = z.infer<typeof UsageCacheFile>;
 
 export function fileUsageCache(path: string): UsageCache {
@@ -217,7 +219,7 @@ export function fileUsageCache(path: string): UsageCache {
       if (!changed && kept.size === stored.size) return;
       mkdirSync(dirname(path), { recursive: true });
       const tmp = join(dirname(path), `.${Date.now()}-${Math.random().toString(36).slice(2, 8)}.tmp`);
-      writeFileSync(tmp, `${JSON.stringify({ version: 1, files: Object.fromEntries(kept) } satisfies UsageCacheFile)}\n`);
+      writeFileSync(tmp, `${JSON.stringify({ version: 2, files: Object.fromEntries(kept) } satisfies UsageCacheFile)}\n`);
       renameSync(tmp, path);
     },
   };
@@ -251,7 +253,7 @@ export async function readLogUsage(host: Host, agents: readonly AgentEntry[] = C
       }
       for (const p of pieces) {
         const d = day(p.at);
-        const key = [agent.id, p.session, d, p.model, p.folder ?? ""].join("\u0000");
+        const key = [agent.id, p.session, d, Math.floor(p.at / HALF_HOUR), p.model, p.folder ?? ""].join("\u0000");
         const held = out.get(key);
         if (held === undefined) out.set(key, { agent: agent.id, session: p.session, day: d, at: p.at, model: p.model, ...(p.folder !== undefined ? { folder: p.folder } : {}), tokens: { ...p.tokens }, ...(p.cost !== undefined ? { cost: p.cost } : {}) });
         else {
