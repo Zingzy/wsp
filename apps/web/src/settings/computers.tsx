@@ -35,15 +35,15 @@ import { useSidebarProjects, useStore } from "../protocol/store.js";
 import { DialButton, useDialPlace } from "./AbsentRoad.js";
 import { AddComputer } from "./AddComputer.js";
 import { ComputerGlyph, useComputerIcon } from "./ComputerGlyph.js";
-import { ADD_COMPUTER_WORDS, PLACE_STATE_WORDS, WHERE_WORDS, capitalised } from "./format.js";
-import { Chevron, GlyphFrame, Grid, GridHead, GridName, GridRow, LIST_COLUMNS, Num, PAGE_COLUMNS, PageCrumbs, PageHead, StateCell, type HeadCell } from "./grid.js";
+import { ADD_COMPUTER_WORDS, PLACE_STATE_WORDS, VALUE, WHERE_WORDS, capitalised } from "./format.js";
+import { Chevron, GlyphFrame, Grid, GridHead, GridName, GridRow, LIST_COLUMNS, Num, PAGE_COLUMNS, StateCell, type HeadCell } from "./grid.js";
 import { copyOn } from "./image.js";
 import { ImageCard, useImageStanding } from "./ImageCard.js";
 import { openImageRecipe } from "./openAt.js";
 import { NOTHING_HELD, absenceOf, absentOf, hereName, isProviderPlace, placeName, placeOf, placeStateCell, type PlaceHolding, type PlaceStateCell } from "./places.js";
 import { cloudsOffered, keyHeld } from "./providers.js";
 import { RemoveComputerDialog } from "./RemoveComputerDialog.js";
-import { CARD_SURFACE, type SettingsCardData, type SettingsRowData } from "./rows.js";
+import { CARD_SURFACE, HeadRow, type SettingsCardData, type SettingsRowData } from "./rows.js";
 import { cn } from "../lib/utils.js";
 import type { SettingsContext } from "./settingsContext.js";
 import type { SettingsAt } from "./settingsStore.js";
@@ -485,6 +485,19 @@ function RemoveLine({ place, ctx, onRemoved }: { place: PlaceView; ctx: Settings
 /** One computer's or cloud's own page. A cloud keeps no computer to read: its agents are the image's, and every word
  * about the image stands under the rule the cloud's key does, since a cloud row drawn for a workspace alone is a
  * machine somebody else's key made. */
+/** A computer's facts of one kind on one line: its system, cores and memory, as it last reported them. */
+const shapeLine = (place: PlaceView): string => [place.os, place.shape === undefined ? undefined : `${place.shape.cpu} cores`, place.shape === undefined ? undefined : fmtMemGb(place.shape.memMb)].filter((part): part is string => part !== undefined && part !== "").join(", ");
+
+/** How many threads run on a computer now, off the sidebar's snapshots like its Threads here list. */
+function RunningHere({ place, ctx }: { place: PlaceView; ctx: SettingsContext }) {
+  const running = threadsHere(useSidebarProjects(), ctx.places, place).length;
+  return (
+    <span data-k="running-here" className={VALUE}>
+      {WHERE_WORDS.runningHere(running)}
+    </span>
+  );
+}
+
 export function ComputerPage({ place, ctx }: { place: PlaceView; ctx: SettingsContext }) {
   const here = place.id === HERE_PLACE_ID;
   const cloud = isProviderPlace(place);
@@ -497,9 +510,12 @@ export function ComputerPage({ place, ctx }: { place: PlaceView; ctx: SettingsCo
   const onRemoved = (): void => void setTimeout(() => ctx.go({ kind: "group", group: "computers" }), 0);
   return (
     <>
-      <PageHead title={name} crumbs={<PageCrumbs group={PLACES_WORDS.section} page={name} onGroup={() => ctx.go({ kind: "group", group: "computers" })} />}>
+      <section data-settings-card="computer" className="flex flex-col gap-3">
+        <div className={CARD_SURFACE}>
+          <HeadRow glyph={<ComputerGlyph place={place} className="size-4 text-foreground/80" />} title={name} {...(shapeLine(place) === "" ? {} : { line: <span className="font-mono">{shapeLine(place)}</span> })} slot={<RunningHere place={place} ctx={ctx} />} attrs={{ "data-k": "computer-head" }} />
+        </div>
         <PlaceStateLine place={place} ctx={ctx} />
-      </PageHead>
+      </section>
       {cloud ? image === null ? null : <ReportLists report={imageAgentsReport(image, place.id)} ctx={{ where: "provider", on: name, editImage: () => openImageRecipe(place.id) }} /> : <ComputerLists place={place} here={here} ctx={ctx} />}
       {standing === undefined || !held ? null : <ImageCard place={place} name={standing.name} state={standing.state} view={standing.view} ctx={ctx} row />}
       <ThreadsHere place={place} ctx={ctx} />

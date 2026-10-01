@@ -13,7 +13,7 @@ import { Kbd, KbdGroup } from "../components/ui/kbd.js";
 import { Spaced } from "../components/ui/spaced.js";
 import { cn } from "../lib/utils.js";
 import { FACT, VALUE } from "./format.js";
-import { CARD_INSET, LINE_FLOOR, ROW_FLOOR, SECTION_HEAD, SETTING_TITLE } from "./layout.js";
+import { CARD_INSET, LINE_FLOOR, LIST_TITLE, NOTE, ROW_FLOOR, SECTION_HEAD, SETTING_TITLE } from "./layout.js";
 
 /** Which mono a word in a slot wears: the foreground for a value a person reads, the muted for a state. */
 export type WordClass = "value" | "fact";
@@ -244,5 +244,29 @@ export function Cards({ cards }: { cards: ReadonlyArray<SettingsCardData> }) {
         );
       })}
     </>
+  );
+}
+
+/** The row a computer's or a project's page opens on: its glyph in its frame, its name, one line of one kind of
+ * fact under it, and a figure or an act at the right. It stands in place of a page title, since the top bar's
+ * crumbs already name the page. */
+export function HeadRow({ glyph, title, line, slot, attrs }: { glyph: ReactNode; title: string; line?: ReactNode; slot?: ReactNode; attrs?: Record<string, string> }) {
+  return (
+    <div data-settings-head-row className={cn("flex flex-wrap items-center justify-between gap-x-6 gap-y-2 py-4", CARD_INSET, ROW_FLOOR)} {...attrs}>
+      <span className="flex min-w-0 flex-1 items-center gap-3">
+        <span className="flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-foreground/[0.04]">{glyph}</span>
+        <span className="flex min-w-0 flex-col gap-0.5">
+          <span data-settings-title className={cn(LIST_TITLE, "truncate")}>
+            {title}
+          </span>
+          {line === undefined ? null : (
+            <span data-settings-description className={cn(NOTE, "truncate")}>
+              {line}
+            </span>
+          )}
+        </span>
+      </span>
+      {slot}
+    </div>
   );
 }

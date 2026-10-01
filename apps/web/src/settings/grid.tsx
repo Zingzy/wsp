@@ -144,17 +144,6 @@ export function Chevron() {
   return <ChevronRightIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />;
 }
 
-/** A page's head at the list's left edge: the crumbs on a page under a group, the title, then the blurb or the
- * state line. */
-export function PageHead({ crumbs, title, children }: { crumbs?: ReactNode; title: string; children?: ReactNode }) {
-  return (
-    <header data-k="settings-page-head" className="flex flex-col gap-1.5 pb-2">
-      {crumbs}
-      <h1 className="text-lg leading-7 font-medium">{title}</h1>
-      {children}
-    </header>
-  );
-}
 
 /** The slash between crumbs, at half the muted ink. */
 export const Slash = () => (
@@ -163,15 +152,3 @@ export const Slash = () => (
   </span>
 );
 
-/** The crumbs over a computer's page title: its group as the way back to the list, then the page itself. */
-export function PageCrumbs({ group, page, onGroup }: { group: string; page: string; onGroup: () => void }) {
-  return (
-    <nav data-k="page-crumbs" className="mb-1 flex min-w-0 items-center gap-2 text-[13px]">
-      <button type="button" data-k="page-crumbs-group" className="cursor-pointer text-muted-foreground transition-colors duration-150 hover:text-foreground" onClick={onGroup}>
-        {group}
-      </button>
-      <Slash />
-      <span className="truncate text-foreground">{page}</span>
-    </nav>
-  );
-}

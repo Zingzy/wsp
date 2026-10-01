@@ -6,8 +6,8 @@ import { fmtPx, listWords, offlineFor, placeUpdateLine, type PlaceDialRoad, type
 /** The muted mono a state word or a description of machine words wears, and the foreground mono a value a person
  * reads wears: an address, a size, a path, a time, a version. Two class strings the page, the sheet and the first
  * run all draw with, so one type ladder holds across them. */
-export const FACT = "font-mono text-[11px] tabular-nums text-muted-foreground";
-export const VALUE = "font-mono text-xs tabular-nums text-foreground";
+export const FACT = "font-mono text-[13px] tabular-nums text-muted-foreground";
+export const VALUE = "font-mono text-sm tabular-nums text-foreground";
 
 /** A fact's slot where its words may take two lines: exactly two of the line's own line heights, held whether the
  * words take one line or two, and cut at the second with the whole on the element's hover text. The height is read
@@ -78,6 +78,7 @@ export const onName = (name: string): string => onceNamed(name, n => ` on ${n}`)
  * computer's own page, its agents and the Remove dialog, which are this build's and are drawn nowhere else. No
  * word is in both. */
 export const WHERE_WORDS = {
+  runningHere: (n: number): string => (n === 0 ? "Nothing running" : `${n} ${n === 1 ? "thread" : "threads"} running`),
   /** A place list the host refused, said where the list would stand. */
   notRead: (said: string) => `Computers not read: ${said}`,
   /** Puts this wsp's daemon on that computer and runs the recipe there again. One word in both states, held and
@@ -326,6 +327,10 @@ export const PROJECTS_WORDS = {
   computer: "Computer",
   computerHover: "Where the project lives and where its tasks run.",
   remote: "Remote",
+  repository: "Repository",
+  open: "Open",
+  where: (source: string, computer: string): string => `${source} on ${computer}`,
+  threads: (n: number, running: number): string => `${n} ${n === 1 ? "thread" : "threads"}${running === 0 ? "" : `, ${running} running`}`,
   remoteHover: "The repository it was cloned from.",
   added: "Added",
   addedHover: "When it was recorded.",

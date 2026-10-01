@@ -21,7 +21,10 @@ import { RefusalSlot } from "./sheetParts.js";
 import { PROJECTS_WORDS, WHERE_WORDS } from "./format.js";
 import { builtWhen } from "./image.js";
 import { hereName, isProviderPlace, placeName } from "./places.js";
-import { Cards, type SettingsCardData, type SettingsItem } from "./rows.js";
+import { CARD_SURFACE, Cards, HeadRow, Row, type SettingsCardData, type SettingsItem } from "./rows.js";
+import { VALUE } from "./format.js";
+import { cn } from "../lib/utils.js";
+import { useSidebarProjects } from "../protocol/store.js";
 import type { SettingsContext } from "./settingsContext.js";
 import type { SettingsAt } from "./settingsStore.js";
 
@@ -142,6 +145,31 @@ function RemoveProjectControl({ project, refusal, line, api, onRemoved, failed, 
 }
 
 /** One project's own page. */
+/** The threads on a project's workspaces, off the sidebar's own snapshots so the page counts what the sidebar shows. */
+function ThreadCount({ project }: { project: Pick<ProjectView, "id"> }) {
+  const threads = useSidebarProjects()
+    .filter(snapshot => snapshot.workspace.project.id === project.id)
+    .flatMap(snapshot => snapshot.threads);
+  const running = threads.filter(thread => thread.status === "running").length;
+  return (
+    <span data-k="project-threads" className={VALUE}>
+      {PROJECTS_WORDS.threads(threads.length, running)}
+    </span>
+  );
+}
+
+/** The repository's page in the browser, where the remote is one a browser can open. */
+function RemoteOpen({ remote }: { remote: string }) {
+  const url = /^https?:\/\//.test(remote) ? remote : /^git@([^:]+):(.+?)(\.git)?$/.exec(remote)?.slice(1, 3).join("/");
+  if (url === undefined) return null;
+  const href = url.startsWith("http") ? url : `https://${url}`;
+  return (
+    <Button size="xs" variant="outline" data-k="remote-open" onClick={() => void window.open(href, "_blank", "noopener,noreferrer")}>
+      {PROJECTS_WORDS.open}
+    </Button>
+  );
+}
+
 export function ProjectPage({ project, ctx }: { project: ProjectView; ctx: SettingsContext }) {
   const place = ctx.places.find(p => p.id === project.computer);
   const computer = project.computer === HERE_PLACE_ID ? hereName(ctx.places) : place === undefined ? project.computer : placeName(place);
@@ -149,23 +177,27 @@ export function ProjectPage({ project, ctx }: { project: ProjectView; ctx: Setti
   const refusal = standing.length === 0 ? null : projectInUseRefusal(project.name, standing);
   const line = removeLine(ctx, project);
   const facts: SettingsItem[] = [
-    { kind: "line", id: "source", label: PROJECTS_WORDS.source, value: sourceWord(project.source), hover: PROJECTS_WORDS.sourceHover, attrs: { "data-k": "source" } },
-    { kind: "line", id: "computer", label: PROJECTS_WORDS.computer, value: computer, hover: PROJECTS_WORDS.computerHover, attrs: { "data-k": "computer" } },
-    { kind: "line", id: "remote", label: PROJECTS_WORDS.remote, value: project.remote, hover: PROJECTS_WORDS.remoteHover, attrs: { "data-k": "remote" } },
+    { kind: "line", id: "branch", label: PROJECTS_WORDS.branch, value: project.base ?? project.defaultBranch, hover: PROJECTS_WORDS.branchDescription, attrs: { "data-k": "branch" } },
     { kind: "line", id: "added", label: PROJECTS_WORDS.added, value: builtWhen(project.createdAt, ctx.now), hover: PROJECTS_WORDS.addedHover, attrs: { "data-k": "added" } },
     ...(project.seeded === undefined
       ? []
       : [{ kind: "line" as const, id: "seeded", label: PROJECTS_WORDS.seeded, value: [plural(project.seeded.files, "file"), fmtBytes(project.seeded.bytes), `memory ${project.seeded.memory}`], hover: PROJECTS_WORDS.seededHover(hereName(ctx.places)), attrs: { "data-k": "seeded" } }]),
-  ];
-  const starts: SettingsItem[] = [
-    { kind: "row", id: "branch", title: PROJECTS_WORDS.branch, description: PROJECTS_WORDS.branchDescription, word: project.base ?? project.defaultBranch, attrs: { "data-k": "branch" } },
-    ...(project.lastAgent === undefined ? [] : [{ kind: "row" as const, id: "last-agent", title: PROJECTS_WORDS.lastAgent, description: PROJECTS_WORDS.lastAgentDescription, word: agentName(project.lastAgent), attrs: { "data-k": "last-agent" } }]),
   ];
   const look = ctx.preferences.projectLook[project.id];
   const icon = look?.icon ?? "folder";
   const hue = look?.hue ?? "neutral";
   const setLook = (next: ProjectLook): void => ctx.setPreferences({ projectLook: { [project.id]: next } });
   const cards: SettingsCardData[] = [
+    {
+      id: "project",
+      items: [],
+      body: (
+        <div className={cn(CARD_SURFACE, "flex flex-col [&>*+*]:border-t [&>*+*]:border-border/50")}>
+          <HeadRow glyph={<ProjectGlyph projectId={project.id} />} title={project.name} line={<span className="font-mono">{PROJECTS_WORDS.where(sourceWord(project.source), computer)}</span>} slot={<ThreadCount project={project} />} attrs={{ "data-k": "project-head" }} />
+          {project.remote === undefined || project.remote === "" ? null : <Row id="remote" title={PROJECTS_WORDS.repository} description={project.remote} mono control={<RemoteOpen remote={project.remote} />} attrs={{ "data-k": "remote" }} />}
+        </div>
+      ),
+    },
     { id: "facts", head: PROJECTS_WORDS.about, items: facts },
     {
       id: "look",
@@ -175,7 +207,6 @@ export function ProjectPage({ project, ctx }: { project: ProjectView; ctx: Setti
         { kind: "row", id: "hue", title: PROJECTS_WORDS.hue, description: PROJECTS_WORDS.hueDescription, control: <HueSelect hue={hue} onChange={next => setLook({ icon, hue: next })} /> },
       ],
     },
-    { id: "starts", head: PROJECTS_WORDS.newWorkspaces, items: starts },
     {
       id: "acts",
       items: [

@@ -113,18 +113,20 @@ describe("Projects", () => {
     fireEvent.click(rowOf("pr_spoo")!);
     expect(pageAt()).toBe("project:pr_spoo");
     expect(crumb()).toBe("Settings/Projects/spoo");
-    expect(lineLabels()).toEqual([PROJECTS_WORDS.source, PROJECTS_WORDS.computer, PROJECTS_WORDS.remote, PROJECTS_WORDS.added, PROJECTS_WORDS.seeded]);
-    expect(wordOf("source")).toBe("/Users/dev/spoo");
-    expect(wordOf("computer")).toBe("zingzy's MacBook Pro");
-    expect(wordOf("remote")).toBe("https://github.com/dev/spoo.git");
-    expect(lineOf("remote")?.getAttribute("title")).toBe(PROJECTS_WORDS.remoteHover);
+    // The page opens on the project itself: its glyph, its name, where its folder is on one line, the thread count, and
+    // the repository on a row of its own, since a folder and a repository are two kinds of fact.
+    const head = document.querySelector("[data-settings-page] [data-k=project-head]")!;
+    expect(head.querySelector("[data-settings-title]")?.textContent).toBe("spoo");
+    expect(head.querySelector("[data-settings-description]")?.textContent).toBe(PROJECTS_WORDS.where("/Users/dev/spoo", "zingzy's MacBook Pro"));
+    expect(head.querySelector("[data-k=project-threads]")?.textContent).toBe(PROJECTS_WORDS.threads(0, 0));
+    expect(descriptionOf("remote")).toBe("https://github.com/dev/spoo.git");
+    expect(lineLabels()).toEqual([PROJECTS_WORDS.branch, PROJECTS_WORDS.added, PROJECTS_WORDS.seeded]);
+    expect(wordOf("branch")).toBe("release");
     expect(wordOf("added")).toMatch(/^Sep 12 \d\d:\d\d$/);
     expect(wordOf("seeded")).toBe(`412 files ${fmtBytes(3_250_000)} memory landed`);
-    // About comes first, then Look with its two selects, then what a new workspace starts from.
-    expect([...document.querySelectorAll("[data-settings-page] [data-settings-head]")].map(h => h.textContent)).toEqual([PROJECTS_WORDS.about, PROJECTS_WORDS.look, PROJECTS_WORDS.newWorkspaces]);
-    expect(rowTitles()).toEqual([PROJECTS_WORDS.icon, PROJECTS_WORDS.hue, PROJECTS_WORDS.branch, PROJECTS_WORDS.lastAgent, "Remove spoo"]);
-    expect(wordOf("branch")).toBe("release");
-    expect(wordOf("last-agent")).toBe("Codex");
+    expect([...document.querySelectorAll("[data-settings-page] [data-settings-head]")].map(h => h.textContent)).toEqual([PROJECTS_WORDS.about, PROJECTS_WORDS.look]);
+    expect(rowTitles()).toEqual([PROJECTS_WORDS.repository, PROJECTS_WORDS.icon, PROJECTS_WORDS.hue, "Remove spoo"]);
+    expect(rowOf("last-agent")).toBeNull();
     // A workspace stands on it: the button is held with no title and the refusal is the description.
     const remove = (): HTMLElement => document.querySelector<HTMLElement>("[data-k=remove-project]")!;
     expect(remove().hasAttribute("disabled")).toBe(true);
@@ -137,7 +139,7 @@ describe("Projects", () => {
     // A project on a joined computer: the line names wsp's own clone there.
     act(() => useSettingsStore.getState().go({ kind: "project", id: "pr_landing" }));
     await settle();
-    expect(wordOf("computer")).toBe("spoo");
+    expect(document.querySelector("[data-settings-page] [data-k=project-head] [data-settings-description]")?.textContent).toContain("on spoo");
     expect(wordOf("branch")).toBe("main");
     expect(rowOf("last-agent")).toBeNull();
     expect(descriptionOf("remove")).toBe(PROJECTS_WORDS.removeOnComputer("spoo"));

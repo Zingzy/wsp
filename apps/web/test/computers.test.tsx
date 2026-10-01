@@ -7,7 +7,7 @@
 // another computer.
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { type InitJob, COPY_CURRENT, DEFAULT_PREFERENCES, PLACES_TICKET_REFUSAL, PLACES_WORDS, PLACE_CONNECTS, PLACE_LOGIN_REFUSED_KIND, PlaceAddStep, absentRoad, fmtBytes, fmtSize, imageCopyStaysLine, placeAddSheetWord, placeDaemonBehind, placeNoDialLine, provisionWord, type AgentsReport, type AgentsTarget, type EventUnion, type InitSetup, type PlaceAddJob, type PlaceProvision, type PlaceView, type SealedImage, type SessionView, type WorkspaceStatus, type WorkspaceView, PLACE_INSTALL, PROVIDER_KEY_WORDS } from "@wsp/protocol";
+import { type InitJob, COPY_CURRENT, DEFAULT_PREFERENCES, PLACES_TICKET_REFUSAL, PLACES_WORDS, PLACE_CONNECTS, PLACE_LOGIN_REFUSED_KIND, PlaceAddStep, absentRoad, fmtBytes, fmtMemGb, fmtSize, imageCopyStaysLine, placeAddSheetWord, placeDaemonBehind, placeNoDialLine, provisionWord, type AgentsReport, type AgentsTarget, type EventUnion, type InitSetup, type PlaceAddJob, type PlaceProvision, type PlaceView, type SealedImage, type SessionView, type WorkspaceStatus, type WorkspaceView, PLACE_INSTALL, PROVIDER_KEY_WORDS } from "@wsp/protocol";
 import { render } from "@testing-library/react";
 import { makeApi, ProtocolClient, RequestError, type Api, type SshLogin } from "../src/protocol/client.js";
 import { useContextMenuStore } from "../src/actions/contextMenu.js";
@@ -346,16 +346,17 @@ describe("a computer's own page", () => {
   const noteOf = (grid: string, name: string): string | undefined =>
     [...document.querySelectorAll(`[data-settings-page] [data-grid='${grid}'] [data-grid-row]`)].find(r => r.querySelector("[data-grid-name]")?.textContent === name)?.querySelector("[data-grid-note]")?.textContent ?? undefined;
 
-  it("heads the page with its crumbs, its name and its state, and none of the old cards", async () => {
+  it("opens the page on the computer itself, its facts of one kind on one line and what runs there, its state under it, and no crumbs of its own", async () => {
     useStore.setState({ places: [here, { ...box, os: "Ubuntu 24.04", joinedAt: AT, copies: "reflink" }] });
     await mountComputers(computersApi({ agentsRead: async () => AGENTS_REPORT }).api, { kind: "computer", id: "p_2" });
-    expect(document.querySelector("[data-k='page-crumbs']")?.textContent).toBe("Computers/hetzner");
-    expect(document.querySelector("[data-settings-page] h1")?.textContent).toBe("hetzner");
+    const head = document.querySelector("[data-settings-page] [data-k=computer-head]")!;
+    expect(head.querySelector("[data-settings-title]")?.textContent).toBe("hetzner");
+    expect(head.querySelector("[data-settings-description]")?.textContent).toBe(`Ubuntu 24.04, ${box.shape!.cpu} cores, ${fmtMemGb(box.shape!.memMb)}`);
+    expect(head.querySelector("[data-k=running-here]")?.textContent).toBe(WHERE_WORDS.runningHere(0));
     expect(document.querySelector("[data-k='place-state']")?.textContent).toBe("Ready");
+    expect(document.querySelector("[data-k='page-crumbs']")).toBeNull();
+    expect(document.querySelector("[data-settings-page] h1")).toBeNull();
     for (const k of ["system", "size", "disk-free", "joined", "address", "answered", "copies", "ports", "computer-icon", "workspace-line"]) expect(document.querySelector(`[data-settings-page] [data-k='${k}']`)).toBeNull();
-    expect(document.querySelector("[data-settings-page] [data-settings-card]")).toBeNull();
-    fireEvent.click(document.querySelector("[data-k='page-crumbs-group']")!);
-    expect(pageAt()).toBe("computers");
   });
 
   it("lists the agents with their version and sign-in, and the MCP servers with their state, off the computer's own report", async () => {
