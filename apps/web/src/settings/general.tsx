@@ -6,8 +6,9 @@
 // editors installed on the computer the host runs on, and whether it opens a
 // workspace on another computer over ssh; and what quitting the desktop app
 // does, whether wsp starts at login and whether the app keeps this computer
-// awake while a thread works on it.
-import { NOTIFY_CHOICES, ON_QUIT_CHOICES, SETTLE_CHOICES, type EditorId, type NotifyChoice, type PreferencesPatch } from "@wsp/protocol";
+// awake while a thread works on it. A row off its default carries the arrow
+// that puts it back.
+import { DEFAULT_PREFERENCES, NOTIFY_CHOICES, ON_QUIT_CHOICES, SETTLE_CHOICES, type EditorId, type NotifyChoice, type PreferencesPatch } from "@wsp/protocol";
 import { SegmentedControl } from "../components/ui/segmented-control.js";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../components/ui/select.js";
 import { Switch } from "../components/ui/switch.js";
@@ -24,6 +25,12 @@ import { SELECT_WIDTH } from "./layout.js";
 
 const W = GENERAL_WORDS;
 const SELECT_CLASS = SELECT_WIDTH;
+
+type GeneralField = "sendWith" | "midTurn" | "notifyNeeds" | "notifyDone" | "planAlerts" | "settleAfter" | "askDelete" | "onQuit" | "keepAwake";
+
+/** The arrow a row off the record's default carries, which writes that one field back. */
+const resetOf = (ctx: SettingsContext, field: GeneralField): Pick<SettingsRowData, "reset"> =>
+  ctx.preferences[field] === DEFAULT_PREFERENCES[field] ? {} : { reset: () => ctx.setPreferences({ [field]: DEFAULT_PREFERENCES[field] } as PreferencesPatch) };
 
 /** A select over a fixed set of words, its value read and written as one of the record's choices. */
 function ChoiceSelect<T extends string>({ k, label, value, choices, words, onChange }: { k: string; label: string; value: T; choices: readonly T[]; words: Record<T, string>; onChange: (next: T) => void }) {
@@ -43,11 +50,11 @@ function ChoiceSelect<T extends string>({ k, label, value, choices, words, onCha
   );
 }
 
-const row = (id: string, title: string, description: string, control: SettingsRowData["control"]): SettingsRowData => ({ kind: "row", id, title, description, control });
+const row = (id: string, title: string, description: string, control: SettingsRowData["control"], extra: Pick<SettingsRowData, "reset"> = {}): SettingsRowData => ({ kind: "row", id, title, description, control, ...extra });
 
 function notifyRow(ctx: SettingsContext, id: "notify-needs" | "notify-done", field: "notifyNeeds" | "notifyDone", title: string, description: string): SettingsRowData {
   const set = (next: NotifyChoice): void => ctx.setPreferences({ [field]: next } satisfies PreferencesPatch);
-  return row(id, title, description, <ChoiceSelect k={id} label={title} value={ctx.preferences[field]} choices={NOTIFY_CHOICES} words={W.notifyChoices} onChange={set} />);
+  return row(id, title, description, <ChoiceSelect k={id} label={title} value={ctx.preferences[field]} choices={NOTIFY_CHOICES} words={W.notifyChoices} onChange={set} />, resetOf(ctx, field));
 }
 
 export function generalCards(ctx: SettingsContext): SettingsCardData[] {
@@ -59,13 +66,14 @@ export function generalCards(ctx: SettingsContext): SettingsCardData[] {
   const keepAwake = AWAKE_WORDS.keepAwake(here);
   const sendKeys = W.sendKeys(isMacPlatform(ctx.platform));
   const loginStart = ctx.reads.loginStart;
+  const turnLogin = (on: boolean): void => void desktopBridge()?.setLoginStart?.(on).then(next => useSettingsStore.getState().setReads({ loginStart: next }), ctx.failed);
   return [
     {
       id: "composer",
       head: W.composer,
       items: [
-        row("send-with", W.sendWith, W.sendWithDescription, <SegmentedControl aria-label={W.sendWith} data-k="send-with" value={p.sendWith} segments={(["enter", "mod-enter"] as const).map(value => ({ value, label: sendKeys[value] }))} onChange={sendWith => set({ sendWith })} />),
-        row("mid-turn", W.midTurn, W.midTurnDescription, <SegmentedControl aria-label={W.midTurn} data-k="mid-turn" value={p.midTurn} segments={(["queue", "steer"] as const).map(value => ({ value, label: W.midTurnChoices[value] }))} onChange={midTurn => set({ midTurn })} />),
+        row("send-with", W.sendWith, W.sendWithDescription, <SegmentedControl aria-label={W.sendWith} data-k="send-with" value={p.sendWith} segments={(["enter", "mod-enter"] as const).map(value => ({ value, label: sendKeys[value] }))} onChange={sendWith => set({ sendWith })} />, resetOf(ctx, "sendWith")),
+        row("mid-turn", W.midTurn, W.midTurnDescription, <SegmentedControl aria-label={W.midTurn} data-k="mid-turn" value={p.midTurn} segments={(["queue", "steer"] as const).map(value => ({ value, label: W.midTurnChoices[value] }))} onChange={midTurn => set({ midTurn })} />, resetOf(ctx, "midTurn")),
       ],
     },
     {
@@ -74,15 +82,15 @@ export function generalCards(ctx: SettingsContext): SettingsCardData[] {
       items: [
         notifyRow(ctx, "notify-needs", "notifyNeeds", W.notifyNeeds, W.notifyNeedsDescription),
         notifyRow(ctx, "notify-done", "notifyDone", W.notifyDone, W.notifyDoneDescription),
-        row("plan-alerts", W.planAlerts, W.planAlertsDescription, <Switch data-k="plan-alerts" aria-label={W.planAlerts} checked={p.planAlerts} onCheckedChange={planAlerts => set({ planAlerts })} />),
+        row("plan-alerts", W.planAlerts, W.planAlertsDescription, <Switch data-k="plan-alerts" aria-label={W.planAlerts} checked={p.planAlerts} onCheckedChange={planAlerts => set({ planAlerts })} />, resetOf(ctx, "planAlerts")),
       ],
     },
     {
       id: "threads",
       head: W.threads,
       items: [
-        row("settle-after", W.settleAfter, W.settleAfterDescription, <ChoiceSelect k="settle-after" label={W.settleAfter} value={p.settleAfter} choices={SETTLE_CHOICES} words={W.settleChoices} onChange={settleAfter => set({ settleAfter })} />),
-        row("ask-delete", W.askDelete, W.askDeleteDescription, <Switch data-k="ask-delete" aria-label={W.askDelete} checked={p.askDelete} onCheckedChange={askDelete => set({ askDelete })} />),
+        row("settle-after", W.settleAfter, W.settleAfterDescription, <ChoiceSelect k="settle-after" label={W.settleAfter} value={p.settleAfter} choices={SETTLE_CHOICES} words={W.settleChoices} onChange={settleAfter => set({ settleAfter })} />, resetOf(ctx, "settleAfter")),
+        row("ask-delete", W.askDelete, W.askDeleteDescription, <Switch data-k="ask-delete" aria-label={W.askDelete} checked={p.askDelete} onCheckedChange={askDelete => set({ askDelete })} />, resetOf(ctx, "askDelete")),
       ],
     },
     {
@@ -140,7 +148,7 @@ export function generalCards(ctx: SettingsContext): SettingsCardData[] {
       head: W.startup,
       items: [
         // Only the desktop app quits; a browser tab closes with nothing to ask.
-        ...(ctx.desktopShell ? [row("on-quit", W.onQuit, W.onQuitDescription(here), <ChoiceSelect k="on-quit" label={W.onQuit} value={p.onQuit} choices={ON_QUIT_CHOICES} words={W.onQuitChoices} onChange={onQuit => set({ onQuit })} />)] : []),
+        ...(ctx.desktopShell ? [row("on-quit", W.onQuit, W.onQuitDescription(here), <ChoiceSelect k="on-quit" label={W.onQuit} value={p.onQuit} choices={ON_QUIT_CHOICES} words={W.onQuitChoices} onChange={onQuit => set({ onQuit })} />, resetOf(ctx, "onQuit"))] : []),
         ...(loginStart === null
           ? []
           : [
@@ -148,15 +156,12 @@ export function generalCards(ctx: SettingsContext): SettingsCardData[] {
                 "login-start",
                 W.loginStart,
                 W.loginStartDescription(here),
-                <Switch
-                  data-k="login-start"
-                  aria-label={W.loginStart}
-                  checked={loginStart}
-                  onCheckedChange={on => void desktopBridge()?.setLoginStart?.(on).then(next => useSettingsStore.getState().setReads({ loginStart: next }), ctx.failed)}
-                />,
+                <Switch data-k="login-start" aria-label={W.loginStart} checked={loginStart} onCheckedChange={turnLogin} />,
+                // The service starts at login unless the person turned it off, so on is this row's default.
+                loginStart ? {} : { reset: () => turnLogin(true) },
               ),
             ]),
-        row("keep-awake", keepAwake, AWAKE_WORDS.keepAwakeDescription, <Switch data-k="keep-awake" aria-label={keepAwake} checked={p.keepAwake} onCheckedChange={keepAwake => set({ keepAwake })} />),
+        row("keep-awake", keepAwake, AWAKE_WORDS.keepAwakeDescription, <Switch data-k="keep-awake" aria-label={keepAwake} checked={p.keepAwake} onCheckedChange={keepAwake => set({ keepAwake })} />, resetOf(ctx, "keepAwake")),
       ],
     },
   ];

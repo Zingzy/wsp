@@ -312,6 +312,8 @@ describe("General", () => {
     const heads = [...document.querySelectorAll("[data-settings-page] > section[data-settings-card] [data-settings-head]")].map(h => h.textContent);
     expect(heads).toEqual(["Composer", "Notifications", "Threads", "Open in", "Startup and quit", ABOUT_WORDS.title]);
     expect(rowTitles()).toEqual(["Send with", "A message while a thread works", "When a thread needs you", "When a thread finishes", "When a plan window runs low", "Settle a thread after", "Ask before deleting", "Open files in", AWAKE_WORDS.keepAwake(""), ABOUT_WORDS.wsp]);
+    // On the defaults no row carries the arrow that puts it back.
+    expect(document.querySelectorAll("[data-settings-page] [data-k=row-reset]")).toHaveLength(0);
     expect(descriptionOf("send-with")).toBe("The other key makes a new line. Keys read as this computer's: ⌘ on a Mac, Ctrl elsewhere.");
     expect(descriptionOf("mid-turn")).toBe("Queue waits for the turn to end; steer hands it to the agent now.");
     expect(descriptionOf("notify-needs")).toBe("A question, a permission prompt, a sign-in.");
@@ -369,10 +371,26 @@ describe("General", () => {
     fireEvent.click(login());
     await waitFor(() => expect(login().getAttribute("aria-checked")).toBe("false"));
     expect(turned).toEqual([false]);
+    // Off is off its default, so the row carries the arrow, and the arrow turns it back on.
+    fireEvent.click(rowOf("login-start")!.querySelector<HTMLElement>("[data-k=row-reset]")!);
+    await waitFor(() => expect(login().getAttribute("aria-checked")).toBe("true"));
+    expect(turned).toEqual([false, true]);
     expect(await pickOption(document.querySelector("[data-settings-page] [data-k=on-quit]")!, "Stop wsp too")).toEqual(["Ask each time", "Keep threads running", "Stop wsp too"]);
     await settle();
     expect(sets).toEqual([{ onQuit: "stop" }]);
     cleanup();
+  });
+
+  it("puts an arrow on each row off its default, and the arrow writes that one field back", async () => {
+    const { api, sets } = settingsApi({ editorList: async () => [] } as Partial<Api>, { ...DEFAULT_PREFERENCES, labs: false, sendWith: "mod-enter", notifyDone: "notify", settleAfter: "1d", askDelete: false });
+    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, sendWith: "mod-enter", notifyDone: "notify", settleAfter: "1d", askDelete: false } });
+    mountSettings({ api, at: { kind: "group", group: "general" } });
+    await settle();
+    const arrowed = [...document.querySelectorAll("[data-settings-page] [data-k=row-reset]")].map(b => b.closest("[data-settings-row]")!.getAttribute("data-settings-row"));
+    expect(arrowed).toEqual(["send-with", "notify-done", "settle-after", "ask-delete"]);
+    fireEvent.click(rowOf("settle-after")!.querySelector<HTMLElement>("[data-k=row-reset]")!);
+    await settle();
+    expect(sets).toEqual([{ settleAfter: "2h" }]);
   });
 
   it("offers no login switch where the shell registered no service", async () => {
