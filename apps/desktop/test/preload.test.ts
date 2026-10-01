@@ -92,6 +92,10 @@ describe("the preload's bridge", () => {
     expect(send).toHaveBeenLastCalledWith("outside:say", { title: "wsp needs you", body: "sign in to GitHub CLI login", show: true, sound: false });
     wsp.setBadge(2);
     expect(send).toHaveBeenLastCalledWith("badge:set", 2);
+    void wsp.loginStart();
+    expect(invoke).toHaveBeenLastCalledWith("service:login");
+    void wsp.setLoginStart(false);
+    expect(invoke).toHaveBeenLastCalledWith("service:login-set", false);
     let opened = 0;
     const stop = wsp.onNeedsYouOpen(() => (opened += 1));
     expect(on).toHaveBeenLastCalledWith("needs-you:open", expect.any(Function));

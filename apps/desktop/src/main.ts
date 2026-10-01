@@ -9,7 +9,7 @@ import { chooseFrom, contextMenuTemplate, parseContextMenuItems } from "./contex
 import { deepLinks, linkInArgv } from "./deep-link.js";
 import { fontDirs, fontFamilies, indexFonts, localFontFaces, type FontFile } from "./fonts.js";
 import { bundleShell, type BundleShell } from "./get-bundle.js";
-import { homeOf, openHost, openHostReady, statePathIn, stopWsp, userDataIn, workingHere, type HostSession, type Launch, type OpenHostOptions } from "./host-lifecycle.js";
+import { homeOf, loginStart, openHost, openHostReady, setLoginStart, statePathIn, stopWsp, userDataIn, workingHere, type HostSession, type Launch, type OpenHostOptions } from "./host-lifecycle.js";
 import { hostSwitcher, type HostSwitcher } from "./host-switch.js";
 import { offerMove, type MoveGate } from "./move.js";
 import { sayOutside, showBadge, type Notifier } from "./needs-you.js";
@@ -173,6 +173,10 @@ listen("outside:say", (event, line) => {
 });
 
 listen("badge:set", (_event, count) => showBadge(count, app));
+
+// Whether this computer's service starts at login is this computer's to say, so only the app's own host's page asks.
+answer("service:login", () => loginStart(where().statePath, systemService()));
+answer("service:login-set", (_event, on) => setLoginStart(where().statePath, on === true, systemService()));
 
 // The one bridge call the preload answers itself, off the shell's own webUtils: it asks here first, so a page a
 // computer this one does not own serves is handed no path from this computer's desktop.

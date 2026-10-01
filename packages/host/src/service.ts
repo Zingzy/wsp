@@ -92,6 +92,12 @@ export interface ServiceManager {
   runs(text: string, program: string): boolean;
   /** Run in order once the file is written, so it serves now and again at login. */
   load(at: ServiceAddress): ReadonlyArray<readonly string[]>;
+  /** Run in order to have a loaded unit start again at every login, or start only when asked, leaving it running. */
+  atLogin(at: ServiceAddress, on: boolean): ReadonlyArray<readonly string[]>;
+  /** The command whose answer says whether the unit starts at login. */
+  loginRead(at: ServiceAddress): readonly string[];
+  /** That answer read: whether it starts at login, or nothing where the manager said neither. */
+  startsAtLogin(answer: RunResult, at: ServiceAddress): boolean | undefined;
   /** Run in order to stop it and leave the manager holding nothing. */
   unload(at: ServiceAddress): ReadonlyArray<readonly string[]>;
   /** Every unit this manager could be holding for the address: the one it writes now first, then any a road wsp
@@ -147,6 +153,9 @@ const xml = (value: string): string => value.replaceAll("&", "&amp;").replaceAll
 const launchdName = (at: ServiceAddress): string => `com.wsp.${roleWord(at)}.${serviceTag(at.statePath)}`;
 const launchdUnit = (at: ServiceAddress): ServiceUnit => ({ name: launchdName(at), path: join(at.home, "Library", "LaunchAgents", `${launchdName(at)}.plist`) });
 const launchdUnload = (at: ServiceAddress): ReadonlyArray<readonly string[]> => [["launchctl", "bootout", `gui/${at.uid}/${launchdName(at)}`]];
+/** launchd keeps a label's login switch in its own overrides, apart from the plist: a disabled label stays loaded and
+ * running, is not loaded at the next login, and refuses a bootstrap until it is enabled again. */
+const launchdAtLogin = (at: ServiceAddress, on: boolean): readonly string[] => ["launchctl", on ? "enable" : "disable", `gui/${at.uid}/${launchdName(at)}`];
 
 const launchd: ServiceManager = {
   words: "launchd agent",
@@ -177,8 +186,12 @@ const launchd: ServiceManager = {
       "",
     ].join("\n"),
   runs: (text, program) => text.includes(`<key>ProgramArguments</key>\n  <array>\n    <string>${xml(program)}</string>\n`),
-  load: at => [["launchctl", "bootstrap", `gui/${at.uid}`, launchdUnit(at).path]],
+  load: at => [launchdAtLogin(at, true), ["launchctl", "bootstrap", `gui/${at.uid}`, launchdUnit(at).path]],
   unload: launchdUnload,
+  atLogin: (at, on) => [launchdAtLogin(at, on)],
+  loginRead: at => ["launchctl", "print-disabled", `gui/${at.uid}`],
+  // A disabled label reads `"label" => disabled`, or `=> true` on macOS before 13; a label never switched is absent.
+  startsAtLogin: (answer, at) => (answer.code !== 0 ? undefined : !new RegExp(`"${launchdName(at).replaceAll(".", "\\.")}" => (disabled|true)`).test(answer.output)),
   holds: at => ["launchctl", "print", `gui/${at.uid}/${launchdName(at)}`],
   // One domain per login, so one file; launchd reads its units off that file alone and has nothing to forget and
   // nothing to reload once it has gone.
@@ -255,6 +268,12 @@ const systemd: ServiceManager = {
     [...systemctlArgs(at), "restart", systemdName(at)],
   ],
   unload: at => systemdUnload(at, systemdScoped(at)),
+  atLogin: (at, on) => [[...systemctlArgs(at), on ? "enable" : "disable", systemdName(at)]],
+  loginRead: at => [...systemctlArgs(at), "is-enabled", systemdName(at)],
+  startsAtLogin: answer => {
+    const said = answer.output.trim().split("\n").at(-1)?.trim();
+    return said === "enabled" ? true : said === "disabled" ? false : undefined;
+  },
   holds: at => [...systemctlArgs(at), "is-enabled", systemdName(at)],
   // systemd enables a unit by a symlink beside its file, so the file alone is not the whole of what it holds: a
   // stop and a disable while the unit file is still there take the process and that link with them, and the reload
@@ -399,6 +418,13 @@ export async function installService(
   const failure = await runAll(manager.load(plan), run);
   if (failure !== undefined && wrote) rmSync(unit.path, { force: true });
   return { unit, installed: existsSync(unit.path), ...(failure !== undefined ? { failure } : {}) };
+}
+
+/** Whether the service registered for this address starts at login: nothing where none is registered or the
+ * manager's answer said neither. */
+export async function serviceStartsAtLogin(manager: ServiceManager | undefined, at: ServiceAddress, run: ServiceRunner): Promise<boolean | undefined> {
+  if (manager === undefined || registeredIn(manager, at) === undefined) return undefined;
+  return manager.startsAtLogin(await run(manager.loginRead(at)), at);
 }
 
 /** What a stop did: whether the manager had it, the answer wsp could not read, and the command that refused. */

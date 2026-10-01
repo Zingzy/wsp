@@ -2476,6 +2476,11 @@ export interface DesktopBridge {
   onNeedsYouOpen(handler: () => void): () => void;
   /** How many threads wait on the person, for the dock's badge; zero clears it. */
   setBadge(count: number): void;
+  /** Whether this computer's service starts wsp at every login; null where no service is registered for this state.
+   * Only the app's own host's page is answered. */
+  loginStart(): Promise<boolean | null>;
+  /** Sets that, leaving wsp running either way, and answers the reading after it. */
+  setLoginStart(on: boolean): Promise<boolean | null>;
   /** A wsp:// link the system handed the shell while the page was up, read down to what it names: the page opens it
    * and does nothing to it. Only the app's own host's page is told. Returns the unsubscribe. */
   onOpen(handler: (target: LinkTarget) => void): () => void;
