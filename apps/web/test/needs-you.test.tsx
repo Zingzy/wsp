@@ -253,10 +253,10 @@ describe("a thread stopped on a permission prompt while the person looked away",
 describe("a machine that came up while the person looked away", () => {
   const WOKEN = { id: "ws_1", name: "b1", machineId: "m1", phase: "running" as const, golden: "snap_g", createdAt: "2026-09-10T00:00:00Z", project: { id: "pr_api", name: "the-project", path: "/root", computer: "default" } };
 
-  it("says the workspace is awake on the same road as a build's need, and a click opens that workspace", () => {
+  it("says the workspace is awake once the person hears finishes, as a finish is said, and a click opens that workspace", () => {
     const emit = bindEvents();
     render(<Harness />);
-    act(() => useStore.setState({ workspaces: [WOKEN], selectedId: null }));
+    act(() => useStore.setState({ workspaces: [WOKEN], selectedId: null, preferences: { ...DEFAULT_PREFERENCES, notifyDone: "notify" } }));
     const focus = vi.spyOn(window, "focus").mockImplementation(() => {});
     act(() => emit({ type: "workspace.woken", workspaceId: "ws_1", machineId: "m1" }));
     expect(FakeNotification.built).toEqual([{ title: NEEDS_YOU, body: workspaceAwakeLine("b1"), silent: true }]);
@@ -276,17 +276,18 @@ describe("a machine that came up while the person looked away", () => {
     expect(FakeNotification.built).toEqual([]);
   });
 
-  it("says nothing where the person turned off what needs them, and never sounds, since a machine up is no alarm", () => {
+  it("follows When a thread finishes, not what needs the person: nothing by default, nothing with needs off, a sound where finishes sound", () => {
     const emit = bindEvents();
     render(<Harness />);
-    act(() => useStore.setState({ workspaces: [WOKEN], preferences: { ...DEFAULT_PREFERENCES, notifyNeeds: "off" } }));
+    act(() => useStore.setState({ workspaces: [WOKEN] }));
     act(() => emit({ type: "workspace.woken", workspaceId: "ws_1", machineId: "m1" }));
-    act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, notifyNeeds: "sound" } }));
+    act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, notifyNeeds: "off", notifyDone: "notify-sound" } }));
     act(() => emit({ type: "workspace.woken", workspaceId: "ws_1", machineId: "m1" }));
-    expect(FakeNotification.built).toEqual([]);
-    expect(FakeAudio.tones).toBe(0);
+    expect(FakeNotification.built).toEqual([{ title: NEEDS_YOU, body: workspaceAwakeLine("b1"), silent: false }]);
+    act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, notifyNeeds: "notify-sound", notifyDone: "off" } }));
+    act(() => emit({ type: "workspace.woken", workspaceId: "ws_1", machineId: "m1" }));
+    expect(FakeNotification.built).toHaveLength(1);
   });
-
   it("says nothing about a workspace this page never knew", () => {
     const emit = bindEvents();
     render(<Harness />);

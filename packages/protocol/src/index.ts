@@ -17,6 +17,7 @@ import { InitJob, InitJobEvent, InitAgent, InitKeys, InitNeedsYou, InitNeedsYouE
 import { UsageRange, UsageSplit, UsageTokens } from "./usage.js";
 import { GENERAL_DEFAULTS, GENERAL_FIELDS, patchedGeneral } from "./general-prefs.js";
 import { UsageAlertEvent } from "./plan-alerts.js";
+import type { OutsideLine } from "./outside-line.js";
 import type { FsListReply as WireFsListReply } from "./generated/FsListReply.js";
 import type { FsFilesReply as WireFsFilesReply } from "./generated/FsFilesReply.js";
 import type { GitPrListReply as WireGitPrListReply } from "./generated/GitPrListReply.js";
@@ -2434,10 +2435,6 @@ export interface ShellChord {
   readonly altKey: boolean;
 }
 
-/** One moment said outside the app: its title, its line, whether a notification shows it, and whether it makes a
- * sound, which with no notification is the sound alone. */
-export const OutsideLine = z.object({ title: z.string(), body: z.string(), show: z.boolean(), sound: z.boolean() });
-export type OutsideLine = z.infer<typeof OutsideLine>;
 
 /** What the desktop shell's preload puts on window.wsp; a browser tab has none of it. */
 export interface DesktopBridge {
@@ -6988,6 +6985,7 @@ export * from "./changes.js";
 export * from "./usage.js";
 export * from "./general-prefs.js";
 export * from "./plan-alerts.js";
+export * from "./outside-line.js";
 export * from "./pull-request.js";
 export * from "./run-block.js";
 export * from "./tree.js";
