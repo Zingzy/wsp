@@ -13,6 +13,7 @@
 // thread before this one. With no workspace selected the terminal chord
 // opens this computer's own terminal, and the panel chord a panel whose
 // panels wait for a workspace.
+import { SETTLE_MS } from "@wsp/protocol";
 import { terminalRefusedLine } from "../actions/format.js";
 import { deriveSidebarProjects, type SidebarProjectSnapshot, type SidebarThreadSnapshot } from "../adapt/index.js";
 import { toggleCommandPalette } from "../commandPaletteBus.js";
@@ -226,13 +227,13 @@ export function cycleThreadSwitcher(step: 1 | -1, hold: ReadonlyArray<string>): 
 /** The open thread's root tree, settled by hand as the tile's menu settles it: the thread the centre shows, else the
  * workspace's top thread, and nothing while a thread of the tree works or the tree is settled already. */
 export function settleOpenThread(): void {
-  const { selectedId, selectedThreadId, settleThreads } = useStore.getState();
+  const { selectedId, selectedThreadId, settleThreads, preferences } = useStore.getState();
   const projects = sidebarProjects();
   const runs = projects.find(project => project.id === selectedId);
   if (runs === undefined) return;
   const open = (selectedThreadId === null ? undefined : runs.threads.find(thread => thread.threadId === selectedThreadId)) ?? topSidebarThread(runs.threads);
   if (open === null) return;
-  const root = rootHolding(sidebarTiles(projects, { picked: null, nowMs: Date.now(), open: open.id }).live, open.id);
+  const root = rootHolding(sidebarTiles(projects, { picked: null, nowMs: Date.now(), open: open.id, settleMs: SETTLE_MS[preferences.settleAfter] }).live, open.id);
   if (root === undefined) return;
   const settle = treeSettle(root);
   if (!settle.working) void settleThreads(settle.threadIds);
@@ -246,7 +247,7 @@ export function openNextNeedsYou(): void {
   const runs = fleet.find(project => project.id === selectedId);
   const open = runs === undefined ? undefined : (selectedThreadId === null ? undefined : runs.threads.find(thread => thread.threadId === selectedThreadId)) ?? topSidebarThread(runs.threads);
   const { projects, picked } = underPicks(fleet, { places, recorded, order: preferences.projectOrder, stored: storedPicks() });
-  const next = nextNeedsYou(sidebarTiles(projects, { picked: picked?.project.id ?? null, nowMs: Date.now(), open: open?.id ?? null }).live, open?.id ?? null);
+  const next = nextNeedsYou(sidebarTiles(projects, { picked: picked?.project.id ?? null, nowMs: Date.now(), open: open?.id ?? null, settleMs: SETTLE_MS[preferences.settleAfter] }).live, open?.id ?? null);
   if (next?.thread != null) select(next.thread.workspaceId, next.thread.threadId);
 }
 

@@ -5,7 +5,7 @@
 // which model state wsp's wire does not carry. Contract types are hand-written
 // against the wsp thread snapshot (startedAt and endedAt instead of createdAt,
 // updatedAt and the turn projection).
-import { THREAD_SETTLE_MS, type SessionStatus, type ThreadSection } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, SETTLE_MS, type SessionStatus, type ThreadSection } from "@wsp/protocol";
 import { cn } from "../lib/utils";
 import { activeThreadAnchorTimestampMs, toSortableTimestamp } from "./threadSort";
 
@@ -262,18 +262,19 @@ function isThreadSeen(thread: SettleInput): boolean {
 
 /** Whether the thread belongs in the Settled fold: nothing running and nothing asked, and either the person settled it
     by hand with nothing happening since, or a window has shown it since it ended and it has been quiet
-    THREAD_SETTLE_MS since then, counted from the later of its last activity and that showing. Three threads never
+    `settleMs` since then, the person's pick on General, counted from the later of its last activity and that
+    showing; a null `settleMs` is never, and only a hand settles. Three threads never
     fold by time and wait for a hand: one nobody has seen since it finished, one whose turn failed, and one `held`
     names: the one open in the centre, so a thread being read does not leave the list under the reader, and one in a
     tree the person pinned. One whose
     times are all missing has no quiet to read, so it stays out rather than falling into a group kept shut. */
-export function isThreadSettled(thread: SettleInput, nowMs: number, held = false): boolean {
+export function isThreadSettled(thread: SettleInput, nowMs: number, held = false, settleMs: number | null = SETTLE_MS[DEFAULT_PREFERENCES.settleAfter]): boolean {
   if (thread.asking !== null || isThreadWorking(thread)) return false;
   const last = lastActivityMs(thread);
   const settled = toSortableTimestamp(thread.settledAt ?? undefined);
   if (settled !== null && (last === null || settled >= last)) return true;
-  if (held || thread.status === "failed" || last === null || !isThreadSeen(thread)) return false;
-  return nowMs - Math.max(last, toSortableTimestamp(thread.readAt ?? undefined) ?? last) >= THREAD_SETTLE_MS;
+  if (held || settleMs === null || thread.status === "failed" || last === null || !isThreadSeen(thread)) return false;
+  return nowMs - Math.max(last, toSortableTimestamp(thread.readAt ?? undefined) ?? last) >= settleMs;
 }
 
 /** Whether the thread has been read and is quiet, so "Settle all read" takes it: no finish nobody has seen, no failure

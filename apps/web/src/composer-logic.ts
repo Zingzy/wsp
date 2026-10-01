@@ -4,11 +4,12 @@
 // a chip's expanded length is the text it is sent as, read off its segment,
 // so a block chip spanning lines maps like a one-line mention; the skill arm
 // reads `$` alone; parseStandaloneComposerSlashCommand went with the built-in
-// plan and default commands.
+// plan and default commands; whether an Enter sends reads the person's send key
+// in place of upstream's foreground and background intents.
+import type { SendKey } from "@wsp/protocol";
 import { splitPromptIntoComposerSegments, type ComposerPromptSegment } from "./composer-editor-mentions";
 
 export type ComposerTriggerKind = "path" | "pull-request" | "slash-command" | "skill";
-export type ComposerSubmissionIntent = "foreground" | "background";
 
 export interface ComposerTrigger {
   kind: ComposerTriggerKind;
@@ -17,16 +18,10 @@ export interface ComposerTrigger {
   rangeEnd: number;
 }
 
-export function composerSubmissionIntentForEnter(input: {
-  isMobileViewport: boolean;
-  shiftKey: boolean;
-  modifierKey: boolean;
-  isDraftThread: boolean;
-}): ComposerSubmissionIntent | null {
-  if (input.isMobileViewport || input.shiftKey) {
-    return null;
-  }
-  return input.modifierKey && input.isDraftThread ? "background" : "foreground";
+/** Whether an Enter sends rather than making a new line: never with Shift, and otherwise as the person's send key
+ * says, Enter alone or Enter with the platform's mod, the other of the two making a new line. */
+export function enterSends(input: { shiftKey: boolean; modKey: boolean; sendWith: SendKey }): boolean {
+  return !input.shiftKey && input.modKey === (input.sendWith === "mod-enter");
 }
 
 const isInlineTokenSegment = (segment: ComposerPromptSegment): boolean => segment.type !== "text";

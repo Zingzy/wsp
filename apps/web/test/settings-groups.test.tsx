@@ -11,7 +11,7 @@ import { DAEMON_VERSION, DEFAULT_PREFERENCES, DEVICES_TICKET_REFUSAL, HOST_NO_RE
 import { DisconnectedError, RequestError, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { EDITOR_SSH_WORDS } from "../src/files/EditorConsent.js";
-import { ABOUT_WORDS, ACCOUNT_WORDS, AWAKE_WORDS, DEVICES_WORDS, FONT_WORDS, GENERAL_WORDS, KEYBINDINGS_WORDS, NOTIFY_WORDS, PRIVACY_WORDS, PROJECTS_WORDS, TRANSPARENCY_WORDS, WHERE_WORDS } from "../src/settings/format.js";
+import { ABOUT_WORDS, ACCOUNT_WORDS, AWAKE_WORDS, DEVICES_WORDS, FONT_WORDS, GENERAL_WORDS, KEYBINDINGS_WORDS, PRIVACY_WORDS, PROJECTS_WORDS, TRANSPARENCY_WORDS, WHERE_WORDS } from "../src/settings/format.js";
 import { builtWhen } from "../src/settings/image.js";
 import { chordsOf, keybindingCards } from "../src/settings/keybindings.js";
 import { CHORD_WORDS, JUMP_WORD, KEYBINDING_WORDS } from "../src/settings/keybindingWords.js";
@@ -284,7 +284,7 @@ describe("General", () => {
     const { api, sets } = settingsApi({ editorList: async () => editors } as Partial<Api>);
     mountSettings({ api, at: { kind: "group", group: "general" } });
     await settle();
-    expect(rowTitles()).toEqual([GENERAL_WORDS.editor, AWAKE_WORDS.keepAwake("")]);
+    expect(rowTitles()).toContain(GENERAL_WORDS.editor);
     expect(descriptionOf("editor")).toBe(GENERAL_WORDS.editorDescription);
     const select = document.querySelector<HTMLElement>("[data-settings-page] [data-k=editor]")!;
     expect(select.textContent).toBe("Cursor");
@@ -302,6 +302,83 @@ describe("General", () => {
     cleanup();
   });
 
+  it("draws the locked design's sections and rows in order, each with its line, in a browser tab", async () => {
+    mountSettings({ api: settingsApi({ editorList: async () => [] } as Partial<Api>).api, at: { kind: "group", group: "general" } });
+    await settle();
+    const heads = [...document.querySelectorAll("[data-settings-page] [data-settings-card] [data-settings-head]")].map(h => h.textContent);
+    expect(heads).toEqual(["Composer", "Notifications", "Threads", "Open in", "Startup and quit"]);
+    expect(rowTitles()).toEqual(["Send with", "A message while a thread works", "When a thread needs you", "When a thread finishes", "When a plan window runs low", "Settle a thread after", "Ask before deleting", "Open files in", AWAKE_WORDS.keepAwake("")]);
+    expect(descriptionOf("send-with")).toBe("The other key makes a new line. Keys read as this computer's: ⌘ on a Mac, Ctrl elsewhere.");
+    expect(descriptionOf("mid-turn")).toBe("Queue waits for the turn to end; steer hands it to the agent now.");
+    expect(descriptionOf("notify-needs")).toBe("A question, a permission prompt, a sign-in.");
+    expect(descriptionOf("notify-done")).toBe("Off keeps ten running threads from pinging you ten times.");
+    expect(descriptionOf("plan-alerts")).toBe("At 70% and 90% of a window, once each, and when an account is blocked.");
+    expect(descriptionOf("settle-after")).toBe("A read thread moves to Settled once it has been quiet this long.");
+    expect(descriptionOf("ask-delete")).toBe("A workspace with unpushed work always asks.");
+    // The defaults: Enter, Queue, notify and sound for a need, nothing for a finish, alerts on, two hours, asks.
+    const checked = (k: string) => document.querySelector(`[data-k=${k}] [data-checked]`)?.textContent;
+    expect([checked("send-with"), checked("mid-turn")]).toEqual(["Enter", "Queue"]);
+    const said = (k: string) => document.querySelector(`[data-settings-page] [data-k=${k}]`)?.textContent;
+    expect([said("notify-needs"), said("notify-done"), said("settle-after")]).toEqual(["Notify and sound", "Off", "2 hours"]);
+    expect(document.querySelector("[data-k=plan-alerts]")!.getAttribute("aria-checked")).toBe("true");
+    expect(document.querySelector("[data-k=ask-delete]")!.getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("writes each pick to the record: the send key in this computer's spelling, queue or steer, and each switch", async () => {
+    const { api, sets } = settingsApi({ editorList: async () => [] } as Partial<Api>);
+    mountSettings({ api, at: { kind: "group", group: "general" } });
+    await settle();
+    const segment = (k: string, value: string) => document.querySelector<HTMLElement>(`[data-k=${k}] [data-segment="${value}"]`)!;
+    expect(segment("send-with", "mod-enter").textContent).toBe(navigator.platform.startsWith("Mac") ? "⌘ Enter" : "Ctrl Enter");
+    fireEvent.click(segment("send-with", "mod-enter"));
+    fireEvent.click(segment("mid-turn", "steer"));
+    fireEvent.click(document.querySelector<HTMLElement>("[data-k=plan-alerts]")!);
+    fireEvent.click(document.querySelector<HTMLElement>("[data-k=ask-delete]")!);
+    await settle();
+    expect(sets).toEqual([{ sendWith: "mod-enter" }, { midTurn: "steer" }, { planAlerts: false }, { askDelete: false }]);
+  });
+
+  it("picks how a finished thread is said and when a read thread settles from the mock's words", async () => {
+    const { api, sets } = settingsApi({ editorList: async () => [] } as Partial<Api>);
+    mountSettings({ api, at: { kind: "group", group: "general" } });
+    await settle();
+    expect(await pickOption(document.querySelector("[data-settings-page] [data-k=notify-done]")!, "Sound")).toEqual(["Off", "Notify", "Sound", "Notify and sound"]);
+    await settle();
+    expect(await pickOption(document.querySelector("[data-settings-page] [data-k=settle-after]")!, "Never")).toEqual(["15 minutes", "1 hour", "2 hours", "1 day", "Never"]);
+    await settle();
+    expect(sets).toEqual([{ notifyDone: "sound" }, { settleAfter: "never" }]);
+    cleanup();
+  });
+
+  it("in the desktop app, asks what a quit does and offers wsp at login over this computer's service, naming the computer", async () => {
+    const turned: boolean[] = [];
+    window.wsp = { loginStart: async () => true, setLoginStart: async (on: boolean) => (turned.push(on), on) };
+    useStore.setState({ places: [here, box] });
+    const { api, sets } = settingsApi({ editorList: async () => [] } as Partial<Api>);
+    mountSettings({ api, at: { kind: "group", group: "general" } });
+    await settle();
+    expect(rowTitles().slice(-3)).toEqual(["When you quit", "Start wsp at login", "Keep zingzy's MacBook Pro awake"]);
+    expect(descriptionOf("on-quit")).toBe("Quitting the window leaves threads running on zingzy's MacBook Pro; quit and stop ends them too.");
+    expect(descriptionOf("login-start")).toBe("wsp keeps running on zingzy's MacBook Pro with no window open, so threads carry on.");
+    const login = (): HTMLElement => document.querySelector<HTMLElement>("[data-k=login-start]")!;
+    expect(login().getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(login());
+    await waitFor(() => expect(login().getAttribute("aria-checked")).toBe("false"));
+    expect(turned).toEqual([false]);
+    expect(await pickOption(document.querySelector("[data-settings-page] [data-k=on-quit]")!, "Stop wsp too")).toEqual(["Ask each time", "Keep threads running", "Stop wsp too"]);
+    await settle();
+    expect(sets).toEqual([{ onQuit: "stop" }]);
+    cleanup();
+  });
+
+  it("offers no login switch where the shell registered no service", async () => {
+    window.wsp = { loginStart: async () => null };
+    mountSettings({ api: settingsApi({ editorList: async () => [] } as Partial<Api>).api, at: { kind: "group", group: "general" } });
+    await settle();
+    expect(rowTitles()).toContain("When you quit");
+    expect(rowTitles()).not.toContain("Start wsp at login");
+  });
+
   it("says no editor is installed, with nothing to pick, where the host found none", async () => {
     mountSettings({ api: settingsApi({ editorList: async () => [] } as Partial<Api>).api, at: { kind: "group", group: "general" } });
     await settle();
@@ -311,22 +388,12 @@ describe("General", () => {
 });
 
 describe("Appearance", () => {
-  it("offers the sound of a finished turn and a prompt as one switch under Notifications, on by default, that writes the record and restores to on", async () => {
-    const { api, sets } = settingsApi();
+  it("holds the glass and the type rows, and no notification row, which General keeps per kind of moment", async () => {
+    const { api } = settingsApi();
     mountSettings({ api, at: { kind: "group", group: "appearance" } });
     await settle();
-    expect(rowTitles()).toEqual([TRANSPARENCY_WORDS.title, FONT_WORDS.app, FONT_WORDS.textSize, FONT_WORDS.code, FONT_WORDS.codeSize, NOTIFY_WORDS.sound]);
-    expect(descriptionOf("notify-sound")).toBe(NOTIFY_WORDS.soundDescription);
-    const toggle = (): HTMLElement => document.querySelector<HTMLElement>("[data-k=notify-sound]")!;
-    expect(toggle().getAttribute("aria-checked")).toBe("true");
-    fireEvent.click(toggle());
-    await settle();
-    expect(sets).toEqual([{ notifySound: false }]);
-    expect(useStore.getState().preferences.notifySound).toBe(false);
-    fireEvent.click(document.querySelector<HTMLElement>("[data-k=restore-defaults]")!);
-    await settle();
-    expect(sets.at(-1)).toMatchObject({ notifySound: true });
-    expect(toggle().getAttribute("aria-checked")).toBe("true");
+    expect(rowTitles()).toEqual([TRANSPARENCY_WORDS.title, FONT_WORDS.app, FONT_WORDS.textSize, FONT_WORDS.code, FONT_WORDS.codeSize]);
+    expect(document.querySelector("[data-k=notify-sound]")).toBeNull();
   });
 });
 
@@ -476,6 +543,10 @@ describe("Keybindings", () => {
       [KEYBINDINGS_WORDS.submitComment, [["⌘Enter"]]],
       [KEYBINDINGS_WORDS.leaveSettings, [["Esc"]]],
     ]);
+    // The send line reads the key the person picked on General, in the platform's spelling.
+    const sendKeys = (platform: string) => keybindingCards(DEFAULT_KEYBINDINGS, { platform, desktopShell: true }, undefined, "mod-enter")[3]!.items.find(item => item.id === "send");
+    expect(sendKeys("MacIntel")).toMatchObject({ keys: [["⌘Enter"]] });
+    expect(sendKeys("Linux x86_64")).toMatchObject({ keys: [["Ctrl+Enter"]] });
   });
 
   it("stands on the page as lines with keycaps, no row and no description", async () => {

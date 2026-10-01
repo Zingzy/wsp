@@ -2,8 +2,9 @@
 // The question a quit asks. wsp runs as this computer's own service, so
 // quitting the app leaves every thread working; the second answer stops wsp
 // too, and the turns on this computer before it, so nothing is left running
-// with nobody reading it.
-import { THIS_COMPUTER } from "@wsp/protocol";
+// with nobody reading it. A person who always gives the same answer picks it
+// on General, and the quit asks nothing.
+import { THIS_COMPUTER, type OnQuit } from "@wsp/protocol";
 
 export type QuitChoice = "quit" | "stop" | "cancel";
 
@@ -43,3 +44,10 @@ export function quitPrompt(working: number): QuitPrompt {
 
 /** The answer a dialog's button index is. */
 export const quitChoice = (response: number): QuitChoice => CHOICES[response]?.choice ?? "cancel";
+
+/** What a quit does under the person's pick on General: their standing answer, else the question's. */
+export async function quitAnswer(onQuit: OnQuit, ask: () => Promise<QuitChoice>): Promise<QuitChoice> {
+  if (onQuit === "keep") return "quit";
+  if (onQuit === "stop") return "stop";
+  return ask();
+}

@@ -4,10 +4,11 @@
 // shape as chat.test.tsx; no live daemon.
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { HOST_ASLEEP_SEND, composerHeldLine, screenCommandLine, SEND_BLOCK_WORDS, sendRefusal, type EventUnion, type HarnessCatalog, type HostItem, type SessionEvent, type SessionView, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, HOST_ASLEEP_SEND, composerHeldLine, screenCommandLine, SEND_BLOCK_WORDS, sendRefusal, type EventUnion, type HarnessCatalog, type HostItem, type SessionEvent, type SessionView, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { installFakeLayout } from "./fake-layout.js";
 import { clickIntoEditor, composerEditor, isEditable, press, typeInto } from "./composer-harness.js";
 import { useStore } from "../src/protocol/store.js";
+import { isMacPlatform } from "../src/lib/utils.js";
 import type { Api, ConnStatus, ProtocolEvent, StartSessionOptions } from "../src/protocol/client.js";
 import { WorkspaceThread } from "../src/shell/WorkspaceThread.js";
 import { RightPanel } from "../src/shell/RightPanel.js";
@@ -131,6 +132,27 @@ describe("composer keys", () => {
     await press(editor, "Enter");
     await waitFor(() => expect(started.length).toBe(1));
     expect(started[0]?.prompt).toBe("line one\nline two");
+  });
+
+  it("with Enter as the send key, the platform's mod with Enter makes a new line; with the mod picked, Enter makes the line and the mod sends", async () => {
+    const mod = isMacPlatform(navigator.platform) ? { metaKey: true } : { ctrlKey: true };
+    const { api, started } = fixtureApi([workspace]);
+    await setup(api);
+    const editor = composerEditor();
+    await typeInto(editor, "one");
+    await press(editor, "Enter", mod);
+    await waitFor(() => expect(draft()).toBe("one\n"));
+    expect(started.length).toBe(0);
+    act(() => useStore.setState({ preferences: { ...useStore.getState().preferences, sendWith: "mod-enter" } }));
+    await typeInto(editor, "two");
+    await press(editor, "Enter");
+    await waitFor(() => expect(draft()).toBe("one\ntwo\n"));
+    expect(started.length).toBe(0);
+    await typeInto(editor, "three");
+    await press(editor, "Enter", mod);
+    await waitFor(() => expect(started.length).toBe(1));
+    expect(started[0]?.prompt).toBe("one\ntwo\nthree");
+    act(() => useStore.setState({ preferences: DEFAULT_PREFERENCES }));
   });
 
   it("takes the caret when a workspace switch asks for it, and leaves it alone when another workspace is asked for", async () => {

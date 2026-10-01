@@ -153,6 +153,12 @@ describe("the sidebar's tiles", () => {
     expect(shape(sidebarTiles(rows, { picked: null, nowMs: NOW, open: "builder" }).live)).toEqual([["lead", ["builder"]]]);
   });
 
+  it("folds a quiet tree on the person's settle pick, and keeps it on the list where they picked never", () => {
+    const rows = [row("ws_a", "pr_1", [done("lead", "ws_a", 30), done("builder", "ws_a", 29, "lead")])];
+    expect(shape(sidebarTiles(rows, { picked: null, nowMs: NOW, settleMs: null }).live)).toEqual([["lead", ["builder"]]]);
+    expect(sidebarTiles(rows, { picked: null, nowMs: NOW, settleMs: null }).settled).toEqual([]);
+  });
+
   it("folds a tree settled by hand at once, unread or not, and brings it back when a thread in it moves after the settle", () => {
     const settledAt = ago(0.05);
     const byHand = [row("ws_a", "pr_1", [done("lead", "ws_a", 0.1, null, { settledAt, readAt: null, unread: true }), done("builder", "ws_a", 0.2, "lead", { settledAt })])];

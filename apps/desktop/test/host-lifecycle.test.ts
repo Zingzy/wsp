@@ -12,7 +12,7 @@ import { createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { stubBackend } from "../../../packages/host/test/stub-backend.js";
 import { copyingFake, fakeDaemonStart } from "../../../packages/host/test/verbs-fixture.js";
-import { ensureService, firstLaunch, homeOf, hostTokenMatches, openHost, openHostReady, runningHere, statePathIn, stopWsp, userDataIn, workingHere, type HostSession, type OpenHostOptions, type ServiceRoad } from "../src/host-lifecycle.js";
+import { ensureService, firstLaunch, homeOf, hostTokenMatches, loginStart, openHost, openHostReady, runningHere, setLoginStart, statePathIn, stopWsp, userDataIn, workingHere, type HostSession, type OpenHostOptions, type ServiceRoad } from "../src/host-lifecycle.js";
 
 const PAGE = `<!doctype html>
 <html><head><title>wsp</title></head>
@@ -112,7 +112,7 @@ function serving(statePath: string, h: HostHandle, over: Record<string, unknown>
 
 /** launchd as far as this window reads it: the real manager's unit files and lines, answered by a fake that serves
  * a real host once a unit is loaded, as the shim's `wsp up` would, and takes it away at a bootout. */
-function fakeLaunchd(statePath: string, runtime: () => Runtime = testRuntime): { road: ServiceRoad & ServiceDeps; ran: string[][]; loaded: () => boolean; host: () => HostHandle | undefined; load: () => Promise<void> } {
+function fakeLaunchd(statePath: string, runtime: () => Runtime = testRuntime): { road: ServiceRoad & ServiceDeps; ran: string[][]; loaded: () => boolean; host: () => HostHandle | undefined; load: () => Promise<void>; atLogin: () => boolean; setAtLogin: (on: boolean) => void } {
   const ran: string[][] = [];
   let loaded = false;
   let host: HostHandle | undefined;
@@ -121,11 +121,19 @@ function fakeLaunchd(statePath: string, runtime: () => Runtime = testRuntime): {
     host = await startHost({ runtime: runtime(), webDir: fakeWebDir(), port: 0 });
     serving(statePath, host, { startedBy: "service" });
   };
+  let atLogin = true;
   const run: ServiceRunner = async argv => {
     ran.push([...argv]);
     const verb = argv[1];
     if (verb === "print") return loaded ? { code: 0, output: "state = running" } : { code: 113, output: "Could not find service" };
+    if (verb === "enable" || verb === "disable") {
+      atLogin = verb === "enable";
+      return { code: 0, output: "" };
+    }
+    if (verb === "print-disabled") return { code: 0, output: `disabled services = {\n\t\t"${argv[2]!.replace("gui/", "x")}" => enabled\n${atLogin ? "" : `\t\t"${SERVICE_MANAGERS.launchd.unit(serviceAddressHere(statePath)).name}" => disabled\n`}}` };
     if (verb === "bootstrap") {
+      // launchd refuses to load a label switched off at login until it is switched on again.
+      if (!atLogin) return { code: 5, output: "Bootstrap failed: 5: Input/output error" };
       await load();
       return { code: 0, output: "" };
     }
@@ -149,7 +157,7 @@ function fakeLaunchd(statePath: string, runtime: () => Runtime = testRuntime): {
     stop: () => {},
     here: async () => undefined,
   };
-  return { road, ran, loaded: () => loaded, host: () => host, load };
+  return { road, ran, loaded: () => loaded, host: () => host, load, atLogin: () => atLogin, setAtLogin: on => void (atLogin = on) };
 }
 
 describe("openHost", () => {
@@ -184,7 +192,7 @@ describe("openHost", () => {
 
   it("installs the unit running the shim with the service mark when none is registered, loads it, waits for the lock, attaches", async () => {
     const session = await open();
-    expect(launchd.ran.map(argv => argv.slice(0, 2).join(" "))).toEqual(["launchctl bootstrap"]);
+    expect(launchd.ran.map(argv => argv.slice(0, 2).join(" "))).toEqual(["launchctl enable", "launchctl bootstrap"]);
     const unit = readFileSync(unitPath(), "utf8");
     expect(unitPath()).toBe(join(home, "Library", "LaunchAgents", `com.wsp.host.${serviceTag(statePath)}.plist`));
     const words = [...unit.matchAll(/<string>([^<]*)<\/string>/g)].map(m => m[1]);
@@ -213,7 +221,7 @@ describe("openHost", () => {
       return run(argv, waitMs);
     };
     await open();
-    expect(launchd.ran.map(argv => argv[1])).toEqual(["bootout", "bootstrap"]);
+    expect(launchd.ran.map(argv => argv[1])).toEqual(["print-disabled", "bootout", "enable", "bootstrap"]);
     expect(readFileSync(unitPath(), "utf8")).toContain(`<string>${shim}</string>`);
     expect(readFileSync(unitPath(), "utf8")).not.toContain("Old.app");
   });
@@ -224,7 +232,7 @@ describe("openHost", () => {
     writeFileSync(unitPath(), SERVICE_MANAGERS.launchd.text(mine));
     const before = readFileSync(unitPath(), "utf8");
     await open();
-    expect(launchd.ran.map(argv => argv[1])).toEqual(["print", "bootstrap"]);
+    expect(launchd.ran.map(argv => argv[1])).toEqual(["print-disabled", "print", "enable", "bootstrap"]);
     expect(readFileSync(unitPath(), "utf8")).toBe(before);
   });
 
@@ -260,8 +268,28 @@ describe("openHost", () => {
     const before = readFileSync(unitPath(), "utf8");
     launchd.ran.length = 0;
     await open();
-    expect(launchd.ran.map(argv => argv[1])).toEqual(["print", "bootstrap"]);
+    expect(launchd.ran.map(argv => argv[1])).toEqual(["print-disabled", "print", "enable", "bootstrap"]);
     expect(readFileSync(unitPath(), "utf8")).toBe(before);
+  });
+
+  it("a unit the person set not to start at login is loaded all the same and set back off once it is up", async () => {
+    await open();
+    await launchd.road.run(["launchctl", "bootout", "x"]);
+    launchd.setAtLogin(false);
+    launchd.ran.length = 0;
+    await open();
+    expect(launchd.ran.map(argv => argv[1])).toEqual(["print-disabled", "print", "enable", "bootstrap", "disable"]);
+    expect([launchd.loaded(), launchd.atLogin()]).toEqual([true, false]);
+  });
+
+  it("reads and sets whether the service starts at login, leaving wsp running, and reads nothing where no service is registered", async () => {
+    expect(await loginStart(statePath, launchd.road)).toBeNull();
+    await open();
+    expect(await loginStart(statePath, launchd.road)).toBe(true);
+    expect(await setLoginStart(statePath, false, launchd.road)).toBe(false);
+    expect([launchd.loaded(), launchd.atLogin()]).toEqual([true, false]);
+    expect(await setLoginStart(statePath, true, launchd.road)).toBe(true);
+    await expect(setLoginStart(statePath, false, { ...launchd.road, run: async () => ({ code: 1, output: "Bad request." }) })).rejects.toThrow(/launchctl disable .* exited 1 and said: Bad request\./);
   });
 
   it("waits past a page that answers before the host has written its token, which a start still in flight serves", async () => {
@@ -333,7 +361,7 @@ describe("openHost", () => {
     expect(ready.session.url).toBe(`http://127.0.0.1:${launchd.host()!.port}`);
     // Read off the host it ended on, which holds nothing, as the fake manager's host does.
     expect(ready.first).toBe(true);
-    expect(launchd.ran.map(argv => argv[1])).toEqual(["bootstrap"]);
+    expect(launchd.ran.map(argv => argv[1])).toEqual(["enable", "bootstrap"]);
   });
 
   it("a launch that meets the host a moment later, its page gone and its process still holding the lock, waits for that process and ends on the next host", async () => {
@@ -579,7 +607,7 @@ describe("openHost", () => {
   });
 
   it("a refused load is the manager's own line", async () => {
-    const road = { ...launchd.road, run: async (argv: readonly string[]) => ({ code: 5, output: `Bootstrap failed: 5: Input/output error (${argv[1]})` }) };
+    const road = { ...launchd.road, run: async (argv: readonly string[]) => (argv[1] === "enable" ? { code: 0, output: "" } : { code: 5, output: `Bootstrap failed: 5: Input/output error (${argv[1]})` }) };
     await expect(open({ service: road })).rejects.toThrow(/launchctl bootstrap .* exited 5 and said: Bootstrap failed: 5/);
   });
 
@@ -637,7 +665,7 @@ describe("openHost", () => {
   /** The window opened on this computer's own service, which it installed and loaded. */
   const onServiceHere = (session: HostSession): void => {
     expect(session).toMatchObject({ remote: false, url: `http://127.0.0.1:${launchd.host()!.port}` });
-    expect(launchd.ran.map(argv => argv[1])).toEqual(["bootstrap"]);
+    expect(launchd.ran.map(argv => argv[1])).toEqual(["enable", "bootstrap"]);
   };
 
   it("the account's host means no unit here: one dial admits this computer there and nothing is installed or started on this one", async () => {
@@ -708,7 +736,7 @@ describe("openHost", () => {
     existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0 });
     const session = await open();
     expect(session.port).not.toBe(existing.port);
-    expect(launchd.ran.map(argv => argv[1])).toEqual(["bootstrap"]);
+    expect(launchd.ran.map(argv => argv[1])).toEqual(["enable", "bootstrap"]);
   });
 
   it("attaches to the host named in host.lock when its page carries the digest of the token beside this state file, and sends that page nothing", async () => {
@@ -793,7 +821,7 @@ describe("openHost", () => {
     serving(statePath, existing, { pid: deadPid() });
     const session = await open();
     expect(session.port).toBe(launchd.host()!.port);
-    expect(launchd.ran.map(argv => argv[1])).toEqual(["bootstrap"]);
+    expect(launchd.ran.map(argv => argv[1])).toEqual(["enable", "bootstrap"]);
   });
 });
 

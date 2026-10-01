@@ -9,6 +9,7 @@
 // mounts once.
 import { useCallback, useEffect, useRef } from "react";
 import { PLACES_TICKET_REFUSAL } from "@wsp/protocol";
+import { desktopBridge } from "../lib/desktopShell.js";
 import { useProtocolEvents, useStore } from "../protocol/store.js";
 import { appScheme } from "../terminal/ghosttyConfig.js";
 import { useSettingsAt } from "./settingsContext.js";
@@ -57,6 +58,15 @@ export function useSettingsReads(): void {
       },
       () => {},
     );
+    // The desktop shell answers for its own computer's service alone; a tab, or a window on a host elsewhere, has none.
+    void desktopBridge()
+      ?.loginStart?.()
+      .then(
+        loginStart => {
+          if (live) setReads({ loginStart });
+        },
+        () => {},
+      );
     void api?.sshInclude?.().then(
       sshInclude => {
         if (live) setReads({ sshInclude });
