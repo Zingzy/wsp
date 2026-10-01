@@ -395,6 +395,57 @@ describe("what each agent's own logs say was used", () => {
     ]);
   });
 
+  it("files a long Claude session at each half hour it worked in, not all of it at its last moment", async () => {
+    const text = [
+      usageLine({ id: "msg_1", session: "s1", at: "2026-09-29T10:00:00.000Z", model: "claude-opus-5", usage: { input_tokens: 100, output_tokens: 10 } }),
+      usageLine({ id: "msg_2", session: "s1", at: "2026-09-29T10:20:00.000Z", model: "claude-opus-5", usage: { input_tokens: 50, output_tokens: 5 } }),
+      usageLine({ id: "msg_3", session: "s1", at: "2026-09-29T13:40:00.000Z", model: "claude-opus-5", usage: { input_tokens: 7, output_tokens: 1 } }),
+    ].join("\n");
+    const host = fakeHost({ files: { "~/.claude/projects/-Users-dev-proj/s1.jsonl": text } });
+    const read = await readLogUsage(host, CATALOG_AGENTS.filter(a => a.id === "claude"), { day: at => new Date(at).toISOString().slice(0, 10) });
+    expect(read.map(r => [new Date(r.at).toISOString(), r.tokens.input, r.tokens.output])).toEqual([
+      ["2026-09-29T10:20:00.000Z", 150, 15],
+      ["2026-09-29T13:40:00.000Z", 7, 1],
+    ]);
+  });
+
+  it("files a Codex rollout's use at each token count that grew its total, across hours and days, under the model then running", async () => {
+    const tc = (at: string, input: number, cached: number, output: number) =>
+      line({ timestamp: at, type: "event_msg", payload: { type: "token_count", info: { total_token_usage: { input_tokens: input, cached_input_tokens: cached, output_tokens: output, reasoning_output_tokens: 0, total_tokens: input + output } }, rate_limits: {} } });
+    const text = [
+      line({ timestamp: "2026-09-29T09:00:00.000Z", type: "session_meta", payload: { id: "01a0e365-72f3-77e3-ba3a-3d18e12e9b95", cwd: "/Users/dev/proj" } }),
+      line({ timestamp: "2026-09-29T09:00:01.000Z", type: "turn_context", payload: { model: "gpt-5.5" } }),
+      tc("2026-09-29T09:01:00.000Z", 1_000, 400, 20),
+      tc("2026-09-29T14:02:00.000Z", 3_000, 2_000, 90),
+      line({ timestamp: "2026-09-30T00:59:00.000Z", type: "turn_context", payload: { model: "gpt-5.5-mini" } }),
+      tc("2026-09-30T01:00:00.000Z", 3_500, 2_100, 100),
+    ].join("\n");
+    const host = fakeHost({ files: { "~/.codex/sessions/2026/09/29/rollout-2026-09-29T09-00-00-01a0e365.jsonl": text } });
+    const read = await readLogUsage(host, CATALOG_AGENTS.filter(a => a.id === "codex"), { day: at => new Date(at).toISOString().slice(0, 10) });
+    expect(read.map(r => [r.day, new Date(r.at).toISOString(), r.model, r.tokens.input, r.tokens.cached, r.tokens.output])).toEqual([
+      ["2026-09-29", "2026-09-29T09:01:00.000Z", "gpt-5.5", 1_000, 400, 20],
+      ["2026-09-29", "2026-09-29T14:02:00.000Z", "gpt-5.5", 2_000, 1_600, 70],
+      ["2026-09-30", "2026-09-30T01:00:00.000Z", "gpt-5.5-mini", 500, 100, 10],
+    ]);
+  });
+
+  it("reads again every file a cache from before the half-hour pieces holds", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-usage-cache-"));
+    try {
+      const path = join(dir, "usage-cache.json");
+      const text = usageLine({ id: "msg_1", session: "s1", at: "2026-09-29T10:00:00.000Z", model: "claude-opus-5", usage: { input_tokens: 1, output_tokens: 1 } });
+      const host = fakeHost({ files: { "~/.claude/projects/-Users-dev-proj/s1.jsonl": text } });
+      await readLogUsage(host, CATALOG_AGENTS.filter(a => a.id === "claude"), { cache: fileUsageCache(path) });
+      const held = JSON.parse(readFileSync(path, "utf8")) as { version: number; files: Record<string, { stamp: string; pieces: { tokens: { input: number } }[] }> };
+      for (const file of Object.values(held.files)) file.pieces[0]!.tokens.input = 999;
+      writeFileSync(path, JSON.stringify({ ...held, version: 1 }));
+      const read = await readLogUsage(host, CATALOG_AGENTS.filter(a => a.id === "claude"), { cache: fileUsageCache(path) });
+      expect(read.map(r => r.tokens.input)).toEqual([1]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("reads OpenCode's own per-session totals and cost out of its database, read-only", async () => {
     const db = "/Users/dev/.local/share/opencode/opencode.db";
     const query = "select id, directory, model, cost, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, time_updated from session";
