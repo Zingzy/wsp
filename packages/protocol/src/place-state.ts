@@ -4,8 +4,8 @@
 // fold its own live rows through the same function, so the two cannot count
 // one computer two ways. One rule per kind of place, so a third kind is one
 // entry in the table below.
-import { plural, SPEND_LIMIT_LINE } from "./format.js";
-import type { CloudCap, PlaceCap, PlaceCapSet, PlaceKind, PlaceView, ThreadView, WorkspaceSize, WorkspaceView } from "./index.js";
+import { fmtCost, plural, SPEND_LIMIT_LINE } from "./format.js";
+import type { CloudCap, PlaceCap, PlaceCapSet, PlaceKind, PlaceSettings, PlaceSettingWord, PlaceView, ThreadView, WorkspaceSize, WorkspaceView } from "./index.js";
 import { HERE_PLACE_ID } from "./place-word.js";
 import { isLocalWorkspace, workspaceState } from "./workspace-state.js";
 
@@ -56,12 +56,42 @@ export const phaseHoldsSlot = (w: Pick<WorkspaceView, "phase">): boolean => {
 export type PlacedWorkspace = Pick<WorkspaceView, "id" | "kind" | "machineId" | "place" | "provider" | "phase">;
 export type PlacedThread = Pick<ThreadView, "workspaceId" | "status">;
 
-/** Every number a person can set on a place, in the words a row says it in. */
-const CAP_WORDS: Record<keyof PlaceCapSet, string> = { threads: "threads at once", machines: "machines at once", spendPerDayUsd: "spend per day" };
+/** A dollar figure a person typed, in whole dollars where it has no cents. */
+const dollars = (usd: number): string => (Number.isInteger(usd) ? `$${usd}` : fmtCost(usd));
+
+/** One number of a cap, off the cap that holds it. */
+const capNumber = (cap: PlaceCap | undefined, key: "threads" | "machines" | "spendPerDayUsd"): number | undefined =>
+  cap !== undefined && key in cap ? (cap as Record<string, number>)[key] : undefined;
+
+type SettingView = Pick<PlaceView, "cap" | "capDefault">;
+/** What a row says a setting runs at: the whole phrase, and the figure alone that a default beside it takes. */
+type SettingSaid = { long: string; short: string };
+
+/** Every setting a person can make on a place: the key it is stored under, the words a refusal names it by, and
+ * what a row says it runs at now or by default. */
+const SETTINGS: Record<PlaceSettingWord, { key: keyof PlaceSettings; words: string; reads(place: SettingView, fallback: boolean): SettingSaid | undefined }> = {
+  threads: { key: "threads", words: "threads at once", reads: (p, fallback) => atOnce(capNumber(fallback ? p.capDefault : p.cap, "threads"), "thread") },
+  machines: { key: "machines", words: "machines at once", reads: (p, fallback) => atOnce(capNumber(fallback ? p.capDefault : p.cap, "machines"), "machine") },
+  spend: {
+    key: "spendPerDayUsd",
+    words: "spend per day",
+    reads: (p, fallback) => {
+      const usd = capNumber(fallback ? p.capDefault : p.cap, "spendPerDayUsd");
+      return usd === undefined ? undefined : { long: `${dollars(usd)} a day`, short: dollars(usd) };
+    },
+  },
+};
+
+function atOnce(n: number | undefined, noun: string): SettingSaid | undefined {
+  return n === undefined ? undefined : { long: `${plural(n, noun)} at once`, short: String(n) };
+}
+
+/** The key a setting's word is stored under. */
+export const placeSettingKey = (word: PlaceSettingWord): keyof PlaceSettings => SETTINGS[word].key;
 
 interface PlaceCapRule {
-  /** The numbers this kind takes. */
-  keys: readonly (keyof PlaceCapSet)[];
+  /** The settings this kind takes. */
+  keys: readonly PlaceSettingWord[];
   /** The set numbers over this kind's defaults; nothing where there is no default and nothing was set. */
   capOf(place: Pick<PlaceView, "shape">, set: PlaceCapSet): PlaceCap | undefined;
   /** How many at once the cap allows. */
@@ -90,7 +120,7 @@ const PLACE_CAPS: Record<PlaceKind, PlaceCapRule> = {
     },
   },
   provider: {
-    keys: ["machines", "spendPerDayUsd"],
+    keys: ["machines", "spend"],
     capOf: (_place, set) => ({ machines: set.machines ?? CLOUD_CAP_DEFAULT.machines, spendPerDayUsd: set.spendPerDayUsd ?? CLOUD_CAP_DEFAULT.spendPerDayUsd }),
     atOnce: cap => ("machines" in cap ? cap.machines : 0),
     noun: "machine",
@@ -104,13 +134,31 @@ export function placeCapOf(place: Pick<PlaceView, "kind" | "shape">, set: PlaceC
   return PLACE_CAPS[place.kind].capOf(place, set);
 }
 
-/** Why a set is refused on this place: no number at all, or one its kind does not take. Nothing when every key fits. */
-export function placeCapRefusal(place: Pick<PlaceView, "kind" | "name">, set: PlaceCapSet): string | undefined {
+/** Why a set is refused on this place: nothing set or reset at all, a setting its kind does not take, or one both
+ * set and reset. Nothing when every key fits. */
+export function placeSetRefusal(place: Pick<PlaceView, "kind" | "name">, set: PlaceSettings, reset: readonly PlaceSettingWord[] = []): string | undefined {
   const takes = PLACE_CAPS[place.kind].keys;
-  if (Object.values(set).every(value => value === undefined)) return `nothing to set on ${place.name}: it takes ${takes.map(key => CAP_WORDS[key]).join(" and ")}`;
-  const wrong = (Object.keys(CAP_WORDS) as (keyof PlaceCapSet)[]).filter(key => set[key] !== undefined && !takes.includes(key));
-  if (wrong.length === 0) return undefined;
-  return `${place.name} takes ${takes.map(key => CAP_WORDS[key]).join(" and ")}, not ${wrong.map(key => CAP_WORDS[key]).join(" and ")}`;
+  const said = (words: readonly PlaceSettingWord[]): string => words.map(word => SETTINGS[word].words).join(" and ");
+  const named = (Object.keys(SETTINGS) as PlaceSettingWord[]).filter(word => set[SETTINGS[word].key] !== undefined);
+  if (named.length === 0 && reset.length === 0) return `nothing to set on ${place.name}: it takes ${said(takes)}`;
+  const wrong = [...new Set([...named, ...reset])].filter(word => !takes.includes(word));
+  if (wrong.length > 0) return `${place.name} takes ${said(takes)}, not ${said(wrong)}`;
+  const both = named.filter(word => reset.includes(word));
+  return both.length === 0 ? undefined : `${place.name}: ${said(both)} is both set and reset; name it once`;
+}
+
+/** One place's settings in a line: each its kind takes at the value it runs at, and beside one the person set what
+ * it reads by default. What wsp computers set answers with. */
+export function placeSettingsLine(place: Pick<PlaceView, "kind" | "name" | "settings"> & SettingView): string {
+  const parts = PLACE_CAPS[place.kind].keys.flatMap(word => {
+    const { key, reads } = SETTINGS[word];
+    const now = reads(place, false);
+    if (now === undefined) return [];
+    if (place.settings?.[key] === undefined) return [`${now.long} (the default)`];
+    const fallback = reads(place, true);
+    return [fallback === undefined ? now.long : `${now.long} (${fallback.short} by default)`];
+  });
+  return `${place.name}: ${parts.join(", ")}`;
 }
 
 /** How many of what a place's cap counts run there now: threads whose latest turn is running on a workspace that

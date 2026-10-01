@@ -95,6 +95,9 @@ import {
   type SealedImageExport,
   ProjectImportResult,
   PlaceView,
+  PlaceSettingWord,
+  placeSettingsLine,
+  type PlaceSettings,
   ProjectPlan,
   RECIPE_TICKS,
   RecipeTick,
@@ -816,6 +819,24 @@ export function usageTableLines(read: { accounts: readonly AccountRow[]; used: U
 async function readComputers(client: HostClient): Promise<{ computers: PlaceView[]; spend: PlaceSpend[] }> {
   const [listed, spent] = await Promise.all([client.request<{ places: PlaceView[] }>("places.list"), client.request<{ places: PlaceSpend[] }>("cost.spend")]);
   return { computers: listed.places, spend: spent.places };
+}
+
+/** The settings a reset takes in this process: a cloud's only where a cloud is registered. */
+const CLOUD_SETTINGS: readonly PlaceSettingWord[] = ["machines", "spend"];
+const SETTING_RESETS = PlaceSettingWord.options.filter(word => CLOUD_ON || !CLOUD_SETTINGS.includes(word)) as [PlaceSettingWord, ...PlaceSettingWord[]];
+
+/** One computer's settings made and reset by the host, answered as the row it now reads: by the id off the listing,
+ * since two computers may share a name and the host keys by id. The row passes through as the host wrote it. */
+async function setComputer(client: HostClient, ref: string, set: PlaceSettings, reset: readonly PlaceSettingWord[]): Promise<PlaceView> {
+  const place = await placeNamed(client, ref);
+  return (await client.request<{ place: PlaceView }>("places.set", { placeId: place.id, ...set, ...(reset.length > 0 ? { reset } : {}) })).place;
+}
+
+/** A --spend figure: dollars, zero or more. */
+function dollarsAsked(word: string): number {
+  const usd = Number(word);
+  if (word.trim() === "" || !Number.isFinite(usd) || usd < 0) throw usageRefusal(`--spend takes dollars a day, zero or more, and got ${JSON.stringify(word)}.`, "Write it as --spend 10.");
+  return usd;
 }
 
 /** The SPEND cell: what the row spent today against its spend per day, empty where its kind has no spend limit or
@@ -3447,6 +3468,48 @@ export const ALL_VERBS: readonly Verb[] = [
     }),
   },
   {
+    name: "computers set",
+    cloudFlags: ["machines", "spend"],
+    usage: "wsp computers set <computer> [--threads <n>] [--machines <n>] [--spend <usd>] [--reset <setting>]...",
+    about: "what you set on one of your computers: how many threads run there at once<!-- cloud -->, and on a cloud how many machines at once and how much it spends a day<!-- /cloud -->; --reset takes a setting back to its default",
+    page: "agent",
+    options: { threads: { type: "string" }, machines: { type: "string" }, spend: { type: "string" }, reset: { type: "string", multiple: true } },
+    run: async ctx => {
+      const [ref, ...rest] = ctx.args;
+      if (ref === undefined || rest.length > 0) throw usageRefusal("wsp computers set takes one computer.", usageIs(ctx));
+      const threads = flag(ctx.flags, "threads");
+      const machines = flag(ctx.flags, "machines");
+      const spend = flag(ctx.flags, "spend");
+      const computer = await setComputer(await ctx.client(), ref, {
+        ...(threads !== undefined ? { threads: countAsked("--threads", threads, 1) } : {}),
+        ...(machines !== undefined ? { machines: countAsked("--machines", machines, 1) } : {}),
+        ...(spend !== undefined ? { spendPerDayUsd: dollarsAsked(spend) } : {}),
+      }, flagList(ctx.flags, "reset").map(word => oneOf("reset", SETTING_RESETS, word)!));
+      ctx.out.emit({ computer }, placeSettingsLine(computer));
+      return 0;
+    },
+    tool: tool({
+      description:
+        "Sets what the person may set on one computer and answers its row as it now reads, the same row computers lists: threads, how many threads may run there at once, a new one waiting past it (one per 2.5 GB of that computer's memory up to its cores until it is set)<!-- cloud -->; machines and spend on a cloud, how many machines may run there at once and the dollars a day it may spend before it starts no new machine (3 and $10 until they are set)<!-- /cloud -->. A setting left out keeps what stands, and each word under reset takes that setting back to its default. The row carries cap, what runs there now, capDefault, what it reads by default, and settings, what the person set. A setting the computer's kind does not take, and a call that sets nothing, are refused in one line.",
+      input: {
+        computer: z.string().describe("the computer, by the name computers lists or its id"),
+        threads: z.number().int().min(1).optional().describe("how many threads may run on that computer at once"),
+        machines: z.number().int().min(1).optional().describe("how many machines may run on that cloud at once"),
+        spend: z.number().min(0).optional().describe("the dollars a day that cloud may spend before it starts no new machine"),
+        reset: z.array(z.enum(SETTING_RESETS)).optional().describe("the settings to take back to their defaults, by the same words"),
+      },
+      output: { computer: PlaceView },
+      call: async ({ computer: ref, threads, machines, spend, reset }, deps) => {
+        const computer = await setComputer(await deps.client(), ref, {
+          ...(threads !== undefined ? { threads } : {}),
+          ...(machines !== undefined ? { machines } : {}),
+          ...(spend !== undefined ? { spendPerDayUsd: spend } : {}),
+        }, reset ?? []);
+        return asJson({ computer });
+      },
+    }),
+  },
+  {
     name: "usage",
     usage: "wsp usage [--range day|week|month] [--by agent|account|computer|project]",
     about: "what each agent account signed in on any of your computers may still use, and what was used over a day, a week or a month split one way; two answers, never added together",
@@ -5459,6 +5522,10 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   fast: "run the turn in the agent's fast mode, on a model that offers one; refused naming the model otherwise",
   file: "a file on this computer to send with the message: an image goes as an image, any other file lands in the thread's folder and the message names its path; repeats",
   last: "the final reply alone, the whole message the thread's finished line carries",
+  threads: "how many threads may run on that computer at once; a new one waits past it",
+  machines: "how many machines may run on that cloud at once",
+  spend: "the dollars a day that cloud may spend before it starts no new machine",
+  reset: "a setting to take back to its default, by its flag's word; repeats",
   "max-depth": "how many levels of threads may stand under the root thread while spawning is on; defaults to 1",
   "max-machines": "how many machines may stand at once under one root thread while spawning is on; defaults to 3",
   model: "the model the turn runs on, by the agent's own slug (claude-sonnet-5); the thread's own without it",

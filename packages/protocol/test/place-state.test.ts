@@ -8,7 +8,8 @@ import {
   PlaceView,
   absentComputer,
   placeCapOf,
-  placeCapRefusal,
+  placeSetRefusal,
+  placeSettingsLine,
   placeRoom,
   placeSpendLimit,
   placeStateOf,
@@ -43,16 +44,27 @@ describe("threads at once", () => {
     expect(placeCapOf({ kind: "provider" }, { spendPerDayUsd: 0 })).toEqual({ machines: 3, spendPerDayUsd: 0 });
   });
 
-  it("refuses a number the row's kind does not take, a set with no number, and counts below one", () => {
-    expect(placeCapRefusal({ kind: "computer", name: "spoo" }, { machines: 2 })).toBe("spoo takes threads at once, not machines at once");
-    expect(placeCapRefusal({ kind: "provider", name: "solari" }, { threads: 2 })).toBe("solari takes machines at once and spend per day, not threads at once");
-    expect(placeCapRefusal({ kind: "computer", name: "spoo" }, { threads: 1 })).toBeUndefined();
-    expect(placeCapRefusal({ kind: "provider", name: "solari" }, { spendPerDayUsd: 0 })).toBeUndefined();
-    expect(placeCapRefusal({ kind: "computer", name: "spoo" }, {})).toBe("nothing to set on spoo: it takes threads at once");
-    expect(placeCapRefusal({ kind: "provider", name: "solari" }, { machines: undefined })).toBe("nothing to set on solari: it takes machines at once and spend per day");
+  it("refuses a number the row's kind does not take, set or reset, a set with nothing in it, one key both set and reset, and counts below one", () => {
+    expect(placeSetRefusal({ kind: "computer", name: "spoo" }, { machines: 2 })).toBe("spoo takes threads at once, not machines at once");
+    expect(placeSetRefusal({ kind: "provider", name: "solari" }, { threads: 2 })).toBe("solari takes machines at once and spend per day, not threads at once");
+    expect(placeSetRefusal({ kind: "computer", name: "spoo" }, {}, ["spend"])).toBe("spoo takes threads at once, not spend per day");
+    expect(placeSetRefusal({ kind: "computer", name: "spoo" }, { threads: 1 })).toBeUndefined();
+    expect(placeSetRefusal({ kind: "provider", name: "solari" }, { spendPerDayUsd: 0 })).toBeUndefined();
+    expect(placeSetRefusal({ kind: "computer", name: "spoo" }, {}, ["threads"])).toBeUndefined();
+    expect(placeSetRefusal({ kind: "computer", name: "spoo" }, {})).toBe("nothing to set on spoo: it takes threads at once");
+    expect(placeSetRefusal({ kind: "provider", name: "solari" }, { machines: undefined }, [])).toBe("nothing to set on solari: it takes machines at once and spend per day");
+    expect(placeSetRefusal({ kind: "computer", name: "spoo" }, { threads: 2 }, ["threads"])).toBe("spoo: threads at once is both set and reset; name it once");
     expect(() => PlaceView.shape.cap.parse({ threads: 0 })).toThrow();
     expect(() => PlaceView.shape.cap.parse({ machines: 0, spendPerDayUsd: 10 })).toThrow();
     expect(PlaceView.shape.cap.parse({ machines: 1, spendPerDayUsd: 0 })).toEqual({ machines: 1, spendPerDayUsd: 0 });
+  });
+});
+
+describe("what a place's settings read as in a line", () => {
+  it("says each setting its kind takes at the value it runs at, with the default beside one the person set", () => {
+    expect(placeSettingsLine({ ...spoo, capDefault: { threads: 2 } })).toBe("spoo: 2 threads at once (the default)");
+    expect(placeSettingsLine({ ...spoo, cap: { threads: 1 }, capDefault: { threads: 2 }, settings: { threads: 1 } })).toBe("spoo: 1 thread at once (2 by default)");
+    expect(placeSettingsLine({ ...solari, cap: { machines: 5, spendPerDayUsd: 2.5 }, capDefault: CLOUD_CAP_DEFAULT, settings: { machines: 5, spendPerDayUsd: 2.5 } })).toBe("solari: 5 machines at once (3 by default), $2.50 a day ($10 by default)");
   });
 });
 

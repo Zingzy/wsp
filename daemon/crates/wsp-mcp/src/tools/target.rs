@@ -103,7 +103,7 @@ async fn workspace_id(client: &Client, words: &Words, reference: &str) -> Result
 }
 
 /// A computer by the name or the id the list carries; a word nothing holds is refused with the names there are.
-async fn place_id(client: &Client, words: &Words, word: &str) -> Result<String, Failure> {
+pub async fn place_id(client: &Client, words: &Words, word: &str) -> Result<String, Failure> {
     #[derive(Deserialize)]
     struct Place {
         id: String,

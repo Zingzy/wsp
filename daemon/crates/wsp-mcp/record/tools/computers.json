@@ -381,6 +381,24 @@
                   }
                 ]
               },
+              "capDefault": {
+                "$ref": "#/properties/computers/items/properties/cap"
+              },
+              "settings": {
+                "type": "object",
+                "properties": {
+                  "threads": {
+                    "$ref": "#/properties/computers/items/properties/cap/anyOf/0/properties/threads"
+                  },
+                  "machines": {
+                    "$ref": "#/properties/computers/items/properties/cap/anyOf/1/properties/machines"
+                  },
+                  "spendPerDayUsd": {
+                    "$ref": "#/properties/computers/items/properties/cap/anyOf/1/properties/spendPerDayUsd"
+                  }
+                },
+                "additionalProperties": false
+              },
               "running": {
                 "type": "integer",
                 "minimum": 0
@@ -815,6 +833,24 @@
                     "additionalProperties": false
                   }
                 ]
+              },
+              "capDefault": {
+                "$ref": "#/properties/computers/items/properties/cap"
+              },
+              "settings": {
+                "type": "object",
+                "properties": {
+                  "threads": {
+                    "$ref": "#/properties/computers/items/properties/cap/anyOf/0/properties/threads"
+                  },
+                  "machines": {
+                    "$ref": "#/properties/computers/items/properties/cap/anyOf/1/properties/machines"
+                  },
+                  "spendPerDayUsd": {
+                    "$ref": "#/properties/computers/items/properties/cap/anyOf/1/properties/spendPerDayUsd"
+                  }
+                },
+                "additionalProperties": false
               },
               "running": {
                 "type": "integer",

@@ -58,6 +58,7 @@ pub type Call = Pin<Box<dyn Future<Output = Result<Answer, Refused>> + Send>>;
 
 pub const TOOLS: &[Tool] = &[
     computers::TOOL,
+    computers::SET,
     usage::TOOL,
     skills::SEARCH,
     skills::SHOW,

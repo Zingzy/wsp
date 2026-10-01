@@ -866,7 +866,7 @@ describe("the list of every place", () => {
     const { hostKey, store } = await serving();
     const joined = await join(hostKey, { code: await code() });
     const host = await WsClient.connect(srv!.port, { token: "host-token" });
-    expect(await host.request("places.cap", { placeId: joined.placeId, threads: 1 })).toMatchObject({ ok: true });
+    expect(await host.request("places.set", { placeId: joined.placeId, threads: 1 })).toMatchObject({ ok: true });
     host.close();
     joined.client.close();
     await until(async () => (await placesOf()).find(p => p.id === joined.placeId)!.present === false);
@@ -899,7 +899,7 @@ describe("the list of every place", () => {
     expect(await relayed.request("places.add", { address: "root@10.0.0.9" })).toMatchObject({ ok: false, error: PLACES_TICKET_REFUSAL });
     expect(await relayed.request("places.dial", { placeId: "p_1" })).toMatchObject({ ok: false, error: PLACES_TICKET_REFUSAL });
     expect(await relayed.request("places.loginLanded", { placeId: "p_1", agent: "codex" })).toMatchObject({ ok: false, error: PLACES_TICKET_REFUSAL });
-    expect(await relayed.request("places.cap", { placeId: "p_1", threads: 1 })).toMatchObject({ ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
+    expect(await relayed.request("places.set", { placeId: "p_1", threads: 1 })).toMatchObject({ ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
     relayed.close();
     expect(THREAD_OPS).not.toContain("places.list");
     expect(THREAD_OPS).not.toContain("places.remove");
@@ -908,7 +908,7 @@ describe("the list of every place", () => {
 });
 
 describe("a place's cap and what runs there", () => {
-  const capOf = async (c: WsClient, placeId: string, set: Record<string, number>): Promise<Record<string, unknown>> => c.request("places.cap", { placeId, ...set });
+  const capOf = async (c: WsClient, placeId: string, set: Record<string, number>): Promise<Record<string, unknown>> => c.request("places.set", { placeId, ...set });
 
   it("gives every row its cap: a joined computer the rule's off its shape, this computer the rule's off its own, a cloud 3 machines and $10 a day", async () => {
     const { hostKey } = await serving({ provider: { id: "solari", rateUsdPerHour: 0.11 } });
@@ -937,6 +937,26 @@ describe("a place's cap and what runs there", () => {
     expect(await store.get("caps", "solari")).toEqual({ machines: 5, spendPerDayUsd: 0 });
     expect(await store.get("caps", joined.placeId)).toEqual({ threads: 1 });
     expect(await store.get("caps", HERE_PLACE_ID)).toBeUndefined();
+  });
+
+  it("says on every row its kind's default beside the cap and what the person set, and a reset takes a number back to the default", async () => {
+    const { hostKey, store } = await serving({ provider: { id: "solari", rateUsdPerHour: 0.11 } });
+    const joined = await join(hostKey, { code: await code(), report: report("spoo", { shape: { cpu: 4, memMb: 8192 } }) });
+    sockets.push(joined.client.ws);
+    const unset = (await placesOf()).find(p => p.id === joined.placeId)!;
+    expect(unset).toMatchObject({ cap: { threads: 3 }, capDefault: { threads: 3 } });
+    expect(unset.settings).toBeUndefined();
+    const host = await WsClient.connect(srv!.port, { token: "host-token" });
+    expect(await capOf(host, joined.placeId, { threads: 1 })).toMatchObject({ ok: true, place: { cap: { threads: 1 }, capDefault: { threads: 3 }, settings: { threads: 1 } } });
+    expect(await capOf(host, "solari", { machines: 5, spendPerDayUsd: 2 })).toMatchObject({ ok: true, place: { cap: { machines: 5, spendPerDayUsd: 2 }, capDefault: { machines: 3, spendPerDayUsd: 10 } } });
+    const back = (await host.request("places.set", { placeId: joined.placeId, reset: ["threads"] })) as { ok: boolean; place: PlaceView };
+    expect(back).toMatchObject({ ok: true, place: { cap: { threads: 3 } } });
+    expect(back.place.settings).toBeUndefined();
+    expect(await host.request("places.set", { placeId: "solari", reset: ["spend"] })).toMatchObject({ ok: true, place: { cap: { machines: 5, spendPerDayUsd: 10 }, settings: { machines: 5 } } });
+    expect(await host.request("places.set", { placeId: joined.placeId, threads: 2, reset: ["threads"] })).toMatchObject({ ok: false, kind: "usage", error: "spoo: threads at once is both set and reset; name it once" });
+    host.close();
+    expect(await store.get("caps", joined.placeId)).toBeUndefined();
+    expect(await store.get("caps", "solari")).toEqual({ machines: 5 });
   });
 
   it("refuses a number the row's kind does not take, a place this host does not hold and a set with no number, as usage, and writes nothing", async () => {
@@ -1012,7 +1032,7 @@ describe("a cloud's spend per day", () => {
       runtime = createRuntime({ backend, places: wiredPlace("solari", backend), store: memoryStore(), adapters: {}, clock: fc.clock, idle: { defaultWindowMs: 24 * HOUR }, placeLinks: wiring(newPlaceKeyPair(), { id: "solari", rateUsdPerHour: 0.11 }), local: fakeLocal(root) });
       srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
       const c = await WsClient.connect(srv.port, { token: "host-token" });
-      expect(await c.request("places.cap", { placeId: "solari", spendPerDayUsd: 0.2 })).toMatchObject({ ok: true });
+      expect(await c.request("places.set", { placeId: "solari", spendPerDayUsd: 0.2 })).toMatchObject({ ok: true });
       c.close();
       const opened = async (name: string) => {
         const made = await createOn(runtime!, { on: "solari", golden: "snap_g", name });
@@ -1033,7 +1053,7 @@ describe("a cloud's spend per day", () => {
       await expect(createOn(runtime, { on: HERE_PLACE_ID, name: "mac" })).resolves.toMatchObject({ name: "mac" });
       // A higher spend per day lets the next machine through the same day.
       const again = await WsClient.connect(srv.port, { token: "host-token" });
-      expect(await again.request("places.cap", { placeId: "solari", spendPerDayUsd: 1 })).toMatchObject({ ok: true });
+      expect(await again.request("places.set", { placeId: "solari", spendPerDayUsd: 1 })).toMatchObject({ ok: true });
       again.close();
       await expect(createOn(runtime, { on: "solari", golden: "snap_g", name: "third" })).resolves.toMatchObject({ name: "third" });
     } finally {

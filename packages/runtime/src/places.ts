@@ -23,8 +23,10 @@ import {
   DAEMON_VERSION,
   forkRoom,
   placeCapOf,
-  placeCapRefusal,
-  PlaceCapSet,
+  placeSetRefusal,
+  placeSettingKey,
+  PlaceSettings,
+  type PlaceSettingWord,
   placeLinkTranscript,
   placeRefusalTranscript,
   isPlainPath,
@@ -103,7 +105,7 @@ import type { Store } from "./store.js";
 
 /** One document per joined computer, keyed by the id this host knows it by. */
 const PLACES = "places";
-/** One document per place a person set a cap on, keyed by place id, holding only the numbers they set. */
+/** One document per place a person set anything on, keyed by place id, holding only what they set. */
 const CAPS = "caps";
 /** The one document naming which place a verb means when nobody says: the last one added. */
 const DEFAULT_COLLECTION = "place-default";
@@ -466,9 +468,10 @@ export interface PlaceDoor {
    * it holds none. Answers what came back and writes it on the record, so a window opened later reads the same
    * answer. Nothing is installed and nothing is left running either way. */
   dial(placeId: string, now: number): Promise<PlaceDial>;
-  /** Sets numbers on one place's cap, each key left out keeping what stands, and answers the row as it now reads.
-   * Refused as usage for a place this host does not hold and for a key the place's kind does not take. */
-  cap(placeId: string, set: PlaceCapSet): Promise<{ place: PlaceView }>;
+  /** Sets what a person may set on one place, each key left out keeping what stands and each word reset taking its
+   * setting back to the default, and answers the row as it now reads. Refused as usage for a place this host does
+   * not hold and for a setting the place's kind does not take. */
+  set(placeId: string, set: PlaceSettings, reset?: readonly PlaceSettingWord[]): Promise<{ place: PlaceView }>;
   /** The port on this computer's loopback that carries to the daemon on a linked place, opened at the first ask
    * and held with the link. Throws with the place's name when it is not connected or has said no port. */
   road(placeId: string): Promise<number>;
@@ -823,8 +826,8 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     const found = await store.get(PLACES, placeId);
     return isPlaceRecord(found) ? found : undefined;
   };
-  const capSetOf = async (placeId: string): Promise<PlaceCapSet> => {
-    const parsed = PlaceCapSet.safeParse(await store.get(CAPS, placeId));
+  const settingsOf = async (placeId: string): Promise<PlaceSettings> => {
+    const parsed = PlaceSettings.safeParse(await store.get(CAPS, placeId));
     return parsed.success ? parsed.data : {};
   };
   /** Every row's id and kind without asking any computer anything: what the running count places a workspace by. */
@@ -833,10 +836,18 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     ...(await records()).map(r => ({ id: r.id, kind: "computer" as const })),
     ...providerIds().map(id => ({ id, kind: "provider" as const })),
   ];
-  /** A row with its cap and what that cap counts, both read now. */
+  /** A row with its cap, its kind's default and what the person set, and what that cap counts, all read now. */
   const withCap = async (row: PlaceView, ids: readonly Pick<PlaceView, "id" | "kind">[]): Promise<PlaceView> => {
-    const cap = placeCapOf(row, await capSetOf(row.id));
-    return { ...row, ...(cap !== undefined ? { cap } : {}), running: await recording.runningOn(row.id, ids) };
+    const settings = await settingsOf(row.id);
+    const cap = placeCapOf(row, settings);
+    const capDefault = placeCapOf(row);
+    return {
+      ...row,
+      ...(cap !== undefined ? { cap } : {}),
+      ...(capDefault !== undefined ? { capDefault } : {}),
+      ...(Object.keys(settings).length > 0 ? { settings } : {}),
+      running: await recording.runningOn(row.id, ids),
+    };
   };
   /** The version the place reports once it has dialled back, or what it still reads when the wait runs out. The
    * record is what a link writes its report onto, so this reads the one fact every other row reads. */
@@ -1976,16 +1987,20 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
 
     rows: async () => rowsOf(await records()),
 
-    async cap(placeId, set) {
+    async set(placeId, set, reset = []) {
       const marked = (await markHeld()) ?? HERE_PLACE_ID;
       const record = placeId === HERE_PLACE_ID ? undefined : await recordOf(placeId);
       const row = placeId === HERE_PLACE_ID ? hereRow(marked) : record !== undefined ? joinedRow(record, marked) : providerIds().includes(placeId) ? providerRow(placeId, marked) : undefined;
       if (row === undefined) throw Object.assign(new Error(noSuchPlaceRefusal(placeId, [wiring.here().name, ...(await records()).map(r => r.name), ...providerIds()])), { kind: "usage" });
-      const refused = placeCapRefusal(row, set);
+      const refused = placeSetRefusal(row, set, reset);
       if (refused !== undefined) throw Object.assign(new Error(refused), { kind: "usage" });
       const given = Object.fromEntries(Object.entries(set).filter(([, value]) => value !== undefined));
-      // Read and written in one turn, so two numbers set at once on one place both stand.
-      await inTurn(async () => store.put(CAPS, placeId, { ...(await capSetOf(placeId)), ...given }));
+      const dropped = new Set<string>(reset.map(placeSettingKey));
+      // Read and written in one turn, so two settings made at once on one place both stand.
+      await inTurn(async () => {
+        const next = Object.fromEntries(Object.entries({ ...(await settingsOf(placeId)), ...given }).filter(([key]) => !dropped.has(key)));
+        await (Object.keys(next).length === 0 ? store.delete(CAPS, placeId) : store.put(CAPS, placeId, next));
+      });
       return { place: await withCap(row, await rowIds()) };
     },
 

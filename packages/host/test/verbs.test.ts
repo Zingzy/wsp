@@ -3984,6 +3984,36 @@ describe("wsp verbs over the host", () => {
     expect(io.errors).toEqual(["wsp threads: unauthorized"]);
   });
 
+  describe("what a person sets on one of their computers", () => {
+    it("sets threads at once on a computer by its name or id, answers the row with its default beside it, and a reset takes it back", async () => {
+      const here = (await rt.places!.rows()).find(p => p.id === HERE_PLACE_ID)!;
+      const fallback = (here.capDefault as { threads: number }).threads;
+      const set = await run("computers", "set", HERE_PLACE_ID, "--threads", "2");
+      expect(set.code, set.io.errors.join("\n")).toBe(0);
+      expect(set.io.lines).toEqual([`${here.name}: 2 threads at once (${fallback} by default)`]);
+      expect((await rt.places!.rows()).find(p => p.id === HERE_PLACE_ID)).toMatchObject({ cap: { threads: 2 }, settings: { threads: 2 } });
+      const asJson = await run("computers", "set", here.name, "--threads", "1", "--json");
+      expect(json(asJson.io).at(-1)).toMatchObject({ computer: { id: HERE_PLACE_ID, cap: { threads: 1 }, capDefault: { threads: fallback } } });
+      const back = await run("computers", "set", HERE_PLACE_ID, "--reset", "threads");
+      expect(back.io.lines).toEqual([`${here.name}: ${fallback} ${fallback === 1 ? "thread" : "threads"} at once (the default)`]);
+      expect((await rt.places!.rows()).find(p => p.id === HERE_PLACE_ID)!.settings).toBeUndefined();
+    });
+
+    it("refuses a count that is not a whole number of one or more, a word reset does not take, and a line that sets nothing, as usage", async () => {
+      const zero = await run("computers", "set", HERE_PLACE_ID, "--threads", "0");
+      expect(zero.code).toBe(EXIT_CODES.usage);
+      expect(zero.io.errors[0]).toBe('wsp computers set: --threads takes a whole number of one or more, and got "0". Write it as --threads <n>.');
+      const wrong = await run("computers", "set", HERE_PLACE_ID, "--reset", "everything");
+      expect(wrong.code).toBe(EXIT_CODES.usage);
+      expect(wrong.io.errors[0]).toContain("--reset takes one of threads");
+      const nothing = await run("computers", "set", HERE_PLACE_ID);
+      expect(nothing.code).toBe(EXIT_CODES.usage);
+      expect(nothing.io.errors[0]).toContain("nothing to set on");
+      const none = await run("computers", "set");
+      expect(none.code).toBe(EXIT_CODES.usage);
+    });
+  });
+
   describe("what the agents on a workspace may do", () => {
     it("the switch is on under the default caps until a person turns it off, and the listing and the card read it off the record", async () => {
       await run("new", "alpha");
