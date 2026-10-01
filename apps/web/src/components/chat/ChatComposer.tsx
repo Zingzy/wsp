@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The composer under the chat thread: the transplanted prompt editor, slash
-// menu, send and stop buttons over one draft per workspace. Enter starts one
-// turn through sessions.start in the thread the view shows unless a new thread
+// menu, send and stop buttons over one draft per workspace. The send key the
+// person picked (Enter, or the platform's mod with Enter, the other making a
+// new line) starts one turn through sessions.start in the thread the view shows unless a new thread
 // was requested; the runtime resumes that thread's latest session, or, after a
 // launch that failed, runs the message as its first turn. A failed send puts
 // the draft back. Stop
@@ -68,7 +69,7 @@
 // model, its window and the effort, so a change mid-thread applies at the
 // next turn, and never the agent or the access, which are that thread's own
 // off its rows.
-import { cn } from "../../lib/utils";
+import { cn, isMacPlatform } from "../../lib/utils";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode, type ClipboardEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { PaperclipIcon } from "lucide-react";
 import { composerHeldLine, HOST_ASLEEP_SEND, FILES_MAX, FILE_MAX_WORDS, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, movesRunningAccess, noImagesLine, readsImages, screenCommandLine, screenCommandTyped, screenCommandsOf, sendRefusal, type SendRefusalKind, type WorkspaceState } from "@wsp/protocol";
@@ -83,7 +84,7 @@ import { DaemonOpError, fsFiles, gitPrList } from "../../terminal/daemon-fs";
 import { useAgentsReport } from "../agents/useAgentsReport";
 import { addNotice } from "../../notices/store";
 import { useRightPanelStore, selectWorkspaceRightPanelState } from "../../rightPanelStore";
-import { collapseExpandedComposerCursor, composerSubmissionIntentForEnter, detectComposerTrigger, expandCollapsedComposerCursor, insertComposerBlock, isCollapsedCursorAdjacentToInlineToken, replaceTextRange } from "../../composer-logic";
+import { collapseExpandedComposerCursor, detectComposerTrigger, enterSends, expandCollapsedComposerCursor, insertComposerBlock, isCollapsedCursorAdjacentToInlineToken, replaceTextRange } from "../../composer-logic";
 import { hostItemText, serializeComposerMention, splitPromptIntoComposerSegments } from "../../composer-editor-mentions";
 import { ComposerPromptEditor, type ComposerCommandKey, type ComposerPromptEditorHandle } from "../ComposerPromptEditor";
 import { asideQuestion, catalogFromHarness, composerPlaceholder, offersSlashCommands, slashHoldLine } from "./adapt";
@@ -230,6 +231,7 @@ export function ChatComposer({
   const conn = useStore(s => s.conn);
   const sessions = useStore(s => s.sessions[workspaceId]);
   const steers = useStore(s => s.preferences.midTurn === "steer");
+  const sendWith = useStore(s => s.preferences.sendWith);
   const state = useWorkspaceState(workspaceId);
   const workspace = useWorkspace(workspaceId);
   const [stop, setStop] = useState<StopAttempt | null>(null);
@@ -840,20 +842,14 @@ export function ChatComposer({
         return recall(key === "ArrowUp" ? "backward" : "forward");
       }
       if (key === "Enter") {
-        const intent = composerSubmissionIntentForEnter({
-          isMobileViewport: false,
-          shiftKey: event.shiftKey,
-          modifierKey: event.metaKey || event.ctrlKey,
-          isDraftThread: false,
-        });
-        if (intent !== null) {
+        if (enterSends({ shiftKey: event.shiftKey, modKey: isMacPlatform(navigator.platform) ? event.metaKey : event.ctrlKey, sendWith })) {
           send();
           return true;
         }
       }
       return false;
     },
-    [activeItemId, dismissTrigger, highlight, items, menuOpen, recall, selectItem, send, trigger],
+    [activeItemId, dismissTrigger, highlight, items, menuOpen, recall, selectItem, send, sendWith, trigger],
   );
 
   // A home's thread carries a history-unavailable row and no message, so the count is of messages alone.

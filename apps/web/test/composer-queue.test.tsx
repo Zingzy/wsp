@@ -360,15 +360,14 @@ describe("composer queue", () => {
     expect(started[0]!.attachments?.map(a => a.name)).toEqual(["notes.md"]);
   });
 
-  it("with queue picked, the default, a send during a turn waits behind it even where the harness steers, and Ctrl+Enter is no road around that pick", async () => {
+  it("with queue picked, the default, a send during a turn waits behind it even where the harness steers", async () => {
     const { api, started, interrupted, steered, emit } = fixtureApi({}, [runningRow], [catalog(true)]);
     await setup(api);
     emit({ type: "session.start", ...scope, prompt: "go" });
     await waitFor(() => expect(useStore.getState().sessions[WS]).toHaveLength(1));
     await waitFor(() => expect(useStore.getState().harnessesByWorkspace[WS]).toHaveLength(1));
     await enter("one");
-    await typeInto(composerEditor(), "two");
-    await press(composerEditor(), "Enter", { ctrlKey: true });
+    await enter("two");
     await waitFor(() => expect(queued()).toEqual(["one", "two"]));
     expect(steered).toEqual([]);
     expect(interrupted).toEqual([]);

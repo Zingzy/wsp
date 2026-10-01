@@ -476,6 +476,10 @@ describe("Keybindings", () => {
       [KEYBINDINGS_WORDS.submitComment, [["⌘Enter"]]],
       [KEYBINDINGS_WORDS.leaveSettings, [["Esc"]]],
     ]);
+    // The send line reads the key the person picked on General, in the platform's spelling.
+    const sendKeys = (platform: string) => keybindingCards(DEFAULT_KEYBINDINGS, { platform, desktopShell: true }, undefined, "mod-enter")[3]!.items.find(item => item.id === "send");
+    expect(sendKeys("MacIntel")).toMatchObject({ keys: [["⌘Enter"]] });
+    expect(sendKeys("Linux x86_64")).toMatchObject({ keys: [["Ctrl+Enter"]] });
   });
 
   it("stands on the page as lines with keycaps, no row and no description", async () => {

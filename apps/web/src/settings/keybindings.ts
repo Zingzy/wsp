@@ -7,7 +7,7 @@
 // chord replacing all of its defaults; the nine jumps share a line one chord
 // cannot stand for, and the fixed keys are not rules, so both stay as drawn.
 import { createElement } from "react";
-import type { Preferences, PreferencesPatch } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, type Preferences, type PreferencesPatch, type SendKey } from "@wsp/protocol";
 import { DEFAULT_KEYBINDINGS, parseKeybindingShortcut } from "../keybindingDefaults.js";
 import { rulesWith } from "../keybindingOverrides.js";
 import { browserTabClaimsShortcut, formatShortcutLabel } from "../keybindings.js";
@@ -66,28 +66,30 @@ function linesOf(rules: ReadonlyArray<KeybindingRule>, commands: readonly Keybin
   });
 }
 
-/** The three keys that are not rules, in the platform's own spelling of the one chord among them. */
-function fixedLines(read: KeybindingsRead): SettingsLineData[] {
+/** The three keys that are not rules, in the platform's own spelling of the chords among them; the send is the key
+ * the person picked on General. */
+function fixedLines(read: KeybindingsRead, sendWith: SendKey): SettingsLineData[] {
   const submit = parseKeybindingShortcut("mod+enter");
+  const modEnter = submit === null ? "Enter" : formatShortcutLabel(submit, read.platform);
   return [
-    { kind: "line", id: "send", label: KEYBINDINGS_WORDS.sendMessage, keys: [["Enter"]] },
-    { kind: "line", id: "submit-comment", label: KEYBINDINGS_WORDS.submitComment, keys: [[submit === null ? "Enter" : formatShortcutLabel(submit, read.platform)]] },
+    { kind: "line", id: "send", label: KEYBINDINGS_WORDS.sendMessage, keys: [[sendWith === "mod-enter" ? modEnter : "Enter"]] },
+    { kind: "line", id: "submit-comment", label: KEYBINDINGS_WORDS.submitComment, keys: [[modEnter]] },
     { kind: "line", id: "leave-settings", label: KEYBINDINGS_WORDS.leaveSettings, keys: [["Esc"]] },
   ];
 }
 
-export function keybindingCards(rules: ReadonlyArray<KeybindingRule>, read: KeybindingsRead, edit?: KeybindingsEdit): SettingsCardData[] {
+export function keybindingCards(rules: ReadonlyArray<KeybindingRule>, read: KeybindingsRead, edit?: KeybindingsEdit, sendWith: SendKey = DEFAULT_PREFERENCES.sendWith): SettingsCardData[] {
   return [
     { id: "shell", items: linesOf(rules, SHELL, read, edit) },
     { id: "work", head: KEYBINDINGS_WORDS.workspacesAndThreads, items: linesOf(rules, WORK, read, edit) },
     { id: "terminal", head: KEYBINDINGS_WORDS.terminal, items: linesOf(rules, TERMINAL, read, edit) },
-    { id: "fixed", head: KEYBINDINGS_WORDS.fixed, items: fixedLines(read) },
+    { id: "fixed", head: KEYBINDINGS_WORDS.fixed, items: fixedLines(read, sendWith) },
   ];
 }
 
 export function keybindingsCards(ctx: SettingsContext): SettingsCardData[] {
   const overrides = ctx.preferences.keybindings;
-  return keybindingCards(rulesWith(DEFAULT_KEYBINDINGS, overrides), { platform: ctx.platform, desktopShell: ctx.desktopShell }, { overrides, write: ctx.setPreferences });
+  return keybindingCards(rulesWith(DEFAULT_KEYBINDINGS, overrides), { platform: ctx.platform, desktopShell: ctx.desktopShell }, { overrides, write: ctx.setPreferences }, ctx.preferences.sendWith);
 }
 
 /** The one patch Restore defaults writes: every command back on its defaults. */
