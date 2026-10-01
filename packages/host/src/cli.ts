@@ -551,8 +551,14 @@ export function localWiring(
   const backend = new LocalBackend({ root, env });
   // Started on the first dial and kept: a host nobody opens a pane on starts no process, binds no port on this
   // computer and writes none of the daemon's own files under the person's home.
+  let running: number | undefined;
   const daemon = startOnce(
-    () => startDaemon({ root: home, workFolder: backend.workFolder(), rootsPath, inboxDir: hostInboxDir(statePath), readingsDir: hostReadingsDir(statePath), say }),
+    async () => {
+      running = undefined;
+      const started = await startDaemon({ root: home, workFolder: backend.workFolder(), rootsPath, inboxDir: hostInboxDir(statePath), readingsDir: hostReadingsDir(statePath), say });
+      running = started.version;
+      return started;
+    },
     why => {
       const last = why.split("\n").map(l => l.trim()).filter(l => l !== "").at(-1) ?? why;
       return cappedLine(`the daemon for this computer's workspace did not start, so its terminal, files and processes have nothing to dial: ${last}`);
@@ -567,7 +573,7 @@ export function localWiring(
     ...(copier !== undefined ? { copier } : {}),
     // The binary the copy road runs, read off the daemon this host starts for its own workspace: a host rebuilt
     // without its binary runs beside an older one, which knows none of this wsp's verbs.
-    hereDaemon: { version: async () => (await daemon.get()).version, fix: daemonFixLine(runningWsp()) },
+    hereDaemon: { version: async () => (await daemon.get()).version, held: () => (daemon.held() === undefined ? undefined : running), fix: daemonFixLine(runningWsp()) },
     platform: hostPlatform(),
     env: () => ({
       ...Object.fromEntries(Object.entries(env).filter((e): e is [string, string] => e[1] !== undefined)),

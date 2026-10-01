@@ -334,6 +334,16 @@ describe("the doctor's line for a place behind this wsp", () => {
     expect(await hereDaemonLines()).toEqual([]);
   });
 
+  it("says this computer's own row once, off its own reading, and never with the line that moves a joined computer", async () => {
+    const here = { version: async () => DAEMON_VERSION - 1, fix: "npm i -g @zingzy/wsp" };
+    const lines = await placesBehindLines(listing([
+      { id: HERE_PLACE_ID, kind: "computer", name: "mac", default: true, daemonVersion: DAEMON_VERSION - 1 },
+      { id: "p_1", kind: "computer", name: "spoo", default: false, daemonVersion: DAEMON_VERSION - 5 },
+    ]), Date.now(), here);
+    expect(lines).toHaveLength(2);
+    expect(lines.join("\n")).not.toContain(placeUpdateLine("mac"));
+  });
+
   it("reads the line that stages the binary off the road this wsp was installed by", async () => {
     expect(daemonFixLine({ argv: ["/usr/local/bin/node", "/usr/local/lib/node_modules/@zingzy/wsp/dist/bin.js"] })).toBe("npm i -g @zingzy/wsp");
     expect(daemonFixLine({ argv: ["/n", "/x"], shim: "/Applications/wsp.app/Contents/Resources/bin/wsp" })).toBe("updating the wsp app");

@@ -891,7 +891,7 @@ describe("runtime wire types", () => {
     expect(new Set(wire.DEVICE_OPS).size).toBe(wire.DEVICE_OPS.length);
     const held = [
       "sessions.start", "sessions.steer", "sessions.interrupt", "sessions.rename", "sessions.answer", "sessions.access", "sessions.aside", "sessions.rewind", "sessions.run", "workspaces.exec", "workspaces.bringBack", "daemon.open", "daemon.send", "daemon.close",
-      "places.add", "places.update", "places.remove", "places.dial", "places.cap", "places.loginLanded", "places.doctor", "places.door", "places.mint", "places.sshHosts", "projects.add",
+      "places.add", "places.update", "places.remove", "places.dial", "places.set", "places.loginLanded", "places.doctor", "places.door", "places.mint", "places.sshHosts", "projects.add",
       "init.keys", "init.start", "init.answer", "init.step", "init.draft", "init.retry", "init.build", "init.signInCode", "init.cancel", "image.build", "golden.prepare", "golden.seal",
       "image.export", "host.folders", "agents.read", "servers.tools", "servers.icon", "agents.signIn", "servers.signIn", "agents.signInCode", "agents.signInStop", "agents.signInLine", "agents.key", "agents.addTools", "skills.search", "skills.get", "skills.preview", "skills.add", "skills.remove", "skills.toggle", "servers.add", "servers.remove", "servers.toggle", "project.seed.plan", "project.plan", "project.import", "project.export",
       "pair.issue", "pair.redeem", "seal.open", "device.auth", "place.join", "place.auth", "place.prove", "host.restart",
@@ -915,11 +915,12 @@ describe("runtime wire types", () => {
     // The newest release is read by every window the person has, their phone's included; a restart is not a phone's.
     for (const op of ["status.list", "workspaces.create", "release.get", "release.check"]) expect(wire.DEVICE_OPS).toContain(op);
     // A cap is the person's number on their own computer; no thread and no paired device sets it.
-    expect(THREAD_OPS).not.toContain("places.cap");
-    expect(RuntimeRequest.parse({ id: 1, op: "places.cap", placeId: "p_1", threads: 1 })).toEqual({ id: 1, op: "places.cap", placeId: "p_1", threads: 1 });
-    expect(RuntimeRequest.parse({ id: 1, op: "places.cap", placeId: "solari", spendPerDayUsd: 0 })).toMatchObject({ spendPerDayUsd: 0 });
-    expect(() => RuntimeRequest.parse({ id: 1, op: "places.cap", placeId: "p_1", threads: 0 })).toThrow();
-    expect(() => RuntimeRequest.parse({ id: 1, op: "places.cap", placeId: "p_1", machines: 1.5 })).toThrow();
+    expect(THREAD_OPS).not.toContain("places.set");
+    expect(RuntimeRequest.parse({ id: 1, op: "places.set", placeId: "p_1", threads: 1 })).toEqual({ id: 1, op: "places.set", placeId: "p_1", threads: 1 });
+    expect(RuntimeRequest.parse({ id: 1, op: "places.set", placeId: "solari", spendPerDayUsd: 0 })).toMatchObject({ spendPerDayUsd: 0 });
+    expect(() => RuntimeRequest.parse({ id: 1, op: "places.set", placeId: "p_1", threads: 0 })).toThrow();
+    expect(() => RuntimeRequest.parse({ id: 1, op: "places.set", placeId: "p_1", machines: 1.5 })).toThrow();
+    expect(() => RuntimeRequest.parse({ id: 1, op: "places.set", placeId: "p_1", reset: ["everything"] })).toThrow();
     expect(wire.deviceHeldRefusal("workspaces.exec")).toBe("workspaces.exec is not a paired computer's to ask for until the owner gives this device a role; run it on the computer the host runs on");
   });
 

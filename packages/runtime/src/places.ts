@@ -21,10 +21,18 @@ import {
   PLACE_LEAVE_LINE,
   PLACE_LINK_NONCE_BYTES,
   DAEMON_VERSION,
+  NAP_AFTER_MS,
   forkRoom,
   placeCapOf,
-  placeCapRefusal,
-  PlaceCapSet,
+  placeSetRefusal,
+  placeSettingKey,
+  PlaceSettings,
+  type PlaceSettingsAsk,
+  type PlaceSettingWord,
+  AGENTS_ON,
+  agentsFrom,
+  placeTakes,
+  settingFor,
   placeLinkTranscript,
   placeRefusalTranscript,
   isPlainPath,
@@ -85,6 +93,7 @@ import {
   twoPlacesRefusal,
   placeBehindLine,
   placeDaemonBehind,
+  placeUpdateLine,
   buildsImages,
   linkedOver,
   type PlaceProveRequest,
@@ -95,7 +104,7 @@ import { CATALOG_AGENTS, keyEnvOf, mintsToken, sharedFileIn, sharedOn } from "@w
 import type { WebSocket } from "ws";
 import type { DeviceDoor } from "./devices.js";
 import { openPlaceForward, type PlaceForward } from "./place-forward.js";
-import type { PlaceBackends } from "./runtime.js";
+import type { HereDaemon, PlaceBackends } from "./runtime.js";
 import type { DaemonChannel } from "./daemon-channel.js";
 import { connectDaemon, type DaemonReach } from "./reach.js";
 import { freshEphemeral, makeSeal, newPlaceKeyPair, sealKeys, sharedSecret, signPlaceBytes, verifyPlaceBytes, type PlaceKeyPair, type Seal } from "@wsp/keys";
@@ -103,7 +112,7 @@ import type { Store } from "./store.js";
 
 /** One document per joined computer, keyed by the id this host knows it by. */
 const PLACES = "places";
-/** One document per place a person set a cap on, keyed by place id, holding only the numbers they set. */
+/** One document per place a person set anything on, keyed by place id, holding only what they set. */
 const CAPS = "caps";
 /** The one document naming which place a verb means when nobody says: the last one added. */
 const DEFAULT_COLLECTION = "place-default";
@@ -355,6 +364,12 @@ export interface PlaceDoorOptions {
    * there, or the reason the last one stopped. The runtime holds the builds, so it answers; nothing for a copy that
    * stands. `stopped` says which of the two the line is. */
   copyBuild?: (placeId: string) => { line: string; stopped: boolean } | undefined;
+  /** How long a quiet workspace runs before it naps where its place names no window: the runtime's own default. */
+  napMs?: number;
+  /** The daemon this host runs for the computer it runs on, whose version its own row carries. */
+  hereDaemon?: HereDaemon;
+  /** A person changed the nap after on one place: the runtime arms its workspaces there again under the new window. */
+  napChanged?: (placeId: string) => void;
   /** How long a computer has to dial back after its join before an install gives up on it. */
   joinWaitMs?: number;
   /** How long a computer that took an update has to dial back running it before the row is answered with what it
@@ -433,6 +448,9 @@ export interface PlaceDoor {
   /** The name a place goes by, for the sentences a person reads; the id itself for a place this host holds no
    * record of. Answered without a read, so a refusal built while a road is running names the computer. */
   nameOf(placeId: string): string;
+  /** What the person set on one place, as load read it and every set since wrote it: answered without a read, since
+   * the idle policy asks it each time it arms a workspace there. */
+  settingsAt(placeId: string): PlaceSettings;
   /** The sign-in word per agent on one computer, off the report it last sent and the vault this host holds: the
    * same reading its row carries, so what a turn is handed and what the screen says cannot part ways. Answered
    * without a read of the store, since every launch on that computer asks it. Nothing for a place this host holds
@@ -466,9 +484,10 @@ export interface PlaceDoor {
    * it holds none. Answers what came back and writes it on the record, so a window opened later reads the same
    * answer. Nothing is installed and nothing is left running either way. */
   dial(placeId: string, now: number): Promise<PlaceDial>;
-  /** Sets numbers on one place's cap, each key left out keeping what stands, and answers the row as it now reads.
-   * Refused as usage for a place this host does not hold and for a key the place's kind does not take. */
-  cap(placeId: string, set: PlaceCapSet): Promise<{ place: PlaceView }>;
+  /** Sets what a person may set on one place, each key left out keeping what stands and each word reset taking its
+   * setting back to the default, and answers the row as it now reads. Refused as usage for a place this host does
+   * not hold and for a setting the place's kind does not take. */
+  set(placeId: string, set: PlaceSettingsAsk, reset?: readonly PlaceSettingWord[]): Promise<{ place: PlaceView }>;
   /** The port on this computer's loopback that carries to the daemon on a linked place, opened at the first ask
    * and held with the link. Throws with the place's name when it is not connected or has said no port. */
   road(placeId: string): Promise<number>;
@@ -823,20 +842,34 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     const found = await store.get(PLACES, placeId);
     return isPlaceRecord(found) ? found : undefined;
   };
-  const capSetOf = async (placeId: string): Promise<PlaceCapSet> => {
-    const parsed = PlaceCapSet.safeParse(await store.get(CAPS, placeId));
+  const settingsOf = async (placeId: string): Promise<PlaceSettings> => {
+    const parsed = PlaceSettings.safeParse(await store.get(CAPS, placeId));
     return parsed.success ? parsed.data : {};
   };
+  /** What settingsAt answers: every place's settings as load read them, written again by every set and remove. */
+  const settingsHeld = new Map<string, PlaceSettings>();
   /** Every row's id and kind without asking any computer anything: what the running count places a workspace by. */
   const rowIds = async (): Promise<Pick<PlaceView, "id" | "kind">[]> => [
     { id: HERE_PLACE_ID, kind: "computer" },
     ...(await records()).map(r => ({ id: r.id, kind: "computer" as const })),
     ...providerIds().map(id => ({ id, kind: "provider" as const })),
   ];
-  /** A row with its cap and what that cap counts, both read now. */
+  /** A row with its cap, its kind's default and what the person set, and what that cap counts, all read now. */
   const withCap = async (row: PlaceView, ids: readonly Pick<PlaceView, "id" | "kind">[]): Promise<PlaceView> => {
-    const cap = placeCapOf(row, await capSetOf(row.id));
-    return { ...row, ...(cap !== undefined ? { cap } : {}), running: await recording.runningOn(row.id, ids) };
+    const settings = await settingsOf(row.id);
+    const cap = placeCapOf(row, settings);
+    const capDefault = placeCapOf(row);
+    const napDefault = opts.napMs ?? NAP_AFTER_MS;
+    return {
+      ...row,
+      ...(cap !== undefined ? { cap } : {}),
+      ...(capDefault !== undefined ? { capDefault } : {}),
+      ...(Object.keys(settings).length > 0 ? { settings } : {}),
+      ...(placeTakes(row, "nap") ? { napMs: settingFor(undefined, settings.napMs, napDefault), napDefault } : {}),
+      spawn: settingFor(undefined, settings.spawn, AGENTS_ON),
+      spawnDefault: AGENTS_ON,
+      running: await recording.runningOn(row.id, ids),
+    };
   };
   /** The version the place reports once it has dialled back, or what it still reads when the wait runs out. The
    * record is what a link writes its report onto, so this reads the one fact every other row reads. */
@@ -1337,6 +1370,10 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       joinedAt: record.joinedAt,
       lastSeenAt: record.lastSeenAt,
       daemonVersion: record.report.daemonVersion,
+      ...((): Pick<PlaceView, "behind"> => {
+        const word = placeDaemonBehind(record.report);
+        return word === undefined ? {} : { behind: { word, fix: placeUpdateLine(record.name), act: "update" } };
+      })(),
       agents: record.report.agents,
       ...(record.report.agentVersions !== undefined ? { agentVersions: record.report.agentVersions } : {}),
       // One word per agent for whether a turn there needs a sign-in first, worked out from what that computer listed
@@ -1415,6 +1452,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     backends.delete(placeId);
     await store.delete(PLACES, placeId);
     await store.delete(CAPS, placeId);
+    settingsHeld.delete(placeId);
     await inTurn(async () => {
       if ((await defaultId()) === placeId) await store.delete(DEFAULT_COLLECTION, DEFAULT_ID);
     });
@@ -1426,6 +1464,8 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
   /** The row of the computer the host runs on, off what it says about itself now. */
   const hereRow = (marked: string): PlaceView => {
     const here = wiring.here();
+    const daemonVersion = opts.hereDaemon?.held?.();
+    const behind = daemonVersion === undefined ? undefined : placeDaemonBehind({ daemonVersion });
     return {
       id: HERE_PLACE_ID,
       kind: "computer",
@@ -1437,6 +1477,8 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       ...(here.shape !== undefined ? { shape: here.shape } : {}),
       ...(here.diskFreeBytes !== undefined ? { diskFreeBytes: here.diskFreeBytes } : {}),
       ...(here.engine !== undefined ? { engine: here.engine } : {}),
+      ...(daemonVersion !== undefined ? { daemonVersion } : {}),
+      ...(behind !== undefined && opts.hereDaemon !== undefined ? { behind: { word: behind, fix: opts.hereDaemon.fix, act: "install" as const } } : {}),
       present: true,
       // This computer is where the person's own agents run, never something the host forks into: a copy of the
       // image on a runtime here is that place's own row, which is the one that says it forks.
@@ -1640,6 +1682,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     },
 
     async load() {
+      for (const placeId of await store.keys(CAPS)) settingsHeld.set(placeId, await settingsOf(placeId));
       for (const record of await records()) {
         kept.set(record.id, record);
         if (record.backendFacts !== undefined && !backends.has(record.id)) backendFrom(record.id, record.backendFacts);
@@ -1654,6 +1697,8 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     },
 
     nameOf: placeId => kept.get(placeId)?.name ?? placeId,
+
+    settingsAt: placeId => settingsHeld.get(placeId) ?? {},
 
     signInsAt: placeId => {
       const report = kept.get(placeId)?.report;
@@ -1976,16 +2021,26 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
 
     rows: async () => rowsOf(await records()),
 
-    async cap(placeId, set) {
+    async set(placeId, set, reset = []) {
       const marked = (await markHeld()) ?? HERE_PLACE_ID;
       const record = placeId === HERE_PLACE_ID ? undefined : await recordOf(placeId);
       const row = placeId === HERE_PLACE_ID ? hereRow(marked) : record !== undefined ? joinedRow(record, marked) : providerIds().includes(placeId) ? providerRow(placeId, marked) : undefined;
       if (row === undefined) throw Object.assign(new Error(noSuchPlaceRefusal(placeId, [wiring.here().name, ...(await records()).map(r => r.name), ...providerIds()])), { kind: "usage" });
-      const refused = placeCapRefusal(row, set);
+      const refused = placeSetRefusal(row, set, reset);
       if (refused !== undefined) throw Object.assign(new Error(refused), { kind: "usage" });
-      const given = Object.fromEntries(Object.entries(set).filter(([, value]) => value !== undefined));
-      // Read and written in one turn, so two numbers set at once on one place both stand.
-      await inTurn(async () => store.put(CAPS, placeId, { ...(await capSetOf(placeId)), ...given }));
+      const { spawn, ...rest } = set;
+      const given = Object.fromEntries(Object.entries(rest).filter(([, value]) => value !== undefined));
+      const dropped = new Set<string>(reset.map(placeSettingKey));
+      // Read and written in one turn, so two settings made at once on one place both stand.
+      await inTurn(async () => {
+        const held = await settingsOf(placeId);
+        // The switch is a patch over the one the place holds, so a cap named alone keeps it on or off.
+        const switched = spawn === undefined ? {} : { spawn: agentsFrom(held.spawn, spawn) };
+        const next = Object.fromEntries(Object.entries({ ...held, ...given, ...switched }).filter(([key]) => !dropped.has(key)));
+        await (Object.keys(next).length === 0 ? store.delete(CAPS, placeId) : store.put(CAPS, placeId, next));
+        settingsHeld.set(placeId, next);
+      });
+      if (set.napMs !== undefined || reset.includes("nap")) opts.napChanged?.(placeId);
       return { place: await withCap(row, await rowIds()) };
     },
 

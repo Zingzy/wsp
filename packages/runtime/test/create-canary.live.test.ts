@@ -11,7 +11,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 import { killUntilGone, SolariBackend, type WspError } from "@wsp/engine";
-import { backstopMs, DEFAULT_IDLE_WINDOW_MS } from "../src/idle.js";
+import { NAP_AFTER_MS } from "@wsp/protocol";
+import { backstopMs } from "../src/idle.js";
 import { createRuntime, type Runtime } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
 import { createOn } from "./stub-backend.js";
@@ -128,7 +129,7 @@ describe.runIf(LIVE)("workspace create canary, live", () => {
       memMb: backend.pricing.defaultSize.memMb,
       metadata: { wsp: "1", ...TEST_LABEL },
       lifecycle: { onTimeout: "pause" },
-      timeoutMs: backstopMs(DEFAULT_IDLE_WINDOW_MS),
+      timeoutMs: backstopMs(NAP_AFTER_MS),
     });
     const metadata = create.body.metadata as Record<string, string>;
     expect(metadata["wsp-owner"]).toMatch(/^h_/);
