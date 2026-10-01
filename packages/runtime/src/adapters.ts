@@ -7,10 +7,11 @@
 // folder the golden's sign-in wrote into, and the command that signs in on a
 // machine; the adapter packages carry no catalog rows of their own.
 import { createClaudeAdapter } from "@wsp/adapter-claude";
-import { createCodexAdapter } from "@wsp/adapter-codex";
+import { codexPlanResets, createCodexAdapter } from "@wsp/adapter-codex";
 import { createCursorAdapter } from "@wsp/adapter-cursor";
 import { createOpenCodeAdapter } from "@wsp/adapter-opencode";
 import { CATALOG_AGENTS, keyEnvOf, mintsToken, type ThreadAgent } from "@wsp/catalog";
+import type { PlanResets } from "@wsp/protocol";
 import type { HarnessAdapterFactory } from "./runtime.js";
 
 /** The sign-in command a person runs on a machine: the row's headless fallback when it has one, else its login. */
@@ -62,3 +63,6 @@ export const HARNESS_ADAPTERS: Readonly<Record<ThreadAgent, HarnessAdapterFactor
   opencode: ctx => createOpenCodeAdapter({ exec: ctx.execStream, baseEnv: ctx.env, signInRefusal: ctx.signInRefusal, ...secretsOf(ctx.vault, "opencode", ctx.loginStands("opencode")), ...(ctx.launch !== undefined ? { launch: ctx.launch } : {}) }),
   cursor: ctx => createCursorAdapter({ exec: ctx.execStream, baseEnv: ctx.env, signInRefusal: ctx.signInRefusal, ...secretsOf(ctx.vault, "cursor", ctx.loginStands("cursor")), ...(ctx.launch !== undefined ? { launch: ctx.launch } : {}) }),
 };
+
+/** The agents whose plans bank resets a person can spend, each with the scripts that read and spend one. */
+export const PLAN_RESETS: Readonly<Partial<Record<ThreadAgent, PlanResets>>> = { codex: codexPlanResets };

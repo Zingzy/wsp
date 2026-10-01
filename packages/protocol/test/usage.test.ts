@@ -4,7 +4,7 @@
 // limit and a reset are read in.
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { accountWords, dayKeyOf, freshIn, LIMIT_KINDS, limitKindOfMinutes, logsLine, parseRateTable, priceOf, resetsWord, usedHeadline, usedPrice, USAGE_WORDS } from "../src/usage.js";
+import { accountWords, creditsWord, dayKeyOf, freshIn, LIMIT_KINDS, limitKindOfMinutes, logsLine, parseRateTable, priceOf, resetsWord, usedHeadline, usedPrice, USAGE_WORDS } from "../src/usage.js";
 
 const PRICES: unknown = JSON.parse(readFileSync(new URL("./fixtures/litellm-prices.json", import.meta.url), "utf8"));
 
@@ -77,6 +77,16 @@ describe("a limit's windows and words", () => {
     expect(resetsWord(now + 2 * 3_600_000 + 10 * 60_000, now, "UTC")).toBe("resets in 2 h");
     expect(resetsWord(now + 3 * 86_400_000, now, "UTC")).toBe("resets on Fri");
     expect(resetsWord(now - 60_000, now, "UTC")).toBe("reset");
+  });
+
+  it("says the banked resets as a count, with when the first lapses where the agent said", () => {
+    const now = Date.UTC(2026, 8, 29, 10, 0);
+    expect(creditsWord({ count: 2, nextExpiresAt: now + 21 * 86_400_000 + 5 * 3_600_000 }, now)).toBe("2 banked, first expires in 21 d");
+    expect(creditsWord({ count: 1, nextExpiresAt: now + 5 * 3_600_000 + 60_000 }, now)).toBe("1 banked, expires in 5 h");
+    expect(creditsWord({ count: 1, nextExpiresAt: now + 30 * 60_000 }, now)).toBe("1 banked, expires in 30 min");
+    expect(creditsWord({ count: 2 }, now)).toBe("2 banked");
+    expect(creditsWord({ count: 2, nextExpiresAt: now - 1 }, now)).toBe("2 banked");
+    expect(creditsWord({ count: 0 }, now)).toBe("none banked");
   });
 
   it("keeps every sentence a row may carry in one table", () => {

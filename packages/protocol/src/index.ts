@@ -6284,6 +6284,9 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** outside: the rows read from this computer's agent logs, which only the person's own page asks for. */
   z.object({ id: reqId, op: z.literal("usage.used"), range: UsageRange, split: UsageSplit, outside: z.boolean().optional() }),
   z.object({ id: reqId, op: z.literal("usage.accounts") }),
+  /** Replies with a ResetAnswer: spends one of the account's banked resets on a computer of the person's that holds
+   * its login, the one named where it is one, after reading the account there. The person's own road alone. */
+  z.object({ id: reqId, op: z.literal("usage.reset"), account: z.string(), creditId: z.string().optional(), on: z.string().optional() }),
   // A computer's readings over a range, off its daemon: this computer, a joined one, or a workspace's own machine.
   z.object({ id: reqId, op: z.literal("places.readings"), placeId: z.string().optional(), workspaceId: z.string().optional(), range: UsageRange }),
   /** Moves the golden's head to a version already in its manifest; replies with a
@@ -7032,4 +7035,4 @@ export * from "./release.js";
 export * from "./init-job.js";
 export { catalogRefused, endAfterResult, endRun, launchWords, PERMISSION_ALLOW, PERMISSION_DENY, programWord } from "./adapter-port.js";
 export { CLOUD_ENV, LAUNCH_ENV, SCOPED_MCP_ARG, FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, PERSON_HOME_ENV, RELEASE_API_ENV, TURN_TOKEN_ENV, UPDATE_CHECK_ENV, WEB_DIR_ENV } from "./env.js";
-export type { AdapterAttachOptions, AdapterEvent, AgentLaunch, AsideAnswer, AsideQuestion, AttachmentRoad, CommitDrafter, DraftAsk, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, PermissionAsk, SessionAsker, SessionRenameWrite, SessionRenamer, SessionTitleMaker, SessionTitleReader, TitleTurn, TurnImage, SessionReverter } from "./adapter-port.js";
+export type { AdapterAttachOptions, AdapterEvent, AgentLaunch, AsideAnswer, AsideQuestion, AttachmentRoad, CommitDrafter, DraftAsk, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, PermissionAsk, PlanResets, ResetReading, ResetRoad, ResetSpend, SessionAsker, SessionRenameWrite, SessionRenamer, SessionTitleMaker, SessionTitleReader, TitleTurn, TurnImage, SessionReverter } from "./adapter-port.js";

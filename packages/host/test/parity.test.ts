@@ -335,6 +335,7 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
       "ssh",
       "status",
       "up",
+      "usage reset",
     ].filter(words => CLOUD_ON || words !== "image export"));
     // A tool with no command line of its own is held to a stated reason: recording a project is the one, since the
     // command line's `wsp add` also hands out a join code and takes a provider's key, neither of which is an agent's.

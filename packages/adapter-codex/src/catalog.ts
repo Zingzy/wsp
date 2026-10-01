@@ -8,16 +8,10 @@
 // provider wants an OpenAI sign-in the machine has not got. Measured on
 // codex-cli 0.153.0: all four answers land about 140 ms after the pipe opens,
 // no model is called.
-//
-// The app-server exits the moment its stdin closes, before it has answered, so
-// the probe holds its stdin open through a named pipe and closes it on the last
-// answer: this line is awaited at a session start, and a fixed wait would be a
-// wait the person sits through. The answers arrive in no fixed order (measured
-// twice, id 3 and id 4 either way round), so the reader counts answers rather
-// than watching for the last id it sent.
 
 import { codexNotSignedInLine, programWord, shellQuote } from "@wsp/protocol";
 import type { AgentLaunch, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe } from "@wsp/protocol";
+import { answersOf, appServerScript, initializeRequest, request, resultOf } from "./app-server-script.js";
 import { buildEnv } from "./command.js";
 
 const SEP = "__WSP_CATALOG_SEP__";
@@ -26,19 +20,7 @@ const INIT = 1;
 const MODELS = 2;
 const CONFIG = 3;
 const ACCOUNT = 4;
-/** How long the reader waits for one more line before giving up on the answers it has not had. Measured at 140 ms for
- * all four on 0.153.0, so this is the stall case only; it is under the runtime's 30s timeout on the whole probe. */
-const LINE_WAIT_S = 10;
-
-const request = (id: number, method: string, params: Record<string, unknown> = {}): string =>
-  JSON.stringify({ jsonrpc: "2.0", id, method, params });
-
-const REQUESTS = [
-  request(INIT, "initialize", { clientInfo: { name: "wsp", version: "0" } }),
-  request(MODELS, "model/list"),
-  request(CONFIG, "config/read"),
-  request(ACCOUNT, "account/read"),
-];
+const REQUESTS = [initializeRequest(INIT), request(MODELS, "model/list"), request(CONFIG, "config/read"), request(ACCOUNT, "account/read")];
 
 /**
  * The probe as one bash script for the guest, since guest exec is `bash -c` and may span lines. `cd ~` for the same
@@ -49,25 +31,7 @@ export function catalogProbeCommand(options: { home: string; baseEnv?: Readonly<
   const codex = programWord("codex", options.launch);
   const env = buildEnv({ base: options.baseEnv, home: options.home });
   const exports = Object.entries(env).map(([k, v]) => `${k}=${shellQuote(v)}`).join(" ");
-  const lines = REQUESTS.map(line => shellQuote(line)).join(" ");
-  const server = [
-    // Two named pipes rather than a coprocess: the Mac's own bash is 3.2, which has none, and the test proves this
-    // line on whatever bash runs it.
-    'WSP_PROBE_DIR=$(mktemp -d) && mkfifo "$WSP_PROBE_DIR/in" "$WSP_PROBE_DIR/out"',
-    `${codex} app-server <"$WSP_PROBE_DIR/in" >"$WSP_PROBE_DIR/out" &`,
-    "WSP_APP_SERVER_PID=$!",
-    'exec 3>"$WSP_PROBE_DIR/in" 4<"$WSP_PROBE_DIR/out"',
-    `printf '%s\\n' ${lines} >&3`,
-    "answers=0",
-    `while [ "$answers" -lt ${String(REQUESTS.length)} ] && IFS= read -r -t ${String(LINE_WAIT_S)} -u 4 line; do`,
-    `  printf '%s\\n' "$line"`,
-    `  case $line in '{"id":'*) answers=$((answers + 1)) ;; esac`,
-    "done",
-    "exec 3>&- 4<&-",
-    // Only ever the pid the shell recorded: bare `kill 0` would signal the whole group.
-    'kill "$WSP_APP_SERVER_PID" 2>/dev/null || :',
-    'rm -rf "$WSP_PROBE_DIR"',
-  ].join("\n");
+  const server = appServerScript(codex, [{ lines: REQUESTS, answers: REQUESTS.length }]);
   return `cd ~ && export ${exports}; ${codex} --version; echo ${SEP}; ${codex} --help; echo ${SEP}\n${server}`;
 }
 
@@ -86,26 +50,6 @@ function rec(value: unknown): Record<string, unknown> | undefined {
 
 function str(value: unknown): string | undefined {
   return typeof value === "string" && value !== "" ? value : undefined;
-}
-
-/** Each JSON-RPC result in the section, by the id the probe sent it under. */
-function results(section: string): Map<number, Record<string, unknown>> {
-  const byId = new Map<number, Record<string, unknown>>();
-  for (const raw of section.split("\n")) {
-    const line = raw.trim();
-    if (!line.startsWith("{")) continue;
-    let value: unknown;
-    try {
-      value = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    const message = rec(value);
-    const result = rec(message?.result);
-    if (typeof message?.id !== "number" || result === undefined) continue;
-    byId.set(message.id, result);
-  }
-  return byId;
 }
 
 /** The models model/list offers, the ones it hides left out, each with the efforts and default effort it reports; the
@@ -158,12 +102,12 @@ export function parseCatalogProbe(stdout: string, login: string): HarnessCatalog
   const parts = stdout.split(SEP);
   if (parts.length < 3) return null;
   const [versionPart, help, serverPart] = parts as [string, string, string];
-  const answers = results(serverPart);
-  if (!answers.has(INIT)) return null;
-  const config = rec(answers.get(CONFIG)?.["config"]);
-  const models = modelsOf(answers.get(MODELS), str(config?.["model"]));
+  const answers = answersOf(serverPart);
+  if (resultOf(answers, INIT) === undefined) return null;
+  const config = rec(resultOf(answers, CONFIG)?.["config"]);
+  const models = modelsOf(resultOf(answers, MODELS), str(config?.["model"]));
   if (models.length === 0) {
-    const account = answers.get(ACCOUNT);
+    const account = resultOf(answers, ACCOUNT);
     const wantsSignIn = account?.["requiresOpenaiAuth"] === true && account["account"] === null;
     return wantsSignIn ? { refused: codexNotSignedInLine(login) } : null;
   }

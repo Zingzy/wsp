@@ -5758,3 +5758,57 @@ describe("a computer that turns unable to run workspaces keeps its link, and ref
     expect(asked[0]!.link).toBeDefined();
   });
 });
+
+describe("spending a banked reset on a computer you joined", () => {
+  const answer = (id: number, result: Record<string, unknown>): string => JSON.stringify({ id, result });
+  const limits = (used: number, availableCount: number) => ({
+    rateLimits: { limitId: "codex", primary: { usedPercent: used, windowDurationMins: 300, resetsAt: 1_790_700_000 }, planType: "plus" },
+    accountId: "acct_a",
+    rateLimitResetCredits: { availableCount, credits: [] },
+  });
+  const READ = [answer(1, {}), answer(2, { account: { type: "chatgpt", email: "a@example.com", planType: "plus" } }), answer(3, limits(100, 2))];
+  const SPEND = [answer(1, {}), answer(4, { outcome: "reset" }), answer(3, limits(0, 1))];
+  const signedIn = report("srv", { agents: ["codex"], logins: ["codex/auth.json"], login: { HOME: "/home/maya", USER: "maya", PATH: "/opt/codex/bin:/usr/bin" } });
+
+  /** A joined computer holding a Codex login, answering each reset script it is asked to run, and the account a turn
+   * there read before. */
+  async function holding(): Promise<{ client: WsClient; placeId: string; ran: string[] }> {
+    const store = memoryStore();
+    const { hostKey } = await serving({ store });
+    const ran: string[] = [];
+    const answers = (c: WsClient): void => {
+      saysItsFacts(() => ({ ...PLACE_FACTS, logins: LOGINS }), { count: 0 })(c);
+      c.onFrame(raw => {
+        const frame = raw as unknown as { id?: number; op?: string; cmd?: string };
+        if (frame.op !== "exec" || !String(frame.cmd).includes("app-server")) return;
+        ran.push(String(frame.cmd));
+        c.say({ id: frame.id, ok: true, exitCode: 0, stderr: "", stdout: (String(frame.cmd).includes("rateLimitResetCredit/consume") ? SPEND : READ).join("\n") });
+      });
+    };
+    const { client, placeId } = await join(hostKey, { code: await code(), report: signedIn, answers });
+    sockets.push(client.ws);
+    await until(async () => (await placesOf()).find(p => p.id === placeId)?.logins === LOGINS);
+    await store.put("limits", "codex:acct_a", { key: "codex:acct_a", agent: "codex", label: "a@example.com", road: "named", plan: "plus", windows: [{ kind: "session", usedPercent: 100 }], readAt: Date.now(), computers: [placeId] });
+    return { client, placeId, ran };
+  }
+
+  it("reads the account and then spends on that computer, under the login its workspaces share and the PATH it reported", async () => {
+    const { ran } = await holding();
+    expect(await runtime!.usage.reset({ account: "codex:acct_a" })).toMatchObject({ outcome: "reset", said: "Reset used: Codex with ChatGPT Plus on srv's windows start again now, 1 left", account: { key: "codex:acct_a", credits: { count: 1 } } });
+    expect(ran).toHaveLength(2);
+    for (const cmd of ran) {
+      expect(cmd).toContain(`CODEX_HOME='${LOGINS}/codex'`);
+      expect(cmd).toContain("PATH='/opt/codex/bin:/usr/bin'");
+    }
+    expect(ran[0]).not.toContain("rateLimitResetCredit/consume");
+    expect(ran[1]).toContain("rateLimitResetCredit/consume");
+  });
+
+  it("is refused in that computer's own words once it is away, with nothing run", async () => {
+    const { client, placeId, ran } = await holding();
+    client.close();
+    await until(async () => (await placesOf()).find(p => p.id === placeId)!.present === false);
+    await expect(runtime!.usage.reset({ account: "codex:acct_a" })).rejects.toThrow(absentComputer("srv", null).sentence);
+    expect(ran).toEqual([]);
+  });
+});

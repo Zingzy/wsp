@@ -20,17 +20,30 @@ export type LimitWindow = z.infer<typeof LimitWindow>;
 export const LimitStatus = z.enum(["ok", "warning", "reached"]);
 export type LimitStatus = z.infer<typeof LimitStatus>;
 
+export const RESET_CREDIT_STATUSES = ["available", "redeeming", "redeemed", "unknown"] as const;
+
+/** One reset a plan has banked, as its agent lists it: an id the agent spends it by, whether it can still be spent,
+ * and when it lapses, ms epoch, where it does. */
+export const ResetCredit = z.object({ id: z.string(), status: z.enum(RESET_CREDIT_STATUSES), expiresAt: z.number().optional() });
+export type ResetCredit = z.infer<typeof ResetCredit>;
+
+/** The resets a plan has banked: how many can be spent, and each one where the agent was asked for them in full,
+ * which it may cut short of the count. */
+export const BankedResets = z.object({ count: z.number().int().nonnegative(), credits: z.array(ResetCredit).optional() });
+export type BankedResets = z.infer<typeof BankedResets>;
+
 /** A plan's limits as a harness printed them during a turn. account is the harness's own name for the sign-in
- * where it gives one; keyed is a sign-in by API key, which has no plan window at all. */
+ * where it gives one; keyed is a sign-in by API key, which has no plan window at all. credits is absent on a reading
+ * that did not ask for them, which leaves the last one standing. */
 export const HarnessLimit = z.object({
   windows: z.array(LimitWindow),
   plan: z.string().optional(),
   status: LimitStatus.optional(),
   account: z.object({ id: z.string(), label: z.string().optional() }).optional(),
   keyed: z.boolean().optional(),
+  credits: BankedResets.optional(),
 });
 export type HarnessLimit = z.infer<typeof HarnessLimit>;
-
 
 /** A window's length in minutes as a limit kind: five hours is the session and seven days the week. */
 export function limitKindOfMinutes(minutes: number): LimitKind {
@@ -57,6 +70,8 @@ export const AccountLimit = z.object({
   keyed: z.boolean().optional(),
   readAt: z.number(),
   computers: z.array(z.string()),
+  /** The banked resets as last read, when, and when each was last read in full, where they ever were. */
+  credits: BankedResets.extend({ readAt: z.number(), detailAt: z.number().optional() }).optional(),
 });
 export type AccountLimit = z.infer<typeof AccountLimit>;
 
@@ -89,11 +104,58 @@ export const AccountRow = z.object({
   /** What the account's running threads are drawing on it now: tokens a minute over the last fifteen minutes, and how
    * many threads. Absent where nothing ran on it in that time. */
   burn: z.object({ tokensPerMinute: z.number(), threads: z.number().int() }).optional(),
+  /** The address a named account signed in as, which a person may name it by. */
+  address: z.string().optional(),
+  /** The resets the plan has banked, with the soonest one that can still be spent lapses. */
+  credits: BankedResets.extend({ nextExpiresAt: z.number().optional(), readAt: z.number(), detailAt: z.number().optional() }).optional(),
 });
 export type AccountRow = z.infer<typeof AccountRow>;
 
 export const AccountsAnswer = z.object({ accounts: z.array(AccountRow) });
 export type AccountsAnswer = z.infer<typeof AccountsAnswer>;
+
+/** What a press to spend a banked reset came to: the agent's four answers, a count that fell since an earlier press
+ * nobody answered, which spends nothing more, or an answer this code does not know, which is never read as a reset. */
+export const RESET_OUTCOMES = ["reset", "nothingToReset", "noCredit", "alreadyRedeemed", "earlier", "unknown"] as const;
+export const ResetOutcome = z.enum(RESET_OUTCOMES);
+export type ResetOutcome = z.infer<typeof ResetOutcome>;
+
+/** The outcome, the sentence that says it, and the account's row as the read after it left it. */
+export const ResetAnswer = z.object({ outcome: ResetOutcome, said: z.string(), account: AccountRow.optional() });
+export type ResetAnswer = z.infer<typeof ResetAnswer>;
+
+/** The account a reset sentence is about: its label, and the computer it runs on where the label does not say. */
+export const resetWho = (o: { label: string; own: boolean; computer: string }): string => (o.own ? o.label : `${o.label} on ${o.computer}`);
+
+/** Every sentence a reset may end in, by what it came to. */
+export const RESET_WORDS = {
+  reset: (who: string, left?: number) => `Reset used: ${who}'s windows start again now${left === undefined ? "" : `, ${left} left`}`,
+  nothingToReset: (who: string) => `No window of ${who} is in use right now, so the credit was kept`,
+  noCredit: (who: string) => `No reset banked on ${who}`,
+  alreadyRedeemed: (who: string) => `That reset of ${who} was already used`,
+  earlier: (who: string, left: number) =>
+    `The count on ${who} fell since the earlier press: it may have gone through, or a reset expired or was used elsewhere. Nothing more was spent; ${left} left.`,
+  unknown: (agent: string, outcome: string, who: string) => `${agent} answered ${outcome} for ${who}; the account was read again`,
+} as const;
+
+/** The one question a spend asks first, in the command line and the app alike. */
+export function resetQuestion(who: string, count: number | undefined): string {
+  const which = count === undefined ? "a reset" : count === 1 ? "the one reset" : `one of the ${count} resets`;
+  return `Use ${which} banked on ${who}? Its five-hour and weekly windows start again now. There is no undo.`;
+}
+
+export const resetKeyedLine = (label: string): string => `${label} pays per token; an API key has no reset to use`;
+export const resetSilentLine = (agent: string, computer: string): string => `${agent} on ${computer} did not answer; the same request goes again on the next press`;
+export const resetUnreadLine = (agent: string, computer: string, label: string): string => `${agent} on ${computer} did not read ${label}'s limits; nothing was spent`;
+export const resetMismatchLine = (agent: string, computer: string, other: string, label: string): string => `${agent} on ${computer} is now signed in as ${other}, not ${label}; nothing was spent`;
+export const resetRefusedLine = (agent: string, computer: string, label: string, said: string): string => `${agent} on ${computer} refused the reset of ${label}: ${said}`;
+export const resetProviderOnlyLine = (label: string, provider: string, agent: string): string => `${label} lives only on ${provider} machines; sign ${agent} in on a computer of yours`;
+export const resetSignedOutLine = (label: string, agent: string): string => `${label} is signed in on none of your computers now; sign ${agent} in on one of them`;
+export const resetNotOnLine = (label: string, computer: string, on: readonly string[]): string => `${label} is not signed in on ${computer}; it is on ${listWords(on)}`;
+export const resetNoLoginsLine = (computer: string, agent: string): string =>
+  `${computer} has not said where it keeps its logins, so ${agent}'s there cannot be reached; wsp add ${computer} --update puts a newer agent on it`;
+export const resetNoneLine = (agent: string): string => `${agent} banks no resets`;
+export const noSuchAccountLine = (word: string): string => `no account ${word}; wsp usage lists every account`;
 
 export const USAGE_RANGES = ["day", "week", "month"] as const;
 export const UsageRange = z.enum(USAGE_RANGES);
@@ -289,6 +351,17 @@ export function resetsWord(resetsAt: number, now: number, timeZone?: string): st
   if (left < 86_400_000) return `resets in ${Math.floor(left / 3_600_000)} h`;
   const weekday = new Intl.DateTimeFormat("en-US", { weekday: "short", ...(timeZone !== undefined ? { timeZone } : {}) }).format(resetsAt);
   return `resets on ${weekday}`;
+}
+
+/** How long until a moment, as a row's quiet word: minutes under an hour, hours under a day, then days. */
+const spanWord = (left: number): string => (left < 3_600_000 ? `${Math.max(1, Math.round(left / 60_000))} min` : left < 86_400_000 ? `${Math.floor(left / 3_600_000)} h` : `${Math.floor(left / 86_400_000)} d`);
+
+/** The resets a plan has banked, as a row's word: how many, and when the first one lapses where the agent said. */
+export function creditsWord(credits: { count: number; nextExpiresAt?: number | undefined }, now: number): string {
+  if (credits.count === 0) return "none banked";
+  const banked = `${credits.count} banked`;
+  if (credits.nextExpiresAt === undefined || credits.nextExpiresAt <= now) return banked;
+  return `${banked}, ${credits.count === 1 ? "expires" : "first expires"} in ${spanWord(credits.nextExpiresAt - now)}`;
 }
 
 /** When a limit was last read, as the row's quiet word: the time today, else the weekday and time. */

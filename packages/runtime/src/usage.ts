@@ -149,6 +149,28 @@ function dayStartOf(at: number, timeZone?: string): number {
 /** A row's value for a split; a model with its context window after it is the same model. */
 const splitValue = (row: UsageRow, split: UsageSplit): string => (split === "model" ? baseModel(row.model) : row[split]);
 
+/** The banked resets a reading leaves held: a reading in full replaces them and stamps the detail, a count alone
+ * keeps the held details while the count stands and drops them once it moved, and a reading that carries none
+ * leaves them as they were. */
+function creditsHeld(held: AccountLimit["credits"], read: HarnessLimit["credits"], now: number): AccountLimit["credits"] {
+  if (read === undefined) return held;
+  if (read.credits !== undefined) return { count: read.count, credits: read.credits, readAt: now, detailAt: now };
+  return held !== undefined && held.count === read.count ? { ...held, readAt: now } : { count: read.count, readAt: now };
+}
+
+/** How old an account's banked resets as last read in full may grow before a turn on it reads them in full again. */
+export const RESET_DETAILS_MS = 24 * HOUR;
+
+/** Whether a turn on the account reads its banked resets in full: they never were, or were a day ago. A key banks none. */
+export const resetDetailsDue = (held: AccountLimit | undefined, now: number): boolean =>
+  held?.keyed !== true && (held?.credits?.detailAt === undefined || now - held.credits.detailAt >= RESET_DETAILS_MS);
+
+/** The resets on a row: what the account holds, with the soonest an available one lapses. */
+function rowCredits(held: NonNullable<AccountLimit["credits"]>): AccountRow["credits"] {
+  const lapses = (held.credits ?? []).flatMap(c => (c.status === "available" && c.expiresAt !== undefined ? [c.expiresAt] : []));
+  return { ...held, ...(lapses.length > 0 ? { nextExpiresAt: Math.min(...lapses) } : {}) };
+}
+
 const rowKey = (row: Omit<UsageRow, "turns" | "tokens" | "costReported">): string =>
   [row.hour, row.agent, row.account, row.computer, row.project, row.model, row.source].join("\u0000");
 
@@ -350,6 +372,7 @@ export function createUsageLedger(o: { store: Store; clock: Clock; timeZone?: st
       const plan = r.limit.plan ?? held?.plan;
       const status = r.limit.status ?? held?.status;
       const keyed = r.limit.keyed ?? held?.keyed;
+      const credits = keyed === true ? undefined : creditsHeld(held?.credits, r.limit.credits, o.clock.now());
       await nameAccounts([{ key: r.key, label: r.label }]);
       const next: AccountLimit = {
         key: r.key,
@@ -362,6 +385,7 @@ export function createUsageLedger(o: { store: Store; clock: Clock; timeZone?: st
         ...(keyed !== undefined ? { keyed } : {}),
         readAt: o.clock.now(),
         computers: [...new Set([...(held?.computers ?? []), r.computer])],
+        ...(credits !== undefined ? { credits } : {}),
       };
       await o.store.put(LIMITS, r.key, next);
       return { before: held, after: next };
@@ -502,6 +526,8 @@ export function accountRows(o: {
       ...(read ? { windows: l.windows, readAt: l.readAt } : {}),
       ...(read && l.status !== undefined ? { status: l.status } : {}),
       ...(read ? {} : { note: noteFor(l.agent, l.keyed) }),
+      ...(l.road === "named" ? { address: l.label } : {}),
+      ...(l.credits !== undefined ? { credits: rowCredits(l.credits) } : {}),
     });
   }
   for (const place of o.places) {

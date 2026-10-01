@@ -333,6 +333,11 @@ import {
   USAGE_SPLITS,
   USAGE_WORDS,
   accountState,
+  creditsWord,
+  listWords,
+  noSuchAccountLine,
+  ResetAnswer,
+  resetQuestion,
   fmtTokens,
   freshIn,
   usedPrice,
@@ -805,6 +810,17 @@ async function readUsage(client: HostClient, range: UsageRange, by: UsageSplit):
   return { accounts: accounts.accounts, used: used.used };
 }
 
+/** The account a person's word names: its key, else its label or the address it signed in as, in any case. */
+function accountNamed(rows: readonly AccountRow[], word: string): AccountRow {
+  const exact = rows.find(r => r.key === word);
+  if (exact !== undefined) return exact;
+  const said = word.toLowerCase();
+  const named = rows.filter(r => r.label.toLowerCase() === said || r.address?.toLowerCase() === said);
+  if (named.length === 1) return named[0]!;
+  if (named.length === 0) throw Object.assign(new Error(noSuchAccountLine(word)), { kind: "not-found" });
+  throw usageRefusal(`${word} names ${named.length} accounts: ${listWords(named.map(r => r.key))}.`, "Name one by its key.");
+}
+
 /** wsp usage's two tables: the accounts, then a blank line, then what was used by the split asked for. */
 export function usageTableLines(read: { accounts: readonly AccountRow[]; used: UsedAnswer }, now: number): string[] {
   const window = (row: AccountRow, kind: LimitKind): string => {
@@ -815,8 +831,8 @@ export function usageTableLines(read: { accounts: readonly AccountRow[]; used: U
     read.accounts.length === 0
       ? ["No agent is signed in on any computer."]
       : table([
-          ["AGENT", "ACCOUNT", "COMPUTERS", "SESSION", "WEEK", "PLAN", "STATE"],
-          ...read.accounts.map(row => [agentName(row.agent), row.label, row.computers.join(", "), window(row, "session"), window(row, "week"), row.plan ?? "", accountState(row)]),
+          ["AGENT", "ACCOUNT", "COMPUTERS", "SESSION", "WEEK", "RESETS", "PLAN", "STATE"],
+          ...read.accounts.map(row => [agentName(row.agent), row.label, row.computers.join(", "), window(row, "session"), window(row, "week"), row.credits === undefined ? "" : creditsWord(row.credits, now), row.plan ?? "", accountState(row)]),
         ]);
   const used =
     read.used.rows.length === 0
@@ -3780,6 +3796,27 @@ export const ALL_VERBS: readonly Verb[] = [
     }),
   },
   {
+    name: "usage reset",
+    usage: "wsp usage reset <account> [--credit <id>] [--on <computer>] [--yes]",
+    about: "spends one of the resets a Codex account has banked, on a computer of yours that holds its login, after reading the account there: its five-hour and weekly windows start again now; asks first unless --yes",
+    page: "agent",
+    options: { credit: { type: "string" }, on: { type: "string" }, yes: { type: "boolean" } },
+    cliOnly: "spends a reset the person owns; the skill already says an agent does not read the person's accounts, and a thread's socket is refused every usage op",
+    run: async ctx => {
+      const [word, ...rest] = ctx.args;
+      if (word === undefined || rest.length > 0) throw usageRefusal("wsp usage reset takes one account.", usageIs(ctx));
+      const client = await ctx.client();
+      const { accounts } = await client.request<{ accounts: unknown }>("usage.accounts");
+      const row = accountNamed(z.array(AccountRow).parse(accounts), word);
+      if (!(await confirmed(ctx, resetQuestion(row.label, row.credits?.count), `Every reset banked on ${row.label}`))) return 1;
+      const credit = flag(ctx.flags, "credit");
+      const on = flag(ctx.flags, "on");
+      const answer = ResetAnswer.parse(await client.request("usage.reset", { account: row.key, ...(credit !== undefined ? { creditId: credit } : {}), ...(on !== undefined ? { on } : {}) }));
+      ctx.out.emit(answer, answer.said);
+      return 0;
+    },
+  },
+  {
     name: "agents",
     usage: "wsp agents [<workspace>] [--on <computer>]",
     about: "the coding agents on this computer, a box you added or a workspace: each one's version and the newest out, whether it is signed in there, and whether it carries the wsp tools",
@@ -5907,6 +5944,8 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   "usage by": "how what was used is split: agent (the default), account, computer, project or model",
   "folders on": "the computer whose folders to list, by the name wsp computers shows; a box you added answers from its own disk, and this computer is listed without it",
   "agents on": AGENTS_ON_WORDS,
+  "usage reset on": "the computer to spend it on, by the name wsp computers shows, one of the account's own that holds its login; the first of those that is connected without it",
+  "usage reset credit": "the reset to spend, by the id Codex lists it under; whichever Codex picks without it",
   "skills on": AGENTS_ON_WORDS,
   "skills show on": AGENTS_ON_WORDS,
   "skills add on": AGENTS_ON_WORDS,
