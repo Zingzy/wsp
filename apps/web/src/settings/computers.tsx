@@ -48,6 +48,7 @@ import { cn } from "../lib/utils.js";
 import type { SettingsContext } from "./settingsContext.js";
 import type { SettingsAt } from "./settingsStore.js";
 import { RefusalSlot } from "./sheetParts.js";
+import { CARD_INSET, ROW_FLOOR } from "./layout.js";
 
 /** What stands on each computer, folded from the workspaces the store already has, each workspace going to
  * exactly one computer by placeOf, the one reading of which computer a workspace stands on. */
@@ -467,7 +468,7 @@ function RemoveLine({ place, ctx, onRemoved }: { place: PlaceView; ctx: Settings
   const name = placeName(place);
   const note = cloud ? WHERE_WORDS.removeCloudDescription : WHERE_WORDS.removeDescription(name, hereName(ctx.places));
   return (
-    <div data-k="remove-line" className={cn(CARD_SURFACE, "flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-8")}>
+    <div data-k="remove-line" className={cn(CARD_SURFACE, CARD_INSET, ROW_FLOOR, "flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-8")}>
       <span className="flex min-w-0 flex-col gap-1">
         <span className="text-sm leading-5 font-medium text-foreground">{WHERE_WORDS.removeTitle(name)}</span>
         {note === "" ? null : (

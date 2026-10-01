@@ -13,6 +13,7 @@ import { Kbd, KbdGroup } from "../components/ui/kbd.js";
 import { Spaced } from "../components/ui/spaced.js";
 import { cn } from "../lib/utils.js";
 import { FACT, VALUE } from "./format.js";
+import { CARD_INSET, LINE_FLOOR, ROW_FLOOR, SECTION_HEAD, SETTING_TITLE } from "./layout.js";
 
 /** Which mono a word in a slot wears: the foreground for a value a person reads, the muted for a state. */
 export type WordClass = "value" | "fact";
@@ -90,7 +91,7 @@ export function itemWords(item: SettingsItem): string[] {
 }
 
 export const CARD_SURFACE = "overflow-hidden rounded-xl border border-border/60 bg-card/40";
-const TITLE_CLASS = "text-sm leading-5 font-medium text-foreground";
+const TITLE_CLASS = SETTING_TITLE;
 const LABEL_CLASS = "text-sm leading-5 text-foreground";
 const DESCRIPTION_CLASS = "max-w-xl text-[13px] leading-[1.45] text-muted-foreground";
 /** The text and what acts on it, each in a column of its own from 640 px, one over the other under it. */
@@ -104,7 +105,7 @@ export function Card({ id, head, lede, under, body, children }: { id: string; he
       {head === undefined && lede === undefined ? null : (
         <div className="flex flex-col gap-1">
           {head === undefined ? null : (
-            <h2 data-settings-head className="flex min-h-7 items-center text-sm font-normal text-foreground/70">
+            <h2 data-settings-head className={SECTION_HEAD}>
               {head}
             </h2>
           )}
@@ -170,13 +171,13 @@ export function Row({ id, title, lead, mark, description, chips, mono = false, w
   );
   if (open !== undefined) {
     return (
-      <button type="button" data-settings-row={id} className={cn("block px-4 py-3", OPENS_CLASS)} onClick={open} {...attrs}>
+      <button type="button" data-settings-row={id} className={cn("flex flex-col justify-center py-3", CARD_INSET, ROW_FLOOR, OPENS_CLASS)} onClick={open} {...attrs}>
         {body}
       </button>
     );
   }
   return (
-    <div data-settings-row={id} className="px-4 py-3" {...attrs}>
+    <div data-settings-row={id} className={cn("flex flex-col justify-center py-3", CARD_INSET, ROW_FLOOR)} {...attrs}>
       {body}
     </div>
   );
@@ -213,7 +214,7 @@ export function Line({ id, label, value, valueClass = "value", keys, keysJoiner,
       <KeyCaps keys={keys} {...(keysJoiner === undefined ? {} : { joiner: keysJoiner })} />
     ));
   return (
-    <div data-settings-line={id} className="px-4 py-3" {...(hover === undefined ? {} : { title: hover })} {...attrs}>
+    <div data-settings-line={id} className={cn("flex flex-col justify-center py-3", CARD_INSET, LINE_FLOOR)} {...(hover === undefined ? {} : { title: hover })} {...attrs}>
       <div className={right === null ? undefined : "flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between sm:gap-8"}>
         <span data-settings-label className={cn(LABEL_CLASS, "min-w-0 break-words")}>
           {label}

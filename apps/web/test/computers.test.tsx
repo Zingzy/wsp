@@ -135,7 +135,7 @@ describe("the Computers list", () => {
     // No chip, no middle dot, no rule: facts are cells on the template.
     expect(document.querySelector("[data-settings-page] [data-chip]")).toBeNull();
     expect(document.querySelector("[data-settings-page]")?.textContent).not.toContain("\u00b7");
-    expect(listRow("here").className).toContain("h-13");
+    expect(listRow("here").className).toContain("min-h-15");
   });
 
   it("says this computer's own daemon is not running in the slot, rather than listing this Mac as perfectly fine", async () => {
@@ -152,7 +152,7 @@ describe("the Computers list", () => {
     expect(cellOf("p_2", "cores")).toBe("");
     expect(cellOf("p_2", "memory")).toBe("");
     expect(listRow("p_2").textContent).not.toMatch(/[-\u2014]/);
-    expect(listRow("p_2").className).toContain("h-13");
+    expect(listRow("p_2").className).toContain("min-h-15");
   });
 
   it("counts the threads with a turn running on the workspaces each row holds, and a zero as 0", async () => {

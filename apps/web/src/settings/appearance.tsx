@@ -15,6 +15,7 @@ import { CARD_SURFACE, type SettingsCardData } from "./rows.js";
 import type { SettingsContext } from "./settingsContext.js";
 import { SYSTEM_DARK_QUERY, useAppDark } from "./theme.js";
 import { ModePicker, shownSide, ThemePicker } from "./ThemePicker.js";
+import { CARD_INSET } from "./layout.js";
 
 const ChatMarkdown = lazy(() => import("../components/ChatMarkdown.js"));
 
@@ -66,7 +67,7 @@ function SizePicker({ id, label, sizes, value, onChange }: { id: string; label: 
 function TypeSample() {
   const dark = useAppDark();
   return (
-    <div data-k="type-sample" className={cn(CARD_SURFACE, "px-4 py-3")}>
+    <div data-k="type-sample" className={cn(CARD_SURFACE, CARD_INSET, "py-3")}>
       <Suspense fallback={null}>
         <ChatMarkdown text={FONT_WORDS.sample} cwd={undefined} resolvedTheme={dark ? "dark" : "light"} />
       </Suspense>

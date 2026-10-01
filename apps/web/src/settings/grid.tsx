@@ -9,6 +9,7 @@ import { ChevronRightIcon } from "lucide-react";
 import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
 import { cn } from "../lib/utils.js";
 import { VALUE } from "./format.js";
+import { CARD_INSET, LINE_FLOOR, LIST_TITLE, NOTE, ROW_FLOOR } from "./layout.js";
 import { CARD_SURFACE } from "./rows.js";
 
 /** The Computers page's template, shared by its two lists so the state column is one line across both. Below
@@ -40,9 +41,9 @@ export interface HeadCell {
  * name stands on the card's outer edge like every settings head; the column words sit over their values. */
 export function GridHead({ columns, cells }: { columns?: string; cells: readonly HeadCell[] }) {
   return (
-    <div data-grid-head className={cn("mb-4 min-h-7 items-end gap-x-4 border-x border-transparent px-4", columns === undefined ? "flex" : cn("grid", columns))}>
+    <div data-grid-head className={cn("mb-4 min-h-7 items-end gap-x-4 border-x border-transparent", CARD_INSET, columns === undefined ? "flex" : cn("grid", columns))}>
       {cells.map((cell, at) => (
-        <span key={`${at}-${cell.word}`} className={cn("whitespace-nowrap text-sm leading-5 font-normal", at === 0 ? "-ml-[17px] text-foreground/70" : "text-muted-foreground", cell.num === true && "text-right", cell.wideOnly === true && WIDE_ONLY)}>
+        <span key={`${at}-${cell.word}`} className={cn("whitespace-nowrap text-sm leading-5 font-normal", at === 0 ? "-ml-[calc(var(--settings-inset,20px)+1px)] text-foreground/70" : "text-muted-foreground", cell.num === true && "text-right", cell.wideOnly === true && WIDE_ONLY)}>
           {cell.word}
         </span>
       ))}
@@ -50,7 +51,7 @@ export function GridHead({ columns, cells }: { columns?: string; cells: readonly
   );
 }
 
-const ROW = "grid items-center gap-x-4 px-4 py-2.5 transition-colors duration-150 hover:bg-accent/60";
+const ROW = cn("grid items-center gap-x-4 py-3 transition-colors duration-150 hover:bg-accent/60", CARD_INSET);
 
 /** One row. A row that opens a page is the press itself, by pointer or by Enter, and a control inside it keeps its
  * own press. */
@@ -74,7 +75,7 @@ export function GridRow({ columns, tight = false, open, onContextMenu, title, at
   return (
     <div
       data-grid-row
-      className={cn(ROW, columns, tight ? "min-h-12" : "min-h-13", open !== undefined && "cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset")}
+      className={cn(ROW, columns, tight ? LINE_FLOOR : ROW_FLOOR, open !== undefined && "cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset")}
       {...(title === undefined ? {} : { title })}
       {...(onContextMenu === undefined ? {} : { onContextMenu })}
       {...opens}
@@ -102,7 +103,7 @@ export function GridName({ glyph, name, tag, note }: { glyph: ReactNode; name: s
       {glyph}
       <span className="flex min-w-0 flex-col">
         <span className="flex min-w-0 items-baseline gap-2">
-          <span data-grid-name className="min-w-0 break-words text-sm leading-5 text-foreground">
+          <span data-grid-name className={cn(LIST_TITLE, "min-w-0 break-words")}>
             {name}
           </span>
           {tag === undefined ? null : (
@@ -112,7 +113,7 @@ export function GridName({ glyph, name, tag, note }: { glyph: ReactNode; name: s
           )}
         </span>
         {note === undefined ? null : (
-          <span data-grid-note className="text-xs leading-4 text-muted-foreground">
+          <span data-grid-note className={NOTE}>
             {note}
           </span>
         )}

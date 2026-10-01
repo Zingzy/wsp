@@ -17,6 +17,8 @@ import { useAgentsReport } from "../components/agents/useAgentsReport.js";
 import { ADD_COMPUTER_WORDS } from "./format.js";
 import { absentOf, placeName } from "./places.js";
 import { Card, Row } from "./rows.js";
+import { cn } from "../lib/utils.js";
+import { CARD_INSET } from "./layout.js";
 
 export function ComputerSignIns({ place, now }: { place: PlaceView; now: number }) {
   const target = useMemo<AgentsTarget>(() => ({ placeId: place.id }), [place.id]);
@@ -45,7 +47,7 @@ export function ComputerSignIns({ place, now }: { place: PlaceView; now: number 
               {...(offered ? { control: <ActButton act={held!} /> } : {})}
             />
             {flow === undefined ? null : (
-              <div className="px-4 pb-4">
+              <div className={cn(CARD_INSET, "pb-4")}>
                 <SignInFlowView view={flow} label={row.name} />
               </div>
             )}
