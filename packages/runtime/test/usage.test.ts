@@ -81,15 +81,6 @@ describe("a turn's end in the ledger", () => {
     expect(byAgent.rows.map(r => [r.key, r.tokens.input, r.costReported, r.turns])).toEqual([["claude", 2_900, 1.25, 1]]);
   });
 
-  it("files the turn under its thread and workspace, and names the thread at answer time as the sidebar does", async () => {
-    const { rt, ws } = await runtimeWith(turning({ status: "completed", text: "done", tokens: { input: 2_000, output: 300 } }));
-    const started = await rt.sessions.start(ws.id, { prompt: "Fix the flaky upload test" });
-    await started.finished;
-    const used = await rt.usage.used({ range: "day", split: "agent" });
-    expect(used.threads).toEqual([expect.objectContaining({ threadId: expect.any(String), workspaceId: ws.id, title: "Fix the flaky upload test", agent: "claude", workspace: ws.name, tokens: 2_300 })]);
-    expect(used.counts).toEqual({ threads: 1, computers: 1 });
-  });
-
   it("files nothing for a turn that reported no tokens and no cost", async () => {
     const { rt, ws } = await runtimeWith(turning({ status: "completed", text: "done" }));
     await (await rt.sessions.start(ws.id, { prompt: "go" })).finished;
@@ -103,6 +94,15 @@ describe("what an account draws right now", () => {
     await (await rt.sessions.start(ws.id, { prompt: "go" })).finished;
     const { accounts } = await rt.usage.accounts();
     expect(accounts.find(a => a.key === "claude:vault-token")?.burn).toEqual({ tokensPerMinute: 3_000, threads: 1 });
+  });
+
+  it("files a live call when the host receives it, whatever the clock of the machine it ran on says", async () => {
+    const behind = Date.now() - 20 * 60_000;
+    const ahead = Date.now() + 20 * 60_000;
+    const { rt, ws } = await runtimeWith(turning({ status: "completed", text: "done", tokens: { input: 10, output: 1 } }, sessionId => [{ type: "limit", sessionId, limit: window }, { type: "turn.usage", sessionId, tokens: 1_500, at: behind }, { type: "turn.usage", sessionId, tokens: 3_000, at: ahead }]));
+    await (await rt.sessions.start(ws.id, { prompt: "go" })).finished;
+    const { accounts } = await rt.usage.accounts();
+    expect(accounts.find(a => a.key === "claude:vault-token")?.burn).toEqual({ tokensPerMinute: 300, threads: 1 });
   });
 });
 

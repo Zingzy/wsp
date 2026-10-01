@@ -535,7 +535,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
       else if (id === REQUEST.turn || id === REQUEST.initialize) finish({ status: "failed", error: `codex could not start the turn: ${message}` });
     };
 
-    const onNotification = (method: string, params: Record<string, unknown>): void => {
+    const onNotification = (method: string, params: Record<string, unknown>, emittedAtMs?: number): void => {
       if (method !== "error") progress();
       switch (method) {
         case "thread/started": {
@@ -564,7 +564,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
           const total = rec(reported?.total) ?? {};
           const last = rec(reported?.last);
           if (last === undefined) break;
-          emit({ type: "turn.usage", sessionId: threadId, tokens: (count(last.inputTokens) ?? 0) + (count(last.outputTokens) ?? 0) });
+          emit({ type: "turn.usage", sessionId: threadId, tokens: (count(last.inputTokens) ?? 0) + (count(last.outputTokens) ?? 0), ...(emittedAtMs !== undefined ? { at: emittedAtMs } : {}) });
           const window = count(reported?.modelContextWindow);
           usage = { before: usage?.before ?? totalBefore(total, last), total, last, ...(window !== undefined ? { window } : {}) };
           break;
@@ -639,7 +639,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
           }
           switch (message.kind) {
             case "notification":
-              onNotification(message.method, message.params);
+              onNotification(message.method, message.params, message.emittedAtMs);
               break;
             case "request":
               onRequest(message.id, message.method, message.params);

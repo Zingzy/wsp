@@ -8382,8 +8382,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
                   accountLabel: account.label,
                   computer: usageComputerOf(entry.record),
                   project: entry.record.project,
-                  threadId,
-                  workspaceId,
                   turns: use.model === counted ? 1 : 0,
                   ...(use.model !== undefined ? { model: use.model } : {}),
                   ...(use.tokens !== undefined ? { tokens: use.tokens } : {}),
@@ -8411,7 +8409,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           return;
         }
         case "turn.usage":
-          burn.add({ account: usageAccountOf(entry, view.harness, turnAccount).key, threadId, tokens: event.tokens });
+          // Only a run re-read after a restart reads the agent's stamp, and only against its own other stamps.
+          burn.add({ account: usageAccountOf(entry, view.harness, turnAccount).key, threadId, tokens: event.tokens, ...(t.written !== undefined && event.at !== undefined ? { replayed: { run: turnId, at: event.at } } : {}) });
           return;
         case "turn.plan":
           record({ type: "session.plan", workspaceId, sessionId, turnId, threadId, ...(event.steps !== undefined ? { steps: event.steps } : {}), ...(event.text !== undefined ? { text: event.text } : {}) });
@@ -11079,17 +11078,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const outside = q.outside === true && (await preferences.get()).usageLogs;
       if (outside) await readLogs().catch((e: unknown) => console.warn(`this computer's agent logs were not read for usage: ${e instanceof Error ? e.message : String(e)}`));
       const places = (await placeDoor?.list(clock.now())) ?? [];
-      return ledger.used({
-        range: q.range,
-        split: q.split,
-        label: usageLabel(places, await ledger.accountLabels()),
-        outside,
-        logsOn: usageComputerName(places, HERE_PLACE_ID),
-        threadNames: (threadId, workspaceId) => {
-          const workspace = live.get(workspaceId)?.record.name;
-          return { title: threadTitle(threadId), ...(workspace !== undefined ? { workspace } : {}) };
-        },
-      });
+      return ledger.used({ range: q.range, split: q.split, label: usageLabel(places, await ledger.accountLabels()), outside, logsOn: usageComputerName(places, HERE_PLACE_ID) });
     },
     readings: async (target, range, origin) => {
       const to = clock.now();

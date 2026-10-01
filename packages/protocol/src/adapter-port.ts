@@ -100,6 +100,9 @@ export type AdapterEvent =
       type: "turn.usage";
       sessionId: string;
       tokens: number;
+      /** When the call was made, ms epoch, on the clock of the machine the agent runs on. A run re-read after a host
+       * restart replays its old calls, and the host reads this only there, against the run's other stamps. */
+      at?: number;
     }
   | { type: "permission.ask"; sessionId: string; ask: PermissionAsk }
   | {

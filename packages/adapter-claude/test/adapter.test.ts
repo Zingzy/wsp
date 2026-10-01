@@ -850,7 +850,6 @@ describe("result classification", () => {
     expect(result).toEqual({
       status: "failed",
       durationMs: 26,
-      costUsd: 0,
       tokens: { input: 0, output: 0, cached: 0, cacheWrite: 0 },
       text: "",
       error: "claude answered with no output and no usage after 26ms: No conversation found with session ID: e16ed170\nError: transcript ended mid-turn",
@@ -1496,9 +1495,28 @@ describe("what a turn cost, off totals the CLI keeps for the whole session", () 
     expect(command).toContain(`grep -F '"type":"cost-state"'`);
   });
 
-  it("a saved line of another session in the file is not this session's total", async () => {
-    const { done } = await run([saved(352.3259844, "11111111-2222-4333-8444-555555555555"), init, result(18)], FIXTURE_SESSION_ID);
-    expect(done.costUsd).toBe(18);
+  it("a saved line of another session, as a fork's file holds, is not this session's total, so the turn's cost is not known", async () => {
+    const { done } = await run([saved(352.3259844, "11111111-2222-4333-8444-555555555555"), init, result(370.679875)], FIXTURE_SESSION_ID);
+    expect(done.costUsd).toBeUndefined();
+    expect(done.tokens).toMatchObject({ input: 10, output: 4 });
+  });
+
+  it("a resume with nothing saved leaves the turn's cost out rather than filing the session's whole total", async () => {
+    const { done } = await run([init, result(370.679875)], FIXTURE_SESSION_ID);
+    expect(done.costUsd).toBeUndefined();
+    expect(done.models).toBeUndefined();
+  });
+
+  it("a saved line that does not read leaves the turn's cost out", async () => {
+    const broken = JSON.stringify({ type: "cost-state", sessionId: FIXTURE_SESSION_ID, totalCostUSD: "352.33", modelUsage: {} });
+    expect((await run([broken, init, result(370.679875)], FIXTURE_SESSION_ID)).done.costUsd).toBeUndefined();
+    expect((await run(['{"type":"cost-state","sessionId":"e16ed170', init, result(370.679875)], FIXTURE_SESSION_ID)).done.costUsd).toBeUndefined();
+  });
+
+  it("a compaction inside the turn leaves the running total running: the turn still costs what it gained", async () => {
+    const compacted = `{"type":"system","subtype":"compact_boundary","session_id":"${FIXTURE_SESSION_ID}","compact_metadata":{"trigger":"auto","pre_tokens":180000,"post_tokens":12000}}`;
+    const { done } = await run([saved(352.3259844), init, compacted, result(370.679875)], FIXTURE_SESSION_ID);
+    expect(done.costUsd).toBeCloseTo(18.3538906, 6);
   });
 
   it("a total under the saved one started again from nothing, so the turn cost the whole of it", async () => {
@@ -1529,7 +1547,7 @@ describe("what a turn cost, off totals the CLI keeps for the whole session", () 
 
   it("says what each model call drew once per message, a subagent's included, though every block of a message repeats its usage", async () => {
     const said = (id: string, usage: Record<string, number>, parent: string | null = null) =>
-      JSON.stringify({ type: "assistant", message: { id, role: "assistant", content: [{ type: "text", text: "x" }], usage }, parent_tool_use_id: parent, session_id: FIXTURE_SESSION_ID });
+      JSON.stringify({ type: "assistant", message: { id, role: "assistant", content: [{ type: "text", text: "x" }], usage }, parent_tool_use_id: parent, session_id: FIXTURE_SESSION_ID, timestamp: `2026-10-01T10:00:0${id.slice(-1)}.000Z` });
     const exec = scriptedExec([
       init,
       said("msg_1", { input_tokens: 5, cache_read_input_tokens: 1_000, cache_creation_input_tokens: 200, output_tokens: 40 }),
@@ -1541,9 +1559,18 @@ describe("what a turn cost, off totals the CLI keeps for the whole session", () 
     const { events, onEvent } = collect();
     await adapter.start({ prompt: "x", onEvent }).finished;
     expect(events.filter(e => e.type === "turn.usage")).toEqual([
-      { type: "turn.usage", sessionId: FIXTURE_SESSION_ID, tokens: 1_245 },
-      { type: "turn.usage", sessionId: FIXTURE_SESSION_ID, tokens: 10 },
+      { type: "turn.usage", sessionId: FIXTURE_SESSION_ID, tokens: 1_245, at: Date.parse("2026-10-01T10:00:01.000Z") },
+      { type: "turn.usage", sessionId: FIXTURE_SESSION_ID, tokens: 10, at: Date.parse("2026-10-01T10:00:02.000Z") },
     ]);
+  });
+
+  it("one model's totals under their saved ones while the session's total grew leaves the split by model unknown, never a model's whole total", async () => {
+    const use = (input: number, cost: number) => ({ inputTokens: input, outputTokens: 10, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, webSearchRequests: 0, costUSD: cost });
+    const before = JSON.stringify({ type: "cost-state", sessionId: FIXTURE_SESSION_ID, totalCostUSD: 10, modelUsage: { "claude-opus-5-5": use(1_000, 9), "claude-haiku-4-5-20251001": use(500, 1) } });
+    const after = JSON.stringify({ type: "result", subtype: "success", is_error: false, num_turns: 1, duration_ms: 900, result: "done", session_id: FIXTURE_SESSION_ID, total_cost_usd: 12, usage: { input_tokens: 10, output_tokens: 4 }, modelUsage: { "claude-opus-5-5": use(1_400, 11.9), "claude-haiku-4-5-20251001": use(200, 0.1) } });
+    const { done } = await run([before, init, after], FIXTURE_SESSION_ID);
+    expect(done.costUsd).toBe(2);
+    expect(done.models).toBeUndefined();
   });
 
   it("a new session has nothing saved: the launch reads no file and the turn cost its whole total", async () => {

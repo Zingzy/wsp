@@ -127,9 +127,6 @@ export type UsageTokens = z.infer<typeof UsageTokens>;
 /** One key's use: its turns and tokens, the cost the harness itself reported where it did, and where it was read:
  * a turn wsp ran, or a harness's own log of work done outside wsp on this computer. */
 export const UsageRow = UsageKey.extend({
-  /** The thread and workspace a wsp turn ran in; absent on a log's rows. */
-  threadId: z.string().optional(),
-  workspaceId: z.string().optional(),
   turns: z.number().int(),
   tokens: UsageTokens,
   costReported: z.number().optional(),
@@ -172,25 +169,6 @@ export const UsedAnswer = z.object({
   logs: z.object({ agents: z.array(z.string()), computer: z.string() }).optional(),
   /** Each row's own series, on the same steps as series, so a chart draws one line per split value. */
   lines: z.array(z.object({ key: z.string(), label: z.string(), points: z.array(z.number()) })).optional(),
-  /** The range split by where it was read: the turns wsp ran, and the agents' own logs of work done outside wsp. */
-  sources: z.array(z.object({ source: z.enum(["wsp", "log"]), tokens: z.number(), estimate: z.number().optional() })).optional(),
-  /** The threads that used the most over the range, most first, five at most. */
-  threads: z
-    .array(
-      z.object({
-        threadId: z.string(),
-        workspaceId: z.string(),
-        title: z.string(),
-        agent: z.string(),
-        workspace: z.string().optional(),
-        computer: z.string().optional(),
-        tokens: z.number(),
-        estimate: z.number().optional(),
-      }),
-    )
-    .optional(),
-  /** How many threads and computers the range's use came from. */
-  counts: z.object({ threads: z.number().int(), computers: z.number().int() }).optional(),
 });
 export type UsedAnswer = z.infer<typeof UsedAnswer>;
 

@@ -278,29 +278,44 @@ function resultTokens(event: Record<string, unknown>): { tokens?: TurnTokens; mo
 
 /** What a session's file saved of its running totals before the turn: the cost and each model's use. */
 interface SavedUse {
-  costUsd?: number;
+  costUsd: number;
   models: ModelUse[];
+}
+
+/** A cost-state line as this session's saved totals, or nothing where it is another session's or does not read. */
+function savedUseOf(event: Record<string, unknown>, sessionId: string): SavedUse | undefined {
+  const costUsd = num(event.totalCostUSD);
+  if (str(event.sessionId) !== sessionId || costUsd === undefined || rec(event.modelUsage) === undefined) return undefined;
+  return { costUsd, models: modelsOf(event.modelUsage) };
 }
 
 const spentBy = (m: ModelUse): number => m.tokens.input + m.tokens.output;
 
-/** One model's running totals less where they stood before the turn, or the whole of them where they started again. */
-function gained(now: ModelUse, before: ModelUse | undefined): ModelUse {
-  if (before === undefined || MODEL_FIELDS.some(k => now.tokens[k] < before.tokens[k])) return now;
+/** One model's running totals less where they stood before the turn; nothing where any of them fell under that, since
+ * which part of them is this turn's is then not known. */
+function gained(now: ModelUse, before: ModelUse | undefined): ModelUse | undefined {
+  if (before === undefined) return now;
+  if (MODEL_FIELDS.some(k => now.tokens[k] < before.tokens[k])) return undefined;
   const tokens = { ...now.tokens };
   for (const k of MODEL_FIELDS) tokens[k] -= before.tokens[k];
   const costUsd = now.costUsd === undefined ? undefined : Math.max(0, now.costUsd - (before.costUsd ?? 0));
   return { model: now.model, tokens, ...(costUsd !== undefined ? { costUsd } : {}) };
 }
 
-/** The turn's own use: the session's running totals less what its file saved before the turn, the cost and each
- * model's, or the whole of a total that started again under that. The model is the one that did the most of it. */
-function ownUse(result: TurnResult, saved: SavedUse | undefined): TurnResult {
-  const total = result.costUsd;
-  const costUsd = total === undefined || saved?.costUsd === undefined || total < saved.costUsd ? total : total - saved.costUsd;
-  const models = result.models?.map(m => gained(m, saved?.models.find(b => b.model === m.model))).filter(m => spentBy(m) > 0);
+/** The turn's own use off the session's running totals. A new session starts them at nothing and a resume at what its
+ * file saved; a resume with nothing saved read leaves the turn's cost and its split by model out, its own tokens
+ * standing, so a turn never files the session's whole spend. A total under the saved one started again inside this
+ * turn, so all of it is this turn's. The model is the one that did the most of it. */
+function ownUse(result: TurnResult, saved: SavedUse | undefined, fresh: boolean): TurnResult {
+  const { costUsd: total, models: running, ...rest } = result;
+  if (!fresh && saved === undefined) return rest;
+  const before = saved ?? { costUsd: 0, models: [] };
+  const restarted = total !== undefined && total < before.costUsd;
+  const costUsd = total === undefined ? undefined : restarted ? total : total - before.costUsd;
+  const own = running?.map(m => (restarted ? m : gained(m, before.models.find(b => b.model === m.model))));
+  const models = own === undefined || own.some(m => m === undefined) ? undefined : (own as ModelUse[]).filter(m => spentBy(m) > 0);
   const model = models?.reduce<ModelUse | undefined>((best, m) => (best === undefined || spentBy(m) > spentBy(best) ? m : best), undefined)?.model;
-  return { ...result, ...(costUsd !== undefined ? { costUsd } : {}), ...(models !== undefined ? { models } : {}), ...(model !== undefined ? { model } : {}) };
+  return { ...rest, ...(costUsd !== undefined ? { costUsd } : {}), ...(models !== undefined ? { models } : {}), ...(model !== undefined ? { model } : {}) };
 }
 
 function normalizeResult(event: Record<string, unknown>, refusal: { road?: string; cause?: TurnRefusal } | undefined): TurnResult {
@@ -617,7 +632,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
   /** Everything a turn is once its stream exists. The launch and the attach differ only in where the stream came
    * from and in what is already known: an attached turn's CLI announced itself to an earlier host process, so it
    * takes a message from the first byte rather than waiting for an init line it may have printed long ago. */
-  const follow = (o: { stream: ExecStream; localId: string; announced: boolean; command?: string; onEvent: (event: AdapterEvent) => void }): ClaudeSession => {
+  const follow = (o: { stream: ExecStream; localId: string; announced: boolean; fresh: boolean; command?: string; onEvent: (event: AdapterEvent) => void }): ClaudeSession => {
     const { stream, localId, onEvent } = o;
 
     let claudeSessionId = localId;
@@ -768,7 +783,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
             continue;
           }
           if (event.type === "cost-state") {
-            if (str(event.sessionId) === localId) saved = { ...(num(event.totalCostUSD) !== undefined ? { costUsd: num(event.totalCostUSD)! } : {}), models: modelsOf(event.modelUsage) };
+            saved = savedUseOf(event, localId);
             continue;
           }
           if (event.type === "assistant" && typeof event.uuid === "string" && (event.parent_tool_use_id === undefined || event.parent_tool_use_id === null)) anchor = event.uuid;
@@ -836,7 +851,8 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
           const callId = str(call?.id);
           if (callUsage !== undefined && callId !== undefined && !drawn.has(callId)) {
             drawn.add(callId);
-            onEvent({ type: "turn.usage", sessionId: claudeSessionId, tokens: heldTokens(callUsage) });
+            const at = typeof event.timestamp === "string" ? Date.parse(event.timestamp) : NaN;
+            onEvent({ type: "turn.usage", sessionId: claudeSessionId, tokens: heldTokens(callUsage), ...(Number.isFinite(at) ? { at } : {}) });
           }
           const usage = str(event.type) === "assistant" && str(event.parent_tool_use_id) === undefined ? rec(rec(event.message)?.usage) : undefined;
           if (usage !== undefined && event.is_api_error_message !== true) heldContext = heldTokens(usage);
@@ -873,7 +889,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
               // their own lines.
               if (sawResult) continue;
               woken = false;
-              const result = spanned(withContext(ownUse(normalized.result, saved), heldContext, initModel));
+              const result = spanned(withContext(ownUse(normalized.result, saved, o.fresh), heldContext, initModel));
               if (backgroundTasks > 0) {
                 // The agent replied while the CLI still reports work it started. The turn is not over: ending it
                 // here kills that work mid-write and nothing ever says what came of it, so the reply is kept, the
@@ -1013,7 +1029,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     });
     const launch = options.resume === undefined ? command : `${savedSpendCommand({ configDir: deps.configDir, sessionId: options.resume })}${command}`;
     const stream = deps.exec(launch, { env: { ...env }, input: [userMessageLine(options.prompt, localId, options.images)] });
-    return follow({ stream, localId, announced: false, command: launch, onEvent: options.onEvent });
+    return follow({ stream, localId, announced: false, fresh: options.resume === undefined, command: launch, onEvent: options.onEvent });
   };
 
   /** A launch, and where it resumes a session the CLI's store does not hold and a seed is at hand, a second launch in a
@@ -1129,7 +1145,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       ? {
           attach: async (options: AdapterAttachOptions) => {
             const stream = await attach(options.run, { input: true, startedAt: options.startedAt });
-            return stream === "gone" ? "gone" : follow({ stream, localId: options.sessionId, announced: true, onEvent: options.onEvent });
+            return stream === "gone" ? "gone" : follow({ stream, localId: options.sessionId, announced: true, fresh: false, onEvent: options.onEvent });
           },
         }
       : {}),
