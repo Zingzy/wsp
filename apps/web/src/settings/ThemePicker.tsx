@@ -49,7 +49,7 @@ export function WindowPicture({ theme }: { theme: Theme }) {
 const RING = "ring-offset-2 ring-offset-background transition-[box-shadow,border-color] duration-150";
 const PICKED = "ring-2 ring-primary";
 /** An unpicked tile or card under the pointer: its edge a step up, the same on both grids. */
-const HOVER = "group-hover:border-foreground/20";
+const HOVER = "hover:border-foreground/20 group-hover:border-foreground/20";
 const FOCUS = "group-focus-visible:ring-2 group-focus-visible:ring-ring";
 
 /** One side tile: its window in the theme that side draws; System's halves are each side's, cut on a slant. */
