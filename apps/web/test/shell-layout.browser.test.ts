@@ -593,7 +593,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
     const composerAt = async (query: string, theme: string, name: string): Promise<Composer> => {
       await page!.goto(`${base}?theme=${theme}&${query}`);
       await page!.waitForSelector("[data-chat-composer]");
-      await page!.waitForSelector("text=loading transcript", { state: "detached" });
+      await page!.waitForSelector("text=Loading transcript", { state: "detached" });
       // The send fades between its held tier and its disc over 150 ms, so a computed style read at mount catches the
       // fade rather than either tier.
       await page!.waitForTimeout(400);
@@ -674,7 +674,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
     // A turn running on this computer with a prompt open under the composer, which is the page the menu covered.
     await page!.goto(`${base}?theme=dark&local=1&ws=ws_m&perm=1`);
     await page!.waitForSelector("[data-composer-picker='access']");
-    await page!.waitForSelector("text=loading transcript", { state: "detached" });
+    await page!.waitForSelector("text=Loading transcript", { state: "detached" });
     await page!.waitForSelector("[data-permission-prompt='ask_open'][data-permission-open='true']");
     await page!.locator("[data-composer-picker='access']").click();
     await page!.waitForSelector("[data-composer-option='plan']");
@@ -696,7 +696,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
   it("an access that answers the open prompt closes it without a click, and says nothing about a next message", async () => {
     await page!.goto(`${base}?theme=dark&local=1&ws=ws_m&perm=1`);
     await page!.waitForSelector("[data-composer-picker='access']");
-    await page!.waitForSelector("text=loading transcript", { state: "detached" });
+    await page!.waitForSelector("text=Loading transcript", { state: "detached" });
     await page!.waitForSelector("[data-permission-prompt='ask_open'][data-permission-open='true']");
     await page!.locator("[data-composer-picker='access']").click();
     await page!.waitForSelector("[data-composer-option='bypassPermissions']");
@@ -713,7 +713,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
     for (const theme of ["dark", "light"] as const) {
       await page!.goto(`${base}?theme=${theme}&local=1&ws=ws_m&perm=1&access=refused`);
       await page!.waitForSelector("[data-composer-picker='access']");
-      await page!.waitForSelector("text=loading transcript", { state: "detached" });
+      await page!.waitForSelector("text=Loading transcript", { state: "detached" });
       const trigger = "[data-composer-picker='access']";
       expect(await page!.locator(trigger).getAttribute("data-access")).toBe("bypassPermissions");
       const before = await box("[data-slot=composer-shell]");

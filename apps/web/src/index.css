@@ -146,7 +146,6 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
   --animate-skeleton: skeleton 2s infinite linear;
   /* Duty-cycled indicator animations: long holds with stepped ramps, so the
      compositor updates discrete frames instead of every vsync. */
-  --animate-status-pulse: status-pulse 2s infinite;
   --animate-ghost-pulse: ghost-pulse 2.4s infinite;
   --animate-status-ping: status-ping 2s infinite;
   --animate-squiggle: squiggle 0.9s linear infinite;
@@ -246,21 +245,6 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
     92% {
       opacity: 0.55;
       animation-timing-function: steps(4);
-    }
-    100% {
-      opacity: 1;
-    }
-  }
-  @keyframes status-pulse {
-    0%,
-    40% {
-      opacity: 1;
-      animation-timing-function: steps(6);
-    }
-    50%,
-    90% {
-      opacity: 0.5;
-      animation-timing-function: steps(6);
     }
     100% {
       opacity: 1;

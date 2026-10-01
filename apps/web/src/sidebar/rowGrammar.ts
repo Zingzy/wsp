@@ -13,9 +13,9 @@ const ROW_FADE_CLASS = "transition-[background-color,color] duration-150";
 export const TOP_ROW_CLASS = `px-2 ${ROW_FADE_CLASS}`;
 const ROW_META_GRAMMAR = "font-mono text-[11px] tabular-nums";
 export const ROW_META_CLASS = `${ROW_META_GRAMMAR} text-[var(--top-row-meta)]`;
-/** The same grammar for a word a person reads rather than glances at: a state word or a sentence. The counts'
- * whisper sits under AA on purpose; a word that has to be read takes the ink that clears it. */
-export const ROW_PROSE_CLASS = `${ROW_META_GRAMMAR} text-[var(--sidebar-prose)]`;
+/** A word a person reads rather than glances at, a state word or a sentence, in the sans. The counts' whisper sits
+ * under AA on purpose; a word that has to be read takes the ink that clears it. */
+export const ROW_PROSE_CLASS = "text-xs text-[var(--sidebar-prose)]";
 /** Every row's text: the sans at 13 px, the kit's medium weight kept for the one selected row. A project row, the
  * search row and the head read in the rest ink; a workspace's name and a working thread's title take the sidebar's
  * foreground, since the rest ink on the dark side sits under the muted ink a settled title wears. */

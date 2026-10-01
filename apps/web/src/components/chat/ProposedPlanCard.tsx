@@ -118,7 +118,7 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
           </MenuTrigger>
           <MenuPopup align="end">
             <MenuItem onClick={handleCopyPlan}>
-              {isCopied ? "Copied!" : "Copy to clipboard"}
+              {isCopied ? "Copied" : "Copy to clipboard"}
             </MenuItem>
             <MenuItem onClick={handleDownload}>Download as markdown</MenuItem>
             {onSavePlan ? (
@@ -208,7 +208,7 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
                 onClick={() => void handleSaveToWorkspace()}
                 disabled={isSavingToWorkspace}
               >
-                {isSavingToWorkspace ? "Saving..." : "Save"}
+                {isSavingToWorkspace ? "Saving…" : "Save"}
               </Button>
             </DialogFooter>
           </DialogPopup>

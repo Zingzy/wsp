@@ -357,7 +357,7 @@ describe("ChatView", () => {
     useStore.getState().bind(api);
     await waitFor(() => expect(useStore.getState().workspaces.length).toBeGreaterThan(0));
     render(<ChatView workspaceId={WS}>{thread => <span data-testid="fresh">{String(thread.fresh)}</span>}</ChatView>);
-    expect(screen.getByText("loading transcript")).toBeDefined();
+    expect(screen.getByText("Loading transcript")).toBeDefined();
     act(() => requestNewThread({ workspaceId: WS }));
     act(() => release(settledTurn(WS, "add a health route", "Added GET /health.")));
     await waitFor(() => expect(screen.queryByText("loading transcript")).toBeNull());

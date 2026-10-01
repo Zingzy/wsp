@@ -59,7 +59,7 @@ export function PermissionPromptRow({
     <div className={`min-w-0 pb-2 pt-1${gutter}`} data-permission-prompt={permission.askId} data-permission-open={open ? "true" : "false"}>
       <div className="flex min-w-0 flex-col gap-1">
         {asker === undefined ? null : (
-          <span className="font-mono text-[11px] leading-4 text-muted-foreground" data-permission-asker="">
+          <span className="text-[11px] leading-4 text-muted-foreground" data-permission-asker="">
             {asker}
           </span>
         )}
@@ -71,7 +71,7 @@ export function PermissionPromptRow({
               <span className="break-words whitespace-pre-wrap text-sm leading-relaxed text-foreground/80" data-permission-says="">
                 {words.says}
               </span>
-              <span className="font-mono text-xs leading-4 text-muted-foreground" data-permission-outcome={permission.outcome ?? undefined}>
+              <span className="text-xs leading-4 text-muted-foreground" data-permission-outcome={permission.outcome ?? undefined}>
                 {permissionOutcomeLine(permission.outcome!, named)}
               </span>
             </>
@@ -99,7 +99,7 @@ export function PermissionPromptRow({
           <Collapsible>
             <CollapsibleTrigger
               data-permission-body-trigger=""
-              className="group flex items-center gap-1 text-left font-mono text-xs leading-4 text-muted-foreground hover:text-foreground"
+              className="group flex items-center gap-1 text-left text-xs leading-4 text-muted-foreground hover:text-foreground"
             >
               <ChevronRightIcon aria-hidden className="size-3 shrink-0 transition-transform duration-150 group-data-panel-open:rotate-90" />
               {words.body.label}
@@ -130,7 +130,7 @@ export function PermissionPromptRow({
             ))}
           </div>
         ) : (
-          <span className="font-mono text-xs leading-4 text-muted-foreground" data-permission-outcome={permission.outcome ?? undefined}>
+          <span className="text-xs leading-4 text-muted-foreground" data-permission-outcome={permission.outcome ?? undefined}>
             {permissionOutcomeLine(permission.outcome!, named)}
           </span>
         )}

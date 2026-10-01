@@ -34,7 +34,7 @@ export const PROJECT_WORDS = {
   new: "New project",
   settings: "Project settings",
   remove: "Remove project",
-  noWorkspaces: "No tasks yet.",
+  noWorkspaces: "No threads yet.",
   notRead: (said: string) => `Projects not read: ${said}`,
 } as const;
 
@@ -79,7 +79,7 @@ export const ADD_PROJECT_WORDS = {
   noRepos: "No git repos found under your home folder. Type a path to one.",
   noFolders: "No folders here.",
   noMatch: "No repo matches.",
-  added: "added",
+  added: "Added",
   cloneLine: (url: string, on: string) => `Clone ${url} on ${on}`,
   cloneInto: (url: string) => `Clone ${url} into`,
   cloneIntoPlaceholder: (name: string) => `An empty folder, like ~/code/${name}`,

@@ -359,7 +359,7 @@ export function ComposerModelPicker({ catalogs, catalog, model, pinned, where, o
             </div>
             {foot === null ? null : (
               <div className="border-t border-border px-2.5 py-1.5" data-composer-model-foot>
-                <div className="truncate font-mono text-[10px] text-muted-foreground/70" role="status" title={foot}>
+                <div className="truncate font-mono text-[11px] text-muted-foreground/70" role="status" title={foot}>
                   {foot}
                 </div>
               </div>
