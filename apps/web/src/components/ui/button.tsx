@@ -16,7 +16,7 @@ const KEYCAP_BEVEL = "shadow-[inset_0_1px_0_var(--keycap-top)]";
 const NEUTRAL_RING = "focus-visible:ring-muted-foreground";
 
 /** The outline keycap's body: the field edge and fill, and a 5% foreground step into that fill under the pointer. */
-const OUTLINE_SURFACE = `${KEYCAP_BEVEL} border-input bg-(--input-fill) [:hover,[data-pressed]]:bg-[color-mix(in_srgb,var(--foreground)_5%,var(--input-fill))]`;
+export const OUTLINE_SURFACE = `${KEYCAP_BEVEL} border-input bg-(--input-fill) [:hover,[data-pressed]]:bg-[color-mix(in_srgb,var(--foreground)_5%,var(--input-fill))]`;
 
 const buttonVariants = cva(
   "[--control-icon-color:currentColor] relative inline-flex shrink-0 cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-[var(--control-radius)] border font-medium text-[13px] outline-none transition-[color,background-color,border-color] duration-150 pointer-coarse:after:absolute pointer-coarse:after:size-full pointer-coarse:after:min-h-11 pointer-coarse:after:min-w-11 focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-64 [&_svg:not([class*='text-'])]:text-[var(--control-icon-color)] [&_svg:not([class*='size-'])]:size-3.5 [&_svg]:pointer-events-none [&_svg]:shrink-0",

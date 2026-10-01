@@ -9,10 +9,10 @@ import { cn } from "../../lib/utils";
 
 export function TimelineRuleLine({ line, children, end, className, ...rest }: ComponentProps<"div"> & { line: string; end?: ReactNode }) {
   return (
-    <div {...rest} className={cn("flex h-6 min-w-0 items-center gap-2 px-1 font-mono text-[11px] text-muted-foreground tabular-nums", className)}>
+    <div {...rest} className={cn("flex h-6 min-w-0 items-center gap-2 px-1 text-[11px] text-muted-foreground", className)}>
       <span className="shrink-0 whitespace-nowrap">{line}</span>
       {children}
-      {end === undefined ? null : <span className="ms-auto shrink-0 whitespace-nowrap">{end}</span>}
+      {end === undefined ? null : <span className="ms-auto shrink-0 whitespace-nowrap font-mono tabular-nums">{end}</span>}
     </div>
   );
 }

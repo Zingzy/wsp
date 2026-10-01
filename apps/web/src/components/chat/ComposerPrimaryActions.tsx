@@ -4,7 +4,7 @@ import { memo, type PointerEventHandler } from "react";
 import { ChevronDownIcon, ChevronLeftIcon } from "lucide-react";
 import { COMPOSER_STATE_WORDS } from "../../composer-state-words.js";
 import { cn } from "../../lib/utils";
-import { Button } from "../ui/button";
+import { Button, OUTLINE_SURFACE } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Spinner } from "../ui/spinner";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -240,7 +240,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
         // same slot and the accent back the moment the block lifts. An empty box is not held, it is simply empty,
         // and stays the fainter accent it has always been.
         isSendDisabled
-          ? "border-input bg-popover text-muted-foreground dark:bg-input/32"
+          ? `${OUTLINE_SURFACE} text-muted-foreground`
           : "bg-foreground text-background hover:bg-foreground/90 disabled:opacity-30",
       )}
       {...pointerFocusProps}
