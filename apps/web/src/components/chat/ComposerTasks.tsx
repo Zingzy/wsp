@@ -48,7 +48,7 @@ export const ComposerTasks = memo(function ComposerTasks({ tasks }: { tasks: Tas
     <div
       data-composer-tasks
       data-composer-banner-surface="attached"
-      className="relative z-0 mx-auto -mb-px w-[calc(100%-2*var(--chat-composer-drawer-inset))] rounded-t-[14px] border border-b-0 border-(--chat-composer-outline) bg-[color-mix(in_srgb,var(--chat-composer-glass-surface)_var(--chat-composer-glass-opacity),transparent)] px-1 pt-1 pb-1 text-xs leading-4 off-mac:glass-backdrop"
+      className="relative z-0 mx-auto -mb-px w-[calc(100%-2*var(--chat-composer-drawer-inset))] rounded-t-[14px] border border-b-0 border-(--chat-composer-outline) bg-[color-mix(in_srgb,var(--chat-composer-glass-surface)_var(--chat-composer-glass-opacity),transparent)] px-1 pt-1 pb-1 text-xs leading-4 glass-backdrop"
     >
       {open ? (
         <ul aria-label={`Task list. ${tasks.done} of ${tasks.total} done.`} data-composer-tasks-list className="max-h-56 overflow-y-auto px-2 pt-1 pb-1.5">
