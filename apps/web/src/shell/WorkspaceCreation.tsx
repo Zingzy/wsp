@@ -1,14 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The centre while a workspace is being made: the thread it becomes, empty,
-// drawn where ChatView draws an empty thread so nothing moves when the
-// workspace takes the page, with one folded "Setting up" row at the top for
-// the create's steps and the composer ready under the question. A message sent
-// now waits under the creation and goes to the workspace once it is up.
+// The centre while a workspace is being made: the thread it becomes. Asked
+// with a message, it is that thread already, the message first, the create's
+// steps in the middle of the room under it and the composer docked; asked with
+// none, it is the empty thread, drawn where ChatView draws one, with one
+// folded "Setting up" row at the top and the composer under the question. A
+// message sent now waits under the creation and goes to the workspace once it
+// is up.
 import { useLayoutEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { ChevronDownIcon, ChevronRightIcon, CircleAlertIcon } from "lucide-react";
 import { ChatComposer } from "../components/chat/ChatComposer.js";
 import { EmptyThread } from "../components/chat/ChatView.js";
+import { PERSON_BUBBLE } from "../components/chat/MessagesTimeline.js";
 import { HeroField } from "../components/chat/EmptyHero.js";
 import { useChatThread } from "../components/chat/useChatThread.js";
 import { Crab } from "../components/status/Crab.js";
@@ -31,6 +34,7 @@ const STEP_ROW_PX = 24;
 export function WorkspaceCreation({ creation }: { creation: Creation }) {
   const thread = useChatThread(creation.key, null, true);
   const [open, setOpen] = useState(false);
+  const asked = creation.asked;
   const { folder, project: projectName, at } = useStore(
     useShallow(s => {
       const project = s.projects.find(p => p.id === creation.project);
@@ -48,15 +52,15 @@ export function WorkspaceCreation({ creation }: { creation: Creation }) {
     const root = rootRef.current;
     const composer = composerRef.current;
     const question = questionRef.current;
-    if (root === null || composer === null || question === null) return;
+    if (root === null || composer === null) return;
     const observer = new ResizeObserver(() => {
       root.style.setProperty("--chat-composer-inset", `${composer.offsetHeight}px`);
-      root.style.setProperty("--question-height", `${question.offsetHeight}px`);
+      if (question !== null) root.style.setProperty("--question-height", `${question.offsetHeight}px`);
     });
     observer.observe(composer);
-    observer.observe(question);
+    if (question !== null) observer.observe(question);
     return () => observer.disconnect();
-  }, []);
+  }, [asked]);
   const project = creation.project === undefined ? {} : { projectId: creation.project };
   return (
     <div
@@ -67,14 +71,32 @@ export function WorkspaceCreation({ creation }: { creation: Creation }) {
       data-terminal-beside
     >
       <div ref={rootRef} className="relative isolate h-full min-h-0 text-foreground [--empty-lift:calc((100%-var(--chat-composer-inset,0px)-5.5rem)/2)]">
-        <div className="absolute inset-0">
-          <HeroField />
-          <div ref={questionRef} className="absolute inset-x-0 bottom-[calc(var(--empty-lift)+var(--chat-composer-inset)+2.5rem)]">
-            <EmptyThread name={projectName ?? creation.name} {...project} />
+        {asked === undefined ? (
+          <div className="absolute inset-0">
+            <HeroField />
+            <div ref={questionRef} className="absolute inset-x-0 bottom-[calc(var(--empty-lift)+var(--chat-composer-inset)+2.5rem)]">
+              <EmptyThread name={projectName ?? creation.name} {...project} />
+            </div>
+            <div className="absolute inset-x-0 top-0 bottom-[calc(var(--empty-lift)+var(--chat-composer-inset)+2.5rem+var(--question-height,8.5rem)+0.75rem)] flex flex-col px-3 pt-3 sm:px-5 sm:pt-4">
+              <SettingUp creation={creation} open={open} onToggle={() => setOpen(o => !o)} />
+            </div>
           </div>
-          <SettingUp creation={creation} open={open} onToggle={() => setOpen(o => !o)} />
-        </div>
-        <div ref={composerRef} data-chat-composer-dock data-centred className="pointer-events-none absolute inset-x-0 bottom-(--empty-lift) z-10 *:pointer-events-auto">
+        ) : (
+          <div data-k="creation-asked" className="absolute inset-x-0 top-0 bottom-(--chat-composer-inset,0px) flex flex-col gap-4 px-3 pt-3 sm:px-5 sm:pt-4">
+            <div className="mx-auto flex w-full min-w-0 max-w-3xl shrink-0 flex-col items-end">
+              <div className={cn(PERSON_BUBBLE, "whitespace-pre-wrap break-words text-sm leading-relaxed")}>{asked}</div>
+            </div>
+            <div className="flex min-h-0 flex-1 items-center justify-center pb-6">
+              <SettingUpCentre creation={creation} />
+            </div>
+          </div>
+        )}
+        <div
+          ref={composerRef}
+          data-chat-composer-dock
+          data-centred={asked === undefined || undefined}
+          className="pointer-events-none absolute inset-x-0 bottom-0 z-10 *:pointer-events-auto data-centred:bottom-(--empty-lift)"
+        >
           <ChatComposer key={creation.key} workspaceId={creation.key} thread={thread} waiting={{ line: creationWaitLine(creation.name), folder }} where={at === undefined || computer === undefined ? undefined : <RunsOn at={at} name={computer} />} />
         </div>
       </div>
@@ -93,7 +115,7 @@ function SettingUp({ creation, open, onToggle }: { creation: Creation; open: boo
   const step = currentStep(creation);
   const Chevron = open ? ChevronDownIcon : ChevronRightIcon;
   return (
-    <div className="absolute inset-x-0 top-0 bottom-[calc(var(--empty-lift)+var(--chat-composer-inset)+2.5rem+var(--question-height,8.5rem)+0.75rem)] flex flex-col px-3 pt-3 sm:px-5 sm:pt-4">
+    <div className="flex min-h-0 flex-1 flex-col">
       <div className="mx-auto flex min-h-0 w-full min-w-0 max-w-3xl flex-1 flex-col">
         <div className="flex min-w-0 shrink-0 items-center gap-2">
           <button
@@ -183,6 +205,70 @@ function Below({ creation, open }: { creation: Creation; open: boolean }) {
           </p>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+/** The steps the newest last, as many as fit a glance. */
+const CENTRE_STEPS = 5;
+
+/** The create's steps for a page that already shows the message that asked for it, standing in the middle of the room
+ * the reply will take: the crab, the words and the time since the ask, then the latest steps, done ones quiet. A refused
+ * create says so in the same place, its reason once, with Retry and Dismiss under it. */
+function SettingUpCentre({ creation }: { creation: Creation }) {
+  const retry = useStore(s => s.retryCreation);
+  const dismiss = useStore(s => s.dismissCreation);
+  const { failed, lines } = creation;
+  const taken = lines.filter(line => line.stage !== "failed");
+  const shown = taken.slice(-CENTRE_STEPS);
+  const last = shown.length - 1;
+  return (
+    <div data-k="setting-up" className="flex w-full max-w-md flex-col items-center gap-4 text-center">
+      <div className="flex items-center gap-2 text-sm">
+        {failed === null ? (
+          <>
+            <Crab className="text-status-working" />
+            <span className="text-foreground">Setting up</span>
+            <span data-step-time className="font-mono text-xs tabular-nums text-muted-foreground">
+              <WorkingSince since={new Date(creation.askedAt).toISOString()} format={stepTime} />
+            </span>
+          </>
+        ) : (
+          <>
+            <CircleAlertIcon aria-hidden className="size-4 shrink-0 text-status-failed" />
+            <span className="font-medium text-status-failed">{CREATE_STEP_WORDS.failed}</span>
+          </>
+        )}
+      </div>
+      <ol aria-label="Setting up" aria-live="polite" className="flex flex-col items-center gap-1">
+        {shown.length === 0 ? <li className={cn("text-[13px] leading-5", failed === null ? "text-foreground" : "text-status-failed")}>{CREATE_ASKED}</li> : null}
+        {shown.map((line, i) => (
+          <li
+            key={taken.length - shown.length + i}
+            className={cn("flex items-baseline gap-2 text-[13px] leading-5", i === last ? (failed === null ? "text-foreground" : "text-status-failed") : "text-muted-foreground/70")}
+          >
+            <span data-step-words>{stepWords(line)}</span>
+            <span data-step-time className="font-mono text-xs tabular-nums text-muted-foreground">
+              {stepTime(line.elapsedMs)}
+            </span>
+          </li>
+        ))}
+      </ol>
+      {failed !== null ? (
+        <>
+          <p data-creation-reason className="text-sm leading-6 text-muted-foreground">
+            {failed.detail}
+          </p>
+          <div data-creation-refusal className="flex items-center gap-2">
+            <Button variant="outline" size="xs" className="h-6" onClick={() => void retry(creation.key)}>
+              Retry
+            </Button>
+            <Button variant="ghost" size="xs" onClick={() => dismiss(creation.key)}>
+              Dismiss
+            </Button>
+          </div>
+        </>
+      ) : null}
     </div>
   );
 }

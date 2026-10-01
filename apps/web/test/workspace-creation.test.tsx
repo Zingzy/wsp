@@ -73,6 +73,14 @@ describe("the step words", () => {
 });
 
 describe("the creation page", () => {
+  it("asked with a message, is that thread already: the message first, the steps in the middle and the composer docked", async () => {
+    const view = await mount(making([line("fork-requested", "Fork requested.", 1200), line("hostname-set", "Named.", 1800)], { asked: "make the rows taller" }));
+    expect(within(view).queryByRole("heading", { level: 1 })).toBeNull();
+    expect(view.querySelector("[data-k=creation-asked]")!.textContent).toContain("make the rows taller");
+    expect(steps(view).map(li => li.querySelector("[data-step-words]")!.textContent)).toEqual([CREATE_STEP_WORDS["fork-requested"], CREATE_STEP_WORDS["hostname-set"]]);
+    expect(view.querySelector<HTMLElement>("[data-chat-composer-dock]")!.hasAttribute("data-centred")).toBe(false);
+  });
+
   it("is the empty thread it becomes: the question with the name, and the composer centred in the dock", async () => {
     const view = await mount(making([]));
     expect(within(view).getByRole("heading", { level: 1 }).textContent).toBe("What should we build in beta?");

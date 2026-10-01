@@ -93,7 +93,7 @@ export function ProjectHome({ projectId }: { projectId: string }) {
     if (asked !== undefined) return fromLink(asked.url, "start");
     const picks = useMultiPickStore.getState().byKey[key];
     if (picks !== undefined) return startSeveral(prompt, picks);
-    const workspaceId = await createWorkspace(project.id, nameOfTask(prompt));
+    const workspaceId = await createWorkspace(project.id, nameOfTask(prompt), undefined, prompt);
     if (workspaceId === null) return null;
     useComposerOptionsStore.setState(s => {
       const picked = s.byWorkspaceId[key];
@@ -118,7 +118,7 @@ export function ProjectHome({ projectId }: { projectId: string }) {
     await Promise.all(
       picks.map(async pick => {
         const name = `${nameOfTask(prompt)} (${pick.label})`;
-        const workspaceId = await createWorkspace(project.id, name);
+        const workspaceId = await createWorkspace(project.id, name, undefined, prompt);
         if (workspaceId === null) return;
         const catalog = catalogs.find(c => c.harness === pick.harness);
         const own = { harness: pick.harness, model: pick.model };

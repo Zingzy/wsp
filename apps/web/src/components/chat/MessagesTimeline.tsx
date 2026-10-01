@@ -995,6 +995,10 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
   );
 });
 
+/** The person's message: what the transcript draws, and what a workspace still being made draws for the message that
+ * asked for it. */
+export const PERSON_BUBBLE = "relative max-w-[80%] rounded-2xl bg-message p-3 text-message-foreground";
+
 function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
   // The pixels are this tab's, held under the request id its own send carried; a transcript from a reload or another
@@ -1004,7 +1008,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
   return (
     <div className="group flex flex-col items-end gap-1">
       <div
-        className="relative max-w-[80%] rounded-2xl bg-message p-3 text-message-foreground"
+        className={PERSON_BUBBLE}
         {...(row.message.steered === true ? { "data-user-message-steered": "true", title: COMPOSER_WORDS.sentWhileWorking } : {})}
       >
         <ChatFileRow records={row.message.attachments ?? []} files={files} />

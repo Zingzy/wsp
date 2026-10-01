@@ -58,6 +58,9 @@ export interface Creation {
   readonly golden?: string;
   /** The size the person picked; absent, the golden's. */
   readonly size?: WorkspaceSize;
+  /** The message that asked for this work, drawn as the thread's first message while the machine is made; the caller
+   * sends it to the workspace once it is up. */
+  readonly asked?: string;
   /** The computer the work lands on, which is the project's own, by the id its row carries. The image build's own
    * frames name their place, so this is what says which are this create's. */
   readonly where?: string;
@@ -195,8 +198,9 @@ interface State {
   setPreferences(patch: PreferencesPatch): Promise<void>;
   /** Starts a workspace for one piece of work on the project named, by the project's id, selects its row and follows
    * it through the stage events; resolves with the runtime's id for the new workspace, or null when the create was
-   * refused. `picked` carries a project image or a size only where the person chose one. */
-  createWorkspace(project: string, name: string, picked?: { golden?: string; size?: WorkspaceSize }): Promise<string | null>;
+   * refused. `picked` carries a project image or a size only where the person chose one; `asked` is the message the
+   * work was asked with, which the creation view draws until the caller sends it. */
+  createWorkspace(project: string, name: string, picked?: { golden?: string; size?: WorkspaceSize }, asked?: string): Promise<string | null>;
   /** Records a project and answers the record the host kept: a folder on this computer, or a repository address on
    * the computer named. The row arrives by the project.added event too; this is what the first run and the sheet
    * wait on. Null on a client that cannot record one. */
@@ -678,7 +682,7 @@ export const useStore = create<State>((set, get) => {
         if (preferenceSetsInFlight === 0) void api.preferences?.().then(preferences => set({ preferences })).catch(() => {});
       }
     },
-    async createWorkspace(project, name, picked) {
+    async createWorkspace(project, name, picked, asked) {
       // The computer is the project's own, so the row that waits on an image build is keyed by it and nothing asks
       // the person where the work goes. Nothing is refused here: a project on this computer forks nothing, and a
       // project on a computer with no image is refused by the runtime in its own sentence on the creation view.
@@ -689,7 +693,7 @@ export const useStore = create<State>((set, get) => {
       set(s => ({
         creations: [
           ...s.creations,
-          { key, name, project, askedAt: Date.now(), ...(picked?.golden !== undefined ? { golden: picked.golden } : {}), ...(picked?.size !== undefined ? { size: picked.size } : {}), ...(computer !== undefined ? { where: computer } : {}), workspaceId: null, lines: NO_LINES, failed: null },
+          { key, name, project, askedAt: Date.now(), ...(picked?.golden !== undefined ? { golden: picked.golden } : {}), ...(picked?.size !== undefined ? { size: picked.size } : {}), ...(asked !== undefined ? { asked } : {}), ...(computer !== undefined ? { where: computer } : {}), workspaceId: null, lines: NO_LINES, failed: null },
         ],
         selectedId: key,
         selectedThreadId: null,
