@@ -52,12 +52,13 @@ export const HARNESS_ADAPTERS: Readonly<Record<ThreadAgent, HarnessAdapterFactor
       baseEnv: ctx.env,
       signInRefusal: ctx.signInRefusal,
       ...(ctx.projectKey !== undefined ? { projectDirName: ctx.projectKey } : {}),
+      ...(ctx.launch !== undefined ? { launch: ctx.launch } : {}),
       // Claude Code keeps no login where a workspace runs: its sign-in is the token this computer minted, so
       // nothing stands there for the vault to give way to.
       ...secretsOf(ctx.vault, "claude", ctx.loginStands("claude")),
     }),
   codex: ctx =>
-    createCodexAdapter({ exec: ctx.execStream, home: ctx.home("codex"), login: machineLogin("codex"), baseEnv: ctx.env, ...secretsOf(ctx.vault, "codex", ctx.loginStands("codex")) }),
-  opencode: ctx => createOpenCodeAdapter({ exec: ctx.execStream, baseEnv: ctx.env, signInRefusal: ctx.signInRefusal, ...secretsOf(ctx.vault, "opencode", ctx.loginStands("opencode")) }),
-  cursor: ctx => createCursorAdapter({ exec: ctx.execStream, baseEnv: ctx.env, signInRefusal: ctx.signInRefusal, ...secretsOf(ctx.vault, "cursor", ctx.loginStands("cursor")) }),
+    createCodexAdapter({ exec: ctx.execStream, home: ctx.home("codex"), login: machineLogin("codex"), baseEnv: ctx.env, ...secretsOf(ctx.vault, "codex", ctx.loginStands("codex")), ...(ctx.launch !== undefined ? { launch: ctx.launch } : {}) }),
+  opencode: ctx => createOpenCodeAdapter({ exec: ctx.execStream, baseEnv: ctx.env, signInRefusal: ctx.signInRefusal, ...secretsOf(ctx.vault, "opencode", ctx.loginStands("opencode")), ...(ctx.launch !== undefined ? { launch: ctx.launch } : {}) }),
+  cursor: ctx => createCursorAdapter({ exec: ctx.execStream, baseEnv: ctx.env, signInRefusal: ctx.signInRefusal, ...secretsOf(ctx.vault, "cursor", ctx.loginStands("cursor")), ...(ctx.launch !== undefined ? { launch: ctx.launch } : {}) }),
 };

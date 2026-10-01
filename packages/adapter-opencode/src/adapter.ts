@@ -9,7 +9,7 @@
 // its error, so any other reason is the turn's end.
 import { randomUUID } from "node:crypto";
 import { INTERRUPT_GRACE_MS, RUN_EXIT_MS, endAfterResult, endRun, refusedTurn } from "@wsp/protocol";
-import type { AdapterAttachOptions, AdapterEvent, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, TurnImage, TurnRefusal, TurnResult, TurnTokens } from "@wsp/protocol";
+import type { AdapterAttachOptions, AdapterEvent, AgentLaunch, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, TurnImage, TurnRefusal, TurnResult, TurnTokens } from "@wsp/protocol";
 import { catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
 import { buildCommand, buildEnv } from "./command.js";
 
@@ -47,6 +47,8 @@ export interface OpenCodeAdapterDeps {
   keyEnv?: string;
   interruptGraceMs?: number;
   resultExitMs?: number;
+  /** The program the person runs in place of opencode on this computer, and the words every turn's launch adds. */
+  launch?: AgentLaunch;
 }
 
 export interface OpenCodeAdapter {
@@ -254,6 +256,7 @@ export function createOpenCodeAdapter(deps: OpenCodeAdapterDeps): OpenCodeAdapte
       ...(options.permissionMode !== undefined ? { permissionMode: options.permissionMode } : {}),
       ...(options.title !== undefined ? { title: options.title } : {}),
       ...(options.images !== undefined ? { images: options.images.map(imagePathOf) } : {}),
+      ...(deps.launch !== undefined ? { launch: deps.launch } : {}),
     });
     return follow({
       stream: deps.exec(command, { env: { ...env } }),
@@ -290,7 +293,7 @@ export function createOpenCodeAdapter(deps: OpenCodeAdapterDeps): OpenCodeAdapte
     sessions,
     steers: false,
     attachments: "file",
-    probeCatalog: exec => exec(catalogProbeCommand({ ...(deps.baseEnv !== undefined ? { baseEnv: deps.baseEnv } : {}) })).then(parseCatalogProbe),
+    probeCatalog: exec => exec(catalogProbeCommand({ ...(deps.baseEnv !== undefined ? { baseEnv: deps.baseEnv } : {}), ...(deps.launch !== undefined ? { launch: deps.launch } : {}) })).then(parseCatalogProbe),
     env,
   };
 }

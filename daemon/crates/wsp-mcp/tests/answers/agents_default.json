@@ -1,0 +1,41 @@
+{
+  "tool": "agents_default",
+  "cases": [
+    {
+      "case": "set",
+      "arguments": {
+        "agent": "codex"
+      },
+      "replies": {
+        "preferences.set": "{\"id\":1,\"ok\":true,\"preferences\":{\"theme\":\"system\",\"lightTheme\":\"paper\",\"darkTheme\":\"graphite\",\"sidebarMode\":\"list\",\"terminalSize\":\"app\",\"terminalZoom\":{},\"access\":{},\"projectLook\":{},\"computerLook\":{},\"serverIcons\":true,\"agentVersions\":true,\"usageLogs\":true,\"keepAwake\":true,\"transparency\":true,\"projectOrder\":[],\"keybindings\":{},\"appFont\":\"\",\"codeFont\":\"\",\"agentDefaults\":{},\"projectDefaults\":{},\"sendWith\":\"enter\",\"midTurn\":\"queue\",\"notifyNeeds\":\"notify-sound\",\"notifyDone\":\"off\",\"planAlerts\":true,\"settleAfter\":\"2h\",\"askDelete\":true,\"onQuit\":\"ask\",\"labs\":false,\"unknownTop\":1}}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"A new thread that names no agent runs Codex, where its project names none.\"}],\"structuredContent\":{\"defaultAgent\":\"codex\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "preferences.set",
+          "patch": {
+            "defaultAgent": "codex"
+          }
+        }
+      ]
+    },
+    {
+      "case": "an agent the host runs no thread of",
+      "arguments": {
+        "agent": "nope"
+      },
+      "replies": {
+        "preferences.set": "{\"id\":1,\"ok\":false,\"error\":\"no harness named nope; the host runs claude, codex\",\"kind\":\"usage\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"no harness named nope; the host runs claude, codex\"}],\"structuredContent\":{\"error\":\"no harness named nope; the host runs claude, codex\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "preferences.set",
+          "patch": {
+            "defaultAgent": "nope"
+          }
+        }
+      ]
+    }
+  ]
+}

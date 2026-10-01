@@ -1,0 +1,70 @@
+{
+  "cloudOff": {
+    "name": "agents_default",
+    "description": "Sets the agent a new thread runs when neither its start nor its project names one, on every computer and in the app alike; the catalog's first agent without it. A project's own agent, set with projects_set, wins over it, and an agent turned off on a computer is passed over there. An agent this host runs no thread of is refused naming the ones it runs.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "agent": {
+          "type": "string",
+          "description": "the catalog id of the agent, one of claude, codex, opencode, cursor"
+        }
+      },
+      "required": [
+        "agent"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "defaultAgent": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "defaultAgent"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  "cloudOn": {
+    "name": "agents_default",
+    "description": "Sets the agent a new thread runs when neither its start nor its project names one, on every computer and in the app alike; the catalog's first agent without it. A project's own agent, set with projects_set, wins over it, and an agent turned off on a computer is passed over there. An agent this host runs no thread of is refused naming the ones it runs.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "agent": {
+          "type": "string",
+          "description": "the catalog id of the agent, one of claude, codex, opencode, cursor"
+        }
+      },
+      "required": [
+        "agent"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "defaultAgent": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "defaultAgent"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  }
+}

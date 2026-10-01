@@ -23,6 +23,20 @@ import { CATALOG_AGENTS, DEFAULT_AGENT, ROAD_MODULES, THREAD_AGENTS, agentName, 
 import { nodeHost, readGhosttyConfig, type Platform } from "@wsp/collect";
 import { freshEphemeral, keyFingerprint, makeSeal, openFrame, sealKeys, sharedSecret, signPlaceBytes, verifyPlaceBytes, SEAL_REFUSAL, type PlaceKeyPair, type Seal } from "@wsp/keys";
 import {
+  AccessChoice,
+  AgentSetupView,
+  ThreadDefaults,
+  accessRefusal,
+  accessWordsLine,
+  agentEnvRefusal,
+  ENV_REFUSED_FIX,
+  configDirSignInLine,
+  EnvName,
+  AgentDefaults,
+  type AgentDefaultsPatch,
+  type AgentSetupSet,
+  type ModelPicker,
+  type ProjectOverridesPatch,
   AFTER_CUT_LINE,
   LOOPBACK,
   SSH_ALIAS_PREFIX,
@@ -1455,7 +1469,7 @@ function fixLine(workspace: string, asked: FixResult): string {
 
 /** A workspace started off a link, as the host answers it: the workspace in the host's own bytes, as a create's. */
 async function startedFrom(client: HostClient, o: { url: string; project?: string; agent?: string; model?: string; effort?: string; access?: string }): Promise<StartResult> {
-  const asked = Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined));
+  const asked = Object.fromEntries(Object.entries({ ...o, access: o.access === undefined ? undefined : accessWordOf(o.access) }).filter(([, v]) => v !== undefined));
   const { workspace, threadId, sessionId } = await client.request<StartResult>("workspaces.start", asked);
   return { workspace, threadId, sessionId };
 }
@@ -2027,16 +2041,24 @@ export function absoluteFolder(cwd: string | undefined): string | undefined {
   return cwd === undefined ? undefined : absolutePath("--cwd is a path on the machine", cwd);
 }
 
-/** The model, effort and access mode a start names, as the composer's pickers name them; the runtime checks each
- * against the harness's catalog and refuses with the list. access is the wire's permissionMode. */
+/** The model, effort and access a start names: the model and effort as the composer's pickers name them, which the
+ * runtime checks against the harness's catalog, and the access in wsp's own word, which the agent's row maps. */
 export type Picks = Partial<Record<(typeof PICK_FLAGS)[number], string>> & { fast?: boolean };
 
+/** wsp's access word off a line or a tool, refused before anything is asked where it is no word of the four: a
+ * harness's own spelling among them, since one word means one thing on every agent. */
+export function accessWordOf(given: string): AccessChoice {
+  const word = AccessChoice.safeParse(given);
+  if (!word.success) throw usageRefusal(`${accessWordsLine(given)}.`, "Name one of those; which of its own modes each one is, is the agent's row's to say.");
+  return word.data;
+}
+
 /** The picks as sessions.start carries them: the fields the app's composer sends, absent ones left out. */
-export function picksOf(picks: Picks): StartPicks {
+export function picksOf(picks: Picks): Omit<StartPicks, "permissionMode"> & { access?: AccessChoice } {
   return {
     ...(picks.model !== undefined ? { model: picks.model } : {}),
     ...(picks.effort !== undefined ? { effort: picks.effort } : {}),
-    ...(picks.access !== undefined ? { permissionMode: picks.access } : {}),
+    ...(picks.access !== undefined ? { access: accessWordOf(picks.access) } : {}),
     ...(picks.fast === true ? { fast: true } : {}),
   };
 }
@@ -2095,14 +2117,22 @@ export async function checkedStart(client: HostClient, task: string, harness: st
   if (task.trim() === "") throw usageRefusal(EMPTY_TASK_LINE, "Put it in quotes after the flags.");
   const { harnesses } = await client.request<{ harnesses: HarnessCatalog[] }>("harnesses.list", workspaceId === undefined ? undefined : { workspaceId });
   const table = harnesses.find(c => (harness === undefined ? c.isDefault === true : c.harness === harness));
-  if (table === undefined && harness !== undefined) throw usageRefusal(noAdapterLine(harness, harnesses.map(c => c.harness)), "Name one of those with --agent.");
+  if (table === undefined && harness !== undefined) {
+    // An agent the host runs that is off on this workspace's computer is the start's to refuse, naming that computer.
+    const all = workspaceId === undefined ? harnesses : (await client.request<{ harnesses: HarnessCatalog[] }>("harnesses.list")).harnesses;
+    if (all.some(c => c.harness === harness)) return;
+    throw usageRefusal(noAdapterLine(harness, all.map(c => c.harness)), "Name one of those with --agent.");
+  }
+  const asked = picksOf(picks);
   try {
-    startPicks(table, picksOf(picks), true);
+    startPicks(table, asked, true);
   } catch (e) {
     const said = e instanceof Error ? e.message : String(e);
     const clause = (e as { offered?: number }).offered === 0 ? BUILT_IN_TABLE_CLAUSE : BUILT_IN_LIST_CLAUSE;
     throw usageRefusal(table?.source === "table" ? `${said}${clause}` : said, "Drop the flag, or give it a value the agent offers.");
   }
+  const refused = asked.access === undefined || table === undefined ? null : accessRefusal(table, asked.access);
+  if (refused !== null) throw usageRefusal(`${refused}.`, "Name one it takes, or drop --access.");
 }
 
 /** The person's view preferences as the host keeps them: the last project per workspace and the last target. */
@@ -3061,11 +3091,14 @@ const FilesIn = z
   );
 const FastIn = z.boolean().optional().describe("true runs the turn in the agent's fast mode, on a model that offers one, and is refused naming the model otherwise; absent runs at the agent's usual speed");
 const ConfirmIn = z.boolean().optional().describe("true deletes the machine; absent or false answers with what would go and deletes nothing, so a person can be asked first");
+/** What a thread may do without asking, in wsp's four words, on every door that opens one or sets a default. */
+const ACCESS_IN_WORDS =
+  "how far the agent may go without asking, in wsp's words: ask (asks about each action that needs permission), auto-edit (edits files without asking), full (every action without asking) or plan (reads and proposes, changes nothing); each is mapped to the agent's own mode and refused where the agent has none, and a harness's own spelling is refused. Absent means the project's access, else the one set for that agent, else full";
 /** The same three words the app's composer uses; the runtime refuses a value the agent's catalog does not list, naming the list. */
 const PICK_INPUTS = {
-  model: z.string().optional().describe("the model the turn runs on, by the agent's own slug (claude-sonnet-5); absent on a new thread means the catalog's default, on send the thread's own"),
+  model: z.string().optional().describe("the model the turn runs on, by the agent's own slug (claude-sonnet-5); absent on a new thread means the project's, else the one set for that agent, else the catalog's default, on send the thread's own"),
   effort: z.string().optional().describe("the reasoning effort, by the agent's own word (low, medium, high, xhigh, max); absent means the agent's default, high for claude"),
-  access: z.string().optional().describe("the access mode, by the agent's own word (Claude Code's acceptEdits or bypassPermissions, Codex's read-only or workspace-write); absent means what a thread on that workspace starts at, which on this computer and on a machine wsp forked is every action without asking, and on a computer you own is asking about each one"),
+  access: z.string().optional().describe(ACCESS_IN_WORDS),
 };
 /** The same two on send, for the reason SEND_FLAGS gives. */
 const SEND_INPUTS = { model: PICK_INPUTS.model, effort: PICK_INPUTS.effort };
@@ -3254,7 +3287,8 @@ function reportTail(r: AgentsReport): string[] {
 
 function agentRowLines(r: AgentsReport): string[] {
   const word = (a: AgentRow): string => (!a.installed ? "not found" : a.signIn === "unknown" ? "sign-in unknown" : agentSignInWord(a.signIn));
-  return [...table([["AGENT", "VERSION", "LATEST", "SIGN-IN", "WSP TOOLS", "PATH"], ...r.agents.map(a => [a.name, a.version ?? "-", a.latest ?? "-", word(a), a.wspTools ? "yes" : "no", a.path ?? "-"])]), ...reportTail(r)];
+  const update = (a: AgentRow): string => (a.update === undefined ? "-" : `${a.update.to}: ${a.update.command}`);
+  return [...table([["AGENT", "VERSION", "LATEST", "SIGN-IN", "WSP TOOLS", "UPDATE", "PATH"], ...r.agents.map(a => [a.name, a.version ?? "-", a.latest ?? "-", word(a), a.wspTools ? "yes" : "no", update(a), a.path ?? "-"])]), ...reportTail(r)];
 }
 
 /** Where a skill or a server stands, as both tables print it: its scope, or the project it is a project's of by name. */
@@ -3455,6 +3489,194 @@ const SkillProjectIn = z
 const SKILL_CHANGE_WORDS =
   "The skill wsp writes and a plugin's are always on and are refused; a napping workspace is not woken. The report there reads again at once.";
 
+/** Each field a --reset puts back on the layer below, by the verb that takes it. */
+const AGENT_SET_RESETS = ["model", "effort", "access", "models"] as const;
+const PROJECT_SET_RESETS = ["agent", "model", "effort", "access"] as const;
+const AGENT_SETUP_RESETS = ["program", "config", "args"] as const;
+
+/** The fields a --reset names, each one of the verb's own; a word outside them is refused naming them. */
+function resetsOf<T extends string>(fields: readonly T[], given: readonly string[]): T[] {
+  for (const word of given) if (!(fields as readonly string[]).includes(word)) throw usageRefusal(`--reset takes ${fields.join(", ")}, and got ${JSON.stringify(word)}.`, "Name one of those for each --reset.");
+  return given as T[];
+}
+
+/** A field as a patch carries it: the value named, null where a --reset puts it back, absent where neither was said. */
+function patched<K extends string, V>(key: K, value: V | undefined, reset: boolean): { [P in K]?: V | null } {
+  return (value !== undefined ? { [key]: value } : reset ? { [key]: null } : {}) as { [P in K]?: V | null };
+}
+
+/** What wsp agents set and its tool take. */
+interface AgentSetAsk {
+  model?: string;
+  effort?: string;
+  access?: string;
+  hide?: readonly string[];
+  show?: readonly string[];
+  order?: readonly string[];
+  addModel?: readonly string[];
+  dropModel?: readonly string[];
+  reset?: readonly string[];
+}
+
+export const agentSetNothingLine = "wsp agents set takes --model, --effort, --access, a model to --hide, --show, --add-model or --drop-model, --order or --reset.";
+/** The fix under a set that names nothing to change. */
+export const NOTHING_TO_SET_FIX = "Name at least one; with none of them there is nothing to change.";
+
+/** One agent's defaults moved, on the person's record the app reads too; answers them as they now stand. The host
+ * refuses an agent it runs no thread of and an access word that agent's row maps to none of its modes. */
+async function agentDefaultsSet(client: HostClient, agent: string, ask: AgentSetAsk): Promise<AgentDefaults> {
+  const resets = resetsOf(AGENT_SET_RESETS, ask.reset ?? []);
+  const lists = [ask.hide, ask.show, ask.order, ask.addModel, ask.dropModel].some(l => l !== undefined && l.length > 0);
+  let models: ModelPicker | null | undefined = resets.includes("models") ? null : undefined;
+  if (models === undefined && lists) {
+    const kept = (await preferencesOf(client)).agentDefaults[agent]?.models ?? {};
+    const hide = [...new Set([...(kept.hide ?? []).filter(m => !(ask.show ?? []).includes(m)), ...(ask.hide ?? [])])];
+    const custom = [...new Set([...(kept.custom ?? []).filter(m => !(ask.dropModel ?? []).includes(m)), ...(ask.addModel ?? [])])];
+    const order = ask.order !== undefined && ask.order.length > 0 ? [...ask.order] : kept.order;
+    models = { ...(hide.length > 0 ? { hide } : {}), ...(order !== undefined && order.length > 0 ? { order } : {}), ...(custom.length > 0 ? { custom } : {}) };
+  }
+  const patch: AgentDefaultsPatch = {
+    ...patched("model", ask.model, resets.includes("model")),
+    ...patched("effort", ask.effort, resets.includes("effort")),
+    ...patched("access", ask.access === undefined ? undefined : accessWordOf(ask.access), resets.includes("access")),
+    ...(models !== undefined ? { models } : {}),
+  };
+  if (Object.keys(patch).length === 0) throw usageRefusal(agentSetNothingLine, NOTHING_TO_SET_FIX);
+  const { preferences } = await client.request<{ preferences: unknown }>("preferences.set", { patch: { agentDefaults: { [agent]: patch } } });
+  return Preferences.parse(preferences).agentDefaults[agent] ?? {};
+}
+
+/** The parts of an agent's defaults line that say how its model picker lists models, each given the models it names. */
+export const PICKER_WORDS = { hide: (models: string): string => `hides ${models}`, order: (models: string): string => `lists ${models} first`, custom: (models: string): string => `adds ${models}` };
+export const startsOnOwnLine = (agent: string): string => `${agent} starts on its own defaults.`;
+export const startsOnLine = (agent: string, said: string): string => `${agent} starts on ${said}.`;
+
+/** What one agent's defaults now read as, in one line. */
+export function agentDefaultsLine(agent: string, d: AgentDefaults): string {
+  const listed = (models: readonly string[] | undefined, words: (models: string) => string): string | undefined => (models === undefined || models.length === 0 ? undefined : words(models.join(" ")));
+  const picker = [listed(d.models?.hide, PICKER_WORDS.hide), listed(d.models?.order, PICKER_WORDS.order), listed(d.models?.custom, PICKER_WORDS.custom)];
+  const said = [d.model, d.effort, d.access, ...picker].filter((w): w is string => w !== undefined);
+  return said.length === 0 ? startsOnOwnLine(agentName(agent)) : startsOnLine(agentName(agent), said.join("; "));
+}
+
+/** The agent a new thread runs where neither its start nor its project names one. */
+async function defaultAgentSet(client: HostClient, agent: string): Promise<{ defaultAgent: string }> {
+  await client.request("preferences.set", { patch: { defaultAgent: agent } });
+  return { defaultAgent: agent };
+}
+
+export const defaultAgentLine = (agent: string): string => `A new thread that names no agent runs ${agentName(agent)}, where its project names none.`;
+
+export const envNameLine = (named: string, quoted: string): string => `${named} takes a variable's name, and got ${quoted}.`;
+export const ENV_NAME_FIX = "Name the variable alone; its value is asked for where nothing echoes it.";
+
+/** A variable's name off a line or a tool, refused where a shell would not read it as one. */
+function envNameOf(name: string, named: string): string {
+  if (!EnvName.safeParse(name).success) throw usageRefusal(envNameLine(named, JSON.stringify(name)), ENV_NAME_FIX);
+  return name;
+}
+
+/** What wsp agents setup and its tool take; a variable's value rides `values`, which only the command line fills. */
+interface AgentSetupAsk {
+  on?: string;
+  enabled?: boolean;
+  program?: string;
+  config?: string;
+  args?: readonly string[];
+  unsetEnv?: readonly string[];
+  reset?: readonly string[];
+}
+
+export const agentSetupNothingLine = "wsp agents setup takes --enable or --disable, --program, --config, --arg, --env, --unset-env or --reset.";
+
+/** How one agent runs on one computer changed there, and its row as that computer's read now gives it, names only. */
+async function agentSetupSet(client: HostClient, agent: string, ask: AgentSetupAsk, values: Readonly<Record<string, string>>, usage: string): Promise<AgentRow> {
+  const resets = resetsOf(AGENT_SETUP_RESETS, ask.reset ?? []);
+  const target = await agentsTarget(client, undefined, ask.on, usage);
+  const unset = (ask.unsetEnv ?? []).map(name => envNameOf(name, "--unset-env"));
+  const env = { ...values, ...Object.fromEntries(unset.map(name => [name, null])) };
+  const change: AgentSetupSet = {
+    ...(ask.enabled !== undefined ? { on: ask.enabled } : {}),
+    ...patched("program", ask.program, resets.includes("program")),
+    ...patched("configDir", ask.config === undefined ? undefined : absolutePath("--config is a folder on that computer", ask.config), resets.includes("config")),
+    ...patched("args", ask.args === undefined || ask.args.length === 0 ? undefined : [...ask.args], resets.includes("args")),
+    ...(Object.keys(env).length > 0 ? { env } : {}),
+  };
+  if (Object.keys(change).length === 0) throw usageRefusal(agentSetupNothingLine, NOTHING_TO_SET_FIX);
+  const placeId = "placeId" in target ? target.placeId : HERE_PLACE_ID;
+  return AgentRow.parse((await client.request<{ agent: unknown }>("agents.setup", { placeId, agent, ...change })).agent);
+}
+
+export const setupOnLine = (name: string, on: boolean): string => `${name} is ${on ? "on" : "off"} there.`;
+/** The label each fact of a setup is printed under. */
+export const SETUP_WORDS = { program: "program", configDir: "config folder", args: "launch words", envNames: "variables" };
+
+/** How an agent now runs there, one fact a line, with the sign-in a moved config folder asks for. */
+export function agentSetupLines(row: AgentRow, configMoved: boolean): string[] {
+  const setup = row.setup ?? AgentSetupView.parse({ on: true, envNames: [] });
+  return [
+    setupOnLine(row.name, setup.on),
+    ...(setup.program !== undefined ? [`${SETUP_WORDS.program}: ${cell(setup.program)}`] : []),
+    ...(setup.configDir !== undefined ? [`${SETUP_WORDS.configDir}: ${cell(setup.configDir)}`] : []),
+    ...(setup.args !== undefined ? [`${SETUP_WORDS.args}: ${setup.args.map(cell).join(" ")}`] : []),
+    ...(setup.envNames.length > 0 ? [`${SETUP_WORDS.envNames}: ${setup.envNames.join(" ")}`] : []),
+    ...(configMoved && setup.configDir !== undefined ? [`${configDirSignInLine(row.name)}.`] : []),
+  ];
+}
+
+/** What wsp projects set and its tool take. */
+interface ProjectSetAsk {
+  agent?: string;
+  model?: string;
+  effort?: string;
+  access?: string;
+  reset?: readonly string[];
+}
+
+export const projectSetNothingLine = "wsp projects set takes --agent, --model, --effort, --access or --reset.";
+export const noDefaultsAnsweredLine = (project: string): string => `the host answered no defaults for ${project}`;
+
+/** What every project starts a new thread on, by project id, each value with where it came from. */
+async function projectDefaultsOf(client: HostClient): Promise<Record<string, ThreadDefaults>> {
+  return z.record(z.string(), ThreadDefaults).parse((await client.request<{ defaults: unknown }>("projects.defaults")).defaults);
+}
+
+/** One project's overrides moved, and what a new thread on it now starts on. */
+async function projectDefaultsSet(client: HostClient, ref: string, ask: ProjectSetAsk): Promise<{ project: ProjectView; defaults: ThreadDefaults }> {
+  const resets = resetsOf(PROJECT_SET_RESETS, ask.reset ?? []);
+  const patch: ProjectOverridesPatch = {
+    ...patched("agent", ask.agent, resets.includes("agent")),
+    ...patched("model", ask.model, resets.includes("model")),
+    ...patched("effort", ask.effort, resets.includes("effort")),
+    ...patched("access", ask.access === undefined ? undefined : accessWordOf(ask.access), resets.includes("access")),
+  };
+  if (Object.keys(patch).length === 0) throw usageRefusal(projectSetNothingLine, NOTHING_TO_SET_FIX);
+  const project = await projectOf(client, ref);
+  await client.request("preferences.set", { patch: { projectDefaults: { [project.id]: patch } } });
+  const defaults = (await projectDefaultsOf(client))[project.id];
+  if (defaults === undefined) throw new Error(noDefaultsAnsweredLine(project.name));
+  return { project, defaults };
+}
+
+/** Where a resolved value came from, as a person reads it. */
+export const FROM_WORDS: Readonly<Record<ThreadDefaults["agent"]["from"], string>> = { named: "named on the start", project: "this project's", default: "your default", catalog: "the catalog's" };
+export const newThreadsHeadLine = (project: string): string => `A new thread on ${project} starts on:`;
+
+/** The word each resolved value is printed under, and the line it is printed in. */
+export const DEFAULTS_LABELS = { agent: "agent", model: "model", effort: "effort", access: "access" };
+export const defaultsValueLine = (label: string, value: string, from: string): string => `${label} ${value}: ${from}`;
+
+/** What a new thread on a project starts on, one value a line, each with where it came from. */
+export function threadDefaultsLines(d: ThreadDefaults): string[] {
+  const line = (label: string, pick: { value: string; from: ThreadDefaults["agent"]["from"] } | undefined, shown = pick?.value): string[] => (pick === undefined ? [] : [defaultsValueLine(label, shown!, FROM_WORDS[pick.from])]);
+  return [...line(DEFAULTS_LABELS.agent, d.agent, agentName(d.agent.value)), ...line(DEFAULTS_LABELS.model, d.model), ...line(DEFAULTS_LABELS.effort, d.effort), ...line(DEFAULTS_LABELS.access, d.access)];
+}
+
+/** A project's row cell: the agent, model and access a new thread there starts on, a value the project set marked. */
+const defaultsCell = (d: ThreadDefaults | undefined): string =>
+  d === undefined ? "-" : [d.agent, d.model, d.access].flatMap(pick => (pick === undefined ? [] : [pick.from === "project" ? `${pick.value} (project)` : pick.value])).join(" ");
+
+
 const AgentsWorkspaceIn = z.string().optional().describe("the workspace to read, by its name, or its id when two share a name; absent reads a computer");
 const AgentsOnIn = z.string().optional().describe("the computer to read, by the name computers lists; absent with no workspace is the computer the app runs on");
 const AGENTS_ON_WORDS = "the computer to read, by the name wsp computers shows; this computer without it, and a workspace names its own";
@@ -3570,7 +3792,7 @@ export const ALL_VERBS: readonly Verb[] = [
       return 0;
     },
     tool: tool({
-      description: `The coding agents the catalog knows, as they stand on one computer or workspace: whether each is on that login's PATH and where, the version its command answers, the newest its vendor publishes as this host last read it (asked of npm, GitHub or the vendor from this host alone, kept a day, never with Newest agent versions off in Settings > Privacy or WSP_UPDATE_CHECK=0) and the version wsp's install pins, its sign-in there (signed in, your key from this host's vault, not signed in, or unknown), how a person signs it in, and whether one of its MCP config files names the wsp server. ${AGENTS_READ_WORDS}`,
+      description: `The coding agents the catalog knows, as they stand on one computer or workspace: whether each is on that login's PATH and where, the version its command answers, the newest its vendor publishes as this host last read it (asked of npm, GitHub or the vendor from this host alone, kept a day, never with Newest agent versions off in Settings > Privacy or WSP_UPDATE_CHECK=0) and the version wsp's install pins, its sign-in there (signed in, your key from this host's vault, not signed in, or unknown) and how it stands in the status command's own words (signInDetail), how a person signs it in, whether one of its MCP config files names the wsp server, the vendor's own command that brings it up to the newest where it is older (update, which wsp shows and never runs), and on a computer how the person set it to run there (setup: on or off, the program, the config folder, the launch words and the names of its variables, never a value). ${AGENTS_READ_WORDS}`,
       input: { workspace: AgentsWorkspaceIn, on: AgentsOnIn },
       output: { ...AGENTS_FRAME, agents: z.array(AgentRow) },
       call: async ({ workspace, on }, deps) => {
@@ -3810,6 +4032,143 @@ export const ALL_VERBS: readonly Verb[] = [
     }),
   },
   {
+    name: "agents default",
+    usage: "wsp agents default <agent>",
+    about: "the agent a new thread runs when neither the line nor its project names one; the catalog's first without it",
+    page: "agent",
+    options: {},
+    run: async ctx => {
+      const [agent, ...rest] = ctx.args;
+      if (agent === undefined || rest.length > 0) throw usageRefusal("wsp agents default takes one agent.", usageIs(ctx));
+      const set = await defaultAgentSet(await ctx.client(), agent);
+      ctx.out.emit(set, defaultAgentLine(agent));
+      return 0;
+    },
+    tool: tool({
+      description: "Sets the agent a new thread runs when neither its start nor its project names one, on every computer and in the app alike; the catalog's first agent without it. A project's own agent, set with projects_set, wins over it, and an agent turned off on a computer is passed over there. An agent this host runs no thread of is refused naming the ones it runs.",
+      input: { agent: z.string().describe(`the catalog id of the agent, one of ${THREAD_AGENTS.join(", ")}`) },
+      output: { defaultAgent: z.string() },
+      call: async ({ agent }, deps) => asText(defaultAgentLine(agent), await defaultAgentSet(await deps.client(), agent)),
+    }),
+  },
+  {
+    name: "agents set",
+    usage: "wsp agents set <agent> [--model <slug>] [--effort <word>] [--access <word>] [--hide <model>]... [--show <model>]... [--order <model,model>] [--add-model <id>]... [--drop-model <id>]... [--reset <field>]...",
+    about: "an agent's defaults on every computer: the model, effort and access a new thread on it starts on, and which models its picker lists",
+    page: "agent",
+    options: { model: { type: "string" }, effort: { type: "string" }, access: { type: "string" }, hide: { type: "string", multiple: true }, show: { type: "string", multiple: true }, order: { type: "string" }, "add-model": { type: "string", multiple: true }, "drop-model": { type: "string", multiple: true }, reset: { type: "string", multiple: true } },
+    run: async ctx => {
+      const [agent, ...rest] = ctx.args;
+      if (agent === undefined || rest.length > 0) throw usageRefusal("wsp agents set takes one agent.", usageIs(ctx));
+      const order = flag(ctx.flags, "order");
+      const set = await agentDefaultsSet(await ctx.client(), agent, {
+        ...(flag(ctx.flags, "model") !== undefined ? { model: flag(ctx.flags, "model")! } : {}),
+        ...(flag(ctx.flags, "effort") !== undefined ? { effort: flag(ctx.flags, "effort")! } : {}),
+        ...(flag(ctx.flags, "access") !== undefined ? { access: flag(ctx.flags, "access")! } : {}),
+        hide: flagList(ctx.flags, "hide"),
+        show: flagList(ctx.flags, "show"),
+        ...(order !== undefined ? { order: order.split(",").map(m => m.trim()).filter(m => m !== "") } : {}),
+        addModel: flagList(ctx.flags, "add-model"),
+        dropModel: flagList(ctx.flags, "drop-model"),
+        reset: flagList(ctx.flags, "reset"),
+      });
+      ctx.out.emit({ agent, defaults: set }, agentDefaultsLine(agent, set));
+      return 0;
+    },
+    tool: tool({
+      description: `Sets one agent's defaults, the same on every computer and in the app: the model and effort a new thread on it starts on, its access, and its model picker: models hidden from it (a start still takes one by name), the order it lists models in, and model ids the binary does not list that the person runs anyway, which a start then takes. A project's own model, effort and access, set with projects_set, win over these, and what a start names wins over both. An access word the agent maps to none of its modes is refused naming the ones it takes. reset puts a field back on the agent's own: model, effort, access or models.`,
+      input: {
+        agent: z.string().describe("the catalog id of the agent, as agents lists it"),
+        model: z.string().optional().describe("the model a new thread on it starts on, by the agent's own slug"),
+        effort: z.string().optional().describe("the effort a new thread on it starts at, by the agent's own word, where its model takes that one"),
+        access: z.string().optional().describe(ACCESS_IN_WORDS),
+        hide: z.array(z.string()).optional().describe("models to take off its picker, by slug"),
+        show: z.array(z.string()).optional().describe("hidden models to put back on its picker, by slug"),
+        order: z.array(z.string()).optional().describe("the models its picker lists first, in this order, by slug; the rest follow in the agent's own order"),
+        add_model: z.array(z.string()).optional().describe("model ids the binary does not list that a start may name and the picker shows"),
+        drop_model: z.array(z.string()).optional().describe("model ids added before, taken back off"),
+        reset: z.array(z.enum(AGENT_SET_RESETS)).optional().describe("fields to put back on the agent's own: model, effort, access, models"),
+      },
+      output: { agent: z.string(), defaults: AgentDefaults },
+      call: async ({ agent, model, effort, access, hide, show, order, add_model, drop_model, reset }, deps) => {
+        const set = await agentDefaultsSet(await deps.client(), agent, {
+          ...(model !== undefined ? { model } : {}),
+          ...(effort !== undefined ? { effort } : {}),
+          ...(access !== undefined ? { access } : {}),
+          ...(hide !== undefined ? { hide } : {}),
+          ...(show !== undefined ? { show } : {}),
+          ...(order !== undefined ? { order } : {}),
+          ...(add_model !== undefined ? { addModel: add_model } : {}),
+          ...(drop_model !== undefined ? { dropModel: drop_model } : {}),
+          ...(reset !== undefined ? { reset } : {}),
+        });
+        return asText(agentDefaultsLine(agent, set), { agent, defaults: set });
+      },
+    }),
+  },
+  {
+    name: "agents setup",
+    usage: "wsp agents setup <agent> [--on <computer>] [--enable | --disable] [--program <path>] [--config <folder>] [--arg <word>]... [--env <NAME>]... [--unset-env <NAME>]... [--reset <field>]...",
+    about: "how an agent runs on one computer: on or off there, the program run in its place, its config folder, words added to every launch and variables every launch carries, each value typed where nothing echoes it",
+    page: "agent",
+    options: { on: { type: "string" }, enable: { type: "boolean" }, disable: { type: "boolean" }, program: { type: "string" }, config: { type: "string" }, arg: { type: "string", multiple: true }, env: { type: "string", multiple: true }, "unset-env": { type: "string", multiple: true }, reset: { type: "string", multiple: true } },
+    run: async ctx => {
+      const [agent, ...rest] = ctx.args;
+      if (agent === undefined || rest.length > 0) throw usageRefusal("wsp agents setup takes one agent.", usageIs(ctx));
+      if (ctx.flags["enable"] === true && ctx.flags["disable"] === true) throw usageRefusal("--enable and --disable say two things.", "Name one.");
+      const names = flagList(ctx.flags, "env").map(name => envNameOf(name, "--env"));
+      for (const name of names) {
+        const refused = agentEnvRefusal(name, agentName(agent));
+        if (refused !== null) throw usageRefusal(`${refused}.`, ENV_REFUSED_FIX);
+      }
+      if (names.length > 0 && ctx.io.isTTY !== true) throw usageRefusal("nobody is at this terminal to type a variable's value.", "Run it in a terminal on the computer the host runs on.");
+      const values: Record<string, string> = {};
+      for (const name of names) values[name] = await ctx.io.askSecret(`${name} for ${agentName(agent)}`);
+      const config = flag(ctx.flags, "config");
+      const row = await agentSetupSet(
+        await ctx.client(),
+        agent,
+        {
+          ...(flag(ctx.flags, "on") !== undefined ? { on: flag(ctx.flags, "on")! } : {}),
+          ...(ctx.flags["enable"] === true ? { enabled: true } : ctx.flags["disable"] === true ? { enabled: false } : {}),
+          ...(flag(ctx.flags, "program") !== undefined ? { program: flag(ctx.flags, "program")! } : {}),
+          ...(config !== undefined ? { config } : {}),
+          args: flagList(ctx.flags, "arg"),
+          unsetEnv: flagList(ctx.flags, "unset-env"),
+          reset: flagList(ctx.flags, "reset"),
+        },
+        values,
+        usageIs(ctx),
+      );
+      ctx.out.emit({ agent: row }, agentSetupLines(row, config !== undefined).join("\n"));
+      return 0;
+    },
+    tool: tool({
+      description: `Sets how one agent runs on one computer, this computer without on: whether it is offered there at all (off, the app's lists drop it there and a start naming it is refused naming the computer), the program run in its place, the folder it keeps its config, sessions and sign-in in (an agent with no variable for one is refused, and a folder that is not under that computer's home once its links are followed, the home itself, or wsp's own folder; a login kept under the old folder does not follow, so sign it in again there), words added to every turn's launch, and variables taken off its launch. A variable that decides how the process starts or what it loads (PATH, HOME, LD_ and DYLD_ ones, NODE_OPTIONS and the like) is never set, nor one of wsp's own. A variable's value is never taken here: the person types it at wsp agents setup --env, where nothing echoes it. Answers the agent's row as that computer's read now gives it, its variables by name alone. reset puts back the agent's own program, config or args.`,
+      input: {
+        agent: z.string().describe("the catalog id of the agent, as agents lists it"),
+        on: z.string().optional().describe("the computer it runs on, by the name computers lists; absent is the computer the app runs on"),
+        enabled: z.boolean().optional().describe("false turns the agent off on that computer, true back on"),
+        program: z.string().optional().describe("the program run in the agent's place there, a path or a word on that computer's PATH"),
+        config: z.string().optional().describe("the folder on that computer the agent keeps its config, sessions and sign-in in, absolute"),
+        args: z.array(z.string()).optional().describe("words added to every turn's launch there, each passed as one word; they replace any set before"),
+        unset_env: z.array(z.string()).optional().describe("variables to take off its launch there, by name"),
+        reset: z.array(z.enum(AGENT_SETUP_RESETS)).optional().describe("fields to put back on the agent's own: program, config, args"),
+      },
+      output: { agent: AgentRow },
+      call: async ({ agent, on, enabled, program, config, args, unset_env, reset }, deps) => {
+        const row = await agentSetupSet(
+          await deps.client(),
+          agent,
+          { ...(on !== undefined ? { on } : {}), ...(enabled !== undefined ? { enabled } : {}), ...(program !== undefined ? { program } : {}), ...(config !== undefined ? { config } : {}), ...(args !== undefined ? { args } : {}), ...(unset_env !== undefined ? { unsetEnv: unset_env } : {}), ...(reset !== undefined ? { reset } : {}) },
+          {},
+          "agents_setup takes on, a computer by name",
+        );
+        return asText(agentSetupLines(row, config !== undefined).join("\n"), { agent: row });
+      },
+    }),
+  },
+  {
     name: "servers signin",
     usage: "wsp servers signin <name> --agent <id> [<workspace>] [--on <computer>]",
     about: "signs one MCP server in by its agent's own command for it, run where the server is set up and shown in this terminal",
@@ -4008,15 +4367,19 @@ export const ALL_VERBS: readonly Verb[] = [
       // The computer's own name, off the one places reading every other table takes; a thread's token is refused
       // that list, and its rows then read the id, which is what it can name a computer by anyway.
       const named = projects.length === 0 ? new Map<string, string>() : await placeNames(client).catch(() => new Map<string, string>());
-      ctx.out.emit({ projects }, projects.length === 0 ? NO_PROJECT_YET : table([["PROJECT", "ID", "COMPUTER", "SOURCE", "PATH", "BASE", "WORKSPACES"], ...projects.map(p => projectLine(p, held, named))]).join("\n"));
+      const defaults = projects.length === 0 ? {} : await projectDefaultsOf(client);
+      ctx.out.emit({ projects, defaults }, projects.length === 0 ? NO_PROJECT_YET : table([["PROJECT", "ID", "COMPUTER", "SOURCE", "PATH", "BASE", "WORKSPACES", "NEW THREADS"], ...projects.map(p => [...projectLine(p, held, named), defaultsCell(defaults[p.id])])]).join("\n"));
       return 0;
     },
     tool: tool({
       description:
-        "Every project this host holds: its name, the computer it lives on, where its code comes from (a folder on the computer the app runs on, or a repo a computer clones), where the checkout sits inside a workspace of it, the branch a workspace of it starts on, and how many workspaces stand on it. The name is what new takes. A project is recorded with add and is one source on one computer; a workspace is a copy of that computer with the project inside.",
+        "Every project this host holds: its name, the computer it lives on, where its code comes from (a folder on the computer the app runs on, or a repo a computer clones), where the checkout sits inside a workspace of it, the branch a workspace of it starts on, and how many workspaces stand on it. The name is what new takes. A project is recorded with add and is one source on one computer; a workspace is a copy of that computer with the project inside. defaults holds, by project id, the agent, model, effort and access a new thread there starts on when its start names none, each with where it came from: the project's own (projects_set), the person's default (agents_set, agents_default) or the agent's own.",
       input: {},
-      output: { projects: z.array(ProjectView) },
-      call: async (_args, deps) => asJson({ projects: await projectsOf(await deps.client()) }),
+      output: { projects: z.array(ProjectView), defaults: z.record(z.string(), ThreadDefaults) },
+      call: async (_args, deps) => {
+        const client = await deps.client();
+        return asJson({ projects: await projectsOf(client), defaults: await projectDefaultsOf(client) });
+      },
     }),
   },
   {
@@ -4077,6 +4440,43 @@ export const ALL_VERBS: readonly Verb[] = [
         const project = await projectOf(client, ref);
         const { said } = await client.request<{ said: string }>("projects.remove", { projectId: project.id });
         return asText(said, { project, said });
+      },
+    }),
+  },
+  {
+    name: "projects set",
+    usage: "wsp projects set <project> [--agent <id>] [--model <slug>] [--effort <word>] [--access <word>] [--reset <field>]...",
+    about: "what a new thread on one project starts on, over the agent's own defaults: its agent, model, effort and access",
+    page: "agent",
+    options: { agent: { type: "string" }, model: { type: "string" }, effort: { type: "string" }, access: { type: "string" }, reset: { type: "string", multiple: true } },
+    run: async ctx => {
+      const [ref, ...rest] = ctx.args;
+      if (ref === undefined || rest.length > 0) throw usageRefusal("wsp projects set takes one project.", usageIs(ctx));
+      const set = await projectDefaultsSet(await ctx.client(), ref, {
+        ...(flag(ctx.flags, "agent") !== undefined ? { agent: flag(ctx.flags, "agent")! } : {}),
+        ...(flag(ctx.flags, "model") !== undefined ? { model: flag(ctx.flags, "model")! } : {}),
+        ...(flag(ctx.flags, "effort") !== undefined ? { effort: flag(ctx.flags, "effort")! } : {}),
+        ...(flag(ctx.flags, "access") !== undefined ? { access: flag(ctx.flags, "access")! } : {}),
+        reset: flagList(ctx.flags, "reset"),
+      });
+      ctx.out.emit(set, [newThreadsHeadLine(set.project.name), ...threadDefaultsLines(set.defaults)].join("\n"));
+      return 0;
+    },
+    tool: tool({
+      description:
+        "Sets what a new thread on one project starts on, over each agent's own defaults and under what a start names: its agent, model, effort and access. Nothing about a computer is a project's to set (threads at once, an agent's program, config folder, launch words, variables, or whether it is on); agents_setup sets those per computer. A model or effort kept for the project's agent drops to the agent's own on a thread that runs another agent, and an access word the project's agent maps to none of its modes is refused naming the ones it takes. Answers what a new thread there now starts on, each value with where it came from. reset puts a field back on the layer below: agent, model, effort or access.",
+      input: {
+        project: z.string().describe("the project's name, or its id when two share a name"),
+        agent: z.string().optional().describe(`the agent a new thread on it runs, one of ${THREAD_AGENTS.join(", ")}`),
+        model: z.string().optional().describe("the model a new thread on it starts on, by the agent's own slug"),
+        effort: z.string().optional().describe("the effort a new thread on it starts at, by the agent's own word"),
+        access: z.string().optional().describe(ACCESS_IN_WORDS),
+        reset: z.array(z.enum(PROJECT_SET_RESETS)).optional().describe("fields to put back on the layer below: agent, model, effort, access"),
+      },
+      output: { project: ProjectView, defaults: ThreadDefaults },
+      call: async ({ project, agent, model, effort, access, reset }, deps) => {
+        const set = await projectDefaultsSet(await deps.client(), project, { ...(agent !== undefined ? { agent } : {}), ...(model !== undefined ? { model } : {}), ...(effort !== undefined ? { effort } : {}), ...(access !== undefined ? { access } : {}), ...(reset !== undefined ? { reset } : {}) });
+        return asText([newThreadsHeadLine(set.project.name), ...threadDefaultsLines(set.defaults)].join("\n"), set);
       },
     }),
   },
@@ -5494,7 +5894,7 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   agents: "the agents whose sessions for that folder travel with it, by catalog id, comma separated; every one that has them without it",
   "add-check": "<id>=<command> proving that added tool is on the machine; repeats",
   add: "<id>=<command> carrying a tool neither the catalog nor this computer has, installed by that command on the machine; repeats",
-  access: "how far the agent may go without asking, by the agent's own word (Claude Code's acceptEdits or bypassPermissions, Codex's read-only or workspace-write); without it, what a thread on that workspace starts at: every action without asking on this computer and on a machine wsp forked, asking about each one on a computer you own",
+  access: "how far the agent may go without asking: ask, auto-edit, full or plan, refused where the agent has no such mode; without it, the project's, else the agent's default, else full",
   cwd: "the folder on the machine to work in; the project's folder without it",
   detach: "print the thread's id and return, leaving the reply to the thread's finished line",
   effort: "how hard the agent thinks, by its own word (low, medium, high, xhigh, max); its default without it",
@@ -5590,6 +5990,29 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   watch: "draw the table again every second where it stands, until Ctrl-C; it needs a terminal to redraw on",
   why: "what the rows this line adds are for, in your own words; the rows say an agent added them without it",
   yes: "go ahead without being asked",
+  "agents set model": "the model a new thread on it starts on, by the agent's own slug",
+  "agents set effort": "the effort a new thread on it starts at, by the agent's own word",
+  "agents set access": "how far a new thread on it may go without asking: ask, auto-edit, full or plan, refused where the agent has no such mode",
+  "agents set hide": "a model to take off its picker; a start still takes it by name; repeats",
+  "agents set show": "a hidden model to put back on its picker; repeats",
+  "agents set order": "the models its picker lists first, comma separated; the rest follow in the agent's own order",
+  "agents set add-model": "a model id the binary does not list, which a start may then name; repeats",
+  "agents set drop-model": "a model id added before, taken back off; repeats",
+  "agents set reset": "put a field back on the agent's own: model, effort, access or models; repeats",
+  "agents setup on": "the computer, by the name wsp computers shows; this computer without it",
+  "agents setup enable": "offer the agent there again",
+  "agents setup disable": "take the agent off that computer: the app's lists drop it there and a start naming it is refused",
+  "agents setup program": "the program run in the agent's place there, a path or a word on its PATH",
+  "agents setup config": "the folder there the agent keeps its config, sessions and sign-in in, absolute and under that computer's home; sign it in again there",
+  "agents setup arg": "a word added to every turn's launch there; repeats, and replaces any set before",
+  "agents setup env": "a variable every launch there carries, by name, never one that decides how the process starts (PATH, LD_*, NODE_OPTIONS and the like); its value is asked for where nothing echoes it; repeats",
+  "agents setup unset-env": "a variable to take off its launch there, by name; repeats",
+  "agents setup reset": "put a field back on the agent's own: program, config or args; repeats",
+  "projects set agent": `the agent a new thread on it runs (${THREAD_AGENTS.join(", ")})`,
+  "projects set model": "the model a new thread on it starts on, by the agent's own slug",
+  "projects set effort": "the effort a new thread on it starts at, by the agent's own word",
+  "projects set access": "how far a new thread on it may go without asking: ask, auto-edit, full or plan",
+  "projects set reset": "put a field back on the layer below: agent, model, effort or access; repeats",
 };
 
 /** The line one flag gets in one verb's own help: the verb's own row where the word means two things, else the

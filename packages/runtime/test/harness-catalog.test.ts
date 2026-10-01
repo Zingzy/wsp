@@ -222,42 +222,19 @@ describe("what an access mode says it does", () => {
   });
 });
 
-describe("the access a thread starts at, per kind of workspace", () => {
-  it("every harness with an access mode names both the mode that asks and the mode that asks nothing, and marks neither", () => {
+describe("the access a thread starts at, and wsp's words for it", () => {
+  it("every harness with an access mode names the mode that asks nothing and marks it, on every kind of workspace alike", () => {
     for (const catalog of HARNESS_CATALOGS) {
       if (catalog.permissionModes.length === 0) {
-        expect(catalog.keptMode).toBeUndefined();
+        expect(catalog.bypassMode, catalog.harness).toBeUndefined();
         continue;
       }
-      expect(catalog.keptMode).toBeDefined();
-      expect(catalog.permissionModes.map(o => o.value)).toContain(catalog.keptMode);
-      // Each row names its own skip-everything mode, so nothing outside the table keeps a list of them.
-      expect(catalog.bypassMode).toBeDefined();
-      expect(catalog.permissionModes.map(o => o.value)).toContain(catalog.bypassMode);
-      // A row with one mode starts there on every kind, so the two name it both; any other row names two.
-      if (catalog.permissionModes.length > 1) expect(catalog.bypassMode).not.toBe(catalog.keptMode);
-      // The mark has one home, and it is not here: which of the two a start runs at belongs to the workspace's
-      // kind, and a mark left on a row would be a second answer for anyone reading the table without a workspace.
-      expect(markedDefault(catalog.permissionModes)).toBeUndefined();
+      expect(catalog.permissionModes.map(o => o.value), catalog.harness).toContain(catalog.bypassMode);
+      expect(markedDefault(catalog.permissionModes)?.value, catalog.harness).toBe(catalog.bypassMode);
+      expect(catalog.permissionModes.filter(o => o.isDefault), catalog.harness).toHaveLength(1);
+      // The kind no longer moves the mark: the person's defaults do, through markedFor.
+      expect(workspaceAccess(catalog, "local")).toBe(catalog);
     }
-  });
-
-  it("claude asks the person in its default mode; codex keeps its narrowest working sandbox and asks past it", () => {
-    expect(harnessCatalog("claude")!.keptMode).toBe("default");
-    expect(harnessCatalog("codex")!.keptMode).toBe("workspace-write");
-  });
-
-  it("on this computer a start with no access word runs every action without asking, on every harness that takes a mode", () => {
-    // Every row in the table, so a harness added to it is held to the ruling without anyone coming back here.
-    for (const table of HARNESS_CATALOGS) {
-      if (table.permissionModes.length === 0) continue;
-      const mac = workspaceAccess(table, "local");
-      expect(markedDefault(mac.permissionModes)?.value, table.harness).toBe(table.bypassMode);
-      expect(mac.permissionModes.filter(o => o.isDefault), table.harness).toHaveLength(1);
-      // A fork wsp made runs the same, and nothing of the person's is named on the pick there.
-      expect(markedDefault(workspaceAccess(table, "cloud").permissionModes)?.value, table.harness).toBe(table.bypassMode);
-    }
-    // The words those rows spell, so the loop above cannot pass on a table that lost them.
     expect(HARNESS_CATALOGS.filter(c => c.permissionModes.length > 0).map(c => [c.harness, c.bypassMode])).toEqual([
       ["claude", "bypassPermissions"],
       ["codex", "danger-full-access"],
@@ -268,25 +245,24 @@ describe("the access a thread starts at, per kind of workspace", () => {
     ]);
   });
 
-  it("this computer's own word is on its own pick, and a machine wsp forked names none", () => {
-    const mac = workspaceAccess(harnessCatalog("claude")!, "local");
-    expect(mac.permissionModes.find(o => o.value === "bypassPermissions")?.label).toBe(`Bypass on ${THIS_COMPUTER}`);
-    const fork = workspaceAccess(harnessCatalog("claude")!, "cloud");
-    expect(fork.permissionModes.find(o => o.value === "bypassPermissions")?.label).toBe("Bypass");
-    expect(fork.permissionModes.filter(o => o.short !== undefined)).toEqual([]);
-  });
-
-  it("a catalog with no access mode of its own comes back untouched, so nothing invents one for it", () => {
-    const pi = harnessCatalog("pi")!;
-    expect(workspaceAccess(pi, "local")).toBe(pi);
-    expect(workspaceAccess(pi, "cloud")).toBe(pi);
+  it("each agent with an adapter maps wsp's words to modes it lists, and a word it cannot honour maps to none", () => {
+    expect(Object.fromEntries(HARNESS_CATALOGS.filter(c => c.access !== undefined).map(c => [c.harness, c.access]))).toEqual({
+      claude: { ask: "default", "auto-edit": "acceptEdits", full: "bypassPermissions" },
+      codex: { ask: "workspace-write", full: "danger-full-access", plan: "read-only" },
+      opencode: { full: "auto" },
+      cursor: { full: "force", plan: "default" },
+    });
+    for (const catalog of HARNESS_CATALOGS) {
+      for (const mode of Object.values(catalog.access ?? {})) expect(catalog.permissionModes.map(o => o.value), catalog.harness).toContain(mode);
+    }
+    // Full is always the mode the table marks, so a start nobody set a word for runs as it did before words.
+    for (const catalog of HARNESS_CATALOGS) if (catalog.access?.full !== undefined) expect(catalog.access.full).toBe(catalog.bypassMode);
   });
 });
 
 describe("startPicks", () => {
-  /** The lists as a workspace answers with them, which is the only shape a start is ever checked against: the
-   * mark is placed against that workspace's kind, and a fork wsp made runs every action without asking. */
-  const claude = workspaceAccess(harnessCatalog("claude")!, "cloud");
+  /** The lists as the table holds them, with the mode that asks nothing marked. */
+  const claude = harnessCatalog("claude")!;
   const MODELS = "Opus 5.5 (claude-opus-5-5), Fable 5.1 (claude-fable-5-1), Sonnet 5 (claude-sonnet-5), Haiku 4.5 (claude-haiku-4-5-20251001)";
   /** A catalog whose default model takes two of the five efforts and whose other model takes none. */
   const narrowed = { ...claude, models: [{ value: "claude-opus-5", label: "Opus 5", isDefault: true, efforts: ["high", "max"] }, { value: "claude-haiku-4-5", label: "Haiku", efforts: [] }] };
@@ -351,14 +327,14 @@ describe("startPicks", () => {
 
   it("a list the CLI leaves empty takes any value, since the values are open or the flag does not exist", () => {
     const gemini = harnessCatalog("gemini")!;
-    expect(startPicks(gemini, { model: "gemini-3-pro" }, true)).toEqual({ model: "gemini-3-pro" });
-    expect(startPicks(gemini, { effort: "anything" }, true)).toEqual({ effort: "anything" });
+    expect(startPicks(gemini, { model: "gemini-3-pro" }, true)).toEqual({ model: "gemini-3-pro", permissionMode: "yolo" });
+    expect(startPicks(gemini, { effort: "anything" }, false)).toEqual({ effort: "anything" });
     const pi = harnessCatalog("pi")!;
     expect(startPicks(pi, { permissionMode: "anything" }, true)).toEqual({ permissionMode: "anything" });
   });
 
   it("a start on the Codex table runs its default model and refuses a model or effort that table does not carry", () => {
-    const codex = workspaceAccess(harnessCatalog("codex")!, "cloud");
+    const codex = harnessCatalog("codex")!;
     expect(startPicks(codex, {}, true)).toEqual({ model: "gpt-5.6-sol", effort: "low", permissionMode: "danger-full-access" });
     expect(markedDefault(effortsFor(codex, markedDefault(codex.models) ?? null))?.value).toBe("low");
     expect(startPicks(codex, { model: "gpt-5.5", effort: "high", permissionMode: "read-only" }, true)).toEqual({ model: "gpt-5.5", effort: "high", permissionMode: "read-only" });
@@ -370,7 +346,7 @@ describe("startPicks", () => {
   });
 
   it("a start on a legacy model runs that model at the levels the binary lists for it, and a refusal names the legacy ones apart", () => {
-    const claude = workspaceAccess(harnessCatalog("claude")!, "cloud");
+    const claude = harnessCatalog("claude")!;
     expect(startPicks(claude, { model: "claude-opus-5", effort: "high" }, true)).toEqual({ model: "claude-opus-5", effort: "high", permissionMode: "bypassPermissions" });
     // Its own default, where the binary lists one; the catalog's high where it lists none.
     expect(startPicks(claude, { model: "claude-opus-4-7" }, true)).toMatchObject({ effort: "xhigh" });

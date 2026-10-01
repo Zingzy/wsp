@@ -6,8 +6,8 @@
 // CLI spells a 1M context as a "[1m]" suffix on the model. Measured on
 // 2.1.257: one line, exit 0 on stdin EOF, no API call.
 
-import { shellQuote } from "@wsp/protocol";
-import type { HarnessCatalogModelProbe, HarnessCatalogProbe, ScreenCommand } from "@wsp/protocol";
+import { programWord, shellQuote } from "@wsp/protocol";
+import type { AgentLaunch, HarnessCatalogModelProbe, HarnessCatalogProbe, ScreenCommand } from "@wsp/protocol";
 import { buildEnv } from "./landmines.js";
 
 const SEP = "__WSP_CATALOG_SEP__";
@@ -43,12 +43,13 @@ type ClaudeModel = HarnessCatalogModelProbe & { efforts: string[]; contextWindow
  * drops every inherited CLAUDE_CODE_* mark the way the session env does (the exec
  * shell is bash).
  */
-export function catalogProbeCommand(options: { baseEnv?: Readonly<Record<string, string | undefined>> } = {}): string {
+export function catalogProbeCommand(options: { baseEnv?: Readonly<Record<string, string | undefined>>; launch?: AgentLaunch } = {}): string {
+  const claude = programWord("claude", options.launch);
   const env = buildEnv({ base: options.baseEnv });
   const exports = Object.entries(env).map(([k, v]) => `${k}=${shellQuote(v)}`).join(" ");
   const clean = `unset \${!CLAUDE_CODE_@} CLAUDECODE FORCE_CODE_TERMINAL; export ${exports}`;
-  const handshake = `printf '%s\\n' "${INIT_REQUEST.replaceAll('"', '\\"')}" | claude -p --bare --output-format stream-json --input-format stream-json --verbose`;
-  return `cd ~ && ${clean}; claude --version; echo ${SEP}; claude --help; echo ${SEP}; ${handshake}`;
+  const handshake = `printf '%s\\n' "${INIT_REQUEST.replaceAll('"', '\\"')}" | ${claude} -p --bare --output-format stream-json --input-format stream-json --verbose`;
+  return `cd ~ && ${clean}; ${claude} --version; echo ${SEP}; ${claude} --help; echo ${SEP}; ${handshake}`;
 }
 
 function quotedList(help: string, flag: string): string[] {

@@ -17,7 +17,6 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Browser, Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { THIS_COMPUTER } from "@wsp/protocol";
 import { accessLabel } from "../src/components/chat/format";
 import { SIDEBAR_MAX_WIDTH } from "../src/shell/sidebarWidth";
 import { launchRender, renderSkipped, stopRender } from "./render-browser";
@@ -136,8 +135,8 @@ describe.skipIf(renderSkipped !== undefined)("the composer's picker row laid out
         expectWhole(before, `${width.label} before the pick in ${theme}`);
         expectWhole(after, `${width.label} after the pick in ${theme}`);
         const access = (await page!.locator("[data-composer-checkout] [data-composer-picker='access']").textContent()) ?? "";
-        expect(access).toBe(accessLabel({ value: "bypassPermissions", label: `Bypass on ${THIS_COMPUTER}`, short: "Bypass" }));
-        expect(menuRow).toContain(`Bypass on ${THIS_COMPUTER}`);
+        expect(access).toBe(accessLabel({ value: "bypassPermissions", label: "Bypass" }));
+        expect(menuRow).toContain("Bypass");
         // The pick moves nothing in the box: every trigger keeps its box and the footer keeps its height.
         expect(after.triggers).toEqual(before.triggers);
         expect(after.footer.height).toBe(before.footer.height);

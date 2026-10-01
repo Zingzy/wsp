@@ -19,7 +19,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { LATEST_PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS } from "@modelcontextprotocol/sdk/types.js";
 import { CATALOG, agentName } from "@wsp/catalog";
 import { SEAL_REFUSAL } from "@wsp/keys";
-import { CLOUD_ENV, cloudFromEnv, placeSetRefusal, EXIT_CODES, HERE_PLACE_ID, HOST_CLOSED_LINE, HOST_KEY_ENV, HOST_STOPPING_CLOSE, HOST_STOPPING_LINE, NOT_DELIVERED_LINE, HOST_TOKEN_ENV, HOST_URL_ENV, KIND_CLASS, TURN_TOKEN_ENV, LAUNCHED_WITH, LOOPBACK, SKILL_PREVIEW_BYTES, WS_PATH, isLoopback, isUrl, isWildcard, servedHostname, wsUrlOf, hostNoKeyLine, jsonLine, NEWER_TURN_LINE, noMessagesLine, noReplyLine, NO_TERMINAL_CONFIG_LINE, refusalLine, scopedNoPairLine, commandWords, authRefusal, deviceAuthOldHostLine, noSuchPlaceRefusal, pairKeyRefusal, SEAL_CLIENT, unclosedQuoteRefusal, validatorRefusal, type PlaceSpend, type PlaceView, type ServerToolsAnswer } from "@wsp/protocol";
+import { CLOUD_ENV, cloudFromEnv, placeSetRefusal, configDirSignInLine, EXIT_CODES, HERE_PLACE_ID, HOST_CLOSED_LINE, HOST_KEY_ENV, HOST_STOPPING_CLOSE, HOST_STOPPING_LINE, NOT_DELIVERED_LINE, HOST_TOKEN_ENV, HOST_URL_ENV, KIND_CLASS, TURN_TOKEN_ENV, LAUNCHED_WITH, LOOPBACK, SKILL_PREVIEW_BYTES, WS_PATH, isLoopback, isUrl, isWildcard, servedHostname, wsUrlOf, hostNoKeyLine, jsonLine, NEWER_TURN_LINE, noMessagesLine, noReplyLine, NO_TERMINAL_CONFIG_LINE, refusalLine, scopedNoPairLine, commandWords, authRefusal, deviceAuthOldHostLine, noSuchPlaceRefusal, pairKeyRefusal, SEAL_CLIENT, unclosedQuoteRefusal, validatorRefusal, type PlaceSpend, type PlaceView, type ServerToolsAnswer } from "@wsp/protocol";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { hostExitedLine, noHostAnsweredLine, startingHostLine, upArgs } from "../src/host-start.js";
 import { hostLogPath, hostTokenPath, lockPathFor, POLL_MS, SERVICE_WAIT_MS, STARTED_BY_ENV } from "../src/host-lock.js";
@@ -30,7 +30,7 @@ import { addressNotPairedLine, aliasOk, deviceRefusedLine, dialWindowMs, hostsDi
 import { GUEST_SERVED } from "../src/guest-mcp.js";
 import { mcpServer, type Dialer } from "../src/mcp.js";
 import { recipeCases, TURN_ANSWERED, turnWords, type TurnCase } from "./mcp-record-turns.js";
-import { agentCopyWords, aimedBothLine, aimedUsage, c1Escaped, CLOSE_GRACE_MS, goneFromLine, hasTool, hostTokenMissingLine, isInAlsoLine, isInLine, noHostServingLine, noSkillHitsLine, notHeaderLine, otherVersion, PLACES_FIX, previewCutLine, projectOffComputerLine, projectScopeLine, projectUnnamedLine, SERVER_TOOL_COLUMNS, SKILL_HIT_COLUMNS, skillsShPlacelessLine, threadOf, toolLines, toolName, toolsAddedLine, toolsProjectBareLine, turnedInLine, turnedLine, UNAUTHORIZED_CLOSE, unsetVariableLine, VERBS, workspaceOf, type HostClient } from "../src/verbs.js";
+import { absolutePath, DEFAULTS_LABELS, defaultsValueLine, noDefaultsAnsweredLine, agentSetNothingLine, agentSetupNothingLine, defaultAgentLine, ENV_NAME_FIX, envNameLine, FROM_WORDS, newThreadsHeadLine, NOTHING_TO_SET_FIX, PICKER_WORDS, projectSetNothingLine, SETUP_WORDS, setupOnLine, startsOnLine, startsOnOwnLine, agentCopyWords, aimedBothLine, aimedUsage, c1Escaped, CLOSE_GRACE_MS, goneFromLine, hasTool, hostTokenMissingLine, isInAlsoLine, isInLine, noHostServingLine, noSkillHitsLine, notHeaderLine, otherVersion, PLACES_FIX, previewCutLine, projectOffComputerLine, projectScopeLine, projectUnnamedLine, SERVER_TOOL_COLUMNS, SKILL_HIT_COLUMNS, skillsShPlacelessLine, threadOf, toolLines, toolName, toolsAddedLine, toolsProjectBareLine, turnedInLine, turnedLine, UNAUTHORIZED_CLOSE, unsetVariableLine, VERBS, workspaceOf, type HostClient } from "../src/verbs.js";
 import { VERSION } from "../src/version.js";
 import { WORKSPACE_ANSWERED, workspaceWords } from "./mcp-record-workspaces.js";
 import { READS } from "./mcp-record-reads.js";
@@ -233,6 +233,28 @@ async function words(): Promise<Record<string, unknown>> {
     newerTurn: NEWER_TURN_LINE,
     noTerminalConfig: NO_TERMINAL_CONFIG_LINE,
     usages: Object.fromEntries(VERBS.filter(hasTool).flatMap(v => ("usage" in v ? [[toolName(v.name), v.usage]] : []))),
+    defaults: {
+      agentSetNothing: refusalLine(agentSetNothingLine, NOTHING_TO_SET_FIX),
+      agentSetupNothing: refusalLine(agentSetupNothingLine, NOTHING_TO_SET_FIX),
+      projectSetNothing: refusalLine(projectSetNothingLine, NOTHING_TO_SET_FIX),
+      defaultAgent: defaultAgentLine("{agent}"),
+      startsOwn: startsOnOwnLine("{agent}"),
+      startsOn: startsOnLine("{agent}", "{said}"),
+      hides: PICKER_WORDS.hide("{models}"),
+      listsFirst: PICKER_WORDS.order("{models}"),
+      adds: PICKER_WORDS.custom("{models}"),
+      envName: refusalLine(envNameLine("{named}", "{quoted}"), ENV_NAME_FIX),
+      configAbsolute: (await thrown(async () => absolutePath("--config is a folder on that computer", "{path}"))).replace(JSON.stringify("{path}"), "{quoted}"),
+      setupOn: setupOnLine("{name}", true),
+      setupOff: setupOnLine("{name}", false),
+      setup: SETUP_WORDS,
+      signInAgain: `${configDirSignInLine("{agent}")}.`,
+      newThreadsHead: newThreadsHeadLine("{project}"),
+      from: FROM_WORDS,
+      noDefaultsAnswered: noDefaultsAnsweredLine("{project}"),
+      labels: DEFAULTS_LABELS,
+      valueLine: defaultsValueLine("{label}", "{value}", "{from}"),
+    },
   };
 }
 

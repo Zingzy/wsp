@@ -5,7 +5,7 @@
 // so the line carries only the folder and the MCP servers' config overrides.
 // No listener is ever named: stdio is the server's default transport, and a
 // socket would let anything on the machine drive the agent.
-import { inFolder, LAUNCH_ENV, MCP_SERVER_NAME, shellQuote, WSP_TOOL_TIMEOUT_SEC, type McpServerSpec } from "@wsp/protocol";
+import { inFolder, LAUNCH_ENV, launchWords, MCP_SERVER_NAME, programWord, shellQuote, WSP_TOOL_TIMEOUT_SEC, type AgentLaunch, type McpServerSpec } from "@wsp/protocol";
 
 const SLUG_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 /** The sandbox modes thread/start takes; the one that turns the sandbox off is the one that asks nobody. */
@@ -37,6 +37,8 @@ export interface BuildCommandOptions {
   cwd?: string;
   /** MCP servers this turn gets besides the ones its config names, by the name each takes there. */
   mcpServers?: Readonly<Record<string, McpServerSpec>>;
+  /** The program run in place of codex and the words added after app-server, from the person's setup there. */
+  launch?: AgentLaunch;
 }
 
 /** A value that may ride a codex command line or a SQL literal unquoted; anything else is refused before it does. */
@@ -87,7 +89,7 @@ export function accessParams(mode: string | undefined): AccessParams {
  * `~`, which bash reads from passwd. */
 export function buildCommand(options: BuildCommandOptions): string {
   // The plan tool is off in a headless server unless its config turns it on; its updates are the turn's steps.
-  return inFolder(options.cwd, ["codex app-server", configRaw("tools.update_plan.enabled", "true"), ...serverFlags(options.mcpServers ?? {})].join(" "));
+  return inFolder(options.cwd, [`${programWord("codex", options.launch)} app-server`, ...launchWords(options.launch), configRaw("tools.update_plan.enabled", "true"), ...serverFlags(options.mcpServers ?? {})].join(" "));
 }
 
 /** An image path is a plain absolute path on the machine, where the runtime landed it before the turn. */

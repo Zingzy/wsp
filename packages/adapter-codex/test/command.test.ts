@@ -3,6 +3,8 @@ import { HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LAUNCH_ENV, TURN_TOKEN_ENV,
 import { describe, expect, it } from "vitest";
 import { accessParams, buildCommand, buildEnv } from "../src/command.js";
 import { threadResumeLine, threadStartLine } from "../src/rpc.js";
+import { catalogProbeCommand } from "../src/catalog.js";
+import { draftForCommand, titleForCommand } from "../src/session-title.js";
 
 describe("buildEnv", () => {
   it("sets CODEX_HOME to the home named and keeps the base environment", () => {
@@ -99,3 +101,24 @@ describe("accessParams", () => {
   });
 });
 
+
+describe("a person's setup for Codex on a computer", () => {
+  const launch = { program: "/opt/codex", args: ["-c", "model_provider=\"ollama\""] };
+
+  it("runs the program in place of codex on the server line, the launch words after app-server", () => {
+    expect(buildCommand({ launch })).toContain(`&& '/opt/codex' app-server '-c' 'model_provider="ollama"' -c tools.update_plan.enabled=`);
+    expect(buildCommand({})).toContain("&& codex app-server -c tools.update_plan.enabled=");
+  });
+
+  it("the probe, a title and a draft run the program and none of the launch words", () => {
+    for (const line of [
+      catalogProbeCommand({ home: "/root/.codex", launch }),
+      titleForCommand({ home: "/root/.codex", prompt: "name it", launch }),
+      draftForCommand({ home: "/root/.codex", promptFile: "/tmp/ask", launch }),
+    ]) {
+      expect(line).toContain("'/opt/codex' ");
+      expect(line).not.toMatch(/(^|[;&] *)codex /);
+      expect(line).not.toContain("model_provider");
+    }
+  });
+});

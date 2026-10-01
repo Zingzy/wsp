@@ -11,6 +11,9 @@ import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { floorApplies, type CommandCount } from "@wsp/collect";
 import {
+  ACCESS_CHOICES,
+  accessNotTakenLine,
+  noAccessWordsLine,
   AFTER_CUT_LINE,
   alsoTitle,
   fmtDuration,
@@ -50,6 +53,7 @@ import { COMMANDS_SHOWN, COMMANDS_TITLE, commandTableLines, NOT_SCANNED, recipeA
 import type { ScanRow } from "../src/scan.js";
 import {
   absoluteFolder,
+  accessWordOf,
   ANSWER_ROADS,
   ANSWER_WORDS,
   answeredLine,
@@ -119,6 +123,9 @@ async function pickWords(): Promise<Record<string, unknown>> {
   const legacy = (await said(catalog({ models: option, legacyModels: [{ value: "LV", label: "LL" }] }), { model: "{value}" })).replace("LL (LV)", "{legacy}").replace("L (V)", "{options}");
   const fixed = catalog({ models: option });
   const refusedStart = await refused(() => checkedStart(answering({ "harnesses.list": { harnesses: [fixed] } }), "t", undefined, { model: "{value}" }));
+  // An agent that maps ask alone, refusing plan: the sentence the start says, with what it refused standing in.
+  const asking = catalog({ label: "{label}", permissionModes: option, access: { ask: "V" } });
+  const accessRefused = await refused(() => checkedStart(answering({ "harnesses.list": { harnesses: [asking] } }), "t", undefined, { access: "plan" }));
   return {
     notOne: {
       model: await notOne(catalog({ models: option }), { model: "{value}" }),
@@ -131,6 +138,11 @@ async function pickWords(): Promise<Record<string, unknown>> {
     refused: refusedStart.replace(await said(fixed, { model: "{value}" }), "{said}"),
     builtInList: BUILT_IN_LIST_CLAUSE,
     builtInTable: BUILT_IN_TABLE_CLAUSE,
+    accessWords: await refused(() => accessWordOf("{given}")),
+    accessNotTaken: accessNotTakenLine("{label}", "{word}", "{takes}"),
+    noAccessWords: noAccessWordsLine("{label}"),
+    accessRefused: accessRefused.replace(accessNotTakenLine("{label}", "plan", "ask"), "{said}"),
+    accessChoices: [...ACCESS_CHOICES],
   };
 }
 
@@ -328,6 +340,7 @@ const CLAUDE = {
     { value: "acceptEdits", label: "Accept edits" },
     { value: "bypassPermissions", label: "Bypass \u0085", isDefault: true },
   ],
+  access: { "auto-edit": "acceptEdits", full: "bypassPermissions" },
   steers: true,
   renames: true,
   images: true,
@@ -442,7 +455,9 @@ export const TURN_ANSWERED: Record<string, TurnCase[]> = {
     { case: "a model the agent does not list", arguments: { workspace: "attic-work", task: "t", model: "gpt-9" }, replies: { "workspaces.resolve": resolved(), "harnesses.list": HARNESSES } },
     { case: "an effort the model does not take", arguments: { workspace: "attic-work", task: "t", model: "claude-haiku", effort: "max" }, replies: { "workspaces.resolve": resolved(), "harnesses.list": HARNESSES } },
     { case: "an effort off the model's list", arguments: { workspace: "attic-work", task: "t", model: "claude-opus-5-5", effort: "low" }, replies: { "workspaces.resolve": resolved(), "harnesses.list": HARNESSES } },
-    { case: "an access off the table's list", arguments: { workspace: "attic-work", task: "t", agent: "codex", access: "yolo" }, replies: { "workspaces.resolve": resolved(), "harnesses.list": HARNESSES } },
+    { case: "an access that is no word of wsp's", arguments: { workspace: "attic-work", task: "t", agent: "codex", access: "yolo" }, replies: { "workspaces.resolve": resolved(), "harnesses.list": HARNESSES } },
+    { case: "an access the agent maps to no mode", arguments: { workspace: "attic-work", task: "t", access: "plan" }, replies: { "workspaces.resolve": resolved(), "harnesses.list": HARNESSES } },
+    { case: "an access the agent maps", arguments: { workspace: "attic-work", task: "t", access: "auto-edit" }, replies: { "workspaces.resolve": resolved(), "harnesses.list": HARNESSES, "workspaces.wake": resolved(), "sessions.start": START }, pushed: { "sessions.start": [done({ status: "completed", text: "edited" })] } },
     { case: "an agent with no adapter", arguments: { workspace: "attic-work", task: "t", agent: "nope" }, replies: { "workspaces.resolve": resolved(), "harnesses.list": HARNESSES } },
     { case: "an agent on a host with none", arguments: { workspace: "attic-work", task: "t", agent: "nope" }, replies: { "workspaces.resolve": resolved(), "harnesses.list": ok({ harnesses: [] }) } },
     { case: "a relative folder", arguments: { workspace: "attic-work", task: "t", cwd: "src" }, replies: { "workspaces.resolve": resolved(), "harnesses.list": HARNESSES, "workspaces.wake": resolved() } },

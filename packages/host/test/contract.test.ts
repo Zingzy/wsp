@@ -370,6 +370,13 @@ describe("the agent contract on the command line and the tool door", () => {
     expect(await last("skills enable", "skills", "enable", "memo")).toEqual({ paths: ["~/.agents/skills/memo"] });
     expect(await last("skills remove", "skills", "remove", "memo")).toEqual({ removed: expect.arrayContaining(["~/.agents/skills/memo", "~/.claude/skills/memo"]) });
     expect(await last("agents addtools", "agents", "addtools", "codex")).toEqual({ file: "~/.codex/config.toml" });
+    // The defaults and the setup, each set and then put back, so every later line runs on the catalog's own.
+    expect(await last("agents default", "agents", "default", "codex")).toEqual({ defaultAgent: "codex" });
+    await last("agents default", "agents", "default", "claude");
+    expect(await last("agents set", "agents", "set", "claude", "--model", "claude-sonnet-5", "--access", "ask", "--hide", "claude-haiku-4-5-20251001")).toEqual({ agent: "claude", defaults: { model: "claude-sonnet-5", access: "ask", models: { hide: ["claude-haiku-4-5-20251001"] } } });
+    expect(await last("agents set", "agents", "set", "claude", "--reset", "model", "--reset", "access", "--reset", "models")).toEqual({ agent: "claude", defaults: {} });
+    expect(await last("agents setup", "agents", "setup", "claude", "--program", "/opt/claude", "--arg=--debug")).toMatchObject({ agent: { id: "claude", setup: { on: true, program: "/opt/claude", args: ["--debug"], envNames: [] } } });
+    expect(await last("agents setup", "agents", "setup", "claude", "--reset", "program", "--reset", "args")).toMatchObject({ agent: { id: "claude", setup: { on: true, envNames: [] } } });
     // A value an add names is read off the environment by its name, lands in the file and is never printed.
     vi.stubEnv("ACME_KEY", "sk-acme-contract-x");
     expect(await last("servers add", "servers", "add", "acme", "--agent", "codex", "--command", "npx -y @acme/mcp", "--env", "ACME_KEY")).toEqual({ file: "~/.codex/config.toml" });
@@ -381,7 +388,11 @@ describe("the agent contract on the command line and the tool door", () => {
     expect(readFileSync(join(dir, "agents", "home", ".codex", "config.toml"), "utf8")).not.toContain("acme");
     // The one verb that starts a server: the fixture's runner exits at once, so the answer is why no tools came back.
     expect(await last("servers tools", "servers", "tools", "local", "--agent", "claude")).toMatchObject({ auth: "failed", refused: expect.any(String) });
-    expect(await last("projects", "projects")).toEqual({ projects: [expect.objectContaining({ name: "alpha", computer: "default" })] });
+    const projects = (await last("projects", "projects")) as { defaults: Record<string, unknown> };
+    expect(projects).toEqual({ projects: [expect.objectContaining({ name: "alpha", computer: "default" })], defaults: expect.any(Object) });
+    expect(Object.values(projects.defaults)).toEqual([expect.objectContaining({ agent: { value: "claude", from: "default" }, access: { value: "full", mode: "bypassPermissions", from: "catalog" } })]);
+    expect(await last("projects set", "projects", "set", "alpha", "--access", "auto-edit")).toMatchObject({ project: { name: "alpha" }, defaults: { access: { value: "auto-edit", mode: "acceptEdits", from: "project" } } });
+    expect(await last("projects set", "projects", "set", "alpha", "--reset", "access")).toMatchObject({ defaults: { access: { value: "full", from: "catalog" } } });
     // A second project, recorded and dropped, so the verb that takes one out is run under --json too.
     await rt.projects.add({ source: "https://github.com/dev/spare.git", on: "default" });
     // The sentence a remove answers with comes off the wire, so the verb and the tool say the same thing about

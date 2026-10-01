@@ -97,6 +97,14 @@ pub struct Picks {
     pub refused: String,
     pub built_in_list: String,
     pub built_in_table: String,
+    /// An access that is none of wsp's words, refused with them named.
+    pub access_words: String,
+    pub access_not_taken: String,
+    pub no_access_words: String,
+    /// A word the agent maps to none of its modes, as a start refuses it, with `{said}` the sentence above.
+    pub access_refused: String,
+    /// wsp's access words, in the order a refusal names the ones an agent takes.
+    pub access_choices: Vec<String>,
 }
 
 #[derive(Deserialize)]

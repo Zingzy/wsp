@@ -1,0 +1,282 @@
+{
+  "cloudOff": {
+    "name": "agents_set",
+    "description": "Sets one agent's defaults, the same on every computer and in the app: the model and effort a new thread on it starts on, its access, and its model picker: models hidden from it (a start still takes one by name), the order it lists models in, and model ids the binary does not list that the person runs anyway, which a start then takes. A project's own model, effort and access, set with projects_set, win over these, and what a start names wins over both. An access word the agent maps to none of its modes is refused naming the ones it takes. reset puts a field back on the agent's own: model, effort, access or models.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "agent": {
+          "type": "string",
+          "description": "the catalog id of the agent, as agents lists it"
+        },
+        "model": {
+          "type": "string",
+          "description": "the model a new thread on it starts on, by the agent's own slug"
+        },
+        "effort": {
+          "type": "string",
+          "description": "the effort a new thread on it starts at, by the agent's own word, where its model takes that one"
+        },
+        "access": {
+          "type": "string",
+          "description": "how far the agent may go without asking, in wsp's words: ask (asks about each action that needs permission), auto-edit (edits files without asking), full (every action without asking) or plan (reads and proposes, changes nothing); each is mapped to the agent's own mode and refused where the agent has none, and a harness's own spelling is refused. Absent means the project's access, else the one set for that agent, else full"
+        },
+        "hide": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "models to take off its picker, by slug"
+        },
+        "show": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "hidden models to put back on its picker, by slug"
+        },
+        "order": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "the models its picker lists first, in this order, by slug; the rest follow in the agent's own order"
+        },
+        "add_model": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "model ids the binary does not list that a start may name and the picker shows"
+        },
+        "drop_model": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "model ids added before, taken back off"
+        },
+        "reset": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "model",
+              "effort",
+              "access",
+              "models"
+            ]
+          },
+          "description": "fields to put back on the agent's own: model, effort, access, models"
+        }
+      },
+      "required": [
+        "agent"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "agent": {
+          "type": "string"
+        },
+        "defaults": {
+          "type": "object",
+          "properties": {
+            "model": {
+              "type": "string"
+            },
+            "effort": {
+              "type": "string"
+            },
+            "access": {
+              "type": "string",
+              "enum": [
+                "ask",
+                "auto-edit",
+                "full",
+                "plan"
+              ]
+            },
+            "models": {
+              "type": "object",
+              "properties": {
+                "hide": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "order": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "custom": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "agent",
+        "defaults"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  "cloudOn": {
+    "name": "agents_set",
+    "description": "Sets one agent's defaults, the same on every computer and in the app: the model and effort a new thread on it starts on, its access, and its model picker: models hidden from it (a start still takes one by name), the order it lists models in, and model ids the binary does not list that the person runs anyway, which a start then takes. A project's own model, effort and access, set with projects_set, win over these, and what a start names wins over both. An access word the agent maps to none of its modes is refused naming the ones it takes. reset puts a field back on the agent's own: model, effort, access or models.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "agent": {
+          "type": "string",
+          "description": "the catalog id of the agent, as agents lists it"
+        },
+        "model": {
+          "type": "string",
+          "description": "the model a new thread on it starts on, by the agent's own slug"
+        },
+        "effort": {
+          "type": "string",
+          "description": "the effort a new thread on it starts at, by the agent's own word, where its model takes that one"
+        },
+        "access": {
+          "type": "string",
+          "description": "how far the agent may go without asking, in wsp's words: ask (asks about each action that needs permission), auto-edit (edits files without asking), full (every action without asking) or plan (reads and proposes, changes nothing); each is mapped to the agent's own mode and refused where the agent has none, and a harness's own spelling is refused. Absent means the project's access, else the one set for that agent, else full"
+        },
+        "hide": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "models to take off its picker, by slug"
+        },
+        "show": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "hidden models to put back on its picker, by slug"
+        },
+        "order": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "the models its picker lists first, in this order, by slug; the rest follow in the agent's own order"
+        },
+        "add_model": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "model ids the binary does not list that a start may name and the picker shows"
+        },
+        "drop_model": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "model ids added before, taken back off"
+        },
+        "reset": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "model",
+              "effort",
+              "access",
+              "models"
+            ]
+          },
+          "description": "fields to put back on the agent's own: model, effort, access, models"
+        }
+      },
+      "required": [
+        "agent"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "agent": {
+          "type": "string"
+        },
+        "defaults": {
+          "type": "object",
+          "properties": {
+            "model": {
+              "type": "string"
+            },
+            "effort": {
+              "type": "string"
+            },
+            "access": {
+              "type": "string",
+              "enum": [
+                "ask",
+                "auto-edit",
+                "full",
+                "plan"
+              ]
+            },
+            "models": {
+              "type": "object",
+              "properties": {
+                "hide": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "order": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "custom": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "agent",
+        "defaults"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  }
+}

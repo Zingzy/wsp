@@ -16,8 +16,8 @@
 // twice, id 3 and id 4 either way round), so the reader counts answers rather
 // than watching for the last id it sent.
 
-import { codexNotSignedInLine, shellQuote } from "@wsp/protocol";
-import type { HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe } from "@wsp/protocol";
+import { codexNotSignedInLine, programWord, shellQuote } from "@wsp/protocol";
+import type { AgentLaunch, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe } from "@wsp/protocol";
 import { buildEnv } from "./command.js";
 
 const SEP = "__WSP_CATALOG_SEP__";
@@ -45,7 +45,8 @@ const REQUESTS = [
  * reason as a session: guest exec carries no HOME, and the app-server writes into the home it is pointed at, so the
  * probe runs under the session's own CODEX_HOME.
  */
-export function catalogProbeCommand(options: { home: string; baseEnv?: Readonly<Record<string, string | undefined>> }): string {
+export function catalogProbeCommand(options: { home: string; baseEnv?: Readonly<Record<string, string | undefined>>; launch?: AgentLaunch }): string {
+  const codex = programWord("codex", options.launch);
   const env = buildEnv({ base: options.baseEnv, home: options.home });
   const exports = Object.entries(env).map(([k, v]) => `${k}=${shellQuote(v)}`).join(" ");
   const lines = REQUESTS.map(line => shellQuote(line)).join(" ");
@@ -53,7 +54,7 @@ export function catalogProbeCommand(options: { home: string; baseEnv?: Readonly<
     // Two named pipes rather than a coprocess: the Mac's own bash is 3.2, which has none, and the test proves this
     // line on whatever bash runs it.
     'WSP_PROBE_DIR=$(mktemp -d) && mkfifo "$WSP_PROBE_DIR/in" "$WSP_PROBE_DIR/out"',
-    'codex app-server <"$WSP_PROBE_DIR/in" >"$WSP_PROBE_DIR/out" &',
+    `${codex} app-server <"$WSP_PROBE_DIR/in" >"$WSP_PROBE_DIR/out" &`,
     "WSP_APP_SERVER_PID=$!",
     'exec 3>"$WSP_PROBE_DIR/in" 4<"$WSP_PROBE_DIR/out"',
     `printf '%s\\n' ${lines} >&3`,
@@ -67,7 +68,7 @@ export function catalogProbeCommand(options: { home: string; baseEnv?: Readonly<
     'kill "$WSP_APP_SERVER_PID" 2>/dev/null || :',
     'rm -rf "$WSP_PROBE_DIR"',
   ].join("\n");
-  return `cd ~ && export ${exports}; codex --version; echo ${SEP}; codex --help; echo ${SEP}\n${server}`;
+  return `cd ~ && export ${exports}; ${codex} --version; echo ${SEP}; ${codex} --help; echo ${SEP}\n${server}`;
 }
 
 /** The `[possible values: ...]` list `codex --help` prints under a flag; empty when the flag or the list is missing. */

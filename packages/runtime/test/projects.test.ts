@@ -433,14 +433,12 @@ describe("the folder a thread starts in", () => {
     expect(starts.at(-1)!.cwd).toBe("/root/elsewhere");
   });
 
-  it("the agent a thread ran under is remembered on the project and taken by the next thread that names none", async () => {
+  it("the agent a thread ran under is not written on the project: the next thread reads the defaults, not the last run", async () => {
     const { rt } = withLocal();
     const project = await projectOn(rt);
     const ws = await rt.workspaces.create({ project: project.id, golden: "snap_g", name: "work" });
-    expect((await rt.projects.resolve(project.id)).lastAgent).toBeUndefined();
     await rt.sessions.start(ws.id, { prompt: "hi", harness: "claude" });
-    expect((await rt.projects.resolve(project.id)).lastAgent).toBe("claude");
-    // A start that names none runs it, which is what the composer and the command line both show as the default.
+    expect((await rt.projects.resolve(project.id)).lastAgent).toBeUndefined();
     const handle = await rt.sessions.start(ws.id, { prompt: "again" });
     expect(handle.view().harness).toBe("claude");
   });

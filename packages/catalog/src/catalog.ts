@@ -111,11 +111,16 @@ export interface AgentEntry extends EntryBase {
   /** Absent where the vendor's versions are not in the form the agent's own version flag prints, so the two are
    * never compared, and the catalog's pin is not set beside what stands either. */
   latest?: LatestSource;
+  /** The vendor's own command that brings the agent to its newest version, which the person runs in a terminal on that
+   * computer; wsp shows it and never runs it, since a binary swapped under a running thread breaks that turn. Absent
+   * where the vendor names none. */
+  updateLine?: string;
   /** The directory the projectState rows sit under, relative to the home directory of the computer the agent ran on. */
   stateHome: string;
   /** Where that directory is on the guest when it is not stateHome under the guest's home, absolute. */
   guestStateHome?: string;
-  /** The variable that points the agent at guestStateHome; a golden with the agent carries it in its envs. */
+  /** The variable that points the agent at its state folder: guestStateHome on a guest, whose golden carries it in its
+   * envs, and the config folder a person's setup names on a computer. */
   stateHomeEnv?: string;
   /** The variable that pins which folder under the state home this agent keeps a project's memory and sessions in,
    * whatever the working directory; the runtime exports it as the project's key on every launch, so one project's

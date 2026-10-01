@@ -15,7 +15,7 @@
         },
         "model": {
           "type": "string",
-          "description": "the model the turn runs on, by the agent's own slug (claude-sonnet-5); absent on a new thread means the catalog's default, on send the thread's own"
+          "description": "the model the turn runs on, by the agent's own slug (claude-sonnet-5); absent on a new thread means the project's, else the one set for that agent, else the catalog's default, on send the thread's own"
         },
         "effort": {
           "type": "string",
@@ -553,7 +553,7 @@
         },
         "model": {
           "type": "string",
-          "description": "the model the turn runs on, by the agent's own slug (claude-sonnet-5); absent on a new thread means the catalog's default, on send the thread's own"
+          "description": "the model the turn runs on, by the agent's own slug (claude-sonnet-5); absent on a new thread means the project's, else the one set for that agent, else the catalog's default, on send the thread's own"
         },
         "effort": {
           "type": "string",
