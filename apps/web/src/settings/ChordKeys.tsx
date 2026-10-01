@@ -72,7 +72,7 @@ export function ChordKeys({ command, keys, rules, defaults, overridden, platform
   return (
     <span className="flex shrink-0 items-center gap-2">
       {overridden && !capturing ? (
-        <Button data-k="reset-chord" size="xs" variant="ghost-muted" onClick={() => write({ keybindings: { [command]: null } })}>
+        <Button data-k="reset-chord" size="xs" variant="ghost" onClick={() => write({ keybindings: { [command]: null } })}>
           {CHORD_WORDS.reset}
         </Button>
       ) : null}

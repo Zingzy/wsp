@@ -68,18 +68,17 @@ export function GitSplit({ workspaceId }: { workspaceId: string }) {
     <div data-git-split className="flex shrink-0 items-center">
       <Button
         variant="outline"
-        size="sm"
         data-git-quick={quick.act ?? "held"}
         disabled={quick.act === null}
         title={quick.hint ?? quick.label}
         onClick={() => quick.act !== null && run(quick.act)}
-        className="rounded-e-none before:rounded-e-none [-webkit-app-region:no-drag]"
+        className="rounded-e-none [-webkit-app-region:no-drag]"
       >
         {quick.act === "view-pr" || quick.act === "create-pr" ? <GitPullRequestIcon /> : quick.act === "push" ? <UploadIcon /> : <GitCommitHorizontalIcon />}
         <span className="max-sm:sr-only">{quick.label}</span>
       </Button>
       <Menu>
-        <MenuTrigger render={<Button variant="outline" size="icon-sm" data-git-more aria-label={GIT_WORDS.menu} className="-ms-px rounded-s-none before:rounded-s-none [-webkit-app-region:no-drag]" />}>
+        <MenuTrigger render={<Button variant="outline" data-git-more aria-label={GIT_WORDS.menu} className="-ms-px rounded-s-none px-2 [-webkit-app-region:no-drag]" />}>
           <ChevronDownIcon />
         </MenuTrigger>
         <MenuPopup align="end" data-git-menu>

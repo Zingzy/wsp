@@ -147,13 +147,13 @@ function SignInSlideRow({ row, marked, onRetry, onCode }: { row: InitRow; marked
             </span>
           ) : null}
           {waiting && row.page !== undefined ? (
-            <Button data-k="open" size="sm" variant="outline" className="h-7 shrink-0 font-mono text-xs sm:h-7 sm:text-xs" render={<a href={row.page} target="_blank" rel="noopener noreferrer" />}>
+            <Button data-k="open" size="xs" variant="outline" className="shrink-0" render={<a href={row.page} target="_blank" rel="noopener noreferrer" />}>
               {CLOUD_SETUP_WORDS.build.open}
               <span aria-hidden>↗</span>
             </Button>
           ) : null}
           {onRetry !== undefined ? (
-            <Button data-k="retry" size="sm" variant="outline" className="h-7 shrink-0 font-mono text-xs sm:h-7 sm:text-xs" onClick={onRetry}>
+            <Button data-k="retry" size="xs" variant="outline" className="shrink-0" onClick={onRetry}>
               {CLOUD_SETUP_WORDS.build.retry}
             </Button>
           ) : null}
@@ -240,13 +240,13 @@ function SignInRow({ row, marked, onRetry, onCode }: { row: InitRow; marked: boo
         ) : null}
         <Slot>
           {waiting && row.page !== undefined ? (
-            <Button data-k="open" size="sm" variant="outline" className="h-7 font-mono text-xs sm:h-7 sm:text-xs" render={<a href={row.page} target="_blank" rel="noopener noreferrer" />}>
+            <Button data-k="open" size="xs" variant="outline" render={<a href={row.page} target="_blank" rel="noopener noreferrer" />}>
               {CLOUD_SETUP_WORDS.build.open}
               <span aria-hidden>↗</span>
             </Button>
           ) : null}
           {onRetry !== undefined ? (
-            <Button data-k="retry" size="sm" variant="outline" className="h-7 font-mono text-xs sm:h-7 sm:text-xs" onClick={onRetry}>
+            <Button data-k="retry" size="xs" variant="outline" onClick={onRetry}>
               {CLOUD_SETUP_WORDS.build.retry}
             </Button>
           ) : null}

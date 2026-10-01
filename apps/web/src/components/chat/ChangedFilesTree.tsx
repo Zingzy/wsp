@@ -56,7 +56,7 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
                   <Button
                     type="button"
                     size="icon-xs"
-                    variant="ghost-muted"
+                    variant="ghost"
                     aria-label={allDirectoriesExpanded ? "Collapse all folders" : "Expand all folders"}
                     data-scroll-anchor-ignore
                     onClick={onToggleAllDirectories}
@@ -70,7 +70,7 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
           )}
           <Tooltip>
             <TooltipTrigger
-              render={<Button type="button" size="xs" variant="ghost-muted" aria-label="Open diff" onClick={() => onOpenTurnDiff(turnId, files[0]?.path)} />}
+              render={<Button type="button" size="xs" variant="ghost" aria-label="Open diff" onClick={() => onOpenTurnDiff(turnId, files[0]?.path)} />}
             >
               <FileDiffIcon className="size-3" />
               <span className="hidden @[24rem]/changed-files:inline">Open diff</span>

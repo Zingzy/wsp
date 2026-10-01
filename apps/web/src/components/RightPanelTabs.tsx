@@ -424,8 +424,8 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                     <Button
                       aria-label="Add a panel"
                       className="size-7"
-                      size="icon-sm"
-                      variant="ghost-muted"
+                      size="icon"
+                      variant="ghost"
                     />
                   }
                 >

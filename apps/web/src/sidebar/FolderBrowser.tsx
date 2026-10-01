@@ -83,7 +83,7 @@ export function FolderBrowser({ disabled, start, onPick }: { disabled: boolean; 
     <div data-k="browse" className="flex flex-col gap-1">
       <div className="flex h-7 min-w-0 items-center gap-2">
         <FolderCrumbRow roots={listing?.roots ?? []} folder={listing?.dir ?? null} onPick={goTo} />
-        <Button type="button" variant="outline" size="sm" className="shrink-0" disabled={disabled || listing === null} onClick={() => listing !== null && onPick(listing.dir)} data-k="browse-pick">
+        <Button type="button" variant="outline" className="shrink-0" disabled={disabled || listing === null} onClick={() => listing !== null && onPick(listing.dir)} data-k="browse-pick">
           Use this folder
         </Button>
       </div>
