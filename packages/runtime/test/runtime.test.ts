@@ -4579,6 +4579,24 @@ describe("runtime create stages", () => {
   }
   const creating = (events: EventUnion[]) => events.filter(e => e.type === "workspace.creating");
 
+  it("a fork the provider holds back on an image it lists says the wait as a step of the create", async () => {
+    const backend = stubBackend();
+    const create = backend.create.bind(backend);
+    backend.create = async (spec, o) => {
+      o?.onWait?.(40_000);
+      return create(spec);
+    };
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    try {
+      const events: EventUnion[] = [];
+      rt.events.on("*", e => events.push(e));
+      await createOn(rt, { golden: "snap_g", name: "task-1" });
+      expect(creating(events).filter(e => e.stage === "fork-requested").map(e => e.message)).toEqual(["starting task-1 on default", "waiting for default to find the image it lists, 40s so far"]);
+    } finally {
+      await rt.close();
+    }
+  });
+
   it("a plain create reports every awaited step in order, names the hostname before the daemon is asked, and announces created last", async () => {
     await withDaemon(async port => {
       const backend = edgeBackend(port);

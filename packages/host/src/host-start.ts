@@ -9,7 +9,7 @@ import { dirname } from "node:path";
 import { fmtDuration } from "@wsp/protocol";
 import { hostLogPath, SERVICE_WAIT_MS, servingHost, STARTED_BY_ENV, type HostLock } from "./host-lock.js";
 import { runningWsp, wspCommand, type RunningWsp } from "./mcp-install.js";
-import { httpProbe, logSince, logSize, logTail, registeredService, untilServing, type HostProbe, type RegisteredService } from "./service.js";
+import { httpProbe, logSince, logSize, logTail, registeredService, serviceLoaded, untilServing, type HostProbe, type RegisteredService } from "./service.js";
 
 /** Starts a host serving this state file on this computer and answers with its lock once it answers on its port.
  * A free port unless `ports` names the one a host that is restarting itself held. */
@@ -27,6 +27,8 @@ export interface StartDeps {
   /** What this computer's own manager is registered to serve this state file with, and nothing where none is.
    * One reading, in service.ts, so this road and wsp up refuse on the same fact. */
   registered: (statePath: string) => RegisteredService | undefined;
+  /** Whether that manager holds the unit loaded, which with no host serving is the manager bringing it back. */
+  loaded: (statePath: string) => Promise<boolean>;
 }
 
 /** The one line a verb prints before it waits, on stderr whatever the line prints on stdout. */
@@ -47,6 +49,10 @@ export const hostExitedLine = (statePath: string, ended: number | string, logPat
  * loaded or not, so a person reads one road out of either state. */
 export const serviceServesStateLine = (statePath: string, service: RegisteredService): string =>
   `${statePath} is served by the ${service.words} ${service.unit.name}, which is not running; wsp up --service --state ${statePath} starts it again`;
+
+/** What a line says while it waits out a restart of the service that owns its state file. */
+export const serviceRestartingLine = (statePath: string, service: RegisteredService): string =>
+  `${statePath} is served by the ${service.words} ${service.unit.name}, which is restarting; waiting for it to come back`;
 
 /** Why a line brings up no host on this state file, or nothing where it may. One rule for both roads that start
  * one, so the sentence is true in the state it is read in: a host that is already serving is the lock's own
@@ -69,7 +75,15 @@ export function hostStarter(deps: StartDeps): HostStarter {
   return async (statePath, say, ports) => {
     // Before anything is spawned: a state file the service owns is served by the service or by nothing.
     const owned = serviceServesState(statePath, deps.registered);
-    if (owned !== undefined) throw new Error(owned);
+    if (owned !== undefined) {
+      const service = deps.registered(statePath);
+      if (service !== undefined && (await deps.loaded(statePath))) {
+        say(serviceRestartingLine(statePath, service));
+        const lock = await untilServing(statePath, deps.waitMs, deps.answers);
+        if (lock !== undefined) return lock;
+      }
+      throw new Error(owned);
+    }
     const logPath = hostLogPath(statePath);
     mkdirSync(dirname(logPath), { recursive: true });
     // Where this child's own lines begin: the log is one file appended to across days, so everything already in it
@@ -115,5 +129,5 @@ export function hostStarter(deps: StartDeps): HostStarter {
 /** The starter for a process that knows how it was started: the same line an agent's config would be given, with
  * the wait a service load is given. */
 export function starterFor(run: RunningWsp = runningWsp(), env: Readonly<Record<string, string | undefined>> = process.env): HostStarter {
-  return hostStarter({ spawn: nodeSpawn, wsp: wspCommand(run), env, waitMs: SERVICE_WAIT_MS, answers: httpProbe, registered: registeredService });
+  return hostStarter({ spawn: nodeSpawn, wsp: wspCommand(run), env, waitMs: SERVICE_WAIT_MS, answers: httpProbe, registered: registeredService, loaded: serviceLoaded });
 }

@@ -18,6 +18,7 @@ import {
   hostIdentity,
   jsonFileStore,
   localExecStream,
+  tokenDigest,
   type GoldenRecipe,
   type GoldenVersion,
   type HarnessAdapterFactory,
@@ -1414,7 +1415,17 @@ async function hostFor(
   const links = opts.links ?? placeWiring(opts.statePath, opts.advertise);
   const lockPath = lockPathFor(opts.statePath);
   const started = startedByEnv(process.env) ?? opts.startedBy;
-  const lock = takeLock(lockPath, opts.statePath, { port: opts.port, address, ...(started !== undefined ? { startedBy: started } : {}) });
+  const authToken = randomBytes(24).toString("base64url");
+  const lock = takeLock(lockPath, opts.statePath, { port: opts.port, address, tokenDigest: tokenDigest(authToken), ...(started !== undefined ? { startedBy: started } : {}) });
+  // After the lock, so a start it refuses leaves the serving host's token alone; a line that reads the lock first
+  // waits for the token its digest names.
+  const tokenPath = hostTokenPath(opts.statePath);
+  try {
+    writeOwn(dirname(tokenPath), basename(tokenPath), authToken);
+  } catch (e) {
+    rmSync(lockPath, { force: true });
+    throw e;
+  }
   // The mark says what started this host and the lock has it now, so it comes off the process here: a thread, the
   // local daemon and every pane's shell start from this environment, and a wsp line typed in one is not the service.
   delete process.env[STARTED_BY_ENV];
@@ -1443,10 +1454,6 @@ async function hostFor(
           restart: () => (serving === undefined ? Promise.reject(new Error("the host is still starting")) : road.restart(serving)),
         };
   try {
-    // Written before startHost binds: a client can read the page while the host is still listing at the provider.
-    const authToken = randomBytes(24).toString("base64url");
-    const tokenPath = hostTokenPath(opts.statePath);
-    writeOwn(dirname(tokenPath), basename(tokenPath), authToken);
     const handle = await startHost({
       runtime: rt,
       authToken,

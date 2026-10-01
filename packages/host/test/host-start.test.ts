@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EXIT_CODES, exitClassOf } from "@wsp/protocol";
 import { cli, HOST_STARTS_ITSELF, localWiring, serve, type CliIO } from "../src/cli.js";
 import { hostLogPath, lockPathFor, SERVICE_WAIT_MS, servingHost, startedByEnv, STARTED_BY_ENV, type HostLock } from "../src/host-lock.js";
-import { hostExitedLine, hostStarter, noHostAnsweredLine, serviceServesStateLine, startingHostLine, type HostStarter } from "../src/host-start.js";
+import { hostExitedLine, hostStarter, noHostAnsweredLine, serviceRestartingLine, serviceServesStateLine, startingHostLine, type HostStarter } from "../src/host-start.js";
 import { dialer } from "../src/mcp.js";
 import { dialHost, noHostServingLine } from "../src/verbs.js";
 import type { HostHandle } from "../src/server.js";
@@ -109,6 +109,7 @@ describe("a verb starts the host when none serves", () => {
       waitMs: 2_000,
       answers: () => Promise.resolve(true),
       registered: () => undefined,
+      loaded: async () => false,
     });
     const said: string[] = [];
     expect(await start(statePath, line => said.push(line))).toEqual(lock);
@@ -129,7 +130,7 @@ describe("a verb starts the host when none serves", () => {
       calls.push(call);
       writeFileSync(lockPathFor(statePath), JSON.stringify(lock));
     });
-    const start = hostStarter({ spawn: fake.spawn, wsp: { command: "wsp", args: [] }, env: {}, waitMs: 2_000, answers: () => Promise.resolve(true), registered: () => undefined });
+    const start = hostStarter({ spawn: fake.spawn, wsp: { command: "wsp", args: [] }, env: {}, waitMs: 2_000, answers: () => Promise.resolve(true), registered: () => undefined, loaded: async () => false });
     expect(await start(statePath, () => undefined, { port: 7101 })).toEqual(lock);
     expect(calls[0]!.args).toEqual(["up", "--state", statePath, "--port", "7101"]);
   });
@@ -138,7 +139,7 @@ describe("a verb starts the host when none serves", () => {
     mkdirSync(join(dir, "state"), { recursive: true });
     writeFileSync(hostLogPath(statePath), "Error: EADDRINUSE 4400\n");
     const fake = fakeSpawn(() => {});
-    const start = hostStarter({ spawn: fake.spawn, wsp: { command: "wsp", args: [] }, env: {}, waitMs: 0, answers: () => Promise.resolve(false), registered: () => undefined });
+    const start = hostStarter({ spawn: fake.spawn, wsp: { command: "wsp", args: [] }, env: {}, waitMs: 0, answers: () => Promise.resolve(false), registered: () => undefined, loaded: async () => false });
     const refused = await start(statePath, () => {}).catch((e: unknown) => e);
     expect(refused).toBeInstanceOf(Error);
     expect((refused as Error).message.split("\n")).toEqual([noHostAnsweredLine(statePath, 0), "Error: EADDRINUSE 4400"]);
@@ -161,6 +162,7 @@ describe("a verb starts the host when none serves", () => {
       waitMs: SERVICE_WAIT_MS,
       answers: () => Promise.resolve(false),
       registered: () => undefined,
+      loaded: async () => false,
     });
     const said: string[] = [];
     vi.useFakeTimers();
@@ -182,7 +184,7 @@ describe("a verb starts the host when none serves", () => {
   it("a child that exits having written nothing is one sentence naming how it ended and where its log is", async () => {
     mkdirSync(join(dir, "state"), { recursive: true });
     const fake = fakeSpawn(() => {}, { code: 3, signal: null });
-    const start = hostStarter({ spawn: fake.spawn, wsp: { command: "wsp", args: [] }, env: {}, waitMs: SERVICE_WAIT_MS, answers: () => Promise.resolve(false), registered: () => undefined });
+    const start = hostStarter({ spawn: fake.spawn, wsp: { command: "wsp", args: [] }, env: {}, waitMs: SERVICE_WAIT_MS, answers: () => Promise.resolve(false), registered: () => undefined, loaded: async () => false });
     const refused = await start(statePath, () => {}).catch((e: unknown) => e);
     expect((refused as Error).message).toBe(hostExitedLine(statePath, 3, hostLogPath(statePath)));
     expect(exitClassOf(refused)).toBe("provider");
@@ -193,7 +195,7 @@ describe("a verb starts the host when none serves", () => {
     const logPath = hostLogPath(statePath);
     const refusal = "the state was written by a newer wsp; run that wsp, or move the file aside";
     const fake = fakeSpawn(() => appendFileSync(logPath, `${refusal}\n`), { code: 1, signal: null });
-    const start = hostStarter({ spawn: fake.spawn, wsp: { command: "wsp", args: [] }, env: {}, waitMs: SERVICE_WAIT_MS, answers: () => Promise.resolve(false), registered: () => undefined });
+    const start = hostStarter({ spawn: fake.spawn, wsp: { command: "wsp", args: [] }, env: {}, waitMs: SERVICE_WAIT_MS, answers: () => Promise.resolve(false), registered: () => undefined, loaded: async () => false });
     const errors: string[] = [];
     expect(await cli(["workspaces", "--state", statePath], quietIO([], errors), undefined, {}, start)).toBe(EXIT_CODES.provider);
     expect(errors).toHaveLength(2);
@@ -342,6 +344,7 @@ describe("a verb starts the host when none serves", () => {
       waitMs: 0,
       answers: () => Promise.resolve(false),
       registered: path => (path === statePath ? service : undefined),
+      loaded: async () => false,
     });
     const said: string[] = [];
     const refused = await start(statePath, line => said.push(line)).catch((e: unknown) => e);
@@ -363,7 +366,38 @@ describe("a verb starts the host when none serves", () => {
       waitMs: 2_000,
       answers: () => Promise.resolve(true),
       registered: path => (path === statePath ? service : undefined),
+      loaded: async () => false,
     });
     expect(await starter(other, () => {})).toEqual(lock);
+  });
+
+  it("on a state file whose unit the manager still holds, waits for the host it brings back and says it is restarting", async () => {
+    // A service restart: the old host has gone and the manager has not yet brought the new one up, and a line in
+    // that second was told the service was not running and to start it again.
+    mkdirSync(join(dir, "state"), { recursive: true });
+    const fake = fakeSpawn(() => {});
+    const service = { unit: { name: "com.wsp.host.af639035", path: join(dir, "com.wsp.host.af639035.plist") }, words: "launchd agent" };
+    const lock: HostLock = { pid: process.pid, port: 1, startedAt: new Date().toISOString(), startedBy: "service" };
+    const start = hostStarter({
+      spawn: fake.spawn,
+      wsp: { command: "wsp", args: [] },
+      env: {},
+      waitMs: 2_000,
+      answers: () => Promise.resolve(true),
+      registered: () => service,
+      loaded: async () => true,
+    });
+    const said: string[] = [];
+    setTimeout(() => writeFileSync(lockPathFor(statePath), JSON.stringify(lock)), 300);
+    expect(await start(statePath, line => said.push(line))).toEqual(lock);
+    expect(said).toEqual([serviceRestartingLine(statePath, service)]);
+    expect(said[0]).toBe(`${statePath} is served by the launchd agent com.wsp.host.af639035, which is restarting; waiting for it to come back`);
+    expect(fake.starts()).toBe(0);
+
+    // A unit the manager no longer holds is not coming back by itself, and the line says so at once.
+    const stopped = hostStarter({ spawn: fake.spawn, wsp: { command: "wsp", args: [] }, env: {}, waitMs: 2_000, answers: () => Promise.resolve(false), registered: () => service, loaded: async () => false });
+    const other = join(dir, "other", "state.json");
+    const refused = await stopped(other, () => {}).catch((e: unknown) => e);
+    expect((refused as Error).message).toBe(serviceServesStateLine(other, service));
   });
 });

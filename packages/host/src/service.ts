@@ -327,6 +327,12 @@ export function registeredIn(manager: ServiceManager | undefined, at: ServiceAdd
 /** The same reading for this computer and this state file, which is what the start road and wsp up ask. */
 export const registeredService = (statePath: string): RegisteredService | undefined => registeredIn(serviceManagerFor(platform()), serviceAddressHere(statePath));
 
+/** Whether this computer's manager holds the unit for this state file loaded, off the same answer wsp status reads. */
+export async function serviceLoaded(statePath: string, run: ServiceRunner = systemRunner): Promise<boolean> {
+  const manager = serviceManagerFor(platform());
+  return manager !== undefined && (await run(manager.holds(serviceAddressHere(statePath)))).code === 0;
+}
+
 export interface ServiceRunner {
   /** The patience is the caller's, since what a manager is being asked for decides it; a caller that names none
    * takes the one a command that only writes or reads gets. */
