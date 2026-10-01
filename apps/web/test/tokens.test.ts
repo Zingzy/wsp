@@ -94,8 +94,8 @@ describe("index.css", () => {
          macOS's, which the window draws once for the whole window, and a pane there stands on its material whole. The
          condition sits at each use, since a variant inside this utility cannot follow a ::before it is used under. */
       @utility glass-backdrop {
-        -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
-        backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+        -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation)) var(--glass-ground,);
+        backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation)) var(--glass-ground,);
       }
 
       /* The shell's sidebar floats over the app background, so it takes the same
@@ -204,6 +204,9 @@ describe("index.css", () => {
          scrim keep their blur: they stand only while open, and a sharp page under a dim scrim reads busier. */
       .desktop-mac {
         --glass-opacity: 100%;
+        /* A blur on the Mac's transparent page lays its copy over the page it sampled, so the sharp text shows through
+           unless the copy stands on the page's own ground: the filter GlassGround renders. The composer is its one user. */
+        --glass-ground: url(#glass-ground);
       }
 
       /* The page drawing no glass (Transparency off in Appearance, or the computer's Reduce transparency on, read in
