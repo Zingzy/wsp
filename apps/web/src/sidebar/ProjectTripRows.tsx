@@ -85,7 +85,7 @@ export function FolderPickerRow({ path, placeholder, disabled, onPick }: { path:
       <span data-k="path" className={cn("min-w-0 flex-1 truncate font-mono text-xs", empty ? "text-muted-foreground" : "text-foreground")} title={empty ? undefined : path}>
         {empty ? placeholder : path}
       </span>
-      <Button type="button" variant="outline" size="sm" className="shrink-0" disabled={disabled} onClick={onPick}>
+      <Button type="button" variant="outline" className="shrink-0" disabled={disabled} onClick={onPick}>
         {empty ? "Choose folder" : "Change"}
       </Button>
     </div>

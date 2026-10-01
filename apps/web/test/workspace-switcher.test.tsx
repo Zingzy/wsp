@@ -366,7 +366,7 @@ describe("the workspace switcher overlay", () => {
       tab();
       await waitFor(() => expect(document.querySelectorAll("[data-card-preview]").length).toBe(3));
       await waitFor(() => expect(document.querySelector<HTMLImageElement>("[data-workspace-card='ws_b'] img")?.src).toBe("data:image/png;base64,AAA"));
-      expect(document.querySelector("[data-workspace-card='ws_a'] [data-card-preview]")?.textContent).toBe("no capture yet");
+      expect(document.querySelector("[data-workspace-card='ws_a'] [data-card-preview]")?.textContent).toBe("No capture yet");
       expect(cardParts("ws_b")).toEqual(["preview", "name", "thread"]);
       release();
       await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_b"));

@@ -73,7 +73,7 @@ export function CopyRow({ label, value, k, children }: { label?: string; value: 
         {value}
       </span>
       {children}
-      <Button variant="ghost-muted" size="icon-xs" className="shrink-0" aria-label={`Copy the ${(label ?? "line").toLowerCase()}`} onClick={copy}>
+      <Button variant="ghost" size="icon-xs" className="shrink-0" aria-label={`Copy the ${(label ?? "line").toLowerCase()}`} onClick={copy}>
         {copied ? <CheckIcon /> : <CopyIcon />}
       </Button>
     </div>

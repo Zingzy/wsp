@@ -30,15 +30,14 @@ describe("the shared Add button", () => {
         <AddButton size="xs">Add a variable</AddButton>
       </>,
     );
-    expect(classes("Add a cloud")).toEqual(expect.arrayContaining(["sm:h-8", "gap-1.5", "sm:text-[13px]"]));
-    expect(classes("Add a variable")).toEqual(expect.arrayContaining(["sm:h-6", "gap-1", "sm:text-xs"]));
+    expect(classes("Add a cloud")).toEqual(expect.arrayContaining(["h-8", "px-3", "gap-1.5", "text-[13px]"]));
+    expect(classes("Add a variable")).toEqual(expect.arrayContaining(["h-6", "px-2", "gap-1", "text-xs"]));
     expect(classes("Add a variable")).not.toContain("gap-1.5");
   });
 
   it("keeps the plus at the padding's edge and the gap's width, pulled in by neither", () => {
     render(<AddButton>Add a computer</AddButton>);
-    expect(classes("Add a computer")).toContain("[&_svg]:mx-0");
-    expect(classes("Add a computer")).not.toContain("[&_svg]:-mx-0.5");
+    expect(classes("Add a computer").filter(c => c.includes("svg]:-m") || c.includes("svg]:m"))).toEqual([]);
   });
 
   it("is the primary for a sheet's Add, and presses", () => {

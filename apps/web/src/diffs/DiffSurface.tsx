@@ -498,7 +498,7 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
           ) : null}
           <Tooltip>
             <TooltipTrigger
-              render={<Button type="button" size="icon-sm" variant="ghost" aria-label={isPending ? "Refreshing changes" : "Refresh changes"} onClick={fetchDiff} />}
+              render={<Button type="button" size="icon" variant="ghost" aria-label={isPending ? "Refreshing changes" : "Refresh changes"} onClick={fetchDiff} />}
             >
               <RefreshCwIcon className={cn("size-3.5", isPending && "animate-spin")} />
             </TooltipTrigger>
@@ -512,7 +512,7 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
                 render={
                   <Button
                     type="button"
-                    size="icon-sm"
+                    size="icon"
                     variant="ghost"
                     className="hidden sm:inline-flex"
                     aria-label={allCollapsed ? "Expand all files" : "Collapse all files"}

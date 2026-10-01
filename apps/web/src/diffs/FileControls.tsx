@@ -35,22 +35,22 @@ export function FileControls({
     <span className={cn("flex shrink-0 items-center gap-1", className)} data-file-controls>
       {children}
       {edit?.kind === "offer" ? (
-        <Button type="button" size="icon-micro" variant="ghost-muted" aria-label={EDIT_WORDS.edit(name)} onClick={event => (event.stopPropagation(), edit.onEdit())}>
+        <Button type="button" size="icon-micro" variant="ghost" aria-label={EDIT_WORDS.edit(name)} onClick={event => (event.stopPropagation(), edit.onEdit())}>
           <PencilIcon className="size-3.5" />
         </Button>
       ) : null}
       {edit?.kind === "open" ? (
         <>
-          <Button type="button" size="icon-micro" variant="ghost-muted" disabled={edit.saving} aria-label={EDIT_WORDS.save(name)} onClick={event => (event.stopPropagation(), edit.onSave())}>
+          <Button type="button" size="icon-micro" variant="ghost" disabled={edit.saving} aria-label={EDIT_WORDS.save(name)} onClick={event => (event.stopPropagation(), edit.onSave())}>
             <CheckIcon className="size-3.5" />
           </Button>
-          <Button type="button" size="icon-micro" variant="ghost-muted" disabled={edit.saving} aria-label={EDIT_WORDS.cancel(name)} onClick={event => (event.stopPropagation(), edit.onCancel())}>
+          <Button type="button" size="icon-micro" variant="ghost" disabled={edit.saving} aria-label={EDIT_WORDS.cancel(name)} onClick={event => (event.stopPropagation(), edit.onCancel())}>
             <XIcon className="size-3.5" />
           </Button>
         </>
       ) : null}
       {onDiscard === undefined ? null : (
-        <Button type="button" size="icon-micro" variant="ghost-muted" className="hover:text-destructive-foreground" aria-label={DISCARD_WORDS.control(name)} onClick={event => (event.stopPropagation(), onDiscard())}>
+        <Button type="button" size="icon-micro" variant="ghost" className="hover:text-destructive-foreground" aria-label={DISCARD_WORDS.control(name)} onClick={event => (event.stopPropagation(), onDiscard())}>
           <Trash2Icon className="size-3.5" />
         </Button>
       )}

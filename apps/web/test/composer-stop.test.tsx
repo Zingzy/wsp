@@ -82,7 +82,7 @@ async function setup() {
   useStore.setState({ harnesses: [TABLE_CATALOG] });
   await waitFor(() => expect(useStore.getState().workspaces.length).toBeGreaterThan(0));
   render(<ChatView workspaceId={WS}>{thread => <ChatComposer workspaceId={WS} thread={thread} />}</ChatView>);
-  await waitFor(() => expect(screen.queryByText("loading transcript")).toBeNull());
+  await waitFor(() => expect(screen.queryByText("Loading transcript")).toBeNull());
   /** A frame from the runtime, delivered where the caller already is (inside a click, or inside act). */
   const deliver = (e: Record<string, unknown>) => sock.onmessage?.({ data: JSON.stringify(e) });
   const push = (e: EventUnion) => act(() => deliver(e));

@@ -22,7 +22,7 @@ export function SettingsHeaderActions() {
     <Tooltip>
       <TooltipTrigger
         render={
-          <Button data-k="restore-defaults" size="xs" variant="ghost-muted" className="[-webkit-app-region:no-drag]" aria-label={SETTINGS_WORDS.restore} onClick={() => void setPreferences(restore.patch)}>
+          <Button data-k="restore-defaults" size="xs" variant="ghost" className="[-webkit-app-region:no-drag]" aria-label={SETTINGS_WORDS.restore} onClick={() => void setPreferences(restore.patch)}>
             <RotateCcwIcon />
             <span className="max-sm:hidden">{SETTINGS_WORDS.restore}</span>
           </Button>

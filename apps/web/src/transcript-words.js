@@ -11,4 +11,4 @@
 // rewording moves the wait with it.
 
 /** The one line the pane shows in place of a transcript it has not got yet. */
-export const TRANSCRIPT_LOADING = "loading transcript";
+export const TRANSCRIPT_LOADING = "Loading transcript";

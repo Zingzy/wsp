@@ -17,7 +17,7 @@ function RemoveButton({ label, title, onRemove }: { label: string; title: string
   return (
     <Button
       size="icon-xs"
-      variant="ghost-muted"
+      variant="ghost"
       aria-label={label}
       title={title}
       onClick={onRemove}

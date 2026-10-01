@@ -589,7 +589,7 @@ describe("what the driver reads and aims at", () => {
 
   it("is not ready while a thread's transcript is still arriving, so no shot of a working thread is blank", () => {
     const ready = () => READY_ON_THE_PAGE([APP_UP, NOT_READY_NAMES, TRANSCRIPT_LOADING, A_MESSAGE]);
-    document.body.innerHTML = `<div data-shell-center><div>loading transcript</div></div>`;
+    document.body.innerHTML = `<div data-shell-center><div>${TRANSCRIPT_LOADING}</div></div>`;
     expect(ready()).toBe(false);
     // The words arrive and the line goes with them.
     document.body.innerHTML = `<div data-shell-center><div data-message-role="user"><p>list the files</p></div></div>`;
