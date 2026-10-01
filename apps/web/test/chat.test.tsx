@@ -159,7 +159,7 @@ describe("chat tab rendering", () => {
       { path: "server.js", kind: "added", additions: 12, deletions: 0 },
       { path: "README.md", kind: "modified", additions: 2, deletions: 3 },
     ];
-    emit({ type: "session.changes", ...scope, from, to, files, shared: true });
+    emit({ type: "session.changes", ...scope, from, to, files, moved: [], shared: true });
     const open = await screen.findByRole("button", { name: "Open diff" });
     expect(screen.getByText("2 changed files")).toBeDefined();
     const counts = document.querySelector<HTMLElement>('[aria-label="14 additions, 3 deletions"]')!;

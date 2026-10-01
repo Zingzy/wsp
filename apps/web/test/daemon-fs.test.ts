@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { rootsPathIn } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { connectDaemonLink, type DaemonLink } from "../src/terminal/daemon-link.js";
-import { DaemonOpError, fsList, fsRead, gitDiff, gitRange, gitStatus } from "../src/terminal/daemon-fs.js";
+import { DaemonOpError, fsList, fsRead, gitDiff, gitRange, gitTurn, gitStatus } from "../src/terminal/daemon-fs.js";
 import type { TerminalWire } from "../src/terminal/link.js";
 import { startRelayHarness, type RelayHarness } from "./relay-harness.js";
 
@@ -29,7 +29,8 @@ describe("daemon-fs wrapper over a wire", () => {
       "fs.read": { content: "hi", size: 2, truncated: false },
       "git.status": { branch: { oid: "a", head: "main", ahead: 0, behind: 0 }, entries: [], root: "/root/repo" },
       "git.diff": { base: null, files: [], truncated: false },
-      "git.range": { base: null, files: [{ path: "a.ts", kind: "added", additions: 2, deletions: 0, patch: "" }], truncated: false },
+      "git.range": { base: null, files: [{ path: "a.ts", kind: "added", additions: 2, deletions: 0, patch: "" }], truncated: false, moved: [] },
+      "git.turn": { base: null, files: [{ path: "a.ts", kind: "added", additions: 2, deletions: 0, patch: "" }], truncated: false, moved: ["Checked out other"] },
     });
     const list = await fsList(w, "repo");
     expect(list.entries[0]?.type).toBe("dir");
@@ -57,6 +58,10 @@ describe("daemon-fs wrapper over a wire", () => {
     const range = await gitRange(w, "repo", "a".repeat(40), "b".repeat(40));
     expect(range.files.map(f => [f.path, f.kind, f.additions])).toEqual([["a.ts", "added", 2]]);
     expect(w.calls[7]).toEqual(["git.range", { cwd: "repo", from: "a".repeat(40), to: "b".repeat(40) }]);
+
+    const turn = await gitTurn(w, "repo", "a".repeat(40), "b".repeat(40));
+    expect(turn.moved).toEqual(["Checked out other"]);
+    expect(w.calls[8]).toEqual(["git.turn", { cwd: "repo", from: "a".repeat(40), to: "b".repeat(40) }]);
   });
 
   it("refuses a malformed reply instead of passing it through", async () => {

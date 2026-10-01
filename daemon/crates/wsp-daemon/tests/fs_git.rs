@@ -910,6 +910,36 @@ async fn git_snapshot_and_range_list_a_turn_s_changes_with_new_files_in_and_the_
     refused(&c.request("git.range", json!({ "cwd": "repo", "from": from, "to": gone })).await, "not-found");
 }
 
+/// git.turn is the agent's own work alone: a turn that checks out another branch and edits one file is that one file
+/// and the checkout line, never the whole branch the checkout brought. git.range over the same two snapshots is the
+/// pure tree diff, so it carries that branch's files too.
+#[tokio::test]
+async fn git_turn_is_the_agents_own_work_while_git_range_over_the_same_snapshots_is_the_pure_diff() {
+    let (t, _d, mut c) = bench().await;
+    let repo = t.repo();
+    // A clean start: commit what the fixture left pending, so the turn can leave the branch.
+    git(&repo, &["add", "-A"]);
+    git(&repo, &["commit", "-q", "-m", "pending"]);
+    let before = c.request("git.snapshot", json!({ "cwd": "repo" })).await;
+    let from = before["commit"].as_str().unwrap().to_owned();
+    // The turn checks out main (a HEAD move it did not write) and edits one file.
+    git(&repo, &["checkout", "-q", "main"]);
+    fs::write(repo.join("src/index.ts"), "export const a = 9;\n").unwrap();
+    let after = c.request("git.snapshot", json!({ "cwd": "repo" })).await;
+    let to = after["commit"].as_str().unwrap().to_owned();
+    let turn = c.request("git.turn", json!({ "cwd": "repo", "from": from, "to": to })).await;
+    assert_eq!(turn["ok"], true, "{turn}");
+    assert_eq!(paths(&turn), vec!["src/index.ts"]);
+    assert_eq!(turn["moved"], json!(["Checked out main"]), "{turn}");
+    // The pure diff of the two snapshot trees carries the branch the checkout brought: feature.txt, which the turn
+    // did not touch, is on the range and never on the turn.
+    let range = c.request("git.range", json!({ "cwd": "repo", "from": from, "to": to })).await;
+    assert_eq!(range["ok"], true, "{range}");
+    assert_eq!(range["moved"], json!([]), "{range}");
+    assert!(paths(&range).contains(&"feature.txt".to_owned()), "{range}");
+    assert!(!paths(&turn).contains(&"feature.txt".to_owned()), "{turn}");
+}
+
 #[tokio::test]
 async fn git_range_refuses_a_ref_that_is_not_forty_hex_before_any_git_runs_and_both_ops_stay_inside_the_root() {
     let (t, _d, mut c) = bench().await;

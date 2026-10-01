@@ -1649,16 +1649,18 @@ export type SessionNotifyEvent = z.infer<typeof SessionNotifyEvent>;
 export const TurnChangedFile = z.object({ path: z.string(), kind: z.string(), additions: z.number(), deletions: z.number() });
 export type TurnChangedFile = z.infer<typeof TurnChangedFile>;
 
-/** What one turn changed in the folder it ran in: every file between the snapshot taken as it launched and the one
- * taken as it ended, with the two commits' shas, off which the Changes pane reads the patches. shared: another
- * thread's turn ran in the same folder between the two, so some of these changes may be that thread's. A turn that
- * changed nothing records none. */
+/** What one turn changed in the folder it ran in: the files the agent itself changed, its own commits and its end
+ * worktree edits, with the two snapshot shas off which the Changes pane reads the patches. moved names each HEAD move
+ * the turn did not write (a checkout, pull, merge, rebase or reset) as one line, with no files of its own. shared:
+ * another thread's turn ran in the same folder between the two, so some of these changes may be that thread's. A turn
+ * that changed nothing and moved HEAD no way records none. */
 export const SessionChangesEvent = z.object({
   type: z.literal("session.changes"),
   ...sessionScope,
   from: z.string(),
   to: z.string(),
   files: z.array(TurnChangedFile),
+  moved: z.array(z.string()),
   shared: z.literal(true).optional(),
 });
 export type SessionChangesEvent = z.infer<typeof SessionChangesEvent>;
@@ -3579,7 +3581,7 @@ type GitBranchCompareReplyHeld = Held<Same<GitBranchCompareReply, WireGitBranchC
 type GitMergeInReplyHeld = Held<Same<GitMergeInReply, WireGitMergeInReply>>;
 /** base is the ref the branch scope diffed against (null for other scopes);
  * truncated means the 2 MiB patch budget cut files or a patch short. */
-export const GitDiffReply = z.object({ base: z.string().nullable(), files: z.array(GitDiffFile), truncated: z.boolean() });
+export const GitDiffReply = z.object({ base: z.string().nullable(), files: z.array(GitDiffFile), truncated: z.boolean(), moved: z.array(z.string()).default([]) });
 export type GitDiffReply = z.infer<typeof GitDiffReply>;
 /** The commit a git.snapshot recorded, by its full sha. */
 export const GitSnapshotReply = z.object({ commit: z.string() });
@@ -3807,6 +3809,9 @@ export const DaemonRequest = z.discriminatedUnion("op", [
   /** The diff between two commits, each its full 40 character sha or the frame is refused before git runs; answers
    * a GitDiffReply. */
   z.object({ id: reqId, op: z.literal("git.range"), cwd: z.string(), from: z.string(), to: z.string(), path: z.string().optional(), machineId: z.string().optional() }),
+  /** What a turn changed between two of its snapshots, the agent's own work alone, each snapshot its full sha; answers
+   * a GitDiffReply with the moves it did not write on `moved`. git.range stays the pure diff of the two trees. */
+  z.object({ id: reqId, op: z.literal("git.turn"), cwd: z.string(), from: z.string(), to: z.string(), path: z.string().optional(), machineId: z.string().optional() }),
   /** Pushes the branch the checkout is on to its remote and answers a GitPushReply. The base branch itself is
    * refused: wsp makes no branch and pushes none of the branch the work started from. Without a base the
    * checkout's own default branch is read, which is what a project recorded without one was cloned at. */

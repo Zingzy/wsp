@@ -902,23 +902,23 @@ describe("what a turn changed", () => {
       { type: "session.done", ...scoped, turnId: "t1", at: 3_000, result: { status: "completed" } },
       { type: "session.end", ...scoped, turnId: "t1", at: 3_100, exitCode: 0, sawResult: true },
       { type: "session.start", ...scoped, turnId: "t2", at: 4_000, prompt: "again" },
-      { type: "session.changes", ...scoped, turnId: "t1", at: 4_100, from, to, files, shared: true },
+      { type: "session.changes", ...scoped, turnId: "t1", at: 4_100, from, to, files, moved: [], shared: true },
     ]);
-    expect(model.turns.map(t => t.changes)).toEqual([{ from, to, files }, null]);
+    expect(model.turns.map(t => t.changes)).toEqual([{ from, to, files, moved: [] }, null]);
   });
 
   it("stays on a turn whose reply lands after it", () => {
     const model = deriveSession([
       { type: "session.start", ...scoped, turnId: "t1", at: 1_000, prompt: "edit" },
-      { type: "session.changes", ...scoped, turnId: "t1", at: 2_000, from, to, files },
+      { type: "session.changes", ...scoped, turnId: "t1", at: 2_000, from, to, files, moved: [] },
       { type: "session.done", ...scoped, turnId: "t1", at: 3_000, result: { status: "completed", text: "edited" } },
       { type: "session.end", ...scoped, turnId: "t1", at: 3_100, exitCode: 0, sawResult: true },
     ]);
-    expect(model.turns[0]!.changes).toEqual({ from, to, files });
+    expect(model.turns[0]!.changes).toEqual({ from, to, files, moved: [] });
   });
 
   it("opens no turn when it names none the thread holds", () => {
-    const model = deriveSession([{ type: "session.changes", ...scoped, turnId: "gone", at: 1_000, from, to, files }]);
+    const model = deriveSession([{ type: "session.changes", ...scoped, turnId: "gone", at: 1_000, from, to, files, moved: [] }]);
     expect(model.turns).toEqual([]);
     expect(model.timeline).toEqual([]);
   });

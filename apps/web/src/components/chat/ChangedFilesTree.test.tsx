@@ -36,6 +36,25 @@ describe("ChangedFilesCard", () => {
     expect(card([{ path: "src/a.ts", kind: "modified", additions: 2, deletions: 1 }], true)).toContain('aria-label="Collapse all folders"');
   });
 
+  it("shows a move-only turn as its quiet lines with no file tree", () => {
+    const markup = renderToStaticMarkup(
+      <ChangedFilesCard
+        turnId={"turn-1"}
+        files={[]}
+        moved={["Checked out pr-889", "Pulled"]}
+        allDirectoriesExpanded={false}
+        resolvedTheme="light"
+        onToggleAllDirectories={() => {}}
+        onOpenTurnDiff={() => {}}
+      />,
+    );
+    expect(markup).toContain("data-changed-files-moved");
+    expect(markup).toContain("Checked out pr-889");
+    expect(markup).toContain("Pulled");
+    // No file tree: the move named itself, and no file is its own.
+    expect(markup).not.toContain("data-changed-file=");
+  });
+
   it("lists a large turn as its top-level rows, with no chips and no Show all", () => {
     const files = [
       ...Array.from({ length: 30 }, (_, n) => ({ path: `apps/web/src/f${n}.ts`, kind: "modified", additions: 3, deletions: 1 })),

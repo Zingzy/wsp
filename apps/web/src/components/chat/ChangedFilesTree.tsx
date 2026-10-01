@@ -13,6 +13,7 @@ import {
   FileDiffIcon,
   FolderIcon,
   FolderClosedIcon,
+  GitBranchIcon,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { DiffStatLabel, hasNonZeroStat } from "./DiffStatLabel";
@@ -21,16 +22,19 @@ import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 const EMPTY_DIRECTORY_OVERRIDES: Record<string, boolean> = {};
+const EMPTY_MOVED: ReadonlyArray<string> = [];
 
 export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
   turnId: TurnId;
   files: ReadonlyArray<TurnDiffFileChange>;
+  /** Each HEAD move the turn did not write, one quiet line with no files of its own. */
+  moved?: ReadonlyArray<string>;
   allDirectoriesExpanded: boolean;
   resolvedTheme: "light" | "dark";
   onToggleAllDirectories: () => void;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
 }) {
-  const { turnId, files, allDirectoriesExpanded, resolvedTheme, onToggleAllDirectories, onOpenTurnDiff } = props;
+  const { turnId, files, moved = EMPTY_MOVED, allDirectoriesExpanded, resolvedTheme, onToggleAllDirectories, onOpenTurnDiff } = props;
   const summaryStat = useMemo(() => summarizeTurnDiffStats(files), [files]);
   const hasDirectories = files.some((file) => /[/\\]/.test(file.path));
 
@@ -79,16 +83,28 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
           </Tooltip>
         </div>
       </div>
-      <div className="p-2">
-        <ChangedFilesTree
-          key={`${turnId}:${allDirectoriesExpanded}`}
-          turnId={turnId}
-          files={files}
-          allDirectoriesExpanded={allDirectoriesExpanded}
-          resolvedTheme={resolvedTheme}
-          onOpenTurnDiff={onOpenTurnDiff}
-        />
-      </div>
+      {moved.length === 0 ? null : (
+        <div data-changed-files-moved="" className="flex flex-col gap-0.5 px-3 pb-1 pt-0.5">
+          {moved.map((line, index) => (
+            <span key={`${index}:${line}`} className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+              <GitBranchIcon aria-hidden className="size-3 shrink-0" />
+              {line}
+            </span>
+          ))}
+        </div>
+      )}
+      {files.length === 0 ? null : (
+        <div className="p-2">
+          <ChangedFilesTree
+            key={`${turnId}:${allDirectoriesExpanded}`}
+            turnId={turnId}
+            files={files}
+            allDirectoriesExpanded={allDirectoriesExpanded}
+            resolvedTheme={resolvedTheme}
+            onOpenTurnDiff={onOpenTurnDiff}
+          />
+        </div>
+      )}
     </div>
   );
 });
