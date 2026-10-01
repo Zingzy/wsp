@@ -4637,6 +4637,7 @@ const DAEMON_CONTENTS = [
   "9a59b1daa92807a07d52f8d1ee0a3b3d3d5680202be1da20498b093b5b1daa71",
   "29eeb80d015c5099f6991b2acc3a0457f26aa1636b66f8751d6734cdb1a0639d",
   "ad16ee01ba69b4bd8339c8aa4753c2f3e46aa80c8d9f1ceeab9ca1038482f062",
+  "409fce58696aaa20c7803f7a963841e4aacc0702a153ca6f916fba64f941bd16",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -4933,7 +4934,10 @@ const DAEMON_CONTENTS = [
  * own files, collected one by one over the turn's reflog window whatever moved HEAD after them, together with the edits
  * standing in its end worktree and the files it resolved by hand in a merge, while a HEAD move it did not write (a
  * checkout, pull, merge, rebase or reset) is named on a line with no files of its own. A rebase is one such line plus
- * the edits standing at the end; the commits it replayed and any conflict it resolved mid-rebase are not listed. */
+ * the edits standing at the end; the commits it replayed and any conflict it resolved mid-rebase are not listed.
+ * Version 110: A joined Mac reports which Mac it is: its place report carries the product name its registry gives, else
+ * its model identifier, so the computer's row draws that Mac rather than a server. git.status counts the stashes a
+ * repository holds, running or stopped, so a delete names them. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary

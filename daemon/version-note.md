@@ -1,1 +1,0 @@
-A joined Mac reports which Mac it is: its place report carries the product name its registry gives, else its model identifier, so the computer's row draws that Mac rather than a server. git.status counts the stashes a repository holds, running or stopped, so a delete names them.
