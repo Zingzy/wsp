@@ -10,7 +10,7 @@
 // Under the transcript stand the threads this one's agent opened, one line each
 // with where it runs and its status, and the footer weighs the turn's own cost
 // against what those threads spent.
-import { HeroAtmosphere, HeroMark } from "./EmptyHero.js";
+import { HeroField, HeroMark } from "./EmptyHero.js";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowDownIcon } from "lucide-react";
 import type { LegendListRef } from "@legendapp/list/react";
@@ -234,7 +234,7 @@ export function ChatView({
           // A fresh thread centres the headline and the composer as one stack; the composer glides to its dock
           // when the first message goes.
           <>
-            <HeroAtmosphere {...(workspace?.project?.id === undefined ? {} : { projectId: workspace.project.id })} />
+            <HeroField />
             <div className="absolute inset-x-0 bottom-[calc(var(--empty-lift)+var(--chat-composer-inset)+2.5rem)]">
               <EmptyThread name={workspace?.project.name ?? workspaceId} {...(workspace?.project?.id === undefined ? {} : { projectId: workspace.project.id })} />
             </div>

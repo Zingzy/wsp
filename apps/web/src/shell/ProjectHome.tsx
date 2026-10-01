@@ -13,7 +13,7 @@ import { ownerRepoOf } from "@wsp/catalog";
 import { Button } from "../components/ui/button.js";
 import { RefusalSlot } from "../settings/sheetParts.js";
 import { EmptyThread } from "../components/chat/ChatView.js";
-import { HeroAtmosphere } from "../components/chat/EmptyHero.js";
+import { HeroField } from "../components/chat/EmptyHero.js";
 import { ChatComposer } from "../components/chat/ChatComposer.js";
 import { newId, useComposerDraft, useComposerDraftStore } from "../components/chat/composerDraftStore.js";
 import { attachmentOf, useComposerFilesStore } from "../components/chat/composerFiles.js";
@@ -136,7 +136,7 @@ export function ProjectHome({ projectId }: { projectId: string }) {
 
   return (
     <div data-k="project-home" className="relative isolate flex min-h-0 flex-1 flex-col justify-center gap-10 pb-[8vh]">
-      <HeroAtmosphere projectId={project.id} />
+      <HeroField />
       <EmptyThread name={project.name} projectId={project.id} picker={<HomeProjectPicker project={project} />} />
       <ChatComposer
         key={key}

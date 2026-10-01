@@ -9,7 +9,7 @@ import { useShallow } from "zustand/react/shallow";
 import { ChevronDownIcon, ChevronRightIcon, CircleAlertIcon } from "lucide-react";
 import { ChatComposer } from "../components/chat/ChatComposer.js";
 import { EmptyThread } from "../components/chat/ChatView.js";
-import { HeroAtmosphere } from "../components/chat/EmptyHero.js";
+import { HeroField } from "../components/chat/EmptyHero.js";
 import { useChatThread } from "../components/chat/useChatThread.js";
 import { Crab } from "../components/status/Crab.js";
 import { WorkingSince } from "../components/status/WorkingSince.js";
@@ -68,7 +68,7 @@ export function WorkspaceCreation({ creation }: { creation: Creation }) {
     >
       <div ref={rootRef} className="relative isolate h-full min-h-0 text-foreground [--empty-lift:calc((100%-var(--chat-composer-inset,0px)-5.5rem)/2)]">
         <div className="absolute inset-0">
-          <HeroAtmosphere {...project} />
+          <HeroField />
           <div ref={questionRef} className="absolute inset-x-0 bottom-[calc(var(--empty-lift)+var(--chat-composer-inset)+2.5rem)]">
             <EmptyThread name={projectName ?? creation.name} {...project} />
           </div>

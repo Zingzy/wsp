@@ -10,6 +10,7 @@
   --accent-foreground: #1f1b18;
   --primary: #2b2622;
   --primary-foreground: #f7f3ec;
+  --hero-field: var(--color-teal-700);
   --border: #dfd7ca;
   --input: #cdc3b3;
   --success: var(--color-emerald-600);
