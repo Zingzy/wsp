@@ -148,6 +148,7 @@ const CALLED: readonly Called[] = [
   { tool: "computers", argv: ["computers"], arguments: {} },
   { tool: "computers_set", argv: ["computers", "set", "here", "--threads", "2"], arguments: { computer: "here", threads: 2 } },
   { tool: "computers_set", argv: ["computers", "set", "here", "--reset", "threads"], arguments: { computer: "here", reset: ["threads"] } },
+  { tool: "computers_set", argv: ["computers", "set", "here", "--nap", "5"], arguments: { computer: "here", nap: 5 }, refused: true },
   { tool: "computers_set", argv: ["computers", "set", "nowhere", "--threads", "2"], arguments: { computer: "nowhere", threads: 2 }, refused: true },
   { tool: "usage", argv: ["usage"], arguments: {} },
   { tool: "usage", argv: ["usage", "--range", "week", "--by", "project"], arguments: { range: "week", by: "project" } },

@@ -48,7 +48,7 @@ import { Checkout } from "./changes.js";
 import { GitBranchCompareReply, GitMergeInReply, GitStartOnReply, TreeFact } from "./tree.js";
 import { GitPrReadReply, GitPrViewReply, GitPrMergeReply, GitRepoReadReply, GitRunLogReply, GitUpdateReply, MergeMethod, PullRequest, PullRequestSeen } from "./pull-request.js";
 import { GitIssueReadReply, GitPrCheckoutReply, GitPrDiffReply, GitPrReviewReply, ReviewDraft, WorkspaceFrom } from "./start.js";
-import { placeAtLimitLine, placeFullLine } from "./place-state.js";
+import { NAP_AFTER_MAX_MS, placeAtLimitLine, placeFullLine } from "./place-state.js";
 import type { AbsentComputer } from "./workspace-state.js";
 import type { LinkTarget } from "./app-address.js";
 import { rootsPathIn } from "./project-path.js";
@@ -3192,11 +3192,12 @@ export type PlaceCap = z.infer<typeof PlaceCap>;
 /** The numbers a person set on one place, each key absent until they set it. */
 export const PlaceCapSet = ComputerCap.merge(CloudCap).partial();
 export type PlaceCapSet = z.infer<typeof PlaceCapSet>;
-/** Everything a person set on one place, each key absent until they set it and gone again once they reset it. */
-export const PlaceSettings = PlaceCapSet;
+/** Everything a person set on one place, each key absent until they set it and gone again once they reset it.
+ * `napMs` is how long a workspace there with no window of its own runs quiet before it naps; null never naps it. */
+export const PlaceSettings = PlaceCapSet.extend({ napMs: z.number().int().min(60_000).max(NAP_AFTER_MAX_MS).nullable().optional() });
 export type PlaceSettings = z.infer<typeof PlaceSettings>;
 /** A setting on a place by the word the command line and the tool name it with, which a reset takes. */
-export const PlaceSettingWord = z.enum(["threads", "machines", "spend"]);
+export const PlaceSettingWord = z.enum(["threads", "machines", "spend", "nap"]);
 export type PlaceSettingWord = z.infer<typeof PlaceSettingWord>;
 
 /** The Macs a computer's icon tells apart. */
@@ -3299,6 +3300,9 @@ export const PlaceView = z.object({
   capDefault: PlaceCap.optional(),
   /** What the person set on this place, which a reset takes back; absent while every setting is its default. */
   settings: PlaceSettings.optional(),
+  /** How long a workspace here with no window of its own runs quiet before it naps, the person's or the default;
+   * null where it never naps. Absent on the computer the host runs on, whose workspaces are folders. */
+  napMs: z.number().int().nullable().optional(),
   /** What its cap counts, at list time: threads running on a computer, machines holding a slot on a cloud. */
   running: z.number().int().nonnegative().optional(),
 });
@@ -5911,7 +5915,7 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * running either way. */
   z.object({ id: reqId, op: z.literal("places.dial"), placeId: z.string() }),
   /** Sets what a person may set on one place: threads at once on a computer, machines at once and spend per day on
-   * a cloud. A key left out keeps what stands, a word under `reset` takes that setting back to its default, and a
+   * a cloud, and the nap after on any place that forks. A key left out keeps what stands, a word under `reset` takes that setting back to its default, and a
    * key the place's kind does not take is refused. Answers `{ place: PlaceView }`, the row as it now reads. The
    * person's own road only, as every other place op is. */
   z.object({ id: reqId, op: z.literal("places.set"), placeId: z.string(), reset: z.array(PlaceSettingWord).optional() }).merge(PlaceSettings),
@@ -6938,7 +6942,7 @@ export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
 export { hereName, isHere, isProviderPlace, placeName, placeOf, workspaceComputerName } from "./place-name.js";
 export { needsYouLine, threadNeedsYou, threadState, threadStateWord, threadUnread, threadUnseenAt, threadWordOf, waitingLine, type ThreadState } from "./thread-state.js";
-export { CLOUD_CAP_DEFAULT, phaseHoldsSlot, placeAtLimitLine, placeCapOf, placeFullLine, placeSetRefusal, placeSettingKey, placeSettingsLine, placeRoom, placeSpendLimit, runningOn, THREAD_MEM_MB, threadsAtOnce, workspacePlace, workspacePlaceId, type PlacedThread, type PlacedWorkspace } from "./place-state.js";
+export { CLOUD_CAP_DEFAULT, NAP_AFTER_MAX_MS, NAP_AFTER_MS, phaseHoldsSlot, placeAtLimitLine, placeCapOf, placeFullLine, placeSetRefusal, placeSettingKey, placeSettingsLine, placeRoom, placeSpendLimit, runningOn, THREAD_MEM_MB, threadsAtOnce, workspacePlace, workspacePlaceId, type PlacedThread, type PlacedWorkspace } from "./place-state.js";
 export { MCP_SERVER_NAME, threadsFollowed, WSP_TOOL_TIMEOUT_SEC } from "./wsp-tools.js";
 export { type AbsentComputer, type AwayWord, absentComputer, actionRefusal, daemonSilent, ownDaemonDown, START_DAEMON_WORD, agentsKindRefusal, agentsMayDrive, awayMsOf, composerHeldLine, type CopyToDelete, deleteCopiesNotice, deleteNotice, unpushedLine, onDeleteOf, type StandsOn, UNNAMED_COMPUTER, goneRefusal, COMPUTER_LEFT, pausedOrPausing, notAnsweringYet, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, turnSpendWord, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, FORGET_NEEDS_GONE, goneRoadRefusal, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, workspaceAccess, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, whereWord, workspaceStateLine, workspaceStateOf, workspaceWord, type AbsentRoad, type AbsentRoadInput, absentRoad, BACK_OVER_SSH, backUrl, dialsBackWord, linkedOver, lastKnown, REPORTED_WORD, placeDialLine, placeNoDialLine, placeDialRoad, sshRoadOf, type PlaceDialRoad } from "./workspace-state.js";
 export * from "./agents-report.js";

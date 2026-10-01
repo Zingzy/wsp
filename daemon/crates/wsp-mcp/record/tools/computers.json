@@ -395,9 +395,31 @@
                   },
                   "spendPerDayUsd": {
                     "$ref": "#/properties/computers/items/properties/cap/anyOf/1/properties/spendPerDayUsd"
+                  },
+                  "napMs": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 60000,
+                        "maximum": 10800000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 },
                 "additionalProperties": false
+              },
+              "napMs": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               },
               "running": {
                 "type": "integer",
@@ -848,9 +870,31 @@
                   },
                   "spendPerDayUsd": {
                     "$ref": "#/properties/computers/items/properties/cap/anyOf/1/properties/spendPerDayUsd"
+                  },
+                  "napMs": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 60000,
+                        "maximum": 10800000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 },
                 "additionalProperties": false
+              },
+              "napMs": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               },
               "running": {
                 "type": "integer",

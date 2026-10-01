@@ -21,6 +21,7 @@ import {
   PLACE_LEAVE_LINE,
   PLACE_LINK_NONCE_BYTES,
   DAEMON_VERSION,
+  NAP_AFTER_MS,
   forkRoom,
   placeCapOf,
   placeSetRefusal,
@@ -357,6 +358,10 @@ export interface PlaceDoorOptions {
    * there, or the reason the last one stopped. The runtime holds the builds, so it answers; nothing for a copy that
    * stands. `stopped` says which of the two the line is. */
   copyBuild?: (placeId: string) => { line: string; stopped: boolean } | undefined;
+  /** How long a quiet workspace runs before it naps where its place names no window: the runtime's own default. */
+  napMs?: number;
+  /** A person changed the nap after on one place: the runtime arms its workspaces there again under the new window. */
+  napChanged?: (placeId: string) => void;
   /** How long a computer has to dial back after its join before an install gives up on it. */
   joinWaitMs?: number;
   /** How long a computer that took an update has to dial back running it before the row is answered with what it
@@ -435,6 +440,9 @@ export interface PlaceDoor {
   /** The name a place goes by, for the sentences a person reads; the id itself for a place this host holds no
    * record of. Answered without a read, so a refusal built while a road is running names the computer. */
   nameOf(placeId: string): string;
+  /** What the person set on one place, as load read it and every set since wrote it: answered without a read, since
+   * the idle policy asks it each time it arms a workspace there. */
+  settingsAt(placeId: string): PlaceSettings;
   /** The sign-in word per agent on one computer, off the report it last sent and the vault this host holds: the
    * same reading its row carries, so what a turn is handed and what the screen says cannot part ways. Answered
    * without a read of the store, since every launch on that computer asks it. Nothing for a place this host holds
@@ -830,6 +838,8 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     const parsed = PlaceSettings.safeParse(await store.get(CAPS, placeId));
     return parsed.success ? parsed.data : {};
   };
+  /** What settingsAt answers: every place's settings as load read them, written again by every set and remove. */
+  const settingsHeld = new Map<string, PlaceSettings>();
   /** Every row's id and kind without asking any computer anything: what the running count places a workspace by. */
   const rowIds = async (): Promise<Pick<PlaceView, "id" | "kind">[]> => [
     { id: HERE_PLACE_ID, kind: "computer" },
@@ -846,6 +856,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       ...(cap !== undefined ? { cap } : {}),
       ...(capDefault !== undefined ? { capDefault } : {}),
       ...(Object.keys(settings).length > 0 ? { settings } : {}),
+      ...(row.takesForks === true ? { napMs: settings.napMs !== undefined ? settings.napMs : (opts.napMs ?? NAP_AFTER_MS) } : {}),
       running: await recording.runningOn(row.id, ids),
     };
   };
@@ -1426,6 +1437,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     backends.delete(placeId);
     await store.delete(PLACES, placeId);
     await store.delete(CAPS, placeId);
+    settingsHeld.delete(placeId);
     await inTurn(async () => {
       if ((await defaultId()) === placeId) await store.delete(DEFAULT_COLLECTION, DEFAULT_ID);
     });
@@ -1651,6 +1663,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     },
 
     async load() {
+      for (const placeId of await store.keys(CAPS)) settingsHeld.set(placeId, await settingsOf(placeId));
       for (const record of await records()) {
         kept.set(record.id, record);
         if (record.backendFacts !== undefined && !backends.has(record.id)) backendFrom(record.id, record.backendFacts);
@@ -1665,6 +1678,8 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     },
 
     nameOf: placeId => kept.get(placeId)?.name ?? placeId,
+
+    settingsAt: placeId => settingsHeld.get(placeId) ?? {},
 
     signInsAt: placeId => {
       const report = kept.get(placeId)?.report;
@@ -2000,7 +2015,9 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       await inTurn(async () => {
         const next = Object.fromEntries(Object.entries({ ...(await settingsOf(placeId)), ...given }).filter(([key]) => !dropped.has(key)));
         await (Object.keys(next).length === 0 ? store.delete(CAPS, placeId) : store.put(CAPS, placeId, next));
+        settingsHeld.set(placeId, next);
       });
+      if (set.napMs !== undefined || reset.includes("nap")) opts.napChanged?.(placeId);
       return { place: await withCap(row, await rowIds()) };
     },
 

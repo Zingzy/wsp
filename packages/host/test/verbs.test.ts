@@ -3999,6 +3999,25 @@ describe("wsp verbs over the host", () => {
       expect((await rt.places!.rows()).find(p => p.id === HERE_PLACE_ID)!.settings).toBeUndefined();
     });
 
+    it("sets the nap after on a computer that forks in minutes or off, and refuses it on this one and past three hours", async () => {
+      // The host again with its provider wired as a place, which is a row whose workspaces nap.
+      await handle?.close();
+      rt = createRuntime({ backend, store, adapters: { claude: claude.adapter }, local: localWiring(join(dir, "user"), process.env, fakeDaemonStart, undefined, copier), placeLinks: { ...placeWiring(statePath), provider: () => ({ id: "default", rateUsdPerHour: 0.1 }) }, daemonChannel: daemon.open });
+      handle = await serve(captured(), { port: 0, statePath, webDir: join(dir, "web"), runtime: rt });
+      const forks = (await rt.places!.rows()).find(p => p.takesForks === true)!;
+      const set = await run("computers", "set", forks.id, "--nap", "5");
+      expect(set.code, set.io.errors.join("\n")).toBe(0);
+      expect(set.io.lines[0]).toContain("naps after 5m (20m by default)");
+      const off = await run("computers", "set", forks.id, "--nap", "off", "--json");
+      expect(json(off.io).at(-1)).toMatchObject({ computer: { napMs: null, settings: { napMs: null } } });
+      const here = await run("computers", "set", HERE_PLACE_ID, "--nap", "5");
+      expect(here.code).toBe(EXIT_CODES.usage);
+      expect(here.io.errors[0]).toContain("not nap after");
+      const long = await run("computers", "set", forks.id, "--nap", "181");
+      expect(long.code).toBe(EXIT_CODES.usage);
+      expect(long.io.errors[0]).toBe('wsp computers set: --nap takes whole minutes from 1 to 180, or off, and got "181". Write it as --nap 20 or --nap off.');
+    });
+
     it("refuses a count that is not a whole number of one or more, a word reset does not take, and a line that sets nothing, as usage", async () => {
       const zero = await run("computers", "set", HERE_PLACE_ID, "--threads", "0");
       expect(zero.code).toBe(EXIT_CODES.usage);

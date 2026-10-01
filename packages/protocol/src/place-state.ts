@@ -4,7 +4,7 @@
 // fold its own live rows through the same function, so the two cannot count
 // one computer two ways. One rule per kind of place, so a third kind is one
 // entry in the table below.
-import { fmtCost, plural, SPEND_LIMIT_LINE } from "./format.js";
+import { fmtCost, fmtDuration, plural, SPEND_LIMIT_LINE } from "./format.js";
 import type { CloudCap, PlaceCap, PlaceCapSet, PlaceKind, PlaceSettings, PlaceSettingWord, PlaceView, ThreadView, WorkspaceSize, WorkspaceView } from "./index.js";
 import { HERE_PLACE_ID } from "./place-word.js";
 import { isLocalWorkspace, workspaceState } from "./workspace-state.js";
@@ -44,6 +44,12 @@ export const threadsAtOnce = (s: WorkspaceSize): number => Math.max(1, Math.min(
 
 export const CLOUD_CAP_DEFAULT: CloudCap = { machines: 3, spendPerDayUsd: 10 };
 
+/** How long a quiet workspace runs before it naps until the person sets another window. */
+export const NAP_AFTER_MS = 20 * 60_000;
+/** The longest nap window a person may set: the provider's own timer is set behind ours at twice the window, and
+ * six hours is the longest it has accepted. */
+export const NAP_AFTER_MAX_MS = 3 * 60 * 60_000;
+
 /** Whether a machine in this phase holds one of its cloud's slots: a napping machine holds none and a gone one is
  * not there, while one creating or waking already does. Phase alone, so a refusal can read it without asking the
  * provider about every machine. */
@@ -63,7 +69,7 @@ const dollars = (usd: number): string => (Number.isInteger(usd) ? `$${usd}` : fm
 const capNumber = (cap: PlaceCap | undefined, key: "threads" | "machines" | "spendPerDayUsd"): number | undefined =>
   cap !== undefined && key in cap ? (cap as Record<string, number>)[key] : undefined;
 
-type SettingView = Pick<PlaceView, "cap" | "capDefault">;
+type SettingView = Pick<PlaceView, "cap" | "capDefault" | "napMs">;
 /** What a row says a setting runs at: the whole phrase, and the figure alone that a default beside it takes. */
 type SettingSaid = { long: string; short: string };
 
@@ -78,6 +84,15 @@ const SETTINGS: Record<PlaceSettingWord, { key: keyof PlaceSettings; words: stri
     reads: (p, fallback) => {
       const usd = capNumber(fallback ? p.capDefault : p.cap, "spendPerDayUsd");
       return usd === undefined ? undefined : { long: `${dollars(usd)} a day`, short: dollars(usd) };
+    },
+  },
+  nap: {
+    key: "napMs",
+    words: "nap after",
+    reads: (p, fallback) => {
+      const ms = fallback ? NAP_AFTER_MS : p.napMs;
+      if (ms === undefined) return undefined;
+      return ms === null ? { long: "never naps", short: "never" } : { long: `naps after ${fmtDuration(ms)}`, short: fmtDuration(ms) };
     },
   },
 };
@@ -106,7 +121,7 @@ interface PlaceCapRule {
 
 const PLACE_CAPS: Record<PlaceKind, PlaceCapRule> = {
   computer: {
-    keys: ["threads"],
+    keys: ["threads", "nap"],
     capOf: (place, set) => {
       const threads = set.threads ?? (place.shape === undefined ? undefined : threadsAtOnce(place.shape));
       return threads === undefined ? undefined : { threads };
@@ -120,7 +135,7 @@ const PLACE_CAPS: Record<PlaceKind, PlaceCapRule> = {
     },
   },
   provider: {
-    keys: ["machines", "spend"],
+    keys: ["machines", "spend", "nap"],
     capOf: (_place, set) => ({ machines: set.machines ?? CLOUD_CAP_DEFAULT.machines, spendPerDayUsd: set.spendPerDayUsd ?? CLOUD_CAP_DEFAULT.spendPerDayUsd }),
     atOnce: cap => ("machines" in cap ? cap.machines : 0),
     noun: "machine",
@@ -136,9 +151,9 @@ export function placeCapOf(place: Pick<PlaceView, "kind" | "shape">, set: PlaceC
 
 /** Why a set is refused on this place: nothing set or reset at all, a setting its kind does not take, or one both
  * set and reset. Nothing when every key fits. */
-export function placeSetRefusal(place: Pick<PlaceView, "kind" | "name">, set: PlaceSettings, reset: readonly PlaceSettingWord[] = []): string | undefined {
-  const takes = PLACE_CAPS[place.kind].keys;
-  const said = (words: readonly PlaceSettingWord[]): string => words.map(word => SETTINGS[word].words).join(" and ");
+export function placeSetRefusal(place: Pick<PlaceView, "kind" | "name" | "takesForks">, set: PlaceSettings, reset: readonly PlaceSettingWord[] = []): string | undefined {
+  const takes = settingsOn(place);
+  const said = (words: readonly PlaceSettingWord[]): string => andList(words.map(word => SETTINGS[word].words));
   const named = (Object.keys(SETTINGS) as PlaceSettingWord[]).filter(word => set[SETTINGS[word].key] !== undefined);
   if (named.length === 0 && reset.length === 0) return `nothing to set on ${place.name}: it takes ${said(takes)}`;
   const wrong = [...new Set([...named, ...reset])].filter(word => !takes.includes(word));
@@ -147,10 +162,18 @@ export function placeSetRefusal(place: Pick<PlaceView, "kind" | "name">, set: Pl
   return both.length === 0 ? undefined : `${place.name}: ${said(both)} is both set and reset; name it once`;
 }
 
+/** The settings a place takes: its kind's, less the nap on a place that forks nothing, whose workspaces are
+ * folders on the computer itself and never nap. */
+function settingsOn(place: Pick<PlaceView, "kind" | "takesForks">): readonly PlaceSettingWord[] {
+  return PLACE_CAPS[place.kind].keys.filter(word => word !== "nap" || place.takesForks === true);
+}
+
+const andList = (words: readonly string[]): string => (words.length < 2 ? words.join("") : `${words.slice(0, -1).join(", ")} and ${words.at(-1)}`);
+
 /** One place's settings in a line: each its kind takes at the value it runs at, and beside one the person set what
  * it reads by default. What wsp computers set answers with. */
-export function placeSettingsLine(place: Pick<PlaceView, "kind" | "name" | "settings"> & SettingView): string {
-  const parts = PLACE_CAPS[place.kind].keys.flatMap(word => {
+export function placeSettingsLine(place: Pick<PlaceView, "kind" | "name" | "settings" | "takesForks"> & SettingView): string {
+  const parts = settingsOn(place).flatMap(word => {
     const { key, reads } = SETTINGS[word];
     const now = reads(place, false);
     if (now === undefined) return [];

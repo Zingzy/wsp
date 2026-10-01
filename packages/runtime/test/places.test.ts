@@ -963,9 +963,9 @@ describe("a place's cap and what runs there", () => {
     const { store } = await serving({ provider: { id: "solari", rateUsdPerHour: 0.11 } });
     const host = await WsClient.connect(srv!.port, { token: "host-token" });
     expect(await capOf(host, HERE_PLACE_ID, { machines: 2 })).toMatchObject({ ok: false, kind: "usage", error: `${HERE.name} takes threads at once, not machines at once` });
-    expect(await capOf(host, "solari", { threads: 2 })).toMatchObject({ ok: false, kind: "usage", error: "solari takes machines at once and spend per day, not threads at once" });
+    expect(await capOf(host, "solari", { threads: 2 })).toMatchObject({ ok: false, kind: "usage", error: "solari takes machines at once, spend per day and nap after, not threads at once" });
     expect(await capOf(host, "p_nothing", { threads: 2 })).toMatchObject({ ok: false, kind: "usage", error: noSuchPlaceRefusal("p_nothing", [HERE.name, "solari"]) });
-    expect(await capOf(host, "solari", {})).toMatchObject({ ok: false, kind: "usage", error: "nothing to set on solari: it takes machines at once and spend per day" });
+    expect(await capOf(host, "solari", {})).toMatchObject({ ok: false, kind: "usage", error: "nothing to set on solari: it takes machines at once, spend per day and nap after" });
     host.close();
     expect(await store.keys("caps")).toEqual([]);
   });
@@ -1017,6 +1017,55 @@ describe("a place's cap and what runs there", () => {
       for (const end of ends.values()) end();
       rmSync(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe("a place's nap after", () => {
+  const MIN = 60_000;
+
+  it("arms a workspace with no window of its own off its place's nap, again from now once the nap changes, never once it is off, and leaves a workspace's own window standing", async () => {
+    const root = mkdtempSync(joinPath(tmpdir(), "wsp-nap-"));
+    try {
+      const backend = stubBackend();
+      const fc = fakeClock(Date.parse("2026-09-16T12:00:00.000Z"));
+      runtime = createRuntime({ backend, places: wiredPlace("solari", backend), store: memoryStore(), adapters: {}, clock: fc.clock, idle: { defaultWindowMs: 60 * MIN }, placeLinks: wiring(newPlaceKeyPair(), { id: "solari", rateUsdPerHour: 0.11 }), local: fakeLocal(root) });
+      srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+      const idleAt = async (id: string): Promise<number | undefined> => (await runtime!.status.list()).find(s => s.id === id)?.idleAt;
+      const first = await createOn(runtime, { on: "solari", golden: "snap_g", name: "first" });
+      const own = await createOn(runtime, { on: "solari", golden: "snap_g", name: "own", idleWindowMs: 30 * MIN });
+      await until(async () => (await idleAt(first.id)) !== undefined);
+      expect(await idleAt(first.id)).toBe(fc.clock.now() + 60 * MIN);
+      const c = await WsClient.connect(srv.port, { token: "host-token" });
+      expect((await placesOf()).find(p => p.id === "solari")).toMatchObject({ napMs: 60 * MIN });
+      fc.advance(MIN);
+      expect(await c.request("places.set", { placeId: "solari", napMs: 5 * MIN })).toMatchObject({ ok: true, place: { napMs: 5 * MIN, settings: { napMs: 5 * MIN } } });
+      // A new window counts from when the person set it, on every workspace there that has none of its own.
+      expect(await idleAt(first.id)).toBe(fc.clock.now() + 5 * MIN);
+      expect(await idleAt(own.id)).toBe(Date.parse("2026-09-16T12:00:00.000Z") + 30 * MIN);
+      // Another setting on the place leaves every window where it stands.
+      fc.advance(MIN);
+      expect(await c.request("places.set", { placeId: "solari", machines: 4 })).toMatchObject({ ok: true });
+      expect(await idleAt(first.id)).toBe(fc.clock.now() + 4 * MIN);
+      const second = await createOn(runtime, { on: "solari", golden: "snap_g", name: "second" });
+      await until(async () => (await idleAt(second.id)) !== undefined);
+      expect(await idleAt(second.id)).toBe(fc.clock.now() + 5 * MIN);
+      expect(await c.request("places.set", { placeId: "solari", napMs: null })).toMatchObject({ ok: true, place: { napMs: null, settings: { napMs: null } } });
+      expect(await idleAt(first.id)).toBeUndefined();
+      expect(await c.request("places.set", { placeId: "solari", reset: ["nap"] })).toMatchObject({ ok: true, place: { napMs: 60 * MIN } });
+      expect(await idleAt(first.id)).toBe(fc.clock.now() + 60 * MIN);
+      c.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("is refused on the computer the host runs on, whose workspaces are folders that never nap, and says nothing of it on that row", async () => {
+    await serving();
+    const host = await WsClient.connect(srv!.port, { token: "host-token" });
+    expect(await host.request("places.set", { placeId: HERE_PLACE_ID, napMs: 5 * MIN })).toMatchObject({ ok: false, kind: "usage", error: `${HERE.name} takes threads at once, not nap after` });
+    expect(await host.request("places.set", { placeId: "p_1", napMs: 30_000 })).toMatchObject({ ok: false });
+    host.close();
+    expect((await placesOf()).find(p => p.id === HERE_PLACE_ID)!.napMs).toBeUndefined();
   });
 });
 
