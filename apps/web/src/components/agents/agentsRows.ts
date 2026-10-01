@@ -116,6 +116,15 @@ export const AGENTS_LIST_WORDS = {
   inRecipe: "yes",
   notInRecipe: "not in the recipe",
   roads: { device: "device code", code: "pasted code", token: "token", key: "key", terminal: "in a terminal" } satisfies Record<Exclude<SignInRoad, "none">, string>,
+  /** The same roads as a sentence, for a row whose description says how the agent signs in. */
+  roadSentences: {
+    device: "Signs in on a page with a device code.",
+    code: "Signs in with a code you paste back.",
+    token: "Signs in with a token made on this computer.",
+    key: "Signs in with a key.",
+    terminal: "Signs in from its own terminal, where it asks you to pick.",
+    none: "Needs no sign-in.",
+  } satisfies Record<SignInRoad, string>,
   own: "by you, not by wsp",
   shim: "through a shim",
   ownHold: "installed by you, not by wsp",

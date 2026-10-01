@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The words the settings page and its palette row say, one place, keyed by the
 // preference value where a value has words of its own.
-import { fmtPx, offlineFor, placeUpdateLine, type PlaceDialRoad, type PlaceProvisionRow, type TerminalSizeSource, type ThemePreference } from "@wsp/protocol";
+import { fmtPx, listWords, offlineFor, placeUpdateLine, type PlaceDialRoad, type PlaceProvisionRow, type TerminalSizeSource, type ThemePreference } from "@wsp/protocol";
 
 /** The muted mono a state word or a description of machine words wears, and the foreground mono a value a person
  * reads wears: an address, a size, a path, a time, a version. Two class strings the page, the sheet and the first
@@ -81,7 +81,7 @@ export const groupBlurbs = (here: string) => ({
   projects: "The repos wsp makes tasks from, each on one computer.",
   devices: "The phones and other computers paired with this wsp.",
   account: "Your sign-in, which lets your other devices find this wsp.",
-  usage: "What each account may still use, what your threads used, and how busy each computer was.",
+  usage: "What each account may still use, and the tokens your agents used and what they cost.",
   privacy: "What wsp asks of services outside your computers, and what it reads on this one.",
   keybindings: "The keys wsp answers to.",
   about: "Which wsp this is.",
@@ -233,7 +233,7 @@ export const PRIVACY_WORDS = {
   agentVersionsDescription: "wsp asks npm, GitHub and each agent's maker for every agent's newest version, once a day.",
   agentVersionsHeld: "Off on the host: WSP_UPDATE_CHECK is 0.",
   usageLogs: "Agent logs",
-  usageLogsDescription: (here: string): string => `Usage counts the work Claude Code, Codex and OpenCode logged on ${here === "" ? "this computer" : here} outside wsp. wsp reads the logs there and shows what they count on this page alone, never to an agent.`,
+  usageLogsDescription: (here: string): string => `Usage counts what Claude Code, Codex and OpenCode logged on ${here === "" ? "this computer" : here}, wsp's own threads there included. wsp reads the logs there and shows what they count on the Usage page alone, never to an agent.`,
 } as const;
 
 /** Settings > Appearance's Notifications: the one switch over the sound a notification makes. */
@@ -276,22 +276,20 @@ export const DEVICES_WORDS = {
 /** Settings > Usage: its title and the words the lists carry beyond the wire's own in USAGE_WORDS. */
 export const USAGE_PAGE_WORDS = {
   title: "Usage",
-  accounts: "Account",
+  limits: "Limits",
   session: "Session",
   week: "Week",
-  plan: "Plan",
   used: "Used",
   tokens: "Tokens",
-  in: "In",
+  range: "Range",
+  split: "Split by",
+  fresh: "Fresh in",
   out: "Out",
   cached: "Cached",
   price: "Price",
-  computers: "Computer",
-  cpu: "CPU",
-  memory: "Memory",
-  disk: "Disk",
   noAccounts: "No agent is signed in on any computer.",
-  ranges: { day: "Day", week: "Week", month: "Month" },
+  noLimit: (agents: readonly string[]): string => `${listWords(agents)} ${agents.length === 1 ? "reports" : "report"} no plan limit.`,
+  ranges: { day: "Today", week: "7 days", month: "30 days" },
   splits: { agent: "Agent", account: "Account", computer: "Computer", project: "Project" },
 } as const;
 

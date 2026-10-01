@@ -4,7 +4,7 @@
 // wsp ran) and what was used (tokens per turn, filed by day, priced off one
 // table). Also the rate table off LiteLLM's price file and the words a row reads.
 import { z } from "zod";
-import { fmtCost, LIST_PRICE_WORD } from "./format.js";
+import { fmtCost, fmtTokens, LIST_PRICE_WORD } from "./format.js";
 
 /** The windows a plan counts use over, as wsp names them: an agent's five-hour window is the session, its seven-day
  * the week, a per-model week its own kind, and anything longer the month. */
@@ -60,8 +60,19 @@ export const AccountLimit = z.object({
 });
 export type AccountLimit = z.infer<typeof AccountLimit>;
 
+/** Every sentence a usage row may carry. */
+export const USAGE_WORDS = {
+  notPriced: "not priced",
+  listPrice: LIST_PRICE_WORD,
+  noLimit: "reports no plan limit",
+  keyed: "pays per token, no plan limit",
+  unread: "not read yet: shows after its next turn",
+  reached: "limit reached",
+  noUse: "Nothing used in this range",
+} as const;
+
 /** Why an account row carries no windows: its agent reports none, it signs in with a key, or no turn has run on it. */
-export const AccountNote = z.enum(["limit not available", "no plan limit: signed in with a key", "not read yet: runs a thread first"]);
+export const AccountNote = z.enum([USAGE_WORDS.noLimit, USAGE_WORDS.keyed, USAGE_WORDS.unread]);
 export type AccountNote = z.infer<typeof AccountNote>;
 
 /** One sign-in as the Usage page lists it: the same account on three computers is one row naming all three. */
@@ -125,8 +136,9 @@ export type UsageRow = z.infer<typeof UsageRow>;
 export const UsageDay = z.object({ day: z.string(), rows: z.array(UsageRow), sessions: z.array(z.string()).optional() });
 export type UsageDay = z.infer<typeof UsageDay>;
 
-/** One split value's use over a range. costList is the rate table's figure for the tokens no harness put a cost on,
- * and priced is false where some of them have no entry in it. outside marks the rows read from the logs. */
+/** One split value's use over a range, wsp's own turns and the agents' logs together. input counts every token the
+ * model read, the cached ones included. costList is the rate table's figure for the tokens no harness put a cost on,
+ * and priced is false where some of them have no entry in it. */
 export const UsedRow = z.object({
   key: z.string(),
   label: z.string(),
@@ -134,7 +146,6 @@ export const UsedRow = z.object({
   costReported: z.number().optional(),
   costList: z.number().optional(),
   priced: z.boolean(),
-  outside: z.boolean().optional(),
 });
 export type UsedRow = z.infer<typeof UsedRow>;
 
@@ -146,21 +157,48 @@ export const UsedAnswer = z.object({
   series: z.array(z.object({ t: z.number(), tokens: z.number() })),
   since: z.number(),
   until: z.number(),
+  /** Whose logs the range counted and on which computer, where it counted any: the agents by their names. */
+  logs: z.object({ agents: z.array(z.string()), computer: z.string() }).optional(),
 });
 export type UsedAnswer = z.infer<typeof UsedAnswer>;
 
-/** Every sentence a usage row may carry. */
-export const USAGE_WORDS = {
-  notPriced: "not priced",
-  listPrice: LIST_PRICE_WORD,
-  outsideWsp: "outside wsp",
-  noLimit: "limit not available",
-  keyed: "no plan limit: signed in with a key",
-  unread: "not read yet: runs a thread first",
-  reached: "limit reached",
-  noReadings: "No readings in this range",
-  noUse: "Nothing used in this range",
-} as const;
+/** The tokens a row read fresh, the cached ones taken out of its input, so fresh, cached and out add up to the row. */
+export const freshIn = (tokens: { input: number; cached: number }): number => Math.max(0, tokens.input - tokens.cached);
+
+/** A list as a sentence reads it: "a", "a and b", "a, b and c". */
+export const listWords = (words: readonly string[]): string => (words.length < 2 ? (words[0] ?? "") : `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`);
+
+/** What the logs a range counted are, said once under its numbers: the agents that kept them and where. */
+export const logsLine = (logs: { agents: readonly string[]; computer: string }): string => `Counts what ${listWords(logs.agents)} logged on ${logs.computer}, wsp's threads there included.`;
+
+const RANGE_WORDS: Record<UsageRange, string> = { day: "today", week: "in the last 7 days", month: "in the last 30 days" };
+
+/** A range's use in one line: the tokens, what they cost and how much of it came from cache. */
+export function usedHeadline(used: Pick<UsedAnswer, "range" | "rows">): string {
+  const sum = (pick: (row: UsedRow) => number): number => used.rows.reduce((n, row) => n + pick(row), 0);
+  const tokens = sum(row => row.tokens.input + row.tokens.output);
+  if (tokens === 0) return USAGE_WORDS.noUse;
+  const priced = used.rows.some(r => r.costReported !== undefined || r.costList !== undefined);
+  const listed = used.rows.some(r => (r.costList ?? 0) > 0);
+  const cost = priced ? `, ${fmtCost(sum(r => (r.costReported ?? 0) + (r.costList ?? 0)))}${listed ? ` at ${LIST_PRICE_WORD}` : ""}` : "";
+  const cached = sum(row => row.tokens.cached);
+  const unpriced = used.rows.some(r => !r.priced) ? " Some of it has no price to read, so the figure leaves it out." : "";
+  return `${fmtTokens(tokens)} tokens ${RANGE_WORDS[used.range]}${cost}${cached > 0 ? `, ${fmtTokens(cached)} of it read from cache` : ""}.${unpriced}`;
+}
+
+/** An account as a person reads it: the agent and how it pays, by key or by its plan, else the address it signed in
+ * as, else your sign-in wsp hands every computer, else the login one computer keeps of its own. */
+export function accountWords(o: { agentName: string; keyed?: boolean | undefined; plan?: string | undefined; planBrand?: string | undefined; named?: string | undefined; vaulted?: boolean | undefined; ownOn?: string | undefined }): string {
+  if (o.keyed === true) return `${o.agentName} with an API key`;
+  if (o.plan !== undefined && o.plan !== "") {
+    const plan = o.plan[0]!.toUpperCase() + o.plan.slice(1);
+    return `${o.agentName} with ${o.planBrand === undefined ? plan : `${o.planBrand} ${plan}`}`;
+  }
+  if (o.named !== undefined) return `${o.agentName} as ${o.named}`;
+  if (o.vaulted === true) return `${o.agentName} with your sign-in`;
+  return o.ownOn === undefined ? o.agentName : `${o.agentName} signed in on ${o.ownOn}`;
+}
+
 
 /** How long a price table is used before the host reads LiteLLM's file again. */
 export const PRICES_TTL_MS = 24 * 3_600_000;

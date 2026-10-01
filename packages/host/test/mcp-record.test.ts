@@ -528,7 +528,7 @@ const ANSWERED: Answered = {
       replies: {
         "usage.accounts": reply({
           accounts: [
-            { key: "claude:vault-token", agent: "claude", label: "your Claude Code sign-in", computers: ["zingzy's MacBook Pro", "Boat"], note: "not read yet: runs a thread first" },
+            { key: "claude:vault-token", agent: "claude", label: "Claude Code with your sign-in", computers: ["zingzy's MacBook Pro", "Boat"], note: "not read yet: shows after its next turn" },
             { key: "codex:acct_7f3a", agent: "codex", label: "dév@example.com", computers: ["Boat"], plan: "plus", windows: [{ kind: "session", usedPercent: 34.5, resetsAt: 1_790_700_000_000 }, { kind: "week", usedPercent: 12 }], status: "ok", readAt: 1_790_650_000_000 },
           ],
         }),

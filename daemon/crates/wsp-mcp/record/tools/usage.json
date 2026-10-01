@@ -1,7 +1,7 @@
 {
   "cloudOff": {
     "name": "usage",
-    "description": "Two answers that are never added together. accounts: every agent account signed in on any computer, the same one on three computers once, each with how much of its plan's windows is used and when each starts again, as that agent printed them in the last turn wsp ran on it; an agent that prints none reads limit not available, a sign-in by API key has no plan window, and an account no turn has run on yet has no reading. used: the tokens the turns used over the range (today, the last seven days or the last thirty), split by agent, account, computer or project, each row with the cost its agent reported or a list price off one table, rows read from this computer's own agent logs for work done outside wsp marked outside, and a series over the range.",
+    "description": "Two answers that are never added together. accounts: every agent account signed in on any computer, the same one on three computers once, each with how much of its plan's windows is used and when each starts again, as that agent printed them in the last turn wsp ran on it; an agent that prints none reports no plan limit, a sign-in by API key pays per token with no plan window, and an account no turn has run on yet has no reading. used: the tokens the turns used over the range (today, the last seven days or the last thirty), split by agent, account, computer or project, each row with the cost its agent reported or a list price off one table, input counting the cached tokens, and a series over the range.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -98,9 +98,9 @@
               "note": {
                 "type": "string",
                 "enum": [
-                  "limit not available",
-                  "no plan limit: signed in with a key",
-                  "not read yet: runs a thread first"
+                  "reports no plan limit",
+                  "pays per token, no plan limit",
+                  "not read yet: shows after its next turn"
                 ]
               }
             },
@@ -172,9 +172,6 @@
                   },
                   "priced": {
                     "type": "boolean"
-                  },
-                  "outside": {
-                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -210,6 +207,25 @@
             },
             "until": {
               "type": "number"
+            },
+            "logs": {
+              "type": "object",
+              "properties": {
+                "agents": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "computer": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "agents",
+                "computer"
+              ],
+              "additionalProperties": false
             }
           },
           "required": [
@@ -236,7 +252,7 @@
   },
   "cloudOn": {
     "name": "usage",
-    "description": "Two answers that are never added together. accounts: every agent account signed in on any computer, the same one on three computers once, each with how much of its plan's windows is used and when each starts again, as that agent printed them in the last turn wsp ran on it; an agent that prints none reads limit not available, a sign-in by API key has no plan window, and an account no turn has run on yet has no reading. used: the tokens the turns used over the range (today, the last seven days or the last thirty), split by agent, account, computer or project, each row with the cost its agent reported or a list price off one table, rows read from this computer's own agent logs for work done outside wsp marked outside, and a series over the range.",
+    "description": "Two answers that are never added together. accounts: every agent account signed in on any computer, the same one on three computers once, each with how much of its plan's windows is used and when each starts again, as that agent printed them in the last turn wsp ran on it; an agent that prints none reports no plan limit, a sign-in by API key pays per token with no plan window, and an account no turn has run on yet has no reading. used: the tokens the turns used over the range (today, the last seven days or the last thirty), split by agent, account, computer or project, each row with the cost its agent reported or a list price off one table, input counting the cached tokens, and a series over the range.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -333,9 +349,9 @@
               "note": {
                 "type": "string",
                 "enum": [
-                  "limit not available",
-                  "no plan limit: signed in with a key",
-                  "not read yet: runs a thread first"
+                  "reports no plan limit",
+                  "pays per token, no plan limit",
+                  "not read yet: shows after its next turn"
                 ]
               }
             },
@@ -407,9 +423,6 @@
                   },
                   "priced": {
                     "type": "boolean"
-                  },
-                  "outside": {
-                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -445,6 +458,25 @@
             },
             "until": {
               "type": "number"
+            },
+            "logs": {
+              "type": "object",
+              "properties": {
+                "agents": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "computer": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "agents",
+                "computer"
+              ],
+              "additionalProperties": false
             }
           },
           "required": [

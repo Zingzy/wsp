@@ -64,7 +64,7 @@ themes Paper's until tuned.
 | `--accent` | #141414 over page | #f4f4f5 | row hover, the pressed tab chip, code spans |
 | `--border` | #232323 | #e4e4e7 | sidebar and panel edges, glyph frames |
 | `--input` / `--input-fill` | #1e1e1e / #101010 | #d4d4d8 / #ffffff | button and field edge and fill |
-| `--primary` | #346bf1 | #1b4ed8 | the one primary button, the focus ring |
+| `--primary` | #346bf1 | #1b4ed8 | the one primary button, the focus ring, the line of the Usage page's chart (2026-10-01) |
 | `--warning` | #fe9a00 | #e17100 | a cloud's Full and At limit, an account's Limit reached on the Usage page |
 | `--error-foreground` | #ff6467 | #c10007 | a refusal sentence, Remove inside a dialog, a diff count's deletions |
 | `--success` | #00bc7d | #009966 | the sign-in dot on an agents panel row, a diff count's additions |
@@ -98,13 +98,15 @@ gap and no line between tiles. A child list is 12px in with a 1px rail and a
 4px tick into each tile's first row at 15px. A section head is 28px, and each
 head after the first, Settled's too, has 12px above it.
 
-Settings: content max 760px, 56px above the title, 32px sides, 40px between
-sections, 4px between a header row and its first row (the 2px list gap plus
-2px under the header), 2px between rows. Rows 52px
-(Computers), 48px (Image, a computer's page), 44px for a label-and-control
-line. Header row 24px. Rows have 8px horizontal padding, radius 8, and the
-list is pulled out by 8px (`margin: 0 -8px`) so glyph frames start on the
-page's left edge. Grid columns 16px apart.
+Settings, after T3 Code's settingsLayout (the owner's ruling, 2026-10-01):
+content max 760px, 56px above the title, 32px sides, 32px between sections.
+Each section is a quiet head (14px sans, foreground 70%, 28px tall, 16px in)
+10px over one soft card: radius 12, 1px `--border` at 60%, `--card` at 40%,
+a hairline at `--border` 50% between what it holds. A row grows with what it
+says, 12px above and below, 16px sides: its title at 14px 500 over a sentence
+at 13/1.45 muted that wraps (at most 576px wide), and from 640px the slot in a
+column of its own beside them (at least 160px, 32px off), under them below.
+Nothing in a row is cut for want of room. Grid columns 16px apart.
 
 Right panel (kept): agent rows 76px, available rows 60px, 2px between.
 
@@ -150,7 +152,8 @@ a thread. See `references/computers-graphite.png` and `references/image-graphite
   chevron-right. Hover `--accent` in 150ms.
 - One left edge: title, blurb, header row, glyph frames and Add buttons share
   one x. Both sections on a page share one column template.
-- No rule under the header, none between rows, no border around the list.
+- The list stands in the settings card above, its header row over the card,
+  each row as tall as its name and note, the note wrapping at 12px.
 
 ### State
 
@@ -312,9 +315,8 @@ elsewhere), `--popover-edge`, `--popover-shadow`.
 
 ### Settings list rows
 
-The list grammar above at 52px (Computers) or 48px (Image, a computer's or
-cloud's page). A label-and-control line is 44px: label at 14px with an
-optional 11px note under it, the control at the right (a 28px stepper, a 28px
+The list grammar above, in the settings card. A label-and-control line is as
+tall as its label, 44px at the least: label at 14px, the control at the right (a 28px stepper, a 28px
 mono field, a segmented control, an xs button). A page's crumbs
 (`Computers / Solari`) are 13px with the slash at 50% muted.
 `references/cloud-solari-graphite.png` shows a whole page: AGENTS, CLIS, MCP
@@ -369,7 +371,8 @@ in place, this list decides.
 - No separator that does no work: no hairline between tiles or rows, no rule
   under every header, no box where spacing groups things (2026-09-26). A line
   stays only at the sidebar's edge, the panel's edge, the composer's frame, a
-  popover's search row and Add row, and the settings search field.
+  popover's search row and Add row, the settings search field, and the
+  settings card's edge and the hairlines between its rows (2026-10-01).
 - Never label a location "this Mac" or "this computer"; every computer has a
   name, so show it (2026-09-26).
 - No chip, pill, badge or dot standing for a state (a standing rule, restated
