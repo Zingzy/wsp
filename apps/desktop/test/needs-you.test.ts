@@ -6,7 +6,7 @@
 // and nothing else.
 import { NEEDS_YOU } from "@wsp/protocol";
 import { describe, expect, it } from "vitest";
-import { sayOutside, showBadge, type Notifier, type SystemNotification } from "../src/needs-you.js";
+import { SOUND_SAMPLE, sayOutside, showBadge, soundSample, type Notifier, type SystemNotification } from "../src/needs-you.js";
 
 const NEED = { title: NEEDS_YOU, body: "sign in to GitHub CLI login", sound: false };
 
@@ -52,6 +52,14 @@ describe("the shell's system notification for something the person should hear a
     expect(shown).toEqual([]);
     expect(displayed()).toBe(0);
     expect(did).toEqual([]);
+  });
+
+  it("plays the sound Settings asks for with its sound on, focused or not, and nothing where the computer shows none", () => {
+    const { notifier, shown, displayed } = stub();
+    expect(soundSample(notifier)).toBe(true);
+    expect(shown).toEqual([{ ...SOUND_SAMPLE, silent: false }]);
+    expect(displayed()).toBe(1);
+    expect(soundSample(stub(false).notifier)).toBe(false);
   });
 
   it("a click raises the window and tells its page to open the build screen", () => {
