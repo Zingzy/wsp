@@ -285,62 +285,6 @@
                 ],
                 "additionalProperties": false
               }
-            },
-            "threads": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "threadId": {
-                    "type": "string"
-                  },
-                  "workspaceId": {
-                    "type": "string"
-                  },
-                  "title": {
-                    "type": "string"
-                  },
-                  "agent": {
-                    "type": "string"
-                  },
-                  "workspace": {
-                    "type": "string"
-                  },
-                  "computer": {
-                    "type": "string"
-                  },
-                  "tokens": {
-                    "type": "number"
-                  },
-                  "estimate": {
-                    "type": "number"
-                  }
-                },
-                "required": [
-                  "threadId",
-                  "workspaceId",
-                  "title",
-                  "agent",
-                  "tokens"
-                ],
-                "additionalProperties": false
-              }
-            },
-            "counts": {
-              "type": "object",
-              "properties": {
-                "threads": {
-                  "type": "integer"
-                },
-                "computers": {
-                  "type": "integer"
-                }
-              },
-              "required": [
-                "threads",
-                "computers"
-              ],
-              "additionalProperties": false
             }
           },
           "required": [
@@ -651,62 +595,6 @@
                 ],
                 "additionalProperties": false
               }
-            },
-            "threads": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "threadId": {
-                    "type": "string"
-                  },
-                  "workspaceId": {
-                    "type": "string"
-                  },
-                  "title": {
-                    "type": "string"
-                  },
-                  "agent": {
-                    "type": "string"
-                  },
-                  "workspace": {
-                    "type": "string"
-                  },
-                  "computer": {
-                    "type": "string"
-                  },
-                  "tokens": {
-                    "type": "number"
-                  },
-                  "estimate": {
-                    "type": "number"
-                  }
-                },
-                "required": [
-                  "threadId",
-                  "workspaceId",
-                  "title",
-                  "agent",
-                  "tokens"
-                ],
-                "additionalProperties": false
-              }
-            },
-            "counts": {
-              "type": "object",
-              "properties": {
-                "threads": {
-                  "type": "integer"
-                },
-                "computers": {
-                  "type": "integer"
-                }
-              },
-              "required": [
-                "threads",
-                "computers"
-              ],
-              "additionalProperties": false
             }
           },
           "required": [

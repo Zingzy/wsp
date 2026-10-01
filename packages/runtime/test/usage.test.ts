@@ -81,15 +81,6 @@ describe("a turn's end in the ledger", () => {
     expect(byAgent.rows.map(r => [r.key, r.tokens.input, r.costReported, r.turns])).toEqual([["claude", 2_900, 1.25, 1]]);
   });
 
-  it("files the turn under its thread and workspace, and names the thread at answer time as the sidebar does", async () => {
-    const { rt, ws } = await runtimeWith(turning({ status: "completed", text: "done", tokens: { input: 2_000, output: 300 } }));
-    const started = await rt.sessions.start(ws.id, { prompt: "Fix the flaky upload test" });
-    await started.finished;
-    const used = await rt.usage.used({ range: "day", split: "agent" });
-    expect(used.threads).toEqual([expect.objectContaining({ threadId: expect.any(String), workspaceId: ws.id, title: "Fix the flaky upload test", agent: "claude", workspace: ws.name, tokens: 2_300 })]);
-    expect(used.counts).toEqual({ threads: 1, computers: 1 });
-  });
-
   it("files nothing for a turn that reported no tokens and no cost", async () => {
     const { rt, ws } = await runtimeWith(turning({ status: "completed", text: "done" }));
     await (await rt.sessions.start(ws.id, { prompt: "go" })).finished;
