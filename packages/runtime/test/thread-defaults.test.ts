@@ -266,6 +266,13 @@ describe("an agent's setup on a computer", () => {
         message: `Claude Code does not start with its config folder ${kept}: Claude Code's config folder has to be under the home folder ${realpathSync(root)}, and ${kept} is not. Set another with wsp agents setup claude --config, or put its own back with --reset config.`,
       });
       expect(launched).toHaveLength(before);
+      // Reading or writing under that folder is refused in the same words, and no read falls back to the agent's own.
+      const words = `Claude Code does not start with its config folder ${kept}: Claude Code's config folder has to be under the home folder ${realpathSync(root)}, and ${kept} is not. Set another with wsp agents setup claude --config, or put its own back with --reset config.`;
+      const row = (await rt.sessions.list(ws.id)).find(r => r.harness === "claude")!;
+      await expect(rt.sessions.rename(row.id, "named")).rejects.toMatchObject({ kind: "usage", message: words });
+      expect((await rt.harnesses.list(ws.id)).find(c => c.harness === "claude")?.refusal).toBe(words);
+      expect((await rt.harnesses.list(ws.id)).find(c => c.harness === "codex")?.refusal).toBeUndefined();
+      expect((await rt.sessions.list(ws.id)).find(r => r.harness === "claude")?.setupRefusal).toBe(words);
     } finally {
       rmSync(outside, { recursive: true, force: true });
     }

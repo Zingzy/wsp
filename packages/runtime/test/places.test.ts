@@ -5025,6 +5025,9 @@ describe("the agents on a computer you own", () => {
       symlinkSync(outside, joinPath(boxHome, "real"));
       await expect(runtime.sessions.start(ws.id, { prompt: "two", harness: "claude" })).rejects.toMatchObject({ kind: "usage", message: expect.stringContaining(`Claude Code does not start with its config folder ${kept}: Claude Code's config folder has to be under the home folder ${realpathSync(boxHome)}`) });
       expect(starts).toHaveLength(1);
+      const row = (await runtime.sessions.list(ws.id))[0]!;
+      await expect(runtime.sessions.rename(row.id, "named")).rejects.toMatchObject({ kind: "usage", message: expect.stringContaining(`Claude Code does not start with its config folder ${kept}`) });
+      expect((await runtime.harnesses.list(ws.id)).find(c => c.harness === "claude")?.refusal).toContain(`Claude Code does not start with its config folder ${kept}`);
     } finally {
       rmSync(boxHome, { recursive: true, force: true });
       rmSync(outside, { recursive: true, force: true });

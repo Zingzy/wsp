@@ -7521,7 +7521,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // The read is started inside a promise and never on this stack: an adapter that refuses the id throws where it
     // builds its command (the codex guard does), and one row's store read may never cost the listing or the turn
     // that asked for it. Nothing here rejects, so both callers may leave it unawaited.
-    pending.done = Promise.resolve()
+    pending.done = confineSetup(entry, view.harness)
       .then(() => read(sessionId, command => entry.machine.exec(command, { timeoutMs: SESSION_TITLE_TIMEOUT_MS }).then(res => res.stdout)))
       // The window opens when the store answered, before the answer is kept: a row that shows the title is a read
       // that is over, so a listing that sees one waits on nothing.
@@ -7591,7 +7591,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (write === undefined) return Promise.resolve();
     // Started inside a promise and never on this stack, as the store read is: an adapter that refuses the id throws
     // where it builds its command, and naming a thread may never cost the turn that asked for it.
-    return Promise.resolve()
+    return confineSetup(entry, view.harness)
       .then(() => write(sessionId, title, command => entry.machine.exec(command, { timeoutMs: SESSION_TITLE_TIMEOUT_MS }).then(res => res.stdout)))
       .then(
         wrote => {
@@ -7675,17 +7675,35 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return { folder: posix.normalize(folder), home, kept: [join(home, ".wsp")] };
   };
 
-  /** Reads the config folder kept for this agent again on the computer the workspace stands on, right before a
-   * launch: a folder that now leads out of that computer's home, onto it, or into wsp's own refuses the launch rather
-   * than starting the agent there or on its own default folder. */
-  const confineSetup = async (entry: LiveWorkspace, named?: string): Promise<void> => {
-    const harness = named ?? DEFAULT_AGENT.id;
+  /** The latest word on each agent's kept config folder by computer and agent, where it was refused: what a thread
+   * row of that agent there says, read off the last check rather than a new one. */
+  const setupRefusals = new Map<string, string>();
+  const keptFolder = (entry: LiveWorkspace, harness: string): { place: string; folder: string } | undefined => {
     const place = setupPlace(entry);
     const folder = place === undefined ? undefined : setups.get(place, harness)?.configDir;
-    if (place === undefined || folder === undefined) return;
-    const why = configDirRefusal(agentLabel(harness), folder, await configFolderOn(place, folder));
-    if (why !== null) throw Object.assign(new Error(configDirLaunchRefusal(agentLabel(harness), harness, folder, why)), { kind: "usage" });
+    return place === undefined || folder === undefined ? undefined : { place, folder };
   };
+  /** The one check on an agent's kept config folder, read again on the computer the workspace stands on before wsp
+   * starts the agent or reads or writes under that folder: why it now leads out of that computer's home, onto it, or
+   * into wsp's own, or null where it stands. Nothing falls back to the agent's own default folder. */
+  const setupRefusal = async (entry: LiveWorkspace, named?: string): Promise<string | null> => {
+    const harness = named ?? DEFAULT_AGENT.id;
+    const kept = keptFolder(entry, harness);
+    if (kept === undefined) return null;
+    const { place, folder } = kept;
+    const why = configDirRefusal(agentLabel(harness), folder, await configFolderOn(place, folder));
+    const refused = why === null ? null : configDirLaunchRefusal(agentLabel(harness), harness, folder, why);
+    if (refused === null) setupRefusals.delete(`${place}:${harness}`);
+    else setupRefusals.set(`${place}:${harness}`, refused);
+    return refused;
+  };
+  /** Settles at once where no config folder is kept, so a road with nothing to check waits on nothing more than before. */
+  const confineSetup = (entry: LiveWorkspace, named?: string): Promise<void> =>
+    keptFolder(entry, named ?? DEFAULT_AGENT.id) === undefined
+      ? Promise.resolve()
+      : setupRefusal(entry, named).then(refused => {
+          if (refused !== null) throw Object.assign(new Error(refused), { kind: "usage" });
+        });
   /** adapterFor for a road that starts the agent's process or runs under its setup, its config folder checked first. */
   const launchAdapterFor = async (...a: Parameters<typeof adapterFor>): Promise<ReturnType<typeof adapterFor>> => {
     await confineSetup(a[0], a[1]);
@@ -9169,6 +9187,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           ...s.view,
           ...(s.view.status === "running" && s.pid !== undefined ? { pid: s.pid } : {}),
           ...(behind !== undefined ? { waitingOn: behind } : {}),
+          ...((): { setupRefusal?: string } => {
+            const entry = live.get(s.view.workspaceId);
+            const place = entry === undefined ? undefined : setupPlace(entry);
+            const refused = place === undefined ? undefined : setupRefusals.get(`${place}:${s.view.harness}`);
+            return refused !== undefined ? { setupRefusal: refused } : {};
+          })(),
           // A turn that ended before the stamps began reads as seen the moment it ended, not at the upgrade, so the quiet
           // the sidebar folds a thread by still counts from its end.
           readAt: marks?.readAt ?? (s.view.endedAt !== undefined && s.view.endedAt < readsSince ? s.view.endedAt : readsSince),
@@ -9287,7 +9311,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const refusal = actionRefusal(workspaceState({ phase: entry.record.phase }), "rename", entry.record.gone, entry.record.name);
       if (refusal !== null) throw new Error(refusal);
       await copyBlocked(entry);
-      const write = adapterFor(entry, s.view.harness).adapter.renameSession;
+      const write = (await launchAdapterFor(entry, s.view.harness)).adapter.renameSession;
       if (write === undefined) return { outcome: "unsupported" };
       // The store is keyed by the harness's own id, so a thread whose harness never announced one has nothing to name.
       if (harnessSessionId === undefined) return { outcome: "no-session" };
@@ -11446,6 +11470,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     setupWrite: async (placeId, agent, change) => {
       if (adapters[agent] === undefined) throw Object.assign(new Error(noAdapterLine(agent, Object.keys(adapters))), { kind: "usage" });
       await setups.set(placeId, agent, change, { folder: path => configFolderOn(placeId, path), agentName: agentLabel(agent) });
+      setupRefusals.delete(`${placeId}:${agent}`);
     },
     relayed: () => backend.capabilities.callbackRelay,
     now: () => clock.now(),
@@ -11492,7 +11517,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const table = HARNESS_CATALOGS.filter(c => c.harness in adapters && (entry === undefined || !agentOff(entry, c.harness)));
         // A record answers what its threads start at whether or not its machine is up; only the rest of the lists
         // waits on the binary, so a picker on a paused workspace still reads the access its next thread would run.
-        const lists = entry === undefined || entry.record.phase !== "running" ? table : await Promise.all(table.map(c => catalogOn(c, entry, adapterFor(entry, c.harness).adapter)));
+        // An agent whose kept config folder is refused, or cannot be read there, answers with why instead of its lists.
+        const listsOn = async (c: HarnessCatalog, on: LiveWorkspace): Promise<HarnessCatalog> => {
+          const refusal = await setupRefusal(on, c.harness).catch((e: unknown) => (e instanceof Error ? e.message : String(e)));
+          return refusal !== null ? { ...c, refusal } : catalogOn(c, on, adapterFor(on, c.harness).adapter);
+        };
+        const lists = entry === undefined || entry.record.phase !== "running" ? table : await Promise.all(table.map(c => listsOn(c, entry)));
         const project = entry === undefined ? undefined : prefs.projectDefaults[entry.record.project];
         const agent = defaultAgentOf(prefs, entry);
         return lists.map(c => ({ ...shapeModels(defaultsOn(c, prefs, project).catalog, prefs.agentDefaults[c.harness]?.models), ...(c.harness === agent ? { isDefault: true } : {}) }));

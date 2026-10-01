@@ -971,6 +971,10 @@ export const SessionView = z.object({
    * pid and for the same reason, it is never written down: it is read off two live turns, and a wait written down
    * outlives the question it was on. */
   waitingOn: ThreadWaitingOn.optional(),
+  /** Why this thread's agent cannot start or read its own store on that computer now: its config folder was last
+   * read leading out of that computer's home, onto it, or into wsp's own. Rides the answer and never the row, as
+   * waitingOn does. */
+  setupRefusal: z.string().optional(),
   /** The process this turn leads on the computer the host runs on, where the turn runs there: the pid the Processes
    * pane heads this thread's tree with. Absent on a turn running on another machine, whose pids are not this
    * computer's, and on a turn that is over. It is never written down: a pid outlives nothing, and the computer is
@@ -1031,6 +1035,8 @@ export const ThreadView = z.object({
   /** The thread the latest turn is stopped behind, as SessionView.waitingOn carries it; threadState reads this too,
    * since a thread that cannot move until a question elsewhere is answered is not working. */
   waitingOn: ThreadWaitingOn.optional(),
+  /** Why the latest turn's agent cannot start or read its own store there now, as SessionView.setupRefusal carries it. */
+  setupRefusal: z.string().optional(),
   /** What this thread has cost: its rows' figures added up. Absent where no row of it carries one. */
   costUsd: z.number().optional(),
   /** The latest turn's process on the computer the host runs on, as SessionView.pid carries it. */
@@ -1094,6 +1100,7 @@ export function foldThreads(sessions: ReadonlyArray<SessionView>): ThreadView[] 
       ...(latest.cwd !== undefined ? { cwd: latest.cwd } : {}),
       ...(latest.asking !== undefined ? { asking: latest.asking } : {}),
       ...(latest.waitingOn !== undefined ? { waitingOn: latest.waitingOn } : {}),
+      ...(latest.setupRefusal !== undefined ? { setupRefusal: latest.setupRefusal } : {}),
       ...(latest.pid !== undefined ? { pid: latest.pid } : {}),
       ...(latest.readAt !== undefined ? { readAt: latest.readAt } : {}),
       ...(latest.settledAt !== undefined ? { settledAt: latest.settledAt } : {}),
