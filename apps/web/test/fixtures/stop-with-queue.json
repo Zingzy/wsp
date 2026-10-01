@@ -1,0 +1,655 @@
+{
+ "thread": "thr_1",
+ "history": [
+  {
+   "type": "session.start",
+   "workspaceId": "ws_a",
+   "sessionId": "sess_1",
+   "turnId": "turn_1",
+   "threadId": "thr_1",
+   "at": 1790878843533,
+   "prompt": "Run exactly this with your bash tool and wait for it to finish: python3 -c \"import time; [print('tick', i, flush=True) or time.sleep(3) for i in range(40)]\". Then reply with the word done.",
+   "requestId": "req_1"
+  },
+  {
+   "type": "session.delta",
+   "workspaceId": "ws_a",
+   "sessionId": "sess_1",
+   "turnId": "turn_1",
+   "threadId": "thr_1",
+   "at": 1790878846669,
+   "line": 1,
+   "kind": "thinking",
+   "text": ""
+  },
+  {
+   "type": "session.delta",
+   "workspaceId": "ws_a",
+   "sessionId": "sess_1",
+   "turnId": "turn_1",
+   "threadId": "thr_1",
+   "at": 1790878847280,
+   "line": 2,
+   "kind": "tool_use",
+   "text": "{\"command\":\"python3 -c \\\"import time; [print('tick', i, flush=True) or time.sleep(3) for i in range(40)]\\\"\",\"description\":\"Run ticking Python command that prints every 3 seconds\",\"timeout\":150000}",
+   "toolName": "Bash",
+   "toolUseId": "tool_1"
+  },
+  {
+   "type": "session.delta",
+   "workspaceId": "ws_a",
+   "sessionId": "sess_1",
+   "turnId": "turn_1",
+   "threadId": "thr_1",
+   "at": 1790878903893,
+   "line": 3,
+   "kind": "tool_result",
+   "text": "Exit code 137\ntick 0\ntick 1\ntick 2\ntick 3\ntick 4\ntick 5\ntick 6\ntick 7\ntick 8\ntick 9\ntick 10\ntick 11\ntick 12\ntick 13\ntick 14\ntick 15\ntick 16\ntick 17\ntick 18",
+   "toolUseId": "tool_1",
+   "isError": true
+  },
+  {
+   "type": "session.done",
+   "workspaceId": "ws_a",
+   "sessionId": "sess_1",
+   "turnId": "turn_1",
+   "threadId": "thr_1",
+   "at": 1790878904828,
+   "result": {
+    "status": "interrupted"
+   }
+  },
+  {
+   "type": "session.end",
+   "workspaceId": "ws_a",
+   "sessionId": "sess_1",
+   "turnId": "turn_1",
+   "threadId": "thr_1",
+   "at": 1790878904828,
+   "exitCode": null,
+   "sawResult": false
+  },
+  {
+   "type": "session.checkpoint",
+   "workspaceId": "ws_a",
+   "sessionId": "sess_1",
+   "turnId": "turn_1",
+   "threadId": "thr_1",
+   "at": 1790878905260
+  },
+  {
+   "type": "session.start",
+   "workspaceId": "ws_a",
+   "sessionId": "sess_1",
+   "turnId": "turn_2",
+   "threadId": "thr_1",
+   "at": 1790878907257,
+   "prompt": "queued note",
+   "requestId": "req_2",
+   "afterCut": true
+  },
+  {
+   "type": "session.delta",
+   "workspaceId": "ws_a",
+   "sessionId": "sess_1",
+   "turnId": "turn_2",
+   "threadId": "thr_1",
+   "at": 1790878910195,
+   "line": 1,
+   "kind": "thinking",
+   "text": ""
+  },
+  {
+   "type": "session.delta",
+   "workspaceId": "ws_a",
+   "sessionId": "sess_1",
+   "turnId": "turn_2",
+   "threadId": "thr_1",
+   "at": 1790878910911,
+   "line": 2,
+   "kind": "text",
+   "text": "I'm not sure what you mean by \"queued note\", could you clarify what you'd like me to do?\n\nAlso, I notice the Python command I just ran didn't complete. It reached tick 18 and then exited with code 137 (killed/timeout) instead of finishing all 40 ticks. Would you like me to try again with a longer timeout, or was there something else you wanted?",
+   "messageId": "msg_1"
+  },
+  {
+   "type": "session.done",
+   "workspaceId": "ws_a",
+   "sessionId": "sess_1",
+   "turnId": "turn_2",
+   "threadId": "thr_1",
+   "at": 1790878911013,
+   "result": {
+    "status": "completed",
+    "durationMs": 3761,
+    "text": "I'm not sure what you mean by \"queued note\", could you clarify what you'd like me to do?\n\nAlso, I notice the Python command I just ran didn't complete. It reached tick 18 and then exited with code 137 (killed/timeout) instead of finishing all 40 ticks. Would you like me to try again with a longer timeout, or was there something else you wanted?"
+   }
+  },
+  {
+   "type": "session.end",
+   "workspaceId": "ws_a",
+   "sessionId": "sess_1",
+   "turnId": "turn_2",
+   "threadId": "thr_1",
+   "at": 1790878921943,
+   "exitCode": null,
+   "sawResult": true
+  },
+  {
+   "type": "session.checkpoint",
+   "workspaceId": "ws_a",
+   "sessionId": "sess_1",
+   "turnId": "turn_2",
+   "threadId": "thr_1",
+   "at": 1790878922153
+  },
+  {
+   "type": "session.start",
+   "workspaceId": "ws_a",
+   "sessionId": "sess_1",
+   "turnId": "turn_3",
+   "threadId": "thr_1",
+   "at": 1790878980384,
+   "prompt": "Run exactly this with your bash tool and wait for it to finish: python3 -c \"import time; [print('tick', i, flush=True) or time.sleep(3) for i in range(30)]\". Then reply with the word done.",
+   "requestId": "req_3"
+  },
+  {
+   "type": "session.delta",
+   "workspaceId": "ws_a",
+   "sessionId": "sess_1",
+   "turnId": "turn_3",
+   "threadId": "thr_1",
+   "at": 1790878981795,
+   "line": 1,
+   "kind": "thinking",
+   "text": ""
+  },
+  {
+   "type": "session.delta",
+   "workspaceId": "ws_a",
+   "sessionId": "sess_1",
+   "turnId": "turn_3",
+   "threadId": "thr_1",
+   "at": 1790878982199,
+   "line": 2,
+   "kind": "tool_use",
+   "text": "{\"command\":\"python3 -c \\\"import time; [print('tick', i, flush=True) or time.sleep(3) for i in range(30)]\\\"\",\"description\":\"Run ticking Python command that prints every 3 seconds for 30 iterations\",\"timeout\":120000}",
+   "toolName": "Bash",
+   "toolUseId": "tool_2"
+  },
+  {
+   "type": "session.delta",
+   "workspaceId": "ws_a",
+   "sessionId": "sess_1",
+   "turnId": "turn_3",
+   "threadId": "thr_1",
+   "at": 1790878985933,
+   "line": 3,
+   "kind": "tool_result",
+   "text": "Exit code 137\ntick 0\ntick 1",
+   "toolUseId": "tool_2",
+   "isError": true
+  },
+  {
+   "type": "session.done",
+   "workspaceId": "ws_a",
+   "sessionId": "sess_1",
+   "turnId": "turn_3",
+   "threadId": "thr_1",
+   "at": 1790878986838,
+   "result": {
+    "status": "interrupted"
+   }
+  },
+  {
+   "type": "session.end",
+   "workspaceId": "ws_a",
+   "sessionId": "sess_1",
+   "turnId": "turn_3",
+   "threadId": "thr_1",
+   "at": 1790878986838,
+   "exitCode": null,
+   "sawResult": false
+  },
+  {
+   "type": "session.checkpoint",
+   "workspaceId": "ws_a",
+   "sessionId": "sess_1",
+   "turnId": "turn_3",
+   "threadId": "thr_1",
+   "at": 1790878987266
+  },
+  {
+   "type": "session.start",
+   "workspaceId": "ws_a",
+   "sessionId": "sess_1",
+   "turnId": "turn_4",
+   "threadId": "thr_1",
+   "at": 1790879044105,
+   "prompt": "Run exactly this with your bash tool and wait for it to finish: python3 -c \"import time; [print('tick', i, flush=True) or time.sleep(3) for i in range(30)]\". Then reply with the word done.",
+   "requestId": "req_4",
+   "afterCut": true
+  },
+  {
+   "type": "session.delta",
+   "workspaceId": "ws_a",
+   "sessionId": "sess_1",
+   "turnId": "turn_4",
+   "threadId": "thr_1",
+   "at": 1790879045728,
+   "line": 1,
+   "kind": "thinking",
+   "text": ""
+  },
+  {
+   "type": "session.delta",
+   "workspaceId": "ws_a",
+   "sessionId": "sess_1",
+   "turnId": "turn_4",
+   "threadId": "thr_1",
+   "at": 1790879046233,
+   "line": 2,
+   "kind": "tool_use",
+   "text": "{\"command\":\"python3 -c \\\"import time; [print('tick', i, flush=True) or time.sleep(3) for i in range(30)]\\\"\",\"description\":\"Run ticking Python command that prints every 3 seconds for 30 iterations\",\"timeout\":180000}",
+   "toolName": "Bash",
+   "toolUseId": "tool_3"
+  },
+  {
+   "type": "session.delta",
+   "workspaceId": "ws_a",
+   "sessionId": "sess_1",
+   "turnId": "turn_4",
+   "threadId": "thr_1",
+   "at": 1790879136094,
+   "line": 3,
+   "kind": "tool_result",
+   "text": "Exit code 137\ntick 0\ntick 1\ntick 2\ntick 3\ntick 4\ntick 5\ntick 6\ntick 7\ntick 8\ntick 9\ntick 10\ntick 11\ntick 12\ntick 13\ntick 14\ntick 15\ntick 16\ntick 17\ntick 18\ntick 19\ntick 20\ntick 21\ntick 22\ntick 23\ntick 24\ntick 25\ntick 26\ntick 27\ntick 28\ntick 29",
+   "toolUseId": "tool_3",
+   "isError": true
+  },
+  {
+   "type": "session.done",
+   "workspaceId": "ws_a",
+   "sessionId": "sess_1",
+   "turnId": "turn_4",
+   "threadId": "thr_1",
+   "at": 1790879137099,
+   "result": {
+    "status": "interrupted"
+   }
+  },
+  {
+   "type": "session.end",
+   "workspaceId": "ws_a",
+   "sessionId": "sess_1",
+   "turnId": "turn_4",
+   "threadId": "thr_1",
+   "at": 1790879137099,
+   "exitCode": null,
+   "sawResult": false
+  },
+  {
+   "type": "session.checkpoint",
+   "workspaceId": "ws_a",
+   "sessionId": "sess_1",
+   "turnId": "turn_4",
+   "threadId": "thr_1",
+   "at": 1790879137313
+  }
+ ],
+ "events": [
+  {
+   "ms": 0,
+   "event": {
+    "type": "session.start",
+    "workspaceId": "ws_a",
+    "sessionId": "sess_1",
+    "turnId": "turn_5",
+    "threadId": "thr_1",
+    "at": 1790880018208,
+    "seq": 678,
+    "prompt": "Run exactly this with your bash tool and wait for it to finish: python3 -c \"import time; [print('tick', i, flush=True) or time.sleep(3) for i in range(40)]\". Then reply with the word done.",
+    "requestId": "req_5",
+    "afterCut": true
+   }
+  },
+  {
+   "ms": 2520,
+   "event": {
+    "type": "session.delta",
+    "workspaceId": "ws_a",
+    "sessionId": "sess_1",
+    "turnId": "turn_5",
+    "threadId": "thr_1",
+    "at": 1790880020537,
+    "seq": 783,
+    "line": 1,
+    "kind": "thinking",
+    "text": ""
+   }
+  },
+  {
+   "ms": 2835,
+   "event": {
+    "type": "session.delta",
+    "workspaceId": "ws_a",
+    "sessionId": "sess_1",
+    "turnId": "turn_5",
+    "threadId": "thr_1",
+    "at": 1790880021043,
+    "seq": 784,
+    "line": 2,
+    "kind": "tool_use",
+    "text": "{\"command\":\"python3 -c \\\"import time; [print('tick', i, flush=True) or time.sleep(3) for i in range(40)]\\\"\",\"description\":\"Run ticking Python command that prints every 3 seconds for 40 iterations\",\"timeout\":150000}",
+    "toolName": "Bash",
+    "toolUseId": "tool_4"
+   }
+  },
+  {
+   "ms": 3951,
+   "event": {
+    "type": "session.delta",
+    "workspaceId": "ws_a",
+    "sessionId": "sess_1",
+    "turnId": "turn_5",
+    "threadId": "thr_1",
+    "at": 1790880022159,
+    "seq": 785,
+    "line": 3,
+    "kind": "tool_result",
+    "text": "Exit code 137\ntick 0",
+    "toolUseId": "tool_4",
+    "isError": true
+   }
+  },
+  {
+   "ms": 4859,
+   "event": {
+    "type": "session.done",
+    "workspaceId": "ws_a",
+    "sessionId": "sess_1",
+    "turnId": "turn_5",
+    "threadId": "thr_1",
+    "at": 1790880023067,
+    "seq": 786,
+    "result": {
+     "status": "interrupted"
+    }
+   }
+  },
+  {
+   "ms": 4870,
+   "event": {
+    "type": "session.end",
+    "workspaceId": "ws_a",
+    "sessionId": "sess_1",
+    "turnId": "turn_5",
+    "threadId": "thr_1",
+    "at": 1790880023068,
+    "seq": 787,
+    "exitCode": null,
+    "sawResult": false
+   }
+  },
+  {
+   "ms": 4982,
+   "event": {
+    "type": "session.held",
+    "workspaceId": "ws_a",
+    "threadId": "thr_1",
+    "seq": 789
+   }
+  },
+  {
+   "ms": 5095,
+   "event": {
+    "type": "session.checkpoint",
+    "workspaceId": "ws_a",
+    "sessionId": "sess_1",
+    "turnId": "turn_5",
+    "threadId": "thr_1",
+    "at": 1790880023289,
+    "seq": 791
+   }
+  },
+  {
+   "ms": 5715,
+   "event": {
+    "type": "session.start",
+    "workspaceId": "ws_a",
+    "sessionId": "sess_1",
+    "turnId": "turn_6",
+    "threadId": "thr_1",
+    "at": 1790880023923,
+    "seq": 792,
+    "prompt": "queued note two",
+    "requestId": "req_6",
+    "afterCut": true
+   }
+  },
+  {
+   "ms": 7840,
+   "event": {
+    "type": "session.delta",
+    "workspaceId": "ws_a",
+    "sessionId": "sess_1",
+    "turnId": "turn_6",
+    "threadId": "thr_1",
+    "at": 1790880026047,
+    "seq": 855,
+    "line": 1,
+    "kind": "thinking",
+    "text": ""
+   }
+  },
+  {
+   "ms": 8043,
+   "event": {
+    "type": "session.delta",
+    "workspaceId": "ws_a",
+    "sessionId": "sess_1",
+    "turnId": "turn_6",
+    "threadId": "thr_1",
+    "at": 1790880026251,
+    "seq": 856,
+    "line": 2,
+    "kind": "text",
+    "text": "I'm not sure what you mean by \"queued note two\", what would you like me to do?",
+    "messageId": "msg_2"
+   }
+  },
+  {
+   "ms": 8085,
+   "event": {
+    "type": "session.done",
+    "workspaceId": "ws_a",
+    "sessionId": "sess_1",
+    "turnId": "turn_6",
+    "threadId": "thr_1",
+    "at": 1790880026252,
+    "seq": 857,
+    "result": {
+     "status": "completed",
+     "durationMs": 2341,
+     "text": "I'm not sure what you mean by \"queued note two\", what would you like me to do?"
+    }
+   }
+  },
+  {
+   "ms": 18983,
+   "event": {
+    "type": "session.end",
+    "workspaceId": "ws_a",
+    "sessionId": "sess_1",
+    "turnId": "turn_6",
+    "threadId": "thr_1",
+    "at": 1790880037191,
+    "seq": 983,
+    "exitCode": null,
+    "sawResult": true
+   }
+  },
+  {
+   "ms": 19171,
+   "event": {
+    "type": "session.checkpoint",
+    "workspaceId": "ws_a",
+    "sessionId": "sess_1",
+    "turnId": "turn_6",
+    "threadId": "thr_1",
+    "at": 1790880037379,
+    "seq": 986
+   }
+  }
+ ],
+ "lists": [
+  {
+   "ms": 54,
+   "rows": [
+    {
+     "id": "sess_1",
+     "workspaceId": "ws_a",
+     "harness": "claude",
+     "status": "running",
+     "startedBy": "cli",
+     "threadId": "thr_1",
+     "prompt": "Run exactly this with your bash tool and wait for it to finish: python3 -c \"import time; [print('tick', i, flush=True) or time.sleep(3) for i in range(40)]\". Then reply with the word done.",
+     "startedAt": 1790880015384
+    }
+   ]
+  },
+  {
+   "ms": 4935,
+   "rows": [
+    {
+     "id": "sess_1",
+     "workspaceId": "ws_a",
+     "harness": "claude",
+     "status": "interrupted",
+     "startedBy": "cli",
+     "threadId": "thr_1",
+     "prompt": "Run exactly this with your bash tool and wait for it to finish: python3 -c \"import time; [print('tick', i, flush=True) or time.sleep(3) for i in range(40)]\". Then reply with the word done.",
+     "startedAt": 1790880015384,
+     "endedAt": 1790880023068
+    }
+   ]
+  },
+  {
+   "ms": 5023,
+   "rows": [
+    {
+     "id": "sess_1",
+     "workspaceId": "ws_a",
+     "harness": "claude",
+     "status": "interrupted",
+     "startedBy": "cli",
+     "threadId": "thr_1",
+     "prompt": "Run exactly this with your bash tool and wait for it to finish: python3 -c \"import time; [print('tick', i, flush=True) or time.sleep(3) for i in range(40)]\". Then reply with the word done.",
+     "startedAt": 1790880015384,
+     "endedAt": 1790880023068
+    },
+    {
+     "id": "turn_6",
+     "workspaceId": "ws_a",
+     "harness": "claude",
+     "status": "running",
+     "startedBy": "person",
+     "threadId": "thr_1",
+     "prompt": "queued note two",
+     "startedAt": 1790880023158
+    }
+   ]
+  },
+  {
+   "ms": 5076,
+   "rows": [
+    {
+     "id": "sess_1",
+     "workspaceId": "ws_a",
+     "harness": "claude",
+     "status": "interrupted",
+     "startedBy": "cli",
+     "threadId": "thr_1",
+     "prompt": "Run exactly this with your bash tool and wait for it to finish: python3 -c \"import time; [print('tick', i, flush=True) or time.sleep(3) for i in range(40)]\". Then reply with the word done.",
+     "startedAt": 1790880015384,
+     "endedAt": 1790880023068
+    },
+    {
+     "id": "turn_6",
+     "workspaceId": "ws_a",
+     "harness": "claude",
+     "status": "running",
+     "startedBy": "person",
+     "threadId": "thr_1",
+     "prompt": "queued note two",
+     "startedAt": 1790880023158
+    }
+   ]
+  },
+  {
+   "ms": 5794,
+   "rows": [
+    {
+     "id": "sess_1",
+     "workspaceId": "ws_a",
+     "harness": "claude",
+     "status": "running",
+     "startedBy": "cli",
+     "threadId": "thr_1",
+     "prompt": "Run exactly this with your bash tool and wait for it to finish: python3 -c \"import time; [print('tick', i, flush=True) or time.sleep(3) for i in range(40)]\". Then reply with the word done.",
+     "startedAt": 1790880023158
+    }
+   ]
+  },
+  {
+   "ms": 19017,
+   "rows": [
+    {
+     "id": "sess_1",
+     "workspaceId": "ws_a",
+     "harness": "claude",
+     "status": "completed",
+     "startedBy": "cli",
+     "threadId": "thr_1",
+     "prompt": "Run exactly this with your bash tool and wait for it to finish: python3 -c \"import time; [print('tick', i, flush=True) or time.sleep(3) for i in range(40)]\". Then reply with the word done.",
+     "startedAt": 1790880023158,
+     "endedAt": 1790880037191
+    }
+   ]
+  },
+  {
+   "ms": 19060,
+   "rows": [
+    {
+     "id": "sess_1",
+     "workspaceId": "ws_a",
+     "harness": "claude",
+     "status": "completed",
+     "startedBy": "cli",
+     "threadId": "thr_1",
+     "prompt": "Run exactly this with your bash tool and wait for it to finish: python3 -c \"import time; [print('tick', i, flush=True) or time.sleep(3) for i in range(40)]\". Then reply with the word done.",
+     "startedAt": 1790880023158,
+     "endedAt": 1790880037191
+    }
+   ]
+  }
+ ],
+ "replies": {
+  "interrupt": {
+   "after": 1018,
+   "outcome": "accepted"
+  },
+  "start": {
+   "after": 177,
+   "session": {
+    "id": "sess_1",
+    "workspaceId": "ws_a",
+    "harness": "claude",
+    "status": "running",
+    "startedBy": "cli",
+    "threadId": "thr_1",
+    "prompt": "Run exactly this with your bash tool and wait for it to finish: python3 -c \"import time; [print('tick', i, flush=True) or time.sleep(3) for i in range(40)]\". Then reply with the word done.",
+    "startedAt": 1790880023158
+   }
+  }
+ }
+}
