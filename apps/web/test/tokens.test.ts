@@ -81,8 +81,10 @@ describe("index.css", () => {
     expect(applied).toBe([...css.matchAll(/@apply glass-backdrop;/g)].length);
     const uses = execFileSync("git", ["grep", "-hoE", "[^ \"'`]*glass-backdrop", "--", "src", ":!*.css", ":!*.test.*"], { cwd: join(__dirname, ".."), encoding: "utf8" }).trim().split("\n");
     expect(uses.length).toBeGreaterThan(0);
-    // The composer alone frosts on the Mac too (ComposerSurface.tsx): the owner wants the page under it to show.
-    expect(uses.filter(use => !use.startsWith("off-mac:"))).toEqual(["before:glass-backdrop"]);
+    // The composer and the rows attached to it frost on the Mac too: the owner wants the page under them to show.
+    expect(uses.filter(use => !use.startsWith("off-mac:")).sort()).toEqual(
+      ["before:glass-backdrop", "before:glass-backdrop", "glass-backdrop", "glass-backdrop", "group-has-data-[composer-banner-surface=attached]/composer-surface:glass-backdrop"].sort(),
+    );
   });
 
   it("pins the sidebar glass utility added after the upstream set", () => {
@@ -207,6 +209,13 @@ describe("index.css", () => {
         /* A blur on the Mac's transparent page lays its copy over the page it sampled, so the sharp text shows through
            unless the copy stands on the page's own ground: the filter GlassGround renders. The composer is its one user. */
         --glass-ground: url(#glass-ground);
+        /* The ground matches what the window's glass reads as behind the page, not the theme's background, so the
+           composer keeps the look of the glass (measured 2026-10-01: the glass reads rgb(16 18 16) in the dark). */
+        --glass-ground-color: rgb(236 237 236);
+      }
+
+      .desktop-mac.dark {
+        --glass-ground-color: rgb(17 19 18);
       }
 
       /* The page drawing no glass (Transparency off in Appearance, or the computer's Reduce transparency on, read in

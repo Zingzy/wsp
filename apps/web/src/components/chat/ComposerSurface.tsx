@@ -57,7 +57,7 @@ function Main({ className, ...props }: ComponentProps<"div">) {
         "group relative z-10 rounded-[22px] p-px transition-colors duration-200",
         outlineClasses,
         "after:z-20 after:hidden group-has-data-[composer-banner-surface=attached]/composer-surface:after:block",
-        "group-has-data-[composer-banner-surface=attached]/composer-surface:bg-[color-mix(in_srgb,var(--chat-composer-glass-surface)_var(--chat-composer-glass-opacity),transparent)] off-mac:group-has-data-[composer-banner-surface=attached]/composer-surface:glass-backdrop",
+        "group-has-data-[composer-banner-surface=attached]/composer-surface:bg-[color-mix(in_srgb,var(--chat-composer-glass-surface)_var(--chat-composer-glass-opacity),transparent)] group-has-data-[composer-banner-surface=attached]/composer-surface:glass-backdrop",
         "group-has-data-[composer-banner-surface=attached]/composer-surface:shadow-[0_12px_28px_-18px_rgb(0_0_0/40%)] dark:group-has-data-[composer-banner-surface=attached]/composer-surface:shadow-none",
         "not-supports-[(backdrop-filter:blur(1px))_or_(-webkit-backdrop-filter:blur(1px))]:group-has-data-[composer-banner-surface=attached]/composer-surface:bg-(--chat-composer-glass-surface)",
         "group-has-data-[composer-banner-surface=attached]/composer-surface:**:data-[chat-composer-mobile-collapsed=true]:min-h-[calc(1rem+1px)]",
