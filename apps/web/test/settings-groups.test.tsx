@@ -92,8 +92,9 @@ describe("Projects", () => {
     act(() => useSettingsStore.getState().closeAddProject());
     act(() => useStore.setState({ projects: [] }));
     await settle();
-    expect(rowTitles()).toEqual([PROJECTS_WORDS.none]);
-    expect(descriptionOf("none")).toBe(PROJECTS_WORDS.noneDescription);
+    // The one empty line every empty card speaks in, inside the card, in the quiet note.
+    expect(rowTitles()).toEqual([]);
+    expect(lineLabels()).toEqual([`${PROJECTS_WORDS.none} ${PROJECTS_WORDS.noneDescription}`]);
     expect(screen.getByRole("button", { name: PROJECTS_WORDS.add })).toBeTruthy();
   });
 

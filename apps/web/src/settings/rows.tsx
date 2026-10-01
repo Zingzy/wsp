@@ -10,6 +10,7 @@ import { Chips, type ChipItem } from "../components/ui/chips.js";
 import { ChevronRightIcon } from "lucide-react";
 import { Children, type ReactNode } from "react";
 import { Kbd, KbdGroup } from "../components/ui/kbd.js";
+import { Skeleton } from "../components/ui/skeleton.js";
 import { Spaced } from "../components/ui/spaced.js";
 import { cn } from "../lib/utils.js";
 import { FACT, VALUE } from "./format.js";
@@ -65,6 +66,8 @@ export interface SettingsLineData {
   readonly hover?: string;
   /** What stands in the keycaps' place where the line can change them; the keys stay the words it is read by. */
   readonly control?: ReactNode;
+  /** The card's one empty line: what is not there yet, in the quiet note, the one voice every empty card speaks in. */
+  readonly empty?: true;
   readonly attrs?: Record<string, string>;
 }
 
@@ -117,7 +120,8 @@ export function Card({ id, head, lede, under, body, children }: { id: string; he
         </div>
       )}
       {body}
-      {body !== undefined && Children.count(children) === 0 ? null : <div className={cn(CARD_SURFACE, "flex flex-col [&>*+*]:border-t [&>*+*]:border-border/50")}>{children}</div>}
+      {/* A card with nothing in it draws no surface: an empty bordered box reads as a fault. */}
+      {Children.count(children) === 0 ? null : <div className={cn(CARD_SURFACE, "flex flex-col [&>*+*]:border-t [&>*+*]:border-border/50")}>{children}</div>}
       {under === undefined ? null : <div className="flex gap-2">{under}</div>}
     </section>
   );
@@ -203,7 +207,7 @@ export function KeyCaps({ keys, joiner }: { keys: ReadonlyArray<ReadonlyArray<st
 
 /** One line: the label, and at its right one mono word or the chord's keycaps, under it below 640 px. The sentence
  * a line has to say is its hover text; a line carries no description. */
-export function Line({ id, label, value, valueClass = "value", keys, keysJoiner, hover, control, attrs }: Omit<SettingsLineData, "kind">) {
+export function Line({ id, label, value, valueClass = "value", keys, keysJoiner, hover, control, empty, attrs }: Omit<SettingsLineData, "kind">) {
   const right =
     control ??
     (value !== undefined ? (
@@ -216,7 +220,7 @@ export function Line({ id, label, value, valueClass = "value", keys, keysJoiner,
   return (
     <div data-settings-line={id} className={cn("flex flex-col justify-center py-3", CARD_INSET, LINE_FLOOR)} {...(hover === undefined ? {} : { title: hover })} {...attrs}>
       <div className={right === null ? undefined : "flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between sm:gap-8"}>
-        <span data-settings-label className={cn(LABEL_CLASS, "min-w-0 break-words")}>
+        <span data-settings-label className={cn(empty === true ? NOTE : LABEL_CLASS, "min-w-0 break-words")}>
           {label}
         </span>
         {right === null ? null : <span className="flex min-w-0 sm:justify-end">{right}</span>}
@@ -267,6 +271,16 @@ export function HeadRow({ glyph, title, line, slot, attrs }: { glyph: ReactNode;
         </span>
       </span>
       {slot}
+    </div>
+  );
+}
+
+/** One row's room while what fills the card is on its way: a title bar over a line bar, at the row's own floor. */
+export function RowSkeleton({ k }: { k: string }) {
+  return (
+    <div data-k={k} aria-busy className={cn(CARD_SURFACE, "flex flex-col justify-center gap-2 py-3", CARD_INSET, ROW_FLOOR)}>
+      <Skeleton className="h-3.5 w-40" />
+      <Skeleton className="h-3 w-64" />
     </div>
   );
 }

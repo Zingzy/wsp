@@ -50,7 +50,7 @@ export const FONT_WORDS = {
 /** Settings > Appearance's theme section. */
 export const THEME_SECTION_WORDS = {
   lede: "Point at a theme to see this window in it.",
-  modeLede: "Light, dark, or whichever side your Mac is on.",
+  modeLede: (here: string): string => `Light, dark, or whichever side ${here === "" ? "this computer" : here} is on.`,
 } as const;
 
 /** Settings > Appearance's glass section, which holds the Transparency switch. */
@@ -205,7 +205,6 @@ export const ACCOUNT_WORDS = {
   reachable: "Reachable from another device outside your network. Not from the app yet.",
 } as const;
 
-/** Settings > Privacy: what this wsp asks of a service outside the person's computers. */
 /** Settings > General. */
 export const GENERAL_WORDS = {
   editor: "Editor",
@@ -224,7 +223,7 @@ export const PRIVACY_WORDS = {
   usageLogsDescription: (here: string): string => `Usage counts what Claude Code, Codex and OpenCode logged on ${here === "" ? "this computer" : here}, wsp's own threads there included. wsp reads the logs there and shows what they count on the Usage page alone, never to an agent.`,
 } as const;
 
-/** Settings > Appearance's Notifications: the one switch over the sound a notification makes. */
+/** Settings > General's Notifications: the one switch over the sound a notification makes. */
 export const NOTIFY_WORDS = {
   head: "Notifications",
   lede: "What wsp says while you are in another app.",
@@ -362,7 +361,7 @@ export const KEYBINDINGS_WORDS = {
   leaveSettings: "Leave Settings",
 } as const;
 
-/** Settings > About: the two halves of one release, and the road to the next. */
+/** Settings > General's Version card: the two halves of one release, and the road to the next. */
 export const ABOUT_WORDS = {
   title: "Version",
   wsp: "wsp",

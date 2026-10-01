@@ -79,7 +79,11 @@ function revealItem(id: string): void {
   let tries = 0;
   const look = (): void => {
     const found = document.querySelector(`[data-settings-row="${id}"], [data-settings-line="${id}"]`);
-    if (found !== null) found.scrollIntoView({ block: "center" });
+    if (found !== null) {
+      found.scrollIntoView({ block: "center" });
+      // The row a result named flashes once, so the eye lands on it.
+      if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches !== true) found.animate?.([{ backgroundColor: "color-mix(in srgb, var(--foreground) 9%, transparent)" }, { backgroundColor: "transparent" }], { duration: 900, easing: "ease-out" });
+    }
     else if (tries++ < 10) window.requestAnimationFrame(look);
   };
   window.requestAnimationFrame(look);

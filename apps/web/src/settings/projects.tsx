@@ -69,7 +69,7 @@ export function projectsCards(ctx: SettingsContext): SettingsCardData[] {
     return [{ id: "projects", items: [], under: <><RefusalSlot k="projects-refused" said={PROJECT_WORDS.notRead(said)} {...(fix === undefined ? {} : { fix })} />{under}</> }];
   }
   if (ctx.projects.length === 0) {
-    return [{ id: "projects", items: [{ kind: "row", id: "none", title: PROJECTS_WORDS.none, description: PROJECTS_WORDS.noneDescription, attrs: { "data-k": "projects-none" } }], under }];
+    return [{ id: "projects", items: [{ kind: "line", id: "none", label: `${PROJECTS_WORDS.none} ${PROJECTS_WORDS.noneDescription}`, empty: true, attrs: { "data-k": "projects-none" } }], under }];
   }
   return [
     {

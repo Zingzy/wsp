@@ -13,7 +13,7 @@ import { Button, DANGER_BUTTON, NEUTRAL_RING } from "../components/ui/button.js"
 import type { Api } from "../protocol/client.js";
 import { DEVICES_WORDS, WHERE_WORDS } from "./format.js";
 import { builtWhen } from "./image.js";
-import type { SettingsCardData } from "./rows.js";
+import { RowSkeleton, type SettingsCardData } from "./rows.js";
 import type { SettingsContext } from "./settingsContext.js";
 
 /** The devices a person revokes: every record with no scope. */
@@ -77,7 +77,8 @@ export function devicesCards(ctx: SettingsContext): SettingsCardData[] {
   // Why Revoke is held is the row's description, as every other held control on these pages says it.
   const held = ctx.api?.devicesRevoke === undefined ? WHERE_WORDS.notYet : null;
   const rows = revocableDevices(devices ?? []);
-  if (devices !== null && rows.length === 0) return [{ id: "devices", items: [{ kind: "line", id: "none", label: DEVICES_WORDS.none, attrs: { "data-k": "devices-none" } }] }];
+  if (devices === null) return [{ id: "devices", items: [], body: <RowSkeleton k="devices-loading" /> }];
+  if (rows.length === 0) return [{ id: "devices", items: [{ kind: "line", id: "none", label: DEVICES_WORDS.none, empty: true, attrs: { "data-k": "devices-none" } }] }];
   return [
     {
       id: "devices",

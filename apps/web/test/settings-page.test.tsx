@@ -380,7 +380,7 @@ describe("Appearance", () => {
     expect(rowTitles()).toEqual([TRANSPARENCY_WORDS.title, FONT_WORDS.app, FONT_WORDS.textSize, FONT_WORDS.code, FONT_WORDS.codeSize]);
     const sections = [...document.querySelectorAll<HTMLElement>("[data-settings-page] [data-settings-card]")];
     expect(sections.map(c => [c.querySelector("[data-settings-head]")?.textContent, c.querySelector("[data-settings-lede]")?.textContent])).toEqual([
-      [SETTINGS_WORDS.mode, THEME_SECTION_WORDS.modeLede],
+      [SETTINGS_WORDS.mode, THEME_SECTION_WORDS.modeLede("")],
       [SETTINGS_WORDS.themesOf(THEME_WORDS.light), THEME_SECTION_WORDS.lede],
       [GLASS_WORDS.head, GLASS_WORDS.lede],
       [FONT_WORDS.head, FONT_WORDS.lede],

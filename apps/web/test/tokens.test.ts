@@ -337,6 +337,12 @@ describe("index.css", () => {
           transform: translateY(-4px);
         }
       }
+
+      /* A rolling digit's column, 0 to 9 one a line, drawn as content so the element's own text stays the digit. */
+      .digit-strip::before {
+        content: "0\\A 1\\A 2\\A 3\\A 4\\A 5\\A 6\\A 7\\A 8\\A 9";
+        white-space: pre;
+      }
       "
     `);
   });

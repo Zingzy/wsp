@@ -10,6 +10,7 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { Switch } from "../components/ui/switch.js";
 import { cn } from "../lib/utils.js";
 import { FontPicker } from "./FontPicker.js";
+import { hereName } from "./places.js";
 import { FONT_WORDS, GLASS_WORDS, SETTINGS_WORDS, THEME_SECTION_WORDS, THEME_WORDS, TRANSPARENCY_WORDS } from "./format.js";
 import { CARD_SURFACE, type SettingsCardData } from "./rows.js";
 import type { SettingsContext } from "./settingsContext.js";
@@ -82,9 +83,9 @@ export function appearanceCards(ctx: SettingsContext): SettingsCardData[] {
     {
       id: "mode",
       head: SETTINGS_WORDS.mode,
-      lede: THEME_SECTION_WORDS.modeLede,
+      lede: THEME_SECTION_WORDS.modeLede(hereName(ctx.places)),
       items: [],
-      search: [{ kind: "row", id: "mode", title: SETTINGS_WORDS.mode, description: THEME_SECTION_WORDS.modeLede }],
+      search: [{ kind: "row", id: "mode", title: SETTINGS_WORDS.mode, description: THEME_SECTION_WORDS.modeLede(hereName(ctx.places)) }],
       body: <ModePicker picks={preferences} onChange={setPreferences} />,
     },
     {

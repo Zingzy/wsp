@@ -376,7 +376,7 @@ function Stat({ k, label, value, note }: { k: string; label: string; value: stri
     <div data-k={k} className="flex min-w-0 flex-col gap-1.5 px-5 py-5">
       <span className="text-[13px] text-muted-foreground">{label}</span>
       <DigitRoll value={value} className="font-mono text-[26px] leading-8 font-medium text-foreground" />
-      {note === undefined ? null : <span className="truncate text-xs text-muted-foreground/80">{note}</span>}
+      {note === undefined ? null : <span className="truncate text-xs text-muted-foreground">{note}</span>}
     </div>
   );
 }
