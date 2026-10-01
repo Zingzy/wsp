@@ -4612,6 +4612,7 @@ const DAEMON_CONTENTS = [
   "3cfade0dea7b54831d65ec361226fb95958f457ad08a3aa6003e67da5581ada8",
   "9a59b1daa92807a07d52f8d1ee0a3b3d3d5680202be1da20498b093b5b1daa71",
   "29eeb80d015c5099f6991b2acc3a0457f26aa1636b66f8751d6734cdb1a0639d",
+  "ad16ee01ba69b4bd8339c8aa4753c2f3e46aa80c8d9f1ceeab9ca1038482f062",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -4903,7 +4904,12 @@ const DAEMON_CONTENTS = [
  * given.
  * Version 108: the daemon keeps its computer's readings, one point a minute folded from its samples, in a file a day
  * beside its token or in the folder --readings-dir names, 14 days under 8 MiB with the oldest day dropped first, and
- * sys.history answers them folded into the step asked for. */
+ * sys.history answers them folded into the step asked for.
+ * Version 109: A turn's changed-files range is now what the agent itself changed: each commit it wrote contributes its
+ * own files, collected one by one over the turn's reflog window whatever moved HEAD after them, together with the edits
+ * standing in its end worktree and the files it resolved by hand in a merge, while a HEAD move it did not write (a
+ * checkout, pull, merge, rebase or reset) is named on a line with no files of its own. A rebase is one such line plus
+ * the edits standing at the end; the commits it replayed and any conflict it resolved mid-rebase are not listed. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
