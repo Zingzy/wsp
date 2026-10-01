@@ -28,6 +28,15 @@ describe("the preferences record", () => {
     expect(PreferencesPatch.safeParse({ terminalZoom: { ws_a: null } }).success).toBe(true);
   });
 
+  it("a reading or code size lands from its table and a null puts each surface back on its own size", () => {
+    const sized = applyPreferencesPatch(DEFAULT_PREFERENCES, { textSize: 16, codeSize: 13 });
+    expect([sized.textSize, sized.codeSize]).toEqual([16, 13]);
+    expect(applyPreferencesPatch(sized, { theme: "dark" }).textSize).toBe(16);
+    const cleared = applyPreferencesPatch(sized, { textSize: null, codeSize: null });
+    expect("textSize" in cleared || "codeSize" in cleared).toBe(false);
+    for (const off of [{ textSize: 21 }, { codeSize: 9 }, { textSize: 14.5 }]) expect(PreferencesPatch.safeParse(off).success, JSON.stringify(off)).toBe(false);
+  });
+
   it("the editor pick lands and stays through a patch that names none, and an editor off the table is refused", () => {
     const picked = applyPreferencesPatch(DEFAULT_PREFERENCES, { editor: "zed" });
     expect(picked).toEqual({ ...DEFAULT_PREFERENCES, editor: "zed" });

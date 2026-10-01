@@ -79,7 +79,26 @@ export function useTransparencyEffect(): void {
 export function useFontEffect(): void {
   const appFont = useStore(s => s.preferences.appFont);
   const codeFont = useStore(s => s.preferences.codeFont);
+  const textSize = useStore(s => s.preferences.textSize);
+  const codeSize = useStore(s => s.preferences.codeSize);
   useLayoutEffect(() => applyFonts({ appFont, codeFont }), [appFont, codeFont]);
+  useLayoutEffect(() => rootVariables(sizeVariables({ textSize, codeSize })), [textSize, codeSize]);
+}
+
+/** The variables a picked size sets, the conversation's text and the composer's for the reading size and every code
+ * surface's for the code size; an unpicked one sets none, so each surface keeps its own size. */
+export function sizeVariables({ textSize, codeSize }: Pick<Preferences, "textSize" | "codeSize">): Record<string, string | null> {
+  const px = (n: number | undefined): string | null => (n === undefined ? null : `${n}px`);
+  return { "--font-size-chat": px(textSize), "--font-size-prompt": px(textSize), "--font-size-code": px(codeSize), "--diffs-font-size": px(codeSize) };
+}
+
+/** Each variable set on the root, or taken off it where its value is null. */
+function rootVariables(values: Record<string, string | null>): void {
+  const style = document.documentElement.style;
+  for (const [name, value] of Object.entries(values)) {
+    if (value === null) style.removeProperty(name);
+    else style.setProperty(name, value);
+  }
 }
 
 const subscribeToHtmlClass = (onChange: () => void): (() => void) => {

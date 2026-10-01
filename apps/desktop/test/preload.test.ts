@@ -90,6 +90,8 @@ describe("the preload's bridge", () => {
     const wsp = await bridge();
     wsp.sayOutside({ title: "wsp needs you", body: "sign in to GitHub CLI login", sound: false });
     expect(send).toHaveBeenLastCalledWith("outside:say", { title: "wsp needs you", body: "sign in to GitHub CLI login", sound: false });
+    wsp.playNoticeSound();
+    expect(send).toHaveBeenLastCalledWith("outside:sample");
     wsp.setBadge(2);
     expect(send).toHaveBeenLastCalledWith("badge:set", 2);
     let opened = 0;

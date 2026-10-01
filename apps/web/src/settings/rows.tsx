@@ -95,6 +95,8 @@ export type SettingsItem = SettingsRowData | SettingsLineData;
 export interface SettingsCardData {
   readonly id: string;
   readonly head?: string;
+  /** One sentence under the head: what the section is for. */
+  readonly lede?: string;
   readonly items: ReadonlyArray<SettingsItem>;
   readonly under?: ReactNode;
   /** A control too large for a row, drawn under the head and over the card's surface where it has rows too. */
@@ -264,7 +266,7 @@ export function Cards({ cards }: { cards: ReadonlyArray<SettingsCardData> }) {
       {cards.map(card => {
         const drops = cardDrops(card.items);
         return (
-          <Card key={card.id} id={card.id} head={card.head} under={card.under} body={card.body}>
+          <Card key={card.id} id={card.id} head={card.head} {...(card.lede === undefined ? {} : { lede: card.lede })} under={card.under} body={card.body}>
             {card.items.map(item => {
               if (item.kind === "line") {
                 const { kind: _line, ...line } = item;

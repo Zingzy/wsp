@@ -2147,6 +2147,12 @@ export const SSH_TICKET_REFUSAL = "a socket let in on a ticket cannot reach a wo
  * own window, and the list of what could start is read on the same terms. */
 export const EDITOR_TICKET_REFUSAL = "a socket let in on a ticket cannot list or open the editors on this computer; use the app on the computer the host runs on";
 
+/** The sizes a person may read the conversation and its code at, in px. Each surface keeps its own size until one is
+ * picked. */
+export const TEXT_SIZES = [13, 14, 15, 16, 17] as const;
+export const CODE_SIZES = [11, 12, 13, 14, 15] as const;
+const sizeOf = (sizes: readonly number[]) => z.number().int().refine(n => sizes.includes(n), { message: `one of ${sizes.join(", ")}` });
+
 export const Preferences = z.object({
   theme: ThemePreference,
   /** Each side's pick. Defaulted rather than required, so a record from a host older than the picks still parses on the
@@ -2199,6 +2205,10 @@ export const Preferences = z.object({
   /** The family the app's text and its code are drawn in, empty for the system stack. The terminal keeps its own. */
   appFont: FontFamily.default(""),
   codeFont: FontFamily.default(""),
+  /** The size replies, the person's own messages and the composer read at; absent, each its own. */
+  textSize: sizeOf(TEXT_SIZES).optional(),
+  /** The size code reads at in replies, tool output, diffs and files; absent, each its own. */
+  codeSize: sizeOf(CODE_SIZES).optional(),
   /** Whether the surfaces still being worked on are offered at all. The host stamps it from its own environment at
    * every read, so no client sets it and nothing a state file holds can turn it on. */
   labs: z.boolean(),
@@ -2226,6 +2236,8 @@ export const PreferencesPatch = Preferences.omit({ labs: true })
     computerLook: z.record(z.string(), ComputerLook.nullable()).optional(),
     target: PreferencesTarget.nullable().optional(),
     keybindings: z.record(z.string(), ChordText.nullable()).optional(),
+    textSize: sizeOf(TEXT_SIZES).nullable().optional(),
+    codeSize: sizeOf(CODE_SIZES).nullable().optional(),
   })
   .strict();
 export type PreferencesPatch = z.infer<typeof PreferencesPatch>;
@@ -2252,6 +2264,8 @@ export function applyPreferencesPatch(current: Preferences, patch: PreferencesPa
   };
   const target = patch.target === undefined ? current.target : patch.target;
   const editor = patch.editor ?? current.editor;
+  const textSize = patch.textSize === undefined ? current.textSize : patch.textSize;
+  const codeSize = patch.codeSize === undefined ? current.codeSize : patch.codeSize;
   return {
     theme: patch.theme ?? current.theme,
     lightTheme: patch.lightTheme ?? current.lightTheme,
@@ -2276,6 +2290,8 @@ export function applyPreferencesPatch(current: Preferences, patch: PreferencesPa
     ...(sidebarWidth === null || sidebarWidth === undefined ? {} : { sidebarWidth }),
     ...(target === null || target === undefined ? {} : { target }),
     ...(editor === undefined ? {} : { editor }),
+    ...(textSize === null || textSize === undefined ? {} : { textSize }),
+    ...(codeSize === null || codeSize === undefined ? {} : { codeSize }),
   };
 }
 
@@ -2446,6 +2462,9 @@ export interface DesktopBridge {
    * turn): the shell shows a system notification while its window has no focus, and nothing while it has, since the
    * page already says it. The page decides nothing about focus; the shell owns that. */
   sayOutside(line: OutsideLine): void;
+  /** One notification shown now, with the sound a finished turn makes, focused or not: what Settings plays so the
+   * person hears it. */
+  playNoticeSound(): void;
   /** A click on that notification, after the shell has raised its window: the page opens what it was about. Returns
    * the unsubscribe. */
   onNeedsYouOpen(handler: () => void): () => void;
