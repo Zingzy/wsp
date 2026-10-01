@@ -12,7 +12,7 @@ import { bundleShell, type BundleShell } from "./get-bundle.js";
 import { homeOf, openHost, openHostReady, statePathIn, stopWsp, userDataIn, workingHere, type HostSession, type Launch, type OpenHostOptions } from "./host-lifecycle.js";
 import { hostSwitcher, type HostSwitcher } from "./host-switch.js";
 import { offerMove, type MoveGate } from "./move.js";
-import { sayOutside, showBadge, soundSample, type Notifier } from "./needs-you.js";
+import { sayOutside, showBadge, type Notifier } from "./needs-you.js";
 import { allowed, fromAppPage, fromOnboardingPage, hostsViewFor, notForThisPage } from "./origin.js";
 import { hostFeed, type FeedEvent, type FeedState, type HostFeed } from "./host-feed.js";
 import { guardWorkers, loadHostPage } from "./page-session.js";
@@ -151,7 +151,7 @@ if (launchedWith !== undefined) links.open(launchedWith);
 if (app.isPackaged && process.env["WSP_DESKTOP_SMOKE"] !== "1") app.setAsDefaultProtocolClient("wsp");
 
 /** How this shell shows a system notification; the module decides whether to, this says with what. */
-const NOTIFIER: Notifier = { supported: () => Notification.isSupported(), make: o => new Notification(o) };
+const NOTIFIER: Notifier = { supported: () => Notification.isSupported(), make: o => new Notification(o), beep: () => shell.beep() };
 
 /** The window brought back in front of the person: a minimised one is restored first, and on a Mac the app itself has
  * to be raised or the window comes up behind whatever they were in. */
@@ -173,10 +173,6 @@ listen("outside:say", (event, line) => {
 });
 
 listen("badge:set", (_event, count) => showBadge(count, app));
-
-// The sound a notification makes, played when Settings asks; this computer's own host's page alone, since it is a
-// notification on this computer.
-listen("outside:sample", () => void soundSample(NOTIFIER));
 
 // The one bridge call the preload answers itself, off the shell's own webUtils: it asks here first, so a page a
 // computer this one does not own serves is handed no path from this computer's desktop.
@@ -538,7 +534,7 @@ function holdAwake(): void {
 /** A finish, a failure or a prompt said over the system while no window is open to say it; the page says them while it is up. */
 function sayWhileClosed(e: FeedEvent): void {
   if (win !== undefined || fed === undefined) return;
-  const line = trayNotice(e as unknown as Parameters<typeof trayNotice>[0], fed, fed.notifySound);
+  const line = trayNotice(e as unknown as Parameters<typeof trayNotice>[0], fed, fed);
   if (line === undefined) return;
   const threadId = typeof e["threadId"] === "string" ? e["threadId"] : undefined;
   sayOutside(line, { focused: () => false, raise: () => void reopen(), open: () => void (threadId !== undefined && fedFrom?.remote !== true && links.open(`wsp://thread/${threadId}`)) }, NOTIFIER);

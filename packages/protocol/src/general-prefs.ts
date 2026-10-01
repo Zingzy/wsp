@@ -21,6 +21,12 @@ export const NOTIFY_CHOICES = ["off", "notify", "sound", "notify-sound"] as cons
 export const NotifyChoice = z.enum(NOTIFY_CHOICES);
 export type NotifyChoice = z.infer<typeof NotifyChoice>;
 
+/** Whether a choice shows a notification and whether it sounds; nothing for off. */
+export function notifyBy(choice: NotifyChoice): { show: boolean; sound: boolean } | undefined {
+  if (choice === "off") return undefined;
+  return { show: choice !== "sound", sound: choice !== "notify" };
+}
+
 export const SETTLE_CHOICES = ["15m", "1h", "2h", "1d", "never"] as const;
 /** How long a read thread sits quiet before the sidebar folds it into Settled. */
 export const SettleAfter = z.enum(SETTLE_CHOICES);

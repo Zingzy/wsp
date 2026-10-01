@@ -2201,8 +2201,6 @@ export const Preferences = z.object({
   usageLogs: z.boolean().default(true),
   /** The editor Open in editor opens a file in; absent opens the first one installed on the computer running the host. */
   editor: EditorId.optional(),
-  /** Whether a system notification for a finished turn or a permission prompt makes a sound. */
-  notifySound: z.boolean(),
   /** Whether the desktop app keeps this computer from sleeping on its own while a thread works on it. On unless the
    * person turns it off; defaulted so a record from a host older than the switch reads as on. */
   keepAwake: z.boolean().default(true),
@@ -2255,7 +2253,7 @@ export const PreferencesPatch = Preferences.omit({ labs: true })
   .strict();
 export type PreferencesPatch = z.infer<typeof PreferencesPatch>;
 
-export const DEFAULT_PREFERENCES: Preferences = { theme: "system", ...THEME_PICK_DEFAULTS, sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, usageLogs: true, notifySound: true, keepAwake: true, transparency: true, projectOrder: [], keybindings: {}, appFont: "", codeFont: "", ...GENERAL_DEFAULTS, labs: false };
+export const DEFAULT_PREFERENCES: Preferences = { theme: "system", ...THEME_PICK_DEFAULTS, sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, usageLogs: true, keepAwake: true, transparency: true, projectOrder: [], keybindings: {}, appFont: "", codeFont: "", ...GENERAL_DEFAULTS, labs: false };
 
 /** The record as stored, over the defaults; a record that does not parse (an older or a hand-edited state file) reads as the defaults. */
 export function preferencesFrom(stored: unknown): Preferences {
@@ -2292,7 +2290,6 @@ export function applyPreferencesPatch(current: Preferences, patch: PreferencesPa
     serverIcons: patch.serverIcons ?? current.serverIcons,
     agentVersions: patch.agentVersions ?? current.agentVersions,
     usageLogs: patch.usageLogs ?? current.usageLogs,
-    notifySound: patch.notifySound ?? current.notifySound,
     keepAwake: patch.keepAwake ?? current.keepAwake,
     transparency: patch.transparency ?? current.transparency,
     projectOrder: patch.projectOrder ?? current.projectOrder,
@@ -2437,8 +2434,9 @@ export interface ShellChord {
   readonly altKey: boolean;
 }
 
-/** One notification said outside the app: its title, its line, and whether it makes a sound. */
-export const OutsideLine = z.object({ title: z.string(), body: z.string(), sound: z.boolean() });
+/** One moment said outside the app: its title, its line, whether a notification shows it, and whether it makes a
+ * sound, which with no notification is the sound alone. */
+export const OutsideLine = z.object({ title: z.string(), body: z.string(), show: z.boolean(), sound: z.boolean() });
 export type OutsideLine = z.infer<typeof OutsideLine>;
 
 /** What the desktop shell's preload puts on window.wsp; a browser tab has none of it. */
@@ -2476,9 +2474,6 @@ export interface DesktopBridge {
    * turn): the shell shows a system notification while its window has no focus, and nothing while it has, since the
    * page already says it. The page decides nothing about focus; the shell owns that. */
   sayOutside(line: OutsideLine): void;
-  /** One notification shown now, with the sound a finished turn makes, focused or not: what Settings plays so the
-   * person hears it. */
-  playNoticeSound(): void;
   /** A click on that notification, after the shell has raised its window: the page opens what it was about. Returns
    * the unsubscribe. */
   onNeedsYouOpen(handler: () => void): () => void;

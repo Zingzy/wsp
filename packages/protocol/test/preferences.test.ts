@@ -2,7 +2,7 @@
 // The preferences record every client reads off the host: what a stored record
 // parses to, how a patch lands on it, and the wire shapes that carry both.
 import { describe, expect, it } from "vitest";
-import { DEFAULT_PREFERENCES, EventUnion, LABS_ENV, Preferences, PreferencesPatch, RuntimeRequest, applyPreferencesPatch, fmtPx, labsFromEnv, preferencesFrom } from "../src/index.js";
+import { DEFAULT_PREFERENCES, EventUnion, LABS_ENV, NOTIFY_CHOICES, notifyBy, Preferences, PreferencesPatch, RuntimeRequest, applyPreferencesPatch, fmtPx, labsFromEnv, preferencesFrom } from "../src/index.js";
 
 describe("the preferences record", () => {
   it("nothing stored, a record from an older host and a corrupt one all read as the defaults", () => {
@@ -10,7 +10,7 @@ describe("the preferences record", () => {
     expect(preferencesFrom({})).toEqual(DEFAULT_PREFERENCES);
     expect(preferencesFrom({ theme: "sepia" })).toEqual(DEFAULT_PREFERENCES);
     expect(preferencesFrom("nonsense")).toEqual(DEFAULT_PREFERENCES);
-    expect(DEFAULT_PREFERENCES).toEqual({ theme: "system", lightTheme: "paper", darkTheme: "graphite", sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, usageLogs: true, notifySound: true, keepAwake: true, transparency: true, projectOrder: [], keybindings: {}, appFont: "", codeFont: "", sendWith: "enter", midTurn: "queue", notifyNeeds: "notify-sound", notifyDone: "off", planAlerts: true, settleAfter: "2h", askDelete: true, onQuit: "ask", labs: false });
+    expect(DEFAULT_PREFERENCES).toEqual({ theme: "system", lightTheme: "paper", darkTheme: "graphite", sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, usageLogs: true, keepAwake: true, transparency: true, projectOrder: [], keybindings: {}, appFont: "", codeFont: "", sendWith: "enter", midTurn: "queue", notifyNeeds: "notify-sound", notifyDone: "off", planAlerts: true, settleAfter: "2h", askDelete: true, onQuit: "ask", labs: false });
   });
 
   it("a stored record keeps what it has and takes the defaults for the rest", () => {
@@ -19,11 +19,11 @@ describe("the preferences record", () => {
 
   it("a patch lands field by field, a null width clears the width, and the zoom lands per workspace, a null entry dropping that workspace's", () => {
     const one = applyPreferencesPatch(DEFAULT_PREFERENCES, { theme: "dark", sidebarWidth: 300, terminalZoom: { ws_a: 2 } });
-    expect(one).toEqual({ theme: "dark", lightTheme: "paper", darkTheme: "graphite", sidebarMode: "list", sidebarWidth: 300, terminalSize: "app", terminalZoom: { ws_a: 2 }, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, usageLogs: true, notifySound: true, keepAwake: true, transparency: true, projectOrder: [], keybindings: {}, appFont: "", codeFont: "", sendWith: "enter", midTurn: "queue", notifyNeeds: "notify-sound", notifyDone: "off", planAlerts: true, settleAfter: "2h", askDelete: true, onQuit: "ask", labs: false });
+    expect(one).toEqual({ theme: "dark", lightTheme: "paper", darkTheme: "graphite", sidebarMode: "list", sidebarWidth: 300, terminalSize: "app", terminalZoom: { ws_a: 2 }, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, usageLogs: true, keepAwake: true, transparency: true, projectOrder: [], keybindings: {}, appFont: "", codeFont: "", sendWith: "enter", midTurn: "queue", notifyNeeds: "notify-sound", notifyDone: "off", planAlerts: true, settleAfter: "2h", askDelete: true, onQuit: "ask", labs: false });
     const two = applyPreferencesPatch(one, { terminalZoom: { ws_b: -1 } });
     expect(two.terminalZoom).toEqual({ ws_a: 2, ws_b: -1 });
     const three = applyPreferencesPatch(two, { sidebarWidth: null, terminalZoom: { ws_a: null } });
-    expect(three).toEqual({ theme: "dark", lightTheme: "paper", darkTheme: "graphite", sidebarMode: "list", terminalSize: "app", terminalZoom: { ws_b: -1 }, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, usageLogs: true, notifySound: true, keepAwake: true, transparency: true, projectOrder: [], keybindings: {}, appFont: "", codeFont: "", sendWith: "enter", midTurn: "queue", notifyNeeds: "notify-sound", notifyDone: "off", planAlerts: true, settleAfter: "2h", askDelete: true, onQuit: "ask", labs: false });
+    expect(three).toEqual({ theme: "dark", lightTheme: "paper", darkTheme: "graphite", sidebarMode: "list", terminalSize: "app", terminalZoom: { ws_b: -1 }, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, usageLogs: true, keepAwake: true, transparency: true, projectOrder: [], keybindings: {}, appFont: "", codeFont: "", sendWith: "enter", midTurn: "queue", notifyNeeds: "notify-sound", notifyDone: "off", planAlerts: true, settleAfter: "2h", askDelete: true, onQuit: "ask", labs: false });
     expect(applyPreferencesPatch(one, {})).toEqual(one);
     expect(PreferencesPatch.safeParse({ terminalZoom: { ws_a: null } }).success).toBe(true);
   });
@@ -209,16 +209,14 @@ describe("transparency on the preferences record", () => {
   });
 });
 
-describe("the sound and the project order on the preferences record", () => {
-  it("the sound switch lands as a flag, and a project order lands whole, the list the person dragged", () => {
-    const quiet = applyPreferencesPatch(DEFAULT_PREFERENCES, { notifySound: false });
-    expect(quiet.notifySound).toBe(false);
-    const ordered = applyPreferencesPatch(quiet, { projectOrder: ["pr_b", "pr_a"] });
-    expect(ordered).toEqual({ ...quiet, projectOrder: ["pr_b", "pr_a"] });
+describe("the project order on the preferences record", () => {
+  it("a project order lands whole, the list the person dragged", () => {
+    const ordered = applyPreferencesPatch(DEFAULT_PREFERENCES, { projectOrder: ["pr_b", "pr_a"] });
+    expect(ordered).toEqual({ ...DEFAULT_PREFERENCES, projectOrder: ["pr_b", "pr_a"] });
     expect(applyPreferencesPatch(ordered, { projectOrder: ["pr_a"] }).projectOrder).toEqual(["pr_a"]);
     expect(applyPreferencesPatch(ordered, { theme: "dark" }).projectOrder).toEqual(["pr_b", "pr_a"]);
     expect(PreferencesPatch.safeParse({ projectOrder: [3] }).success).toBe(false);
-    expect(PreferencesPatch.safeParse({ notifySound: "loud" }).success).toBe(false);
+    expect(PreferencesPatch.safeParse({ notifySound: false }).success).toBe(false);
   });
 });
 
@@ -244,6 +242,10 @@ describe("the General choices on the preferences record", () => {
     expect(picked).toEqual({ ...DEFAULT_PREFERENCES, sendWith: "mod-enter", midTurn: "steer", notifyNeeds: "sound", notifyDone: "notify", planAlerts: false, settleAfter: "never", askDelete: false, onQuit: "stop" });
     expect(applyPreferencesPatch(picked, { theme: "dark" })).toEqual({ ...picked, theme: "dark" });
     expect(preferencesFrom({ settleAfter: "15m", onQuit: "keep" })).toMatchObject({ settleAfter: "15m", onQuit: "keep" });
+  });
+
+  it("each notification choice shows, sounds, both, or says nothing", () => {
+    expect(NOTIFY_CHOICES.map(choice => notifyBy(choice))).toEqual([undefined, { show: true, sound: false }, { show: false, sound: true }, { show: true, sound: true }]);
   });
 
   it("a choice off its table is refused", () => {

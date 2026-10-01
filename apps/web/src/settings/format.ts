@@ -236,15 +236,6 @@ export const PRIVACY_WORDS = {
   usageLogsDescription: (here: string): string => `Usage counts what Claude Code, Codex and OpenCode logged on ${here === "" ? "this computer" : here}, wsp's own threads there included. wsp reads the logs there and shows what they count on the Usage page alone, never to an agent.`,
 } as const;
 
-/** Settings > Appearance's Notifications: the one switch over the sound a notification makes. */
-export const NOTIFY_WORDS = {
-  head: "Notifications",
-  lede: "What wsp says while you are in another app.",
-  play: "Play the sound",
-  sound: "Sound",
-  soundDescription: "A finished turn and a permission prompt make a sound while wsp is not in front.",
-} as const;
-
 /** Settings > Appearance's switch over the app's glass. */
 export const TRANSPARENCY_WORDS = {
   title: "Transparency",

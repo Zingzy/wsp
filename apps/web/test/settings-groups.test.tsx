@@ -11,7 +11,7 @@ import { DAEMON_VERSION, DEFAULT_PREFERENCES, DEVICES_TICKET_REFUSAL, HOST_NO_RE
 import { DisconnectedError, RequestError, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { EDITOR_SSH_WORDS } from "../src/files/EditorConsent.js";
-import { ABOUT_WORDS, ACCOUNT_WORDS, AWAKE_WORDS, DEVICES_WORDS, FONT_WORDS, GENERAL_WORDS, KEYBINDINGS_WORDS, NOTIFY_WORDS, PRIVACY_WORDS, PROJECTS_WORDS, TRANSPARENCY_WORDS, WHERE_WORDS } from "../src/settings/format.js";
+import { ABOUT_WORDS, ACCOUNT_WORDS, AWAKE_WORDS, DEVICES_WORDS, FONT_WORDS, GENERAL_WORDS, KEYBINDINGS_WORDS, PRIVACY_WORDS, PROJECTS_WORDS, TRANSPARENCY_WORDS, WHERE_WORDS } from "../src/settings/format.js";
 import { builtWhen } from "../src/settings/image.js";
 import { chordsOf, keybindingCards } from "../src/settings/keybindings.js";
 import { CHORD_WORDS, JUMP_WORD, KEYBINDING_WORDS } from "../src/settings/keybindingWords.js";
@@ -311,22 +311,12 @@ describe("General", () => {
 });
 
 describe("Appearance", () => {
-  it("offers the sound of a finished turn and a prompt as one switch under Notifications, on by default, that writes the record and restores to on", async () => {
-    const { api, sets } = settingsApi();
+  it("holds the glass and the type rows, and no notification row, which General keeps per kind of moment", async () => {
+    const { api } = settingsApi();
     mountSettings({ api, at: { kind: "group", group: "appearance" } });
     await settle();
-    expect(rowTitles()).toEqual([TRANSPARENCY_WORDS.title, FONT_WORDS.app, FONT_WORDS.textSize, FONT_WORDS.code, FONT_WORDS.codeSize, NOTIFY_WORDS.sound]);
-    expect(descriptionOf("notify-sound")).toBe(NOTIFY_WORDS.soundDescription);
-    const toggle = (): HTMLElement => document.querySelector<HTMLElement>("[data-k=notify-sound]")!;
-    expect(toggle().getAttribute("aria-checked")).toBe("true");
-    fireEvent.click(toggle());
-    await settle();
-    expect(sets).toEqual([{ notifySound: false }]);
-    expect(useStore.getState().preferences.notifySound).toBe(false);
-    fireEvent.click(document.querySelector<HTMLElement>("[data-k=restore-defaults]")!);
-    await settle();
-    expect(sets.at(-1)).toMatchObject({ notifySound: true });
-    expect(toggle().getAttribute("aria-checked")).toBe("true");
+    expect(rowTitles()).toEqual([TRANSPARENCY_WORDS.title, FONT_WORDS.app, FONT_WORDS.textSize, FONT_WORDS.code, FONT_WORDS.codeSize]);
+    expect(document.querySelector("[data-k=notify-sound]")).toBeNull();
   });
 });
 

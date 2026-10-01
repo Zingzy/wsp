@@ -5,7 +5,7 @@
 // turn starts, asks or ends, rather than folded here a second way. A host that
 // does not answer, or goes, reads as lost and is dialled again until it answers.
 import type { dialHost } from "@wsp/host";
-import { DEFAULT_PREFERENCES, type PlaceView, type Preferences, type SessionView, type WorkspaceView } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, type NotifyChoice, type PlaceView, type Preferences, type SessionView, type WorkspaceView } from "@wsp/protocol";
 import type { OpenAsk } from "./tray.js";
 
 type HostClient = Awaited<ReturnType<typeof dialHost>>;
@@ -16,7 +16,8 @@ export interface FeedState {
   places: readonly PlaceView[];
   asks: ReadonlyMap<string, OpenAsk>;
   keepAwake: boolean;
-  notifySound: boolean;
+  notifyNeeds: NotifyChoice;
+  notifyDone: NotifyChoice;
   lost: boolean;
 }
 
@@ -64,7 +65,7 @@ const text = (e: unknown): string => (e instanceof Error ? e.message : String(e)
 export function hostFeed(deps: FeedDeps): HostFeed {
   const settleMs = deps.settleMs ?? 150;
   const retryMs = deps.retryMs ?? 3_000;
-  let state: FeedState = { sessions: [], workspaces: [], places: [], asks: new Map(), keepAwake: DEFAULT_PREFERENCES.keepAwake, notifySound: DEFAULT_PREFERENCES.notifySound, lost: false };
+  let state: FeedState = { sessions: [], workspaces: [], places: [], asks: new Map(), keepAwake: DEFAULT_PREFERENCES.keepAwake, notifyNeeds: DEFAULT_PREFERENCES.notifyNeeds, notifyDone: DEFAULT_PREFERENCES.notifyDone, lost: false };
   let client: HostClient | undefined;
   let dialing = false;
   let closed = false;
@@ -75,7 +76,7 @@ export function hostFeed(deps: FeedDeps): HostFeed {
     state = { ...state, ...next };
     deps.changed(state);
   };
-  const switches = (p: Pick<Preferences, "keepAwake" | "notifySound">): Partial<FeedState> => ({ keepAwake: p.keepAwake, notifySound: p.notifySound });
+  const switches = (p: Pick<Preferences, "keepAwake" | "notifyNeeds" | "notifyDone">): Partial<FeedState> => ({ keepAwake: p.keepAwake, notifyNeeds: p.notifyNeeds, notifyDone: p.notifyDone });
 
   const reread = async (on: HostClient): Promise<void> => {
     const [{ sessions }, { workspaces }, { places }] = await Promise.all([
