@@ -65,8 +65,8 @@ describe("the menu bar's feed from the host the window is on", () => {
     await vi.waitFor(() => expect(states.at(-1)?.asks.has("s1")).toBe(false));
     await feed.interrupt("s1");
     expect(host.asked.at(-1)).toEqual({ op: "sessions.interrupt", params: { sessionId: "s1" } });
-    host.push({ type: "preferences.changed", preferences: { ...DEFAULT_PREFERENCES, keepAwake: true, notifyNeeds: "sound", notifyDone: "notify" } });
-    await vi.waitFor(() => expect(states.at(-1)).toMatchObject({ keepAwake: true, notifyNeeds: "sound", notifyDone: "notify" }));
+    host.push({ type: "preferences.changed", preferences: { ...DEFAULT_PREFERENCES, keepAwake: true, notifyNeeds: "sound", notifyDone: "notify", planAlerts: false, onQuit: "keep" } });
+    await vi.waitFor(() => expect(states.at(-1)).toMatchObject({ keepAwake: true, notifyNeeds: "sound", notifyDone: "notify", planAlerts: false, onQuit: "keep" }));
     feed.close();
   });
 

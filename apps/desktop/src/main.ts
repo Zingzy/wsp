@@ -2,7 +2,7 @@
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { adoptLoginPath, agentsHere, aimedHost, computerNameHere, daemonBinaryHere, dialHost, installEach, mcpServerSpec, runningWsp, shimPath, systemService, wspHome, type CliIO } from "@wsp/host";
-import { HOST_WORDS, OutsideLine, ThemePreference, hostMenuAction, hostsMenuItems } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, HOST_WORDS, OutsideLine, ThemePreference, hostMenuAction, hostsMenuItems } from "@wsp/protocol";
 import { BrowserWindow, Menu, Notification, Tray, app, dialog, ipcMain, nativeImage, nativeTheme, powerSaveBlocker, shell, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
 import { awakeWanted } from "./awake.js";
 import { chooseFrom, contextMenuTemplate, parseContextMenuItems } from "./context-menu.js";
@@ -17,7 +17,7 @@ import { allowed, fromAppPage, fromOnboardingPage, hostsViewFor, notForThisPage 
 import { hostFeed, type FeedEvent, type FeedState, type HostFeed } from "./host-feed.js";
 import { guardWorkers, loadHostPage } from "./page-session.js";
 import { pagePreviews } from "./previews.js";
-import { QUIT_WORD, quitChoice, quitPrompt } from "./quit.js";
+import { QUIT_WORD, quitAnswer, quitChoice, quitPrompt } from "./quit.js";
 import { installShim, shimText } from "./shim.js";
 import { trayModel, trayNotice, type TrayAct, type TrayModel, type TrayRow } from "./tray.js";
 import { vibrancyFor, windowOptions } from "./window.js";
@@ -379,14 +379,17 @@ app.on("before-quit", () => {
 });
 
 /** The question the menu's Quit asks while the window is on this computer's own host: quit and leave wsp running, or
- * stop it too. A window on a host somewhere else quits with nothing to ask. */
+ * stop it too, unless the person picked a standing answer on General. A window on a host somewhere else quits with
+ * nothing to ask. */
 async function askQuit(): Promise<void> {
   if (local === undefined || local.remote) return app.quit();
   const { home, statePath } = where();
-  const working = await workingHere(statePath, home).catch(() => 0);
-  // Picked from the menu bar, the app may not be frontmost, and the question would open behind another app's window.
-  app.focus({ steal: true });
-  const choice = quitChoice((await dialog.showMessageBox({ type: "question", ...quitPrompt(working) })).response);
+  const choice = await quitAnswer(fed?.onQuit ?? DEFAULT_PREFERENCES.onQuit, async () => {
+    const working = await workingHere(statePath, home).catch(() => 0);
+    // Picked from the menu bar, the app may not be frontmost, and the question would open behind another app's window.
+    app.focus({ steal: true });
+    return quitChoice((await dialog.showMessageBox({ type: "question", ...quitPrompt(working) })).response);
+  });
   if (choice === "cancel") return;
   if (choice === "stop") {
     quitting = true;
