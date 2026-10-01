@@ -93,7 +93,7 @@ export function refuseRequestLine(id: RequestId, method: string): string {
 export type RpcMessage =
   | { kind: "response"; id: RequestId; result: unknown }
   | { kind: "error"; id: RequestId; message: string }
-  | { kind: "notification"; method: string; params: Record<string, unknown> }
+  | { kind: "notification"; method: string; params: Record<string, unknown>; emittedAtMs?: number }
   | { kind: "request"; id: RequestId; method: string; params: Record<string, unknown> };
 
 function rec(value: unknown): Record<string, unknown> | undefined {
@@ -115,7 +115,7 @@ export function readMessage(raw: string): RpcMessage | undefined {
   if (message === undefined) return undefined;
   const method = typeof message.method === "string" ? message.method : undefined;
   const params = rec(message.params) ?? {};
-  if (method !== undefined) return isId(message.id) ? { kind: "request", id: message.id, method, params } : { kind: "notification", method, params };
+  if (method !== undefined) return isId(message.id) ? { kind: "request", id: message.id, method, params } : { kind: "notification", method, params, ...(typeof message.emittedAtMs === "number" ? { emittedAtMs: message.emittedAtMs } : {}) };
   if (!isId(message.id)) return undefined;
   const error = rec(message.error);
   if (error !== undefined) return { kind: "error", id: message.id, message: typeof error.message === "string" ? error.message : "codex refused the request without saying why" };

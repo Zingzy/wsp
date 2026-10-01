@@ -45,6 +45,10 @@ describe("a turn's list price", () => {
     expect(priceOf("claude-opus-5-20260901", { input: 0, output: 1_000 }, table)).toBeCloseTo(2.5e-2, 12);
   });
 
+  it("prices a model named with its context window after it, as Claude Code's [1m], at its base model's rate", () => {
+    expect(priceOf("claude-opus-5[1m]", { input: 0, output: 1_000 }, table)).toBeCloseTo(2.5e-2, 12);
+  });
+
   it("answers nothing for a model the table does not have, and never a guess", () => {
     expect(priceOf("some-new-model", { input: 1_000, output: 1_000 }, table)).toBeUndefined();
   });
@@ -109,6 +113,10 @@ describe("what a range used, said once", () => {
     expect(usedHeadline({ range: "week", rows })).toBe("7.35B tokens in the last 7 days, $4,317.19 at list price, 6.9B of it read from cache.");
     expect(rows.map(r => freshIn(r.tokens))).toEqual([448_900_000, 1_300_000]);
     expect(usedHeadline({ range: "day", rows: [] })).toBe(USAGE_WORDS.noUse);
+  });
+
+  it("takes the written part out of fresh as well, so fresh, written, cached and out add up to the row", () => {
+    expect(freshIn({ input: 10_000, cached: 6_000, cacheWrite: 3_000 })).toBe(1_000);
   });
 
   it("names whose logs it counted and on which computer, wsp's own threads among them", () => {

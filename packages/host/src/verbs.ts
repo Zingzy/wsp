@@ -815,10 +815,10 @@ export function usageTableLines(read: { accounts: readonly AccountRow[]; used: U
     read.used.rows.length === 0
       ? [`${USAGE_WORDS.noUse}.`]
       : table([
-          [read.used.split.toUpperCase(), "FRESH IN", "CACHED", "OUT", "PRICE"],
+          [read.used.split.toUpperCase(), "FRESH IN", "WRITTEN", "CACHED", "OUT", "PRICE"],
           ...read.used.rows.map(row => {
             const price = usedPrice(row);
-            return [row.label, fmtTokens(freshIn(row.tokens)), fmtTokens(row.tokens.cached), fmtTokens(row.tokens.output), [price.figure, price.word].filter(Boolean).join(" ")];
+            return [row.label, fmtTokens(freshIn(row.tokens)), fmtTokens(row.tokens.cacheWrite ?? 0), fmtTokens(row.tokens.cached), fmtTokens(row.tokens.output), [price.figure, price.word].filter(Boolean).join(" ")];
           }),
         ]);
   return [...accounts, "", ...used];
@@ -3668,7 +3668,7 @@ export const ALL_VERBS: readonly Verb[] = [
   },
   {
     name: "usage",
-    usage: "wsp usage [--range day|week|month] [--by agent|account|computer|project]",
+    usage: "wsp usage [--range day|week|month] [--by agent|account|computer|project|model]",
     about: "what each agent account signed in on any of your computers may still use, and what was used over a day, a week or a month split one way; two answers, never added together",
     page: "agent",
     options: { range: { type: "string" }, by: { type: "string" } },
@@ -3682,8 +3682,8 @@ export const ALL_VERBS: readonly Verb[] = [
     },
     tool: tool({
       description:
-        "Two answers that are never added together. accounts: every agent account signed in on any computer, the same one on three computers once, each with how much of its plan's windows is used and when each starts again, as that agent printed them in the last turn wsp ran on it; an agent that prints none reports no plan limit, a sign-in by API key pays per token with no plan window, and an account no turn has run on yet has no reading. used: the tokens the turns used over the range (today, the last seven days or the last thirty), split by agent, account, computer or project, each row with the cost its agent reported or a list price off one table, input counting the cached tokens, and a series over the range.",
-      input: { range: UsageRange.optional().describe("day (the default), week or month"), by: UsageSplit.optional().describe("agent (the default), account, computer or project") },
+        "Two answers that are never added together. accounts: every agent account signed in on any computer, the same one on three computers once, each with how much of its plan's windows is used and when each starts again, as that agent printed them in the last turn wsp ran on it; an agent that prints none reports no plan limit, a sign-in by API key pays per token with no plan window, and an account no turn has run on yet has no reading. used: the tokens the turns used over the range (today, the last seven days or the last thirty), split by agent, account, computer, project or model, each row with the cost its agent reported, a list price off one table for every token and what the cache saved, input counting the cached and the written tokens, the turns wsp ran, and a series over the range with one line per row.",
+      input: { range: UsageRange.optional().describe("day (the default), week or month"), by: UsageSplit.optional().describe("agent (the default), account, computer, project or model") },
       output: { accounts: z.array(AccountRow), used: UsedAnswer },
       call: async ({ range, by }, deps) => asJson(await readUsage(await deps.client(), range ?? "day", by ?? "agent")),
     }),
@@ -5809,7 +5809,7 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   force: "build again even where the place already holds this version",
   hidden: "list the folders whose names start with a dot too",
   "usage range": "the days what was used is read over: day (today, the default), week (the last seven) or month (the last thirty); the accounts' limits are the same whatever it says",
-  "usage by": "how what was used is split: agent (the default), account, computer or project",
+  "usage by": "how what was used is split: agent (the default), account, computer, project or model",
   "folders on": "the computer whose folders to list, by the name wsp computers shows; a box you added answers from its own disk, and this computer is listed without it",
   "agents on": AGENTS_ON_WORDS,
   "skills on": AGENTS_ON_WORDS,

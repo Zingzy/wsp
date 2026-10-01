@@ -109,6 +109,16 @@ export type AdapterEvent =
       sessionId: string;
       limit: HarnessLimit;
     }
+  | {
+      /** The tokens one model call of this turn drew, a subagent's included, sent as the harness reports each call: what
+       * the account it runs on is drawing right now. Read by the runtime alone. */
+      type: "turn.usage";
+      sessionId: string;
+      tokens: number;
+      /** When the call was made, ms epoch, on the clock of the machine the agent runs on. A run re-read after a host
+       * restart replays its old calls, and the host reads this only there, against the run's other stamps. */
+      at?: number;
+    }
   | { type: "permission.ask"; sessionId: string; ask: PermissionAsk }
   | {
       type: "permission.close";
