@@ -72,10 +72,12 @@ const FOLDS: readonly Fold[] = ["pinned", "needs-you", "settled"];
  * stopped looking at; every live section starts open. */
 const FOLDED_KEY = "wsp:sidebar-folded";
 const foldedCodec: Codec<readonly Fold[]> = {
+  // A section the sidebar no longer has is dropped, not a refusal of the list: a refusal pins every fold at its
+  // default and no click can store another (the cut to three sections stranded Settled folded on 2026-10-01).
   decode: raw => {
     const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed) || !parsed.every(id => (FOLDS as readonly unknown[]).includes(id))) throw new Error(`Expected a list of section ids, got ${raw}.`);
-    return parsed as Fold[];
+    if (!Array.isArray(parsed)) throw new Error(`Expected a list of section ids, got ${raw}.`);
+    return parsed.filter((id): id is Fold => (FOLDS as readonly unknown[]).includes(id));
   },
   encode: value => JSON.stringify(value),
 };
