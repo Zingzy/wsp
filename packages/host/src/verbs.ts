@@ -326,7 +326,7 @@ import type { RelayTerminal } from "./signin-relay.js";
 import { gitRootOf } from "./repo-root.js";
 import { CLOUD_ON } from "./cloud.js";
 import { cloudText } from "./skill.js";
-import { dialAddress, heldOrStarted, hostTokenFor, hostTokenPath, POLL_MS, SERVICE_WAIT_MS, servingHost } from "./host-lock.js";
+import { dialAddress, heldOrStarted, hostTokenFor, hostTokenPath, lockedTokenFor, POLL_MS, SERVICE_WAIT_MS, servingHost } from "./host-lock.js";
 import type { HostStarter } from "./host-start.js";
 import { addressNotPairedLine, aimAddress, aimHolds, aimName, aimedHost, deviceRefusedLine, dialWindowMs, hostSideOnlyFix, hostSideOnlyLine, noAnswerRefusal, noAnswerWithin, READ_THE_HOSTS, stateIgnoredLine, wsUrlOf, wspHome, writeHost, type HostAim, type HostPick } from "./hosts.js";
 import { readDeviceKeyPair } from "./account.js";
@@ -407,6 +407,21 @@ export function hostAddress(statePath: string, pick: HostPick & { aim?: HostAim 
   return { url: wsUrlOf(`http://${authority(dialAddress(lock), lock.port)}`), token };
 }
 
+/** How long a dial here reads the token file again while the host whose lock it read has not yet written its own. */
+const TOKEN_LANDS_MS = 1_000;
+
+/** A host takes its lock and then writes its token, so for a moment the lock is the new host's and the file the last
+ * host's: the dial waits until the file holds the token the lock names, within TOKEN_LANDS_MS. Past that the file is
+ * read as it stands, and the host's own refusal of it is the answer. */
+async function tokenLanded(statePath: string): Promise<void> {
+  const until = Date.now() + TOKEN_LANDS_MS;
+  for (;;) {
+    const lock = servingHost(statePath);
+    if (lock === undefined || lockedTokenFor(statePath, lock) !== undefined || Date.now() >= until) return;
+    await new Promise(r => setTimeout(r, POLL_MS));
+  }
+}
+
 /** One socket to the host, and for a host on the account the one re-admission it may need on the way: a record
  * whose token that host no longer takes is a computer the account still trusts, so this computer proves its device
  * key once, writes the token the host answers into the record and carries on. The dial itself is below. */
@@ -452,6 +467,7 @@ async function dialOnce(statePath: string, opts: DialOpts, again?: (refused: unk
   if (aim.kind === "here") await heldOrStarted(statePath, opts.start, opts.say ?? (line => void process.stderr.write(`${line}\n`)));
   // An address with no token beside it opens nothing: this computer holds a token only under a name.
   if (aim.kind === "url" && aim.token === undefined && opts.admit === undefined) throw usageRefusal(addressNotPairedLine(aim.url), READ_THE_HOSTS);
+  if (aim.kind === "here") await tokenLanded(statePath);
   const { url, token } = hostAddress(statePath, { aim });
   const deadlineMs = opts.deadlineMs ?? dialWindowMs(aim);
   const ws = new WebSocket(url);

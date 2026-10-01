@@ -10,6 +10,7 @@ import { createRuntime, memoryStore, tokenDigest, type Runtime } from "@wsp/runt
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cli, hostRoadWord, hostStoppedLine, serve, type CliIO } from "../src/cli.js";
 import { hostTokenFor, ownPid, pidAlive } from "../src/host-lock.js";
+import { dialHost } from "../src/verbs.js";
 import type { HostHandle } from "../src/server.js";
 import { stubBackend } from "./stub-backend.js";
 import { describeWithDists } from "./built-bin.js";
@@ -115,6 +116,44 @@ describe("serve takes host.lock next to the state file", () => {
     } finally {
       release();
       handles.push(await serving);
+    }
+  });
+
+  it("the token beside the lock is the new host's from the moment the lock stands, so no line dials it with the old one", async () => {
+    // A host took its lock, then read its places before it wrote its token, and a line that read the lock in that
+    // gap dialled the new host with the token the host before it had left, which it refused as unauthorized.
+    mkdirSync(join(home, "state"), { recursive: true });
+    writeFileSync(join(home, "state", "host-token"), "the-host-before\n");
+    const rt = testRuntime();
+    let release = (): void => {};
+    const held = new Promise<void>(resolve => (release = resolve));
+    let asked = false;
+    Object.assign(rt, { places: { list: async () => ((asked = true), await held, []) } });
+    const serving = serve(quietIO, { port: 0, statePath, webDir, runtime: rt });
+    try {
+      await vi.waitFor(() => expect(asked).toBe(true));
+      expect(readLock(lockPath).pid).toBe(process.pid);
+      expect(hostTokenFor(statePath)).not.toBe("the-host-before");
+    } finally {
+      release();
+      handles.push(await serving);
+    }
+  });
+
+  it("a line that reads a new host's lock before its token waits for that token rather than dialling with the last one", async () => {
+    // The gap a second process can land in: the lock names the new host, which already answers, while the file
+    // beside it still holds the token the host before it wrote. Made here by putting that token back by hand.
+    await start();
+    const tokenPath = join(home, "state", "host-token");
+    const theirs = readFileSync(tokenPath, "utf8");
+    writeFileSync(tokenPath, "the-host-before\n");
+    const dialled = dialHost(statePath);
+    setTimeout(() => writeFileSync(tokenPath, theirs), 300);
+    const client = await dialled;
+    try {
+      await client.request("sessions.list");
+    } finally {
+      client.close();
     }
   });
 

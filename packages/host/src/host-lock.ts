@@ -5,6 +5,7 @@ import { existsSync, linkSync, readdirSync, readFileSync, renameSync, rmSync, st
 import { basename, dirname, join } from "node:path";
 import { authority, isWildcard, LOOPBACK, relayUrlOf, WS_PATH, type HostShape } from "@wsp/protocol";
 import { ownFolder } from "@wsp/own-file";
+import { tokenDigest } from "@wsp/runtime";
 import type { HostStarter } from "./host-start.js";
 
 export interface HostLock {
@@ -17,6 +18,9 @@ export interface HostLock {
    * or this computer's own manager holding the unit for the state file. wsp down stops any of them, and a second
    * wsp up is told so. Absent is a host a process serves inside itself, which nothing here may stop. */
   startedBy?: HostStarted;
+  /** The digest of the token this host writes beside the lock, which it writes only once the lock stands: until the
+   * file's token has it, the file still holds the last host's. Absent on a lock a host of an earlier build wrote. */
+  tokenDigest?: string;
 }
 
 /** The three roads a host is started by, as the lock records them: two a person's command line takes, and the
@@ -127,6 +131,13 @@ export function hostTokenFor(statePath: string): string | undefined {
   }
 }
 
+/** The token beside the state file once it is the one this lock's host wrote, and nothing while the file still holds
+ * the last host's. A lock that names no digest takes the file as it is. */
+export function lockedTokenFor(statePath: string, lock: Pick<HostLock, "tokenDigest">): string | undefined {
+  const token = hostTokenFor(statePath);
+  return token !== undefined && (lock.tokenDigest === undefined || tokenDigest(token) === lock.tokenDigest) ? token : undefined;
+}
+
 /** Where the runs a turn on this computer leaves live, beside the lock and the token: the script, the log, the pid
  * and the exit code of every turn this host launched here. One folder per state file, so a host that comes back
  * finds its own turns still running and two hosts on this computer never sweep each other's. */
@@ -222,7 +233,7 @@ export function refuseIfServed(lockPath: string, statePath: string): void {
  * whole: it is written to a file of this process's own and linked into place,
  * which fails where any lock stands, so of starts at once only one gets past
  * here and the others never reach the token. */
-export function takeLock(lockPath: string, statePath: string, ports: { port: number; address?: string; startedBy?: HostStarted }): HostLock {
+export function takeLock(lockPath: string, statePath: string, ports: { port: number; address?: string; startedBy?: HostStarted; tokenDigest?: string }): HostLock {
   refuseIfServed(lockPath, statePath);
   const lock: HostLock = { pid: process.pid, ...ports, startedAt: new Date().toISOString() };
   // The state file, its blobs and the host token sit here, so the folder is the owner's before the lock is taken.
