@@ -58,6 +58,7 @@ pub type Call = Pin<Box<dyn Future<Output = Result<Answer, Refused>> + Send>>;
 
 pub const TOOLS: &[Tool] = &[
     computers::TOOL,
+    computers::SET,
     usage::TOOL,
     skills::SEARCH,
     skills::SHOW,
@@ -197,6 +198,25 @@ impl From<Failure> for Refused {
 /// The SDK's own words for a call it refused before the tool ran.
 pub fn input_refusal(tool: &str, why: &str) -> String {
     format!("MCP error -32602: Input validation error: Invalid arguments for tool {tool}: {why}")
+}
+
+/// One field a tool reads again past the check every call gets, held to the tool's recorded entry: refused in the
+/// check's words, which are the TypeScript server's, and never read as some other value.
+pub fn held_field(tool: &str, entry: &str, name: &str, value: &Value) -> Result<(), String> {
+    let issues = crate::checked::field_issues(&crate::checked::input_schema(entry), name, value);
+    if issues.is_empty() {
+        Ok(())
+    } else {
+        Err(input_refusal(tool, &issues.join("\n")))
+    }
+}
+
+/// A field a tool could not read, refused in the check's words, or plainly where the entry holds no rule for it.
+pub fn refused_field(tool: &str, listed: &str, cloud: bool, name: &str, value: Value) -> Refused {
+    let entry = entry_in(listed, cloud).unwrap_or_default();
+    Refused::Input(
+        held_field(tool, entry, name, &value).err().unwrap_or_else(|| input_refusal(tool, &format!("{name} cannot be read as {value}"))),
+    )
 }
 
 /// A tool's arguments read as its input.

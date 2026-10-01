@@ -1,0 +1,1112 @@
+{
+  "cloudOff": {
+    "name": "computers_set",
+    "description": "Sets what the person may set on one computer and answers its row as it now reads, the same row computers lists: threads, how many threads may run there at once, a new one waiting past it (one per 2.5 GB of that computer's memory up to its cores until it is set); nap, the minutes a workspace there with no window of its own runs with no turn and no work before it naps and stops costing anything, waking on the next message (20 until it is set, 0 never naps it), which every workspace there counts again from now and which the computer the app runs on does not take, since its workspaces are folders; spawn, max_machines and max_depth, what the agents on a workspace there that holds no switch of its own may ask of this host, as workspaces_agents names it for one workspace (on, up to 3 machines and one level deep, until it is set), read at every ask so a workspace made before the change follows it. A setting left out keeps what stands, and each word under reset takes that setting back to its default. The row carries cap, what runs there now, capDefault, what it reads by default, and settings, what the person set. A setting the computer's kind does not take, and a call that sets nothing, are refused in one line.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "computer": {
+          "type": "string",
+          "description": "the computer, by the name computers lists or its id"
+        },
+        "threads": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "how many threads may run on that computer at once"
+        },
+        "nap": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 180,
+          "description": "the minutes a quiet workspace there runs before it naps; 0 never naps it"
+        },
+        "spawn": {
+          "type": "string",
+          "enum": [
+            "on",
+            "off"
+          ],
+          "description": "whether agents on a workspace there may open threads and fork machines under the thread they run in, capped, where the workspace holds no switch of its own"
+        },
+        "max_machines": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "how many machines may stand at once under one root thread there while spawn is on"
+        },
+        "max_depth": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "how many levels deep the tree under a root thread there may go while spawn is on"
+        },
+        "reset": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "threads",
+              "nap",
+              "spawn"
+            ]
+          },
+          "description": "the settings to take back to their defaults, by the same words"
+        }
+      },
+      "required": [
+        "computer"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "computer": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "computer",
+                "provider"
+              ]
+            },
+            "name": {
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "mac": {
+              "type": "string",
+              "enum": [
+                "macbook",
+                "imac",
+                "mac-mini",
+                "mac-studio",
+                "mac-pro"
+              ]
+            },
+            "default": {
+              "type": "boolean"
+            },
+            "os": {
+              "type": "string"
+            },
+            "shape": {
+              "type": "object",
+              "properties": {
+                "cpu": {
+                  "type": "number"
+                },
+                "memMb": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "cpu",
+                "memMb"
+              ],
+              "additionalProperties": false
+            },
+            "diskFreeBytes": {
+              "type": "integer"
+            },
+            "engine": {
+              "type": "string",
+              "enum": [
+                "none",
+                "docker",
+                "podman"
+              ]
+            },
+            "copies": {
+              "type": "string",
+              "enum": [
+                "reflink",
+                "snapshot",
+                "plain"
+              ]
+            },
+            "present": {
+              "type": "boolean"
+            },
+            "joinedAt": {
+              "type": "string"
+            },
+            "lastSeenAt": {
+              "type": "string"
+            },
+            "daemonVersion": {
+              "type": "integer"
+            },
+            "behind": {
+              "type": "object",
+              "properties": {
+                "word": {
+                  "type": "string"
+                },
+                "fix": {
+                  "type": "string"
+                },
+                "act": {
+                  "type": "string",
+                  "enum": [
+                    "update",
+                    "install"
+                  ]
+                }
+              },
+              "required": [
+                "word",
+                "fix",
+                "act"
+              ],
+              "additionalProperties": false
+            },
+            "agents": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "agentVersions": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "signIns": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "enum": [
+                  "signed-in",
+                  "vault-key",
+                  "none"
+                ]
+              }
+            },
+            "logins": {
+              "type": "string"
+            },
+            "rateUsdPerHour": {
+              "type": "number"
+            },
+            "sizes": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "cpu": {
+                    "$ref": "#/properties/computer/properties/shape/properties/cpu"
+                  },
+                  "memMb": {
+                    "$ref": "#/properties/computer/properties/shape/properties/memMb"
+                  },
+                  "rateUsdPerHour": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "cpu",
+                  "memMb",
+                  "rateUsdPerHour"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "forks": {
+              "type": "object",
+              "properties": {
+                "running": {
+                  "type": "integer"
+                },
+                "room": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "running",
+                "room"
+              ],
+              "additionalProperties": false
+            },
+            "takesForks": {
+              "type": "boolean"
+            },
+            "road": {
+              "type": "object",
+              "properties": {
+                "ssh": {
+                  "type": "string",
+                  "maxLength": 300
+                },
+                "from": {
+                  "type": "string",
+                  "maxLength": 300
+                },
+                "back": {
+                  "type": "object",
+                  "properties": {
+                    "boxPort": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 65535
+                    }
+                  },
+                  "required": [
+                    "boxPort"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            "home": {
+              "type": "string"
+            },
+            "uptimeMs": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "reportedAt": {
+              "type": "string"
+            },
+            "dialled": {
+              "type": "object",
+              "properties": {
+                "at": {
+                  "type": "string"
+                },
+                "answered": {
+                  "type": "boolean"
+                },
+                "roundTripMs": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "said": {
+                  "type": "string",
+                  "maxLength": 2000
+                }
+              },
+              "required": [
+                "at",
+                "answered"
+              ],
+              "additionalProperties": false
+            },
+            "blocked": {
+              "type": "string"
+            },
+            "build": {
+              "type": "string"
+            },
+            "buildStopped": {
+              "type": "boolean"
+            },
+            "buildsImages": {
+              "type": "boolean"
+            },
+            "provision": {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "running",
+                    "done",
+                    "stopped"
+                  ]
+                },
+                "addId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "recipeAt": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "startedAt": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "finishedAt": {
+                  "type": "string"
+                },
+                "rows": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "label": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "outcome": {
+                        "type": "string",
+                        "enum": [
+                          "installed",
+                          "present",
+                          "failed",
+                          "skipped"
+                        ]
+                      },
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "tool",
+                          "file",
+                          "server"
+                        ]
+                      },
+                      "note": {
+                        "type": "string"
+                      },
+                      "ms": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "label",
+                      "outcome"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "at": {
+                  "type": "object",
+                  "properties": {
+                    "label": {
+                      "type": "string"
+                    },
+                    "index": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0
+                    },
+                    "of": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0
+                    }
+                  },
+                  "required": [
+                    "label",
+                    "index",
+                    "of"
+                  ],
+                  "additionalProperties": false
+                },
+                "said": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "state",
+                "addId",
+                "recipeAt",
+                "startedAt",
+                "rows"
+              ],
+              "additionalProperties": false
+            },
+            "cap": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "threads": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  },
+                  "required": [
+                    "threads"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "machines": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "spendPerDayUsd": {
+                      "type": "number",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "machines",
+                    "spendPerDayUsd"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "capDefault": {
+              "$ref": "#/properties/computer/properties/cap"
+            },
+            "settings": {
+              "type": "object",
+              "properties": {
+                "threads": {
+                  "$ref": "#/properties/computer/properties/cap/anyOf/0/properties/threads"
+                },
+                "machines": {
+                  "$ref": "#/properties/computer/properties/cap/anyOf/1/properties/machines"
+                },
+                "spendPerDayUsd": {
+                  "$ref": "#/properties/computer/properties/cap/anyOf/1/properties/spendPerDayUsd"
+                },
+                "napMs": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 60000,
+                      "maximum": 10800000
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "spawn": {
+                  "type": "object",
+                  "properties": {
+                    "spawn": {
+                      "type": "boolean"
+                    },
+                    "maxMachines": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "maxDepth": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  },
+                  "required": [
+                    "spawn",
+                    "maxMachines",
+                    "maxDepth"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            "napMs": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "napDefault": {
+              "type": "integer"
+            },
+            "spawn": {
+              "$ref": "#/properties/computer/properties/settings/properties/spawn"
+            },
+            "spawnDefault": {
+              "$ref": "#/properties/computer/properties/settings/properties/spawn"
+            },
+            "running": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "id",
+            "kind",
+            "name",
+            "default"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "computer"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  "cloudOn": {
+    "name": "computers_set",
+    "description": "Sets what the person may set on one computer and answers its row as it now reads, the same row computers lists: threads, how many threads may run there at once, a new one waiting past it (one per 2.5 GB of that computer's memory up to its cores until it is set); nap, the minutes a workspace there with no window of its own runs with no turn and no work before it naps and stops costing anything, waking on the next message (20 until it is set, 0 never naps it), which every workspace there counts again from now and which the computer the app runs on does not take, since its workspaces are folders; spawn, max_machines and max_depth, what the agents on a workspace there that holds no switch of its own may ask of this host, as workspaces_agents names it for one workspace (on, up to 3 machines and one level deep, until it is set), read at every ask so a workspace made before the change follows it; machines and spend on a cloud, how many machines may run there at once and the dollars a day it may spend before it starts no new machine (3 and $10 until they are set). A setting left out keeps what stands, and each word under reset takes that setting back to its default. The row carries cap, what runs there now, capDefault, what it reads by default, and settings, what the person set. A setting the computer's kind does not take, and a call that sets nothing, are refused in one line.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "computer": {
+          "type": "string",
+          "description": "the computer, by the name computers lists or its id"
+        },
+        "threads": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "how many threads may run on that computer at once"
+        },
+        "machines": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "how many machines may run on that cloud at once"
+        },
+        "spend": {
+          "type": "number",
+          "minimum": 0,
+          "description": "the dollars a day that cloud may spend before it starts no new machine"
+        },
+        "nap": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 180,
+          "description": "the minutes a quiet workspace there runs before it naps; 0 never naps it"
+        },
+        "spawn": {
+          "type": "string",
+          "enum": [
+            "on",
+            "off"
+          ],
+          "description": "whether agents on a workspace there may open threads and fork machines under the thread they run in, capped, where the workspace holds no switch of its own"
+        },
+        "max_machines": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "how many machines may stand at once under one root thread there while spawn is on"
+        },
+        "max_depth": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "how many levels deep the tree under a root thread there may go while spawn is on"
+        },
+        "reset": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "threads",
+              "machines",
+              "spend",
+              "nap",
+              "spawn"
+            ]
+          },
+          "description": "the settings to take back to their defaults, by the same words"
+        }
+      },
+      "required": [
+        "computer"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "computer": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "computer",
+                "provider"
+              ]
+            },
+            "name": {
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "mac": {
+              "type": "string",
+              "enum": [
+                "macbook",
+                "imac",
+                "mac-mini",
+                "mac-studio",
+                "mac-pro"
+              ]
+            },
+            "default": {
+              "type": "boolean"
+            },
+            "os": {
+              "type": "string"
+            },
+            "shape": {
+              "type": "object",
+              "properties": {
+                "cpu": {
+                  "type": "number"
+                },
+                "memMb": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "cpu",
+                "memMb"
+              ],
+              "additionalProperties": false
+            },
+            "diskFreeBytes": {
+              "type": "integer"
+            },
+            "engine": {
+              "type": "string",
+              "enum": [
+                "none",
+                "docker",
+                "podman"
+              ]
+            },
+            "copies": {
+              "type": "string",
+              "enum": [
+                "reflink",
+                "snapshot",
+                "plain"
+              ]
+            },
+            "present": {
+              "type": "boolean"
+            },
+            "joinedAt": {
+              "type": "string"
+            },
+            "lastSeenAt": {
+              "type": "string"
+            },
+            "daemonVersion": {
+              "type": "integer"
+            },
+            "behind": {
+              "type": "object",
+              "properties": {
+                "word": {
+                  "type": "string"
+                },
+                "fix": {
+                  "type": "string"
+                },
+                "act": {
+                  "type": "string",
+                  "enum": [
+                    "update",
+                    "install"
+                  ]
+                }
+              },
+              "required": [
+                "word",
+                "fix",
+                "act"
+              ],
+              "additionalProperties": false
+            },
+            "agents": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "agentVersions": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "signIns": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "enum": [
+                  "signed-in",
+                  "vault-key",
+                  "none"
+                ]
+              }
+            },
+            "logins": {
+              "type": "string"
+            },
+            "rateUsdPerHour": {
+              "type": "number"
+            },
+            "sizes": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "cpu": {
+                    "$ref": "#/properties/computer/properties/shape/properties/cpu"
+                  },
+                  "memMb": {
+                    "$ref": "#/properties/computer/properties/shape/properties/memMb"
+                  },
+                  "rateUsdPerHour": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "cpu",
+                  "memMb",
+                  "rateUsdPerHour"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "forks": {
+              "type": "object",
+              "properties": {
+                "running": {
+                  "type": "integer"
+                },
+                "room": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "running",
+                "room"
+              ],
+              "additionalProperties": false
+            },
+            "takesForks": {
+              "type": "boolean"
+            },
+            "road": {
+              "type": "object",
+              "properties": {
+                "ssh": {
+                  "type": "string",
+                  "maxLength": 300
+                },
+                "from": {
+                  "type": "string",
+                  "maxLength": 300
+                },
+                "back": {
+                  "type": "object",
+                  "properties": {
+                    "boxPort": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 65535
+                    }
+                  },
+                  "required": [
+                    "boxPort"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            "home": {
+              "type": "string"
+            },
+            "uptimeMs": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "reportedAt": {
+              "type": "string"
+            },
+            "dialled": {
+              "type": "object",
+              "properties": {
+                "at": {
+                  "type": "string"
+                },
+                "answered": {
+                  "type": "boolean"
+                },
+                "roundTripMs": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "said": {
+                  "type": "string",
+                  "maxLength": 2000
+                }
+              },
+              "required": [
+                "at",
+                "answered"
+              ],
+              "additionalProperties": false
+            },
+            "blocked": {
+              "type": "string"
+            },
+            "build": {
+              "type": "string"
+            },
+            "buildStopped": {
+              "type": "boolean"
+            },
+            "buildsImages": {
+              "type": "boolean"
+            },
+            "provision": {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "running",
+                    "done",
+                    "stopped"
+                  ]
+                },
+                "addId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "recipeAt": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "startedAt": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "finishedAt": {
+                  "type": "string"
+                },
+                "rows": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "label": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "outcome": {
+                        "type": "string",
+                        "enum": [
+                          "installed",
+                          "present",
+                          "failed",
+                          "skipped"
+                        ]
+                      },
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "tool",
+                          "file",
+                          "server"
+                        ]
+                      },
+                      "note": {
+                        "type": "string"
+                      },
+                      "ms": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "label",
+                      "outcome"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "at": {
+                  "type": "object",
+                  "properties": {
+                    "label": {
+                      "type": "string"
+                    },
+                    "index": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0
+                    },
+                    "of": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0
+                    }
+                  },
+                  "required": [
+                    "label",
+                    "index",
+                    "of"
+                  ],
+                  "additionalProperties": false
+                },
+                "said": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "state",
+                "addId",
+                "recipeAt",
+                "startedAt",
+                "rows"
+              ],
+              "additionalProperties": false
+            },
+            "cap": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "threads": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  },
+                  "required": [
+                    "threads"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "machines": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "spendPerDayUsd": {
+                      "type": "number",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "machines",
+                    "spendPerDayUsd"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "capDefault": {
+              "$ref": "#/properties/computer/properties/cap"
+            },
+            "settings": {
+              "type": "object",
+              "properties": {
+                "threads": {
+                  "$ref": "#/properties/computer/properties/cap/anyOf/0/properties/threads"
+                },
+                "machines": {
+                  "$ref": "#/properties/computer/properties/cap/anyOf/1/properties/machines"
+                },
+                "spendPerDayUsd": {
+                  "$ref": "#/properties/computer/properties/cap/anyOf/1/properties/spendPerDayUsd"
+                },
+                "napMs": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 60000,
+                      "maximum": 10800000
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "spawn": {
+                  "type": "object",
+                  "properties": {
+                    "spawn": {
+                      "type": "boolean"
+                    },
+                    "maxMachines": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "maxDepth": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  },
+                  "required": [
+                    "spawn",
+                    "maxMachines",
+                    "maxDepth"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            "napMs": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "napDefault": {
+              "type": "integer"
+            },
+            "spawn": {
+              "$ref": "#/properties/computer/properties/settings/properties/spawn"
+            },
+            "spawnDefault": {
+              "$ref": "#/properties/computer/properties/settings/properties/spawn"
+            },
+            "running": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "id",
+            "kind",
+            "name",
+            "default"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "computer"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  }
+}

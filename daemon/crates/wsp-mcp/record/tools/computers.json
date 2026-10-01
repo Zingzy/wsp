@@ -94,6 +94,30 @@
               "daemonVersion": {
                 "type": "integer"
               },
+              "behind": {
+                "type": "object",
+                "properties": {
+                  "word": {
+                    "type": "string"
+                  },
+                  "fix": {
+                    "type": "string"
+                  },
+                  "act": {
+                    "type": "string",
+                    "enum": [
+                      "update",
+                      "install"
+                    ]
+                  }
+                },
+                "required": [
+                  "word",
+                  "fix",
+                  "act"
+                ],
+                "additionalProperties": false
+              },
               "agents": {
                 "type": "array",
                 "items": {
@@ -380,6 +404,77 @@
                     "additionalProperties": false
                   }
                 ]
+              },
+              "capDefault": {
+                "$ref": "#/properties/computers/items/properties/cap"
+              },
+              "settings": {
+                "type": "object",
+                "properties": {
+                  "threads": {
+                    "$ref": "#/properties/computers/items/properties/cap/anyOf/0/properties/threads"
+                  },
+                  "machines": {
+                    "$ref": "#/properties/computers/items/properties/cap/anyOf/1/properties/machines"
+                  },
+                  "spendPerDayUsd": {
+                    "$ref": "#/properties/computers/items/properties/cap/anyOf/1/properties/spendPerDayUsd"
+                  },
+                  "napMs": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 60000,
+                        "maximum": 10800000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "spawn": {
+                    "type": "object",
+                    "properties": {
+                      "spawn": {
+                        "type": "boolean"
+                      },
+                      "maxMachines": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "maxDepth": {
+                        "type": "integer",
+                        "minimum": 1
+                      }
+                    },
+                    "required": [
+                      "spawn",
+                      "maxMachines",
+                      "maxDepth"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              },
+              "napMs": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "napDefault": {
+                "type": "integer"
+              },
+              "spawn": {
+                "$ref": "#/properties/computers/items/properties/settings/properties/spawn"
+              },
+              "spawnDefault": {
+                "$ref": "#/properties/computers/items/properties/settings/properties/spawn"
               },
               "running": {
                 "type": "integer",
@@ -529,6 +624,30 @@
               "daemonVersion": {
                 "type": "integer"
               },
+              "behind": {
+                "type": "object",
+                "properties": {
+                  "word": {
+                    "type": "string"
+                  },
+                  "fix": {
+                    "type": "string"
+                  },
+                  "act": {
+                    "type": "string",
+                    "enum": [
+                      "update",
+                      "install"
+                    ]
+                  }
+                },
+                "required": [
+                  "word",
+                  "fix",
+                  "act"
+                ],
+                "additionalProperties": false
+              },
               "agents": {
                 "type": "array",
                 "items": {
@@ -815,6 +934,77 @@
                     "additionalProperties": false
                   }
                 ]
+              },
+              "capDefault": {
+                "$ref": "#/properties/computers/items/properties/cap"
+              },
+              "settings": {
+                "type": "object",
+                "properties": {
+                  "threads": {
+                    "$ref": "#/properties/computers/items/properties/cap/anyOf/0/properties/threads"
+                  },
+                  "machines": {
+                    "$ref": "#/properties/computers/items/properties/cap/anyOf/1/properties/machines"
+                  },
+                  "spendPerDayUsd": {
+                    "$ref": "#/properties/computers/items/properties/cap/anyOf/1/properties/spendPerDayUsd"
+                  },
+                  "napMs": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 60000,
+                        "maximum": 10800000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "spawn": {
+                    "type": "object",
+                    "properties": {
+                      "spawn": {
+                        "type": "boolean"
+                      },
+                      "maxMachines": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "maxDepth": {
+                        "type": "integer",
+                        "minimum": 1
+                      }
+                    },
+                    "required": [
+                      "spawn",
+                      "maxMachines",
+                      "maxDepth"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              },
+              "napMs": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "napDefault": {
+                "type": "integer"
+              },
+              "spawn": {
+                "$ref": "#/properties/computers/items/properties/settings/properties/spawn"
+              },
+              "spawnDefault": {
+                "$ref": "#/properties/computers/items/properties/settings/properties/spawn"
               },
               "running": {
                 "type": "integer",

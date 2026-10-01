@@ -89,6 +89,16 @@ pub fn known(schema: &Schema, arguments: Value) -> Value {
     Value::Object(given)
 }
 
+/// One field's issues against the entry's own schema for it, in the words `issues` says them in: what a tool that
+/// reads a field again past the check every call gets refuses with.
+pub fn field_issues(schema: &Schema, name: &str, value: &Value) -> Vec<String> {
+    let mut said = Vec::new();
+    if let Some((key, field)) = schema.properties.0.iter().find(|(key, _)| key == name) {
+        check(field, value, &mut vec![Step::Key(key)], &mut said);
+    }
+    said
+}
+
 pub fn issues(schema: &Schema, arguments: &Value) -> Vec<String> {
     let mut said = Vec::new();
     check(schema, arguments, &mut Vec::new(), &mut said);

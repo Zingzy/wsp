@@ -216,6 +216,7 @@ const DAEMON_FRAME_OPS: readonly string[] = DaemonRequest.options.map(o => o.sha
 
 const LISTS_ON_THE_COMMAND_LINE: Record<string, string> = {
   "commit files": "--file",
+  "computers set reset": "--reset",
   "threads wait threads": "the threads are the words after the verb",
   "exec argv": "the command is the words after the verb",
   "export agents": "the catalog ids are one comma-joined value of --agents",
