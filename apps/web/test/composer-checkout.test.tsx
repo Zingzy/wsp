@@ -103,6 +103,7 @@ import { provideDaemonHello, provideDaemonWire } from "../src/files/wire.js";
 import { DAEMON_HELLO, DAEMON_ROOT, fakeWire, LISTING, PROJECT_DEST, resetSurfaces } from "./surface-harness.js";
 import { CHAT_STREAM, CHAT_WS } from "./fixtures/chat-stream.js";
 import { caps } from "./caps.js";
+import { statusOf } from "./workspace-status.js";
 import { noDaemonApi } from "./fake-daemon-api.js";
 
 let restoreLayout: () => void = () => {};
@@ -179,6 +180,18 @@ const settle = () => act(() => new Promise<void>(resolve => setTimeout(resolve, 
 const root = () => selectRoot(useRootStore.getState().byWorkspaceId, WS, [DAEMON_ROOT]);
 
 describe("composer checkout row", () => {
+  it("names the branch the host last read for the workspace's own checkout, the one its tile shows, and follows it when the host reads another", async () => {
+    provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": params => ({ ...STATUS, root: String(params["cwd"]) }) }));
+    const { api } = fixtureApi();
+    await setup(api);
+    const pushed = (name: string) =>
+      act(() => useStore.setState(s => ({ statuses: { ...s.statuses, [WS]: statusOf(workspace, { checkout: { branch: name, ahead: 0, behind: 0, changed: 0, readAt: 1 } }) } })));
+    pushed("ticket/1401-live");
+    await waitFor(() => expect(branch()).toBe("ticket/1401-live"));
+    pushed("ticket/1401-moved");
+    await waitFor(() => expect(branch()).toBe("ticket/1401-moved"));
+  });
+
   it("names the computer first, then the access and the branch, every item in one grammar, and neither the folder's path nor a pull request's number", async () => {
     provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": params => ({ ...STATUS, root: String(params["cwd"]) }) }));
     const { api } = fixtureApi();

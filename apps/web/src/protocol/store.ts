@@ -1140,6 +1140,10 @@ export const useStore = create<State>((set, get) => {
             costs: { ...s.costs, [e.workspaceId]: { rateUsdPerHour: e.rateUsdPerHour, accruedUsd: e.accruedUsd, at: e.at } },
           }));
           return;
+        case "session.held":
+          // A thread is spoken for before its harness is up, from this window or any other client: its row is read now.
+          void get().reloadSessions(e.workspaceId);
+          return;
         case "session.start": {
           // The next send resumes this id; the runtime persists it, the view learns it here.
           const remember = <T extends WorkspaceView>(w: T): T => (w.id === e.workspaceId ? { ...w, claudeSessionId: e.sessionId } : w);

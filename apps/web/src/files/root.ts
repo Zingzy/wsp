@@ -120,9 +120,16 @@ export function useProject(workspaceId: string): ProjectRef | null {
 
 export function useRoots(workspaceId: string): string[] {
   const home = useDaemonRoot(workspaceId);
-  const project = useProject(workspaceId);
-  const path = project?.path;
+  const path = useProjectFolder(workspaceId);
   return useMemo(() => rootsOf(home, path === undefined ? [] : [path]), [home, path]);
+}
+
+/** The project's folder as the workspace holds it: a copy's own folder where it has one. */
+function useProjectFolder(workspaceId: string): string | undefined {
+  return useStore(s => {
+    const workspace = s.workspaces.find(w => w.id === workspaceId);
+    return workspace === undefined ? undefined : projectFolderOf(workspace);
+  });
 }
 
 export function useRoot(workspaceId: string): string | null {
@@ -138,18 +145,12 @@ export function usePinned(workspaceId: string): boolean {
   return useRootStore(s => (s.byWorkspaceId[workspaceId] ?? NONE).pinned !== null);
 }
 
-/** The project the next thread on the workspace starts in when no folder was chosen outright: the workspace's own,
- * since a workspace is one project's copy. Null while the store has no record for it yet. */
-export function useDefaultProject(workspaceId: string): ProjectRef | null {
-  return useProject(workspaceId);
-}
-
 /** The folder the workspace's thread works in, for a dialog about that folder (export): the thread's own as the
  * harness reported it, else the default project's, else the daemon's home. */
 export function useWorkingFolder(workspaceId: string): string | null {
   const daemonRoot = useDaemonRoot(workspaceId);
-  const project = useDefaultProject(workspaceId);
-  return useRootStore(s => (s.byWorkspaceId[workspaceId] ?? NONE).followed) ?? project?.path ?? daemonRoot;
+  const project = useProjectFolder(workspaceId);
+  return useRootStore(s => (s.byWorkspaceId[workspaceId] ?? NONE).followed) ?? project ?? daemonRoot;
 }
 
 export function useChosenFolder(workspaceId: string): string | null {

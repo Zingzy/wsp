@@ -52,7 +52,15 @@ pub(crate) fn status(copy: &Path, root: &str) -> Result<GitStatusReply, OpError>
     let dir = GitDir::open(copy)?;
     let mut repo = Repo::new(&dir).map_err(|why| unread(root, &why))?;
     let branch = repo.branch().map_err(|why| unread(root, &why))?;
-    Ok(GitStatusReply { branch, entries: Vec::new(), root: root.to_owned(), edits_unread: true, counts_unknown: repo.over_budget })
+    let stashes = stashes_of(&dir).map_err(|why| unread(root, &why))?;
+    Ok(GitStatusReply { branch, entries: Vec::new(), root: root.to_owned(), edits_unread: true, counts_unknown: repo.over_budget, stashes })
+}
+
+/// How many stashes the stash ref's log holds, one line each; a stash ref with no log is one.
+fn stashes_of(dir: &GitDir) -> Result<Option<u64>, String> {
+    let logged = dir.text("logs/refs/stash", LIST_MAX)?.map_or(0, |log| log.lines().filter(|line| !line.trim().is_empty()).count() as u64);
+    let held = if logged == 0 && dir.text("refs/stash", REF_MAX)?.is_some() { 1 } else { logged };
+    Ok((held > 0).then_some(held))
 }
 
 fn unread(root: &str, why: &str) -> OpError {
@@ -946,6 +954,18 @@ mod tests {
         // And with every delta naming its base by id rather than by where it sits in the pack.
         git(&copy, &["-c", "repack.useDeltaBaseOffset=false", "repack", "-q", "-a", "-d", "-f", "--depth=50", "--window=250"]);
         assert_eq!(status(&copy, "/root/app").unwrap().branch, want);
+    }
+
+    #[test]
+    fn a_stopped_copys_stashes_are_counted_off_the_stash_log() {
+        let (_dir, copy) = tracking_clone();
+        assert_eq!(status(&copy, "/root/app").unwrap().stashes, None);
+        for n in 0..2 {
+            std::fs::write(copy.join("stashed.txt"), format!("{n}\n")).unwrap();
+            git(&copy, &["add", "stashed.txt"]);
+            git(&copy, &["stash", "-q"]);
+        }
+        assert_eq!(status(&copy, "/root/app").unwrap().stashes, Some(2));
     }
 
     #[test]

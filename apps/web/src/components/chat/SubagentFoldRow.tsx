@@ -77,7 +77,7 @@ export function SubagentFoldRow({
                   </span>
                 )}
                 {line.detail === undefined ? null : (
-                  <span className="break-words whitespace-pre-wrap font-mono text-xs leading-4 text-muted-foreground/72" data-subagent-detail="">
+                  <span className="break-words whitespace-pre-wrap font-mono text-xs leading-4 text-muted-foreground" data-subagent-detail="">
                     {line.detail}
                   </span>
                 )}

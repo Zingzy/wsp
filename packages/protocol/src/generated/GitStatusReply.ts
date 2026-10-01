@@ -12,4 +12,8 @@ editsUnread?: boolean,
  * Ahead and behind were not counted: the history of a stopped workspace's copy was too long or too slow to walk
  * within the daemon's budget, so the zeros say nothing.
  */
-countsUnknown?: boolean, };
+countsUnknown?: boolean, 
+/**
+ * How many stashes the repository holds, work no branch carries and no remote has; absent where there are none.
+ */
+stashes?: number, };
