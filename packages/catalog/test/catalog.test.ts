@@ -22,6 +22,11 @@ describe("catalog", () => {
     expect(DEFAULT_AGENT.context).toBeDefined();
   });
 
+  it("marks the agents that print their plan's limits in a turn, and names OpenCode's usage database", () => {
+    expect(CATALOG_AGENTS.filter(a => a.printsLimits === true).map(a => a.id)).toEqual(["claude", "codex"]);
+    expect(CATALOG_AGENTS.filter(a => a.usageLog !== undefined).map(a => [a.id, a.usageLog])).toEqual([["opencode", { format: "opencode-sqlite", root: "~/.local/share/opencode/opencode.db" }]]);
+  });
+
   it("names a session history for the agents with a reader, in a known format under a home path", () => {
     expect(CATALOG_AGENTS.filter(a => a.history !== undefined).map(a => a.id)).toEqual(["claude", "codex", "hermes"]);
     for (const a of CATALOG_AGENTS) {

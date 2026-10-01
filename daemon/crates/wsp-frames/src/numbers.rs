@@ -2,7 +2,7 @@
 //! The numbers and paths the protocol and the node daemon own, as the contract fixture pins them.
 
 /// The daemon's protocol version, carried in its hello: the length of the protocol's DAEMON_CONTENTS record.
-pub const DAEMON_VERSION: u32 = 107;
+pub const DAEMON_VERSION: u32 = 108;
 
 pub const DEFAULT_HOST: &str = "0.0.0.0";
 pub const DEFAULT_PORT: u16 = 7070;
@@ -135,6 +135,16 @@ pub const PID_MAX: u32 = 4_194_304;
 /// to a watch its first sample lands. The protocol's DAEMON_SAMPLER_INTERVAL_MS is the same figure, held so by the
 /// contract fixture.
 pub const SAMPLER_INTERVAL_MS: u64 = 2000;
+/// The days of readings a daemon keeps, one file a day, and the most those files may hold between them on disk: the
+/// oldest day goes first past either. A minute's point is about 130 bytes, so a day is about 190 KB and the cap
+/// holds the fourteen days with room to spare.
+pub const READINGS_KEPT_DAYS: u32 = 14;
+pub const READINGS_CAP_BYTES: u64 = 8 * 1024 * 1024;
+/// How often the kept readings read the computer: four reads fold into each minute's point, an eighth of what a
+/// watch reads, since nobody is waiting on them.
+pub const READINGS_EVERY_MS: u64 = 15_000;
+/// The most steps one sys.history answers with; a range that holds more answers the first ones and says so.
+pub const READINGS_POINTS_CAP: usize = 2000;
 /// One tick of the stat files under /proc in milliseconds: the kernel reports those fields at 100 Hz whatever its
 /// own timer runs at, so a start time or a cpu count read there is turned into time with this.
 pub const STAT_TICK_MS: u64 = 10;

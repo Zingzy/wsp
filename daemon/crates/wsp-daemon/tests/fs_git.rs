@@ -134,6 +134,8 @@ async fn start(root: &Path, roots_path: &Path) -> Running {
     let mut token = tempfile::NamedTempFile::new().unwrap();
     writeln!(token, "{TOKEN}").unwrap();
     let mut options = Options::new(token.path());
+    // The kept readings wait a day, so no case writes them into the temp folder every case's token shares.
+    options.readings_interval_ms = Some(86_400_000);
     options.host = "127.0.0.1".to_owned();
     options.port = 0;
     options.root = Some(root.to_path_buf());

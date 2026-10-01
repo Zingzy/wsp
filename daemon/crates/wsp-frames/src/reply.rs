@@ -7,7 +7,7 @@ use ts_rs::TS;
 
 use crate::{
     CheckState, DaemonErrorCode, FsEntryType, HostItemKind, MachineErrorKind, MergeMethod, Mergeable, PullRequestState, RequestId,
-    ReviewState,
+    ReviewState, Usage,
 };
 
 /// The literal `true` the ok envelope carries.
@@ -380,6 +380,29 @@ pub struct GitCommitReply {
     pub files_changed: u64,
     pub insertions: u64,
     pub deletions: u64,
+}
+
+/// One step of a computer's kept readings: the mean cpu and load over it, the last memory and disk in it, and the
+/// instant it starts, ms epoch.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct SysPoint {
+    pub at: i64,
+    pub cpu: f64,
+    pub load1: f64,
+    pub mem: Usage,
+    pub disk: Usage,
+}
+
+/// What a sys.history answered: the steps with a reading in them, oldest first, their width, and whether the range
+/// held more steps than one answer carries.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct SysHistoryReply {
+    pub points: Vec<SysPoint>,
+    pub step_ms: u64,
+    pub truncated: bool,
 }
 
 /// The commit a git.snapshot recorded, by its full sha.

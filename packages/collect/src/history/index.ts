@@ -105,3 +105,4 @@ export { type Count, type HistoryBucket, type Usage, HEAVY_BYTES, HEAVY_USED_FLO
 export { claudeCall, claudeReader, claudeSession } from "./claude.js";
 export { codexCall, codexReader } from "./codex.js";
 export { hermesCall, hermesCalls, hermesReader } from "./hermes.js";
+export { fileUsageCache, readLogUsage, type LogUsage, type UsageCache } from "./usage.js";

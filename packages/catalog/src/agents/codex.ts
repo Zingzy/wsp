@@ -32,5 +32,6 @@ export const CODEX: AgentEntry = {
     { state: "memories", location: "memories/rollout_summaries/*.md and memories/MEMORY.md", key: "global files", pathFields: ["cwd: and path: lines in each summary", "applies_to: cwd=PATH lines in MEMORY.md"], move: "rewrite if memories should follow the project", status: "inferred" },
   ],
   history: { format: "codex-rollout", root: "~/.codex/sessions" },
+  printsLimits: true,
   source: { sessions: 5, images: 1, road: "measured" },
 };

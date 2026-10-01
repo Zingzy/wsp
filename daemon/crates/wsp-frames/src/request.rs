@@ -138,6 +138,10 @@ pub enum DaemonOp {
     InboxRescan,
     #[serde(rename = "sys.watch")]
     SysWatch,
+    /// The computer's readings a minute apart between two instants, ms epoch, folded into steps of step_ms: what the
+    /// daemon kept while it ran, whether or not anybody watched.
+    #[serde(rename = "sys.history", rename_all = "camelCase")]
+    SysHistory { from: i64, to: i64, step_ms: u64 },
     #[serde(rename = "proc.watch")]
     ProcWatch,
     #[serde(rename = "proc.unwatch")]
@@ -637,7 +641,7 @@ pub struct ReviewComment {
     pub body: String,
 }
 
-pub const DAEMON_OPS: [&str; 62] = [
+pub const DAEMON_OPS: [&str; 63] = [
     "pty.create",
     "pty.attach",
     "pty.detach",
@@ -652,6 +656,7 @@ pub const DAEMON_OPS: [&str; 62] = [
     "inbox.watch",
     "inbox.rescan",
     "sys.watch",
+    "sys.history",
     "proc.watch",
     "proc.unwatch",
     "proc.inspect",

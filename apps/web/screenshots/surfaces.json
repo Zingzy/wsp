@@ -529,6 +529,37 @@
       "reason": "What this shot adds is the Mac window's glass behind the page; the page itself is shot at every width in settings-computers."
     },
     {
+      "name": "settings-usage",
+      "at": "/",
+      "fixture": "usage",
+      "steps": [
+        "k=settings-row",
+        "k=settings-usage"
+      ],
+      "wait": "usage-computer=here",
+      "settleMs": 700,
+      "height": 1100,
+      "widths": [
+        1440
+      ],
+      "reason": "The lists are one column template at every width the page reaches its 760px; 1440 is where the brief judges it."
+    },
+    {
+      "name": "settings-usage-empty",
+      "at": "/",
+      "fixture": "mac-only",
+      "steps": [
+        "k=settings-row",
+        "k=settings-usage"
+      ],
+      "wait": "usage-computer=here",
+      "settleMs": 700,
+      "widths": [
+        1440
+      ],
+      "reason": "The same page with nothing used and no readings kept; settings-usage shoots the page with a week behind it."
+    },
+    {
       "name": "settings-account",
       "at": "/",
       "steps": [

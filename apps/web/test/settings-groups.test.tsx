@@ -406,7 +406,7 @@ describe("Privacy", () => {
     const { api, sets } = settingsApi();
     mountSettings({ api, at: { kind: "group", group: "privacy" } });
     await settle();
-    expect(rowTitles()).toEqual([PRIVACY_WORDS.serverIcons, PRIVACY_WORDS.agentVersions]);
+    expect(rowTitles()).toEqual([PRIVACY_WORDS.serverIcons, PRIVACY_WORDS.agentVersions, PRIVACY_WORDS.usageLogs]);
     expect(descriptionOf("server-icons")).toBe(PRIVACY_WORDS.serverIconsDescription);
     expect(PRIVACY_WORDS.serverIconsDescription).toBe("wsp asks Google for each public server's icon by host name; turning this off deletes the saved icons.");
     const toggle = (): HTMLElement => document.querySelector<HTMLElement>("[data-k=server-icons]")!;
@@ -418,7 +418,7 @@ describe("Privacy", () => {
     expect(toggle().getAttribute("aria-checked")).toBe("false");
     fireEvent.click(document.querySelector<HTMLElement>("[data-k=restore-defaults]")!);
     await settle();
-    expect(sets.at(-1)).toEqual({ serverIcons: true, agentVersions: true });
+    expect(sets.at(-1)).toEqual({ serverIcons: true, agentVersions: true, usageLogs: true });
     expect(toggle().getAttribute("aria-checked")).toBe("true");
   });
 

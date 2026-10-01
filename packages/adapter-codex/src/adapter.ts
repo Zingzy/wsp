@@ -21,6 +21,7 @@ import {
   codexReconnectLine,
   endAfterResult,
   endRun,
+  limitKindOfMinutes,
   titlePrompt,
 } from "@wsp/protocol";
 import type {
@@ -43,12 +44,16 @@ import type {
   TurnResult,
   PlanStep,
   TurnTokens,
+  HarnessLimit,
+  LimitWindow,
 } from "@wsp/protocol";
 import { catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
 import { accessParams, buildCommand, buildEnv, imagePath } from "./command.js";
 import {
   INITIALIZED_LINE,
   REQUEST,
+  ACCOUNT_READ_LINE,
+  RATE_LIMITS_READ_LINE,
   decisionLine,
   initializeLine,
   readMessage,
@@ -251,6 +256,32 @@ function turnTokensOf(seen: UsageSeen): TurnTokens {
   return { input: 0, output: 0, ...fields, context: held, ...(seen.window !== undefined ? { window: seen.window } : {}) };
 }
 
+/** A window's reset as ms epoch: the server sends unix seconds, as the rollout's resets_at is. */
+const resetMs = (value: number): number => (value < 1e11 ? value * 1000 : value);
+
+/** The plan's windows off a rate-limit snapshot, each read as a kind by its length (the primary is the session and the
+ * secondary the week where the server names no length), with the plan and the account account/read named. A limit
+ * the backend says was reached reads reached. */
+function limitOf(snapshot: Record<string, unknown>, account: { id?: string; label?: string; plan?: string }): HarnessLimit | undefined {
+  const windows: LimitWindow[] = [];
+  for (const [slot, fallback] of [["primary", 300], ["secondary", 10_080]] as const) {
+    const w = rec(snapshot[slot]);
+    const used = count(w?.usedPercent);
+    if (w === undefined || used === undefined) continue;
+    const resetsAt = count(w.resetsAt);
+    windows.push({ kind: limitKindOfMinutes(count(w.windowDurationMins) ?? fallback), usedPercent: used, ...(resetsAt !== undefined ? { resetsAt: resetMs(resetsAt) } : {}) });
+  }
+  if (windows.length === 0) return undefined;
+  const plan = str(snapshot.planType) ?? account.plan;
+  const id = account.id ?? account.label;
+  return {
+    windows,
+    ...(plan !== undefined ? { plan } : {}),
+    status: snapshot.rateLimitReachedType === undefined || snapshot.rateLimitReachedType === null ? "ok" : "reached",
+    ...(id !== undefined ? { account: { id, ...(account.label !== undefined ? { label: account.label } : {}) } } : {}),
+  };
+}
+
 /** The running total as it stood before the call a report's `last` covers. */
 const totalBefore = (total: Record<string, unknown>, last: Record<string, unknown>): Record<string, unknown> =>
   Object.fromEntries(BREAKDOWN.flatMap(([, key]) => (count(total[key]) === undefined ? [] : [[key, count(total[key])! - (count(last[key]) ?? 0)]])));
@@ -339,6 +370,9 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     let turnResult: TurnResult | undefined;
     let lastText: string | undefined;
     let usage: UsageSeen | undefined;
+    /** The account's plan windows as last read, with the sign-in account/read named, merged across rolling updates. */
+    let rateLimits: Record<string, unknown> | undefined;
+    let account: { id?: string; label?: string; plan?: string } = {};
     let modelUsed = o.model;
     /** The last failure the stream showed, if any, in wsp's words and under the cause it claims. */
     let words: { line: string; cause?: TurnRefusal } | undefined;
@@ -416,6 +450,12 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
       return { status: "failed", durationMs: Date.now() - startedAt, error: words?.line ?? message, ...(words?.cause !== undefined ? { refusal: words.cause } : {}) };
     };
 
+    const emitLimit = (): void => {
+      if (rateLimits === undefined) return;
+      const limit = limitOf(rateLimits, account);
+      if (limit !== undefined) emit({ type: "limit", sessionId: threadId, limit });
+    };
+
     const onRequest = (id: RequestId, method: string, params: Record<string, unknown>): void => {
       const toolName = APPROVALS[method];
       if (toolName === undefined) {
@@ -457,6 +497,23 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
       }
       if (id === REQUEST.revert) {
         finish({ status: "completed", durationMs: Date.now() - startedAt });
+        return;
+      }
+      if (id === REQUEST.account) {
+        const signIn = rec(rec(result)?.account);
+        if (str(signIn?.type) === "apiKey") emit({ type: "limit", sessionId: threadId, limit: { windows: [], keyed: true } });
+        const email = str(signIn?.email);
+        const plan = str(signIn?.planType);
+        account = { ...account, ...(email !== undefined ? { label: email } : {}), ...(plan !== undefined ? { plan } : {}) };
+        emitLimit();
+        return;
+      }
+      if (id === REQUEST.rateLimits) {
+        const answer = rec(result);
+        const accountId = str(answer?.accountId);
+        if (accountId !== undefined) account = { ...account, id: accountId };
+        rateLimits = rec(answer?.rateLimits);
+        emitLimit();
         return;
       }
       const settle = typeof id === "string" ? steers.get(id) : undefined;
@@ -509,6 +566,13 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
           if (last === undefined) break;
           const window = count(reported?.modelContextWindow);
           usage = { before: usage?.before ?? totalBefore(total, last), total, last, ...(window !== undefined ? { window } : {}) };
+          break;
+        }
+        case "account/rateLimits/updated": {
+          // A rolling update is sparse: what it leaves out, or names null, keeps the last reading's value.
+          const update = Object.fromEntries(Object.entries(rec(params.rateLimits) ?? {}).filter(([, value]) => value !== null));
+          rateLimits = { ...(rateLimits ?? {}), ...update };
+          emitLimit();
           break;
         }
         case "turn/plan/updated": {
@@ -675,7 +739,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     const threadLine = options.resume === undefined ? threadStartLine(thread) : threadResumeLine({ ...thread, threadId: options.resume });
     const command = buildCommand({ ...(options.cwd !== undefined ? { cwd: options.cwd } : {}), ...(options.mcpServers !== undefined ? { mcpServers: options.mcpServers } : {}) });
     return follow({
-      stream: deps.exec(command, { env: { ...env }, input: [initializeLine(), INITIALIZED_LINE, threadLine] }),
+      stream: deps.exec(command, { env: { ...env }, input: [initializeLine(), INITIALIZED_LINE, ACCOUNT_READ_LINE, RATE_LIMITS_READ_LINE, threadLine] }),
       localId,
       startedAt: Date.now(),
       command,

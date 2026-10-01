@@ -14,6 +14,7 @@
 // why the vocabulary they share (DeltaKind, TurnResult, SessionHarness) is
 // declared once there and imported back here.
 import type { DeltaKind, PermissionOption, PermissionOutcome, PlanStep, SessionHarness, TurnResult } from "./index.js";
+import type { HarnessLimit } from "./usage.js";
 
 /** The id every adapter's ask carries for "run this call" and for "refuse it", so the runtime's own answers (the
  * deny it sends when nobody answered in time) name an option without knowing which CLI raised the prompt. Options
@@ -84,6 +85,14 @@ export type AdapterEvent =
       type: "turn.anchor";
       sessionId: string;
       anchor: string;
+    }
+  | {
+      /** The plan's limits for the account this turn runs on, as the harness printed them: sent whenever it prints
+       * a reading, which is during a turn and never between them. Read by the runtime alone, which keeps the last
+       * one per account. */
+      type: "limit";
+      sessionId: string;
+      limit: HarnessLimit;
     }
   | { type: "permission.ask"; sessionId: string; ask: PermissionAsk }
   | {

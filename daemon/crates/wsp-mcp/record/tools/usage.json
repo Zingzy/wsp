@@ -1,0 +1,472 @@
+{
+  "cloudOff": {
+    "name": "usage",
+    "description": "Two answers that are never added together. accounts: every agent account signed in on any computer, the same one on three computers once, each with how much of its plan's windows is used and when each starts again, as that agent printed them in the last turn wsp ran on it; an agent that prints none reads limit not available, a sign-in by API key has no plan window, and an account no turn has run on yet has no reading. used: the tokens the turns used over the range (today, the last seven days or the last thirty), split by agent, account, computer or project, each row with the cost its agent reported or a list price off one table, rows read from this computer's own agent logs for work done outside wsp marked outside, and a series over the range.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "range": {
+          "type": "string",
+          "enum": [
+            "day",
+            "week",
+            "month"
+          ],
+          "description": "day (the default), week or month"
+        },
+        "by": {
+          "type": "string",
+          "enum": [
+            "agent",
+            "account",
+            "computer",
+            "project"
+          ],
+          "description": "agent (the default), account, computer or project"
+        }
+      },
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "accounts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string"
+              },
+              "agent": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "computers": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "plan": {
+                "type": "string"
+              },
+              "windows": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "session",
+                        "week",
+                        "week_opus",
+                        "week_sonnet",
+                        "month",
+                        "overage"
+                      ]
+                    },
+                    "usedPercent": {
+                      "type": "number"
+                    },
+                    "resetsAt": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "usedPercent"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "ok",
+                  "warning",
+                  "reached"
+                ]
+              },
+              "readAt": {
+                "type": "number"
+              },
+              "note": {
+                "type": "string",
+                "enum": [
+                  "limit not available",
+                  "no plan limit: signed in with a key",
+                  "not read yet: runs a thread first"
+                ]
+              }
+            },
+            "required": [
+              "key",
+              "agent",
+              "label",
+              "computers"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "used": {
+          "type": "object",
+          "properties": {
+            "range": {
+              "type": "string",
+              "enum": [
+                "day",
+                "week",
+                "month"
+              ]
+            },
+            "split": {
+              "type": "string",
+              "enum": [
+                "agent",
+                "account",
+                "computer",
+                "project"
+              ]
+            },
+            "rows": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string"
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "tokens": {
+                    "type": "object",
+                    "properties": {
+                      "input": {
+                        "type": "number"
+                      },
+                      "output": {
+                        "type": "number"
+                      },
+                      "cached": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "input",
+                      "output",
+                      "cached"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "costReported": {
+                    "type": "number"
+                  },
+                  "costList": {
+                    "type": "number"
+                  },
+                  "priced": {
+                    "type": "boolean"
+                  },
+                  "outside": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "key",
+                  "label",
+                  "tokens",
+                  "priced"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "series": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "t": {
+                    "type": "number"
+                  },
+                  "tokens": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "t",
+                  "tokens"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "since": {
+              "type": "number"
+            },
+            "until": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "range",
+            "split",
+            "rows",
+            "series",
+            "since",
+            "until"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "accounts",
+        "used"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  "cloudOn": {
+    "name": "usage",
+    "description": "Two answers that are never added together. accounts: every agent account signed in on any computer, the same one on three computers once, each with how much of its plan's windows is used and when each starts again, as that agent printed them in the last turn wsp ran on it; an agent that prints none reads limit not available, a sign-in by API key has no plan window, and an account no turn has run on yet has no reading. used: the tokens the turns used over the range (today, the last seven days or the last thirty), split by agent, account, computer or project, each row with the cost its agent reported or a list price off one table, rows read from this computer's own agent logs for work done outside wsp marked outside, and a series over the range.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "range": {
+          "type": "string",
+          "enum": [
+            "day",
+            "week",
+            "month"
+          ],
+          "description": "day (the default), week or month"
+        },
+        "by": {
+          "type": "string",
+          "enum": [
+            "agent",
+            "account",
+            "computer",
+            "project"
+          ],
+          "description": "agent (the default), account, computer or project"
+        }
+      },
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "accounts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string"
+              },
+              "agent": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "computers": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "plan": {
+                "type": "string"
+              },
+              "windows": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "session",
+                        "week",
+                        "week_opus",
+                        "week_sonnet",
+                        "month",
+                        "overage"
+                      ]
+                    },
+                    "usedPercent": {
+                      "type": "number"
+                    },
+                    "resetsAt": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "usedPercent"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "ok",
+                  "warning",
+                  "reached"
+                ]
+              },
+              "readAt": {
+                "type": "number"
+              },
+              "note": {
+                "type": "string",
+                "enum": [
+                  "limit not available",
+                  "no plan limit: signed in with a key",
+                  "not read yet: runs a thread first"
+                ]
+              }
+            },
+            "required": [
+              "key",
+              "agent",
+              "label",
+              "computers"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "used": {
+          "type": "object",
+          "properties": {
+            "range": {
+              "type": "string",
+              "enum": [
+                "day",
+                "week",
+                "month"
+              ]
+            },
+            "split": {
+              "type": "string",
+              "enum": [
+                "agent",
+                "account",
+                "computer",
+                "project"
+              ]
+            },
+            "rows": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string"
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "tokens": {
+                    "type": "object",
+                    "properties": {
+                      "input": {
+                        "type": "number"
+                      },
+                      "output": {
+                        "type": "number"
+                      },
+                      "cached": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "input",
+                      "output",
+                      "cached"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "costReported": {
+                    "type": "number"
+                  },
+                  "costList": {
+                    "type": "number"
+                  },
+                  "priced": {
+                    "type": "boolean"
+                  },
+                  "outside": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "key",
+                  "label",
+                  "tokens",
+                  "priced"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "series": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "t": {
+                    "type": "number"
+                  },
+                  "tokens": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "t",
+                  "tokens"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "since": {
+              "type": "number"
+            },
+            "until": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "range",
+            "split",
+            "rows",
+            "series",
+            "since",
+            "until"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "accounts",
+        "used"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  }
+}

@@ -146,6 +146,8 @@ const GHOSTTY: Record<string, string> = {
  * on adds its row here; a refused row is called with nothing on the host to act on. */
 const CALLED: readonly Called[] = [
   { tool: "computers", argv: ["computers"], arguments: {} },
+  { tool: "usage", argv: ["usage"], arguments: {} },
+  { tool: "usage", argv: ["usage", "--range", "week", "--by", "project"], arguments: { range: "week", by: "project" } },
   { tool: "workspaces", argv: ["workspaces"], arguments: {} },
   { tool: "projects", argv: ["projects"], arguments: {} },
   { tool: "threads", argv: ["threads"], arguments: {} },

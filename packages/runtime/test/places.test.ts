@@ -3225,6 +3225,7 @@ describe("a fork on a computer you joined", () => {
   const REFUSED = [
     "ports.watch",
     "sys.watch",
+    "sys.history",
     "proc.watch",
     "proc.unwatch",
     "proc.inspect",

@@ -354,6 +354,7 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
       "workspaces.pullRequestView": "the pull request's page the pane shows; an agent reads its pull request with gh in its copy",
       "workspaces.viewed": "a viewed mark is one person's place in a review; an agent reads the diff whole with git and marks nothing",
       "fs.write": "the pane's save of an edit made inside the diff; the command line reaches a file through wsp exec",
+      "places.readings": "a computer's chart over a day, a week or a month; wsp computers prints its cores and memory now",
     };
     for (const [op, why] of Object.entries(PANE_ONLY)) {
       expect([...RUNTIME_OPS, ...DAEMON_FRAME_OPS], `${op} is served`).toContain(op);

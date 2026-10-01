@@ -142,6 +142,11 @@ export function hostRootsPath(statePath: string): string {
   return join(dirname(statePath), "roots");
 }
 
+/** Where this computer's daemon keeps its readings, beside the state file, since its own folder lasts one start. */
+export function hostReadingsDir(statePath: string): string {
+  return join(dirname(statePath), "readings");
+}
+
 /** Where the files handed to a turn on this computer land for its daemon to pick up, beside the lock and the runs,
  * under the same rule: one per state file, made by the host that serves it. */
 export function hostInboxDir(statePath: string): string {

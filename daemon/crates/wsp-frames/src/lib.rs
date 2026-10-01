@@ -59,7 +59,7 @@ pub use reply::{
     ListeningPort, ManifestEntry, ManifestGetReply, ManifestRecordReply, ManifestRestartScriptReply, PlaceLeaveReply, PlaceUpdateReply,
     PortsWatchReply, ProcInspectReply, PtyAttachReply, PtyCreateReply, PtyListEntry, PtyListReply, PullRequest, PullRequestCheck,
     PullRequestCheckRun, PullRequestComment, PullRequestCommit, PullRequestFile, PullRequestFork, PullRequestReview,
-    PullRequestReviewComment, Reply, SshStartReply, True,
+    PullRequestReviewComment, Reply, SshStartReply, SysHistoryReply, SysPoint, True,
 };
 pub use request::{DaemonOp, DaemonRequest, ReviewComment, DAEMON_OPS, GUEST_OPS};
 pub use shell::shell_quote;

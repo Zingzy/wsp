@@ -44,6 +44,8 @@ async fn start(tune: impl FnOnce(&mut Options)) -> Running {
     let mut token = tempfile::NamedTempFile::new().unwrap();
     writeln!(token, "{TOKEN}").unwrap();
     let mut options = Options::new(token.path());
+    // The kept readings wait a day, so no case writes them into the temp folder every case's token shares.
+    options.readings_interval_ms = Some(86_400_000);
     options.host = "127.0.0.1".to_owned();
     options.port = 0;
     tune(&mut options);
@@ -539,4 +541,36 @@ async fn a_watch_on_a_port_scoped_socket_is_refused_before_any_probe_runs() {
     }
     assert_eq!(frames[2]["code"], "forbidden");
     assert!(d.log().is_empty());
+}
+
+#[tokio::test]
+async fn sys_history_answers_the_kept_minutes_folded_into_steps_and_refuses_a_range_with_no_width() {
+    let kept = tempfile::tempdir().unwrap();
+    // 2026-09-29T00:00:00Z and the ten minutes after it, one point each, as the daemon writes them.
+    let t0: i64 = 1_790_640_000_000;
+    let day: String = (0..10)
+        .map(|m| format!("{}\n", json!({ "at": t0 + m * 60_000, "cpu": m as f64 * 10.0, "load1": 1.0, "mem": { "used": m, "total": 100 }, "disk": { "used": 9, "total": 100 } })))
+        .collect();
+    std::fs::write(kept.path().join("2026-09-29.jsonl"), day).unwrap();
+    let dir = kept.path().to_path_buf();
+    let d = start(move |o| o.readings_dir = Some(dir)).await;
+    let mut c = Client::connect(d.addr).await;
+    let res = c.request("sys.history", json!({ "from": t0, "to": t0 + 600_000, "stepMs": 300_000 })).await;
+    assert_eq!(res["ok"], true, "{res}");
+    assert_eq!(res["stepMs"], 300_000);
+    assert_eq!(res["truncated"], false);
+    let points = res["points"].as_array().unwrap();
+    assert_eq!(points.len(), 2);
+    assert_eq!(
+        points[0],
+        json!({ "at": t0, "cpu": 20.0, "load1": 1.0, "mem": { "used": 4, "total": 100 }, "disk": { "used": 9, "total": 100 } })
+    );
+    // A range with no reading in it is an empty answer, not a refusal: a chart draws its gap.
+    let none = c.request("sys.history", json!({ "from": t0 + 86_400_000, "to": t0 + 2 * 86_400_000, "stepMs": 300_000 })).await;
+    assert_eq!(none["points"], json!([]));
+    for bad in [json!({ "from": t0, "to": t0, "stepMs": 300_000 }), json!({ "from": t0, "to": t0 + 1, "stepMs": 0 })] {
+        let refused = c.request("sys.history", bad).await;
+        assert_eq!((refused["ok"].clone(), refused["code"].clone()), (json!(false), json!("bad-request")), "{refused}");
+    }
+    c.close().await;
 }
