@@ -234,7 +234,7 @@ import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
 import { isNoProvider, isPlaceAbsent, projectStateKey, putFiles, type Copier } from "@wsp/engine";
-import { boxFullLine, workspaceMemMb } from "@wsp/protocol";
+import { boxFullLine, threadMessages, threadSeed, workspaceMemMb } from "@wsp/protocol";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
 import { assertTokenShape, daemonTokenFor, daemonTokenPathOf, rotateDaemonToken } from "./daemon-token.js";
@@ -356,6 +356,9 @@ export interface HarnessStartOptions {
    * takes in a config; the adapter hands them to its CLI the way that CLI takes one. Absent on a turn that carries
    * none, which is every turn a person sends. */
   mcpServers?: Readonly<Record<string, McpServerSpec>>;
+  /** On a resume: the thread so far as text, for an adapter whose CLI holds no session under `resume` to open a new one
+   * with. Asked for only then. */
+  seed?: () => Promise<string>;
   onEvent: (event: AdapterEvent) => void;
 }
 
@@ -8947,6 +8950,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
               ...(title !== undefined ? { title } : {}),
               ...(images.length > 0 ? { images } : {}),
               ...(mcpServers !== undefined ? { mcpServers } : {}),
+              // The thread's earlier turns as its transcript holds them, this one left out since its message follows.
+              ...(resume !== undefined ? { seed: async () => threadSeed(threadMessages((await openTranscript(workspaceId)).filter(e => e.turnId !== turnId), threadId)) } : {}),
               onEvent,
             }),
         });

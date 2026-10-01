@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
-import { backgroundTasksLine, notifyTail, signInRefusalLine } from "@wsp/protocol";
+import { backgroundTasksLine, LOST_SESSION_NOTE, notifyTail, signInRefusalLine } from "@wsp/protocol";
 import type { AdapterEvent, ExecStream, ExecStreamFactory, TurnResult } from "@wsp/protocol";
 import { createClaudeAdapter, type ClaudeSession } from "../src/adapter.js";
 import { CLAUDE_SCREEN_COMMANDS } from "../src/catalog.js";
@@ -893,6 +893,62 @@ describe("result classification", () => {
     expect(result).toMatchObject({ status: "completed", text: "hi", durationMs: 1237 });
     expect(events.filter((e) => e.type === "turn.done")).toHaveLength(1);
     expect(events.at(-1)).toMatchObject({ type: "session.end", sawResult: true });
+  });
+
+  describe("a resume of a session the machine no longer holds", () => {
+    // What Claude Code 2.1.280 printed for --resume of a session id its store does not hold (measured 2026-10-01 on a
+    // Boat box): the sentence on stderr, then an error result in 0 ms naming it, and exit 1. A paused Boat machine woke
+    // with no store for a thread's session and every send to it answered this (wsp-map#1412).
+    const goneLines = [
+      `No conversation found with session ID: ${FIXTURE_SESSION_ID}`,
+      `{"type":"result","subtype":"error_during_execution","duration_ms":0,"is_error":true,"num_turns":0,"session_id":"${FIXTURE_SESSION_ID}","total_cost_usd":0,"usage":{"input_tokens":0,"output_tokens":0},"errors":["No conversation found with session ID: ${FIXTURE_SESSION_ID}"]}`,
+    ];
+    const FRESH = "0b7f5d0e-3c1a-4e2b-9f6d-2a8c4e6b1d3f";
+    const freshLines = [
+      `{"type":"system","subtype":"init","cwd":"/w","session_id":"${FRESH}","model":"claude-haiku-4-5"}`,
+      `{"type":"assistant","message":{"id":"msg_1","role":"assistant","content":[{"type":"text","text":"picking up"}]},"parent_tool_use_id":null,"session_id":"${FRESH}"}`,
+      `{"type":"result","subtype":"success","is_error":false,"num_turns":1,"duration_ms":900,"result":"picking up","session_id":"${FRESH}","total_cost_usd":0.01,"usage":{"input_tokens":10,"output_tokens":4}}`,
+    ];
+    /** The first launch answers the gone session, every later one the fresh session. */
+    const twoRuns = () => {
+      const runs = [scriptedExec(goneLines, { exitCode: 1 }), scriptedExec(freshLines)];
+      let n = 0;
+      const factory: ExecStreamFactory = (command, o) => runs[Math.min(n++, 1)]!.factory(command, o);
+      return { factory, runs };
+    };
+
+    it("starts a new session seeded with the thread so far, says so, and answers the person's message", async () => {
+      const exec = twoRuns();
+      const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
+      const { events, onEvent } = collect();
+      const seed = "person: fix the login page\nagent: done, pushed to fix/login";
+
+      const session = adapter.start({ prompt: "now add a test", resume: FIXTURE_SESSION_ID, seed: async () => seed, onEvent });
+      const result = await session.finished;
+
+      expect(result).toMatchObject({ status: "completed", text: "picking up" });
+      const fresh = exec.runs[1]!.calls[0]!;
+      expect(fresh.command).not.toContain("--resume");
+      const sent = JSON.parse(fresh.input![0]!) as { message: { content: { text: string }[] } };
+      const text = sent.message.content.at(-1)!.text;
+      expect(text).toContain(seed);
+      expect(text.endsWith("now add a test")).toBe(true);
+      // The failed resume is no turn of the thread's: one turn ends, the fresh session's, and it announced itself.
+      expect(events.filter(e => e.type === "turn.done")).toHaveLength(1);
+      const started = events.findIndex(e => e.type === "session.start");
+      expect(events[started]).toMatchObject({ sessionId: session.claudeSessionId });
+      expect(session.claudeSessionId).not.toBe(FIXTURE_SESSION_ID);
+      expect(events.slice(started).find(e => e.type === "turn.delta" && e.kind === "note")).toMatchObject({ text: LOST_SESSION_NOTE });
+    });
+
+    it("fails with the CLI's own sentence where nothing seeds a new one", async () => {
+      const exec = twoRuns();
+      const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
+      const { onEvent } = collect();
+      const result = await adapter.start({ prompt: "x", resume: FIXTURE_SESSION_ID, onEvent }).finished;
+      expect(result).toMatchObject({ status: "failed", error: `No conversation found with session ID: ${FIXTURE_SESSION_ID}` });
+      expect(exec.runs[1]!.calls).toHaveLength(0);
+    });
   });
 
   it("a report's answer that carries words is the turn's reply, so a send it ends never waits on an answer that is not coming", async () => {

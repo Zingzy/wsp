@@ -535,6 +535,14 @@ export const noReplyLine = (threadId: string): string => `thread ${threadId.slic
  * working, so what is above is the report before this one, not the one being written. */
 export const NEWER_TURN_LINE = "a newer turn is running; the reply above is the one before it";
 
+/** The note a turn carries where the machine held no session for the thread to resume (a Boat box woke with none on
+ * 2026-09-27): the turn ran in a new session, which the thread so far was handed as its first message. */
+export const LOST_SESSION_NOTE = "the agent's session for this thread was gone from the machine, so this turn started a new one and handed it the thread so far";
+
+/** The first message of that new session: the thread so far, then the person's message as they sent it. */
+export const lostSessionPrompt = (thread: string, prompt: string): string =>
+  `Your earlier session for this thread was lost, so it continues here in a new one. The thread so far, oldest first:\n\n${thread}\n\nThe new message:\n\n${prompt}`;
+
 /** One tool call's input, as the wire's delta carries it: the JSON the harness reported, already parsed. */
 type ToolInput = Readonly<Record<string, unknown>>;
 

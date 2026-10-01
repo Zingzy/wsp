@@ -6894,7 +6894,7 @@ export { compareVersions } from "./semver.mjs";
 export { attachedFilesPrompt, Attachment, attachmentBytes, attachmentLine, AttachmentRecord, attachmentRecord, FILE_MAX_BYTES, FILE_MAX_WORDS, FILES_AFTER_TURN, FILES_DIR, FILES_MAX, filePathIn, filesBlocked, filesNotLandedLine, filesRefusal, IMAGE_MAX_BYTES, IMAGE_MAX_WORDS, IMAGE_TYPES, IMAGE_TYPE_WORDS, imagePathIn, imageTypeOf, isImage, dropFilesLine, landFilesLine, noImagesLine, notAFileLine, safeFileName, sendFilesDir, threadFilesDir, threadImagesDir, turnImagesDir, UNTYPED_FILE } from "./attachments.js";
 export * from "./oom.js";
 export { accruedAt, accruedPast, appendCostPoint, COST_HISTORY_CAP, dayStart, monthStart, rateAt, spentSince } from "./cost-history.js";
-export { leadAsk, openAsk, ThreadMessage, threadMarkdown, threadMessages, threadReplyRows, threadResult, ThreadVoice } from "./thread-read.js";
+export { leadAsk, openAsk, THREAD_SEED_CHARS, ThreadMessage, threadMarkdown, threadMessages, threadReplyRows, threadResult, threadSeed, ThreadVoice } from "./thread-read.js";
 export { inFolder, shellLine, shellQuote } from "./shell-quote.js";
 export {
   DEFAULT_THEME,

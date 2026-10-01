@@ -725,6 +725,25 @@ describe("runtime session history", () => {
     await rt.close();
   });
 
+  it("hands a resume the thread so far for a new session to open with, the turn being sent left out, and a fresh start nothing", async () => {
+    const seeds: HarnessStartOptions["seed"][] = [];
+    const inner = threaded();
+    const claude: HarnessAdapterFactory = ctx => {
+      const a = inner(ctx);
+      return { ...a, start: o => (seeds.push(o.seed), a.start(o)) };
+    };
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude } });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+    const first = await rt.sessions.start(ws.id, { prompt: "fix the login page" });
+    await first.finished;
+    await (await rt.sessions.start(ws.id, { prompt: "now add a test", thread: first.view().threadId! })).finished;
+    expect(seeds.map(seed => seed !== undefined)).toEqual([false, true]);
+    const text = await seeds[1]!();
+    expect(text).toContain("fix the login page");
+    expect(text).not.toContain("now add a test");
+    await rt.close();
+  });
+
   it("a row says who opened its thread: a resumed turn keeps the answer of the turn it resumes, a fresh start gives its own", async () => {
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: threaded() } });
     const ws = await createOn(rt, { golden: "snap_g", name: "a" });
