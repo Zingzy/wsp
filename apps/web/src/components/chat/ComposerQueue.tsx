@@ -3,8 +3,8 @@
 // how many wait, the first line of the one that goes next, and for one message
 // an Edit that puts it back in the box and a Cancel that takes it off the
 // queue. Several open to the list, oldest first, each with its own Edit and
-// Cancel. The head goes when the turn ends; Ctrl+Enter in the box is what sends
-// a message now, so nothing here carries a send of its own.
+// Cancel. The head goes when the turn ends; a message goes now only where the
+// person picked steer, so nothing here carries a send of its own.
 import { ChevronRightIcon, FileTextIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { Button } from "../ui/button";
@@ -14,7 +14,7 @@ import type { QueuedMessage } from "./composerDraftStore";
 /** Every word the queue says. */
 export const QUEUE_WORDS = {
   waiting: (count: number): string => (count === 1 ? "1 message waiting" : `${count} messages waiting`),
-  /** The message a Ctrl+Enter took, while its send is out. */
+  /** The message a steer took, while its send is out. */
   sending: "Sending now",
   edit: "Edit",
   editLabel: "Edit queued message",

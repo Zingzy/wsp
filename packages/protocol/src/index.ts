@@ -15,6 +15,9 @@ import { Attachment, AttachmentRecord } from "./attachments.js";
 import { fmtBytes, fmtBytesOfTotal, isoSeconds, KNOWN_HOSTS, nameList, openingTitle, PLACE_INSTALL, PLACE_LEAVE_LINE, plural, thisComputer, THIS_COMPUTER, threadWord, titleLine } from "./format.js";
 import { InitJob, InitJobEvent, InitAgent, InitKeys, InitNeedsYou, InitNeedsYouEvent, InitRoad, InitScreenId, LoginChoice, LoginState, SIGN_IN_CODE_MAX } from "./init-job.js";
 import { UsageRange, UsageSplit, UsageTokens } from "./usage.js";
+import { GENERAL_DEFAULTS, GENERAL_FIELDS, patchedGeneral } from "./general-prefs.js";
+import { UsageAlertEvent } from "./plan-alerts.js";
+import type { OutsideLine } from "./outside-line.js";
 import type { FsListReply as WireFsListReply } from "./generated/FsListReply.js";
 import type { FsFilesReply as WireFsFilesReply } from "./generated/FsFilesReply.js";
 import type { GitPrListReply as WireGitPrListReply } from "./generated/GitPrListReply.js";
@@ -85,10 +88,6 @@ export const TURN_IDLE_MS = 10 * 60_000;
  * percent of one core clears it, which a vitest batch or a packager does many times over; a harness process waking
  * on its own timers stays under it, so a turn nothing is working on is still cut at TURN_IDLE_MS. */
 export const TURN_WORK_TICKS_PER_S = 5;
-/** How long a thread a person has read sits quiet before the sidebar folds it into Settled. The fold reads the
- * thread's own last activity, so a thread that takes a new turn leaves Settled by itself; one nobody has read since
- * its turn ended never folds by time. */
-export const THREAD_SETTLE_MS = 2 * 60 * 60_000;
 /** The longest one turn may run however much it prints, a safety cap only; a per-workspace setting is a follow-up. */
 export const TURN_WALL_MS = 6 * 60 * 60_000;
 /** How long a harness gets to exit on its own after the result its turn ended on, before the runtime ends it and its
@@ -2198,8 +2197,6 @@ export const Preferences = z.object({
   usageLogs: z.boolean().default(true),
   /** The editor Open in editor opens a file in; absent opens the first one installed on the computer running the host. */
   editor: EditorId.optional(),
-  /** Whether a system notification for a finished turn or a permission prompt makes a sound. */
-  notifySound: z.boolean(),
   /** Whether the desktop app keeps this computer from sleeping on its own while a thread works on it. On unless the
    * person turns it off; defaulted so a record from a host older than the switch reads as on. */
   keepAwake: z.boolean().default(true),
@@ -2218,6 +2215,7 @@ export const Preferences = z.object({
   textSize: sizeOf(TEXT_SIZES).optional(),
   /** The size code reads at in replies, tool output, diffs and files; absent, each its own. */
   codeSize: sizeOf(CODE_SIZES).optional(),
+  ...GENERAL_FIELDS,
   /** Whether the surfaces still being worked on are offered at all. The host stamps it from its own environment at
    * every read, so no client sets it and nothing a state file holds can turn it on. */
   labs: z.boolean(),
@@ -2251,7 +2249,7 @@ export const PreferencesPatch = Preferences.omit({ labs: true })
   .strict();
 export type PreferencesPatch = z.infer<typeof PreferencesPatch>;
 
-export const DEFAULT_PREFERENCES: Preferences = { theme: "system", ...THEME_PICK_DEFAULTS, sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, usageLogs: true, notifySound: true, keepAwake: true, transparency: true, projectOrder: [], keybindings: {}, appFont: "", codeFont: "", labs: false };
+export const DEFAULT_PREFERENCES: Preferences = { theme: "system", ...THEME_PICK_DEFAULTS, sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, usageLogs: true, keepAwake: true, transparency: true, projectOrder: [], keybindings: {}, appFont: "", codeFont: "", ...GENERAL_DEFAULTS, labs: false };
 
 /** The record as stored, over the defaults; a record that does not parse (an older or a hand-edited state file) reads as the defaults. */
 export function preferencesFrom(stored: unknown): Preferences {
@@ -2288,13 +2286,13 @@ export function applyPreferencesPatch(current: Preferences, patch: PreferencesPa
     serverIcons: patch.serverIcons ?? current.serverIcons,
     agentVersions: patch.agentVersions ?? current.agentVersions,
     usageLogs: patch.usageLogs ?? current.usageLogs,
-    notifySound: patch.notifySound ?? current.notifySound,
     keepAwake: patch.keepAwake ?? current.keepAwake,
     transparency: patch.transparency ?? current.transparency,
     projectOrder: patch.projectOrder ?? current.projectOrder,
     keybindings: perWorkspace(current.keybindings, patch.keybindings),
     appFont: patch.appFont ?? current.appFont,
     codeFont: patch.codeFont ?? current.codeFont,
+    ...patchedGeneral(current, patch),
     labs: current.labs,
     ...(sidebarWidth === null || sidebarWidth === undefined ? {} : { sidebarWidth }),
     ...(target === null || target === undefined ? {} : { target }),
@@ -2432,9 +2430,6 @@ export interface ShellChord {
   readonly altKey: boolean;
 }
 
-/** One notification said outside the app: its title, its line, and whether it makes a sound. */
-export const OutsideLine = z.object({ title: z.string(), body: z.string(), sound: z.boolean() });
-export type OutsideLine = z.infer<typeof OutsideLine>;
 
 /** What the desktop shell's preload puts on window.wsp; a browser tab has none of it. */
 export interface DesktopBridge {
@@ -2471,14 +2466,16 @@ export interface DesktopBridge {
    * turn): the shell shows a system notification while its window has no focus, and nothing while it has, since the
    * page already says it. The page decides nothing about focus; the shell owns that. */
   sayOutside(line: OutsideLine): void;
-  /** One notification shown now, with the sound a finished turn makes, focused or not: what Settings plays so the
-   * person hears it. */
-  playNoticeSound(): void;
   /** A click on that notification, after the shell has raised its window: the page opens what it was about. Returns
    * the unsubscribe. */
   onNeedsYouOpen(handler: () => void): () => void;
   /** How many threads wait on the person, for the dock's badge; zero clears it. */
   setBadge(count: number): void;
+  /** Whether this computer's service starts wsp at every login; null where no service is registered for this state.
+   * Only the app's own host's page is answered. */
+  loginStart(): Promise<boolean | null>;
+  /** Sets that, leaving wsp running either way, and answers the reading after it. */
+  setLoginStart(on: boolean): Promise<boolean | null>;
   /** A wsp:// link the system handed the shell while the page was up, read down to what it names: the page opens it
    * and does nothing to it. Only the app's own host's page is told. Returns the unsubscribe. */
   onOpen(handler: (target: LinkTarget) => void): () => void;
@@ -3453,6 +3450,7 @@ export const EventUnion = z.discriminatedUnion("type", [
   PlaceAbsentEvent.extend(sequenced),
   PlaceRemovedEvent.extend(sequenced),
   AgentsChangedEvent.extend(sequenced),
+  UsageAlertEvent.extend(sequenced),
 ]);
 export type EventUnion = z.infer<typeof EventUnion>;
 
@@ -7024,6 +7022,9 @@ export { claudeMemoryDir, claudeProjectKey, copyPathFor, folderName, folderSlug,
 export * from "./bring-back.js";
 export * from "./changes.js";
 export * from "./usage.js";
+export * from "./general-prefs.js";
+export * from "./plan-alerts.js";
+export * from "./outside-line.js";
 export * from "./pull-request.js";
 export * from "./run-block.js";
 export * from "./tree.js";

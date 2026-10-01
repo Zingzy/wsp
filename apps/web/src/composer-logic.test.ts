@@ -1,74 +1,32 @@
 // Adapted from pingdotgg/t3code apps/web/src/composer-logic.test.ts at 57a66608 (MIT).
 // Differs from upstream: the citation cases are dropped with T3's citation links;
 // the pull-request arm is upstream's later one, and the cursor maps read wsp's
-// own wire forms, where a block chip spans lines.
+// own wire forms, where a block chip spans lines; the Enter cases read the
+// person's send key.
 import { describe, expect, it } from "vitest";
 
 import {
   clampCollapsedComposerCursor,
   collapseExpandedComposerCursor,
-  composerSubmissionIntentForEnter,
   detectComposerTrigger,
+  enterSends,
   expandCollapsedComposerCursor,
   isCollapsedCursorAdjacentToInlineToken,
   replaceTextRange,
 } from "./composer-logic";
 import { hostItemText, terminalExcerptText } from "./composer-editor-mentions";
 
-describe("composerSubmissionIntentForEnter", () => {
-  it("submits plain Enter on desktop", () => {
-    expect(
-      composerSubmissionIntentForEnter({
-        isMobileViewport: false,
-        shiftKey: false,
-        modifierKey: false,
-        isDraftThread: true,
-      }),
-    ).toBe("foreground");
+describe("enterSends", () => {
+  it("with Enter as the send key, Enter alone sends and Mod+Enter or Shift+Enter makes a new line", () => {
+    expect(enterSends({ shiftKey: false, modKey: false, sendWith: "enter" })).toBe(true);
+    expect(enterSends({ shiftKey: false, modKey: true, sendWith: "enter" })).toBe(false);
+    expect(enterSends({ shiftKey: true, modKey: false, sendWith: "enter" })).toBe(false);
   });
 
-  it("inserts a newline for plain Enter on mobile", () => {
-    expect(
-      composerSubmissionIntentForEnter({
-        isMobileViewport: true,
-        shiftKey: false,
-        modifierKey: false,
-        isDraftThread: true,
-      }),
-    ).toBeNull();
-  });
-
-  it("inserts a newline for Shift+Enter", () => {
-    expect(
-      composerSubmissionIntentForEnter({
-        isMobileViewport: false,
-        shiftKey: true,
-        modifierKey: false,
-        isDraftThread: true,
-      }),
-    ).toBeNull();
-  });
-
-  it("submits a new thread in the background with Mod+Enter", () => {
-    expect(
-      composerSubmissionIntentForEnter({
-        isMobileViewport: false,
-        shiftKey: false,
-        modifierKey: true,
-        isDraftThread: true,
-      }),
-    ).toBe("background");
-  });
-
-  it("keeps Mod+Enter in the foreground for an active thread", () => {
-    expect(
-      composerSubmissionIntentForEnter({
-        isMobileViewport: false,
-        shiftKey: false,
-        modifierKey: true,
-        isDraftThread: false,
-      }),
-    ).toBe("foreground");
+  it("with Mod+Enter as the send key, Mod+Enter sends and Enter or Shift+Enter makes a new line", () => {
+    expect(enterSends({ shiftKey: false, modKey: true, sendWith: "mod-enter" })).toBe(true);
+    expect(enterSends({ shiftKey: false, modKey: false, sendWith: "mod-enter" })).toBe(false);
+    expect(enterSends({ shiftKey: true, modKey: true, sendWith: "mod-enter" })).toBe(false);
   });
 });
 

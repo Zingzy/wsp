@@ -6,9 +6,13 @@
 // the host's refusal in place. Keep this one ends several copies at once
 // through the same dialog, naming how many go, as Delete copies does a settled
 // tree's. A delete first reads each copy's checkout and names any copy that
-// holds commits not pushed or uncommitted files. The row leaves on
-// workspace.deleted, which the store already applies.
-import { useEffect, useState } from "react";
+// holds commits not pushed or uncommitted files. With Ask before deleting
+// off on General, a delete whose copies all read clean goes without the
+// dialog, as does a forget, whose machine is already gone; a copy holding
+// work, or one whose checkout could not be read, still asks, and a refusal
+// still opens the dialog to say it. The row leaves on workspace.deleted,
+// which the store already applies.
+import { useEffect, useRef, useState } from "react";
 import { deleteCopiesNotice, deleteNotice, forgetNotice, isProviderPlace, placeName, placeOf, unpushedLine, workspaceKind, type Checkout, type StandsOn, type WorkspaceView } from "@wsp/protocol";
 import { CLIENT_CANNOT_DELETE, CLIENT_CANNOT_FORGET } from "../actions/format.js";
 import { errorText } from "../lib/utils.js";
@@ -43,6 +47,7 @@ export function ForgetWorkspaceDialog({
 }) {
   const api = useStore(s => s.api);
   const places = useStore(s => s.places);
+  const asks = useStore(s => s.preferences.askDelete);
   const road = ROADS[act];
   const [workspace] = workspaces;
   // A workspace on a computer somebody joined is deleted from that computer, named as the app names it.
@@ -82,6 +87,13 @@ export function ForgetWorkspaceDialog({
   const reading = act === "delete" && read === null;
   const holding = read === null ? [] : workspaces.flatMap(w => unpushedLine(w.name, read.get(w.id)) ?? []);
 
+  // Off on General, nothing that would be lost asks: a forget, whose machine is gone, or a delete whose copies all
+  // read clean. A copy holding work or read as unknown asks whatever the switch says.
+  const quiet = !asks && (act === "forget" || (read !== null && holding.length === 0));
+  // While the copies are read the dialog waits unseen, so a clean delete never flashes one.
+  const shown = asks || refusal !== null || (act === "delete" && read !== null && holding.length > 0);
+  const went = useRef(false);
+
   const change = (next: boolean): void => {
     if (!next) setRefusal(null);
     onOpenChange(next);
@@ -102,9 +114,15 @@ export function ForgetWorkspaceDialog({
     else setRefusal(errorText(refused.reason));
   };
 
+  useEffect(() => {
+    if (!open || !quiet || went.current) return;
+    went.current = true;
+    void forget();
+  });
+
   if (workspace === undefined) return null;
   return (
-    <AlertDialog open={open} onOpenChange={change}>
+    <AlertDialog open={open && shown} onOpenChange={change}>
       <AlertDialogPopup>
         <AlertDialogHeader>
           <AlertDialogTitle>{many ? (copies ? `${road.word} ${workspaces.length} copies?` : `${road.word} the other ${workspaces.length} copies?`) : `${road.word} ${workspace.name}?`}</AlertDialogTitle>

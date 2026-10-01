@@ -265,7 +265,7 @@ describe("the creation page", () => {
     expect(queued.querySelector("[data-queued-word]")!.getAttribute("title")).toBe("Sends once beta is up");
     expect(view.querySelector("[data-composer-refusal]")).toBeNull();
     await typeInto(editor, "and a README");
-    await press(editor, "Enter", { ctrlKey: true });
+    await press(editor, "Enter");
     expect(useComposerDraftStore.getState().queues["creating:beta"]?.map(r => r.prompt)).toEqual(["add a LICENSE file", "and a README"]);
   });
 });

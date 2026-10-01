@@ -9,9 +9,13 @@
 // and a build's need is said when its rows leave the screen with it standing.
 // The need, the prompt, a machine that came up and a finished turn also go out
 // on the shell's own road, which speaks only while the app is not in front of
-// the person; the prompt and the finish make a sound unless the person turned
-// it off. The dock's badge counts the threads waiting on the person.
-import { GET_THE_APP_WORD, NEEDS_YOU, NOTIFY_ME, askingLine, exitLine, foldThreads, initJobBuilding, initNeedsYouLine, needsYouCount, oneLine, threadFinishedLine, threadKeyOf, threadStoppedLine, titleWithNeed, workspaceAwakeLine, type OutsideLine, type ReleaseView, type TurnResult } from "@wsp/protocol";
+// the person, each as the person chose for its kind on General, by the one
+// rule in the protocol: a need and a prompt as one that needs them, a finish,
+// a failure and a machine that came up as things that finished. An account's
+// plan running low, blocked or back is a notice and a notification with no
+// sound while the person keeps that switch on. The
+// dock's badge counts the threads waiting on the person.
+import { GET_THE_APP_WORD, NOTIFY_ME, askingLine, exitLine, foldThreads, initJobBuilding, initNeedsYouLine, needsYouCount, outsideLine, planAlertLine, threadFinishedLine, threadKeyOf, threadStoppedLine, titleWithNeed, type OutsideLine, type OutsideMoment, type ReleaseView, type TurnResult } from "@wsp/protocol";
 import { useCallback, useEffect, useRef } from "react";
 import type { ProtocolEvent } from "../protocol/client.js";
 import { threadRows, useProtocolEvents, useStore } from "../protocol/store.js";
@@ -62,11 +66,8 @@ function threadTitle(workspaceId: string, threadId: string | undefined): string 
 
 const threadOf = (workspaceId: string, threadId: string | undefined) => foldThreads(useStore.getState().sessions[workspaceId] ?? []).find(t => t.id === threadId);
 
-/** A line said outside the app for a thread's own moment, sounding unless the person turned the sound off. */
-const threadLine = (title: string, body: string): OutsideLine => ({ title, body, sound: useStore.getState().preferences.notifySound });
-
-/** A need or a machine up, said outside the app with no sound: neither is an alarm. */
-const quietLine = (body: string): OutsideLine => ({ title: NEEDS_YOU, body, sound: false });
+/** The line a moment makes outside the app under the person's choices, by the one rule the desktop shell reads too. */
+const lineFor = (moment: OutsideMoment): OutsideLine | undefined => outsideLine(moment, useStore.getState().preferences);
 
 function threadOnScreen(e: { workspaceId: string; sessionId: string; threadId?: string | undefined }): boolean {
   const s = useStore.getState();
@@ -89,6 +90,14 @@ function computerOnScreen(placeId: string | undefined): boolean {
   const at = useSettingsStore.getState().at;
   return s.addComputerOpen || (at.kind === "group" && at.group === "computers") || (at.kind === "computer" && at.id === placeId);
 }
+
+const openUsage: NoticeAction = {
+  word: HOST_NOTICE_WORDS.open,
+  run: () => {
+    useSettingsStore.getState().go({ kind: "group", group: "usage" });
+    useStore.getState().openSettings();
+  },
+};
 
 const versionOnScreen = (): boolean => {
   const at = useSettingsStore.getState().at;
@@ -122,7 +131,8 @@ interface Held {
   results: Map<string, TurnResult>;
 }
 
-function sayOutside(held: Held, opens: () => void, line: OutsideLine): void {
+function sayOutside(held: Held, opens: () => void, line: OutsideLine | undefined): void {
+  if (line === undefined) return;
   held.opens = opens;
   held.road?.say(line);
 }
@@ -209,7 +219,7 @@ const RULES: { [T in ProtocolEvent["type"]]?: Rule<T> } = {
     const thread = threadOf(e.workspaceId, e.threadId);
     if (result?.status === "completed" && e.reason === undefined && thread !== undefined && thread.startedBy !== "agent") {
       const { workspaceId, threadId } = e;
-      sayOutside(held, () => useStore.getState().select(workspaceId, threadId ?? null), threadLine(HOST_NOTICE_WORDS.threadFinished(thread.title), workspaceNamed(workspaceId) ?? ""));
+      sayOutside(held, () => useStore.getState().select(workspaceId, threadId ?? null), lineFor({ kind: "finished", thread: thread.title, where: workspaceNamed(workspaceId) ?? "" }));
     }
     // A failure is said the same way, with its error on the line under it. A reason means the runtime ended it (a
     // pause, a delete, the machine gone, which is its own notice), and an interrupted turn is one somebody stopped:
@@ -217,7 +227,7 @@ const RULES: { [T in ProtocolEvent["type"]]?: Rule<T> } = {
     if (result?.status === "failed" && e.reason === undefined && thread !== undefined && thread.startedBy !== "agent") {
       const { workspaceId, threadId } = e;
       const error = result.error ?? exitLine(e.exitCode);
-      sayOutside(held, () => useStore.getState().select(workspaceId, threadId ?? null), threadLine(HOST_NOTICE_WORDS.threadFailed(thread.title), error === undefined ? (workspaceNamed(workspaceId) ?? "") : oneLine(error)));
+      sayOutside(held, () => useStore.getState().select(workspaceId, threadId ?? null), lineFor({ kind: "failed", thread: thread.title, where: workspaceNamed(workspaceId) ?? "", error }));
     }
     if (e.exitCode === 0 || e.sawResult || e.reason !== undefined || result?.status === "interrupted" || threadOnScreen(e)) return;
     const where = workspaceNamed(e.workspaceId);
@@ -226,7 +236,7 @@ const RULES: { [T in ProtocolEvent["type"]]?: Rule<T> } = {
   },
   "session.permission": (e, held) => {
     const { workspaceId, threadId } = e;
-    sayOutside(held, () => useStore.getState().select(workspaceId, threadId ?? null), threadLine(NEEDS_YOU, askingLine(e)));
+    sayOutside(held, () => useStore.getState().select(workspaceId, threadId ?? null), lineFor({ kind: "asks", line: askingLine(e) }));
     if (threadOnScreen(e)) return;
     const where = workspaceNamed(workspaceId);
     addNotice({ kind: "waiting", key: askKey(workspaceId, threadId, e.askId), text: askingLine(e), ...(where === undefined ? {} : { where }), action: openThread(workspaceId, threadId) });
@@ -239,7 +249,7 @@ const RULES: { [T in ProtocolEvent["type"]]?: Rule<T> } = {
   },
   "job.needs-you": (e, held) => {
     const at = useStore.getState().initJob?.place?.id;
-    sayOutside(held, () => openComputer(at).run(), quietLine(e.needsYou.what));
+    sayOutside(held, () => openComputer(at).run(), lineFor({ kind: "signIn", what: e.needsYou.what }));
     if (buildOnScreen(at)) return;
     sayNeed(held, e.needsYou.what, at);
   },
@@ -259,9 +269,15 @@ const RULES: { [T in ProtocolEvent["type"]]?: Rule<T> } = {
     if (name === undefined || workspaceOnScreen(e.workspaceId)) return;
     addNotice({ kind: "error", text: HOST_NOTICE_WORDS.gone(name, e.reason), where: name, action: openThread(e.workspaceId, undefined) });
   },
+  "usage.alert": (e, held) => {
+    if (!useStore.getState().preferences.planAlerts) return;
+    const text = planAlertLine(e.label, e.alert);
+    addNotice({ kind: e.alert.kind === "back" ? "done" : "note", text, action: openUsage });
+    sayOutside(held, openUsage.run, lineFor({ kind: "plan", label: e.label, alert: e.alert }));
+  },
   "workspace.woken": (e, held) => {
     const name = workspaceNamed(e.workspaceId);
-    if (name !== undefined) sayOutside(held, () => useStore.getState().select(e.workspaceId), quietLine(workspaceAwakeLine(name)));
+    if (name !== undefined) sayOutside(held, () => useStore.getState().select(e.workspaceId), lineFor({ kind: "awake", workspace: name }));
   },
 };
 

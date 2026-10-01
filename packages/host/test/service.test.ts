@@ -90,7 +90,11 @@ describe("one module per service manager", () => {
     expect(text).toContain("<key>WSP_HOME</key><string>/Users/z/.wsp</string>");
     expect(text).toContain("<key>StandardOutPath</key><string>/Users/z/.wsp/host.log</string>");
     expect(text).not.toContain(KEY);
-    expect(launchd.load(at)).toEqual([["launchctl", "bootstrap", "gui/501", `/Users/z/Library/LaunchAgents/com.wsp.host.${tag}.plist`]]);
+    // The load enables the label first: one the app left off at login refuses a bootstrap until it is enabled again.
+    expect(launchd.load(at)).toEqual([
+      ["launchctl", "enable", `gui/501/com.wsp.host.${tag}`],
+      ["launchctl", "bootstrap", "gui/501", `/Users/z/Library/LaunchAgents/com.wsp.host.${tag}.plist`],
+    ]);
     expect(launchd.unload(at)).toEqual([["launchctl", "bootout", `gui/501/com.wsp.host.${tag}`]]);
     expect(launchd.holds(at)).toEqual(["launchctl", "print", `gui/501/com.wsp.host.${tag}`]);
     // One domain per login, so one unit and one call: the bootout is the stop, run while the plist is still there,
@@ -105,6 +109,24 @@ describe("one module per service manager", () => {
       },
     ]);
     expect(launchd.afterLoad).toBeUndefined();
+  });
+
+  it("starts at login or only when asked by each manager's own switch, read off its own answer", () => {
+    const { launchd, systemd } = SERVICE_MANAGERS;
+    expect(launchd.atLogin(at, false)).toEqual([["launchctl", "disable", `gui/501/com.wsp.host.${tag}`]]);
+    expect(launchd.atLogin(at, true)).toEqual([["launchctl", "enable", `gui/501/com.wsp.host.${tag}`]]);
+    expect(launchd.loginRead(at)).toEqual(["launchctl", "print-disabled", "gui/501"]);
+    const overrides = (line: string) => ({ code: 0, output: `disabled services = {\n\t\t"com.apple.x" => disabled\n${line}\n}` });
+    expect(launchd.startsAtLogin(overrides(`\t\t"com.wsp.host.${tag}" => disabled`), at)).toBe(false);
+    expect(launchd.startsAtLogin(overrides(`\t\t"com.wsp.host.${tag}" => true`), at)).toBe(false);
+    expect(launchd.startsAtLogin(overrides(`\t\t"com.wsp.host.${tag}" => enabled`), at)).toBe(true);
+    expect(launchd.startsAtLogin(overrides(""), at)).toBe(true);
+    expect(launchd.startsAtLogin({ code: 1, output: "Bad request." }, at)).toBeUndefined();
+    expect(systemd.atLogin(at, false)).toEqual([["systemctl", "--user", "disable", `wsp-host-${tag}.service`]]);
+    expect(systemd.loginRead(at)).toEqual(["systemctl", "--user", "is-enabled", `wsp-host-${tag}.service`]);
+    expect(systemd.startsAtLogin({ code: 0, output: "enabled" }, at)).toBe(true);
+    expect(systemd.startsAtLogin({ code: 1, output: "disabled" }, at)).toBe(false);
+    expect(systemd.startsAtLogin({ code: 1, output: "Failed to connect to bus: No medium found" }, at)).toBeUndefined();
   });
 
   it("names the agent on a computer joined as a place apart from the host, so one computer can hold both", () => {
@@ -322,6 +344,9 @@ function fakeService(over: Partial<ServiceDeps> = {}): {
     load: a => [["fake", "load", unit(a).name]],
     unload: a => [["fake", "unload", unit(a).name]],
     holds: a => ["fake", "holds", unit(a).name],
+    atLogin: (a, on) => [["fake", on ? "enable" : "disable", unit(a).name]],
+    loginRead: a => ["fake", "is-enabled", unit(a).name],
+    startsAtLogin: answer => answer.output === "enabled",
     held: a => [{ unit: unit(a), words: "fake service", stop: [["fake", "unload", unit(a).name]], forget: [], reload: [] }],
     absent: answer => answer.output === "not held",
   };

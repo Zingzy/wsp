@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { HERE_PLACE_ID, NEEDS_YOU, type PlaceView, type SessionEvent, type SessionPermissionEvent, type SessionView, type TurnResult, type WorkspaceView } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, HERE_PLACE_ID, NEEDS_YOU, type PlaceView, type SessionEvent, type SessionPermissionEvent, type SessionView, type TurnResult, type WorkspaceView } from "@wsp/protocol";
 import { describe, expect, it } from "vitest";
 import { QUIT_WORD } from "../src/quit.js";
 import { TRAY_WORDS, trayModel, trayNotice, type TrayInput, type TrayRow } from "../src/tray.js";
@@ -116,21 +116,25 @@ describe("the menu bar's model", () => {
 describe("what the menu bar says over the system while no window is open", () => {
   const sessions = [row({ id: "s1", threadId: "t1", prompt: "fix login" }), row({ id: "s2", threadId: "t_agent", prompt: "sub task", startedBy: "agent" })];
 
-  it("a finished turn says the thread finished and where, with the sound the person chose", () => {
+  const loud = { notifyNeeds: "notify-sound", notifyDone: "notify-sound", planAlerts: true } as const;
+
+  it("a finished turn says the thread finished and where, as the person chose for a finish, and nothing by default", () => {
     const done = { type: "session.done", workspaceId: "ws_mac", sessionId: "s1", threadId: "t1", result: { status: "completed" } } as const;
-    expect(trayNotice(done, { sessions, workspaces, places }, true)).toEqual({ title: "fix login finished", body: "zingzy's MacBook Pro", sound: true });
-    expect(trayNotice(done, { sessions, workspaces, places }, false)?.sound).toBe(false);
+    expect(trayNotice(done, { sessions, workspaces, places }, loud)).toEqual({ title: "fix login finished", body: "zingzy's MacBook Pro", show: true, sound: true });
+    expect(trayNotice(done, { sessions, workspaces, places }, { ...loud, notifyDone: "notify" })).toMatchObject({ show: true, sound: false });
+    expect(trayNotice(done, { sessions, workspaces, places }, { ...loud, notifyDone: "sound" })).toMatchObject({ show: false, sound: true });
+    expect(trayNotice(done, { sessions, workspaces, places }, DEFAULT_PREFERENCES)).toBeUndefined();
   });
 
   it("an agent's own thread reports to it, and a turn that did not complete says nothing", () => {
-    expect(trayNotice({ type: "session.done", workspaceId: "ws_mac", sessionId: "s2", threadId: "t_agent", result: { status: "completed" } }, { sessions, workspaces, places }, true)).toBeUndefined();
-    expect(trayNotice({ type: "session.done", workspaceId: "ws_mac", sessionId: "s1", threadId: "t1", result: { status: "interrupted" } }, { sessions, workspaces, places }, true)).toBeUndefined();
+    expect(trayNotice({ type: "session.done", workspaceId: "ws_mac", sessionId: "s2", threadId: "t_agent", result: { status: "completed" } }, { sessions, workspaces, places }, loud)).toBeUndefined();
+    expect(trayNotice({ type: "session.done", workspaceId: "ws_mac", sessionId: "s1", threadId: "t1", result: { status: "interrupted" } }, { sessions, workspaces, places }, loud)).toBeUndefined();
   });
 
-  it("a turn that failed says the thread stopped with its error in one line, with the same sound", () => {
+  it("a turn that failed says the thread stopped with its error in one line, as a finish is said", () => {
     const done = { type: "session.done", workspaceId: "ws_mac", sessionId: "s1", threadId: "t1", result: { status: "failed", error: "API Error: 529\n overloaded" } } as const;
-    expect(trayNotice(done, { sessions, workspaces, places }, true)).toEqual({ title: "fix login stopped", body: "API Error: 529 overloaded", sound: true });
-    expect(trayNotice(done, { sessions, workspaces, places }, false)?.sound).toBe(false);
+    expect(trayNotice(done, { sessions, workspaces, places }, loud)).toEqual({ title: "fix login stopped", body: "API Error: 529 overloaded", show: true, sound: true });
+    expect(trayNotice(done, { sessions, workspaces, places }, { ...loud, notifyDone: "off" })).toBeUndefined();
   });
 
   // What every adapter sends as its process ends: its own result, a made-up one when the process died first, and
@@ -139,25 +143,34 @@ describe("what the menu bar says over the system while no window is open", () =>
     { type: "session.done", workspaceId: "ws_mac", sessionId: "s1", threadId: "t1", result },
     { type: "session.end", workspaceId: "ws_mac", sessionId: "s1", threadId: "t1", exitCode, sawResult: false },
   ];
-  const said = (events: SessionEvent[]) => events.flatMap(e => trayNotice(e, { sessions, workspaces, places }, true) ?? []);
+  const said = (events: SessionEvent[]) => events.flatMap(e => trayNotice(e, { sessions, workspaces, places }, loud) ?? []);
 
   it("a process that died says its thread stopped once, and one somebody stopped says nothing", () => {
-    expect(said(ending({ status: "failed", error: "claude exited with code 1" }, 1))).toEqual([{ title: "fix login stopped", body: "claude exited with code 1", sound: true }]);
+    expect(said(ending({ status: "failed", error: "claude exited with code 1" }, 1))).toEqual([{ title: "fix login stopped", body: "claude exited with code 1", show: true, sound: true }]);
     expect(said(ending({ status: "interrupted" }, 143))).toEqual([]);
   });
 
   it("an end the runtime gave its own reason, one that saw a result, an agent's thread and a turn somebody stopped say nothing", () => {
     const rows = { sessions, workspaces, places };
-    expect(trayNotice({ type: "session.end", workspaceId: "ws_mac", sessionId: "s1", threadId: "t1", exitCode: null, sawResult: false, reason: "paused" }, rows, true)).toBeUndefined();
-    expect(trayNotice({ type: "session.end", workspaceId: "ws_mac", sessionId: "s1", threadId: "t1", exitCode: 0, sawResult: true }, rows, true)).toBeUndefined();
-    expect(trayNotice({ type: "session.done", workspaceId: "ws_mac", sessionId: "s2", threadId: "t_agent", result: { status: "failed", error: "x" } }, rows, true)).toBeUndefined();
-    expect(trayNotice({ type: "session.done", workspaceId: "ws_mac", sessionId: "s1", threadId: "t1", result: { status: "interrupted" } }, rows, true)).toBeUndefined();
+    expect(trayNotice({ type: "session.end", workspaceId: "ws_mac", sessionId: "s1", threadId: "t1", exitCode: null, sawResult: false, reason: "paused" }, rows, loud)).toBeUndefined();
+    expect(trayNotice({ type: "session.end", workspaceId: "ws_mac", sessionId: "s1", threadId: "t1", exitCode: 0, sawResult: true }, rows, loud)).toBeUndefined();
+    expect(trayNotice({ type: "session.done", workspaceId: "ws_mac", sessionId: "s2", threadId: "t_agent", result: { status: "failed", error: "x" } }, rows, loud)).toBeUndefined();
+    expect(trayNotice({ type: "session.done", workspaceId: "ws_mac", sessionId: "s1", threadId: "t1", result: { status: "interrupted" } }, rows, loud)).toBeUndefined();
+  });
+
+  it("an account's plan running low is said with no sound while the switch is on, and nothing once it is off", () => {
+    const low = { type: "usage.alert", key: "claude:acct_1", agent: "claude", label: "Claude Max", alert: { kind: "low", window: "week", step: 90 } } as const;
+    expect(trayNotice(low, { sessions, workspaces, places }, DEFAULT_PREFERENCES)).toEqual({ title: "Claude Max has used 90% of its week", body: "", show: true, sound: false });
+    expect(trayNotice({ ...low, alert: { kind: "blocked" } }, { sessions, workspaces, places }, DEFAULT_PREFERENCES)?.title).toBe("Claude Max reached its plan limit");
+    expect(trayNotice(low, { sessions, workspaces, places }, { ...DEFAULT_PREFERENCES, planAlerts: false })).toBeUndefined();
   });
 
   it("a prompt says what the thread asks", () => {
     const ask = { type: "session.permission", workspaceId: "ws_mac", sessionId: "s1", threadId: "t1", askId: "a1", toolName: "Bash", input: JSON.stringify({ command: "sleep 5" }), options: [] } as unknown as SessionPermissionEvent;
-    const said = trayNotice(ask, { sessions, workspaces, places }, true);
+    const said = trayNotice(ask, { sessions, workspaces, places }, DEFAULT_PREFERENCES);
     expect(said?.title).toBe(NEEDS_YOU);
     expect(said?.body).toContain("sleep 5");
+    expect(said).toMatchObject({ show: true, sound: true });
+    expect(trayNotice(ask, { sessions, workspaces, places }, { ...DEFAULT_PREFERENCES, notifyNeeds: "off" })).toBeUndefined();
   });
 });
