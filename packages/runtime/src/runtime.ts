@@ -270,7 +270,7 @@ import {
   type WorkspaceFrom,
 } from "@wsp/protocol";
 import { secretsOf } from "./adapters.js";
-import { accountOf, accountOnComputer, accountRows, createPriceTable, createUsageLedger, usageComputerName, type Vaulted } from "./usage.js";
+import { accountOf, accountOnComputer, accountRows, createBurn, createPriceTable, createUsageLedger, usageComputerName, type Vaulted } from "./usage.js";
 
 // --- adapter port -------------------------------------------------------------
 
@@ -8371,6 +8371,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             .catch((e: unknown) => console.warn(`the limits of ${account.key} were not kept: ${e instanceof Error ? e.message : String(e)}`));
           return;
         }
+        case "turn.usage":
+          burn.add({ account: usageAccountOf(entry, view.harness, turnAccount).key, threadId, tokens: event.tokens });
+          return;
         case "turn.plan":
           record({ type: "session.plan", workspaceId, sessionId, turnId, threadId, ...(event.steps !== undefined ? { steps: event.steps } : {}), ...(event.text !== undefined ? { text: event.text } : {}) });
           return;
@@ -10968,6 +10971,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   const prices = createPriceTable({ store, clock, fetch: opts.pricesFetch ?? (async () => ({})) });
   const ledger = createUsageLedger({ store, clock, prices: () => prices.get() });
+  const burn = createBurn(clock);
 
   /** A usage split value as a person reads it: the agent's name, the account's label, the computer's, the project's. */
   const usageLabel = (places: readonly PlaceView[], accounts: ReadonlyMap<string, string>) => (split: UsageSplit, value: string): string => {
@@ -11074,6 +11078,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           planBrand: agent => CATALOG_AGENTS.find(a => a.id === agent)?.planBrand,
           vaulted: agent => vaultedFor(agent),
           printsLimits: agent => CATALOG_AGENTS.find(a => a.id === agent)?.printsLimits === true,
+          burn: burn.of,
         }),
       };
     },

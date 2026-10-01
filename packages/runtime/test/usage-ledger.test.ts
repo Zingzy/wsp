@@ -4,7 +4,7 @@
 // the rate table where no harness put a cost on them, and never added together.
 import { describe, expect, it } from "vitest";
 import { parseRateTable, type AgentSignInState, type HarnessLimit, type PlaceView, type RateTable, type UsageSplit } from "@wsp/protocol";
-import { accountOf, accountRows, createPriceTable, createUsageLedger, usageComputerName, type UsageEntry } from "../src/usage.js";
+import { accountOf, accountRows, createBurn, createPriceTable, createUsageLedger, usageComputerName, type UsageEntry } from "../src/usage.js";
 import { memoryStore } from "../src/store.js";
 import { fakeClock } from "./fake-clock.js";
 
@@ -332,5 +332,24 @@ describe("the account rows", () => {
       ["Codex with ChatGPT Plus", ["zingzy's MacBook Pro"], undefined],
       ["OpenCode signed in on zingzy's MacBook Pro", ["zingzy's MacBook Pro"], "reports no plan limit"],
     ]);
+  });
+});
+
+describe("what an account draws right now", () => {
+  it("is the tokens its running threads drew over the last fifteen minutes, a minute, and how many threads drew them", () => {
+    const { clock, advance } = fakeClock(NOON);
+    const burn = createBurn(clock);
+    burn.add({ account: "claude:vault-token", threadId: "t1", tokens: 9_000 });
+    advance(10 * 60_000);
+    burn.add({ account: "claude:vault-token", threadId: "t2", tokens: 6_000 });
+    burn.add({ account: "claude:vault-token", threadId: "t1", tokens: 15_000 });
+    burn.add({ account: "codex:acct_1", threadId: "t3", tokens: 1_500 });
+    expect(burn.of("claude:vault-token")).toEqual({ tokensPerMinute: 2_000, threads: 2 });
+    expect(burn.of("codex:acct_1")).toEqual({ tokensPerMinute: 100, threads: 1 });
+    expect(burn.of("claude:vault-key")).toBeUndefined();
+    advance(6 * 60_000);
+    expect(burn.of("claude:vault-token")).toEqual({ tokensPerMinute: 1_400, threads: 2 });
+    advance(10 * 60_000);
+    expect(burn.of("claude:vault-token")).toBeUndefined();
   });
 });

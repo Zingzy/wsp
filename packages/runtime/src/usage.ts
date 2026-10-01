@@ -416,6 +416,26 @@ export function createUsageLedger(o: { store: Store; clock: Clock; timeZone?: st
   return { add, fileLogs, used, day: readDay, days: index, limit, limits, accountLabels };
 }
 
+/** How far back an account's draw right now reaches. */
+export const BURN_WINDOW_MS = 15 * 60_000;
+
+/** What each account's running threads drew over the last fifteen minutes, off the calls their turns reported. Kept in
+ * memory alone: a reading this old is gone by the time a host has restarted. */
+export function createBurn(clock: Clock): { add(o: { account: string; threadId: string; tokens: number }): void; of(account: string): AccountRow["burn"] } {
+  let calls: { at: number; account: string; threadId: string; tokens: number }[] = [];
+  const recent = () => (calls = calls.filter(c => c.at > clock.now() - BURN_WINDOW_MS));
+  return {
+    add: o => {
+      recent().push({ at: clock.now(), ...o });
+    },
+    of: account => {
+      const on = recent().filter(c => c.account === account);
+      if (on.length === 0) return undefined;
+      return { tokensPerMinute: on.reduce((n, c) => n + c.tokens, 0) / (BURN_WINDOW_MS / 60_000), threads: new Set(on.map(c => c.threadId)).size };
+    },
+  };
+}
+
 /** The rate table, read off LiteLLM's price file once a day and kept under the wsp home, so a host offline prices
  * off the last one it read. Nothing is sent in the read. */
 export function createPriceTable(o: { store: Store; clock: Clock; fetch: () => Promise<unknown> }): { get(): Promise<RateTable> } {
@@ -472,6 +492,8 @@ export function accountRows(o: {
   vaulted: (agent: string) => Vaulted;
   /** Whether the agent prints its plan's limits in a turn, as the catalog says. */
   printsLimits: (agent: string) => boolean;
+  /** What the account's running threads are drawing on it now, where any did. */
+  burn?: (key: string) => AccountRow["burn"];
 }): AccountRow[] {
   const rows = new Map<string, AccountRow>();
   const noteFor = (agent: string, keyed: boolean | undefined): AccountRow["note"] =>
@@ -507,6 +529,8 @@ export function accountRows(o: {
   for (const row of rows.values()) {
     const address = addresses.get(row.key);
     if (shared.has(row.label) && address !== undefined && !row.label.endsWith(` as ${address}`)) row.label = `${row.label} as ${address}`;
+    const burn = o.burn?.(row.key);
+    if (burn !== undefined) row.burn = burn;
   }
   return [...rows.values()].sort((a, b) => a.agent.localeCompare(b.agent) || a.label.localeCompare(b.label));
 }

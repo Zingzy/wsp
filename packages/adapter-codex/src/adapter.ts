@@ -564,6 +564,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
           const total = rec(reported?.total) ?? {};
           const last = rec(reported?.last);
           if (last === undefined) break;
+          emit({ type: "turn.usage", sessionId: threadId, tokens: (count(last.inputTokens) ?? 0) + (count(last.outputTokens) ?? 0) });
           const window = count(reported?.modelContextWindow);
           usage = { before: usage?.before ?? totalBefore(total, last), total, last, ...(window !== undefined ? { window } : {}) };
           break;
