@@ -3,12 +3,12 @@
 // the tab or window title leads with the mark while a need stands, and each
 // need is said once outside the app on this shell's own road, and a machine
 // that came up while the person looked away is said on that same road, as is
-// a turn that finished, which makes a sound unless the person turned it off.
+// a turn that finished, each as the person chose for its kind on General.
 // The dock's badge counts the threads waiting on the person. Both roads run
-// here against a stubbed Notification and a stubbed bridge; nothing real is
-// shown and nothing makes a sound.
+// here against a stubbed Notification, a stubbed tone and a stubbed bridge;
+// nothing real is shown and nothing makes a sound.
 import { act, render } from "@testing-library/react";
-import { DEFAULT_PREFERENCES, NEEDS_YOU, askingLine, initNeedsYouLine, workspaceAwakeLine, type InitNeedsYou, type OutsideLine, type SessionView, type TurnResult } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, NEEDS_YOU, askingLine, initNeedsYouLine, workspaceAwakeLine, type InitNeedsYou, type NotifyChoice, type OutsideLine, type SessionView, type TurnResult } from "@wsp/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
@@ -40,8 +40,27 @@ class FakeNotification {
   }
 }
 
+/** An AudioContext that counts the tones started on it and plays none. */
+class FakeAudio {
+  static tones = 0;
+  currentTime = 0;
+  destination = {};
+  createOscillator() {
+    const node = { frequency: { value: 0 }, onended: null as (() => void) | null, connect: (to: unknown) => to, start: () => void (FakeAudio.tones += 1), stop: () => {} };
+    return node;
+  }
+  createGain() {
+    return { gain: { setValueAtTime: () => {}, exponentialRampToValueAtTime: () => {} }, connect: (to: unknown) => to };
+  }
+  close() {
+    return Promise.resolve();
+  }
+}
+
 let hidden = true;
 beforeEach(() => {
+  FakeAudio.tones = 0;
+  vi.stubGlobal("AudioContext", FakeAudio);
   FakeNotification.built = [];
   FakeNotification.permission = "granted";
   FakeNotification.asked = 0;
@@ -149,12 +168,12 @@ describe("a browser tab's road out of the app", () => {
     expect(FakeNotification.asked).toBe(0);
   });
 
-  it("says the need with the app's name and no sound while the tab is hidden, and a click focuses the tab and opens Computers, where the build's card is", () => {
+  it("says the need with the app's name and a sound while the tab is hidden, as a thread that needs the person is said, and a click focuses the tab and opens Computers, where the build's card is", () => {
     const emit = bindEvents();
     render(<Harness />);
     const focus = vi.spyOn(window, "focus").mockImplementation(() => {});
     emit({ type: "job.needs-you", jobId: "init_1", needsYou: NEED });
-    expect(FakeNotification.built).toEqual([{ title: NEEDS_YOU, body: "sign in to GitHub CLI login", silent: true }]);
+    expect(FakeNotification.built).toEqual([{ title: NEEDS_YOU, body: "sign in to GitHub CLI login", silent: false }]);
     expect(useStore.getState().settingsOpen).toBe(false);
     FakeNotification.last!.onclick!();
     expect(focus).toHaveBeenCalled();
@@ -197,7 +216,7 @@ describe("a thread stopped on a permission prompt while the person looked away",
     render(<Harness />);
     const focus = vi.spyOn(window, "focus").mockImplementation(() => {});
     act(() => emit(ASKED));
-    // A prompt sounds under the person's one switch, which is on until they turn it off.
+    // A prompt is said as the person chose for a thread that needs them, notify and sound until they pick otherwise.
     expect(FakeNotification.built).toEqual([{ title: NEEDS_YOU, body: askingLine(ASKED), silent: false }]);
     FakeNotification.last!.onclick!();
     expect(focus).toHaveBeenCalled();
@@ -211,6 +230,23 @@ describe("a thread stopped on a permission prompt while the person looked away",
     hidden = false;
     act(() => emit(ASKED));
     expect(FakeNotification.built).toEqual([]);
+  });
+
+  it("says it as the person chose: nothing on off, no sound on notify, and a tone with nothing shown on sound", () => {
+    const emit = bindEvents();
+    render(<Harness />);
+    const needs = (notifyNeeds: NotifyChoice) => act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, notifyNeeds } }));
+    needs("off");
+    act(() => emit(ASKED));
+    act(() => emit({ type: "job.needs-you", jobId: "init_1", needsYou: NEED }));
+    expect(FakeNotification.built).toEqual([]);
+    needs("notify");
+    act(() => emit(ASKED));
+    expect(FakeNotification.built).toEqual([{ title: NEEDS_YOU, body: askingLine(ASKED), silent: true }]);
+    needs("sound");
+    act(() => emit(ASKED));
+    expect(FakeNotification.built).toHaveLength(1);
+    expect(FakeAudio.tones).toBe(1);
   });
 });
 
@@ -240,6 +276,17 @@ describe("a machine that came up while the person looked away", () => {
     expect(FakeNotification.built).toEqual([]);
   });
 
+  it("says nothing where the person turned off what needs them, and never sounds, since a machine up is no alarm", () => {
+    const emit = bindEvents();
+    render(<Harness />);
+    act(() => useStore.setState({ workspaces: [WOKEN], preferences: { ...DEFAULT_PREFERENCES, notifyNeeds: "off" } }));
+    act(() => emit({ type: "workspace.woken", workspaceId: "ws_1", machineId: "m1" }));
+    act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, notifyNeeds: "sound" } }));
+    act(() => emit({ type: "workspace.woken", workspaceId: "ws_1", machineId: "m1" }));
+    expect(FakeNotification.built).toEqual([]);
+    expect(FakeAudio.tones).toBe(0);
+  });
+
   it("says nothing about a workspace this page never knew", () => {
     const emit = bindEvents();
     render(<Harness />);
@@ -262,7 +309,7 @@ describe("the desktop shell's road out of the app", () => {
     const emit = bindEvents();
     render(<Harness />);
     emit({ type: "job.needs-you", jobId: "init_1", needsYou: NEED });
-    expect(said).toEqual([{ title: NEEDS_YOU, body: NEED.what, sound: false }]);
+    expect(said).toEqual([{ title: NEEDS_YOU, body: NEED.what, show: true, sound: true }]);
     // The browser's own notifications are never used where a shell owns them.
     expect(FakeNotification.built).toEqual([]);
     // The shell's click comes back over the bridge and opens Computers here.
@@ -275,7 +322,7 @@ describe("the desktop shell's road out of the app", () => {
   it("a shell too old to take a need falls back to the browser's own road, so nothing is silently dropped", () => {
     window.wsp = { setTheme: () => {} };
     const road = needsYouRoad(() => {});
-    road.say({ title: NEEDS_YOU, body: NEED.what, sound: false });
+    road.say({ title: NEEDS_YOU, body: NEED.what, show: true, sound: false });
     expect(FakeNotification.built).toEqual([{ title: NEEDS_YOU, body: "sign in to GitHub CLI login", silent: true }]);
     road.close();
     expect(FakeNotification.last!.closed).toBe(1);
@@ -291,16 +338,28 @@ describe("a turn that finished while the person looked away", () => {
     emit({ type: "session.end", workspaceId: "ws_1", sessionId: "s1", turnId: `turn_${threadId}`, threadId, exitCode: 0, sawResult: true });
   };
 
-  it("says which thread finished with a sound, silent once the switch is off, and a click opens that thread", () => {
+  const finishes = (notifyDone: NotifyChoice) => act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, notifyDone } }));
+
+  it("says nothing for a finished thread by default, since ten running threads would ping ten times", () => {
     const emit = bindEvents();
     render(<Harness />);
+    act(() => useStore.setState({ workspaces: [WS], sessions: { ws_1: [turn()] } }));
+    act(() => finish(emit));
+    act(() => fail(emit));
+    expect(FakeNotification.built).toEqual([]);
+  });
+
+  it("says which thread finished with a sound once the person picks notify and sound, silent on notify alone, and a click opens that thread", () => {
+    const emit = bindEvents();
+    render(<Harness />);
+    finishes("notify-sound");
     act(() => useStore.setState({ workspaces: [WS], sessions: { ws_1: [turn()] } }));
     const focus = vi.spyOn(window, "focus").mockImplementation(() => {});
     act(() => finish(emit));
     expect(FakeNotification.built).toEqual([{ title: "Fix the redirect finished", body: "b1", silent: false }]);
     FakeNotification.last!.onclick!();
     expect([useStore.getState().selectedId, useStore.getState().selectedThreadId]).toEqual(["ws_1", "thr_1"]);
-    act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, notifySound: false } }));
+    finishes("notify");
     act(() => finish(emit));
     expect(FakeNotification.built.at(-1)).toEqual({ title: "Fix the redirect finished", body: "b1", silent: true });
     focus.mockRestore();
@@ -309,6 +368,7 @@ describe("a turn that finished while the person looked away", () => {
   it("says nothing for a turn somebody stopped, for a thread an agent opened, or while the app is in front", () => {
     const emit = bindEvents();
     render(<Harness />);
+    finishes("notify-sound");
     act(() => useStore.setState({ workspaces: [WS], sessions: { ws_1: [turn(), turn({ id: "s2", threadId: "thr_child", startedBy: "agent", parentThreadId: "thr_1" })] } }));
     act(() => finish(emit, "interrupted"));
     act(() => finish(emit, "completed", "thr_child"));
@@ -326,16 +386,17 @@ describe("a turn that finished while the person looked away", () => {
   };
   const fail = (emit: (e: ProtocolEvent) => void, o: { error?: string; reason?: string; threadId?: string } = {}) => ending(emit, { status: "failed", ...(o.error !== undefined ? { error: o.error } : {}) }, o);
 
-  it("says a thread that failed stopped, with its error in one line and the same sound switch, and a click opens that thread", () => {
+  it("says a thread that failed stopped, with its error in one line, as a finish is said, and a click opens that thread", () => {
     const emit = bindEvents();
     render(<Harness />);
+    finishes("notify-sound");
     act(() => useStore.setState({ workspaces: [WS], sessions: { ws_1: [turn({ status: "failed" })] } }));
     const focus = vi.spyOn(window, "focus").mockImplementation(() => {});
     act(() => fail(emit, { error: "API Error: 529 overloaded\n  retry later" }));
     expect(FakeNotification.built).toEqual([{ title: "Fix the redirect stopped", body: "API Error: 529 overloaded retry later", silent: false }]);
     FakeNotification.last!.onclick!();
     expect([useStore.getState().selectedId, useStore.getState().selectedThreadId]).toEqual(["ws_1", "thr_1"]);
-    act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, notifySound: false } }));
+    finishes("notify");
     act(() => fail(emit));
     expect(FakeNotification.built.at(-1)).toEqual({ title: "Fix the redirect stopped", body: "exit 1", silent: true });
     expect(FakeNotification.built).toHaveLength(2);
@@ -345,6 +406,7 @@ describe("a turn that finished while the person looked away", () => {
   it("says nothing for a turn somebody stopped, whose process the stop killed before it replied", () => {
     const emit = bindEvents();
     render(<Harness />);
+    finishes("notify-sound");
     act(() => useStore.setState({ workspaces: [WS], sessions: { ws_1: [turn({ status: "interrupted" })] } }));
     act(() => ending(emit, { status: "interrupted" }, { exitCode: 143 }));
     expect(FakeNotification.built).toEqual([]);
@@ -353,6 +415,7 @@ describe("a turn that finished while the person looked away", () => {
   it("says nothing for a failure the runtime ended itself, for a thread an agent opened, or while the app is in front", () => {
     const emit = bindEvents();
     render(<Harness />);
+    finishes("notify-sound");
     act(() => useStore.setState({ workspaces: [WS], sessions: { ws_1: [turn({ status: "failed" }), turn({ id: "s2", threadId: "thr_child", startedBy: "agent", parentThreadId: "thr_1", status: "failed" })] } }));
     act(() => fail(emit, { reason: "the machine went away" }));
     act(() => fail(emit, { threadId: "thr_child" }));
@@ -373,5 +436,36 @@ describe("a turn that finished while the person looked away", () => {
     expect(badge.at(-1)).toBe(1);
     act(() => useStore.setState({ sessions: {} }));
     expect(badge.at(-1)).toBe(0);
+  });
+});
+
+describe("an account's plan running low", () => {
+  const LOW = { type: "usage.alert" as const, key: "claude:acct_1", agent: "claude", label: "Claude Max", alert: { kind: "low" as const, window: "week" as const, step: 70 } };
+
+  it("is a notice that opens Usage and a notification with no sound while the person looks away", () => {
+    const emit = bindEvents();
+    render(<Harness />);
+    const focus = vi.spyOn(window, "focus").mockImplementation(() => {});
+    act(() => emit(LOW));
+    expect(lastNotice()).toBe("Claude Max has used 70% of its week");
+    expect(FakeNotification.built).toEqual([{ title: "Claude Max has used 70% of its week", body: "", silent: true }]);
+    FakeNotification.last!.onclick!();
+    expect(useStore.getState().settingsOpen).toBe(true);
+    expect(useSettingsStore.getState().at).toEqual({ kind: "group", group: "usage" });
+    focus.mockRestore();
+  });
+
+  it("says a block and a comeback the same way, and nothing at all once the switch is off", () => {
+    const emit = bindEvents();
+    render(<Harness />);
+    act(() => emit({ ...LOW, alert: { kind: "blocked" } }));
+    expect(lastNotice()).toBe("Claude Max reached its plan limit");
+    act(() => emit({ ...LOW, alert: { kind: "back" } }));
+    expect(lastNotice()).toBe("Claude Max can run again: its plan limit reset");
+    clearNotices();
+    act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, planAlerts: false } }));
+    act(() => emit(LOW));
+    expect(lastNotice()).toBeNull();
+    expect(FakeNotification.built).toHaveLength(2);
   });
 });

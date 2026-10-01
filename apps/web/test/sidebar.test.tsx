@@ -953,6 +953,18 @@ describe("one lifted tile", () => {
   });
 });
 
+describe("the settle pick", () => {
+  it("folds a read thread quiet past the person's pick, and keeps it on the list where they picked never", async () => {
+    const quiet = session("s2", "ws_a", { status: "completed", prompt: "done", threadId: "thr_2", startedAt: iso(-3 * 60 * 60_000), endedAt: iso(-90 * 60_000), readAt: iso(-90 * 60_000) });
+    act(() => useStore.setState({ preferences: { ...useStore.getState().preferences, settleAfter: "1h" } }));
+    await mount(fakeApi([API], [status(API)], [session("s1", "ws_a", { prompt: "hello", threadId: "thr_1", startedAt: iso(-60_000) }), quiet]), "hello");
+    expect(screen.getByRole("button", { name: "Settled 1" })).toBeDefined();
+    act(() => useStore.setState({ preferences: { ...useStore.getState().preferences, settleAfter: "never" } }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Settled 1" })).toBeNull());
+    expect(rowOf("done")).toBeDefined();
+  });
+});
+
 describe("the creation tile", () => {
   it("is a tile at the thread tile's height: where it will run, Starting with the crab, the name, the step in plain words; a refused create says Failed in the slot", async () => {
     await mount(fakeApi([COPIED], [status(COPIED)]), "api");

@@ -9,19 +9,24 @@ import {
   askingLine,
   foldThreads,
   needsYouCount,
+  notifyBy,
   oneLine,
+  planAlertLine,
   threadFinishedLine,
   threadNeedsYou,
   threadStoppedLine,
   threadState,
   threadStateWord,
   workspaceComputerName,
+  type NotifyChoice,
   type OutsideLine,
   type PermissionOption,
+  type Preferences,
   type PlaceView,
   type SessionEvent,
   type SessionView,
   type ThreadView,
+  type UsageAlertEvent,
   type WorkspaceView,
 } from "@wsp/protocol";
 import { QUIT_WORD } from "./quit.js";
@@ -146,16 +151,23 @@ export function trayModel(input: TrayInput): TrayModel {
   };
 }
 
-/** What the menu bar says over the system while no window is open to say it: a thread a person or a line opened
- * that finished or failed, and a prompt. An agent's own thread reports to that agent. Nothing for anything else. */
-export function trayNotice(event: SessionEvent, rows: Pick<TrayInput, "sessions" | "workspaces" | "places">, sound: boolean): OutsideLine | undefined {
-  if (event.type === "session.permission") return { title: NEEDS_YOU, body: askingLine(event), sound };
+/** What the menu bar says over the system while no window is open to say it, each as the person chose for its kind: a
+ * prompt as one that needs them, a thread a person or a line opened that finished or failed as a finish, and an
+ * account's plan running low, blocked or back under its own switch, with no sound. An
+ * agent's own thread reports to that agent. Nothing for anything else. */
+export function trayNotice(event: SessionEvent | UsageAlertEvent, rows: Pick<TrayInput, "sessions" | "workspaces" | "places">, choices: Pick<Preferences, "notifyNeeds" | "notifyDone" | "planAlerts">): OutsideLine | undefined {
+  const as = (choice: NotifyChoice, title: string, body: string): OutsideLine | undefined => {
+    const how = notifyBy(choice);
+    return how === undefined ? undefined : { title, body, ...how };
+  };
+  if (event.type === "usage.alert") return choices.planAlerts ? { title: planAlertLine(event.label, event.alert), body: "", show: true, sound: false } : undefined;
+  if (event.type === "session.permission") return as(choices.notifyNeeds, NEEDS_YOU, askingLine(event));
   // Every adapter sends a result before its process ends, a made-up one when the process died first, so the end
   // after it has nothing to add: a death is said once and a stop not at all.
   if (event.type !== "session.done") return undefined;
   const thread = foldThreads(rows.sessions).find(t => t.id === (event.threadId ?? event.sessionId));
   if (thread === undefined || thread.startedBy === "agent") return undefined;
-  if (event.result.status === "failed") return { title: threadStoppedLine(thread.title), body: event.result.error === undefined ? computerOf(rows, event.workspaceId) : oneLine(event.result.error), sound };
+  if (event.result.status === "failed") return as(choices.notifyDone, threadStoppedLine(thread.title), event.result.error === undefined ? computerOf(rows, event.workspaceId) : oneLine(event.result.error));
   if (event.result.status !== "completed") return undefined;
-  return { title: threadFinishedLine(thread.title), body: computerOf(rows, event.workspaceId), sound };
+  return as(choices.notifyDone, threadFinishedLine(thread.title), computerOf(rows, event.workspaceId));
 }

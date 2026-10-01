@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CODE_SIZES, DEFAULT_PREFERENCES, TEXT_SIZES, type PlaceView, type ProjectView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
 import { useStore } from "../src/protocol/store.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
-import { ABOUT_WORDS, FONT_WORDS, GLASS_WORDS, NOTIFY_WORDS, THEME_SECTION_WORDS, THEME_WORDS, TRANSPARENCY_WORDS, SETTINGS_WORDS } from "../src/settings/format.js";
+import { ABOUT_WORDS, FONT_WORDS, GLASS_WORDS, THEME_SECTION_WORDS, THEME_WORDS, TRANSPARENCY_WORDS, SETTINGS_WORDS } from "../src/settings/format.js";
 import { SETTINGS_GROUPS } from "../src/settings/groups.js";
 import { useSettingsStore } from "../src/settings/settingsStore.js";
 import { SYSTEM_DARK_QUERY, useFontEffect, useThemeEffect } from "../src/settings/theme.js";
@@ -503,23 +503,6 @@ describe("Appearance's previews and new controls", () => {
     cleanup();
   });
 
-  it("plays the sound from the shell that can, waits while Sound is off, and offers no button where nothing could play it", async () => {
-    const playNoticeSound = vi.fn();
-    window.wsp = { playNoticeSound };
-    const { api } = settingsApi();
-    mountSettings({ api, at: { kind: "group", group: "general" } });
-    await settle();
-    const play = screen.getByRole("button", { name: NOTIFY_WORDS.play });
-    fireEvent.click(play);
-    expect(playNoticeSound).toHaveBeenCalledTimes(1);
-    fireEvent.click(document.querySelector("[data-k=notify-sound]")!);
-    await waitFor(() => expect(screen.getByRole("button", { name: NOTIFY_WORDS.play }).hasAttribute("disabled")).toBe(true));
-    cleanup();
-    window.wsp = {};
-    mountSettings({ api: settingsApi().api, at: { kind: "group", group: "general" } });
-    await settle();
-    expect(screen.queryByRole("button", { name: NOTIFY_WORDS.play })).toBeNull();
-  });
 });
 
 describe("Appearance's fonts", () => {

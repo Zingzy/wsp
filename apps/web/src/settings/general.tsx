@@ -1,122 +1,162 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Settings > General: the editor Open in editor opens a file in, picked from
-// the editors installed on the computer the host runs on, whether they open a
-// workspace on another computer over ssh, whether the desktop app keeps this
-// computer awake while a thread works on it, and whether a notification makes a
-// sound, with a play beside it where the shell can.
-import { DEFAULT_PREFERENCES } from "@wsp/protocol";
-import type { EditorId } from "@wsp/protocol";
-import { Play } from "lucide-react";
-import { Button } from "../components/ui/button.js";
+// Settings > General, in the order a person reaches for it: the composer's
+// send key and what a message does while a thread works; how each kind of
+// moment is said outside the app; when a read thread settles and whether a
+// delete asks; the editor Open in editor opens a file in, picked from the
+// editors installed on the computer the host runs on, and whether it opens a
+// workspace on another computer over ssh; and what quitting the desktop app
+// does, whether wsp starts at login and whether the app keeps this computer
+// awake while a thread works on it.
+import { NOTIFY_CHOICES, ON_QUIT_CHOICES, SETTLE_CHOICES, type EditorId, type NotifyChoice, type PreferencesPatch } from "@wsp/protocol";
+import { SegmentedControl } from "../components/ui/segmented-control.js";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../components/ui/select.js";
 import { Switch } from "../components/ui/switch.js";
 import { EDITOR_SSH_WORDS } from "../files/EditorConsent.js";
 import { EditorGlyph } from "../files/EditorGlyph.js";
 import { desktopBridge } from "../lib/desktopShell.js";
-import { AWAKE_WORDS, GENERAL_WORDS, NOTIFY_WORDS } from "./format.js";
+import { isMacPlatform } from "../lib/utils.js";
+import { AWAKE_WORDS, GENERAL_WORDS } from "./format.js";
 import { hereName } from "./places.js";
-import type { SettingsCardData } from "./rows.js";
+import type { SettingsCardData, SettingsRowData } from "./rows.js";
 import type { SettingsContext } from "./settingsContext.js";
 import { useSettingsStore } from "./settingsStore.js";
 import { SELECT_WIDTH } from "./layout.js";
 
+const W = GENERAL_WORDS;
+const SELECT_CLASS = SELECT_WIDTH;
+
+/** A select over a fixed set of words, its value read and written as one of the record's choices. */
+function ChoiceSelect<T extends string>({ k, label, value, choices, words, onChange }: { k: string; label: string; value: T; choices: readonly T[]; words: Record<T, string>; onChange: (next: T) => void }) {
+  return (
+    <Select value={value} onValueChange={next => choices.includes(next as T) && onChange(next as T)}>
+      <SelectTrigger size="sm" aria-label={label} data-k={k} className={SELECT_CLASS}>
+        <SelectValue>{(picked: T) => words[picked]}</SelectValue>
+      </SelectTrigger>
+      <SelectPopup>
+        {choices.map(choice => (
+          <SelectItem key={choice} value={choice}>
+            {words[choice]}
+          </SelectItem>
+        ))}
+      </SelectPopup>
+    </Select>
+  );
+}
+
+const row = (id: string, title: string, description: string, control: SettingsRowData["control"]): SettingsRowData => ({ kind: "row", id, title, description, control });
+
+function notifyRow(ctx: SettingsContext, id: "notify-needs" | "notify-done", field: "notifyNeeds" | "notifyDone", title: string, description: string): SettingsRowData {
+  const set = (next: NotifyChoice): void => ctx.setPreferences({ [field]: next } satisfies PreferencesPatch);
+  return row(id, title, description, <ChoiceSelect k={id} label={title} value={ctx.preferences[field]} choices={NOTIFY_CHOICES} words={W.notifyChoices} onChange={set} />);
+}
+
 export function generalCards(ctx: SettingsContext): SettingsCardData[] {
+  const { preferences: p, setPreferences: set } = ctx;
   const editors = ctx.reads.editors ?? [];
-  const picked = editors.find(editor => editor.id === ctx.preferences.editor) ?? editors[0];
+  const picked = editors.find(editor => editor.id === p.editor) ?? editors[0];
   const nameOf = (id: EditorId): string => editors.find(editor => editor.id === id)?.name ?? id;
-  const keepAwake = AWAKE_WORDS.keepAwake(hereName(ctx.places));
-  const play = desktopBridge()?.playNoticeSound;
+  const here = hereName(ctx.places);
+  const keepAwake = AWAKE_WORDS.keepAwake(here);
+  const sendKeys = W.sendKeys(isMacPlatform(ctx.platform));
+  const loginStart = ctx.reads.loginStart;
   return [
     {
-      id: "notifications",
-      head: NOTIFY_WORDS.head,
+      id: "composer",
+      head: W.composer,
       items: [
-        {
-          kind: "row",
-          id: "notify-sound",
-          title: NOTIFY_WORDS.sound,
-          description: NOTIFY_WORDS.soundDescription,
-          control: (
-            <span className="flex items-center gap-3">
-              {play === undefined ? null : (
-                <Button data-k="notify-play" variant="ghost" size="icon" aria-label={NOTIFY_WORDS.play} title={NOTIFY_WORDS.play} disabled={!ctx.preferences.notifySound} onClick={() => play()}>
-                  <Play />
-                </Button>
-              )}
-              <Switch data-k="notify-sound" aria-label={NOTIFY_WORDS.sound} checked={ctx.preferences.notifySound} onCheckedChange={notifySound => ctx.setPreferences({ notifySound })} />
-            </span>
-          ),
-          ...(ctx.preferences.notifySound === DEFAULT_PREFERENCES.notifySound ? {} : { reset: () => ctx.setPreferences({ notifySound: DEFAULT_PREFERENCES.notifySound }) }),
-        },
+        row("send-with", W.sendWith, W.sendWithDescription, <SegmentedControl aria-label={W.sendWith} data-k="send-with" value={p.sendWith} segments={(["enter", "mod-enter"] as const).map(value => ({ value, label: sendKeys[value] }))} onChange={sendWith => set({ sendWith })} />),
+        row("mid-turn", W.midTurn, W.midTurnDescription, <SegmentedControl aria-label={W.midTurn} data-k="mid-turn" value={p.midTurn} segments={(["queue", "steer"] as const).map(value => ({ value, label: W.midTurnChoices[value] }))} onChange={midTurn => set({ midTurn })} />),
+      ],
+    },
+    {
+      id: "notifications",
+      head: W.notifications,
+      items: [
+        notifyRow(ctx, "notify-needs", "notifyNeeds", W.notifyNeeds, W.notifyNeedsDescription),
+        notifyRow(ctx, "notify-done", "notifyDone", W.notifyDone, W.notifyDoneDescription),
+        row("plan-alerts", W.planAlerts, W.planAlertsDescription, <Switch data-k="plan-alerts" aria-label={W.planAlerts} checked={p.planAlerts} onCheckedChange={planAlerts => set({ planAlerts })} />),
+      ],
+    },
+    {
+      id: "threads",
+      head: W.threads,
+      items: [
+        row("settle-after", W.settleAfter, W.settleAfterDescription, <ChoiceSelect k="settle-after" label={W.settleAfter} value={p.settleAfter} choices={SETTLE_CHOICES} words={W.settleChoices} onChange={settleAfter => set({ settleAfter })} />),
+        row("ask-delete", W.askDelete, W.askDeleteDescription, <Switch data-k="ask-delete" aria-label={W.askDelete} checked={p.askDelete} onCheckedChange={askDelete => set({ askDelete })} />),
       ],
     },
     {
       id: "open-in",
-      head: GENERAL_WORDS.openIn,
+      head: W.openIn,
       items: [
-        {
-          kind: "row",
-          id: "editor",
-          title: GENERAL_WORDS.editor,
-          description: ctx.reads.editors !== null && editors.length === 0 ? GENERAL_WORDS.noEditor : GENERAL_WORDS.editorDescription,
-          control:
-            picked === undefined ? null : (
-              <Select value={picked.id} onValueChange={next => ctx.setPreferences({ editor: next as EditorId })}>
-                <SelectTrigger size="sm" aria-label={GENERAL_WORDS.editor} data-k="editor" className={SELECT_WIDTH}>
-                  <SelectValue>
-                    {(value: EditorId) => (
-                      <span className="flex items-center gap-2">
-                        <EditorGlyph id={value} />
-                        {nameOf(value)}
-                      </span>
-                    )}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectPopup>
-                  {editors.map(editor => (
-                    <SelectItem key={editor.id} value={editor.id}>
-                      <span className="flex items-center gap-2">
-                        <EditorGlyph id={editor.id} />
-                        {editor.name}
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectPopup>
-              </Select>
-            ),
-        },
+        row(
+          "editor",
+          W.editor,
+          ctx.reads.editors !== null && editors.length === 0 ? W.noEditor : W.editorDescription,
+          picked === undefined ? null : (
+            <Select value={picked.id} onValueChange={next => set({ editor: next as EditorId })}>
+              <SelectTrigger size="sm" aria-label={W.editor} data-k="editor" className={SELECT_CLASS}>
+                <SelectValue>
+                  {(value: EditorId) => (
+                    <span className="flex items-center gap-2">
+                      <EditorGlyph id={value} />
+                      {nameOf(value)}
+                    </span>
+                  )}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup>
+                {editors.map(editor => (
+                  <SelectItem key={editor.id} value={editor.id}>
+                    <span className="flex items-center gap-2">
+                      <EditorGlyph id={editor.id} />
+                      {editor.name}
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
+          ),
+        ),
         ...(ctx.reads.sshInclude === null
           ? []
           : [
-              {
-                kind: "row" as const,
-                id: "editor-ssh",
-                title: EDITOR_SSH_WORDS.setting,
-                description: EDITOR_SSH_WORDS.settingNote,
-                control: (
-                  <Switch
-                    data-k="editor-ssh"
-                    aria-label={EDITOR_SSH_WORDS.setting}
-                    checked={ctx.reads.sshInclude}
-                    onCheckedChange={on => void ctx.api?.sshInclude?.(on).then(sshInclude => useSettingsStore.getState().setReads({ sshInclude }), ctx.failed)}
-                  />
-                ),
-              },
+              row(
+                "editor-ssh",
+                EDITOR_SSH_WORDS.setting,
+                EDITOR_SSH_WORDS.settingNote,
+                <Switch
+                  data-k="editor-ssh"
+                  aria-label={EDITOR_SSH_WORDS.setting}
+                  checked={ctx.reads.sshInclude}
+                  onCheckedChange={on => void ctx.api?.sshInclude?.(on).then(sshInclude => useSettingsStore.getState().setReads({ sshInclude }), ctx.failed)}
+                />,
+              ),
             ]),
       ],
     },
     {
       id: "startup",
-      head: GENERAL_WORDS.startup,
+      head: W.startup,
       items: [
-        {
-          kind: "row",
-          id: "keep-awake",
-          title: keepAwake,
-          description: AWAKE_WORDS.keepAwakeDescription,
-          control: <Switch data-k="keep-awake" aria-label={keepAwake} checked={ctx.preferences.keepAwake} onCheckedChange={keepAwake => ctx.setPreferences({ keepAwake })} />,
-          ...(ctx.preferences.keepAwake === DEFAULT_PREFERENCES.keepAwake ? {} : { reset: () => ctx.setPreferences({ keepAwake: DEFAULT_PREFERENCES.keepAwake }) }),
-        },
+        // Only the desktop app quits; a browser tab closes with nothing to ask.
+        ...(ctx.desktopShell ? [row("on-quit", W.onQuit, W.onQuitDescription(here), <ChoiceSelect k="on-quit" label={W.onQuit} value={p.onQuit} choices={ON_QUIT_CHOICES} words={W.onQuitChoices} onChange={onQuit => set({ onQuit })} />)] : []),
+        ...(loginStart === null
+          ? []
+          : [
+              row(
+                "login-start",
+                W.loginStart,
+                W.loginStartDescription(here),
+                <Switch
+                  data-k="login-start"
+                  aria-label={W.loginStart}
+                  checked={loginStart}
+                  onCheckedChange={on => void desktopBridge()?.setLoginStart?.(on).then(next => useSettingsStore.getState().setReads({ loginStart: next }), ctx.failed)}
+                />,
+              ),
+            ]),
+        row("keep-awake", keepAwake, AWAKE_WORDS.keepAwakeDescription, <Switch data-k="keep-awake" aria-label={keepAwake} checked={p.keepAwake} onCheckedChange={keepAwake => set({ keepAwake })} />),
       ],
     },
   ];

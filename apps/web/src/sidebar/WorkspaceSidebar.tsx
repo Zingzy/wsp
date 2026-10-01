@@ -21,7 +21,7 @@
 import { openProjectSettings } from "../settings/openAt.js";
 import { ChevronDownIcon, CopyIcon, PlusIcon, SquarePenIcon, Trash2Icon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
-import { HOST_ASLEEP_LINE, modelOf, workspaceState, type WorkspaceState } from "@wsp/protocol";
+import { HOST_ASLEEP_LINE, SETTLE_MS, modelOf, workspaceState, type WorkspaceState } from "@wsp/protocol";
 import { openContextMenu, runAction } from "../actions/contextMenu.js";
 import { THREAD_TREE_WORKING, rebuildRefusedLine } from "../actions/format.js";
 import { CREATE_ASKED, CREATE_STEP_WORDS, currentStep, stepWords, stoppedStep } from "../shell/creationLog.js";
@@ -227,7 +227,8 @@ export function WorkspaceSidebar() {
     if (runs === undefined) return null;
     return ((selectedThreadId === null ? undefined : runs.threads.find(t => t.threadId === selectedThreadId)) ?? topSidebarThread(runs.threads))?.id ?? null;
   }, [fleet, selectedId, selectedThreadId]);
-  const tiles = useMemo(() => sidebarTiles(projects, { picked: picked?.project.id ?? null, nowMs, open }), [projects, picked, nowMs, open]);
+  const settleAfter = useStore(s => s.preferences.settleAfter);
+  const tiles = useMemo(() => sidebarTiles(projects, { picked: picked?.project.id ?? null, nowMs, open, settleMs: SETTLE_MS[settleAfter] }), [projects, picked, nowMs, open, settleAfter]);
   // One landing per project, for the pause mode a copy's phase verb reads. Asked here, where the tiles are drawn,
   // so no tile asks for itself.
   useEffect(() => {
