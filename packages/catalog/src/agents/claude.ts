@@ -48,5 +48,6 @@ export const CLAUDE: AgentEntry = {
   ],
   history: { format: "claude-jsonl", root: "~/.claude/projects" },
   printsLimits: true,
+  planBrand: "Claude",
   source: { sessions: 149, images: 1, road: "measured" },
 };

@@ -125,7 +125,7 @@ export function spanPoints<T extends { at: number }>(readings: readonly T[], fro
 /** One series in the chart's grammar: the rule lines, each run of points as a line over a faint fill, and a dot on
  * the newest point. Separate runs draw no line between them, so a stretch with no reading is a gap. A chart too
  * small for the fill draws the line alone, since fills under short runs read as bars. */
-export function ChartPlot({ runs, label, end, fill = true, className, height = "h-24" }: { runs: ReadonlyArray<ReadonlyArray<{ x: number; y: number }>>; label: string; end: boolean; fill?: boolean; className?: string; height?: string }) {
+export function ChartPlot({ runs, label, end, fill = true, marked, className, height = "h-24" }: { runs: ReadonlyArray<ReadonlyArray<{ x: number; y: number }>>; label: string; end: boolean; fill?: boolean; /** A point a reader is on, drawn as the newest one is. */ marked?: { x: number; y: number } | undefined; className?: string; height?: string }) {
   const fade = useId();
   const drawn = runs.filter(run => run.length > 0);
   const newest = drawn[drawn.length - 1]?.at(-1);
@@ -156,6 +156,9 @@ export function ChartPlot({ runs, label, end, fill = true, className, height = "
       {newest !== undefined && end ? (
         <span aria-hidden data-chart-end className="absolute size-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-current ring-2 ring-background" style={{ left: `${(newest.x / CHART_W) * 100}%`, top: `${(newest.y / CHART_H) * 100}%` }} />
       ) : null}
+      {marked === undefined ? null : (
+        <span aria-hidden data-chart-mark className="absolute size-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-current ring-2 ring-background" style={{ left: `${(marked.x / CHART_W) * 100}%`, top: `${(marked.y / CHART_H) * 100}%` }} />
+      )}
     </div>
   );
 }

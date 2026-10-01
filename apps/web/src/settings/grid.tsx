@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The settings list grammar: a header row whose first cell names the section,
-// then rows on the same column template so the columns line up down the page.
-// A row is a glyph frame and a sans name with an optional quiet note under it,
-// numbers in right-aligned mono, and a state as a word or the action itself. No rule under the header, none between rows, no box
-// around the list: space groups them. The list is pulled out by the rows'
-// padding, so glyph frames start on the page's left edge.
+// then the rows on the same column template in the settings pages' one soft
+// card, so the columns line up down the page. A row is a glyph frame and a
+// sans name with an optional quiet note under it that wraps, numbers in
+// right-aligned mono, and a state as a word or the action itself. A row grows
+// with what it says.
 import { ChevronRightIcon } from "lucide-react";
 import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
 import { GROUP_LABEL } from "../lib/microLabel.js";
 import { cn } from "../lib/utils.js";
 import { VALUE } from "./format.js";
+import { CARD_SURFACE } from "./rows.js";
 
 /** The Computers page's template, shared by its two lists so the state column is one line across both. Below
  * 768 px the name, one load, the state and the chevron stand. */
@@ -20,10 +21,12 @@ export const PAGE_COLUMNS = "grid-cols-[minmax(0,1fr)_64px_280px] max-md:grid-co
 /** A cell that stands only while the full template does. */
 export const WIDE_ONLY = "max-md:hidden";
 
-export function Grid({ id, children }: { id: string; children: ReactNode }) {
+/** A list: its header row over the card, then the card of rows. */
+export function Grid({ id, head, children }: { id: string; head?: ReactNode; children: ReactNode }) {
   return (
-    <div data-grid={id} className="-mx-2 flex flex-col gap-0.5">
-      {children}
+    <div data-grid={id} className="flex flex-col">
+      {head}
+      <div className={cn(CARD_SURFACE, "flex flex-col [&>*+*]:border-t [&>*+*]:border-border/50")}>{children}</div>
     </div>
   );
 }
@@ -37,9 +40,9 @@ export interface HeadCell {
 /** The header row, on the list's template, or on its own where the section's rows are not grid rows. */
 export function GridHead({ columns, cells }: { columns?: string; cells: readonly HeadCell[] }) {
   return (
-    <div data-grid-head className={cn("mb-0.5 h-6 items-center gap-x-4 px-2", columns === undefined ? "flex" : cn("grid", columns))}>
+    <div data-grid-head className={cn("mb-2.5 min-h-7 items-end gap-x-4 border-x border-transparent px-4", columns === undefined ? "flex" : cn("grid", columns))}>
       {cells.map((cell, at) => (
-        <span key={`${at}-${cell.word}`} className={cn(GROUP_LABEL, "whitespace-nowrap text-muted-foreground", cell.num === true && "text-right", cell.wideOnly === true && WIDE_ONLY)}>
+        <span key={`${at}-${cell.word}`} className={cn("whitespace-nowrap", at === 0 ? "text-sm leading-5 font-normal text-foreground/70" : cn(GROUP_LABEL, "text-muted-foreground"), cell.num === true && "text-right", cell.wideOnly === true && WIDE_ONLY)}>
           {cell.word}
         </span>
       ))}
@@ -47,7 +50,7 @@ export function GridHead({ columns, cells }: { columns?: string; cells: readonly
   );
 }
 
-const ROW = "grid items-center gap-x-4 rounded-lg px-2 transition-colors duration-150 hover:bg-accent";
+const ROW = "grid items-center gap-x-4 px-4 py-2.5 transition-colors duration-150 hover:bg-accent/60";
 
 /** One row. A row that opens a page is the press itself, by pointer or by Enter, and a control inside it keeps its
  * own press. */
@@ -71,7 +74,7 @@ export function GridRow({ columns, tight = false, open, onContextMenu, title, at
   return (
     <div
       data-grid-row
-      className={cn(ROW, columns, tight ? "h-12" : "h-13", open !== undefined && "cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset")}
+      className={cn(ROW, columns, tight ? "min-h-12" : "min-h-13", open !== undefined && "cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset")}
       {...(title === undefined ? {} : { title })}
       {...(onContextMenu === undefined ? {} : { onContextMenu })}
       {...opens}
@@ -99,7 +102,7 @@ export function GridName({ glyph, name, tag, note }: { glyph: ReactNode; name: s
       {glyph}
       <span className="flex min-w-0 flex-col">
         <span className="flex min-w-0 items-baseline gap-2">
-          <span data-grid-name className="truncate text-sm leading-5 text-foreground">
+          <span data-grid-name className="min-w-0 break-words text-sm leading-5 text-foreground">
             {name}
           </span>
           {tag === undefined ? null : (
@@ -109,7 +112,7 @@ export function GridName({ glyph, name, tag, note }: { glyph: ReactNode; name: s
           )}
         </span>
         {note === undefined ? null : (
-          <span data-grid-note className="truncate text-[11px] leading-[14px] text-muted-foreground" title={note}>
+          <span data-grid-note className="text-xs leading-4 text-muted-foreground">
             {note}
           </span>
         )}

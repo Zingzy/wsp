@@ -8,6 +8,7 @@ import {
   PRICES_TTL_MS,
   USAGE_WORDS,
   RANGE_DAYS,
+  accountWords,
   UsageDay,
   dayKeyOf,
   hourOf,
@@ -24,6 +25,12 @@ import {
   type UsageSplit,
   type UsedAnswer,
   type UsedRow,
+  HERE_PLACE_ID,
+  THIS_COMPUTER,
+  hereName,
+  placeName,
+  providerKeyName,
+  type PlaceView,
 } from "@wsp/protocol";
 import type { Clock } from "./clock.js";
 import type { Store } from "./store.js";
@@ -66,6 +73,8 @@ export interface UsedQuery {
   label: (split: UsageSplit, value: string) => string;
   /** Whether the rows read from the harnesses' own logs are counted; the person can turn that reading off. */
   outside?: boolean;
+  /** The computer whose agents' logs were read, by its name, which the answer says the logs were counted on. */
+  logsOn?: string;
 }
 
 export interface LimitReading {
@@ -98,9 +107,25 @@ export type Vaulted = "token" | "key" | undefined;
  * computer keeps of its own. */
 export function accountOf(o: { agent: string; agentName: string; named?: { id: string; label?: string }; vaulted: Vaulted; computer: { id: string; name: string } }): { key: string; label: string; road: AccountRoad } {
   if (o.named !== undefined) return { key: `${o.agent}:${o.named.id}`, label: o.named.label ?? o.named.id, road: "named" };
-  if (o.vaulted === "token") return { key: `${o.agent}:vault-token`, label: `your ${o.agentName} sign-in`, road: "vault" };
-  if (o.vaulted === "key") return { key: `${o.agent}:vault-key`, label: `your ${o.agentName} key`, road: "vault" };
-  return { key: `${o.agent}@${o.computer.id}`, label: `${o.agentName} on ${o.computer.name}`, road: "own" };
+  if (o.vaulted === "token") return { key: `${o.agent}:vault-token`, label: accountWords({ agentName: o.agentName, vaulted: true }), road: "vault" };
+  if (o.vaulted === "key") return { key: `${o.agent}:vault-key`, label: accountWords({ agentName: o.agentName, keyed: true }), road: "vault" };
+  return { key: `${o.agent}@${o.computer.id}`, label: accountWords({ agentName: o.agentName, ownOn: o.computer.name }), road: "own" };
+}
+
+/** The account an agent's work on a computer runs on, read off the limits its turns there left: the one a turn named,
+ * else the vault's key where a turn there ran on it, since a key is one account wherever it is used, else that
+ * computer's own login. A vault token stays apart from a login, which may be another person's plan. */
+export function accountOnComputer(o: { agent: string; agentName: string; computer: { id: string; name: string }; limits: readonly AccountLimit[]; vaulted: Vaulted }): { key: string; label: string } {
+  const ran = (road: (r: AccountRoad | undefined) => boolean) => o.limits.find(l => l.agent === o.agent && road(l.road) && l.computers.includes(o.computer.id));
+  return ran(r => r !== "vault") ?? (o.vaulted === "key" ? ran(r => r === "vault") : undefined) ?? accountOf({ agent: o.agent, agentName: o.agentName, vaulted: undefined, computer: o.computer });
+}
+
+/** A computer the usage records name by its id, as a person reads it: its row's own name, this computer's, or a
+ * provider's by the word its table gives it, never a hostname or a provider's id. */
+export function usageComputerName(places: readonly PlaceView[], id: string): string {
+  const place = places.find(p => p.id === id);
+  if (place !== undefined) return placeName(place);
+  return id === HERE_PLACE_ID ? hereName(places) || THIS_COMPUTER : providerKeyName(id);
 }
 
 /** The instant a zone's day began, for the day holding `at`. */
@@ -248,6 +273,7 @@ export function createUsageLedger(o: { store: Store; clock: Clock; timeZone?: st
     let table: RateTable | undefined;
     const outside = q.outside ?? true;
     const rows = new Map<string, UsedRow>();
+    const logged = new Set<string>();
     const series =
       count === 1
         ? Array.from({ length: 24 }, (_, h) => ({
@@ -259,14 +285,13 @@ export function createUsageLedger(o: { store: Store; clock: Clock; timeZone?: st
       const held = await readDay(dayKeyOf(start + HOUR * 12, zone));
       for (const row of held?.rows ?? []) {
         if (row.source === "log" && !outside) continue;
-        const value = splitValue(row, q.split);
-        const key = row.source === "log" ? `log:${value}` : value;
+        if (row.source === "log") logged.add(row.agent);
+        const key = splitValue(row, q.split);
         const line = rows.get(key) ?? {
           key,
-          label: q.label(q.split, value),
+          label: q.label(q.split, key),
           tokens: { input: 0, output: 0, cached: 0 },
           priced: true,
-          ...(row.source === "log" ? { outside: true } : {}),
         };
         line.tokens.input += row.tokens.input;
         line.tokens.output += row.tokens.output;
@@ -285,7 +310,8 @@ export function createUsageLedger(o: { store: Store; clock: Clock; timeZone?: st
     }
     const ordered = [...rows.values()].sort((a, b) => b.tokens.input + b.tokens.output - (a.tokens.input + a.tokens.output) || a.key.localeCompare(b.key));
     // The range ends where today does, so two reads a moment apart answer the same range.
-    return { range: q.range, split: q.split, rows: ordered, series, since, until: dayStartOf(today + DAY + HOUR * 12, zone) };
+    const logs = logged.size === 0 || q.logsOn === undefined ? {} : { logs: { agents: [...logged].map(agent => q.label("agent", agent)).sort(), computer: q.logsOn } };
+    return { range: q.range, split: q.split, rows: ordered, series, since, until: dayStartOf(today + DAY + HOUR * 12, zone), ...logs };
   };
 
   const limit = (r: LimitReading): Promise<void> =>
@@ -379,6 +405,8 @@ export function accountRows(o: {
   }[];
   nameOf: (placeId: string) => string;
   agentName: (agent: string) => string;
+  /** The name the agent's plans are sold under, where the catalog gives one. */
+  planBrand?: (agent: string) => string | undefined;
   /** What the vault holds for an agent: a token, a key, or nothing. */
   vaulted: (agent: string) => Vaulted;
   /** Whether the agent prints its plan's limits in a turn, as the catalog says. */
@@ -392,7 +420,7 @@ export function accountRows(o: {
     rows.set(l.key, {
       key: l.key,
       agent: l.agent,
-      label: l.label,
+      label: accountWords({ agentName: o.agentName(l.agent), keyed: l.keyed, plan: l.plan, planBrand: o.planBrand?.(l.agent), named: l.road === "named" ? l.label : undefined, vaulted: l.road === "vault", ownOn: l.road === "own" && l.computers[0] !== undefined ? o.nameOf(l.computers[0]) : undefined }),
       computers: l.computers.map(o.nameOf),
       ...(l.plan !== undefined ? { plan: l.plan } : {}),
       ...(read ? { windows: l.windows, readAt: l.readAt } : {}),
@@ -404,14 +432,20 @@ export function accountRows(o: {
     for (const [agent, state] of Object.entries(place.signIns ?? {})) {
       if (state === "none") continue;
       const held = state === "vault-key" ? o.vaulted(agent) : undefined;
-      // A computer's own login is the account a turn there named, where one did.
-      const read = held === undefined ? o.limits.find(l => l.agent === agent && l.road !== "vault" && l.computers.includes(place.id)) : undefined;
-      const { key, label } = read ?? accountOf({ agent, agentName: o.agentName(agent), vaulted: held, computer: { id: place.id, name: o.nameOf(place.id) } });
+      const computer = { id: place.id, name: o.nameOf(place.id) };
+      const { key, label } = held !== undefined ? accountOf({ agent, agentName: o.agentName(agent), vaulted: held, computer }) : accountOnComputer({ agent, agentName: o.agentName(agent), computer, limits: o.limits, vaulted: o.vaulted(agent) });
       const row = rows.get(key) ?? { key, agent, label, computers: [], note: noteFor(agent, held === "key") };
       const name = o.nameOf(place.id);
       if (!row.computers.includes(name)) row.computers = [...row.computers, name];
       rows.set(key, row);
     }
+  }
+  // Two accounts of one agent that read the same, two logins on one plan, keep the address each signed in as.
+  const addresses = new Map(o.limits.flatMap(l => (l.road === "named" ? [[l.key, l.label] as const] : [])));
+  const shared = new Set([...rows.values()].map(row => row.label).filter((label, at, all) => all.indexOf(label) !== at));
+  for (const row of rows.values()) {
+    const address = addresses.get(row.key);
+    if (shared.has(row.label) && address !== undefined && !row.label.endsWith(` as ${address}`)) row.label = `${row.label} as ${address}`;
   }
   return [...rows.values()].sort((a, b) => a.agent.localeCompare(b.agent) || a.label.localeCompare(b.label));
 }

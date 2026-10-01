@@ -43,7 +43,8 @@ import { openImageRecipe } from "./openAt.js";
 import { NOTHING_HELD, absenceOf, absentOf, hereName, isProviderPlace, placeName, placeOf, placeStateCell, type PlaceHolding, type PlaceStateCell } from "./places.js";
 import { cloudsOffered, keyHeld } from "./providers.js";
 import { RemoveComputerDialog } from "./RemoveComputerDialog.js";
-import type { SettingsCardData, SettingsRowData } from "./rows.js";
+import { CARD_SURFACE, type SettingsCardData, type SettingsRowData } from "./rows.js";
+import { cn } from "../lib/utils.js";
 import type { SettingsContext } from "./settingsContext.js";
 import type { SettingsAt } from "./settingsStore.js";
 import { RefusalSlot } from "./sheetParts.js";
@@ -126,8 +127,7 @@ export function computersCards(ctx: SettingsContext): SettingsCardData[] {
   const computersBody = (
     <div className="flex flex-col gap-2">
       {computers.length === 0 ? null : (
-        <Grid id="computers">
-          <GridHead columns={LIST_COLUMNS} cells={COMPUTER_HEAD} />
+        <Grid id="computers" head={<GridHead columns={LIST_COLUMNS} cells={COMPUTER_HEAD} />}>
           {computers.map(place => (
             <ComputerListRow key={place.id} place={place} running={running[place.id] ?? 0} cell={stateCellAt(ctx, place)} open={go(place)} ctx={ctx} />
           ))}
@@ -144,8 +144,7 @@ export function computersCards(ctx: SettingsContext): SettingsCardData[] {
   const cloudsBody = (
     <div className="flex flex-col gap-2">
       {clouds.length === 0 ? null : (
-        <Grid id="clouds">
-          <GridHead columns={LIST_COLUMNS} cells={[{ word: H.cloud }]} />
+        <Grid id="clouds" head={<GridHead columns={LIST_COLUMNS} cells={[{ word: H.cloud }]} />}>
           {clouds.map(place => (
             <CloudListRow key={place.id} place={place} cell={stateCellAt(ctx, place)} open={go(place)} ctx={ctx} />
           ))}
@@ -242,8 +241,7 @@ function PlaceState({ place, cell, onSignIn, className }: { place: PlaceView; ce
 export function ComputerRow({ place, now }: { place: PlaceView; now: number }) {
   const setPreferences = useStore(s => s.setPreferences);
   return (
-    <Grid id="joined">
-      <GridHead columns={LIST_COLUMNS} cells={COMPUTER_HEAD} />
+    <Grid id="joined" head={<GridHead columns={LIST_COLUMNS} cells={COMPUTER_HEAD} />}>
       <ComputerListRow place={place} running={0} cell={placeStateCell(place, absentOf(place, now), { canUpdate: false })} ctx={{ setPreferences: patch => void setPreferences(patch) }} />
     </Grid>
   );
@@ -351,8 +349,7 @@ function kindLines<T>(kind: KindModule<T>, items: readonly T[], ctx: RowsContext
 function KindGrid({ id, head, lines }: { id: string; head: string; lines: readonly KindLine[] }) {
   const versioned = lines.some(line => line.version !== undefined);
   return (
-    <Grid id={id}>
-      <GridHead columns={PAGE_COLUMNS} cells={[{ word: head }, ...(versioned ? [{ word: WHERE_WORDS.heads.version, num: true, wideOnly: true }] : [])]} />
+    <Grid id={id} head={<GridHead columns={PAGE_COLUMNS} cells={[{ word: head }, ...(versioned ? [{ word: WHERE_WORDS.heads.version, num: true, wideOnly: true }] : [])]} />}>
       {lines.map(line => (
         <div key={line.key} className="flex flex-col">
           <GridRow columns={PAGE_COLUMNS} tight attrs={{ "data-kind-row": line.key }}>
@@ -454,8 +451,7 @@ function ThreadsHere({ place, ctx }: { place: PlaceView; ctx: SettingsContext })
   const rows = threadsHere(useSidebarProjects(), ctx.places, place);
   if (rows.length === 0) return null;
   return (
-    <Grid id="threads-here">
-      <GridHead cells={[{ word: WHERE_WORDS.heads.threadsHere }]} />
+    <Grid id="threads-here" head={<GridHead cells={[{ word: WHERE_WORDS.heads.threadsHere }]} />}>
       {rows.map(row => (
         <ThreadRow key={row.thread.id} {...row} />
       ))}
@@ -472,11 +468,11 @@ function RemoveLine({ place, ctx, onRemoved }: { place: PlaceView; ctx: Settings
   const name = placeName(place);
   const note = cloud ? WHERE_WORDS.removeCloudDescription : WHERE_WORDS.removeDescription(name, hereName(ctx.places));
   return (
-    <div data-k="remove-line" className="-mx-2 flex min-h-11 items-center justify-between gap-3 rounded-lg p-2">
-      <span className="flex min-w-0 flex-col">
-        <span className="text-sm leading-5 text-foreground">{WHERE_WORDS.removeTitle(name)}</span>
+    <div data-k="remove-line" className={cn(CARD_SURFACE, "flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-8")}>
+      <span className="flex min-w-0 flex-col gap-1">
+        <span className="text-sm leading-5 font-medium text-foreground">{WHERE_WORDS.removeTitle(name)}</span>
         {note === "" ? null : (
-          <span data-k="remove-note" className="text-[11px] leading-[14px] text-muted-foreground">
+          <span data-k="remove-note" className="max-w-xl text-[13px] leading-[1.45] text-muted-foreground">
             {note}
           </span>
         )}

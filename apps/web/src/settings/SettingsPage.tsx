@@ -17,7 +17,7 @@ import { PageHead } from "./grid.js";
 import { drawnGroups, groupById, searchGroup } from "./groups.js";
 import { hereName } from "./places.js";
 import { ProjectPage } from "./projects.js";
-import { Card, cardDrops, Cards, Line, Row, ROW_CLASS } from "./rows.js";
+import { Card, Cards, Line, Row } from "./rows.js";
 import { useSettingsAt, useSettingsContext, type SettingsContext } from "./settingsContext.js";
 import { useSettingsReads } from "./settingsReads.js";
 import { atId, useSettingsStore, type SettingsAt } from "./settingsStore.js";
@@ -29,7 +29,7 @@ function SearchPage({ ctx, query }: { ctx: SettingsContext; query: string }) {
     .filter(hit => hit.items.length > 0);
   if (found.length === 0) {
     return (
-      <p data-k="nothing-matches" className={`${ROW_CLASS} flex items-center justify-center text-[13px] text-muted-foreground`}>
+      <p data-k="nothing-matches" className="py-3 text-center text-[13px] text-muted-foreground">
         {SETTINGS_WORDS.nothingMatches}
       </p>
     );
@@ -37,7 +37,6 @@ function SearchPage({ ctx, query }: { ctx: SettingsContext; query: string }) {
   return (
     <>
       {found.map(({ group, items }) => {
-        const drops = cardDrops(items);
         return (
           <Card
             key={group.id}
@@ -54,7 +53,7 @@ function SearchPage({ ctx, query }: { ctx: SettingsContext; query: string }) {
                 return <Line key={item.id} {...line} />;
               }
               const { kind: _row, ...row } = item;
-              return <Row key={item.id} {...row} drops={drops} />;
+              return <Row key={item.id} {...row} />;
             })}
           </Card>
         );
@@ -95,7 +94,7 @@ export function SettingsPage() {
   const searching = search !== "" && !isMobile;
   return (
     <ScrollArea className="min-h-0 flex-1">
-      <div data-settings-page data-settings-at={searching ? "search" : atId(at)} className="mx-auto flex w-full max-w-[760px] flex-col gap-10 px-8 pt-14 pb-12 max-sm:px-4 max-sm:pt-6">
+      <div data-settings-page data-settings-at={searching ? "search" : atId(at)} className="mx-auto flex w-full max-w-[760px] flex-col gap-8 px-8 pt-14 pb-12 max-sm:px-4 max-sm:pt-6">
         {searching ? <SearchPage ctx={ctx} query={search} /> : <Page key={atId(at)} at={at} ctx={ctx} />}
       </div>
       {addProjectAt === null ? null : (

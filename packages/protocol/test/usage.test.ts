@@ -4,7 +4,7 @@
 // limit and a reset are read in.
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { dayKeyOf, LIMIT_KINDS, limitKindOfMinutes, parseRateTable, priceOf, resetsWord, usedPrice, USAGE_WORDS } from "../src/usage.js";
+import { accountWords, dayKeyOf, freshIn, LIMIT_KINDS, limitKindOfMinutes, logsLine, parseRateTable, priceOf, resetsWord, usedHeadline, usedPrice, USAGE_WORDS } from "../src/usage.js";
 
 const PRICES: unknown = JSON.parse(readFileSync(new URL("./fixtures/litellm-prices.json", import.meta.url), "utf8"));
 
@@ -79,12 +79,41 @@ describe("a limit's windows and words", () => {
     expect(USAGE_WORDS).toMatchObject({
       notPriced: "not priced",
       listPrice: "list price",
-      outsideWsp: "outside wsp",
-      noLimit: "limit not available",
-      keyed: "no plan limit: signed in with a key",
-      unread: "not read yet: runs a thread first",
+      noLimit: "reports no plan limit",
+      keyed: "pays per token, no plan limit",
+      unread: "not read yet: shows after its next turn",
       reached: "limit reached",
     });
+  });
+});
+
+describe("an account in plain words", () => {
+  it("says how it pays: a key, its plan under the plan's own name, the address it signed in as, your sign-in, a computer's own login", () => {
+    expect([
+      accountWords({ agentName: "Claude Code", keyed: true, plan: "max" }),
+      accountWords({ agentName: "Codex", plan: "plus", planBrand: "ChatGPT", named: "dev@example.com" }),
+      accountWords({ agentName: "Codex", named: "dev@example.com" }),
+      accountWords({ agentName: "Claude Code", vaulted: true }),
+      accountWords({ agentName: "OpenCode", ownOn: "zingzy's MacBook Pro" }),
+    ]).toEqual(["Claude Code with an API key", "Codex with ChatGPT Plus", "Codex as dev@example.com", "Claude Code with your sign-in", "OpenCode signed in on zingzy's MacBook Pro"]);
+  });
+});
+
+describe("what a range used, said once", () => {
+  // The owner's week, near enough: almost all of it read from cache, priced off the table.
+  const rows = [
+    { key: "claude", label: "Claude Code", tokens: { input: 7_323_700_000, output: 7_300_000, cached: 6_874_800_000 }, costList: 4_301.74, priced: true },
+    { key: "codex", label: "Codex", tokens: { input: 22_000_000, output: 42_000, cached: 20_700_000 }, costList: 15.45, priced: true },
+  ];
+  it("reads the tokens, the price and the cached share in one line, the cached ones taken out of fresh", () => {
+    expect(usedHeadline({ range: "week", rows })).toBe("7.35B tokens in the last 7 days, $4,317.19 at list price, 6.9B of it read from cache.");
+    expect(rows.map(r => freshIn(r.tokens))).toEqual([448_900_000, 1_300_000]);
+    expect(usedHeadline({ range: "day", rows: [] })).toBe(USAGE_WORDS.noUse);
+  });
+
+  it("names whose logs it counted and on which computer, wsp's own threads among them", () => {
+    expect(logsLine({ agents: ["Claude Code", "Codex", "OpenCode"], computer: "zingzy's MacBook Pro" })).toBe("Counts what Claude Code, Codex and OpenCode logged on zingzy's MacBook Pro, wsp's threads there included.");
+    expect(logsLine({ agents: ["Codex"], computer: "Boat" })).toBe("Counts what Codex logged on Boat, wsp's threads there included.");
   });
 });
 

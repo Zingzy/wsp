@@ -938,28 +938,27 @@ const macAndBoxes = () =>
     },
   });
 
-/** Settings > Usage with a week behind it: Claude and Codex limits as their last turns printed them, a week of
- * turns and of work the agents logged outside wsp, and this computer's readings with its nights asleep. The limits
- * and the ledger days are what the host itself keeps; the price table is kept as read, so no shot downloads it. */
+/** Settings > Usage in the owner's shape, with a week behind it: Claude Code on an API key kept in wsp's keys, its
+ * turns run on this computer and on Boat, Codex on ChatGPT Plus here with its last reading, Hermes Agent and
+ * OpenCode installed with no plan limit, and a week of turns at the owner's size, a billion tokens a day nearly all
+ * read from cache. The limits and the ledger days are what the host itself keeps; the price table is kept as read,
+ * so no shot downloads it. */
 const usageState = () => ({
   ...store({
-    projects: [project("spoo", HERE, 60 * 20), project("box-build", "p_hetzner", 60 * 21)],
+    projects: [project("spoo", HERE, 60 * 20)],
     workspaces: [workspace("ws_here", THIS_COMPUTER, { project: "pr_spoo" })],
-    places: {
-      p_hetzner: place("p_hetzner", "hetzner", 1, { platform: "linux", os: "Ubuntu 24.04", shape: { cpu: 2, memMb: 4096 }, diskFreeBytes: 38 * 1024 ** 3, runsWorkspaces: true, engine: "docker", login: { HOME: "/root", USER: "root", PATH: "/usr/bin" }, logins: ["codex/auth.json"] }),
-    },
   }),
   "usage-index": { days: { days: usageDays().map(d => d.day) } },
   limits: {
-    "claude@here": { key: "claude@here", agent: "claude", label: `Claude Code on ${THIS_COMPUTER}`, road: "own", windows: [{ kind: "session", usedPercent: 100, resetsAt: Date.now() + 83 * 60_000 }, { kind: "week", usedPercent: 71, resetsAt: Date.now() + 4 * 86_400_000 }], status: "reached", readAt: Date.now() - 12 * 60_000, computers: [HERE] },
-    "codex:acct_7f3": { key: "codex:acct_7f3", agent: "codex", label: "maya@example.com", road: "named", plan: "plus", windows: [{ kind: "session", usedPercent: 62, resetsAt: Date.now() + 150 * 60_000 }, { kind: "week", usedPercent: 18, resetsAt: Date.now() + 3 * 86_400_000 }], status: "ok", readAt: Date.now() - 20 * 60_000, computers: [HERE, "p_hetzner"] },
+    "claude:vault-key": { key: "claude:vault-key", agent: "claude", label: "Claude Code with an API key", road: "vault", windows: [], keyed: true, readAt: Date.now() - 12 * 60_000, computers: ["box", HERE] },
+    "codex:acct_7f3": { key: "codex:acct_7f3", agent: "codex", label: "maya@example.com", road: "named", plan: "plus", windows: [{ kind: "session", usedPercent: 62, resetsAt: Date.now() + 150 * 60_000 }, { kind: "week", usedPercent: 18, resetsAt: Date.now() + 3 * 86_400_000 }], status: "ok", readAt: Date.now() - 20 * 60_000, computers: [HERE] },
   },
 });
 
 const dayKey = at => new Date(at - new Date(at).getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
 
-/** Seven days of the ledger, one document each, in this computer's zone as the host files them: Claude's turns on
- * both projects with the cost Claude reported, and Codex's with none so the table prices them. */
+/** Seven days of the ledger, one document each, in this computer's zone as the host files them: Claude Code's turns
+ * on the key here and on Boat, and Codex's here, none with a cost of its own, so the table prices them all. */
 const usageDays = () =>
   Array.from({ length: 7 }, (_, back) => {
     const at = Date.now() - back * 86_400_000;
@@ -971,9 +970,9 @@ const usageDays = () =>
     return {
       day,
       rows: [
-        row({ agent: "claude", account: "claude@here", computer: HERE, project: "pr_spoo", model: "claude-opus-4-5", tokens: tokens(820_000, 41_000, 690_000), costReported: Number((2.4 * busy).toFixed(2)), source: "wsp" }, 1),
-        row({ agent: "claude", account: "claude@here", computer: HERE, project: "pr_box-build", model: "claude-sonnet-4-5", tokens: tokens(240_000, 12_000, 180_000), costReported: Number((0.4 * busy).toFixed(2)), source: "wsp" }, 2),
-        row({ agent: "codex", account: "codex:acct_7f3", computer: "p_hetzner", project: "pr_box-build", model: "gpt-5.5", tokens: tokens(510_000, 22_000, 300_000), source: "wsp" }, 3),
+        row({ agent: "claude", account: "claude:vault-key", computer: HERE, project: "pr_spoo", model: "claude-opus-4-5", tokens: tokens(640_000_000, 640_000, 602_000_000), source: "wsp" }, 1),
+        row({ agent: "claude", account: "claude:vault-key", computer: "box", project: "pr_spoo", model: "claude-opus-4-5", tokens: tokens(410_000_000, 400_000, 380_000_000), source: "wsp" }, 2),
+        row({ agent: "codex", account: "codex:acct_7f3", computer: HERE, project: "pr_spoo", model: "gpt-5.5", tokens: tokens(3_100_000, 6_000, 2_900_000), source: "wsp" }, 3),
       ].map(clean),
     };
   });
@@ -1015,13 +1014,13 @@ const claudeLog = () => {
 const usageFiles = () => [
   claudeLog(),
   ...usageDays().map(d => ({ path: join("blobs", "usage-days", d.day), text: JSON.stringify(d) })),
-  { path: join("blobs", "prices", "litellm"), text: JSON.stringify({ fetchedAt: Date.now(), table: { "gpt-5.5": { input: 1.25e-6, output: 1e-5, cacheRead: 1.25e-7, provider: "openai" } } }) },
+  { path: join("blobs", "prices", "litellm"), text: JSON.stringify({ fetchedAt: Date.now(), table: { "gpt-5.5": { input: 1.25e-6, output: 1e-5, cacheRead: 1.25e-7, provider: "openai" }, "claude-opus-4-5": { input: 5e-6, output: 2.5e-5, cacheRead: 5e-7, cacheWrite: 6.25e-6, provider: "anthropic" } } }) },
   ...readingsDays(),
 ];
 
 /** This computer's agents for the Usage fixture: the ones every fixture has, and OpenCode signed in with a key of
  * its own, which prints no limits. */
-const USAGE_AGENTS = { ...HERE_AGENTS, agents: { ...HERE_AGENTS.agents, opencode: { version: "1.18.18", status: "1 credentials" } }, latest: { ...HERE_AGENTS.latest, opencode: "1.18.18" } };
+const USAGE_AGENTS = { ...HERE_AGENTS, agents: { ...HERE_AGENTS.agents, opencode: { version: "1.18.18", status: "1 credentials" }, hermes: { version: "0.4.2", status: "nous (1 credentials):\n  #1 nous-portal" } }, latest: { ...HERE_AGENTS.latest, opencode: "1.18.18", hermes: "0.4.2" } };
 
 /** A person whose image is sealed and built in two places: what Settings > Image reads when there is a record to
  * read. One copy stands on the record as it is now and one was built from the record before it, so the table shows
@@ -1422,7 +1421,7 @@ const FIXTURES = {
   "review-posted": { build: inReview(true), changes: ["spoo"], pulls: "failed" },
   rewind: { build: rewind },
   replies: { build: replies },
-  usage: { build: usageState, files: usageFiles, agents: () => USAGE_AGENTS },
+  usage: { build: usageState, files: usageFiles, agents: () => USAGE_AGENTS, keys: { ANTHROPIC_API_KEY: "sk-ant-x-fixture-not-a-key" } },
 };
 
 export const FIXTURE_NAMES = Object.keys(FIXTURES);

@@ -73,7 +73,7 @@ describe("Add a computer goes on to the sign-ins on it", () => {
     expect(card()?.querySelector("[data-settings-head]")?.textContent).toBe(ADD_COMPUTER_WORDS.signInsOn("hetzner"));
     // Why a sign-in is asked here while the image asks none: the login is the computer's, shared by every workspace there.
     expect(card()?.querySelector("[data-settings-lede]")?.textContent).toBe("Codex keeps one login for every workspace on hetzner, so sign in once here.");
-    expect(row("codex")!.querySelector("[data-settings-description]")?.textContent).toBe(AGENTS_LIST_WORDS.roads.device);
+    expect(row("codex")!.querySelector("[data-settings-description]")?.textContent).toBe(AGENTS_LIST_WORDS.roadSentences.device);
     // Claude Code's login there stays in the home of that computer's login, which no workspace shares: not offered.
     expect([...card()!.querySelectorAll("[data-settings-row]")].map(r => r.getAttribute("data-settings-row"))).toEqual(["sign-in-codex"]);
     expect(row("codex")!.querySelector("[data-settings-word]")?.textContent).toBe(AGENTS_LIST_WORDS.needsSignIn);

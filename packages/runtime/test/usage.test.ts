@@ -51,7 +51,7 @@ describe("a turn's end in the ledger", () => {
     const { rt, ws } = await runtimeWith(turning(result));
     await (await rt.sessions.start(ws.id, { prompt: "go" })).finished;
     const byAccount = await rt.usage.used({ range: "day", split: "account" });
-    expect(byAccount.rows).toEqual([{ key: "claude:vault-token", label: "your Claude Code sign-in", tokens: { input: 2_000, output: 300, cached: 1_500 }, costReported: 0.12, priced: true }]);
+    expect(byAccount.rows).toEqual([{ key: "claude:vault-token", label: "Claude Code with your sign-in", tokens: { input: 2_000, output: 300, cached: 1_500 }, costReported: 0.12, priced: true }]);
     const byProject = await rt.usage.used({ range: "day", split: "project" });
     expect(byProject.rows.map(r => r.label)).toEqual([ws.project.name]);
     const byAgent = await rt.usage.used({ range: "day", split: "agent" });
@@ -71,7 +71,7 @@ describe("an account's limits", () => {
     await (await rt.sessions.start(ws.id, { prompt: "go" })).finished;
     const { accounts } = await rt.usage.accounts();
     expect(accounts).toEqual([
-      expect.objectContaining({ key: "claude:vault-token", agent: "claude", label: "your Claude Code sign-in", windows: window.windows, status: "ok", readAt: expect.any(Number) }),
+      expect.objectContaining({ key: "claude:vault-token", agent: "claude", label: "Claude Code with your sign-in", windows: window.windows, status: "ok", readAt: expect.any(Number) }),
     ]);
     expect(accounts[0]!.computers).toHaveLength(1);
     const used = await rt.usage.used({ range: "day", split: "account" });
@@ -81,7 +81,7 @@ describe("an account's limits", () => {
   it("says a turn signed in with a key has no plan limit", async () => {
     const { rt, ws } = await runtimeWith(turning({ status: "completed", text: "done" }, sessionId => [{ type: "limit", sessionId, limit: { windows: [], keyed: true } }]), { ANTHROPIC_API_KEY: "sk-ant-api-test" });
     await (await rt.sessions.start(ws.id, { prompt: "go" })).finished;
-    expect((await rt.usage.accounts()).accounts).toEqual([expect.objectContaining({ key: "claude:vault-key", note: "no plan limit: signed in with a key" })]);
+    expect((await rt.usage.accounts()).accounts).toEqual([expect.objectContaining({ key: "claude:vault-key", note: "pays per token, no plan limit", label: "Claude Code with an API key" })]);
   });
 });
 
@@ -103,9 +103,9 @@ describe("this computer's own sign-ins", () => {
     });
     const { accounts } = await rt.usage.accounts();
     expect(accounts.map(a => [a.key, a.note, a.computers.length])).toEqual([
-      ["claude@here", "not read yet: runs a thread first", 1],
-      ["codex@here", "not read yet: runs a thread first", 1],
-      ["opencode@here", "limit not available", 1],
+      ["claude@here", "not read yet: shows after its next turn", 1],
+      ["codex@here", "not read yet: shows after its next turn", 1],
+      ["opencode@here", "reports no plan limit", 1],
     ]);
     // A read for the accounts asks no vendor for its newest version.
     expect(asked).toEqual([[{ kind: "here" }, { latest: false }]]);
@@ -135,10 +135,13 @@ describe("work done outside wsp", () => {
     const here = await projectOn(rt, HERE_PLACE_ID);
     project = here.path;
     const rows = (await rt.usage.used({ range: "day", split: "project", outside: true })).rows;
-    expect(rows.map(r => [r.label, r.tokens.input, r.outside])).toEqual([
-      [here.name, 40, true],
-      ["No project", 5, true],
+    const used = await rt.usage.used({ range: "day", split: "project", outside: true });
+    expect(rows.map(r => [r.label, r.tokens.input])).toEqual([
+      [here.name, 40],
+      ["No project", 5],
     ]);
+    // The answer says whose logs it counted, by the agent's name.
+    expect(used.logs?.agents).toEqual(["Claude Code"]);
     // Only a reader that asks for them gets them: the command line and its tool, whose answer an agent reads, never do.
     expect((await rt.usage.used({ range: "day", split: "project" })).rows).toEqual([]);
     await rt.preferences.set({ usageLogs: false });
@@ -164,8 +167,8 @@ describe("work outside wsp on this computer", () => {
     await (await rt.sessions.start(ws.id, { prompt: "go" })).finished;
     const rows = (await rt.usage.used({ range: "day", split: "account", outside: true })).rows;
     expect(rows.map(r => [r.key, r.label, r.tokens.input])).toEqual([
-      ["claude:vault-token", "your Claude Code sign-in", 10],
-      ["log:claude@here", expect.stringMatching(/^Claude Code on /), 7],
+      ["claude:vault-token", "Claude Code with your sign-in", 10],
+      ["claude@here", expect.stringMatching(/^Claude Code signed in on /), 7],
     ]);
   });
 });
@@ -192,7 +195,7 @@ describe("a wsp thread's own transcript", () => {
     const ws = await createOn(rt, { golden: "snap_g", name: "usage" });
     await (await rt.sessions.start(ws.id, { prompt: "go" })).finished;
     const rows = (await rt.usage.used({ range: "day", split: "agent", outside: true })).rows;
-    expect(rows.map(r => [r.key, r.tokens.input])).toEqual([["log:claude", 9]]);
+    expect(rows.map(r => [r.key, r.tokens.input])).toEqual([["claude", 9]]);
   });
 });
 
