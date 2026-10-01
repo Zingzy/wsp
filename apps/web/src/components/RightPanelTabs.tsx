@@ -14,7 +14,6 @@ import {
 import type { RightPanelSurface } from "../rightPanelStore";
 import { PANE_KINDS, paneOf, paneTitle, type RightPanelKind } from "../panes";
 import { cn } from "../lib/utils";
-import { CARD_SURFACE } from "../settings/rows";
 import { Button } from "./ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { Kbd } from "./ui/kbd";
@@ -23,6 +22,9 @@ import { ScrollArea } from "./ui/scroll-area";
 import { PanelTabCloseButton } from "./ui/panel-tab-close-button";
 
 import { PreviewPanelShell, type PreviewPanelMode } from "./preview/PreviewPanelShell";
+
+/** A launcher tile's surface: the right panel keeps its own, apart from the settings cards'. */
+export const TILE_SURFACE = "overflow-hidden rounded-[10px] border border-border bg-card";
 
 /** What a browser surface's tab shows; the browser pane supplies these per open tab. */
 export interface PreviewTabSnapshot {
@@ -236,7 +238,7 @@ function RightPanelEmptyState(props: { actions: readonly SurfaceAction[] }) {
     highlightIndex !== -1 && availableActions[highlightIndex] === action;
 
   // py-2 and the hairline around 36px of text make a 54px tile, on the 4px pitch.
-  const tileClass = cn(CARD_SURFACE, "flex w-full items-center gap-3 px-3 py-2 text-left");
+  const tileClass = cn(TILE_SURFACE, "flex w-full items-center gap-3 px-3 py-2 text-left");
   const rowText = (action: SurfaceAction, line: string, head?: string) => {
     const Icon = action.icon;
     return (

@@ -315,6 +315,7 @@ import {
   USAGE_WORDS,
   accountState,
   fmtTokens,
+  freshIn,
   usedPrice,
   windowCell,
   type LimitKind,
@@ -802,10 +803,10 @@ export function usageTableLines(read: { accounts: readonly AccountRow[]; used: U
     read.used.rows.length === 0
       ? [`${USAGE_WORDS.noUse}.`]
       : table([
-          [read.used.split.toUpperCase(), "IN", "OUT", "CACHED", "PRICE"],
+          [read.used.split.toUpperCase(), "FRESH IN", "CACHED", "OUT", "PRICE"],
           ...read.used.rows.map(row => {
             const price = usedPrice(row);
-            return [row.label, fmtTokens(row.tokens.input), fmtTokens(row.tokens.output), fmtTokens(row.tokens.cached), [price.figure, price.word].filter(Boolean).join(" ")];
+            return [row.label, fmtTokens(freshIn(row.tokens)), fmtTokens(row.tokens.cached), fmtTokens(row.tokens.output), [price.figure, price.word].filter(Boolean).join(" ")];
           }),
         ]);
   return [...accounts, "", ...used];
@@ -3461,7 +3462,7 @@ export const ALL_VERBS: readonly Verb[] = [
     },
     tool: tool({
       description:
-        "Two answers that are never added together. accounts: every agent account signed in on any computer, the same one on three computers once, each with how much of its plan's windows is used and when each starts again, as that agent printed them in the last turn wsp ran on it; an agent that prints none reads limit not available, a sign-in by API key has no plan window, and an account no turn has run on yet has no reading. used: the tokens the turns used over the range (today, the last seven days or the last thirty), split by agent, account, computer or project, each row with the cost its agent reported or a list price off one table, rows read from this computer's own agent logs for work done outside wsp marked outside, and a series over the range.",
+        "Two answers that are never added together. accounts: every agent account signed in on any computer, the same one on three computers once, each with how much of its plan's windows is used and when each starts again, as that agent printed them in the last turn wsp ran on it; an agent that prints none reports no plan limit, a sign-in by API key pays per token with no plan window, and an account no turn has run on yet has no reading. used: the tokens the turns used over the range (today, the last seven days or the last thirty), split by agent, account, computer or project, each row with the cost its agent reported or a list price off one table, input counting the cached tokens, and a series over the range.",
       input: { range: UsageRange.optional().describe("day (the default), week or month"), by: UsageSplit.optional().describe("agent (the default), account, computer or project") },
       output: { accounts: z.array(AccountRow), used: UsedAnswer },
       call: async ({ range, by }, deps) => asJson(await readUsage(await deps.client(), range ?? "day", by ?? "agent")),

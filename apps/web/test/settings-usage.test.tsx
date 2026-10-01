@@ -1,30 +1,31 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Settings > Usage: each account's limits with the warning ink on a reached
-// limit alone, what was used over a range split four ways with its one line
-// chart, each computer's readings as three small line charts with a gap where
-// no reading was kept, and the Privacy switch over the log reading.
+// Settings > Usage in the owner's shape: Claude Code with an API key on the Mac
+// and Boat, Codex with ChatGPT Plus on the Mac, agents that report no limit as
+// one line; then what was used over a range in one line, one chart with no
+// fill, and a table whose fresh, cached and out add up to the row. No
+// computer's load stands on the page.
 import { fireEvent } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { AccountRow, PlaceView, ReadingsAnswer, SysPoint, UsageRange, UsageSplit, UsedAnswer } from "@wsp/protocol";
-import { USAGE_WORDS } from "@wsp/protocol";
+import type { AccountRow, PlaceView, UsageRange, UsageSplit, UsedAnswer } from "@wsp/protocol";
+import { logsLine, usedHeadline, USAGE_WORDS } from "@wsp/protocol";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { PRIVACY_WORDS, USAGE_PAGE_WORDS } from "../src/settings/format.js";
 import { mountSettings, resetSettings, rowOf, settingsApi, settle } from "./settings-harness.js";
 
-const here: PlaceView = { id: "here", kind: "computer", name: "zingzy-mbp", label: "zingzy's MacBook Pro", default: true, present: true, takesForks: false, shape: { cpu: 10, memMb: 32_768 } };
-const box: PlaceView = { id: "p_spoo", kind: "computer", name: "spoo", default: false, present: true, takesForks: true, shape: { cpu: 8, memMb: 16_384 } };
-const solari: PlaceView = { id: "solari", kind: "provider", name: "solari", default: false, rateUsdPerHour: 0.11, takesForks: true };
+const here: PlaceView = { id: "here", kind: "computer", name: "zingzys-macbook-pro.local", label: "zingzy's MacBook Pro", default: true, present: true, takesForks: false, shape: { cpu: 10, memMb: 32_768 } };
+const boat: PlaceView = { id: "box", kind: "provider", name: "box", default: false, takesForks: true };
 
 const HOUR = 3_600_000;
 // The page reads the minute clock, so a reset is set off the minute it will read.
 const minute = (): number => Math.floor(Date.now() / 60_000) * 60_000;
 const accounts = (): AccountRow[] => [
+  { key: "claude:vault-key", agent: "claude", label: "Claude Code with an API key", computers: ["zingzy's MacBook Pro", "Boat"], note: USAGE_WORDS.keyed },
   {
     key: "codex:acct-1",
     agent: "codex",
-    label: "zingzy@example.com",
-    computers: ["zingzy's MacBook Pro", "spoo"],
+    label: "Codex with ChatGPT Plus",
+    computers: ["zingzy's MacBook Pro"],
     plan: "plus",
     windows: [
       { kind: "session", usedPercent: 62, resetsAt: minute() + 2.5 * HOUR },
@@ -33,8 +34,8 @@ const accounts = (): AccountRow[] => [
     status: "ok",
     readAt: Date.now() - 60_000,
   },
-  { key: "claude:vault-token", agent: "claude", label: "Claude on the vault", computers: ["spoo"], windows: [{ kind: "session", usedPercent: 100 }], status: "reached", readAt: Date.now() - 60_000 },
-  { key: "claude@here", agent: "claude", label: "Claude Code", computers: ["zingzy's MacBook Pro"], note: "no plan limit: signed in with a key" },
+  { key: "hermes@here", agent: "hermes", label: "Hermes Agent", computers: ["zingzy's MacBook Pro"], note: USAGE_WORDS.noLimit },
+  { key: "opencode@here", agent: "opencode", label: "OpenCode", computers: ["zingzy's MacBook Pro"], note: USAGE_WORDS.noLimit },
 ];
 
 const used = (range: UsageRange, split: UsageSplit, rows = true): UsedAnswer => ({
@@ -42,47 +43,34 @@ const used = (range: UsageRange, split: UsageSplit, rows = true): UsedAnswer => 
   split,
   rows: rows
     ? [
-        { key: "claude", label: "Claude Code", tokens: { input: 1_200_000, output: 48_000, cached: 9_000_000 }, costList: 4.2, priced: true },
-        { key: "codex", label: "Codex", tokens: { input: 300_000, output: 12_000, cached: 0 }, priced: false, outside: true },
+        { key: "claude", label: "Claude Code", tokens: { input: 7_323_700_000, output: 7_300_000, cached: 6_874_800_000 }, costList: 4_301.74, priced: true },
+        { key: "codex", label: "Codex", tokens: { input: 22_000_000, output: 42_000, cached: 20_700_000 }, priced: false },
       ]
     : [],
-  series: rows ? Array.from({ length: 7 }, (_, i) => ({ t: Date.parse("2026-09-24T00:00:00Z") + i * 24 * HOUR, tokens: (i + 1) * 100_000 })) : Array.from({ length: 7 }, (_, i) => ({ t: Date.parse("2026-09-24T00:00:00Z") + i * 24 * HOUR, tokens: 0 })),
+  series: Array.from({ length: 7 }, (_, i) => ({ t: Date.parse("2026-09-24T00:00:00Z") + i * 24 * HOUR, tokens: rows ? (i + 1) * 100_000_000 : 0 })),
   since: Date.parse("2026-09-24T00:00:00Z"),
   until: Date.parse("2026-10-01T00:00:00Z"),
+  ...(rows ? { logs: { agents: ["Claude Code", "Codex"], computer: "zingzy's MacBook Pro" } } : {}),
 });
 
-const point = (at: number, cpu: number): SysPoint => ({ at, cpu, load1: 1, mem: { used: 8, total: 32 }, disk: { used: 50, total: 200 } });
-const TO = Date.parse("2026-09-30T12:00:00Z");
-const FROM = TO - 7 * 24 * HOUR;
-const STEP = 30 * 60_000;
-// Two runs of readings with a day between them that has none: the box was paused.
-const readingsOf = (placeId: string): ReadingsAnswer =>
-  placeId === "here"
-    ? { points: [...Array.from({ length: 4 }, (_, i) => point(FROM + i * STEP, 10 + i)), ...Array.from({ length: 3 }, (_, i) => point(FROM + 2 * 24 * HOUR + i * STEP, 40 + i))], stepMs: STEP, from: FROM, to: TO }
-    : { points: [], stepMs: STEP, from: FROM, to: TO };
-
-interface Asks {
-  used: [UsageRange, UsageSplit][];
-  readings: [string, UsageRange][];
-}
-
-const mount = async (over: Partial<Api> = {}): Promise<{ asks: Asks; sets: ReturnType<typeof settingsApi>["sets"] }> => {
-  const asks: Asks = { used: [], readings: [] };
-  const { api, sets } = settingsApi({
+const mount = async (over: Partial<Api> = {}): Promise<{ asks: [UsageRange, UsageSplit][]; readings: string[] }> => {
+  const asks: [UsageRange, UsageSplit][] = [];
+  const readings: string[] = [];
+  const { api } = settingsApi({
     usageAccounts: async () => ({ accounts: accounts() }),
     usageUsed: async (range: UsageRange, split: UsageSplit) => {
-      asks.used.push([range, split]);
+      asks.push([range, split]);
       return used(range, split);
     },
-    placesReadings: async (placeId: string, range: UsageRange) => {
-      asks.readings.push([placeId, range]);
-      return readingsOf(placeId);
+    placesReadings: async (placeId: string) => {
+      readings.push(placeId);
+      return { points: [], stepMs: 1, from: 0, to: 1 };
     },
     ...over,
   } as Partial<Api>);
   mountSettings({ api, at: { kind: "group", group: "usage" } });
   await settle();
-  return { asks, sets };
+  return { asks, readings };
 };
 
 const $ = (sel: string): HTMLElement | null => document.querySelector<HTMLElement>(`[data-settings-page] ${sel}`);
@@ -91,40 +79,59 @@ const text = (el: Element | null | undefined): string => el?.textContent ?? "";
 
 beforeEach(() => {
   resetSettings();
-  useStore.setState({ places: [here, box, solari] });
+  useStore.setState({ places: [here, boat] });
 });
 
 afterEach(() => {
   document.body.innerHTML = "";
 });
 
-describe("Usage: accounts", () => {
-  it("lists each account once with its computers as the note, a meter and percent per window with its reset, and the plan", async () => {
+describe("Usage: limits", () => {
+  it("lists each real account in plain words with the computers it is used on as one line, and a reading as a thin meter per window with its percent and reset", async () => {
     await mount();
-    expect($$("[data-usage-account]").map(r => r.dataset["usageAccount"])).toEqual(["codex:acct-1", "claude:vault-token", "claude@here"]);
+    expect($$("[data-usage-account]").map(r => text(r.querySelector("[data-settings-title]")))).toEqual(["Claude Code with an API key", "Codex with ChatGPT Plus"]);
     const codex = $("[data-usage-account='codex:acct-1']")!;
     expect(codex.querySelector("[data-harness-mark=codex]")).not.toBeNull();
-    expect(text(codex.querySelector("[data-k=label]"))).toBe("zingzy@example.com");
-    expect(text(codex.querySelector("[data-k=note]"))).toBe("zingzy's MacBook Pro, spoo");
+    expect(text(codex.querySelector("[data-settings-description]"))).toBe("zingzy's MacBook Pro");
     const session = codex.querySelector<HTMLElement>("[data-window=session]")!;
+    expect(text(session.querySelector("[data-k=window]"))).toBe(USAGE_PAGE_WORDS.session);
     expect(text(session.querySelector("[data-k=percent]"))).toBe("62%");
     expect(text(session.querySelector("[data-k=resets]"))).toBe("resets in 2 h");
     expect(session.querySelector<HTMLElement>("[data-k=meter-fill]")!.style.width).toBe("62%");
     expect(text(codex.querySelector("[data-window=week] [data-k=percent]"))).toBe("18%");
     expect(text(codex.querySelector("[data-window=week] [data-k=resets]"))).toBe("resets in 40 min");
-    expect(text(codex.querySelector("[data-k=plan]"))).toBe("plus");
-    expect(text(codex.querySelector("[data-k=state]"))).toBe("");
   });
 
-  it("carries the warning ink on a reached limit alone, and a row with no reading says why in its state cell", async () => {
+  it("says in one quiet line why a row has no reading, and names the agents that report no limit once under the list", async () => {
     await mount();
-    const reached = $("[data-usage-account='claude:vault-token'] [data-k=state]")!;
-    expect(text(reached)).toBe("Limit reached");
-    expect(reached.className).toContain("text-warning-foreground");
-    expect($$(".text-warning-foreground")).toEqual([reached]);
-    const keyed = $("[data-usage-account='claude@here']")!;
-    expect(keyed.querySelector("[data-window]")).toBeNull();
-    expect(text(keyed.querySelector("[data-k=state]"))).toBe("No plan limit: signed in with a key");
+    const key = $("[data-usage-account='claude:vault-key']")!;
+    expect(text(key.querySelector("[data-settings-description]"))).toBe("zingzy's MacBook Pro and Boat");
+    expect(key.querySelector("[data-window]")).toBeNull();
+    expect(text(key.querySelector("[data-k=state]"))).toBe("Pays per token, no plan limit");
+    expect($("[data-usage-account='opencode@here']")).toBeNull();
+    expect(text($("[data-k=no-limit]"))).toBe("Hermes Agent and OpenCode report no plan limit.");
+  });
+
+  it("says a computer's own login's computer once, in its title, with no line repeating it", async () => {
+    await mount({ usageAccounts: async () => ({ accounts: [{ key: "codex@here", agent: "codex", label: "Codex signed in on zingzy's MacBook Pro", computers: ["zingzy's MacBook Pro"], note: USAGE_WORDS.unread }] }) } as Partial<Api>);
+    const row = $("[data-usage-account='codex@here']")!;
+    expect(row.querySelector("[data-settings-description]")).toBeNull();
+    expect(text(row.querySelector("[data-k=state]"))).toBe("Not read yet: shows after its next turn");
+  });
+
+  it("carries the warning ink on a reached limit alone", async () => {
+    await mount({ usageAccounts: async () => ({ accounts: [{ key: "claude:vault-token", agent: "claude", label: "Claude Code with your sign-in", computers: ["Boat"], windows: [{ kind: "session", usedPercent: 100 }], status: "reached", readAt: Date.now() }] }) } as Partial<Api>);
+    const state = $("[data-usage-account='claude:vault-token'] [data-k=state]")!;
+    expect(text(state)).toBe("Limit reached");
+    expect(state.className).toContain("text-warning-foreground");
+  });
+
+  it("stands its head and a row's room from the first paint, so Used never moves down when the accounts arrive", async () => {
+    await mount({ usageAccounts: () => new Promise<never>(() => {}) } as Partial<Api>);
+    const card = $("[data-settings-card=usage-limits]")!;
+    expect(text(card.querySelector("[data-settings-head]"))).toBe(USAGE_PAGE_WORDS.limits);
+    expect(card.querySelector("[data-k=limits-loading]")).not.toBeNull();
+    expect($("[data-usage-account]")).toBeNull();
   });
 
   it("says no agent is signed in where the host knows no account", async () => {
@@ -134,81 +141,78 @@ describe("Usage: accounts", () => {
 });
 
 describe("Usage: used", () => {
-  it("reads a week by agent first, and each segment asks again for its range and split", async () => {
+  it("says the range in one line: the tokens, the price at list price and the cached share", async () => {
+    await mount();
+    expect(text($("[data-k=used-headline]"))).toBe(usedHeadline(used("week", "agent")));
+    expect(text($("[data-k=used-headline]"))).toBe("7.35B tokens in the last 7 days, $4,301.74 at list price, 6.9B of it read from cache. Some of it has no price to read, so the figure leaves it out.");
+  });
+
+  it("reads a week by agent first, and the small quiet controls ask again for their range and split", async () => {
     const { asks } = await mount();
-    expect(asks.used).toEqual([["week", "agent"]]);
-    fireEvent.click($("[data-k=usage-range] [data-segment=month]")!);
+    expect(asks).toEqual([["week", "agent"]]);
+    fireEvent.click($("[data-k=usage-range] [data-range=month]")!);
     await settle();
-    fireEvent.click($("[data-k=usage-split] [data-segment=project]")!);
+    fireEvent.click($("[data-k=usage-split] [data-split=project]")!);
     await settle();
-    expect(asks.used).toEqual([
-      ["week", "agent"],
+    expect(asks.slice(1)).toEqual([
       ["month", "agent"],
       ["month", "project"],
     ]);
-    expect($("[data-k=usage-range] [data-segment=month]")!.getAttribute("aria-checked")).toBe("true");
+    expect($("[data-k=usage-range] [data-range=month]")!.getAttribute("aria-pressed")).toBe("true");
+    expect($("[data-k=usage-range] [data-range=week]")!.getAttribute("aria-pressed")).toBe("false");
     expect(text($("[data-k=used-head] [data-k=split-head]"))).toBe("Project");
   });
 
-  it("draws one row per split value with in, out and cached, the price with its word, and outside wsp as the note", async () => {
+  it("draws one row per split value with fresh in, cached and out that add up to it, and the price with its word", async () => {
     await mount();
+    expect([...$$("[data-k=used-head] span")].map(text)).toEqual(["Agent", "Fresh in", "Cached", "Out", "Price"]);
     const claude = $("[data-used-row=claude]")!;
-    expect([...claude.querySelectorAll("[data-k=in], [data-k=out], [data-k=cached]")].map(el => el.textContent)).toEqual(["1.2M", "48k", "9M"]);
-    expect(text(claude.querySelector("[data-k=price]"))).toBe("$4.20");
+    expect([...claude.querySelectorAll("[data-k=fresh], [data-k=cached], [data-k=out]")].map(text)).toEqual(["449M", "6.87B", "7.3M"]);
+    expect(text(claude.querySelector("[data-k=price]"))).toBe("$4,301.74");
     expect(text(claude.querySelector("[data-k=price-word]"))).toBe(USAGE_WORDS.listPrice);
-    expect(claude.querySelector("[data-k=note]")).toBeNull();
     const codex = $("[data-used-row=codex]")!;
     expect(codex.querySelector("[data-k=price]")).toBeNull();
     expect(text(codex.querySelector("[data-k=price-word]"))).toBe(USAGE_WORDS.notPriced);
-    expect(text(codex.querySelector("[data-k=note]"))).toBe(USAGE_WORDS.outsideWsp);
   });
 
-  it("draws the tokens as one line with a tick per day, and nothing used as its sentence in the chart's place", async () => {
+  it("draws the tokens as one line with no fill, each day's point readable on hover, and says once whose logs it counted", async () => {
     await mount();
     const chart = $("[data-usage-chart=tokens]")!;
     expect(chart.querySelectorAll("[data-chart-line]").length).toBe(1);
+    expect(chart.querySelectorAll("[data-chart-area]").length).toBe(0);
     expect(chart.querySelectorAll("[data-k=tick]").length).toBe(7);
-    document.body.innerHTML = "";
-    resetSettings();
-    useStore.setState({ places: [here] });
+    const points = [...chart.querySelectorAll<HTMLElement>("[data-k=point]")];
+    expect(points.length).toBe(7);
+    // No native title: the figure comes in the app's tooltip, and the point it reads is drawn on the line.
+    expect(points.some(point => point.hasAttribute("title"))).toBe(false);
+    expect(chart.querySelector("[data-chart-mark]")).toBeNull();
+    fireEvent.pointerEnter(points[2]!, { pointerType: "mouse" });
+    fireEvent.mouseEnter(points[2]!);
+    fireEvent.mouseMove(points[2]!);
+    await settle();
+    expect(chart.querySelector("[data-chart-mark]")).not.toBeNull();
+    expect(text(document.querySelector("[data-k=point-figure]"))).toMatch(/: 300M tokens$/);
+    fireEvent.mouseLeave(points[2]!);
+    await settle();
+    expect(chart.querySelector("[data-chart-mark]")).toBeNull();
+    expect(text($("[data-k=logs]"))).toBe(logsLine({ agents: ["Claude Code", "Codex"], computer: "zingzy's MacBook Pro" }));
+  });
+
+  it("says nothing was used in the chart's place, with no rows and no logs line", async () => {
     await mount({ usageUsed: async (range: UsageRange, split: UsageSplit) => used(range, split, false) } as Partial<Api>);
     expect($("[data-usage-chart=tokens] svg")).toBeNull();
-    expect(text($("[data-usage-chart=tokens]"))).toBe(USAGE_WORDS.noUse);
+    expect(text($("[data-k=used-headline]"))).toBe(USAGE_WORDS.noUse);
     expect($$("[data-used-row]")).toEqual([]);
+    expect($("[data-k=logs]")).toBeNull();
   });
 });
 
-describe("Usage: computers", () => {
-  it("reads each computer over the range, not a cloud, and draws CPU, memory and disk with the last value, a gap splitting the line", async () => {
-    const { asks } = await mount();
-    expect(asks.readings.map(([id]) => id).sort()).toEqual(["here", "p_spoo"]);
-    const row = $("[data-usage-computer=here]")!;
-    expect(text(row.querySelector("[data-k=label]"))).toBe("zingzy's MacBook Pro");
-    expect(text(row.querySelector("[data-k=note]"))).toBe("10 cores32 GB");
-    expect([...row.querySelectorAll<HTMLElement>("[data-reading]")].map(c => [c.dataset["reading"], text(c.querySelector("[data-k=last]"))])).toEqual([
-      ["cpu", "42%"],
-      ["mem", "25%"],
-      ["disk", "25%"],
-    ]);
-    expect(row.querySelectorAll("[data-reading=cpu] [data-chart-line]").length).toBe(2);
-    const idle = $("[data-usage-computer=p_spoo]")!;
-    expect(idle.querySelector("[data-reading]")).toBeNull();
-    expect(text(idle.querySelector("[data-k=no-readings]"))).toBe(USAGE_WORDS.noReadings);
-    expect($("[data-usage-computer=solari]")).toBeNull();
-  });
-
-  it("a computer whose readings were refused reads as no readings, and the range asks each again", async () => {
-    const { asks } = await mount({
-      placesReadings: async (placeId: string, range: UsageRange) => {
-        asks.readings.push([placeId, range]);
-        if (placeId === "p_spoo") throw new Error("spoo is away");
-        return readingsOf(placeId);
-      },
-    } as Partial<Api>);
-    expect(text($("[data-usage-computer=p_spoo] [data-k=no-readings]"))).toBe(USAGE_WORDS.noReadings);
-    fireEvent.click($("[data-k=usage-range] [data-segment=day]")!);
-    await settle();
-    expect(asks.readings.filter(([, range]) => range === "day").map(([id]) => id).sort()).toEqual(["here", "p_spoo"]);
+describe("Usage: what it is", () => {
+  it("is accounts, tokens and money alone: no computer's load, and no reading of one asked for", async () => {
+    const { readings } = await mount();
+    expect($("[data-usage-section=computers]")).toBeNull();
+    expect(readings).toEqual([]);
+    expect(document.querySelector("[data-settings-page] header")?.textContent).not.toMatch(/busy/);
   });
 });
 

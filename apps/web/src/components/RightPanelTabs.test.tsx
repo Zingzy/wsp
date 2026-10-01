@@ -4,10 +4,9 @@
 // held with the one line that says why.
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { RightPanelTabs } from "./RightPanelTabs";
+import { RightPanelTabs, TILE_SURFACE } from "./RightPanelTabs";
 import type { RightPanelSurface } from "../rightPanelStore";
 import { PANE_KINDS, PANES, type RightPanelKind } from "../panes";
-import { CARD_SURFACE } from "../settings/rows";
 
 function draw(over: { surfaces?: RightPanelSurface[]; activeSurfaceId?: string | null; diffAvailable?: boolean; processesAvailable?: boolean; prAvailable?: boolean; onAdd?: (kind: RightPanelKind) => void } = {}) {
   return render(
@@ -87,7 +86,7 @@ describe("the right panel's launcher", () => {
     const browser = document.querySelector<HTMLElement>('[data-surface-launch="preview"]')!;
     for (const kind of PANE_KINDS) {
       const tile = document.querySelector<HTMLElement>(`[data-surface-launch="${kind}"]`)!;
-      for (const surface of CARD_SURFACE.split(" ")) expect(tile.classList).toContain(surface);
+      for (const surface of TILE_SURFACE.split(" ")) expect(tile.classList).toContain(surface);
     }
     expect(browser.parentElement!.className).toContain("gap-2");
     expect(browser.className).toContain("hover:bg-card-hover");

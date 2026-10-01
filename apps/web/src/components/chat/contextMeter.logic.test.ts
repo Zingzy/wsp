@@ -37,7 +37,7 @@ describe("the context meter's reading of a thread", () => {
     const at = (context: number) => contextPercent(contextSnapshot([turn("t1", { input: 1, output: 1, context, window: 200_000 })])!);
     expect([at(4_269), at(10_000), at(68_250), at(250_000)]).toEqual(["2.1%", "5%", "34%", "100%"]);
     expect(contextPercent(contextSnapshot([turn("t1", { input: 1, output: 1, context: 24_763 })])!)).toBeNull();
-    expect(contextTitle(contextSnapshot([turn("t1", { input: 1, output: 1, context: 4_269, window: 200_000 })])!, "Claude Code")).toBe("Context: 2.1% used, 4.3k of 200k tokens");
+    expect(contextTitle(contextSnapshot([turn("t1", { input: 1, output: 1, context: 4_269, window: 200_000 })])!, "Claude Code")).toBe("Context: 2.1% used, 4.27k of 200k tokens");
   });
 
   it("never fills past full", () => {

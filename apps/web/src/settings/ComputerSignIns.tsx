@@ -39,15 +39,13 @@ export function ComputerSignIns({ place, now }: { place: PlaceView; now: number 
             <Row
               id={`sign-in-${row.id}`}
               title={row.name}
-              description={row.signInRoad === "none" ? "" : AGENTS_LIST_WORDS.roads[row.signInRoad]}
-              mono
+              description={AGENTS_LIST_WORDS.roadSentences[row.signInRoad]}
               word={waitingFlow(flow) ? AGENTS_LIST_WORDS.waitingOnYou : signInWord(row)}
               wordClass="fact"
-              drops
               {...(offered ? { control: <ActButton act={held!} /> } : {})}
             />
             {flow === undefined ? null : (
-              <div className="px-5 pb-4">
+              <div className="px-4 pb-4">
                 <SignInFlowView view={flow} label={row.name} />
               </div>
             )}
