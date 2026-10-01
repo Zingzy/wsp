@@ -30,7 +30,6 @@ export function generalCards(ctx: SettingsContext): SettingsCardData[] {
     {
       id: "notifications",
       head: NOTIFY_WORDS.head,
-      lede: NOTIFY_WORDS.lede,
       items: [
         {
           kind: "row",
