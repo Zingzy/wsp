@@ -273,13 +273,13 @@ describe("Appearance", () => {
     const { api, sets } = settingsApi();
     mountSettings({ api, children: <ThemeRule /> });
     await settle();
-    expect(segments(SETTINGS_WORDS.theme)).toEqual(["System", "Light", "Dark"]);
-    expect(checked(SETTINGS_WORDS.theme)).toEqual(["true", "false", "false"]);
-    fireEvent.click(within(group(SETTINGS_WORDS.theme)).getByRole("radio", { name: "Light" }));
+    expect(segments(SETTINGS_WORDS.mode)).toEqual(["System", "Light", "Dark"]);
+    expect(checked(SETTINGS_WORDS.mode)).toEqual(["true", "false", "false"]);
+    fireEvent.click(within(group(SETTINGS_WORDS.mode)).getByRole("radio", { name: "Light" }));
     expect(useStore.getState().preferences.theme).toBe("light");
     expect(document.documentElement.classList.contains("dark")).toBe(false);
     expect(setTheme).toHaveBeenLastCalledWith("light");
-    fireEvent.click(within(group(SETTINGS_WORDS.theme)).getByRole("radio", { name: "Dark" }));
+    fireEvent.click(within(group(SETTINGS_WORDS.mode)).getByRole("radio", { name: "Dark" }));
     expect(document.documentElement.classList.contains("dark")).toBe(true);
     expect(setTheme).toHaveBeenLastCalledWith("dark");
     await settle();
@@ -290,7 +290,7 @@ describe("Appearance", () => {
     const { api, sets } = settingsApi();
     mountSettings({ api, children: <ThemeRule /> });
     await settle();
-    fireEvent.click(within(group(SETTINGS_WORDS.theme)).getByRole("radio", { name: "Light" }));
+    fireEvent.click(within(group(SETTINGS_WORDS.mode)).getByRole("radio", { name: "Light" }));
     expect(cellIds()).toEqual(sideIds("light"));
     for (const cell of cells()) expect(cell.querySelector("[data-theme]")?.getAttribute("data-theme")).toBe(cell.dataset["themeOption"]);
     expect(cells().map(c => c.textContent)).toEqual(THEMES.filter(t => t.side === "light").map(t => `${t.word}${t.line}`));
@@ -300,7 +300,7 @@ describe("Appearance", () => {
     expect(document.documentElement.dataset["theme"]).toBe("linen");
     expect(cellOf("linen").getAttribute("aria-checked")).toBe("true");
     expect(cellOf("paper").getAttribute("aria-checked")).toBe("false");
-    fireEvent.click(within(group(SETTINGS_WORDS.theme)).getByRole("radio", { name: "Dark" }));
+    fireEvent.click(within(group(SETTINGS_WORDS.mode)).getByRole("radio", { name: "Dark" }));
     expect(cellIds()).toEqual(sideIds("dark"));
     for (const cell of cells()) expect(cell.querySelector("[data-theme]")?.getAttribute("data-theme")).toBe(cell.dataset["themeOption"]);
     fireEvent.click(cellOf("denim"));
@@ -314,7 +314,7 @@ describe("Appearance", () => {
     const { api, sets } = settingsApi();
     mountSettings({ api, children: <ThemeRule /> });
     await settle();
-    fireEvent.click(within(group(SETTINGS_WORDS.theme)).getByRole("radio", { name: "Light" }));
+    fireEvent.click(within(group(SETTINGS_WORDS.mode)).getByRole("radio", { name: "Light" }));
     const light = sideIds("light");
     expect(cells().map(c => c.tabIndex)).toEqual(light.map(id => (id === "paper" ? 0 : -1)));
     act(() => cellOf("paper").focus());
@@ -340,7 +340,7 @@ describe("Appearance", () => {
     const { api, sets } = settingsApi();
     mountSettings({ api });
     await settle();
-    expect(checked(SETTINGS_WORDS.theme)).toEqual(["true", "false", "false"]);
+    expect(checked(SETTINGS_WORDS.mode)).toEqual(["true", "false", "false"]);
     expect(cellIds()).toEqual(sideIds("light"));
     act(() => {
       systemDark = true;
@@ -353,25 +353,25 @@ describe("Appearance", () => {
     expect(sets).toEqual([{ darkTheme: "pitch" }]);
   });
 
-  it("is the page's head over the theme picker, the Transparency switch, the type rows and the one Notifications switch, each section under a head and one sentence, with no line under the pictures", async () => {
+  it("is the page's head over the mode, the themes of the side drawn, the Transparency switch and the type rows, each section under a head and one sentence, with no line under the pictures", async () => {
     const { api } = settingsApi();
     mountSettings({ api });
     await settle();
     const head = document.querySelector<HTMLElement>("[data-settings-page] [data-k=settings-page-head]")!;
     expect(head.querySelector("h1")!.textContent).toBe(SETTINGS_WORDS.appearance);
     expect(head.querySelector("p")!.textContent).toBe(groupBlurbs("").appearance);
-    expect(rowTitles()).toEqual([TRANSPARENCY_WORDS.title, FONT_WORDS.app, FONT_WORDS.textSize, FONT_WORDS.code, FONT_WORDS.codeSize, NOTIFY_WORDS.sound]);
+    expect(rowTitles()).toEqual([TRANSPARENCY_WORDS.title, FONT_WORDS.app, FONT_WORDS.textSize, FONT_WORDS.code, FONT_WORDS.codeSize]);
     const sections = [...document.querySelectorAll<HTMLElement>("[data-settings-page] [data-settings-card]")];
     expect(sections.map(c => [c.querySelector("[data-settings-head]")?.textContent, c.querySelector("[data-settings-lede]")?.textContent])).toEqual([
-      [SETTINGS_WORDS.theme, THEME_SECTION_WORDS.lede],
+      [SETTINGS_WORDS.mode, THEME_SECTION_WORDS.modeLede],
+      [SETTINGS_WORDS.themesOf(THEME_WORDS.light), THEME_SECTION_WORDS.lede],
       [GLASS_WORDS.head, GLASS_WORDS.lede],
       [FONT_WORDS.head, FONT_WORDS.lede],
-      [NOTIFY_WORDS.head, NOTIFY_WORDS.lede],
     ]);
     expect(document.querySelectorAll("[data-settings-page] [data-settings-line]")).toHaveLength(0);
     expect(document.querySelector("[data-k=sidebar-width]")).toBeNull();
     expect(document.querySelector("[data-k=terminal-size-row]")).toBeNull();
-    expect(within(group(SETTINGS_WORDS.theme)).queryByText(/whatever this Mac/)).toBeNull();
+    expect(within(group(SETTINGS_WORDS.mode)).queryByText(/whatever this Mac/)).toBeNull();
   });
 
   it("Restore defaults is absent on the defaults, stands once any pick is off them, writes the one patch, and is absent on every other group", async () => {
@@ -379,7 +379,7 @@ describe("Appearance", () => {
     mountSettings({ api });
     await settle();
     expect(restore()).toBeNull();
-    fireEvent.click(within(group(SETTINGS_WORDS.theme)).getByRole("radio", { name: "Light" }));
+    fireEvent.click(within(group(SETTINGS_WORDS.mode)).getByRole("radio", { name: "Light" }));
     await waitFor(() => expect(restore()).not.toBeNull());
     fireEvent.click(document.querySelector("[data-k=settings-about]")!);
     expect(restore()).toBeNull();
@@ -388,7 +388,7 @@ describe("Appearance", () => {
     await waitFor(() => expect(restore()).toBeNull());
     expect(useStore.getState().preferences.theme).toBe("system");
     await settle();
-    expect(sets.at(-1)).toEqual({ theme: "system", lightTheme: "paper", darkTheme: "graphite", appFont: "", codeFont: "", textSize: null, codeSize: null, transparency: true, notifySound: true });
+    expect(sets.at(-1)).toEqual({ theme: "system", lightTheme: "paper", darkTheme: "graphite", appFont: "", codeFont: "", textSize: null, codeSize: null, transparency: true });
   });
 
   it("a theme picked for either side is off the defaults, and Restore defaults puts both sides back", async () => {
@@ -401,7 +401,7 @@ describe("Appearance", () => {
     await waitFor(() => expect(restore()).toBeNull());
     expect(useStore.getState().preferences.darkTheme).toBe("graphite");
     await settle();
-    expect(sets.at(-1)).toEqual({ theme: "system", lightTheme: "paper", darkTheme: "graphite", appFont: "", codeFont: "", textSize: null, codeSize: null, transparency: true, notifySound: true });
+    expect(sets.at(-1)).toEqual({ theme: "system", lightTheme: "paper", darkTheme: "graphite", appFont: "", codeFont: "", textSize: null, codeSize: null, transparency: true });
   });
 });
 
@@ -415,7 +415,7 @@ describe("Appearance's previews and new controls", () => {
     const { api, sets } = settingsApi();
     mountSettings({ api, children: <ThemeRule /> });
     await settle();
-    fireEvent.click(within(group(SETTINGS_WORDS.theme)).getByRole("radio", { name: "Dark" }));
+    fireEvent.click(within(group(SETTINGS_WORDS.mode)).getByRole("radio", { name: "Dark" }));
     expect(document.documentElement.dataset["theme"]).toBe("graphite");
     fireEvent.pointerEnter(cellOf("moss"));
     expect(document.documentElement.dataset["theme"]).toBe("moss");
@@ -462,7 +462,7 @@ describe("Appearance's previews and new controls", () => {
     const playNoticeSound = vi.fn();
     window.wsp = { playNoticeSound };
     const { api } = settingsApi();
-    mountSettings({ api });
+    mountSettings({ api, at: { kind: "group", group: "general" } });
     await settle();
     const play = screen.getByRole("button", { name: NOTIFY_WORDS.play });
     fireEvent.click(play);
@@ -471,7 +471,7 @@ describe("Appearance's previews and new controls", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: NOTIFY_WORDS.play }).hasAttribute("disabled")).toBe(true));
     cleanup();
     window.wsp = {};
-    mountSettings({ api: settingsApi().api });
+    mountSettings({ api: settingsApi().api, at: { kind: "group", group: "general" } });
     await settle();
     expect(screen.queryByRole("button", { name: NOTIFY_WORDS.play })).toBeNull();
   });

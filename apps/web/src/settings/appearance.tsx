@@ -1,28 +1,25 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Settings > Appearance: the side and each side's theme, drawn as the windows
-// they make; whether the glass shows what is behind the window; the app and
-// code faces and the sizes they are read at, under a sample drawn by the
-// conversation's own renderer; and whether a notification makes a sound, with a
-// play where the shell can. The terminal draws with the person's Ghostty font
-// and takes neither face nor size.
+// Settings > Appearance: the side, then the themes of the side drawn, each as
+// the window it makes; whether the glass shows what is behind the window; and
+// the app and code faces and the sizes they are read at, under a sample drawn
+// by the conversation's own renderer. The terminal draws with the person's
+// Ghostty font and takes neither face nor size.
 import { CODE_SIZES, DEFAULT_PREFERENCES, TEXT_SIZES, type Preferences, type PreferencesPatch } from "@wsp/protocol";
 import { Suspense, lazy } from "react";
-import { Button } from "../components/ui/button.js";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../components/ui/select.js";
 import { Switch } from "../components/ui/switch.js";
-import { desktopBridge } from "../lib/desktopShell.js";
 import { cn } from "../lib/utils.js";
 import { FontPicker } from "./FontPicker.js";
-import { FONT_WORDS, GLASS_WORDS, NOTIFY_WORDS, SETTINGS_WORDS, THEME_SECTION_WORDS, TRANSPARENCY_WORDS } from "./format.js";
+import { FONT_WORDS, GLASS_WORDS, SETTINGS_WORDS, THEME_SECTION_WORDS, THEME_WORDS, TRANSPARENCY_WORDS } from "./format.js";
 import { CARD_SURFACE, type SettingsCardData } from "./rows.js";
 import type { SettingsContext } from "./settingsContext.js";
-import { useAppDark } from "./theme.js";
-import { ThemePicker } from "./ThemePicker.js";
+import { SYSTEM_DARK_QUERY, useAppDark } from "./theme.js";
+import { ModePicker, shownSide, ThemePicker } from "./ThemePicker.js";
 
 const ChatMarkdown = lazy(() => import("../components/ChatMarkdown.js"));
 
-/** The one patch Restore defaults writes: the side, each side's theme, Transparency, both faces, both sizes and the sound
- * back to the record's defaults. */
+/** The one patch Restore defaults writes: the side, each side's theme, Transparency, both faces and both sizes back to
+ * the record's defaults. */
 export const APPEARANCE_DEFAULTS: PreferencesPatch = {
   theme: DEFAULT_PREFERENCES.theme,
   lightTheme: DEFAULT_PREFERENCES.lightTheme,
@@ -32,7 +29,6 @@ export const APPEARANCE_DEFAULTS: PreferencesPatch = {
   textSize: null,
   codeSize: null,
   transparency: DEFAULT_PREFERENCES.transparency,
-  notifySound: DEFAULT_PREFERENCES.notifySound,
 };
 
 /** Whether any of those is off its default, which is when Restore defaults stands. */
@@ -44,8 +40,7 @@ export const appearanceOffDefaults = (p: Preferences): boolean =>
   p.codeFont !== DEFAULT_PREFERENCES.codeFont ||
   p.textSize !== undefined ||
   p.codeSize !== undefined ||
-  p.transparency !== DEFAULT_PREFERENCES.transparency ||
-  p.notifySound !== DEFAULT_PREFERENCES.notifySound;
+  p.transparency !== DEFAULT_PREFERENCES.transparency;
 
 /** A size row's control: Default, which leaves every surface its own size, then each size the table offers. */
 function SizePicker({ id, label, sizes, value, onChange }: { id: string; label: string; sizes: readonly number[]; value: number | undefined; onChange: (size: number | null) => void }) {
@@ -81,11 +76,19 @@ function TypeSample() {
 
 export function appearanceCards(ctx: SettingsContext): SettingsCardData[] {
   const { preferences, setPreferences } = ctx;
-  const play = desktopBridge()?.playNoticeSound;
+  const themes = SETTINGS_WORDS.themesOf(THEME_WORDS[shownSide(preferences, window.matchMedia(SYSTEM_DARK_QUERY).matches)]);
   return [
     {
+      id: "mode",
+      head: SETTINGS_WORDS.mode,
+      lede: THEME_SECTION_WORDS.modeLede,
+      items: [],
+      search: [{ kind: "row", id: "mode", title: SETTINGS_WORDS.mode, description: THEME_SECTION_WORDS.modeLede }],
+      body: <ModePicker picks={preferences} onChange={setPreferences} />,
+    },
+    {
       id: "theme",
-      head: SETTINGS_WORDS.theme,
+      head: themes,
       lede: THEME_SECTION_WORDS.lede,
       items: [],
       search: [{ kind: "row", id: "theme", title: SETTINGS_WORDS.theme, description: THEME_SECTION_WORDS.lede }],
@@ -116,29 +119,6 @@ export function appearanceCards(ctx: SettingsContext): SettingsCardData[] {
         { kind: "row", id: "code-font", title: FONT_WORDS.code, description: FONT_WORDS.codeDescription, control: <FontPicker id="code-font" label={FONT_WORDS.code} value={preferences.codeFont} onChange={codeFont => setPreferences({ codeFont })} /> },
         { kind: "row", id: "code-size", title: FONT_WORDS.codeSize, description: FONT_WORDS.codeSizeDescription, control: <SizePicker id="code-size" label={FONT_WORDS.codeSize} sizes={CODE_SIZES} value={preferences.codeSize} onChange={codeSize => setPreferences({ codeSize })} /> },
       ],
-    },
-    {
-      id: "notifications",
-      head: NOTIFY_WORDS.head,
-      lede: NOTIFY_WORDS.lede,
-      items: [
-        {
-          kind: "row",
-          id: "notify-sound",
-          title: NOTIFY_WORDS.sound,
-          description: NOTIFY_WORDS.soundDescription,
-          control: <Switch data-k="notify-sound" aria-label={NOTIFY_WORDS.sound} checked={preferences.notifySound} onCheckedChange={notifySound => setPreferences({ notifySound })} />,
-        },
-      ],
-      ...(play === undefined
-        ? {}
-        : {
-            under: (
-              <Button data-k="notify-play" variant="outline" disabled={!preferences.notifySound} onClick={() => play()}>
-                {NOTIFY_WORDS.play}
-              </Button>
-            ),
-          }),
     },
   ];
 }

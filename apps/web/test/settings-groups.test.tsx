@@ -284,7 +284,7 @@ describe("General", () => {
     const { api, sets } = settingsApi({ editorList: async () => editors } as Partial<Api>);
     mountSettings({ api, at: { kind: "group", group: "general" } });
     await settle();
-    expect(rowTitles()).toEqual([GENERAL_WORDS.editor, AWAKE_WORDS.keepAwake("")]);
+    expect(rowTitles()).toEqual([GENERAL_WORDS.editor, AWAKE_WORDS.keepAwake(""), NOTIFY_WORDS.sound]);
     expect(descriptionOf("editor")).toBe(GENERAL_WORDS.editorDescription);
     const select = document.querySelector<HTMLElement>("[data-settings-page] [data-k=editor]")!;
     expect(select.textContent).toBe("Cursor");
@@ -302,20 +302,10 @@ describe("General", () => {
     cleanup();
   });
 
-  it("says no editor is installed, with nothing to pick, where the host found none", async () => {
-    mountSettings({ api: settingsApi({ editorList: async () => [] } as Partial<Api>).api, at: { kind: "group", group: "general" } });
-    await settle();
-    expect(descriptionOf("editor")).toBe(GENERAL_WORDS.noEditor);
-    expect(document.querySelector("[data-settings-page] [data-k=editor]")).toBeNull();
-  });
-});
-
-describe("Appearance", () => {
-  it("offers the sound of a finished turn and a prompt as one switch under Notifications, on by default, that writes the record and restores to on", async () => {
+  it("offers the sound of a finished turn and a prompt as one switch under Notifications, on by default, that writes the record", async () => {
     const { api, sets } = settingsApi();
-    mountSettings({ api, at: { kind: "group", group: "appearance" } });
+    mountSettings({ api, at: { kind: "group", group: "general" } });
     await settle();
-    expect(rowTitles()).toEqual([TRANSPARENCY_WORDS.title, FONT_WORDS.app, FONT_WORDS.textSize, FONT_WORDS.code, FONT_WORDS.codeSize, NOTIFY_WORDS.sound]);
     expect(descriptionOf("notify-sound")).toBe(NOTIFY_WORDS.soundDescription);
     const toggle = (): HTMLElement => document.querySelector<HTMLElement>("[data-k=notify-sound]")!;
     expect(toggle().getAttribute("aria-checked")).toBe("true");
@@ -323,10 +313,13 @@ describe("Appearance", () => {
     await settle();
     expect(sets).toEqual([{ notifySound: false }]);
     expect(useStore.getState().preferences.notifySound).toBe(false);
-    fireEvent.click(document.querySelector<HTMLElement>("[data-k=restore-defaults]")!);
+  });
+
+  it("says no editor is installed, with nothing to pick, where the host found none", async () => {
+    mountSettings({ api: settingsApi({ editorList: async () => [] } as Partial<Api>).api, at: { kind: "group", group: "general" } });
     await settle();
-    expect(sets.at(-1)).toMatchObject({ notifySound: true });
-    expect(toggle().getAttribute("aria-checked")).toBe("true");
+    expect(descriptionOf("editor")).toBe(GENERAL_WORDS.noEditor);
+    expect(document.querySelector("[data-settings-page] [data-k=editor]")).toBeNull();
   });
 });
 
