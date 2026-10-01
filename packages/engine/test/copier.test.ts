@@ -104,6 +104,14 @@ describe("the copy verb as a child of this host", () => {
   });
 });
 
+describe("the room a copy is held to", () => {
+  it("is the kernel's reading on the real road, and on the stand-in only what a test hands it", async () => {
+    if (process.platform === "linux") expect((await verbCopier("/nowhere/wsp-daemon").room!())!.totalMb).toBeGreaterThan(0);
+    expect(fakeCopier().room).toBeUndefined();
+    expect(await fakeCopier(undefined, async () => ({ freeMb: 900, totalMb: 16_384 })).room!()).toEqual({ freeMb: 900, totalMb: 16_384 });
+  });
+});
+
 describe("the stand-in every road above the daemon is driven through", () => {
   it("records what it was asked for and answers a report of the road it was told to take", async () => {
     const copier = fakeCopier();

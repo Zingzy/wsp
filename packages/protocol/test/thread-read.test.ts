@@ -11,6 +11,8 @@ import {
   notifyLine,
   threadReplyRows,
   threadMarkdown,
+  threadSeed,
+  THREAD_SEED_CHARS,
   threadMessages,
   threadReadText,
   threadResult,
@@ -423,5 +425,20 @@ describe("the prompt a thread is stopped on", () => {
     const elsewhere = { ...ask("a1", "ls"), threadId: "t2" } as SessionEvent;
     expect(openAsk([elsewhere], "t1")).toBeUndefined();
     expect(openAsk([elsewhere], "t2")).toMatchObject({ askId: "a1" });
+  });
+});
+
+describe("the thread a new session is handed", () => {
+  it("is the thread's Markdown, its oldest rows left out past the cap and counted first", () => {
+    const rows = [
+      { who: "person" as const, text: "fix the login page" },
+      { who: "agent" as const, text: "done, pushed to fix/login" },
+    ];
+    expect(threadSeed(rows)).toBe(threadMarkdown(rows));
+    const long = { who: "agent" as const, text: "x".repeat(THREAD_SEED_CHARS - 10) };
+    const seed = threadSeed([...rows, long]);
+    expect(seed.startsWith("*2 earlier messages left out*\n\n")).toBe(true);
+    expect(seed).not.toContain("fix the login page");
+    expect(seed).toContain(long.text);
   });
 });

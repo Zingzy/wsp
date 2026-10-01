@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { diskSyncFailedLine } from "@wsp/protocol";
-import { DISK_SYNC_CMD, DiskSyncError, diskUnsettled, syncDisk } from "../src/disk-sync.js";
+import { DISK_SYNC_CMD, DISK_USE_CMD, DiskSyncError, diskUnsettled, diskUsePct, syncDisk } from "../src/disk-sync.js";
 import { INLINE_EXEC_MS, machineAnswer } from "../src/exec-detached.js";
 import type { ExecResult, Machine } from "../src/machine.js";
 
@@ -68,5 +68,20 @@ describe("syncDisk", () => {
     const machine = { id: "here", exec: async () => printed(stdout) } as unknown as Machine;
     const read = await syncDisk(machine);
     expect(read).toEqual({ dirtyKb: expect.any(Number), writebackKb: expect.any(Number) });
+  });
+});
+
+describe("diskUsePct", () => {
+  it("is the share used, unrounded, off df's used and free counts, and nothing for a reading that is not two counts", () => {
+    expect(diskUsePct("896000 104000\n")).toBeCloseTo(89.6, 10);
+    expect(diskUsePct("900000 100000\n")).toBe(90);
+    expect(diskUsePct("901000 99000\n")).toBeCloseTo(90.1, 10);
+    for (const odd of ["", "0 0", "12", "a b"]) expect(diskUsePct(odd), odd).toBeUndefined();
+  });
+
+  it("reads this computer's own root the way the guest's is read", () => {
+    const pct = diskUsePct(execFileSync("sh", ["-c", DISK_USE_CMD], { encoding: "utf8" }));
+    expect(pct).toBeGreaterThan(0);
+    expect(pct).toBeLessThan(100);
   });
 });

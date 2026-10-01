@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { landBytes } from "../src/land-bytes.js";
-import { LOCAL_MACHINE_ID, LocalBackend, localShape } from "../src/local-backend.js";
+import { LOCAL_MACHINE_ID, LocalBackend, localShape, memoryHere, memoryOfMeminfo, memoryOfPressure } from "../src/local-backend.js";
 
 describe("local backend", () => {
   let root: string;
@@ -129,5 +129,17 @@ describe("local backend", () => {
     await landBytes(machine, path, new Uint8Array([0x25, 0x50, 0x44, 0x46]));
     expect(readFileSync(path, "latin1")).toBe("%PDF");
     expect(statSync(path).mode & 0o777).toBe(0o600);
+  });
+});
+
+describe("this computer's memory, as the room check reads it", () => {
+  it("is MemAvailable over MemTotal on Linux, and the kernel's free percentage over the memory on macOS", async () => {
+    expect(memoryOfMeminfo("MemTotal:       16303412 kB\nMemFree:          401200 kB\nMemAvailable:    9216000 kB\n")).toEqual({ freeMb: 9_000, totalMb: 15_921 });
+    expect(memoryOfMeminfo("MemTotal: 10 kB\n")).toBeUndefined();
+    expect(memoryOfPressure("54\n", 16 * 1024 ** 3)).toEqual({ freeMb: 8_847, totalMb: 16_384 });
+    for (const odd of ["", "x", "101", "-1", "5.5"]) expect(memoryOfPressure(odd, 16 * 1024 ** 3), odd).toBeUndefined();
+    // A kernel that keeps neither reading holds a copy to nothing.
+    expect(await memoryHere("win32")).toBeUndefined();
+    if (process.platform === "linux") expect((await memoryHere())!.totalMb).toBeGreaterThan(0);
   });
 });

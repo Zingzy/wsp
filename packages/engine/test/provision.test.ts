@@ -19,7 +19,6 @@ import {
   provisionLandedLine,
   provisionLines,
   provisionListReadLine,
-  provisionSkippedLine,
   provisionPackedLine,
   provisionServersLine,
   provisionShippedLine,
@@ -508,20 +507,23 @@ describe("the person's own files and their servers, on the same run", () => {
     ]);
   });
 
-  it("says each thing the pack left out of the copy as a line of the job, where the person reads it", async () => {
+  it("puts each thing the pack left out of the copy in the job's rows with its reason, where the app and the log read it", async () => {
     const tar = tarOf([{ path: ".claude-cfg/skills/why/SKILL.md", mode: 0o644, content: "why\n" }]);
     const plan = withFilesAndServers([]);
-    const note = "gem left out of the copy: GEMINI_API_KEY belongs to the Gemini CLI key, so set it there or give the variable another name";
+    const gem = "gem left out of the copy: GEMINI_API_KEY belongs to the Gemini CLI key, so set it there or give the variable another name";
+    const pem = "pem left out of the copy: sets KEY to a value on more than one line, which cannot travel by name";
+    const skipped = [gem, pem].map(note => ({ id: "agents/claude", path: "~/.claude.json", note }));
     const { machine } = boxMachine();
     const said: string[] = [];
-    await provisionBox(
+    const rows = await provisionBox(
       machine,
-      { ...plan, files: { lands: plan.files!.lands, pack: async () => ({ tar, bytes: tar.length, unpacked: 4, files: 1, skipped: [{ id: "agents/claude", path: "~/.claude.json", note }], cut: [], silenced: [], macPaths: [] }) } },
+      { ...plan, files: { lands: plan.files!.lands, pack: async () => ({ tar, bytes: tar.length, unpacked: 4, files: 1, skipped, cut: [], silenced: [], macPaths: [] }) } },
       detail => said.push(detail),
       ON,
     );
-    expect(said).toContain(provisionSkippedLine("~/.claude.json", note));
-    expect(provisionSkippedLine("~/.claude.json", note)).toBe(`~/.claude.json: ${note}`);
+    const left = rows.filter(r => r.id.startsWith("left-out/"));
+    expect(left).toEqual([gem, pem].map((note, i) => ({ id: `left-out/${i}`, label: "~/.claude.json", outcome: "skipped", kind: "file", note })));
+    expect(said).toContain(`~/.claude.json: skipped (${gem})`);
   });
 
   it("says every path the archive carried failed, with the reason, when the files could not be packed or landed, and goes on with the rest", async () => {

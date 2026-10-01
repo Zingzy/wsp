@@ -93,12 +93,8 @@ fn workspace_name(record: &Workspace) -> String {
 /// to name, and says so rather than naming nothing.
 pub fn box_full_refusal(need_mb: u64, free_mb: u64, quietest: Option<(String, u64)>) -> String {
     match quietest {
-        Some((name, quiet_min)) => format!(
-            "this computer has {free_mb} MB free and a workspace needs {need_mb} MB; stop {name}, quiet for {quiet_min} min, to make room"
-        ),
-        None => format!(
-            "this computer has {free_mb} MB free and a workspace needs {need_mb} MB, and no workspace of yours is awake to stop: what is holding it is the computer's own work"
-        ),
+        Some((name, quiet_min)) => words::box_full(need_mb, free_mb, &name, quiet_min),
+        None => words::box_full_own_work(need_mb, free_mb),
     }
 }
 

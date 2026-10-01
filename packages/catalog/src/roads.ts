@@ -208,15 +208,18 @@ export interface NodeRelease {
  * agents and their version checks run on it. */
 export const NODE_PATH_LINE = 'export PATH="/usr/local/bin:$PATH"';
 
-/** Installs the release into /usr/local when the guest's Node major is under
- * `floor`, and reports what it had and what it did on stdout. */
+/** Installs the release into /usr/local unless the guest's Node major is
+ * between `floor` and the release's own, and reports what it had and what it
+ * did on stdout. A newer major is replaced too: the step names the release's
+ * version, and Boat's base puts nvm's Node 24 first on PATH. */
 export function nodeInstallScript(floor: number, release: NodeRelease): string {
   const v = release.version;
+  const major = Number(v.split(".")[0]);
   return [
     "node_have=\"$(node --version 2>/dev/null || echo v0)\"",
     "node_major=\"$(printf '%s' \"$node_have\" | sed 's/^v//; s/\\..*//')\"",
     'echo "NODE_HAVE $node_have"',
-    `if [ "\${node_major:-0}" -ge ${floor} ]; then echo "NODE_KEPT $node_have"; exit 0; fi`,
+    `if [ "\${node_major:-0}" -ge ${floor} ] && [ "\${node_major:-0}" -le ${major} ]; then echo "NODE_KEPT $node_have"; exit 0; fi`,
     'arch="$(uname -m)"',
     'case "$arch" in',
     `  x86_64) pkg=node-v${v}-linux-x64.tar.gz sha=${release.sha256.x86_64} ;;`,

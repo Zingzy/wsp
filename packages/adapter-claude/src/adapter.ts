@@ -3,7 +3,7 @@
 // t3code ClaudeAdapter.ts (MIT, see NOTICE); event shapes are the ones
 // recorded in solari-poc/RESULTS.md.
 
-import { ASIDE_WALL_MS, INTERRUPT_GRACE_MS, PERMISSION_ALLOW, PERMISSION_DENY, RUN_EXIT_MS, asideWallLine, backgroundTasksLine, endAfterResult, endRun, fmtDuration, harnessExitLine, refusedTurn, taskFinishedLine, titlePrompt } from "@wsp/protocol";
+import { ASIDE_WALL_MS, INTERRUPT_GRACE_MS, LOST_SESSION_NOTE, PERMISSION_ALLOW, PERMISSION_DENY, RUN_EXIT_MS, asideWallLine, backgroundTasksLine, endAfterResult, endRun, fmtDuration, harnessExitLine, lostSessionPrompt, refusedTurn, taskFinishedLine, titlePrompt } from "@wsp/protocol";
 import type { AdapterAttachOptions, AdapterEvent, AsideAnswer, AsideQuestion, ExecStream, ExecStreamFactory, HarnessCatalogProbe, McpServerSpec, PermissionAsk, PermissionOutcome, ScreenCommand, SessionAsker, SessionHarness, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnRefusal, TurnResult, TurnStatus, CommitDrafter, PlanStep, TurnTokens, HarnessLimit, LimitKind, LimitStatus, LimitWindow } from "@wsp/protocol";
 import { SKIP_PROMPTS_MODE, controlAllowLine, controlAnswerLine, controlErrorLine, controlLine, modeOptionOn, setModeLine } from "./permissions.js";
 import { CLAUDE_SCREEN_COMMANDS, catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
@@ -33,6 +33,9 @@ export interface StartOptions {
   images?: readonly TurnImage[];
   /** MCP servers this turn gets besides the config dir's own, by the name each takes in a config. */
   mcpServers?: Readonly<Record<string, McpServerSpec>>;
+  /** The thread so far as text, asked for only where the CLI holds no session under `resume`: the turn then runs in a
+   * new session handed it ahead of the prompt. Absent, that turn fails with the CLI's own sentence. */
+  seed?: () => Promise<string>;
   onEvent: (event: AdapterEvent) => void;
 }
 
@@ -341,6 +344,9 @@ function apiErrorCause(event: Record<string, unknown>): TurnRefusal | null | und
   if (str(event.type) !== "assistant" || event.is_api_error_message !== true) return undefined;
   return REFUSAL_CAUSES[str(event.error) ?? ""] ?? null;
 }
+
+/** The CLI's sentence for a resume of a session id its store does not hold, before the id (measured on 2.1.280). */
+const NO_CONVERSATION = "No conversation found with session ID:";
 
 /** A success with no text and no token counted: the CLI refused the turn (a resume of a transcript a kill left
  * half-written) and said why on stderr only. */
@@ -1007,7 +1013,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     return session;
   };
 
-  const start = (options: StartOptions): ClaudeSession => {
+  const launch = (options: StartOptions): ClaudeSession => {
     const localId = options.resume ?? newSessionId();
     const command = buildCommand({
       ...(options.resume === undefined ? { sessionId: localId } : { resume: options.resume }),
@@ -1024,6 +1030,61 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     const launch = options.resume === undefined ? command : `${savedSpendCommand({ configDir: deps.configDir, sessionId: options.resume })}${command}`;
     const stream = deps.exec(launch, { env: { ...env }, input: [userMessageLine(options.prompt, localId, options.images)] });
     return follow({ stream, localId, announced: false, fresh: options.resume === undefined, command: launch, onEvent: options.onEvent });
+  };
+
+  /** A launch, and where it resumes a session the CLI's store does not hold and a seed is at hand, a second launch in a
+   * new session that is handed the thread so far: the failed resume is no turn of the thread's, so its end is held
+   * back, and the new session's note says what happened. The session answered is the one running at the moment. */
+  const start = (options: StartOptions): ClaudeSession => {
+    const { resume, seed } = options;
+    if (resume === undefined || seed === undefined) return launch(options);
+    let lost = false;
+    const first = launch({
+      ...options,
+      onEvent: event => {
+        if (event.type === "turn.done" && event.result.error === `${NO_CONVERSATION} ${resume}`) lost = true;
+        else if (!(lost && event.type === "session.end")) options.onEvent(event);
+      },
+    });
+    let current = first;
+    const finished = first.finished.then(async result => {
+      if (!lost) return result;
+      const { resume: _gone, resumeAt: _cut, seed: _seed, ...fresh } = options;
+      let noted = false;
+      current = launch({
+        ...fresh,
+        prompt: lostSessionPrompt(await seed(), options.prompt),
+        onEvent: event => {
+          options.onEvent(event);
+          if (event.type !== "session.start" || noted) return;
+          noted = true;
+          options.onEvent({ type: "turn.delta", sessionId: event.sessionId, kind: "note", text: LOST_SESSION_NOTE });
+        },
+      });
+      return current.finished;
+    });
+    const session: ClaudeSession = {
+      localId: first.localId,
+      get claudeSessionId() {
+        return current.claudeSessionId;
+      },
+      get command() {
+        return current.command;
+      },
+      get run() {
+        return current.run;
+      },
+      get pid() {
+        return current.pid;
+      },
+      finished,
+      interrupt: () => current.interrupt(),
+      steer: prompt => current.steer(prompt),
+      answer: (askId, answer) => current.answer(askId, answer),
+      setAccess: mode => current.setAccess(mode),
+    };
+    sessions.set(first.localId, session);
+    return session;
   };
 
   /** Removes the fork's file on the same road, once the side question's own run has ended; a removal that fails leaves

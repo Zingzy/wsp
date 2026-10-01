@@ -171,6 +171,7 @@ import {
   portScopeRefusal,
   probePath,
   unknownOpLine,
+  boxFullLine,
   workScoreLine,
 } from "../src/index.js";
 
@@ -298,6 +299,8 @@ const words = (): Record<string, string> => ({
   hostRefused: hostRefusedLine("{url}", "{refusal}"),
   linkOutOfOrder: linkOutOfOrderLine("{url}"),
   linkHostUnsealed: linkHostUnsealedLine("{url}"),
+  boxFull: boxFullLine("{need}", "{free}", { name: "{name}", quietMin: "{quiet}" }),
+  boxFullOwnWork: boxFullLine("{need}", "{free}"),
 });
 
 /** The home the owned-paths fixture is rendered for: one letter, so the list reads as the shape of the paths

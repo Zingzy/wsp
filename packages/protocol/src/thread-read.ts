@@ -31,6 +31,19 @@ const inThread = (event: { threadId?: string }, threadId: string): boolean => ev
 /** A turn that ended with no result and no reason from the runtime. */
 const NO_RESULT_LINE = "turn ended without a result";
 
+/** The most of a thread a new session is handed where the one it resumed is gone, in characters, its newest rows kept:
+ * a long thread's tool rows alone run past what one message should carry. */
+export const THREAD_SEED_CHARS = 100_000;
+
+/** The thread as a new session is handed it, the Markdown a person would paste, its newest rows kept within the cap
+ * and the count of the rows left out said first. */
+export function threadSeed(messages: readonly ThreadMessage[]): string {
+  let at = messages.length;
+  for (let size = 0; at > 0 && size + messages[at - 1]!.text.length <= THREAD_SEED_CHARS; at--) size += messages[at - 1]!.text.length;
+  const kept = threadMarkdown(messages.slice(at));
+  return at === 0 ? kept : `*${at} earlier ${at === 1 ? "message" : "messages"} left out*\n\n${kept}`;
+}
+
 const message = (who: ThreadVoice, at: number | undefined, text: string): ThreadMessage => ({ who, ...(at !== undefined ? { at } : {}), text });
 
 /** The thread's messages, oldest first: the prompt of every turn and every steer, the agent's text as it arrived,
