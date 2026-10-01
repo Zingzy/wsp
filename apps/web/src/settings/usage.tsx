@@ -17,7 +17,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.
 import { ComputerGlyph } from "./ComputerGlyph.js";
 import { ABOUT_WORDS, USAGE_PAGE_WORDS as W } from "./format.js";
 import { GlyphFrame } from "./grid.js";
-import { CARD_SURFACE, Card, Row, type SettingsCardData } from "./rows.js";
+import { CARD_SURFACE, Card, type SettingsCardData } from "./rows.js";
 import type { SettingsContext } from "./settingsContext.js";
 import { useSettingsStore, type UsageTab } from "./settingsStore.js";
 import { CHART_HEIGHT, UsageChart, type ChartLine } from "./usageChart.js";
@@ -190,17 +190,9 @@ function Pool({ agent, accounts, now }: { agent: string; accounts: readonly Acco
   const readAt = Math.min(...accounts.map(a => a.readAt ?? now));
   return (
     <Card id={`usage-pool-${agent}`} head={agentName(agent)}>
-      <div data-usage-pool={agent} className="flex flex-col px-5 pt-5 pb-0">
+      <div data-usage-pool={agent} className={cn("flex flex-col pt-5", CARD_PAD)}>
         <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
-          <span className="flex min-w-0 items-center gap-3">
-            <GlyphFrame>
-              <HarnessMark harness={agent} label={agentName(agent)} className="size-4" />
-            </GlyphFrame>
-            <span className="flex min-w-0 flex-col">
-              <span className="truncate text-[15px] leading-6 font-medium text-foreground">{title}</span>
-              <span className="truncate text-[13px] text-muted-foreground">{listWords(computers)}</span>
-            </span>
-          </span>
+          <Identity mark={agentGlyph(agent)} title={title} line={listWords(computers)} />
           <span className="flex flex-wrap items-center gap-x-5 text-[12.5px] text-muted-foreground">
             {burn > 0 ? <span data-k="burn">{W.burn(fmtTokens(burn), threads)}</span> : null}
             <span data-k="read-at">{W.checked(ABOUT_WORDS.readWhen(Math.max(0, now - readAt)))}</span>
@@ -225,18 +217,16 @@ function AccountLine({ row }: { row: AccountRow }) {
   // A computer's own login names its computer in its title already, so the line under it would only say it again.
   const own = row.computers.length === 1 && row.label === accountWords({ agentName: agentName(row.agent), ownOn: row.computers[0] });
   const where = own ? "" : listWords(row.computers);
-  const slot =
-    state === "" ? undefined : (
-      <span data-k="state" className={cn("text-[13px] leading-5", row.status === "reached" ? "text-warning-foreground" : "text-muted-foreground")}>
-        {state}
-      </span>
-    );
-  const lead = (
-    <GlyphFrame>
-      <HarnessMark harness={row.agent} label={agentName(row.agent)} className="size-4" />
-    </GlyphFrame>
+  return (
+    <div data-usage-account={row.key} className={cn("flex flex-wrap items-center justify-between gap-x-6 gap-y-2 py-5", CARD_PAD)}>
+      <Identity mark={agentGlyph(row.agent)} title={row.label} line={where} />
+      {state === "" ? null : (
+        <span data-k="state" className={cn("text-[13px] leading-5", row.status === "reached" ? "text-warning-foreground" : "text-muted-foreground")}>
+          {state}
+        </span>
+      )}
+    </div>
   );
-  return <Row id={`account-${row.key}`} title={row.label} lead={lead} description={where} {...(slot === undefined ? {} : { control: slot })} attrs={{ "data-usage-account": row.key }} />;
 }
 
 function Limits({ accounts, now }: { accounts: ReadonlyArray<AccountRow> | null; now: number }) {
@@ -251,7 +241,7 @@ function Limits({ accounts, now }: { accounts: ReadonlyArray<AccountRow> | null;
   if (accounts.length === 0)
     return (
       <Card id="usage-limits">
-        <p data-k="no-accounts" className={cn(QUIET, "px-4 py-3")}>
+        <p data-k="no-accounts" className={cn(QUIET, CARD_PAD, "py-5")}>
           {W.noAccounts}
         </p>
       </Card>
@@ -269,7 +259,7 @@ function Limits({ accounts, now }: { accounts: ReadonlyArray<AccountRow> | null;
             ? {}
             : {
                 under: (
-                  <p data-k="no-limit" className={cn(QUIET, "px-4")}>
+                  <p data-k="no-limit" className={cn(QUIET, CARD_PAD)}>
                     {W.noLimit(names)}
                   </p>
                 ),
@@ -283,6 +273,32 @@ function Limits({ accounts, now }: { accounts: ReadonlyArray<AccountRow> | null;
     </div>
   );
 }
+
+/** The inset every card on this page keeps its content at. */
+const CARD_PAD = "px-5";
+
+/** The page's one way of naming a thing: its mark in a frame, its title, and under it a line or a figure. Pools,
+ * accounts, split rows and threads all name themselves this way, so they read at one size. */
+function Identity({ mark, title, line, under }: { mark: ReactNode; title: string; line?: string; under?: ReactNode }) {
+  return (
+    <span className="flex min-w-0 flex-1 items-center gap-3">
+      {mark === null ? null : <GlyphFrame>{mark}</GlyphFrame>}
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span data-settings-title className="truncate text-[15px] leading-6 font-medium text-foreground">
+          {title}
+        </span>
+        {line === undefined || line === "" ? null : (
+          <span data-settings-description className="truncate text-[13px] leading-5 text-muted-foreground">
+            {line}
+          </span>
+        )}
+        {under}
+      </span>
+    </span>
+  );
+}
+
+const agentGlyph = (agent: string): ReactNode => <HarnessMark harness={agent} label={agentName(agent)} className="size-4" />;
 
 const RANGES = USAGE_RANGES.map(value => ({ value, label: W.ranges[value] }));
 const SPLITS = USAGE_SPLITS.map(value => ({ value, label: W.splits[value] }));
@@ -330,29 +346,15 @@ function inkOf(split: UsageSplit, key: string, rank: number, projectHue?: string
 }
 
 /** The mark a split row leads with: the agent's, the computer's or the project's glyph, in its frame. */
-function SplitMark({ split, rowKey, ctx }: { split: UsageSplit; rowKey: string; ctx: SettingsContext }) {
-  const agent = agentOf(split, rowKey);
-  if (agent !== undefined && agentMark(agent) !== undefined)
-    return (
-      <GlyphFrame>
-        <HarnessMark harness={agent} label={agentName(agent)} className="size-4" />
-      </GlyphFrame>
-    );
+/** The glyph a split row leads with: the agent's, the computer's or the project's; null where the value has none. */
+function splitGlyph(split: UsageSplit, key: string, ctx: SettingsContext): ReactNode {
+  const agent = agentOf(split, key);
+  if (agent !== undefined && agentMark(agent) !== undefined) return agentGlyph(agent);
   if (split === "computer") {
-    const place = ctx.places.find(p => p.id === rowKey || p.name === rowKey);
-    if (place !== undefined)
-      return (
-        <GlyphFrame>
-          <ComputerGlyph place={place} className="size-4 text-foreground/80" />
-        </GlyphFrame>
-      );
+    const place = ctx.places.find(p => p.id === key || p.name === key);
+    if (place !== undefined) return <ComputerGlyph place={place} className="size-4 text-foreground/80" />;
   }
-  if (split === "project" && ctx.projects.some(p => p.id === rowKey))
-    return (
-      <GlyphFrame>
-        <ProjectGlyph projectId={rowKey} />
-      </GlyphFrame>
-    );
+  if (split === "project" && ctx.projects.some(p => p.id === key)) return <ProjectGlyph projectId={key} />;
   return null;
 }
 
@@ -433,17 +435,23 @@ function SplitRow({ row, split, share, turns, ink, sub = false, ctx }: { row: Us
   const estimate = estimateOf(row);
   return (
     <div data-used-row={row.key} {...(sub ? { "data-sub": "" } : {})} className={cn(turns ? SPLIT_COLUMNS : SPLIT_COLUMNS_NO_TURNS, "items-center", sub ? "py-2.5" : "py-4")}>
-      <span className={cn("flex min-w-0 items-center gap-3", sub && "ps-11")}>
-        {sub ? null : <SplitMark split={split} rowKey={row.key} ctx={ctx} />}
-        <span className="flex min-w-0 flex-1 flex-col gap-1.5">
-          <span data-k="label" className={cn("min-w-0 truncate", sub ? "text-sm leading-5 text-foreground/80" : "text-[15px] leading-6 text-foreground")}>
+      {sub ? (
+        <span className="flex min-w-0 flex-col gap-1.5 ps-11">
+          <span data-k="label" className="min-w-0 truncate text-sm leading-5 text-foreground/80">
             {row.label}
           </span>
-          <span aria-hidden className="block h-1 max-w-64 overflow-hidden rounded-full bg-foreground/[0.08]">
-            <span className={cn("block h-full rounded-full bg-current", ink === undefined ? "text-foreground/45" : ink.className)} style={{ ...ink?.style, width: `${Math.max(1, share * 100)}%` }} />
-          </span>
         </span>
-      </span>
+      ) : (
+        <Identity
+          mark={splitGlyph(split, row.key, ctx)}
+          title={row.label}
+          under={
+            <span aria-hidden className="mt-1 block h-1 max-w-64 overflow-hidden rounded-full bg-foreground/[0.08]">
+              <span className={cn("block h-full rounded-full bg-current", ink === undefined ? "text-foreground/45" : ink.className)} style={{ ...ink?.style, width: `${Math.max(1, share * 100)}%` }} />
+            </span>
+          }
+        />
+      )}
       <span data-k="tokens" className={cn(ROW_NUMBER, "text-right text-foreground")}>
         {fmtTokens(row.tokens.input + row.tokens.output)}
       </span>
@@ -483,13 +491,7 @@ function TopThreads({ used }: { used: UsedAnswer }) {
           }}
           className="grid w-full grid-cols-[minmax(0,1fr)_128px_96px_120px_16px] items-center gap-x-6 py-3.5 text-left transition-colors duration-150 hover:bg-accent/40 max-sm:grid-cols-[minmax(0,1fr)_72px_16px] max-sm:gap-x-4"
         >
-          <span className="flex min-w-0 items-center gap-3">
-            <HarnessMark harness={thread.agent} label={agentName(thread.agent)} className="size-4" />
-            <span className="flex min-w-0 flex-col">
-              <span className="truncate text-sm leading-5 text-foreground">{thread.title}</span>
-              {thread.workspace === undefined ? null : <span className="truncate text-xs text-muted-foreground">{thread.workspace}</span>}
-            </span>
-          </span>
+          <Identity mark={agentGlyph(thread.agent)} title={thread.title} {...(thread.workspace === undefined ? {} : { line: thread.workspace })} />
           <span className={cn("truncate text-right text-[13px] text-muted-foreground", WIDE_ONLY)}>{thread.computer ?? ""}</span>
           <span className={cn(NUMBER, "text-right text-foreground")}>{fmtTokens(thread.tokens)}</span>
           <span className={cn(NUMBER, "text-right text-foreground", WIDE_ONLY)}>{thread.estimate === undefined ? "" : fmtCost(thread.estimate)}</span>

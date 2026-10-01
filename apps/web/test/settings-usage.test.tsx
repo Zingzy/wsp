@@ -302,7 +302,7 @@ describe("Usage: used", () => {
     expect($("[data-k=turns]")).toBeNull();
     expect($$("[data-used-row]").map(row => row.dataset["usedRow"])).toEqual(["claude", "codex"]);
     const claude = $("[data-used-row=claude]")!;
-    expect(text(claude.querySelector("[data-k=label]"))).toBe("Claude Code");
+    expect(text(claude.querySelector("[data-settings-title]"))).toBe("Claude Code");
     expect([...claude.querySelectorAll("[data-k=tokens], [data-k=cache-hit], [data-k=price]")].map(text)).toEqual(["7.33B", "93.9%", "$4,301.74"]);
     const codex = $("[data-used-row=codex]")!;
     expect(text(codex.querySelector("[data-k=tokens]"))).toBe("22M");
