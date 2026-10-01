@@ -382,23 +382,9 @@ describe("Usage: used", () => {
     expect([state.selectedId, state.selectedThreadId, state.settingsOpen]).toEqual(["w-relay", "t-relay", false]);
   });
 
-  it("splits the range by where it was read, wsp's threads and the agents' own logs", async () => {
-    await mountUsed({
-      sources: [
-        { source: "wsp", tokens: 5_000_000, estimate: 12 },
-        { source: "log", tokens: 2_000_000 },
-      ],
-    });
-    expect(text($("[data-settings-card=usage-sources] [data-settings-head]"))).toBe(USAGE_PAGE_WORDS.sources);
-    expect($$("[data-usage-source]").map(row => row.dataset["usageSource"])).toEqual(["wsp", "log"]);
-    expect([...$("[data-usage-source=wsp]")!.children].map(text)).toEqual([USAGE_PAGE_WORDS.fromWsp, "5M", "$12.00"]);
-    expect([...$("[data-usage-source=log]")!.children].map(text)).toEqual([USAGE_PAGE_WORDS.fromLogs, "2M", ""]);
-  });
-
-  it("draws no threads or sources card where the answer carries none", async () => {
+  it("draws no threads card where the answer carries none", async () => {
     await mount();
     expect($("[data-settings-card=usage-threads]")).toBeNull();
-    expect($("[data-settings-card=usage-sources]")).toBeNull();
   });
 
   it("says nothing was used in the chart's place, with no totals, no rows and no logs line", async () => {

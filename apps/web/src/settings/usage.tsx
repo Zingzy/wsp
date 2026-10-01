@@ -510,27 +510,6 @@ function TopThreads({ used }: { used: UsedAnswer }) {
   );
 }
 
-function Sources({ used }: { used: UsedAnswer }) {
-  if (used.sources === undefined || used.sources.length === 0) return null;
-  return (
-    <Card
-      id="usage-sources"
-      head={W.sources}
-      body={
-        <div className={BARE_TABLE}>
-      {used.sources.map(source => (
-        <div key={source.source} data-usage-source={source.source} className="grid grid-cols-[minmax(0,1fr)_120px_120px] items-center gap-x-6 py-3.5">
-          <span className="text-sm leading-5 text-foreground">{source.source === "wsp" ? W.fromWsp : W.fromLogs}</span>
-          <span className={cn(NUMBER, "text-right text-foreground")}>{fmtTokens(source.tokens)}</span>
-          <span className={cn(NUMBER, "text-right text-foreground")}>{source.estimate === undefined ? "" : fmtCost(source.estimate)}</span>
-        </div>
-      ))}
-        </div>
-      }
-    />
-  );
-}
-
 /** The Usage tab while its answer is on the way, in the loaded page's own shape and heights so nothing moves when
  * it lands. */
 function UsedSkeleton({ range }: { range: UsageRange }) {
@@ -719,7 +698,6 @@ function Used({ used, models, range, split, onRange, onSplit, ctx }: { used: Use
             <Mix used={used} />
           </section>
           <TopThreads used={used} />
-          <Sources used={used} />
           {used.logs === undefined ? null : (
             <p data-k="logs" className={QUIET}>
               {logsLine(used.logs)}
