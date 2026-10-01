@@ -11,7 +11,7 @@ import { USAGE_RANGES, USAGE_SPLITS, USAGE_WORDS, accountState, accountWords, fm
 import { HarnessMark } from "../components/chat/HarnessMark.js";
 import { SegmentedControl } from "../components/ui/segmented-control.js";
 import { cn } from "../lib/utils.js";
-import { ProjectGlyph } from "../projects/look.js";
+import { PROJECT_HUES, ProjectGlyph } from "../projects/look.js";
 import { useStore } from "../protocol/store.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
 import { ComputerGlyph } from "./ComputerGlyph.js";
@@ -23,6 +23,9 @@ import { useSettingsStore, type UsageTab } from "./settingsStore.js";
 import { UsageChart, type ChartLine } from "./usageChart.js";
 
 const NUMBER = "font-mono text-xs tabular-nums";
+const ROW_NUMBER = "font-mono text-sm tabular-nums";
+/** A table on this page: a hairline under its head and between its rows, no box, its text on the page's edge. */
+const BARE_TABLE = "flex flex-col border-b border-border/50 [&>*]:border-t [&>*]:border-border/50";
 const QUIET = "text-[13px] leading-5 text-muted-foreground";
 const WIDE_ONLY = "max-sm:hidden";
 
@@ -225,7 +228,12 @@ function AccountLine({ row }: { row: AccountRow }) {
         {state}
       </span>
     );
-  return <Row id={`account-${row.key}`} title={row.label} lead={<HarnessMark harness={row.agent} label={agentName(row.agent)} className="size-4" />} description={where} {...(slot === undefined ? {} : { control: slot })} attrs={{ "data-usage-account": row.key }} />;
+  const lead = (
+    <GlyphFrame>
+      <HarnessMark harness={row.agent} label={agentName(row.agent)} className="size-4" />
+    </GlyphFrame>
+  );
+  return <Row id={`account-${row.key}`} title={row.label} lead={lead} description={where} {...(slot === undefined ? {} : { control: slot })} attrs={{ "data-usage-account": row.key }} />;
 }
 
 function Limits({ accounts, now }: { accounts: ReadonlyArray<AccountRow> | null; now: number }) {
@@ -308,15 +316,19 @@ function agentOf(split: UsageSplit, key: string): string | undefined {
   return undefined;
 }
 
-const NEUTRAL_INKS = ["text-foreground", "text-muted-foreground", "text-muted-foreground/55", "text-muted-foreground/35"];
+/** The hues a computer, an account or a project takes by rank: none of them orange, Claude's, nor the done and failed
+ * greens and reds; past them the neutral ramp. */
+const SPLIT_INKS = ["text-sky-500", "text-violet-500", "text-amber-500", "text-pink-500", "text-teal-500", "text-muted-foreground"];
 const BRAND_INK = "[--line:var(--line-light)] dark:[--line:var(--line-dark)] text-(--line)";
 
-/** A line's ink: the agent's own colour where its mark carries one, else a step down the neutral ramp by rank. */
-function inkOf(split: UsageSplit, key: string, rank: number): ChartLine["ink"] {
+/** A line's ink: the agent's own colour where its mark carries one, a project's own hue where one was picked, else
+ * the next hue by rank. */
+function inkOf(split: UsageSplit, key: string, rank: number, projectHue?: string): ChartLine["ink"] {
   const agent = agentOf(split, key);
   const ink = agent === undefined ? undefined : agentMark(agent)?.inks?.[0];
   if (ink !== undefined) return { className: BRAND_INK, style: { "--line-light": ink.light, "--line-dark": ink.dark } as CSSProperties };
-  return { className: NEUTRAL_INKS[Math.min(rank, NEUTRAL_INKS.length - 1)]! };
+  if (projectHue !== undefined && projectHue !== "") return { className: projectHue };
+  return { className: agent === undefined ? SPLIT_INKS[Math.min(rank, SPLIT_INKS.length - 1)]! : "text-muted-foreground" };
 }
 
 /** The mark a split row leads with: the agent's, the computer's or the project's glyph, in its frame. */
@@ -356,10 +368,10 @@ const percent = (part: number, whole: number): string => (whole === 0 ? "0%" : `
 
 function Stat({ k, label, value, note }: { k: string; label: string; value: string; note?: string }) {
   return (
-    <div data-k={k} className="flex min-w-0 flex-col gap-1 px-4 py-3.5">
-      <span className="text-xs text-muted-foreground">{label}</span>
-      <span className="font-mono text-lg leading-6 font-medium text-foreground tabular-nums">{value}</span>
-      {note === undefined ? null : <span className="truncate text-[11.5px] text-muted-foreground/80">{note}</span>}
+    <div data-k={k} className="flex min-w-0 flex-col gap-1.5 px-5 py-5">
+      <span className="text-[13px] text-muted-foreground">{label}</span>
+      <span className="font-mono text-[26px] leading-8 font-medium text-foreground tabular-nums">{value}</span>
+      {note === undefined ? null : <span className="truncate text-xs text-muted-foreground/80">{note}</span>}
     </div>
   );
 }
@@ -375,7 +387,7 @@ function Totals({ used }: { used: UsedAnswer }) {
     <Stat key="tokens" k="stat-tokens" label={W.tokens} value={fmtTokens(tokens)} note={W.fromCache(percent(cached, input))} />,
     ...(estimate === undefined ? [] : [<Stat key="estimate" k="stat-estimate" label={W.estimate} value={fmtCost(estimate)} note={W.atListPrice} />]),
     ...(used.counts === undefined ? [] : [<Stat key="threads" k="stat-threads" label={W.threads} value={used.counts.threads.toLocaleString("en-US")} note={W.onComputers(used.counts.computers)} />]),
-    ...(turns === undefined ? [] : [<Stat key="turns" k="stat-turns" label={W.turns} value={turns.toLocaleString("en-US")} />]),
+    ...(turns === undefined ? [] : [<Stat key="turns" k="stat-turns" label={W.turns} value={turns.toLocaleString("en-US")} note={W.turnsNote} />]),
     <Stat key="cache" k="stat-cache" label={W.cacheHit} value={percent(cached, input)} {...(saved === undefined ? {} : { note: W.saved(fmtCost(saved)) })} />,
   ];
   return (
@@ -400,10 +412,10 @@ function Mix({ used }: { used: UsedAnswer }) {
   if (all === 0) return null;
   return (
     <div data-k="usage-mix" className="flex flex-col gap-3">
-      <div aria-hidden className="flex h-2.5 gap-0.5 overflow-hidden rounded-[4px]">
+      <div aria-hidden className="flex h-3 gap-0.5 overflow-hidden rounded-[4px]">
         {parts.map(p => (p.n === 0 ? null : <span key={p.k} className={p.ink} style={{ width: `${(p.n / all) * 100}%`, minWidth: 2 }} />))}
       </div>
-      <div className="flex flex-wrap gap-x-5 gap-y-1.5 text-[12.5px] text-muted-foreground">
+      <div className="flex flex-wrap gap-x-6 gap-y-2 text-[13.5px] text-muted-foreground">
         {parts.map(p => (
           <span key={p.k} data-k={`mix-${p.k}`} className="flex items-center gap-2">
             <span aria-hidden className={cn("size-2 rounded-[2px]", p.ink)} />
@@ -416,36 +428,36 @@ function Mix({ used }: { used: UsedAnswer }) {
   );
 }
 
-const SPLIT_COLUMNS = "grid grid-cols-[minmax(0,1fr)_88px_76px_64px_96px] gap-x-4 max-sm:grid-cols-[minmax(0,1fr)_72px_88px]";
-const SPLIT_COLUMNS_NO_TURNS = "grid grid-cols-[minmax(0,1fr)_88px_76px_96px] gap-x-4 max-sm:grid-cols-[minmax(0,1fr)_72px_88px]";
+const SPLIT_COLUMNS = "grid grid-cols-[minmax(0,1fr)_104px_96px_80px_120px] gap-x-6 max-sm:grid-cols-[minmax(0,1fr)_72px_88px] max-sm:gap-x-4";
+const SPLIT_COLUMNS_NO_TURNS = "grid grid-cols-[minmax(0,1fr)_104px_96px_120px] gap-x-6 max-sm:grid-cols-[minmax(0,1fr)_72px_88px] max-sm:gap-x-4";
 
-function SplitRow({ row, split, share, turns, sub = false, ctx }: { row: UsedRow; split: UsageSplit; share: number; turns: boolean; sub?: boolean; ctx: SettingsContext }) {
+function SplitRow({ row, split, share, turns, ink, sub = false, ctx }: { row: UsedRow; split: UsageSplit; share: number; turns: boolean; ink?: ChartLine["ink"]; sub?: boolean; ctx: SettingsContext }) {
   const estimate = estimateOf(row);
   return (
-    <div data-used-row={row.key} {...(sub ? { "data-sub": "" } : {})} className={cn(turns ? SPLIT_COLUMNS : SPLIT_COLUMNS_NO_TURNS, "items-center px-4", sub ? "py-2" : "py-3")}>
+    <div data-used-row={row.key} {...(sub ? { "data-sub": "" } : {})} className={cn(turns ? SPLIT_COLUMNS : SPLIT_COLUMNS_NO_TURNS, "items-center", sub ? "py-2.5" : "py-4")}>
       <span className={cn("flex min-w-0 items-center gap-3", sub && "ps-11")}>
         {sub ? null : <SplitMark split={split} rowKey={row.key} ctx={ctx} />}
         <span className="flex min-w-0 flex-1 flex-col gap-1.5">
-          <span data-k="label" className={cn("min-w-0 truncate leading-5", sub ? "text-[13px] text-foreground/80" : "text-sm text-foreground")}>
+          <span data-k="label" className={cn("min-w-0 truncate", sub ? "text-sm leading-5 text-foreground/80" : "text-[15px] leading-6 text-foreground")}>
             {row.label}
           </span>
-          <span aria-hidden className="block h-1 max-w-48 overflow-hidden rounded-full bg-foreground/[0.08]">
-            <span className="block h-full rounded-full bg-foreground/45" style={{ width: `${Math.max(1, share * 100)}%` }} />
+          <span aria-hidden className="block h-1 max-w-64 overflow-hidden rounded-full bg-foreground/[0.08]">
+            <span className={cn("block h-full rounded-full bg-current", ink === undefined ? "text-foreground/45" : ink.className)} style={{ ...ink?.style, width: `${Math.max(1, share * 100)}%` }} />
           </span>
         </span>
       </span>
-      <span data-k="tokens" className={cn(NUMBER, "text-right text-foreground")}>
+      <span data-k="tokens" className={cn(ROW_NUMBER, "text-right text-foreground")}>
         {fmtTokens(row.tokens.input + row.tokens.output)}
       </span>
-      <span data-k="cache-hit" className={cn(NUMBER, "text-right text-muted-foreground", WIDE_ONLY)}>
+      <span data-k="cache-hit" className={cn(ROW_NUMBER, "text-right text-muted-foreground", WIDE_ONLY)}>
         {percent(row.tokens.cached, row.tokens.input)}
       </span>
       {turns ? (
-        <span data-k="turns" className={cn(NUMBER, "text-right text-muted-foreground", WIDE_ONLY)}>
+        <span data-k="turns" className={cn(ROW_NUMBER, "text-right text-muted-foreground", WIDE_ONLY)}>
           {row.turns === undefined ? "" : row.turns.toLocaleString("en-US")}
         </span>
       ) : null}
-      <span data-k="price" className={cn(NUMBER, "text-right", estimate === undefined ? "text-muted-foreground" : "text-foreground")}>
+      <span data-k="price" className={cn(ROW_NUMBER, "text-right", estimate === undefined ? "text-muted-foreground" : "text-foreground")}>
         {estimate === undefined ? USAGE_WORDS.notPriced : fmtCost(estimate)}
       </span>
     </div>
@@ -457,7 +469,11 @@ function TopThreads({ used }: { used: UsedAnswer }) {
   const closeSettings = useStore(s => s.closeSettings);
   if (used.threads === undefined || used.threads.length === 0) return null;
   return (
-    <Card id="usage-threads" head={W.topThreads}>
+    <Card
+      id="usage-threads"
+      head={W.topThreads}
+      body={
+        <div className={BARE_TABLE}>
       {used.threads.map(thread => (
         <button
           key={thread.threadId}
@@ -467,7 +483,7 @@ function TopThreads({ used }: { used: UsedAnswer }) {
             select(thread.workspaceId, thread.threadId);
             closeSettings();
           }}
-          className="grid w-full grid-cols-[minmax(0,1fr)_112px_72px_84px_16px] items-center gap-x-4 px-4 py-3 text-left transition-colors duration-150 hover:bg-accent/60 max-sm:grid-cols-[minmax(0,1fr)_72px_16px]"
+          className="grid w-full grid-cols-[minmax(0,1fr)_128px_96px_120px_16px] items-center gap-x-6 py-3.5 text-left transition-colors duration-150 hover:bg-accent/40 max-sm:grid-cols-[minmax(0,1fr)_72px_16px] max-sm:gap-x-4"
         >
           <span className="flex min-w-0 items-center gap-3">
             <HarnessMark harness={thread.agent} label={agentName(thread.agent)} className="size-4" />
@@ -482,30 +498,38 @@ function TopThreads({ used }: { used: UsedAnswer }) {
           <ArrowUpRightIcon aria-hidden className="size-3.5 text-muted-foreground" />
         </button>
       ))}
-    </Card>
+        </div>
+      }
+    />
   );
 }
 
 function Sources({ used }: { used: UsedAnswer }) {
   if (used.sources === undefined || used.sources.length === 0) return null;
   return (
-    <Card id="usage-sources" head={W.sources}>
+    <Card
+      id="usage-sources"
+      head={W.sources}
+      body={
+        <div className={BARE_TABLE}>
       {used.sources.map(source => (
-        <div key={source.source} data-usage-source={source.source} className="grid grid-cols-[minmax(0,1fr)_96px_96px] items-center gap-x-4 px-4 py-3">
+        <div key={source.source} data-usage-source={source.source} className="grid grid-cols-[minmax(0,1fr)_120px_120px] items-center gap-x-6 py-3.5">
           <span className="text-sm leading-5 text-foreground">{source.source === "wsp" ? W.fromWsp : W.fromLogs}</span>
           <span className={cn(NUMBER, "text-right text-foreground")}>{fmtTokens(source.tokens)}</span>
           <span className={cn(NUMBER, "text-right text-foreground")}>{source.estimate === undefined ? "" : fmtCost(source.estimate)}</span>
         </div>
       ))}
-    </Card>
+        </div>
+      }
+    />
   );
 }
 
 function Used({ used, models, range, split, onRange, onSplit, ctx }: { used: UsedAnswer | null; models: readonly UsedRow[]; range: UsageRange; split: UsageSplit; onRange: (r: UsageRange) => void; onSplit: (s: UsageSplit) => void; ctx: SettingsContext }) {
   const controls = (
     <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-      <SegmentedControl data-k="usage-range" aria-label={W.range} value={range} segments={RANGES} onChange={onRange} />
-      <SegmentedControl data-k="usage-split" aria-label={W.split} value={split} segments={SPLITS} onChange={onSplit} />
+      <SegmentedControl data-k="usage-range" aria-label={W.range} value={range} segments={RANGES} onChange={onRange} className="h-9" segmentClassName="px-3.5 text-sm" />
+      <SegmentedControl data-k="usage-split" aria-label={W.split} value={split} segments={SPLITS} onChange={onSplit} className="h-9" segmentClassName="px-3.5 text-sm" />
     </div>
   );
   if (used === null) return <section data-usage-section="used" aria-label={W.used} className="flex flex-col gap-8">{controls}</section>;
@@ -514,7 +538,19 @@ function Used({ used, models, range, split, onRange, onSplit, ctx }: { used: Use
   const top = tokensOf(ranked[0] ?? { tokens: { input: 0, output: 0, cached: 0 } } as UsedRow);
   const word = stepWord(used);
   const lineRows = used.lines ?? [{ key: "tokens", label: W.tokens, points: used.series.map(s => s.tokens) }];
-  const lines: ChartLine[] = lineRows.map((line, rank) => ({ key: line.key, label: line.label, points: line.points, ink: used.lines === undefined ? { className: "text-foreground" } : inkOf(split, line.key, rank) }));
+  const hueOf = (key: string): string | undefined => (split === "project" ? PROJECT_HUES[ctx.preferences.projectLook[key]?.hue ?? "neutral"].text : undefined);
+  // A hue a project picked is that project's alone, so the hues handed out by rank skip it; use with no project is grey.
+  const picked = new Set(lineRows.map(line => hueOf(line.key)).filter((hue): hue is string => hue !== undefined && hue !== ""));
+  const free = SPLIT_INKS.filter(hue => !picked.has(hue));
+  let next = 0;
+  const lines: ChartLine[] = lineRows.map(line => {
+    if (used.lines === undefined) return { key: line.key, label: line.label, points: line.points, ink: { className: "text-foreground" } };
+    const unowned = split === "project" && !ctx.projects.some(p => p.id === line.key);
+    const own = hueOf(line.key);
+    const ink = unowned ? { className: "text-muted-foreground" } : own !== undefined && own !== "" ? { className: own } : agentOf(split, line.key) !== undefined ? inkOf(split, line.key, 0) : { className: free[Math.min(next++, free.length - 1)]! };
+    return { key: line.key, label: line.label, points: line.points, ink };
+  });
+  const inkByKey = new Map(used.lines === undefined ? [] : lines.map(line => [line.key, line.ink] as const));
   const empty = ranked.length === 0;
   const turns = used.rows.some(r => r.turns !== undefined);
   const nestedHead = used.split === "agent" && models.length > 0;
@@ -533,14 +569,14 @@ function Used({ used, models, range, split, onRange, onSplit, ctx }: { used: Use
             head={W.chartHead[used.range]}
             body={<div className="flex flex-col gap-4">
               {used.lines === undefined ? (
-                <div data-k="usage-legend" className="flex flex-wrap gap-x-5 gap-y-1.5 text-[12.5px] text-muted-foreground">
+                <div data-k="usage-legend" className="flex flex-wrap gap-x-6 gap-y-2 text-[13.5px] text-muted-foreground">
                   <span className="flex items-center gap-2">
                     <span aria-hidden className="h-0.5 w-3.5 rounded-full bg-foreground" />
                     {W.allOf[used.split]}
                   </span>
                 </div>
               ) : (
-                <div data-k="usage-legend" className="flex flex-wrap gap-x-5 gap-y-1.5 text-[12.5px] text-muted-foreground">
+                <div data-k="usage-legend" className="flex flex-wrap gap-x-6 gap-y-2 text-[13.5px] text-muted-foreground">
                   {lines.map(line => {
                     const agent = agentOf(split, line.key);
                     return (
@@ -556,8 +592,12 @@ function Used({ used, models, range, split, onRange, onSplit, ctx }: { used: Use
               <UsageChart steps={used.series.map(s => s.t)} lines={lines} stepWord={t => word.format(t)} ticks={ticksOf(used)} />
             </div>}
           />
-          <Card id="usage-used" head={W.by(W.splits[used.split])}>
-            <div data-k="used-head" className={cn(turns ? SPLIT_COLUMNS : SPLIT_COLUMNS_NO_TURNS, "px-4 py-2.5 text-xs leading-4 text-muted-foreground")}>
+          <Card
+            id="usage-used"
+            head={W.by(W.splits[used.split])}
+            body={
+              <div className={BARE_TABLE}>
+            <div data-k="used-head" className={cn(turns ? SPLIT_COLUMNS : SPLIT_COLUMNS_NO_TURNS, "py-3 text-[13px] leading-4 text-muted-foreground")}>
               <span data-k="split-head">{nestedHead ? W.agentAndModel : W.splits[used.split]}</span>
               <span className="text-right">{W.tokens}</span>
               <span className={cn("text-right", WIDE_ONLY)}>{W.cacheHit}</span>
@@ -568,14 +608,16 @@ function Used({ used, models, range, split, onRange, onSplit, ctx }: { used: Use
               const own = used.split === "agent" ? models.filter(m => agentOf("model" as UsageSplit, m.key) === row.key).sort((a, b) => tokensOf(b) - tokensOf(a)) : [];
               return (
                 <div key={row.key} data-used-group={row.key} className="flex flex-col pb-1 [&>[data-sub]]:-mt-0.5">
-                  <SplitRow row={row} split={used.split} share={top === 0 ? 0 : tokensOf(row) / top} turns={turns} ctx={ctx} />
+                  <SplitRow row={row} split={used.split} share={top === 0 ? 0 : tokensOf(row) / top} turns={turns} {...(inkByKey.has(row.key) ? { ink: inkByKey.get(row.key)! } : {})} ctx={ctx} />
                   {own.map(model => (
                     <SplitRow key={model.key} row={model} split={"model" as UsageSplit} share={tokensOf(row) === 0 ? 0 : tokensOf(model) / tokensOf(row)} turns={turns} sub ctx={ctx} />
                   ))}
                 </div>
               );
             })}
-          </Card>
+              </div>
+            }
+          />
           <section data-settings-card="usage-mix-card" aria-label={W.mix} className="flex flex-col gap-4">
             <h2 data-settings-head className="flex min-h-7 items-center text-sm font-normal text-foreground/70">
               {W.mix}

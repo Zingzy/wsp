@@ -265,7 +265,7 @@ describe("Usage: used", () => {
     await mountUsed({ rows, counts: { threads: 7, computers: 2 } });
     expect(stat("stat-estimate")[1]).toBe("$13.00");
     expect(stat("stat-threads")).toEqual([USAGE_PAGE_WORDS.threads, "7", USAGE_PAGE_WORDS.onComputers(2)]);
-    expect(stat("stat-turns")).toEqual([USAGE_PAGE_WORDS.turns, "42"]);
+    expect(stat("stat-turns")).toEqual([USAGE_PAGE_WORDS.turns, "42", USAGE_PAGE_WORDS.turnsNote]);
     expect($$("[data-used-row]").map(row => row.dataset["usedRow"])).toEqual(["claude", "codex"]);
     expect([...$$("[data-k=used-head] span")].map(text)).toEqual(["Agent", "Tokens", "Cache hit", "Turns", "API estimate"]);
     expect(text($("[data-used-row=codex] [data-k=price]"))).toBe("$10.00");

@@ -20,7 +20,7 @@ export interface ChartLine {
 
 const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map(n => (n + 0.5) / 16);
 const CELL = 2;
-const HEIGHT = 240;
+const HEIGHT = 300;
 const PAD = 6;
 
 function paintDither(canvas: HTMLCanvasElement, points: readonly number[], top: number, ink: string): void {
@@ -103,7 +103,7 @@ export function UsageChart({ steps, lines, stepWord, ticks }: { steps: readonly 
 
   return (
     <div data-usage-chart="tokens" className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-3">
-      <div data-k="y-axis" aria-hidden className="relative font-mono text-[11px] leading-none text-muted-foreground tabular-nums" style={{ height: HEIGHT }}>
+      <div data-k="y-axis" aria-hidden className="relative font-mono text-xs leading-none text-muted-foreground tabular-nums" style={{ height: HEIGHT }}>
         {[0, 1, 2, 3, 4].map(g => (
           <span key={g} data-k="y-tick" className="invisible block h-0 text-right">
             {fmtTokens((top * g) / 4)}
@@ -163,7 +163,7 @@ export function UsageChart({ steps, lines, stepWord, ticks }: { steps: readonly 
         </div>
       </div>
       <span aria-hidden />
-      <div className="relative h-4 font-mono text-[11px] leading-4 text-muted-foreground tabular-nums">
+      <div className="relative h-4 font-mono text-xs leading-4 text-muted-foreground tabular-nums">
         {ticks.map(tick => (
           <span key={tick.at} data-k="tick" className={cn("absolute top-0", tick.at === 0 ? "" : tick.at === 1 ? "-translate-x-full" : "-translate-x-1/2")} style={{ left: `${tick.at * 100}%` }}>
             {tick.word}

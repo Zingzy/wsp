@@ -8,6 +8,7 @@
 // page is open.
 import { Fragment } from "react";
 import { ScrollArea } from "../components/ui/scroll-area.js";
+import { cn } from "../lib/utils.js";
 import { useIsMobile } from "../hooks/useMediaQuery.js";
 import { useStore } from "../protocol/store.js";
 import { AddProjectDialog } from "../sidebar/AddProjectDialog.js";
@@ -85,7 +86,7 @@ export function SettingsPage() {
   const searching = search !== "" && !isMobile;
   return (
     <ScrollArea className="min-h-0 flex-1">
-      <div data-settings-page data-settings-at={searching ? "search" : atId(at)} className="mx-auto flex w-full max-w-[760px] flex-col gap-12 px-8 pt-14 pb-12 max-sm:px-4 max-sm:pt-6">
+      <div data-settings-page data-settings-at={searching ? "search" : atId(at)} className={cn("mx-auto flex w-full flex-col gap-12 px-8 pt-14 pb-12 max-sm:px-4 max-sm:pt-6", !searching && at.kind === "group" && at.group === "usage" ? "max-w-[1080px]" : "max-w-[760px]")}>
         {searching ? <SearchPage ctx={ctx} query={search} /> : <Page key={atId(at)} at={at} ctx={ctx} />}
       </div>
       {addProjectAt === null ? null : (

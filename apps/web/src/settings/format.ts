@@ -294,6 +294,7 @@ export const USAGE_PAGE_WORDS = {
   atListPrice: "at list price",
   threads: "Threads",
   turns: "Turns",
+  turnsNote: "in threads wsp ran",
   cacheHit: "Cache hit",
   saved: (amount: string): string => `${amount} saved`,
   cacheWrite: "Cache write",
