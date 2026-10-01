@@ -306,13 +306,20 @@ export function writeHereAgents(home, here) {
  * secret is handed to the child and never written into the environment this answers with: the lab records and
  * prints what it started the host with, and a key in that record would be a key in a log.
  *
+ * `files` are written under the state file's folder before the host starts: the blobs and readings a fixture keeps.
+ *
  * `agents` names the fixture's own agents on this computer, which the host then reads in place of this computer's:
  * their stand-ins lead a path of the system's folders alone, and the newest versions are kept as already asked, so
  * no agent of the person's is run and no vendor is asked. A lab names none, since its testers' turns run real agents. */
-export async function startHost({ home, state, port, logPath, detached = false, personHome, appDir, cloud, binDir, standIn, records, advertise, agents, hostItems, secrets = {} }) {
+export async function startHost({ home, state, port, logPath, detached = false, personHome, appDir, cloud, binDir, standIn, records, advertise, agents, hostItems, files = [], secrets = {} }) {
   const statePath = join(home, ".wsp", "state.json");
   mkdirSync(dirname(statePath), { recursive: true });
   writeFileSync(statePath, JSON.stringify(state, null, 2));
+  for (const file of files) {
+    const at = join(dirname(statePath), file.path);
+    mkdirSync(dirname(at), { recursive: true });
+    writeFileSync(at, file.text);
+  }
   const out = logPath === undefined ? "pipe" : openSync(logPath, "a");
   const { hostTokenFor, writeKeptLatest } = await import(pathToFileURL(HOST_PACKAGE).href);
   if (agents !== undefined) writeKeptLatest(statePath, agents.latest, Date.now());

@@ -87,12 +87,9 @@ interface ChartProps {
 }
 
 function Chart({ label, k, samples, y, text, tone, stale, unavailable }: ChartProps) {
-  const fade = useId();
   const points = chartPoints(samples, y);
   const last = samples[samples.length - 1];
   const word = stale ?? (unavailable !== null ? "unavailable" : last === undefined ? "pending" : null);
-  // A single sample draws as a dot through the round cap.
-  const d = points.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join("") + (points.length === 1 ? `L${points[0]!.x.toFixed(2)} ${points[0]!.y.toFixed(2)}` : "");
   return (
     <div data-chart={k} {...(stale !== null ? { "data-stale": stale } : {})} className="py-1">
       <div className="flex items-baseline justify-between gap-2 font-mono text-[13px] tabular-nums">
@@ -105,8 +102,36 @@ function Chart({ label, k, samples, y, text, tone, stale, unavailable }: ChartPr
           {word ?? (last !== undefined ? text(last) : "")}
         </span>
       </div>
-      <div className={cn("relative mt-3", stale !== null ? "text-muted-foreground/40" : last !== undefined ? TONE_LINE[tone(last)] : "text-foreground/80")}>
-      <svg className="block h-24 w-full" viewBox={`0 0 ${CHART_W} ${CHART_H}`} preserveAspectRatio="none" role="img" aria-label={`${label} over the last two minutes`}>
+      <ChartPlot
+        runs={[points]}
+        label={`${label} over the last two minutes`}
+        end={stale === null}
+        className={cn("mt-3", stale !== null ? "text-muted-foreground/40" : last !== undefined ? TONE_LINE[tone(last)] : "text-foreground/80")}
+      />
+      <div className="mt-1.5 flex justify-between font-mono text-[10px] text-muted-foreground/70">
+        <span>2 min</span>
+        <span>now</span>
+      </div>
+    </div>
+  );
+}
+
+/** Points at chart scale for readings over a span of time: x by the reading's time between from and to, y its share. */
+export function spanPoints<T extends { at: number }>(readings: readonly T[], from: number, to: number, y: (r: T) => number): { x: number; y: number }[] {
+  const span = CHART_H - 2 * CHART_PAD;
+  return readings.map(r => ({ x: (Math.min(1, Math.max(0, (r.at - from) / Math.max(1, to - from))) * CHART_W), y: CHART_PAD + (1 - Math.min(1, Math.max(0, y(r)))) * span }));
+}
+
+/** One series in the chart's grammar: the rule lines, each run of points as a line over a faint fill, and a dot on
+ * the newest point. Separate runs draw no line between them, so a stretch with no reading is a gap. A chart too
+ * small for the fill draws the line alone, since fills under short runs read as bars. */
+export function ChartPlot({ runs, label, end, fill = true, className, height = "h-24" }: { runs: ReadonlyArray<ReadonlyArray<{ x: number; y: number }>>; label: string; end: boolean; fill?: boolean; className?: string; height?: string }) {
+  const fade = useId();
+  const drawn = runs.filter(run => run.length > 0);
+  const newest = drawn[drawn.length - 1]?.at(-1);
+  return (
+    <div className={cn("relative", className)}>
+      <svg className={cn("block w-full", height)} viewBox={`0 0 ${CHART_W} ${CHART_H}`} preserveAspectRatio="none" role="img" aria-label={label}>
         {[0.25, 0.5, 0.75, 1].map(at => (
           <line key={at} x1={0} x2={CHART_W} y1={CHART_PAD + (1 - at) * (CHART_H - 2 * CHART_PAD)} y2={CHART_PAD + (1 - at) * (CHART_H - 2 * CHART_PAD)} className="stroke-border" strokeWidth={1} strokeDasharray={at === 1 ? undefined : "2 3"} vectorEffect="non-scaling-stroke" />
         ))}
@@ -117,30 +142,20 @@ function Chart({ label, k, samples, y, text, tone, stale, unavailable }: ChartPr
             <stop offset="1" stopColor="currentColor" stopOpacity="0" />
           </linearGradient>
         </defs>
-        {points.length > 1 && (
-          <path d={`${d}L${points[points.length - 1]!.x.toFixed(2)} ${CHART_H}L${points[0]!.x.toFixed(2)} ${CHART_H}Z`} fill={`url(#${fade})`} stroke="none" data-chart-area />
-        )}
-        {points.length > 0 && (
-          <path
-            d={d}
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={1.5}
-            strokeLinejoin="round"
-            strokeLinecap="round"
-            vectorEffect="non-scaling-stroke"
-            data-chart-line
-          />
-        )}
+        {drawn.map((run, i) => {
+          // A single point draws as a dot through the round cap.
+          const d = run.map((p, j) => `${j === 0 ? "M" : "L"}${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join("") + (run.length === 1 ? `L${run[0]!.x.toFixed(2)} ${run[0]!.y.toFixed(2)}` : "");
+          return (
+            <g key={i}>
+              {fill && run.length > 1 && <path d={`${d}L${run[run.length - 1]!.x.toFixed(2)} ${CHART_H}L${run[0]!.x.toFixed(2)} ${CHART_H}Z`} fill={`url(#${fade})`} stroke="none" data-chart-area />}
+              <path d={d} fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" data-chart-line />
+            </g>
+          );
+        })}
       </svg>
-      {points.length > 0 && stale === null ? (
-        <span aria-hidden data-chart-end className="absolute size-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-current ring-2 ring-background" style={{ left: `${(points[points.length - 1]!.x / CHART_W) * 100}%`, top: `${(points[points.length - 1]!.y / CHART_H) * 100}%` }} />
+      {newest !== undefined && end ? (
+        <span aria-hidden data-chart-end className="absolute size-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-current ring-2 ring-background" style={{ left: `${(newest.x / CHART_W) * 100}%`, top: `${(newest.y / CHART_H) * 100}%` }} />
       ) : null}
-      </div>
-      <div className="mt-1.5 flex justify-between font-mono text-[10px] text-muted-foreground/70">
-        <span>2 min</span>
-        <span>now</span>
-      </div>
     </div>
   );
 }

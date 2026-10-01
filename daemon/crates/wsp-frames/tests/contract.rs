@@ -17,7 +17,7 @@ use wsp_frames::{
     GitPrReadReply, GitPrReply, GitPrReviewReply, GitPrViewReply, GitPushReply, GitRepoReadReply, GitRestoreReply, GitRunLogReply,
     GitSnapshotReply, GitStartOnReply, GitUpdateReply, GuestCliMessage, GuestOpenReply, HostFolderListing, MachineAnswersReply,
     MachineExecReply, MachineHandleReply, MachineLinkRequest, MachineListReply, MachineReachReply, MachineReadingReply, MachineShapeReply,
-    MachineStateReply, PlaceAuthRequest, PlaceCapacity, PlaceProveRequest, SshStartReply, DAEMON_OPS, MACHINE_OPS,
+    MachineStateReply, PlaceAuthRequest, PlaceCapacity, PlaceProveRequest, SshStartReply, SysHistoryReply, DAEMON_OPS, MACHINE_OPS,
 };
 
 fn fixtures() -> PathBuf {
@@ -283,6 +283,9 @@ fn every_reply_fixture_round_trips_through_the_reply_types() {
                 "SshStartReply" => {
                     round_trip::<SshStartReply>(&sample, &at);
                 }
+                "SysHistoryReply" => {
+                    round_trip::<SysHistoryReply>(&sample, &at);
+                }
                 other => panic!("{at}: no reply type here reads {other}"),
             }
         }
@@ -328,6 +331,7 @@ fn every_reply_fixture_round_trips_through_the_reply_types() {
         "MachineShapeReply",
         "MachineStateReply",
         "SshStartReply",
+        "SysHistoryReply",
     ];
     expected.sort_unstable();
     assert_eq!(seen, expected, "every reply this daemon answers has its fixture");

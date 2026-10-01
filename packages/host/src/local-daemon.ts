@@ -80,6 +80,9 @@ export interface LocalDaemonOptions {
   rootsPath: string;
   /** The folder a file handed to a turn lands in for this daemon to see, made here before the watch reads it. */
   inboxDir: string;
+  /** The folder the daemon keeps its minute readings in, which has to outlive the token folder a start makes fresh:
+   * the host keeps it beside its state file. Without one they sit beside the token and go with it. */
+  readingsDir?: string;
   /** The binary to spawn; this computer's own out of the daemon asset when none is named. */
   binary?: string;
   /** The file this daemon reads its token from, for a daemon whose token something else rotates: a stand-in
@@ -187,7 +190,7 @@ export class LocalDaemon {
     // which. The kind is what picks the modules the Live rows and the Processes tab read: this computer answers
     // for itself, with ps, df and the memory road the platform has, where a guest daemon reads the /proc a Mac
     // does not have.
-    const argv = ["--kind", "local", "--host", LOOPBACK, "--port", "0", "--token-path", tokenPath, "--root", opts.root, "--roots-path", opts.rootsPath, "--inbox", opts.inboxDir, "--work-folder", opts.workFolder, "--manifest", join(ownDir, "manifest.json")];
+    const argv = ["--kind", "local", "--host", LOOPBACK, "--port", "0", "--token-path", tokenPath, "--root", opts.root, "--roots-path", opts.rootsPath, "--inbox", opts.inboxDir, "--work-folder", opts.workFolder, "--manifest", join(ownDir, "manifest.json"), ...(opts.readingsDir === undefined ? [] : ["--readings-dir", opts.readingsDir])];
     const child = spawn(bin, argv, { stdio: ["ignore", "pipe", "pipe"] });
     opts.spawned?.(child);
     const said: string[] = [];

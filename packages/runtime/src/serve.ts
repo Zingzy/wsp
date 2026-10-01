@@ -1540,6 +1540,30 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "cost.history":
               send({ id: msg.id, ok: true, points: await rt.status.history(msg.workspaceId, origin) });
               return;
+            case "usage.used":
+            case "usage.accounts":
+              // The person's accounts and what their turns used are read on the road their computers are: a socket let
+              // in on a ticket sees neither.
+              if (!ownRoad()) {
+                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
+                return;
+              }
+              if (msg.op === "usage.used") send({ id: msg.id, ok: true, used: await rt.usage.used({ range: msg.range, split: msg.split, ...(msg.outside !== undefined ? { outside: msg.outside } : {}) }) });
+              else send({ id: msg.id, ok: true, ...(await rt.usage.accounts()) });
+              return;
+            case "places.readings": {
+              if (!ownRoad()) {
+                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
+                return;
+              }
+              const target = msg.workspaceId !== undefined ? { workspaceId: msg.workspaceId } : msg.placeId !== undefined ? { placeId: msg.placeId } : undefined;
+              if (target === undefined) {
+                send({ id: msg.id, ok: false, error: "places.readings names a placeId or a workspaceId", kind: "usage" });
+                return;
+              }
+              send({ id: msg.id, ok: true, ...(await rt.usage.readings(target, msg.range, origin)) });
+              return;
+            }
             case "cost.spend":
               // What the person's computers and providers have cost them is read on the same road their list is:
               // a socket let in on a ticket sees neither.

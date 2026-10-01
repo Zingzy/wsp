@@ -6,7 +6,7 @@ import { linkSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { HISTORY_READERS, PARSE_VERSION, claudeSession, codexReader, commandNames, fileHistoryCache, hermesReader, installNames, readHistories, readStore, splitCommands, withoutHeredocs } from "../src/history/index.js";
+import { HISTORY_READERS, PARSE_VERSION, claudeSession, codexReader, commandNames, fileHistoryCache, fileUsageCache, hermesReader, installNames, readHistories, readLogUsage, readStore, splitCommands, withoutHeredocs } from "../src/history/index.js";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { MTIME, fakeHost } from "./fake-host.js";
 
@@ -357,5 +357,72 @@ describe("the session cache", () => {
     for (const f of ["claude.ts", "codex.ts", "commands.ts", "hermes.ts", "reader.ts", "tally.ts"]) h.update(readFileSync(new URL(`../src/history/${f}`, import.meta.url)));
     // Bump PARSE_VERSION in reader.ts and put the digest this prints here: every cache filled by the old code is then re-read.
     expect(`${PARSE_VERSION}:${h.digest("hex").slice(0, 16)}`).toBe(FINGERPRINT);
+  });
+});
+
+describe("what each agent's own logs say was used", () => {
+  const usageLine = (o: { id: string; session: string; at: string; model: string; cwd?: string; usage: Record<string, number> }) =>
+    line({ type: "assistant", sessionId: o.session, timestamp: o.at, requestId: `req_${o.id}`, ...(o.cwd !== undefined ? { cwd: o.cwd } : {}), message: { id: o.id, model: o.model, role: "assistant", content: [{ type: "text", text: "x" }], usage: o.usage } });
+
+  it("reads Claude's tokens once per message, though every block of a message repeats its usage, by session, day and model", async () => {
+    const usage = { input_tokens: 2, cache_creation_input_tokens: 100, cache_read_input_tokens: 1_000, output_tokens: 50 };
+    const text = [
+      usageLine({ id: "msg_1", session: "s1", at: "2026-09-29T10:00:00.000Z", model: "claude-opus-5", cwd: "/Users/dev/proj", usage }),
+      usageLine({ id: "msg_1", session: "s1", at: "2026-09-29T10:00:01.000Z", model: "claude-opus-5", cwd: "/Users/dev/proj", usage }),
+      usageLine({ id: "msg_2", session: "s1", at: "2026-09-29T10:05:00.000Z", model: "claude-opus-5", cwd: "/Users/dev/proj", usage: { input_tokens: 10, output_tokens: 5 } }),
+      userLine("a tool's result is not usage"),
+    ].join("\n");
+    const host = fakeHost({ files: { "~/.claude/projects/-Users-dev-proj/s1.jsonl": text } });
+    const read = await readLogUsage(host, CATALOG_AGENTS.filter(a => a.id === "claude"), { day: at => new Date(at).toISOString().slice(0, 10) });
+    expect(read).toEqual([
+      { agent: "claude", session: "s1", day: "2026-09-29", at: Date.parse("2026-09-29T10:05:00.000Z"), model: "claude-opus-5", folder: "/Users/dev/proj", tokens: { input: 1_112, output: 55, cached: 1_000, cacheWrite: 100, reasoning: 0 } },
+    ]);
+  });
+
+  it("reads a Codex rollout's last total under the thread id its session_meta names, with its model and folder", async () => {
+    const tc = (at: string, input: number, output: number) =>
+      line({ timestamp: at, type: "event_msg", payload: { type: "token_count", info: { total_token_usage: { input_tokens: input, cached_input_tokens: 400, output_tokens: output, reasoning_output_tokens: 7, total_tokens: input + output }, last_token_usage: {}, model_context_window: 258_400 }, rate_limits: {} } });
+    const text = [
+      line({ timestamp: "2026-09-29T09:00:00.000Z", type: "session_meta", payload: { id: "01a0e365-72f3-77e3-ba3a-3d18e12e9b95", cwd: "/Users/dev/proj" } }),
+      line({ timestamp: "2026-09-29T09:00:01.000Z", type: "turn_context", payload: { model: "gpt-5.5", cwd: "/Users/dev/proj" } }),
+      tc("2026-09-29T09:01:00.000Z", 1_000, 20),
+      tc("2026-09-29T09:02:00.000Z", 3_000, 90),
+    ].join("\n");
+    const host = fakeHost({ files: { "~/.codex/sessions/2026/09/29/rollout-2026-09-29T09-00-00-01a0e365.jsonl": text } });
+    const read = await readLogUsage(host, CATALOG_AGENTS.filter(a => a.id === "codex"), { day: at => new Date(at).toISOString().slice(0, 10) });
+    expect(read).toEqual([
+      { agent: "codex", session: "01a0e365-72f3-77e3-ba3a-3d18e12e9b95", day: "2026-09-29", at: Date.parse("2026-09-29T09:02:00.000Z"), model: "gpt-5.5", folder: "/Users/dev/proj", tokens: { input: 3_000, output: 90, cached: 400, cacheWrite: 0, reasoning: 7 } },
+    ]);
+  });
+
+  it("reads OpenCode's own per-session totals and cost out of its database, read-only", async () => {
+    const db = "/Users/dev/.local/share/opencode/opencode.db";
+    const query = "select id, directory, model, cost, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, time_updated from session";
+    const rows = JSON.stringify([
+      { id: "ses_1", directory: "/Users/dev/proj", model: '{"providerID":"anthropic","modelID":"claude-sonnet-4-5"}', cost: 0.12, tokens_input: 900, tokens_output: 40, tokens_reasoning: 0, tokens_cache_read: 300, tokens_cache_write: 10, time_updated: Date.parse("2026-09-29T11:00:00.000Z") },
+      { id: "ses_2", directory: "/Users/dev/other", model: "gpt-5.5", cost: 0, tokens_input: 0, tokens_output: 0, tokens_reasoning: 0, tokens_cache_read: 0, tokens_cache_write: 0, time_updated: Date.parse("2026-09-29T11:00:00.000Z") },
+    ]);
+    const host = fakeHost({ files: { "~/.local/share/opencode/opencode.db": 8192 }, exec: { [`sqlite3 -readonly -json ${db} ${query}`]: rows } });
+    const read = await readLogUsage(host, CATALOG_AGENTS.filter(a => a.id === "opencode"), { day: at => new Date(at).toISOString().slice(0, 10) });
+    // OpenCode's input leaves the cache out, so the cached and written parts are added in to match every other agent's.
+    expect(read).toEqual([
+      { agent: "opencode", session: "ses_1", day: "2026-09-29", at: Date.parse("2026-09-29T11:00:00.000Z"), model: "anthropic/claude-sonnet-4-5", folder: "/Users/dev/proj", tokens: { input: 1_210, output: 40, cached: 300, cacheWrite: 10, reasoning: 0 }, cost: 0.12 },
+    ]);
+  });
+
+  it("keeps what each file came to and reads again only a file whose stamp moved", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-usage-cache-"));
+    try {
+      const text = usageLine({ id: "msg_1", session: "s1", at: "2026-09-29T10:00:00.000Z", model: "claude-opus-5", usage: { input_tokens: 1, output_tokens: 1 } });
+      const host = fakeHost({ files: { "~/.claude/projects/-Users-dev-proj/s1.jsonl": text } });
+      const cache = fileUsageCache(join(dir, "usage-cache.json"));
+      const first = await readLogUsage(host, CATALOG_AGENTS.filter(a => a.id === "claude"), { day: at => new Date(at).toISOString().slice(0, 10), cache });
+      const reads = host.calls.length;
+      const again = await readLogUsage(host, CATALOG_AGENTS.filter(a => a.id === "claude"), { day: at => new Date(at).toISOString().slice(0, 10), cache: fileUsageCache(join(dir, "usage-cache.json")) });
+      expect(again).toEqual(first);
+      expect(host.calls.filter(c => c.startsWith("lines")).length).toBe(host.calls.slice(0, reads).filter(c => c.startsWith("lines")).length);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

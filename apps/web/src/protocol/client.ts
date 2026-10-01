@@ -68,6 +68,11 @@ import {
   JoinMint,
   SshHostSuggestion,
   PlaceSpend,
+  AccountsAnswer,
+  ReadingsAnswer,
+  UsedAnswer,
+  type UsageRange,
+  type UsageSplit,
   PlaceAddJob,
   PlaceUpdateReply,
   PlaceView,
@@ -704,6 +709,13 @@ export interface Api {
    * metered on. Optional so fixtures without the settings table need not fake it; without it the table says no
    * money at all rather than guessing at one. */
   spend?(): Promise<PlaceSpend[]>;
+  /** What the person's turns used over a range, split one way. Optional so fixtures without the Usage page need not
+   * fake it. */
+  usageUsed?(range: UsageRange, split: UsageSplit): Promise<UsedAnswer>;
+  /** Every sign-in wsp knows, one row per account, with its limits as the agent last reported them. */
+  usageAccounts?(): Promise<AccountsAnswer>;
+  /** A computer's readings over a range, folded into the range's step; none where its daemon kept none. */
+  placesReadings?(placeId: string, range: UsageRange): Promise<ReadingsAnswer>;
   /** Moves head to a version in the manifest; workspaces already forked keep their image. */
   rollbackSnapshot(version: number, name?: string): Promise<SnapshotRollbackResult>;
   /** Snapshots the workspace's disk as a project golden; the runtime refuses a machine that is not first-life. Optional
@@ -983,6 +995,9 @@ export function makeApi(c: ProtocolClient): Api {
     costHistory: async workspaceId => WorkspaceCostEvent.array().parse((await c.request<{ points?: unknown }>("cost.history", { workspaceId })).points),
     // Parsed, not trusted: a figure a person reads as money is a figure the wire type vouched for.
     spend: async () => PlaceSpend.array().parse((await c.request<{ places?: unknown }>("cost.spend")).places),
+    usageUsed: async (range, split) => UsedAnswer.parse((await c.request<{ used?: unknown }>("usage.used", { range, split, outside: true })).used),
+    usageAccounts: async () => AccountsAnswer.parse(await c.request<unknown>("usage.accounts")),
+    placesReadings: async (placeId, range) => ReadingsAnswer.parse(await c.request<unknown>("places.readings", { placeId, range })),
     // Parsed, not trusted: the lineage renders and forks only snapshots the wire type vouches for.
     snapshotWorkspace: async id => ProjectGolden.parse((await c.request<{ projectGolden?: unknown }>("workspaces.snapshot", { workspaceId: id })).projectGolden),
     listProjectGoldens: async () => ProjectGolden.array().parse((await c.request<{ projectGoldens?: unknown }>("projectGoldens.list")).projectGoldens),

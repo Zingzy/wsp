@@ -6,7 +6,7 @@
 import type { AccessParams } from "./command.js";
 
 /** The ids of the requests a turn sends once each; a steer is numbered, since a turn may take several. */
-export const REQUEST = { initialize: "wsp-initialize", thread: "wsp-thread", turn: "wsp-turn", interrupt: "wsp-interrupt", revert: "wsp-revert" } as const;
+export const REQUEST = { initialize: "wsp-initialize", thread: "wsp-thread", turn: "wsp-turn", interrupt: "wsp-interrupt", revert: "wsp-revert", account: "wsp-account", rateLimits: "wsp-rate-limits" } as const;
 
 /** A request id as the server sends one: a string or an integer, echoed back as it came. */
 export type RequestId = string | number;
@@ -25,6 +25,12 @@ export function initializeLine(): string {
 }
 
 export const INITIALIZED_LINE = line({ method: "initialized" });
+
+/** The sign-in the server runs on, whose answer names a ChatGPT account's email and plan, or a key. */
+export const ACCOUNT_READ_LINE = line({ id: REQUEST.account, method: "account/read", params: {} });
+
+/** The account's plan windows as they stand; later changes arrive as account/rateLimits/updated. */
+export const RATE_LIMITS_READ_LINE = line({ id: REQUEST.rateLimits, method: "account/rateLimits/read", params: { excludeResetCreditDetails: true } });
 
 export interface ThreadOptions {
   cwd?: string;

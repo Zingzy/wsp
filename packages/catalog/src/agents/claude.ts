@@ -47,5 +47,6 @@ export const CLAUDE: AgentEntry = {
     { state: "prompt history", location: "history.jsonl", key: "one line per prompt", pathFields: ["project"], move: "rewrite the field", status: "inferred" },
   ],
   history: { format: "claude-jsonl", root: "~/.claude/projects" },
+  printsLimits: true,
   source: { sessions: 149, images: 1, road: "measured" },
 };

@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Settings > Privacy: what this wsp asks of a service outside the person's
-// computers, each as one switch.
+// computers and what it reads on this one, each as one switch.
 import { DEFAULT_PREFERENCES, type Preferences, type PreferencesPatch } from "@wsp/protocol";
 import { Switch } from "../components/ui/switch.js";
 import { PRIVACY_WORDS } from "./format.js";
+import { hereName } from "./places.js";
 import type { SettingsCardData } from "./rows.js";
 import type { SettingsContext } from "./settingsContext.js";
 
-export const PRIVACY_DEFAULTS: PreferencesPatch = { serverIcons: DEFAULT_PREFERENCES.serverIcons, agentVersions: DEFAULT_PREFERENCES.agentVersions };
+export const PRIVACY_DEFAULTS: PreferencesPatch = { serverIcons: DEFAULT_PREFERENCES.serverIcons, agentVersions: DEFAULT_PREFERENCES.agentVersions, usageLogs: DEFAULT_PREFERENCES.usageLogs };
 
-export const privacyOffDefaults = (p: Preferences): boolean => p.serverIcons !== DEFAULT_PREFERENCES.serverIcons || p.agentVersions !== DEFAULT_PREFERENCES.agentVersions;
+export const privacyOffDefaults = (p: Preferences): boolean => p.serverIcons !== DEFAULT_PREFERENCES.serverIcons || p.agentVersions !== DEFAULT_PREFERENCES.agentVersions || p.usageLogs !== DEFAULT_PREFERENCES.usageLogs;
 
 export function privacyCards(ctx: SettingsContext): SettingsCardData[] {
   const { preferences, setPreferences } = ctx;
@@ -36,6 +37,13 @@ export function privacyCards(ctx: SettingsContext): SettingsCardData[] {
               <Switch data-k="agent-versions" aria-label={PRIVACY_WORDS.agentVersions} disabled={envOff} checked={!envOff && preferences.agentVersions} onCheckedChange={agentVersions => setPreferences({ agentVersions })} />
             </span>
           ),
+        },
+        {
+          kind: "row",
+          id: "usage-logs",
+          title: PRIVACY_WORDS.usageLogs,
+          description: PRIVACY_WORDS.usageLogsDescription(hereName(ctx.places)),
+          control: <Switch data-k="usage-logs" aria-label={PRIVACY_WORDS.usageLogs} checked={preferences.usageLogs} onCheckedChange={usageLogs => setPreferences({ usageLogs })} />,
         },
       ],
     },

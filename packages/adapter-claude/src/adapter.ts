@@ -4,7 +4,7 @@
 // recorded in solari-poc/RESULTS.md.
 
 import { ASIDE_WALL_MS, INTERRUPT_GRACE_MS, PERMISSION_ALLOW, PERMISSION_DENY, RUN_EXIT_MS, asideWallLine, backgroundTasksLine, endAfterResult, endRun, fmtDuration, harnessExitLine, refusedTurn, taskFinishedLine, titlePrompt } from "@wsp/protocol";
-import type { AdapterAttachOptions, AdapterEvent, AsideAnswer, AsideQuestion, ExecStream, ExecStreamFactory, HarnessCatalogProbe, McpServerSpec, PermissionAsk, PermissionOutcome, ScreenCommand, SessionAsker, SessionHarness, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnRefusal, TurnResult, TurnStatus, CommitDrafter, PlanStep, TurnTokens } from "@wsp/protocol";
+import type { AdapterAttachOptions, AdapterEvent, AsideAnswer, AsideQuestion, ExecStream, ExecStreamFactory, HarnessCatalogProbe, McpServerSpec, PermissionAsk, PermissionOutcome, ScreenCommand, SessionAsker, SessionHarness, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnRefusal, TurnResult, TurnStatus, CommitDrafter, PlanStep, TurnTokens, HarnessLimit, LimitKind, LimitStatus, LimitWindow } from "@wsp/protocol";
 import { SKIP_PROMPTS_MODE, controlAllowLine, controlAnswerLine, controlErrorLine, controlLine, modeOptionOn, setModeLine } from "./permissions.js";
 import { CLAUDE_SCREEN_COMMANDS, catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
 import { asideAnswer, asideCommand, forkCleanupCommand } from "./aside.js";
@@ -411,6 +411,9 @@ function normalizeEvent(event: Record<string, unknown>, fallbackSessionId: strin
     case "system": {
       if (str(event.subtype) !== "init") return [];
       const harness = harnessOf(event);
+      // Claude Code names where its credential came from; any source but none is a key, which has no plan window.
+      const keySource = str(event.apiKeySource);
+      const keyed: AdapterEvent[] = keySource !== undefined && keySource !== "none" ? [{ type: "limit", sessionId, limit: { windows: [], keyed: true } }] : [];
       return [
         {
           type: "session.start",
@@ -420,6 +423,7 @@ function normalizeEvent(event: Record<string, unknown>, fallbackSessionId: strin
           tools: strArr(event.tools),
           ...(harness !== undefined ? { harness } : {}),
         },
+        ...keyed,
       ];
     }
     case "assistant": {
@@ -502,9 +506,46 @@ function normalizeEvent(event: Record<string, unknown>, fallbackSessionId: strin
     }
     case "result":
       return [{ type: "turn.done", sessionId, result: normalizeResult(event, refusal) }];
+    case "rate_limit_event": {
+      const limit = limitOf(rec(event.rate_limit_info));
+      return limit === undefined ? [] : [{ type: "limit", sessionId, limit }];
+    }
     default:
       return [];
   }
+}
+
+/** Claude Code's name for each window as wsp's kind. The overage buckets are one kind: both are use past the plan. */
+const LIMIT_KIND: Record<string, LimitKind> = {
+  five_hour: "session",
+  seven_day: "week",
+  seven_day_opus: "week_opus",
+  seven_day_sonnet: "week_sonnet",
+  seven_day_overage_included: "overage",
+  overage: "overage",
+};
+const LIMIT_STATUS: Record<string, LimitStatus> = { allowed: "ok", allowed_warning: "warning", rejected: "reached" };
+
+/** A rate_limit_event's reading: every window it tracks under unifiedWindows, else the one window it names at the top
+ * level, utilization (a fraction, above 1 when a window ran past its cap) as a percent and resetsAt (epoch seconds) in
+ * ms. A reading with no utilization for any window says nothing about the plan and is dropped. Claude Code names no
+ * account in it. */
+function limitOf(info: Record<string, unknown> | undefined): HarnessLimit | undefined {
+  if (info === undefined) return undefined;
+  const windows: LimitWindow[] = [];
+  const add = (type: string, reading: Record<string, unknown> | undefined): void => {
+    const kind = LIMIT_KIND[type];
+    const used = num(reading?.utilization);
+    if (kind === undefined || used === undefined || windows.some(w => w.kind === kind)) return;
+    const resetsAt = num(reading?.resetsAt);
+    windows.push({ kind, usedPercent: Math.round(used * 1000) / 10, ...(resetsAt !== undefined ? { resetsAt: resetsAt * 1000 } : {}) });
+  };
+  for (const [type, reading] of Object.entries(rec(info.unifiedWindows) ?? {})) add(type, rec(reading));
+  const top = str(info.rateLimitType);
+  if (top !== undefined) add(top, info);
+  if (windows.length === 0) return undefined;
+  const status = LIMIT_STATUS[str(info.status) ?? ""];
+  return { windows, ...(status !== undefined ? { status } : {}) };
 }
 
 export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {

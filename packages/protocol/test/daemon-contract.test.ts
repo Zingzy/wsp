@@ -101,6 +101,7 @@ import {
   GitRestoreReply,
   FsFilesReply,
   GitSnapshotReply,
+  SysHistoryReply,
   GitPushReply,
   GuestCliMessage,
   GuestOpenReply,
@@ -669,6 +670,13 @@ const REPLIES: Record<string, { schema: ZodTypeAny; samples: unknown[] }> = {
   },
   GitRestoreReply: { schema: GitRestoreReply, samples: [{ before: "refs/wsp/checkpoints/spoo-fix-login/thr_01a0e365/turn_1-before-1790521483000", files: 3 }] },
   GitSnapshotReply: { schema: GitSnapshotReply, samples: [{ commit: "0123456789abcdef0123456789abcdef01234567" }] },
+  SysHistoryReply: {
+    schema: SysHistoryReply,
+    samples: [
+      { points: [{ at: 1_790_640_000_000, cpu: 20.5, load1: 0.42, mem: { used: 2_048_000, total: 8_192_000 }, disk: { used: 40_960_000, total: 81_920_000 } }], stepMs: 300_000, truncated: false },
+      { points: [], stepMs: 7_200_000, truncated: true },
+    ],
+  },
   FsFilesReply: { schema: FsFilesReply, samples: [{ files: ["README.md", "src/ChatView.tsx"], truncated: false }, { files: [], truncated: true }] },
   GuestOpenReply: { schema: GuestOpenReply, samples: [{ session: "g1" }] },
   SshStartReply: { schema: SshStartReply, samples: [{ port: 42022, hostKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOvWlEn2x0cQO0mTu7nV9VbWSm5aXQ3u2QYqZ2mGHcbS" }] },

@@ -229,8 +229,10 @@ describe("ClaudeAdapter over the recorded fixture", () => {
     const session = adapter.start({ prompt: "write a hello world server", onEvent });
     const result = await session.finished;
 
+    // The recording's init names ANTHROPIC_API_KEY as its credential, which is a sign-in with no plan window.
     expect(events.map((e) => e.type)).toEqual([
       "session.start",
+      "limit",
       "turn.delta",
       "turn.delta",
       "turn.delta",
@@ -1329,5 +1331,83 @@ describe("what the model held after a compaction", () => {
     expect(result.tokens?.context).toBe(31_250);
     expect(result.tokens?.window).toBe(1_000_000);
     expect(result.model).toBe("claude-opus-5-5[1m]");
+  });
+});
+
+describe("ClaudeAdapter reads the plan's limits Claude Code prints", () => {
+  const SID = "4b9c1d2e-0a1f-4c3b-9d8e-7f6a5b4c3d2e";
+  const init = JSON.stringify({ type: "system", subtype: "init", cwd: "/root", session_id: SID, tools: [], model: "claude-opus-5" });
+  const result = JSON.stringify({ type: "result", subtype: "success", is_error: false, duration_ms: 1, result: "done", session_id: SID });
+  // The shape Claude Code 2.1.280's own stream-json schema declares for the event (Jbr in its binary).
+  const limitLine = (info: Record<string, unknown>) => JSON.stringify({ type: "rate_limit_event", rate_limit_info: info, uuid: "7c1e0f5e-3d44-4b0a-9a1c-2e6f8d9b0a11", session_id: SID });
+
+  async function limits(lines: string[]) {
+    const exec = scriptedExec([init, ...lines, result]);
+    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
+    const { events, onEvent } = collect();
+    await adapter.start({ prompt: "go", onEvent }).finished;
+    return events.flatMap(e => (e.type === "limit" ? [e] : []));
+  }
+
+  it("reads every window the event tracks, utilization as a percent and the reset in ms, and names no account", async () => {
+    const seen = await limits([
+      limitLine({
+        status: "allowed",
+        rateLimitType: "five_hour",
+        utilization: 0.62,
+        resetsAt: 1_790_700_000,
+        unifiedWindows: { five_hour: { utilization: 0.62, resetsAt: 1_790_700_000 }, seven_day: { utilization: 0.18, resetsAt: 1_791_200_000 } },
+      }),
+    ]);
+    expect(seen).toEqual([
+      {
+        type: "limit",
+        sessionId: SID,
+        limit: {
+          windows: [
+            { kind: "session", usedPercent: 62, resetsAt: 1_790_700_000_000 },
+            { kind: "week", usedPercent: 18, resetsAt: 1_791_200_000_000 },
+          ],
+          status: "ok",
+        },
+      },
+    ]);
+  });
+
+  it("maps each of the six limit types to its kind, and the status words to ok, warning and reached", async () => {
+    const one = (rateLimitType: string, status: string) => limitLine({ status, rateLimitType, utilization: 0.5, resetsAt: 1_790_700_000 });
+    const seen = await limits([
+      one("five_hour", "allowed"),
+      one("seven_day", "allowed_warning"),
+      one("seven_day_opus", "allowed"),
+      one("seven_day_sonnet", "allowed"),
+      one("seven_day_overage_included", "allowed"),
+      one("overage", "rejected"),
+    ]);
+    expect(seen.map(e => [e.limit.windows.map(w => w.kind), e.limit.status])).toEqual([
+      [["session"], "ok"],
+      [["week"], "warning"],
+      [["week_opus"], "ok"],
+      [["week_sonnet"], "ok"],
+      [["overage"], "ok"],
+      [["overage"], "reached"],
+    ]);
+  });
+
+  it("says a turn signed in with a key has no plan window, off the key source the init line names", async () => {
+    const run = async (apiKeySource: string | undefined) => {
+      const line = JSON.stringify({ type: "system", subtype: "init", cwd: "/root", session_id: SID, tools: [], model: "claude-opus-5", ...(apiKeySource !== undefined ? { apiKeySource } : {}) });
+      const exec = scriptedExec([line, result]);
+      const { events, onEvent } = collect();
+      await createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" }).start({ prompt: "go", onEvent }).finished;
+      return events.flatMap(e => (e.type === "limit" ? [e.limit] : []));
+    };
+    for (const keyed of ["ANTHROPIC_API_KEY", "apiKeyHelper", "/login managed key"]) expect(await run(keyed)).toEqual([{ windows: [], keyed: true }]);
+    expect(await run("none")).toEqual([]);
+    expect(await run(undefined)).toEqual([]);
+  });
+
+  it("drops an event that reads no utilization for any window", async () => {
+    expect(await limits([limitLine({ status: "allowed", rateLimitType: "five_hour", resetsAt: 1_790_700_000 }), limitLine({ status: "allowed" })])).toEqual([]);
   });
 });

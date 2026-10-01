@@ -26,6 +26,7 @@ mod proc;
 mod proc_local;
 mod pty;
 mod readings;
+mod readings_history;
 mod relay;
 /// The seal a place link agrees in its handshake. Public so the suite that drives both ends of a link can
 /// stand on the host's side of it, which in the product is node's own.
@@ -111,6 +112,10 @@ pub struct Options {
     /// The workspace AppArmor profile a leave run as root takes off; the one a root install writes where unset. A
     /// test names a file under its own temp home, since a leave there would otherwise take the machine's own.
     pub apparmor_profile: Option<PathBuf>,
+    /// Where this daemon keeps its readings a minute apart; its token's folder's readings where unset.
+    pub readings_dir: Option<PathBuf>,
+    /// How often the kept readings read the computer; the rule's own where unset. Only a case has use for another.
+    pub readings_interval_ms: Option<u64>,
 }
 
 impl Options {
@@ -154,6 +159,8 @@ impl Options {
             ssh_programs: None,
             ssh_idle_ms: None,
             apparmor_profile: None,
+            readings_dir: None,
+            readings_interval_ms: None,
         }
     }
 }
@@ -262,6 +269,8 @@ pub(crate) struct Ctx {
     /// file it binds, which sits in that workspace's own wsp folder and so inside that workspace alone.
     workspace_doors: Mutex<HashMap<String, WorkspaceDoor>>,
     keys: AtomicU64,
+    /// The readings this daemon keeps a minute apart for as long as it runs, which sys.history reads back.
+    pub(crate) history: Arc<readings_history::History>,
 }
 
 /// One workspace's door: the task accepting on the socket inside that workspace, which a stop ends, and the
@@ -291,6 +300,12 @@ impl Ctx {
         let guest_unwatched = Duration::from_millis(options.guest_unwatched_ms.unwrap_or(numbers::GUEST_UNWATCHED_MS));
         #[cfg(target_os = "linux")]
         let (runtime, runtime_refusal) = open_runtime(&options, &log, daemon_port);
+        // Beside the token, in the daemon's own folder: a box keeps them under /root/.wsp/readings.
+        let readings_dir = options
+            .readings_dir
+            .clone()
+            .unwrap_or_else(|| options.token_path.parent().map_or_else(|| PathBuf::from("readings"), |dir| dir.join("readings")));
+        let history = Arc::new(readings_history::History::new(readings_dir, numbers::READINGS_KEPT_DAYS, numbers::READINGS_CAP_BYTES));
         let sshd = Arc::new(ssh::Servers::new(
             options.ssh_programs.clone().unwrap_or_default(),
             Duration::from_millis(options.ssh_idle_ms.unwrap_or(numbers::SSH_IDLE_MS)),
@@ -321,6 +336,7 @@ impl Ctx {
             tokened: Mutex::new(HashMap::new()),
             workspace_doors: Mutex::new(HashMap::new()),
             keys: AtomicU64::new(1),
+            history,
         })
     }
 
@@ -543,6 +559,11 @@ impl Daemon {
             tokio::spawn(relay::serve_open_socket(open_socket, Arc::clone(&self.ctx)));
         }
         tokio::spawn(auth::watch(Arc::clone(&self.ctx)));
+        // The readings are kept whether or not anybody watches, off the same module a watch reads, at their own pace.
+        if let Ok(kind) = readings::readings_for(&self.ctx.options.kind, std::env::consts::OS) {
+            let every = Duration::from_millis(self.ctx.options.readings_interval_ms.unwrap_or(numbers::READINGS_EVERY_MS));
+            tokio::spawn(readings_history::record((kind.metrics)(&self.ctx.readings_options()), Arc::clone(&self.ctx.history), every));
+        }
         let ctx = Arc::clone(&self.ctx);
         // A copy sits beside its project folder, so a removal a stop cut short is left in the folder a root sits in.
         std::thread::spawn(move || {

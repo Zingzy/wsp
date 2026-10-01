@@ -125,6 +125,11 @@ export interface AgentEntry extends EntryBase {
   projectState: readonly ProjectState[];
   /** Absent while the agent's session format has no reader: its history reads as none. */
   history?: SessionHistory;
+  /** The agent prints its plan's limits in a turn's stream, which the Usage page reads; absent, it prints none. */
+  printsLimits?: true;
+  /** Where the agent keeps its token counts when its history has no reader: what the Usage page reads for work done
+   * outside wsp. An agent with a history reads its usage there. */
+  usageLog?: { format: "opencode-sqlite"; root: string };
   /** Where the agent on this computer keeps its user-wide MCP servers and how one is named there, per its own docs;
    * absent when the catalog knows no such file for it, and wsp's server is then added by hand. */
   mcp?: McpConfig;

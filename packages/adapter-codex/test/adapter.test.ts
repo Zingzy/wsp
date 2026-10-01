@@ -207,8 +207,8 @@ describe("CodexAdapter over codex app-server", () => {
     expect(call.env).toEqual({ CODEX_HOME: "/root/.codex" });
     expect(adapter.env).toEqual({ CODEX_HOME: "/root/.codex" });
     expect(session.command).toBe(call.command);
-    expect(call.input?.map(l => parse(l).method)).toEqual(["initialize", "initialized", "thread/start"]);
-    expect(parse(call.input![2]!).params).toEqual({ cwd: "/root/app", model: "gpt-5.5", sandbox: "workspace-write", approvalPolicy: "on-request" });
+    expect(call.input?.map(l => parse(l).method)).toEqual(["initialize", "initialized", "account/read", "account/rateLimits/read", "thread/start"]);
+    expect(parse(call.input![4]!).params).toEqual({ cwd: "/root/app", model: "gpt-5.5", sandbox: "workspace-write", approvalPolicy: "on-request" });
     const turn = launch.wires[0]!.written.find(m => m.method === "turn/start")!;
     expect(turn.params).toEqual({ threadId: RECORDED_THREAD, input: [{ type: "text", text: "list the repo" }], effort: "low" });
     // The reply is the turn's end, so stdin closes there and the server exits on its own.
@@ -236,7 +236,9 @@ describe("CodexAdapter over codex app-server", () => {
       "permission.ask",
       "permission.close",
       "delta:tool_result",
+      "limit",
       "delta:text",
+      "limit",
       "turn.done",
       "session.end",
     ]);
@@ -245,6 +247,15 @@ describe("CodexAdapter over codex app-server", () => {
     expect(deltas[0]!.text).toMatch(/^loading hooks from both /);
     expect(deltas[1]).toMatchObject({ text: "I\u2019ll create `hi.txt` in the current folder.", messageId: "msg_0567d7bf2c7ea0de016ab930865e9087d09774946388412886" });
     expect(deltas[2]).toMatchObject({ toolName: "command_execution", toolUseId: RECORDED_COMMAND, text: JSON.stringify({ command: "/bin/zsh -lc 'touch hi.txt'" }) });
+    // The recording's two rolling updates, each a plan window pair on a Plus plan, epoch seconds read as ms.
+    expect(events.flatMap(e => (e.type === "limit" ? [e.limit] : [])).at(-1)).toEqual({
+      windows: [
+        { kind: "session", usedPercent: 9, resetsAt: 1_790_539_090_000 },
+        { kind: "week", usedPercent: 5, resetsAt: 1_791_094_756_000 },
+      ],
+      plan: "plus",
+      status: "ok",
+    });
     const ask = events.find((e): e is Extract<AdapterEvent, { type: "permission.ask" }> => e.type === "permission.ask")!.ask;
     expect(ask).toMatchObject({ askId: "0", toolName: "command_execution", toolUseId: RECORDED_COMMAND, detail: "Allow me to create hi.txt in the current folder?" });
     expect(JSON.parse(ask.input)).toEqual({ command: "/bin/zsh -lc 'touch hi.txt'", cwd: "/private/tmp/b7-real" });
@@ -311,7 +322,7 @@ describe("CodexAdapter over codex app-server", () => {
     await session.finished;
     expect(session.localId).toBe(RECORDED_THREAD);
     expect(adapter.sessions.get(RECORDED_THREAD)).toBe(session);
-    expect(parse(launch.calls[0]!.input![2]!)).toEqual({ id: "wsp-thread", method: "thread/resume", params: { threadId: RECORDED_THREAD, cwd: "/root/app", sandbox: "read-only", approvalPolicy: "on-request" } });
+    expect(parse(launch.calls[0]!.input![4]!)).toEqual({ id: "wsp-thread", method: "thread/resume", params: { threadId: RECORDED_THREAD, cwd: "/root/app", sandbox: "read-only", approvalPolicy: "on-request" } });
     expect(new Set(events.map(e => e.sessionId))).toEqual(new Set([RECORDED_THREAD]));
   });
 
@@ -703,6 +714,8 @@ describe("a side question on a Codex thread", () => {
     expect(answer).toEqual({ text: "You are in /root/app; you last asked me to count.", usage: { input: 900, cached: 880, output: 12, reasoning: 0, context: 912 } });
     const call = launch.calls[0]!;
     expect(call.command).toBe("cd '/root/app' && codex app-server -c tools.update_plan.enabled='true'");
+    // A side question is no turn of the account's: it asks neither the account nor its limits.
+    expect(call.input?.map(l => parse(l).method)).toEqual(["initialize", "initialized", "thread/fork"]);
     const fork = parse(call.input!.at(-1)!);
     expect(fork.method).toBe("thread/fork");
     expect(fork.params).toMatchObject({ threadId: THREAD_ID, ephemeral: true, sandbox: "read-only", approvalPolicy: "never", model: "gpt-5.5" });
@@ -791,5 +804,90 @@ describe("what a rewind needs of a Codex turn", () => {
       return w;
     });
     await expect(adapterOver(launch).revert({ session: THREAD_ID, beforeTurn: TURN_ID })).rejects.toThrow("codex would not cut the thread: thread history is not paginated");
+  });
+});
+
+describe("a Codex account's plan limits on the app server", () => {
+  // Shapes from `codex app-server generate-ts` on codex-cli 0.157.1: GetAccountResponse, GetAccountRateLimitsResponse,
+  // AccountRateLimitsUpdatedNotification.
+  const account = (value: Json | null) => JSON.stringify({ id: "wsp-account", result: { account: value, requiresOpenaiAuth: true } });
+  const window = (usedPercent: number, windowDurationMins: number, resetsAt: number) => ({ usedPercent, windowDurationMins, resetsAt });
+  const snapshot = (o: { primary?: Json | null; secondary?: Json | null; planType?: string | null; reached?: string | null }) => ({
+    limitId: "codex",
+    limitName: null,
+    normalModelSlug: null,
+    primary: o.primary ?? null,
+    secondary: o.secondary ?? null,
+    credits: null,
+    individualLimit: null,
+    spendControlReached: null,
+    planType: o.planType ?? null,
+    rateLimitReachedType: o.reached ?? null,
+  });
+  const rateLimits = (s: Json, accountId: string | null = "acct_7f3a") =>
+    JSON.stringify({ id: "wsp-rate-limits", result: { ordinaryUsageAllowed: true, rateLimits: s, rateLimitsByLimitId: null, rateLimitResetCredits: null, accountId, rateLimitUpsell: null } });
+  const updated = (s: Json) => JSON.stringify({ method: "account/rateLimits/updated", params: { rateLimits: s } });
+  const limitsOf = (events: AdapterEvent[]) => events.flatMap(e => (e.type === "limit" ? [e.limit] : []));
+
+  it("asks the account and its limits once as the turn opens, and reads the windows by their length with the plan and the account", async () => {
+    const launch = launcher(
+      scripted([
+        account({ type: "chatgpt", email: "dev@example.com", planType: "plus" }),
+        rateLimits(snapshot({ primary: window(34.5, 300, 1_790_700_000), secondary: window(12, 10_080, 1_791_200_000), planType: "plus" })),
+        agentMessage("m1", "done"),
+        completed("completed"),
+      ]),
+    );
+    const { events, onEvent } = collect();
+    await adapterOver(launch).start({ prompt: "hi", onEvent }).finished;
+    const seed = (launch.calls[0]!.input ?? []).map(line => (JSON.parse(line) as Json).method);
+    expect(seed).toEqual(["initialize", "initialized", "account/read", "account/rateLimits/read", "thread/start"]);
+    expect(limitsOf(events)).toEqual([
+      {
+        windows: [
+          { kind: "session", usedPercent: 34.5, resetsAt: 1_790_700_000_000 },
+          { kind: "week", usedPercent: 12, resetsAt: 1_791_200_000_000 },
+        ],
+        plan: "plus",
+        status: "ok",
+        account: { id: "acct_7f3a", label: "dev@example.com" },
+      },
+    ]);
+  });
+
+  it("merges a rolling update into the last reading, a window it leaves out kept and a reached limit said", async () => {
+    const launch = launcher(
+      scripted([
+        account({ type: "chatgpt", email: "dev@example.com", planType: "plus" }),
+        rateLimits(snapshot({ primary: window(34.5, 300, 1_790_700_000), secondary: window(12, 10_080, 1_791_200_000), planType: "plus" })),
+        updated(snapshot({ primary: window(100, 300, 1_790_700_000), reached: "rate_limit_reached" })),
+        completed("completed"),
+      ]),
+    );
+    const { events, onEvent } = collect();
+    await adapterOver(launch).start({ prompt: "hi", onEvent }).finished;
+    expect(limitsOf(events).at(-1)).toEqual({
+      windows: [
+        { kind: "session", usedPercent: 100, resetsAt: 1_790_700_000_000 },
+        { kind: "week", usedPercent: 12, resetsAt: 1_791_200_000_000 },
+      ],
+      plan: "plus",
+      status: "reached",
+      account: { id: "acct_7f3a", label: "dev@example.com" },
+    });
+  });
+
+  it("reads a window longer than a week as the month", async () => {
+    const launch = launcher(scripted([rateLimits(snapshot({ primary: window(5, 43_200, 1_792_000_000) }), null), completed("completed")]));
+    const { events, onEvent } = collect();
+    await adapterOver(launch).start({ prompt: "hi", onEvent }).finished;
+    expect(limitsOf(events)).toEqual([{ windows: [{ kind: "month", usedPercent: 5, resetsAt: 1_792_000_000_000 }], status: "ok" }]);
+  });
+
+  it("says a sign-in by API key has no plan window", async () => {
+    const launch = launcher(scripted([account({ type: "apiKey" }), completed("completed")]));
+    const { events, onEvent } = collect();
+    await adapterOver(launch).start({ prompt: "hi", onEvent }).finished;
+    expect(limitsOf(events)).toEqual([{ windows: [], keyed: true }]);
   });
 });

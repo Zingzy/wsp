@@ -1,0 +1,26 @@
+[
+  {
+    "points": [
+      {
+        "at": 1790640000000,
+        "cpu": 20.5,
+        "load1": 0.42,
+        "mem": {
+          "used": 2048000,
+          "total": 8192000
+        },
+        "disk": {
+          "used": 40960000,
+          "total": 81920000
+        }
+      }
+    ],
+    "stepMs": 300000,
+    "truncated": false
+  },
+  {
+    "points": [],
+    "stepMs": 7200000,
+    "truncated": true
+  }
+]
