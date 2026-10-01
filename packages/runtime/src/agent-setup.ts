@@ -54,7 +54,7 @@ export function realFolderScript(path: string): string {
     "cd ~ && pwd -P",
   ].join("; ");
 }
-const keyOf = (placeId: string, agent: string): string => `${placeId}:${agent}`;
+export const keyOf = (placeId: string, agent: string): string => `${placeId}:${agent}`;
 
 /** What a launch of one agent on one computer takes from its setup. */
 export interface SetupLaunch {

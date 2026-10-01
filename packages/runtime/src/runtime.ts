@@ -240,7 +240,7 @@ import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./
 import { isNoProvider, isPlaceAbsent, projectStateKey, putFiles, type Copier } from "@wsp/engine";
 import { boxFullLine, DISK_FULL_PCT, diskFullLine, stopRefusedLine, threadMessages, threadSeed, workspaceMemMb } from "@wsp/protocol";
 import { accessMode, accessRefusal, agentOffLine, configDirLaunchRefusal, configDirRefusal, markedFor, openDefaults, resolveThreadDefaults, setupView, shapeModels, withCustomModels, type AccessChoice, type AgentLaunch, type AgentRow, type AgentSetupSet, type ProjectOverrides, type ResolvedFolder, type ThreadDefaults } from "@wsp/protocol";
-import { agentSetups, realFolderHere, realFolderScript } from "./agent-setup.js";
+import { agentSetups, keyOf, realFolderHere, realFolderScript } from "./agent-setup.js";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
 import { assertTokenShape, daemonTokenFor, daemonTokenPathOf, rotateDaemonToken } from "./daemon-token.js";
@@ -7693,8 +7693,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const { place, folder } = kept;
     const why = configDirRefusal(agentLabel(harness), folder, await configFolderOn(place, folder));
     const refused = why === null ? null : configDirLaunchRefusal(agentLabel(harness), harness, folder, why);
-    if (refused === null) setupRefusals.delete(`${place}:${harness}`);
-    else setupRefusals.set(`${place}:${harness}`, refused);
+    if (refused === null) setupRefusals.delete(keyOf(place, harness));
+    else setupRefusals.set(keyOf(place, harness), refused);
     return refused;
   };
   /** Settles at once where no config folder is kept, so a road with nothing to check waits on nothing more than before. */
@@ -9190,7 +9190,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           ...((): { setupRefusal?: string } => {
             const entry = live.get(s.view.workspaceId);
             const place = entry === undefined ? undefined : setupPlace(entry);
-            const refused = place === undefined ? undefined : setupRefusals.get(`${place}:${s.view.harness}`);
+            const refused = place === undefined ? undefined : setupRefusals.get(keyOf(place, s.view.harness));
             return refused !== undefined ? { setupRefusal: refused } : {};
           })(),
           // A turn that ended before the stamps began reads as seen the moment it ended, not at the upgrade, so the quiet
@@ -11470,7 +11470,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     setupWrite: async (placeId, agent, change) => {
       if (adapters[agent] === undefined) throw Object.assign(new Error(noAdapterLine(agent, Object.keys(adapters))), { kind: "usage" });
       await setups.set(placeId, agent, change, { folder: path => configFolderOn(placeId, path), agentName: agentLabel(agent) });
-      setupRefusals.delete(`${placeId}:${agent}`);
+      setupRefusals.delete(keyOf(placeId, agent));
     },
     relayed: () => backend.capabilities.callbackRelay,
     now: () => clock.now(),
