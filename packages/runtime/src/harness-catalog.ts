@@ -213,6 +213,16 @@ export function harnessCatalog(harness: string): HarnessCatalog | undefined {
   return HARNESS_CATALOGS.find(c => c.harness === harness);
 }
 
+/** A model as a person reads it: its label in any agent's table, found as an agent names it, with a provider in front
+ * or a date after it; else its id, and an empty id as no model named. */
+export function modelLabel(model: string): string {
+  if (model === "") return "Model not named";
+  const bare = model.slice(model.lastIndexOf("/") + 1);
+  const undated = (id: string): string => id.replace(/-\d{8}$/, "");
+  const known = HARNESS_CATALOGS.flatMap(everyModel);
+  return (known.find(o => o.value === bare) ?? known.find(o => undated(o.value) === undated(bare)))?.label ?? bare;
+}
+
 /** The model a thread's title question runs on: the harness row's own smallest, where the catalog in front of us
  * still lists it. Nothing where the harness names none and where the binary no longer offers the one it named, and
  * the question then runs on whatever that CLI runs without a model. */

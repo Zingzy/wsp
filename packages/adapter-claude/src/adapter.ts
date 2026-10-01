@@ -228,18 +228,33 @@ function heldTokens(usage: Record<string, unknown>): number {
   return inputTokens(usage) + (num(usage.output_tokens) ?? 0);
 }
 
-/** The turn's tokens off its result: the usage sums every call of the turn, and modelUsage names each model the turn
- * ran with its window. The model is the one that did the most of it, since a turn hands small jobs to a cheaper one. */
-function resultTokens(event: Record<string, unknown>): { tokens?: TurnTokens; model?: string } {
-  const usage = rec(event.usage);
-  const models = Object.entries(rec(event.modelUsage) ?? {}).flatMap(([id, raw]) => {
-    const row = rec(raw);
+type ModelUse = NonNullable<TurnResult["models"]>[number];
+
+const MODEL_FIELDS = ["input", "output", "cached", "cacheWrite", "reasoning"] as const;
+
+/** Each model's running totals as Claude Code keeps them, off a result's modelUsage or a saved cost-state line's. input
+ * counts the fresh, the written and the cached part, as every turn's tokens do, and thinking is already inside output. */
+function modelsOf(raw: unknown): ModelUse[] {
+  return Object.entries(rec(raw) ?? {}).flatMap(([model, value]) => {
+    const row = rec(value);
     if (row === undefined) return [];
-    const spent = (num(row.inputTokens) ?? 0) + (num(row.outputTokens) ?? 0) + (num(row.cacheReadInputTokens) ?? 0) + (num(row.cacheCreationInputTokens) ?? 0);
-    return [{ id, spent, window: num(row.contextWindow) }];
+    const cached = num(row.cacheReadInputTokens) ?? 0;
+    const cacheWrite = num(row.cacheCreationInputTokens) ?? 0;
+    const costUsd = num(row.costUSD);
+    const tokens = { input: (num(row.inputTokens) ?? 0) + cached + cacheWrite, output: num(row.outputTokens) ?? 0, cached, cacheWrite, reasoning: num(row.thinkingTokens) ?? 0 };
+    return [{ model, tokens, ...(costUsd !== undefined ? { costUsd } : {}) }];
   });
-  const model = models.reduce<{ id: string; spent: number } | undefined>((best, row) => (best === undefined || row.spent > best.spent ? row : best), undefined)?.id;
-  const windows = models.flatMap(row => (row.window !== undefined ? [row.window] : []));
+}
+
+/** The turn's tokens off its result: the usage sums the agent's own calls of the turn, and modelUsage keeps each model's
+ * running totals for the session, subagents included, with its window. */
+function resultTokens(event: Record<string, unknown>): { tokens?: TurnTokens; models?: ModelUse[] } {
+  const usage = rec(event.usage);
+  const windows = Object.values(rec(event.modelUsage) ?? {}).flatMap(raw => {
+    const window = num(rec(raw)?.contextWindow);
+    return window !== undefined ? [window] : [];
+  });
+  const models = event.modelUsage === undefined ? undefined : modelsOf(event.modelUsage);
   const cached = usage === undefined ? undefined : num(usage.cache_read_input_tokens);
   const cacheWrite = usage === undefined ? undefined : num(usage.cache_creation_input_tokens);
   return {
@@ -254,15 +269,35 @@ function resultTokens(event: Record<string, unknown>): { tokens?: TurnTokens; mo
           },
         }
       : {}),
-    ...(model !== undefined ? { model } : {}),
+    ...(models !== undefined ? { models } : {}),
   };
 }
 
-/** The turn's own cost: the session's running total less the total its file saved before the turn, or the whole of
- * it where the total started again under that. */
-function ownCost(result: TurnResult, saved: number | undefined): TurnResult {
+/** What a session's file saved of its running totals before the turn: the cost and each model's use. */
+interface SavedUse {
+  costUsd?: number;
+  models: ModelUse[];
+}
+
+const spentBy = (m: ModelUse): number => m.tokens.input + m.tokens.output;
+
+/** One model's running totals less where they stood before the turn, or the whole of them where they started again. */
+function gained(now: ModelUse, before: ModelUse | undefined): ModelUse {
+  if (before === undefined || MODEL_FIELDS.some(k => now.tokens[k] < before.tokens[k])) return now;
+  const tokens = { ...now.tokens };
+  for (const k of MODEL_FIELDS) tokens[k] -= before.tokens[k];
+  const costUsd = now.costUsd === undefined ? undefined : Math.max(0, now.costUsd - (before.costUsd ?? 0));
+  return { model: now.model, tokens, ...(costUsd !== undefined ? { costUsd } : {}) };
+}
+
+/** The turn's own use: the session's running totals less what its file saved before the turn, the cost and each
+ * model's, or the whole of a total that started again under that. The model is the one that did the most of it. */
+function ownUse(result: TurnResult, saved: SavedUse | undefined): TurnResult {
   const total = result.costUsd;
-  return total === undefined || saved === undefined || total < saved ? result : { ...result, costUsd: total - saved };
+  const costUsd = total === undefined || saved?.costUsd === undefined || total < saved.costUsd ? total : total - saved.costUsd;
+  const models = result.models?.map(m => gained(m, saved?.models.find(b => b.model === m.model))).filter(m => spentBy(m) > 0);
+  const model = models?.reduce<ModelUse | undefined>((best, m) => (best === undefined || spentBy(m) > spentBy(best) ? m : best), undefined)?.model;
+  return { ...result, ...(costUsd !== undefined ? { costUsd } : {}), ...(models !== undefined ? { models } : {}), ...(model !== undefined ? { model } : {}) };
 }
 
 function normalizeResult(event: Record<string, unknown>, refusal: { road?: string; cause?: TurnRefusal } | undefined): TurnResult {
@@ -605,8 +640,8 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
      * compaction's figure where one came after it. The result's usage sums the turn, so it cannot say this. */
     let heldContext: number | undefined;
     let initModel: string | undefined;
-    /** The session's running cost as its file saved it before this turn, which every result's total starts from. */
-    let savedSpend: number | undefined;
+    /** The session's running totals as its file saved them before this turn, which every result's totals start from. */
+    let saved: SavedUse | undefined;
     /** One line per task that finished after the held reply, in the order the CLI reported them. */
     const finishedAfter: string[] = [];
     /** Running while a held reply waits out the CLI's silence: its tasks are done, and this is the window it has to
@@ -725,7 +760,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
             continue;
           }
           if (event.type === "cost-state") {
-            if (str(event.sessionId) === localId) savedSpend = num(event.totalCostUSD);
+            if (str(event.sessionId) === localId) saved = { ...(num(event.totalCostUSD) !== undefined ? { costUsd: num(event.totalCostUSD)! } : {}), models: modelsOf(event.modelUsage) };
             continue;
           }
           if (event.type === "assistant" && typeof event.uuid === "string" && (event.parent_tool_use_id === undefined || event.parent_tool_use_id === null)) anchor = event.uuid;
@@ -823,7 +858,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
               // their own lines.
               if (sawResult) continue;
               woken = false;
-              const result = spanned(withContext(ownCost(normalized.result, savedSpend), heldContext, initModel));
+              const result = spanned(withContext(ownUse(normalized.result, saved), heldContext, initModel));
               if (backgroundTasks > 0) {
                 // The agent replied while the CLI still reports work it started. The turn is not over: ending it
                 // here kills that work mid-write and nothing ever says what came of it, so the reply is kept, the

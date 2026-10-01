@@ -245,7 +245,7 @@ import { makeDevices, type DeviceDoor, type ScopedRoad } from "./devices.js";
 import { makePlaceDoor, PlaceForksNowhereError, PlaceProvisioningError, type PlaceDoor, type PlaceRecord, type PlaceWiring } from "./places.js";
 import type { BlobMark, Store } from "./store.js";
 import { RANGE_DAYS, READINGS_STEP_MS, SysHistoryReply, type ReadingsAnswer, type PlaceView, type AccountsAnswer, type UsageRange, type UsageSplit, type UsedAnswer } from "@wsp/protocol";
-import { HARNESS_CATALOGS, catalogFromProbe, harnessCatalog, smallestModel } from "./harness-catalog.js";
+import { HARNESS_CATALOGS, catalogFromProbe, harnessCatalog, modelLabel, smallestModel } from "./harness-catalog.js";
 import {
   GitIssueReadReply,
   GitPrDiffReply,
@@ -8330,21 +8330,27 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           // What the turn used, filed in the ledger under the sign-in it ran on; a turn that counted nothing files nothing.
           if (result.tokens !== undefined || result.costUsd !== undefined) {
             const account = usageAccountOf(entry, view.harness, turnAccount);
-            void ledger
-              .add({
-                at: clock.now(),
-                agent: view.harness,
-                account: account.key,
-                accountLabel: account.label,
-                computer: usageComputerOf(entry.record),
-                project: entry.record.project,
-                ...((result.model ?? view.model) !== undefined ? { model: (result.model ?? view.model)! } : {}),
-                ...(result.tokens !== undefined ? { tokens: result.tokens } : {}),
-                ...(result.costUsd !== undefined ? { costUsd: result.costUsd } : {}),
-                ...((view.claudeSessionId ?? sessionId) !== undefined ? { session: view.claudeSessionId ?? sessionId } : {}),
-                source: "wsp",
-              })
-              .catch((e: unknown) => console.warn(`the use of turn ${turnId} was not filed: ${e instanceof Error ? e.message : String(e)}`));
+            const model = result.model ?? view.model;
+            // An agent that names each model a turn used files a row for each; the turn counts once, under its own model.
+            const uses = result.models !== undefined && result.models.length > 0 ? result.models : [{ model, tokens: result.tokens, costUsd: result.costUsd }];
+            const counted = uses.some(u => u.model === model) ? model : uses[0]!.model;
+            for (const use of uses)
+              void ledger
+                .add({
+                  at: clock.now(),
+                  agent: view.harness,
+                  account: account.key,
+                  accountLabel: account.label,
+                  computer: usageComputerOf(entry.record),
+                  project: entry.record.project,
+                  turns: use.model === counted ? 1 : 0,
+                  ...(use.model !== undefined ? { model: use.model } : {}),
+                  ...(use.tokens !== undefined ? { tokens: use.tokens } : {}),
+                  ...(use.costUsd !== undefined ? { costUsd: use.costUsd } : {}),
+                  ...((view.claudeSessionId ?? sessionId) !== undefined ? { session: view.claudeSessionId ?? sessionId } : {}),
+                  source: "wsp",
+                })
+                .catch((e: unknown) => console.warn(`the use of turn ${turnId} was not filed: ${e instanceof Error ? e.message : String(e)}`));
           }
           void persistSessions(workspaceId);
           if (notify !== undefined) notifyEnd({ view, turnId }, notify, tellAs(t), result);
@@ -10972,6 +10978,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         return usageComputerName(places, value);
       case "account":
         return accounts.get(value) ?? value;
+      case "model":
+        return modelLabel(value);
       default: {
         const _exhaustive: never = split;
         return value;
