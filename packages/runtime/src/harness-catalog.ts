@@ -53,6 +53,8 @@ const fromTable = (
   catalog: Omit<HarnessCatalog, "source" | "version" | "contextWindows" | "steers" | "renames" | "images"> & { contextWindows?: HarnessOption[]; pin?: TablePin },
 ): HarnessCatalog => {
   const { pin, ...rest } = catalog;
+  // The mode that asks nobody is where a thread starts until the person sets another for that agent or project.
+  const permissionModes = rest.permissionModes.map(o => (o.value === rest.bypassMode ? { ...o, isDefault: true } : o));
   return {
     source: "table",
     version: pin === undefined ? null : `${pin.read} ${pin.version}, ${pin.date}`,
@@ -61,6 +63,7 @@ const fromTable = (
     renames: false,
     images: false,
     ...rest,
+    permissionModes,
   };
 };
 
@@ -99,10 +102,9 @@ export const HARNESS_CATALOGS: readonly HarnessCatalog[] = [
     efforts: CLAUDE_EFFORTS,
     contextWindows: CLAUDE_CONTEXT_WINDOWS,
     // default is the mode this CLI raises its own prompts in: with --permission-prompt-tool they reach the host over
-    // the control channel and the person answers them in the chat (measured on 2.1.263, 2026-09-08). No mode here
-    // carries the default mark: which of the two below a thread starts at belongs to the workspace's kind, and
-    // workspaceAccess places the mark against it.
-    keptMode: "default",
+    // the control channel and the person answers them in the chat (measured on 2.1.263, 2026-09-08). Plan maps to
+    // none: a headless plan turn's exit prompt is unmeasured over stream-json.
+    access: { ask: "default", "auto-edit": "acceptEdits", full: "bypassPermissions" },
     bypassMode: "bypassPermissions",
     // A reviewer's mode: every action that needs permission refused without asking, Bash included, so it reads and
     // changes nothing; the diff rides its task. wsp offers no plan mode, though the binary lists one.
@@ -141,8 +143,8 @@ export const HARNESS_CATALOGS: readonly HarnessCatalog[] = [
     ],
     efforts: levels(["low", "medium", "high", "xhigh", "max", "ultra"], "low"),
     // A sandboxed mode asks the person in the chat before the agent goes past its sandbox, over the app server's
-    // approval requests; the narrowest sandbox a turn can still work in is the answer for a kept machine.
-    keptMode: "workspace-write",
+    // approval requests; no sandbox edits files without asking and runs nothing past it, so auto-edit maps to none.
+    access: { ask: "workspace-write", full: "danger-full-access", plan: "read-only" },
     bypassMode: "danger-full-access",
     // A reviewer's mode: the sandbox stops every write, .git included, so the diff rides its task.
     readOnlyMode: "read-only",
@@ -157,7 +159,6 @@ export const HARNESS_CATALOGS: readonly HarnessCatalog[] = [
     label: "Gemini CLI",
     models: [],
     efforts: [],
-    keptMode: "default",
     bypassMode: "yolo",
     permissionModes: [
       option("default", "Default", "Asks before every action"),
@@ -172,7 +173,8 @@ export const HARNESS_CATALOGS: readonly HarnessCatalog[] = [
     pin: { read: "run --help", version: "1.18.18", date: "2026-09-27" },
     models: [],
     efforts: [],
-    keptMode: AUTO_MODE,
+    // Its one mode runs every action without asking, so full is the one word it takes.
+    access: { full: AUTO_MODE },
     bypassMode: AUTO_MODE,
     // Its one mode: a thread starts there on every kind of workspace, since the mode that would ask has nobody to ask.
     permissionModes: [option(AUTO_MODE, "Auto", "Runs every action without asking, save what its own settings deny: a headless run has nobody to ask")],
@@ -189,7 +191,6 @@ export const HARNESS_CATALOGS: readonly HarnessCatalog[] = [
     label: "Hermes Agent",
     models: [],
     efforts: levels(["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]),
-    keptMode: "default",
     bypassMode: "yolo",
     permissionModes: [option("default", "Default", "Asks before a command that could do damage"), option("yolo", "Yolo", "Runs a command that could do damage without asking")],
   }),
@@ -200,7 +201,8 @@ export const HARNESS_CATALOGS: readonly HarnessCatalog[] = [
     pin: { read: "-h", version: "2026.09.26-dd393fe", date: "2026-09-27" },
     models: [],
     efforts: [],
-    keptMode: DEFAULT_MODE,
+    // Its default proposes and applies nothing, which is what plan asks for.
+    access: { full: FORCE_MODE, plan: DEFAULT_MODE },
     bypassMode: FORCE_MODE,
     permissionModes: [
       option(DEFAULT_MODE, "Default", "Proposes changes and runs no command; applies nothing"),

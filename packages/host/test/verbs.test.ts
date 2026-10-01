@@ -2332,7 +2332,7 @@ describe("wsp verbs over the host", () => {
     expect(claude.starts.at(-1)!.permissionMode).toBe("acceptEdits");
     const plan = await run("run", "mac", "--access", "plan", "read the notes");
     expect(plan.code).toBe(3);
-    expect(plan.io.errors[0]).toMatch(/^wsp run: access mode "plan" is not one claude takes; one of: Default \(default\), Accept edits \(acceptEdits\), Bypass on this computer \(bypassPermissions\), Auto \(auto\), /);
+    expect(plan.io.errors[0]).toMatch(/^wsp run: access mode "plan" is not one claude takes; one of: Default \(default\), Accept edits \(acceptEdits\), Bypass \(bypassPermissions\), Auto \(auto\), /);
     expect(claude.starts.at(-1)!.permissionMode).toBe("acceptEdits");
     // The command line reads it off the same catalog the app's composer draws, so neither holds a default of its own.
     const [mac] = await rt.workspaces.list();

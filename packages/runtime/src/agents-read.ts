@@ -4,7 +4,7 @@
 // reading the agents, skills and servers off it is the host's, since the
 // catalog's readers live there. A read never wakes a machine.
 import { randomBytes } from "node:crypto";
-import { AgentsReport, HERE_PLACE_ID, THIS_COMPUTER, noSuchAgentsProjectRefusal, sharedAgentsProjectRefusal, ServerToolsAnswer, SignInLine, SkillAdded, SkillHit, SkillPreview, isJoinedComputer, nappingAgentsRefusal, nappingServersRefusal, nappingSignInRefusal, nappingSkillsRefusal, nappingToolsRefusal, noSignInRefusal, noSuchPlaceRefusal, providerAgentsRefusal, type AgentSignInState, type AgentsProject, type AgentsSignInEvent, type AgentsTarget, type DaemonFrame, type PageReach, type ServerAdd, type ServerAsk, type WorkspacePhase, withoutControlChars } from "@wsp/protocol";
+import { AgentsReport, HERE_PLACE_ID, type AgentRow, type AgentSetupSet, type AgentSetupView, THIS_COMPUTER, noSuchAgentsProjectRefusal, sharedAgentsProjectRefusal, ServerToolsAnswer, SignInLine, SkillAdded, SkillHit, SkillPreview, isJoinedComputer, nappingAgentsRefusal, nappingServersRefusal, nappingSignInRefusal, nappingSkillsRefusal, nappingToolsRefusal, noSignInRefusal, noSuchPlaceRefusal, providerAgentsRefusal, type AgentSignInState, type AgentsProject, type AgentsSignInEvent, type AgentsTarget, type DaemonFrame, type PageReach, type ServerAdd, type ServerAsk, type WorkspacePhase, withoutControlChars } from "@wsp/protocol";
 import type { Machine } from "@wsp/engine";
 import type { DaemonChannel } from "./daemon-channel.js";
 import { NO_PLACE_DOOR, type PlaceDoor } from "./places.js";
@@ -178,6 +178,11 @@ export interface AgentsReadOptions<Caller> {
   relayed?: () => boolean;
   /** The host's log: each sign-in's start and end, never its page, code or token. */
   log?: (line: string) => void;
+  /** How the person set an agent to run on a computer, names only; nothing for an agent wsp runs no thread of. */
+  setupOf?: (placeId: string, agent: string) => AgentSetupView | undefined;
+  /** Writes a change to how an agent runs on a computer, checked first; `home` is a joined computer's home folder as
+   * it reported it, absent for this computer. */
+  setupWrite?: (placeId: string, agent: string, change: AgentSetupSet, home: string | undefined) => Promise<void>;
 }
 
 /** How many hits a search asks skills.sh for where the asker names no number. */
@@ -211,6 +216,7 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
   serversRemove(target: AgentsTarget, ask: ServerAsk, origin?: Caller): Promise<{ file: string }>;
   serversToggle(target: AgentsTarget, ask: ServerAsk & { on: boolean }, origin?: Caller): Promise<{ file: string }>;
   serversIcon(host: string, refresh?: boolean): Promise<string | null>;
+  setup(placeId: string, agent: string, change: AgentSetupSet, origin?: Caller): Promise<AgentRow>;
 } {
   /** A write in one project of a computer changes the computer's report, which is the one a page reads. */
   const changed = (target?: AgentsTarget): void => o.changed(target === undefined || !("placeId" in target) ? target : { placeId: target.placeId });
@@ -328,8 +334,8 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
     if (ws.phase === "napping") return { napping: ws.name };
     return ws.local ? { kind: "here", projects: [ws.project] } : { kind: "machine", machine: ws.machine, projects: [ws.project], ...(o.relayed?.() === true ? { relayed: true } : {}) };
   };
-  return {
-    async read(target, origin) {
+  const reads = {
+    async read(target: AgentsTarget, origin?: Caller): Promise<AgentsReport> {
       const reader = readerOf();
       const on = await onOf(target, origin, true);
       if ("napping" in on) {
@@ -338,9 +344,26 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
         return { ...held, stale: "napping" };
       }
       const { runAs, ...read } = await reader.read(on, { latest: (await o.latestOn?.()) ?? true });
-      const report = stamped(target, { ...read, reach: pageReachOf(on, runAs) });
+      const setups = (row: AgentRow): AgentRow => {
+        const setup = "placeId" in target ? o.setupOf?.(target.placeId, row.id) : undefined;
+        return setup === undefined ? row : { ...row, setup };
+      };
+      const report = stamped(target, { ...read, agents: read.agents.map(setups), reach: pageReachOf(on, runAs) });
       if ("workspaceId" in target) last.set(target.workspaceId, report);
       return report;
+    },
+  };
+  return {
+    read: reads.read,
+    async setup(placeId, agent, change, origin) {
+      if (o.setupWrite === undefined) throw new Error(NO_AGENTS_READER);
+      const write = o.setupWrite;
+      const on = await onOf({ placeId }, origin);
+      if ("napping" in on) throw usage(nappingAgentsRefusal(on.napping));
+      await written({ placeId }, () => write(placeId, agent, change, on.kind === "box" ? on.login["HOME"] : undefined));
+      const row = (await reads.read({ placeId }, origin)).agents.find(a => a.id === agent);
+      if (row === undefined) throw usage(`there is no agent ${agent} in the catalog`);
+      return row;
     },
     async tools(target, ask, origin) {
       const reader = readerOf();

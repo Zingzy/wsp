@@ -377,7 +377,7 @@ describe("the MCP server over the host", () => {
     expect(claude.starts.at(-1)!.permissionMode).toBe("acceptEdits");
     const plan = await call("run", { workspace: "mac", task: "read the notes", access: "plan" });
     expect(plan.isError).toBe(true);
-    expect(plan.text).toMatch(/^access mode "plan" is not one claude takes; one of: Default \(default\), Accept edits \(acceptEdits\), Bypass on this computer \(bypassPermissions\), Auto \(auto\), /);
+    expect(plan.text).toMatch(/^access mode "plan" is not one claude takes; one of: Default \(default\), Accept edits \(acceptEdits\), Bypass \(bypassPermissions\), Auto \(auto\), /);
     const refused = await call("run", { workspace: "mac", task: "go", access: "yolo" });
     expect(refused.isError).toBe(true);
     expect(refused.text).toMatch(/^access mode "yolo" is not one claude takes/);

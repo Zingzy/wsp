@@ -1228,15 +1228,8 @@ export const HarnessCatalog = z.object({
    * harness added to the table names its own. Absent where the harness offers no model of its own, and the title
    * question runs on whatever the CLI would run without one. */
   smallModel: z.string().optional(),
-  /** The access a thread starts at on a kind whose row asks: the mode whose tools reach the person as a prompt where
-   * this CLI can ask one (Claude Code's default over its control stream), else the narrowest mode that still lets a
-   * turn work, for a CLI with no road to ask (codex exec runs non-interactively, so its sandbox is the whole
-   * answer). Which kinds those are is the kind table's, not this row's: workspaceAccess marks one of these two.
-   * Absent on a harness whose CLI takes no access mode at all. */
-  keptMode: z.string().optional(),
-  /** This CLI's mode that runs every tool without asking anyone, as it spells it, and what a thread starts at on
-   * every other kind. A picker on a machine the person owns names that machine on this one, since picking it hands
-   * that computer over for the turn. Absent on a harness whose CLI has no such mode. */
+  /** This CLI's mode that runs every tool without asking anyone, as it spells it, which the table marks as the mode a
+   * thread starts at where nobody set another. Absent on a harness whose CLI has no such mode. */
   bypassMode: z.string().optional(),
   /** This CLI's mode that changes nothing, as it spells it, which a reviewer runs at: absent on a harness wsp can give
    * no read-only access, which reviews nothing. */
@@ -1366,9 +1359,8 @@ export function startPicks(catalog: HarnessCatalog | undefined, picks: StartPick
   if (catalog !== undefined) checkedAgainst(catalog, picks, model, runsOn);
   const effort = picks.effort ?? (opensThread && catalog !== undefined ? markedDefault(effortsFor(catalog, modelOf(catalog, model)))?.value : undefined);
   // The access is filled in like the other two, so what the picker shows is what the CLI is told: an unnamed access
-  // used to reach the adapter as nothing, which every adapter here reads as its own skip-everything flag. On a
-  // machine the person owns that turned the picker's Default into bypass behind their back. The mark is on the
-  // catalog a workspace answered with, which workspaceAccess placed against that workspace's kind.
+  // used to reach the adapter as nothing, which every adapter here reads as its own skip-everything flag. The mark
+  // is the one markedFor placed from the person's defaults, else the table's own.
   const permissionMode = picks.permissionMode ?? (opensThread && catalog !== undefined ? markedDefault(catalog.permissionModes)?.value : undefined);
   return {
     ...(model !== undefined ? { model } : {}),

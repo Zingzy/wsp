@@ -94,8 +94,8 @@ describe("the access a thread starts at, on each kind of workspace", () => {
     expect((await ran(mac.id, "codex", "read-only")).start).toBe("read-only");
     // Named or not, a mode the agent does not take is refused with its list; the pick is not silently dropped.
     await expect(rt.sessions.start(mac.id, { prompt: "go", harness: "claude", permissionMode: "yolo" })).rejects.toThrow(/not one claude takes/);
-    // A start that names no agent runs the one the last thread on this project used, so the refusal is that one's.
-    await expect(rt.sessions.start(mac.id, { prompt: "go", permissionMode: "yolo" })).rejects.toThrow(/not one codex takes/);
+    // A start that names no agent runs the default one, never the agent the last thread ran, so the refusal is claude's.
+    await expect(rt.sessions.start(mac.id, { prompt: "go", permissionMode: "yolo" })).rejects.toThrow(/not one claude takes/);
   });
 
   it("a thread on a machine wsp forked runs every action without asking, as it did", async () => {

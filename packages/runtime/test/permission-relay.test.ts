@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LocalBackend } from "@wsp/engine";
-import { HERE_PLACE_ID, PERMISSION_ALLOW, PERMISSION_DENY, PERMISSION_DENIED_LINE, QUESTION_TOOL, pickedOptionId, questionOptions, askingLine, THIS_COMPUTER, threadWord, threadWordOf, foldThreads, type PermissionAsk, type PermissionOutcome, type SessionEvent, type TurnResult } from "@wsp/protocol";
+import { HERE_PLACE_ID, PERMISSION_ALLOW, PERMISSION_DENY, PERMISSION_DENIED_LINE, QUESTION_TOOL, pickedOptionId, questionOptions, askingLine, threadWord, threadWordOf, foldThreads, type PermissionAsk, type PermissionOutcome, type SessionEvent, type TurnResult } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterFactory, type LocalWiring, type Runtime, type SessionHandle } from "../src/runtime.js";
 import { localExecStream } from "../src/local-exec.js";
 import { memoryStore, type Store } from "../src/store.js";
@@ -423,13 +423,12 @@ describe("the access a thread starts at", () => {
     return { rt: createRuntime({ backend: stubBackend(), store, adapters: { claude: adapter }, local: localWiring }), picks };
   };
 
-  it("on this computer the composer's access list marks the mode that asks nothing and names the machine on it", async () => {
+  it("on this computer the composer's access list marks the mode that asks nothing until the person sets another", async () => {
     const { rt } = recording();
     const local = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
     const [claude] = await rt.harnesses.list(local.id);
-    expect(claude!.keptMode).toBe("default");
+    expect(claude!.access?.ask).toBe("default");
     expect(claude!.permissionModes.find(o => o.isDefault)?.value).toBe("bypassPermissions");
-    expect(claude!.permissionModes.find(o => o.value === "bypassPermissions")?.label).toBe(`Bypass on ${THIS_COMPUTER}`);
     // Every mode that asks is still one pick away, in the same list, in the same order.
     expect(claude!.permissionModes.map(o => o.value)).toContain("default");
   });
@@ -450,52 +449,44 @@ describe("the access a thread starts at", () => {
     expect(picks).toEqual(["bypassPermissions", "bypassPermissions", "bypassPermissions"]);
   });
 
-  it("a thread nobody named an access for starts at the pick the composer last made in that workspace", async () => {
+  it("a thread nobody named an access for starts at the agent's default, the project's over it, and never at a workspace's last pick", async () => {
     const { rt, picks } = recording();
     const local = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
     await (await rt.sessions.start(local.id, { prompt: "one" })).finished;
     expect(picks).toEqual(["bypassPermissions"]);
-
-    // The pick as the composer keeps it: on the host's own record, per workspace, so the next thread reads it
-    // whichever client or CLI opens it. A person who wants to be asked here says so once.
+    // The composer's pick is for one thread: one kept per workspace decides no later thread.
     await rt.preferences.set({ access: { [local.id]: "default" } });
     await (await rt.sessions.start(local.id, { prompt: "two" })).finished;
-    expect(picks).toEqual(["bypassPermissions", "default"]);
-
-    // A pick in one workspace says nothing about another's: that one still starts at what its catalog marks.
-    const other = await createOn(rt, { golden: "snap_g", name: "b1" });
-    await (await rt.sessions.start(other.id, { prompt: "three" })).finished;
-    expect(picks).toEqual(["bypassPermissions", "default", "bypassPermissions"]);
-    await rt.preferences.set({ access: { [local.id]: "dontAsk" } });
-    await (await rt.sessions.start(local.id, { prompt: "four" })).finished;
-    expect(picks).toEqual(["bypassPermissions", "default", "bypassPermissions", "dontAsk"]);
-  });
-
-  it("a pick this harness does not take is dropped, not a refusal: the send runs the harness's own default", async () => {
-    const { rt, picks } = recording();
-    const local = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
-    // A mode the other harness's list carries and claude's does not; the record is keyed by workspace, and a
-    // workspace's threads may run on either.
-    await rt.preferences.set({ access: { [local.id]: "read-only" } });
-    const first = await rt.sessions.start(local.id, { prompt: "one" });
-    await first.finished;
-    expect(picks).toEqual(["bypassPermissions"]);
-    // It drops to what the list marks for this kind of workspace, never to whatever the binary would run without a flag.
-    expect(first.view().permissionMode).toBe("bypassPermissions");
-    // The pick stands on the record for the harness it belongs to; nothing rewrites the person's record on a read.
-    expect((await rt.preferences.get()).access).toEqual({ [local.id]: "read-only" });
-    // A resume on that thread is read the same way rather than refused.
-    await (await rt.sessions.start(local.id, { prompt: "two", thread: first.view().threadId })).finished;
     expect(picks).toEqual(["bypassPermissions", "bypassPermissions"]);
+    await rt.preferences.set({ agentDefaults: { claude: { access: "ask" } } });
+    await (await rt.sessions.start(local.id, { prompt: "three" })).finished;
+    expect(picks.at(-1)).toBe("default");
+    await rt.preferences.set({ projectDefaults: { [local.project.id]: { access: "auto-edit" } } });
+    await (await rt.sessions.start(local.id, { prompt: "four" })).finished;
+    expect(picks.at(-1)).toBe("acceptEdits");
+    // The composer's list carries the same mark, so what the picker shows is what a start runs.
+    const [claude] = await rt.harnesses.list(local.id);
+    expect(claude!.permissionModes.find(o => o.isDefault)?.value).toBe("acceptEdits");
   });
 
-  it("a start that names an access still wins over the pick, and a resumed thread keeps its own", async () => {
+  it("a word the agent maps to no mode is refused at the set and on a start, never run looser", async () => {
+    const { rt, picks } = recording();
+    const local = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
+    await expect(rt.preferences.set({ agentDefaults: { claude: { access: "plan" } } })).rejects.toMatchObject({ message: "Claude Code takes no plan access; it takes ask, auto-edit, full", kind: "usage" });
+    await expect(rt.preferences.set({ projectDefaults: { [local.project.id]: { access: "plan" } } })).rejects.toMatchObject({ kind: "usage" });
+    await expect(rt.sessions.start(local.id, { prompt: "one", access: "plan" })).rejects.toMatchObject({ message: "Claude Code takes no plan access; it takes ask, auto-edit, full", kind: "usage" });
+    expect(picks).toEqual([]);
+    await (await rt.sessions.start(local.id, { prompt: "two", access: "auto-edit" })).finished;
+    expect(picks).toEqual(["acceptEdits"]);
+  });
+
+  it("a start that names an access wins over every default, and a resumed thread keeps its own", async () => {
     const { rt, picks } = recording();
     const local = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
     const first = await rt.sessions.start(local.id, { prompt: "one" });
     await first.finished;
-    await rt.preferences.set({ access: { [local.id]: "acceptEdits" } });
-    // The thread opened before the pick keeps the access its own turns ran at; the pick is what a new thread reads.
+    await rt.preferences.set({ agentDefaults: { claude: { access: "auto-edit" } } });
+    // The thread opened before the default keeps the access its own turns ran at; the default is what a new thread reads.
     await (await rt.sessions.start(local.id, { prompt: "two", thread: first.view().threadId })).finished;
     // A start that names one wins over both.
     await (await rt.sessions.start(local.id, { prompt: "three", permissionMode: "dontAsk" })).finished;

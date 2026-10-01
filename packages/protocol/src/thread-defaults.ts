@@ -126,8 +126,11 @@ export type ThreadDefaults = z.infer<typeof ThreadDefaults>;
 export interface DefaultsAsk {
   /** The agent a thread runs when nothing names one and no default stands. */
   firstAgent: string;
-  /** Each agent's lists, its custom models in; nothing for an agent that cannot run here, which no layer then picks. */
+  /** Each agent's lists, its custom models in; nothing for an agent with no catalog row. */
   catalogOf: (agent: string) => HarnessCatalog | undefined;
+  /** Whether an agent can run a thread here, which a layer naming one that cannot drops past; absent, the ones with
+   * lists. */
+  runs?: (agent: string) => boolean;
   /** The agent the start names, or the one the thread already runs on. */
   named?: string;
   project?: ProjectOverrides;
@@ -156,7 +159,7 @@ const applies = (list: { options: readonly HarnessOption[]; open: boolean }, val
  * the next one, so a stale override never refuses a start; startPicks refuses only what a start names.
  */
 export function resolveThreadDefaults(ask: DefaultsAsk): ThreadDefaults {
-  const runs = (id: string | undefined): id is string => id !== undefined && ask.catalogOf(id) !== undefined;
+  const runs = (id: string | undefined): id is string => id !== undefined && (ask.runs?.(id) ?? ask.catalogOf(id) !== undefined);
   const agent: ResolvedPick =
     ask.named !== undefined
       ? { value: ask.named, from: "named" }
