@@ -151,6 +151,8 @@ export const UsedRow = z.object({
   priced: z.boolean(),
   /** The rate table's figure for every token of the row, whatever its harness reported: the API estimate. */
   estimate: z.number().optional(),
+  /** What the cached tokens saved at list price: their fresh input price less their cache read price. */
+  saved: z.number().optional(),
   turns: z.number().int().optional(),
 });
 export type UsedRow = z.infer<typeof UsedRow>;
