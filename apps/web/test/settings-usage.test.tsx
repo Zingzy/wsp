@@ -133,12 +133,12 @@ describe("Usage: limits", () => {
     expect($("[data-usage-account='codex:acct-1']")).toBeNull();
     const session = pool.querySelector<HTMLElement>("[data-window=session]")!;
     expect(text(session.querySelector("[data-k=window]"))).toBe("5-hour");
-    expect(text(session.querySelector("[data-k=percent]"))).toBe("62%");
+    expect(text(session.querySelector("[data-k=left]"))).toBe("38%");
     expect(session.querySelectorAll("[data-k=segment]").length).toBe(1);
     expect(session.querySelector<HTMLElement>("[data-k=meter-fill]")!.style.width).toBe("62%");
     const week = pool.querySelector<HTMLElement>("[data-window=week]")!;
     expect(text(week.querySelector("[data-k=window]"))).toBe("Week");
-    expect(text(week.querySelector("[data-k=percent]"))).toBe("18%");
+    expect(text(week.querySelector("[data-k=left]"))).toBe("82%");
     expect(text(week.querySelector("[data-k=verdict]"))).toBe(USAGE_PAGE_WORDS.underPace("resets in 40 min"));
     expect(week.querySelector("[data-k=verdict]")!.className).toContain("text-muted-foreground");
   });
@@ -196,7 +196,7 @@ describe("Usage: limits", () => {
     expect(text(pool.querySelector("[data-k=read-at]"))).toBe(USAGE_PAGE_WORDS.checked(ABOUT_WORDS.readWhen(5 * 60_000)));
     const session = pool.querySelector<HTMLElement>("[data-window=session]")!;
     expect([...session.querySelectorAll<HTMLElement>("[data-k=meter-fill]")].map(fill => fill.style.width)).toEqual(["62%", "36%"]);
-    expect(text(session.querySelector("[data-k=percent]"))).toBe("49%");
+    expect(text(session.querySelector("[data-k=left]"))).toBe("51%");
     // Plus runs out before its reset but Pro, a little under pace, lasts past both: the pool is ahead, not out.
     expect(runsOutAt(36, now + 3 * HOUR, SESSION_MS, now)).toBeGreaterThan(now + 3 * HOUR);
     expect(text(session.querySelector("[data-k=verdict]"))).toBe(USAGE_PAGE_WORDS.aheadOfPace("resets in 2 h"));
@@ -229,7 +229,7 @@ describe("Usage: limits", () => {
     const verdict = session.querySelector<HTMLElement>("[data-k=verdict]")!;
     expect(text(verdict)).toBe("Limit reached");
     expect(verdict.className).toContain("text-warning-foreground");
-    expect(text(session.querySelector("[data-k=percent]"))).toBe("100%");
+    expect(text(session.querySelector("[data-k=left]"))).toBe("0%");
     expect(session.querySelector("[data-k=pace]")).toBeNull();
   });
 

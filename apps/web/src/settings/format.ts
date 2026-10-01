@@ -279,6 +279,7 @@ export const USAGE_PAGE_WORDS = {
   noAccounts: "No agent is signed in on any computer.",
   windows: { session: "5-hour", week: "Week", week_opus: "Week, Opus", week_sonnet: "Week, Sonnet", month: "Month" } as Partial<Record<string, string>>,
   reached: "Limit reached",
+  left: "left",
   runsOut: (when: string): string => `Runs out ${when}`,
   aheadOfPace: (resets: string): string => `Ahead of pace${resets === "" ? "" : `, ${resets}`}`,
   underPace: (resets: string): string => `Under pace${resets === "" ? "" : `, ${resets}`}`,

@@ -141,38 +141,40 @@ function verdictOf(segments: readonly Segment[], kind: LimitKind, now: number): 
   return { word: W.onPace(resets), tone: "plain" };
 }
 
-/** One window of a pool: a segment per account filled by what it has used, the even-pace mark on each, the pool's
- * share and its verdict. */
+/** One window of a pool: what is left as its big figure with the verdict under it, and beside them a segment per
+ * account filled by what it has used, the even-pace mark on each. */
 function PoolWindow({ kind, segments, now }: { kind: LimitKind; segments: readonly Segment[]; now: number }) {
-  const share = Math.round(segments.reduce((n, s) => n + Math.min(100, s.used), 0) / segments.length);
+  const used = Math.round(segments.reduce((n, s) => n + Math.min(100, s.used), 0) / segments.length);
   const verdict = verdictOf(segments, kind, now);
   return (
-    <div data-window={kind} className="grid grid-cols-[5.5rem_minmax(0,1fr)_3rem_minmax(0,10rem)] items-center gap-x-4 max-sm:grid-cols-[4.5rem_minmax(0,1fr)_3rem] max-sm:gap-y-1">
-      <span data-k="window" className={QUIET}>
-        {W.windows[kind] ?? kind}
-      </span>
-      <span className="flex h-2.5 gap-[3px]">
+    <div data-window={kind} className="grid grid-cols-[minmax(11rem,14rem)_minmax(0,1fr)] items-center gap-x-10 py-4 max-sm:grid-cols-1 max-sm:gap-y-3">
+      <div className="flex min-w-0 flex-col gap-1">
+        <span data-k="window" className="text-[12.5px] leading-5 text-muted-foreground">
+          {W.windows[kind] ?? kind}
+        </span>
+        <span className="flex items-baseline gap-2">
+          <span data-k="left" className="font-mono text-2xl leading-8 font-medium text-foreground tabular-nums">{`${Math.max(0, 100 - used)}%`}</span>
+          <span className="text-[12.5px] text-muted-foreground">{W.left}</span>
+        </span>
+        <span data-k="verdict" className={cn("truncate text-[12.5px] leading-5", verdict.tone === "warn" ? "text-warning-foreground" : verdict.tone === "quiet" ? "text-muted-foreground" : "text-foreground/80")}>
+          {verdict.word}
+        </span>
+      </div>
+      <span className="flex h-5 gap-1">
         {segments.map(s => (
           <Tooltip key={s.account.key}>
-            <TooltipTrigger
-              delay={0}
-              render={<span data-k="segment" className="relative flex-1 overflow-visible rounded-[3px] bg-foreground/[0.09]" />}
-            >
-              <span data-k="meter-fill" className={cn("absolute inset-y-0 left-0 rounded-[3px] transition-[width] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none", s.used >= 90 ? "bg-warning" : "bg-foreground/55")} style={{ width: `${Math.min(100, Math.max(0, s.used))}%` }} />
-              {s.elapsed === undefined ? null : <span data-k="pace" aria-hidden className="absolute -inset-y-1 w-[1.5px] rounded-full bg-foreground/80" style={{ left: `${s.elapsed * 100}%` }} />}
+            <TooltipTrigger delay={0} render={<span data-k="segment" className="relative flex-1 overflow-visible rounded-[5px] bg-foreground/[0.09]" />}>
+              <span data-k="meter-fill" className={cn("absolute inset-y-0 left-0 rounded-[5px] transition-[width] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none", s.used >= 90 ? "bg-warning" : "bg-foreground/55")} style={{ width: `${Math.min(100, Math.max(0, s.used))}%` }} />
+              {s.elapsed === undefined ? null : <span data-k="pace" aria-hidden className="absolute -inset-y-1 w-0.5 rounded-full bg-foreground/80" style={{ left: `${s.elapsed * 100}%` }} />}
             </TooltipTrigger>
-            <TooltipPopup side="top" sideOffset={6}>
+            <TooltipPopup side="top" sideOffset={8}>
               <span className="flex flex-col gap-0.5 text-xs">
                 <span className="text-foreground">{s.account.label}</span>
-                <span className="font-mono text-muted-foreground tabular-nums">{`${Math.round(s.used)}%${s.resetsAt === undefined ? "" : `, ${resetsWord(s.resetsAt, now)}`}`}</span>
+                <span className="font-mono text-muted-foreground tabular-nums">{`${Math.round(s.used)}% used${s.resetsAt === undefined ? "" : `, ${resetsWord(s.resetsAt, now)}`}`}</span>
               </span>
             </TooltipPopup>
           </Tooltip>
         ))}
-      </span>
-      <span data-k="percent" className={cn(NUMBER, "text-right text-foreground")}>{`${share}%`}</span>
-      <span data-k="verdict" className={cn("truncate text-[12.5px] max-sm:col-start-2 max-sm:col-span-2", verdict.tone === "warn" ? "text-warning-foreground" : verdict.tone === "quiet" ? "text-muted-foreground" : "text-foreground/80")}>
-        {verdict.word}
       </span>
     </div>
   );
@@ -188,14 +190,14 @@ function Pool({ agent, accounts, now }: { agent: string; accounts: readonly Acco
   const readAt = Math.min(...accounts.map(a => a.readAt ?? now));
   return (
     <Card id={`usage-pool-${agent}`} head={agentName(agent)}>
-      <div data-usage-pool={agent} className="flex flex-col gap-4 px-4 py-4">
+      <div data-usage-pool={agent} className="flex flex-col px-5 pt-5 pb-0">
         <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
           <span className="flex min-w-0 items-center gap-3">
             <GlyphFrame>
               <HarnessMark harness={agent} label={agentName(agent)} className="size-4" />
             </GlyphFrame>
             <span className="flex min-w-0 flex-col">
-              <span className="truncate text-sm leading-5 font-medium text-foreground">{title}</span>
+              <span className="truncate text-[15px] leading-6 font-medium text-foreground">{title}</span>
               <span className="truncate text-[13px] text-muted-foreground">{listWords(computers)}</span>
             </span>
           </span>
@@ -204,7 +206,7 @@ function Pool({ agent, accounts, now }: { agent: string; accounts: readonly Acco
             <span data-k="read-at">{W.checked(ABOUT_WORDS.readWhen(Math.max(0, now - readAt)))}</span>
           </span>
         </div>
-        <div className="flex flex-col gap-3">
+        <div className="mt-2 flex flex-col [&>*]:border-t [&>*]:border-border/50">
           {kinds.map(kind => {
             const segments = accounts
               .map(a => segmentOf(a, kind, now))
