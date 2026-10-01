@@ -8,9 +8,9 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { DAEMON_UNIT } from "@wsp/protocol";
+import { DAEMON_UNIT, stopRefusedLine } from "@wsp/protocol";
 import { writeStub } from "../../protocol/test/stub-script.js";
-import { GuestUnusableError, MoveUnansweredError, ROAD_TRIES, isMissing, type RetryClock } from "../src/errors.js";
+import { GuestUnusableError, MoveUnansweredError, ROAD_TRIES, StopRefusedError, isMissing, type RetryClock } from "../src/errors.js";
 import { DAEMON_ENV_FILE, DEADLINE_EXIT, INLINE_EXEC_MS } from "../src/exec-detached.js";
 import { EXEC_ENV } from "../src/golden-import.js";
 import { GONE_READS, killUntilGone } from "../src/golden.js";
@@ -36,6 +36,7 @@ import {
   boxSnapshotName,
   envLandingScript,
   sudoCommand,
+  stopRefusalOf,
 } from "../src/box-backend.js";
 import { BUILDER_LABEL, CREATED_AT_LABEL, GOLDEN_LABEL, NAME_LABEL, OWNER_LABEL, WORKSPACE_LABEL, WSP_LABEL } from "../src/labels.js";
 import { goldenName, nameOwner } from "../src/snapshot-names.js";
@@ -625,18 +626,27 @@ describe("BoxBackend against a fake Box API", () => {
     await expect(machineOn(refused).machine.pause()).rejects.toMatchObject({ code: "stop_failed", message: "Snapshot failed; the box keeps running." });
     expect(refused.calls().filter(c => c.endsWith("/stop"))).toHaveLength(1);
 
+    // The box's own fields after a stop the provider took back (the API's Sandbox schema): its latest snapshot failed
+    // while the last that completed stays behind, which is how it says its snapshots keep failing.
+    const failing = { lastSnapshotStatus: "failed", lastSnapshotAttemptAt: "2026-10-01T00:40:00Z", snapshotCompletedAt: "2026-09-30T21:02:00Z" };
     const undone = new FakeBox()
-      .on("GET", "/boxes/bx_tumrjngm", INFO("bx_tumrjngm", "idle"), INFO("bx_tumrjngm", "archiving"), INFO("bx_tumrjngm", "idle"))
+      .on("GET", "/boxes/bx_tumrjngm", INFO("bx_tumrjngm", "idle"), INFO("bx_tumrjngm", "archiving"), INFO("bx_tumrjngm", "idle", failing))
       .on("POST", "/boxes/bx_tumrjngm/stop", { status: 202, body: { ok: true, type: "box.stopping", status: "archiving", box: BOX("bx_tumrjngm", "archiving") } });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const e = await machineOn(undone).machine.pause().catch((err: unknown) => err);
-      expect(e).toBeInstanceOf(MoveUnansweredError);
-      expect((e as Error).message).toMatch(/pause did not take: the provider left bx_tumrjngm idle/);
+      const said = "its latest snapshot failed at 2026-10-01T00:40:00Z, and the last that completed was at 2026-09-30T21:02:00Z";
+      expect(e).toBeInstanceOf(StopRefusedError);
+      expect(e).toMatchObject({ machineId: "bx_tumrjngm", said, message: stopRefusedLine(said) });
+      // The line the host logs keeps the provider's reading, not a guess at it.
+      expect(warn).toHaveBeenCalledWith(`bx_tumrjngm: pause did not take: the provider left it idle and refused the stop: ${said}`);
       expect(undone.calls().filter(c => c.endsWith("/stop"))).toHaveLength(1);
     } finally {
       warn.mockRestore();
     }
+    // The box's own error, where it gives one, is the reading.
+    expect(stopRefusalOf({ error: "disk snapshot failed: no space left on device", ...failing })).toBe("disk snapshot failed: no space left on device");
+    expect(stopRefusalOf({})).toBe("it reported no snapshot attempt, and the last that completed was none");
   });
 
   it("a stop that never lands inside the budget ends the pause with the row's words, the machine still read as paused-in-progress", async () => {

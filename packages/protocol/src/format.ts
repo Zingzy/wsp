@@ -1342,6 +1342,23 @@ export function napRefusedLine(said: string): string {
   return `the provider does not pause this machine (${said}): its memory and disk together are over what it pauses; it runs until you delete it`;
 }
 
+/** A stop the provider would not take while the snapshot of the machine's disk fails, which it does rather than lose
+ * what was written since the last one (Boat): its own reading, the cause seen (a full disk), and the road left. A Boat
+ * machine whose stops kept failing was dropped with its disk on 2026-10-01, so pushing comes first. */
+export function stopRefusedLine(said: string): string {
+  return `the provider will not stop this machine while the snapshot of its disk fails (${said}): push its work, then free space on its disk, since a full disk fails the snapshot and a machine left like this has been dropped with its disk`;
+}
+
+/** How full a disk may be before its row says so, said only past it: past this a build's output can fill the rest
+ * between two turns, and a stop that snapshots a full disk fails. */
+export const DISK_FULL_PCT = 90;
+
+/** A machine whose stop snapshots its disk, past DISK_FULL_PCT: said before a stop can fail. The share is cut to a
+ * tenth and never rounded up, so a disk just past the line never reads as standing on it. */
+export function diskFullLine(pct: number): string {
+  return `its disk is ${Math.floor(pct * 10) / 10}% full: a stop snapshots the disk and fails once it is full, so free space on it (build output, caches) before it naps`;
+}
+
 /** The turn's error when nothing on the machine answered a launch from this computer for the whole reach window:
  * how many times it was tried and over how long. The fetch's own words name a Node error and the machine id,
  * neither of which a person can act on. */

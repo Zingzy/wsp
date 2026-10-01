@@ -34,6 +34,7 @@ import {
   importInto,
   isMissing,
   NapRefusedError,
+  StopRefusedError,
   installScript,
   INSTALL_MS,
   landBundle,
@@ -121,6 +122,8 @@ import {
   TOOLS_PATH,
   DiskSyncError,
   syncDisk,
+  DISK_USE_CMD,
+  diskUsePct,
 } from "@wsp/engine";
 import type { AgentsReport, AgentsSignInEvent, AgentsTarget, DaemonFrame, DaemonResponse, EditorChoice, EditorId, PlaceReport, ServerAdd, ServerAsk, ServerToolsAnswer, SignInLine, SkillAdded, SkillHit, SkillPreview } from "@wsp/protocol";
 import type {
@@ -234,7 +237,7 @@ import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
 import { isNoProvider, isPlaceAbsent, projectStateKey, putFiles, type Copier } from "@wsp/engine";
-import { boxFullLine, threadMessages, threadSeed, workspaceMemMb } from "@wsp/protocol";
+import { boxFullLine, DISK_FULL_PCT, diskFullLine, stopRefusedLine, threadMessages, threadSeed, workspaceMemMb } from "@wsp/protocol";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
 import { assertTokenShape, daemonTokenFor, daemonTokenPathOf, rotateDaemonToken } from "./daemon-token.js";
@@ -4180,6 +4183,31 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const said = napRefusedOf(entry);
     return said === undefined ? undefined : napRefusedLine(said);
   };
+  /** A stop the provider would not take while the snapshot of the disk fails, by workspace, held like a refused pause:
+   * on the row from the first one, for the machine it was said of, until a pause lands. */
+  const stopRefusals = new Map<string, { machineId: string; said: string }>();
+  const stopRefusedReason = (entry: LiveWorkspace): string | undefined => {
+    const refused = stopRefusals.get(entry.record.id);
+    return refused === undefined || refused.machineId !== entry.machine.id ? undefined : stopRefusedLine(refused.said);
+  };
+  /** How full the disk of a machine whose stop snapshots it read at its last turn's end, by workspace and machine. */
+  const disks = new Map<string, { machineId: string; pct: number }>();
+  const diskReason = (entry: LiveWorkspace): string | undefined => {
+    const read = disks.get(entry.record.id);
+    return read === undefined || read.machineId !== entry.machine.id || !(read.pct > DISK_FULL_PCT) ? undefined : diskFullLine(read.pct);
+  };
+  /** Reads the disk at a turn's end, where the stop snapshots it: what a turn wrote is what fills it, and the nap that
+   * may fail on a full one comes a window after. A row crossing the line either way is pushed at once. */
+  const readDisk = async (entry: LiveWorkspace): Promise<void> => {
+    if (!pauseKeepsDisk(backendFor(entry.record)) || entry.record.phase !== "running") return;
+    const res = await entry.machine.exec(DISK_USE_CMD, { timeoutMs: INLINE_EXEC_MS }).catch(() => undefined);
+    const pct = res?.exitCode === 0 ? diskUsePct(res.stdout) : undefined;
+    if (pct === undefined) return;
+    const was = diskReason(entry);
+    disks.set(entry.record.id, { machineId: entry.machine.id, pct });
+    const now = diskReason(entry);
+    if (now !== was && entry.record.phase === "running") await emitStatus(entry, reachOf(entry), rowReason(entry));
+  };
 
   /** The reach a status pushed for a running machine carries: what the poll last measured, and where it has
    * measured nothing, the claim this kind's road makes. A measurement outranks the claim because the pushes that
@@ -5340,12 +5368,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             if (napRefusedOf(entry) === undefined) console.warn(`the provider does not pause ${entry.machine.id} of ${id} (${e.said}); an idle nap waits for the backstop and exports no vault until a pause lands`);
             napRefusals.set(id, { machineId: entry.machine.id, said: e.said });
           }
+          if (e instanceof StopRefusedError) stopRefusals.set(id, { machineId: entry.machine.id, said: e.said });
           await emitStatus(entry, reachOf(entry), e instanceof Error ? e.message : String(e));
           throw e;
         }
         // The reason says the machine paused, so it is written once the provider has confirmed that.
         endSessions(id, PAUSED_REASON);
         napRefusals.delete(id);
+        stopRefusals.delete(id);
         entry.record.phase = "napping";
         await persist(entry.record);
         bus.emit({ type: "workspace.napped", workspaceId: id });
@@ -5529,7 +5559,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         // that window, the words unchanged. A refusal that stands was logged once, where the pause met it.
         idle.touch(id);
         const entry = live.get(id);
-        if (entry !== undefined) await emitStatus(entry, reachOf(entry), napRefusedReason(entry) ?? (e instanceof Error ? e.message : String(e)));
+        if (entry !== undefined) await emitStatus(entry, reachOf(entry), napRefusedReason(entry) ?? stopRefusedReason(entry) ?? (e instanceof Error ? e.message : String(e)));
         if (!(e instanceof NapRefusedError)) console.warn(`idle nap of ${id} was answered with ${providerSaid(e)}; a full ${Math.round(windowMs / 60_000)} min window starts over`);
       }
     },
@@ -8414,7 +8444,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       throw e;
     }
     started.finished.then(
-      () => idle.release(workspaceId),
+      () => {
+        idle.release(workspaceId);
+        void readDisk(entry).catch((e: unknown) => console.warn(`disk of ${workspaceId} not read after its turn: ${e instanceof Error ? e.message : String(e)}`));
+      },
       () => idle.release(workspaceId),
     );
     answerAsk = started.answer?.bind(started);
@@ -10955,6 +10988,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   /** A nap, a pause the poll adopts or a gone verdict moves the phase, and the sentence was about the phase it left. */
   const deleteLine = (e: LiveWorkspace): string | undefined => (e.deleteSaid?.phase === e.record.phase ? e.deleteSaid.line : undefined);
+  /** The one sentence a row carries, the most pressing first: a delete the provider sat on, the wake's own line or the
+   * words it left, a pause or a stop the provider refused, then a disk past the line a stop fails at. */
+  const rowReason = (e: LiveWorkspace): string | undefined => deleteLine(e) ?? e.wakeSaid ?? e.record.wakeRefused ?? napRefusedReason(e) ?? stopRefusedReason(e) ?? diskReason(e);
 
   const prices = createPriceTable({ store, clock, fetch: opts.pricesFetch ?? (async () => ({})) });
   const ledger = createUsageLedger({ store, clock, prices: () => prices.get() });
@@ -11070,8 +11106,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         // The wake's own line while one is in flight, and the words it left behind once its asking ran out: the poll
         // builds every status from the record, so a row that carried only what was pushed would fall silent between
         // two asks and forget the rebuild road at the next tick. A delete the provider sat on outranks both.
-        // A pause the provider refused stays on the row as long as it stands, for the same reason.
-        ...(deleteLine(e) ?? e.wakeSaid ?? e.record.wakeRefused ?? napRefusedReason(e)) !== undefined ? { reason: (deleteLine(e) ?? e.wakeSaid ?? e.record.wakeRefused ?? napRefusedReason(e))! } : {},
+        // A pause or a stop the provider refused stays on the row as long as it stands, for the same reason, and so
+        // does a disk past the line, which is said before a stop can fail on it.
+        ...(rowReason(e) !== undefined ? { reason: rowReason(e)! } : {}),
         ...(e.wakeAsk !== undefined ? { wakeAsk: e.wakeAsk } : {}),
         ...(e.checkout !== undefined ? { checkout: e.checkout } : {}),
         ...(e.pr !== undefined ? { pr: e.pr } : {}),
