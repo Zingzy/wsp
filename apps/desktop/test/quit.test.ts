@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { quitChoice, quitPrompt } from "../src/quit.js";
+import { quitAnswer, quitChoice, quitPrompt } from "../src/quit.js";
 
 describe("the question a quit asks", () => {
   it("offers Quit, Quit and stop wsp, and Cancel, with Quit the default and Cancel what Escape answers", () => {
@@ -19,5 +19,16 @@ describe("the question a quit asks", () => {
 
   it("never names the parts of wsp a person does not see", () => {
     for (const n of [0, 1, 2]) expect(`${quitPrompt(n).message} ${quitPrompt(n).detail}`).not.toMatch(/host|daemon|service/i);
+  });
+});
+
+describe("the standing answer picked on General", () => {
+  it("asks only on Ask each time; Keep threads running quits and Stop wsp too stops, with no question", async () => {
+    let asked = 0;
+    const ask = async () => (asked += 1, "cancel" as const);
+    expect(await quitAnswer("ask", ask)).toBe("cancel");
+    expect(await quitAnswer("keep", ask)).toBe("quit");
+    expect(await quitAnswer("stop", ask)).toBe("stop");
+    expect(asked).toBe(1);
   });
 });

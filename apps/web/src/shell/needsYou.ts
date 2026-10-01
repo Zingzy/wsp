@@ -6,8 +6,8 @@
 // the page hands it the sentence and it decides whether to show anything; a
 // browser tab has the browser's own notifications, asked for on the press that
 // opens the setup and spoken only while the tab is hidden. Nothing is said
-// while the app is in front of the person, and a line makes a sound only
-// where it says so.
+// while the app is in front of the person, and a line shows and sounds only
+// where it says so; a line that only sounds plays a short tone.
 import type { OutsideLine } from "@wsp/protocol";
 import { desktopBridge } from "../lib/desktopShell.js";
 
@@ -53,6 +53,25 @@ function desktopRoad(onOpen: () => void): NeedsYouRoad {
   };
 }
 
+/** A short tone for a line the person chose to hear and not see; a browser that will not play one says nothing. */
+function chime(): void {
+  if (typeof AudioContext === "undefined") return;
+  try {
+    const audio = new AudioContext();
+    const tone = audio.createOscillator();
+    const level = audio.createGain();
+    tone.frequency.value = 880;
+    level.gain.setValueAtTime(0.15, audio.currentTime);
+    level.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + 0.3);
+    tone.connect(level).connect(audio.destination);
+    tone.onended = () => void audio.close();
+    tone.start();
+    tone.stop(audio.currentTime + 0.3);
+  } catch {
+    // A tab the browser holds no sound for stays quiet; the sidebar and the title still say it.
+  }
+}
+
 /** A browser tab's road: the browser's own notifications, asked for once and spoken only while the tab is hidden. */
 function browserRoad(onOpen: () => void): NeedsYouRoad {
   const standing = new Set<Notification>();
@@ -60,7 +79,12 @@ function browserRoad(onOpen: () => void): NeedsYouRoad {
   return {
     ready: askToNotify,
     say: line => {
-      if (!has() || Notification.permission !== "granted" || !document.hidden) return;
+      if (!document.hidden) return;
+      if (!line.show) {
+        if (line.sound) chime();
+        return;
+      }
+      if (!has() || Notification.permission !== "granted") return;
       const shown = new Notification(line.title, { body: line.body, silent: !line.sound });
       standing.add(shown);
       shown.onclick = () => {

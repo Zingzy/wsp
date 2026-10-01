@@ -66,9 +66,12 @@ export interface SettingsReads {
   /** Whether the person's ~/.ssh/config reads wsp's own ssh config; null before an answer and where the host carries
    * no editor's ssh. */
   readonly sshInclude: boolean | null;
+  /** Whether this computer's service starts wsp at login; null before an answer, in a browser tab, and where no
+   * service is registered. */
+  readonly loginStart: boolean | null;
 }
 
-export const NO_READS: SettingsReads = { setup: null, file: null, account: null, devices: null, devicesRefused: false, image: null, spend: [], editors: null, sshInclude: null };
+export const NO_READS: SettingsReads = { setup: null, file: null, account: null, devices: null, devicesRefused: false, image: null, spend: [], editors: null, sshInclude: null, loginStart: null };
 
 export interface SettingsState {
   readonly at: SettingsAt;

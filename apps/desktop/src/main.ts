@@ -2,22 +2,22 @@
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { adoptLoginPath, agentsHere, aimedHost, computerNameHere, daemonBinaryHere, dialHost, installEach, mcpServerSpec, runningWsp, shimPath, systemService, wspHome, type CliIO } from "@wsp/host";
-import { HOST_WORDS, OutsideLine, ThemePreference, hostMenuAction, hostsMenuItems } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, HOST_WORDS, OutsideLine, ThemePreference, hostMenuAction, hostsMenuItems } from "@wsp/protocol";
 import { BrowserWindow, Menu, Notification, Tray, app, dialog, ipcMain, nativeImage, nativeTheme, powerSaveBlocker, shell, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
 import { awakeWanted } from "./awake.js";
 import { chooseFrom, contextMenuTemplate, parseContextMenuItems } from "./context-menu.js";
 import { deepLinks, linkInArgv } from "./deep-link.js";
 import { fontDirs, fontFamilies, indexFonts, localFontFaces, type FontFile } from "./fonts.js";
 import { bundleShell, type BundleShell } from "./get-bundle.js";
-import { homeOf, openHost, openHostReady, statePathIn, stopWsp, userDataIn, workingHere, type HostSession, type Launch, type OpenHostOptions } from "./host-lifecycle.js";
+import { homeOf, loginStart, openHost, openHostReady, setLoginStart, statePathIn, stopWsp, userDataIn, workingHere, type HostSession, type Launch, type OpenHostOptions } from "./host-lifecycle.js";
 import { hostSwitcher, type HostSwitcher } from "./host-switch.js";
 import { offerMove, type MoveGate } from "./move.js";
-import { sayOutside, showBadge, soundSample, type Notifier } from "./needs-you.js";
+import { sayOutside, showBadge, type Notifier } from "./needs-you.js";
 import { allowed, fromAppPage, fromOnboardingPage, hostsViewFor, notForThisPage } from "./origin.js";
 import { hostFeed, type FeedEvent, type FeedState, type HostFeed } from "./host-feed.js";
 import { guardWorkers, loadHostPage } from "./page-session.js";
 import { pagePreviews } from "./previews.js";
-import { QUIT_WORD, quitChoice, quitPrompt } from "./quit.js";
+import { QUIT_WORD, quitAnswer, quitChoice, quitPrompt } from "./quit.js";
 import { installShim, shimText } from "./shim.js";
 import { trayModel, trayNotice, type TrayAct, type TrayModel, type TrayRow } from "./tray.js";
 import { vibrancyFor, windowOptions } from "./window.js";
@@ -151,7 +151,7 @@ if (launchedWith !== undefined) links.open(launchedWith);
 if (app.isPackaged && process.env["WSP_DESKTOP_SMOKE"] !== "1") app.setAsDefaultProtocolClient("wsp");
 
 /** How this shell shows a system notification; the module decides whether to, this says with what. */
-const NOTIFIER: Notifier = { supported: () => Notification.isSupported(), make: o => new Notification(o) };
+const NOTIFIER: Notifier = { supported: () => Notification.isSupported(), make: o => new Notification(o), beep: () => shell.beep() };
 
 /** The window brought back in front of the person: a minimised one is restored first, and on a Mac the app itself has
  * to be raised or the window comes up behind whatever they were in. */
@@ -174,9 +174,9 @@ listen("outside:say", (event, line) => {
 
 listen("badge:set", (_event, count) => showBadge(count, app));
 
-// The sound a notification makes, played when Settings asks; this computer's own host's page alone, since it is a
-// notification on this computer.
-listen("outside:sample", () => void soundSample(NOTIFIER));
+// Whether this computer's service starts at login is this computer's to say, so only the app's own host's page asks.
+answer("service:login", () => loginStart(where().statePath, systemService()));
+answer("service:login-set", (_event, on) => setLoginStart(where().statePath, on === true, systemService()));
 
 // The one bridge call the preload answers itself, off the shell's own webUtils: it asks here first, so a page a
 // computer this one does not own serves is handed no path from this computer's desktop.
@@ -383,14 +383,17 @@ app.on("before-quit", () => {
 });
 
 /** The question the menu's Quit asks while the window is on this computer's own host: quit and leave wsp running, or
- * stop it too. A window on a host somewhere else quits with nothing to ask. */
+ * stop it too, unless the person picked a standing answer on General. A window on a host somewhere else quits with
+ * nothing to ask. */
 async function askQuit(): Promise<void> {
   if (local === undefined || local.remote) return app.quit();
   const { home, statePath } = where();
-  const working = await workingHere(statePath, home).catch(() => 0);
-  // Picked from the menu bar, the app may not be frontmost, and the question would open behind another app's window.
-  app.focus({ steal: true });
-  const choice = quitChoice((await dialog.showMessageBox({ type: "question", ...quitPrompt(working) })).response);
+  const choice = await quitAnswer(fed?.onQuit ?? DEFAULT_PREFERENCES.onQuit, async () => {
+    const working = await workingHere(statePath, home).catch(() => 0);
+    // Picked from the menu bar, the app may not be frontmost, and the question would open behind another app's window.
+    app.focus({ steal: true });
+    return quitChoice((await dialog.showMessageBox({ type: "question", ...quitPrompt(working) })).response);
+  });
   if (choice === "cancel") return;
   if (choice === "stop") {
     quitting = true;
@@ -535,10 +538,10 @@ function holdAwake(): void {
   }
 }
 
-/** A finish, a failure or a prompt said over the system while no window is open to say it; the page says them while it is up. */
+/** A finish, a failure, a prompt or a plan alert said over the system while no window is open to say it; the page says them while it is up. */
 function sayWhileClosed(e: FeedEvent): void {
   if (win !== undefined || fed === undefined) return;
-  const line = trayNotice(e as unknown as Parameters<typeof trayNotice>[0], fed, fed.notifySound);
+  const line = trayNotice(e as unknown as Parameters<typeof trayNotice>[0], fed, fed);
   if (line === undefined) return;
   const threadId = typeof e["threadId"] === "string" ? e["threadId"] : undefined;
   sayOutside(line, { focused: () => false, raise: () => void reopen(), open: () => void (threadId !== undefined && fedFrom?.remote !== true && links.open(`wsp://thread/${threadId}`)) }, NOTIFIER);

@@ -66,7 +66,7 @@ describe("ComposerQueue", () => {
     expect(onRemove).toHaveBeenCalledWith("a");
   });
 
-  it("offers no send-now control: Ctrl+Enter in the box is the one road to send now", () => {
+  it("offers no send-now control: steer, picked in Settings, is the one road to send now", () => {
     mount();
     expect(screen.queryByRole("button", { name: /send now/i })).toBeNull();
     expect(screen.queryByRole("status")).toBeNull();

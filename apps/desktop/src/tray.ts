@@ -5,23 +5,22 @@
 // tiles use), so the menu and the tiles never disagree. Nothing here touches
 // Electron; main.ts draws what this returns.
 import {
-  NEEDS_YOU,
   askingLine,
   foldThreads,
   needsYouCount,
-  oneLine,
-  threadFinishedLine,
+  outsideLine,
   threadNeedsYou,
-  threadStoppedLine,
   threadState,
   threadStateWord,
   workspaceComputerName,
   type OutsideLine,
   type PermissionOption,
+  type Preferences,
   type PlaceView,
   type SessionEvent,
   type SessionView,
   type ThreadView,
+  type UsageAlertEvent,
   type WorkspaceView,
 } from "@wsp/protocol";
 import { QUIT_WORD } from "./quit.js";
@@ -146,16 +145,19 @@ export function trayModel(input: TrayInput): TrayModel {
   };
 }
 
-/** What the menu bar says over the system while no window is open to say it: a thread a person or a line opened
- * that finished or failed, and a prompt. An agent's own thread reports to that agent. Nothing for anything else. */
-export function trayNotice(event: SessionEvent, rows: Pick<TrayInput, "sessions" | "workspaces" | "places">, sound: boolean): OutsideLine | undefined {
-  if (event.type === "session.permission") return { title: NEEDS_YOU, body: askingLine(event), sound };
+/** What the menu bar says over the system while no window is open to say it, by the protocol's one rule the page
+ * reads too: a prompt, a thread a person or a line opened that finished or failed, and an account's plan alert. An
+ * agent's own thread reports to that agent. Nothing for anything else. */
+export function trayNotice(event: SessionEvent | UsageAlertEvent, rows: Pick<TrayInput, "sessions" | "workspaces" | "places">, choices: Pick<Preferences, "notifyNeeds" | "notifyDone" | "planAlerts">): OutsideLine | undefined {
+  if (event.type === "usage.alert") return outsideLine({ kind: "plan", label: event.label, alert: event.alert }, choices);
+  if (event.type === "session.permission") return outsideLine({ kind: "asks", line: askingLine(event) }, choices);
   // Every adapter sends a result before its process ends, a made-up one when the process died first, so the end
   // after it has nothing to add: a death is said once and a stop not at all.
   if (event.type !== "session.done") return undefined;
   const thread = foldThreads(rows.sessions).find(t => t.id === (event.threadId ?? event.sessionId));
   if (thread === undefined || thread.startedBy === "agent") return undefined;
-  if (event.result.status === "failed") return { title: threadStoppedLine(thread.title), body: event.result.error === undefined ? computerOf(rows, event.workspaceId) : oneLine(event.result.error), sound };
+  const where = computerOf(rows, event.workspaceId);
+  if (event.result.status === "failed") return outsideLine({ kind: "failed", thread: thread.title, where, error: event.result.error }, choices);
   if (event.result.status !== "completed") return undefined;
-  return { title: threadFinishedLine(thread.title), body: computerOf(rows, event.workspaceId), sound };
+  return outsideLine({ kind: "finished", thread: thread.title, where }, choices);
 }

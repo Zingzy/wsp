@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CODE_SIZES, DEFAULT_PREFERENCES, TEXT_SIZES, type PlaceView, type ProjectView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
 import { useStore } from "../src/protocol/store.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
-import { ABOUT_WORDS, FONT_WORDS, GLASS_WORDS, NOTIFY_WORDS, THEME_SECTION_WORDS, THEME_WORDS, TRANSPARENCY_WORDS, SETTINGS_WORDS, groupBlurbs } from "../src/settings/format.js";
+import { ABOUT_WORDS, FONT_WORDS, GLASS_WORDS, THEME_SECTION_WORDS, THEME_WORDS, TRANSPARENCY_WORDS, SETTINGS_WORDS, groupBlurbs } from "../src/settings/format.js";
 import { SETTINGS_GROUPS } from "../src/settings/groups.js";
 import { useSettingsStore } from "../src/settings/settingsStore.js";
 import { SYSTEM_DARK_QUERY, useFontEffect, useThemeEffect } from "../src/settings/theme.js";
@@ -353,20 +353,19 @@ describe("Appearance", () => {
     expect(sets).toEqual([{ darkTheme: "pitch" }]);
   });
 
-  it("is the page's head over the theme picker, the Transparency switch, the type rows and the one Notifications switch, each section under a head and one sentence, with no line under the pictures", async () => {
+  it("is the page's head over the theme picker, the Transparency switch and the type rows, each section under a head and one sentence, with no line under the pictures", async () => {
     const { api } = settingsApi();
     mountSettings({ api });
     await settle();
     const head = document.querySelector<HTMLElement>("[data-settings-page] [data-k=settings-page-head]")!;
     expect(head.querySelector("h1")!.textContent).toBe(SETTINGS_WORDS.appearance);
     expect(head.querySelector("p")!.textContent).toBe(groupBlurbs("").appearance);
-    expect(rowTitles()).toEqual([TRANSPARENCY_WORDS.title, FONT_WORDS.app, FONT_WORDS.textSize, FONT_WORDS.code, FONT_WORDS.codeSize, NOTIFY_WORDS.sound]);
+    expect(rowTitles()).toEqual([TRANSPARENCY_WORDS.title, FONT_WORDS.app, FONT_WORDS.textSize, FONT_WORDS.code, FONT_WORDS.codeSize]);
     const sections = [...document.querySelectorAll<HTMLElement>("[data-settings-page] [data-settings-card]")];
     expect(sections.map(c => [c.querySelector("[data-settings-head]")?.textContent, c.querySelector("[data-settings-lede]")?.textContent])).toEqual([
       [SETTINGS_WORDS.theme, THEME_SECTION_WORDS.lede],
       [GLASS_WORDS.head, GLASS_WORDS.lede],
       [FONT_WORDS.head, FONT_WORDS.lede],
-      [NOTIFY_WORDS.head, NOTIFY_WORDS.lede],
     ]);
     expect(document.querySelectorAll("[data-settings-page] [data-settings-line]")).toHaveLength(0);
     expect(document.querySelector("[data-k=sidebar-width]")).toBeNull();
@@ -388,7 +387,7 @@ describe("Appearance", () => {
     await waitFor(() => expect(restore()).toBeNull());
     expect(useStore.getState().preferences.theme).toBe("system");
     await settle();
-    expect(sets.at(-1)).toEqual({ theme: "system", lightTheme: "paper", darkTheme: "graphite", appFont: "", codeFont: "", textSize: null, codeSize: null, transparency: true, notifySound: true });
+    expect(sets.at(-1)).toEqual({ theme: "system", lightTheme: "paper", darkTheme: "graphite", appFont: "", codeFont: "", textSize: null, codeSize: null, transparency: true });
   });
 
   it("a theme picked for either side is off the defaults, and Restore defaults puts both sides back", async () => {
@@ -401,7 +400,7 @@ describe("Appearance", () => {
     await waitFor(() => expect(restore()).toBeNull());
     expect(useStore.getState().preferences.darkTheme).toBe("graphite");
     await settle();
-    expect(sets.at(-1)).toEqual({ theme: "system", lightTheme: "paper", darkTheme: "graphite", appFont: "", codeFont: "", textSize: null, codeSize: null, transparency: true, notifySound: true });
+    expect(sets.at(-1)).toEqual({ theme: "system", lightTheme: "paper", darkTheme: "graphite", appFont: "", codeFont: "", textSize: null, codeSize: null, transparency: true });
   });
 });
 
@@ -458,23 +457,6 @@ describe("Appearance's previews and new controls", () => {
     cleanup();
   });
 
-  it("plays the sound from the shell that can, waits while Sound is off, and offers no button where nothing could play it", async () => {
-    const playNoticeSound = vi.fn();
-    window.wsp = { playNoticeSound };
-    const { api } = settingsApi();
-    mountSettings({ api });
-    await settle();
-    const play = screen.getByRole("button", { name: NOTIFY_WORDS.play });
-    fireEvent.click(play);
-    expect(playNoticeSound).toHaveBeenCalledTimes(1);
-    fireEvent.click(document.querySelector("[data-k=notify-sound]")!);
-    await waitFor(() => expect(screen.getByRole("button", { name: NOTIFY_WORDS.play }).hasAttribute("disabled")).toBe(true));
-    cleanup();
-    window.wsp = {};
-    mountSettings({ api: settingsApi().api });
-    await settle();
-    expect(screen.queryByRole("button", { name: NOTIFY_WORDS.play })).toBeNull();
-  });
 });
 
 describe("Appearance's fonts", () => {
