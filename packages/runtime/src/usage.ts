@@ -9,11 +9,13 @@ import {
   USAGE_WORDS,
   RANGE_DAYS,
   accountWords,
+  baseModel,
   UsageDay,
   dayKeyOf,
   hourOf,
   parseRateTable,
   priceOf,
+  rateOf,
   type AccountRoad,
   type AccountRow,
   type AgentSignInState,
@@ -59,6 +61,8 @@ export interface UsageEntry {
   computer: string;
   project: string;
   model?: string;
+  /** The turns this entry counts: one, unless it is a second model's share of a turn already counted. */
+  turns?: number;
   tokens?: Partial<TurnTokens>;
   costUsd?: number;
   /** The harness's own session id, which a read of the logs skips once a wsp turn was filed under it. */
@@ -142,10 +146,12 @@ function dayStartOf(at: number, timeZone?: string): number {
   return at - ((part("hour") * 60 + part("minute")) * 60 + part("second")) * 1000 - (at % 1000);
 }
 
-const splitValue = (row: UsageRow, split: UsageSplit): string => row[split];
+/** A row's value for a split; a model with its context window after it is the same model. */
+const splitValue = (row: UsageRow, split: UsageSplit): string => (split === "model" ? baseModel(row.model) : row[split]);
 
 const rowKey = (row: Omit<UsageRow, "turns" | "tokens" | "costReported">): string =>
   [row.hour, row.agent, row.account, row.computer, row.project, row.model, row.source].join("\u0000");
+
 
 export function createUsageLedger(o: { store: Store; clock: Clock; timeZone?: string; prices: () => Promise<RateTable>; retentionDays?: number }): UsageLedger {
   const zone = o.timeZone;
@@ -194,12 +200,12 @@ export function createUsageLedger(o: { store: Store; clock: Clock; timeZone?: st
     if (found === undefined) {
       held.rows.push({
         ...key,
-        turns: 1,
+        turns: entry.turns ?? 1,
         tokens,
         ...(entry.costUsd !== undefined ? { costReported: entry.costUsd } : {}),
       });
     } else {
-      found.turns += 1;
+      found.turns += entry.turns ?? 1;
       for (const field of ["input", "output", "cached", "cacheWrite", "reasoning"] as const) found.tokens[field] += tokens[field];
       if (entry.costUsd !== undefined) found.costReported = (found.costReported ?? 0) + entry.costUsd;
     }
@@ -270,7 +276,7 @@ export function createUsageLedger(o: { store: Store; clock: Clock; timeZone?: st
     const since = count === 1 ? today : dayStartOf(today - (count - 1) * DAY + HOUR * 12, zone);
     // Each day of the range by its own start, stepped from noon so a clock change never skips or repeats one.
     const starts = Array.from({ length: count }, (_, i) => dayStartOf(today - (count - 1 - i) * DAY + HOUR * 12, zone));
-    // The table is read only for a row no harness put a cost on, so a range with none asks for no download.
+    // The table is read only once a row is found, so an empty range asks for no download.
     let table: RateTable | undefined;
     const outside = q.outside ?? true;
     const rows = new Map<string, UsedRow>();
@@ -282,6 +288,7 @@ export function createUsageLedger(o: { store: Store; clock: Clock; timeZone?: st
             tokens: 0,
           }))
         : starts.map(t => ({ t, tokens: 0 }));
+    const points = new Map<string, number[]>();
     for (const [at, start] of starts.entries()) {
       const held = await readDay(dayKeyOf(start + HOUR * 12, zone));
       for (const row of held?.rows ?? []) {
@@ -291,28 +298,47 @@ export function createUsageLedger(o: { store: Store; clock: Clock; timeZone?: st
         const line = rows.get(key) ?? {
           key,
           label: q.label(q.split, key),
-          tokens: { input: 0, output: 0, cached: 0 },
+          tokens: { input: 0, output: 0, cached: 0, cacheWrite: 0, reasoning: 0 },
           priced: true,
+          turns: 0,
         };
-        line.tokens.input += row.tokens.input;
-        line.tokens.output += row.tokens.output;
-        line.tokens.cached += row.tokens.cached;
-        if (row.costReported !== undefined) line.costReported = (line.costReported ?? 0) + row.costReported;
-        else {
-          table ??= await o.prices();
-          const listed = priceOf(row.model, row.tokens, table);
-          if (listed !== undefined) line.costList = (line.costList ?? 0) + listed;
-          else if (row.tokens.input + row.tokens.output > 0) line.priced = false;
+        for (const field of ["input", "output", "cached", "cacheWrite", "reasoning"] as const) line.tokens[field] = (line.tokens[field] ?? 0) + row.tokens[field];
+        // A log keeps sessions and no turns, so turns count the ones wsp ran.
+        if (row.source === "wsp") line.turns = (line.turns ?? 0) + row.turns;
+        table ??= await o.prices();
+        const listed = priceOf(row.model, row.tokens, table);
+        const rate = rateOf(row.model, table);
+        if (listed !== undefined && rate !== undefined) {
+          line.estimate = (line.estimate ?? 0) + listed;
+          line.saved = (line.saved ?? 0) + row.tokens.cached * (rate.input - (rate.cacheRead ?? rate.input));
         }
+        if (row.costReported !== undefined) line.costReported = (line.costReported ?? 0) + row.costReported;
+        else if (listed !== undefined) line.costList = (line.costList ?? 0) + listed;
+        else if (row.tokens.input + row.tokens.output > 0) line.priced = false;
         rows.set(key, line);
         const step = count === 1 ? row.hour : at;
-        if (series[step] !== undefined) series[step].tokens += row.tokens.input + row.tokens.output;
+        if (series[step] !== undefined) {
+          series[step].tokens += row.tokens.input + row.tokens.output;
+          const line = points.get(key) ?? series.map(() => 0);
+          line[step]! += row.tokens.input + row.tokens.output;
+          points.set(key, line);
+        }
       }
     }
     const ordered = [...rows.values()].sort((a, b) => b.tokens.input + b.tokens.output - (a.tokens.input + a.tokens.output) || a.key.localeCompare(b.key));
     // The range ends where today does, so two reads a moment apart answer the same range.
     const logs = logged.size === 0 || q.logsOn === undefined ? {} : { logs: { agents: [...logged].map(agent => q.label("agent", agent)).sort(), computer: q.logsOn } };
-    return { range: q.range, split: q.split, rows: ordered, series, since, until: dayStartOf(today + DAY + HOUR * 12, zone), ...logs };
+    const lines = ordered.map(row => ({ key: row.key, label: row.label, points: points.get(row.key) ?? series.map(() => 0) }));
+    return {
+      range: q.range,
+      split: q.split,
+      rows: ordered,
+      series,
+      lines,
+      since,
+      until: dayStartOf(today + DAY + HOUR * 12, zone),
+      ...logs,
+    };
   };
 
   const limit = (r: LimitReading): Promise<{ before: AccountLimit | undefined; after: AccountLimit }> =>
@@ -355,6 +381,50 @@ export function createUsageLedger(o: { store: Store; clock: Clock; timeZone?: st
   };
 
   return { add, fileLogs, used, day: readDay, days: index, limit, limits, accountLabels };
+}
+
+/** How far back an account's draw right now reaches. */
+export const BURN_WINDOW_MS = 15 * 60_000;
+
+/** A call a run re-read after a host restart replayed: the run it came from and the moment the agent's machine
+ * stamped on it, on that machine's clock. */
+export interface ReplayedStamp {
+  run: string;
+  at: number;
+}
+
+/** What each account's running threads drew over the last fifteen minutes, off the calls their turns reported. Kept in
+ * memory alone: a reading this old is gone by the time a host has restarted. A call is filed when this host received
+ * it. A run re-read after a restart hands its old calls over all at once, so each of its calls is filed by its age
+ * against the newest stamp that run has given, counted back from when that newest one arrived: two stamps of one
+ * machine are compared, never a machine's clock against this host's. */
+export function createBurn(clock: Clock): { add(o: { account: string; threadId: string; tokens: number; replayed?: ReplayedStamp }): void; of(account: string): AccountRow["burn"] } {
+  let calls: { receivedAt: number; account: string; threadId: string; tokens: number; replayed?: ReplayedStamp }[] = [];
+  /** Each re-read run's newest stamp and when it arrived. */
+  const newest = new Map<string, { at: number; receivedAt: number }>();
+  const filedAt = (c: (typeof calls)[number]): number => {
+    const top = c.replayed === undefined ? undefined : newest.get(c.replayed.run);
+    return c.replayed === undefined || top === undefined ? c.receivedAt : Math.min(c.receivedAt, top.receivedAt - (top.at - c.replayed.at));
+  };
+  const recent = () => {
+    const since = clock.now() - BURN_WINDOW_MS;
+    calls = calls.filter(c => filedAt(c) > since);
+    const runs = new Set(calls.flatMap(c => (c.replayed !== undefined ? [c.replayed.run] : [])));
+    for (const run of newest.keys()) if (!runs.has(run)) newest.delete(run);
+    return calls;
+  };
+  return {
+    add: o => {
+      const receivedAt = clock.now();
+      if (o.replayed !== undefined && o.replayed.at >= (newest.get(o.replayed.run)?.at ?? -Infinity)) newest.set(o.replayed.run, { at: o.replayed.at, receivedAt });
+      recent().push({ receivedAt, ...o });
+    },
+    of: account => {
+      const on = recent().filter(c => c.account === account);
+      if (on.length === 0) return undefined;
+      return { tokensPerMinute: on.reduce((n, c) => n + c.tokens, 0) / (BURN_WINDOW_MS / 60_000), threads: new Set(on.map(c => c.threadId)).size };
+    },
+  };
 }
 
 /** The rate table, read off LiteLLM's price file once a day and kept under the wsp home, so a host offline prices
@@ -413,6 +483,8 @@ export function accountRows(o: {
   vaulted: (agent: string) => Vaulted;
   /** Whether the agent prints its plan's limits in a turn, as the catalog says. */
   printsLimits: (agent: string) => boolean;
+  /** What the account's running threads are drawing on it now, where any did. */
+  burn?: (key: string) => AccountRow["burn"];
 }): AccountRow[] {
   const rows = new Map<string, AccountRow>();
   const noteFor = (agent: string, keyed: boolean | undefined): AccountRow["note"] =>
@@ -448,6 +520,8 @@ export function accountRows(o: {
   for (const row of rows.values()) {
     const address = addresses.get(row.key);
     if (shared.has(row.label) && address !== undefined && !row.label.endsWith(` as ${address}`)) row.label = `${row.label} as ${address}`;
+    const burn = o.burn?.(row.key);
+    if (burn !== undefined) row.burn = burn;
   }
   return [...rows.values()].sort((a, b) => a.agent.localeCompare(b.agent) || a.label.localeCompare(b.label));
 }

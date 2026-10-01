@@ -86,6 +86,9 @@ export const AccountRow = z.object({
   status: LimitStatus.optional(),
   readAt: z.number().optional(),
   note: AccountNote.optional(),
+  /** What the account's running threads are drawing on it now: tokens a minute over the last fifteen minutes, and how
+   * many threads. Absent where nothing ran on it in that time. */
+  burn: z.object({ tokensPerMinute: z.number(), threads: z.number().int() }).optional(),
 });
 export type AccountRow = z.infer<typeof AccountRow>;
 
@@ -96,7 +99,7 @@ export const USAGE_RANGES = ["day", "week", "month"] as const;
 export const UsageRange = z.enum(USAGE_RANGES);
 export type UsageRange = z.infer<typeof UsageRange>;
 
-export const USAGE_SPLITS = ["agent", "account", "computer", "project"] as const;
+export const USAGE_SPLITS = ["agent", "account", "computer", "project", "model"] as const;
 export const UsageSplit = z.enum(USAGE_SPLITS);
 export type UsageSplit = z.infer<typeof UsageSplit>;
 
@@ -142,10 +145,15 @@ export type UsageDay = z.infer<typeof UsageDay>;
 export const UsedRow = z.object({
   key: z.string(),
   label: z.string(),
-  tokens: UsageTokens.pick({ input: true, output: true, cached: true }),
+  tokens: UsageTokens.pick({ input: true, output: true, cached: true }).extend({ cacheWrite: z.number().optional(), reasoning: z.number().optional() }),
   costReported: z.number().optional(),
   costList: z.number().optional(),
   priced: z.boolean(),
+  /** The rate table's figure for every token of the row, whatever its harness reported: the API estimate. */
+  estimate: z.number().optional(),
+  /** What the cached tokens saved at list price: their fresh input price less their cache read price. */
+  saved: z.number().optional(),
+  turns: z.number().int().optional(),
 });
 export type UsedRow = z.infer<typeof UsedRow>;
 
@@ -159,11 +167,14 @@ export const UsedAnswer = z.object({
   until: z.number(),
   /** Whose logs the range counted and on which computer, where it counted any: the agents by their names. */
   logs: z.object({ agents: z.array(z.string()), computer: z.string() }).optional(),
+  /** Each row's own series, on the same steps as series, so a chart draws one line per split value. */
+  lines: z.array(z.object({ key: z.string(), label: z.string(), points: z.array(z.number()) })).optional(),
 });
 export type UsedAnswer = z.infer<typeof UsedAnswer>;
 
-/** The tokens a row read fresh, the cached ones taken out of its input, so fresh, cached and out add up to the row. */
-export const freshIn = (tokens: { input: number; cached: number }): number => Math.max(0, tokens.input - tokens.cached);
+/** The tokens a row read fresh, the cached and the written ones taken out of its input, so fresh, written, cached and
+ * out add up to the row. */
+export const freshIn = (tokens: { input: number; cached: number; cacheWrite?: number | undefined }): number => Math.max(0, tokens.input - tokens.cached - (tokens.cacheWrite ?? 0));
 
 /** A list as a sentence reads it: "a", "a and b", "a, b and c". */
 export const listWords = (words: readonly string[]): string => (words.length < 2 ? (words[0] ?? "") : `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`);
@@ -236,9 +247,13 @@ export function parseRateTable(document: unknown): RateTable {
   return table;
 }
 
-/** A model's entry as a harness names it: as it is, without a provider in front, or without a date after it. */
-function rateOf(model: string, table: RateTable): Rate | undefined {
-  const bare = model.includes("/") ? model.slice(model.lastIndexOf("/") + 1) : model;
+/** A model as its maker names it, without the context window Claude Code writes after it, as in [1m]. */
+export const baseModel = (model: string): string => model.replace(/\[[^\]]*\]$/, "");
+
+/** A model's entry as a harness names it: as it is, without a provider in front, or without a date or a context
+ * window after it. */
+export function rateOf(model: string, table: RateTable): Rate | undefined {
+  const bare = baseModel(model.includes("/") ? model.slice(model.lastIndexOf("/") + 1) : model);
   return table[model] ?? table[bare] ?? table[bare.replace(/-\d{8}$/, "")];
 }
 
