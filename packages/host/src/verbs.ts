@@ -803,10 +803,10 @@ export function usageTableLines(read: { accounts: readonly AccountRow[]; used: U
     read.used.rows.length === 0
       ? [`${USAGE_WORDS.noUse}.`]
       : table([
-          [read.used.split.toUpperCase(), "FRESH IN", "CACHED", "OUT", "PRICE"],
+          [read.used.split.toUpperCase(), "FRESH IN", "WRITTEN", "CACHED", "OUT", "PRICE"],
           ...read.used.rows.map(row => {
             const price = usedPrice(row);
-            return [row.label, fmtTokens(freshIn(row.tokens)), fmtTokens(row.tokens.cached), fmtTokens(row.tokens.output), [price.figure, price.word].filter(Boolean).join(" ")];
+            return [row.label, fmtTokens(freshIn(row.tokens)), fmtTokens(row.tokens.cacheWrite ?? 0), fmtTokens(row.tokens.cached), fmtTokens(row.tokens.output), [price.figure, price.word].filter(Boolean).join(" ")];
           }),
         ]);
   return [...accounts, "", ...used];

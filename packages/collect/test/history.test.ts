@@ -429,6 +429,23 @@ describe("what each agent's own logs say was used", () => {
     ]);
   });
 
+  it("keeps a Codex rollout's cache writes, and leaves out the lines Claude Code writes under no model", async () => {
+    const text = [
+      line({ timestamp: "2026-09-29T09:00:01.000Z", type: "turn_context", payload: { model: "gpt-5.5" } }),
+      line({ timestamp: "2026-09-29T09:01:00.000Z", type: "event_msg", payload: { type: "token_count", info: { total_token_usage: { input_tokens: 1_000, cached_input_tokens: 400, cache_write_input_tokens: 300, output_tokens: 20, reasoning_output_tokens: 0 } } } }),
+    ].join("\n");
+    const claude = [
+      usageLine({ id: "msg_1", session: "s1", at: "2026-09-29T10:00:00.000Z", model: "<synthetic>", usage: { input_tokens: 5, output_tokens: 1 } }),
+      usageLine({ id: "msg_2", session: "s1", at: "2026-09-29T10:01:00.000Z", model: "claude-opus-5", usage: { input_tokens: 7, output_tokens: 1 } }),
+    ].join("\n");
+    const host = fakeHost({ files: { "~/.codex/sessions/2026/09/29/rollout-2026-09-29T09-00-00-01a0e365.jsonl": text, "~/.claude/projects/-Users-dev-proj/s1.jsonl": claude } });
+    const read = await readLogUsage(host, CATALOG_AGENTS.filter(a => a.id === "codex" || a.id === "claude"), { day: at => new Date(at).toISOString().slice(0, 10) });
+    expect(read.map(r => [r.agent, r.model, r.tokens.input, r.tokens.cacheWrite])).toEqual([
+      ["claude", "claude-opus-5", 7, 0],
+      ["codex", "gpt-5.5", 1_000, 300],
+    ]);
+  });
+
   it("reads again every file a cache from before the half-hour pieces holds", async () => {
     const dir = mkdtempSync(join(tmpdir(), "wsp-usage-cache-"));
     try {

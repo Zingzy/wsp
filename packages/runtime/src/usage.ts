@@ -14,6 +14,7 @@ import {
   hourOf,
   parseRateTable,
   priceOf,
+  rateOf,
   type AccountRoad,
   type AccountRow,
   type AgentSignInState,
@@ -269,7 +270,7 @@ export function createUsageLedger(o: { store: Store; clock: Clock; timeZone?: st
     const since = count === 1 ? today : dayStartOf(today - (count - 1) * DAY + HOUR * 12, zone);
     // Each day of the range by its own start, stepped from noon so a clock change never skips or repeats one.
     const starts = Array.from({ length: count }, (_, i) => dayStartOf(today - (count - 1 - i) * DAY + HOUR * 12, zone));
-    // The table is read only for a row no harness put a cost on, so a range with none asks for no download.
+    // The table is read only once a row is found, so an empty range asks for no download.
     let table: RateTable | undefined;
     const outside = q.outside ?? true;
     const rows = new Map<string, UsedRow>();
@@ -291,19 +292,23 @@ export function createUsageLedger(o: { store: Store; clock: Clock; timeZone?: st
         const line = rows.get(key) ?? {
           key,
           label: q.label(q.split, key),
-          tokens: { input: 0, output: 0, cached: 0 },
+          tokens: { input: 0, output: 0, cached: 0, cacheWrite: 0, reasoning: 0 },
           priced: true,
+          turns: 0,
         };
-        line.tokens.input += row.tokens.input;
-        line.tokens.output += row.tokens.output;
-        line.tokens.cached += row.tokens.cached;
-        if (row.costReported !== undefined) line.costReported = (line.costReported ?? 0) + row.costReported;
-        else {
-          table ??= await o.prices();
-          const listed = priceOf(row.model, row.tokens, table);
-          if (listed !== undefined) line.costList = (line.costList ?? 0) + listed;
-          else if (row.tokens.input + row.tokens.output > 0) line.priced = false;
+        for (const field of ["input", "output", "cached", "cacheWrite", "reasoning"] as const) line.tokens[field] = (line.tokens[field] ?? 0) + row.tokens[field];
+        // A log keeps sessions and no turns, so turns count the ones wsp ran.
+        if (row.source === "wsp") line.turns = (line.turns ?? 0) + row.turns;
+        table ??= await o.prices();
+        const listed = priceOf(row.model, row.tokens, table);
+        const rate = rateOf(row.model, table);
+        if (listed !== undefined && rate !== undefined) {
+          line.estimate = (line.estimate ?? 0) + listed;
+          line.saved = (line.saved ?? 0) + row.tokens.cached * (rate.input - (rate.cacheRead ?? rate.input));
         }
+        if (row.costReported !== undefined) line.costReported = (line.costReported ?? 0) + row.costReported;
+        else if (listed !== undefined) line.costList = (line.costList ?? 0) + listed;
+        else if (row.tokens.input + row.tokens.output > 0) line.priced = false;
         rows.set(key, line);
         const step = count === 1 ? row.hour : at;
         if (series[step] !== undefined) {

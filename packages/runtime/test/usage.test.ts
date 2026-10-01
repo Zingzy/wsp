@@ -51,7 +51,7 @@ describe("a turn's end in the ledger", () => {
     const { rt, ws } = await runtimeWith(turning(result));
     await (await rt.sessions.start(ws.id, { prompt: "go" })).finished;
     const byAccount = await rt.usage.used({ range: "day", split: "account" });
-    expect(byAccount.rows).toEqual([{ key: "claude:vault-token", label: "Claude Code with your sign-in", tokens: { input: 2_000, output: 300, cached: 1_500 }, costReported: 0.12, priced: true }]);
+    expect(byAccount.rows).toEqual([{ key: "claude:vault-token", label: "Claude Code with your sign-in", tokens: { input: 2_000, output: 300, cached: 1_500, cacheWrite: 200, reasoning: 0 }, costReported: 0.12, priced: true, turns: 1 }]);
     const byProject = await rt.usage.used({ range: "day", split: "project" });
     expect(byProject.rows.map(r => r.label)).toEqual([ws.project.name]);
     const byAgent = await rt.usage.used({ range: "day", split: "agent" });

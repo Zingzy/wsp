@@ -191,8 +191,9 @@ export const UsedAnswer = z.object({
 });
 export type UsedAnswer = z.infer<typeof UsedAnswer>;
 
-/** The tokens a row read fresh, the cached ones taken out of its input, so fresh, cached and out add up to the row. */
-export const freshIn = (tokens: { input: number; cached: number }): number => Math.max(0, tokens.input - tokens.cached);
+/** The tokens a row read fresh, the cached and the written ones taken out of its input, so fresh, written, cached and
+ * out add up to the row. */
+export const freshIn = (tokens: { input: number; cached: number; cacheWrite?: number | undefined }): number => Math.max(0, tokens.input - tokens.cached - (tokens.cacheWrite ?? 0));
 
 /** A list as a sentence reads it: "a", "a and b", "a, b and c". */
 export const listWords = (words: readonly string[]): string => (words.length < 2 ? (words[0] ?? "") : `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`);
@@ -265,9 +266,10 @@ export function parseRateTable(document: unknown): RateTable {
   return table;
 }
 
-/** A model's entry as a harness names it: as it is, without a provider in front, or without a date after it. */
-function rateOf(model: string, table: RateTable): Rate | undefined {
-  const bare = model.includes("/") ? model.slice(model.lastIndexOf("/") + 1) : model;
+/** A model's entry as a harness names it: as it is, without a provider in front, or without a date or a context
+ * window after it. */
+export function rateOf(model: string, table: RateTable): Rate | undefined {
+  const bare = (model.includes("/") ? model.slice(model.lastIndexOf("/") + 1) : model).replace(/\[[^\]]*\]$/, "");
   return table[model] ?? table[bare] ?? table[bare.replace(/-\d{8}$/, "")];
 }
 

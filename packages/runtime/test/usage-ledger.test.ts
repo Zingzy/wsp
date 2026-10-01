@@ -35,14 +35,13 @@ const turn = (o: Partial<UsageEntry> & { at: number }): UsageEntry => ({
 });
 
 describe("the ledger of what was used", () => {
-  it("reads the rate table only for a row no harness put a cost on", async () => {
+  it("reads the rate table only for a range with a row in it, once whatever the rows", async () => {
     const { clock } = fakeClock(NOON);
     let asked = 0;
     const usage = createUsageLedger({ store: memoryStore(), clock, timeZone: TZ, prices: async () => (asked++, TABLE) });
     await usage.used({ range: "week", split: "agent", label: labelOf });
-    await usage.add(turn({ at: NOON, costUsd: 0.5 }));
-    await usage.used({ range: "week", split: "agent", label: labelOf });
     expect(asked).toBe(0);
+    await usage.add(turn({ at: NOON, costUsd: 0.5 }));
     await usage.add(turn({ at: NOON, project: "p_other" }));
     await usage.used({ range: "week", split: "agent", label: labelOf });
     expect(asked).toBe(1);
@@ -121,6 +120,21 @@ describe("the ledger of what was used", () => {
     expect(rows.get("codex")).toMatchObject({ priced: true });
     expect(rows.get("opencode")).toMatchObject({ priced: false });
     expect(rows.get("opencode")?.costList).toBeUndefined();
+  });
+
+  it("returns the whole token mix, wsp's own turns, and the list price of every token whatever the harness reported", async () => {
+    const table = parseRateTable({ "claude-opus-5-5": { input_cost_per_token: 4e-6, output_cost_per_token: 2e-5, cache_read_input_token_cost: 2e-7, cache_creation_input_token_cost: 5e-6 } });
+    const { usage } = ledger(NOON, table);
+    await usage.add(turn({ at: NOON, agent: "claude", model: "claude-opus-5-5[1m]", costUsd: 9, tokens: { input: 10_000, output: 100, cached: 6_000, cacheWrite: 3_000, reasoning: 40 } }));
+    await usage.add(turn({ at: NOON, agent: "claude", model: "claude-opus-5-5", source: "log", tokens: { input: 1_000, output: 10, cached: 0, cacheWrite: 0 } }));
+    const [row] = (await usage.used({ range: "day", split: "agent", label: labelOf })).rows;
+    expect(row?.tokens).toEqual({ input: 11_000, output: 110, cached: 6_000, cacheWrite: 3_000, reasoning: 40 });
+    // A turn is one wsp ran; the logs keep sessions, not turns.
+    expect(row?.turns).toBe(1);
+    expect(row?.costReported).toBe(9);
+    expect(row?.costList).toBeCloseTo(1_000 * 4e-6 + 10 * 2e-5, 12);
+    expect(row?.estimate).toBeCloseTo(1_000 * 4e-6 + 6_000 * 2e-7 + 3_000 * 5e-6 + 100 * 2e-5 + 1_000 * 4e-6 + 10 * 2e-5, 12);
+    expect(row?.saved).toBeCloseTo(6_000 * (4e-6 - 2e-7), 12);
   });
 
   it("counts work read from the logs in the same row as wsp's own turns, and says once whose logs it counted and where", async () => {

@@ -77,7 +77,8 @@ const claudeUsage: UsageReader = {
       const usage = message["usage"];
       const id = typeof message["id"] === "string" ? message["id"] : undefined;
       const at = typeof row["timestamp"] === "string" ? Date.parse(row["timestamp"]) : NaN;
-      if (!isRecord(usage) || id === undefined || seen.has(id) || !Number.isFinite(at)) continue;
+      // Claude Code files its own error lines as messages of a model it calls <synthetic>, which no model wrote.
+      if (!isRecord(usage) || id === undefined || seen.has(id) || !Number.isFinite(at) || message["model"] === "<synthetic>") continue;
       seen.add(id);
       const cached = count(usage["cache_read_input_tokens"]);
       const cacheWrite = count(usage["cache_creation_input_tokens"]);
@@ -118,7 +119,7 @@ const codexUsage: UsageReader = {
         const at = typeof row["timestamp"] === "string" ? Date.parse(row["timestamp"]) : NaN;
         if (!Number.isFinite(at)) continue;
         const t = payload["info"]["total_token_usage"];
-        const total: Tokens = { input: count(t["input_tokens"]), output: count(t["output_tokens"]), cached: count(t["cached_input_tokens"]), cacheWrite: 0, reasoning: count(t["reasoning_output_tokens"]) };
+        const total: Tokens = { input: count(t["input_tokens"]), output: count(t["output_tokens"]), cached: count(t["cached_input_tokens"]), cacheWrite: count(t["cache_write_input_tokens"]), reasoning: count(t["reasoning_output_tokens"]) };
         // A total under the last one started again from nothing, so all of it is new.
         const restarted = total.input < before.input || total.output < before.output;
         const gained = { ...total };
