@@ -9,7 +9,7 @@ import { cleanup, fireEvent } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { agentMark } from "@wsp/catalog";
 import type { AccountRow, PlaceView, UsageRange, UsageSplit, UsedAnswer, UsedRow } from "@wsp/protocol";
-import { logsLine, USAGE_WORDS } from "@wsp/protocol";
+import { creditsWord, logsLine, resetQuestion, RESET_WORDS, USAGE_WORDS } from "@wsp/protocol";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { ABOUT_WORDS, PRIVACY_WORDS, USAGE_PAGE_WORDS } from "../src/settings/format.js";
@@ -126,6 +126,39 @@ afterEach(() => {
 });
 
 describe("Usage: limits", () => {
+  it("says a Codex account's banked resets under its pool, and spends one only after the person says yes to the shared question", async () => {
+    const day = 24 * HOUR;
+    const banked: AccountRow = { ...codexPlus(), credits: { count: 2, nextExpiresAt: minute() + 21 * day, readAt: minute() } };
+    const spent: string[] = [];
+    await mountLimits({
+      usageAccounts: async () => ({ accounts: accounts().map(row => (row.key === banked.key ? banked : row)) }),
+      usageReset: async account => {
+        spent.push(account);
+        return { outcome: "reset", said: RESET_WORDS.reset("Codex with ChatGPT Plus", 1), account: { ...banked, credits: { count: 1, readAt: minute() } } };
+      },
+    });
+    const line = $("[data-usage-resets='codex:acct-1']")!;
+    expect(text(line.querySelector("[data-k=banked]"))).toBe(creditsWord(banked.credits!, minute()));
+    fireEvent.click(line.querySelector("[data-k=use-reset]")!);
+    await settle();
+    expect(text(document.querySelector("[data-k=reset-question]"))).toBe(resetQuestion("Codex with ChatGPT Plus", 2));
+    expect(spent).toEqual([]);
+    fireEvent.click(document.querySelector("[data-k=reset-confirm]")!);
+    await settle();
+    expect(spent).toEqual(["codex:acct-1"]);
+    expect(text($("[data-usage-resets='codex:acct-1'] [data-k=banked]"))).toBe("1 banked");
+  });
+
+  it("draws no Use reset where nothing is banked, and no resets line where the host has read none", async () => {
+    const none: AccountRow = { ...codexPlus(), credits: { count: 0, readAt: minute() } };
+    await mountLimits({ usageAccounts: async () => ({ accounts: [none] }), usageReset: async () => ({ outcome: "noCredit", said: "" }) });
+    expect(text($("[data-usage-resets='codex:acct-1'] [data-k=banked]"))).toBe("none banked");
+    expect($("[data-usage-resets='codex:acct-1'] [data-k=use-reset]")).toBeNull();
+    cleanup();
+    await mountLimits();
+    expect($("[data-usage-resets]")).toBeNull();
+  });
+
   it("pools an agent's plan accounts as one card: the account, the computers as one line, when it was checked, and a meter per window with its percent and verdict", async () => {
     await mountLimits();
     const card = $("[data-settings-card=usage-pool-codex]")!;

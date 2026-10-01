@@ -7,14 +7,18 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { agentMark, agentName } from "@wsp/catalog";
 import { BoxIcon, ChartLineIcon, CircleDashedIcon, GaugeIcon, MonitorIcon, UserRoundIcon } from "lucide-react";
-import { USAGE_RANGES, USAGE_SPLITS, USAGE_WORDS, accountState, accountWords, fmtCost, fmtTokens, listWords, logsLine, resetsWord, type AccountRow, type AccountsAnswer, type LimitKind, type UsageRange, type UsageSplit, type UsedAnswer, type UsedRow } from "@wsp/protocol";
+import { USAGE_RANGES, USAGE_SPLITS, USAGE_WORDS, accountState, accountWords, creditsWord, resetQuestion, fmtCost, fmtTokens, listWords, logsLine, resetsWord, type AccountRow, type AccountsAnswer, type LimitKind, type UsageRange, type UsageSplit, type UsedAnswer, type UsedRow } from "@wsp/protocol";
 import { HarnessMark } from "../components/chat/HarnessMark.js";
+import { AlertDialog, AlertDialogClose, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogPopup, AlertDialogTitle } from "../components/ui/alert-dialog.js";
+import { Button, NEUTRAL_RING } from "../components/ui/button.js";
+import { addNotice, noticeFailure } from "../notices/store.js";
 import { SegmentedControl } from "../components/ui/segmented-control.js";
 import { cn } from "../lib/utils.js";
+import { useStore } from "../protocol/store.js";
 import { PROJECT_HUES, ProjectGlyph } from "../projects/look.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
 import { ComputerGlyph } from "./ComputerGlyph.js";
-import { ABOUT_WORDS, USAGE_PAGE_WORDS as W } from "./format.js";
+import { ABOUT_WORDS, RESET_LINE_WORDS, USAGE_PAGE_WORDS as W } from "./format.js";
 import { GlyphFrame } from "./grid.js";
 import { CARD_SURFACE, Card, type SettingsCardData } from "./rows.js";
 import type { SettingsContext } from "./settingsContext.js";
@@ -96,7 +100,7 @@ function UsagePage({ ctx }: { ctx: SettingsContext }) {
 
   return (
     <div key={tab} className="flex animate-settle-in flex-col gap-8 motion-reduce:animate-none">
-      {tab === "limits" ? <Limits accounts={accounts?.accounts ?? null} now={ctx.now} /> : <Used used={used} models={models} range={range} split={split} onRange={setRange} onSplit={setSplit} ctx={ctx} />}
+      {tab === "limits" ? <Limits accounts={accounts?.accounts ?? null} now={ctx.now} onAccount={row => setAccounts(held => (held === null ? held : { ...held, accounts: held.accounts.map(a => (a.key === row.key ? row : a)) }))} /> : <Used used={used} models={models} range={range} split={split} onRange={setRange} onSplit={setSplit} ctx={ctx} />}
     </div>
   );
 }
@@ -181,7 +185,63 @@ function PoolWindow({ kind, segments, now }: { kind: LimitKind; segments: readon
 }
 
 /** One agent's subscription accounts as a pool: who they are, what they draw now, and one line per window. */
-function Pool({ agent, accounts, now }: { agent: string; accounts: readonly AccountRow[]; now: number }) {
+/** One account's banked resets under its pool's head, and Use reset where one is banked: it asks the one question the
+ * command line asks, spends on yes, says what the host answered and puts the row it sends back in place. */
+function ResetLine({ row, now, onAccount }: { row: AccountRow; now: number; onAccount: (row: AccountRow) => void }) {
+  const api = useStore(s => s.api);
+  const [asking, setAsking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const credits = row.credits;
+  if (credits === undefined) return null;
+  const use = (): void => {
+    if (api?.usageReset === undefined) return;
+    setBusy(true);
+    void api
+      .usageReset(row.key)
+      .then(
+        answer => {
+          addNotice({ kind: answer.outcome === "reset" ? "note" : "error", text: answer.said });
+          if (answer.account !== undefined) onAccount(answer.account);
+        },
+        noticeFailure,
+      )
+      .finally(() => {
+        setBusy(false);
+        setAsking(false);
+      });
+  };
+  return (
+    <div data-usage-resets={row.key} className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 pt-3 text-[12.5px] text-muted-foreground">
+      <span className="flex min-w-0 items-baseline gap-2">
+        <span>{RESET_LINE_WORDS.resets}</span>
+        <span data-k="banked" className="font-mono text-foreground/80 tabular-nums">
+          {creditsWord(credits, now)}
+        </span>
+      </span>
+      {credits.count === 0 || api?.usageReset === undefined ? null : (
+        <Button variant="outline" size="xs" data-k="use-reset" disabled={busy} onClick={() => setAsking(true)}>
+          {busy ? RESET_LINE_WORDS.using : RESET_LINE_WORDS.use}
+        </Button>
+      )}
+      <AlertDialog open={asking} onOpenChange={open => !busy && setAsking(open)}>
+        <AlertDialogPopup data-reset-dialog>
+          <AlertDialogHeader>
+            <AlertDialogTitle data-k="reset-title">{RESET_LINE_WORDS.use}</AlertDialogTitle>
+            <AlertDialogDescription data-k="reset-question">{resetQuestion(row.label, credits.count)}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogClose render={<Button variant="outline" className={NEUTRAL_RING} />}>{RESET_LINE_WORDS.cancel}</AlertDialogClose>
+            <Button data-k="reset-confirm" disabled={busy} onClick={use}>
+              {busy ? RESET_LINE_WORDS.using : RESET_LINE_WORDS.use}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogPopup>
+      </AlertDialog>
+    </div>
+  );
+}
+
+function Pool({ agent, accounts, now, onAccount }: { agent: string; accounts: readonly AccountRow[]; now: number; onAccount: (row: AccountRow) => void }) {
   const kinds = POOLED_KINDS.filter(kind => accounts.some(a => a.windows?.some(w => w.kind === kind)));
   const computers = [...new Set(accounts.flatMap(a => a.computers))];
   const title = accounts.length === 1 ? accounts[0]!.label : W.accounts(accounts.length, agentName(agent));
@@ -198,6 +258,9 @@ function Pool({ agent, accounts, now }: { agent: string; accounts: readonly Acco
             <span data-k="read-at">{W.checked(ABOUT_WORDS.readWhen(Math.max(0, now - readAt)))}</span>
           </span>
         </div>
+        {accounts.map(row => (
+          <ResetLine key={row.key} row={row} now={now} onAccount={onAccount} />
+        ))}
         <div className="mt-2 flex flex-col [&>*]:border-t [&>*]:border-border/50">
           {kinds.map(kind => {
             const segments = accounts
@@ -229,7 +292,7 @@ function AccountLine({ row }: { row: AccountRow }) {
   );
 }
 
-function Limits({ accounts, now }: { accounts: ReadonlyArray<AccountRow> | null; now: number }) {
+function Limits({ accounts, now, onAccount }: { accounts: ReadonlyArray<AccountRow> | null; now: number; onAccount: (row: AccountRow) => void }) {
   // Until the accounts arrive the card holds one row's room, so nothing moves when they land.
   if (accounts === null) return <LimitsSkeleton />;
   const windowed = accounts.filter(row => (row.windows ?? []).some(w => POOLED_KINDS.includes(w.kind)));
@@ -249,7 +312,7 @@ function Limits({ accounts, now }: { accounts: ReadonlyArray<AccountRow> | null;
   return (
     <div className="flex flex-col gap-10">
       {agents.map(agent => (
-        <Pool key={agent} agent={agent} accounts={windowed.filter(row => row.agent === agent)} now={now} />
+        <Pool key={agent} agent={agent} accounts={windowed.filter(row => row.agent === agent)} now={now} onAccount={onAccount} />
       ))}
       {quiet.length === 0 && names.length === 0 ? null : (
         <Card

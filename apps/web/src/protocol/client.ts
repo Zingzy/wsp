@@ -69,6 +69,7 @@ import {
   SshHostSuggestion,
   PlaceSpend,
   AccountsAnswer,
+  ResetAnswer,
   ReadingsAnswer,
   UsedAnswer,
   type UsageRange,
@@ -719,6 +720,9 @@ export interface Api {
   usageUsed?(range: UsageRange, split: UsageSplit): Promise<UsedAnswer>;
   /** Every sign-in wsp knows, one row per account, with its limits as the agent last reported them. */
   usageAccounts?(): Promise<AccountsAnswer>;
+  /** Spends one banked reset of the account named by its key, on the person's own road: what it came to, the sentence
+   * the command line prints for it, and the account row as it now reads. */
+  usageReset?(account: string): Promise<ResetAnswer>;
   /** A computer's readings over a range, folded into the range's step; none where its daemon kept none. */
   placesReadings?(placeId: string, range: UsageRange): Promise<ReadingsAnswer>;
   /** Moves head to a version in the manifest; workspaces already forked keep their image. */
@@ -1003,6 +1007,7 @@ export function makeApi(c: ProtocolClient): Api {
     spend: async () => PlaceSpend.array().parse((await c.request<{ places?: unknown }>("cost.spend")).places),
     usageUsed: async (range, split) => UsedAnswer.parse((await c.request<{ used?: unknown }>("usage.used", { range, split, outside: true })).used),
     usageAccounts: async () => AccountsAnswer.parse(await c.request<unknown>("usage.accounts")),
+    usageReset: async account => ResetAnswer.parse(await c.request<unknown>("usage.reset", { account })),
     placesReadings: async (placeId, range) => ReadingsAnswer.parse(await c.request<unknown>("places.readings", { placeId, range })),
     // Parsed, not trusted: the lineage renders and forks only snapshots the wire type vouches for.
     snapshotWorkspace: async id => ProjectGolden.parse((await c.request<{ projectGolden?: unknown }>("workspaces.snapshot", { workspaceId: id })).projectGolden),

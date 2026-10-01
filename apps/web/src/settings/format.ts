@@ -455,3 +455,11 @@ export const COMPUTER_PAGE_WORDS = {
   spawnTitle: "Agents may start agents",
   spawnLine: (machines: number, depth: number): string => `A thread here may open threads of its own: up to ${machines} ${machines === 1 ? "machine" : "machines"}, ${depth === 1 ? "one level deep" : `${depth} levels deep`}.`,
 } as const;
+
+/** The Limits tab's banked resets line: what is banked, and the one act that spends one after asking. */
+export const RESET_LINE_WORDS = {
+  resets: "Resets",
+  use: "Use reset",
+  using: "Using reset",
+  cancel: "Cancel",
+} as const;

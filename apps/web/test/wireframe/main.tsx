@@ -551,10 +551,11 @@ const HELD_SESSIONS: Record<string, SessionView[]> = Object.fromEntries(Object.e
  * OpenCode with no plan limit, and a week at his size, nearly all of it read from cache. */
 const DAY_MS = 86_400_000;
 const USAGE_ANSWERS = {
+  usageReset: async () => ({ outcome: "reset" as const, said: "Reset used: Codex with ChatGPT Plus's windows start again now, 1 left" }),
   usageAccounts: async () => ({
     accounts: [
       { key: "claude:vault-key", agent: "claude", label: "Claude Code with an API key", computers: ["Boat", "zingzy's MacBook Pro"], note: "pays per token, no plan limit" },
-      { key: "codex:acct_7f3", agent: "codex", label: "Codex with ChatGPT Plus", computers: ["zingzy's MacBook Pro"], plan: "plus", windows: [{ kind: "session", usedPercent: 62, resetsAt: Date.parse(AT) + 2.5 * 3_600_000 }, { kind: "week", usedPercent: 18, resetsAt: Date.parse(AT) + 3 * DAY_MS }], status: "ok", readAt: Date.parse(AT) },
+      { key: "codex:acct_7f3", agent: "codex", label: "Codex with ChatGPT Plus", computers: ["zingzy's MacBook Pro"], plan: "plus", credits: { count: 2, nextExpiresAt: Date.parse(AT) + 21 * DAY_MS, readAt: Date.parse(AT) }, windows: [{ kind: "session", usedPercent: 62, resetsAt: Date.parse(AT) + 2.5 * 3_600_000 }, { kind: "week", usedPercent: 18, resetsAt: Date.parse(AT) + 3 * DAY_MS }], status: "ok", readAt: Date.parse(AT) },
       { key: "opencode@here", agent: "opencode", label: "OpenCode signed in on zingzy's MacBook Pro", computers: ["zingzy's MacBook Pro"], note: "reports no plan limit" },
     ],
   }),
