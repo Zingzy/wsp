@@ -20,7 +20,8 @@ export interface ChartLine {
 
 const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map(n => (n + 0.5) / 16);
 const CELL = 2;
-const HEIGHT = 300;
+export const CHART_HEIGHT = 300;
+const HEIGHT = CHART_HEIGHT;
 const PAD = 6;
 
 function paintDither(canvas: HTMLCanvasElement, points: readonly number[], top: number, ink: string): void {

@@ -20,7 +20,8 @@ import { GlyphFrame } from "./grid.js";
 import { CARD_SURFACE, Card, Row, type SettingsCardData } from "./rows.js";
 import type { SettingsContext } from "./settingsContext.js";
 import { useSettingsStore, type UsageTab } from "./settingsStore.js";
-import { UsageChart, type ChartLine } from "./usageChart.js";
+import { CHART_HEIGHT, UsageChart, type ChartLine } from "./usageChart.js";
+import { Skeleton } from "../components/ui/skeleton.js";
 
 const NUMBER = "font-mono text-xs tabular-nums";
 const ROW_NUMBER = "font-mono text-sm tabular-nums";
@@ -238,12 +239,7 @@ function AccountLine({ row }: { row: AccountRow }) {
 
 function Limits({ accounts, now }: { accounts: ReadonlyArray<AccountRow> | null; now: number }) {
   // Until the accounts arrive the card holds one row's room, so nothing moves when they land.
-  if (accounts === null)
-    return (
-      <Card id="usage-limits">
-        <div data-k="limits-loading" aria-busy className="h-[68px]" />
-      </Card>
-    );
+  if (accounts === null) return <LimitsSkeleton />;
   const windowed = accounts.filter(row => (row.windows ?? []).some(w => POOLED_KINDS.includes(w.kind)));
   const agents = [...new Set(windowed.map(row => row.agent))];
   // An agent that reports no limit at all has nothing to read on a row of its own, so it is named once under the list.
@@ -525,6 +521,88 @@ function Sources({ used }: { used: UsedAnswer }) {
   );
 }
 
+/** The Usage tab while its answer is on the way, in the loaded page's own shape and heights so nothing moves when
+ * it lands. */
+function UsedSkeleton({ range }: { range: UsageRange }) {
+  return (
+    <div data-k="used-loading" aria-busy className="flex flex-col gap-10">
+      <div className={cn(CARD_SURFACE, "grid grid-cols-4 divide-x divide-border/50 max-sm:grid-cols-2 max-sm:divide-x-0")}>
+        {[0, 1, 2, 3].map(i => (
+          <div key={i} className="flex flex-col gap-1.5 px-5 py-5">
+            <Skeleton className="my-1 h-3 w-16" />
+            <Skeleton className="my-0.5 h-7 w-28" />
+            <Skeleton className="my-0.5 h-3 w-24" />
+          </div>
+        ))}
+      </div>
+      <section className="flex flex-col gap-4">
+        <h2 data-settings-head className="flex min-h-7 items-center text-sm font-normal text-foreground/70">
+          {W.chartHead[range]}
+        </h2>
+        <div className="flex gap-6">
+          <Skeleton className="h-3.5 w-28" />
+          <Skeleton className="h-3.5 w-20" />
+        </div>
+        <div className="grid grid-cols-[2.25rem_minmax(0,1fr)] gap-x-3 gap-y-3">
+          <span className="flex flex-col justify-between py-1" style={{ height: CHART_HEIGHT }}>
+            {[0, 1, 2, 3, 4].map(i => (
+              <Skeleton key={i} className="h-2.5 w-8" />
+            ))}
+          </span>
+          <Skeleton className="rounded-md opacity-60" style={{ height: CHART_HEIGHT }} />
+          <span />
+          <span className="h-4" />
+        </div>
+      </section>
+      <section className="flex flex-col gap-4">
+        <Skeleton className="h-3.5 w-20" />
+        <div className={BARE_TABLE}>
+          <div className="py-3">
+            <Skeleton className="h-3 w-24" />
+          </div>
+          {[0, 1].map(i => (
+            <div key={i} className="flex items-center gap-3 py-4">
+              <Skeleton className="size-8 rounded-md" />
+              <span className="flex flex-1 flex-col gap-2">
+                <Skeleton className="h-3.5 w-32" />
+                <Skeleton className="h-1 w-48" />
+              </span>
+              <Skeleton className="h-3.5 w-16" />
+              <Skeleton className="ms-6 h-3.5 w-20" />
+            </div>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+/** The Limits tab while the accounts are on the way: one pool's card with two windows, as most people have. */
+function LimitsSkeleton() {
+  return (
+    <div data-k="limits-loading" aria-busy className="flex flex-col gap-4">
+      <Skeleton className="h-3.5 w-16" />
+      <div className={cn(CARD_SURFACE, "flex flex-col gap-4 px-4 py-4")}>
+        <div className="flex items-center gap-3">
+          <Skeleton className="size-8 rounded-md" />
+          <span className="flex flex-col gap-2">
+            <Skeleton className="h-3.5 w-40" />
+            <Skeleton className="h-3 w-28" />
+          </span>
+        </div>
+        {[0, 1].map(i => (
+          <div key={i} className="grid grid-cols-[5.5rem_minmax(0,1fr)_3rem_minmax(0,10rem)] items-center gap-x-4">
+            <Skeleton className="h-3 w-12" />
+            <Skeleton className="h-2.5" />
+            <Skeleton className="ms-auto h-3 w-8" />
+            <Skeleton className="h-3 w-24" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function Used({ used, models, range, split, onRange, onSplit, ctx }: { used: UsedAnswer | null; models: readonly UsedRow[]; range: UsageRange; split: UsageSplit; onRange: (r: UsageRange) => void; onSplit: (s: UsageSplit) => void; ctx: SettingsContext }) {
   const controls = (
     <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
@@ -532,7 +610,13 @@ function Used({ used, models, range, split, onRange, onSplit, ctx }: { used: Use
       <SegmentedControl data-k="usage-split" aria-label={W.split} value={split} segments={SPLITS} onChange={onSplit} className="h-9" segmentClassName="px-3.5 text-sm" />
     </div>
   );
-  if (used === null) return <section data-usage-section="used" aria-label={W.used} className="flex flex-col gap-8">{controls}</section>;
+  if (used === null)
+    return (
+      <section data-usage-section="used" aria-label={W.used} className="flex flex-col gap-10">
+        {controls}
+        <UsedSkeleton range={range} />
+      </section>
+    );
   const tokensOf = (row: UsedRow): number => row.tokens.input + row.tokens.output;
   const ranked = [...used.rows].sort((a, b) => tokensOf(b) - tokensOf(a));
   const top = tokensOf(ranked[0] ?? { tokens: { input: 0, output: 0, cached: 0 } } as UsedRow);

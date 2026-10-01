@@ -233,10 +233,11 @@ describe("Usage: limits", () => {
     expect(session.querySelector("[data-k=pace]")).toBeNull();
   });
 
-  it("stands a row's room from the first paint, so nothing moves when the accounts arrive", async () => {
+  it("draws a pool's skeleton from the first paint, so nothing moves when the accounts arrive", async () => {
     await mountLimits({ usageAccounts: () => new Promise<never>(() => {}) } as Partial<Api>);
-    const card = $("[data-settings-card=usage-limits]")!;
-    expect(card.querySelector("[data-k=limits-loading]")).not.toBeNull();
+    const loading = $("[data-k=limits-loading]")!;
+    expect(loading.getAttribute("aria-busy")).toBe("true");
+    expect(loading.querySelectorAll("[data-slot=skeleton]").length).toBeGreaterThan(0);
     expect($("[data-usage-account]")).toBeNull();
     expect($("[data-usage-pool]")).toBeNull();
   });
@@ -396,6 +397,17 @@ describe("Usage: used", () => {
     expect($("[data-k=usage-totals]")).toBeNull();
     expect($$("[data-used-row]")).toEqual([]);
     expect($("[data-k=logs]")).toBeNull();
+  });
+});
+
+describe("Usage: loading", () => {
+  it("draws the totals, the chart and the table as skeletons while the answer is on the way, the controls already there", async () => {
+    await mount({ usageUsed: () => new Promise<never>(() => {}) } as Partial<Api>);
+    const loading = $("[data-k=used-loading]")!;
+    expect(loading.getAttribute("aria-busy")).toBe("true");
+    expect(loading.querySelectorAll("[data-slot=skeleton]").length).toBeGreaterThan(10);
+    expect($("[data-k=usage-range]")).not.toBeNull();
+    expect($("[data-k=usage-totals]")).toBeNull();
   });
 });
 
