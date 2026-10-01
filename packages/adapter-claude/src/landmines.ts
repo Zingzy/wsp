@@ -185,11 +185,15 @@ export function buildCommand(options: BuildCommandOptions): string {
   return inFolder(cwd, claude);
 }
 
+/** How much of a session's file the saved cost is looked for in: the CLI appends it as its process exits, so on a
+ * resume the last one sits behind the previous turn's few closing lines, and a file of any length costs one read. */
+export const SAVED_SPEND_TAIL_BYTES = 8 * 1024 * 1024;
+
 /** Prints the session's saved running cost ahead of a resumed turn's CLI: Claude Code appends its totals to the
  * session's file as cost-state lines, and a resume carries the last one into every result's total_cost_usd. */
 export function savedSpendCommand(o: { configDir: string; sessionId: string }): string {
   const file = `${shellQuote(`${o.configDir}/projects`)}/*/${shellQuote(`${o.sessionId}.jsonl`)}`;
-  return `wsp_saved=$(ls -1td ${file} 2>/dev/null | head -n 1); [ -z "$wsp_saved" ] || grep -F ${shellQuote('"type":"cost-state"')} "$wsp_saved" | tail -n 1; `;
+  return `wsp_saved=$(ls -1td ${file} 2>/dev/null | head -n 1); [ -z "$wsp_saved" ] || tail -c ${SAVED_SPEND_TAIL_BYTES} "$wsp_saved" | grep -F ${shellQuote('"type":"cost-state"')} | tail -n 1; `;
 }
 
 /**

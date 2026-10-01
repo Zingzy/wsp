@@ -1,6 +1,10 @@
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { buildCommand, buildEnv, newSessionId, PROJECT_DIR_ENV, userMessageLine } from "../src/landmines.js";
+import { buildCommand, buildEnv, newSessionId, PROJECT_DIR_ENV, SAVED_SPEND_TAIL_BYTES, savedSpendCommand, userMessageLine } from "../src/landmines.js";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -242,5 +246,33 @@ describe("userMessageLine", () => {
 
   it("a message with no image is the one-block line it always was: nothing rides for free", () => {
     expect(JSON.parse(userMessageLine("plain", sessionId, []))).toEqual(JSON.parse(userMessageLine("plain", sessionId)));
+  });
+});
+
+describe("the saved running cost a resume prints ahead of the CLI", () => {
+  const SESSION = "e16ed170-8257-4668-879e-fe836341633c";
+  const saved = (total: number) => JSON.stringify({ type: "cost-state", sessionId: SESSION, totalCostUSD: total, modelUsage: {} });
+  const printed = (lines: string[]): string => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-saved-spend-"));
+    try {
+      mkdirSync(join(dir, "projects", "-w"), { recursive: true });
+      writeFileSync(join(dir, "projects", "-w", `${SESSION}.jsonl`), `${lines.join("\n")}\n`);
+      return execFileSync("bash", ["-c", `${savedSpendCommand({ configDir: dir, sessionId: SESSION })}echo launched`], { encoding: "utf8" });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  it("is the last cost-state line of the session's file", () => {
+    expect(printed([saved(1), '{"type":"user"}', saved(352.3), '{"type":"last-prompt"}'])).toBe(`${saved(352.3)}\nlaunched\n`);
+  });
+
+  it("is read off the file's last bytes alone: a line further back than that prints nothing, and the turn's cost is then not known", () => {
+    const filler = JSON.stringify({ type: "user", text: "x".repeat(SAVED_SPEND_TAIL_BYTES) });
+    expect(printed([saved(352.3), filler])).toBe("launched\n");
+  });
+
+  it("prints nothing for a session with no file", () => {
+    expect(execFileSync("bash", ["-c", `${savedSpendCommand({ configDir: "/nonexistent-config", sessionId: SESSION })}echo launched`], { encoding: "utf8" })).toBe("launched\n");
   });
 });
