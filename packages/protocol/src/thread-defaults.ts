@@ -335,6 +335,11 @@ export function configDirRefusal(agent: string, given: string, real: ResolvedFol
   return null;
 }
 
+/** Why a launch did not start: the config folder kept at setup now leads somewhere `why` refuses, read again on that
+ * computer just before the launch. */
+export const configDirLaunchRefusal = (agent: string, agentId: string, folder: string, why: string): string =>
+  `${agent} does not start with its config folder ${folder}: ${why}. Set another with wsp agents setup ${agentId} --config, or put its own back with --reset config.`;
+
 /** What a config folder change asks of the person: a login kept under the old folder does not follow it. */
 export const configDirSignInLine = (agent: string): string => `${agent} keeps its sign-in under its config folder, so sign it in again there before its next thread`;
 

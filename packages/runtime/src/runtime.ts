@@ -239,7 +239,7 @@ import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
 import { isNoProvider, isPlaceAbsent, projectStateKey, putFiles, type Copier } from "@wsp/engine";
 import { boxFullLine, DISK_FULL_PCT, diskFullLine, stopRefusedLine, threadMessages, threadSeed, workspaceMemMb } from "@wsp/protocol";
-import { accessMode, accessRefusal, agentOffLine, markedFor, openDefaults, resolveThreadDefaults, setupView, shapeModels, withCustomModels, type AccessChoice, type AgentLaunch, type AgentRow, type AgentSetupSet, type ProjectOverrides, type ResolvedFolder, type ThreadDefaults } from "@wsp/protocol";
+import { accessMode, accessRefusal, agentOffLine, configDirLaunchRefusal, configDirRefusal, markedFor, openDefaults, resolveThreadDefaults, setupView, shapeModels, withCustomModels, type AccessChoice, type AgentLaunch, type AgentRow, type AgentSetupSet, type ProjectOverrides, type ResolvedFolder, type ThreadDefaults } from "@wsp/protocol";
 import { agentSetups, realFolderHere, realFolderScript } from "./agent-setup.js";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
@@ -7020,7 +7020,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     async execStream(id, argv, cwd, origin) {
       const entry = await entryOf(id, origin);
       await copyBlocked(entry);
-      const { adapter } = adapterFor(entry);
+      const { adapter } = await launchAdapterFor(entry);
       // Only the socket or the machine going away ends a command; a build may outlive the deadline a harness turn gets.
       const ranIn = await threadFolder(entry, { cwd });
       const inner = execFactoryFor(entry, { idleMs: Number.POSITIVE_INFINITY, deadlineMs: Number.POSITIVE_INFINITY })(inFolder(ranIn, argv.map(shellQuote).join(" ")), { env: { ...adapter.env } });
@@ -7154,7 +7154,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const opening = newest?.threadId === undefined ? undefined : rows.find(v => v.threadId === newest.threadId)?.prompt;
       const named = newest?.harness ?? defaultAgentOf(await preferences.get(), entry);
       if (adapters[named] === undefined || agentOff(entry, named)) return { message: null, note: DRAFT_NOTES.noAgent };
-      const { harness, adapter } = adapterFor(entry, named);
+      const { harness, adapter } = await launchAdapterFor(entry, named);
       if (adapter.draftFor === undefined) return { message: null, note: DRAFT_NOTES.noAgent };
       const diff = GitDiffReply.parse(await withDaemon(entry, ask => ask({ op: "git.diff", cwd: checkoutOf(entry.record), scope: "head", ...(paths !== undefined ? { paths } : {}) })));
       const table = harnessCatalog(harness);
@@ -7615,7 +7615,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (threadId === undefined || entry === undefined || titlesAsked.has(threadId)) return;
     if (view.prompt === undefined || threadSource(threadId) !== "seed") return;
     if (workspaceState({ phase: entry.record.phase }) !== "running" || adapters[view.harness] === undefined) return;
-    const { harness, adapter } = adapterFor(entry, view.harness);
+    const { harness, adapter } = await launchAdapterFor(entry, view.harness);
     if (adapter.titleFor === undefined) return;
     titlesAsked.add(threadId);
     const table = harnessCatalog(harness);
@@ -7672,6 +7672,23 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const [folder, home] = read.stdout.trim().split("\n");
     if (read.exitCode !== 0 || folder === undefined || home === undefined || !home.startsWith("/")) throw new Error(`${door.nameOf(placeId)} did not say where ${path} is: ${read.stderr.trim() || `exit ${read.exitCode}`}`);
     return { folder: posix.normalize(folder), home, kept: [join(home, ".wsp")] };
+  };
+
+  /** Reads the config folder kept for this agent again on the computer the workspace stands on, right before a
+   * launch: a folder that now leads out of that computer's home, onto it, or into wsp's own refuses the launch rather
+   * than starting the agent there or on its own default folder. */
+  const confineSetup = async (entry: LiveWorkspace, named?: string): Promise<void> => {
+    const harness = named ?? DEFAULT_AGENT.id;
+    const place = setupPlace(entry);
+    const folder = place === undefined ? undefined : setups.get(place, harness)?.configDir;
+    if (place === undefined || folder === undefined) return;
+    const why = configDirRefusal(agentLabel(harness), folder, await configFolderOn(place, folder));
+    if (why !== null) throw Object.assign(new Error(configDirLaunchRefusal(agentLabel(harness), harness, folder, why)), { kind: "usage" });
+  };
+  /** adapterFor for a road that starts the agent's process or runs under its setup, its config folder checked first. */
+  const launchAdapterFor = async (...a: Parameters<typeof adapterFor>): Promise<ReturnType<typeof adapterFor>> => {
+    await confineSetup(a[0], a[1]);
+    return adapterFor(...a);
   };
 
   /** The agent a new thread runs when its start names none: the project's, then the person's default, then the
@@ -8807,6 +8824,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         delete o.access;
       }
       if (agentOff(entry, o.harness)) throw Object.assign(new Error(agentOffLine(agentLabel(o.harness), computerOf(entry))), { kind: "usage" });
+      await confineSetup(entry, o.harness);
       const refuse = (): void => {
         const refusal = sendRefusal(workspaceState({ phase: entry.record.phase }), entry.record.gone, entry.record.name);
         if (refusal !== null) throw new Error(refusal);
@@ -9225,7 +9243,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (entry === undefined) return { outcome: "not-found" };
       const refusal = sendRefusal(workspaceState({ phase: entry.record.phase }), entry.record.gone, entry.record.name);
       if (refusal !== null) throw new Error(refusal);
-      const { harness, adapter } = adapterFor(entry, s.view.harness);
+      const { harness, adapter } = await launchAdapterFor(entry, s.view.harness);
       const table = harnessCatalog(harness);
       // Checked against the list the picker showed, so a mode this CLI does not take is refused in the same words a
       // start refuses it with rather than travelling to the machine as a request it will not answer.
@@ -9341,7 +9359,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const refusal = sendRefusal(workspaceState({ phase: entry.record.phase }), entry.record.gone);
       if (refusal !== null) throw new Error(refusal);
       const latest = s.view.threadId === undefined ? s.view : (latestOn(s.view.threadId) ?? s.view);
-      const { harness, adapter } = adapterFor(entry, latest.harness);
+      const { harness, adapter } = await launchAdapterFor(entry, latest.harness);
       if (adapter.aside === undefined) throw new Error(asideUnsupportedLine(harness));
       if (latest.claudeSessionId === undefined) throw new Error(ASIDE_NO_SESSION_LINE);
       const answer = await adapter.aside({
@@ -9441,7 +9459,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       };
       const kept = keptOf(order[at]!);
       const latest = latestOn(threadId) ?? rows[0]?.view;
-      const { harness, adapter } = adapterFor(entry, latest?.harness ?? held?.harness);
+      const { harness, adapter } = await launchAdapterFor(entry, latest?.harness ?? held?.harness);
       const agent = harnessCatalog(harness)?.label ?? harness;
       const files = opts.files === true;
       if (files && kept?.ref === undefined) throw conflict(REWIND_NO_CHECKPOINT_LINE);

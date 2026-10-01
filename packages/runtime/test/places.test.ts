@@ -5,7 +5,7 @@
 // ones, so what the door verifies is what a place would send.
 import { createHash, createPrivateKey, randomBytes, randomUUID, sign } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as joinPath } from "node:path";
 import { connect as netConnect } from "node:net";
@@ -4977,6 +4977,57 @@ describe("the agents on a computer you own", () => {
       expect(kept, String(kept["error"])).toMatchObject({ ok: true });
     } finally {
       rmSync(boxHome, { recursive: true, force: true });
+    }
+  });
+
+  it("read an agent's config folder again on that computer before each launch there, and refuse one that now leads out of its home", async () => {
+    const boxHome = mkdtempSync(joinPath(tmpdir(), "wsp-box-home-"));
+    const outside = mkdtempSync(joinPath(tmpdir(), "wsp-outside-"));
+    try {
+      mkdirSync(joinPath(boxHome, "real"));
+      const starts: string[] = [];
+      const factory: HarnessAdapterFactory = ctx => ({
+        steers: false,
+        start: ({ onEvent }) => {
+          starts.push(ctx.home("claude") ?? "");
+          const result: TurnResult = { status: "completed", text: "ok" };
+          onEvent({ type: "session.start", sessionId: randomUUID() });
+          onEvent({ type: "turn.done", sessionId: "s", result });
+          return { localId: "s", finished: Promise.resolve(result), interrupt: async () => {} };
+        },
+      });
+      const claude = { id: "claude", name: "Claude Code", installed: true, road: "own" as const, signIn: "signed-in" as const, signInRoad: "device" as const, wspTools: false };
+      const reader: AgentsReader = { read: async () => ({ ...READ, agents: [claude] }), tools: async () => ({ auth: "open", readAt: "2026-10-01T12:00:00.000Z" }) };
+      const hostKey = newPlaceKeyPair();
+      runtime = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: factory }, placeLinks: wiring(hostKey), agentsReader: reader });
+      srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+      const { client, placeId } = await join(hostKey, {
+        code: await code(),
+        report: report("srv", { agents: ["claude"] }),
+        answers: c => {
+          forks(c, undefined, undefined, KEEPS_NO_IMAGE).swallow.add("exec");
+          c.onFrame(raw => {
+            const frame = raw as unknown as Record<string, unknown>;
+            if (frame["op"] !== "exec") return;
+            const stdout = execFileSync("/bin/bash", ["-c", String(frame["cmd"])], { env: { HOME: boxHome, PATH: "/usr/bin:/bin" }, encoding: "utf8" });
+            c.say({ id: frame["id"], ok: true, exitCode: 0, stdout, stderr: "", truncated: false });
+          });
+        },
+      });
+      sockets.push(client.ws);
+      const ws = await createOn(runtime, { name: "x", on: "srv" });
+      const kept = joinPath(realpathSync(boxHome), "real", "c");
+      symlinkSync(joinPath(boxHome, "real"), joinPath(boxHome, "in"));
+      expect((await runtime.agents.setup(placeId, "claude", { configDir: joinPath(boxHome, "in", "c") })).setup?.configDir).toBe(kept);
+      await (await runtime.sessions.start(ws.id, { prompt: "one", harness: "claude" })).finished;
+      expect(starts).toEqual([kept]);
+      rmSync(joinPath(boxHome, "real"), { recursive: true });
+      symlinkSync(outside, joinPath(boxHome, "real"));
+      await expect(runtime.sessions.start(ws.id, { prompt: "two", harness: "claude" })).rejects.toMatchObject({ kind: "usage", message: expect.stringContaining(`Claude Code does not start with its config folder ${kept}: Claude Code's config folder has to be under the home folder ${realpathSync(boxHome)}`) });
+      expect(starts).toHaveLength(1);
+    } finally {
+      rmSync(boxHome, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
     }
   });
 

@@ -100,17 +100,21 @@ export function agentSetups(store: Store): AgentSetups {
     },
     async set(placeId, agent, change, o) {
       const dir = change.configDir;
+      let patch = change;
       if (typeof dir === "string") {
         if (stateEnvOf(agent) === undefined) throw usage(noConfigDirLine(o.agentName));
         if (!dir.startsWith("/")) throw usage(`${o.agentName}'s config folder must be an absolute path, and got ${dir}`);
-        const refused = configDirRefusal(o.agentName, dir, await o.folder(dir));
+        const real = await o.folder(dir);
+        const refused = configDirRefusal(o.agentName, dir, real);
         if (refused !== null) throw usage(refused);
+        // The folder the links led to is kept, so moving a link named here later moves no launch.
+        patch = { ...change, configDir: real.folder };
       }
       for (const [name, value] of Object.entries(change.env ?? {})) {
         const refused = value === null ? null : agentEnvRefusal(name, o.agentName, DROPPED_ENV[agent]);
         if (refused !== null) throw usage(refused);
       }
-      const next = setupPatched(held.get(keyOf(placeId, agent)), change);
+      const next = setupPatched(held.get(keyOf(placeId, agent)), patch);
       if (next === undefined) {
         await store.delete(AGENT_SETUPS, keyOf(placeId, agent));
         held.delete(keyOf(placeId, agent));

@@ -185,7 +185,8 @@ describe("an agent's setup on a computer", () => {
     const configDir = join(root, "claude-wsp");
     await rt.agents.setup(HERE_PLACE_ID, "claude", { program: "/opt/claude", args: ["--debug"], configDir, env: { FOO: "bar" } });
     await (await rt.sessions.start(ws.id, { prompt: "one" })).finished;
-    expect(launched.at(-1)).toMatchObject({ harness: "claude", home: configDir, launch: { program: "/opt/claude", args: ["--debug"] }, env: { FOO: "bar", CLAUDE_CONFIG_DIR: configDir } });
+    const kept = join(realpathSync(root), "claude-wsp");
+    expect(launched.at(-1)).toMatchObject({ harness: "claude", home: kept, launch: { program: "/opt/claude", args: ["--debug"] }, env: { FOO: "bar", CLAUDE_CONFIG_DIR: kept } });
     // Another agent on the same computer keeps its own.
     await (await rt.sessions.start(ws.id, { prompt: "two", harness: "codex" })).finished;
     expect(launched.at(-1)!.env).not.toHaveProperty("FOO");
@@ -239,7 +240,35 @@ describe("an agent's setup on a computer", () => {
       await expect(rt.agents.setup(HERE_PLACE_ID, "claude", { configDir: dir }), dir).rejects.toMatchObject({ kind: "usage" });
     }
     expect(await store.list("agentSetups")).toEqual([]);
-    expect((await rt.agents.setup(HERE_PLACE_ID, "claude", { configDir: join(root, "in", "claude-wsp") })).setup?.configDir).toBe(join(root, "in", "claude-wsp"));
+    expect((await rt.agents.setup(HERE_PLACE_ID, "claude", { configDir: join(root, "in", "claude-wsp") })).setup?.configDir).toBe(join(realpathSync(root), "real", "claude-wsp"));
+  });
+
+  it("keeps the folder its links lead to, and refuses the next launch once that folder leads out of the home", async () => {
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
+    const outside = mkdtempSync(join(tmpdir(), "wsp-outside-"));
+    try {
+      mkdirSync(join(root, "real"));
+      symlinkSync(join(root, "real"), join(root, "in"));
+      const kept = join(realpathSync(root), "real", "claude-wsp");
+      expect((await rt.agents.setup(HERE_PLACE_ID, "claude", { configDir: join(root, "in", "claude-wsp") })).setup?.configDir).toBe(kept);
+      await (await rt.sessions.start(ws.id, { prompt: "one" })).finished;
+      expect(launched.at(-1)).toMatchObject({ home: kept, env: { CLAUDE_CONFIG_DIR: kept } });
+      // Moving the link named at setup moves nothing: the launch reads the folder kept.
+      rmSync(join(root, "in"));
+      symlinkSync(outside, join(root, "in"));
+      await (await rt.sessions.start(ws.id, { prompt: "two" })).finished;
+      expect(launched.at(-1)).toMatchObject({ home: kept });
+      const before = launched.length;
+      rmSync(join(root, "real"), { recursive: true });
+      symlinkSync(outside, join(root, "real"));
+      await expect(rt.sessions.start(ws.id, { prompt: "three" })).rejects.toMatchObject({
+        kind: "usage",
+        message: `Claude Code does not start with its config folder ${kept}: Claude Code's config folder has to be under the home folder ${realpathSync(root)}, and ${kept} is not. Set another with wsp agents setup claude --config, or put its own back with --reset config.`,
+      });
+      expect(launched).toHaveLength(before);
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
   });
 
   it("reads a folder on another computer the same way, on that computer: links followed, the part not made yet kept", () => {
