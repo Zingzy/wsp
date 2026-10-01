@@ -18,6 +18,7 @@ import { hereName } from "./places.js";
 import type { SettingsCardData } from "./rows.js";
 import type { SettingsContext } from "./settingsContext.js";
 import { useSettingsStore } from "./settingsStore.js";
+import { SELECT_WIDTH } from "./layout.js";
 
 export function generalCards(ctx: SettingsContext): SettingsCardData[] {
   const editors = ctx.reads.editors ?? [];
@@ -62,7 +63,7 @@ export function generalCards(ctx: SettingsContext): SettingsCardData[] {
           control:
             picked === undefined ? null : (
               <Select value={picked.id} onValueChange={next => ctx.setPreferences({ editor: next as EditorId })}>
-                <SelectTrigger size="sm" aria-label={GENERAL_WORDS.editor} data-k="editor" className="w-44">
+                <SelectTrigger size="sm" aria-label={GENERAL_WORDS.editor} data-k="editor" className={SELECT_WIDTH}>
                   <SelectValue>
                     {(value: EditorId) => (
                       <span className="flex items-center gap-2">

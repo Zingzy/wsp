@@ -16,7 +16,7 @@ import { CARD_SURFACE, type SettingsCardData } from "./rows.js";
 import type { SettingsContext } from "./settingsContext.js";
 import { SYSTEM_DARK_QUERY, useAppDark } from "./theme.js";
 import { ModePicker, shownSide, ThemePicker } from "./ThemePicker.js";
-import { CARD_INSET } from "./layout.js";
+import { SELECT_WIDTH, CARD_INSET } from "./layout.js";
 
 const ChatMarkdown = lazy(() => import("../components/ChatMarkdown.js"));
 
@@ -48,7 +48,7 @@ export const appearanceOffDefaults = (p: Preferences): boolean =>
 function SizePicker({ id, label, sizes, value, onChange }: { id: string; label: string; sizes: readonly number[]; value: number | undefined; onChange: (size: number | null) => void }) {
   return (
     <Select value={value === undefined ? "" : String(value)} onValueChange={next => onChange(typeof next === "string" && next !== "" ? Number(next) : null)}>
-      <SelectTrigger size="sm" aria-label={label} data-k={id} className="w-28">
+      <SelectTrigger size="sm" aria-label={label} data-k={id} className={SELECT_WIDTH}>
         <SelectValue>{(picked: string) => (picked === "" ? FONT_WORDS.default : FONT_WORDS.px(Number(picked)))}</SelectValue>
       </SelectTrigger>
       <SelectPopup>

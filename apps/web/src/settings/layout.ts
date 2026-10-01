@@ -17,3 +17,5 @@ export const LIST_TITLE = "text-[15px] leading-6 font-medium text-foreground";
 export const NOTE = "text-[13px] leading-5 text-muted-foreground";
 /** The head over every card. */
 export const SECTION_HEAD = "flex min-h-7 items-center text-sm font-normal text-foreground/70";
+/** The one width every select in a setting row takes, so the controls line up down a card. */
+export const SELECT_WIDTH = "w-44 max-sm:w-36";
