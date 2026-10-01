@@ -18,7 +18,7 @@
 // typed and raises the reason as a flyout, so Enter never fails silently. A workspace whose machine is not
 // answering keeps its editor open and holds the send alone, so the wait can be
 // spent writing the message that goes when the machine answers. A running turn
-// blocks nothing: Enter then queues the message under the thread's key in the
+// blocks nothing: with queue picked, Enter then queues the message under the thread's key in the
 // draft store, a card stacks above the box with the files it goes with, and
 // when the turn ends the head
 // row starts the next turn; a fresh thread's rows wait under the workspace id
@@ -26,9 +26,9 @@
 // thread is on screen when that start lands. Every send holds the thread's
 // rows until its start lands, so a start the runtime refuses or a harness
 // that dies before init drains nothing behind it. Rows read back from storage
-// are held too. Held rows go only after the person's next Enter or Ctrl+Enter
-// here, never on their own, and a row typed during a turn goes ahead of the
-// held ones it releases. Ctrl+Enter sends the draft now: it goes to the head,
+// are held too. Held rows go only after the person's next send here, never on
+// their own, and a row typed during a turn goes ahead of the held ones it
+// releases. With steer picked a send during a turn goes now: it goes to the head,
 // and when the harness's catalog says it steers and the draft carries no file,
 // into the running turn through sessions.steer, leaving the queue once the
 // runtime took it (the thread shows it from the session.steer event), while
@@ -229,12 +229,13 @@ export function ChatComposer({
   const wake = useStore(s => s.wake);
   const conn = useStore(s => s.conn);
   const sessions = useStore(s => s.sessions[workspaceId]);
+  const steers = useStore(s => s.preferences.midTurn === "steer");
   const state = useWorkspaceState(workspaceId);
   const workspace = useWorkspace(workspaceId);
   const [stop, setStop] = useState<StopAttempt | null>(null);
   const stops = useRef(0);
   const multiPicks = useMultiPicks(workspaceId);
-  // The message a Ctrl+Enter put at the head while its steer or its stop is out.
+  // The message a send during a turn put at the head while its steer or its stop is out.
   const [next, setNext] = useState<string | null>(null);
   const draft = useComposerDraft(workspaceId);
   const { threadKey, named } = thread;
@@ -593,8 +594,8 @@ export function ChatComposer({
     [absent, api, blocked, computer, runningTurn, stopPending, stopTarget],
   );
 
-  /** Ctrl+Enter during a turn: the message goes to the head, then into the running turn where the harness steers and
-   * the message carries words alone, else the turn is stopped and the message goes as the next start. */
+  /** A send during a turn with steer picked: the message goes to the head, then into the running turn where the harness
+   * steers and the message carries words alone, else the turn is stopped and the message goes as the next start. */
   const sendNow = useCallback(
     (row: QueuedMessage) => {
       release(threadKey);
@@ -625,9 +626,10 @@ export function ChatComposer({
     [api, canSteer, canStop, interrupt, release, removeQueued, runningTurn, stopTarget, threadKey],
   );
 
-  /** Enter sends the draft, or queues it behind a running turn; with `now` (Ctrl+Enter) a queued message goes at once. */
+  /** Sends the draft, or queues it behind a running turn; with steer picked the message goes into that turn at once. */
   const send = useCallback(
-    (now = false) => {
+    () => {
+      const now = steers;
       // The same reading the send button's hover is already wearing: an Enter that lands here leaves the draft where
       // it was typed and says why.
       if (sendHeld !== null) {
@@ -679,7 +681,7 @@ export function ChatComposer({
       if (now) sendNow({ id, prompt });
       else release(threadKey);
     },
-    [askAside, asides, busy, dismissRefused, dismissTrigger, draft, enqueue, harnessCatalog, held, onStart, queueFiles, release, restoreDraft, runningTurn, sendHeld, sendNow, sending, setDraft, start, threadKey, trigger, waits, workspace, workspaceId],
+    [askAside, asides, busy, dismissRefused, dismissTrigger, draft, enqueue, harnessCatalog, held, onStart, queueFiles, release, restoreDraft, runningTurn, sendHeld, sendNow, sending, setDraft, start, steers, threadKey, trigger, waits, workspace, workspaceId],
   );
 
   // The head row goes as soon as nothing blocks a send; starting flips busy, so the rest wait for the next end.
@@ -845,7 +847,7 @@ export function ChatComposer({
           isDraftThread: false,
         });
         if (intent !== null) {
-          send(event.ctrlKey && !event.metaKey);
+          send();
           return true;
         }
       }

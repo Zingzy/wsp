@@ -2,13 +2,14 @@
 // Messages entered while a turn runs: Enter queues instead of failing, each
 // message a card above the composer with the files it goes with, going one per
 // turn end in order; a card's edit puts it back in the box and its remove drops
-// it; Ctrl+Enter sends now, into the turn where the harness steers and by
-// stopping the turn otherwise; and the queue lives in local storage so a reload
+// it; with steer picked in Settings a send goes now, into the turn where the
+// harness steers and by stopping the turn otherwise, and no chord stands in
+// for that pick; and the queue lives in local storage so a reload
 // still holds it: restored rows wait for the person's next send. Same fixture
 // api shape as chat.test.tsx; no live daemon.
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import type { EventUnion, HarnessCatalog, SessionEvent, SessionView, WorkspaceView } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, type EventUnion, type HarnessCatalog, type SessionEvent, type SessionView, type WorkspaceView } from "@wsp/protocol";
 import { installFakeLayout } from "./fake-layout.js";
 import { TABLE_CATALOG, whenAgentsAnswered } from "./agents.js";
 import { composerEditor, isEditable, press, typeInto } from "./composer-harness.js";
@@ -30,6 +31,7 @@ afterAll(() => restoreLayout());
 beforeEach(() => {
   window.localStorage.clear();
   useComposerDraftStore.setState({ drafts: {}, queues: {}, held: {} });
+  useStore.setState({ preferences: DEFAULT_PREFERENCES });
 });
 
 const WS = CHAT_WS;
@@ -126,10 +128,13 @@ async function enter(text: string) {
   await press(composerEditor(), "Enter");
 }
 
-/** Ctrl+Enter: the message goes into the running turn now rather than waiting behind it. */
-async function ctrlEnter(text: string) {
-  await typeInto(composerEditor(), text);
-  await press(composerEditor(), "Enter", { ctrlKey: true });
+/** Picks what a message sent during a turn does, as Settings > General does. */
+const midTurn = (pick: "queue" | "steer") => act(() => useStore.setState({ preferences: { ...useStore.getState().preferences, midTurn: pick } }));
+
+/** Enter with steer picked: the message goes into the running turn now rather than waiting behind it. */
+async function steer(text: string) {
+  midTurn("steer");
+  await enter(text);
 }
 
 /** A held card sent: its Edit puts it back in the box and the person's Enter sends it. */
@@ -229,7 +234,7 @@ describe("composer queue", () => {
     expect(started[0]!.attachments?.map(a => a.name)).toEqual(["notes.md"]);
   });
 
-  it("Ctrl+Enter sends the draft now with a harness that does not steer: the turn stops through the runtime's session id and the message goes first", async () => {
+  it("with steer picked, Enter sends the draft now with a harness that does not steer: the turn stops through the runtime's session id and the message goes first", async () => {
     const { api, started, interrupted, emit, hooks } = fixtureApi({}, [runningRow], [catalog(false)]);
     await setup(api);
     emit({ type: "session.start", ...scope, prompt: "go" });
@@ -239,7 +244,7 @@ describe("composer queue", () => {
     await enter("one");
     // The runtime pushes the interrupted done and end before it answers accepted.
     hooks.onInterrupt = () => { emit(done("interrupted")); emit(end()); };
-    await ctrlEnter("two");
+    await steer("two");
     expect(interrupted).toEqual([runningRow.id]);
     await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["two"]));
     expect(queued()).toEqual(["one"]);
@@ -259,7 +264,7 @@ describe("composer queue", () => {
     let release: () => void = () => {};
     const held = new Promise<void>(resolve => { release = resolve; });
     api.interruptSession = async id => { interrupted.push(id); await held; throw new Error("runtime is busy"); };
-    await ctrlEnter("two");
+    await steer("two");
     await waitFor(() => expect(queued()).toEqual(["two", "one"]));
     const word = () => document.querySelector("[data-composer-queue] summary [data-queued-word]")?.textContent;
     expect(word()).toBe(QUEUE_WORDS.sending);
@@ -274,7 +279,7 @@ describe("composer queue", () => {
     await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["two"]));
   });
 
-  it("with a harness that steers, Ctrl+Enter sends the draft into the running turn: one steer, no stop, no card, and it shows in the thread once recorded", async () => {
+  it("with steer picked and a harness that steers, Enter sends the draft into the running turn: one steer, no stop, no card, and it shows in the thread once recorded", async () => {
     const { api, started, interrupted, steered, emit } = fixtureApi({}, [runningRow], [catalog(true)]);
     await setup(api);
     emit({ type: "session.start", ...scope, prompt: "go" });
@@ -282,7 +287,7 @@ describe("composer queue", () => {
     await waitFor(() => expect(useStore.getState().sessions[WS]).toHaveLength(1));
     await waitFor(() => expect(useStore.getState().harnessesByWorkspace[WS]).toHaveLength(1));
     await enter("one");
-    await ctrlEnter("two");
+    await steer("two");
     await waitFor(() => expect(steered).toHaveLength(1));
     expect(steered[0]).toMatchObject({ sessionId: runningRow.id, prompt: "two" });
     expect(steered[0]!.requestId).toMatch(/\S/);
@@ -307,7 +312,7 @@ describe("composer queue", () => {
     await waitFor(() => expect(useStore.getState().sessions[WS]).toHaveLength(1));
     await waitFor(() => expect(useStore.getState().harnessesByWorkspace[WS]).toHaveLength(1));
     await enter("one");
-    await ctrlEnter("two");
+    await steer("two");
     await waitFor(() => expect(steered).toHaveLength(1));
     await waitFor(() => expect(queued()).toEqual(["two", "one"]));
     expect(interrupted).toEqual([]);
@@ -326,7 +331,7 @@ describe("composer queue", () => {
     await waitFor(() => expect(useStore.getState().sessions[WS]).toHaveLength(1));
     await waitFor(() => expect(useStore.getState().harnessesByWorkspace[WS]).toHaveLength(1));
     clearNotices();
-    await ctrlEnter("one");
+    await steer("one");
     await waitFor(() => expect(lastNotice()).toBe(COMPOSER_WORDS.sendNowFailed("Workspace is pausing; wake it to send")));
     expect(queued()).toEqual(["one"]);
     noLineAbove();
@@ -336,7 +341,7 @@ describe("composer queue", () => {
     await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["one"]));
   });
 
-  it("Ctrl+Enter with a file goes by the stop road even where the harness steers, since a steer carries words alone", async () => {
+  it("with steer picked, a send with a file goes by the stop road even where the harness steers, since a steer carries words alone", async () => {
     const { api, started, interrupted, steered, emit, hooks } = fixtureApi({}, [runningRow], [catalog(true)]);
     await setup(api);
     emit({ type: "session.start", ...scope, prompt: "go" });
@@ -347,7 +352,7 @@ describe("composer queue", () => {
     });
     await waitFor(() => expect(document.querySelector('[data-composer-files] [data-chat-file="notes.md"]')).not.toBeNull());
     hooks.onInterrupt = () => { emit(done("interrupted")); emit(end()); };
-    await ctrlEnter("read the notes now");
+    await steer("read the notes now");
     expect(steered).toEqual([]);
     expect(interrupted).toEqual([runningRow.id]);
     await waitFor(() => expect(started).toHaveLength(1));
@@ -355,12 +360,27 @@ describe("composer queue", () => {
     expect(started[0]!.attachments?.map(a => a.name)).toEqual(["notes.md"]);
   });
 
-  it("Ctrl+Enter before the turn's start arrives queues the message as Enter does, since nothing can be stopped yet", async () => {
+  it("with queue picked, the default, a send during a turn waits behind it even where the harness steers, and Ctrl+Enter is no road around that pick", async () => {
+    const { api, started, interrupted, steered, emit } = fixtureApi({}, [runningRow], [catalog(true)]);
+    await setup(api);
+    emit({ type: "session.start", ...scope, prompt: "go" });
+    await waitFor(() => expect(useStore.getState().sessions[WS]).toHaveLength(1));
+    await waitFor(() => expect(useStore.getState().harnessesByWorkspace[WS]).toHaveLength(1));
+    await enter("one");
+    await typeInto(composerEditor(), "two");
+    await press(composerEditor(), "Enter", { ctrlKey: true });
+    await waitFor(() => expect(queued()).toEqual(["one", "two"]));
+    expect(steered).toEqual([]);
+    expect(interrupted).toEqual([]);
+    expect(started).toHaveLength(0);
+  });
+
+  it("with steer picked, a send before the turn's start arrives queues the message, since nothing can be stopped yet", async () => {
     const { api, started, interrupted } = fixtureApi();
     await setup(api);
     await enter("first");
     await waitFor(() => expect(started).toHaveLength(1));
-    await ctrlEnter("second");
+    await steer("second");
     expect(started).toHaveLength(1);
     expect(interrupted).toEqual([]);
     expect(queued()).toEqual(["second"]);
