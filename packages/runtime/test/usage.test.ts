@@ -2,15 +2,16 @@
 // The usage records as the runtime keeps them: a turn's end files its tokens
 // under the sign-in its machine ran it with, a limit the harness printed files
 // that account's reading, and the two answers never add one into the other.
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { HERE_PLACE_ID, type AdapterEvent, type DaemonFrame, type DaemonResponse, type HarnessLimit, type TurnResult } from "@wsp/protocol";
+import { DEVICE_OPS, HERE_PLACE_ID, THREAD_OPS, type AdapterEvent, type DaemonFrame, type DaemonResponse, type HarnessLimit, type TurnResult } from "@wsp/protocol";
 import type { DaemonChannel, DaemonChannelOptions } from "../src/daemon-channel.js";
 import { createRuntime, type HarnessAdapterFactory, type Runtime } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
 import { createOn, fakeLocal, projectOn, stubBackend, tokenGuest } from "./stub-backend.js";
+import { fakeAppServer } from "../../adapter-codex/test/fake-app-server.js";
 
 /** A harness whose one turn prints what the case gives it before its result. */
 const turning = (result: TurnResult, before: (sessionId: string) => AdapterEvent[] = () => []): HarnessAdapterFactory => () => ({
@@ -292,5 +293,45 @@ describe("a computer's readings", () => {
   it("hands on a daemon's refusal as it said it: one from before it kept readings names the op, and the page reads any refusal as no readings", async () => {
     const { rt, ws } = await readingsFrom(frame => (frame["op"] === "sys.history" ? { id: 1, ok: false, error: "unknown op: sys.history" } : { id: 1, ok: true }) as DaemonResponse);
     await expect(rt.usage.readings({ workspaceId: ws.id }, "day")).rejects.toThrow("unknown op: sys.history");
+  });
+});
+
+describe("spending a banked reset", () => {
+  const snapshot = (used: number) => ({ limitId: "codex", primary: { usedPercent: used, windowDurationMins: 300, resetsAt: 1_790_700_000 }, secondary: null, planType: "plus", rateLimitReachedType: null });
+  const limits = (used: number, availableCount: number) => ({
+    result: { rateLimits: snapshot(used), rateLimitsByLimitId: { codex: snapshot(used) }, accountId: "acct_7f3a", rateLimitResetCredits: { availableCount, credits: [] } },
+  });
+
+  it("runs on this computer under its own login, files the reads before and after it, and answers the account's row", async () => {
+    const server = fakeAppServer({
+      "account/read": { result: { account: { type: "chatgpt", email: "dev@example.com", planType: "plus" }, requiresOpenaiAuth: true } },
+      "account/rateLimits/read": [limits(100, 2), limits(0, 1)],
+      "account/rateLimitResetCredit/consume": { result: { outcome: "reset" } },
+    });
+    const root = mkdtempSync(join(tmpdir(), "wsp-usage-reset-"));
+    const row = (id: string) => ({ id, name: id, installed: true, road: "npm", signIn: "signed-in", signInRoad: "login", wspTools: false });
+    try {
+      rt = createRuntime({
+        backend: stubBackend(),
+        store: memoryStore(),
+        adapters: {},
+        pricesFetch: async () => ({}),
+        local: { ...fakeLocal(root), home: id => (id === "codex" ? server.home : join(root, `.${id}`)), env: () => ({ PATH: server.path, HOME: root }) },
+        agentsReader: { read: async () => ({ home: root, user: "maya", agents: [row("codex")], skills: [], servers: [], refused: [] }) as never, tools: async () => ({ auth: "open", readAt: "2026-09-25T12:00:00.000Z" }) as never },
+      });
+      const answer = await rt.usage.reset({ account: "codex@here" });
+      expect(answer).toMatchObject({ outcome: "reset", said: expect.stringMatching(/^Reset used: Codex signed in on .+'s windows start again now, 1 left$/), account: { key: "codex:acct_7f3a", credits: { count: 1 } } });
+      const consume = server.requests().find(r => r["method"] === "account/rateLimitResetCredit/consume");
+      expect(consume?.["params"]).toEqual({ idempotencyKey: expect.stringMatching(/^[0-9a-f-]{36}$/) });
+      expect((await rt.usage.accounts()).accounts.find(a => a.key === "codex:acct_7f3a")).toMatchObject({ windows: [{ kind: "session", usedPercent: 0 }], credits: { count: 1 } });
+    } finally {
+      server.remove();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("is the person's own act: no thread's token and no paired computer may ask it", () => {
+    expect(THREAD_OPS).not.toContain("usage.reset");
+    expect(DEVICE_OPS).not.toContain("usage.reset");
   });
 });

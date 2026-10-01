@@ -1556,6 +1556,14 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               if (msg.op === "usage.used") send({ id: msg.id, ok: true, used: await rt.usage.used({ range: msg.range, split: msg.split, ...(msg.outside !== undefined ? { outside: msg.outside } : {}) }) });
               else send({ id: msg.id, ok: true, ...(await rt.usage.accounts()) });
               return;
+            case "usage.reset":
+              // Spending a reset is the person's act on their own account, on the road their computers are.
+              if (!ownRoad()) {
+                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
+                return;
+              }
+              send({ id: msg.id, ok: true, ...(await rt.usage.reset({ account: msg.account, ...(msg.creditId !== undefined ? { creditId: msg.creditId } : {}), ...(msg.on !== undefined ? { on: msg.on } : {}) })) });
+              return;
             case "places.readings": {
               if (!ownRoad()) {
                 send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });

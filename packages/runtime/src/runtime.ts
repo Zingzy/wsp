@@ -2,7 +2,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { homedir, hostname, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, posix, resolve as resolvePathOn } from "node:path";
-import { CATALOG_AGENTS, DEFAULT_AGENT, GUEST_HOME, type ThreadAgent, PATH_BOUND_DIR_NAMES, TOOL_PREFIX, catalogIdOfRow, gitHostOf, ownerRepoOf, remoteHost, serverValuesOf, guestEnv, installEnv, installHomes, sharedOn } from "@wsp/catalog";
+import { CATALOG_AGENTS, DEFAULT_AGENT, GUEST_HOME, type ThreadAgent, PATH_BOUND_DIR_NAMES, TOOL_PREFIX, catalogIdOfRow, gitHostOf, ownerRepoOf, remoteHost, serverValuesOf, guestEnv, installEnv, installHomes, loginHomeIn, sharedOn } from "@wsp/catalog";
 import {
   BUILDER_IDLE_MS,
   DAEMON_PORT,
@@ -249,9 +249,9 @@ import { nextPortBase } from "./ports.js";
 import { connectDaemon, type DaemonReach } from "./reach.js";
 import { POLL_INTERVAL_MS, createStatusTracker, machineStateOf, phaseLeavingGone, providerSaid, type StatusApi, type StatusListOptions, type StatusWatchOptions } from "./status.js";
 import { makeDevices, type DeviceDoor, type ScopedRoad } from "./devices.js";
-import { makePlaceDoor, PlaceForksNowhereError, PlaceProvisioningError, type PlaceDoor, type PlaceRecord, type PlaceWiring } from "./places.js";
+import { makePlaceDoor, NO_PLACE_DOOR, PlaceForksNowhereError, PlaceProvisioningError, type PlaceDoor, type PlaceRecord, type PlaceWiring } from "./places.js";
 import type { BlobMark, Store } from "./store.js";
-import { RANGE_DAYS, READINGS_STEP_MS, SysHistoryReply, type ReadingsAnswer, type PlaceView, type AccountsAnswer, type UsageRange, type UsageSplit, type UsedAnswer } from "@wsp/protocol";
+import { RANGE_DAYS, READINGS_STEP_MS, SysHistoryReply, resetNoLoginsLine, type ReadingsAnswer, type PlaceView, type AccountsAnswer, type AgentSignInState, type ResetAnswer, type UsageRange, type UsageSplit, type UsedAnswer } from "@wsp/protocol";
 import { HARNESS_CATALOGS, catalogFromProbe, harnessCatalog, modelLabel, smallestModel } from "./harness-catalog.js";
 import {
   GitIssueReadReply,
@@ -276,9 +276,10 @@ import {
   type StartResult,
   type WorkspaceFrom,
 } from "@wsp/protocol";
-import { secretsOf } from "./adapters.js";
+import { PLAN_RESETS, secretsOf } from "./adapters.js";
 import { accountOf, accountOnComputer, accountRows, createBurn, createPriceTable, createUsageLedger, usageComputerName, type Vaulted } from "./usage.js";
 import { planAlerts } from "./plan-alerts.js";
+import { usageResets, type ResetPlace } from "./usage-reset.js";
 
 // --- adapter port -------------------------------------------------------------
 
@@ -1363,6 +1364,9 @@ export interface LogUsageRow {
 /** How often a read of the Usage page may read the logs again: once a minute, so a turn run outside wsp shows soon. */
 const LOG_READ_EVERY_MS = 60_000;
 
+/** How long one reset script may run on a computer: each of its reads waits ten seconds at most for a line. */
+const RESET_EXEC_MS = 30_000;
+
 export interface UsageDoor {
   /** outside: count the rows read from this computer's agent logs, where the person has not turned that off. */
   used(q: { range: UsageRange; split: UsageSplit; outside?: boolean }): Promise<UsedAnswer>;
@@ -1370,6 +1374,9 @@ export interface UsageDoor {
   /** A computer's readings over a range, off the daemon that kept them: this computer, a joined one, or a workspace's
    * own machine. A daemon that keeps none, or none yet, answers no points. */
   readings(target: { placeId: string } | { workspaceId: string }, range: UsageRange, origin?: Caller): Promise<ReadingsAnswer>;
+  /** Spends one of an account's banked resets on a computer of the person's that holds its login, `on` naming one by
+   * a word a person types. Refused before anything runs for a key, an away computer and a provider's machines. */
+  reset(ask: { account: string; creditId?: string; on?: string }): Promise<ResetAnswer>;
 }
 
 export interface Runtime {
@@ -11202,7 +11209,98 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     );
   };
 
+  /** This computer's own sign-ins, read off its agents since no report carries them; a read that fails lists none. */
+  const hereSignIns = (): Promise<Record<string, AgentSignInState>> =>
+    (opts.agentsReader?.read({ kind: "here" }, { latest: false }) ?? Promise.resolve(undefined)).then(
+      read => (read === undefined ? {} : Object.fromEntries(read.agents.flatMap(a => (a.signIn === "signed-in" || a.signIn === "vault-key" ? [[a.id, a.signIn]] : [])))),
+      () => ({}),
+    );
+
+  const usageAccounts = async (): Promise<AccountsAnswer> => {
+    const places = (await placeDoor?.list(clock.now())) ?? [];
+    const here = await hereSignIns();
+    const listed = places.map(p => ({ id: p.id, name: p.name, ...(p.signIns !== undefined ? { signIns: p.signIns } : {}) }));
+    const row = listed.find(p => p.id === HERE_PLACE_ID);
+    if (row !== undefined) row.signIns ??= here;
+    else listed.push({ id: HERE_PLACE_ID, name: THIS_COMPUTER, signIns: here });
+    return {
+      accounts: accountRows({
+        limits: await ledger.limits(),
+        places: listed,
+        nameOf: id => usageComputerName(places, id),
+        agentName: agent => harnessCatalog(agent)?.label ?? agent,
+        planBrand: agent => CATALOG_AGENTS.find(a => a.id === agent)?.planBrand,
+        vaulted: agent => vaultedFor(agent),
+        printsLimits: agent => CATALOG_AGENTS.find(a => a.id === agent)?.printsLimits === true,
+        burn: burn.of,
+      }),
+    };
+  };
+
+  /** One reset script on one computer: this one as a child of this host, a joined one over its link. */
+  const resetRun = async (place: ResetPlace, script: string): Promise<string> => {
+    if (place.kind === "box") {
+      if (placeDoor === undefined) throw new Error(NO_PLACE_DOOR);
+      return (await placeDoor.exec(place.id, script, { timeoutMs: RESET_EXEC_MS })).stdout;
+    }
+    if (local === undefined) throw new Error(absentComputer(place.name, null).sentence);
+    const stream = local.execStream({ idleMs: RESET_EXEC_MS, deadlineMs: RESET_EXEC_MS })(script, { env: { ...local.env() } });
+    const lines: string[] = [];
+    for await (const line of stream.lines) lines.push(line);
+    await stream.exited;
+    return lines.join("\n");
+  };
+
+  const spendReset = usageResets({
+    store,
+    limits: () => ledger.limits(),
+    agentName: agent => harnessCatalog(agent)?.label ?? agent,
+    resets: agent => PLAN_RESETS[agent as ThreadAgent],
+    places: async () => {
+      const views = (await placeDoor?.list(clock.now())) ?? [];
+      const here = await hereSignIns();
+      return id => {
+        const name = usageComputerName(views, id);
+        if (id === HERE_PLACE_ID) return { id, name, kind: "here", connected: local !== undefined, signedIn: agent => here[agent] === "signed-in" };
+        const view = views.find(v => v.id === id);
+        if (view === undefined || !isJoinedComputer(view)) return { id, name, kind: "provider", connected: false, signedIn: () => false };
+        return { id, name, kind: "box", connected: placeDoor?.link(id) !== undefined, signedIn: agent => placeDoor?.signInsAt(id)?.[agent] === "signed-in" };
+      };
+    },
+    road: async (agent, at) => {
+      const setup = setups.launchOf(at.id, agent);
+      const launch = setup.launch?.program !== undefined ? { launch: { program: setup.launch.program } } : {};
+      if (at.kind === "here") {
+        if (local === undefined) throw new Error(absentComputer(at.name, null).sentence);
+        return { home: setup.configDir ?? local.home(agent), env: { PATH: local.env()["PATH"], ...setup.env }, ...launch };
+      }
+      const report = await placeDoor?.reportOf(at.id);
+      const env = { PATH: report?.login["PATH"], ...setup.env };
+      if (setup.configDir !== undefined) return { home: setup.configDir, env, ...launch };
+      const logins = (await placeDoor?.list(clock.now()))?.find(v => v.id === at.id)?.logins;
+      const shared = sharedOn(agent);
+      if (logins === undefined || shared === undefined) throw new Error(resetNoLoginsLine(at.name, harnessCatalog(agent)?.label ?? agent));
+      return { home: loginHomeIn(logins, shared), env, ...launch };
+    },
+    run: resetRun,
+    file: async ({ agent, place: at, limit }) => {
+      const account = accountOf({ agent, agentName: harnessCatalog(agent)?.label ?? agent, ...(limit.account !== undefined ? { named: limit.account } : {}), vaulted: undefined, computer: { id: at.id, name: at.name } });
+      const { before, after } = await ledger.limit({ key: account.key, agent, label: account.label, road: account.road, computer: at.id, limit });
+      await alerts.read(before, after);
+      return account.key;
+    },
+    row: async key => (await usageAccounts()).accounts.find(a => a.key === key),
+    uuid: () => randomUUID(),
+  });
+
+  /** A spend, the computer the person named read as a place first: a word, or this computer. */
+  const reset = async (ask: { account: string; creditId?: string; on?: string }): Promise<ResetAnswer> => {
+    const on = ask.on === undefined ? undefined : ((await placeDoor?.placeFor(ask.on))?.placeId ?? HERE_PLACE_ID);
+    return spendReset({ account: ask.account, ...(ask.creditId !== undefined ? { creditId: ask.creditId } : {}), ...(on !== undefined ? { on } : {}) });
+  };
+
   const usage: UsageDoor = {
+    reset,
     used: async q => {
       const outside = q.outside === true && (await preferences.get()).usageLogs;
       if (outside) await readLogs().catch((e: unknown) => console.warn(`this computer's agent logs were not read for usage: ${e instanceof Error ? e.message : String(e)}`));
@@ -11224,30 +11322,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (onLink === undefined) throw new Error(absentComputer(placeDoor?.nameOf(target.placeId) ?? target.placeId, null).sentence);
       return overChannel(onLink, read);
     },
-    accounts: async () => {
-      const places = (await placeDoor?.list(clock.now())) ?? [];
-      // No report carries this computer's own sign-ins, so they are read off its agents; a read that fails lists none.
-      const hereSignIns = await (opts.agentsReader?.read({ kind: "here" }, { latest: false }) ?? Promise.resolve(undefined)).then(
-        read => (read === undefined ? {} : Object.fromEntries(read.agents.flatMap(a => (a.signIn === "signed-in" || a.signIn === "vault-key" ? [[a.id, a.signIn]] : [])))),
-        () => ({}),
-      );
-      const listed = places.map(p => ({ id: p.id, name: p.name, ...(p.signIns !== undefined ? { signIns: p.signIns } : {}) }));
-      const here = listed.find(p => p.id === HERE_PLACE_ID);
-      if (here !== undefined) here.signIns ??= hereSignIns;
-      else listed.push({ id: HERE_PLACE_ID, name: THIS_COMPUTER, signIns: hereSignIns });
-      return {
-        accounts: accountRows({
-          limits: await ledger.limits(),
-          places: listed,
-          nameOf: id => usageComputerName(places, id),
-          agentName: agent => harnessCatalog(agent)?.label ?? agent,
-          planBrand: agent => CATALOG_AGENTS.find(a => a.id === agent)?.planBrand,
-          vaulted: agent => vaultedFor(agent),
-          printsLimits: agent => CATALOG_AGENTS.find(a => a.id === agent)?.printsLimits === true,
-          burn: burn.of,
-        }),
-      };
-    },
+    accounts: usageAccounts,
   };
 
   const status = createStatusTracker({

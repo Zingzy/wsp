@@ -112,6 +112,49 @@ export type AccountRow = z.infer<typeof AccountRow>;
 export const AccountsAnswer = z.object({ accounts: z.array(AccountRow) });
 export type AccountsAnswer = z.infer<typeof AccountsAnswer>;
 
+/** What a press to spend a banked reset came to: the agent's four answers, a count that fell since an earlier press
+ * nobody answered, which spends nothing more, or an answer this code does not know, which is never read as a reset. */
+export const RESET_OUTCOMES = ["reset", "nothingToReset", "noCredit", "alreadyRedeemed", "earlier", "unknown"] as const;
+export const ResetOutcome = z.enum(RESET_OUTCOMES);
+export type ResetOutcome = z.infer<typeof ResetOutcome>;
+
+/** The outcome, the sentence that says it, and the account's row as the read after it left it. */
+export const ResetAnswer = z.object({ outcome: ResetOutcome, said: z.string(), account: AccountRow.optional() });
+export type ResetAnswer = z.infer<typeof ResetAnswer>;
+
+/** The account a reset sentence is about: its label, and the computer it runs on where the label does not say. */
+export const resetWho = (o: { label: string; own: boolean; computer: string }): string => (o.own ? o.label : `${o.label} on ${o.computer}`);
+
+/** Every sentence a reset may end in, by what it came to. */
+export const RESET_WORDS = {
+  reset: (who: string, left?: number) => `Reset used: ${who}'s windows start again now${left === undefined ? "" : `, ${left} left`}`,
+  nothingToReset: (who: string) => `No window of ${who} is in use right now, so the credit was kept`,
+  noCredit: (who: string) => `No reset banked on ${who}`,
+  alreadyRedeemed: (who: string) => `That reset of ${who} was already used`,
+  earlier: (who: string, left: number) =>
+    `The count on ${who} fell since the earlier press: it may have gone through, or a reset expired or was used elsewhere. Nothing more was spent; ${left} left.`,
+  unknown: (agent: string, outcome: string, who: string) => `${agent} answered ${outcome} for ${who}; the account was read again`,
+} as const;
+
+/** The one question a spend asks first, in the command line and the app alike. */
+export function resetQuestion(who: string, count: number | undefined): string {
+  const which = count === undefined ? "a reset" : count === 1 ? "the one reset" : `one of the ${count} resets`;
+  return `Use ${which} banked on ${who}? Its five-hour and weekly windows start again now. There is no undo.`;
+}
+
+export const resetKeyedLine = (label: string): string => `${label} pays per token; an API key has no reset to use`;
+export const resetSilentLine = (agent: string, computer: string): string => `${agent} on ${computer} did not answer; the same request goes again on the next press`;
+export const resetUnreadLine = (agent: string, computer: string, label: string): string => `${agent} on ${computer} did not read ${label}'s limits; nothing was spent`;
+export const resetMismatchLine = (agent: string, computer: string, other: string, label: string): string => `${agent} on ${computer} is now signed in as ${other}, not ${label}; nothing was spent`;
+export const resetRefusedLine = (agent: string, computer: string, label: string, said: string): string => `${agent} on ${computer} refused the reset of ${label}: ${said}`;
+export const resetProviderOnlyLine = (label: string, provider: string, agent: string): string => `${label} lives only on ${provider} machines; sign ${agent} in on a computer of yours`;
+export const resetSignedOutLine = (label: string, agent: string): string => `${label} is signed in on none of your computers now; sign ${agent} in on one of them`;
+export const resetNotOnLine = (label: string, computer: string, on: readonly string[]): string => `${label} is not signed in on ${computer}; it is on ${listWords(on)}`;
+export const resetNoLoginsLine = (computer: string, agent: string): string =>
+  `${computer} has not said where it keeps its logins, so ${agent}'s there cannot be reached; wsp add ${computer} --update puts a newer agent on it`;
+export const resetNoneLine = (agent: string): string => `${agent} banks no resets`;
+export const noSuchAccountLine = (word: string): string => `no account ${word}; wsp usage lists every account`;
+
 export const USAGE_RANGES = ["day", "week", "month"] as const;
 export const UsageRange = z.enum(USAGE_RANGES);
 export type UsageRange = z.infer<typeof UsageRange>;

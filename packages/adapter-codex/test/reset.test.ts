@@ -1,70 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The two scripts a banked reset is read and spent by, run under bash against a fake `codex app-server` that answers
-// each request a beat after it reads it and exits the moment its stdin closes, dropping whatever it had not answered
-// yet, as the real one does: a script that let go of stdin early would lose its answers here too.
+// The two scripts a banked reset is read and spent by, run under bash against a fake `codex app-server` that exits
+// on stdin EOF as the real one does.
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { writeStub } from "../../protocol/test/stub-script.js";
+import { fakeAppServer, type Json } from "./fake-app-server.js";
 import { codexPlanResets, parseResetCredit, parseResetRead, resetCreditCommand, resetReadCommand } from "../src/reset.js";
 
-type Json = Record<string, unknown>;
-
-const FAKE = `#!${process.execPath}
-const fs = require("fs");
-const path = require("path");
-const home = process.env.CODEX_HOME;
-if (process.argv[2] !== "app-server") process.exit(2);
-const answers = JSON.parse(fs.readFileSync(path.join(home, "answers.json"), "utf8"));
-let sent = 0;
-let buf = "";
-const log = m => fs.appendFileSync(path.join(home, "requests.log"), JSON.stringify({ after: sent, ...m }) + "\\n");
-const handle = line => {
-  const m = JSON.parse(line);
-  log(m);
-  if (m.id === undefined) return;
-  const a = answers[m.method];
-  if (a === "exit") process.exit(0);
-  if (a === "silent") return;
-  setTimeout(() => {
-    process.stdout.write(JSON.stringify({ id: m.id, ...(a ?? { result: {} }) }) + "\\n");
-    sent++;
-  }, 30);
+const made: (() => void)[] = [];
+afterEach(() => made.splice(0).forEach(remove => remove()));
+const fake = (answers: Json) => {
+  const f = fakeAppServer(answers);
+  made.push(f.remove);
+  return f;
 };
-process.stdin.on("data", d => {
-  buf += d;
-  for (let i = buf.indexOf("\\n"); i >= 0; i = buf.indexOf("\\n")) {
-    handle(buf.slice(0, i));
-    buf = buf.slice(i + 1);
-  }
-});
-process.stdin.on("end", () => process.exit(0));
-`;
-
-const dirs: string[] = [];
-afterEach(() => {
-  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
-});
-
-/** A CODEX_HOME holding the fake's answers by method, and a bin folder with the fake as codex. */
-function fake(answers: Json): { home: string; path: string; requests: () => Json[] } {
-  const dir = mkdtempSync(join(tmpdir(), "wsp-codex-reset-"));
-  dirs.push(dir);
-  const home = join(dir, "codex-home");
-  const bin = join(dir, "bin");
-  mkdirSync(home);
-  mkdirSync(bin);
-  writeStub(join(bin, "codex"), FAKE);
-  writeFileSync(join(home, "answers.json"), JSON.stringify(answers));
-  const requests = (): Json[] =>
-    readFileSync(join(home, "requests.log"), "utf8")
-      .split("\n")
-      .filter(l => l !== "")
-      .map(l => JSON.parse(l) as Json);
-  return { home, path: `${bin}:/usr/bin:/bin`, requests };
-}
 
 const run = (script: string): string => execFileSync("bash", ["-c", script], { encoding: "utf8", env: { PATH: "/usr/bin:/bin", HOME: tmpdir() } });
 
