@@ -3186,6 +3186,18 @@ export type PlaceCapSet = z.infer<typeof PlaceCapSet>;
 export const MacKind = z.enum(["macbook", "imac", "mac-mini", "mac-studio", "mac-pro"]);
 export type MacKind = z.infer<typeof MacKind>;
 
+/** Which Mac a product name ("MacBook Pro (14-inch, M5)") or a model identifier ("Macmini9,1") names. Apple
+ * silicon's identifiers since 2022 ("Mac17,2") name no family, which is why the product name is read first. */
+export function macKindOf(said: string): MacKind | undefined {
+  const word = said.replace(/\s+/g, "").toLowerCase();
+  if (word.startsWith("macbook")) return "macbook";
+  if (word.startsWith("imac")) return "imac";
+  if (word.startsWith("macmini")) return "mac-mini";
+  if (word.startsWith("macstudio")) return "mac-studio";
+  if (word.startsWith("macpro")) return "mac-pro";
+  return undefined;
+}
+
 /** One row of wsp places: a computer of the person's own, this computer itself, or the provider this host forks on. */
 export const PlaceView = z.object({
   id: z.string(),
@@ -5409,6 +5421,8 @@ export const PlaceReport = z.object({
   os: z.string().max(200),
   shape: WorkspaceSize,
   diskFreeBytes: z.number().int().nonnegative().optional(),
+  /** Which Mac this is, as its registry names the product, else its model identifier; absent off a Mac. */
+  model: z.string().max(200).optional(),
   /** HOME, USER, PATH and each harness's store variable, as the ssh read records them. */
   login: z.record(z.string()),
   /** Whether this computer's own daemon runs workspaces here: cgroup v2 with the controllers a cap needs, an

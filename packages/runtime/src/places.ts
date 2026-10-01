@@ -88,6 +88,7 @@ import {
   buildsImages,
   linkedOver,
   type PlaceProveRequest,
+  macKindOf,
 } from "@wsp/protocol";
 import { LinkBackend, PlaceAbsentError, PlaceMachine, SSH_STORE_VARS, keyFingerprint, machineServerPort, plainPath, provisionCountsOf, putFiles, serversOutLines, unmergeServers, type ExecResult, type Machine, type MachineBackend, type MachineLink, type ProvisionPlan, type ProvisionStage } from "@wsp/engine";
 import { CATALOG_AGENTS, keyEnvOf, mintsToken, sharedFileIn, sharedOn } from "@wsp/catalog";
@@ -1320,12 +1321,14 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
 
   const viewOf = (record: PlaceRecord, defaulted: string | undefined): PlaceView => {
     const blocked = placeBlocked(record.name, record.report);
+    const mac = record.report.model === undefined ? undefined : macKindOf(record.report.model);
     return {
       id: record.id,
       kind: "computer",
       name: record.name,
       default: defaulted === record.id,
       os: record.report.os,
+      ...(mac !== undefined ? { mac } : {}),
       shape: record.report.shape,
       ...(record.report.diskFreeBytes !== undefined ? { diskFreeBytes: record.report.diskFreeBytes } : {}),
       engine: record.report.engine,

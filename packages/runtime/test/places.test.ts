@@ -457,6 +457,17 @@ describe("a computer joining", () => {
     expect(kept!.login["HOME"]).toBe("/home/maya");
   });
 
+  it("draws a joined Mac as the Mac its report names, and a computer that names no Mac as none", async () => {
+    const { hostKey } = await serving();
+    const mac = await join(hostKey, { code: await code(), report: report("studio", { platform: "darwin", os: "Darwin 25.4.0", model: "Mac mini (2024)" }) });
+    sockets.push(mac.client.ws);
+    const box = await join(hostKey, { code: await code(), report: report("vps") });
+    sockets.push(box.client.ws);
+    const views = await placesOf();
+    expect(views.find(p => p.id === mac.placeId)?.mac).toBe("mac-mini");
+    expect(views.find(p => p.id === box.placeId)?.mac).toBeUndefined();
+  });
+
   it("records a second computer under a name another place already holds, since a place is no workspace and ids tell them apart", async () => {
     const { hostKey } = await serving();
     const first = await join(hostKey, { code: await code() });
