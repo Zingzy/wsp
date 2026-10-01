@@ -56,7 +56,7 @@ export const PROMPT_ECHOES = ['[data-testid="composer-editor"]', "[data-thread-b
  * caller says so rather than hanging on every command.
  *
  * The transcript is the third mark because the first two are up while the centre is still empty: a thread is
- * chosen, the pane reads "loading transcript", and a shot taken then is a picture of nothing. It is a mark only
+ * chosen, the pane reads "Loading transcript", and a shot taken then is a picture of nothing. It is a mark only
  * while that line is on the page, since a thread with no turn yet has an empty pane for good reason. */
 export async function whenReady(page, ms) {
   try {

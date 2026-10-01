@@ -255,7 +255,7 @@ describe("ChatView", () => {
     expect(screen.queryByText(/waiting for/)).toBeNull();
   });
 
-  it("the send that wakes a paused workspace draws one mono rule line in the timeline, naming the workspace, where it runs and how long it has been waking", async () => {
+  it("the send that wakes a paused workspace draws one rule line in the timeline, naming the workspace, where it runs and how long it has been waking, the time alone in mono", async () => {
     const { api, emit } = fixtureApi([workspace]);
     await setup(api);
     emit({ type: "session.start", ...scope, prompt: "hi" });
@@ -263,9 +263,11 @@ describe("ChatView", () => {
     emit({ type: "workspace.status", status: { ...status, phase: "waking" } });
     const line = await screen.findByText(/^waking api on Solari/);
     const row = line.closest<HTMLElement>("[data-machine-wait]")!;
-    expect(row.className).toContain("font-mono");
+    expect(row.className).not.toContain("font-mono");
     expect(row.className).toContain("text-[11px]");
     expect(row.textContent).toMatch(/^waking api on Solari \d+s$/);
+    expect(row.lastElementChild!.textContent).toMatch(/^\d+s$/);
+    expect(row.lastElementChild!.className).toContain("font-mono");
     expect(row.querySelector("[role=alert], [data-slot=alert]")).toBeNull();
   });
 
@@ -283,12 +285,12 @@ describe("ChatView", () => {
     emit({ type: "workspace.napped", workspaceId: WS });
     emit({ type: "workspace.status", status: { ...status, phase: "napping", reason: "idle 30 min" } });
     const line = (await screen.findByText("Paused")).closest<HTMLElement>("[data-workspace-paused]")!;
-    expect(line.className).toContain("font-mono");
+    expect(line.className).not.toContain("font-mono");
     expect(line.className).toContain("text-muted-foreground");
     // One word and the action: no sentence about why, no alarm tone, nothing that reads as a fault.
     expect(line.textContent).toBe("PausedWake");
     expect(line.querySelector("[role=alert], [data-slot=alert], [class*=warning], [class*=error], [class*=destructive]")).toBeNull();
-    // The button takes the button type, not the rule line's mono.
+    // The button takes the button type, not the rule line's 11px.
     expect(within(line).getByRole("button", { name: "Wake" }).className).toContain("font-sans");
     expect(within(line).getByRole("button", { name: "Wake" }).className).toContain("text-[13px]");
     expect(within(line).getByRole("button", { name: "Wake" }).className).toContain("font-medium");

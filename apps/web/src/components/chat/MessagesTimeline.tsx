@@ -1180,7 +1180,7 @@ function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "workin
         {machineWait.elapsed && row.createdAt !== null ? (
           <>
             {" "}
-            <span className="ms-1">
+            <span className="ms-1 font-mono tabular-nums">
               <WorkingTimer createdAt={row.createdAt} />
             </span>
           </>
