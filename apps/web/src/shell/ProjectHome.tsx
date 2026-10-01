@@ -148,7 +148,7 @@ export function ProjectHome({ projectId }: { projectId: string }) {
         {...(link?.kind === "pull_request" && linked !== undefined
           ? {
               beside: (
-                <Button type="button" size="sm" variant="outline" data-k="start-review" onClick={() => void fromLink(link.url, "review").then(said => (said === null ? undefined : noticeFailure(new Error(said))))}>
+                <Button type="button" variant="outline" data-k="start-review" onClick={() => void fromLink(link.url, "review").then(said => (said === null ? undefined : noticeFailure(new Error(said))))}>
                   {START_WORDS.review(link.number)}
                 </Button>
               ),

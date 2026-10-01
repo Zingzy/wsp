@@ -1092,7 +1092,7 @@ describe("composer while the workspace is not live", () => {
     const send = screen.getByRole("button", { name: held }) as HTMLButtonElement;
     expect(send.disabled).toBe(true);
     expect(send.className).toContain("border-input");
-    expect(send.className).toContain("bg-popover");
+    expect(send.className).toContain("bg-(--input-fill)");
     expect(send.className).not.toContain("bg-foreground");
     expect(heldHover()).toBe(held);
     // Not the state table's words, and no machine id where a person reads.
@@ -1262,10 +1262,10 @@ function expectHeld(words: string): void {
   expect(heldHover()).toBe(words);
   expect(sendControl().getAttribute("aria-label")).toBe(words);
   expect(sendControl().disabled).toBe(true);
-  // Held is the tier ui/button.tsx gives a primary that cannot be pressed, not a fainter blue: five testers read a
-  // lit arrow over a box that refused them as a screen saying it was ready to send.
+  // Held is the outline keycap's surface from ui/button.tsx, not a fainter blue: five testers read a lit arrow over
+  // a box that refused them as a screen saying it was ready to send.
   expect(sendControl().className).toContain("border-input");
-  expect(sendControl().className).toContain("bg-popover");
+  expect(sendControl().className).toContain("bg-(--input-fill)");
   expect(sendControl().className).not.toContain("bg-foreground");
   expect(sendControl().className).not.toContain("disabled:opacity-30");
 }

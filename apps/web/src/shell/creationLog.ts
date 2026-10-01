@@ -49,7 +49,7 @@ export const stoppedStep = (creation: Pick<Creation, "lines">): CreationLine | u
 
 /** What the log says while the image is built somewhere else, with the stage's own words after it. The build runs
  * before the workspace can start, so the line names the computer rather than the workspace. */
-export const imageBuildLine = (place: string, stage: string): string => `building your image on ${place}: ${stage}`;
+export const imageBuildLine = (place: string, stage: string): string => `Building your image on ${place}: ${stage}`;
 
 /** One line for a golden stage frame carrying a place, or nothing for a frame the log has nothing to say about:
  * the seal and the failure are the create's own to report, and a stage with no word is not a person's business.

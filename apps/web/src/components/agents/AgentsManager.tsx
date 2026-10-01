@@ -78,6 +78,7 @@ const ASK_AFTER_MS = 250;
 
 const GROUP_WORDS: Record<GroupBy, string> = { none: "None", agent: "Agent", source: "Source", scope: "Scope" };
 const LABEL = cn(GROUP_LABEL, "text-muted-foreground");
+const REFUSED_LINE = "text-[11px] text-muted-foreground";
 
 /** The nearest box that scrolls, whose place the list keeps while a detail stands over it. */
 const scrollerOf = (el: HTMLElement | null): HTMLElement | null => {
@@ -461,11 +462,11 @@ export function AgentsManager({ shell, head, report, reading, error = null, on, 
           <div data-agents-refused className="mt-2 flex flex-col px-4">
             {lines.map(line => (
               <p key={line.id} data-refused-line={line.id} className="flex min-h-7 items-start gap-2 py-1.5">
-                <span data-refused-label className={cn(FACT, "min-w-0 [overflow-wrap:anywhere]", line.value !== undefined && "shrink-0 text-foreground")}>
+                <span data-refused-label className={cn(REFUSED_LINE, "min-w-0 [overflow-wrap:anywhere]", line.value !== undefined && "shrink-0 text-foreground")}>
                   {line.label}
                 </span>
                 {line.value === undefined ? null : (
-                  <span data-refused-value className={cn(FACT, "min-w-0 flex-1 [overflow-wrap:anywhere]")}>
+                  <span data-refused-value className={cn(REFUSED_LINE, "min-w-0 flex-1 [overflow-wrap:anywhere]")}>
                     {line.value}
                   </span>
                 )}

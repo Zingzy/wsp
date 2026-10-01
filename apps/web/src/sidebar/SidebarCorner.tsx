@@ -16,7 +16,7 @@ export function SidebarCorner() {
   return (
     <div data-sidebar-corner className="flex items-center gap-1 px-0.5">
       <Tooltip>
-        <TooltipTrigger render={<Button variant="ghost-muted" size="icon-sm" data-k="settings-row" aria-label={SETTINGS_WORDS.title} onClick={openSettings} />}>
+        <TooltipTrigger render={<Button variant="ghost" size="icon" data-k="settings-row" aria-label={SETTINGS_WORDS.title} onClick={openSettings} />}>
           <SettingsIcon aria-hidden />
         </TooltipTrigger>
         <TooltipPopup side="top">
@@ -25,7 +25,7 @@ export function SidebarCorner() {
         </TooltipPopup>
       </Tooltip>
       <Tooltip>
-        <TooltipTrigger render={<Button variant="ghost-muted" size="icon-sm" data-k="usage-row" aria-label={USAGE_PAGE_WORDS.title} onClick={() => openSettingsGroup("usage")} />}>
+        <TooltipTrigger render={<Button variant="ghost" size="icon" data-k="usage-row" aria-label={USAGE_PAGE_WORDS.title} onClick={() => openSettingsGroup("usage")} />}>
           <GaugeIcon aria-hidden />
         </TooltipTrigger>
         <TooltipPopup side="top">{USAGE_PAGE_WORDS.title}</TooltipPopup>

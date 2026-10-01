@@ -49,7 +49,7 @@ import { fakeWire, folderCrumbRow, imported, LISTING, PROJECT_DEST, resetSurface
 const patch = (path: string, from: string, to: string) =>
   [`diff --git a/${path} b/${path}`, "index 1111111..2222222 100644", `--- a/${path}`, `+++ b/${path}`, "@@ -1 +1 @@", `-${from}`, `+${to}`, ""].join("\n");
 
-const DIFF = { base: null, files: [{ path: "src/a.ts", kind: "modified", additions: 1, deletions: 1, patch: patch("src/a.ts", "one", "two") }, { path: "README.md", kind: "modified", additions: 1, deletions: 1, patch: patch("README.md", "old", "new") }], truncated: false };
+const DIFF = { base: null, files: [{ path: "src/a.ts", kind: "modified", additions: 1, deletions: 1, patch: patch("src/a.ts", "one", "two") }, { path: "README.md", kind: "modified", additions: 1, deletions: 1, patch: patch("README.md", "old", "new") }], truncated: false, moved: [] };
 const STATUS = { branch: { oid: "abc", head: "main", ahead: 0, behind: 0 }, entries: [], root: "/root/app" };
 const NOT_A_REPO = () => Object.assign(new Error("not inside a git repository"), { code: "not-a-git-repo" });
 const OUTSIDE_ROOT = () => Object.assign(new Error("outside the browsable roots"), { code: "outside-root" });
@@ -371,10 +371,10 @@ describe("diff surface", () => {
   describe("one turn's changes", () => {
     const from = "a".repeat(40);
     const to = "b".repeat(40);
-    const rangeCalls = (wire: { calls: [string, Record<string, unknown>][] }) => wire.calls.filter(([op]) => op === "git.range").map(([, p]) => p);
+    const rangeCalls = (wire: { calls: [string, Record<string, unknown>][] }) => wire.calls.filter(([op]) => op === "git.turn").map(([, p]) => p);
 
     it("reads the range between the turn's snapshots in its folder, reveals the file asked for, and leaves for a scope", async () => {
-      const wire = fakeWire({ "fs.list": LISTING, "git.status": STATUS, "git.diff": DIFF, "git.range": DIFF });
+      const wire = fakeWire({ "fs.list": LISTING, "git.status": STATUS, "git.diff": DIFF, "git.turn": DIFF });
       provideDaemonWire(WS, wire);
       act(() => useDiffStore.getState().openTurn(WS, { turnId: "t1", cwd: "/root/app", from, to, path: "gone.ts" }));
       const { container } = render(<DiffSurface workspaceId={WS} theme="dark" />);
@@ -394,7 +394,7 @@ describe("diff surface", () => {
 
     it("offers no commit, no edit and no discard on a turn's range, which is a record of what the turn changed", async () => {
       // Discard on a turn's range would put back the file's working tree, not the turn.
-      const wire = fakeWire({ "fs.list": LISTING, "git.status": STATUS, "git.diff": DIFF, "git.range": DIFF });
+      const wire = fakeWire({ "fs.list": LISTING, "git.status": STATUS, "git.diff": DIFF, "git.turn": DIFF });
       provideDaemonWire(WS, wire);
       const { api } = paneApi();
       useStore.setState({ api: api as never });
@@ -411,7 +411,7 @@ describe("diff surface", () => {
 
     it("says the snapshot is gone when git no longer holds it", async () => {
       const gone = () => Object.assign(new Error(`the snapshot ${from} is gone`), { code: "not-found" });
-      const wire = fakeWire({ "fs.list": LISTING, "git.status": STATUS, "git.range": gone });
+      const wire = fakeWire({ "fs.list": LISTING, "git.status": STATUS, "git.turn": gone });
       provideDaemonWire(WS, wire);
       act(() => useDiffStore.getState().openTurn(WS, { turnId: "t1", cwd: "/root/app", from, to }));
       render(<DiffSurface workspaceId={WS} theme="dark" />);

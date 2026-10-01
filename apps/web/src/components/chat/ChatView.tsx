@@ -128,7 +128,7 @@ export function ChatView({
   const diffPlacesRef = useRef(diffPlaces);
   diffPlacesRef.current = diffPlaces;
   const turnDiffs = useMemo(
-    () => new Map<MessageId, TurnDiffSummary>(diffPlacesRef.current.map(p => [p.messageId, { turnId: p.turn, files: p.changes.files }])),
+    () => new Map<MessageId, TurnDiffSummary>(diffPlacesRef.current.map(p => [p.messageId, { turnId: p.turn, files: p.changes.files, moved: p.changes.moved }])),
     [diffKey],
   );
   const turnsRef = useRef(view.turns);

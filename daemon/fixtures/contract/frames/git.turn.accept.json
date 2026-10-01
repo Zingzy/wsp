@@ -1,0 +1,25 @@
+[
+  {
+    "id": 1,
+    "op": "git.turn",
+    "cwd": "repo",
+    "from": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "to": "0123456789abcdef0123456789abcdef01234567"
+  },
+  {
+    "id": 1,
+    "op": "git.turn",
+    "cwd": "repo",
+    "from": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "to": "0123456789abcdef0123456789abcdef01234567",
+    "path": "src/a.ts"
+  },
+  {
+    "id": 1,
+    "op": "git.turn",
+    "cwd": "/root/repo",
+    "from": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "to": "0123456789abcdef0123456789abcdef01234567",
+    "machineId": "wsp-x"
+  }
+]

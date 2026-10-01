@@ -101,7 +101,7 @@ export function ReviewDraftSection({ workspaceId, name, fact, head }: { workspac
               {draft.posted.folded.length > 0 ? <span className={NOTE}>{`${draft.posted.folded.length} went into the summary`}</span> : null}
             </>
           ) : (
-            <Button type="button" size="sm" disabled={posting || (!ticked && summary.trim() === "")} onClick={() => void post()}>
+            <Button type="button" disabled={posting || (!ticked && summary.trim() === "")} onClick={() => void post()}>
               {START_WORDS.post}
             </Button>
           )}

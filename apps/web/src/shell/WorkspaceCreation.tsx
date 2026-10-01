@@ -126,7 +126,7 @@ function SettingUp({ creation, open, onToggle }: { creation: Creation; open: boo
               <Button variant="outline" size="xs" className="h-6" onClick={() => void retry(creation.key)}>
                 Retry
               </Button>
-              <Button variant="ghost-muted" size="xs" className="h-6" onClick={() => dismiss(creation.key)}>
+              <Button variant="ghost" size="xs" onClick={() => dismiss(creation.key)}>
                 Dismiss
               </Button>
             </div>

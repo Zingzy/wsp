@@ -233,12 +233,12 @@ describe("a thread's messages", () => {
       { path: "a.ts", kind: "modified", additions: 12, deletions: 3 },
       { path: "b.ts", kind: "added", additions: 2, deletions: 0 },
     ];
-    const rows = threadMessages([...turn("build it", "built it"), { type: "session.changes", ...SCOPE, turnId: "u1", at: AT + 6_000, from: "a".repeat(40), to: "b".repeat(40), files }], "t1");
+    const rows = threadMessages([...turn("build it", "built it"), { type: "session.changes", ...SCOPE, turnId: "u1", at: AT + 6_000, from: "a".repeat(40), to: "b".repeat(40), files, moved: [] }], "t1");
     expect(rows.slice(-2).map(r => [r.who, r.text])).toEqual([
       ["tool", "Changed 2 files, +14 -3"],
       ["turn", "completed"],
     ]);
-    const one = threadMessages([...turn("fix", "fixed"), { type: "session.changes", ...SCOPE, turnId: "u1", at: AT + 6_000, from: "a".repeat(40), to: "b".repeat(40), files: files.slice(1) }], "t1");
+    const one = threadMessages([...turn("fix", "fixed"), { type: "session.changes", ...SCOPE, turnId: "u1", at: AT + 6_000, from: "a".repeat(40), to: "b".repeat(40), files: files.slice(1), moved: [] }], "t1");
     expect(one.at(-2)!.text).toBe("Changed 1 file, +2 -0");
   });
 });
@@ -331,7 +331,7 @@ describe("the printout a reader sees", () => {
   it("copies as Markdown: who spoke as a bold header, the reply as written, tool rows as a list, the turn's end in italics", () => {
     const events: SessionEvent[] = [
       ...turn("build it", "read the ticket, then built it", { status: "completed", text: "read the ticket, then built it", durationMs: 10_000 }),
-      { type: "session.changes", ...SCOPE, turnId: "u1", at: AT + 6_000, from: "a".repeat(40), to: "b".repeat(40), files: [{ path: "a.ts", kind: "modified", additions: 14, deletions: 3 }, { path: "b.ts", kind: "added", additions: 0, deletions: 0 }] },
+      { type: "session.changes", ...SCOPE, turnId: "u1", at: AT + 6_000, from: "a".repeat(40), to: "b".repeat(40), files: [{ path: "a.ts", kind: "modified", additions: 14, deletions: 3 }, { path: "b.ts", kind: "added", additions: 0, deletions: 0 }], moved: [] },
       { type: "session.start", ...SCOPE, turnId: "u2", at: AT + 7_000, prompt: "and the math" },
       { type: "session.plan", ...SCOPE, turnId: "u2", at: AT + 7_500, steps: [{ text: "derive", state: "done" }, { text: "check", state: "working" }] },
       { type: "session.delta", ...SCOPE, turnId: "u2", at: AT + 8_000, kind: "text", text: "Here:\n\n$$E=mc^2$$\n\n```ts\nconst x = 1;\n```" },

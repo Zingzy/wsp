@@ -1,0 +1,29 @@
+[
+  {
+    "id": 1,
+    "op": "git.turn",
+    "cwd": "repo",
+    "to": "0123456789abcdef0123456789abcdef01234567"
+  },
+  {
+    "id": 1,
+    "op": "git.turn",
+    "cwd": "repo",
+    "from": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  {
+    "id": 1,
+    "op": "git.turn",
+    "cwd": "repo",
+    "from": 7,
+    "to": "0123456789abcdef0123456789abcdef01234567"
+  },
+  {
+    "id": 1,
+    "op": "git.turn",
+    "cwd": "repo",
+    "from": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "to": "0123456789abcdef0123456789abcdef01234567",
+    "path": 3
+  }
+]

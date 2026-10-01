@@ -77,7 +77,7 @@ export function ProviderKey({ id, words, held, kept, onKept, children }: { id: s
           <Input data-k="cloud-key" nativeInput type="password" autoComplete="off" spellCheck={false} value={key} placeholder={has ? MINE.replaceKey : words.keyName} aria-label={words.keyName} {...(refusal === null ? {} : { "aria-invalid": true })} onChange={e => setKey(e.target.value)} onKeyDown={e => (e.key === "Enter" && !busy ? save() : undefined)} className={INPUT} />
         </span>
         {has ? (
-          <Button data-k="cloud-save" variant="outline" className="h-10 px-4 sm:h-10" held={busy || key.trim() === ""} onClick={save}>
+          <Button data-k="cloud-save" variant="outline" held={busy || key.trim() === ""} onClick={save}>
             {busy ? MINE.checking : MINE.replace}
           </Button>
         ) : (

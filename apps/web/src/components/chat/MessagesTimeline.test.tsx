@@ -258,6 +258,7 @@ describe("MessagesTimeline", () => {
               {
                 turnId,
                 files: [{ path: "src/README.md", kind: "modified", additions: 2, deletions: 1 }],
+                moved: [],
               },
             ],
           ])

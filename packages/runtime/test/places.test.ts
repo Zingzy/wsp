@@ -2675,6 +2675,7 @@ function forks(
       case "git.diff":
       case "git.snapshot":
       case "git.range":
+      case "git.turn":
       case "git.prList":
       case "guest.watch":
       case "guest.reply":
@@ -3218,7 +3219,7 @@ describe("a fork on a computer you joined", () => {
   });
 
   const PTY = ["pty.create", "pty.attach", "pty.detach", "pty.write", "pty.resize", "pty.kill", "pty.tab", "pty.list"];
-  const FILES_AND_GIT = ["fs.list", "fs.files", "fs.read", "fs.write", "fs.search", "git.status", "git.diff", "git.snapshot", "git.range", "git.push", "git.pr", "git.prList"];
+  const FILES_AND_GIT = ["fs.list", "fs.files", "fs.read", "fs.write", "fs.search", "git.status", "git.diff", "git.snapshot", "git.range", "git.turn", "git.push", "git.pr", "git.prList"];
   const HOST_GUESTS = ["guest.watch", "guest.reply", "guest.close"];
   /** The host's own road to an editor's ssh server inside the fork: its start and the tunnel that carries to it. */
   const HOST_TUNNELS = ["ssh.start", "tunnel.open", "tunnel.write", "tunnel.close"];

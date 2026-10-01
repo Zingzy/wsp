@@ -118,7 +118,7 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
           </MenuTrigger>
           <MenuPopup align="end">
             <MenuItem onClick={handleCopyPlan}>
-              {isCopied ? "Copied!" : "Copy to clipboard"}
+              {isCopied ? "Copied" : "Copy to clipboard"}
             </MenuItem>
             <MenuItem onClick={handleDownload}>Download as markdown</MenuItem>
             {onSavePlan ? (
@@ -153,7 +153,6 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
         {canCollapse ? (
           <div className="mt-4 flex justify-center">
             <Button
-              size="sm"
               variant="outline"
               data-scroll-anchor-ignore
               onClick={() => setExpanded((value) => !value)}
@@ -200,18 +199,16 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
             <DialogFooter>
               <Button
                 variant="outline"
-                size="sm"
                 onClick={() => setIsSaveDialogOpen(false)}
                 disabled={isSavingToWorkspace}
               >
                 Cancel
               </Button>
               <Button
-                size="sm"
                 onClick={() => void handleSaveToWorkspace()}
                 disabled={isSavingToWorkspace}
               >
-                {isSavingToWorkspace ? "Saving..." : "Save"}
+                {isSavingToWorkspace ? "Saving…" : "Save"}
               </Button>
             </DialogFooter>
           </DialogPopup>

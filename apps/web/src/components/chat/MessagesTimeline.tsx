@@ -1050,7 +1050,7 @@ function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-
   const Icon = row.expanded ? ChevronDownIcon : ChevronRightIcon;
 
   return (
-    <div className="border-b border-border/60 pb-2 pt-1">
+    <div className="pb-2 pt-1">
       <button
         type="button"
         aria-expanded={row.expanded}
@@ -1168,7 +1168,7 @@ function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "workin
         {machineWait.elapsed && row.createdAt !== null ? (
           <>
             {" "}
-            <span className="ms-1">
+            <span className="ms-1 font-mono tabular-nums">
               <WorkingTimer createdAt={row.createdAt} />
             </span>
           </>
@@ -1182,7 +1182,7 @@ function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "workin
     );
   }
   return (
-    <div className="border-b border-border/60 pb-2 pt-1">
+    <div className="pb-2 pt-1">
       <div className="flex h-6 min-w-0 items-baseline px-1 text-sm leading-relaxed text-muted-foreground tabular-nums">
         <span
           key={isPreparingWorktree ? "setup" : row.waitingOnYou ? "waiting" : "working"}
@@ -1613,7 +1613,8 @@ const AssistantChangedFilesSection = memo(function AssistantChangedFilesSection(
 }) {
   if (!turnSummary) return null;
   const checkpointFiles = turnSummary.files;
-  if (checkpointFiles.length === 0) return null;
+  // A turn that only moved HEAD still shows its card, for the one line naming the move.
+  if (checkpointFiles.length === 0 && turnSummary.moved.length === 0) return null;
 
   return (
     <AssistantChangedFilesSectionInner
@@ -1644,6 +1645,7 @@ function AssistantChangedFilesSectionInner({
     <ChangedFilesCard
       turnId={turnSummary.turnId}
       files={checkpointFiles}
+      moved={turnSummary.moved}
       allDirectoriesExpanded={allDirectoriesExpanded}
       resolvedTheme={resolvedTheme}
       onToggleAllDirectories={() => setAllDirectoriesExpanded((current) => !current)}
