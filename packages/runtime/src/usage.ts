@@ -14,6 +14,7 @@ import {
   dayKeyOf,
   hourOf,
   parseRateTable,
+  threadWord,
   priceOf,
   rateOf,
   type AccountRoad,
@@ -61,6 +62,9 @@ export interface UsageEntry {
   computer: string;
   project: string;
   model?: string;
+  /** The thread and workspace a wsp turn ran in. */
+  threadId?: string;
+  workspaceId?: string;
   /** The turns this entry counts: one, unless it is a second model's share of a turn already counted. */
   turns?: number;
   tokens?: Partial<TurnTokens>;
@@ -79,6 +83,8 @@ export interface UsedQuery {
   outside?: boolean;
   /** The computer whose agents' logs were read, by its name, which the answer says the logs were counted on. */
   logsOn?: string;
+  /** What a thread is called and the name of its workspace, read when the answer is made. */
+  threadNames?: (threadId: string, workspaceId: string) => { title: string; workspace?: string };
 }
 
 export interface LimitReading {
@@ -149,7 +155,10 @@ function dayStartOf(at: number, timeZone?: string): number {
 const splitValue = (row: UsageRow, split: UsageSplit): string => (split === "model" ? baseModel(row.model) : row[split]);
 
 const rowKey = (row: Omit<UsageRow, "turns" | "tokens" | "costReported">): string =>
-  [row.hour, row.agent, row.account, row.computer, row.project, row.model, row.source].join("\u0000");
+  [row.hour, row.agent, row.account, row.computer, row.project, row.model, row.source, row.threadId ?? "", row.workspaceId ?? ""].join("\u0000");
+
+/** How many of the top threads by tokens an answer names. */
+const TOP_THREADS = 5;
 
 export function createUsageLedger(o: { store: Store; clock: Clock; timeZone?: string; prices: () => Promise<RateTable>; retentionDays?: number }): UsageLedger {
   const zone = o.timeZone;
@@ -185,6 +194,8 @@ export function createUsageLedger(o: { store: Store; clock: Clock; timeZone?: st
       project: entry.project,
       model: entry.model ?? "",
       source: entry.source,
+      ...(entry.threadId !== undefined ? { threadId: entry.threadId } : {}),
+      ...(entry.workspaceId !== undefined ? { workspaceId: entry.workspaceId } : {}),
     };
     const t = entry.tokens ?? {};
     const tokens = {
@@ -287,6 +298,9 @@ export function createUsageLedger(o: { store: Store; clock: Clock; timeZone?: st
           }))
         : starts.map(t => ({ t, tokens: 0 }));
     const points = new Map<string, number[]>();
+    const sources = new Map<"wsp" | "log", { source: "wsp" | "log"; tokens: number; estimate?: number }>();
+    const threads = new Map<string, { threadId: string; workspaceId: string; agent: string; computer: string; tokens: number; estimate?: number }>();
+    const computers = new Set<string>();
     for (const [at, start] of starts.entries()) {
       const held = await readDay(dayKeyOf(start + HOUR * 12, zone));
       for (const row of held?.rows ?? []) {
@@ -313,6 +327,18 @@ export function createUsageLedger(o: { store: Store; clock: Clock; timeZone?: st
         if (row.costReported !== undefined) line.costReported = (line.costReported ?? 0) + row.costReported;
         else if (listed !== undefined) line.costList = (line.costList ?? 0) + listed;
         else if (row.tokens.input + row.tokens.output > 0) line.priced = false;
+        const used = row.tokens.input + row.tokens.output;
+        const from = sources.get(row.source) ?? { source: row.source, tokens: 0 };
+        from.tokens += used;
+        if (listed !== undefined) from.estimate = (from.estimate ?? 0) + listed;
+        sources.set(row.source, from);
+        computers.add(row.computer);
+        if (row.threadId !== undefined && row.workspaceId !== undefined) {
+          const thread = threads.get(row.threadId) ?? { threadId: row.threadId, workspaceId: row.workspaceId, agent: row.agent, computer: row.computer, tokens: 0 };
+          thread.tokens += used;
+          if (listed !== undefined) thread.estimate = (thread.estimate ?? 0) + listed;
+          threads.set(row.threadId, thread);
+        }
         rows.set(key, line);
         const step = count === 1 ? row.hour : at;
         if (series[step] !== undefined) {
@@ -327,7 +353,26 @@ export function createUsageLedger(o: { store: Store; clock: Clock; timeZone?: st
     // The range ends where today does, so two reads a moment apart answer the same range.
     const logs = logged.size === 0 || q.logsOn === undefined ? {} : { logs: { agents: [...logged].map(agent => q.label("agent", agent)).sort(), computer: q.logsOn } };
     const lines = ordered.map(row => ({ key: row.key, label: row.label, points: points.get(row.key) ?? series.map(() => 0) }));
-    return { range: q.range, split: q.split, rows: ordered, series, lines, since, until: dayStartOf(today + DAY + HOUR * 12, zone), ...logs };
+    const top = [...threads.values()]
+      .sort((a, b) => b.tokens - a.tokens || a.threadId.localeCompare(b.threadId))
+      .slice(0, TOP_THREADS)
+      .map(({ computer, ...t }) => {
+        const named = q.threadNames?.(t.threadId, t.workspaceId) ?? { title: threadWord(t.threadId) };
+        return { threadId: t.threadId, workspaceId: t.workspaceId, title: named.title, agent: t.agent, ...(named.workspace !== undefined ? { workspace: named.workspace } : {}), computer: q.label("computer", computer), tokens: t.tokens, ...(t.estimate !== undefined ? { estimate: t.estimate } : {}) };
+      });
+    return {
+      range: q.range,
+      split: q.split,
+      rows: ordered,
+      series,
+      lines,
+      sources: (["wsp", "log"] as const).flatMap(s => (sources.has(s) ? [sources.get(s)!] : [])),
+      threads: top,
+      counts: { threads: threads.size, computers: computers.size },
+      since,
+      until: dayStartOf(today + DAY + HOUR * 12, zone),
+      ...logs,
+    };
   };
 
   const limit = (r: LimitReading): Promise<void> =>

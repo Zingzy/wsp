@@ -127,6 +127,9 @@ export type UsageTokens = z.infer<typeof UsageTokens>;
 /** One key's use: its turns and tokens, the cost the harness itself reported where it did, and where it was read:
  * a turn wsp ran, or a harness's own log of work done outside wsp on this computer. */
 export const UsageRow = UsageKey.extend({
+  /** The thread and workspace a wsp turn ran in; absent on a log's rows. */
+  threadId: z.string().optional(),
+  workspaceId: z.string().optional(),
   turns: z.number().int(),
   tokens: UsageTokens,
   costReported: z.number().optional(),
