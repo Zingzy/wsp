@@ -12,6 +12,8 @@ import { connect as netConnect } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type WebSocket from "ws";
 import {
+  AGENTS_ON,
+  placeSettingsLine,
   dayStart,
   spendCapRefusal,
   NO_PLACE_INSTALLER,
@@ -867,7 +869,7 @@ describe("the list of every place", () => {
     const { hostKey, store } = await serving();
     const joined = await join(hostKey, { code: await code() });
     const host = await WsClient.connect(srv!.port, { token: "host-token" });
-    expect(await host.request("places.cap", { placeId: joined.placeId, threads: 1 })).toMatchObject({ ok: true });
+    expect(await host.request("places.set", { placeId: joined.placeId, threads: 1 })).toMatchObject({ ok: true });
     host.close();
     joined.client.close();
     await until(async () => (await placesOf()).find(p => p.id === joined.placeId)!.present === false);
@@ -900,7 +902,7 @@ describe("the list of every place", () => {
     expect(await relayed.request("places.add", { address: "root@10.0.0.9" })).toMatchObject({ ok: false, error: PLACES_TICKET_REFUSAL });
     expect(await relayed.request("places.dial", { placeId: "p_1" })).toMatchObject({ ok: false, error: PLACES_TICKET_REFUSAL });
     expect(await relayed.request("places.loginLanded", { placeId: "p_1", agent: "codex" })).toMatchObject({ ok: false, error: PLACES_TICKET_REFUSAL });
-    expect(await relayed.request("places.cap", { placeId: "p_1", threads: 1 })).toMatchObject({ ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
+    expect(await relayed.request("places.set", { placeId: "p_1", threads: 1 })).toMatchObject({ ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
     relayed.close();
     expect(THREAD_OPS).not.toContain("places.list");
     expect(THREAD_OPS).not.toContain("places.remove");
@@ -909,7 +911,7 @@ describe("the list of every place", () => {
 });
 
 describe("a place's cap and what runs there", () => {
-  const capOf = async (c: WsClient, placeId: string, set: Record<string, number>): Promise<Record<string, unknown>> => c.request("places.cap", { placeId, ...set });
+  const capOf = async (c: WsClient, placeId: string, set: Record<string, number>): Promise<Record<string, unknown>> => c.request("places.set", { placeId, ...set });
 
   it("gives every row its cap: a joined computer the rule's off its shape, this computer the rule's off its own, a cloud 3 machines and $10 a day", async () => {
     const { hostKey } = await serving({ provider: { id: "solari", rateUsdPerHour: 0.11 } });
@@ -940,13 +942,33 @@ describe("a place's cap and what runs there", () => {
     expect(await store.get("caps", HERE_PLACE_ID)).toBeUndefined();
   });
 
+  it("says on every row its kind's default beside the cap and what the person set, and a reset takes a number back to the default", async () => {
+    const { hostKey, store } = await serving({ provider: { id: "solari", rateUsdPerHour: 0.11 } });
+    const joined = await join(hostKey, { code: await code(), report: report("spoo", { shape: { cpu: 4, memMb: 8192 } }) });
+    sockets.push(joined.client.ws);
+    const unset = (await placesOf()).find(p => p.id === joined.placeId)!;
+    expect(unset).toMatchObject({ cap: { threads: 3 }, capDefault: { threads: 3 } });
+    expect(unset.settings).toBeUndefined();
+    const host = await WsClient.connect(srv!.port, { token: "host-token" });
+    expect(await capOf(host, joined.placeId, { threads: 1 })).toMatchObject({ ok: true, place: { cap: { threads: 1 }, capDefault: { threads: 3 }, settings: { threads: 1 } } });
+    expect(await capOf(host, "solari", { machines: 5, spendPerDayUsd: 2 })).toMatchObject({ ok: true, place: { cap: { machines: 5, spendPerDayUsd: 2 }, capDefault: { machines: 3, spendPerDayUsd: 10 } } });
+    const back = (await host.request("places.set", { placeId: joined.placeId, reset: ["threads"] })) as { ok: boolean; place: PlaceView };
+    expect(back).toMatchObject({ ok: true, place: { cap: { threads: 3 } } });
+    expect(back.place.settings).toBeUndefined();
+    expect(await host.request("places.set", { placeId: "solari", reset: ["spend"] })).toMatchObject({ ok: true, place: { cap: { machines: 5, spendPerDayUsd: 10 }, settings: { machines: 5 } } });
+    expect(await host.request("places.set", { placeId: joined.placeId, threads: 2, reset: ["threads"] })).toMatchObject({ ok: false, kind: "usage", error: "spoo: threads at once is both set and reset; name it once" });
+    host.close();
+    expect(await store.get("caps", joined.placeId)).toBeUndefined();
+    expect(await store.get("caps", "solari")).toEqual({ machines: 5 });
+  });
+
   it("refuses a number the row's kind does not take, a place this host does not hold and a set with no number, as usage, and writes nothing", async () => {
     const { store } = await serving({ provider: { id: "solari", rateUsdPerHour: 0.11 } });
     const host = await WsClient.connect(srv!.port, { token: "host-token" });
-    expect(await capOf(host, HERE_PLACE_ID, { machines: 2 })).toMatchObject({ ok: false, kind: "usage", error: `${HERE.name} takes threads at once, not machines at once` });
-    expect(await capOf(host, "solari", { threads: 2 })).toMatchObject({ ok: false, kind: "usage", error: "solari takes machines at once and spend per day, not threads at once" });
+    expect(await capOf(host, HERE_PLACE_ID, { machines: 2 })).toMatchObject({ ok: false, kind: "usage", error: `${HERE.name} takes threads at once and agents may start agents, not machines at once` });
+    expect(await capOf(host, "solari", { threads: 2 })).toMatchObject({ ok: false, kind: "usage", error: "solari takes machines at once, spend per day, nap after and agents may start agents, not threads at once" });
     expect(await capOf(host, "p_nothing", { threads: 2 })).toMatchObject({ ok: false, kind: "usage", error: noSuchPlaceRefusal("p_nothing", [HERE.name, "solari"]) });
-    expect(await capOf(host, "solari", {})).toMatchObject({ ok: false, kind: "usage", error: "nothing to set on solari: it takes machines at once and spend per day" });
+    expect(await capOf(host, "solari", {})).toMatchObject({ ok: false, kind: "usage", error: "nothing to set on solari: it takes machines at once, spend per day, nap after and agents may start agents" });
     host.close();
     expect(await store.keys("caps")).toEqual([]);
   });
@@ -1001,6 +1023,119 @@ describe("a place's cap and what runs there", () => {
   });
 });
 
+describe("a place's nap after", () => {
+  const MIN = 60_000;
+
+  it("arms a workspace with no window of its own off its place's nap, again from now once the nap changes, never once it is off, and leaves a workspace's own window standing", async () => {
+    const root = mkdtempSync(joinPath(tmpdir(), "wsp-nap-"));
+    try {
+      const backend = stubBackend();
+      const fc = fakeClock(Date.parse("2026-09-16T12:00:00.000Z"));
+      runtime = createRuntime({ backend, places: wiredPlace("solari", backend), store: memoryStore(), adapters: {}, clock: fc.clock, idle: { defaultWindowMs: 60 * MIN }, placeLinks: wiring(newPlaceKeyPair(), { id: "solari", rateUsdPerHour: 0.11 }), local: fakeLocal(root) });
+      srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+      const idleAt = async (id: string): Promise<number | undefined> => (await runtime!.status.list()).find(s => s.id === id)?.idleAt;
+      const first = await createOn(runtime, { on: "solari", golden: "snap_g", name: "first" });
+      const own = await createOn(runtime, { on: "solari", golden: "snap_g", name: "own", idleWindowMs: 30 * MIN });
+      await until(async () => (await idleAt(first.id)) !== undefined);
+      expect(await idleAt(first.id)).toBe(fc.clock.now() + 60 * MIN);
+      const c = await WsClient.connect(srv.port, { token: "host-token" });
+      expect((await placesOf()).find(p => p.id === "solari")).toMatchObject({ napMs: 60 * MIN, napDefault: 60 * MIN });
+      fc.advance(MIN);
+      const fiveMin = (await c.request("places.set", { placeId: "solari", napMs: 5 * MIN })) as { place: PlaceView };
+      expect(fiveMin).toMatchObject({ ok: true, place: { napMs: 5 * MIN, napDefault: 60 * MIN, settings: { napMs: 5 * MIN } } });
+      // The line says the default this host runs, which is the row's own.
+      expect(placeSettingsLine(fiveMin.place)).toContain("naps after 5m (60m by default)");
+      // A new window counts from when the person set it, on every workspace there that has none of its own.
+      expect(await idleAt(first.id)).toBe(fc.clock.now() + 5 * MIN);
+      expect(await idleAt(own.id)).toBe(Date.parse("2026-09-16T12:00:00.000Z") + 30 * MIN);
+      // Another setting on the place leaves every window where it stands.
+      fc.advance(MIN);
+      expect(await c.request("places.set", { placeId: "solari", machines: 4 })).toMatchObject({ ok: true });
+      expect(await idleAt(first.id)).toBe(fc.clock.now() + 4 * MIN);
+      const second = await createOn(runtime, { on: "solari", golden: "snap_g", name: "second" });
+      await until(async () => (await idleAt(second.id)) !== undefined);
+      expect(await idleAt(second.id)).toBe(fc.clock.now() + 5 * MIN);
+      expect(await c.request("places.set", { placeId: "solari", napMs: null })).toMatchObject({ ok: true, place: { napMs: null, settings: { napMs: null } } });
+      expect(await idleAt(first.id)).toBeUndefined();
+      expect(await c.request("places.set", { placeId: "solari", reset: ["nap"] })).toMatchObject({ ok: true, place: { napMs: 60 * MIN } });
+      expect(await idleAt(first.id)).toBe(fc.clock.now() + 60 * MIN);
+      c.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("is refused on the computer the host runs on, whose workspaces are folders that never nap, and says nothing of it on that row", async () => {
+    await serving();
+    const host = await WsClient.connect(srv!.port, { token: "host-token" });
+    expect(await host.request("places.set", { placeId: HERE_PLACE_ID, napMs: 5 * MIN })).toMatchObject({ ok: false, kind: "usage", error: `${HERE.name} takes threads at once and agents may start agents, not nap after` });
+    expect(await host.request("places.set", { placeId: "p_1", napMs: 30_000 })).toMatchObject({ ok: false });
+    host.close();
+    expect((await placesOf()).find(p => p.id === HERE_PLACE_ID)!.napMs).toBeUndefined();
+  });
+});
+
+describe("whether agents may start agents, as a place's default", () => {
+  it("gives a workspace with no switch of its own its place's, keeps one a workspace was given, and patches a workspace's switch over the one it inherits", async () => {
+    const root = mkdtempSync(joinPath(tmpdir(), "wsp-spawn-place-"));
+    try {
+      const backend = stubBackend();
+      runtime = createRuntime({ backend, places: wiredPlace("solari", backend), store: memoryStore(), adapters: {}, placeLinks: wiring(newPlaceKeyPair(), { id: "solari", rateUsdPerHour: 0.11 }), local: fakeLocal(root) });
+      srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+      const c = await WsClient.connect(srv.port, { token: "host-token" });
+      expect((await placesOf()).find(p => p.id === "solari")).toMatchObject({ spawn: AGENTS_ON, spawnDefault: AGENTS_ON });
+      const before = await createOn(runtime, { on: "solari", golden: "snap_g", name: "before" });
+      expect(await c.request("places.set", { placeId: "solari", spawn: { spawn: false } })).toMatchObject({ ok: true, place: { spawn: { ...AGENTS_ON, spawn: false }, settings: { spawn: { ...AGENTS_ON, spawn: false } } } });
+      expect(await c.request("places.set", { placeId: HERE_PLACE_ID, spawn: { maxMachines: 1 } })).toMatchObject({ ok: true, place: { spawn: { ...AGENTS_ON, maxMachines: 1 } } });
+      // Read at every ask rather than copied at the create, so a workspace made before the change follows it.
+      expect((await runtime.workspaces.get(before.id)).agents).toEqual({ ...AGENTS_ON, spawn: false });
+      const after = await createOn(runtime, { on: "solari", golden: "snap_g", name: "after" });
+      expect((await runtime.workspaces.get(after.id)).agents).toEqual({ ...AGENTS_ON, spawn: false });
+      const own = await createOn(runtime, { on: "solari", golden: "snap_g", name: "own", agents: { maxDepth: 2 } });
+      expect((await runtime.workspaces.get(own.id)).agents).toEqual({ ...AGENTS_ON, spawn: false, maxDepth: 2 });
+      const mac = await createOn(runtime, { on: HERE_PLACE_ID, name: "mac" });
+      expect((await runtime.workspaces.get(mac.id)).agents).toEqual({ ...AGENTS_ON, maxMachines: 1 });
+      // A cap named alone on a workspace tightens the switch it reads as, which is its place's.
+      expect((await runtime.workspaces.agents(after.id, { maxMachines: 2 })).agents).toEqual({ spawn: false, maxMachines: 2, maxDepth: 1 });
+      expect(await c.request("places.set", { placeId: "solari", reset: ["spawn"] })).toMatchObject({ ok: true, place: { spawn: AGENTS_ON } });
+      expect((await runtime.workspaces.get(before.id)).agents).toEqual(AGENTS_ON);
+      c.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("a computer that runs an older wsp than this host", () => {
+  it("says so on its row with what brings it level: wsp add <name> --update on a joined one, this wsp's own road on this one, and nothing on a level one or where no daemon runs here", async () => {
+    const root = mkdtempSync(joinPath(tmpdir(), "wsp-behind-"));
+    try {
+      const hostKey = newPlaceKeyPair();
+      let held: number | undefined = DAEMON_VERSION - 1;
+      runtime = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {}, placeLinks: wiring(hostKey), local: { ...fakeLocal(root), hereDaemon: { version: async () => held ?? DAEMON_VERSION, held: () => held, fix: "updating the wsp app" } } });
+      srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+      const old = await join(hostKey, { code: await code(), report: report("spoo", { daemonVersion: DAEMON_VERSION - 1 }) });
+      sockets.push(old.client.ws);
+      const level = await join(hostKey, { code: await code(), report: report("box", { daemonVersion: DAEMON_VERSION }) });
+      sockets.push(level.client.ws);
+      const word = placeDaemonBehind({ daemonVersion: DAEMON_VERSION - 1 })!;
+      const rows = await placesOf();
+      expect(rows.find(p => p.id === old.placeId)).toMatchObject({ daemonVersion: DAEMON_VERSION - 1, behind: { word, fix: "wsp add spoo --update", act: "update" } });
+      expect(rows.find(p => p.id === level.placeId)!.behind).toBeUndefined();
+      expect(rows.find(p => p.id === HERE_PLACE_ID)).toMatchObject({ daemonVersion: DAEMON_VERSION - 1, behind: { word, fix: "updating the wsp app", act: "install" } });
+      held = DAEMON_VERSION;
+      const levelled = (await placesOf()).find(p => p.id === HERE_PLACE_ID)!;
+      expect(levelled.daemonVersion).toBe(DAEMON_VERSION);
+      expect(levelled.behind).toBeUndefined();
+      // No daemon started here yet is a version this host does not know, not one it guesses.
+      held = undefined;
+      expect((await placesOf()).find(p => p.id === HERE_PLACE_ID)!.daemonVersion).toBeUndefined();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("a cloud's spend per day", () => {
   const HOUR = 3_600_000;
 
@@ -1013,7 +1148,7 @@ describe("a cloud's spend per day", () => {
       runtime = createRuntime({ backend, places: wiredPlace("solari", backend), store: memoryStore(), adapters: {}, clock: fc.clock, idle: { defaultWindowMs: 24 * HOUR }, placeLinks: wiring(newPlaceKeyPair(), { id: "solari", rateUsdPerHour: 0.11 }), local: fakeLocal(root) });
       srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
       const c = await WsClient.connect(srv.port, { token: "host-token" });
-      expect(await c.request("places.cap", { placeId: "solari", spendPerDayUsd: 0.2 })).toMatchObject({ ok: true });
+      expect(await c.request("places.set", { placeId: "solari", spendPerDayUsd: 0.2 })).toMatchObject({ ok: true });
       c.close();
       const opened = async (name: string) => {
         const made = await createOn(runtime!, { on: "solari", golden: "snap_g", name });
@@ -1034,7 +1169,7 @@ describe("a cloud's spend per day", () => {
       await expect(createOn(runtime, { on: HERE_PLACE_ID, name: "mac" })).resolves.toMatchObject({ name: "mac" });
       // A higher spend per day lets the next machine through the same day.
       const again = await WsClient.connect(srv.port, { token: "host-token" });
-      expect(await again.request("places.cap", { placeId: "solari", spendPerDayUsd: 1 })).toMatchObject({ ok: true });
+      expect(await again.request("places.set", { placeId: "solari", spendPerDayUsd: 1 })).toMatchObject({ ok: true });
       again.close();
       await expect(createOn(runtime, { on: "solari", golden: "snap_g", name: "third" })).resolves.toMatchObject({ name: "third" });
     } finally {

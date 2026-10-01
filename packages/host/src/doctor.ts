@@ -1524,7 +1524,8 @@ export async function placesBehindLines(rt: Pick<Runtime, "places">, now = Date.
   const places = await rt.places.list(now);
   return [
     ...mine,
-    ...places.flatMap(place => {
+    // This computer's own row is read above off its daemon, and its fix is not the line that moves a joined one.
+    ...places.filter(isJoinedComputer).flatMap(place => {
       const word = placeDaemonBehind(place);
       return word === undefined ? [] : [placeBehindLine(place.name, word)];
     }),

@@ -949,13 +949,13 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, ...(await places().dial(msg.placeId, now())) });
               return;
             }
-            case "places.cap": {
+            case "places.set": {
               if (!ownRoad()) {
                 send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
                 return;
               }
-              const { id: _id, op: _op, placeId, ...set } = msg;
-              send({ id: msg.id, ok: true, ...(await places().cap(placeId, set)) });
+              const { id: _id, op: _op, placeId, reset, ...set } = msg;
+              send({ id: msg.id, ok: true, ...(await places().set(placeId, set, reset)) });
               return;
             }
             case "places.loginLanded": {

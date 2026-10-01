@@ -192,6 +192,7 @@
   "noTerminalConfig": "No Ghostty config on this computer; the terminal pane keeps its defaults.",
   "usages": {
     "computers": "wsp computers",
+    "computers_set": "wsp computers set <computer> [--threads <n>] [--nap <minutes>|off] [--spawn on|off] [--max-machines <n>] [--max-depth <n>] [--reset <setting>]...",
     "usage": "wsp usage [--range day|week|month] [--by agent|account|computer|project|model]",
     "agents": "wsp agents [<workspace>] [--on <computer>]",
     "skills": "wsp skills [<workspace>] [--on <computer>]",

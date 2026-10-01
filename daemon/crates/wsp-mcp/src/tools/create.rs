@@ -9,7 +9,7 @@ use serde_json::{Map, Number, Value};
 
 use super::turn::{self, Picks, TurnOut};
 use super::workspace::{self, agents_asked, fmt_rate, js_number, params, quoted_inner, to_fixed, workspace_of};
-use super::{input, Answer, Refused, Tool};
+use super::{input, refused_field, Answer, Refused, Tool};
 use crate::client::Client;
 use crate::failure::Failure;
 use crate::host::Host;
@@ -267,14 +267,16 @@ pub struct NewIn {
 
 const NEW_NAME: &str = "new";
 
-pub const NEW: Tool =
-    Tool { name: NEW_NAME, listed: include_str!("../../record/tools/new.json"), call: |host, args| Box::pin(new(host, args)) };
+const NEW_LISTED: &str = include_str!("../../record/tools/new.json");
+
+pub const NEW: Tool = Tool { name: NEW_NAME, listed: NEW_LISTED, call: |host, args| Box::pin(new(host, args)) };
 
 async fn new(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     let NewIn { project, name, from, size, engine, spawn, max_machines, max_depth } = input(NEW_NAME, arguments)?;
     let client = host.client().await?;
     let project = the_project(&client, project.as_deref()).await?;
-    let agents = agents_asked(spawn.as_deref(), max_machines.as_ref(), max_depth.as_ref());
+    let agents = agents_asked(spawn.as_deref(), max_machines.as_ref(), max_depth.as_ref())
+        .map_err(|word| refused_field(NEW_NAME, NEW_LISTED, host.cloud(), "spawn", Value::from(word)))?;
     let created = create_for(&client, &project, &name, Asked { from, size, agents, engine: engine == Some(true), parent: None }).await?;
     Ok(Answer::json(&created))
 }
@@ -328,8 +330,9 @@ pub struct ForkOut {
 
 const FORK_NAME: &str = "fork";
 
-pub const FORK: Tool =
-    Tool { name: FORK_NAME, listed: include_str!("../../record/tools/fork.json"), call: |host, args| Box::pin(fork(host, args)) };
+const FORK_LISTED: &str = include_str!("../../record/tools/fork.json");
+
+pub const FORK: Tool = Tool { name: FORK_NAME, listed: FORK_LISTED, call: |host, args| Box::pin(fork(host, args)) };
 
 /// A folder named for the thread is refused unless absolute, before anything else: the agent would run a relative
 /// one against its own home on the machine and fail there. The task and its picks are checked against the source's
@@ -352,7 +355,8 @@ async fn fork(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     .await;
     // A fork with a task sends a message, and a host that stops under these reads took none.
     let source = if task.is_some() { turn::before_sending(&client, read)? } else { read? };
-    let agents = agents_asked(spawn.as_deref(), max_machines.as_ref(), max_depth.as_ref());
+    let agents = agents_asked(spawn.as_deref(), max_machines.as_ref(), max_depth.as_ref())
+        .map_err(|word| refused_field(FORK_NAME, FORK_LISTED, host.cloud(), "spawn", Value::from(word)))?;
     let project = project_of(&client, &source.project.id).await?;
     let name = name.unwrap_or_else(|| format!("{}-fork", source.name));
     let Created { workspace, notice } =
