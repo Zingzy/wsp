@@ -842,6 +842,7 @@ export const useStore = create<State>((set, get) => {
       if (!api?.forgetThread) return false;
       try {
         await api.forgetThread(threadId);
+        if (get().selectedThreadId === threadId) set({ selectedThreadId: null });
         await get().reloadSessions(workspaceId);
         return true;
       } catch (e: unknown) {
@@ -1014,10 +1015,14 @@ export const useStore = create<State>((set, get) => {
             const { [e.workspaceId]: _r, ...sessions } = s.sessions;
             const { [e.workspaceId]: _b, ...broughtBack } = s.broughtBack;
             const creation = s.creations.find(c => c.workspaceId === e.workspaceId);
+            const workspaces = s.workspaces.filter(x => x.id !== e.workspaceId);
+            // A page open on the workspace goes with it, or the centre keeps drawing a thread the host no longer has.
+            const left = s.selectedId === e.workspaceId ? { selectedId: firstRow({ workspaces, statuses, sessions }), selectedThreadId: null } : {};
             return {
-              workspaces: s.workspaces.filter(x => x.id !== e.workspaceId),
+              workspaces,
               creations: s.creations.filter(c => c !== creation),
               ...(creation !== undefined && s.selectedId === creation.key ? { selectedId: null } : {}),
+              ...left,
               statuses,
               costs,
               spending,
