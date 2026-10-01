@@ -1467,3 +1467,44 @@ describe("ClaudeAdapter reads the plan's limits Claude Code prints", () => {
     expect(await limits([limitLine({ status: "allowed", rateLimitType: "five_hour", resetsAt: 1_790_700_000 }), limitLine({ status: "allowed" })])).toEqual([]);
   });
 });
+
+describe("what a turn cost, off totals the CLI keeps for the whole session", () => {
+  // Claude Code's result carries the session's running total, and a resume starts from the total its transcript saved
+  // in a cost-state line. Two turns of one thread on 2026-10-01 reported 352.3259844 and then 370.679875.
+  const init = `{"type":"system","subtype":"init","cwd":"/w","session_id":"${FIXTURE_SESSION_ID}","model":"claude-opus-5-5"}`;
+  const saved = (total: number, session = FIXTURE_SESSION_ID) =>
+    JSON.stringify({ type: "cost-state", sessionId: session, totalCostUSD: total, modelUsage: { "claude-opus-5-5": { inputTokens: 9, outputTokens: 9, cacheReadInputTokens: 9, cacheCreationInputTokens: 9, webSearchRequests: 0, costUSD: total } } });
+  const result = (total: number) =>
+    `{"type":"result","subtype":"success","is_error":false,"num_turns":1,"duration_ms":900,"result":"done","session_id":"${FIXTURE_SESSION_ID}","total_cost_usd":${total},"usage":{"input_tokens":10,"output_tokens":4}}`;
+  const run = async (lines: string[], resume?: string) => {
+    const exec = scriptedExec(lines);
+    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
+    const { onEvent } = collect();
+    const done = await adapter.start({ prompt: "x", ...(resume !== undefined ? { resume } : {}), onEvent }).finished;
+    return { done, command: exec.calls[0]?.command ?? "" };
+  };
+
+  it("a resumed turn costs its result's total less the total the session's transcript saved before it", async () => {
+    const { done, command } = await run([saved(352.3259844), init, result(370.679875)], FIXTURE_SESSION_ID);
+    expect(done.costUsd).toBeCloseTo(18.3538906, 6);
+    // The launch prints the saved line ahead of the CLI, read from the same file the CLI restores from.
+    expect(command).toMatch(/^wsp_saved=\$\(ls -1td '\/root\/\.claude-cfg\/projects'\/\*\/'e16ed170-8257-4668-879e-fe836341633c\.jsonl'/);
+    expect(command).toContain(`grep -F '"type":"cost-state"'`);
+  });
+
+  it("a saved line of another session in the file is not this session's total", async () => {
+    const { done } = await run([saved(352.3259844, "11111111-2222-4333-8444-555555555555"), init, result(18)], FIXTURE_SESSION_ID);
+    expect(done.costUsd).toBe(18);
+  });
+
+  it("a total under the saved one started again from nothing, so the turn cost the whole of it", async () => {
+    const { done } = await run([saved(352.3259844), init, result(2.5)], FIXTURE_SESSION_ID);
+    expect(done.costUsd).toBe(2.5);
+  });
+
+  it("a new session has nothing saved: the launch reads no file and the turn cost its whole total", async () => {
+    const { done, command } = await run([init, result(4.25)]);
+    expect(done.costUsd).toBe(4.25);
+    expect(command).not.toContain("cost-state");
+  });
+});

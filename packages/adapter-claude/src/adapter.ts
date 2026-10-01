@@ -9,7 +9,7 @@ import { SKIP_PROMPTS_MODE, controlAllowLine, controlAnswerLine, controlErrorLin
 import { CLAUDE_SCREEN_COMMANDS, catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
 import { asideAnswer, asideCommand, forkCleanupCommand } from "./aside.js";
 import { draftForCommand, parseDraftFor, parseRename, parseSessionTitle, parseTitleFor, renameCommand, sessionTitleCommand, titleForCommand } from "./session-title.js";
-import { buildCommand, buildEnv, newSessionId, userMessageLine } from "./landmines.js";
+import { buildCommand, buildEnv, newSessionId, savedSpendCommand, userMessageLine } from "./landmines.js";
 import { shellCwdAfter } from "./shell-cwd.js";
 
 export interface StartOptions {
@@ -259,6 +259,13 @@ function resultTokens(event: Record<string, unknown>): { tokens?: TurnTokens; mo
       : {}),
     ...(model !== undefined ? { model } : {}),
   };
+}
+
+/** The turn's own cost: the session's running total less the total its file saved before the turn, or the whole of
+ * it where the total started again under that. */
+function ownCost(result: TurnResult, saved: number | undefined): TurnResult {
+  const total = result.costUsd;
+  return total === undefined || saved === undefined || total < saved ? result : { ...result, costUsd: total - saved };
 }
 
 function normalizeResult(event: Record<string, unknown>, refusal: { road?: string; cause?: TurnRefusal } | undefined): TurnResult {
@@ -604,6 +611,8 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
      * compaction's figure where one came after it. The result's usage sums the turn, so it cannot say this. */
     let heldContext: number | undefined;
     let initModel: string | undefined;
+    /** The session's running cost as its file saved it before this turn, which every result's total starts from. */
+    let savedSpend: number | undefined;
     /** One line per task that finished after the held reply, in the order the CLI reported them. */
     const finishedAfter: string[] = [];
     /** Running while a held reply waits out the CLI's silence: its tasks are done, and this is the window it has to
@@ -721,6 +730,10 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
             if (text.length > 0 && stderrTail.push(text) > STDERR_TAIL_LINES) stderrTail.shift();
             continue;
           }
+          if (event.type === "cost-state") {
+            if (str(event.sessionId) === localId) savedSpend = num(event.totalCostUSD);
+            continue;
+          }
           if (event.type === "assistant" && typeof event.uuid === "string" && (event.parent_tool_use_id === undefined || event.parent_tool_use_id === null)) anchor = event.uuid;
           const control = controlLine(event);
           if (control !== undefined) {
@@ -816,7 +829,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
               // their own lines.
               if (sawResult) continue;
               woken = false;
-              const result = spanned(withContext(normalized.result, heldContext, initModel));
+              const result = spanned(withContext(ownCost(normalized.result, savedSpend), heldContext, initModel));
               if (backgroundTasks > 0) {
                 // The agent replied while the CLI still reports work it started. The turn is not over: ending it
                 // here kills that work mid-write and nothing ever says what came of it, so the reply is kept, the
@@ -954,8 +967,9 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       ...(options.title !== undefined ? { name: options.title } : {}),
       ...(options.mcpServers !== undefined ? { mcpServers: options.mcpServers } : {}),
     });
-    const stream = deps.exec(command, { env: { ...env }, input: [userMessageLine(options.prompt, localId, options.images)] });
-    return follow({ stream, localId, announced: false, command, onEvent: options.onEvent });
+    const launch = options.resume === undefined ? command : `${savedSpendCommand({ configDir: deps.configDir, sessionId: options.resume })}${command}`;
+    const stream = deps.exec(launch, { env: { ...env }, input: [userMessageLine(options.prompt, localId, options.images)] });
+    return follow({ stream, localId, announced: false, command: launch, onEvent: options.onEvent });
   };
 
   /** A launch, and where it resumes a session the CLI's store does not hold and a seed is at hand, a second launch in a
