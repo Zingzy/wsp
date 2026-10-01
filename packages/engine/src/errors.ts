@@ -27,6 +27,11 @@ export function classify(status: number, body: { code?: string; error?: string }
  * refusal the provider answered with is thrown as itself. */
 export class MoveUnansweredError extends Error {}
 
+/** What a backend's pause ends with when its budget ran out while the provider still reads the stop under way: the
+ * stop was taken and the provider finishes it on its own, so the machine is pausing and nothing is to be asked again.
+ * Not a MoveUnansweredError: the provider did answer. */
+export class StopUnderWayError extends Error {}
+
 /** What a backend's resume ends with when the provider never took the call inside its cap and the machine still
  * reads paused: the one failure the host answers by asking again on its own rather than by handing the row back to
  * the person. */

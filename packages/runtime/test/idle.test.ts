@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { AdapterEvent, EventUnion, TurnResult, WorkspaceStatus } from "@wsp/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { MoveUnansweredError } from "@wsp/engine";
+import { MoveUnansweredError, StopUnderWayError } from "@wsp/engine";
 import { moveTimedOutLine } from "@wsp/protocol";
 import { IDLE_OFF_BACKSTOP_MS, createIdlePolicy, type IdlePolicy } from "../src/idle.js";
 import { createRuntime, type HarnessAdapterFactory, type RuntimeOptions } from "../src/runtime.js";
@@ -481,6 +481,31 @@ describe("idle policy in the runtime", () => {
     await napping(rt, ws.id);
     expect(calls).toBe(2);
     expect(statuses.at(-1)).toMatchObject({ phase: "napping", reason: "idle 5 min" });
+  });
+
+  it("an idle nap whose stop the provider is still saving past the budget has napped: the row says so, nothing is logged failed and nothing is asked again", async () => {
+    const { rt, backend, fc } = testRuntime();
+    const statuses: WorkspaceStatus[] = [];
+    rt.events.on("workspace.status", e => statuses.push((e as { status: WorkspaceStatus }).status));
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+    const m = backend.machines[0]!;
+    let calls = 0;
+    m.pause = async () => {
+      calls++;
+      throw new StopUnderWayError("Boat is still saving the disk, 10 min so far");
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      fc.advance(WINDOW);
+      await napping(rt, ws.id);
+      expect(statuses.at(-1)).toMatchObject({ phase: "napping", reason: "Boat is still saving the disk, 10 min so far" });
+      fc.advance(WINDOW * 3);
+      await settled();
+      expect(calls).toBe(1);
+      expect(warn.mock.calls.map(c => String(c[0])).filter(l => l.startsWith("idle nap of"))).toEqual([]);
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("an idle nap whose pause the backend gave up on keeps the deadline on the row with the backend's words, and is asked again at the cadence until one lands", async () => {

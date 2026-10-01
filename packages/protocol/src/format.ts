@@ -3214,6 +3214,11 @@ export function providerCannotRefusal(name: string, machine: string, action: str
 /** The row's line when a pause or a wake ran its deadline out, once and once more after the retry: which move, how
  * long it was given in all, and what the provider reads about the machine after it, or that the provider could not
  * be read. The person's road is to try again; the runtime never leaves the row at Pausing or Waking. */
+/** A stop the provider is still saving the disk for once the pause's budget has run out, with the minutes so far. */
+export function stopUnderWayLine(provider: string, elapsedMs: number): string {
+  return `${provider} is still saving the disk, ${Math.floor(elapsedMs / 60_000)} min so far`;
+}
+
 export function moveTimedOutLine(move: "pause" | "wake", elapsedMs: number, reads: MachineState | undefined): string {
   const provider = reads === undefined ? "could not be read about the machine" : `reads the machine ${reads}`;
   return `${move} did not complete in ${fmtDuration(elapsedMs)}; the provider did not answer and ${provider}; try again`;

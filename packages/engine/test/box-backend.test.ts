@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { DAEMON_UNIT } from "@wsp/protocol";
 import { writeStub } from "../../protocol/test/stub-script.js";
-import { GuestUnusableError, MoveUnansweredError, ROAD_TRIES, isMissing, type RetryClock } from "../src/errors.js";
+import { GuestUnusableError, MoveUnansweredError, ROAD_TRIES, StopUnderWayError, isMissing, type RetryClock } from "../src/errors.js";
 import { DAEMON_ENV_FILE, DEADLINE_EXIT, INLINE_EXEC_MS } from "../src/exec-detached.js";
 import { EXEC_ENV } from "../src/golden-import.js";
 import { GONE_READS, killUntilGone } from "../src/golden.js";
@@ -639,18 +639,21 @@ describe("BoxBackend against a fake Box API", () => {
     }
   });
 
-  it("a stop that never lands inside the budget ends the pause with the row's words, the machine still read as paused-in-progress", async () => {
+  it("a box still archiving past the budget is the stop under way: the pause ends saying how long Boat has been saving, never as unanswered", async () => {
+    // Boat archived a 69 GB disk in about 14 minutes on 2026-10-01, past the 10 minute budget, and finished fine.
     const api = new FakeBox()
       .on("GET", "/boxes/bx_tumrjngm", INFO("bx_tumrjngm", "idle"), INFO("bx_tumrjngm", "archiving"))
       .on("POST", "/boxes/bx_tumrjngm/stop", { status: 202, body: { ok: true, type: "box.stopping", status: "archiving", box: BOX("bx_tumrjngm", "archiving") } });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      const { machine, clock } = machineOn(api);
+      const { backend, clock } = backendOn(api, "trial", { pollMs: 60_000, pauseMs: 10 * 60_000 });
       const before = clock.at;
-      const e = await machine.pause().catch((err: unknown) => err);
-      expect(e).toBeInstanceOf(MoveUnansweredError);
-      expect((e as Error).message).toMatch(/^pause did not complete in .*; the provider did not answer and reads the machine paused; try again$/);
-      expect(clock.at - before).toBeGreaterThanOrEqual(100);
+      const e = await new BoxMachine(backend, "bx_tumrjngm", "sandbox").pause().catch((err: unknown) => err);
+      expect(e).toBeInstanceOf(StopUnderWayError);
+      expect(e).not.toBeInstanceOf(MoveUnansweredError);
+      expect((e as Error).message).toBe("Boat is still saving the disk, 10 min so far");
+      expect(clock.at - before).toBe(10 * 60_000);
+      expect(api.calls().filter(c => c.endsWith("/stop"))).toHaveLength(1);
     } finally {
       warn.mockRestore();
     }

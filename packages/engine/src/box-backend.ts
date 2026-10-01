@@ -9,8 +9,8 @@
 // is a declaration through the seam or an internal of this file.
 
 import { createHash, randomBytes } from "node:crypto";
-import { DAEMON_UNIT, moveTimedOutLine, providerKeyName, providerRoadRetryLine, shellQuote, type Capabilities } from "@wsp/protocol";
-import { GuestUnusableError, MoveUnansweredError, ROAD_TRIES, abort, backoffMs, classify, isMissing, realRetryClock, roadBackoffMs, roadCode, shouldRetry, type RetryClock, type WspError } from "./errors.js";
+import { DAEMON_UNIT, providerKeyName, providerRoadRetryLine, shellQuote, stopUnderWayLine, type Capabilities } from "@wsp/protocol";
+import { GuestUnusableError, MoveUnansweredError, ROAD_TRIES, StopUnderWayError, abort, backoffMs, classify, isMissing, realRetryClock, roadBackoffMs, roadCode, shouldRetry, type RetryClock, type WspError } from "./errors.js";
 import { DAEMON_ENV_FILE, DEADLINE_EXIT, INLINE_EXEC_MS, execDetached } from "./exec-detached.js";
 import { EXEC_ENV } from "./golden-import.js";
 import { BUILDER_LABEL, CREATED_AT_LABEL, DOCTOR_LABEL, GOLDEN_LABEL, HOST_LABEL, NAME_LABEL, OWNER_LABEL, SMOKE_LABEL, WORKSPACE_LABEL, WSP_LABEL } from "./labels.js";
@@ -762,7 +762,8 @@ export class BoxMachine implements Machine {
   /** Returns when the box reads archived. A stop is a 202 the provider lands in seconds to minutes, so the box is
    * read until it does; archiving is the stop under way and a box already archived needs none. A stop the
    * provider refuses is thrown as itself, and one it takes back (the snapshot behind it failing leaves the box
-   * running, which the provider does rather than lose work) ends the move as not taken; nothing here sends force. */
+   * running, which the provider does rather than lose work) ends the move as not taken; one still archiving past the
+   * budget ends as the stop under way; nothing here sends force. */
   async pause(): Promise<void> {
     const { pauseMs, pollMs } = this.backend.budgets;
     const now = this.backend.clock.now;
@@ -779,10 +780,11 @@ export class BoxMachine implements Machine {
         console.warn(`${this.id}: ${words}`);
         throw new MoveUnansweredError(words);
       }
+      // Archiving is the stop under way: a 69 GB disk took Boat about 14 minutes (2026-10-01), past the budget.
       if (now() - started >= pauseMs) {
-        const words = moveTimedOutLine("pause", now() - started, STATE_MAP[view.state]);
+        const words = stopUnderWayLine("Boat", now() - started);
         console.warn(`${this.id}: ${words}`);
-        throw new MoveUnansweredError(words);
+        throw new StopUnderWayError(words);
       }
     }
   }

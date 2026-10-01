@@ -9,6 +9,7 @@ import {
   INLINE_EXEC_MS,
   MachineUnreachableError,
   MoveUnansweredError,
+  StopUnderWayError,
   NotFirstLifeError,
   ResumeUnansweredError,
   SnapshotFailedError,
@@ -5333,8 +5334,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         entry.record.phase = "pausing";
         await persist(entry.record);
         await emitStatus(entry, "napping");
+        let said = reason;
         try {
-          await entry.ws.nap();
+          // The provider took the stop and is finishing it on its own, which it reads as paused: the nap has landed,
+          // and the row says how far the provider has got rather than a failure to ask again.
+          await entry.ws.nap().catch((e: unknown) => {
+            if (!(e instanceof StopUnderWayError)) throw e;
+            entry.ws.notePaused();
+            said = e.message;
+          });
         } catch (e) {
           // A 404 the pause answered with is a sighting like any other: it settles only where the state read agrees,
           // and a machine still running takes the road any other refused pause takes.
@@ -5354,7 +5362,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         entry.record.phase = "napping";
         await persist(entry.record);
         bus.emit({ type: "workspace.napped", workspaceId: id });
-        await emitStatus(entry, "napping", reason);
+        await emitStatus(entry, "napping", said);
         return view(entry.record);
       } finally {
         delete entry.napping;
