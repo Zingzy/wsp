@@ -533,31 +533,31 @@
       "at": "/",
       "fixture": "usage",
       "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
         "k=settings-row",
         "k=settings-usage"
       ],
-      "wait": "usage-computer=here",
+      "wait": "k=used-headline",
       "settleMs": 700,
       "height": 1100,
-      "widths": [
-        1440
-      ],
-      "reason": "The lists are one column template at every width the page reaches its 760px; 1440 is where the brief judges it."
+      "widths": [1440, 390],
+      "reason": "The settings column is 760px at most, so 1280 draws it as 1440 does; 390 is where the table narrows."
     },
     {
       "name": "settings-usage-empty",
       "at": "/",
       "fixture": "mac-only",
       "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
         "k=settings-row",
         "k=settings-usage"
       ],
-      "wait": "usage-computer=here",
+      "wait": "k=used-headline",
       "settleMs": 700,
-      "widths": [
-        1440
-      ],
-      "reason": "The same page with nothing used and no readings kept; settings-usage shoots the page with a week behind it."
+      "widths": [1440, 390],
+      "reason": "The same page with nothing used; settings-usage shoots the page with a week behind it, at 1440 and 390."
     },
     {
       "name": "settings-account",

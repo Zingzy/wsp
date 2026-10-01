@@ -37,6 +37,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Browser, Page } from "playwright";
 import { DEFAULT_PREFERENCES, PlaceAddStep } from "@wsp/protocol";
+import { CARD_SURFACE } from "../src/settings/rows.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { textContrast, wcagContrast } from "./contrast";
 import { launchRender, renderSkipped, stopRender } from "./render-browser";
@@ -450,6 +451,7 @@ const SETTINGS_SCREENS = [
   ["settings-account", "[data-settings-at=account] [data-k=account-action]"],
   ["settings-keybindings", "[data-settings-at=keybindings] [data-slot=kbd]"],
   ["settings-about", "[data-settings-at=about] [data-k=app-version]"],
+  ["settings-usage", "[data-settings-at=usage] [data-used-row=codex]"],
   ["settings-search", "[data-settings-at=search] [data-settings-row=server-icons]"],
   ["settings-over-panel", "[data-settings-at=appearance]"],
   ["settings-add-computer", "[data-k=add-computer] [data-k=road-ssh] [data-k=login]"],
@@ -468,6 +470,8 @@ const FOOT_SIZES = [
 interface SettingsRead {
   rows: { id: string; height: number; card: string; fill: string; spills: boolean; chips: boolean; chipsCut: string[] }[];
   lines: { id: string; height: number; spills: boolean }[];
+  /** Each list in the list grammar: the classes its card wears, and its rows' heights. */
+  grids: { id: string; card: string; rows: number[] }[];
   sidebarRows: { id: string; height: number; active: boolean; dimmed: boolean; opacity: number }[];
   cutSegments: string[];
   /** Every word, sentence and value whose box cannot hold it: the ones a person would read cut short. */
@@ -533,6 +537,11 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
           })
           .map(chip => (chip.textContent ?? "").trim()),
       }));
+      const grids = [...document.querySelectorAll<HTMLElement>("[data-settings-page] [data-grid]")].map(el => ({
+        id: el.dataset["grid"] ?? "?",
+        card: el.querySelector<HTMLElement>(":scope > [data-grid-row], :scope > div:not([data-grid-head])")?.className ?? "",
+        rows: [...el.querySelectorAll<HTMLElement>("[data-grid-row]")].map(row => box(row).height),
+      }));
       const lines = [...document.querySelectorAll<HTMLElement>("[data-settings-page] [data-settings-line]")].map(el => ({
         id: el.dataset["settingsLine"] ?? "?",
         height: box(el).height,
@@ -565,6 +574,7 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
       return {
         rows,
         lines,
+        grids,
         sidebarRows,
         cutSegments,
         cutWords,
@@ -585,6 +595,11 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
     for (const line of got.lines) {
       expect(line.height, `${line.id} at ${where}`).toBeGreaterThanOrEqual(LEAST_ROW);
       expect(line.spills, `${line.id} at ${where} holds what it says`).toBe(false);
+    }
+    // A list in the list grammar stands in the one settings card, its rows grown like any row.
+    for (const grid of got.grids) {
+      for (const surface of CARD_SURFACE.split(" ")) expect(grid.card.split(" "), `the ${grid.id} list's card at ${where}`).toContain(surface);
+      for (const height of grid.rows) expect(height, `a row of the ${grid.id} list at ${where}`).toBeGreaterThanOrEqual(LEAST_ROW);
     }
     expect(got.cutWords, `words cut at ${where}`).toEqual([]);
     for (const row of got.sidebarRows) expect(row.height, `${row.id} at ${where}`).toBe(ONE_LINE);

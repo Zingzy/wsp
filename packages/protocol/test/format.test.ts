@@ -598,7 +598,7 @@ describe("a turn's activity in one line each", () => {
   });
 
   it("says a turn's model and tokens in short figures, and nothing the agent did not report", () => {
-    expect([0, 251, 999, 1_000, 4_269, 12_400, 22_564, 200_000, 1_000_000, 1_250_000].map(fmtTokens)).toEqual(["0", "251", "999", "1k", "4.3k", "12.4k", "22.6k", "200k", "1M", "1.3M"]);
+    expect([0, 251, 999, 1_000, 4_269, 12_400, 22_564, 200_000, 999_600, 1_000_000, 1_250_000, 687_400_000, 7_369_100_000].map(fmtTokens)).toEqual(["0", "251", "999", "1k", "4.27k", "12.4k", "22.6k", "200k", "1M", "1M", "1.25M", "687M", "7.37B"]);
     expect(turnFactsParts({ model: "claude-sonnet-4-5", tokens: { input: 12_400, output: 251 } })).toEqual(["claude-sonnet-4-5", "12.4k in", "251 out"]);
     // The app names the model the way its picker does; the command line has only the id.
     expect(turnFactsParts({ model: "claude-sonnet-4-5", tokens: { input: 12_400, output: 251 } }, "Sonnet 4.5")).toEqual(["Sonnet 4.5", "12.4k in", "251 out"]);

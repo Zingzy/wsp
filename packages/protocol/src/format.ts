@@ -322,10 +322,10 @@ export function fmtDuration(ms: number, style: DurationStyle = "short"): string 
  * with no trailing zero place. */
 export function fmtTokens(n: number): string {
   const count = Number.isFinite(n) && n > 0 ? Math.round(n) : 0;
-  const short = (value: number, unit: string): string => `${Number(value.toFixed(1))}${unit}`;
   if (count < 1_000) return String(count);
-  if (count < 1_000_000) return short(count / 1_000, "k");
-  return short(count / 1_000_000, "M");
+  // Three figures in the unit, the decimals that leaves and no trailing zero: 4.27k, 22.6M, 7.37B, 687M.
+  const [value, unit] = count < 999_500 ? [count / 1_000, "k"] : count < 999_500_000 ? [count / 1_000_000, "M"] : [count / 1_000_000_000, "B"];
+  return `${Number(value.toFixed(value < 10 ? 2 : value < 100 ? 1 : 0))}${unit}`;
 }
 
 /** How long a machine has been up, as the Machine tab reads it: minutes under an hour, hours and minutes under a
@@ -349,7 +349,7 @@ export function fmtElapsed(ms: number): string {
  * read $0.51, $0.22 and $0.0000, and a reader cannot tell at a glance that the third is the smallest of them. A
  * turn under a cent reads $0.00, which is what it costs to the cent. */
 export function fmtCost(usd: number): string {
-  return `$${usd.toFixed(2)}`;
+  return `$${usd.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 /** The word beside a figure nobody is billed for: what the agent's own table lists for the tokens a turn spent, on

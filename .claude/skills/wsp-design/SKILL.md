@@ -64,7 +64,7 @@ themes Paper's until tuned.
 | `--accent` | #141414 over page | #f4f4f5 | row hover, the pressed tab chip, code spans |
 | `--border` | #232323 | #e4e4e7 | sidebar and panel edges, glyph frames |
 | `--input` / `--input-fill` | #1e1e1e / #101010 | #d4d4d8 / #ffffff | button and field edge and fill |
-| `--primary` | #346bf1 | #1b4ed8 | the one primary button, the focus ring |
+| `--primary` | #346bf1 | #1b4ed8 | the one primary button, the focus ring, the line of the Usage page's chart (2026-10-01) |
 | `--warning` | #fe9a00 | #e17100 | a cloud's Full and At limit, an account's Limit reached on the Usage page |
 | `--error-foreground` | #ff6467 | #c10007 | a refusal sentence, Remove inside a dialog, a diff count's deletions |
 | `--success` | #00bc7d | #009966 | the sign-in dot on an agents panel row, a diff count's additions |
