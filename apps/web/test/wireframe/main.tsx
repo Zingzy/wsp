@@ -299,7 +299,21 @@ const box = (id: string, name: string, over: Partial<PlaceView>): PlaceView =>
  * done, one still running and one that lost two rows, and the cloud account whose key this host holds. */
 const COMPUTERS: PlaceView[] = [
   { id: "here", kind: "computer", name: "zingzy-mbp", default: false, present: true, os: "macOS 26.4", shape: { cpu: 10, memMb: 16384 }, diskFreeBytes: 214 * GB, takesForks: false } as PlaceView,
-  box("p_spoo", "spoo", { default: true, provision: provision({}), road: { ssh: "root@spoo", from: "127.0.0.1", back: { boxPort: 4640 } } }),
+  // What the host's row says of what a person may set on spoo: threads at once at the shape's default, a nap window
+  // set off its default, the agents switch, and the update its older daemon takes.
+  box("p_spoo", "spoo", {
+    default: true,
+    provision: provision({}),
+    road: { ssh: "root@spoo", from: "127.0.0.1", back: { boxPort: 4640 } },
+    cap: { threads: 3 },
+    capDefault: { threads: 3 },
+    settings: { napMs: 30 * 60_000 },
+    napMs: 30 * 60_000,
+    napDefault: 20 * 60_000,
+    spawn: { spawn: true, maxMachines: 3, maxDepth: 1 },
+    spawnDefault: { spawn: true, maxMachines: 3, maxDepth: 1 },
+    behind: { word: "daemon 40, host 111", fix: "wsp add spoo --update", act: "update" },
+  }),
   box("p_dev4", "dev4", { provision: provision({ state: "running", finishedAt: undefined, at: { label: "uv", index: 3, of: 7 } }) }),
   box("p_lab", "lab", {
     provision: provision({

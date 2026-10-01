@@ -15,7 +15,7 @@ import { useStore } from "../src/protocol/store.js";
 import { AddComputer } from "../src/settings/AddComputer.js";
 import { useAdds } from "../src/settings/adds.js";
 import { AGENTS_LIST_WORDS } from "../src/components/agents/agentsRows.js";
-import { ADD_COMPUTER_WORDS, WHERE_WORDS, capitalised } from "../src/settings/format.js";
+import { ADD_COMPUTER_WORDS, COMPUTER_PAGE_WORDS, WHERE_WORDS, capitalised } from "../src/settings/format.js";
 import { AGENTS_REPORT } from "./fixtures/agents-report.js";
 import { IMAGE_WORDS } from "../src/settings/image.js";
 import { absentOf } from "../src/settings/places.js";
@@ -334,6 +334,47 @@ describe("the Computers list", () => {
 });
 
 describe("a computer's own page", () => {
+  it("sets threads at once, the nap window and the agents switch through the host, takes a set one back, and offers an older daemon its update", async () => {
+    const asked: Array<[string, unknown, readonly string[]]> = [];
+    const updated: string[] = [];
+    const agents = { spawn: true, maxMachines: 3, maxDepth: 1 };
+    const row: PlaceView = { ...box, cap: { threads: 2 }, capDefault: { threads: 2 }, settings: { napMs: 30 * 60_000 }, napMs: 30 * 60_000, napDefault: 20 * 60_000, spawn: agents, spawnDefault: agents, daemonVersion: 1, behind: { word: "daemon 1", fix: "wsp add hetzner --update", act: "update" } };
+    useStore.setState({ places: [here, row] });
+    const api = computersApi({
+      agentsRead: async () => AGENTS_REPORT,
+      placesSet: async (placeId, ask, reset = []) => {
+        asked.push([placeId, ask, reset]);
+        return { ...row, ...(ask.threads === undefined ? {} : { cap: { threads: ask.threads }, settings: { ...row.settings, threads: ask.threads } }) };
+      },
+      placesUpdate: async placeId => {
+        updated.push(placeId);
+        return {} as never;
+      },
+    }).api;
+    await mountComputers(api, { kind: "computer", id: "p_2" });
+    const page = document.querySelector("[data-settings-page]")!;
+    const behind = page.querySelector("[data-k=computer-behind]")!;
+    expect(behind.querySelector("[data-settings-title]")?.textContent).toBe(COMPUTER_PAGE_WORDS.behindTitle(MAC));
+    expect(document.querySelector("[data-k='place-state']")).toBeNull();
+    await act(async () => fireEvent.click(behind.querySelector("[data-k=update-wsp]")!));
+    expect(updated).toEqual(["p_2"]);
+
+    const threads = page.querySelector("[data-settings-row=threads-at-once]")!;
+    expect(threads.querySelector("[data-k=threads-at-once-value]")?.textContent).toBe("2");
+    expect(threads.querySelector("[data-settings-description]")?.textContent).toBe(COMPUTER_PAGE_WORDS.threadsLine(2, "hetzner", fmtMemGb(4096)));
+    expect(threads.querySelector("[data-k=row-reset]")).toBeNull();
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: COMPUTER_PAGE_WORDS.more })));
+    await settle();
+    expect(asked.at(-1)).toEqual(["p_2", { threads: 3 }, []]);
+    expect(page.querySelector("[data-k=threads-at-once-value]")?.textContent).toBe("3");
+    expect(page.querySelector("[data-settings-row=threads-at-once] [data-k=row-reset]")).not.toBeNull();
+
+    await act(async () => fireEvent.click(page.querySelector("[data-settings-row=nap-after] [data-k=row-reset]")!));
+    expect(asked.at(-1)).toEqual(["p_2", {}, ["nap"]]);
+    await act(async () => fireEvent.click(page.querySelector("[data-k=agents-start-agents]")!));
+    expect(asked.at(-1)).toEqual(["p_2", { spawn: { spawn: false } }, []]);
+  });
+
   const withWorkspaces = (): void => {
     useStore.setState({
       places: [here, laptop],

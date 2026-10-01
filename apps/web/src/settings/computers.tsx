@@ -31,6 +31,7 @@ import { useSidebarProjects, useStore } from "../protocol/store.js";
 import { DialButton, useDialPlace } from "./AbsentRoad.js";
 import { AddComputer } from "./AddComputer.js";
 import { ComputerGlyph, useComputerIcon } from "./ComputerGlyph.js";
+import { BehindRow, LimitsCard, SpawnCard } from "./computerSettings.js";
 import { ADD_COMPUTER_WORDS, AGENTS_PAGE_WORDS, PLACE_STATE_WORDS, VALUE, WHERE_WORDS, capitalised } from "./format.js";
 import { Chevron, GlyphFrame, Grid, GridHead, GridName, GridRow, LIST_COLUMNS, Num, PAGE_COLUMNS, StateCell, type HeadCell } from "./grid.js";
 import { copyOn } from "./image.js";
@@ -298,6 +299,8 @@ function PlaceStateLine({ place, ctx }: { place: PlaceView; ctx: SettingsContext
   const away = !here && absent !== null;
   const kept = away ? absentRoad({ name: place.name, road: place.road, awayMs: awayMsOf(place, ctx.now), dialled: place.dialled }).refused : null;
   const sentence = away ? (line ?? kept ?? heldWhy ?? cell.why) : cell.why;
+  // An older daemon is said by the row under the computer's head, with its update; the line says only what outranks it.
+  if (place.behind !== undefined && !isProviderPlace(place) && (cell.kind === "update" || (cell.kind === "word" && cell.word === PLACE_STATE_WORDS.behind))) return null;
   return (
     <div className="flex flex-col gap-2">
       <div data-k="place-state" className="flex min-w-0 items-center gap-2.5 text-[13px] leading-5">
@@ -479,9 +482,12 @@ export function ComputerPage({ place, ctx }: { place: PlaceView; ctx: SettingsCo
       <section data-settings-card="computer" className="flex flex-col gap-3">
         <div className={CARD_SURFACE}>
           <HeadRow glyph={<ComputerGlyph place={place} className="size-4 text-foreground/80" />} title={name} {...(shapeLine(place) === "" ? {} : { line: <span className="font-mono">{shapeLine(place)}</span> })} slot={<RunningHere place={place} ctx={ctx} />} attrs={{ "data-k": "computer-head" }} />
+          {cloud ? null : <BehindRow place={place} ctx={ctx} />}
         </div>
         <PlaceStateLine place={place} ctx={ctx} />
       </section>
+      {cloud ? null : <LimitsCard place={place} />}
+      {cloud ? null : <SpawnCard place={place} />}
       {cloud ? image === null ? null : <ReportLists report={imageAgentsReport(image, place.id)} ctx={{ where: "provider", on: name, editImage: () => openImageRecipe(place.id) }} /> : <AgentsLink place={place} ctx={ctx} />}
       {standing === undefined || !held ? null : <ImageCard place={place} name={standing.name} state={standing.state} view={standing.view} ctx={ctx} row />}
       <ThreadsHere place={place} ctx={ctx} />

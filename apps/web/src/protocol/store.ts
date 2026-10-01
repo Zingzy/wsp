@@ -3,7 +3,7 @@
 // contract components code against.
 import { useEffect, useMemo } from "react";
 import { create } from "zustand";
-import { applyPreferencesPatch, kindForComputer, threadsFollowed, workspaceAccess, type AbsentComputer, type BringBackResult, foldThreads, goldenHead, threadKeyOf, workspaceStateOf, type AppAddress, type Capabilities, copyBuildOf, type GoldenStageEvent, type HarnessCatalog, type InitJob, type InitSetup, type PlaceView, type PortForward, type ProjectView, type Preferences, type PreferencesPatch, type ReleaseView, type SessionView, type ThreadMarks, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceProject, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView, type PlaceDial, type WorkspaceLanding, type ReviewDraft } from "@wsp/protocol";
+import { applyPreferencesPatch, kindForComputer, threadsFollowed, workspaceAccess, type AbsentComputer, type BringBackResult, foldThreads, goldenHead, threadKeyOf, workspaceStateOf, type AppAddress, type Capabilities, copyBuildOf, type GoldenStageEvent, type HarnessCatalog, type InitJob, type InitSetup, type PlaceView, type PlaceSettingsAsk, type PlaceSettingWord, type PortForward, type ProjectView, type Preferences, type PreferencesPatch, type ReleaseView, type SessionView, type ThreadMarks, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceProject, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView, type PlaceDial, type WorkspaceLanding, type ReviewDraft } from "@wsp/protocol";
 import { noSuchThreadLine, renameNotTakenLine } from "../actions/format.js";
 import { readAddress, readProjectHome, writeAddress, writeProjectHome } from "./address.js";
 import { deriveSidebarProjects, sidebarWorkspaceOrder } from "../adapt/workspaces.js";
@@ -244,6 +244,9 @@ interface State {
    * onto that row, so the word in the row's state slot is the job's own. A refusal is the host's own sentence in
    * a notice. */
   updatePlace(placeId: string): Promise<void>;
+  /** Sets a computer's own settings, or takes the ones named under `reset` back to their defaults, and puts the row
+   * the host answers in place of the one held. A refusal is the host's own sentence in a notice. */
+  setPlace(placeId: string, ask: PlaceSettingsAsk, reset?: ReadonlyArray<PlaceSettingWord>): Promise<void>;
   applyEvent(e: ProtocolEvent): void;
   /** Rows come from the runtime (only it knows harness and final status); events say when to ask. */
   reloadSessions(workspaceId: string): Promise<void>;
@@ -972,6 +975,16 @@ export const useStore = create<State>((set, get) => {
         // put on that computer and then what stands, with no second reading of the same job here.
         if (answer.provision !== undefined) set(s => ({ places: s.places.map(p => (p.id === placeId ? { ...p, provision: answer.provision } : p)) }));
         if (answer.said !== undefined) addNotice({ kind: "note", text: answer.said });
+      } catch (e) {
+        noticeFailure(e);
+      }
+    },
+    async setPlace(placeId, ask, reset) {
+      const api = get().api;
+      if (api?.placesSet === undefined) return;
+      try {
+        const place = await api.placesSet(placeId, ask, reset);
+        set(s => ({ places: s.places.map(p => (p.id === placeId ? place : p)) }));
       } catch (e) {
         noticeFailure(e);
       }

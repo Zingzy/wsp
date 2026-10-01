@@ -76,6 +76,8 @@ import {
   PlaceAddJob,
   PlaceUpdateReply,
   PlaceView,
+  type PlaceSettingsAsk,
+  type PlaceSettingWord,
   ProjectView,
   type InitScreenId,
   type Attachment,
@@ -472,6 +474,9 @@ export interface Api {
    * again. Answers what the daemon half came to where it ran, the recipe job as it stands when the reply goes out
    * and, where no job started, why. A client without it holds Update rather than offering one that asks nobody. */
   placesUpdate?(placeId: string): Promise<PlaceUpdateReply>;
+  /** Sets what a person may set on one place, a word under `reset` taking that one back to its default, and answers
+   * the row as it now reads. A client without it draws the settings as words with no control. */
+  placesSet?(placeId: string, ask: PlaceSettingsAsk, reset?: ReadonlyArray<PlaceSettingWord>): Promise<PlaceView>;
   /** What stands on one computer or workspace for the agents: each agent, every skill, every MCP server. A read never
    * wakes a napping machine. A client without it draws no report. */
   agentsRead?(target: AgentsTarget): Promise<AgentsReport>;
@@ -936,6 +941,7 @@ export function makeApi(c: ProtocolClient): Api {
     dialPlace: async placeId => PlaceDial.parse(await c.request<Record<string, unknown>>("places.dial", { placeId })),
     // Parsed, not trusted: the word the row's state slot reads is built from the job this answers with.
     placesUpdate: async placeId => PlaceUpdateReply.parse(await c.request<Record<string, unknown>>("places.update", { placeId })),
+    placesSet: async (placeId, ask, reset) => PlaceView.parse((await c.request<{ place: unknown }>("places.set", { placeId, ...ask, ...(reset === undefined || reset.length === 0 ? {} : { reset: [...reset] }) })).place),
     agentsRead: async target => AgentsReport.parse((await c.request<{ report?: unknown }>("agents.read", { target })).report),
     skillsSearch: async q => {
       const skills = (await c.request<{ skills?: unknown }>("skills.search", { q })).skills;

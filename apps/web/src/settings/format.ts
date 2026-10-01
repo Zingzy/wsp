@@ -432,3 +432,26 @@ export const PROVISION_OUTCOME_WORDS: Record<PlaceProvisionRow["outcome"], strin
   failed: "failed",
   skipped: "set aside",
 };
+
+/** A computer's own page: whether it runs an older wsp, the limits a person sets on it, and whether its threads may
+ * open threads. `here` is the name of the computer the host runs on, never "this Mac". */
+export const COMPUTER_PAGE_WORDS = {
+  behindTitle: (here: string): string => `Runs an older wsp than ${here}`,
+  behindUpdate: (name: string, here: string): string => `Threads still run there. Updating installs ${here}'s version on ${name} and restarts it; running threads carry on.`,
+  behindHereTitle: "Runs an older wsp than this app",
+  behindInstall: (fix: string): string => `Threads still run. Run ${fix} in a terminal to bring it level.`,
+  update: (name: string): string => `Update wsp on ${name}`,
+  updating: "Updating",
+  limits: "Limits",
+  threadsAtOnce: "Threads at once",
+  threadsLine: (n: number, name: string, mem: string): string => `New threads wait past this. The default is one thread for every 2.5 GB of this computer's memory, so ${n} on ${name}'s ${mem}.`,
+  threadsLineBare: "New threads wait past this.",
+  fewer: "One fewer",
+  more: "One more",
+  napTitle: "Nap a quiet workspace after",
+  napLine: "A workspace with no running turn stops and wakes on the next message.",
+  napNever: "Never",
+  threadsHere: "Threads here",
+  spawnTitle: "Agents may start agents",
+  spawnLine: (machines: number, depth: number): string => `A thread here may open threads of its own: up to ${machines} ${machines === 1 ? "machine" : "machines"}, ${depth === 1 ? "one level deep" : `${depth} levels deep`}.`,
+} as const;

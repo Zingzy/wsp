@@ -53,6 +53,8 @@ export interface SettingsRowData {
   readonly open?: () => void;
   /** Present only while the row is off its default: an arrow beside the title puts that one row back. */
   readonly reset?: () => void;
+  /** A title that warns: a computer that runs an older wsp. */
+  readonly tone?: "warning";
   /** Extra attributes the tests and the screenshot list reach the row by. */
   readonly attrs?: Record<string, string>;
 }
@@ -134,7 +136,7 @@ export function Card({ id, head, lede, under, body, children }: { id: string; he
 }
 
 /** One row: the title over its sentence, and beside them the slot, which stands under them below 640 px. */
-export function Row({ id, title, lead, mark, description, chips, mono = false, word, wordClass = "value", wordK, control, open, reset, attrs }: Omit<SettingsRowData, "kind">) {
+export function Row({ id, title, lead, mark, description, chips, mono = false, word, wordClass = "value", wordK, control, open, reset, tone, attrs }: Omit<SettingsRowData, "kind">) {
   const slot =
     word === undefined && control === undefined && open === undefined ? null : (
       <div data-settings-slot className="flex min-w-0 items-center gap-3 sm:justify-end">
@@ -152,7 +154,7 @@ export function Row({ id, title, lead, mark, description, chips, mono = false, w
       {lead === undefined ? null : <span className="flex shrink-0 items-center">{lead}</span>}
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="flex min-h-5 min-w-0 flex-wrap items-center gap-x-2">
-          <span data-settings-title className={cn(TITLE_CLASS, "min-w-0 break-words")}>
+          <span data-settings-title className={cn(TITLE_CLASS, "min-w-0 break-words", tone === "warning" && "text-warning-foreground")}>
             {title}
           </span>
           {mark === undefined ? null : (
