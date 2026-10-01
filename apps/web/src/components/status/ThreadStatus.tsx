@@ -42,7 +42,7 @@ export function ThreadStatus({
       className={cn("inline-flex shrink-0 items-center gap-1 whitespace-nowrap tabular-nums", className, kind.tone !== undefined && "font-medium", kind.ink)}
     >
       {Glyph !== undefined && <Glyph aria-hidden className="size-3 shrink-0" />}
-      {kind.word !== undefined && <span className={kind.timed ? "sr-only" : undefined}>{kind.word}</span>}
+      {kind.word !== undefined && <span className={kind.timed || kind.glyphOnly ? "sr-only" : undefined}>{kind.word}</span>}
       {kind.timed && <WorkingSince since={thread.startedAt} />}
       {kind.aged && age !== undefined && <span>{age}</span>}
       {crab && kind.crab && <Crab />}

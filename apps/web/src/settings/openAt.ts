@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { useStore } from "../protocol/store.js";
+import type { SettingsGroupId } from "./groupIds.js";
 import { useSettingsStore } from "./settingsStore.js";
+
+/** One group's page in Settings: the Usage button in the sidebar's corner. */
+export function openSettingsGroup(group: SettingsGroupId): void {
+  useSettingsStore.getState().go({ kind: "group", group });
+  useStore.getState().openSettings();
+}
 
 /** One project's page in Settings, where its glyph and hue are picked: the switcher's gear and the row's menu both. */
 export function openProjectSettings(projectId: string): void {

@@ -11,4 +11,5 @@ export const DONE: StatusKind = {
   ink: "text-status-done",
   glyph: CircleCheckIcon,
   word: threadStateWord("done"),
+  glyphOnly: true,
 };
