@@ -185,6 +185,13 @@ export function buildCommand(options: BuildCommandOptions): string {
   return inFolder(cwd, claude);
 }
 
+/** Prints the session's saved running cost ahead of a resumed turn's CLI: Claude Code appends its totals to the
+ * session's file as cost-state lines, and a resume carries the last one into every result's total_cost_usd. */
+export function savedSpendCommand(o: { configDir: string; sessionId: string }): string {
+  const file = `${shellQuote(`${o.configDir}/projects`)}/*/${shellQuote(`${o.sessionId}.jsonl`)}`;
+  return `wsp_saved=$(ls -1td ${file} 2>/dev/null | head -n 1); [ -z "$wsp_saved" ] || grep -F ${shellQuote('"type":"cost-state"')} "$wsp_saved" | tail -n 1; `;
+}
+
 /**
  * One line of the stdin channel: a user message in the CLI's stream-json input shape. Images ride the same message as
  * base64 content blocks ahead of the text, the shape the CLI took on 2.1.263 (measured 2026-09-08: a 64px block sent
