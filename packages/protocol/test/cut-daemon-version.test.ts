@@ -17,7 +17,7 @@ const REPO = fileURLToPath(new URL("../../../", import.meta.url));
 
 const made: string[] = [];
 afterEach(() => {
-  for (const dir of made.splice(0)) rmSync(dir, { recursive: true, force: true });
+  for (const dir of made.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 /** Commits whatever the tree holds, as a merge, or the squash after a cut, leaves it: the cut reads a clean tree. */
@@ -35,6 +35,8 @@ function repoAt(from = REPO): string {
   cpSync(join(from, "daemon"), join(dir, "daemon"), { recursive: true, filter: path => !/[\\/](target|\.git)([\\/]|$)/.test(path) });
   cpSync(join(from, CUT_PATHS.record), join(dir, CUT_PATHS.record));
   execFileSync("git", ["init", "-q"], { cwd: dir });
+  // Git's housekeeping after a commit can still be writing objects as the case ends, which fails the cleanup on CI.
+  execFileSync("git", ["config", "gc.auto", "0"], { cwd: dir });
   commitAll(dir);
   // A branch's checkout carries its own daemon change and its note, and no version: landed first, it is the main
   // the cases play on. On main, and on a branch with no daemon change, the cut does nothing.
