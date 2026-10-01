@@ -882,6 +882,53 @@ describe("which road wsp doctor takes", () => {
 });
 
 
+describe("the cloud account the fork road forks on", () => {
+  const cloud = (id: string): PlaceView => ({ id, kind: "provider", name: id, default: false, takesForks: true });
+
+  /** A host holding two cloud accounts with an image sealed: the fork stops at its create, which is where the
+   * account it was asked for is read. */
+  function twoClouds() {
+    const on: (string | undefined)[] = [];
+    const rt = {
+      places: { list: async () => [cloud("box"), cloud("solari")] },
+      projects: {
+        add: async (o: { on?: string }) => {
+          on.push(o.on);
+          return { id: "pr_doctor", name: "wsp" };
+        },
+      },
+      workspaces: {
+        create: async () => {
+          throw new Error("the fork stops here");
+        },
+      },
+      golden: {
+        promote: async () => [],
+        storage: async () => undefined,
+        orphans: async () => undefined,
+        get: async () => ({ name: "default", head: 1, versions: [{ version: 1, snapshotId: "snap_1" }] }),
+      },
+    } as unknown as Runtime;
+    return { rt, on };
+  }
+
+  it("forks on the account the person named, not the first one listed", async () => {
+    const host = twoClouds();
+    const io = captured();
+    expect(await forkDoctor(host.rt, io, { computer: cloud("solari") })).toBe(1);
+    expect(host.on).toEqual(["solari"]);
+    expect(io.errors.join("\n")).toContain("the fork stops here");
+  });
+
+  it("with two accounts and none named forks nothing and names both", async () => {
+    const host = twoClouds();
+    const io = captured();
+    expect(await forkDoctor(host.rt, io, {})).toBe(1);
+    expect(host.on).toEqual([]);
+    expect(io.errors.join("\n")).toContain("wsp doctor box or wsp doctor solari");
+  });
+});
+
 describe("what a road of the doctor's leaves open", () => {
   it("a wiring built the doctor's way lets go of a turn it is reading when it closes, so nothing it opened holds this process", async () => {
     const home = tmp("wsp-doctor-handles-");
