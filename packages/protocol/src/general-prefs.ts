@@ -28,9 +28,14 @@ export function notifyBy(choice: NotifyChoice): { show: boolean; sound: boolean 
 }
 
 export const SETTLE_CHOICES = ["15m", "1h", "2h", "1d", "never"] as const;
-/** How long a read thread sits quiet before the sidebar folds it into Settled. */
+/** How long a thread a person has read sits quiet before the sidebar folds it into Settled. The fold reads the
+ * thread's own last activity, so a thread that takes a new turn leaves Settled by itself; one nobody has read since
+ * its turn ended never folds by time. */
 export const SettleAfter = z.enum(SETTLE_CHOICES);
 export type SettleAfter = z.infer<typeof SettleAfter>;
+
+/** Each settle choice in ms; never is null, and such a thread settles only by hand. */
+export const SETTLE_MS: Readonly<Record<SettleAfter, number | null>> = { "15m": 15 * 60_000, "1h": 60 * 60_000, "2h": 2 * 60 * 60_000, "1d": 24 * 60 * 60_000, never: null };
 
 export const ON_QUIT_CHOICES = ["ask", "keep", "stop"] as const;
 /** What the desktop app's quit does while it runs on this computer's host: ask, leave wsp running, or stop it too. */

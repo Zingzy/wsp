@@ -87,10 +87,6 @@ export const TURN_IDLE_MS = 10 * 60_000;
  * percent of one core clears it, which a vitest batch or a packager does many times over; a harness process waking
  * on its own timers stays under it, so a turn nothing is working on is still cut at TURN_IDLE_MS. */
 export const TURN_WORK_TICKS_PER_S = 5;
-/** How long a thread a person has read sits quiet before the sidebar folds it into Settled. The fold reads the
- * thread's own last activity, so a thread that takes a new turn leaves Settled by itself; one nobody has read since
- * its turn ended never folds by time. */
-export const THREAD_SETTLE_MS = 2 * 60 * 60_000;
 /** The longest one turn may run however much it prints, a safety cap only; a per-workspace setting is a follow-up. */
 export const TURN_WALL_MS = 6 * 60 * 60_000;
 /** How long a harness gets to exit on its own after the result its turn ended on, before the runtime ends it and its
