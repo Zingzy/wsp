@@ -201,8 +201,9 @@ describe("chat tab rendering", () => {
     emit({ type: "session.done", ...scope, result: { status: "completed", durationMs: 900 } });
     emit({ type: "session.end", ...scope, exitCode: 0, sawResult: true });
     await waitFor(() => expect(document.querySelector("[data-composer-tasks]")).toBeNull());
-    emit({ type: "session.start", ...scope, prompt: "plan it" });
-    emit({ type: "session.plan", ...scope, text: "# Add a quiet flag\n\n1. Parse it" });
+    const next = { ...scope, turnId: "turn_0002" };
+    emit({ type: "session.start", ...next, prompt: "plan it" });
+    emit({ type: "session.plan", ...next, text: "# Add a quiet flag\n\n1. Parse it" });
     expect(await screen.findByText("Add a quiet flag")).toBeDefined();
   });
 
