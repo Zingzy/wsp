@@ -120,6 +120,9 @@
                 ],
                 "additionalProperties": false
               },
+              "address": {
+                "type": "string"
+              },
               "credits": {
                 "type": "object",
                 "properties": {
@@ -480,6 +483,9 @@
                   "threads"
                 ],
                 "additionalProperties": false
+              },
+              "address": {
+                "type": "string"
               },
               "credits": {
                 "type": "object",

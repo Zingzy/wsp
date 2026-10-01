@@ -340,6 +340,16 @@ describe("the account rows", () => {
     expect(rows.find(r => r.key === "codex:acct_7f3a")).toMatchObject({ plan: "plus", windows: codex.windows, status: "ok", readAt: NOON });
   });
 
+  it("carries the address a named account signed in as, which a person may name it by", () => {
+    const codex = { key: "codex:acct_7f3a", agent: "codex", label: "dev@example.com", road: "named" as const, plan: "plus", windows: [], readAt: NOON, computers: ["here"] };
+    const own = { key: "codex@pl_boat", agent: "codex", label: "Codex signed in on Boat", road: "own" as const, windows: [], readAt: NOON, computers: ["pl_boat"] };
+    const rows = accountRows({ limits: [codex, own], places: [], nameOf, agentName, planBrand, printsLimits, vaulted: () => undefined });
+    expect(rows.map(r => [r.key, r.address])).toEqual([
+      ["codex@pl_boat", undefined],
+      ["codex:acct_7f3a", "dev@example.com"],
+    ]);
+  });
+
   it("reads a vault key or a key a turn named as a sign-in with no plan window", () => {
     const keyed = { key: "claude@pl_spoo", agent: "claude", label: "spoo", windows: [], keyed: true, readAt: NOON, computers: ["pl_spoo"] };
     const rows = accountRows({ limits: [keyed], places, nameOf, agentName, printsLimits, vaulted: agent => (agent === "claude" ? "key" : undefined) });

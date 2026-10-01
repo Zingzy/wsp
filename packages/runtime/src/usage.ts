@@ -519,6 +519,7 @@ export function accountRows(o: {
       ...(read ? { windows: l.windows, readAt: l.readAt } : {}),
       ...(read && l.status !== undefined ? { status: l.status } : {}),
       ...(read ? {} : { note: noteFor(l.agent, l.keyed) }),
+      ...(l.road === "named" ? { address: l.label } : {}),
       ...(l.credits !== undefined ? { credits: rowCredits(l.credits) } : {}),
     });
   }

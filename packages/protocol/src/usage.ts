@@ -104,6 +104,8 @@ export const AccountRow = z.object({
   /** What the account's running threads are drawing on it now: tokens a minute over the last fifteen minutes, and how
    * many threads. Absent where nothing ran on it in that time. */
   burn: z.object({ tokensPerMinute: z.number(), threads: z.number().int() }).optional(),
+  /** The address a named account signed in as, which a person may name it by. */
+  address: z.string().optional(),
   /** The resets the plan has banked, with the soonest one that can still be spent lapses. */
   credits: BankedResets.extend({ nextExpiresAt: z.number().optional(), readAt: z.number(), detailAt: z.number().optional() }).optional(),
 });
