@@ -2259,6 +2259,27 @@ describe("a turn the host comes back to", () => {
     return { workspaceId: ws.id, run };
   };
 
+  it("a run re-read after a restart files each call by its age against the run's newest stamp, so a call made long before stays out", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h = machineRuns();
+    const { workspaceId, run } = await hostWentDown(h, store, backend);
+    // The machine's clock means nothing to this host: only the twenty minutes between the run's two calls do.
+    const stamp = 1_000_000;
+    const rt = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    expect((await rt.sessions.list(workspaceId)).map(s => s.status)).toEqual(["running"]);
+    h.emit(run, { type: "limit", sessionId: "sess-1", limit: { windows: [{ kind: "session", usedPercent: 10 }] } });
+    h.emit(run, { type: "turn.usage", sessionId: "sess-1", tokens: 30_000, at: stamp });
+    h.emit(run, { type: "turn.usage", sessionId: "sess-1", tokens: 1_500, at: stamp + 20 * 60_000 });
+    await rt.close();
+
+    const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    expect((await rt2.sessions.list(workspaceId)).map(s => s.status)).toEqual(["running"]);
+    await until(async () => (await rt2.usage.accounts()).accounts.some(a => a.burn !== undefined));
+    expect((await rt2.usage.accounts()).accounts.flatMap(a => (a.burn !== undefined ? [a.burn] : []))).toEqual([{ tokensPerMinute: 100, threads: 1 }]);
+    await rt2.close();
+  });
+
   it("the run outlives the host: the row keeps its run, stays running across the restart and completes with its reply", async () => {
     const backend = stubBackend();
     const store = memoryStore();
