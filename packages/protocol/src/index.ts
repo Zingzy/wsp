@@ -15,6 +15,8 @@ import { Attachment, AttachmentRecord } from "./attachments.js";
 import { fmtBytes, fmtBytesOfTotal, isoSeconds, KNOWN_HOSTS, nameList, openingTitle, PLACE_INSTALL, PLACE_LEAVE_LINE, plural, thisComputer, THIS_COMPUTER, threadWord, titleLine } from "./format.js";
 import { InitJob, InitJobEvent, InitAgent, InitKeys, InitNeedsYou, InitNeedsYouEvent, InitRoad, InitScreenId, LoginChoice, LoginState, SIGN_IN_CODE_MAX } from "./init-job.js";
 import { UsageRange, UsageSplit } from "./usage.js";
+import { effortsFor, everyModel, markedDefault, modelOf } from "./harness-picks.js";
+import { AccessChoice, AgentDefaults, AgentDefaultsPatch, ProjectOverrides, ProjectOverridesPatch, AgentSetupSet, patchedFields } from "./thread-defaults.js";
 import type { FsListReply as WireFsListReply } from "./generated/FsListReply.js";
 import type { FsFilesReply as WireFsFilesReply } from "./generated/FsFilesReply.js";
 import type { GitPrListReply as WireGitPrListReply } from "./generated/GitPrListReply.js";
@@ -1239,6 +1241,9 @@ export const HarnessCatalog = z.object({
   /** This CLI's mode that changes nothing, as it spells it, which a reviewer runs at: absent on a harness wsp can give
    * no read-only access, which reviews nothing. */
   readOnlyMode: z.string().optional(),
+  /** Which of this CLI's own modes each of wsp's access words stands for. A word the row leaves out is one this agent
+   * cannot take, refused where it is set and never stood in for by a looser mode; absent maps none. */
+  access: z.record(AccessChoice, z.string()).optional(),
 });
 export type HarnessCatalog = z.infer<typeof HarnessCatalog>;
 
@@ -1320,43 +1325,6 @@ export function screenCommandTyped(catalog: ScreenCommandsHolder | null | undefi
   return screenCommandsOf(catalog).find(c => c.name === name) ?? null;
 }
 
-/** The option a list marks as its default, if one is: what an unpicked picker shows and an unnamed start runs. */
-export function markedDefault<T extends HarnessOption>(options: ReadonlyArray<T>): T | undefined {
-  return options.find(o => o.isDefault === true);
-}
-
-function narrowed(all: ReadonlyArray<HarnessOption>, subset: ReadonlyArray<string> | undefined): HarnessOption[] {
-  return subset === undefined ? [...all] : all.filter(o => subset.includes(o.value));
-}
-
-/** The efforts a model takes: its own subset of the catalog's, in the catalog's order, else all of them, with the
- * one this pick runs at when a turn names none marked. The picked model's own default wins where the binary named
- * one, and the catalog's mark stands only for a model that names none, so the mark is the default of this pick and
- * not of the harness. A model that names a default its own list does not carry marks nothing, as a catalog whose
- * binary does. This is the one rule for that: the composer's effort picker and startPicks both read it. */
-export function effortsFor(catalog: HarnessCatalog, model: HarnessModel | null): HarnessOption[] {
-  const options = narrowed(catalog.efforts, model?.efforts);
-  const own = model?.defaultEffort;
-  if (own === undefined) return options;
-  return options.map(({ isDefault: _harness, ...rest }) => (rest.value === own ? { ...rest, isDefault: true } : rest));
-}
-
-/** Every model a start may name: the catalog's current ones, then its legacy ones. */
-export function everyModel(catalog: HarnessCatalog): HarnessModel[] {
-  return [...catalog.models, ...(catalog.legacyModels ?? [])];
-}
-
-/** The model a pick names, as the catalog knows it; a slug the catalog does not list still counts, named by itself. */
-export function modelOf(catalog: HarnessCatalog, value: string | undefined): HarnessModel | null {
-  if (value === undefined) return null;
-  return everyModel(catalog).find(m => m.value === value) ?? { value, label: value };
-}
-
-/** None without a model: the window rides the model as a suffix, so there is nothing to offer it on. */
-export function contextWindowsFor(catalog: HarnessCatalog, model: HarnessModel | null): HarnessOption[] {
-  return model === null ? [] : narrowed(catalog.contextWindows, model.contextWindows);
-}
-
 /** The picks a start names, as sessions.start carries them. */
 export interface StartPicks {
   model?: string;
@@ -1367,18 +1335,6 @@ export interface StartPicks {
 
 /** Why a start asked for fast on a model that has no faster output. */
 export const noFastLine = (model: string): string => `${model} has no fast mode; pick a model that offers it, or send without it`;
-
-/**
- * A remembered pick read against the list in front of us: the value where that list carries it, nothing where it
- * does not. Every reader of a pick kept for later needs this and there is one rule for all of them, because a pick
- * is remembered per workspace while the lists belong to a harness and no two harnesses share one (claude's access
- * modes and codex's are disjoint sets, as are their models and efforts). A pick the resolved harness does not take
- * is not a request to refuse: it is a pick that does not apply here, so it is dropped and that list's own default
- * runs. startPicks refuses a value a caller NAMED, which is a different thing and stays an error.
- */
-export function listedPick(options: ReadonlyArray<HarnessOption>, value: string | undefined): string | undefined {
-  return value !== undefined && options.some(o => o.value === value) ? value : undefined;
-}
 
 const optionWords = (options: ReadonlyArray<HarnessOption>): string => options.map(o => `${o.label} (${o.value})`).join(", ");
 
@@ -1406,7 +1362,7 @@ function checkedAgainst(catalog: HarnessCatalog, picks: StartPicks, model: strin
  * the three picks and fast come out, whatever else rides in; fast only where it was asked for. `runsOn` is the model a
  * resumed thread already runs on, which a fast asked for with no model named is checked against. */
 export function startPicks(catalog: HarnessCatalog | undefined, picks: StartPicks, opensThread: boolean, runsOn?: string): StartPicks {
-  const model = picks.model ?? (opensThread && catalog !== undefined ? markedDefault(catalog.models)?.value : undefined);
+  const model = picks.model ?? (opensThread && catalog !== undefined ? markedDefault(everyModel(catalog))?.value : undefined);
   if (catalog !== undefined) checkedAgainst(catalog, picks, model, runsOn);
   const effort = picks.effort ?? (opensThread && catalog !== undefined ? markedDefault(effortsFor(catalog, modelOf(catalog, model)))?.value : undefined);
   // The access is filled in like the other two, so what the picker shows is what the CLI is told: an unnamed access
@@ -2220,6 +2176,12 @@ export const Preferences = z.object({
   textSize: sizeOf(TEXT_SIZES).optional(),
   /** The size code reads at in replies, tool output, diffs and files; absent, each its own. */
   codeSize: sizeOf(CODE_SIZES).optional(),
+  /** The agent a new thread runs when neither its start nor its project names one; absent is the catalog's first. */
+  defaultAgent: z.string().optional(),
+  /** The person's model, effort, access and model picker for each agent, by catalog id; the same on every computer. */
+  agentDefaults: z.record(z.string(), AgentDefaults).default({}),
+  /** What each project overrides for the threads opened on it, by project id. */
+  projectDefaults: z.record(z.string(), ProjectOverrides).default({}),
   /** Whether the surfaces still being worked on are offered at all. The host stamps it from its own environment at
    * every read, so no client sets it and nothing a state file holds can turn it on. */
   labs: z.boolean(),
@@ -2249,11 +2211,14 @@ export const PreferencesPatch = Preferences.omit({ labs: true })
     keybindings: z.record(z.string(), ChordText.nullable()).optional(),
     textSize: sizeOf(TEXT_SIZES).nullable().optional(),
     codeSize: sizeOf(CODE_SIZES).nullable().optional(),
+    defaultAgent: z.string().nullable().optional(),
+    agentDefaults: z.record(z.string(), AgentDefaultsPatch.nullable()).optional(),
+    projectDefaults: z.record(z.string(), ProjectOverridesPatch.nullable()).optional(),
   })
   .strict();
 export type PreferencesPatch = z.infer<typeof PreferencesPatch>;
 
-export const DEFAULT_PREFERENCES: Preferences = { theme: "system", ...THEME_PICK_DEFAULTS, sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, usageLogs: true, notifySound: true, keepAwake: true, transparency: true, projectOrder: [], keybindings: {}, appFont: "", codeFont: "", labs: false };
+export const DEFAULT_PREFERENCES: Preferences = { theme: "system", ...THEME_PICK_DEFAULTS, sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, usageLogs: true, notifySound: true, keepAwake: true, transparency: true, projectOrder: [], keybindings: {}, appFont: "", codeFont: "", agentDefaults: {}, projectDefaults: {}, labs: false };
 
 /** The record as stored, over the defaults; a record that does not parse (an older or a hand-edited state file) reads as the defaults. */
 export function preferencesFrom(stored: unknown): Preferences {
@@ -2277,6 +2242,16 @@ export function applyPreferencesPatch(current: Preferences, patch: PreferencesPa
   const editor = patch.editor ?? current.editor;
   const textSize = patch.textSize === undefined ? current.textSize : patch.textSize;
   const codeSize = patch.codeSize === undefined ? current.codeSize : patch.codeSize;
+  const defaultAgent = patch.defaultAgent === undefined ? current.defaultAgent : patch.defaultAgent;
+  const fieldsById = <T extends object>(kept: Record<string, T>, moved: Record<string, { [K in keyof T]?: T[K] | null } | null> | undefined): Record<string, T> => {
+    const next = { ...kept };
+    for (const [id, value] of Object.entries(moved ?? {})) {
+      const merged = value === null ? undefined : patchedFields(next[id], value);
+      if (merged === undefined) delete next[id];
+      else next[id] = merged;
+    }
+    return next;
+  };
   return {
     theme: patch.theme ?? current.theme,
     lightTheme: patch.lightTheme ?? current.lightTheme,
@@ -2297,12 +2272,15 @@ export function applyPreferencesPatch(current: Preferences, patch: PreferencesPa
     keybindings: perWorkspace(current.keybindings, patch.keybindings),
     appFont: patch.appFont ?? current.appFont,
     codeFont: patch.codeFont ?? current.codeFont,
+    agentDefaults: fieldsById(current.agentDefaults, patch.agentDefaults),
+    projectDefaults: fieldsById(current.projectDefaults, patch.projectDefaults),
     labs: current.labs,
     ...(sidebarWidth === null || sidebarWidth === undefined ? {} : { sidebarWidth }),
     ...(target === null || target === undefined ? {} : { target }),
     ...(editor === undefined ? {} : { editor }),
     ...(textSize === null || textSize === undefined ? {} : { textSize }),
     ...(codeSize === null || codeSize === undefined ? {} : { codeSize }),
+    ...(defaultAgent === null || defaultAgent === undefined ? {} : { defaultAgent }),
   };
 }
 
@@ -6059,7 +6037,7 @@ const RuntimeOp = z.discriminatedUnion("op", [
     agent: z.string().optional(),
     model: z.string().optional(),
     effort: z.string().optional(),
-    access: z.string().optional(),
+    access: AccessChoice.optional(),
   }),
   /** A reviewer thread on a pull request, off its link or off a workspace's own pull request: a fresh copy at its
    * head, the agent at its harness's read-only word (Codex where none is named), and the diff in its task. Answered
@@ -6156,6 +6134,9 @@ const RuntimeOp = z.discriminatedUnion("op", [
     model: z.string().optional(),
     effort: z.string().optional(),
     permissionMode: z.string().optional(),
+    /** The access in wsp's own word, which the harness's catalog row turns into its mode; refused where the row maps
+     * the word to none. A permissionMode beside it wins. */
+    access: AccessChoice.optional(),
     contextWindow: z.string().optional(),
     /** The model's faster output for this turn; refused naming the model where its catalog row offers none. */
     fast: z.boolean().optional(),
@@ -6376,6 +6357,10 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** Replies with { file }: the wsp server written into that agent's own config on this computer, the entry an
    * install writes, with the wsp skill beside it. Refused on any other computer. */
   z.object({ id: reqId, op: z.literal("agents.addTools"), target: AgentsTarget, agent: z.string() }),
+  /** Sets how one agent runs on one computer, by the place id places.list gives it: on or off, the program, its config
+   * folder, launch arguments and environment. Replies with { agent: AgentRow }, the row as a read of that computer
+   * would give it, names only. The person's own road only; a variable's value only on the host's own socket. */
+  z.object({ id: reqId, op: z.literal("agents.setup"), placeId: z.string(), agent: z.string() }).merge(AgentSetupSet),
   /** Replies with { skills: SkillHit[] }: skills.sh searched by this host, the one caller of it; an empty query is
    * refused, since skills.sh refuses it. */
   z.object({ id: reqId, op: z.literal("skills.search"), q: z.string(), limit: z.number().int().min(1).max(50).optional() }),
@@ -6930,6 +6915,8 @@ export { CLOUD_CAP_DEFAULT, phaseHoldsSlot, placeAtLimitLine, placeCapOf, placeC
 export { MCP_SERVER_NAME, threadsFollowed, WSP_TOOL_TIMEOUT_SEC } from "./wsp-tools.js";
 export { type AbsentComputer, type AwayWord, absentComputer, actionRefusal, daemonSilent, ownDaemonDown, START_DAEMON_WORD, agentsKindRefusal, agentsMayDrive, awayMsOf, composerHeldLine, type CopyToDelete, deleteCopiesNotice, deleteNotice, unpushedLine, onDeleteOf, type StandsOn, UNNAMED_COMPUTER, goneRefusal, COMPUTER_LEFT, pausedOrPausing, notAnsweringYet, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, turnSpendWord, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, FORGET_NEEDS_GONE, goneRoadRefusal, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, workspaceAccess, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, whereWord, workspaceStateLine, workspaceStateOf, workspaceWord, type AbsentRoad, type AbsentRoadInput, absentRoad, BACK_OVER_SSH, backUrl, dialsBackWord, linkedOver, lastKnown, REPORTED_WORD, placeDialLine, placeNoDialLine, placeDialRoad, sshRoadOf, type PlaceDialRoad } from "./workspace-state.js";
 export * from "./agents-report.js";
+export { contextWindowsFor, effortsFor, everyModel, listedPick, markedDefault, modelOf } from "./harness-picks.js";
+export * from "./thread-defaults.js";
 export * from "./exit.js";
 export * from "./format.js";
 export { psCpuSeconds } from "./ps-time.js";

@@ -168,6 +168,56 @@
               },
               "wspTools": {
                 "type": "boolean"
+              },
+              "signInDetail": {
+                "type": "string"
+              },
+              "update": {
+                "type": "object",
+                "properties": {
+                  "to": {
+                    "type": "string"
+                  },
+                  "command": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "to",
+                  "command"
+                ],
+                "additionalProperties": false
+              },
+              "setup": {
+                "type": "object",
+                "properties": {
+                  "on": {
+                    "type": "boolean"
+                  },
+                  "program": {
+                    "type": "string"
+                  },
+                  "configDir": {
+                    "type": "string"
+                  },
+                  "args": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "envNames": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "on",
+                  "envNames"
+                ],
+                "additionalProperties": false
               }
             },
             "required": [
@@ -367,6 +417,56 @@
               },
               "wspTools": {
                 "type": "boolean"
+              },
+              "signInDetail": {
+                "type": "string"
+              },
+              "update": {
+                "type": "object",
+                "properties": {
+                  "to": {
+                    "type": "string"
+                  },
+                  "command": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "to",
+                  "command"
+                ],
+                "additionalProperties": false
+              },
+              "setup": {
+                "type": "object",
+                "properties": {
+                  "on": {
+                    "type": "boolean"
+                  },
+                  "program": {
+                    "type": "string"
+                  },
+                  "configDir": {
+                    "type": "string"
+                  },
+                  "args": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "envNames": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "on",
+                  "envNames"
+                ],
+                "additionalProperties": false
               }
             },
             "required": [
