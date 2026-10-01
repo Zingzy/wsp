@@ -8382,6 +8382,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
                   accountLabel: account.label,
                   computer: usageComputerOf(entry.record),
                   project: entry.record.project,
+                  threadId,
+                  workspaceId,
                   turns: use.model === counted ? 1 : 0,
                   ...(use.model !== undefined ? { model: use.model } : {}),
                   ...(use.tokens !== undefined ? { tokens: use.tokens } : {}),
@@ -11073,7 +11075,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const outside = q.outside === true && (await preferences.get()).usageLogs;
       if (outside) await readLogs().catch((e: unknown) => console.warn(`this computer's agent logs were not read for usage: ${e instanceof Error ? e.message : String(e)}`));
       const places = (await placeDoor?.list(clock.now())) ?? [];
-      return ledger.used({ range: q.range, split: q.split, label: usageLabel(places, await ledger.accountLabels()), outside, logsOn: usageComputerName(places, HERE_PLACE_ID) });
+      return ledger.used({
+        range: q.range,
+        split: q.split,
+        label: usageLabel(places, await ledger.accountLabels()),
+        outside,
+        logsOn: usageComputerName(places, HERE_PLACE_ID),
+        threadNames: (threadId, workspaceId) => {
+          const workspace = live.get(workspaceId)?.record.name;
+          return { title: threadTitle(threadId), ...(workspace !== undefined ? { workspace } : {}) };
+        },
+      });
     },
     readings: async (target, range, origin) => {
       const to = clock.now();

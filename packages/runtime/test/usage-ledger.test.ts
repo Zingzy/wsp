@@ -137,6 +137,32 @@ describe("the ledger of what was used", () => {
     expect(row?.saved).toBeCloseTo(6_000 * (4e-6 - 2e-7), 12);
   });
 
+  it("says how much was wsp's and how much the logs', how many threads and computers it came from, and the top five threads", async () => {
+    const { usage } = ledger();
+    const tokens = (n: number) => ({ input: n, output: 0, cached: 0 });
+    for (const [i, n] of [100, 600, 300, 500, 200, 400].entries()) await usage.add(turn({ at: NOON, threadId: `t${i}`, workspaceId: `ws_${i % 2}`, computer: i === 5 ? "pl_boat" : "here", tokens: tokens(n) }));
+    await usage.add(turn({ at: NOON + 60_000, threadId: "t0", workspaceId: "ws_0", tokens: tokens(450) }));
+    await usage.add(turn({ at: NOON, source: "log", session: "s-log", tokens: tokens(1_000) }));
+    const used = await usage.used({
+      range: "day",
+      split: "agent",
+      label: labelOf,
+      threadNames: (threadId, workspaceId) => ({ title: `title of ${threadId}`, workspace: `name of ${workspaceId}` }),
+    });
+    expect(used.sources).toEqual([
+      { source: "wsp", tokens: 2_550, estimate: expect.any(Number) },
+      { source: "log", tokens: 1_000, estimate: expect.any(Number) },
+    ]);
+    expect(used.counts).toEqual({ threads: 6, computers: 2 });
+    expect(used.threads).toEqual([
+      { threadId: "t1", workspaceId: "ws_1", title: "title of t1", agent: "codex", workspace: "name of ws_1", computer: "computer:here", tokens: 600, estimate: 600 * 5e-6 },
+      { threadId: "t0", workspaceId: "ws_0", title: "title of t0", agent: "codex", workspace: "name of ws_0", computer: "computer:here", tokens: 550, estimate: 550 * 5e-6 },
+      { threadId: "t3", workspaceId: "ws_1", title: "title of t3", agent: "codex", workspace: "name of ws_1", computer: "computer:here", tokens: 500, estimate: 500 * 5e-6 },
+      { threadId: "t5", workspaceId: "ws_1", title: "title of t5", agent: "codex", workspace: "name of ws_1", computer: "computer:pl_boat", tokens: 400, estimate: 400 * 5e-6 },
+      { threadId: "t2", workspaceId: "ws_0", title: "title of t2", agent: "codex", workspace: "name of ws_0", computer: "computer:here", tokens: 300, estimate: 300 * 5e-6 },
+    ]);
+  });
+
   it("counts work read from the logs in the same row as wsp's own turns, and says once whose logs it counted and where", async () => {
     const { usage } = ledger();
     await usage.add(turn({ at: NOON, agent: "claude", model: "claude-opus-5", source: "wsp" }));
