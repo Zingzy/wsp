@@ -7,6 +7,7 @@
 // is not drawn.
 import { FolderIcon, GaugeIcon, InfoIcon, KeyboardIcon, MonitorIcon, PaletteIcon, ShieldIcon, SlidersHorizontalIcon, SmartphoneIcon, UserIcon, type LucideIcon } from "lucide-react";
 import { PLACES_WORDS } from "@wsp/protocol";
+import type { ComponentType } from "react";
 import type { Preferences, PreferencesPatch } from "@wsp/protocol";
 import { aboutCards, aboutMeta } from "./about.js";
 import { accountCards } from "./account.js";
@@ -19,7 +20,7 @@ import { SETTINGS_GROUP_IDS, type SettingsGroupId } from "./groupIds.js";
 import { KEYBINDING_DEFAULTS, keybindingsCards, keybindingsOffDefaults } from "./keybindings.js";
 import { PRIVACY_DEFAULTS, privacyCards, privacyOffDefaults } from "./privacy.js";
 import { projectSubPages, projectsCards } from "./projects.js";
-import { usageCards } from "./usage.js";
+import { UsageTabs, usageCards } from "./usage.js";
 import { normalizeSearchText } from "../lib/utils.js";
 import { itemWords, type SettingsCardData, type SettingsItem } from "./rows.js";
 import type { SettingsContext } from "./settingsContext.js";
@@ -35,6 +36,8 @@ export interface SettingsGroup {
   /** A group whose page has no row yet, which is not drawn: a group with nothing in it is decoration. */
   readonly empty?: true;
   readonly cards: (ctx: SettingsContext) => SettingsCardData[];
+  /** A control at the right end of the top bar while this group's page is open, where the page splits into tabs. */
+  readonly head?: ComponentType;
   /** The pages under this group in the sidebar, where the group lists nouns that each have a page of their own.
    * The sidebar reads this and nothing else, so a group that gains pages is one entry here and its page module. */
   readonly sub?: (ctx: SettingsContext) => { at: SettingsAt; name: string }[];
@@ -46,7 +49,7 @@ const TABLE: Record<SettingsGroupId, Omit<SettingsGroup, "id">> = {
   general: { name: "General", glyph: SlidersHorizontalIcon, cards: generalCards },
   appearance: { name: SETTINGS_WORDS.appearance, glyph: PaletteIcon, restore: { off: appearanceOffDefaults, patch: APPEARANCE_DEFAULTS }, cards: appearanceCards },
   computers: { name: PLACES_WORDS.section, glyph: MonitorIcon, cards: computersCards, sub: computerSubPages },
-  usage: { name: USAGE_PAGE_WORDS.title, glyph: GaugeIcon, cards: usageCards },
+  usage: { name: USAGE_PAGE_WORDS.title, glyph: GaugeIcon, cards: usageCards, head: UsageTabs },
   projects: { name: PROJECTS_WORDS.title, glyph: FolderIcon, cards: projectsCards, sub: projectSubPages },
   devices: { name: DEVICES_WORDS.title, glyph: SmartphoneIcon, cards: devicesCards },
   account: { name: ACCOUNT_WORDS.title, glyph: UserIcon, cards: accountCards },

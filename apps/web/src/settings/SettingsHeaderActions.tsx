@@ -16,8 +16,12 @@ export function SettingsHeaderActions() {
   const at = useSettingsAt();
   const preferences = usePreferences();
   const setPreferences = useStore(s => s.setPreferences);
-  const restore = groupById(groupOf(at)).restore;
-  if (at.kind !== "group" || restore === undefined || !restore.off(preferences)) return null;
+  const group = groupById(groupOf(at));
+  const restore = group.restore;
+  if (at.kind !== "group") return null;
+  const Head = group.head;
+  if (Head !== undefined) return <Head />;
+  if (restore === undefined || !restore.off(preferences)) return null;
   return (
     <Tooltip>
       <TooltipTrigger

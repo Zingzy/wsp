@@ -86,6 +86,8 @@ export interface SettingsState {
   /** The Add a computer panel asked for from the Computers page, on the road its button names or on the picker, keyed
    * by the ask so a second press is a fresh panel. Moving to another page shuts it. */
   readonly addAsked: { readonly road: AddRoad | null; readonly n: number } | null;
+  /** The Usage page's tab, kept while the window is open so coming back finds the same one. */
+  readonly usageTab: UsageTab;
   go(at: SettingsAt): void;
   setSearch(search: string): void;
   setReads(patch: Partial<SettingsReads>): void;
@@ -96,7 +98,10 @@ export interface SettingsState {
   hideBuild(placeId: string): void;
   askRecipe(placeId: string | null): void;
   askAdd(road: AddRoad | null): void;
+  pickUsageTab(tab: UsageTab): void;
 }
+
+export type UsageTab = "used" | "limits";
 
 export const useSettingsStore = create<SettingsState>(set => ({
   at: typeof window === "undefined" ? FIRST_PAGE : readStored(),
@@ -107,6 +112,7 @@ export const useSettingsStore = create<SettingsState>(set => ({
   buildShown: null,
   recipeAsked: null,
   addAsked: null,
+  usageTab: "used",
   go(at) {
     set({ at, search: "", recipeAsked: null, addAsked: null });
     try {
@@ -114,7 +120,10 @@ export const useSettingsStore = create<SettingsState>(set => ({
     } catch {
       // A browser that refuses storage keeps the page for this window alone.
     }
+  },  pickUsageTab(usageTab) {
+    set({ usageTab });
   },
+
   setSearch(search) {
     set({ search });
   },

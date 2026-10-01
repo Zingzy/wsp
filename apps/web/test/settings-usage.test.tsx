@@ -73,6 +73,12 @@ const mount = async (over: Partial<Api> = {}): Promise<{ asks: [UsageRange, Usag
   return { asks, readings };
 };
 
+const mountLimits = async (over: Partial<Api> = {}): Promise<void> => {
+  await mount(over);
+  fireEvent.click(document.querySelector("[data-k=usage-tabs] [data-segment=limits]")!);
+  await settle();
+};
+
 const $ = (sel: string): HTMLElement | null => document.querySelector<HTMLElement>(`[data-settings-page] ${sel}`);
 const $$ = (sel: string): HTMLElement[] => [...document.querySelectorAll<HTMLElement>(`[data-settings-page] ${sel}`)];
 const text = (el: Element | null | undefined): string => el?.textContent ?? "";
@@ -88,7 +94,7 @@ afterEach(() => {
 
 describe("Usage: limits", () => {
   it("lists each real account in plain words with the computers it is used on as one line, and a reading as a thin meter per window with its percent and reset", async () => {
-    await mount();
+    await mountLimits();
     expect($$("[data-usage-account]").map(r => text(r.querySelector("[data-settings-title]")))).toEqual(["Claude Code with an API key", "Codex with ChatGPT Plus"]);
     const codex = $("[data-usage-account='codex:acct-1']")!;
     expect(codex.querySelector("[data-harness-mark=codex]")).not.toBeNull();
@@ -103,7 +109,7 @@ describe("Usage: limits", () => {
   });
 
   it("says in one quiet line why a row has no reading, and names the agents that report no limit once under the list", async () => {
-    await mount();
+    await mountLimits();
     const key = $("[data-usage-account='claude:vault-key']")!;
     expect(text(key.querySelector("[data-settings-description]"))).toBe("zingzy's MacBook Pro and Boat");
     expect(key.querySelector("[data-window]")).toBeNull();
@@ -113,29 +119,28 @@ describe("Usage: limits", () => {
   });
 
   it("says a computer's own login's computer once, in its title, with no line repeating it", async () => {
-    await mount({ usageAccounts: async () => ({ accounts: [{ key: "codex@here", agent: "codex", label: "Codex signed in on zingzy's MacBook Pro", computers: ["zingzy's MacBook Pro"], note: USAGE_WORDS.unread }] }) } as Partial<Api>);
+    await mountLimits({ usageAccounts: async () => ({ accounts: [{ key: "codex@here", agent: "codex", label: "Codex signed in on zingzy's MacBook Pro", computers: ["zingzy's MacBook Pro"], note: USAGE_WORDS.unread }] }) } as Partial<Api>);
     const row = $("[data-usage-account='codex@here']")!;
     expect(row.querySelector("[data-settings-description]")).toBeNull();
     expect(text(row.querySelector("[data-k=state]"))).toBe("Not read yet: shows after its next turn");
   });
 
   it("carries the warning ink on a reached limit alone", async () => {
-    await mount({ usageAccounts: async () => ({ accounts: [{ key: "claude:vault-token", agent: "claude", label: "Claude Code with your sign-in", computers: ["Boat"], windows: [{ kind: "session", usedPercent: 100 }], status: "reached", readAt: Date.now() }] }) } as Partial<Api>);
+    await mountLimits({ usageAccounts: async () => ({ accounts: [{ key: "claude:vault-token", agent: "claude", label: "Claude Code with your sign-in", computers: ["Boat"], windows: [{ kind: "session", usedPercent: 100 }], status: "reached", readAt: Date.now() }] }) } as Partial<Api>);
     const state = $("[data-usage-account='claude:vault-token'] [data-k=state]")!;
     expect(text(state)).toBe("Limit reached");
     expect(state.className).toContain("text-warning-foreground");
   });
 
-  it("stands its head and a row's room from the first paint, so Used never moves down when the accounts arrive", async () => {
-    await mount({ usageAccounts: () => new Promise<never>(() => {}) } as Partial<Api>);
+  it("stands a row's room from the first paint, so nothing moves when the accounts arrive", async () => {
+    await mountLimits({ usageAccounts: () => new Promise<never>(() => {}) } as Partial<Api>);
     const card = $("[data-settings-card=usage-limits]")!;
-    expect(text(card.querySelector("[data-settings-head]"))).toBe(USAGE_PAGE_WORDS.limits);
     expect(card.querySelector("[data-k=limits-loading]")).not.toBeNull();
     expect($("[data-usage-account]")).toBeNull();
   });
 
   it("says no agent is signed in where the host knows no account", async () => {
-    await mount({ usageAccounts: async () => ({ accounts: [] }) } as Partial<Api>);
+    await mountLimits({ usageAccounts: async () => ({ accounts: [] }) } as Partial<Api>);
     expect(text($("[data-k=no-accounts]"))).toBe(USAGE_PAGE_WORDS.noAccounts);
   });
 });
@@ -204,6 +209,20 @@ describe("Usage: used", () => {
     expect(text($("[data-k=used-headline]"))).toBe(USAGE_WORDS.noUse);
     expect($$("[data-used-row]")).toEqual([]);
     expect($("[data-k=logs]")).toBeNull();
+  });
+});
+
+describe("Usage: the tabs", () => {
+  it("opens on what was used, and Limits in the top bar's tabs shows the accounts in its place", async () => {
+    await mount();
+    const tabs = document.querySelector("[data-thread-breadcrumb] ~ * [data-k=usage-tabs]")!;
+    expect([...tabs.querySelectorAll("[data-segment]")].map(text)).toEqual([USAGE_PAGE_WORDS.tabs.used, USAGE_PAGE_WORDS.tabs.limits]);
+    expect($("[data-settings-card=usage-used]")).not.toBeNull();
+    expect($("[data-settings-card=usage-limits]")).toBeNull();
+    fireEvent.click(tabs.querySelector("[data-segment=limits]")!);
+    await settle();
+    expect($("[data-settings-card=usage-limits]")).not.toBeNull();
+    expect($("[data-settings-card=usage-used]")).toBeNull();
   });
 });
 

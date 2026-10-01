@@ -278,6 +278,8 @@ export const DEVICES_WORDS = {
 /** Settings > Usage: its title and the words the lists carry beyond the wire's own in USAGE_WORDS. */
 export const USAGE_PAGE_WORDS = {
   title: "Usage",
+  tabs: { used: "Usage", limits: "Limits" },
+  tab: "Show",
   limits: "Limits",
   session: "Session",
   week: "Week",

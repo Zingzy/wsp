@@ -5,14 +5,17 @@
 // The accounts and the tokens are two ledgers and are never summed.
 import { useEffect, useState, type ReactNode } from "react";
 import { agentName } from "@wsp/catalog";
+import { ChartLineIcon, GaugeIcon } from "lucide-react";
 import { USAGE_RANGES, USAGE_SPLITS, USAGE_WORDS, accountState, accountWords, fmtTokens, freshIn, listWords, logsLine, resetsWord, usedHeadline, usedPrice, type AccountRow, type AccountsAnswer, type LimitKind, type UsageRange, type UsageSplit, type UsedAnswer, type UsedRow } from "@wsp/protocol";
 import { ChartPlot, spanPoints } from "../components/machine/MachineSurface.js";
 import { HarnessMark } from "../components/chat/HarnessMark.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
+import { SegmentedControl } from "../components/ui/segmented-control.js";
 import { cn } from "../lib/utils.js";
 import { USAGE_PAGE_WORDS as W } from "./format.js";
 import { Card, Row, type SettingsCardData } from "./rows.js";
 import type { SettingsContext } from "./settingsContext.js";
+import { useSettingsStore, type UsageTab } from "./settingsStore.js";
 
 const NUMBER = "font-mono text-xs tabular-nums";
 const QUIET = "text-[13px] leading-5 text-muted-foreground";
@@ -24,12 +27,25 @@ const WIDE_ONLY = "max-sm:hidden";
 /** A state word as the page draws it, capitalised: the wire's words are the command line's, in its lower case. */
 const stateWord = (word: string): string => (word === "" ? "" : word[0]!.toUpperCase() + word.slice(1));
 
+const TABS: ReadonlyArray<{ value: UsageTab; label: ReactNode }> = [
+  { value: "used", label: <><ChartLineIcon aria-hidden className="size-4" />{W.tabs.used}</> },
+  { value: "limits", label: <><GaugeIcon aria-hidden className="size-4" />{W.tabs.limits}</> },
+];
+
+/** The page's two tabs, at the top bar's right end: what the agents used, and what each account may still use. */
+export function UsageTabs() {
+  const tab = useSettingsStore(state => state.usageTab);
+  const pick = useSettingsStore(state => state.pickUsageTab);
+  return <SegmentedControl data-k="usage-tabs" aria-label={W.tab} value={tab} segments={TABS} onChange={pick} className="h-9 [-webkit-app-region:no-drag]" segmentClassName="gap-2 px-3.5 text-sm" />;
+}
+
 export function usageCards(ctx: SettingsContext): SettingsCardData[] {
   return [{ id: "usage", items: [], body: <UsagePage ctx={ctx} /> }];
 }
 
 function UsagePage({ ctx }: { ctx: SettingsContext }) {
   const { api } = ctx;
+  const tab = useSettingsStore(state => state.usageTab);
   const [range, setRange] = useState<UsageRange>("week");
   const [split, setSplit] = useState<UsageSplit>("agent");
   const [accounts, setAccounts] = useState<AccountsAnswer | null>(null);
@@ -59,8 +75,7 @@ function UsagePage({ ctx }: { ctx: SettingsContext }) {
 
   return (
     <div className="flex flex-col gap-8">
-      <Limits accounts={accounts?.accounts ?? null} now={ctx.now} />
-      <Used used={used} range={range} split={split} onRange={setRange} onSplit={setSplit} />
+      {tab === "limits" ? <Limits accounts={accounts?.accounts ?? null} now={ctx.now} /> : <Used used={used} range={range} split={split} onRange={setRange} onSplit={setSplit} />}
     </div>
   );
 }
@@ -110,7 +125,7 @@ function Limits({ accounts, now }: { accounts: ReadonlyArray<AccountRow> | null;
   // Until the accounts arrive the card holds one row's room, so Used under it does not move when they land.
   if (accounts === null)
     return (
-      <Card id="usage-limits" head={W.limits}>
+      <Card id="usage-limits">
         <div data-k="limits-loading" aria-busy className="h-[68px]" />
       </Card>
     );
@@ -121,7 +136,6 @@ function Limits({ accounts, now }: { accounts: ReadonlyArray<AccountRow> | null;
   return (
     <Card
       id="usage-limits"
-      head={W.limits}
       {...(names.length === 0
         ? {}
         : {
@@ -278,7 +292,6 @@ function Used({ used, range, split, onRange, onSplit }: { used: UsedAnswer | nul
     <section data-usage-section="used" aria-label={W.used}>
       <Card
         id="usage-used"
-        head={W.used}
         body={body}
         {...(used?.logs === undefined || used.rows.length === 0
           ? {}
