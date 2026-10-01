@@ -8,7 +8,7 @@
 // sentence goes to stderr and the process exits non-zero.
 import { randomUUID } from "node:crypto";
 import { INTERRUPT_GRACE_MS, RUN_EXIT_MS, endAfterResult, endRun, refusedTurn } from "@wsp/protocol";
-import type { AdapterAttachOptions, AdapterEvent, ExecStream, ExecStreamFactory, TurnResult } from "@wsp/protocol";
+import type { AdapterAttachOptions, AdapterEvent, AgentLaunch, ExecStream, ExecStreamFactory, TurnResult } from "@wsp/protocol";
 import { buildCommand, buildEnv } from "./command.js";
 
 export interface CursorStartOptions {
@@ -42,6 +42,8 @@ export interface CursorAdapterDeps {
   keyEnv?: string;
   interruptGraceMs?: number;
   resultExitMs?: number;
+  /** The program the person runs in place of cursor-agent on this computer, and the words every turn's launch adds. */
+  launch?: AgentLaunch;
 }
 
 /** No image flag and no control channel are documented, so it declares no attachments and no answer: a turn with an
@@ -221,6 +223,7 @@ export function createCursorAdapter(deps: CursorAdapterDeps): CursorAdapter {
       ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
       ...(options.model !== undefined ? { model: options.model } : {}),
       ...(options.permissionMode !== undefined ? { permissionMode: options.permissionMode } : {}),
+      ...(deps.launch !== undefined ? { launch: deps.launch } : {}),
     });
     return follow({
       stream: deps.exec(command, { env: { ...env } }),

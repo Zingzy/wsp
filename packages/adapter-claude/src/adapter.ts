@@ -4,7 +4,7 @@
 // recorded in solari-poc/RESULTS.md.
 
 import { ASIDE_WALL_MS, INTERRUPT_GRACE_MS, LOST_SESSION_NOTE, PERMISSION_ALLOW, PERMISSION_DENY, RUN_EXIT_MS, asideWallLine, backgroundTasksLine, endAfterResult, endRun, fmtDuration, harnessExitLine, lostSessionPrompt, refusedTurn, taskFinishedLine, titlePrompt } from "@wsp/protocol";
-import type { AdapterAttachOptions, AdapterEvent, AsideAnswer, AsideQuestion, ExecStream, ExecStreamFactory, HarnessCatalogProbe, McpServerSpec, PermissionAsk, PermissionOutcome, ScreenCommand, SessionAsker, SessionHarness, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnRefusal, TurnResult, TurnStatus, CommitDrafter, PlanStep, TurnTokens, HarnessLimit, LimitKind, LimitStatus, LimitWindow } from "@wsp/protocol";
+import type { AdapterAttachOptions, AdapterEvent, AgentLaunch, AsideAnswer, AsideQuestion, ExecStream, ExecStreamFactory, HarnessCatalogProbe, McpServerSpec, PermissionAsk, PermissionOutcome, ScreenCommand, SessionAsker, SessionHarness, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnRefusal, TurnResult, TurnStatus, CommitDrafter, PlanStep, TurnTokens, HarnessLimit, LimitKind, LimitStatus, LimitWindow } from "@wsp/protocol";
 import { SKIP_PROMPTS_MODE, controlAllowLine, controlAnswerLine, controlErrorLine, controlLine, modeOptionOn, setModeLine } from "./permissions.js";
 import { CLAUDE_SCREEN_COMMANDS, catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
 import { asideAnswer, asideCommand, forkCleanupCommand } from "./aside.js";
@@ -102,6 +102,8 @@ export interface AdapterDeps {
   signInRefusal?: string;
   /** How long a side question may run before its process is ended; ASIDE_WALL_MS unless a test says otherwise. */
   asideWallMs?: number;
+  /** The program the person runs in place of claude on this computer, and the words every turn's launch adds. */
+  launch?: AgentLaunch;
 }
 
 export interface ClaudeAdapter {
@@ -953,6 +955,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       ...(options.fast === true ? { fast: true } : {}),
       ...(options.title !== undefined ? { name: options.title } : {}),
       ...(options.mcpServers !== undefined ? { mcpServers: options.mcpServers } : {}),
+      ...(deps.launch !== undefined ? { launch: deps.launch } : {}),
     });
     const stream = deps.exec(command, { env: { ...env }, input: [userMessageLine(options.prompt, localId, options.images)] });
     return follow({ stream, localId, announced: false, command, onEvent: options.onEvent });
@@ -1024,7 +1027,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
   /** One run on the turn's road and environment, read to its end so the answer lands after the fork's file is gone. */
   const aside = async (q: AsideQuestion): Promise<AsideAnswer> => {
     const fork = newSessionId();
-    const command = asideCommand({ session: q.session, fork, configDir: deps.configDir, ...(q.cwd !== undefined ? { cwd: q.cwd } : {}), ...(q.model !== undefined ? { model: q.model } : {}) });
+    const command = asideCommand({ session: q.session, fork, configDir: deps.configDir, ...(q.cwd !== undefined ? { cwd: q.cwd } : {}), ...(q.model !== undefined ? { model: q.model } : {}), ...(deps.launch !== undefined ? { launch: deps.launch } : {}) });
     const stream = deps.exec(command, { env: { ...env }, input: [userMessageLine(q.question, fork)] });
     const wallMs = deps.asideWallMs ?? ASIDE_WALL_MS;
     let walled = false;
@@ -1082,7 +1085,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     attachments: "inline",
     mcpServers: true,
     screenCommands: CLAUDE_SCREEN_COMMANDS,
-    probeCatalog: exec => exec(catalogProbeCommand({ baseEnv: deps.baseEnv })).then(parseCatalogProbe),
+    probeCatalog: exec => exec(catalogProbeCommand({ baseEnv: deps.baseEnv, ...(deps.launch !== undefined ? { launch: deps.launch } : {}) })).then(parseCatalogProbe),
     sessionTitle: (sessionId, exec) => exec(sessionTitleCommand({ configDir: deps.configDir, sessionId })).then(parseSessionTitle),
     renameSession: (sessionId, title, exec) => exec(renameCommand({ configDir: deps.configDir, sessionId, title })).then(parseRename),
     titleFor: (turn, exec) =>
@@ -1091,6 +1094,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
           prompt: titlePrompt(turn.opening, turn.reply),
           ...(turn.model !== undefined ? { model: turn.model } : {}),
           ...(deps.baseEnv !== undefined ? { baseEnv: deps.baseEnv } : {}),
+          ...(deps.launch !== undefined ? { launch: deps.launch } : {}),
         }),
       ).then(parseTitleFor),
     draftFor: (ask, exec) =>
@@ -1099,6 +1103,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
           promptFile: ask.promptFile,
           ...(ask.model !== undefined ? { model: ask.model } : {}),
           ...(deps.baseEnv !== undefined ? { baseEnv: deps.baseEnv } : {}),
+          ...(deps.launch !== undefined ? { launch: deps.launch } : {}),
         }),
       ).then(parseDraftFor),
     aside,

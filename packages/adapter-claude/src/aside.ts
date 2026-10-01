@@ -7,8 +7,8 @@
 // unless --fork-session is given) and a second run removes that file once the
 // CLI's run has ended, since the kill a stuck one gets takes its shell with it.
 
-import { inFolder, shellQuote } from "@wsp/protocol";
-import type { AsideAnswer } from "@wsp/protocol";
+import { inFolder, programWord, shellQuote } from "@wsp/protocol";
+import type { AgentLaunch, AsideAnswer } from "@wsp/protocol";
 import { UUID_RE, slugFlag } from "./landmines.js";
 
 export interface AsideCommandOptions {
@@ -20,6 +20,7 @@ export interface AsideCommandOptions {
   configDir: string;
   cwd?: string;
   model?: string;
+  launch?: AgentLaunch;
 }
 
 /**
@@ -32,7 +33,7 @@ export function asideCommand(options: AsideCommandOptions): string {
   const { session, fork, configDir, cwd, model } = options;
   for (const id of [session, fork]) if (!UUID_RE.test(id)) throw new Error(`session identifier must be a UUID, got "${id}"`);
   const claude = [
-    "claude -p",
+    `${programWord("claude", options.launch)} -p`,
     "--input-format stream-json",
     "--output-format stream-json",
     "--verbose",

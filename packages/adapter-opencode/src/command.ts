@@ -5,7 +5,7 @@
 // the message when no message words are given (the run command in the 1.18.18
 // binary), so a long task never meets the kernel's per-argument cap. -f takes
 // many values, so no word follows the last one but the heredoc.
-import { inFolder, shellQuote } from "@wsp/protocol";
+import { inFolder, launchWords, programWord, shellQuote, type AgentLaunch } from "@wsp/protocol";
 
 const PROMPT_END = "WSP_PROMPT_END";
 const SLUG_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
@@ -41,6 +41,8 @@ export interface BuildCommandOptions {
   title?: string;
   /** Absolute paths of images already on the machine. */
   images?: readonly string[];
+  /** The program run in place of opencode and the words added after run, from the person's setup there. */
+  launch?: AgentLaunch;
 }
 
 function slug(name: string, value: string): string {
@@ -63,7 +65,9 @@ export function buildCommand(options: BuildCommandOptions): string {
   if (prompt.split("\n").includes(PROMPT_END)) throw new Error(`the prompt has a line that reads ${PROMPT_END}, which ends the prompt`);
   if (permissionMode !== undefined && permissionMode !== AUTO_MODE) throw new Error(`permissionMode must be ${AUTO_MODE}, got "${permissionMode}"`);
   const line = [
-    "opencode run --format json",
+    `${programWord("opencode", options.launch)} run`,
+    ...launchWords(options.launch),
+    "--format json",
     // The JSON stream names a failure only as an unexpected server error and a ref; the log line with that ref says
     // what failed (measured on 1.18.18), so the log rides the turn's output at the one level that prints it.
     "--print-logs --log-level ERROR",

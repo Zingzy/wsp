@@ -161,3 +161,11 @@ describe("CursorAdapter over an agent -p stream-json turn", () => {
     expect(events[0]).toMatchObject({ type: "session.start", sessionId: CHAT, model: "sonnet-4.5", cwd: "/root/app" });
   });
 });
+
+describe("a person's setup for Cursor on a computer", () => {
+  it("runs the program in place of cursor-agent, the launch words after -p", async () => {
+    const exec = scriptedExec(fixture("turn.jsonl"));
+    await createCursorAdapter({ exec: exec.factory, launch: { program: "/opt/ca", args: ["--sandbox", "disabled"] } }).start({ prompt: "hi", onEvent: () => {} }).finished;
+    expect(exec.calls[0]!.command).toContain(`'/opt/ca' -p '--sandbox' 'disabled' --output-format stream-json`);
+  });
+});
