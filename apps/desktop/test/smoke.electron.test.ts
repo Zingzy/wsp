@@ -92,7 +92,13 @@ function seedLocalWorkspace(home: string): void {
     memoryDir: join(home, ".claude", "projects", folder.replace(/[^A-Za-z0-9]/g, "-"), "memory"),
     createdAt: LOCAL_WORKSPACE.createdAt,
   };
-  const workspace = { ...LOCAL_WORKSPACE, copy: { road: "clonefile", path: `${folder}-first`, source: folder, base: "", branch: "main", carried: "deps-and-config" }, portBase: 3100 };
+  // The copy is a checkout on main with one commit, so the branch the host reads off it is the one its record names.
+  const copy = `${folder}-first`;
+  mkdirSync(copy, { recursive: true });
+  const git = (...args: string[]) => spawnSync("git", ["-c", "user.name=smoke", "-c", "user.email=smoke@example.com", "-c", "commit.gpgsign=false", ...args], { cwd: copy, stdio: "ignore" });
+  git("init", "-q", "-b", "main");
+  git("commit", "-q", "--allow-empty", "-m", "seeded");
+  const workspace = { ...LOCAL_WORKSPACE, copy: { road: "clonefile", path: copy, source: folder, base: "", branch: "main", carried: "deps-and-config" }, portBase: 3100 };
   writeFileSync(join(home, "state.json"), stateText({ projects: { [project.id]: project }, workspaces: { [LOCAL_WORKSPACE.id]: workspace } }));
 }
 
@@ -690,6 +696,20 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     // The one value the page ever says, whatever a pin before it was: no screen picks a side, so the frame and the
     // page cannot draw two.
     await vi.waitFor(async () => expect(await source()).toBe("system"));
+    // The page left on System draws the side the appearance under it takes, dark and then light, with nothing reloaded
+    // between, and the side the Mac itself is set to once the shell hands the appearance back to it.
+    const pageSide = () => win.evaluate(() => ({ media: window.matchMedia("(prefers-color-scheme: dark)").matches, dark: document.documentElement.classList.contains("dark") }));
+    for (const side of ["dark", "light"] as const) {
+      await launched.app.evaluate(({ nativeTheme }, s) => {
+        nativeTheme.themeSource = s;
+      }, side);
+      await vi.waitFor(async () => expect(await pageSide()).toEqual({ media: side === "dark", dark: side === "dark" }));
+    }
+    await launched.app.evaluate(({ nativeTheme }) => {
+      nativeTheme.themeSource = "system";
+    });
+    const macDark = await launched.app.evaluate(({ nativeTheme }) => nativeTheme.shouldUseDarkColors);
+    await vi.waitFor(async () => expect(await pageSide()).toEqual({ media: macDark, dark: macDark }));
     await launched.app.evaluate(({ nativeTheme }) => {
       nativeTheme.themeSource = "dark";
     });
@@ -905,8 +925,11 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     const row = win.locator(`[data-row-id='${workspaceRowId(LOCAL_WORKSPACE.id)}']`);
     await row.waitFor();
     expect(await row.locator("[data-thread-title]").textContent()).toBe(LOCAL_WORKSPACE.name);
-    // Row three is the branch the seeded copy stands on.
-    expect(await row.locator("[data-tile-branch]").textContent()).toBe("main");
+    // The tile's card names the branch the seeded copy stands on.
+    await row.hover();
+    const branch = win.locator("[data-tile-card] [data-tile-card-line=branch]");
+    await branch.waitFor();
+    expect(await branch.textContent()).toBe("main");
     // The seeded record is the whole list: nothing was recorded on the way in.
     expect(await win.locator("[data-row-id^='ws:']").count()).toBe(1);
     expect(appWindows(launched.app).filter(w => ONBOARDING_URL.test(w.url()))).toHaveLength(0);

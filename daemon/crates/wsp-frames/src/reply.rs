@@ -347,6 +347,10 @@ pub struct GitStatusReply {
     /// within the daemon's budget, so the zeros say nothing.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub counts_unknown: bool,
+    /// How many stashes the repository holds, work no branch carries and no remote has; absent where there are none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub stashes: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]

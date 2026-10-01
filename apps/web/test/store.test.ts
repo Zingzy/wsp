@@ -544,6 +544,25 @@ describe("store sessions", () => {
     expect(settled).toEqual([["thr_a", "thr_b"]]);
   });
 
+  it("a thread started from the command line reaches its tile on the event that holds its row, before its harness is up and with no timer", async () => {
+    const sessions: SessionView[] = [];
+    const { api, emit, listCalls } = fakeApi([view("ws_a")], sessions);
+    useStore.getState().bind(api);
+    await flush();
+    listCalls.length = 0;
+    vi.useFakeTimers();
+    try {
+      sessions.push({ id: "s1", workspaceId: "ws_a", harness: "claude", status: "running", startedBy: "cli", threadId: "thr_cli" });
+      emit({ type: "session.held", workspaceId: "ws_a", threadId: "thr_cli" });
+      for (let i = 0; i < 5; i++) await Promise.resolve();
+      expect(listCalls).toEqual(["ws_a"]);
+      expect(useStore.getState().sessions["ws_a"]).toEqual(sessions);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("session.start remembers the claude session id on the workspace and refetches that workspace's rows", async () => {
     const sessions: SessionView[] = [];
     const { api, emit, listCalls } = fakeApi([view("ws_a")], sessions);

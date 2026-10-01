@@ -1439,6 +1439,23 @@
       "settleMs": 800
     },
     {
+      "name": "delete-dialog-unpushed",
+      "at": "/",
+      "fixture": "changes",
+      "widths": [
+        1440
+      ],
+      "reason": "A 440px dialog, the same at every desktop width. Judged against the mockup's 1440 render; the dialog's narrow form is not in the design's reading.",
+      "steps": [
+        "row-id=thread:redirect",
+        "key:ControlOrMeta+k",
+        "type:delete",
+        "key:Enter"
+      ],
+      "wait": "k=unpushed",
+      "settleMs": 800
+    },
+    {
       "name": "browser-empty",
       "at": "/",
       "widths": [

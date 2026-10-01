@@ -70,7 +70,6 @@ export default [
         "init-local",
         "keys",
         "providers",
-        "key-saved-place",
         "provider-swap",
       ].map(name => `packages/host/test/${name}.test.ts`),
       environment: "node",

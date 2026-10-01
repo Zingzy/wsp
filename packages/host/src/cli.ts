@@ -35,7 +35,7 @@ import { CATALOG_AGENTS, GOLDEN_SETUP, GOLDEN_SMOKE, GUEST_HOME, MCP_AGENT_IDS, 
 import { authRefusal, cloudOffRefusal, PRICES_URL, holdsNothing, type McpServerSpec, hostFromEnv, jsonLine, SCOPED_MCP_ARG, scopedNoPairLine, imageHomeKeptLine, isJoinedComputer, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, loopbackThreadsLine, LOOPBACK, PERSON_HOME_ENV, portInsteadLine, PORT_TAKEN_REFUSAL, portsAsked, portsPickedLine, portTakenLine, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, namesPlace, noSuchPlaceRefusal, type PlaceView, unknownWordLine, usageRefusal, verbFailure, foreignFlagLine } from "@wsp/protocol";
 import { agentHome, agentHomes, checkProviderKey, type Copier, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, providerSlot, type ProviderSlot, verbCopier } from "@wsp/engine";
 import { CLOUD_ON } from "./cloud.js";
-import { noMachinesLine, providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerKeyRows, providerKeySet, providerModule, providerPlaces, wiredPlaceRow, wiredProviderId, type ProviderEnv } from "./providers.js";
+import { noMachinesLine, PROVIDER_MODULES, providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerKeyRows, providerKeySet, providerModule, providerPlaces, wiredPlaceRow, wiredProviderId, type ProviderEnv, type ProviderModule } from "./providers.js";
 import { daemonBinaryHere, webDirFor } from "./assets.js";
 import { DAEMON_DEPLOYED_LINE, cappedLine, claudeEnvs, deployDaemon, doctor, doctorOverHost, hostDoctor, missingBundleFile } from "./doctor.js";
 import { daemonFixLine, releaseUpdateLine } from "./daemon-fix.js";
@@ -708,6 +708,8 @@ const PROVIDER_PICKS = new WeakMap<Runtime, ProviderPick>();
 interface ProviderPick {
   id: string;
   env: ProviderEnv;
+  /** The provider table the runtime was made on, which a saved key is picked out of too. */
+  modules: readonly ProviderModule[];
 }
 export const providerSlotOf = (rt: Runtime): ProviderSlot | undefined => PROVIDER_SLOTS.get(rt);
 
@@ -723,9 +725,10 @@ export function swapProvider(rt: Runtime, keys: Readonly<Record<string, string |
   // other places it can build at are the same pick, so they cannot drift apart when a key is saved.
   const pick = PROVIDER_PICKS.get(rt);
   const env = { ...(pick?.env ?? process.env), ...keys };
-  slot.swap(providerBackendFor(env));
+  const modules = pick?.modules ?? PROVIDER_MODULES;
+  slot.swap(providerBackendFor(env, modules));
   if (pick !== undefined) {
-    pick.id = wiredProviderId(env);
+    pick.id = wiredProviderId(env, modules);
     pick.env = env;
   }
 }
@@ -760,17 +763,20 @@ export function makeRuntime(
   store: Store = jsonFileStore(statePath, stateWriterHere()),
   /** The agents a turn runs; a test hands in stand-ins so no real agent starts. */
   adapters: Record<string, HarnessAdapterFactory> = HARNESS_ADAPTERS,
+  /** The providers this host answers for, its own process's by default; a test hands in the table it means. */
+  modules: readonly ProviderModule[] = PROVIDER_MODULES,
 ): Runtime {
-  const slot = providerSlot(providerBackendFor(env));
+  const slot = providerSlot(providerBackendFor(env, modules));
   // The place this host's copies are filed under is the provider module it forks on, read at each call: a host that
   // starts with no key swaps its module in when one is saved, and its copies belong to the module that made them.
-  const pick: ProviderPick = { id: wiredProviderId(env), env };
+  const pick: ProviderPick = { id: wiredProviderId(env, modules), env, modules };
   const rt = createRuntime({
-    noMachinesLine: noMachinesLine(),
+    noMachinesLine: noMachinesLine(modules),
     places: providerPlaces(
       () => pick.id,
       slot.backend,
       () => pick.env,
+      modules,
     ),
     backend: slot.backend,
     // What a turn on this computer needs to reach back in: the loopback this host fills once it binds, and the same
@@ -782,7 +788,7 @@ export function makeRuntime(
     local,
     // The provider row off the same pick the slot and the table stand on, so a key saved while this host serves
     // makes its provider a place on every screen at once.
-    placeLinks: { ...links, provider: () => wiredPlaceRow(pick.env, slot.current()) },
+    placeLinks: { ...links, provider: () => wiredPlaceRow(pick.env, slot.current(), modules) },
     // The build this host is, written into the state file at every save, so a host that meets a record it cannot
     // read says which wsp on this computer wrote it.
     store,

@@ -43,5 +43,7 @@
   "authUnreadable": "{url} answered place.auth with something this computer cannot read: {error}",
   "hostRefused": "{url}: {refusal}",
   "linkOutOfOrder": "{url} answered out of order; nothing was sent to it and the next address is tried",
-  "linkHostUnsealed": "the host at {url} agreed no key for this link; it runs an older wsp"
+  "linkHostUnsealed": "the host at {url} agreed no key for this link; it runs an older wsp",
+  "boxFull": "this computer has {free} MB free and a workspace needs {need} MB; stop {name}, quiet for {quiet} min, to make room",
+  "boxFullOwnWork": "this computer has {free} MB free and a workspace needs {need} MB, and no workspace of yours is awake to stop: what is holding it is the computer's own work"
 }

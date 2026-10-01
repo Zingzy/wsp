@@ -1585,6 +1585,15 @@ export const SessionQueuedEvent = z.object({
 });
 export type SessionQueuedEvent = z.infer<typeof SessionQueuedEvent>;
 
+/** Pushed once when a start holds its thread's row, before the harness has announced its session: the thread is in
+ * the listing from here, whoever started it, so a window draws it now rather than after the launch; never in history. */
+export const SessionHeldEvent = z.object({
+  type: z.literal("session.held"),
+  workspaceId: z.string(),
+  threadId: z.string(),
+});
+export type SessionHeldEvent = z.infer<typeof SessionHeldEvent>;
+
 /** The word a start's notify carries to mean the caller: the thread the request came out of when it came out of one,
  * and otherwise the person who ran it. */
 export const NOTIFY_ME = "me";
@@ -3188,6 +3197,18 @@ export type PlaceCapSet = z.infer<typeof PlaceCapSet>;
 export const MacKind = z.enum(["macbook", "imac", "mac-mini", "mac-studio", "mac-pro"]);
 export type MacKind = z.infer<typeof MacKind>;
 
+/** Which Mac a product name ("MacBook Pro (14-inch, M5)") or a model identifier ("Macmini9,1") names. Apple
+ * silicon's identifiers since 2022 ("Mac17,2") name no family, which is why the product name is read first. */
+export function macKindOf(said: string): MacKind | undefined {
+  const word = said.replace(/\s+/g, "").toLowerCase();
+  if (word.startsWith("macbook")) return "macbook";
+  if (word.startsWith("imac")) return "imac";
+  if (word.startsWith("macmini")) return "mac-mini";
+  if (word.startsWith("macstudio")) return "mac-studio";
+  if (word.startsWith("macpro")) return "mac-pro";
+  return undefined;
+}
+
 /** One row of wsp places: a computer of the person's own, this computer itself, or the provider this host forks on. */
 export const PlaceView = z.object({
   id: z.string(),
@@ -3368,6 +3389,7 @@ export const EventUnion = z.discriminatedUnion("type", [
   SessionPlanEvent.extend(sequenced),
   SessionRunEvent.extend(sequenced),
   SessionQueuedEvent.extend(sequenced),
+  SessionHeldEvent.extend(sequenced),
   ThreadMarkedEvent.extend(sequenced),
   ThreadRewoundEvent.extend(sequenced),
   PortOpenEvent.extend(sequenced),
@@ -3533,6 +3555,8 @@ export const GitStatusReply = z.object({
   root: z.string(),
   editsUnread: z.boolean().optional(),
   countsUnknown: z.boolean().optional(),
+  /** How many stashes the repository holds; absent where there are none. */
+  stashes: z.number().int().positive().optional(),
 });
 export type GitStatusReply = z.infer<typeof GitStatusReply>;
 
@@ -4077,6 +4101,10 @@ export const SnapshotRow = z.object({
    * listing carries none. */
   name: z.string().optional(),
   sizeBytes: z.number(),
+  /** The size the snapshot restores to, which is an image's size, where the provider reports one. A provider that
+   * stores a snapshot as what changed since another bills on that change, so sizeBytes is not this; absent, the
+   * image's size is unknown and nothing stands in for it. */
+  restoredBytes: z.number().optional(),
   createdAt: z.string().optional(),
   /** The snapshot this one was taken under, as the provider chains them; null at a root. */
   parent: z.string().nullable().optional(),
@@ -4613,6 +4641,8 @@ const DAEMON_CONTENTS = [
   "9a59b1daa92807a07d52f8d1ee0a3b3d3d5680202be1da20498b093b5b1daa71",
   "29eeb80d015c5099f6991b2acc3a0457f26aa1636b66f8751d6734cdb1a0639d",
   "ad16ee01ba69b4bd8339c8aa4753c2f3e46aa80c8d9f1ceeab9ca1038482f062",
+  "409fce58696aaa20c7803f7a963841e4aacc0702a153ca6f916fba64f941bd16",
+  "89e10a249a0e59670fc8fefec015f640d8f021d0b24bb34665412360cf6b999b",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -4909,7 +4939,11 @@ const DAEMON_CONTENTS = [
  * own files, collected one by one over the turn's reflog window whatever moved HEAD after them, together with the edits
  * standing in its end worktree and the files it resolved by hand in a merge, while a HEAD move it did not write (a
  * checkout, pull, merge, rebase or reset) is named on a line with no files of its own. A rebase is one such line plus
- * the edits standing at the end; the commits it replayed and any conflict it resolved mid-rebase are not listed. */
+ * the edits standing at the end; the commits it replayed and any conflict it resolved mid-rebase are not listed.
+ * Version 110: A joined Mac reports which Mac it is: its place report carries the product name its registry gives, else
+ * its model identifier, so the computer's row draws that Mac rather than a server. git.status counts the stashes a
+ * repository holds, running or stopped, so a delete names them.
+ * Version 111: the room check's refusal is a contract word, so the Mac's copy road says the same sentence. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -5072,9 +5106,6 @@ export const provisionLandedLine = (files: number): string => `landed: ${plural(
 /** What the list beside the job holds for the servers round: one key per server wsp wrote into an agent's own
  * file there. */
 export const provisionListReadLine = (keys: number): string => `list read: ${plural(keys, "server key")}`;
-
-/** What the pack left out of the copy for a computer you own, one line per path and reason, as the job says it. */
-export const provisionSkippedLine = (path: string, note: string): string => `${path}: ${note}`;
 
 /** What the servers round wrote into the agents' own files on that computer, of the servers the recipe names. */
 export const provisionServersLine = (written: number, servers: number): string =>
@@ -5420,6 +5451,8 @@ export const PlaceReport = z.object({
   os: z.string().max(200),
   shape: WorkspaceSize,
   diskFreeBytes: z.number().int().nonnegative().optional(),
+  /** Which Mac this is, as its registry names the product, else its model identifier; absent off a Mac. */
+  model: z.string().max(200).optional(),
   /** HOME, USER, PATH and each harness's store variable, as the ssh read records them. */
   login: z.record(z.string()),
   /** Whether this computer's own daemon runs workspaces here: cgroup v2 with the controllers a cap needs, an
@@ -6895,7 +6928,7 @@ export { hereName, isHere, isProviderPlace, placeName, placeOf, workspaceCompute
 export { needsYouLine, threadNeedsYou, threadState, threadStateWord, threadUnread, threadUnseenAt, threadWordOf, waitingLine, type ThreadState } from "./thread-state.js";
 export { CLOUD_CAP_DEFAULT, phaseHoldsSlot, placeAtLimitLine, placeCapOf, placeCapRefusal, placeFullLine, placeRoom, placeSpendLimit, runningOn, THREAD_MEM_MB, threadsAtOnce, workspacePlace, workspacePlaceId, type PlacedThread, type PlacedWorkspace } from "./place-state.js";
 export { MCP_SERVER_NAME, threadsFollowed, WSP_TOOL_TIMEOUT_SEC } from "./wsp-tools.js";
-export { type AbsentComputer, type AwayWord, absentComputer, actionRefusal, daemonSilent, ownDaemonDown, START_DAEMON_WORD, agentsKindRefusal, agentsMayDrive, awayMsOf, composerHeldLine, type CopyToDelete, deleteCopiesNotice, deleteNotice, onDeleteOf, type StandsOn, UNNAMED_COMPUTER, goneRefusal, COMPUTER_LEFT, pausedOrPausing, notAnsweringYet, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, turnSpendWord, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, FORGET_NEEDS_GONE, goneRoadRefusal, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, workspaceAccess, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, whereWord, workspaceStateLine, workspaceStateOf, workspaceWord, type AbsentRoad, type AbsentRoadInput, absentRoad, BACK_OVER_SSH, backUrl, dialsBackWord, linkedOver, lastKnown, REPORTED_WORD, placeDialLine, placeNoDialLine, placeDialRoad, sshRoadOf, type PlaceDialRoad } from "./workspace-state.js";
+export { type AbsentComputer, type AwayWord, absentComputer, actionRefusal, daemonSilent, ownDaemonDown, START_DAEMON_WORD, agentsKindRefusal, agentsMayDrive, awayMsOf, composerHeldLine, type CopyToDelete, deleteCopiesNotice, deleteNotice, unpushedLine, onDeleteOf, type StandsOn, UNNAMED_COMPUTER, goneRefusal, COMPUTER_LEFT, pausedOrPausing, notAnsweringYet, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, turnSpendWord, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, FORGET_NEEDS_GONE, goneRoadRefusal, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, workspaceAccess, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, whereWord, workspaceStateLine, workspaceStateOf, workspaceWord, type AbsentRoad, type AbsentRoadInput, absentRoad, BACK_OVER_SSH, backUrl, dialsBackWord, linkedOver, lastKnown, REPORTED_WORD, placeDialLine, placeNoDialLine, placeDialRoad, sshRoadOf, type PlaceDialRoad } from "./workspace-state.js";
 export * from "./agents-report.js";
 export * from "./exit.js";
 export * from "./format.js";
@@ -6904,7 +6937,7 @@ export { compareVersions } from "./semver.mjs";
 export { attachedFilesPrompt, Attachment, attachmentBytes, attachmentLine, AttachmentRecord, attachmentRecord, FILE_MAX_BYTES, FILE_MAX_WORDS, FILES_AFTER_TURN, FILES_DIR, FILES_MAX, filePathIn, filesBlocked, filesNotLandedLine, filesRefusal, IMAGE_MAX_BYTES, IMAGE_MAX_WORDS, IMAGE_TYPES, IMAGE_TYPE_WORDS, imagePathIn, imageTypeOf, isImage, dropFilesLine, landFilesLine, noImagesLine, notAFileLine, safeFileName, sendFilesDir, threadFilesDir, threadImagesDir, turnImagesDir, UNTYPED_FILE } from "./attachments.js";
 export * from "./oom.js";
 export { accruedAt, accruedPast, appendCostPoint, COST_HISTORY_CAP, dayStart, monthStart, rateAt, spentSince } from "./cost-history.js";
-export { leadAsk, openAsk, ThreadMessage, threadMarkdown, threadMessages, threadReplyRows, threadResult, ThreadVoice } from "./thread-read.js";
+export { leadAsk, openAsk, THREAD_SEED_CHARS, ThreadMessage, threadMarkdown, threadMessages, threadReplyRows, threadResult, threadSeed, ThreadVoice } from "./thread-read.js";
 export { inFolder, shellLine, shellQuote } from "./shell-quote.js";
 export {
   DEFAULT_THEME,

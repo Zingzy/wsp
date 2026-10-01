@@ -44,6 +44,7 @@ export const THREAD_WORDS = {
   unpin: "Unpin thread",
   snooze: "Snooze thread",
   keep: "Keep this one",
+  deleteCopies: "Delete copies",
   undoRewind: "Undo rewind",
 } as const;
 

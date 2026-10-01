@@ -776,12 +776,19 @@ describe("the states", () => {
   });
 
   it("draws each refusal as a line under the list, the reader then the reason, and the recipe's missing rows", () => {
-    draw({ misses: recipeMissLines([{ id: "agents/mcp/linear", label: "linear", outcome: "skipped", kind: "server", note: "waited on GitHub CLI" }]) });
+    const left = "gem left out of the copy: GEMINI_API_KEY belongs to the Gemini CLI key, so set it there or give the variable another name";
+    draw({
+      misses: recipeMissLines([
+        { id: "agents/mcp/linear", label: "linear", outcome: "skipped", kind: "server", note: "waited on GitHub CLI" },
+        { id: "left-out/0", label: "~/.claude.json", outcome: "skipped", kind: "file", note: left },
+      ]),
+    });
     const lines = [...document.querySelectorAll<HTMLElement>("[data-refused-line]")].map(l => [l.querySelector("[data-refused-label]")!.textContent, l.querySelector("[data-refused-value]")?.textContent]);
     expect(lines).toEqual([
       ["Skills", "the answer was cut short, so the list is not whole"],
       ["~/.hermes/config.yaml is over 1 MB and was not read", undefined],
       ["linear", "set aside: waited on GitHub CLI"],
+      ["~/.claude.json", `set aside: ${left}`],
     ]);
     // Label and reason in the one sans, sentences both, the label in the foreground.
     for (const l of document.querySelectorAll<HTMLElement>("[data-refused-line]")) expect(l.querySelector("[data-refused-label]")!.className).not.toContain("font-mono");

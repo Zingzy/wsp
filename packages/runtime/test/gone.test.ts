@@ -8,8 +8,8 @@
 // not a vanish.
 import { createServer, type Server, type ServerResponse } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GONE_UNCHECKED, goneRefusal, goneWords, napRefusedLine, NOT_GONE, type EventUnion, type WorkspaceStatus } from "@wsp/protocol";
-import { GONE_READS, NapRefusedError, SolariBackend, type MachineBackend } from "@wsp/engine";
+import { GONE_UNCHECKED, goneRefusal, goneWords, napRefusedLine, NOT_GONE, stopRefusedLine, type EventUnion, type WorkspaceStatus } from "@wsp/protocol";
+import { GONE_READS, NapRefusedError, SolariBackend, StopRefusedError, type MachineBackend } from "@wsp/engine";
 import { backstopMs } from "../src/idle.js";
 import { createRuntime, type RuntimeOptions } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
@@ -1221,6 +1221,33 @@ describe("a nap the provider refuses in words", () => {
       expect(statuses.at(-1)).toMatchObject({ phase: "running", reason: napRefusedLine("Not pausable") });
       expect((await rt.status.list())[0]).toMatchObject({ reason: napRefusedLine("Not pausable"), idleAt: asked + WINDOW });
       expect(warn.mock.calls).toHaveLength(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("a stop the provider refuses while its snapshot fails stands on the row from the first one, in the provider's reading, until a pause lands", async () => {
+    const { rt, backend, statuses } = testRuntime();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+      const m = backend.machines[0]!;
+      const said = "its latest snapshot failed at 2026-10-01T00:40:00Z, and the last that completed was at 2026-09-30T21:02:00Z";
+      const pause = m.pause.bind(m);
+      let refusing = true;
+      m.pause = async () => {
+        if (refusing) throw new StopRefusedError(m.id, said);
+        await pause();
+      };
+      const e = await rt.workspaces.nap(ws.id).catch((err: unknown) => err);
+      expect(e).toBeInstanceOf(StopRefusedError);
+      expect(statuses.at(-1)).toMatchObject({ phase: "running", reason: stopRefusedLine(said) });
+      // The poll builds the row from the record, so the sentence holds past the push that first carried it.
+      expect((await rt.status.list())[0]).toMatchObject({ reason: stopRefusedLine(said) });
+      refusing = false;
+      await rt.workspaces.nap(ws.id);
+      await rt.workspaces.wake(ws.id);
+      expect((await rt.status.list())[0]!.reason).toBeUndefined();
     } finally {
       warn.mockRestore();
     }

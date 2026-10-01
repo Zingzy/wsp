@@ -35,7 +35,7 @@ export const DiffStatLabel = memo(function DiffStatLabel(props: {
   const delInk = tone === "diff" ? "text-error-foreground" : "text-muted-foreground";
   return (
     <>
-      {showParentheses && <span className="text-muted-foreground/70">(</span>}
+      {showParentheses && <span className="text-muted-foreground">(</span>}
       <span
         role="group"
         aria-label={`${additions} additions, ${deletions} deletions`}
@@ -53,7 +53,7 @@ export const DiffStatLabel = memo(function DiffStatLabel(props: {
           -{formatCompactDiffCount(deletions)}
         </span>
       </span>
-      {showParentheses && <span className="text-muted-foreground/70">)</span>}
+      {showParentheses && <span className="text-muted-foreground">)</span>}
     </>
   );
 });

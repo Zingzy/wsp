@@ -591,6 +591,13 @@ describe("a computer's icon", () => {
     expect(listRow("solari").querySelector("[data-computer-glyph]")?.getAttribute("data-brand-mark")).toBe("solari");
   });
 
+  it("a joined Mac draws the model it is off its own report, and a joined computer that names none a server", async () => {
+    useStore.setState({ places: [{ ...here, mac: "mac-mini" }, { ...box, mac: "macbook" }, { ...box, id: "p_3", name: "vps" }], workspaces: [] });
+    await mountComputers(computersApi().api);
+    expect(listRow("p_2").querySelector("[data-computer-glyph]")?.classList.contains("lucide-laptop")).toBe(true);
+    expect(listRow("p_3").querySelector("[data-computer-glyph]")?.classList.contains("lucide-server")).toBe(true);
+  });
+
   it("an iMac reads as a monitor and a MacBook as a laptop whatever it is named, and a pick still wins over the model", async () => {
     useStore.setState({ places: [{ ...here, label: "the studio", mac: "macbook" }], workspaces: [] });
     await mountComputers(computersApi().api);

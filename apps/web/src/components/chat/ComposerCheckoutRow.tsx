@@ -13,8 +13,9 @@
 import { GitBranchIcon } from "lucide-react";
 import { useEffect, type ReactNode } from "react";
 import { DETACHED_HEAD, type PlaceView } from "@wsp/protocol";
-import { useRootStore, useThreadFolder } from "../../files/root";
+import { projectFolderOf, useRootStore, useThreadFolder } from "../../files/root";
 import { useDaemonWire } from "../../files/wire";
+import { useStatus, useWorkspace } from "../../protocol/store";
 import { ComputerGlyph } from "../../settings/ComputerGlyph";
 import { useComputer, useComputerName } from "../../sidebar/workspaceRows";
 import { useBranch, useLinkWord } from "../../terminal/paneWords";
@@ -86,7 +87,12 @@ export function ComposerCheckoutRow({
   const opening = opensThread(thread);
   // A view on a turn reads that turn's folder; a view about to open a thread reads the one the thread will start in.
   const folder = opening ? startFolder : (cwd ?? startFolder);
-  const branch = useBranch(wire, folder, true, linkWord, { running, moved: thread.view.entries.length });
+  // The workspace's own checkout reads as the host last read it, the one fact its tile shows; another folder asks git.
+  const workspace = useWorkspace(workspaceId);
+  const fact = useStatus(workspaceId)?.checkout;
+  const onCheckout = fact !== undefined && workspace !== null && folder === projectFolderOf(workspace);
+  const branch = useBranch(wire, folder, !onCheckout, linkWord, { running, moved: thread.view.entries.length });
+  const head = onCheckout ? fact.branch : branch.kind === "repo" ? branch.head : null;
 
   useEffect(() => {
     if (cwd !== null) follow(workspaceId, cwd);
@@ -100,7 +106,7 @@ export function ComposerCheckoutRow({
       <RowComputer name={computer} place={place} />
       {access}
       {stash}
-      <RowBranch head={branch.kind === "repo" && branch.head !== DETACHED_HEAD ? branch.head : null} why={branch.kind === "repo" ? "detached" : branch.kind} />
+      <RowBranch head={head !== null && head !== DETACHED_HEAD ? head : null} why={onCheckout || branch.kind === "repo" ? "detached" : branch.kind} />
     </ComposerSurface.ContextStrip>
   );
 }

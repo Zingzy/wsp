@@ -178,6 +178,35 @@ describe("a whole file's servers by name", () => {
 });
 
 describe("what a reference writer refuses rather than guess", () => {
+  it("every format: a server entry or server table that is not an object is refused by its key path, its value never said", async () => {
+    const SECRET = "tok_TESTONLY_bare";
+    const values: unknown[] = [`Bearer ${SECRET}`, [SECRET], 42];
+    const cases: [McpFormat, string, string][] = [
+      ...values.flatMap((v): [McpFormat, string, string][] => [
+        [MCP_SERVERS_JSON, JSON.stringify({ mcpServers: { ok: { command: "a" }, linear: v } }), "mcpServers.linear"],
+        [MCP_SERVERS_JSON, JSON.stringify({ projects: { [HOME]: { mcpServers: { linear: v } } } }), `projects.${HOME}.mcpServers.linear`],
+        [GEMINI_SETTINGS_JSON, JSON.stringify({ mcpServers: { linear: v } }), "mcpServers.linear"],
+        [OPENCODE_JSON, JSON.stringify({ mcp: { linear: v } }), "mcp.linear"],
+        [MCP_SERVERS_JSON, JSON.stringify({ mcpServers: v }), "mcpServers"],
+        [MCP_SERVERS_JSON, JSON.stringify({ projects: { [HOME]: { mcpServers: v } } }), `projects.${HOME}.mcpServers`],
+        [OPENCODE_JSON, JSON.stringify({ mcp: v }), "mcp"],
+      ]),
+      [CODEX_TOML, `[mcp_servers]\nlinear = "Bearer ${SECRET}"\n`, "mcp_servers.linear"],
+      [CODEX_TOML, `[mcp_servers]\nlinear = ["${SECRET}"]\n`, "mcp_servers.linear"],
+      [CODEX_TOML, "[mcp_servers]\nlinear = 42\n", "mcp_servers.linear"],
+    ];
+    for (const [format, text, where] of cases) {
+      const said = await serversByName(format, text, new Map(), () => undefined).then(
+        () => "",
+        (e: unknown) => (e instanceof Error ? e.message : String(e)),
+      );
+      expect(said, text).toBe(`${where} is written in a shape wsp does not read, so its values cannot be written by name`);
+    }
+    // A table written as null holds nothing to carry, so the file travels.
+    const empty = JSON.stringify({ mcpServers: null, projects: { [HOME]: { mcpServers: null } } });
+    expect((await serversByName(MCP_SERVERS_JSON, empty, new Map(), () => undefined)).text).toBe(empty);
+  });
+
   it("Codex: every TOML spelling of a server's headers and variables reads as one tree, so none of them travels with its value", async () => {
     const spellings: [string, string, Record<string, string>][] = [
       ['mcp_servers.linear = { url = "https://l.example", http_headers = { Authorization = "Bearer tok_INLINE" } }\n', "tok_INLINE", { WSP_MCP_LINEAR_AUTHORIZATION: "tok_INLINE" }],

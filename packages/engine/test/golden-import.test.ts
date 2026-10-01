@@ -8,7 +8,7 @@ import { describe, expect, it, onTestFinished } from "vitest";
 import { ROOT, sourceFiles } from "../../protocol/test/source-files.js";
 import { describeDiff, diffRecipes, isEmptyDiff } from "../src/golden-diff.js";
 import { withRecordedPins } from "../src/golden-tools.js";
-import { CATALOG_AGENTS, CLAUDE_INSTALL, LOCAL_BIN, ROAD_MODULES, ROAD_STEPS, baseNote, catalogEntry as catalogEntryOf, parseJsonc } from "@wsp/catalog";
+import { CATALOG_AGENTS, CLAUDE_INSTALL, LOCAL_BIN, ROAD_MODULES, ROAD_STEPS, baseNote, catalogEntry as catalogEntryOf, installLine, parseJsonc } from "@wsp/catalog";
 import {
   rowRoad,
   UNMEASURED_ROAD,
@@ -1384,6 +1384,21 @@ describe("the node a recipe's own rows bring", () => {
     expect(res.stdout).toContain("NODE_KEPT v22.23.2");
     expect(res.stderr).not.toContain("curl ran");
   });
+
+  it("installs the row's own Node over a newer one the machine has: Node 22 with npm never leaves Node 24 standing", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-node-step-"));
+    onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
+    writeStub(join(dir, "node"), "#!/bin/sh\necho v24.18.1\n");
+    writeStub(join(dir, "curl"), '#!/bin/sh\necho "curl ran $*" >&2\nexit 1\n');
+    // A guest's arch, not the machine running the test: a Mac answers arm64, which no Linux guest reads.
+    writeStub(join(dir, "uname"), "#!/bin/sh\necho x86_64\n");
+    const row = catalogEntry("node")!;
+    expect(row.name).toBe("Node 22 with npm");
+    const script = [...ROAD_STEPS.script.env, installLine(row)].join("\n");
+    const res = spawnSync("bash", ["-c", script], { encoding: "utf8", env: { HOME: dir, PATH: `${dir}:/usr/bin:/bin` } });
+    expect(res.stdout).not.toContain("NODE_KEPT");
+    expect(res.stderr).toMatch(new RegExp(`curl ran .*https://nodejs.org/dist/v${NODE_RELEASES[22].version}/`));
+  });
 });
 
 describe("agentInstallsFor", () => {
@@ -1466,10 +1481,10 @@ describe("agentInstallsFor", () => {
     expect(a.node).toMatchObject({ floor: 16, agents: ["Codex"] });
   });
 
-  it("the Node script keeps a guest whose major meets the floor, else installs the pinned, sha256-checked release into /usr/local", () => {
+  it("the Node script keeps a guest whose major is between the floor and the pin's, else installs the pinned, sha256-checked release into /usr/local", () => {
     const script = nodeInstallScript(20, NODE_RELEASES[20]);
     expect(script).toContain('echo "NODE_HAVE $node_have"');
-    expect(script).toContain('-ge 20 ]; then echo "NODE_KEPT $node_have"; exit 0; fi');
+    expect(script).toContain('-ge 20 ] && [ "${node_major:-0}" -le 20 ]; then echo "NODE_KEPT $node_have"; exit 0; fi');
     expect(script).toContain(`https://nodejs.org/dist/v${NODE_RELEASES[20].version}/`);
     expect(script).toContain(`node-v${NODE_RELEASES[20].version}-linux-x64.tar.gz sha=${NODE_RELEASES[20].sha256.x86_64}`);
     expect(script).toContain(`node-v${NODE_RELEASES[20].version}-linux-arm64.tar.gz sha=${NODE_RELEASES[20].sha256.aarch64}`);

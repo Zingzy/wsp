@@ -594,7 +594,9 @@ export async function provisionFiles(machine: Machine, o: { home: string; lands:
     });
     say(provisionPackedLine(o.lands.length, { bytes: packed.bytes, ...(packed.files !== undefined ? { files: packed.files } : {}), ...(packed.stood !== undefined ? { stood: packed.stood.length } : {}) }));
     const landed = await landAgentFiles(machine, { home: o.home, tar: packed.tar, lands: o.lands, ...(packed.stood !== undefined ? { stood: packed.stood } : {}), say });
-    return { ...landed, skipped: [...packed.skipped, ...landed.skipped] };
+    // What the pack left out never reaches that computer, so only a row of the job can say why: the app reads rows.
+    const left = packed.skipped.map((s, i): PlaceProvisionRow => ({ id: `left-out/${i}`, label: s.path, outcome: "skipped", kind: "file", note: s.note }));
+    return { ...landed, rows: [...landed.rows, ...left], skipped: [...packed.skipped, ...landed.skipped] };
   } catch (e) {
     const note = (e instanceof Error ? e.message : String(e)).split("\n")[0]!;
     return {

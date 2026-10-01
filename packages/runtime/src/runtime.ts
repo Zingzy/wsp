@@ -34,6 +34,7 @@ import {
   importInto,
   isMissing,
   NapRefusedError,
+  StopRefusedError,
   installScript,
   INSTALL_MS,
   landBundle,
@@ -121,6 +122,8 @@ import {
   TOOLS_PATH,
   DiskSyncError,
   syncDisk,
+  DISK_USE_CMD,
+  diskUsePct,
 } from "@wsp/engine";
 import type { AgentsReport, AgentsSignInEvent, AgentsTarget, DaemonFrame, DaemonResponse, EditorChoice, EditorId, PlaceReport, ServerAdd, ServerAsk, ServerToolsAnswer, SignInLine, SkillAdded, SkillHit, SkillPreview } from "@wsp/protocol";
 import type {
@@ -234,6 +237,7 @@ import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
 import { isNoProvider, isPlaceAbsent, projectStateKey, putFiles, type Copier } from "@wsp/engine";
+import { boxFullLine, DISK_FULL_PCT, diskFullLine, stopRefusedLine, threadMessages, threadSeed, workspaceMemMb } from "@wsp/protocol";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
 import { assertTokenShape, daemonTokenFor, daemonTokenPathOf, rotateDaemonToken } from "./daemon-token.js";
@@ -355,6 +359,9 @@ export interface HarnessStartOptions {
    * takes in a config; the adapter hands them to its CLI the way that CLI takes one. Absent on a turn that carries
    * none, which is every turn a person sends. */
   mcpServers?: Readonly<Record<string, McpServerSpec>>;
+  /** On a resume: the thread so far as text, for an adapter whose CLI holds no session under `resume` to open a new one
+   * with. Asked for only then. */
+  seed?: () => Promise<string>;
   onEvent: (event: AdapterEvent) => void;
 }
 
@@ -755,6 +762,8 @@ interface WorkspaceRecord extends Omit<WorkspaceView, "project"> {
   /** What the host keeps of the workspace's pull request: enough that a merged one reads merged after a restart and is
    * never read again, and nothing more of it is written under the host's folder. */
   pr?: PullRequestRecord;
+  /** The checkout git last gave, so a machine nothing can ask after a restart still shows its branch and counts. */
+  checkout?: Checkout;
   /** What a child keeps of the tree it is in: its merge into its lead, the files a merge stopped on, and why its last
    * push was refused. Absent on a workspace that is nobody's child and on one nothing has happened to yet. */
   tree?: TreeRecord;
@@ -4176,6 +4185,31 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const said = napRefusedOf(entry);
     return said === undefined ? undefined : napRefusedLine(said);
   };
+  /** A stop the provider would not take while the snapshot of the disk fails, by workspace, held like a refused pause:
+   * on the row from the first one, for the machine it was said of, until a pause lands. */
+  const stopRefusals = new Map<string, { machineId: string; said: string }>();
+  const stopRefusedReason = (entry: LiveWorkspace): string | undefined => {
+    const refused = stopRefusals.get(entry.record.id);
+    return refused === undefined || refused.machineId !== entry.machine.id ? undefined : stopRefusedLine(refused.said);
+  };
+  /** How full the disk of a machine whose stop snapshots it read at its last turn's end, by workspace and machine. */
+  const disks = new Map<string, { machineId: string; pct: number }>();
+  const diskReason = (entry: LiveWorkspace): string | undefined => {
+    const read = disks.get(entry.record.id);
+    return read === undefined || read.machineId !== entry.machine.id || !(read.pct > DISK_FULL_PCT) ? undefined : diskFullLine(read.pct);
+  };
+  /** Reads the disk at a turn's end, where the stop snapshots it: what a turn wrote is what fills it, and the nap that
+   * may fail on a full one comes a window after. A row crossing the line either way is pushed at once. */
+  const readDisk = async (entry: LiveWorkspace): Promise<void> => {
+    if (!pauseKeepsDisk(backendFor(entry.record)) || entry.record.phase !== "running") return;
+    const res = await entry.machine.exec(DISK_USE_CMD, { timeoutMs: INLINE_EXEC_MS }).catch(() => undefined);
+    const pct = res?.exitCode === 0 ? diskUsePct(res.stdout) : undefined;
+    if (pct === undefined) return;
+    const was = diskReason(entry);
+    disks.set(entry.record.id, { machineId: entry.machine.id, pct });
+    const now = diskReason(entry);
+    if (now !== was && entry.record.phase === "running") await emitStatus(entry, reachOf(entry), rowReason(entry));
+  };
 
   /** The reach a status pushed for a running machine carries: what the poll last measured, and where it has
    * measured nothing, the claim this kind's road makes. A measurement outranks the claim because the pushes that
@@ -4378,9 +4412,16 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           changed: said.entries.filter(e => e.xy !== "!!").length,
           ...(said.editsUnread === true ? { editsUnread: true } : {}),
           ...(said.countsUnknown === true ? { countsUnknown: true } : {}),
+          ...(said.stashes !== undefined ? { stashes: said.stashes } : {}),
           ...(/^[0-9a-f]{7,40}$/.test(said.branch.oid) ? { head: said.branch.oid } : {}),
           readAt: clock.now(),
         };
+        const { readAt: _was, ...kept } = entry.record.checkout ?? { readAt: 0 };
+        const { readAt: _now, ...read } = entry.checkout;
+        if (JSON.stringify(kept) !== JSON.stringify(read)) {
+          entry.record.checkout = entry.checkout;
+          await persist(entry.record);
+        }
         await statusNow(entry);
       } catch {
         // A copy git could not read keeps the last fact it gave; the time on it says how old it is.
@@ -5147,6 +5188,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // A merged or closed pull request reads as the record kept it and is never read again, a restart included.
     const kept = record.pr;
     if (kept !== undefined && kept.state !== "open") entry.pr = { ...kept, readAt: kept.mergedAt ?? kept.closedAt ?? 0 };
+    if (record.checkout !== undefined) entry.checkout = record.checkout;
     const at = backendFor(record);
     /** A vault carries a workspace's own home onto a fresh fork of an image. A computer that keeps no image forks
      * none: such a workspace is a copy of that computer, its files stand on that computer's own disk, and its
@@ -5336,12 +5378,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             if (napRefusedOf(entry) === undefined) console.warn(`the provider does not pause ${entry.machine.id} of ${id} (${e.said}); an idle nap waits for the backstop and exports no vault until a pause lands`);
             napRefusals.set(id, { machineId: entry.machine.id, said: e.said });
           }
+          if (e instanceof StopRefusedError) stopRefusals.set(id, { machineId: entry.machine.id, said: e.said });
           await emitStatus(entry, reachOf(entry), e instanceof Error ? e.message : String(e));
           throw e;
         }
         // The reason says the machine paused, so it is written once the provider has confirmed that.
         endSessions(id, PAUSED_REASON);
         napRefusals.delete(id);
+        stopRefusals.delete(id);
         entry.record.phase = "napping";
         await persist(entry.record);
         bus.emit({ type: "workspace.napped", workspaceId: id });
@@ -5525,7 +5569,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         // that window, the words unchanged. A refusal that stands was logged once, where the pause met it.
         idle.touch(id);
         const entry = live.get(id);
-        if (entry !== undefined) await emitStatus(entry, reachOf(entry), napRefusedReason(entry) ?? (e instanceof Error ? e.message : String(e)));
+        if (entry !== undefined) await emitStatus(entry, reachOf(entry), napRefusedReason(entry) ?? stopRefusedReason(entry) ?? (e instanceof Error ? e.message : String(e)));
         if (!(e instanceof NapRefusedError)) console.warn(`idle nap of ${id} was answered with ${providerSaid(e)}; a full ${Math.round(windowMs / 60_000)} min window starts over`);
       }
     },
@@ -6253,6 +6297,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // request its own refusal was going to stop.
     const project = recorded;
     const start = parent === undefined ? undefined : await leadStart(parent, n);
+    // Before a byte is copied: the room check the daemon holds a create on a box to, by the same rule and in the same
+    // words, off the memory the copy road reads. A copy here has no awake workspace to stop, so the sentence names the
+    // computer's own work.
+    const room = await local?.copier?.room?.();
+    if (room !== undefined && room.freeMb < workspaceMemMb(room.totalMb)) throw new Error(boxFullLine(workspaceMemMb(room.totalMb), room.freeMb));
     const mine = backendOfKind("local");
     const copy = await moduleOf("local").makeCopy(project, { slug: folderSlug(n), ...(project.base !== undefined ? { base: project.base } : {}) });
     const portBase = portBaseHere();
@@ -8408,7 +8457,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       throw e;
     }
     started.finished.then(
-      () => idle.release(workspaceId),
+      () => {
+        idle.release(workspaceId);
+        void readDisk(entry).catch((e: unknown) => console.warn(`disk of ${workspaceId} not read after its turn: ${e instanceof Error ? e.message : String(e)}`));
+      },
       () => idle.release(workspaceId),
     );
     answerAsk = started.answer?.bind(started);
@@ -8818,6 +8870,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         // The row that says the thread is spoken for also says who its turns tell: a send into the thread reads the
         // opener's notify off its rows, and inside the launch window this is the only one.
         sessions.set(turnId, { view, turnId, launch, ...(notify !== undefined ? { notify } : {}), ...(notifyBy !== undefined ? { notifyBy } : {}), ...(notifyRoad !== undefined ? { notifyRoad } : {}) });
+        bus.emit({ type: "session.held", workspaceId, threadId });
       };
       hold();
       let outcome: SessionStartOutcome = "started";
@@ -8944,6 +8997,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
               ...(title !== undefined ? { title } : {}),
               ...(images.length > 0 ? { images } : {}),
               ...(mcpServers !== undefined ? { mcpServers } : {}),
+              // The thread's earlier turns as its transcript holds them, this one left out since its message follows.
+              ...(resume !== undefined ? { seed: async () => threadSeed(threadMessages((await openTranscript(workspaceId)).filter(e => e.turnId !== turnId), threadId)) } : {}),
               onEvent,
             }),
         });
@@ -10284,12 +10339,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   };
 
-  /** The sizes a place's provider reports for the snapshots named, keyed by id; empty where it has no listing or
-   * would not answer, since a size nobody read is left absent rather than guessed. */
+  /** The sizes a place's provider reports the snapshots named restore to, keyed by id; empty where it has no listing
+   * or would not answer, and none for a snapshot it reports only the stored size of, since a size nobody read is left
+   * absent rather than guessed. */
   const snapshotSizes = async (at: MachineBackend, ids: readonly string[]): Promise<Map<string, number>> => {
     if (ids.length === 0 || !at.capabilities.snapshotListing || at.listSnapshots === undefined) return new Map();
     const rows = await at.listSnapshots().catch(() => []);
-    return new Map(rows.filter(r => ids.includes(r.id)).map(r => [r.id, r.sizeBytes]));
+    return new Map(rows.flatMap(r => (ids.includes(r.id) && r.restoredBytes !== undefined ? [[r.id, r.restoredBytes] as const] : [])));
   };
 
   /** The copy each place holds of this golden, newest version per place, with the record's hash it was built at. */
@@ -10946,6 +11002,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   /** A nap, a pause the poll adopts or a gone verdict moves the phase, and the sentence was about the phase it left. */
   const deleteLine = (e: LiveWorkspace): string | undefined => (e.deleteSaid?.phase === e.record.phase ? e.deleteSaid.line : undefined);
+  /** The one sentence a row carries, the most pressing first: a delete the provider sat on, the wake's own line or the
+   * words it left, a pause or a stop the provider refused, then a disk past the line a stop fails at. */
+  const rowReason = (e: LiveWorkspace): string | undefined => deleteLine(e) ?? e.wakeSaid ?? e.record.wakeRefused ?? napRefusedReason(e) ?? stopRefusedReason(e) ?? diskReason(e);
 
   const prices = createPriceTable({ store, clock, fetch: opts.pricesFetch ?? (async () => ({})) });
   const ledger = createUsageLedger({ store, clock, prices: () => prices.get() });
@@ -11061,8 +11120,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         // The wake's own line while one is in flight, and the words it left behind once its asking ran out: the poll
         // builds every status from the record, so a row that carried only what was pushed would fall silent between
         // two asks and forget the rebuild road at the next tick. A delete the provider sat on outranks both.
-        // A pause the provider refused stays on the row as long as it stands, for the same reason.
-        ...(deleteLine(e) ?? e.wakeSaid ?? e.record.wakeRefused ?? napRefusedReason(e)) !== undefined ? { reason: (deleteLine(e) ?? e.wakeSaid ?? e.record.wakeRefused ?? napRefusedReason(e))! } : {},
+        // A pause or a stop the provider refused stays on the row as long as it stands, for the same reason, and so
+        // does a disk past the line, which is said before a stop can fail on it.
+        ...(rowReason(e) !== undefined ? { reason: rowReason(e)! } : {}),
         ...(e.wakeAsk !== undefined ? { wakeAsk: e.wakeAsk } : {}),
         ...(e.checkout !== undefined ? { checkout: e.checkout } : {}),
         ...(e.pr !== undefined ? { pr: e.pr } : {}),

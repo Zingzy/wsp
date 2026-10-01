@@ -1,4 +1,4 @@
-import { execFailedLine, guestUnusableLine, LINK_RETRY_WINDOW_MS, linkBackoffMs, machineUnreachedLine, napRefusedLine } from "@wsp/protocol";
+import { execFailedLine, guestUnusableLine, LINK_RETRY_WINDOW_MS, linkBackoffMs, machineUnreachedLine, napRefusedLine, stopRefusedLine } from "@wsp/protocol";
 
 export type ErrorKind =
   | "concurrency" | "plan" | "missing" | "conflict"
@@ -88,6 +88,18 @@ export class ExecFailedError extends MachineUnreachableError {
   constructor(machineId: string, said: string, status: number) {
     super(machineId, said, status, execFailedLine(said));
     this.name = "ExecFailedError";
+  }
+}
+
+/** Thrown by a backend whose provider would not stop a machine because the snapshot behind the stop fails: the machine
+ * keeps running, and `said` is the provider's own reading of its snapshots. */
+export class StopRefusedError extends Error {
+  constructor(
+    readonly machineId: string,
+    readonly said: string,
+  ) {
+    super(stopRefusedLine(said));
+    this.name = "StopRefusedError";
   }
 }
 

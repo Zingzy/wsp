@@ -75,6 +75,19 @@ pub const LINK_CLOSE_UPDATING: &str = "place agent restarting on the daemon the 
 pub const LINK_CLOSE_ATTEMPT_OVER: &str = "place link ending its attempt";
 pub const LINK_CLOSE_QUIET: &str = "the host went quiet";
 
+/// What a create is refused with on a computer with no room for another workspace: what the kernel says is free,
+/// what the workspace needs, and the awake one to stop to make room. The Mac's host says the same of its copies.
+pub fn box_full(need_mb: impl std::fmt::Display, free_mb: impl std::fmt::Display, name: &str, quiet_min: impl std::fmt::Display) -> String {
+    format!("this computer has {free_mb} MB free and a workspace needs {need_mb} MB; stop {name}, quiet for {quiet_min} min, to make room")
+}
+
+/// The same refusal where nothing of ours is awake to stop, which is a computer whose own work filled it.
+pub fn box_full_own_work(need_mb: impl std::fmt::Display, free_mb: impl std::fmt::Display) -> String {
+    format!(
+        "this computer has {free_mb} MB free and a workspace needs {need_mb} MB, and no workspace of yours is awake to stop: what is holding it is the computer's own work"
+    )
+}
+
 pub fn unknown_op(op: &str) -> String {
     format!("unknown op: {op}")
 }

@@ -6,9 +6,9 @@ import type { AddressInfo } from "node:net";
 import { hostname } from "node:os";
 import { gunzipSync } from "node:zlib";
 import { catalogProbeCommand, createClaudeAdapter, parseCatalogProbe } from "@wsp/adapter-claude";
-import { execFailedLine, machineUnreachableLine, projectNeedsReaddLine, STATE_SHAPE, type StateShape } from "@wsp/protocol";
+import { diskFullLine, execFailedLine, machineUnreachableLine, projectNeedsReaddLine, STATE_SHAPE, type StateShape } from "@wsp/protocol";
 import { HOST_TOKEN_ENV, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NO_SUCH_TURN, NOTIFY_ME, PERMISSION_ALLOW, RUN_GONE_LINE, SessionEvent, TURN_TOKEN_ENV, foldThreads, notifyLine, stillWorkingLine, threadMessages, threadReplyRows, threadResult, threadWordOf, type AdapterEvent, type ExecStream, type EventUnion, type PermissionAsk, type RecipeDigest, type SessionView, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
-import { BUILDER_IDLE_MS, DISK_SYNC_CMD, ExecFailedError, GuestUnusableError, KILL_ASKS, MachineUnreachableError, TOOLS_PATH, type ExecResult, type GoldenDelta, type GoldenImport } from "@wsp/engine";
+import { BUILDER_IDLE_MS, DISK_SYNC_CMD, DISK_USE_CMD, ExecFailedError, GuestUnusableError, KILL_ASKS, MachineUnreachableError, TOOLS_PATH, type ExecResult, type GoldenDelta, type GoldenImport } from "@wsp/engine";
 import { DAEMON_TOKEN_PATH } from "@wsp/protocol";
 import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET, daemonTokenFor, rotateDaemonTokenScript } from "../src/daemon-token.js";
 import { writeDaemonRootsScript } from "../src/daemon-roots.js";
@@ -718,10 +718,54 @@ describe("runtime session history", () => {
     expect(new Set(history.slice(8).map(e => e.threadId)).size).toBe(1);
     expect(history[8]!.threadId).not.toBe(history[0]!.threadId);
     expect(threads(history)).toBe(2);
-    expect(live.flatMap(e => ("threadId" in e ? [e.threadId] : []))).toEqual(history.map(e => e.threadId));
+    expect(live.flatMap(e => ("threadId" in e && e.type !== "session.held" ? [e.threadId] : []))).toEqual(history.map(e => e.threadId));
     // The session rows carry the same ids, so a sidebar can fold rows into the threads the transcript folds into;
     // the resumed turn shares the first one's local id and so its row.
     expect((await rt.sessions.list(ws.id)).map(s => s.threadId)).toEqual([history[0]!.threadId, history[8]!.threadId]);
+    await rt.close();
+  });
+
+  it("hands a resume the thread so far for a new session to open with, the turn being sent left out, and a fresh start nothing", async () => {
+    const seeds: HarnessStartOptions["seed"][] = [];
+    const inner = threaded();
+    const claude: HarnessAdapterFactory = ctx => {
+      const a = inner(ctx);
+      return { ...a, start: o => (seeds.push(o.seed), a.start(o)) };
+    };
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude } });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+    const first = await rt.sessions.start(ws.id, { prompt: "fix the login page" });
+    await first.finished;
+    await (await rt.sessions.start(ws.id, { prompt: "now add a test", thread: first.view().threadId! })).finished;
+    expect(seeds.map(seed => seed !== undefined)).toEqual([false, true]);
+    const text = await seeds[1]!();
+    expect(text).toContain("fix the login page");
+    expect(text).not.toContain("now add a test");
+    await rt.close();
+  });
+
+  it("reads the disk at a turn's end where a stop snapshots it, and a row says so only once use passes 90%", async () => {
+    const backend = stubBackend();
+    backend.capabilities.pauseMode = "disk";
+    // Used and free in kB, as df prints them: 89.6%, 90.0% and 90.1% used.
+    const readings = ["896000 104000", "900000 100000", "901000 99000"];
+    const answer = backend.execImpl;
+    let reads = 0;
+    backend.execImpl = (m, cmd) => (cmd === DISK_USE_CMD ? { exitCode: 0, stdout: `${readings[reads++]}\n`, stderr: "" } : answer(m, cmd));
+    const statuses: WorkspaceStatus[] = [];
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: threaded() } });
+    rt.events.on("workspace.status", e => void (e.type === "workspace.status" && statuses.push(e.status)));
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+    for (const n of [1, 2]) {
+      await (await rt.sessions.start(ws.id, { prompt: `build ${n}` })).finished;
+      await until(async () => reads === n, 2_000);
+      await new Promise(r => setTimeout(r, 20));
+      // Neither just under the line nor on it says anything.
+      expect((await rt.status.list())[0]!.reason).toBeUndefined();
+    }
+    await (await rt.sessions.start(ws.id, { prompt: "build 3" })).finished;
+    await until(async () => statuses.some(s => s.reason === diskFullLine(90.1)), 2_000);
+    expect((await rt.status.list())[0]!.reason).toMatch(/^its disk is 90\.1% full: /);
     await rt.close();
   });
 

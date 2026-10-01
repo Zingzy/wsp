@@ -302,7 +302,7 @@ export function stubBackend(mark?: string): StubBackend {
           const id = backend.namedSnapshots === true ? name : nth === 1 ? `snap_${at}${name}` : `snap_${at}${name}-${nth}`;
           const held = snapshots.findIndex(r => r.id === id);
           if (held >= 0) snapshots.splice(held, 1);
-          snapshots.push({ id, name, sizeBytes: backend.snapshotBytes, createdAt: new Date().toISOString() });
+          snapshots.push({ id, name, sizeBytes: backend.snapshotBytes, restoredBytes: backend.snapshotBytes, createdAt: new Date().toISOString() });
           return id;
         },
         async pause(): Promise<void> {

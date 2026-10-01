@@ -201,7 +201,7 @@ class FakeMachine implements Machine {
   }
 
   async snapshot(name: string): Promise<string> {
-    const row = { id: id("fksnap"), name, sizeBytes: 8 * 1024 ** 3, createdAt: new Date().toISOString() };
+    const row = { id: id("fksnap"), name, sizeBytes: 8 * 1024 ** 3, restoredBytes: 8 * 1024 ** 3, createdAt: new Date().toISOString() };
     const held = this.records.read();
     this.records.write({ ...held, snapshots: [...held.snapshots, row] });
     return row.id;
