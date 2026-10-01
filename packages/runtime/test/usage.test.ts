@@ -97,6 +97,15 @@ describe("a turn's end in the ledger", () => {
   });
 });
 
+describe("what an account draws right now", () => {
+  it("reads off the calls its running turns report, on the account each turn runs on", async () => {
+    const { rt, ws } = await runtimeWith(turning({ status: "completed", text: "done", tokens: { input: 10, output: 1 } }, sessionId => [{ type: "limit", sessionId, limit: window }, { type: "turn.usage", sessionId, tokens: 30_000 }, { type: "turn.usage", sessionId, tokens: 15_000 }]));
+    await (await rt.sessions.start(ws.id, { prompt: "go" })).finished;
+    const { accounts } = await rt.usage.accounts();
+    expect(accounts.find(a => a.key === "claude:vault-token")?.burn).toEqual({ tokensPerMinute: 3_000, threads: 1 });
+  });
+});
+
 describe("an account's limits", () => {
   it("keeps the reading a turn printed under the account the turn ran on, and the ledger's answer carries none of it", async () => {
     const { rt, ws } = await runtimeWith(turning({ status: "completed", text: "done", tokens: { input: 10, output: 1 } }, sessionId => [{ type: "limit", sessionId, limit: window }]));

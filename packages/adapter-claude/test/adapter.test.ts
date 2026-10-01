@@ -233,10 +233,14 @@ describe("ClaudeAdapter over the recorded fixture", () => {
     expect(events.map((e) => e.type)).toEqual([
       "session.start",
       "limit",
+      "turn.usage",
+      "turn.delta",
+      "turn.usage",
       "turn.delta",
       "turn.delta",
+      "turn.usage",
       "turn.delta",
-      "turn.delta",
+      "turn.usage",
       "turn.delta",
       "turn.anchor",
       "turn.done",
@@ -1520,6 +1524,25 @@ describe("what a turn cost, off totals the CLI keeps for the whole session", () 
     expect(done.models).toEqual([
       { model: "claude-opus-5-5[1m]", tokens: { input: 21_005, output: 300, cached: 20_000, cacheWrite: 1_000, reasoning: 40 }, costUsd: 2.5 },
       { model: "claude-sonnet-5", tokens: { input: 3_507, output: 70, cached: 3_000, cacheWrite: 500, reasoning: 0 }, costUsd: 0.75 },
+    ]);
+  });
+
+  it("says what each model call drew once per message, a subagent's included, though every block of a message repeats its usage", async () => {
+    const said = (id: string, usage: Record<string, number>, parent: string | null = null) =>
+      JSON.stringify({ type: "assistant", message: { id, role: "assistant", content: [{ type: "text", text: "x" }], usage }, parent_tool_use_id: parent, session_id: FIXTURE_SESSION_ID });
+    const exec = scriptedExec([
+      init,
+      said("msg_1", { input_tokens: 5, cache_read_input_tokens: 1_000, cache_creation_input_tokens: 200, output_tokens: 40 }),
+      said("msg_1", { input_tokens: 5, cache_read_input_tokens: 1_000, cache_creation_input_tokens: 200, output_tokens: 40 }),
+      said("msg_2", { input_tokens: 3, output_tokens: 7 }, "toolu_1"),
+      result(1),
+    ]);
+    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
+    const { events, onEvent } = collect();
+    await adapter.start({ prompt: "x", onEvent }).finished;
+    expect(events.filter(e => e.type === "turn.usage")).toEqual([
+      { type: "turn.usage", sessionId: FIXTURE_SESSION_ID, tokens: 1_245 },
+      { type: "turn.usage", sessionId: FIXTURE_SESSION_ID, tokens: 10 },
     ]);
   });
 

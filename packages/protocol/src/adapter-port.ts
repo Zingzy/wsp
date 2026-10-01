@@ -94,6 +94,13 @@ export type AdapterEvent =
       sessionId: string;
       limit: HarnessLimit;
     }
+  | {
+      /** The tokens one model call of this turn drew, a subagent's included, sent as the harness reports each call: what
+       * the account it runs on is drawing right now. Read by the runtime alone. */
+      type: "turn.usage";
+      sessionId: string;
+      tokens: number;
+    }
   | { type: "permission.ask"; sessionId: string; ask: PermissionAsk }
   | {
       type: "permission.close";

@@ -648,6 +648,8 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     let initModel: string | undefined;
     /** The session's running totals as its file saved them before this turn, which every result's totals start from. */
     let saved: SavedUse | undefined;
+    /** The messages whose call was already reported as drawn: every block of a message repeats the message's usage. */
+    const drawn = new Set<string>();
     /** One line per task that finished after the held reply, in the order the CLI reported them. */
     const finishedAfter: string[] = [];
     /** Running while a held reply waits out the CLI's silence: its tasks are done, and this is the window it has to
@@ -829,6 +831,13 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
           if (heldReply === undefined && !sawResult && drainedNotice(event)) continue;
           const compacted = compactedTo(event);
           if (compacted !== undefined) heldContext = compacted;
+          const call = str(event.type) === "assistant" && event.is_api_error_message !== true ? rec(event.message) : undefined;
+          const callUsage = rec(call?.usage);
+          const callId = str(call?.id);
+          if (callUsage !== undefined && callId !== undefined && !drawn.has(callId)) {
+            drawn.add(callId);
+            onEvent({ type: "turn.usage", sessionId: claudeSessionId, tokens: heldTokens(callUsage) });
+          }
           const usage = str(event.type) === "assistant" && str(event.parent_tool_use_id) === undefined ? rec(rec(event.message)?.usage) : undefined;
           if (usage !== undefined && event.is_api_error_message !== true) heldContext = heldTokens(usage);
           const cause = apiErrorCause(event);
