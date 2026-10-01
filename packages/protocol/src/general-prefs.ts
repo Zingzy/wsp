@@ -42,21 +42,8 @@ export const ON_QUIT_CHOICES = ["ask", "keep", "stop"] as const;
 export const OnQuit = z.enum(ON_QUIT_CHOICES);
 export type OnQuit = z.infer<typeof OnQuit>;
 
-/** The record's General fields, each defaulted so a record from a host older than the field parses on the wire. */
-export const GENERAL_FIELDS = {
-  sendWith: SendKey.default("enter"),
-  midTurn: MidTurn.default("queue"),
-  notifyNeeds: NotifyChoice.default("notify-sound"),
-  notifyDone: NotifyChoice.default("off"),
-  planAlerts: z.boolean().default(true),
-  settleAfter: SettleAfter.default("2h"),
-  askDelete: z.boolean().default(true),
-  onQuit: OnQuit.default("ask"),
-};
-
-export type GeneralPreferences = { [K in keyof typeof GENERAL_FIELDS]: z.infer<(typeof GENERAL_FIELDS)[K]> };
-
-export const GENERAL_DEFAULTS: GeneralPreferences = {
+/** The record's General fields with their defaults, the one list both the schema and the defaults are read off. */
+export const GENERAL_DEFAULTS = {
   sendWith: "enter",
   midTurn: "queue",
   notifyNeeds: "notify-sound",
@@ -65,7 +52,21 @@ export const GENERAL_DEFAULTS: GeneralPreferences = {
   settleAfter: "2h",
   askDelete: true,
   onQuit: "ask",
+} as const satisfies Record<string, unknown>;
+
+/** Each defaulted, so a record from a host older than the field parses on the wire. */
+export const GENERAL_FIELDS = {
+  sendWith: SendKey.default(GENERAL_DEFAULTS.sendWith),
+  midTurn: MidTurn.default(GENERAL_DEFAULTS.midTurn),
+  notifyNeeds: NotifyChoice.default(GENERAL_DEFAULTS.notifyNeeds),
+  notifyDone: NotifyChoice.default(GENERAL_DEFAULTS.notifyDone),
+  planAlerts: z.boolean().default(GENERAL_DEFAULTS.planAlerts),
+  settleAfter: SettleAfter.default(GENERAL_DEFAULTS.settleAfter),
+  askDelete: z.boolean().default(GENERAL_DEFAULTS.askDelete),
+  onQuit: OnQuit.default(GENERAL_DEFAULTS.onQuit),
 };
+
+export type GeneralPreferences = { [K in keyof typeof GENERAL_FIELDS]: z.infer<(typeof GENERAL_FIELDS)[K]> };
 
 /** The General fields with a patch's over them, the part of the record's one merge rule these fields take. */
 export function patchedGeneral(current: GeneralPreferences, patch: Partial<GeneralPreferences>): GeneralPreferences {

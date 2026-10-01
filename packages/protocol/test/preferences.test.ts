@@ -2,7 +2,7 @@
 // The preferences record every client reads off the host: what a stored record
 // parses to, how a patch lands on it, and the wire shapes that carry both.
 import { describe, expect, it } from "vitest";
-import { DEFAULT_PREFERENCES, EventUnion, LABS_ENV, NOTIFY_CHOICES, notifyBy, Preferences, PreferencesPatch, RuntimeRequest, applyPreferencesPatch, fmtPx, labsFromEnv, preferencesFrom } from "../src/index.js";
+import { DEFAULT_PREFERENCES, EventUnion, GENERAL_DEFAULTS, LABS_ENV, NOTIFY_CHOICES, notifyBy, Preferences, PreferencesPatch, RuntimeRequest, applyPreferencesPatch, fmtPx, labsFromEnv, preferencesFrom } from "../src/index.js";
 
 describe("the preferences record", () => {
   it("nothing stored, a record from an older host and a corrupt one all read as the defaults", () => {
@@ -246,6 +246,10 @@ describe("the General choices on the preferences record", () => {
 
   it("each notification choice shows, sounds, both, or says nothing", () => {
     expect(NOTIFY_CHOICES.map(choice => notifyBy(choice))).toEqual([undefined, { show: true, sound: false }, { show: false, sound: true }, { show: true, sound: true }]);
+  });
+
+  it("the defaults the schema fills in are the defaults the record starts at, from one list", () => {
+    expect(Preferences.parse({ ...DEFAULT_PREFERENCES, ...Object.fromEntries(Object.keys(GENERAL_DEFAULTS).map(k => [k, undefined])) })).toEqual(DEFAULT_PREFERENCES);
   });
 
   it("a choice off its table is refused", () => {
