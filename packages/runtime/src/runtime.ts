@@ -8372,7 +8372,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           return;
         }
         case "turn.usage":
-          burn.add({ account: usageAccountOf(entry, view.harness, turnAccount).key, threadId, tokens: event.tokens });
+          burn.add({ account: usageAccountOf(entry, view.harness, turnAccount).key, threadId, tokens: event.tokens, ...(event.at !== undefined ? { at: event.at } : {}) });
           return;
         case "turn.plan":
           record({ type: "session.plan", workspaceId, sessionId, turnId, threadId, ...(event.steps !== undefined ? { steps: event.steps } : {}), ...(event.text !== undefined ? { text: event.text } : {}) });

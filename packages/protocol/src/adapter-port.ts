@@ -100,6 +100,9 @@ export type AdapterEvent =
       type: "turn.usage";
       sessionId: string;
       tokens: number;
+      /** When the call was made, ms epoch, as the harness stamped it; a run re-read after a host restart replays its
+       * old calls, and this keeps each at its own moment. */
+      at?: number;
     }
   | { type: "permission.ask"; sessionId: string; ask: PermissionAsk }
   | {

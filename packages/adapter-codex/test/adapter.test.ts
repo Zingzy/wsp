@@ -194,6 +194,13 @@ describe("a Codex turn's tokens and plan on the app server", () => {
     ]);
   });
 
+  it("carries the moment the server says it sent each call's figure, so a re-read run files old calls at their own time", async () => {
+    const stamped = usage([50_000, 900], [20_000, 100]).replace(/}$/, `,"emittedAtMs":1790521480354}`);
+    const { events, onEvent } = collect();
+    await adapterOver(launcher(scripted([stamped, agentMessage("m1", "done"), completed("completed")]))).start({ prompt: "again", resume: THREAD_ID, onEvent }).finished;
+    expect(events.filter(e => e.type === "turn.usage")).toEqual([{ type: "turn.usage", sessionId: THREAD_ID, tokens: 20_100, at: 1790521480354 }]);
+  });
+
   it("reads the plan the server updates as the turn's steps, the step under way as working", async () => {
     const plan = `{"method":"turn/plan/updated","params":{"threadId":"${THREAD_ID}","turnId":"${TURN_ID}","explanation":null,"plan":[{"step":"read","status":"completed"},{"step":"write","status":"inProgress"},{"step":"ship","status":"pending"}]}}`;
     const { events, onEvent } = collect();

@@ -104,6 +104,14 @@ describe("what an account draws right now", () => {
     const { accounts } = await rt.usage.accounts();
     expect(accounts.find(a => a.key === "claude:vault-token")?.burn).toEqual({ tokensPerMinute: 3_000, threads: 1 });
   });
+
+  it("files each call at the moment it was made, so a run re-read after a host restart does not count its old calls again", async () => {
+    const old = Date.now() - 20 * 60_000;
+    const { rt, ws } = await runtimeWith(turning({ status: "completed", text: "done", tokens: { input: 10, output: 1 } }, sessionId => [{ type: "limit", sessionId, limit: window }, { type: "turn.usage", sessionId, tokens: 30_000, at: old }, { type: "turn.usage", sessionId, tokens: 1_500, at: Date.now() - 60_000 }]));
+    await (await rt.sessions.start(ws.id, { prompt: "go" })).finished;
+    const { accounts } = await rt.usage.accounts();
+    expect(accounts.find(a => a.key === "claude:vault-token")?.burn).toEqual({ tokensPerMinute: 100, threads: 1 });
+  });
 });
 
 describe("an account's limits", () => {

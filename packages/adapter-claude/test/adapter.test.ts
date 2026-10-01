@@ -1473,7 +1473,7 @@ describe("what a turn cost, off totals the CLI keeps for the whole session", () 
 
   it("says what each model call drew once per message, a subagent's included, though every block of a message repeats its usage", async () => {
     const said = (id: string, usage: Record<string, number>, parent: string | null = null) =>
-      JSON.stringify({ type: "assistant", message: { id, role: "assistant", content: [{ type: "text", text: "x" }], usage }, parent_tool_use_id: parent, session_id: FIXTURE_SESSION_ID });
+      JSON.stringify({ type: "assistant", message: { id, role: "assistant", content: [{ type: "text", text: "x" }], usage }, parent_tool_use_id: parent, session_id: FIXTURE_SESSION_ID, timestamp: `2026-10-01T10:00:0${id.slice(-1)}.000Z` });
     const exec = scriptedExec([
       init,
       said("msg_1", { input_tokens: 5, cache_read_input_tokens: 1_000, cache_creation_input_tokens: 200, output_tokens: 40 }),
@@ -1485,8 +1485,8 @@ describe("what a turn cost, off totals the CLI keeps for the whole session", () 
     const { events, onEvent } = collect();
     await adapter.start({ prompt: "x", onEvent }).finished;
     expect(events.filter(e => e.type === "turn.usage")).toEqual([
-      { type: "turn.usage", sessionId: FIXTURE_SESSION_ID, tokens: 1_245 },
-      { type: "turn.usage", sessionId: FIXTURE_SESSION_ID, tokens: 10 },
+      { type: "turn.usage", sessionId: FIXTURE_SESSION_ID, tokens: 1_245, at: Date.parse("2026-10-01T10:00:01.000Z") },
+      { type: "turn.usage", sessionId: FIXTURE_SESSION_ID, tokens: 10, at: Date.parse("2026-10-01T10:00:02.000Z") },
     ]);
   });
 

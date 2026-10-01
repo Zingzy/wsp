@@ -830,7 +830,8 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
           const callId = str(call?.id);
           if (callUsage !== undefined && callId !== undefined && !drawn.has(callId)) {
             drawn.add(callId);
-            onEvent({ type: "turn.usage", sessionId: claudeSessionId, tokens: heldTokens(callUsage) });
+            const at = typeof event.timestamp === "string" ? Date.parse(event.timestamp) : NaN;
+            onEvent({ type: "turn.usage", sessionId: claudeSessionId, tokens: heldTokens(callUsage), ...(Number.isFinite(at) ? { at } : {}) });
           }
           const usage = str(event.type) === "assistant" && str(event.parent_tool_use_id) === undefined ? rec(rec(event.message)?.usage) : undefined;
           if (usage !== undefined && event.is_api_error_message !== true) heldContext = heldTokens(usage);

@@ -421,12 +421,13 @@ export const BURN_WINDOW_MS = 15 * 60_000;
 
 /** What each account's running threads drew over the last fifteen minutes, off the calls their turns reported. Kept in
  * memory alone: a reading this old is gone by the time a host has restarted. */
-export function createBurn(clock: Clock): { add(o: { account: string; threadId: string; tokens: number }): void; of(account: string): AccountRow["burn"] } {
+export function createBurn(clock: Clock): { add(o: { account: string; threadId: string; tokens: number; at?: number }): void; of(account: string): AccountRow["burn"] } {
   let calls: { at: number; account: string; threadId: string; tokens: number }[] = [];
   const recent = () => (calls = calls.filter(c => c.at > clock.now() - BURN_WINDOW_MS));
   return {
-    add: o => {
-      recent().push({ at: clock.now(), ...o });
+    add: ({ at, ...o }) => {
+      // A machine's clock ahead of this one's never files a call in the future.
+      recent().push({ at: Math.min(at ?? clock.now(), clock.now()), ...o });
     },
     of: account => {
       const on = recent().filter(c => c.account === account);
