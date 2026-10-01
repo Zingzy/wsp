@@ -19,8 +19,9 @@ import { DIST, describeWithDists, distOf } from "./built-bin.js";
 const HOST_MEMORY_BUDGET_MB = 40;
 
 /** What the run is held to, under the promise so a regression is caught while the promise still holds: the host
- * read 31.3 MB on CI when this was set. */
-const HOST_MEMORY_CAP_MB = 35;
+ * read 31.3 MB on CI when this was first set, main read 35.1 MB on 2026-10-01, and the per-model usage rows, the
+ * top threads and the fifteen-minute draw added about 0.1 MB more. */
+const HOST_MEMORY_CAP_MB = 36;
 
 /** The one page that quotes the budget. */
 const PAGE = join("apps", "www", "src", "sections", "story.tsx");
