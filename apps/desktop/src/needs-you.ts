@@ -42,6 +42,17 @@ export function sayOutside(line: OutsideLine, win: NoticeWindow, notifier: Notif
   return true;
 }
 
+/** What the notification Settings plays says: it stands for every sound a finished turn or a prompt makes. */
+export const SOUND_SAMPLE = { title: "wsp", body: "A finished turn sounds like this." } as const;
+
+/** Shows that one notification with its sound, whatever has focus, since the person asked to hear it. True where one
+ * was shown. */
+export function soundSample(notifier: Notifier): boolean {
+  if (!notifier.supported()) return false;
+  notifier.make({ ...SOUND_SAMPLE, silent: false }).show();
+  return true;
+}
+
 /** The part of Electron's app the badge needs. */
 export interface Dock {
   setBadgeCount(count: number): void;
