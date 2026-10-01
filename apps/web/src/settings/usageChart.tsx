@@ -25,34 +25,41 @@ export const CHART_HEIGHT = 300;
 const HEIGHT = CHART_HEIGHT;
 const PAD = 6;
 
-function paintDither(canvas: HTMLCanvasElement, points: readonly number[], top: number, ink: string): void {
+/** The dither under each line, biggest first: the lead at full density and each line after it lighter, each on its
+ * own phase of the pattern so two lines never take the same cell and an overlap reads as both inks. */
+function paintDither(canvas: HTMLCanvasElement, fills: ReadonlyArray<{ points: readonly number[]; ink: string }>, top: number): void {
   const dpr = window.devicePixelRatio || 1;
   const w = canvas.clientWidth;
   const h = canvas.clientHeight;
   canvas.width = Math.round(w * dpr);
   canvas.height = Math.round(h * dpr);
   const ctx = canvas.getContext("2d");
-  if (ctx === null || w === 0 || points.length < 2 || top === 0) return;
+  if (ctx === null || w === 0 || top === 0) return;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
-  const n = points.length;
   const y = (v: number): number => h - PAD - (v / top) * (h - PAD * 2);
-  const at = (px: number): number => {
-    const t = (px / w) * (n - 1);
-    const i = Math.min(n - 2, Math.floor(t));
-    const f = t - i;
-    return points[i]! * (1 - f) + points[i + 1]! * f;
-  };
-  ctx.fillStyle = ink;
-  ctx.globalAlpha = 0.5;
-  for (let px = 0; px < w; px += CELL) {
-    const line = y(at(px));
-    const floor = h - PAD;
-    for (let py = Math.ceil(line); py < floor; py += CELL) {
-      const depth = 1 - (py - line) / (floor - line + 1);
-      if (depth * 0.55 > BAYER[((py / CELL) & 3) * 4 + ((px / CELL) & 3)]!) ctx.fillRect(px, py, CELL - 0.6, CELL - 0.6);
+  const floor = h - PAD;
+  fills.forEach(({ points, ink }, rank) => {
+    const n = points.length;
+    if (n < 2) return;
+    const at = (px: number): number => {
+      const t = (px / w) * (n - 1);
+      const i = Math.min(n - 2, Math.floor(t));
+      const f = t - i;
+      return points[i]! * (1 - f) + points[i + 1]! * f;
+    };
+    const density = rank === 0 ? 0.55 : 0.32;
+    const phase = rank * 5;
+    ctx.fillStyle = ink;
+    ctx.globalAlpha = rank === 0 ? 0.5 : 0.45;
+    for (let px = 0; px < w; px += CELL) {
+      const line = y(at(px));
+      for (let py = Math.ceil(line); py < floor; py += CELL) {
+        const depth = 1 - (py - line) / (floor - line + 1);
+        if (depth * density > BAYER[((((py / CELL) & 3) * 4 + ((px / CELL) & 3)) + phase) % 16]!) ctx.fillRect(px, py, CELL - 0.6, CELL - 0.6);
+      }
     }
-  }
+  });
 }
 
 /** The axis's top: the smallest round figure at or over the largest point, so the four gridlines read as round
@@ -123,7 +130,6 @@ function useThemeTick(): number {
 export function UsageChart({ steps, lines, stepWord, ticks }: { steps: readonly number[]; lines: readonly ChartLine[]; stepWord: (t: number) => string; ticks: ReadonlyArray<{ at: number; word: string }> }) {
   const [hovered, setHovered] = useState<number | null>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
-  const leadInk = useRef<SVGGElement>(null);
   const themeTick = useThemeTick();
   const n = steps.length;
   const top = niceTop(Math.max(0, ...lines.flatMap(line => line.points)));
@@ -136,11 +142,18 @@ export function UsageChart({ steps, lines, stepWord, ticks }: { steps: readonly 
   const scale = frame.top;
   const y = (v: number): number => HEIGHT - PAD - (scale === 0 ? 0 : (v / scale) * (HEIGHT - PAD * 2));
 
-  const painted = useRef({ points: lead === undefined ? [] : pointsOf(lead), scale });
-  painted.current = { points: lead === undefined ? [] : pointsOf(lead), scale };
+  const inks = useRef(new Map<string, SVGGElement>());
+  const byTotal = [...lines].sort((a, b) => total(b) - total(a));
+  const painted = useRef({ fills: byTotal, scale });
+  painted.current = { fills: byTotal, scale };
   const paint = (): void => {
     const el = canvas.current;
-    if (el !== null && lead !== undefined) paintDither(el, painted.current.points, painted.current.scale, leadInk.current === null ? "currentColor" : getComputedStyle(leadInk.current).color);
+    if (el === null) return;
+    const fills = painted.current.fills.map(line => {
+      const g = inks.current.get(line.key);
+      return { points: frame.points.get(line.key) ?? line.points, ink: g === undefined ? "currentColor" : getComputedStyle(g).color };
+    });
+    paintDither(el, fills, painted.current.scale);
   };
   useEffect(paint, [frame, themeTick]);
   useEffect(() => {
@@ -176,7 +189,13 @@ export function UsageChart({ steps, lines, stepWord, ticks }: { steps: readonly 
         <canvas ref={canvas} aria-hidden className="absolute inset-0 size-full" />
         <svg role="img" aria-label="Tokens over the range" className="absolute inset-0 size-full overflow-visible" viewBox={`0 0 100 ${HEIGHT}`} preserveAspectRatio="none">
           {[...lines].reverse().map(line => (
-            <g key={line.key} ref={line === lead ? leadInk : undefined} data-line={line.key} className={line.ink.className} style={line.ink.style}>
+            <g
+              key={line.key}
+              ref={el => {
+                if (el === null) inks.current.delete(line.key);
+                else inks.current.set(line.key, el);
+              }}
+              data-line={line.key} className={line.ink.className} style={line.ink.style}>
               <polyline points={pointsOf(line).map((v, i) => `${x(i)},${y(v)}`).join(" ")} fill="none" stroke="currentColor" strokeWidth={line === lead ? 1.75 : 1.4} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
             </g>
           ))}

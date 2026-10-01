@@ -6,7 +6,7 @@
 // are two ledgers and are never summed.
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { agentMark, agentName } from "@wsp/catalog";
-import { ArrowUpRightIcon, ChartLineIcon, GaugeIcon } from "lucide-react";
+import { ArrowUpRightIcon, BoxIcon, ChartLineIcon, CircleDashedIcon, GaugeIcon, MonitorIcon, UserRoundIcon } from "lucide-react";
 import { USAGE_RANGES, USAGE_SPLITS, USAGE_WORDS, accountState, accountWords, fmtCost, fmtTokens, listWords, logsLine, resetsWord, type AccountRow, type AccountsAnswer, type LimitKind, type UsageRange, type UsageSplit, type UsedAnswer, type UsedRow } from "@wsp/protocol";
 import { HarnessMark } from "../components/chat/HarnessMark.js";
 import { SegmentedControl } from "../components/ui/segmented-control.js";
@@ -356,8 +356,13 @@ function splitGlyph(split: UsageSplit, key: string, ctx: SettingsContext): React
     if (place !== undefined) return <ComputerGlyph place={place} className="size-4 text-foreground/80" />;
   }
   if (split === "project" && ctx.projects.some(p => p.id === key)) return <ProjectGlyph projectId={key} />;
-  return null;
+  // A value with no glyph of its own still takes a frame, so every row's name starts at one edge.
+  const Fallback = FALLBACK_GLYPHS[split as keyof typeof FALLBACK_GLYPHS];
+  return Fallback === undefined ? null : <Fallback aria-hidden className="size-4 text-muted-foreground" />;
 }
+
+/** The glyph a split value with none of its own takes: use filed under no project reads as none. */
+const FALLBACK_GLYPHS = { project: CircleDashedIcon, computer: MonitorIcon, account: UserRoundIcon, model: BoxIcon, agent: BoxIcon };
 
 const sumOf = (rows: readonly UsedRow[], pick: (row: UsedRow) => number | undefined): number | undefined => {
   const picked = rows.map(pick).filter((n): n is number => n !== undefined);
