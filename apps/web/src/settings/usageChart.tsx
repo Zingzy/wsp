@@ -9,6 +9,7 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { fmtTokens } from "@wsp/protocol";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
 import { cn } from "../lib/utils.js";
+import { DigitRoll } from "../components/ui/digit-roll.js";
 
 export interface ChartLine {
   readonly key: string;
@@ -63,6 +64,51 @@ function niceTop(max: number): number {
   return step * magnitude;
 }
 
+const TWEEN_MS = 520;
+const reducedMotion = (): boolean => typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+
+interface Frame {
+  readonly points: ReadonlyMap<string, readonly number[]>;
+  readonly top: number;
+}
+
+/** The lines and the scale as drawn this frame: each change eases from wherever the last one stood, a line new to
+ * the chart rising from the baseline, a range of another length read off the old one at the same share of its way. */
+function useTween(lines: readonly ChartLine[], top: number, dataKey: string): Frame {
+  const target = (): Frame => ({ points: new Map(lines.map(line => [line.key, line.points])), top });
+  const [frame, setFrame] = useState<Frame>(() => ({ points: new Map(lines.map(line => [line.key, line.points.map(() => 0)])), top }));
+  const drawn = useRef(frame);
+  drawn.current = frame;
+  useEffect(() => {
+    const to = target();
+    if (reducedMotion()) return setFrame(to);
+    const from = drawn.current;
+    const start = performance.now();
+    let raf = 0;
+    const step = (now: number): void => {
+      const k = Math.min(1, (now - start) / TWEEN_MS);
+      const e = 1 - (1 - k) ** 3;
+      const points = new Map<string, number[]>();
+      for (const [key, end] of to.points) {
+        const old = from.points.get(key);
+        points.set(
+          key,
+          end.map((v, i) => {
+            const o = old === undefined || old.length === 0 ? 0 : (old[Math.round((i * (old.length - 1)) / Math.max(1, end.length - 1))] ?? 0);
+            return o + (v - o) * e;
+          }),
+        );
+      }
+      setFrame({ points, top: from.top === 0 ? to.top : from.top + (to.top - from.top) * e });
+      if (k < 1) raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+    // dataKey names the lines' values; the target is rebuilt from them inside.
+  }, [dataKey, top]);
+  return frame;
+}
+
 /** Repaints when the root's theme class flips, since the ink is read off the computed style. */
 function useThemeTick(): number {
   const [tick, setTick] = useState(0);
@@ -84,23 +130,26 @@ export function UsageChart({ steps, lines, stepWord, ticks }: { steps: readonly 
   const total = (line: ChartLine): number => line.points.reduce((a, b) => a + b, 0);
   const lead = [...lines].sort((a, b) => total(b) - total(a))[0];
   const x = (i: number): number => (n > 1 ? (i / (n - 1)) * 100 : 0);
-  const y = (v: number): number => HEIGHT - PAD - (top === 0 ? 0 : (v / top) * (HEIGHT - PAD * 2));
   const dataKey = lines.map(line => `${line.key}:${line.points.join(",")}`).join("|");
+  const frame = useTween(lines, top, dataKey);
+  const pointsOf = (line: ChartLine): readonly number[] => frame.points.get(line.key) ?? line.points;
+  const scale = frame.top;
+  const y = (v: number): number => HEIGHT - PAD - (scale === 0 ? 0 : (v / scale) * (HEIGHT - PAD * 2));
 
-  const drawn = useRef({ lead, top });
-  drawn.current = { lead, top };
+  const painted = useRef({ points: lead === undefined ? [] : pointsOf(lead), scale });
+  painted.current = { points: lead === undefined ? [] : pointsOf(lead), scale };
+  const paint = (): void => {
+    const el = canvas.current;
+    if (el !== null && lead !== undefined) paintDither(el, painted.current.points, painted.current.scale, leadInk.current === null ? "currentColor" : getComputedStyle(leadInk.current).color);
+  };
+  useEffect(paint, [frame, themeTick]);
   useEffect(() => {
     const el = canvas.current;
     if (el === null) return;
-    const paint = (): void => {
-      const { lead: line, top: scale } = drawn.current;
-      if (line !== undefined) paintDither(el, line.points, scale, leadInk.current === null ? "currentColor" : getComputedStyle(leadInk.current).color);
-    };
-    paint();
     const sized = new ResizeObserver(paint);
     sized.observe(el);
     return () => sized.disconnect();
-  }, [dataKey, themeTick]);
+  }, []);
 
   return (
     <div data-usage-chart="tokens" className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-3">
@@ -112,7 +161,7 @@ export function UsageChart({ steps, lines, stepWord, ticks }: { steps: readonly 
         ))}
         {[0, 1, 2, 3, 4].map(g => (
           <span key={g} className="absolute right-0 -translate-y-1/2" style={{ top: HEIGHT - PAD - (g / 4) * (HEIGHT - PAD * 2) }}>
-            {fmtTokens((top * g) / 4)}
+            <DigitRoll value={fmtTokens((top * g) / 4)} />
           </span>
         ))}
       </div>
@@ -128,13 +177,13 @@ export function UsageChart({ steps, lines, stepWord, ticks }: { steps: readonly 
         <svg role="img" aria-label="Tokens over the range" className="absolute inset-0 size-full overflow-visible" viewBox={`0 0 100 ${HEIGHT}`} preserveAspectRatio="none">
           {[...lines].reverse().map(line => (
             <g key={line.key} ref={line === lead ? leadInk : undefined} data-line={line.key} className={line.ink.className} style={line.ink.style}>
-              <polyline points={line.points.map((v, i) => `${x(i)},${y(v)}`).join(" ")} fill="none" stroke="currentColor" strokeWidth={line === lead ? 1.75 : 1.4} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+              <polyline points={pointsOf(line).map((v, i) => `${x(i)},${y(v)}`).join(" ")} fill="none" stroke="currentColor" strokeWidth={line === lead ? 1.75 : 1.4} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
             </g>
           ))}
           {hovered === null ? null : <line x1={x(hovered)} x2={x(hovered)} y1={0} y2={HEIGHT} className="text-foreground/30" stroke="currentColor" vectorEffect="non-scaling-stroke" />}
         </svg>
         {lead === undefined || n === 0 ? null : (
-          <span aria-hidden className={cn("absolute size-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-current", lead.ink.className)} style={{ ...lead.ink.style, left: `${x(hovered ?? n - 1)}%`, top: y(lead.points[hovered ?? n - 1] ?? 0) }} />
+          <span aria-hidden className={cn("absolute size-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-current", lead.ink.className)} style={{ ...lead.ink.style, left: `${x(hovered ?? n - 1)}%`, top: y(pointsOf(lead)[hovered ?? n - 1] ?? 0) }} />
         )}
         <div className="absolute inset-0 flex">
           {steps.map((t, i) => (

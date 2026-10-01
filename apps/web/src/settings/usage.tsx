@@ -22,6 +22,7 @@ import type { SettingsContext } from "./settingsContext.js";
 import { useSettingsStore, type UsageTab } from "./settingsStore.js";
 import { CHART_HEIGHT, UsageChart, type ChartLine } from "./usageChart.js";
 import { Skeleton } from "../components/ui/skeleton.js";
+import { DigitRoll } from "../components/ui/digit-roll.js";
 
 const NUMBER = "font-mono text-xs tabular-nums";
 const ROW_NUMBER = "font-mono text-sm tabular-nums";
@@ -95,7 +96,7 @@ function UsagePage({ ctx }: { ctx: SettingsContext }) {
   }, [api, range, nested]);
 
   return (
-    <div className="flex flex-col gap-8">
+    <div key={tab} className="flex animate-settle-in flex-col gap-8 motion-reduce:animate-none">
       {tab === "limits" ? <Limits accounts={accounts?.accounts ?? null} now={ctx.now} /> : <Used used={used} models={models} range={range} split={split} onRange={setRange} onSplit={setSplit} ctx={ctx} />}
     </div>
   );
@@ -153,7 +154,7 @@ function PoolWindow({ kind, segments, now }: { kind: LimitKind; segments: readon
           {W.windows[kind] ?? kind}
         </span>
         <span className="flex items-baseline gap-2">
-          <span data-k="left" className="font-mono text-2xl leading-8 font-medium text-foreground tabular-nums">{`${Math.max(0, 100 - used)}%`}</span>
+          <DigitRoll value={`${Math.max(0, 100 - used)}%`} className="font-mono text-2xl leading-8 font-medium text-foreground" data-k="left" />
           <span className="text-[12.5px] text-muted-foreground">{W.left}</span>
         </span>
         <span data-k="verdict" className={cn("truncate text-[12.5px] leading-5", verdict.tone === "warn" ? "text-warning-foreground" : verdict.tone === "quiet" ? "text-muted-foreground" : "text-foreground/80")}>
@@ -370,7 +371,7 @@ function Stat({ k, label, value, note }: { k: string; label: string; value: stri
   return (
     <div data-k={k} className="flex min-w-0 flex-col gap-1.5 px-5 py-5">
       <span className="text-[13px] text-muted-foreground">{label}</span>
-      <span className="font-mono text-[26px] leading-8 font-medium text-foreground tabular-nums">{value}</span>
+      <DigitRoll value={value} className="font-mono text-[26px] leading-8 font-medium text-foreground" />
       {note === undefined ? null : <span className="truncate text-xs text-muted-foreground/80">{note}</span>}
     </div>
   );
@@ -447,7 +448,7 @@ function SplitRow({ row, split, share, turns, ink, sub = false, ctx }: { row: Us
           title={row.label}
           under={
             <span aria-hidden className="mt-1 block h-1 max-w-64 overflow-hidden rounded-full bg-foreground/[0.08]">
-              <span className={cn("block h-full rounded-full bg-current", ink === undefined ? "text-foreground/45" : ink.className)} style={{ ...ink?.style, width: `${Math.max(1, share * 100)}%` }} />
+              <span className={cn("block h-full rounded-full bg-current transition-[width] duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none", ink === undefined ? "text-foreground/45" : ink.className)} style={{ ...ink?.style, width: `${Math.max(1, share * 100)}%` }} />
             </span>
           }
         />
@@ -692,10 +693,10 @@ function Used({ used, models, range, split, onRange, onSplit, ctx }: { used: Use
               {turns ? <span className={cn("text-right", WIDE_ONLY)}>{W.turns}</span> : null}
               <span className="text-right">{W.estimate}</span>
             </div>
-            {ranked.map(row => {
+            {ranked.map((row, i) => {
               const own = used.split === "agent" ? models.filter(m => agentOf("model" as UsageSplit, m.key) === row.key).sort((a, b) => tokensOf(b) - tokensOf(a)) : [];
               return (
-                <div key={row.key} data-used-group={row.key} className="flex flex-col pb-1 [&>[data-sub]]:-mt-0.5">
+                <div key={`${used.split}:${row.key}`} data-used-group={row.key} className="flex animate-settle-in flex-col pb-1 motion-reduce:animate-none [&>[data-sub]]:-mt-0.5" style={{ animationDelay: `${Math.min(i, 6) * 30}ms` }}>
                   <SplitRow row={row} split={used.split} share={top === 0 ? 0 : tokensOf(row) / top} turns={turns} {...(inkByKey.has(row.key) ? { ink: inkByKey.get(row.key)! } : {})} ctx={ctx} />
                   {own.map(model => (
                     <SplitRow key={model.key} row={model} split={"model" as UsageSplit} share={tokensOf(row) === 0 ? 0 : tokensOf(model) / tokensOf(row)} turns={turns} sub ctx={ctx} />
