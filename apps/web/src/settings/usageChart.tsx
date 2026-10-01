@@ -20,7 +20,7 @@ export interface ChartLine {
 
 const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map(n => (n + 0.5) / 16);
 const CELL = 2;
-const HEIGHT = 168;
+const HEIGHT = 240;
 const PAD = 6;
 
 function paintDither(canvas: HTMLCanvasElement, points: readonly number[], top: number, ink: string): void {
@@ -53,6 +53,15 @@ function paintDither(canvas: HTMLCanvasElement, points: readonly number[], top: 
   }
 }
 
+/** The axis's top: the smallest round figure at or over the largest point, so the four gridlines read as round
+ * numbers. */
+function niceTop(max: number): number {
+  if (max <= 0) return 0;
+  const magnitude = 10 ** Math.floor(Math.log10(max));
+  const step = [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10].find(m => m * magnitude >= max) ?? 10;
+  return step * magnitude;
+}
+
 /** Repaints when the root's theme class flips, since the ink is read off the computed style. */
 function useThemeTick(): number {
   const [tick, setTick] = useState(0);
@@ -70,7 +79,7 @@ export function UsageChart({ steps, lines, stepWord, ticks }: { steps: readonly 
   const leadInk = useRef<SVGGElement>(null);
   const themeTick = useThemeTick();
   const n = steps.length;
-  const top = Math.max(0, ...lines.flatMap(line => line.points));
+  const top = niceTop(Math.max(0, ...lines.flatMap(line => line.points)));
   const total = (line: ChartLine): number => line.points.reduce((a, b) => a + b, 0);
   const lead = [...lines].sort((a, b) => total(b) - total(a))[0];
   const x = (i: number): number => (n > 1 ? (i / (n - 1)) * 100 : 0);
@@ -93,13 +102,26 @@ export function UsageChart({ steps, lines, stepWord, ticks }: { steps: readonly 
   }, [dataKey, themeTick]);
 
   return (
-    <div data-usage-chart="tokens" className="flex flex-col gap-3">
+    <div data-usage-chart="tokens" className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-3">
+      <div data-k="y-axis" aria-hidden className="relative font-mono text-[11px] leading-none text-muted-foreground tabular-nums" style={{ height: HEIGHT }}>
+        {[0, 1, 2, 3, 4].map(g => (
+          <span key={g} data-k="y-tick" className="invisible block h-0 text-right">
+            {fmtTokens((top * g) / 4)}
+          </span>
+        ))}
+        {[0, 1, 2, 3, 4].map(g => (
+          <span key={g} className="absolute right-0 -translate-y-1/2" style={{ top: HEIGHT - PAD - (g / 4) * (HEIGHT - PAD * 2) }}>
+            {fmtTokens((top * g) / 4)}
+          </span>
+        ))}
+      </div>
       <div className="relative" style={{ height: HEIGHT }}>
         <svg aria-hidden className="absolute inset-0 size-full overflow-visible text-border" viewBox={`0 0 100 ${HEIGHT}`} preserveAspectRatio="none">
-          {[1, 2, 3].map(g => {
-            const gy = PAD + (g / 4) * (HEIGHT - PAD * 2);
+          {[1, 2, 3, 4].map(g => {
+            const gy = HEIGHT - PAD - (g / 4) * (HEIGHT - PAD * 2);
             return <line key={g} x1={0} x2={100} y1={gy} y2={gy} stroke="currentColor" strokeDasharray="2 4" vectorEffect="non-scaling-stroke" />;
           })}
+          <line x1={0} x2={100} y1={HEIGHT - PAD} y2={HEIGHT - PAD} stroke="currentColor" vectorEffect="non-scaling-stroke" />
         </svg>
         <canvas ref={canvas} aria-hidden className="absolute inset-0 size-full" />
         <svg role="img" aria-label="Tokens over the range" className="absolute inset-0 size-full overflow-visible" viewBox={`0 0 100 ${HEIGHT}`} preserveAspectRatio="none">
@@ -140,6 +162,7 @@ export function UsageChart({ steps, lines, stepWord, ticks }: { steps: readonly 
           ))}
         </div>
       </div>
+      <span aria-hidden />
       <div className="relative h-4 font-mono text-[11px] leading-4 text-muted-foreground tabular-nums">
         {ticks.map(tick => (
           <span key={tick.at} data-k="tick" className={cn("absolute top-0", tick.at === 0 ? "" : tick.at === 1 ? "-translate-x-full" : "-translate-x-1/2")} style={{ left: `${tick.at * 100}%` }}>

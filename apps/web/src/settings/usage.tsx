@@ -528,8 +528,10 @@ function Used({ used, models, range, split, onRange, onSplit, ctx }: { used: Use
       ) : (
         <>
           <Totals used={used} />
-          <Card id="usage-chart" head={W.chartHead[used.range]}>
-            <div className="flex flex-col gap-4 px-4 pt-4 pb-3">
+          <Card
+            id="usage-chart"
+            head={W.chartHead[used.range]}
+            body={<div className="flex flex-col gap-4">
               {used.lines === undefined ? (
                 <div data-k="usage-legend" className="flex flex-wrap gap-x-5 gap-y-1.5 text-[12.5px] text-muted-foreground">
                   <span className="flex items-center gap-2">
@@ -552,8 +554,8 @@ function Used({ used, models, range, split, onRange, onSplit, ctx }: { used: Use
                 </div>
               )}
               <UsageChart steps={used.series.map(s => s.t)} lines={lines} stepWord={t => word.format(t)} ticks={ticksOf(used)} />
-            </div>
-          </Card>
+            </div>}
+          />
           <Card id="usage-used" head={W.by(W.splits[used.split])}>
             <div data-k="used-head" className={cn(turns ? SPLIT_COLUMNS : SPLIT_COLUMNS_NO_TURNS, "px-4 py-2.5 text-xs leading-4 text-muted-foreground")}>
               <span data-k="split-head">{nestedHead ? W.agentAndModel : W.splits[used.split]}</span>
