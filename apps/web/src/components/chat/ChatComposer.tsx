@@ -364,7 +364,7 @@ export function ChatComposer({
   const fastOn = fastOffered && (fastPicked ?? latestRow?.fast === true);
   const stopPending = stop !== null && runningTurn !== null && stop.turnId === runningTurn.turnId;
   const canStop = runningTurn !== null && api?.interruptSession !== undefined;
-  // The catalog answers before the click: a harness that steers takes the row into the turn, any other gets the turn stopped.
+  // The catalog answers before the click: a harness that steers takes the row into the turn, any other queues it.
   const canSteer = canStop && harnessCatalog?.steers === true && api?.steerSession !== undefined;
   // The draft holds the collapsed caret, where a chip is one place; a trigger reads the text as sent. A caret beside a
   // chip opens nothing, so a chip's own text never reads as a token being typed.
