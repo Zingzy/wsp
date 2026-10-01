@@ -283,10 +283,14 @@ export function creditsOf(answer: Record<string, unknown> | undefined): HarnessL
   return { count: banked, credits };
 }
 
+/** The snapshot a rate-limits answer reads the windows off: the legacy single bucket can name another meter than
+ * codex's own, and the buckets by id say which is which. */
+export const snapshotOf = (answer: Record<string, unknown> | undefined): Record<string, unknown> | undefined => rec(rec(answer?.rateLimitsByLimitId)?.codex) ?? rec(answer?.rateLimits);
+
 /** The plan's windows off a rate-limit snapshot, each read as a kind by its length (the primary is the session and the
  * secondary the week where the server names no length), with the plan and the account account/read named. A limit
  * the backend says was reached reads reached. */
-function limitOf(snapshot: Record<string, unknown>, account: { id?: string; label?: string; plan?: string }, credits?: HarnessLimit["credits"]): HarnessLimit | undefined {
+export function limitOf(snapshot: Record<string, unknown>, account: { id?: string; label?: string; plan?: string }, credits?: HarnessLimit["credits"]): HarnessLimit | undefined {
   const windows: LimitWindow[] = [];
   for (const [slot, fallback] of [["primary", 300], ["secondary", 10_080]] as const) {
     const w = rec(snapshot[slot]);
@@ -537,8 +541,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
         const answer = rec(result);
         const accountId = str(answer?.accountId);
         if (accountId !== undefined) account = { ...account, id: accountId };
-        // The legacy single bucket can name another meter than codex's own; the buckets by id say which is which.
-        rateLimits = rec(rec(answer?.rateLimitsByLimitId)?.codex) ?? rec(answer?.rateLimits);
+        rateLimits = snapshotOf(answer);
         emitLimit(creditsOf(answer));
         return;
       }
