@@ -9,8 +9,9 @@
 // meaning on a computer and throw, since the runtime refuses them by capability
 // before it ever reaches here.
 
+import { execFile } from "node:child_process";
 import { mkdirSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { cpus, release, totalmem, type, uptime } from "node:os";
 import { runChild } from "./child-exec.js";
@@ -29,6 +30,41 @@ const GB = 1024 ** 3;
  * Nothing bills on it, so the rate is zero and the storage pricing is empty. */
 export function localShape(cores: number = cpus().length, totalBytes: number = totalmem()): { cpu: number; memMb: number } {
   return { cpu: cores, memMb: Math.round(totalBytes / GB) * 1024 };
+}
+
+/** What this computer has free this moment and in all, in MB: the kernel's own figure for what may be handed out
+ * without pushing it into reclaim, the one the daemon's room check reads on Linux. */
+export interface MemoryHere {
+  freeMb: number;
+  totalMb: number;
+}
+
+/** MemAvailable and MemTotal off /proc/meminfo, written in kB; nothing where either is missing. */
+export function memoryOfMeminfo(meminfo: string): MemoryHere | undefined {
+  const mb = (key: string): number | undefined => {
+    const kb = new RegExp(`^${key}:\\s*(\\d+)\\s*kB`, "m").exec(meminfo)?.[1];
+    return kb === undefined ? undefined : Math.floor(Number(kb) / 1024);
+  };
+  const [freeMb, totalMb] = [mb("MemAvailable"), mb("MemTotal")];
+  return freeMb === undefined || totalMb === undefined ? undefined : { freeMb, totalMb };
+}
+
+/** macOS's share of memory free, kern.memorystatus_level (what memory_pressure prints as the system-wide free
+ * percentage), over the memory the computer has; nothing for a reading that is not a percentage. */
+export function memoryOfPressure(level: string, totalBytes: number): MemoryHere | undefined {
+  const pct = Number(level.trim());
+  if (level.trim() === "" || !Number.isInteger(pct) || pct < 0 || pct > 100) return undefined;
+  const totalMb = Math.floor(totalBytes / 1024 ** 2);
+  return { freeMb: Math.floor((totalMb * pct) / 100), totalMb };
+}
+
+/** This computer's memory as its kernel reads it now, never kept since it moves with every process; nothing where
+ * the kernel says nothing, and a copy is then held to nothing, as a create is on a daemon with no /proc/meminfo. */
+export async function memoryHere(platform: NodeJS.Platform = process.platform): Promise<MemoryHere | undefined> {
+  if (platform === "linux") return memoryOfMeminfo(await readFile("/proc/meminfo", "utf8").catch(() => ""));
+  if (platform !== "darwin") return undefined;
+  const level = await new Promise<string>(done => execFile("sysctl", ["-n", "kern.memorystatus_level"], { timeout: 5_000 }, (e, out) => done(e === null ? out : "")));
+  return memoryOfPressure(level, totalmem());
 }
 
 const NO_SNAPSHOT_STORAGE: SnapshotStoragePricing = { freeGb: 0, usdPerGbMonth: 0, billedFrom: "" };

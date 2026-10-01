@@ -234,6 +234,7 @@ import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
 import { isNoProvider, isPlaceAbsent, projectStateKey, putFiles, type Copier } from "@wsp/engine";
+import { boxFullLine, workspaceMemMb } from "@wsp/protocol";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
 import { assertTokenShape, daemonTokenFor, daemonTokenPathOf, rotateDaemonToken } from "./daemon-token.js";
@@ -6253,6 +6254,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // request its own refusal was going to stop.
     const project = recorded;
     const start = parent === undefined ? undefined : await leadStart(parent, n);
+    // Before a byte is copied: the room check the daemon holds a create on a box to, by the same rule and in the same
+    // words, off the memory the copy road reads. A copy here has no awake workspace to stop, so the sentence names the
+    // computer's own work.
+    const room = await local?.copier?.room?.();
+    if (room !== undefined && room.freeMb < workspaceMemMb(room.totalMb)) throw new Error(boxFullLine(workspaceMemMb(room.totalMb), room.freeMb));
     const mine = backendOfKind("local");
     const copy = await moduleOf("local").makeCopy(project, { slug: folderSlug(n), ...(project.base !== undefined ? { base: project.base } : {}) });
     const portBase = portBaseHere();

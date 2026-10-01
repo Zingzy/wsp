@@ -152,6 +152,16 @@ export const DAEMON_INVALID_JSON = "invalid json";
 /** Why a daemon started with an empty token file refuses to start at all. */
 export const DAEMON_NO_TOKEN = "daemon refuses to start without an auth token";
 export const unknownOpLine = (op: string): string => `unknown op: ${op}`;
+/** What a create is refused with on a computer with no room for another workspace, the daemon's room check and the
+ * Mac's copy road alike: what the kernel says is free, what the workspace needs, and the awake one to stop where
+ * there is one. */
+export const boxFullLine = (needMb: number | string, freeMb: number | string, quietest?: { name: string; quietMin: number | string }): string =>
+  quietest === undefined
+    ? `this computer has ${freeMb} MB free and a workspace needs ${needMb} MB, and no workspace of yours is awake to stop: what is holding it is the computer's own work`
+    : `this computer has ${freeMb} MB free and a workspace needs ${needMb} MB; stop ${quietest.name}, quiet for ${quietest.quietMin} min, to make room`;
+/** What one workspace may take of a computer's memory, the rule of daemon/crates/wsp-runtime/src/size.rs: a third,
+ * never the last gigabyte, and never under a gigabyte. The room check holds a create to it. */
+export const workspaceMemMb = (totalMb: number): number => Math.max(1024, Math.min(Math.floor(totalMb / 3), totalMb - 1024));
 /** The refusal every op but tunnel ops on the scoped port and ping gets on a socket whose auth frame named a port. */
 export const portScopeRefusal = (port: number | string): string => `this socket is scoped to port ${port}: only tunnel ops on it and ping are allowed`;
 /** Directories a machine recreates, by exact name: installs, build output and tool caches. A directory is a cache only
