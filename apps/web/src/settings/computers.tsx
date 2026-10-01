@@ -331,7 +331,7 @@ interface KindLine {
 const NO_NAV = { openUnder: () => {} };
 
 /** An act as its word alone, as every act on the settings grid is: the plus is Add's and no other button wears a glyph. */
-const wordOnly = ({ icon: _icon, ...act }: RowAct): RowAct => act;
+export const wordOnly = ({ icon: _icon, ...act }: RowAct): RowAct => act;
 
 /** A kind's rows as lines: the row's lead, name and state word as the note, and its step only where it has a road,
  * since a held button beside every row is furniture. A state nothing has read yet is no state, and says nothing. */

@@ -100,7 +100,7 @@ describe("the settings sidebar", () => {
   });
 
   it("reads which groups have pages under them off the one table, so a group that gains pages is one entry there", () => {
-    expect(SETTINGS_GROUPS.filter(group => group.sub !== undefined).map(group => group.id)).toEqual(["computers", "projects"]);
+    expect(SETTINGS_GROUPS.filter(group => group.sub !== undefined).map(group => group.id)).toEqual(["agents", "computers", "projects"]);
   });
 
   it("lists an open page's sections under it, each scrolling the page to its card when pressed", async () => {

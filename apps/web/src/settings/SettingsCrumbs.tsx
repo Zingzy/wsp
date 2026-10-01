@@ -4,6 +4,7 @@
 // project's page, back to its list; and the page itself in the foreground ink
 // at medium weight, as the thread crumb is. While the field holds text the
 // page is Search. The left crumbs give way first when the line is short.
+import { agentName } from "@wsp/catalog";
 import { ProjectGlyph } from "../projects/look.js";
 import { useIsMobile } from "../hooks/useMediaQuery.js";
 import { useStore } from "../protocol/store.js";
@@ -20,12 +21,13 @@ export function SettingsCrumbs() {
   const go = useSettingsStore(s => s.go);
   const places = useStore(s => s.places);
   const projects = useStore(s => s.projects);
+  const harnesses = useStore(s => s.harnesses);
   const isMobile = useIsMobile();
   const group = groupById(groupOf(at));
   const searching = search !== "" && !isMobile;
   const place = at.kind === "computer" ? places.find(p => p.id === at.id) : undefined;
   const project = at.kind === "project" ? projects.find(p => p.id === at.id) : undefined;
-  const page = place !== undefined ? placeName(place) : project?.name;
+  const page = place !== undefined ? placeName(place) : at.kind === "agent" ? (harnesses.find(c => c.harness === at.id)?.label ?? agentName(at.id)) : project?.name;
   return (
     <>
       <span data-breadcrumb-settings className="min-w-0 truncate text-muted-foreground">

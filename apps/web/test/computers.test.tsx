@@ -550,10 +550,10 @@ function dialling(line = "vps answered in 12 ms."): Partial<Api> {
 
 describe("the Agents page on a computer", () => {
   const manager = (): HTMLElement => document.querySelector<HTMLElement>("[data-settings-page] [data-agents-manager]")!;
-  const rowEl = (key: string): HTMLElement => manager().querySelector<HTMLElement>(`[data-agents-row="${key}"]`)!;
   const rowKeys = (): string[] => [...manager().querySelectorAll<HTMLElement>("[data-agents-row]")].map(r => r.dataset["agentsRow"] ?? "");
-  const subtext = (key: string): string | undefined => rowEl(key).querySelector("[data-row-subtext]")?.textContent ?? undefined;
-  const stateLine = (key: string): string | undefined => rowEl(key).querySelector("[data-row-status] [data-status-word]")?.textContent ?? undefined;
+  const agentRow = (id: string): HTMLElement => document.querySelector<HTMLElement>(`[data-settings-page] [data-agent-row="${id}"]`)!;
+  const agentIds = (): string[] => [...document.querySelectorAll<HTMLElement>("[data-settings-page] [data-agent-row]")].map(r => r.dataset["agentRow"] ?? "");
+  const stateLine = (key: string): string | undefined => manager().querySelector(`[data-agents-row="${key}"] [data-row-status] [data-status-word]`)?.textContent ?? undefined;
   const topBarTab = (tab: "agents" | "servers" | "skills"): void => void fireEvent.click(document.querySelector(`[data-k=agents-tabs] [data-segment=${tab}]`)!);
   const picked = (): string | undefined => document.querySelector("[data-k=agents-tabs] [data-checked]")?.getAttribute("data-segment") ?? undefined;
   const computerPick = (): HTMLElement => document.querySelector<HTMLElement>("[data-k=agents-picker]")!;
@@ -562,24 +562,24 @@ describe("the Agents page on a computer", () => {
     await mountComputers(api, { kind: "group", group: "agents" });
   };
 
-  it("lists the agents with their version and sign-in, and the MCP servers with their state, off the picked computer's own report", async () => {
+  it("lists the agents with their version and sign-in, installed first, and the MCP servers with their state, off the picked computer's own report", async () => {
     const asked: AgentsTarget[] = [];
     useStore.setState({ places: [here, box] });
     await mountAgents(computersApi({ agentsRead: async (target: AgentsTarget) => (asked.push(target), AGENTS_REPORT) }).api, "p_2");
     expect(asked).toEqual([{ placeId: "p_2" }]);
     expect(computerPick().textContent).toBe("hetzner");
     const installed = AGENTS_REPORT.agents.filter(a => a.installed);
-    expect(rowKeys().slice(0, installed.length)).toEqual(installed.map(a => `agent-${a.id}`));
+    expect(agentIds()).toEqual([...installed, ...AGENTS_REPORT.agents.filter(a => !a.installed)].map(a => a.id));
     const claude = installed.find(a => a.id === "claude")!;
-    expect(rowEl("agent-claude").querySelector("[data-row-title]")?.textContent).toBe(claude.name);
-    expect(rowEl("agent-claude").querySelector("[data-k='lead-tile'] svg")).not.toBeNull();
-    expect(subtext("agent-claude")).toBe(claude.version);
-    expect(stateLine("agent-claude")).toBe(AGENTS_LIST_WORDS.signedIn);
-    // The page draws one kind at a time: the top bar holds the tabs, so the manager draws none of its own.
-    expect(manager().querySelector("[role='radiogroup']")).toBeNull();
-    expect(rowKeys().some(k => k.startsWith("server-"))).toBe(false);
+    expect(agentRow("claude").querySelector("[data-settings-title]")?.textContent).toBe(claude.name);
+    expect(agentRow("claude").querySelector("svg")).not.toBeNull();
+    expect(agentRow("claude").querySelector("[data-settings-mark]")?.textContent).toBe(claude.version);
+    expect(agentRow("claude").querySelector("[data-settings-description]")?.textContent).toBe(capitalised(AGENTS_LIST_WORDS.signedIn));
+    expect(document.querySelector("[data-settings-page] [data-agents-manager]")).toBeNull();
     topBarTab("servers");
     expect(picked()).toBe("servers");
+    // The page draws one kind at a time: the top bar holds the tabs, so the manager draws none of its own.
+    expect(manager().querySelector("[role='radiogroup']")).toBeNull();
     expect(rowKeys().length).toBeGreaterThan(0);
     expect(rowKeys().every(k => k.startsWith("server-"))).toBe(true);
     expect(stateLine(rowKeys()[0]!)).not.toBe("");
@@ -596,17 +596,17 @@ describe("the Agents page on a computer", () => {
     };
     useStore.setState({ places: [here, box] });
     await mountAgents(computersApi({ agentsRead: async () => report, agentsSignIn } as unknown as Partial<Api>).api, "p_2");
-    expect(stateLine("agent-claude")).toBe(AGENTS_LIST_WORDS.needsSignIn);
-    const signIn = rowEl("agent-claude").querySelector<HTMLElement>("[data-row-slot] [data-k='act-sign-in']")!;
+    const description = (): string | undefined => agentRow("claude").querySelector("[data-settings-description]")?.textContent ?? undefined;
+    expect(description()?.startsWith(capitalised(AGENTS_LIST_WORDS.needsSignIn))).toBe(true);
+    const signIn = agentRow("claude").querySelector<HTMLElement>("[data-settings-slot] [data-k='act-sign-in']")!;
     expect(signIn.textContent).toBe("Sign in");
     fireEvent.click(signIn);
     await settle();
     expect(started).toEqual([[{ placeId: "p_2" }, "claude"]]);
-    expect(manager().querySelector("[data-agents-detail] [data-k='sign-in-flow']")).not.toBeNull();
+    expect(document.querySelector("[data-settings-page] [data-k='sign-in-flow']")).not.toBeNull();
     // While the flow waits on the person its own controls are the step, and the row says so.
-    fireEvent.click(manager().querySelector<HTMLElement>("[data-agents-detail] [data-k=agents-back]")!);
-    expect(rowEl("agent-claude").querySelector("[data-row-slot] [data-k='act-sign-in']")).toBeNull();
-    expect(stateLine("agent-claude")).toBe(AGENTS_LIST_WORDS.waitingOnYou);
+    expect(agentRow("claude").querySelector("[data-k='act-sign-in']")).toBeNull();
+    expect(description()?.startsWith(capitalised(AGENTS_LIST_WORDS.waitingOnYou))).toBe(true);
   });
 
   it("puts the report's refusals under the list as quiet lines", async () => {
@@ -626,7 +626,7 @@ describe("the Agents page on a computer", () => {
     useStore.setState({ places: [here, { ...laptop, present: true, name: "spoo", provision }] });
     await mountAgents(computersApi({ agentsRead: async () => ({ ...EMPTY_REPORT, refused: ["skills: the folder is not readable"] }) }).api, "p_1");
     // The report's refusals, then the recipe's rows that did not land there, one quiet line each under the list.
-    expect([...manager().querySelectorAll("[data-agents-refused] [data-refused-line]")].map(l => [l.querySelector("[data-refused-label]")?.textContent, l.querySelector("[data-refused-value]")?.textContent])).toEqual([
+    expect([...document.querySelectorAll("[data-settings-page] [data-agents-refused] [data-refused-line]")].map(l => [l.querySelector("[data-refused-label]")?.textContent, l.querySelector("[data-refused-value]")?.textContent])).toEqual([
       ["Skills", "the folder is not readable"],
       ["Codex", "failed: npm exited 1"],
       ["linear", "set aside: waited on GitHub CLI"],
@@ -650,7 +650,7 @@ describe("the Agents page on a computer", () => {
     expect(computerPick().textContent).toBe("hetzner");
     expect(asked).toEqual([{ placeId: "p_2" }]);
     expect(picked()).toBe("agents");
-    expect(rowKeys().every(k => k.startsWith("agent-"))).toBe(true);
+    expect(agentIds().length).toBeGreaterThan(0);
     topBarTab("servers");
     expect(useSettingsStore.getState().agentsTab).toBe("servers");
     expect(rowKeys().length).toBeGreaterThan(0);

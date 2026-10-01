@@ -7,6 +7,9 @@
 // to live.
 import {
   AccountView,
+  AgentRow,
+  type AgentSetupSet,
+  ThreadDefaults,
   AgentsReport,
   AgentsSignInEvent,
   ServerToolsAnswer,
@@ -480,6 +483,10 @@ export interface Api {
   /** What stands on one computer or workspace for the agents: each agent, every skill, every MCP server. A read never
    * wakes a napping machine. A client without it draws no report. */
   agentsRead?(target: AgentsTarget): Promise<AgentsReport>;
+  /** Sets how one agent runs on one computer and answers its row as that computer's read now gives it, its variables
+   * by name alone. A variable's value is refused off the host's own socket. A client without it draws the setup as
+   * words with no control. */
+  agentsSetup?(placeId: string, agent: string, change: AgentSetupSet): Promise<AgentRow>;
   /** Starts one MCP server there once, or asks its address once, for its tools and its sign-in; the host keeps the
    * answer an hour unless `refresh`. A client without it holds List tools. */
   serversTools?(target: AgentsTarget, agent: string, name: string, refresh?: boolean): Promise<ServerToolsAnswer>;
@@ -627,6 +634,9 @@ export interface Api {
    * still stands on, naming them. Optional so a fixture that removes none need not fake it; without it the row's
    * Remove project is held. */
   projectsRemove?(projectId: string): Promise<{ said: string | undefined }>;
+  /** What a new thread on each project starts on, by project id, each value with where it came from. Optional so a
+   * fixture with no project page need not fake it; without it the page's rows name nothing they inherit. */
+  projectsDefaults?(): Promise<Record<string, ThreadDefaults>>;
   /** Where a workspace of this project would land and what that computer offers: the computer's name, and the
    * flags the row's own words about the copy's ports and the state word's pause mode are read off. Refused in the
    * runtime's own sentence where that computer forks nothing. Optional so a fixture with no landing need not fake
@@ -897,6 +907,7 @@ export function makeApi(c: ProtocolClient): Api {
     },
     projectsList: async () => ProjectView.array().parse((await c.request<{ projects?: unknown }>("projects.list")).projects),
     projectsAdd: async (source, on, into) => ProjectView.parse((await c.request<{ project?: unknown }>("projects.add", { source, ...(on === undefined ? {} : { on }), ...(into === undefined ? {} : { into }) })).project),
+    projectsDefaults: async () => Object.fromEntries(Object.entries((await c.request<{ defaults?: Record<string, unknown> }>("projects.defaults")).defaults ?? {}).map(([id, defaults]) => [id, ThreadDefaults.parse(defaults)])),
     projectsRemove: async projectId => {
       const reply = await c.request<{ said?: unknown }>("projects.remove", { projectId });
       return { said: typeof reply.said === "string" ? reply.said : undefined };
@@ -943,6 +954,7 @@ export function makeApi(c: ProtocolClient): Api {
     placesUpdate: async placeId => PlaceUpdateReply.parse(await c.request<Record<string, unknown>>("places.update", { placeId })),
     placesSet: async (placeId, ask, reset) => PlaceView.parse((await c.request<{ place: unknown }>("places.set", { placeId, ...ask, ...(reset === undefined || reset.length === 0 ? {} : { reset: [...reset] }) })).place),
     agentsRead: async target => AgentsReport.parse((await c.request<{ report?: unknown }>("agents.read", { target })).report),
+    agentsSetup: async (placeId, agent, change) => AgentRow.parse((await c.request<{ agent?: unknown }>("agents.setup", { placeId, agent, ...change })).agent),
     skillsSearch: async q => {
       const skills = (await c.request<{ skills?: unknown }>("skills.search", { q })).skills;
       return (Array.isArray(skills) ? skills : []).map(hit => SkillHit.parse(hit));

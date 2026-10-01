@@ -385,6 +385,10 @@ function dropWaiting(key: string): void {
 /** Sets on their way to the host. While one is, a reply or a preferences.changed for an earlier set would paint an
  * older record over the one the person sees; the last reply, or the record read after a refusal, settles it. */
 let preferenceSetsInFlight = 0;
+
+/** Whether a record moved what the host's agent lists are marked and shaped by: the default agent, or an agent's own
+ * defaults and picker. */
+const agentListsMoved = (a: Preferences, b: Preferences): boolean => a.defaultAgent !== b.defaultAgent || JSON.stringify(a.agentDefaults) !== JSON.stringify(b.agentDefaults);
 /** Every init.job view taken so far. The setup snapshot read on a connect is a view of the moment it was asked
  * for, so a job started or ended between the ask and the reply would be painted over by the older one; a snapshot
  * that raced a view is dropped and the view stands. Dropping it loses nothing because the reply and the events
@@ -396,6 +400,16 @@ let initJobViews = 0;
 export const GOLDEN_FRAMES_KEPT = 64;
 
 export const useStore = create<State>((set, get) => {
+  /** A record the host answered, and its agent lists read again where it moved what they are marked by. */
+  const preferencesLanded = (preferences: Preferences, before: Preferences): void => {
+    set({ preferences });
+    const api = get().api;
+    if (!agentListsMoved(before, preferences) || api?.listHarnesses === undefined) return;
+    void api
+      .listHarnesses()
+      .then(harnesses => set({ harnesses }))
+      .catch(() => {});
+  };
   const patchCreation = (key: string, patch: (c: Creation) => Creation): void => {
     set(s => ({ creations: s.creations.map(c => (c.key === key ? patch(c) : c)) }));
   };
@@ -671,12 +685,13 @@ export const useStore = create<State>((set, get) => {
     toggleSettings() { set(s => ({ settingsOpen: !s.settingsOpen, addComputerOpen: s.settingsOpen ? false : s.addComputerOpen })); },
     async setPreferences(patch) {
       const api = get().api;
+      const before = get().preferences;
       set(s => ({ preferences: applyPreferencesPatch(s.preferences, patch) }));
       if (!api?.setPreferences) return;
       preferenceSetsInFlight++;
       try {
         const { notice, ...preferences } = await api.setPreferences(patch);
-        if (--preferenceSetsInFlight === 0) set({ preferences });
+        if (--preferenceSetsInFlight === 0) preferencesLanded(preferences, before);
         if (notice !== undefined) addNotice({ kind: "error", text: notice });
       } catch (e) {
         preferenceSetsInFlight--;
@@ -1207,7 +1222,7 @@ export const useStore = create<State>((set, get) => {
           return;
         }
         case "preferences.changed":
-          if (preferenceSetsInFlight === 0) set({ preferences: e.preferences });
+          if (preferenceSetsInFlight === 0) preferencesLanded(e.preferences, get().preferences);
           return;
         case "release.changed":
           set({ release: e.release });

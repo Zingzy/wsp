@@ -11,6 +11,8 @@ import { cn } from "../../lib/utils.js";
 export interface Segment<T extends string> {
   readonly value: T;
   readonly label: ReactNode;
+  /** A word that cannot be picked here, standing in its place with why on its hover. */
+  readonly held?: string;
 }
 
 export function SegmentedControl<T extends string>({
@@ -43,7 +45,8 @@ export function SegmentedControl<T extends string>({
           key={segment.value}
           value={segment.value}
           data-segment={segment.value}
-          className={cn("inline-flex cursor-pointer items-center justify-center rounded-md px-3 text-[13px] leading-none text-muted-foreground outline-none transition-colors duration-150 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-checked:bg-accent data-checked:text-foreground", segmentClassName)}
+          {...(segment.held === undefined ? {} : { disabled: true, title: segment.held })}
+          className={cn("inline-flex cursor-pointer items-center justify-center rounded-md px-3 text-[13px] leading-none text-muted-foreground outline-none transition-colors duration-150 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-checked:bg-accent data-checked:text-foreground data-disabled:cursor-default data-disabled:opacity-50 data-disabled:hover:text-muted-foreground", segmentClassName)}
         >
           {segment.label}
         </RadioPrimitive.Root>

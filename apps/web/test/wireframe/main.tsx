@@ -70,6 +70,11 @@
 //   settings-add-cloud    the cloud road, where a key saved for Boat lists it and
 //                         draws its Image card (&image=none as above)
 //   settings-remove-computer  the Remove dialog over the box's page
+//   settings-agents       the Agents page on this Mac: the default agent, then Claude Code
+//                         with an update out, Codex, and OpenCode not installed
+//   settings-agent        Claude Code's own page on this Mac, with launch words and two variables
+//   settings-project-overrides  wsp's page with Codex set as its agent, its model and access
+//                         left to Codex's own
 //   settings-image-nothing, -copy, -copying, -stopped, -stale, -ready  the box's
 //                         page with its Image card in that state, or the cloud's
 //                         with &computer=solari; settings-computer is the box's
@@ -107,7 +112,7 @@
 import { createRoot } from "react-dom/client";
 import { CATALOG_AGENTS, agentName } from "@wsp/catalog";
 import { manyAgents } from "./agents";
-import { DEFAULT_PREFERENCES, copyFirstLine, hostnameSetLine, type HarnessCatalog, GOLDEN_STAGE_WORDS, MACHINE_ROW_LABEL, STOP_LEFT_MACHINE_LINE, hereWord, startingLine, type AgentsSignInEvent, type Capabilities, type DeviceView, type InitAgent, type InitJob, type InitRow, type InitScreen, type PlaceAddJob, type PlaceAddStep, type PlaceProvision, type PlaceView, type ProjectView, type SealedImage, type SessionView, type WorkspaceLanding, type WorkspaceView } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, copyFirstLine, hostnameSetLine, type HarnessCatalog, GOLDEN_STAGE_WORDS, MACHINE_ROW_LABEL, STOP_LEFT_MACHINE_LINE, hereWord, startingLine, type AgentsSignInEvent, type Capabilities, type DeviceView, type InitAgent, type InitJob, type InitRow, type InitScreen, type PlaceAddJob, type PlaceAddStep, type PlaceProvision, type PlaceView, type ProjectView, type SealedImage, type SessionView, type ThreadDefaults, type WorkspaceLanding, type WorkspaceView } from "@wsp/protocol";
 import { AppShell } from "../../src/shell/AppShell";
 import { FirstRun } from "../../src/shell/FirstRun";
 import { AgentsManager, type AgentsShell } from "../../src/components/agents/AgentsManager";
@@ -116,7 +121,8 @@ import { useServerActs } from "../../src/components/agents/useServerActs";
 import { useSkillActs } from "../../src/components/agents/useSkillActs";
 import { useAgentActs } from "../../src/components/agents/useAgentActs";
 import { SettingsPage } from "../../src/settings/SettingsPage";
-import { AGENTS_PAGE_REPORT, AGENTS_REPORT, HOSTILE_SKILL_MD, SERVER_TOOLS, SKILL_HITS, SKILL_PREVIEWS } from "../fixtures/agents-report";
+import { HARNESSES } from "../fixtures/harnesses";
+import { AGENTS_PAGE_REPORT, AGENTS_REPORT, AGENTS_SETUP_REPORT, HOSTILE_SKILL_MD, SERVER_TOOLS, SKILL_HITS, SKILL_PREVIEWS } from "../fixtures/agents-report";
 import { useSettingsStore, type SettingsAt } from "../../src/settings/settingsStore";
 import { applyTheme, useThemeEffect } from "../../src/settings/theme";
 import { useHostNotices } from "../../src/notices/hostNotices";
@@ -418,6 +424,9 @@ const SETTINGS_SCREENS: Record<string, SettingsAt> = {
   "settings-computers-refused": { kind: "group", group: "computers" },
   ...Object.fromEntries(ADD_SCREENS.map(name => [name, { kind: "group", group: "computers" } as SettingsAt])),
   "settings-remove-computer": { kind: "computer", id: "p_spoo" },
+  "settings-agents": { kind: "group", group: "agents" },
+  "settings-agent": { kind: "agent", id: "claude" },
+  "settings-project-overrides": { kind: "project", id: "pr_wsp" },
   ...Object.fromEntries(IMAGE_SCREENS.map(name => [name, { kind: "computer", id: imageAt.id } as SettingsAt])),
 };
 const settingsAt = SETTINGS_SCREENS[screen];
@@ -525,6 +534,14 @@ const CREATING_CATALOG: HarnessCatalog = {
   images: true,
 };
 const creatingScreen = screen === "creating" || screen === "creating-refused";
+/** The screens about what a new thread starts on: the Agents page, Claude Code's own page, and wsp's page with Codex
+ * set as its agent, which read the host's own lists and this Mac's agents. */
+const agentScreen = ["settings-agents", "settings-agent", "settings-project-overrides"].includes(screen);
+/** wsp's own overrides on the screen about them: its agent set to Codex, its model and access left to Codex's own. */
+const OVERRIDES = screen === "settings-project-overrides" ? { projectDefaults: { pr_wsp: { agent: "codex" } } } : {};
+const PROJECT_DEFAULTS: Record<string, ThreadDefaults> = {
+  pr_wsp: { agent: { value: "codex", from: "project" }, model: { value: "gpt-5.6-sol", from: "catalog" }, effort: { value: "low", from: "catalog" }, access: { value: "full", mode: "danger-full-access", from: "catalog" } },
+};
 const drawsSidebar = !firstRunScreens.includes(screen);
 /** The screens about the sidebar's shape with fewer records: nothing at all, and one project alone. */
 const emptyScreen = screen === "sidebar-empty";
@@ -604,7 +621,8 @@ const api = {
   ...(screen === "settings-computers-refused" ? { sshHosts: async () => Promise.reject(new RequestError("~/.ssh/config: permission denied")) } : {}),
   projectsList: async () => (drawsSidebar ? RECORDED : []),
   workspacesLanding: async (project: string) => landings[project] ?? landings["pr_spoo"]!,
-  listHarnesses: async () => (creatingScreen ? [CREATING_CATALOG] : []),
+  listHarnesses: async () => (creatingScreen ? [CREATING_CATALOG] : agentScreen ? HARNESSES : []),
+  ...(agentScreen ? { projectsDefaults: async () => PROJECT_DEFAULTS, agentsSetup: async (_placeId: string, agent: string) => AGENTS_SETUP_REPORT.agents.find(row => row.id === agent)! } : {}),
   initGet: async () => ({
     keys: { solari: settings || params.get("fork") === "solari" },
     home: "/Users/dev",
@@ -643,7 +661,7 @@ const api = {
   initStart: async () => new Promise<never>(() => {}),
   initDraft: async () => new Promise<never>(() => {}),
   hostTerminalConfig: async () => ({ files: [] }),
-  agentsRead: async () => (params.get("projects") === "1" ? AGENTS_PAGE_REPORT : AGENTS_REPORT),
+  agentsRead: async () => (agentScreen ? AGENTS_SETUP_REPORT : params.get("projects") === "1" ? AGENTS_PAGE_REPORT : AGENTS_REPORT),
   serversIcon: async (host: string) => SERVER_ICON[host]?.() ?? null,
   // wsp's own server is still being asked, so a row reads checking; any other server answers with one tool.
   serversTools: async (_target: unknown, _agent: string, name: string) =>
@@ -723,7 +741,8 @@ useStore.setState({
   conn: "live",
   ready: true,
   projectsRead: true,
-  preferences: { ...DEFAULT_PREFERENCES, ...picks, ...(sidebarWidth !== null ? { sidebarWidth: Number(sidebarWidth) } : {}), ...(screen === "settings-light-picked" ? { theme: "light" as const } : {}) },
+  preferences: { ...DEFAULT_PREFERENCES, ...picks, ...OVERRIDES, ...(sidebarWidth !== null ? { sidebarWidth: Number(sidebarWidth) } : {}), ...(screen === "settings-light-picked" ? { theme: "light" as const } : {}) },
+  ...(agentScreen ? { harnesses: HARNESSES } : {}),
   places: computers,
   settingsOpen: settings,
   addComputerOpen: screen === "settings-add-computer" || screen === "settings-add-computer-failed" || screen === "settings-computers-refused" || ADD_SCREENS.includes(screen),
