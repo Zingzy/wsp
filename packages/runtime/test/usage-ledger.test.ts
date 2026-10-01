@@ -3,8 +3,8 @@
 // use: rows filed by day, folded over a range and split four ways, priced off
 // the rate table where no harness put a cost on them, and never added together.
 import { describe, expect, it } from "vitest";
-import { parseRateTable, type AgentSignInState, type HarnessLimit, type RateTable, type UsageSplit } from "@wsp/protocol";
-import { accountOf, accountRows, createPriceTable, createUsageLedger, type UsageEntry } from "../src/usage.js";
+import { parseRateTable, type AgentSignInState, type HarnessLimit, type PlaceView, type RateTable, type UsageSplit } from "@wsp/protocol";
+import { accountOf, accountRows, createPriceTable, createUsageLedger, usageComputerName, type UsageEntry } from "../src/usage.js";
 import { memoryStore } from "../src/store.js";
 import { fakeClock } from "./fake-clock.js";
 
@@ -109,16 +109,15 @@ describe("the ledger of what was used", () => {
     expect(rows.get("opencode")?.costList).toBeUndefined();
   });
 
-  it("keeps work read from the logs outside wsp on rows of its own", async () => {
+  it("counts work read from the logs in the same row as wsp's own turns, and says once whose logs it counted and where", async () => {
     const { usage } = ledger();
     await usage.add(turn({ at: NOON, agent: "claude", model: "claude-opus-5", source: "wsp" }));
     await usage.add(turn({ at: NOON, agent: "claude", model: "claude-opus-5", source: "log" }));
-    const rows = (await usage.used({ range: "day", split: "agent", label: labelOf })).rows;
-    expect(rows.map(r => [r.key, r.outside ?? false])).toEqual([
-      ["claude", false],
-      ["log:claude", true],
-    ]);
-    expect((await usage.used({ range: "day", split: "agent", label: labelOf, outside: false })).rows.map(r => r.key)).toEqual(["claude"]);
+    const used = await usage.used({ range: "day", split: "agent", label: labelOf, logsOn: "zingzy's MacBook Pro" });
+    expect(used.rows.map(r => [r.key, r.tokens.input])).toEqual([["claude", 2_000]]);
+    expect(used.logs).toEqual({ agents: ["agent:claude"], computer: "zingzy's MacBook Pro" });
+    const without = await usage.used({ range: "day", split: "agent", label: labelOf, outside: false, logsOn: "zingzy's MacBook Pro" });
+    expect([without.rows.map(r => [r.key, r.tokens.input]), without.logs]).toEqual([[["claude", 1_000]], undefined]);
   });
 
   it("keeps ninety days of documents, the oldest dropped as a new day is filed", async () => {
@@ -145,10 +144,8 @@ describe("work read from the logs", () => {
     await usage.fileLogs(logs);
     await usage.fileLogs(logs);
     const rows = (await usage.used({ range: "day", split: "agent", label: labelOf })).rows;
-    expect(rows.map(r => [r.key, r.tokens.input, r.tokens.output])).toEqual([
-      ["claude", 100, 10],
-      ["log:claude", 7, 3],
-    ]);
+    // The wsp turn once and the outside session once, in one row.
+    expect(rows.map(r => [r.key, r.tokens.input, r.tokens.output])).toEqual([["claude", 107, 13]]);
   });
 });
 
@@ -202,13 +199,21 @@ describe("the rate table", () => {
   });
 });
 
+describe("a computer in the usage records", () => {
+  const mac = { id: "here", kind: "computer", name: "zingzys-macbook-pro.local", label: "zingzy's MacBook Pro" } as PlaceView;
+  const boat = { id: "box", kind: "provider", name: "box" } as PlaceView;
+  it("reads as its name: this computer's own, a provider's by its word, never a hostname or a provider's id", () => {
+    expect([usageComputerName([mac, boat], "here"), usageComputerName([mac, boat], "box"), usageComputerName([mac], "box")]).toEqual(["zingzy's MacBook Pro", "Boat", "Boat"]);
+  });
+});
+
 describe("an account's key and label", () => {
   const computer = { id: "here", name: "zingzy's MacBook Pro" };
   it("names the account a harness named, else the vault's token or key, else the computer's own login", () => {
     expect(accountOf({ agent: "codex", agentName: "Codex", named: { id: "maya@example.com" }, vaulted: "token", computer })).toEqual({ key: "codex:maya@example.com", label: "maya@example.com", road: "named" });
-    expect(accountOf({ agent: "claude", agentName: "Claude Code", vaulted: "token", computer })).toEqual({ key: "claude:vault-token", label: "your Claude Code sign-in", road: "vault" });
-    expect(accountOf({ agent: "claude", agentName: "Claude Code", vaulted: "key", computer })).toEqual({ key: "claude:vault-key", label: "your Claude Code key", road: "vault" });
-    expect(accountOf({ agent: "opencode", agentName: "OpenCode", vaulted: undefined, computer })).toEqual({ key: "opencode@here", label: "OpenCode on zingzy's MacBook Pro", road: "own" });
+    expect(accountOf({ agent: "claude", agentName: "Claude Code", vaulted: "token", computer })).toEqual({ key: "claude:vault-token", label: "Claude Code with your sign-in", road: "vault" });
+    expect(accountOf({ agent: "claude", agentName: "Claude Code", vaulted: "key", computer })).toEqual({ key: "claude:vault-key", label: "Claude Code with an API key", road: "vault" });
+    expect(accountOf({ agent: "opencode", agentName: "OpenCode", vaulted: undefined, computer })).toEqual({ key: "opencode@here", label: "OpenCode signed in on zingzy's MacBook Pro", road: "own" });
   });
 
   it("keeps the label each account was filed under, so an account split reads it and never takes the key apart", async () => {
@@ -228,15 +233,16 @@ describe("the account rows", () => {
   const nameOf = (id: string): string => places.find(p => p.id === id)?.name ?? id;
   const printsLimits = (agent: string): boolean => agent === "claude" || agent === "codex";
   const agentName = (agent: string): string => ({ claude: "Claude Code", codex: "Codex", opencode: "OpenCode" })[agent] ?? agent;
+  const planBrand = (agent: string): string | undefined => ({ codex: "ChatGPT", claude: "Claude" })[agent];
 
   it("lists the vault's token once across every computer it was handed to, a computer's own login apart, and the account a turn named across its computers", () => {
     const codex = { key: "codex:acct_7f3a", agent: "codex", label: "dev@example.com", plan: "plus", windows: [{ kind: "session" as const, usedPercent: 34 }], status: "ok" as const, readAt: NOON, computers: ["here", "pl_boat"] };
-    const rows = accountRows({ limits: [codex], places, nameOf, agentName, printsLimits, vaulted: agent => (agent === "claude" ? "token" : undefined) });
+    const rows = accountRows({ limits: [codex], places, nameOf, agentName, planBrand, printsLimits, vaulted: agent => (agent === "claude" ? "token" : undefined) });
     expect(rows.map(r => [r.key, r.label, r.computers, r.note])).toEqual([
-      ["claude@pl_spoo", "Claude Code on spoo", ["spoo"], "not read yet: runs a thread first"],
-      ["claude:vault-token", "your Claude Code sign-in", ["zingzy's MacBook Pro", "Boat"], "not read yet: runs a thread first"],
-      ["codex:acct_7f3a", "dev@example.com", ["zingzy's MacBook Pro", "Boat"], undefined],
-      ["opencode@here", "OpenCode on zingzy's MacBook Pro", ["zingzy's MacBook Pro"], "limit not available"],
+      ["claude@pl_spoo", "Claude Code signed in on spoo", ["spoo"], "not read yet: shows after its next turn"],
+      ["claude:vault-token", "Claude Code with your sign-in", ["zingzy's MacBook Pro", "Boat"], "not read yet: shows after its next turn"],
+      ["codex:acct_7f3a", "Codex with ChatGPT Plus", ["zingzy's MacBook Pro", "Boat"], undefined],
+      ["opencode@here", "OpenCode signed in on zingzy's MacBook Pro", ["zingzy's MacBook Pro"], "reports no plan limit"],
     ]);
     expect(rows.find(r => r.key === "codex:acct_7f3a")).toMatchObject({ plan: "plus", windows: codex.windows, status: "ok", readAt: NOON });
   });
@@ -245,8 +251,32 @@ describe("the account rows", () => {
     const keyed = { key: "claude@pl_spoo", agent: "claude", label: "spoo", windows: [], keyed: true, readAt: NOON, computers: ["pl_spoo"] };
     const rows = accountRows({ limits: [keyed], places, nameOf, agentName, printsLimits, vaulted: agent => (agent === "claude" ? "key" : undefined) });
     expect(rows.filter(r => r.agent === "claude").map(r => [r.key, r.label, r.note])).toEqual([
-      ["claude@pl_spoo", "spoo", "no plan limit: signed in with a key"],
-      ["claude:vault-key", "your Claude Code key", "no plan limit: signed in with a key"],
+      ["claude@pl_spoo", "Claude Code with an API key", "pays per token, no plan limit"],
+      ["claude:vault-key", "Claude Code with an API key", "pays per token, no plan limit"],
+    ]);
+  });
+
+  it("keeps the address beside the plan where two accounts of one agent would otherwise read the same", () => {
+    const plus = (id: string, email: string, computer: string) => ({ key: `codex:${id}`, agent: "codex", label: email, road: "named" as const, plan: "plus", windows: [{ kind: "session" as const, usedPercent: 10 }], readAt: NOON, computers: [computer] });
+    const pro = { key: "codex:acct_c", agent: "codex", label: "c@example.com", road: "named" as const, plan: "pro", windows: [{ kind: "session" as const, usedPercent: 10 }], readAt: NOON, computers: ["here"] };
+    const rows = accountRows({ limits: [plus("acct_a", "a@example.com", "here"), plus("acct_b", "b@example.com", "pl_boat"), pro], places: [], nameOf, agentName, planBrand, printsLimits, vaulted: () => undefined });
+    expect(rows.map(r => r.label)).toEqual(["Codex with ChatGPT Plus as a@example.com", "Codex with ChatGPT Plus as b@example.com", "Codex with ChatGPT Pro"]);
+  });
+
+  it("folds a computer's own login into the vault's key where that computer's turns ran on the key, so one key is one row", () => {
+    // The owner's shape: an API key in the vault, the Mac's agent signed in on its own but its turns run on the key,
+    // Boat handed the key, Codex on ChatGPT Plus on the Mac, OpenCode reporting no limit.
+    const key = { key: "claude:vault-key", agent: "claude", label: "Claude Code with an API key", road: "vault" as const, windows: [], keyed: true, readAt: NOON, computers: ["pl_boat", "here"] };
+    const codex = { key: "codex:acct_7f3a", agent: "codex", label: "dev@example.com", road: "named" as const, plan: "plus", windows: [{ kind: "session" as const, usedPercent: 12 }, { kind: "week" as const, usedPercent: 40 }], readAt: NOON, computers: ["here"] };
+    const mine = [
+      { id: "here", name: "zingzy's MacBook Pro", signIns: { claude: "signed-in", codex: "signed-in", opencode: "signed-in" } as Record<string, AgentSignInState> },
+      { id: "pl_boat", name: "Boat", signIns: { claude: "vault-key" } as Record<string, AgentSignInState> },
+    ];
+    const rows = accountRows({ limits: [key, codex], places: mine, nameOf: id => mine.find(p => p.id === id)?.name ?? id, agentName, planBrand, printsLimits, vaulted: agent => (agent === "claude" ? "key" : undefined) });
+    expect(rows.map(r => [r.label, r.computers, r.note])).toEqual([
+      ["Claude Code with an API key", ["Boat", "zingzy's MacBook Pro"], "pays per token, no plan limit"],
+      ["Codex with ChatGPT Plus", ["zingzy's MacBook Pro"], undefined],
+      ["OpenCode signed in on zingzy's MacBook Pro", ["zingzy's MacBook Pro"], "reports no plan limit"],
     ]);
   });
 });

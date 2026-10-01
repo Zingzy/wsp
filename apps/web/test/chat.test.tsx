@@ -141,7 +141,7 @@ describe("chat tab rendering", () => {
       expect(found).not.toBeNull();
       return found!;
     });
-    expect(ring.getAttribute("aria-label")).toBe("Context: 2.1% used, 4.3k of 200k tokens");
+    expect(ring.getAttribute("aria-label")).toBe("Context: 2.1% used, 4.27k of 200k tokens");
     expect(ring.querySelector("svg circle[data-context-used]")).not.toBeNull();
   });
 

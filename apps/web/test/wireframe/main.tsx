@@ -392,6 +392,7 @@ const SETTINGS_SCREENS: Record<string, SettingsAt> = {
   "settings-devices": { kind: "group", group: "devices" },
   "settings-account": { kind: "group", group: "account" },
   "settings-privacy": { kind: "group", group: "privacy" },
+  "settings-usage": { kind: "group", group: "usage" },
   "settings-keybindings": { kind: "group", group: "keybindings" },
   "settings-about": { kind: "group", group: "about" },
   "settings-about-behind": { kind: "group", group: "about" },
@@ -532,8 +533,34 @@ const HELD: WorkspaceView[] = emptyScreen
 /** The threads of the workspaces this screen holds and no other. */
 const HELD_SESSIONS: Record<string, SessionView[]> = Object.fromEntries(Object.entries(SESSIONS).filter(([workspace]) => HELD.some(w => w.id === workspace)));
 
+/** Usage in the owner's shape: Claude Code on an API key on the Mac and Boat, Codex on ChatGPT Plus with a reading,
+ * OpenCode with no plan limit, and a week at his size, nearly all of it read from cache. */
+const DAY_MS = 86_400_000;
+const USAGE_ANSWERS = {
+  usageAccounts: async () => ({
+    accounts: [
+      { key: "claude:vault-key", agent: "claude", label: "Claude Code with an API key", computers: ["Boat", "zingzy's MacBook Pro"], note: "pays per token, no plan limit" },
+      { key: "codex:acct_7f3", agent: "codex", label: "Codex with ChatGPT Plus", computers: ["zingzy's MacBook Pro"], plan: "plus", windows: [{ kind: "session", usedPercent: 62, resetsAt: Date.parse(AT) + 2.5 * 3_600_000 }, { kind: "week", usedPercent: 18, resetsAt: Date.parse(AT) + 3 * DAY_MS }], status: "ok", readAt: Date.parse(AT) },
+      { key: "opencode@here", agent: "opencode", label: "OpenCode signed in on zingzy's MacBook Pro", computers: ["zingzy's MacBook Pro"], note: "reports no plan limit" },
+    ],
+  }),
+  usageUsed: async (range: string, split: string) => ({
+    range,
+    split,
+    rows: [
+      { key: "claude", label: "Claude Code", tokens: { input: 7_323_700_000, output: 7_300_000, cached: 6_874_800_000 }, costList: 4_301.74, priced: true },
+      { key: "codex", label: "Codex", tokens: { input: 22_000_000, output: 42_000, cached: 20_700_000 }, costList: 15.45, priced: true },
+    ],
+    series: Array.from({ length: 7 }, (_, i) => ({ t: Date.parse(AT) - (6 - i) * DAY_MS, tokens: [1.4, 0.6, 1.1, 0.3, 1.8, 0.9, 1.2][i]! * 1_000_000_000 })),
+    since: Date.parse(AT) - 6 * DAY_MS,
+    until: Date.parse(AT) + DAY_MS,
+    logs: { agents: ["Claude Code"], computer: "zingzy's MacBook Pro" },
+  }),
+};
+
 const api = {
   subscribe: () => () => {},
+  ...(screen === "settings-usage" ? USAGE_ANSWERS : {}),
   listWorkspaces: async () => HELD,
   listSessions: async () => (drawsSidebar ? Object.values(HELD_SESSIONS).flat() : []),
   watchStatuses: async () => [],

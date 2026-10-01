@@ -33,5 +33,6 @@ export const CODEX: AgentEntry = {
   ],
   history: { format: "codex-rollout", root: "~/.codex/sessions" },
   printsLimits: true,
+  planBrand: "ChatGPT",
   source: { sessions: 5, images: 1, road: "measured" },
 };

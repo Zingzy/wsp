@@ -127,6 +127,8 @@ export interface AgentEntry extends EntryBase {
   history?: SessionHistory;
   /** The agent prints its plan's limits in a turn's stream, which the Usage page reads; absent, it prints none. */
   printsLimits?: true;
+  /** The name the agent's plans are sold under, before the plan word the agent prints: ChatGPT for Codex's Plus. */
+  planBrand?: string;
   /** Where the agent keeps its token counts when its history has no reader: what the Usage page reads for work done
    * outside wsp. An agent with a history reads its usage there. */
   usageLog?: { format: "opencode-sqlite"; root: string };

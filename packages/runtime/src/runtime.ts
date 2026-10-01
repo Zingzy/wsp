@@ -270,7 +270,7 @@ import {
   type WorkspaceFrom,
 } from "@wsp/protocol";
 import { secretsOf } from "./adapters.js";
-import { accountOf, accountRows, createPriceTable, createUsageLedger, type Vaulted } from "./usage.js";
+import { accountOf, accountOnComputer, accountRows, createPriceTable, createUsageLedger, usageComputerName, type Vaulted } from "./usage.js";
 
 // --- adapter port -------------------------------------------------------------
 
@@ -10958,7 +10958,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       case "project":
         return value === "" ? "No project" : (projectsHeld.get(value)?.name ?? value);
       case "computer":
-        return places.find(p => p.id === value)?.name ?? (value === HERE_PLACE_ID ? THIS_COMPUTER : value);
+        return usageComputerName(places, value);
       case "account":
         return accounts.get(value) ?? value;
       default: {
@@ -10981,11 +10981,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     await ready();
     const threads = new Set([...sessions.values()].flatMap(s => (s.view.claudeSessionId !== undefined ? [s.view.claudeSessionId] : [])));
     const rows = (await opts.logUsage()).filter(r => !threads.has(r.session));
-    const hereName = ((await placeDoor?.list(clock.now())) ?? []).find(p => p.id === HERE_PLACE_ID)?.name ?? THIS_COMPUTER;
-    // Work in a terminal here runs on this computer's own login: the account a turn here named, else the login itself.
-    const accountHere = (agent: string): { key: string; label: string } =>
-      limits.find(l => l.agent === agent && l.road === "named" && l.computers.includes(HERE_PLACE_ID)) ??
-      accountOf({ agent, agentName: harnessCatalog(agent)?.label ?? agent, vaulted: undefined, computer: { id: HERE_PLACE_ID, name: hereName } });
+    const thisComputer = { id: HERE_PLACE_ID, name: usageComputerName((await placeDoor?.list(clock.now())) ?? [], HERE_PLACE_ID) };
+    // Work in a terminal here runs on the account this computer's turns run on.
+    const accountHere = (agent: string): { key: string; label: string } => accountOnComputer({ agent, agentName: harnessCatalog(agent)?.label ?? agent, computer: thisComputer, limits, vaulted: vaultedFor(agent) });
     await ledger.fileLogs(
       rows.map(r => ({
         at: r.at,
@@ -11008,7 +11006,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const outside = q.outside === true && (await preferences.get()).usageLogs;
       if (outside) await readLogs().catch((e: unknown) => console.warn(`this computer's agent logs were not read for usage: ${e instanceof Error ? e.message : String(e)}`));
       const places = (await placeDoor?.list(clock.now())) ?? [];
-      return ledger.used({ range: q.range, split: q.split, label: usageLabel(places, await ledger.accountLabels()), outside });
+      return ledger.used({ range: q.range, split: q.split, label: usageLabel(places, await ledger.accountLabels()), outside, logsOn: usageComputerName(places, HERE_PLACE_ID) });
     },
     readings: async (target, range, origin) => {
       const to = clock.now();
@@ -11040,8 +11038,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         accounts: accountRows({
           limits: await ledger.limits(),
           places: listed,
-          nameOf: id => places.find(p => p.id === id)?.name ?? (id === HERE_PLACE_ID ? THIS_COMPUTER : id),
+          nameOf: id => usageComputerName(places, id),
           agentName: agent => harnessCatalog(agent)?.label ?? agent,
+          planBrand: agent => CATALOG_AGENTS.find(a => a.id === agent)?.planBrand,
           vaulted: agent => vaultedFor(agent),
           printsLimits: agent => CATALOG_AGENTS.find(a => a.id === agent)?.printsLimits === true,
         }),
