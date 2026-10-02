@@ -12,7 +12,8 @@ import { METHOD_WORDS, PR_WORDS } from "./words.js";
 
 /** The box's buttons, 28 px, 12.5 px medium, the merge itself in the foreground ink. */
 export const BOX_BUTTON = "h-7 gap-1.5 rounded-[7px] px-2.5 text-[12.5px] font-medium [&_svg]:size-[13px]";
-const MERGE_INK = "border-foreground bg-foreground text-background shadow-none [:hover,[data-pressed]]:bg-foreground/90 [&_svg]:text-background";
+// The pane stands on the Mac's glass, where --background is transparent; the primary pair stays solid in every theme.
+const MERGE_INK = "border-primary bg-primary text-primary-foreground shadow-none [:hover,[data-pressed]]:bg-primary/90 [&_svg]:text-primary-foreground";
 
 export function MergeControls({ workspaceId, name, fact, repo }: { workspaceId: string; name: string; fact: PullRequestFact; repo?: GitRepoReadReply | undefined }) {
   if (fact.state !== "open") return null;

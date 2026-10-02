@@ -78,7 +78,7 @@ export function ReplyField({ to, onSend, onCancel }: { to: string; onSend: (body
           <Button type="button" variant="ghost" className={XS} data-pr-reply-cancel onClick={onCancel}>
             {PR_WORDS.cancel}
           </Button>
-          <Button type="button" className={cn(XS, "border-foreground bg-foreground text-background shadow-none [:hover,[data-pressed]]:bg-foreground/90")} data-pr-reply-send disabled={text.trim() === "" || sending} onClick={send}>
+          <Button type="button" className={XS} data-pr-reply-send disabled={text.trim() === "" || sending} onClick={send}>
             {PR_WORDS.send}
           </Button>
         </div>
