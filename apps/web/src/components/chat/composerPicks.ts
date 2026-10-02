@@ -94,16 +94,17 @@ export function threadPicks(thread: { running: boolean; model: string | null; pe
 }
 
 /** The picks that apply to the thread in front of the person. Every pick a thread keeps for itself, the model and the
- * window that rides inside it on the wire, the effort and the access, is remembered per workspace while the thread
- * goes on running at the one it was opened at, so each is dropped here unless it was made on this thread: otherwise
- * it paints this one's button and moves it on the next send. They apply to a thread that has not run, which is what
- * the pick was made for, and each to the thread it was made on, which is someone changing that thread on purpose.
- * Each is read against its own thread and not several against one, or picking a window here would carry in a model
- * picked somewhere else. */
+ * window that rides inside it on the wire, the effort and the access, applies only on the thread it was made on: a
+ * pick made on a thread that ran would otherwise paint another one's button and move it on the next send. A thread
+ * that has not run, which is a draft, takes the picks made on it and an access the host's record carries with no
+ * thread named, and none made on a thread that ran, so a new thread opens on the defaults. Each is read against its
+ * own thread and not several against one, or picking a window here would carry in a model picked somewhere else. */
 export function pickedFor(picked: ComposerOptions, thread: { model: string | null }, pickedOn: PickThreads, threadKey: string): ComposerOptions {
-  if (thread.model === null) return picked;
   const applies: ComposerOptions = { ...picked };
-  for (const key of THREAD_SCOPED_PICKS) if (pickedOn[key] !== threadKey) delete applies[key];
+  for (const key of THREAD_SCOPED_PICKS) {
+    const on = pickedOn[key];
+    if (on !== threadKey && (thread.model !== null || on !== undefined)) delete applies[key];
+  }
   return applies;
 }
 

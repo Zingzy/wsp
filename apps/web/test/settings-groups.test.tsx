@@ -100,7 +100,7 @@ describe("Projects", () => {
 
   it("a project's page says its lines, its two rows, and Remove held with the refusal while a workspace stands, else asks with the line for the computer's kind and lands the runtime's answer as the toast", async () => {
     const removed: string[] = [];
-    const spoo = project("pr_spoo", "spoo", "here", { base: "release", lastAgent: "codex", seeded: { files: 412, bytes: 3_250_000, memory: "landed", commits: 9, at: AT } });
+    const spoo = project("pr_spoo", "spoo", "here", { base: "release", seeded: { files: 412, bytes: 3_250_000, memory: "landed", commits: 9, at: AT } });
     useStore.setState({ places: [here, box, solari], projects: [spoo, project("pr_landing", "landing", "p_spoo"), project("pr_cloud", "cloud", "solari")], workspaces: [view("ws_a", "pricing page", "pr_spoo")] });
     await mount(
       {

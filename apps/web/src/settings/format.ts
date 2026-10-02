@@ -421,8 +421,6 @@ export const PROJECTS_WORDS = {
   newWorkspaces: "New tasks",
   branch: "Branch",
   branchDescription: "Where a new task starts.",
-  lastAgent: "Last agent",
-  lastAgentDescription: "What a new thread on it defaults to.",
   remove: "Remove",
   removeTitle: (name: string): string => `Remove ${name}`,
   removeAsk: (name: string): string => `Remove ${name}?`,

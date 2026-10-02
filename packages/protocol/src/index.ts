@@ -294,7 +294,7 @@ export const Capabilities = z.object({
   /** The machine is the person's own, kept: its files, its sign-ins and its git checkouts outlive every turn, and
    * wsp neither made it nor throws it away. False on a fork wsp made, where a turn that wrecks the disk costs a
    * rebuild and nothing else. Whether the access picker names the machine on the pick that asks nothing reads this;
-   * what a thread with no access word runs at is the kind's own row, read through workspaceAccess. */
+   * what a thread with no access word runs at is the person's default, which markedFor places. */
   kept: z.boolean(),
   /** The computer makes a workspace as a copy of itself with the project inside. A Linux box and a provider fork
    * yes; the computer the app runs on yes, by copying the project folder to a path of its own; a machine reached
@@ -525,8 +525,6 @@ export const ProjectView = z.object({
   /** The branch a new workspace starts on; absent is the remote's default branch, read at the clone. */
   base: z.string().optional(),
   createdAt: z.string(),
-  /** The agent the last thread on this project used; what run and the composer default to. */
-  lastAgent: z.string().optional(),
 });
 export type ProjectView = z.infer<typeof ProjectView>;
 
@@ -6962,7 +6960,7 @@ export { hereName, isHere, isProviderPlace, placeName, placeOf, workspaceCompute
 export { needsYouLine, threadNeedsYou, threadState, threadStateWord, threadUnread, threadUnseenAt, threadWordOf, waitingLine, type ThreadState } from "./thread-state.js";
 export { AGENTS_ON, CLOUD_CAP_DEFAULT, NAP_AFTER_MAX_MS, NAP_AFTER_MS, phaseHoldsSlot, placeAtLimitLine, placeCapOf, placeFullLine, placeSetRefusal, placeSettingKey, placeSettingsLine, placeTakes, settingFor, napMsOf, placeRoom, placeSpendLimit, runningOn, THREAD_MEM_MB, threadsAtOnce, workspacePlace, workspacePlaceId, type PlacedThread, type PlacedWorkspace } from "./place-state.js";
 export { MCP_SERVER_NAME, threadsFollowed, WSP_TOOL_TIMEOUT_SEC } from "./wsp-tools.js";
-export { type AbsentComputer, type AwayWord, absentComputer, actionRefusal, daemonSilent, ownDaemonDown, START_DAEMON_WORD, agentsKindRefusal, agentsMayDrive, awayMsOf, composerHeldLine, type CopyToDelete, deleteCopiesNotice, deleteNotice, unpushedLine, onDeleteOf, type StandsOn, UNNAMED_COMPUTER, goneRefusal, COMPUTER_LEFT, pausedOrPausing, notAnsweringYet, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, turnSpendWord, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, FORGET_NEEDS_GONE, goneRoadRefusal, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, workspaceAccess, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, whereWord, workspaceStateLine, workspaceStateOf, workspaceWord, type AbsentRoad, type AbsentRoadInput, absentRoad, BACK_OVER_SSH, backUrl, dialsBackWord, linkedOver, lastKnown, REPORTED_WORD, placeDialLine, placeNoDialLine, placeDialRoad, sshRoadOf, type PlaceDialRoad } from "./workspace-state.js";
+export { type AbsentComputer, type AwayWord, absentComputer, actionRefusal, daemonSilent, ownDaemonDown, START_DAEMON_WORD, agentsKindRefusal, agentsMayDrive, awayMsOf, composerHeldLine, type CopyToDelete, deleteCopiesNotice, deleteNotice, unpushedLine, onDeleteOf, type StandsOn, UNNAMED_COMPUTER, goneRefusal, COMPUTER_LEFT, pausedOrPausing, notAnsweringYet, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, turnSpendWord, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, FORGET_NEEDS_GONE, goneRoadRefusal, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, whereWord, workspaceStateLine, workspaceStateOf, workspaceWord, type AbsentRoad, type AbsentRoadInput, absentRoad, BACK_OVER_SSH, backUrl, dialsBackWord, linkedOver, lastKnown, REPORTED_WORD, placeDialLine, placeNoDialLine, placeDialRoad, sshRoadOf, type PlaceDialRoad } from "./workspace-state.js";
 export * from "./agents-report.js";
 export { contextWindowsFor, effortsFor, everyModel, listedPick, markedDefault, modelOf } from "./harness-picks.js";
 export * from "./thread-defaults.js";

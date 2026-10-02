@@ -438,7 +438,7 @@ describe("the folder a thread starts in", () => {
     const project = await projectOn(rt);
     const ws = await rt.workspaces.create({ project: project.id, golden: "snap_g", name: "work" });
     await rt.sessions.start(ws.id, { prompt: "hi", harness: "claude" });
-    expect((await rt.projects.resolve(project.id)).lastAgent).toBeUndefined();
+    expect(await rt.projects.resolve(project.id)).not.toHaveProperty("lastAgent");
     const handle = await rt.sessions.start(ws.id, { prompt: "again" });
     expect(handle.view().harness).toBe("claude");
   });

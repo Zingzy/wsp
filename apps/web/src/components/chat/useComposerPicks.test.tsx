@@ -135,8 +135,9 @@ describe("the composer's picks on a thread the catalog's list does not know", ()
     act(() => seed([ROW]));
     act(() => useComposerOptionsStore.getState().pick(WORKSPACE, "model", "claude-fable-5-1", "t9"));
     expect(read("claude-opus-5")).toEqual({ model: { value: "claude-opus-5", label: "Opus 5", isDefault: true, contextWindows: ["200k", "1m"] }, start: { model: "claude-opus-5" } });
-    // A thread with no start behind it is the one that pick is for.
-    expect(read(null).start).toEqual({ model: "claude-fable-5-1" });
+    // The draft it was picked on takes it; a new thread anywhere else opens on the defaults.
+    expect(read(null, "t9").start).toEqual({ model: "claude-fable-5-1" });
+    expect(read(null).start).toEqual({});
   });
 
   it("a window picked here does not bring in a model picked on another thread, nor the other way round", () => {
@@ -163,9 +164,10 @@ describe("the composer's picks on a thread the catalog's list does not know", ()
     const ran = readAll("claude-fable-5-1");
     expect(ran.shows["effort"]).toBe("high");
     expect(ran.start).toEqual({ model: "claude-fable-5-1", effort: "high", permissionMode: "plan" });
-    // A thread with no turn behind it is the one that pick was made for.
-    expect(readAll(null).shows["effort"]).toBe("low");
-    expect(readAll(null).start).toEqual({ effort: "low" });
+    // The draft it was picked on takes it; a new thread anywhere else opens on the defaults.
+    expect(readAll(null, "t9").shows["effort"]).toBe("low");
+    expect(readAll(null, "t9").start).toEqual({ effort: "low" });
+    expect(readAll(null).shows["effort"]).toBe("high");
   });
 
   it("an access picked on another thread of this workspace paints neither this thread's button nor its send", () => {
@@ -177,8 +179,9 @@ describe("the composer's picks on a thread the catalog's list does not know", ()
     const ran = readAll("claude-fable-5-1");
     expect(ran.shows["permissionMode"]).toBe("plan");
     expect(ran.start).toEqual({ model: "claude-fable-5-1", effort: "high", permissionMode: "plan" });
-    expect(readAll(null).shows["permissionMode"]).toBe("bypassPermissions");
-    expect(readAll(null).start).toEqual({ permissionMode: "bypassPermissions" });
+    expect(readAll(null, "t9").shows["permissionMode"]).toBe("bypassPermissions");
+    expect(readAll(null, "t9").start).toEqual({ permissionMode: "bypassPermissions" });
+    expect(readAll(null).start).toEqual({});
   });
 
   it("an effort or an access picked on this thread still wins over what it ran at", () => {

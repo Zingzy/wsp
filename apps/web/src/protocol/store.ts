@@ -3,7 +3,7 @@
 // contract components code against.
 import { useEffect, useMemo } from "react";
 import { create } from "zustand";
-import { applyPreferencesPatch, kindForComputer, threadsFollowed, workspaceAccess, type AbsentComputer, type BringBackResult, foldThreads, goldenHead, threadKeyOf, workspaceStateOf, type AppAddress, type Capabilities, copyBuildOf, type GoldenStageEvent, type HarnessCatalog, type InitJob, type InitSetup, type PlaceView, type PlaceSettingsAsk, type PlaceSettingWord, type PortForward, type ProjectView, type Preferences, type PreferencesPatch, type ReleaseView, type SessionView, type ThreadMarks, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceProject, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView, type PlaceDial, type WorkspaceLanding, type ReviewDraft } from "@wsp/protocol";
+import { applyPreferencesPatch, threadsFollowed, type AbsentComputer, type BringBackResult, foldThreads, goldenHead, threadKeyOf, workspaceStateOf, type AppAddress, type Capabilities, copyBuildOf, type GoldenStageEvent, type HarnessCatalog, type InitJob, type InitSetup, type PlaceView, type PlaceSettingsAsk, type PlaceSettingWord, type PortForward, type ProjectView, type Preferences, type PreferencesPatch, type ReleaseView, type SessionView, type ThreadMarks, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceProject, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView, type PlaceDial, type WorkspaceLanding, type ReviewDraft } from "@wsp/protocol";
 import { noSuchThreadLine, renameNotTakenLine } from "../actions/format.js";
 import { readAddress, readProjectHome, writeAddress, writeProjectHome } from "./address.js";
 import { deriveSidebarProjects, sidebarWorkspaceOrder } from "../adapt/workspaces.js";
@@ -349,19 +349,14 @@ function handOver(key: string, workspaceId: string): void {
       return { drafts: { ...rest, [workspaceId]: draft } };
     });
   }
-  useComposerOptionsStore.setState(s => {
-    const picked = s.byWorkspaceId[key];
-    return picked === undefined ? s : { byWorkspaceId: { ...s.byWorkspaceId, [workspaceId]: picked } };
-  });
+  useComposerOptionsStore.getState().move(key, workspaceId);
   const access = useStore.getState().preferences.access[key];
   if (access !== undefined) void useStore.getState().setPreferences({ access: { [workspaceId]: access, [key]: null } });
   // The lists the creation's composer drew stand for the workspace until its machine answers with its own, so the
   // footer it lands with is the one that was on screen.
   const s = useStore.getState();
-  const project = s.projects.find(p => p.id === s.creations.find(c => c.key === key)?.project);
-  if (project !== undefined && s.harnessesByWorkspace[workspaceId] === undefined) {
-    const kind = kindForComputer(project.computer);
-    useStore.setState(now => ({ harnessesByWorkspace: { ...now.harnessesByWorkspace, [workspaceId]: now.harnesses.map(c => workspaceAccess(c, kind)) } }));
+  if (s.creations.some(c => c.key === key) && s.harnessesByWorkspace[workspaceId] === undefined) {
+    useStore.setState(now => ({ harnessesByWorkspace: { ...now.harnessesByWorkspace, [workspaceId]: now.harnesses } }));
   }
 }
 
@@ -1329,8 +1324,8 @@ export function useGoldenFrames(): Record<string, GoldenStageEvent[]> { return u
 export function useHarnessCatalogs(workspaceId: string | null): HarnessCatalog[] {
   return useStore(s => catalogsIn(s, workspaceId));
 }
-export function useHarnessCatalog(harness: string, workspaceId: string | null = null): HarnessCatalog | null {
-  return useStore(s => catalogIn(s, workspaceId, harness));
+export function useHarnessCatalog(harness: string | null, workspaceId: string | null = null): HarnessCatalog | null {
+  return useStore(s => (harness === null ? null : catalogIn(s, workspaceId, harness)));
 }
 
 type Catalogs = Pick<State, "harnesses" | "harnessesByWorkspace">;
@@ -1362,6 +1357,9 @@ export const catalogsIn = (s: Catalogs, workspaceId: string | null): HarnessCata
 const PROJECT_HOME_PREFIX = "project:";
 export const projectHomeKey = (projectId: string): string => `${PROJECT_HOME_PREFIX}${projectId}`;
 export const isProjectHomeKey = (key: string): boolean => key.startsWith(PROJECT_HOME_PREFIX);
+/** The project a composer's send lands in: its home's, the creation's, or the workspace's own. */
+export const projectOfKey = (s: Pick<State, "workspaces" | "creations">, key: string): string | undefined =>
+  isProjectHomeKey(key) ? key.slice(PROJECT_HOME_PREFIX.length) : (s.creations.find(c => c.key === key)?.project ?? s.workspaces.find(w => w.id === key)?.project?.id);
 /** A workspace being made reads the lists as its project's home does, since they are what its workspace is picked from. */
 const CREATION_PREFIX = "creating:";
 export const isCreationKey = (key: string): boolean => key.startsWith(CREATION_PREFIX);
@@ -1375,11 +1373,6 @@ export function useOpenThread(workspaceId: string | null): ThreadView | null {
   const threadId = useSelectedThreadId();
   return useMemo(() => (threadId === null ? null : foldThreads(sessions).find(t => t.threadId === threadId) ?? null), [sessions, threadId]);
 }
-/** The workspace's most recent session row, running or not; null before its first session this runtime remembers. */
-export function useLatestSession(id: string | null): SessionView | null {
-  return useStore(s => (id ? s.sessions[id]?.at(-1) ?? null : null));
-}
-
 /** Every turn the runtime holds for one thread, oldest first: what that thread has already run with, which is what a
  * composer reads its pickers off, its running turn included, so a second thread running in the same workspace paints
  * neither. A view holding no thread of its own carries the workspace's id as its key, which no row carries: there the

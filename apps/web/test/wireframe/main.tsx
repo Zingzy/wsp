@@ -548,7 +548,7 @@ const emptyScreen = screen === "sidebar-empty";
 const oneProject = screen === "sidebar-one-project";
 /** On a settings screen spoo carries what its own page reads: the branch a workspace starts on, the last agent and
  * what the seed carried. */
-const SPOO_RECORDED: ProjectView = settings ? { ...SPOO, base: "main", lastAgent: "claude", seeded: { files: 412, bytes: 3_250_000, memory: "landed", memoryFiles: 3, commits: 9, at: AT } } : SPOO;
+const SPOO_RECORDED: ProjectView = settings ? { ...SPOO, base: "main", seeded: { files: 412, bytes: 3_250_000, memory: "landed", memoryFiles: 3, commits: 9, at: AT } } : SPOO;
 const RECORDED: ProjectView[] = emptyScreen ? [] : oneProject ? [SPOO] : [SPOO_RECORDED, WSP, LANDING];
 
 /** The workspaces this screen's store holds, which is also what the fake host answers with: a bind that answered
