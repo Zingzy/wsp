@@ -200,6 +200,10 @@ function toolsOf(body: string): { tools: McpTool[] } | { refused: string; said?:
 
 type Asked = Omit<ServerToolsAnswer, "readAt">;
 
+/** The shell's own codes for a command it could not start say so in words; any other exit says its code. */
+export const exitedRefusal = (command: string, exit: string | undefined): string =>
+  exit === "127" ? `${command} was not found` : exit === "126" ? `${command} could not be run` : `it exited with ${exit ?? "no code"} before it answered`;
+
 const RUN_MARGIN_MS = 10_000;
 
 const SHELL_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -219,7 +223,7 @@ async function askStdio(host: Host, t: Extract<McpTransport, { kind: "stdio" }>,
   // What a server says on stderr may carry its own key, so it goes to the host's log and never onto the page.
   if (outcome !== "0" && err.trim() !== "") log(`it said on stderr: ${err.trim()}`);
   if (outcome === "2") return { auth: "failed", refused: serverToolsLateRefusal(deadlineMs) };
-  if (outcome === "1") return { auth: "failed", refused: `it exited with ${exit ?? "no code"} before it answered` };
+  if (outcome === "1") return { auth: "failed", refused: exitedRefusal(t.command, exit) };
   return read(rest.join("\n"), log, hide);
 }
 

@@ -27,6 +27,7 @@ import { useSkillActs } from "../components/agents/useSkillActs.js";
 import { HarnessMark } from "../components/chat/HarnessMark.js";
 import { AddButton } from "../components/ui/add-button.js";
 import { Button } from "../components/ui/button.js";
+import { Spinner } from "../components/ui/spinner.js";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "../components/ui/input-group.js";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../components/ui/select.js";
 import { Switch } from "../components/ui/switch.js";
@@ -53,11 +54,33 @@ const STATUS_DOT: Record<Tone, string> = { good: "bg-success", waiting: "bg-warn
 
 /** A state as the Agents page's lists say it: its word in the page's own ink, then a small dot. */
 export function StatusWord({ word, tone, hover, k = "agent-status" }: { word: string; tone: Tone; hover?: string; k?: string }) {
-  return (
-    <span data-k={k} data-tone={tone} className="inline-flex items-center gap-2 text-[13px] leading-5 text-muted-foreground" {...(hover === undefined ? {} : { title: hover })}>
+  const said = (
+    <span data-k={k} data-tone={tone} className="inline-flex items-center gap-2 text-[13px] leading-5 text-muted-foreground">
       {word}
       <span aria-hidden className={cn("size-2 shrink-0 rounded-full", STATUS_DOT[tone])} />
     </span>
+  );
+  if (hover === undefined) return said;
+  return (
+    <Tooltip>
+      <TooltipTrigger render={said} />
+      <TooltipPopup side="top" className="max-w-80">
+        {hover}
+      </TooltipPopup>
+    </Tooltip>
+  );
+}
+
+/** A row's step beside a failed status, as its icon alone: the status says what went wrong, the icon tries again. */
+function StepMark({ act }: { act: RowAct }) {
+  const Icon = act.icon;
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<Button variant="ghost" size="icon-xs" data-k={`act-${act.id}`} aria-label={act.label} disabled={act.run === undefined} onClick={() => act.run?.()} />}>
+        {act.busy === true ? <Spinner className="size-3.5" /> : Icon === undefined ? null : <Icon aria-hidden className="size-3.5 text-muted-foreground" />}
+      </TooltipTrigger>
+      <TooltipPopup side="top">{act.label}</TooltipPopup>
+    </Tooltip>
   );
 }
 
@@ -134,7 +157,19 @@ function KindRow({ kind, item, rows, computer, open }: { kind: AnyKind; item: un
   const status = row.status ?? statusFact(detail);
   // A kind whose rows say a state keeps its switch on the item's page; one whose rows say none turns on the row.
   const turn = row.status === undefined ? turnOf(detail.acts) : undefined;
-  const right = step !== undefined ? <ActButton act={step} /> : turn !== undefined ? <TurnSwitch turn={turn} label={row.title} computer={computer} /> : status === undefined ? null : <KindStatus status={status} />;
+  const failed = status?.tone === "bad" && step !== undefined && row.quick?.icon !== undefined;
+  const right = failed ? (
+    <>
+      <StepMark act={row.quick!} />
+      <KindStatus status={status!} />
+    </>
+  ) : step !== undefined ? (
+    <ActButton act={step} />
+  ) : turn !== undefined ? (
+    <TurnSwitch turn={turn} label={row.title} computer={computer} />
+  ) : status === undefined ? null : (
+    <KindStatus status={status} />
+  );
   // One block per item, so the card's rule falls between items and never between a row and its own lines.
   return (
     <div data-kind-item={row.key}>
@@ -155,6 +190,7 @@ function KindRow({ kind, item, rows, computer, open }: { kind: AnyKind; item: un
           <SignInFlowView view={detail.flow} label={row.title} />
         </div>
       )}
+      {/* Only a refusal of something the person did stands under the row; a state's reason is its status's hover. */}
       {detail.flow !== undefined || detail.refused === undefined ? null : (
         <p data-k="kind-row-refused" className="pr-5 pb-3 pl-[64px] text-[13px] leading-[18px] break-words text-destructive-foreground">
           {detail.refused}

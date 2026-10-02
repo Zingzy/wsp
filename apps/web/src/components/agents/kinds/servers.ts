@@ -328,7 +328,8 @@ export const SERVERS_KIND: KindModule<ServerEntry> = {
       facts,
       acts,
       ...(flow === undefined ? {} : { flow }),
-      ...(wrote !== undefined ? { refused: wrote } : refused === undefined ? {} : { refused }),
+      // Only what a write was refused: why it did not connect is the status's, and the tools level's below.
+      ...(wrote === undefined ? {} : { refused: wrote }),
       under: {
         title: W.toolsOf(entry.name),
         reading: asked?.listing === true || worst.state === "checking",

@@ -107,10 +107,12 @@ describe("the Tool servers tab", () => {
     expect(rowOf(METRICS)!.closest("[data-settings-card]")?.getAttribute("data-settings-card")).toBe("kind-project-pr_wsp");
   });
 
-  it("stands the one step a server needs in its state's place: Reconnect where it failed, Sign in where it needs one", async () => {
+  it("says a failed server as its status with Reconnect as an icon beside it and no line under the row, and stands Sign in in its state's place", async () => {
     await mountTab(toolsApi().api, "servers");
-    expect(rowOf(GITHUB)!.querySelector("[data-k=act-reconnect]")?.textContent).toBe("Reconnect");
-    expect(status(GITHUB)).toBeNull();
+    expect(rowOf(GITHUB)!.querySelector("[data-k=act-reconnect]")?.getAttribute("aria-label")).toBe("Reconnect");
+    expect(status(GITHUB)?.textContent).toBe("Failed");
+    expect(status(GITHUB)?.dataset["tone"]).toBe("bad");
+    expect(rowOf(GITHUB)!.closest("[data-kind-item]")!.querySelector("[data-k=kind-row-refused]")).toBeNull();
     expect(rowOf(LINEAR)!.querySelector("[data-k=act-sign-in]")?.textContent).toBe("Sign in");
     expect(status(LINEAR)).toBeNull();
     // Off is a state the row says; turning it on is the server's own page's switch.

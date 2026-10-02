@@ -175,7 +175,8 @@ describe("a server's state and tools", () => {
     serversTab();
     await answerAll(asks);
     open(GITHUB);
-    expect(document.querySelector("[data-k=detail-refused]")?.textContent).toBe("Did not answer in 20 s.");
+    // Why it did not connect is the status's, never the refusal slot, which is for a write the host refused.
+    expect(document.querySelector("[data-k=detail-refused]")).toBeNull();
     expect(said(badge())).toBe("failed");
     expect(badge().getAttribute("title")).toBe("Did not answer in 20 s.");
     expect(document.querySelector("[data-fact=status] [data-fact-note]")?.textContent).toBe("Did not answer in 20 s.");
@@ -183,7 +184,7 @@ describe("a server's state and tools", () => {
     expect(asks.at(-1)).toMatchObject({ name: "github", refresh: true });
     asks.at(-1)!.refuse(new Error("spoo is not answering"));
     await settle();
-    expect(document.querySelector("[data-k=detail-refused]")?.textContent).toBe("spoo is not answering");
+    expect(document.querySelector("[data-fact=status] [data-fact-note]")?.textContent).toBe("spoo is not answering");
   });
 
   it("offers Sign in first and no List tools where a sign-in is needed, and names the harness that keeps a sign-in on View tools' hover", async () => {
