@@ -4,13 +4,12 @@
 // tab. The agents tab says which agent a new thread starts on, then one row
 // per agent on that computer with its version, its sign-in and what a new
 // thread runs it with, each opening that agent's own page; an agent that is
-// not there offers its install. The other two tabs are the agents manager for
-// that one kind, so their details, acts and sign-ins are the panel's own.
-import { BotIcon, CircleArrowUpIcon, RotateCwIcon, ScrollTextIcon, ServerIcon } from "lucide-react";
+// not there offers its install. The other two tabs draw their kind's rows in
+// the same grammar, each opening its item's own page.
+import { BotIcon, CircleArrowUpIcon, ScrollTextIcon, ServerIcon } from "lucide-react";
 import { HERE_PLACE_ID, accessWord, effortsFor, markedDefault, modelOf, type AccessChoice, type AgentRow, type HarnessCatalog, type PlaceView } from "@wsp/protocol";
 import { agentName } from "@wsp/catalog";
 import { copyText } from "../actions/clipboard.js";
-import { AgentsManager, RefusedLines } from "../components/agents/AgentsManager.js";
 import { ActButton } from "../components/agents/agentsParts.js";
 import { AGENTS_LIST_WORDS, recipeMissLines, refusedLines, waitingFlow, type RefusedLine, type RowsContext } from "../components/agents/agentsRows.js";
 import { AGENTS_KIND, signInWord } from "../components/agents/kinds/agents.js";
@@ -20,19 +19,16 @@ import type { AnyKind } from "../components/agents/kinds/kind.js";
 import { SignInFlowView } from "../components/agents/SignInFlowView.js";
 import { useAgentActs } from "../components/agents/useAgentActs.js";
 import { useAgentsReport } from "../components/agents/useAgentsReport.js";
-import { useServerActs } from "../components/agents/useServerActs.js";
-import { useServerTools } from "../components/agents/useServerTools.js";
-import { useSkillActs } from "../components/agents/useSkillActs.js";
 import { HarnessMark } from "../components/chat/HarnessMark.js";
 import { Button } from "../components/ui/button.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
-import { cn } from "../lib/utils.js";
 import { SegmentedControl } from "../components/ui/segmented-control.js";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../components/ui/select.js";
 import { useStore } from "../protocol/store.js";
 import { ComputerGlyph } from "./ComputerGlyph.js";
 import { wordOnly } from "./computers.js";
-import { ABOUT_WORDS, AGENTS_PAGE_WORDS as W, capitalised } from "./format.js";
+import { AGENTS_PAGE_WORDS as W, capitalised } from "./format.js";
+import { KindTab, NotReadCard, OnHead, StatusWord } from "./agentKinds.js";
 import { GlyphFrame } from "./grid.js";
 import { SELECT_WIDTH } from "./layout.js";
 import { absentOf, isProviderPlace, placeName } from "./places.js";
@@ -202,18 +198,6 @@ function NewThreadsCard({ ctx }: { ctx: SettingsContext }) {
   );
 }
 
-/** The list's one way of saying an agent's state: its word in the page's own ink, then the dot the agents panel
- * uses, green signed in, amber waiting on the person, grey not installed. */
-const STATUS_DOT = { good: "bg-success", waiting: "bg-warning", quiet: "bg-foreground/30" } as const;
-function AgentStatus({ word, tone }: { word: string; tone: keyof typeof STATUS_DOT }) {
-  return (
-    <span data-k="agent-status" data-tone={tone} className="inline-flex items-center gap-2 text-[13px] leading-5 text-muted-foreground">
-      {word}
-      <span aria-hidden className={cn("size-2 shrink-0 rounded-full", STATUS_DOT[tone])} />
-    </span>
-  );
-}
-
 /** A newer version waiting: a small arrow that copies the agent's own update line, its version on the hover. */
 function UpdateMark({ row, computer, ctx }: { row: AgentRow; computer: string; ctx: SettingsContext }) {
   const update = row.update;
@@ -268,7 +252,7 @@ function AgentLine({ row, rows, computer, ctx }: { row: AgentRow; rows: RowsCont
           <span className="flex items-center gap-3">
             <UpdateMark row={row} computer={computer} ctx={ctx} />
             {/* A step to take is its own word; the status stands only where there is none. */}
-            {step === undefined ? <AgentStatus word={word} tone={tone} /> : <ActButton act={wordOnly(step)} />}
+            {step === undefined ? <StatusWord word={word} tone={tone} /> : <ActButton act={wordOnly(step)} />}
           </span>
         }
         open={() => ctx.go({ kind: "agent", id: row.id })}
@@ -280,26 +264,6 @@ function AgentLine({ row, rows, computer, ctx }: { row: AgentRow; rows: RowsCont
         </div>
       )}
     </>
-  );
-}
-
-/** The list's head: the computer it reads, when it was last read, and Read again, which asks at once. */
-function OnHead({ name, readAt, reading, now, refresh }: { name: string; readAt: number | null; reading: boolean; now: number; refresh: () => void }) {
-  return (
-    <span className="flex w-full items-center gap-3">
-      <span className="min-w-0 flex-1 truncate">{W.on(name)}</span>
-      {readAt === null ? null : (
-        <span data-k="agents-read-at" className="shrink-0 text-[12.5px] font-normal text-muted-foreground">
-          {W.checkedNow(ABOUT_WORDS.readWhen(Math.max(0, now - readAt)))}
-        </span>
-      )}
-      <Tooltip>
-        <TooltipTrigger render={<Button variant="ghost" size="icon-xs" data-k="agents-refresh" aria-label={W.readAgain} disabled={reading} onClick={refresh} />}>
-          <RotateCwIcon aria-hidden className={cn("size-3.5", reading && "animate-spin motion-reduce:animate-none")} />
-        </TooltipTrigger>
-        <TooltipPopup side="top">{W.readAgain}</TooltipPopup>
-      </Tooltip>
-    </span>
   );
 }
 
@@ -317,66 +281,31 @@ function AgentsTabBody({ place, ctx }: { place: PlaceView; ctx: SettingsContext 
   return (
     <>
       <NewThreadsCard ctx={ctx} />
-      <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-[30px]">
         {report === null && reading ? (
           <Card id="agents-on" head={W.on(name)} body={<RowSkeleton k="agents-reading" />} />
         ) : (
-          <Card id="agents-on" head={<OnHead name={name} readAt={readAt} reading={reading} now={ctx.now} refresh={refresh} />}>
+          <Card id="agents-on" head={<OnHead head={W.on(name)} readAt={readAt} reading={reading} now={ctx.now} refresh={refresh} />}>
             {agents.map(row => (
               <AgentLine key={row.id} row={row} rows={rows} computer={name} ctx={ctx} />
             ))}
           </Card>
         )}
-        <RefusedLines lines={lines} className="px-5" />
+        <NotReadCard lines={lines} />
       </div>
     </>
-  );
-}
-
-function ManagerOn({ place, tab, ctx }: { place: PlaceView; tab: Exclude<AgentsTab, "agents">; ctx: SettingsContext }) {
-  const target = { placeId: place.id };
-  const { report, reading, error, refresh } = useAgentsReport(target);
-  const tools = useServerTools(target);
-  const acts = useAgentActs(target);
-  const skills = useSkillActs(target);
-  const servers = useServerActs(target);
-  const here = place.id === HERE_PLACE_ID;
-  const name = placeName(place);
-  const away = here ? null : absentOf(place, ctx.now);
-  return (
-    <AgentsManager
-      key={`${place.id}:${tab}`}
-      shell="page"
-      head={{ computer: name }}
-      report={report}
-      reading={reading}
-      error={error}
-      on={name}
-      ctx={{
-        where: here ? "here" : "box",
-        ...(here ? {} : { computer: name }),
-        heldWhy: away?.away ?? null,
-        ...(tools === undefined ? {} : { tools }),
-        ...(acts === undefined ? {} : { acts }),
-        ...(skills === undefined ? {} : { skills }),
-        ...(servers === undefined ? {} : { servers }),
-      }}
-      onRefresh={refresh}
-      now={ctx.now}
-      misses={recipeMissLines(place.provision?.rows ?? [])}
-      kinds={[KIND_OF[tab]]}
-    />
   );
 }
 
 function AgentsPage({ ctx }: { ctx: SettingsContext }) {
   const place = usePickedPlace();
   const tab = useSettingsStore(s => s.agentsTab);
+  const level = useSettingsStore(s => s.agentsLevel);
   if (place === undefined) return null;
   return (
     <div className="flex flex-col gap-[30px]">
-      <AgentsControls />
-      {tab === "agents" ? <AgentsTabBody place={place} ctx={ctx} /> : <ManagerOn place={place} tab={tab} ctx={ctx} />}
+      <AgentsControls tabs={tab === "agents" || level === null} />
+      {tab === "agents" ? <AgentsTabBody place={place} ctx={ctx} /> : <KindTab key={`${place.id}:${tab}`} place={place} kind={KIND_OF[tab]} ctx={ctx} />}
     </div>
   );
 }

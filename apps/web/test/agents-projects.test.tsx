@@ -3,7 +3,7 @@
 // stand under Global, then one group per project by name with its folder; a
 // server or skill of one name in two projects is two rows; an act on a
 // project's row names that project to the host, and the report read again is
-// the computer's. A tool's own level lists its parameters. Add an MCP server
+// the computer's. A tool's own level lists its parameters. Add a tool server
 // and Add a skill ask where it goes: the home, or one of the projects.
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
@@ -134,7 +134,7 @@ describe("a computer's page over its projects", () => {
   it("stands its servers under Global, then each project by name with its folder, one row per project for one name", () => {
     host();
     render(<Page />);
-    tab("MCP servers");
+    tab("Tool servers");
     expect(groups()).toEqual([
       ["global", "Global", ["server-global-notion-stdio-npx notion-mcp"]],
       ["project-pr_app", "app~/code/app", ["server-project-pr_app-db-stdio-npx db-mcp"]],
@@ -158,7 +158,7 @@ describe("a computer's page over its projects", () => {
   it("names the project to the host when a project's server or skill is removed, and the computer alone for the computer's own", async () => {
     const h = host();
     render(<Page />);
-    tab("MCP servers");
+    tab("Tool servers");
     await remove(open("server-project-pr_www-db-stdio-npx db-mcp"));
     fireEvent.click(document.querySelector<HTMLButtonElement>("[data-k=agents-back]")!);
     await remove(open("server-global-notion-stdio-npx notion-mcp"));
@@ -176,7 +176,7 @@ describe("a computer's page over its projects", () => {
   it("asks a project's server for its tools in that project, and a tool's own level lists its parameters with their type and whether a call needs them", async () => {
     const h = host();
     render(<Page />);
-    tab("MCP servers");
+    tab("Tool servers");
     const detail = open("server-project-pr_app-db-stdio-npx db-mcp");
     fireEvent.click(detail.querySelector<HTMLButtonElement>("[data-detail-acts] [data-k=act-list-tools]")!);
     const db = h.tools.filter(t => t.name === "db");
@@ -200,7 +200,7 @@ describe("a computer's page over its projects", () => {
   it("adds an MCP server to the home or to the project picked, each by its folder, and names that project to the host", async () => {
     const h = host();
     render(<Page />);
-    tab("MCP servers");
+    tab("Tool servers");
     fireEvent.click(document.querySelector<HTMLButtonElement>("[data-k=agents-add]")!);
     expect(document.querySelector("[data-k=where-pick]")?.textContent).toBe(W.global);
     expect(document.querySelector("[data-k=add-server-file]")?.textContent).toBe("~/.claude.json");
@@ -233,10 +233,10 @@ describe("a computer's page over its projects", () => {
     expect(h.adds).toEqual([[{ placeId: "p_spoo", project: "pr_app" }, "anthropics/skills/pdf", ["claude"], true]]);
   });
 
-  it("holds Add an MCP server where the project picked left on a read again, naming it, and never falls back to the home", async () => {
+  it("holds Add a tool server where the project picked left on a read again, naming it, and never falls back to the home", async () => {
     const h = host();
     const { rerender } = render(<Page />);
-    tab("MCP servers");
+    tab("Tool servers");
     fireEvent.click(document.querySelector<HTMLButtonElement>("[data-k=agents-add]")!);
     await pickWhere("www");
     fireEvent.change(document.querySelector<HTMLInputElement>("[data-k=add-server-name]")!, { target: { value: "acme" } });

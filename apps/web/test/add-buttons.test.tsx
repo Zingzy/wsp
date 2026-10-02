@@ -139,7 +139,7 @@ describe("the one size of the shared Add button", () => {
 });
 
 describe("the shared Add button in the agents manager", () => {
-  it("is every Add on each tab, at the add level and in the Add an MCP server form", async () => {
+  it("is every Add on each tab, at the add level and in the Add a tool server form", async () => {
     await mountPanel();
     const tabs = (): HTMLElement[] => [...document.querySelectorAll<HTMLElement>("[data-agents-manager] [data-slot=segmented-control] [role=radio]")];
     const names = tabs().map(t => t.textContent ?? "");
@@ -169,6 +169,6 @@ describe("the shared Add button in the agents manager", () => {
       fireEvent.click(document.querySelector<HTMLButtonElement>("[data-level-head] button")!);
       await settle();
     }
-    expect([...seen]).toEqual(expect.arrayContaining(["Add the wsp tools", "Add skill", "Add MCP server", "Add server"]));
+    expect([...seen]).toEqual(expect.arrayContaining(["Add the wsp tools", "Add skill", "Add a tool server", "Add server"]));
   });
 });

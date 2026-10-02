@@ -15,7 +15,7 @@ import { useStore } from "../src/protocol/store.js";
 import { AddComputer } from "../src/settings/AddComputer.js";
 import { useAdds } from "../src/settings/adds.js";
 import { AGENTS_LIST_WORDS } from "../src/components/agents/agentsRows.js";
-import { ADD_COMPUTER_WORDS, COMPUTER_PAGE_WORDS, WHERE_WORDS, capitalised } from "../src/settings/format.js";
+import { ADD_COMPUTER_WORDS, AGENTS_PAGE_WORDS, COMPUTER_PAGE_WORDS, WHERE_WORDS, capitalised } from "../src/settings/format.js";
 import { AGENTS_REPORT } from "./fixtures/agents-report.js";
 import { IMAGE_WORDS } from "../src/settings/image.js";
 import { absentOf } from "../src/settings/places.js";
@@ -549,11 +549,10 @@ function dialling(line = "vps answered in 12 ms."): Partial<Api> {
 }
 
 describe("the Agents page on a computer", () => {
-  const manager = (): HTMLElement => document.querySelector<HTMLElement>("[data-settings-page] [data-agents-manager]")!;
-  const rowKeys = (): string[] => [...manager().querySelectorAll<HTMLElement>("[data-agents-row]")].map(r => r.dataset["agentsRow"] ?? "");
+  const rowKeys = (): string[] => [...document.querySelectorAll<HTMLElement>("[data-settings-page] [data-kind-row]")].map(r => r.dataset["kindRow"] ?? "");
   const agentRow = (id: string): HTMLElement => document.querySelector<HTMLElement>(`[data-settings-page] [data-agent-row="${id}"]`)!;
   const agentIds = (): string[] => [...document.querySelectorAll<HTMLElement>("[data-settings-page] [data-agent-row]")].map(r => r.dataset["agentRow"] ?? "");
-  const stateLine = (key: string): string | undefined => manager().querySelector(`[data-agents-row="${key}"] [data-row-status] [data-status-word]`)?.textContent ?? undefined;
+  const stateLine = (key: string): string | undefined => document.querySelector(`[data-settings-page] [data-kind-row="${key}"] [data-settings-slot]`)?.textContent ?? undefined;
   const topBarTab = (tab: "agents" | "servers" | "skills"): void => void fireEvent.click(document.querySelector(`[data-k=agents-tabs] [data-segment=${tab}]`)!);
   const picked = (): string | undefined => document.querySelector("[data-k=agents-tabs] [data-checked]")?.getAttribute("data-segment") ?? undefined;
   const computerPick = (): HTMLElement => document.querySelector<HTMLElement>("[data-k=agents-picker]")!;
@@ -578,8 +577,8 @@ describe("the Agents page on a computer", () => {
     expect(document.querySelector("[data-settings-page] [data-agents-manager]")).toBeNull();
     topBarTab("servers");
     expect(picked()).toBe("servers");
-    // The page draws one kind at a time: the top bar holds the tabs, so the manager draws none of its own.
-    expect(manager().querySelector("[role='radiogroup']")).toBeNull();
+    // The page draws one kind at a time in its own rows; the panel's manager stands nowhere on it.
+    expect(document.querySelector("[data-settings-page] [data-agents-manager]")).toBeNull();
     expect(rowKeys().length).toBeGreaterThan(0);
     expect(rowKeys().every(k => k.startsWith("server-"))).toBe(true);
     expect(stateLine(rowKeys()[0]!)).not.toBe("");
@@ -610,7 +609,7 @@ describe("the Agents page on a computer", () => {
     expect(state()).toBe(capitalised(AGENTS_LIST_WORDS.waitingOnYou));
   });
 
-  it("puts the report's refusals under the list as quiet lines", async () => {
+  it("puts the report's refusals in a Not read card under the list, one row each", async () => {
     const provision: PlaceProvision = {
       state: "done",
       addId: "a_1",
@@ -626,15 +625,16 @@ describe("the Agents page on a computer", () => {
     };
     useStore.setState({ places: [here, { ...laptop, present: true, name: "spoo", provision }] });
     await mountAgents(computersApi({ agentsRead: async () => ({ ...EMPTY_REPORT, refused: ["skills: the folder is not readable"] }) }).api, "p_1");
-    // The report's refusals, then the recipe's rows that did not land there, one quiet line each under the list.
-    expect([...document.querySelectorAll("[data-settings-page] [data-agents-refused] [data-refused-line]")].map(l => [l.querySelector("[data-refused-label]")?.textContent, l.querySelector("[data-refused-value]")?.textContent])).toEqual([
-      ["Skills", "the folder is not readable"],
-      ["Codex", "failed: npm exited 1"],
-      ["linear", "set aside: waited on GitHub CLI"],
+    // The report's refusals, then the recipe's rows that did not land there, a row each in a card of their own.
+    expect(document.querySelector("[data-settings-card=not-read] [data-settings-head]")?.textContent).toBe(AGENTS_PAGE_WORDS.notRead);
+    expect([...document.querySelectorAll("[data-settings-page] [data-settings-card=not-read] [data-refused-line]")].map(l => [l.querySelector("[data-settings-title]")?.textContent, l.querySelector("[data-settings-description]")?.textContent])).toEqual([
+      ["Skills", "The folder is not readable"],
+      ["Codex", "Failed: npm exited 1"],
+      ["linear", "Set aside: waited on GitHub CLI"],
     ]);
   });
 
-  it("opens from a computer's own page with that computer picked, and the top bar's tabs switch the manager's one kind", async () => {
+  it("opens from a computer's own page with that computer picked, and the top bar's tabs switch the one kind the page lists", async () => {
     const asked: AgentsTarget[] = [];
     useStore.setState({ places: [here, box] });
     await mountComputers(computersApi({ agentsRead: async (target: AgentsTarget) => (asked.push(target), AGENTS_REPORT) }).api, { kind: "computer", id: "p_2" });
@@ -660,7 +660,7 @@ describe("the Agents page on a computer", () => {
     expect(picked()).toBe("skills");
     expect(rowKeys().length).toBeGreaterThan(0);
     expect(rowKeys().every(k => k.startsWith("skill-"))).toBe(true);
-    expect(manager().querySelector("[role='radiogroup']")).toBeNull();
+    expect(document.querySelector("[data-settings-page] [data-agents-manager]")).toBeNull();
   });
 });
 

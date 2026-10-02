@@ -15,6 +15,7 @@ import { agentName, mcpSwitch, serverMark } from "@wsp/catalog";
 import type { AgentsProject, AgentsReport, McpRow, McpTool, McpToolParam, ServerToolsAnswer } from "@wsp/protocol";
 import { AGENTS_LIST_WORDS as W, editImageAct, heldReason, holdAll, notYet, onImage, serverSignInStart, signInAct, waitingFlow, type FlowView, type RowAct, type RowsContext, type ToolsState } from "../agentsRows.js";
 import { AddServerForm } from "../AddServerForm.js";
+import { AddServerRows } from "../../../settings/AddServerRows.js";
 import { byName, kind, matchesAny, projectGroups, rowKey, type Fact, type GroupBy, type GroupView, type KindModule, type Lead, type ServerState, type Status, type UnderRow } from "./kind.js";
 
 /** Where a server is set up: the person's own files, or the project's. */
@@ -244,11 +245,11 @@ function scopeGroups(items: readonly ServerEntry[], ctx: RowsContext): GroupView
 export const SERVERS_KIND: KindModule<ServerEntry> = {
   id: "servers",
   icon: PlugIcon,
-  word: "MCP servers",
+  word: "Tool servers",
   noun: n => `${n} ${n === 1 ? "server" : "servers"}`,
-  search: "Search MCP servers",
-  add: "Add MCP server",
-  line: project => ["MCP servers on ", project === undefined ? "" : `, for ${project}`],
+  search: "Search tool servers",
+  add: "Add a tool server",
+  line: project => ["Tool servers on ", project === undefined ? "" : `, for ${project}`],
   rowHeight: "h-[84px]",
   groupings: ["scope", "agent", "none"],
   defaultGroup: () => "scope",
@@ -344,9 +345,9 @@ export const SERVERS_KIND: KindModule<ServerEntry> = {
     if (tools === undefined) return;
     for (const row of entries.flatMap(e => e.rows)) if (checksOnShow(row, ctx) && tools.of(row)?.listing !== true) tools.list(row);
   },
-  empty: on => `No MCP servers on ${on} yet.`,
-  none: "no MCP servers",
-  form: ctx => (ctx.servers === undefined || onImage(ctx) ? undefined : { title: W.addServer, Form: AddServerForm }),
+  empty: on => `No tool servers on ${on} yet.`,
+  none: "no tool servers",
+  form: ctx => (ctx.servers === undefined || onImage(ctx) ? undefined : { title: W.addServer, Form: AddServerForm, Page: AddServerRows }),
 };
 
 export const SERVERS = kind(SERVERS_KIND);

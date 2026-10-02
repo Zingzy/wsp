@@ -71,7 +71,7 @@ function useLevelKeys(back: () => void, first?: React.RefObject<HTMLElement | nu
   return { headRef, onKeyDown };
 }
 
-function CopyGlyph({ value, label }: { value: string; label: string }) {
+export function CopyGlyph({ value, label }: { value: string; label: string }) {
   const [copied, setCopied] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(timer.current), []);

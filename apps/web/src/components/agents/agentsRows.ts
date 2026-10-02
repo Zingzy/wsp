@@ -21,7 +21,7 @@ export const NOT_ANSWERING_AFTER_MS = 30_000;
 export const saysNotAnswering = (awayMs: number | null): boolean => awayMs === null || awayMs >= NOT_ANSWERING_AFTER_MS;
 
 export const AGENTS_LIST_WORDS = {
-  section: "Agents, MCP servers and skills",
+  section: "Agents, tool servers and skills",
   readAgain: "Read again",
   readAgo: (span: string): string => `read ${span} ago`,
   paused: "paused",
@@ -158,9 +158,9 @@ export const AGENTS_LIST_WORDS = {
   firstOf: (shown: number, all: number): string => `shows the first ${shown} KB of ${all} KB`,
   removeTitle: (name: string): string => `Remove ${name}?`,
   removeBody: (computer: string): string => `Its folder and every link to it leave ${computer}.`,
-  leavesFiles: (files: readonly string[], computer: string): string => `It leaves ${files.join(" and ")} on ${computer}.`,
+  leavesFiles: (files: readonly string[], computer: string): string => `It comes out of ${files.join(" and ")} on ${computer}.`,
   noSwitch: (agent: string): string => `${agent} turns a server off per folder, in its own /mcp`,
-  addServer: "Add an MCP server",
+  addServer: "Add a tool server",
   agent: "Agent",
   serverName: "Name",
   reachedBy: "Reached by",
@@ -175,7 +175,7 @@ export const AGENTS_LIST_WORDS = {
   adding: "Adding",
   twoPairsOneName: (road: "command" | "address"): string => (road === "command" ? "Two variables have the same name; keep one of them." : "Two headers have the same name; keep one of them."),
   projectLeft: (project: string, computer: string): string => `${project} is no longer on ${computer}; pick where it goes.`,
-  noServerAgents: (computer: string): string => `No agent on ${computer} keeps MCP servers in a file wsp writes.`,
+  noServerAgents: (computer: string): string => `No agent on ${computer} keeps tool servers in a file wsp writes.`,
 } as const;
 
 /** Compact counts the way skills.sh draws them: 3.6M, 201K, 12. */

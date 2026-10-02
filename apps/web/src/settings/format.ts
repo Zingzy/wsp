@@ -107,7 +107,7 @@ export const WHERE_WORDS = {
   cannotDial: "This wsp cannot dial a computer from here.",
   cannotSaveKey: "This wsp cannot save a key from here.",
   /** The first cell of each list's header row, which is the only name a section has. */
-  heads: { computer: "Computer", cores: "Cores", memory: "Memory", threads: "Threads", cloud: "Cloud", agents: "Agents", version: "Version", servers: "MCP servers", image: "Image", threadsHere: "Threads running here" },
+  heads: { computer: "Computer", cores: "Cores", memory: "Memory", threads: "Threads", cloud: "Cloud", agents: "Agents", version: "Version", servers: "Tool servers", image: "Image", threadsHere: "Threads running here" },
   yourImage: "Your image",
 } as const;
 
@@ -293,6 +293,16 @@ export const AGENTS_PAGE_WORDS = {
   defaultAgent: "Default agent",
   defaultAgentDescription: "A project can set its own.",
   on: (name: string): string => `On ${name}`,
+  /** The first card's head on the Tool servers and Skills tabs: its group, on the computer read. */
+  groupOn: (group: string, name: string): string => `${group} on ${name}`,
+  /** A state with the figure it answered with: a server connected with its tools. */
+  stateWith: (state: string, count: string): string => `${state} with ${count}`,
+  details: "Details",
+  /** The head over what the host could not read on the computer. */
+  notRead: "Not read",
+  skillFile: "SKILL.md",
+  removeName: (act: string, name: string): string => `${act} ${name}`,
+  notListed: "Not listed yet.",
   notInstalled: "Not installed here",
   notInstalledShort: "Not installed",
   checkedNow: (when: string): string => `checked ${when}`,

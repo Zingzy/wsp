@@ -31,12 +31,12 @@ import { startVite, type ViteChild } from "./vite-child";
 const WEB_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SHOTS_DIR = join(tmpdir(), "wsp-render");
 const WIDTHS = [760, 696, 358, 520, 480, 380, 360] as const;
-const TABS = ["Agents", "MCP servers", "Skills"] as const;
+const TABS = ["Agents", "Tool servers", "Skills"] as const;
 /** The rows of each tab stand at one height: 56, 72 where an agent's state takes a third line, 84 where a server's badge does. */
-const ROW_HEIGHT: Record<(typeof TABS)[number], number> = { Agents: 72, "MCP servers": 84, Skills: 56 };
+const ROW_HEIGHT: Record<(typeof TABS)[number], number> = { Agents: 72, "Tool servers": 84, Skills: 56 };
 const DETAILS = [
   { tab: "Agents", row: "agent-claude" },
-  { tab: "MCP servers", row: "server-global-notion-http-mcp.notion.com" },
+  { tab: "Tool servers", row: "server-global-notion-http-mcp.notion.com" },
   { tab: "Skills", row: "skill-user-frontend-design" },
 ] as const;
 
@@ -153,7 +153,7 @@ describe.skipIf(renderSkipped !== undefined)("the agents manager laid out in Chr
     await open("screen=agents-widths&theme=dark");
     await page!.waitForSelector("[data-agents-row]");
     for (const width of [360, 520, 696]) {
-      await pickTab(width, "MCP servers");
+      await pickTab(width, "Tool servers");
       const list = await at(width).evaluate(el => {
         const box = el.getBoundingClientRect();
         const x = (sel: string) => Math.round((el.querySelector(sel)?.getBoundingClientRect().left ?? NaN) - box.left);
@@ -183,7 +183,7 @@ describe.skipIf(renderSkipped !== undefined)("the agents manager laid out in Chr
     await open("screen=agents-widths&theme=dark");
     await page!.waitForSelector("[data-agents-row]");
     for (const width of [360, 696]) {
-      for (const name of ["Agents", "MCP servers"] as const) {
+      for (const name of ["Agents", "Tool servers"] as const) {
         await pickTab(width, name);
         const read = await at(width).evaluate(el => {
           const items = [...el.querySelectorAll<HTMLElement>("[data-agents-rows] [data-group-label], [data-agents-rows] [data-agents-row]")].map(n => n.getBoundingClientRect());
@@ -213,7 +213,7 @@ describe.skipIf(renderSkipped !== undefined)("the agents manager laid out in Chr
     await open("screen=panel-agents&theme=dark", { width: 1280, height: 420 });
     await page!.waitForSelector("[data-k=agents-surface] [data-agents-row]");
     const surface = page!.locator("[data-k=agents-surface]");
-    await surface.locator("[data-segment]").filter({ has: page!.locator('[aria-label="MCP servers"]') }).click();
+    await surface.locator("[data-segment]").filter({ has: page!.locator('[aria-label="Tool servers"]') }).click();
     // In the panel the list scrolls under a head that stands outside it, so nothing passes under the head.
     const panel = await surface.evaluate(el => {
       const body = el.querySelector<HTMLElement>("[data-agents-body]")!;
@@ -417,7 +417,7 @@ describe.skipIf(renderSkipped !== undefined)("the agents manager laid out in Chr
         await at(width).locator("[data-k=agents-back]").click();
       }
       // A server's tools and one tool, at the panel's floor.
-      await pickTab(360, "MCP servers");
+      await pickTab(360, "Tool servers");
       // A command on a joined computer waits for Check, which checks it in place.
       await at(360).locator('[data-agents-row="server-global-airtable-stdio-npx -y airtable-mcp-server"] [data-row-slot] [data-k=act-check]').click();
       await at(360).locator('[data-agents-row="server-global-airtable-stdio-npx -y airtable-mcp-server"] [data-k=status][data-state=connected]').waitFor();
@@ -458,13 +458,13 @@ describe.skipIf(renderSkipped !== undefined)("the agents manager laid out in Chr
     }
   }, 180_000);
 
-  it("photographs Add an MCP server with a command and a variable, and with an address and a header, at 360, 480 and 696 in both themes", async () => {
+  it("photographs Add a tool server with a command and a variable, and with an address and a header, at 360, 480 and 696 in both themes", async () => {
     for (const theme of ["dark", "light"] as const) {
       await open(`screen=agents-widths&theme=${theme}`);
       await page!.waitForSelector("[data-agents-row]");
       expect(await page!.evaluate(() => document.documentElement.classList.contains("dark"))).toBe(theme === "dark");
       for (const width of [360, 480, 696]) {
-        await pickTab(width, "MCP servers");
+        await pickTab(width, "Tool servers");
         await at(width).locator("[data-k=agents-add]").click();
         const form = at(width).locator("[data-add-server]");
         await form.waitFor();
@@ -520,7 +520,7 @@ describe.skipIf(renderSkipped !== undefined)("the agents manager laid out in Chr
       await open(`screen=agents-states&theme=${theme}`, { width: 900, height: 2400 });
       await page!.waitForSelector("[data-agents-row]");
       for (const width of [360, 696]) {
-        await pickTab(width, "MCP servers");
+        await pickTab(width, "Tool servers");
         await at(width).locator('[data-agents-row] [data-k=status][data-state="connected"]').first().waitFor();
         const marks = await at(width)
           .locator("[data-agents-row] [data-k=status]")
@@ -568,7 +568,7 @@ describe.skipIf(renderSkipped !== undefined)("the agents manager laid out in Chr
       for (const h of rows) expect(h).toBe(72);
       await page!.screenshot({ path: join(SHOTS_DIR, `agents-panel-${theme}.png`), animations: "disabled" });
       const surface = page!.locator("[data-k=agents-surface]");
-      await surface.locator("[data-segment]").filter({ has: page!.locator('[aria-label="MCP servers"]') }).click();
+      await surface.locator("[data-segment]").filter({ has: page!.locator('[aria-label="Tool servers"]') }).click();
       expect(await surface.locator("[data-k=agents-line]").textContent()).toMatch(/^MCP servers on spoo, for \S/);
       expect(await surface.locator("[data-k=agents-project]").getAttribute("title")).toMatch(/^[~/]/);
       await surface.locator("[data-agents-row] [data-k=status]:not([data-state=checking])").first().waitFor();

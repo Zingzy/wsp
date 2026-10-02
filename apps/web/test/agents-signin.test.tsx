@@ -201,7 +201,7 @@ describe("signing an agent in from its row", () => {
   it("types a code the page handed back into the tool, and a failure says what the tool said", async () => {
     const h = host();
     render(<List />);
-    fireEvent.click(screen.getByRole("radio", { name: /^MCP servers/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /^Tool servers/ }));
     fireEvent.click(rowEl(LINEAR).querySelector<HTMLButtonElement>("[data-row-slot] [data-k=act-sign-in]")!);
     await settle();
     expect(h.started.map(s => [s.agent, s.server])).toEqual([["claude", "linear"]]);
@@ -276,7 +276,7 @@ describe("signing an agent in from its row", () => {
     const h = host();
     const opened = vi.spyOn(window, "open").mockReturnValue(null);
     render(<List where="here" report={{ ...AGENTS_REPORT, target: { placeId: "here" }, reach: "here" }} />);
-    fireEvent.click(screen.getByRole("radio", { name: /^MCP servers/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /^Tool servers/ }));
     fireEvent.click(rowEl(LINEAR).querySelector<HTMLButtonElement>("[data-row-slot] [data-k=act-sign-in]")!);
     await settle();
     expect(h.started.map(s => [s.target, s.agent, s.server])).toEqual([[{ placeId: "here" }, "claude", "linear"]]);
@@ -299,7 +299,7 @@ describe("signing an agent in from its row", () => {
   it("hands a server whose page returns to localhost on another computer the harness's own line, from that agent's own line in a folded entry", async () => {
     host();
     render(<List />);
-    fireEvent.click(screen.getByRole("radio", { name: /^MCP servers/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /^Tool servers/ }));
     openRow(NOTION);
     fireEvent.click(detail().querySelector<HTMLButtonElement>("[data-fact=config-codex] [data-k=act-sign-in]")!);
     expect(detail().querySelector("[data-k=sign-in-line]")?.textContent).toBe("codex mcp login 'notion'");
@@ -309,7 +309,7 @@ describe("signing an agent in from its row", () => {
   it("runs a server's sign-in on a joined computer the host relays and waits on the browser, taking the landed address only when the host asks", async () => {
     const h = host();
     render(<List report={{ ...AGENTS_REPORT, reach: "relay" }} />);
-    fireEvent.click(screen.getByRole("radio", { name: /^MCP servers/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /^Tool servers/ }));
     openRow(NOTION);
     fireEvent.click(detail().querySelector<HTMLButtonElement>("[data-fact=config-codex] [data-k=act-sign-in]")!);
     await settle();

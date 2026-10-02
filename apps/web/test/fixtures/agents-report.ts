@@ -198,3 +198,6 @@ export const AGENTS_SETUP_REPORT: AgentsReport = {
   projects: [],
   refused: [],
 };
+
+/** This Mac's agents with every server and skill the box's report carries, for the Tool servers and Skills tabs. */
+export const AGENTS_TOOLS_REPORT: AgentsReport = { ...AGENTS_REPORT, target: { placeId: "here" }, agents: AGENTS_SETUP_REPORT.agents };

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// MCP servers from the app: Add an MCP server replaces the list with a form
+// MCP servers from the app: Add a tool server replaces the list with a form
 // whose values are masked and ride once to the host, the file it lands in at
 // its foot; Turn off and on go to the host for every agent a server is set up
 // for, held where an agent keeps no switch per server; Remove goes only once
@@ -56,7 +56,7 @@ const type = (k: string, value: string): void => void fireEvent.change(field(k),
 const fields = (k: string): HTMLInputElement[] => [...document.querySelectorAll<HTMLInputElement>(`[data-k=${k}]`)];
 const go = (): HTMLButtonElement => document.querySelector<HTMLButtonElement>("[data-k=add-server-go]")!;
 const openForm = (): void => {
-  tab("MCP servers");
+  tab("Tool servers");
   fireEvent.click(document.querySelector<HTMLButtonElement>("[data-k=agents-add]")!);
 };
 
@@ -79,7 +79,7 @@ describe("Server icons", () => {
   it("draws a remote server's own icon off the host in its row and its detail, asks once per host, and keeps the glyph for a command server", async () => {
     const asked = icons({ "mcp.notion.com": NOTION });
     render(<List />);
-    tab("MCP servers");
+    tab("Tool servers");
     await settle();
     expect(iconIn(rowEl(SERVER.notion))?.getAttribute("src")).toBe(NOTION);
     expect(iconIn(rowEl(SERVER.sentry))).toBeNull();
@@ -95,7 +95,7 @@ describe("Server icons", () => {
   it("draws a registered brand mark in the box of a server reached over its company's address or running its package, in its row and its detail, and asks the host for neither", async () => {
     const asked = icons({ "mcp.linear.app": NOTION });
     render(<List />);
-    tab("MCP servers");
+    tab("Tool servers");
     await settle();
     const markIn = (el: HTMLElement): string | null | undefined => el.querySelector("[data-k=lead-box] svg[data-brand-mark]")?.getAttribute("data-brand-mark");
     expect(markIn(rowEl(SERVER.linear))).toBe("linear");
@@ -110,7 +110,7 @@ describe("Server icons", () => {
   it("asks the host again with refresh after Read again", async () => {
     const asked = icons({ "mcp.notion.com": NOTION });
     render(<List />);
-    tab("MCP servers");
+    tab("Tool servers");
     await settle();
     fireEvent.click(document.querySelector<HTMLButtonElement>("[data-k=agents-read-again]")!);
     await settle();
@@ -125,7 +125,7 @@ describe("Server icons", () => {
     const asked = icons({ "mcp.notion.com": NOTION });
     useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, serverIcons: false } });
     render(<List />);
-    tab("MCP servers");
+    tab("Tool servers");
     await settle();
     expect(asked).toEqual([]);
     expect(document.querySelectorAll("img[data-k=server-icon]")).toHaveLength(0);
@@ -137,7 +137,7 @@ describe("Server icons", () => {
   });
 });
 
-describe("Add an MCP server", () => {
+describe("Add a tool server", () => {
   it("replaces the list with its form, focus on the name, the file it lands in following the agent, and Add held until it can go", () => {
     host();
     render(<List />);
@@ -247,11 +247,11 @@ describe("Add an MCP server", () => {
     expect(document.querySelector("[data-k=add-server-none]")?.textContent).toBe(W.noServerAgents("spoo"));
     cleanup();
     render(<List ctx={{ heldWhy: "away" }} />);
-    tab("MCP servers");
+    tab("Tool servers");
     expect(document.querySelector<HTMLButtonElement>("[data-k=agents-add]")!.disabled).toBe(true);
     cleanup();
     render(<List ctx={{ where: "fork", editImage: () => {} }} />);
-    tab("MCP servers");
+    tab("Tool servers");
     expect(document.querySelector("[data-k=agents-add]")?.getAttribute("aria-label")).toBe(W.editImage);
   });
 });
@@ -260,7 +260,7 @@ describe("Turn off, turn on and Remove", () => {
   it("turns a server off through the host where its agent keeps a switch, holding the act while it runs, and says a refusal in the detail", async () => {
     const h = host();
     render(<List />);
-    tab("MCP servers");
+    tab("Tool servers");
     openRow(SERVER.github);
     fireEvent.click(actIn("turn-off"));
     expect(h.toggles).toEqual([[{ agent: "opencode", name: "github", scope: "user" }, false]]);
@@ -273,7 +273,7 @@ describe("Turn off, turn on and Remove", () => {
   it("turns an off server on from its row, and holds Turn off on Claude Code, which keeps no switch per server", () => {
     const h = host();
     render(<List />);
-    tab("MCP servers");
+    tab("Tool servers");
     fireEvent.click(rowEl(SERVER.sentry).querySelector<HTMLButtonElement>("[data-k=act-turn-on]")!);
     expect(h.toggles).toEqual([[{ agent: "codex", name: "sentry", scope: "user" }, true]]);
     expect(detail().querySelector("[data-k=detail-title]")?.textContent).toBe("sentry");
@@ -286,12 +286,12 @@ describe("Turn off, turn on and Remove", () => {
   it("removes a server only once the confirmation is taken, from every file it is set up in, one agent after another", async () => {
     const h = host();
     render(<List />);
-    tab("MCP servers");
+    tab("Tool servers");
     openRow(SERVER.notion);
     fireEvent.click(actIn("remove"));
     expect(h.removes).toEqual([]);
     expect(await screen.findByText("Remove notion?")).toBeTruthy();
-    expect(screen.getByText("It leaves ~/.codex/config.toml and ~/.claude.json on spoo.")).toBeTruthy();
+    expect(screen.getByText("It comes out of ~/.codex/config.toml and ~/.claude.json on spoo.")).toBeTruthy();
     const confirm = document.querySelector<HTMLButtonElement>("[data-k=confirm-remove-go]")!;
     expect(confirm.className).toContain("bg-destructive");
     expect(actIn("remove").className).not.toContain("bg-destructive");

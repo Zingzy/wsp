@@ -54,7 +54,7 @@ const settle = async (): Promise<void> => {
     for (let i = 0; i < 4; i++) await new Promise(r => setTimeout(r, 0));
   });
 };
-const serversTab = (): void => void fireEvent.click(screen.getByRole("radio", { name: /^MCP servers/ }));
+const serversTab = (): void => void fireEvent.click(screen.getByRole("radio", { name: /^Tool servers/ }));
 const open = (key: string): HTMLElement => {
   fireEvent.click(document.querySelector<HTMLElement>(`[data-agents-row="${key}"] [data-row-trigger]`)!);
   return document.querySelector<HTMLElement>("[data-agents-detail]")!;

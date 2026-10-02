@@ -23,6 +23,8 @@ if (renderSkipped !== undefined) console.info(`agent settings render test skippe
 const SCREENS = [
   { screen: "settings-agents", ready: "[data-agent-row='claude']", rows: ["default-agent", "claude", "codex", "opencode"] },
   { screen: "settings-agent", ready: "[data-settings-row='agent-env']", rows: ["agent-model", "agent-access", "agent-models", "agent-program", "agent-config", "agent-args", "agent-env"] },
+  { screen: "settings-agents-servers", ready: "[data-kind-row='server-global-airtable-stdio-npx -y airtable-mcp-server']", rows: ["server-global-airtable-stdio-npx -y airtable-mcp-server", "server-global-sentry-http-mcp.sentry.dev"] },
+  { screen: "settings-agents-skills", ready: "[data-kind-row='skill-user-frontend-design']", rows: ["skill-user-frontend-design", "skill-user-wsp", "skill-plugin-pdf"] },
   { screen: "settings-project-overrides", ready: "[data-settings-row='project-access']", rows: ["project-agent", "project-model", "project-access"] },
 ] as const;
 

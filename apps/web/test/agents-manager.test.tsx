@@ -76,8 +76,8 @@ describe("the head and the tabs", () => {
     expect(screen.getByRole("region", { name: W.section }).tagName).toBe("SECTION");
     const line = (): string | undefined => document.querySelector("[data-k=agents-line]")?.textContent ?? undefined;
     expect(line()).toBe("Agents on spoo");
-    tab("MCP servers");
-    expect(line()).toBe("MCP servers on spoo, for wsp");
+    tab("Tool servers");
+    expect(line()).toBe("Tool servers on spoo, for wsp");
     tab("Skills");
     expect(line()).toBe("Skills on spoo, for wsp");
     expect(document.querySelector("[data-k=agents-project]")?.getAttribute("title")).toBe("~/wsp");
@@ -94,25 +94,25 @@ describe("the head and the tabs", () => {
     expect(open).toHaveBeenCalledTimes(1);
     cleanup();
     draw({ head: { computer: "this Mac" } });
-    tab("MCP servers");
-    expect(line()).toBe("MCP servers on this Mac");
+    tab("Tool servers");
+    expect(line()).toBe("Tool servers on this Mac");
     expect(document.querySelector("[data-agents-line] button[data-k=agents-computer]"), "a computer with no page of its own is no link").toBeNull();
   });
 
   it("draws the page's head as its one line beside Read again", () => {
-    draw({ shell: "page", head: { line: "Agents, MCP servers and skills on spoo." } });
+    draw({ shell: "page", head: { line: "Agents, tool servers and skills on spoo." } });
     expect(document.querySelector("[data-k=agents-title]")).toBeNull();
-    expect(document.querySelector("[data-k=agents-line]")?.textContent).toBe("Agents, MCP servers and skills on spoo.");
+    expect(document.querySelector("[data-k=agents-line]")?.textContent).toBe("Agents, tool servers and skills on spoo.");
     expect(screen.getByRole("button", { name: "Read again" })).toBeTruthy();
   });
 
   it("offers Agents, MCP servers and Skills, each with its glyph and its count once the report stands, and never Plugins or CLIs yet", () => {
     draw();
     const radios = screen.getAllByRole("radio");
-    expect(radios.map(r => r.querySelector("[data-segment-word]")?.textContent)).toEqual(["Agents", "MCP servers", "Skills"]);
+    expect(radios.map(r => r.querySelector("[data-segment-word]")?.textContent)).toEqual(["Agents", "Tool servers", "Skills"]);
     expect(radios.map(r => r.querySelector("[data-segment-count]")?.textContent)).toEqual(["3", "7", "4"]);
     for (const r of radios) expect(r.querySelector("svg")).not.toBeNull();
-    expect(radios.map(r => r.querySelector("[data-segment-label]")?.getAttribute("aria-label"))).toEqual(["Agents", "MCP servers", "Skills"]);
+    expect(radios.map(r => r.querySelector("[data-segment-label]")?.getAttribute("aria-label"))).toEqual(["Agents", "Tool servers", "Skills"]);
     expect(document.querySelector("[data-segment-word]")?.className).toContain("hidden");
     cleanup();
     draw({ report: null, reading: true });
@@ -123,16 +123,16 @@ describe("the head and the tabs", () => {
     draw();
     expect(document.querySelector("[data-agents-toolbar]")).toBeNull();
     expect(document.querySelector("[data-k=agents-add]")).toBeNull();
-    tab("MCP servers");
+    tab("Tool servers");
     const add = document.querySelector<HTMLButtonElement>("[data-k=agents-add]")!;
-    expect(add.textContent).toBe("Add MCP server");
+    expect(add.textContent).toBe("Add a tool server");
     expect(add.querySelector("svg")).not.toBeNull();
     expect(add.disabled).toBe(true);
     expect(add.parentElement?.getAttribute("title")).toBe(W.notYet);
     expect(document.querySelector("[data-k=agents-count]")?.textContent).toBe("7 servers");
-    expect(document.querySelector<HTMLInputElement>("[data-k=agents-search]")?.placeholder).toBe("Search MCP servers");
+    expect(document.querySelector<HTMLInputElement>("[data-k=agents-search]")?.placeholder).toBe("Search tool servers");
     expect(document.querySelector("[data-k=agents-view]")?.getAttribute("aria-label")).toBe("Group and sort");
-    expect(document.querySelector("[data-k=agents-add]")?.getAttribute("aria-label")).toBe("Add MCP server");
+    expect(document.querySelector("[data-k=agents-add]")?.getAttribute("aria-label")).toBe("Add a tool server");
     tab("Skills");
     expect(document.querySelector<HTMLInputElement>("[data-k=agents-search]")?.placeholder).toBe("Search skills");
     expect(document.querySelector("[data-k=agents-add]")?.getAttribute("aria-label")).toBe("Add skill");
@@ -204,7 +204,7 @@ describe("the list grammar", () => {
 
   it("folds a server two agents name the same way into one entry with both marks, its worst state on its one badge", () => {
     draw();
-    tab("MCP servers");
+    tab("Tool servers");
     expect(titles()).toEqual(["airtable", "github", "linear", "notion", "sentry", "wsp", "spoo-metrics"]);
     const notion = rowEl(SERVER.notion);
     expect([...notion.querySelectorAll("[data-row-marks] [data-harness-mark]")].map(m => m.getAttribute("data-harness-mark"))).toEqual(["codex", "claude"]);
@@ -223,7 +223,7 @@ describe("the list grammar", () => {
     tools.answer("linear", { auth: "needs-sign-in", holder: "claude", readAt: AGENTS_REPORT.readAt });
     tools.answer("wsp", { auth: "connected", readAt: AGENTS_REPORT.readAt });
     draw({ report, ctx: { where: "box", tools } });
-    tab("MCP servers");
+    tab("Tool servers");
     const read = (key: string) => {
       const b = badge(rowEl(key));
       return [b.dataset["state"], said(b), dotOf(b)];
@@ -258,7 +258,7 @@ describe("the list grammar", () => {
       servers: [...AGENTS_REPORT.servers, { agent: "codex", name: "posthog", scope: "user", file: "~/.codex/config.toml", transport: { kind: "http", host: "mcp.posthog.com" }, envNames: ["POSTHOG_TOKEN"], auth: "env-key", enabled: true }],
     };
     draw({ report, ctx: { where: "here" } });
-    tab("MCP servers");
+    tab("Tool servers");
     const key = "server-global-posthog-http-mcp.posthog.com";
     const b = badge(rowEl(key));
     expect([b.dataset["state"], b.textContent, dotOf(b)]).toEqual(["env-key", "key from the environment", "bg-foreground/30"]);
@@ -270,7 +270,7 @@ describe("the list grammar", () => {
     const tools = fakeTools();
     tools.answer("github", SERVER_TOOLS["github"]!);
     draw({ ctx: { where: "box", tools } });
-    tab("MCP servers");
+    tab("Tool servers");
     expect(groupLabels()).toEqual(["Global", "wsp~/wsp"]);
     const github = badge(rowEl(SERVER.github));
     expect([github.dataset["state"], github.textContent, github.getAttribute("title")]).toEqual(["failed", "failed", "Did not answer in 20 s."]);
@@ -283,7 +283,7 @@ describe("the list grammar", () => {
 
   it("regroups a tab from Group and sort by where servers are set up or by agent, never by a state", async () => {
     draw();
-    tab("MCP servers");
+    tab("Tool servers");
     fireEvent.click(document.querySelector<HTMLButtonElement>("[data-k=agents-view]")!);
     const items = await screen.findAllByRole("menuitemradio");
     expect(items.map(i => i.textContent)).toEqual(["Scope", "Agent", "None", "Name"]);
@@ -445,7 +445,7 @@ describe("the detail", () => {
 
   it("shows a folded server's status, command, each agent's file with its own state where they disagree, and the tools line", () => {
     draw();
-    tab("MCP servers");
+    tab("Tool servers");
     const detail = openRow(SERVER.notion);
     expect(facts(detail)).toEqual([
       ["Status", "needs sign-in"],
@@ -467,7 +467,7 @@ describe("the detail", () => {
     const tools = fakeTools();
     const METRICS = "server-project-pr_wsp-spoo-metrics-stdio-node scripts/metrics-mcp.js --token ${METRICS_TOKEN}";
     const { rerender } = draw({ ctx: { where: "box", tools } });
-    tab("MCP servers");
+    tab("Tool servers");
     let detail = openRow(METRICS);
     expect(facts(detail).find(f => f[0] === "Tools")).toEqual(["Tools", W.notListed]);
     expect(acts(detail)).toEqual(["List tools", "Turn off", "Remove"]);
@@ -504,7 +504,7 @@ describe("the detail", () => {
     const tools = fakeTools();
     tools.answer("linear", { auth: "needs-sign-in", holder: "claude", readAt: AGENTS_REPORT.readAt });
     const { rerender } = draw({ ctx: { where: "box", tools } });
-    tab("MCP servers");
+    tab("Tool servers");
     let detail = openRow(SERVER.linear);
     expect(acts(detail)).toEqual(["Sign in", "Turn off", "Remove"]);
     tools.answer("linear", { auth: "connected", tools: [{ name: "search" }], readAt: AGENTS_REPORT.readAt });
@@ -518,7 +518,7 @@ describe("the detail", () => {
     const tools = fakeTools();
     tools.answer("notion", { auth: "signed-in", holder: "claude", readAt: AGENTS_REPORT.readAt });
     draw({ ctx: { where: "box", tools } });
-    tab("MCP servers");
+    tab("Tool servers");
     fireEvent.click(openRow(SERVER.notion).querySelector<HTMLButtonElement>("[data-k=act-view-tools]")!);
     const level = document.querySelector<HTMLElement>("[data-agents-under]")!;
     expect(level.querySelector("[data-k=under-refused]")).toBeNull();
@@ -532,7 +532,7 @@ describe("the detail", () => {
     for (const [where, extra, on] of [["box", {}, "spoo"], ["fork", { editImage: () => {} }, "wsp-fork (Solari)"]] as const) {
       const tools = fakeTools();
       draw({ on, ctx: { where, ...extra, tools } });
-      tab("MCP servers");
+      tab("Tool servers");
       const status = badge(rowEl(SERVER.airtable));
       expect([status.dataset["state"], said(status), status.getAttribute("title")], where).toEqual(["unknown", "not checked", W.checkStarts(on)]);
       expect(acts(openRow(SERVER.airtable))[0], where).toBe("Check");
@@ -548,7 +548,7 @@ describe("the detail", () => {
     const tools = fakeTools();
     tools.answer("airtable", SERVER_TOOLS["airtable"]!);
     draw({ ctx: { where: "box-task", computer: "spoo", tools } });
-    tab("MCP servers");
+    tab("Tool servers");
     const detail = openRow(SERVER.airtable);
     expect(detail.querySelector<HTMLButtonElement>("[data-k=act-view-tools]")?.disabled).toBe(false);
     expect(detail.querySelector<HTMLButtonElement>("[data-k=act-reconnect]")?.disabled).toBe(true);
@@ -645,7 +645,7 @@ describe("the detail", () => {
     const tools = fakeTools();
     tools.answer("linear", { auth: "signed-in", holder: "claude", readAt: AGENTS_REPORT.readAt });
     draw({ ctx: { where: "box", tools } });
-    tab("MCP servers");
+    tab("Tool servers");
     expect(said(badge(rowEl(SERVER.linear)))).toBe("signed in");
     expect(dotOf(badge(rowEl(SERVER.linear)))).toBe("bg-success");
     const detail = openRow(SERVER.linear);
@@ -658,7 +658,7 @@ describe("the detail", () => {
     tools.answer("airtable", { ...SERVER_TOOLS["airtable"]!, readAt: "2026-09-24T11:00:00.000Z" });
     const report: AgentsReport = { ...AGENTS_REPORT, servers: AGENTS_REPORT.servers.map(s => (s.name === "linear" ? { ...s, auth: "signed-in" } : s)) };
     draw({ report, ctx: { where: "box", tools } });
-    tab("MCP servers");
+    tab("Tool servers");
     expect(said(badge(rowEl(SERVER.linear)))).toBe("needs sign-in");
     expect(said(badge(rowEl(SERVER.airtable)))).toBe("connected 3 tools");
   });
@@ -712,7 +712,7 @@ describe("the keyboard", () => {
   it("focuses Back when a detail opens, steps to the first act it can take on ArrowDown, and goes back to the opened row on Escape", () => {
     const METRICS = "server-project-pr_wsp-spoo-metrics-stdio-node scripts/metrics-mcp.js --token ${METRICS_TOKEN}";
     draw({ ctx: { where: "box", tools: fakeTools() } });
-    tab("MCP servers");
+    tab("Tool servers");
     openRow(METRICS);
     const back = document.querySelector<HTMLButtonElement>("[data-k=agents-back]")!;
     expect(document.activeElement).toBe(back);
@@ -744,7 +744,7 @@ describe("the states", () => {
     expect(bars).toHaveLength(3);
     for (const bar of bars) expect(bar.className).toContain("h-[72px]");
     expect(document.querySelector("[data-agents-rows]")?.getAttribute("aria-busy")).toBe("true");
-    tab("MCP servers");
+    tab("Tool servers");
     for (const bar of document.querySelectorAll<HTMLElement>("[data-k=agents-skeleton]")) expect(bar.className).toContain("h-[84px]");
   });
 
@@ -762,9 +762,9 @@ describe("the states", () => {
 
   it("says an empty tab in one centred sentence in the panel, and draws the page's empty with its ghost word and Add", () => {
     draw({ report: { ...AGENTS_REPORT, skills: [], servers: [] } });
-    tab("MCP servers");
+    tab("Tool servers");
     const empty = document.querySelector<HTMLElement>("[data-k=agents-empty]")!;
-    expect(empty.textContent).toBe("No MCP servers on spoo yet.");
+    expect(empty.textContent).toBe("No tool servers on spoo yet.");
     expect(empty.className).toContain("min-h-[168px]");
     expect(empty.querySelector("button")).toBeNull();
     cleanup();
@@ -908,7 +908,7 @@ describe("the status dots", () => {
     };
     draw({ report, ctx: { where: "box", tools } });
     const seen = new Set<string>();
-    for (const name of ["Agents", "MCP servers", "Skills"]) {
+    for (const name of ["Agents", "Tool servers", "Skills"]) {
       tab(name);
       const keys = rows().map(r => r.dataset["agentsRow"]!);
       for (const [word, dotted] of walk()) {
