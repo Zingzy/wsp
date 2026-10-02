@@ -107,7 +107,7 @@ import { useComposerModesStore } from "./composerModesStore";
 import { nextPastedTextName, pastesAsFile } from "./pastedText";
 import { buildComposerPromptHistoryEntries, stepComposerPromptHistory, type ComposerPromptHistoryPosition } from "./composerPromptHistory";
 import { EMPTY_DRAFT, newId, useComposerDraft, useComposerDraftStore, useComposerQueue, useComposerQueueHeld, type QueuedMessage } from "./composerDraftStore";
-import { ComposerAccessPicker, ComposerOptionPickers, useAccessPick, useComposerPicks, type AccessTarget } from "./ComposerOptionPickers";
+import { BarRule, ComposerAccessPicker, ComposerOptionPickers, useAccessPick, useComposerPicks, type AccessTarget } from "./ComposerOptionPickers";
 import { useComposerOptionsStore } from "./composerOptionsStore";
 import type { ComposerStart } from "./composerPicks";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
@@ -116,7 +116,7 @@ import { useMultiPicks } from "./composerMultiPick";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { ComposerQueue } from "./ComposerQueue";
 import { ComposerSurface } from "./ComposerSurface";
-import { useAnimatedHeight, useFlip, useTallDraft } from "./composerMotion";
+import { ACCESS_IN_BAR_PX, useAnimatedHeight, useFlip, useTallDraft, useWiderThan } from "./composerMotion";
 import { Button } from "../ui/button";
 import type { ChatThreadHandle } from "./useChatThread";
 import { ComposerTasks } from "./ComposerTasks";
@@ -857,6 +857,7 @@ export function ChatComposer({
   // A home's thread carries a history-unavailable row and no message, so the count is of messages alone.
   const compact = thread.view.running || thread.view.entries.some(entry => entry.kind === "message");
   const access = <ComposerAccessPicker workspaceId={workspaceId} thread={thread} onPickAccess={accessPick.pick} refused={accessPick.line} />;
+  const accessInBar = <ComposerAccessPicker workspaceId={workspaceId} thread={thread} onPickAccess={accessPick.pick} refused={accessPick.line} inBar />;
   const home = useStore(s => s.projects.find(p => projectHomeKey(p.id) === workspaceId));
   usePublishContext(workspaceId, thread.view.turns, harnessCatalog?.label ?? harnessId);
   const heightRef = useRef<HTMLDivElement | null>(null);
@@ -865,6 +866,9 @@ export function ChatComposer({
   const tall = useTallDraft(mirrorRef, draft.prompt, compact);
   useAnimatedHeight(heightRef, surfaceRef);
   useFlip(surfaceRef, compact ? (tall ? "tall" : "line") : "full");
+  // The full box's bar holds the access beside the model and the effort while it fits; narrower, it waits underneath.
+  const wide = useWiderThan(surfaceRef, ACCESS_IN_BAR_PX);
+  const accessIn = !compact && wide;
   const commandMenu = menuOpen ? (
     <ComposerCommandMenuLayer anchor={menuAnchor}>
       <ComposerCommandMenu groups={groups} note={menuNote} triggerKind={trigger?.kind ?? null} activeItemId={activeItemId} onHighlightedItemChange={highlight} onSelect={selectItem} />
@@ -1030,6 +1034,12 @@ export function ChatComposer({
                           thread={thread}
                           fast={fastOffered ? { on: fastOn, set: on => setFast(threadKey, on), held: waits } : null}
                         />
+                        {accessIn ? (
+                          <>
+                            <BarRule />
+                            {accessInBar}
+                          </>
+                        ) : null}
                       </div>
                       <div
                         data-chat-composer-actions="right"
@@ -1050,14 +1060,14 @@ export function ChatComposer({
           </form>
         </ComposerSurface.Host>
         {home !== undefined ? (
-          <HomeCheckoutRow path={home.path} branch={home.defaultBranch} where={where} access={access} />
+          <HomeCheckoutRow path={home.path} branch={home.defaultBranch} where={where} access={accessIn ? null : access} />
         ) : waiting !== undefined ? (
-          <HomeCheckoutRow path={waiting.folder} branch="" where={where} access={access} />
+          <HomeCheckoutRow path={waiting.folder} branch="" where={where} access={accessIn ? null : access} />
         ) : (
           <ComposerCheckoutRow
           workspaceId={workspaceId}
           thread={thread}
-          access={access}
+          access={accessIn ? null : access}
           stash={stashWord}
           />
         )}

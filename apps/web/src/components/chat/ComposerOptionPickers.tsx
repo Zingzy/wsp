@@ -270,12 +270,15 @@ function AccessPicker({
   /** What a pick does to the turn running now, over the access list; nothing while no turn runs and the pick only starts one. */
   note,
   onPickAccess,
+  inBar = false,
 }: {
   modes: ReadonlyArray<HarnessOption>;
   picks: ResolvedPicks;
   refused: string | null;
   note: string | null;
   onPickAccess: (mode: string) => void;
+  /** In the box beside the model and the effort, at their size, rather than in the strip under it. */
+  inBar?: boolean;
 }) {
   const shown = picks.permissionMode;
   const access = modes.find(o => o.value === shown);
@@ -285,15 +288,15 @@ function AccessPicker({
     <Menu>
       <MenuTrigger
         render={<Button type="button" variant="ghost" size="xs" />}
-        className={cn(ROW_ITEM_CLASS, "hover:text-foreground", refused !== null && "text-error-foreground hover:text-error-foreground")}
+        className={cn(inBar ? triggerClass : cn(ROW_ITEM_CLASS, "hover:text-foreground"), refused !== null && "text-error-foreground hover:text-error-foreground")}
         aria-label={`${ACCESS_WORD}: ${label}`}
         data-composer-picker="access"
         data-access={shown ?? undefined}
         {...(refused !== null ? { "data-access-refused": refused, title: refused } : {})}
       >
-        <Icon className="size-3 shrink-0" aria-hidden />
+        <Icon className={cn(inBar ? "size-4" : "size-3", "shrink-0")} aria-hidden />
         <span className="truncate">{label}</span>
-        <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
+        <ChevronDownIcon className={cn("shrink-0", inBar ? "size-3.5 opacity-60" : "size-3 opacity-50")} />
       </MenuTrigger>
       <MenuPopup align="start" side="top" className="w-64">
         <MenuGroup>
@@ -315,7 +318,7 @@ function AccessPicker({
 }
 
 /** The hairline between two pickers of the bar, so each reads as its own control. */
-const BarRule = () => <span aria-hidden className="mx-1.5 h-5 w-px shrink-0 bg-border" />;
+export const BarRule = () => <span aria-hidden className="mx-1.5 h-5 w-px shrink-0 bg-border" />;
 
 /** The thread an access pick is put to through the access verb, once it has run: the runtime's id for one of its
  * rows, which is what sessions.access takes, and the turn running now where one is, which the refusal note belongs
@@ -413,8 +416,8 @@ export function ComposerOptionPickers({
   );
 }
 
-/** The access picker, sized for the strip under the box. */
-export function ComposerAccessPicker({ workspaceId, thread, onPickAccess, refused }: { workspaceId: string; thread: ChatThreadHandle; onPickAccess: (mode: string) => void; refused: string | null }) {
+/** The access picker, sized for the strip under the box, or for the box's own bar where it stands there. */
+export function ComposerAccessPicker({ workspaceId, thread, onPickAccess, refused, inBar = false }: { workspaceId: string; thread: ChatThreadHandle; onPickAccess: (mode: string) => void; refused: string | null; inBar?: boolean }) {
   const { catalog, picks } = useComposerPicks(workspaceId, thread);
   if (catalog === null || picks === null || catalog.permissionModes.length === 0) return null;
   return (
@@ -424,6 +427,7 @@ export function ComposerAccessPicker({ workspaceId, thread, onPickAccess, refuse
       refused={refused}
       note={thread.view.running ? accessReachLine(movesRunningAccess(catalog)) : null}
       onPickAccess={onPickAccess}
+      inBar={inBar}
     />
   );
 }

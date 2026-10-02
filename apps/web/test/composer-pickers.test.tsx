@@ -274,7 +274,7 @@ function appSources(dir: string, out: Array<readonly [string, string]> = []): Ar
 }
 
 describe("composer pickers", () => {
-  it("sit inside the composer box, the access under it, with the machine's catalog, read the defaults, and picks ride the next start", async () => {
+  it("sit inside the composer box, the access with them where the box is wide, with the machine's catalog, read the defaults, and picks ride the next start", async () => {
     const { api, started, listed } = fixtureApi({ table: [TABLE, CODEX], machine: [CLAUDE, CODEX] });
     await setup(api);
     await waitFor(() => expect(document.querySelector('[data-composer-picker="model"][data-value]')).not.toBeNull());
@@ -282,8 +282,9 @@ describe("composer pickers", () => {
     const footer = document.querySelector("[data-chat-composer-footer]")!;
     expect(footer.contains(picker("model"))).toBe(true);
     expect(footer.contains(picker("reasoning"))).toBe(true);
-    expect(footer.contains(picker("access"))).toBe(false);
-    expect(document.querySelector("[data-composer-checkout]")!.contains(picker("access"))).toBe(true);
+    // A full box wide enough holds the access in its bar beside the model and the effort, not in the strip under it.
+    expect(footer.contains(picker("access"))).toBe(true);
+    expect(document.querySelector("[data-composer-checkout]")!.contains(picker("access"))).toBe(false);
     // Defaults read: the catalog's default model beside its agent's mark, the default
     // context, and the mode under the word for what it sets.
     expect(picker("model")?.textContent).toBe("Opus 5");

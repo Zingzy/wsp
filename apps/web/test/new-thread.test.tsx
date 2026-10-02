@@ -192,7 +192,7 @@ describe("New thread from Cmd+T", () => {
     expect(where()!.closest("button")).toBeNull();
   });
 
-  it("the box carries model, effort with its brain, attach and send; under it the computer, access and branch, no folder path, and no project chip", async () => {
+  it("the box carries model, effort with its brain, access, attach and send; under it the computer and branch, no folder path, and no project chip", async () => {
     await mount();
     cmdT();
     const effort = await waitFor(() => document.querySelector<HTMLElement>('[data-composer-picker="reasoning"]')!);
@@ -202,9 +202,9 @@ describe("New thread from Cmd+T", () => {
     expect(document.querySelector('[data-composer-picker="project"]')).toBeNull();
     expect(screen.queryByText("other folder")).toBeNull();
     const strip = document.querySelector<HTMLElement>("[data-composer-checkout]")!;
-    expect(strip.querySelector('[data-composer-picker="access"]')).not.toBeNull();
+    expect(strip.querySelector('[data-composer-picker="access"]')).toBeNull();
     const footer = document.querySelector<HTMLElement>("[data-chat-composer-footer]")!;
-    expect(footer.querySelector('[data-composer-picker="access"]')).toBeNull();
+    expect(footer.querySelector('[data-composer-picker="access"]')).not.toBeNull();
     expect(strip.dataset["composerFolder"]).toBeDefined();
     expect(strip.textContent).not.toContain(strip.dataset["composerFolder"]!);
     expect(strip.querySelector("[data-composer-computer]")).not.toBeNull();

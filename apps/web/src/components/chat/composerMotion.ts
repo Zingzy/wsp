@@ -78,3 +78,21 @@ export function useTallDraft(mirrorRef: RefObject<HTMLElement | null>, text: str
   }, [enabled, mirrorRef, text]);
   return tall;
 }
+
+/** The full box's width at which its bar holds the access beside the model and the effort without wrapping. */
+export const ACCESS_IN_BAR_PX = 640;
+
+/** Whether the element is wider than `px`, read off a ResizeObserver; false before the first reading. */
+export function useWiderThan(ref: RefObject<HTMLElement | null>, px: number): boolean {
+  const [wide, setWide] = useState(false);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (el === null) return;
+    const measure = () => setWide(el.getBoundingClientRect().width > px);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [ref, px]);
+  return wide;
+}
