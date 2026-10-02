@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   APP_LOCALE,
+  formatChatTimestamp,
   formatElapsedDurationLabel,
   formatExpiresInLabel,
   formatRelativeTime,
@@ -178,5 +179,25 @@ describe("formatElapsedDurationLabel", () => {
     expect(formatElapsedDurationLabel("2026-04-07T11:45:00.000Z")).toBe("15m");
     expect(formatElapsedDurationLabel("2026-04-07T06:00:00.000Z")).toBe("6h");
     expect(formatElapsedDurationLabel("2026-04-03T12:00:00.000Z")).toBe("4d");
+  });
+});
+
+describe("formatChatTimestamp", () => {
+  const at = (y: number, m: number, d: number, h: number, min: number): string => new Date(y, m, d, h, min).toISOString();
+  const now = new Date(2026, 9, 2, 12, 0).getTime();
+
+  it("says the day and the time with no year inside the current year", () => {
+    expect(formatChatTimestamp(at(2026, 9, 1, 15, 54), "12-hour", now)).toBe("Oct 1, 3:54 PM");
+    expect(formatChatTimestamp(at(2026, 9, 1, 15, 54), "24-hour", now)).toBe("Oct 1, 15:54");
+  });
+
+  it("carries the year once the stamp is from another year, even a day across New Year", () => {
+    const newYear = new Date(2027, 0, 2, 9, 0).getTime();
+    expect(formatChatTimestamp(at(2026, 11, 30, 23, 5), "12-hour", newYear)).toBe("Dec 30, 2026, 11:05 PM");
+    expect(formatChatTimestamp(at(2027, 0, 1, 23, 5), "12-hour", newYear)).toBe("Jan 1, 11:05 PM");
+  });
+
+  it("says nothing for a stamp it cannot read", () => {
+    expect(formatChatTimestamp("not a date", "12-hour", now)).toBe("");
   });
 });
