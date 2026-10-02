@@ -4,7 +4,7 @@
 // side fills, and the calls recorded per tool. A sentence is taken off the
 // function or the tool that says it here, with each value it names standing
 // in as {name}, so its words keep one home in this package.
-import { CATALOG, DEFAULT_AGENT, ROAD_MODULES, agentName } from "@wsp/catalog";
+import { CATALOG, ROAD_MODULES } from "@wsp/catalog";
 import {
   START_WORDS,
   COPY_CURRENT,
@@ -184,7 +184,6 @@ export async function workspaceWords(line: LineOf, host: HostOf): Promise<Record
     fixAsked: fixAskedLine("{name}", "{agent}", "{check}"),
     fixConflicts: fixConflictsLine("{name}", "{agent}", "{base}"),
     fixNothing: fixNothingLine("{name}", "{base}"),
-    fixAgentDefault: agentName(DEFAULT_AGENT.id),
     fixMergeChild: fixMergeChildLine("{name}", "{agent}", "{child}"),
     fixCheckOrChild: FIX_CHECK_OR_CHILD,
     merged: slot(mergedLine("{name}", { number: 7, method: "{method}" as never, merged: true }), "7", "number"),
@@ -448,7 +447,8 @@ export const WORKSPACE_ANSWERED: Record<string, TurnCase[]> = {
   ],
   fix: [
     { case: "a failed check", arguments: { workspace: "alpha", check: "ci \u0085 / test 🧪" }, replies: { "workspaces.resolve": reply({ workspace: NAPPING }), "workspaces.fix": reply({ outcome: "steered", threadId: "t-1", check: "ci \u0085 / test 🧪", base: "main", agent: "codex" }) } },
-    { case: "the conflicts sent", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: NAPPING }), "workspaces.wake": reply({ workspace: WORKSPACE }), "workspaces.fix": reply({ outcome: "started", threadId: "t-2", base: "main" }) } },
+    { case: "the conflicts sent", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: NAPPING }), "workspaces.wake": reply({ workspace: WORKSPACE }), "workspaces.fix": reply({ outcome: "started", threadId: "t-2", base: "main", agent: "claude" }) } },
+    { case: "a sent fix naming no agent", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.wake": reply({ workspace: WORKSPACE }), "workspaces.fix": reply({ outcome: "started", threadId: "t-5", base: "main" }) } },
     { case: "an agent the catalog does not name", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.wake": reply({ workspace: WORKSPACE }), "workspaces.fix": reply({ outcome: "queued", threadId: "t-3", base: "develop", agent: "someone-else" }) } },
     { case: "updated clean, nothing sent", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.wake": reply({ workspace: WORKSPACE }), "workspaces.fix": reply({ outcome: "updated", base: "main \u0085 🧪" }) } },
     { case: "refused", arguments: { workspace: "alpha", check: "lint" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.fix": refused("lint has not failed on #4", "usage") } },

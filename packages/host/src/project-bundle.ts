@@ -395,14 +395,14 @@ export async function packState(root: string, homes: Readonly<Record<string, str
   }
 }
 
-/** The folder as the runtime's project.import op reads it: planned once, packed when consent is known; `homes` is
- * each agent's home by catalog id, the production caller's under the real home directory. */
-export function projectBundler(source: string, homes: Readonly<Record<string, string>>): ProjectBundler {
+/** The folder as the runtime's project.import op reads it: planned once, packed when consent is known; `homes`
+ * answers each agent's home by catalog id, the production caller's where a launch here finds it. */
+export function projectBundler(source: string, homes: () => Promise<Readonly<Record<string, string>>>): ProjectBundler {
   let listing: Promise<ProjectListing> | undefined;
-  const listed = (): Promise<ProjectListing> => (listing ??= planProject(source, homes));
+  const listed = (): Promise<ProjectListing> => (listing ??= homes().then(at => planProject(source, at)));
   return {
     plan: async () => (await listed()).plan,
     pack: async (carry, rewrite) => packProject(await listed(), carry, rewrite),
-    packState: async req => packState((await listed()).plan.source, homes, req),
+    packState: async req => packState((await listed()).plan.source, await homes(), req),
   };
 }

@@ -986,8 +986,9 @@ export interface HereDaemon {
 /** What the host wires for the seed half of an add: the menu for a folder on this computer, and the archive of
  * whichever rows the person ticked. Both read that folder, which is why neither is the runtime's own. */
 export interface SeedWiring {
-  plan(folder: string): Promise<SeedPlan>;
-  pack(o: { plan: SeedPlan; choice: SeedChoice }): Promise<{ tar: Buffer; files: number; bytes: number; commits: number; left: readonly string[] }>;
+  /** `homes` is each agent's folder on this computer as `agents.homesHere` answers it. */
+  plan(folder: string, homes: Readonly<Record<string, string>>): Promise<SeedPlan>;
+  pack(o: { plan: SeedPlan; choice: SeedChoice; homes: Readonly<Record<string, string>> }): Promise<{ tar: Buffer; files: number; bytes: number; commits: number; left: readonly string[] }>;
 }
 
 export interface RuntimeOptions {
@@ -1437,6 +1438,9 @@ export interface Runtime {
     serversIcon(host: string, refresh?: boolean): Promise<string | null>;
     /** Changes how one agent runs on one computer, checked first, and answers its row there, names only. */
     setup(placeId: string, agent: string, change: AgentSetupSet, origin?: Caller): Promise<AgentRow>;
+    /** Every catalog agent's config folder on this computer by id, where a launch here finds it: the one the person
+     * kept, refused in a launch's words once it leads out of the home, else the agent's own. */
+    homesHere(): Promise<Record<string, string>>;
   };
   /** Every verb takes where the request reached the host from as its last argument: here, this computer's own app,
    * CLI or MCP, or relayed from a machine. Absent reads here. A workspace whose kind takes no relayed request
@@ -4665,19 +4669,19 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     origin: Caller | undefined,
   ): Promise<{ outcome: "steered" | "queued" | "started"; threadId: string; harness: string }> => {
     const requestId = randomUUID();
-    let queuedNow: (() => void) | undefined;
-    const queued = new Promise<"queued">(resolve => {
-      queuedNow = () => resolve("queued");
+    let queuedNow: ((harness: string) => void) | undefined;
+    const queued = new Promise<{ queuedOn: string }>(resolve => {
+      queuedNow = harness => resolve({ queuedOn: harness });
     });
     const off = bus.on("session.queued", e => {
-      if (e.type === "session.queued" && e.requestId === requestId) queuedNow?.();
+      if (e.type === "session.queued" && e.requestId === requestId) queuedNow?.(e.harness);
     });
     try {
       const started = sessionsApi.start(workspaceId, { ...o, requestId }, origin);
       const first = await Promise.race([started, queued]);
-      if (first === "queued") {
+      if ("queuedOn" in first) {
         started.catch((e: unknown) => console.warn(`a message waiting in thread ${threadWord(o.thread ?? "")} was not sent: ${e instanceof Error ? e.message : String(e)}`));
-        return { outcome: "queued", threadId: o.thread!, harness: latestOn(o.thread!)?.harness ?? DEFAULT_AGENT.id };
+        return { outcome: "queued", threadId: o.thread!, harness: first.queuedOn };
       }
       const view = first.view();
       return { outcome: first.outcome === "steered" ? "steered" : "started", threadId: view.threadId ?? view.id, harness: view.harness };
@@ -7700,13 +7704,25 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const setupRefusal = async (entry: LiveWorkspace, named?: string): Promise<string | null> => {
     const harness = named ?? DEFAULT_AGENT.id;
     const kept = keptFolder(entry, harness);
-    if (kept === undefined) return null;
-    const { place, folder } = kept;
+    return kept === undefined ? null : keptRefusal(kept.place, harness, kept.folder);
+  };
+  const keptRefusal = async (place: string, harness: string, folder: string): Promise<string | null> => {
     const why = configDirRefusal(agentLabel(harness), folder, await configFolderOn(place, folder));
     const refused = why === null ? null : configDirLaunchRefusal(agentLabel(harness), harness, folder, why);
     if (refused === null) setupRefusals.delete(keyOf(place, harness));
     else setupRefusals.set(keyOf(place, harness), refused);
     return refused;
+  };
+  const homesHere = async (): Promise<Record<string, string>> => {
+    await ready();
+    const homes: Record<string, string> = {};
+    for (const { id } of CATALOG_AGENTS) {
+      const kept = setups.get(HERE_PLACE_ID, id)?.configDir;
+      const refused = kept === undefined ? null : await keptRefusal(HERE_PLACE_ID, id, kept);
+      if (refused !== null) throw Object.assign(new Error(refused), { kind: "usage" });
+      homes[id] = kept ?? local?.home(id) ?? agentHomes(homedir())[id]!;
+    }
+    return homes;
   };
   /** Settles at once where no config folder is kept, so a road with nothing to check waits on nothing more than before. */
   const confineSetup = (entry: LiveWorkspace, named?: string): Promise<void> =>
@@ -9069,7 +9085,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             // out yet, so this one waits for the moment it has one or is given up, and looks again.
             const launching = launchingOn(threadId);
             if (launching !== undefined && launching.turnId !== turnId) {
-              if (outcome === "started") bus.emit({ type: "session.queued", workspaceId, threadId, prompt: o.prompt, ...(o.requestId !== undefined ? { requestId: o.requestId } : {}) });
+              if (outcome === "started") bus.emit({ type: "session.queued", workspaceId, threadId, harness, prompt: o.prompt, ...(o.requestId !== undefined ? { requestId: o.requestId } : {}) });
               outcome = "queued";
               await launching.launch;
               refuse();
@@ -9101,7 +9117,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             recordSteer(running, running.handle.id, o);
             return { ...running.handle, outcome: "steered" };
           }
-          if (outcome === "started") bus.emit({ type: "session.queued", workspaceId, threadId, prompt: o.prompt, ...(o.requestId !== undefined ? { requestId: o.requestId } : {}) });
+          if (outcome === "started") bus.emit({ type: "session.queued", workspaceId, threadId, harness, prompt: o.prompt, ...(o.requestId !== undefined ? { requestId: o.requestId } : {}) });
           outcome = "queued";
           await running.handle.finished.catch(() => {});
           refuse();
@@ -10876,7 +10892,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     async seedPlan(source: string): Promise<SeedPlan> {
       await ready();
       const folder = folderNamed(source);
-      const plan = await seedWiring().plan(folder);
+      const plan = await seedWiring().plan(folder, await homesHere());
       const remembered = (await store.get(SEED_CHOICES, folder)) as SeedChoice | undefined;
       if (remembered === undefined) return plan;
       return { ...plan, remembered: true, files: plan.files.map(f => ({ ...f, ticked: f.kind !== "never" && remembered.files.includes(f.path) })) };
@@ -10982,7 +10998,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (!road.landsAtAdd({ seeding: seed !== undefined })) return keep({});
       report("planned", addingProjectLine(project.name, source, seed !== undefined));
       try {
-        const packed = seed === undefined ? undefined : await seedWiring().pack(seed);
+        const packed = seed === undefined ? undefined : await seedWiring().pack({ ...seed, homes: await homesHere() });
         // A login inside a folder they ticked stays on this computer: said as the pack finds it, so the terminal
         // watching the add reads it there and the answer's notice is the tool door's copy of the same fact.
         if (packed !== undefined && packed.left.length > 0) report("seeding", leftBehindLine(packed.left));
@@ -11589,7 +11605,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     devices: deviceDoor,
     ...(placeDoor !== undefined ? { places: placeDoor } : {}),
     hereChannel: async onEvent => channelOver(await localRoad(), THIS_COMPUTER, onEvent),
-    agents: agentsRead,
+    agents: { ...agentsRead, homesHere },
     preferences,
     usage,
     status: {

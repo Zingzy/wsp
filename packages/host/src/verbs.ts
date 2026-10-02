@@ -19,7 +19,7 @@ import { StringDecoder } from "node:string_decoder";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import WebSocket from "ws";
 import { z } from "zod";
-import { CATALOG_AGENTS, DEFAULT_AGENT, ROAD_MODULES, THREAD_AGENTS, agentName, catalogEntry, isRoad } from "@wsp/catalog";
+import { CATALOG_AGENTS, ROAD_MODULES, THREAD_AGENTS, agentName, catalogEntry, isRoad } from "@wsp/catalog";
 import { nodeHost, readGhosttyConfig, type Platform } from "@wsp/collect";
 import { freshEphemeral, keyFingerprint, makeSeal, openFrame, sealKeys, sharedSecret, signPlaceBytes, verifyPlaceBytes, SEAL_REFUSAL, type PlaceKeyPair, type Seal } from "@wsp/keys";
 import {
@@ -305,6 +305,7 @@ import {
   GitDiscardReply,
   committedLine,
   discardedLine,
+  FIX_RESULT_FIELDS,
   FixResult,
   FIX_CHECK_OR_CHILD,
   MergeInResult,
@@ -1465,7 +1466,9 @@ async function committed(client: HostClient, workspaceId: string, message: strin
 
 /** A fix asked of the host, one road for the command line and the tool. */
 async function askedToFix(client: HostClient, workspaceId: string, check: string | undefined, child?: string): Promise<FixResult> {
-  return FixResult.parse(await client.request("workspaces.fix", { workspaceId, ...(check !== undefined ? { check } : {}), ...(child !== undefined ? { child } : {}) }));
+  const read = FixResult.safeParse(await client.request("workspaces.fix", { workspaceId, ...(check !== undefined ? { check } : {}), ...(child !== undefined ? { child } : {}) }));
+  if (!read.success) throw new Error(otherVersion("workspaces.fix"));
+  return read.data;
 }
 
 /** A merge of a child into its lead asked of the host, the lead woken first; one road for the command line and the tool. */
@@ -1478,7 +1481,7 @@ async function mergedIn(client: HostClient, leadRef: string, child: string, said
 /** What a fix reads as: which agent was asked to fix what, or that the update left nothing to fix. */
 function fixLine(workspace: string, asked: FixResult): string {
   if (asked.outcome === "updated") return fixNothingLine(workspace, asked.base);
-  const agent = agentName(asked.agent ?? DEFAULT_AGENT.id);
+  const agent = agentName(asked.agent);
   if (asked.child !== undefined) return fixMergeChildLine(workspace, agent, asked.child);
   return asked.check !== undefined ? fixAskedLine(workspace, agent, asked.check) : fixConflictsLine(workspace, agent, asked.base);
 }
@@ -4982,7 +4985,7 @@ export const ALL_VERBS: readonly Verb[] = [
           .optional()
           .describe("a child of this workspace whose merge into it stopped on conflicts: its agent is asked to fetch the child's branch, merge it with a merge commit and resolve them; never with check"),
       },
-      output: FixResult.shape,
+      output: FIX_RESULT_FIELDS,
       call: async ({ workspace: ref, check, child }, deps) => {
         if (check !== undefined && child !== undefined) throw new Error(FIX_CHECK_OR_CHILD);
         const client = await deps.client();

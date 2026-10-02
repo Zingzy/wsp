@@ -234,8 +234,11 @@ export function conflictsPrompt(o: { base: string; branch: string; files: readon
  * not sent since an update from the base left nothing to fix. */
 export const FixOutcome = z.enum(["steered", "queued", "started", "updated"]);
 export type FixOutcome = z.infer<typeof FixOutcome>;
-export const FixResult = z.object({ outcome: FixOutcome, threadId: z.string().optional(), check: z.string().optional(), child: z.string().optional(), base: z.string(), agent: z.string().optional() });
+const FixSent = z.object({ outcome: FixOutcome.exclude(["updated"]), threadId: z.string(), check: z.string().optional(), child: z.string().optional(), base: z.string(), agent: z.string() });
+export const FixResult = z.discriminatedUnion("outcome", [FixSent, z.object({ outcome: z.literal("updated"), base: z.string() })]);
 export type FixResult = z.infer<typeof FixResult>;
+/** Every field either answer carries, for a tool's output schema, which is one object. */
+export const FIX_RESULT_FIELDS = FixSent.partial({ threadId: true, agent: true }).extend({ outcome: FixOutcome }).shape;
 
 /** What a merge answers: merged now, or armed to merge once its checks pass, with the number and the method. */
 export const MergeResult = z.object({ number: count, method: MergeMethod, merged: z.boolean(), autoArmed: z.boolean() });

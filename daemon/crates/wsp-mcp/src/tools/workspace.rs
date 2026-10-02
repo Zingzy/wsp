@@ -85,7 +85,6 @@ pub struct Words {
     pub fix_asked: String,
     pub fix_conflicts: String,
     pub fix_nothing: String,
-    pub fix_agent_default: String,
     pub fix_merge_child: String,
     pub fix_check_or_child: String,
     pub merged: String,

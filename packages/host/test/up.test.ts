@@ -340,43 +340,48 @@ describe("wsp up", () => {
     expect(existsSync(join(home, "state", "host.lock"))).toBe(false);
   });
 
-  it("a host serving a state file somewhere else writes nothing under the person's home, and one on their own wsp says in one line what it brought up to date", async () => {
-    // Priya kept her whole session inside /tmp and read six lines about files rewritten under her home folder.
-    stateFile({ goldens: { default: SEALED_GOLDEN } });
-    const user = join(dir, "user");
-    const stale = join(user, ".claude", "skills", "wsp", "SKILL.md");
-    mkdirSync(dirname(stale), { recursive: true });
-    writeFileSync(stale, "an older wsp's skill\n");
-    const lines: string[] = [];
-    await answered(await started(lines));
-    // The state file here is not this wsp home's own, so nothing of the person's is touched: not the skill copy
-    // their agent holds, and not a line about it.
-    expect(readFileSync(stale, "utf8")).toBe("an older wsp's skill\n");
-    expect(lines.filter(l => l.includes("skill"))).toEqual([]);
-
-    // The same start on this home's own state file: the copy is brought up to date, in one line naming it.
-    for (const h of handles.splice(0)) await h.close();
-    const own = join(home, "state.json");
-    writeFileSync(own, JSON.stringify({ goldens: { default: SEALED_GOLDEN }, [STATE_SHAPE_KEY]: shapeHere() }));
-    const mine: string[] = [];
-    handles.push(await answered(await up(quietIO(mine), { port: 0, statePath: own, webDir, runtime: createRuntime({ backend: stubBackend(), store: jsonFileStore(own, stateWriterHere()), adapters: {} }) })));
-    expect(readFileSync(stale, "utf8")).toBe(WSP_SKILL);
-    expect(mine).toContain(skillsRefreshedLine(["~/.claude/skills/wsp/SKILL.md"]));
-    expect(mine.filter(l => l.includes("skill"))).toHaveLength(1);
-  });
-
-  it("a host on the person's own wsp moves the wsp tools an agent's config holds onto this computer's tool server, in one line", async () => {
+  it("a host brings an agent's skill copy and wsp tools up to its own only where that agent's entry names its state file", async () => {
+    // A proof host on a scratch home rewrote six skill copies the person's own host had written; the host their
+    // agents dial is the one whose state file the agents' entries name, wherever that home is.
     const node: RunningWsp = { execPath: "/usr/local/bin/node", execArgv: [], argv: ["/usr/local/bin/node", "/opt/wsp/dist/bin.js"], version: "9.9.9", PATH: "/usr/bin:/bin", toolServer: false };
     const binary: RunningWsp = { ...node, toolServer: "/opt/wsp/daemon/wsp-daemon" };
-    const own = join(home, "state.json");
-    writeFileSync(own, JSON.stringify({ goldens: { default: SEALED_GOLDEN }, [STATE_SHAPE_KEY]: shapeHere() }));
-    mkdirSync(join(dir, "user"), { recursive: true });
-    installMcp("claude", mcpServerSpec(own, node), join(dir, "user"));
-    const mine: string[] = [];
-    handles.push(await answered(await up(quietIO(mine), { port: 0, statePath: own, webDir, running: binary, runtime: createRuntime({ backend: stubBackend(), store: jsonFileStore(own, stateWriterHere()), adapters: {} }) })));
-    const held = JSON.parse(readFileSync(join(dir, "user", ".claude.json"), "utf8")) as { mcpServers: Record<string, unknown> };
-    expect(held.mcpServers["wsp"]).toMatchObject(mcpServerSpec(own, binary));
-    expect(mine).toContain(serversRefreshedLine(["~/.claude.json"]));
+    const user = join(dir, "user");
+    mkdirSync(user, { recursive: true });
+    const served = join(home, "state.json");
+    writeFileSync(served, JSON.stringify({ goldens: { default: SEALED_GOLDEN }, [STATE_SHAPE_KEY]: shapeHere() }));
+    stateFile({ goldens: { default: SEALED_GOLDEN } });
+    // Codex dials the host on this WSP_HOME's own state; Claude dials one on another state file.
+    installMcp("codex", mcpServerSpec(served, node), user);
+    installMcp("claude", mcpServerSpec(join(user, "elsewhere", "state.json"), node), user);
+    const skill = (agent: string): string => join(user, `.${agent}`, "skills", "wsp", "SKILL.md");
+    for (const agent of ["codex", "claude"]) writeFileSync(skill(agent), "an older wsp's skill\n");
+    const codexConfig = join(user, ".codex", "config.toml");
+    const claudeConfig = join(user, ".claude.json");
+    const before = { codex: readFileSync(codexConfig, "utf8"), claude: readFileSync(claudeConfig, "utf8") };
+    const start = async (statePath: string, lines: string[]): Promise<void> => {
+      handles.push(await answered(await up(quietIO(lines), { port: 0, statePath, webDir, running: binary, runtime: createRuntime({ backend: stubBackend(), store: jsonFileStore(statePath, stateWriterHere()), adapters: {} }) })));
+    };
+
+    // A host on a state file no entry names writes nothing under the person's home and says nothing about it.
+    const scratch: string[] = [];
+    await start(statePath, scratch);
+    for (const agent of ["codex", "claude"]) expect(readFileSync(skill(agent), "utf8")).toBe("an older wsp's skill\n");
+    expect(readFileSync(codexConfig, "utf8")).toBe(before.codex);
+    expect(readFileSync(claudeConfig, "utf8")).toBe(before.claude);
+    expect(scratch.filter(l => l.includes("skill") || l.includes("wsp tools now"))).toEqual([]);
+
+    // The host on the state Codex's entry names brings Codex's copy and tools up to date, each in one line, and
+    // leaves Claude's as its own host wrote them.
+    for (const h of handles.splice(0)) await h.close();
+    const dialled: string[] = [];
+    await start(served, dialled);
+    expect(readFileSync(skill("codex"), "utf8")).toBe(WSP_SKILL);
+    expect(readFileSync(codexConfig, "utf8")).not.toBe(before.codex);
+    expect(readFileSync(codexConfig, "utf8")).toContain(binary.toolServer as string);
+    expect(readFileSync(skill("claude"), "utf8")).toBe("an older wsp's skill\n");
+    expect(readFileSync(claudeConfig, "utf8")).toBe(before.claude);
+    expect(dialled).toContain(skillsRefreshedLine(["~/.codex/skills/wsp/SKILL.md"]));
+    expect(dialled).toContain(serversRefreshedLine(["~/.codex/config.toml"]));
   });
 
   it("a host on another home writes every file of its own there and nothing under the home a bare line picks", async () => {

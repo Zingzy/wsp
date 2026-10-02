@@ -237,7 +237,7 @@ function fake(over: { platform?: "darwin" | "linux"; env?: Record<string, string
         };
       },
       daemon: async () => ({ link: link.dial(), close: () => {} }),
-      roads: () => workspaceRoads(rt, {}),
+      roads: () => workspaceRoads(rt),
       recipe: recipe => ({ ...recipe, deployDaemon: over.deployDaemon ?? (async () => "node v22.12.0") }),
     },
     retry: { waitMs: 1, attempts: 3 },

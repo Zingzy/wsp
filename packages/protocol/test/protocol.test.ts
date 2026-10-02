@@ -549,13 +549,14 @@ describe("a relayed permission prompt on the wire", () => {
 
 describe("session.queued", () => {
   it("is a pushed event, not a session event: a start waiting behind the thread's running turn, with the send's request id, never in history", () => {
-    const queued = { type: "session.queued", workspaceId: "ws_1", threadId: "thread_0001", prompt: "and then this", requestId: "req_8" };
+    const queued = { type: "session.queued", workspaceId: "ws_1", threadId: "thread_0001", harness: "codex", prompt: "and then this", requestId: "req_8" };
     expect(EventUnion.parse(queued)).toEqual(queued);
     expect(EventUnion.parse({ ...queued, seq: 4 })).toEqual({ ...queued, seq: 4 });
     const { requestId: _r, ...plain } = queued;
     expect(EventUnion.parse(plain)).toEqual(plain);
     expect(() => EventUnion.parse({ ...queued, prompt: undefined })).toThrow();
     expect(() => EventUnion.parse({ ...queued, threadId: undefined })).toThrow();
+    expect(() => EventUnion.parse({ ...queued, harness: undefined })).toThrow();
     expect(() => SessionEvent.parse(queued)).toThrow();
   });
 });

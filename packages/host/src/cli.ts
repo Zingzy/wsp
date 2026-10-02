@@ -33,7 +33,7 @@ import {
 import { writeOwn } from "@wsp/own-file";
 import { CATALOG_AGENTS, GOLDEN_SETUP, GOLDEN_SMOKE, GUEST_HOME, MCP_AGENT_IDS, THREAD_AGENTS, serverValuesOf } from "@wsp/catalog";
 import { authRefusal, cloudOffRefusal, PRICES_URL, holdsNothing, type McpServerSpec, hostFromEnv, jsonLine, SCOPED_MCP_ARG, scopedNoPairLine, imageHomeKeptLine, isJoinedComputer, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, loopbackThreadsLine, LOOPBACK, PERSON_HOME_ENV, portInsteadLine, PORT_TAKEN_REFUSAL, portsAsked, portsPickedLine, portTakenLine, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, namesPlace, noSuchPlaceRefusal, type PlaceView, unknownWordLine, usageRefusal, verbFailure, foreignFlagLine } from "@wsp/protocol";
-import { agentHome, agentHomes, checkProviderKey, type Copier, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, providerSlot, type ProviderSlot, verbCopier } from "@wsp/engine";
+import { agentHome, checkProviderKey, type Copier, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, providerSlot, type ProviderSlot, verbCopier } from "@wsp/engine";
 import { CLOUD_ON } from "./cloud.js";
 import { noMachinesLine, PROVIDER_MODULES, providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerKeyRows, providerKeySet, providerModule, providerPlaces, wiredPlaceRow, wiredProviderId, type ProviderEnv, type ProviderModule } from "./providers.js";
 import { daemonBinaryHere, webDirFor } from "./assets.js";
@@ -840,13 +840,12 @@ export function makeRuntime(
 }
 
 /** The seed half of an add on this computer: the menu off git's own listing of what a folder ignores, and the
- * archive of the rows the person ticked. Both read the person's folder and Claude Code's store here, so the state
- * home is read the one way every road on this computer reads it. */
-function hostSeed(): SeedWiring {
-  const claudeStateHome = (): string => agentHomes(homedir(), process.env)["claude"] ?? join(homedir(), ".claude");
+ * archive of the rows the person ticked. Both read the person's folder and Claude Code's store in the folder the
+ * runtime hands them, which is the one a launch here reads. */
+export function hostSeed(): SeedWiring {
   return {
-    plan: folder => seedMenu(nodeHost(), folder, { claudeStateHome: claudeStateHome() }),
-    pack: o => packSeed({ ...o, claudeStateHome: claudeStateHome() }),
+    plan: (folder, homes) => seedMenu(nodeHost(), folder, { claudeStateHome: homes["claude"]! }),
+    pack: ({ homes, ...o }) => packSeed({ ...o, claudeStateHome: homes["claude"]! }),
   };
 }
 
@@ -916,7 +915,7 @@ function hostInitDoor(rt: Runtime, statePath: string, run: RunningWsp, openUrl: 
           openLine: hooks.openLine,
           builder,
         }),
-      roads: () => workspaceRoads(rt, agentHomes(home), workspaceEnvsFor()),
+      roads: () => workspaceRoads(rt, workspaceEnvsFor()),
       recipe: recipe => ({ ...recipe, deployDaemon: async machine => deployDaemon(machine).then(() => DAEMON_DEPLOYED_LINE) }),
       bundleFile: () => missingBundleFile(),
     },
@@ -1217,7 +1216,7 @@ async function init(
         address: opts.address,
         upCommand: flags.upCommand,
         runtime: () => makeRuntime(keys, opts.statePath, goldenRecipe(), providerEnv, undefined, undefined, links),
-        roads: rt => workspaceRoads(rt, agentHomes(homedir()), workspaceEnvsFor()),
+        roads: rt => workspaceRoads(rt, workspaceEnvsFor()),
         host: (rt, ports) => hostFor(rt, keys, { ...opts, port: ports.port, providerEnv, links }, say),
       },
       screen,
@@ -1277,7 +1276,7 @@ async function init(
             openLine: hooks.openLine,
             builder,
           }),
-        roads: rt => workspaceRoads(rt, agentHomes(homedir()), workspaceEnvsFor()),
+        roads: rt => workspaceRoads(rt, workspaceEnvsFor()),
         host: (rt, ports) => hostFor(rt, keys, { ...opts, port: ports.port, providerEnv, links }, say),
         ...(beside !== undefined ? { handOff: (o: { interactive: boolean }) => handOffTo(beside, opts.statePath, screen, o.interactive, flags) } : {}),
       },
@@ -1488,18 +1487,13 @@ async function hostFor(
       ...(restart !== undefined ? { restart } : {}),
     });
     rewriteLock(lockPath, { ...lock, port: handle.port, address });
-    const home = resolve(wspHome());
     // A skill copy an install wrote once falls behind the binary at the next release, and the agent reading it
-    // calls verbs that are gone. The copies that are there are brought up to this wsp's, and none is written where
-    // there is none. Only for a host serving this wsp home's own state file, which is the person's own wsp: a host
-    // on a state file somewhere else writes nothing outside that file's own folder, which is what somebody keeping
-    // their whole session inside one folder asked for.
-    if (realState(opts.statePath) === realState(join(home, "state.json"))) {
-      const refreshed = refreshSkills(homedir());
-      if (refreshed.length > 0) io.log(skillsRefreshedLine(refreshed));
-      const servers = refreshServers(homedir(), opts.statePath, run);
-      if (servers.length > 0) io.log(serversRefreshedLine(servers));
-    }
+    // calls verbs that are gone. Only the agents whose wsp entry names this state file are brought up to date: a
+    // host for a proof, on a state no entry names, writes nothing under the person's home.
+    const refreshed = refreshSkills(homedir(), opts.statePath);
+    if (refreshed.length > 0) io.log(skillsRefreshedLine(refreshed));
+    const servers = refreshServers(homedir(), opts.statePath, run);
+    if (servers.length > 0) io.log(serversRefreshedLine(servers));
 
     for (const line of addressLines(opts.statePath, { ...handle, address })) io.log(line);
     if (!isLoopback(address)) io.log(listenBeyondLoopbackLine(address));

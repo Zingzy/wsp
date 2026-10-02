@@ -1534,6 +1534,8 @@ export const SessionQueuedEvent = z.object({
   type: z.literal("session.queued"),
   workspaceId: z.string(),
   threadId: z.string(),
+  /** The agent the waiting message runs on: the thread's own. */
+  harness: z.string(),
   prompt: z.string(),
   /** The id the client minted for the sessions.start that waits. */
   requestId: z.string().optional(),

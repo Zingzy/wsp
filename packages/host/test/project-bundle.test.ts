@@ -441,7 +441,7 @@ describe("packProject", () => {
 describe("projectBundler", () => {
   it("plans once and packs from that plan with the consent given", async () => {
     const root = fixture();
-    const b = projectBundler(root, {});
+    const b = projectBundler(root, async () => ({}));
     const plan = await b.plan();
     expect(plan.secrets.map(s => s.path)).toEqual([".env", "config/secrets.json", "keys/id_ed25519"]);
     expect(await b.plan()).toBe(plan);
@@ -488,7 +488,7 @@ describe("packState", () => {
     const real = realpathSync(root);
     const h = homes(real);
     const before = { claude: snapshot(h.claude), pi: snapshot(h.pi) };
-    const b = projectBundler(root, { claude: h.claude, pi: h.pi, codex: join(h.dir, "codex") });
+    const b = projectBundler(root, async () => ({ claude: h.claude, pi: h.pi, codex: join(h.dir, "codex") }));
     const packed = await b.packState({ dest: "/root/work/proj", agents: [{ agent: "claude", home: "/root/.claude-cfg", present: true }, { agent: "pi", home: "/root/.pi/agent", present: false }] });
     const moved = session("S1", "/root/work/proj");
     expect(packed.agents).toEqual([
@@ -517,7 +517,7 @@ describe("packState", () => {
     put(h.claude, `projects/${h.key}-inner/S9.jsonl`, session("S9", `${real}/inner`));
     const hermes = join(h.dir, "hermes");
     mkdirSync(hermes);
-    const b = projectBundler(root, { claude: h.claude, pi: h.pi, hermes });
+    const b = projectBundler(root, async () => ({ claude: h.claude, pi: h.pi, hermes }));
     const packed = await b.packState({
       dest: `${real}/inner`,
       agents: [{ agent: "claude", home: "/root/.claude-cfg", present: true }, { agent: "hermes", home: "/root/.hermes", present: true }, { agent: "pi", home: "/root/.pi/agent", present: true }],
@@ -547,7 +547,7 @@ describe("packState", () => {
     db.close();
     const opencode = join(h.dir, "opencode");
     put(opencode, "opencode.db", "not a database\n");
-    const b = projectBundler(root, { claude: h.claude, hermes, opencode });
+    const b = projectBundler(root, async () => ({ claude: h.claude, hermes, opencode }));
     const packed = await b.packState({
       dest: "/root/work/proj",
       agents: [{ agent: "claude", home: "/root/.claude-cfg", present: true }, { agent: "hermes", home: "/root/.hermes", present: true }, { agent: "opencode", home: "/root/.local/share/opencode", present: true }],
@@ -590,7 +590,7 @@ describe("packState", () => {
     db.close();
     const gemini = join(h.dir, "gemini");
     mkdirSync(gemini);
-    const b = projectBundler(root, { codex, gemini });
+    const b = projectBundler(root, async () => ({ codex, gemini }));
     const packed = await b.packState({ dest: "/root/work/proj", agents: [{ agent: "codex", home: "/root/.codex", present: true }, { agent: "gemini", home: "/root/.gemini", present: false }] });
     expect(packed.agents).toEqual([
       { agent: "codex", files: 1, bytes: Buffer.byteLength(meta), outcome: "transcript-only" },

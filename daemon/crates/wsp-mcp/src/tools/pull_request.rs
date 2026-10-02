@@ -6,6 +6,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Number, Value};
 
+use super::named::other_version;
 use super::said::turns;
 use super::workspace::{self, awake, counted_number, params, read, workspace_of};
 use super::{input, Answer, Refused, Tool};
@@ -122,13 +123,12 @@ async fn fix(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     }
     let done: FixOut = client.request("workspaces.fix", asked).await?;
     let words = workspace::words();
-    let agent = match &done.agent {
-        Some(id) => turns().agents.get(id).cloned().unwrap_or_else(|| id.clone()),
-        None => words.fix_agent_default.clone(),
-    };
-    let said = if done.outcome == "updated" {
-        fill(&words.fix_nothing, &[("name", &name), ("base", &done.base)])
-    } else if let Some(child) = &done.child {
+    if done.outcome == "updated" {
+        return Ok(Answer::text(fill(&words.fix_nothing, &[("name", &name), ("base", &done.base)]), &done));
+    }
+    let Some(id) = &done.agent else { return Err(other_version("workspaces.fix").into()) };
+    let agent = turns().agents.get(id).cloned().unwrap_or_else(|| id.clone());
+    let said = if let Some(child) = &done.child {
         fill(&words.fix_merge_child, &[("name", &name), ("agent", &agent), ("child", child)])
     } else if let Some(check) = &done.check {
         fill(&words.fix_asked, &[("name", &name), ("agent", &agent), ("check", check)])

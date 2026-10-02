@@ -5,10 +5,10 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { isIP, type Socket } from "node:net";
 import { homedir, networkInterfaces, platform } from "node:os";
 import { extname, join, resolve as resolvePath, sep } from "node:path";
-import { CREATED_AT_LABEL, HOST_LABEL, SMOKE_LABEL, WSP_LABEL, agentHomes, type ProvisionPlan } from "@wsp/engine";
+import { CREATED_AT_LABEL, HOST_LABEL, SMOKE_LABEL, WSP_LABEL, type ProvisionPlan } from "@wsp/engine";
 import { BOOT_SCRIPT, DEFAULT_PORT, PAIR_CODE_TTL_MS, PLACES_WORDS, PLACE_PORT_OFFSET, WILDCARD, WS_PATH, authority, doorPortHeldLine, isLoopback, joinAddressOf, servedHostname, noSuchPlaceRefusal, recordRestoredLine, peerAddress, relayUrlOf, scopeOf, type BootPayload, type DoctorLineEvent, type Caller, type PlaceDoorView, type ProjectImportResult, type ProjectPlan, type ProjectView, type WorkspaceView, kindForComputer, nameTheProjectLine, copiesFolder } from "@wsp/protocol";
 import { sshHostsIn } from "./ssh-hosts.js";
-import { LOOPBACK, describeAge, goldenHead, serveRuntime, tokenDigest, type AdmittedDevices, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type HostSsh, type InitDoor, type PlaceBackHolder, type PlaceDoctor, type PlaceDoorControl, type ProjectBundler, type ProjectImportOptions, type ReapedMachine, type RestartDoor, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
+import { LOOPBACK, describeAge, goldenHead, serveRuntime, tokenDigest, type AdmittedDevices, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type HostSsh, type InitDoor, type PlaceBackHolder, type PlaceDoctor, type PlaceDoorControl, type ProjectBundler, type ProjectImportOptions, type ProjectLander, type ReapedMachine, type RestartDoor, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
 import { computerDoctor } from "./doctor.js";
 import { advertiseWord, hereUrl, reachAddresses, type HereAt } from "./pairing.js";
 import { NO_PROJECT_YET } from "./verbs.js";
@@ -338,12 +338,14 @@ async function sweepOrphans(rt: Runtime, log: (line: string) => void, listSpared
   }
 }
 
-/** `homes` is where each agent keeps its sessions on this computer, what the bundler carries beside a folder. */
-export function workspaceRoads(rt: Runtime, homes: Readonly<Record<string, string>>, opts: Pick<HostOptions, "workspaceEnvs"> = {}): WorkspaceRoads & { bundlerFor(source: string): ProjectBundler } {
+/** The bundler and the lander read each agent's folder on this computer where a launch here finds it. */
+export function workspaceRoads(rt: Runtime, opts: Pick<HostOptions, "workspaceEnvs"> = {}): WorkspaceRoads & { bundlerFor(source: string): ProjectBundler; lander: ProjectLander } {
   // One bundler road for the app's import op and the handle's own: a folder is read and packed the same either way.
+  const homes = () => rt.agents.homesHere();
   const bundlerFor = (source: string) => projectBundler(source, homes);
   return {
     bundlerFor,
+    lander: projectLander(homes),
     addProject: (source, on, caller) => rt.projects.add({ source, ...(on !== undefined ? { on } : {}) }, caller),
     createWorkspace: async (name, caller, named) => {
       // A workspace is one project's copy. A road that names none takes the only project there is and refuses in
@@ -394,8 +396,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   const webDir = resolvePath(opts.webDir);
   const log = opts.log ?? (() => {});
 
-  const homes = agentHomes(homedir());
-  const { bundlerFor, addProject, createWorkspace, planProject, importProject } = workspaceRoads(rt, homes, opts);
+  const { bundlerFor, lander, addProject, createWorkspace, planProject, importProject } = workspaceRoads(rt, opts);
 
   const address = opts.listen ?? LOOPBACK;
   // Reaching the loopback port is not being the person: another login on this computer reaches it too. The loopback
@@ -593,7 +594,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
       authToken,
       forwards: relay,
       projects: bundlerFor,
-      landing: projectLander(homes),
+      landing: lander,
       imageExport: imageExporter,
       folders: hostFolders(() => rt.workspaces.list()),
       terminalConfig: { read: scheme => readGhosttyConfig(nodeHost(), scheme) },
