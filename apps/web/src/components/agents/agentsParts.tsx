@@ -4,7 +4,7 @@
 // add, a row's or a head's lead, the agents' marks after a name, a status as
 // a dot and a word on every tab, and one pick of a few in a select.
 import type { LucideIcon } from "lucide-react";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { agentName } from "@wsp/catalog";
 import { cn } from "../../lib/utils.js";
 import { FACT } from "../../settings/format.js";
@@ -97,35 +97,28 @@ export function ActButton({ act, className, k, tall = false, wordClassName }: { 
 }
 
 /** A row's or a head's lead: the agent's own mark in its own colours in a tile, installed or not; a server's
- * brand mark, icon or glyph in its bordered box; the kind's glyph. */
-export function LeadMark({ lead, label, big = false }: { lead: Lead; label: string; big?: boolean }) {
-  if (lead.kind === "agent") {
-    return (
-      <span data-k="lead-tile" className={GLYPH_FRAME}>
-        <HarnessMark harness={lead.agent} label={label} className="size-5" />
+ * brand mark, icon or glyph in its bordered box; the kind's glyph. `bare` draws the mark alone, for a host that
+ * stands it in a frame of its own. */
+export function LeadMark({ lead, label, big = false, bare = false }: { lead: Lead; label: string; big?: boolean; bare?: boolean }) {
+  const frame = (k: string, inner: ReactNode) =>
+    bare ? (
+      inner
+    ) : (
+      <span data-k={k} className={GLYPH_FRAME}>
+        {inner}
       </span>
     );
-  }
+  if (lead.kind === "agent") return frame("lead-tile", <HarnessMark harness={lead.agent} label={label} className={bare ? "size-4" : "size-5"} />);
   const Icon = lead.icon;
-  if (lead.kind === "box" && lead.mark !== undefined) {
-    return (
-      <span data-k="lead-box" className={GLYPH_FRAME}>
-        <MarkSvg mark={lead.mark} className="size-[18px]" data-brand-mark={lead.mark.id} />
-      </span>
-    );
-  }
-  if (lead.kind === "box") return <BoxLead icon={Icon} host={lead.host} />;
+  if (lead.kind === "box" && lead.mark !== undefined) return frame("lead-box", <MarkSvg mark={lead.mark} className="size-[18px]" data-brand-mark={lead.mark.id} />);
+  if (lead.kind === "box") return frame("lead-box", <BoxIcon icon={Icon} host={lead.host} />);
   return <Icon aria-hidden className={cn("shrink-0 text-foreground/80", big ? "size-5" : "size-4")} />;
 }
 
-/** A server's box: its own icon as the host fetched it, or the glyph where it has none or icons are off. */
-function BoxLead({ icon: Icon, host }: { icon: LucideIcon; host: string | undefined }) {
+/** A server's own icon as the host fetched it, or the glyph where it has none or icons are off. */
+function BoxIcon({ icon: Icon, host }: { icon: LucideIcon; host: string | undefined }) {
   const src = useServerIcon(host);
-  return (
-    <span data-k="lead-box" className={GLYPH_FRAME}>
-      {src === null ? <Icon aria-hidden className="size-4 text-foreground/80" /> : <img data-k="server-icon" src={src} alt="" draggable={false} className="size-5 rounded-sm object-contain" />}
-    </span>
-  );
+  return src === null ? <Icon aria-hidden className="size-4 text-foreground/80" /> : <img data-k="server-icon" src={src} alt="" draggable={false} className="size-5 rounded-sm object-contain" />;
 }
 
 /** The marks of the agents a skill or a server is set up for, after its name: four, or two in a narrow container,

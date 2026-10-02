@@ -73,6 +73,8 @@ export interface Fact {
   readonly href?: string;
   /** The value is a whole line a person pastes, drawn in a copy row. */
   readonly line?: boolean;
+  /** The value is a sentence, which a settings page draws in its sans rather than the mono. */
+  readonly prose?: boolean;
 }
 
 /** One line of a list a row's own level draws under its body: a name in the mono, a fact after it in the muted mono,
@@ -181,6 +183,8 @@ export interface AddFormProps {
 export interface AddForm {
   readonly title: string;
   readonly Form: ComponentType<AddFormProps>;
+  /** The same form in a settings page's own rows. */
+  readonly Page?: ComponentType<AddFormProps>;
 }
 
 export interface GroupView<T> {

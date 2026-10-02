@@ -549,11 +549,10 @@ function dialling(line = "vps answered in 12 ms."): Partial<Api> {
 }
 
 describe("the Agents page on a computer", () => {
-  const manager = (): HTMLElement => document.querySelector<HTMLElement>("[data-settings-page] [data-agents-manager]")!;
-  const rowKeys = (): string[] => [...manager().querySelectorAll<HTMLElement>("[data-agents-row]")].map(r => r.dataset["agentsRow"] ?? "");
+  const rowKeys = (): string[] => [...document.querySelectorAll<HTMLElement>("[data-settings-page] [data-kind-row]")].map(r => r.dataset["kindRow"] ?? "");
   const agentRow = (id: string): HTMLElement => document.querySelector<HTMLElement>(`[data-settings-page] [data-agent-row="${id}"]`)!;
   const agentIds = (): string[] => [...document.querySelectorAll<HTMLElement>("[data-settings-page] [data-agent-row]")].map(r => r.dataset["agentRow"] ?? "");
-  const stateLine = (key: string): string | undefined => manager().querySelector(`[data-agents-row="${key}"] [data-row-status] [data-status-word]`)?.textContent ?? undefined;
+  const stateLine = (key: string): string | undefined => document.querySelector(`[data-settings-page] [data-kind-row="${key}"] [data-settings-slot]`)?.textContent ?? undefined;
   const topBarTab = (tab: "agents" | "servers" | "skills"): void => void fireEvent.click(document.querySelector(`[data-k=agents-tabs] [data-segment=${tab}]`)!);
   const picked = (): string | undefined => document.querySelector("[data-k=agents-tabs] [data-checked]")?.getAttribute("data-segment") ?? undefined;
   const computerPick = (): HTMLElement => document.querySelector<HTMLElement>("[data-k=agents-picker]")!;
@@ -578,8 +577,8 @@ describe("the Agents page on a computer", () => {
     expect(document.querySelector("[data-settings-page] [data-agents-manager]")).toBeNull();
     topBarTab("servers");
     expect(picked()).toBe("servers");
-    // The page draws one kind at a time: the top bar holds the tabs, so the manager draws none of its own.
-    expect(manager().querySelector("[role='radiogroup']")).toBeNull();
+    // The page draws one kind at a time in its own rows; the panel's manager stands nowhere on it.
+    expect(document.querySelector("[data-settings-page] [data-agents-manager]")).toBeNull();
     expect(rowKeys().length).toBeGreaterThan(0);
     expect(rowKeys().every(k => k.startsWith("server-"))).toBe(true);
     expect(stateLine(rowKeys()[0]!)).not.toBe("");
@@ -634,7 +633,7 @@ describe("the Agents page on a computer", () => {
     ]);
   });
 
-  it("opens from a computer's own page with that computer picked, and the top bar's tabs switch the manager's one kind", async () => {
+  it("opens from a computer's own page with that computer picked, and the top bar's tabs switch the one kind the page lists", async () => {
     const asked: AgentsTarget[] = [];
     useStore.setState({ places: [here, box] });
     await mountComputers(computersApi({ agentsRead: async (target: AgentsTarget) => (asked.push(target), AGENTS_REPORT) }).api, { kind: "computer", id: "p_2" });
@@ -660,7 +659,7 @@ describe("the Agents page on a computer", () => {
     expect(picked()).toBe("skills");
     expect(rowKeys().length).toBeGreaterThan(0);
     expect(rowKeys().every(k => k.startsWith("skill-"))).toBe(true);
-    expect(manager().querySelector("[role='radiogroup']")).toBeNull();
+    expect(document.querySelector("[data-settings-page] [data-agents-manager]")).toBeNull();
   });
 });
 

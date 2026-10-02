@@ -73,6 +73,8 @@
 //   settings-agents       the Agents page on this Mac: the default agent, then Claude Code
 //                         with an update out, Codex, and OpenCode not installed
 //   settings-agent        Claude Code's own page on this Mac, with launch words and two variables
+//   settings-agents-servers  the Tool servers tab on this Mac: every server state, the person's own and a project's
+//   settings-agents-skills   the Skills tab on this Mac: a shared skill, wsp's own, a plugin's and a project's
 //   settings-project-overrides  wsp's page with Codex set as its agent, its model and access
 //                         left to Codex's own
 //   settings-image-nothing, -copy, -copying, -stopped, -stale, -ready  the box's
@@ -122,7 +124,7 @@ import { useSkillActs } from "../../src/components/agents/useSkillActs";
 import { useAgentActs } from "../../src/components/agents/useAgentActs";
 import { SettingsPage } from "../../src/settings/SettingsPage";
 import { HARNESSES } from "../fixtures/harnesses";
-import { AGENTS_PAGE_REPORT, AGENTS_REPORT, AGENTS_SETUP_REPORT, HOSTILE_SKILL_MD, SERVER_TOOLS, SKILL_HITS, SKILL_PREVIEWS } from "../fixtures/agents-report";
+import { AGENTS_PAGE_REPORT, AGENTS_REPORT, AGENTS_SETUP_REPORT, AGENTS_TOOLS_REPORT, HOSTILE_SKILL_MD, SERVER_TOOLS, SKILL_HITS, SKILL_PREVIEWS } from "../fixtures/agents-report";
 import { useSettingsStore, type SettingsAt } from "../../src/settings/settingsStore";
 import { applyTheme, useThemeEffect } from "../../src/settings/theme";
 import { useHostNotices } from "../../src/notices/hostNotices";
@@ -426,6 +428,8 @@ const SETTINGS_SCREENS: Record<string, SettingsAt> = {
   "settings-remove-computer": { kind: "computer", id: "p_spoo" },
   "settings-agents": { kind: "group", group: "agents" },
   "settings-agent": { kind: "agent", id: "claude" },
+  "settings-agents-servers": { kind: "group", group: "agents" },
+  "settings-agents-skills": { kind: "group", group: "agents" },
   "settings-project-overrides": { kind: "project", id: "pr_wsp" },
   ...Object.fromEntries(IMAGE_SCREENS.map(name => [name, { kind: "computer", id: imageAt.id } as SettingsAt])),
 };
@@ -537,6 +541,8 @@ const creatingScreen = screen === "creating" || screen === "creating-refused";
 /** The screens about what a new thread starts on: the Agents page, Claude Code's own page, and wsp's page with Codex
  * set as its agent, which read the host's own lists and this Mac's agents. */
 const agentScreen = ["settings-agents", "settings-agent", "settings-project-overrides"].includes(screen);
+/** The Agents page's Tool servers and Skills tabs, which read every server and skill on this Mac. */
+const toolsScreen = screen === "settings-agents-servers" || screen === "settings-agents-skills";
 /** wsp's own overrides on the screen about them: its agent set to Codex, its model and access left to Codex's own. */
 const OVERRIDES = screen === "settings-project-overrides" ? { projectDefaults: { pr_wsp: { agent: "codex" } } } : {};
 const PROJECT_DEFAULTS: Record<string, ThreadDefaults> = {
@@ -622,7 +628,7 @@ const api = {
   ...(screen === "settings-computers-refused" ? { sshHosts: async () => Promise.reject(new RequestError("~/.ssh/config: permission denied")) } : {}),
   projectsList: async () => (drawsSidebar ? RECORDED : []),
   workspacesLanding: async (project: string) => landings[project] ?? landings["pr_spoo"]!,
-  listHarnesses: async () => (creatingScreen ? [CREATING_CATALOG] : agentScreen ? HARNESSES : []),
+  listHarnesses: async () => (creatingScreen ? [CREATING_CATALOG] : agentScreen || toolsScreen ? HARNESSES : []),
   ...(agentScreen ? { projectsDefaults: async () => PROJECT_DEFAULTS, agentsSetup: async (_placeId: string, agent: string) => AGENTS_SETUP_REPORT.agents.find(row => row.id === agent)! } : {}),
   initGet: async () => ({
     keys: { solari: settings || params.get("fork") === "solari" },
@@ -662,7 +668,7 @@ const api = {
   initStart: async () => new Promise<never>(() => {}),
   initDraft: async () => new Promise<never>(() => {}),
   hostTerminalConfig: async () => ({ files: [] }),
-  agentsRead: async () => (agentScreen ? AGENTS_SETUP_REPORT : params.get("projects") === "1" ? AGENTS_PAGE_REPORT : AGENTS_REPORT),
+  agentsRead: async () => (toolsScreen ? AGENTS_TOOLS_REPORT : agentScreen ? AGENTS_SETUP_REPORT : params.get("projects") === "1" ? AGENTS_PAGE_REPORT : AGENTS_REPORT),
   serversIcon: async (host: string) => SERVER_ICON[host]?.() ?? null,
   // wsp's own server is still being asked, so a row reads checking; any other server answers with one tool.
   serversTools: async (_target: unknown, _agent: string, name: string) =>
@@ -737,13 +743,13 @@ const pick = params.get("pick");
 if (pick !== null) window.localStorage.setItem("wsp:sidebar-project", JSON.stringify(pick));
 const sidebarWidth = params.get("sidebar");
 // The page Settings opens on, as this window would remember it, and the one screen with text in the field.
-if (settingsAt !== undefined) useSettingsStore.setState({ at: settingsAt, search: screen === "settings-search" ? "icons" : "" });
+if (settingsAt !== undefined) useSettingsStore.setState({ at: settingsAt, search: screen === "settings-search" ? "icons" : "", ...(toolsScreen ? { agentsTab: screen === "settings-agents-servers" ? ("servers" as const) : ("skills" as const) } : {}) });
 useStore.setState({
   conn: "live",
   ready: true,
   projectsRead: true,
   preferences: { ...DEFAULT_PREFERENCES, ...picks, ...OVERRIDES, ...(sidebarWidth !== null ? { sidebarWidth: Number(sidebarWidth) } : {}), ...(screen === "settings-light-picked" ? { theme: "light" as const } : {}) },
-  ...(agentScreen ? { harnesses: HARNESSES } : {}),
+  ...(agentScreen || toolsScreen ? { harnesses: HARNESSES } : {}),
   places: computers,
   settingsOpen: settings,
   addComputerOpen: screen === "settings-add-computer" || screen === "settings-add-computer-failed" || screen === "settings-computers-refused" || ADD_SCREENS.includes(screen),

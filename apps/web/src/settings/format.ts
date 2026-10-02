@@ -293,6 +293,14 @@ export const AGENTS_PAGE_WORDS = {
   defaultAgent: "Default agent",
   defaultAgentDescription: "A project can set its own.",
   on: (name: string): string => `On ${name}`,
+  /** The first card's head on the Tool servers and Skills tabs: its group, on the computer read. */
+  groupOn: (group: string, name: string): string => `${group} on ${name}`,
+  /** A state with the figure it answered with: a server connected with its tools. */
+  stateWith: (state: string, count: string): string => `${state} with ${count}`,
+  details: "Details",
+  skillFile: "SKILL.md",
+  removeName: (act: string, name: string): string => `${act} ${name}`,
+  notListed: "Not listed yet.",
   notInstalled: "Not installed here",
   notInstalledShort: "Not installed",
   checkedNow: (when: string): string => `checked ${when}`,

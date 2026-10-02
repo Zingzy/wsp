@@ -36,13 +36,16 @@ export interface SettingsRowData {
   readonly title: string;
   /** A glyph before the title, where the row's noun has one of its own: a project's. */
   readonly lead?: ReactNode;
-  /** One mono word after the title, in the fact class: the default mark on a computer. */
-  readonly mark?: string;
+  /** After the title: one mono word in the fact class (the default mark on a computer), or the marks of the agents a
+   * thing is set up for. */
+  readonly mark?: ReactNode;
   /** One sentence, or machine words in the mono fact class where `mono` is set; a list is facts held apart by space. */
   readonly description: Words;
   /** The facts as chips in place of the description line, which stays the words a search reads. */
   readonly chips?: readonly ChipItem[];
   readonly mono?: boolean;
+  /** The description on one line, cut at the row's edge with the whole of it on the hover: a command or a path. */
+  readonly clip?: boolean;
   /** The one mono word in the slot, before the control, and the id a door or a list reaches it by. */
   readonly word?: string;
   readonly wordClass?: WordClass;
@@ -136,7 +139,7 @@ export function Card({ id, head, lede, under, body, children }: { id: string; he
 }
 
 /** One row: the title over its sentence, and beside them the slot, which stands under them below 640 px. */
-export function Row({ id, title, lead, mark, description, chips, mono = false, word, wordClass = "value", wordK, control, open, reset, tone, attrs }: Omit<SettingsRowData, "kind">) {
+export function Row({ id, title, lead, mark, description, chips, mono = false, clip = false, word, wordClass = "value", wordK, control, open, reset, tone, attrs }: Omit<SettingsRowData, "kind">) {
   const slot =
     word === undefined && control === undefined && open === undefined ? null : (
       <div data-settings-slot className="flex min-w-0 items-center gap-3 sm:justify-end">
@@ -177,7 +180,7 @@ export function Row({ id, title, lead, mark, description, chips, mono = false, w
         </span>
         {chips === undefined ? (
           wordsLine(description) === "" ? null : (
-            <span data-settings-description className={cn(mono ? cn(FACT, "break-all leading-[1.45]") : DESCRIPTION_CLASS)}>
+            <span data-settings-description className={cn(mono ? cn(FACT, "break-all leading-[1.45]") : DESCRIPTION_CLASS, clip && "truncate")} {...(clip ? { title: wordsLine(description) } : {})}>
               <WordsSlot words={description} />
             </span>
           )
@@ -299,7 +302,7 @@ export function Cards({ cards }: { cards: ReadonlyArray<SettingsCardData> }) {
 /** The row a computer's or a project's page opens on: its glyph in its frame, its name, one line of one kind of
  * fact under it, and a figure or an act at the right. It stands in place of a page title, since the top bar's
  * crumbs already name the page. */
-export function HeadRow({ glyph, title, mark, line, slot, attrs }: { glyph: ReactNode; title: string; /** One mono fact after the name: an agent's version. */ mark?: string; line?: ReactNode; slot?: ReactNode; attrs?: Record<string, string> }) {
+export function HeadRow({ glyph, title, mark, line, slot, attrs }: { glyph: ReactNode; title: string; /** One mono fact after the name (an agent's version), or the marks of the agents a thing is set up for. */ mark?: ReactNode; line?: ReactNode; slot?: ReactNode; attrs?: Record<string, string> }) {
   return (
     <div data-settings-head-row className={cn("flex flex-wrap items-center justify-between gap-x-6 gap-y-2 py-4", CARD_INSET, ROW_FLOOR)} {...attrs}>
       <span className="flex min-w-40 flex-1 items-center gap-3">

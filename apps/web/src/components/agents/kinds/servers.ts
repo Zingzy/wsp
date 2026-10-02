@@ -15,6 +15,7 @@ import { agentName, mcpSwitch, serverMark } from "@wsp/catalog";
 import type { AgentsProject, AgentsReport, McpRow, McpTool, McpToolParam, ServerToolsAnswer } from "@wsp/protocol";
 import { AGENTS_LIST_WORDS as W, editImageAct, heldReason, holdAll, notYet, onImage, serverSignInStart, signInAct, waitingFlow, type FlowView, type RowAct, type RowsContext, type ToolsState } from "../agentsRows.js";
 import { AddServerForm } from "../AddServerForm.js";
+import { AddServerRows } from "../../../settings/AddServerRows.js";
 import { byName, kind, matchesAny, projectGroups, rowKey, type Fact, type GroupBy, type GroupView, type KindModule, type Lead, type ServerState, type Status, type UnderRow } from "./kind.js";
 
 /** Where a server is set up: the person's own files, or the project's. */
@@ -346,7 +347,7 @@ export const SERVERS_KIND: KindModule<ServerEntry> = {
   },
   empty: on => `No MCP servers on ${on} yet.`,
   none: "no MCP servers",
-  form: ctx => (ctx.servers === undefined || onImage(ctx) ? undefined : { title: W.addServer, Form: AddServerForm }),
+  form: ctx => (ctx.servers === undefined || onImage(ctx) ? undefined : { title: W.addServer, Form: AddServerForm, Page: AddServerRows }),
 };
 
 export const SERVERS = kind(SERVERS_KIND);

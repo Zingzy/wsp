@@ -97,6 +97,9 @@ export interface SettingsState {
   /** The Agents page's tab and the computer it reads, kept while the window is open. Null reads the one wsp runs on. */
   readonly agentsTab: AgentsTab;
   readonly agentsPlace: string | null;
+  /** The page under the Agents page's tab that stands in place of its list: one server or skill, or an add. Moving to
+   * another page, tab or computer drops it. */
+  readonly agentsLevel: AgentsLevel | null;
   go(at: SettingsAt): void;
   setSearch(search: string): void;
   setReads(patch: Partial<SettingsReads>): void;
@@ -110,10 +113,18 @@ export interface SettingsState {
   pickUsageTab(tab: UsageTab): void;
   pickAgentsTab(tab: AgentsTab): void;
   pickAgentsPlace(placeId: string | null): void;
+  openAgentsLevel(level: AgentsLevel | null): void;
 }
 
 export type UsageTab = "used" | "limits";
 export type AgentsTab = "agents" | "servers" | "skills";
+
+/** A page under the Agents page's list, by its name for the crumb: one item of the tab's kind by its key, the tab's
+ * add, or one thing the add found, by its key and the search that found it. `up` is where the crumb's back goes. */
+export type AgentsLevel =
+  | { readonly kind: "item"; readonly key: string; readonly name: string }
+  | { readonly kind: "add"; readonly name: string; readonly query?: string }
+  | { readonly kind: "found"; readonly key: string; readonly name: string; readonly query: string; readonly up: AgentsLevel };
 
 export const useSettingsStore = create<SettingsState>(set => ({
   at: typeof window === "undefined" ? FIRST_PAGE : readStored(),
@@ -127,8 +138,9 @@ export const useSettingsStore = create<SettingsState>(set => ({
   usageTab: "used",
   agentsTab: "agents",
   agentsPlace: null,
+  agentsLevel: null,
   go(at) {
-    set({ at, search: "", recipeAsked: null, addAsked: null });
+    set({ at, search: "", recipeAsked: null, addAsked: null, agentsLevel: null });
     try {
       window.localStorage.setItem(AT_KEY, atId(at));
     } catch {
@@ -139,10 +151,13 @@ export const useSettingsStore = create<SettingsState>(set => ({
     set({ usageTab });
   },
   pickAgentsTab(agentsTab) {
-    set({ agentsTab });
+    set({ agentsTab, agentsLevel: null });
   },
   pickAgentsPlace(agentsPlace) {
-    set({ agentsPlace });
+    set({ agentsPlace, agentsLevel: null });
+  },
+  openAgentsLevel(agentsLevel) {
+    set({ agentsLevel });
   },
 
   setSearch(search) {

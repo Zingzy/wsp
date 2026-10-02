@@ -203,7 +203,7 @@ export const SKILLS_KIND: KindModule<SkillRow> = {
             : { id: "status", label: W.status, status: isOff(row) ? OFF : ON };
     const facts: Fact[] = [
       status,
-      ...(row.description === undefined ? [] : [{ id: "description", label: W.description, value: row.description }]),
+      ...(row.description === undefined ? [] : [{ id: "description", label: W.description, value: row.description, prose: true }]),
       ...ordered.map((p, at) => ({ id: `path-${at}`, label: at === 0 ? W.path : "", value: p.path, copy: true, ...(p.agent === undefined ? { fact: W.shared } : { agent: p.agent }) })),
     ];
     const skills = ctx.skills;

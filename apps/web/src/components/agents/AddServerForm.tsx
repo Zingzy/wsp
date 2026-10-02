@@ -81,7 +81,9 @@ function Field({ k, value, set, placeholder, label, secret = false, fieldRef, on
   );
 }
 
-export function AddServerForm({ report, ctx, first, done }: AddFormProps) {
+/** What an add has typed so far, the file it lands in, and the one submit that hands it to the host: shared by every
+ * place the form is drawn. `agents` is empty, or `servers` absent, where nothing there takes a server. */
+export function useServerAdd({ report, ctx, done }: Pick<AddFormProps, "report" | "ctx" | "done">) {
   const agents = serverAgents(report);
   const [agent, setAgent] = useState<string>(agents[0] ?? "");
   const [name, setName] = useState("");
@@ -96,14 +98,6 @@ export function AddServerForm({ report, ctx, first, done }: AddFormProps) {
   const servers = ctx.servers;
   const on = ctx.on ?? ctx.computer ?? "";
 
-  if (agents.length === 0 || servers === undefined) {
-    return (
-      <p data-k="add-server-none" className="flex min-h-[168px] items-center justify-center text-center text-[13px] text-muted-foreground">
-        {W.noServerAgents(on)}
-      </p>
-    );
-  }
-
   const named = pairs.filter(p => p.name.trim() !== "" || p.value !== "");
   const where = whereNow(report, picked, on);
   const project = where.project;
@@ -111,7 +105,7 @@ export function AddServerForm({ report, ctx, first, done }: AddFormProps) {
   const file = where.lost === undefined ? fileOf(agent, project, report) : undefined;
 
   const submit = (): void => {
-    if (!ready) return;
+    if (!ready || servers === undefined) return;
     const words = road === "command" ? commandWords(command) : [];
     if (words === undefined) return setRefused(unclosedQuoteRefusal);
     if (new Set(named.map(p => p.name.trim())).size < named.length) return setRefused(W.twoPairsOneName(road));
@@ -141,6 +135,20 @@ export function AddServerForm({ report, ctx, first, done }: AddFormProps) {
     setPairs(all => [...all, { id: next, name: "", value: "" }]);
     setNext(n => n + 1);
   };
+  const dropPair = (id: number): void => setPairs(all => all.filter(x => x.id !== id));
+  return { agents, servers, on, agent, setAgent, name, setName, road, pick, command, setCommand, url, setUrl, pairs, setPair, addPair, dropPair, where, setPicked: (v: string) => setPicked(pickOf(report, v)), ready, file, adding, refused, submit };
+}
+
+export function AddServerForm({ report, ctx, first, done }: AddFormProps) {
+  const { agents, servers, on, agent, setAgent, name, setName, road, pick, command, setCommand, url, setUrl, pairs, setPair, addPair, dropPair, where, setPicked, ready, file, adding, refused, submit } = useServerAdd({ report, ctx, done });
+
+  if (agents.length === 0 || servers === undefined) {
+    return (
+      <p data-k="add-server-none" className="flex min-h-[168px] items-center justify-center text-center text-[13px] text-muted-foreground">
+        {W.noServerAgents(on)}
+      </p>
+    );
+  }
 
   return (
     <div data-add-server className="flex flex-col gap-3">
@@ -198,7 +206,7 @@ export function AddServerForm({ report, ctx, first, done }: AddFormProps) {
           <div key={p.id} data-server-pair className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 @min-[480px]:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
             <Field k="add-server-pair-name" className="col-span-2 @min-[480px]:col-span-1" value={p.name} set={v => setPair(p.id, { name: v })} placeholder={road === "command" ? "API_KEY" : "Authorization"} label={road === "command" ? W.variables : W.headers} onEnter={submit} />
             <Field k="add-server-pair-value" value={p.value} set={v => setPair(p.id, { value: v })} placeholder={W.value} label={`${W.value} of ${p.name.trim() === "" ? (road === "command" ? "the variable" : "the header") : p.name.trim()}`} secret onEnter={submit} />
-            <Button data-k="add-server-pair-drop" size="icon-xs" variant="ghost" aria-label={W.removePair(p.name.trim())} onClick={() => setPairs(all => all.filter(x => x.id !== p.id))}>
+            <Button data-k="add-server-pair-drop" size="icon-xs" variant="ghost" aria-label={W.removePair(p.name.trim())} onClick={() => dropPair(p.id)}>
               <XIcon />
             </Button>
           </div>
@@ -209,7 +217,7 @@ export function AddServerForm({ report, ctx, first, done }: AddFormProps) {
       </Line>
       {where.options.length === 0 ? null : (
         <Line label={W.where} top>
-          <OneOf k="where-pick" label={W.where} options={where.options} value={where.value} set={v => setPicked(pickOf(report, v))} {...(where.lost === undefined ? {} : { lost: where.lost })} />
+          <OneOf k="where-pick" label={W.where} options={where.options} value={where.value} set={setPicked} {...(where.lost === undefined ? {} : { lost: where.lost })} />
         </Line>
       )}
       <div data-add-server-footer className="mt-1 flex items-center gap-3 border-t border-border pt-4">
