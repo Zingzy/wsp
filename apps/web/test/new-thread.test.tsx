@@ -111,7 +111,7 @@ afterEach(() => {
   delete window.wsp;
 });
 
-async function mount(projects: ProjectView[] = [WSP, SPOO], preferences: Preferences = DEFAULT_PREFERENCES) {
+async function mount(projects: ProjectView[] = [WSP, SPOO], preferences: Preferences = CURRENT) {
   useStore.setState({ api: null, conn: "live", workspaces: [], statuses: {}, creations: [], sessions: {}, ready: false, selectedId: null, selectedThreadId: null, projectHome: null, freshThread: false, preferences, projects: [], places: [], landings: {} });
   useStore.getState().bind(fakeApi(projects, preferences));
   render(<Shell />);
@@ -131,6 +131,7 @@ const paletteRows = () => [...palette()!.querySelectorAll<HTMLElement>("[data-sl
 const rowTitle = (row: HTMLElement) => row.querySelector("span.truncate")?.textContent;
 const projectRows = () => [...palette()!.querySelectorAll<HTMLElement>("[data-palette-group=projects] [data-slot=command-item]")];
 const ASK: Preferences = { ...DEFAULT_PREFERENCES, newThreadIn: "ask" };
+const CURRENT: Preferences = { ...DEFAULT_PREFERENCES, newThreadIn: "current" };
 /** The desktop shell, told apart by the bridge its preload puts on the page; a browser tab keeps the mod digits. */
 const asDesktopShell = (): void => void (window.wsp = {});
 const modDigit = (n: number) => fireEvent.keyDown(search(), { key: String(n), code: `Digit${n}`, metaKey: true });
@@ -258,6 +259,13 @@ describe("New thread when the setting asks every time", () => {
     expect(search().getAttribute("placeholder")).toBe("Search projects...");
     expect(palette()!.querySelector("[data-slot=autocomplete-start-addon] svg.lucide-arrow-left")).not.toBeNull();
     expect([...palette()!.querySelectorAll("[data-slot=command-footer] [data-slot=kbd-group] > span")].map(hint => hint.textContent)).toEqual(["Navigate", "Select", "Close"]);
+  });
+
+  it("asks for the project by default: Cmd+T on preferences that name no choice opens the projects page", async () => {
+    await mount([WSP, SPOO], DEFAULT_PREFERENCES);
+    cmdT();
+    await waitFor(() => expect(palette()).not.toBeNull());
+    expect(projectRows().map(rowTitle)).toEqual(expect.arrayContaining([WSP.name, SPOO.name]));
   });
 
   it("Cmd and a digit open that row's project while the page is open, and the chord leaves the sidebar's rows alone", async () => {

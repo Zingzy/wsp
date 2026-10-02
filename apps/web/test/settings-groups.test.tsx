@@ -325,7 +325,7 @@ describe("General", () => {
     const checked = (k: string) => document.querySelector(`[data-k=${k}] [data-checked]`)?.textContent;
     expect([checked("send-with"), checked("mid-turn")]).toEqual(["Enter", "Queue"]);
     const said = (k: string) => document.querySelector(`[data-settings-page] [data-k=${k}]`)?.textContent;
-    expect([said("notify-needs"), said("notify-done"), said("new-thread-in"), said("settle-after")]).toEqual(["Notify and sound", "Off", "Current project", "2 hours"]);
+    expect([said("notify-needs"), said("notify-done"), said("new-thread-in"), said("settle-after")]).toEqual(["Notify and sound", "Off", "Ask every time", "2 hours"]);
     expect(document.querySelector("[data-k=plan-alerts]")!.getAttribute("aria-checked")).toBe("true");
     expect(document.querySelector("[data-k=ask-delete]")!.getAttribute("aria-checked")).toBe("true");
   });
@@ -352,9 +352,9 @@ describe("General", () => {
     await settle();
     expect(await pickOption(document.querySelector("[data-settings-page] [data-k=settle-after]")!, "Never")).toEqual(["15 minutes", "1 hour", "2 hours", "1 day", "Never"]);
     await settle();
-    expect(await pickOption(document.querySelector("[data-settings-page] [data-k=new-thread-in]")!, "Ask every time")).toEqual(["Current project", "Ask every time"]);
+    expect(await pickOption(document.querySelector("[data-settings-page] [data-k=new-thread-in]")!, "Current project")).toEqual(["Current project", "Ask every time"]);
     await settle();
-    expect(sets).toEqual([{ notifyDone: "sound" }, { settleAfter: "never" }, { newThreadIn: "ask" }]);
+    expect(sets).toEqual([{ notifyDone: "sound" }, { settleAfter: "never" }, { newThreadIn: "current" }]);
     cleanup();
   });
 
@@ -384,8 +384,8 @@ describe("General", () => {
   });
 
   it("puts an arrow on each row off its default, and the arrow writes that one field back", async () => {
-    const { api, sets } = settingsApi({ editorList: async () => [] } as Partial<Api>, { ...DEFAULT_PREFERENCES, labs: false, sendWith: "mod-enter", notifyDone: "notify", newThreadIn: "ask", settleAfter: "1d", askDelete: false });
-    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, sendWith: "mod-enter", notifyDone: "notify", newThreadIn: "ask", settleAfter: "1d", askDelete: false } });
+    const { api, sets } = settingsApi({ editorList: async () => [] } as Partial<Api>, { ...DEFAULT_PREFERENCES, labs: false, sendWith: "mod-enter", notifyDone: "notify", newThreadIn: "current", settleAfter: "1d", askDelete: false });
+    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, sendWith: "mod-enter", notifyDone: "notify", newThreadIn: "current", settleAfter: "1d", askDelete: false } });
     mountSettings({ api, at: { kind: "group", group: "general" } });
     await settle();
     const arrowed = [...document.querySelectorAll("[data-settings-page] [data-k=row-reset]")].map(b => b.closest("[data-settings-row]")!.getAttribute("data-settings-row"));

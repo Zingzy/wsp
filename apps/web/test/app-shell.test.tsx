@@ -448,7 +448,7 @@ describe("the header row", () => {
 
   it("the compose glyph sits in the search row and opens New thread on the selected workspace's project rather than inside it, and stays live on New thread itself", async () => {
     await mountShell();
-    act(() => useStore.setState({ projects: [{ id: "pr_1", name: "the-project", computer: "here", source: { kind: "folder", path: "/root" }, path: "/root", remote: "", defaultBranch: "main", memoryKey: "-root", memoryDir: "/root/memory", createdAt: "t" }] }));
+    act(() => useStore.setState({ projects: [{ id: "pr_1", name: "the-project", computer: "here", source: { kind: "folder", path: "/root" }, path: "/root", remote: "", defaultBranch: "main", memoryKey: "-root", memoryDir: "/root/memory", createdAt: "t" }], preferences: { ...useStore.getState().preferences, newThreadIn: "current" } }));
     const seen: string[] = [];
     const off = onNewThreadRequest(d => seen.push(d.workspaceId));
     const compose = screen.getByRole("button", { name: "New thread" });

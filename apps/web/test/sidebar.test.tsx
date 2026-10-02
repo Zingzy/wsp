@@ -302,6 +302,7 @@ describe("tiles from the fixture wire", () => {
 describe("new thread", () => {
   it("the compose glyph opens New thread on a project, with or without a workspace selected, never inside one; no tile carries a plus of its own", async () => {
     await mount(fakeApi([API, WEB], [status(API), status(WEB)], [session("s1", "ws_a", { prompt: "hello" })]), "hello");
+    act(() => useStore.setState({ preferences: { ...useStore.getState().preferences, newThreadIn: "current" } }));
     const seen: string[] = [];
     const off = onNewThreadRequest(d => seen.push(d.workspaceId));
     const compose = screen.getByRole("button", { name: "New thread" });

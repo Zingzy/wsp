@@ -380,7 +380,7 @@ describe("command palette", () => {
 
   it("offers one New thread row, which opens New thread on the selected copy's project and starts nothing in the copy", async () => {
     await mountShell();
-    act(() => useStore.setState({ projects: [PROJECT] }));
+    act(() => useStore.setState({ projects: [PROJECT], preferences: { ...useStore.getState().preferences, newThreadIn: "current" } }));
     const threads: string[] = [];
     const offThreads = onNewThreadRequest(d => threads.push(d.workspaceId));
     mod("k");
