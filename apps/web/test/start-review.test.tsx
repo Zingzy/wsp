@@ -40,7 +40,23 @@ const fact = (over: Partial<PullRequestFact> = {}): PullRequestFact => ({
   readAt: 1,
   ...over,
 });
-const PAGE: PullRequestPage = { title: "Rename the status word", body: "", author: "", updatedAt: "", commits: [], reviews: [], comments: [], reviewComments: [], files: [] };
+const PAGE: PullRequestPage = {
+  title: "Rename the status word",
+  body: "",
+  author: "",
+  createdAt: "",
+  updatedAt: "",
+  labels: [],
+  reviewRequests: [],
+  latestReviews: [],
+  assignees: [],
+  commits: [],
+  reviews: [],
+  comments: [],
+  reviewComments: [],
+  files: [],
+  sent: [],
+};
 
 const DRAFT: ReviewDraft = {
   verdict: "request_changes",

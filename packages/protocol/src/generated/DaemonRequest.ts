@@ -162,7 +162,7 @@ machineId?: string, } | { "op": "git.prCheckout", cwd: string, number: number,
 /**
  * The workspace this frame is for, as on fs.list above.
  */
-machineId?: string, } | { "op": "git.prDiff", cwd: string, remote: string, number: number, 
+machineId?: string, } | { "op": "git.prDiff", cwd: string, remote: string, number: number, maxBytes?: number, 
 /**
  * The workspace this frame is for, as on fs.list above.
  */

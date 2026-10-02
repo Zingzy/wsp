@@ -494,6 +494,21 @@ pub struct PullRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub fork: Option<PullRequestFork>,
+    /// Armed to merge once its checks pass: by which method, and who armed it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub auto_merge: Option<PullRequestAutoMerge>,
+}
+
+/// A merge armed to land once a pull request's checks pass.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestAutoMerge {
+    pub method: MergeMethod,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub by: Option<String>,
 }
 
 /// A pull request's head on someone's fork: whose, and whether its author let the repository's maintainers push there.
@@ -525,6 +540,13 @@ pub struct PullRequestCheck {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub description: Option<String>,
+    /// When it started and when it finished, as ISO times; absent while it has not.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub started_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub completed_at: Option<String>,
 }
 
 /// The run and the job a check is, where the host's own runner ran it.
@@ -679,41 +701,87 @@ pub struct GitPrReviewReply {
     pub folded: Vec<String>,
 }
 
-/// One commit of a pull request: its id, its subject, when it was made as an ISO time, and its author.
+/// One commit of a pull request: its id, its subject and the rest of its message, when it was made as an ISO time, and
+/// its author; and where the host's API answered for it, its parents (two on a merge), its line counts and every
+/// check on it rolled into one word.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct PullRequestCommit {
     pub oid: String,
     pub subject: String,
+    pub body: String,
     pub at: String,
     pub author: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub parents: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub additions: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub deletions: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub check: Option<CheckState>,
 }
 
-/// One review left on a pull request: who, the state it left, its body cut at GIT_PR_LIST_BODY_CAP, and when.
+/// One review left on a pull request: its id, which the comments it left on lines name, who and their association,
+/// the state it left, its body whole, and when.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct PullRequestReview {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub id: Option<u64>,
     pub author: String,
+    /// The author's association with the repository, GitHub's word in lower case: owner, member, collaborator,
+    /// contributor, first_time_contributor, first_timer, mannequin or none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub association: Option<String>,
     /// The host's word in lower case: approved, changes_requested, commented, dismissed, pending.
     pub state: String,
     pub body: String,
     pub at: String,
 }
 
-/// One comment in a pull request's conversation.
+/// A reviewer's latest verdict on a pull request.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestVerdict {
+    pub author: String,
+    pub state: String,
+    pub at: String,
+}
+
+/// One comment in a pull request's conversation: its id, who and their association, whether a bot wrote it, the face
+/// the host shows for its author, its body whole, its link and when.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct PullRequestComment {
+    pub id: u64,
     pub author: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub association: Option<String>,
+    pub bot: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub avatar: Option<String>,
     pub body: String,
+    pub url: String,
     pub at: String,
 }
 
-/// One comment left on a line of a pull request's diff: the file and line it is on, absent once the line moved away,
-/// the side of the diff, who, the body, its link and when.
+/// One comment left on a line of a pull request's diff: the file and line it is on, the line it was on once the line
+/// moved away, the side of the diff, who, whether a bot wrote it and its face, the body whole, its link and when; the
+/// diff's lines down to the commented one, the comment it answers, the review it was left in, and whether its thread
+/// is resolved.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 #[serde(rename_all = "camelCase")]
@@ -727,9 +795,49 @@ pub struct PullRequestReviewComment {
     #[ts(optional)]
     pub side: Option<String>,
     pub author: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub association: Option<String>,
+    pub bot: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub avatar: Option<String>,
     pub body: String,
     pub url: String,
     pub at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub hunk: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub reply_to: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub review_id: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub resolved: Option<bool>,
+}
+
+/// One label on a pull request: its name, its colour as six hex digits, and what it means where its repository says.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestLabel {
+    pub name: String,
+    pub color: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub description: Option<String>,
+}
+
+/// A review asked for and not yet given: a person by login, or a team by its slug.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestReviewRequest {
+    pub name: String,
+    pub team: bool,
 }
 
 /// One file a pull request changes, with its counts.
@@ -742,8 +850,9 @@ pub struct PullRequestFile {
     pub deletions: u64,
 }
 
-/// A pull request as its page reads: title, body, the author and when it was last updated, commits, reviews, the
-/// conversation, the comments on lines and the files, every body cut at GIT_PR_LIST_BODY_CAP.
+/// A pull request as its page reads: title, body, the author, when it opened, last moved and settled, who merged it
+/// into which commit, labels, the reviews asked for and each reviewer's latest verdict, assignees, commits, reviews,
+/// the conversation, the comments on lines and the files. No body on it is cut.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 #[serde(rename_all = "camelCase")]
@@ -751,12 +860,51 @@ pub struct GitPrViewReply {
     pub title: String,
     pub body: String,
     pub author: String,
+    pub created_at: String,
     pub updated_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub closed_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub merged_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub merged_by: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub merge_commit: Option<String>,
+    pub labels: Vec<PullRequestLabel>,
+    pub review_requests: Vec<PullRequestReviewRequest>,
+    pub latest_reviews: Vec<PullRequestVerdict>,
+    pub assignees: Vec<String>,
     pub commits: Vec<PullRequestCommit>,
     pub reviews: Vec<PullRequestReview>,
     pub comments: Vec<PullRequestComment>,
     pub review_comments: Vec<PullRequestReviewComment>,
     pub files: Vec<PullRequestFile>,
+    /// What the read left out, where it reached a cap; absent where it read everything.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub cut: Option<PullRequestPageCut>,
+}
+
+/// The parts of a page read only in part: commits past gh's first 100, which carry no lines or checks of their own,
+/// reviews before the newest 100, which carry no id, and review threads before the newest 100, whose comments do not
+/// say whether they are resolved. Each is present only where true.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestPageCut {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub commits: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub reviews: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub threads: Option<bool>,
 }
 
 /// The failed steps of one job's log, its last CHECK_LOG_LINES lines at most; truncated where there were more.

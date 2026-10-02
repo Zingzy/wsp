@@ -978,10 +978,10 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
             };
             answer(id, checked.await)
         }
-        DaemonOp::GitPrDiff { cwd, remote, number, machine_id } => {
+        DaemonOp::GitPrDiff { cwd, remote, number, max_bytes, machine_id } => {
             let read = async {
                 let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Reads).await?;
-                hosts::diff(&runner, &hosts::Ask { cwd: &at, remote_url: &remote }, number).await
+                hosts::diff(&runner, &hosts::Ask { cwd: &at, remote_url: &remote }, number, max_bytes).await
             };
             answer(id, read.await)
         }

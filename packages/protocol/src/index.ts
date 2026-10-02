@@ -51,7 +51,7 @@ import { HERE_PLACE_ID, namesPlace } from "./place-word.js";
 import { threadNeedsYou } from "./thread-state.js";
 import { Checkout } from "./changes.js";
 import { GitBranchCompareReply, GitMergeInReply, GitStartOnReply, TreeFact } from "./tree.js";
-import { GitPrReadReply, GitPrViewReply, GitPrMergeReply, GitRepoReadReply, GitRunLogReply, GitUpdateReply, MergeMethod, PullRequest, PullRequestSeen } from "./pull-request.js";
+import { GitPrReadReply, GitPrViewReply, GitPrMergeReply, GitRepoReadReply, GitRunLogReply, GitUpdateReply, MergeMethod, PullRequest, PullRequestItem, PullRequestSeen } from "./pull-request.js";
 import { GitIssueReadReply, GitPrCheckoutReply, GitPrDiffReply, GitPrReviewReply, ReviewDraft, WorkspaceFrom } from "./start.js";
 import { AGENTS_ON, NAP_AFTER_MAX_MS, placeAtLimitLine, placeFullLine } from "./place-state.js";
 import type { AbsentComputer } from "./workspace-state.js";
@@ -3897,15 +3897,23 @@ export const DaemonRequest = z.discriminatedUnion("op", [
     machineId: z.string().optional(),
   }),
   /** An issue, or a pull request read as the issue it also is, by number in the repository the remote names, answered
-   * as a GitIssueReadReply with each body cut as a page cuts it. */
+   * as a GitIssueReadReply with each body cut as a list cuts it. */
   z.object({ id: reqId, op: z.literal("git.issueRead"), cwd: z.string(), remote: z.string(), number: z.number().int().nonnegative(), machineId: z.string().optional() }),
   /** Puts the copy on a pull request's head branch through the git host's own command line, run inside the copy, the
    * host read off the copy's own remote; answered as a GitPrCheckoutReply naming the branch, which tracks where the
    * head lives. */
   z.object({ id: reqId, op: z.literal("git.prCheckout"), cwd: z.string(), number: z.number().int().nonnegative(), machineId: z.string().optional() }),
-  /** A pull request's diff against its base, cut on a file's boundary at REVIEW_DIFF_MAX_BYTES, answered as a
-   * GitPrDiffReply naming every file the cut left out. */
-  z.object({ id: reqId, op: z.literal("git.prDiff"), cwd: z.string(), remote: z.string(), number: z.number().int().nonnegative(), machineId: z.string().optional() }),
+  /** A pull request's diff against its base, cut on a file's boundary at maxBytes, never past GIT_DIFF_CAP_BYTES and
+   * REVIEW_DIFF_MAX_BYTES where absent, answered as a GitPrDiffReply naming every file the cut left out. */
+  z.object({
+    id: reqId,
+    op: z.literal("git.prDiff"),
+    cwd: z.string(),
+    remote: z.string(),
+    number: z.number().int().nonnegative(),
+    maxBytes: z.number().int().positive().optional(),
+    machineId: z.string().optional(),
+  }),
   /** Posts one review in one call pinned to the head named: the verdict, the body and every comment on a line, a comment
    * whose line falls outside the diff put into the body; answered as a GitPrReviewReply. A refusal is the command
    * line's own last line. */
@@ -6056,6 +6064,14 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** The workspace's pull request page, read through the git host's command line on this computer, or the running
    * copy's where this computer has none, and answered as a GitPrViewReply; never kept, so every ask reads it anew. */
   z.object({ id: reqId, op: z.literal("workspaces.pullRequestView"), workspaceId: z.string() }),
+  /** The workspace's pull request's diff against its base, read as the page is and cut on a file's boundary at
+   * GIT_DIFF_CAP_BYTES, answered as a GitPrDiffReply naming every file the cut left out. */
+  z.object({ id: reqId, op: z.literal("workspaces.pullRequestDiff"), workspaceId: z.string() }),
+  /** Sends items of the workspace's pull request page to its agent as one message, each with its author, its words
+   * and, for a comment on a line, its file, line and the diff's lines above it, numbered where there are several;
+   * the message joins the workspace's first thread as a fix's does. The host keeps what was sent, with when, and the
+   * page answers it. Answered as a PullRequestSendResult. */
+  z.object({ id: reqId, op: z.literal("workspaces.pullRequestSend"), workspaceId: z.string(), items: z.array(PullRequestItem).min(1) }),
   /** Asks the workspace's agent to fix a failed check, named, with its log's failed steps; with no check, updates the
    * copy from its base first and asks it to fix the conflicts where the merge had any. Answered as a FixResult at
    * once, the turn going on without the caller. */
@@ -6690,6 +6706,7 @@ export const DEVICE_OPS: readonly string[] = [
   "workspaces.checkout",
   "workspaces.viewed",
   "workspaces.pullRequestView",
+  "workspaces.pullRequestDiff",
   // A review draft's ticks, verdict and summary are a record on this computer, as a viewed mark is; its post is not
   // here, since posting under the person's name is the person's act.
   "workspaces.reviewDraft",

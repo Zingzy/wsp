@@ -45,16 +45,22 @@ const PAGE: PullRequestPage = {
   title: "Set .ci-status back to 0",
   body: "The check failed.",
   author: "cass",
+  createdAt: "2026-09-28T09:00:00Z",
   updatedAt: "2026-09-28T12:00:00Z",
+  labels: [],
+  reviewRequests: [],
+  latestReviews: [],
+  assignees: [],
   commits: [
-    { oid: "abc1234def", subject: "Set ci status", at: "2026-09-28T10:00:00Z", author: "cass" },
-    { oid: "def5678abc", subject: "Merge branch 'main' into fix", at: "2026-09-28T10:30:00Z", author: "cass" },
+    { oid: "abc1234def", subject: "Set ci status", body: "", at: "2026-09-28T10:00:00Z", author: "cass" },
+    { oid: "def5678abc", subject: "Merge branch 'main' into fix", body: "", at: "2026-09-28T10:30:00Z", author: "cass" },
   ],
   reviews: [{ author: "ana", state: "changes_requested", body: "see line 3", at: "2026-09-28T11:00:00Z" }],
-  comments: [{ author: "bo", body: "thanks", at: "2026-09-28T12:00:00Z" }],
-  reviewComments: [{ id: 7, path: "check.sh", line: 3, side: "RIGHT", author: "ana", body: "exit 1 here\nnot 0", url: "https://github.com/o/r/pull/12#discussion_r7", at: "2026-09-28T11:00:00Z" }],
+  comments: [{ id: 1, author: "bo", bot: false, body: "thanks", url: "https://github.com/o/r/pull/12#issuecomment-1", at: "2026-09-28T12:00:00Z" }],
+  reviewComments: [{ id: 7, path: "check.sh", line: 3, side: "RIGHT", author: "ana", bot: false, body: "exit 1 here\nnot 0", url: "https://github.com/o/r/pull/12#discussion_r7", at: "2026-09-28T11:00:00Z" }],
   files: [{ path: "check.sh", additions: 2, deletions: 1 }],
   merge: { methods: ["merge", "squash"], defaultMethod: "squash", autoMerge: true },
+  sent: [],
 };
 
 const statusWith = (pr: WorkspaceStatus["pr"]): WorkspaceStatus =>

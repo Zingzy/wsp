@@ -4086,5 +4086,4 @@ export const threadStoppedLine = (title: string): string => `${title} stopped`;
 /** What a thread's end says of a process that went without an error of its own: its exit code, when it had one. */
 export const exitLine = (exitCode: number | null): string | undefined => (exitCode === null ? undefined : `exit ${exitCode}`);
 
-/** Text a notification carries on one line: every run of whitespace, line breaks included, as one space. */
-export const oneLine = (text: string): string => text.replace(/\s+/g, " ").trim();
+export { oneLine } from "./quote.js";

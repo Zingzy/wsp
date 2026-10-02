@@ -416,12 +416,16 @@ pub enum DaemonOp {
         #[ts(optional)]
         machine_id: Option<String>,
     },
-    /// A pull request's diff against its base, cut on a file's boundary at REVIEW_DIFF_MAX_BYTES.
+    /// A pull request's diff against its base, cut on a file's boundary at max_bytes, never past GIT_DIFF_CAP_BYTES,
+    /// and at REVIEW_DIFF_MAX_BYTES where absent.
     #[serde(rename = "git.prDiff", rename_all = "camelCase")]
     GitPrDiff {
         cwd: String,
         remote: String,
         number: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        max_bytes: Option<u64>,
         /// The workspace this frame is for, as on fs.list above.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
