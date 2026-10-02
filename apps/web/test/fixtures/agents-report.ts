@@ -168,3 +168,37 @@ export const HOSTILE_SKILL_MD = [
   "## Usage",
   "",
 ].join("\n");
+
+/** This Mac's agents as the Settings pages read them: Claude Code on an API key with a newer version out and a setup
+ * of its own, Codex on its OAuth sign-in, OpenCode not on the PATH. */
+export const AGENTS_SETUP_REPORT: AgentsReport = {
+  ...AGENTS_REPORT,
+  target: { placeId: "here" },
+  agents: [
+    {
+      id: "claude",
+      name: "Claude Code",
+      installed: true,
+      version: "2.1.286",
+      latest: "2.1.290",
+      road: "own",
+      path: "~/.local/bin/claude",
+      signIn: "signed-in",
+      signInRoad: "token",
+      signInDetail: "API key from ANTHROPIC_API_KEY on the machine",
+      signInKind: "api-key",
+      wspTools: true,
+      update: { to: "2.1.290", command: "claude update" },
+      setup: { on: true, args: ["--verbose", "--debug"], envNames: ["ANTHROPIC_BASE_URL", "FOO"] },
+    },
+    { id: "codex", name: "Codex", installed: true, version: "0.47.0", road: "own", path: "~/.local/bin/codex", signIn: "signed-in", signInRoad: "device", signInKind: "subscription", wspTools: true, setup: { on: true, envNames: [] } },
+    { id: "opencode", name: "OpenCode", installed: false, road: "none", signIn: "unknown", signInRoad: "terminal", wspTools: false },
+  ],
+  skills: [],
+  servers: [],
+  projects: [],
+  refused: [],
+};
+
+/** This Mac's agents with every server and skill the box's report carries, for the Tool servers and Skills tabs. */
+export const AGENTS_TOOLS_REPORT: AgentsReport = { ...AGENTS_REPORT, target: { placeId: "here" }, agents: AGENTS_SETUP_REPORT.agents };

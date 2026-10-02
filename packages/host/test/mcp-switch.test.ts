@@ -90,10 +90,13 @@ describe("the wsp tools an agent's config already holds", () => {
     expect(refreshServers(home, "/s/state.json", binary)).toEqual([]);
   });
 
-  it("keep a --host line's host and name the state beside it", () => {
+  it("are left as they are where the line names another state file or none", () => {
+    installMcp("claude", mcpServerSpec("/other/state.json", node), home);
+    expect(refreshServers(home, "/s/state.json", binary)).toEqual([]);
+    expect(wsp(".claude.json")).toMatchObject(mcpServerSpec("/other/state.json", node));
     installMcp("claude", mcpServerSpec("/s/state.json", node, { host: "attic" }), home);
-    expect(refreshServers(home, "/s/state.json", binary)).toEqual(["~/.claude.json"]);
-    expect(wsp(".claude.json")).toMatchObject(mcpServerSpec("/s/state.json", binary, { host: "attic" }));
+    expect(refreshServers(home, "/s/state.json", binary)).toEqual([]);
+    expect(wsp(".claude.json")).toMatchObject(mcpServerSpec("/s/state.json", node, { host: "attic" }));
   });
 
   it("are left as they are where the binary has no tool server, or the line is not this wsp's own", () => {

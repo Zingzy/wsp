@@ -291,7 +291,7 @@ describe("export project dialog", () => {
     expect(root.querySelector("[data-k=cache-list]")).toBeNull();
     fireEvent.click(within(root).getByRole("button", { name: "1 folder" }));
     expect(value(root, "cache-list")).toBe("node_modules");
-    expect(outcomes(root)).toEqual(["moved", "transcripts landed, not yet listed, 1 rollout skipped"]);
+    expect(outcomes(root)).toEqual(["moved", "landed, not listed yet, 1 rollout skipped"]);
     expect(within(root).queryByRole("button", { name: "Cancel" })).toBeNull();
     fireEvent.click(button(root, "Done"));
     expect(onClose).toHaveBeenCalled();

@@ -2,7 +2,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { homedir, hostname, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, posix, resolve as resolvePathOn } from "node:path";
-import { CATALOG_AGENTS, DEFAULT_AGENT, GUEST_HOME, type ThreadAgent, PATH_BOUND_DIR_NAMES, TOOL_PREFIX, catalogIdOfRow, gitHostOf, ownerRepoOf, remoteHost, serverValuesOf, guestEnv, installEnv, installHomes, loginHomeIn, sharedOn } from "@wsp/catalog";
+import { CATALOG_AGENTS, DEFAULT_AGENT, GUEST_HOME, type ThreadAgent, PATH_BOUND_DIR_NAMES, TOOL_PREFIX, catalogIdOfRow, gitHostOf, remoteHost, serverValuesOf, guestEnv, installEnv, installHomes, loginHomeIn, sharedOn } from "@wsp/catalog";
 import {
   BUILDER_IDLE_MS,
   DAEMON_PORT,
@@ -231,15 +231,16 @@ import type {
 } from "@wsp/protocol";
 import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding } from "./project-landing.js";
 import { projectRemote, projectSource } from "./project-sources.js";
-import { vaultUnlistedRefusal, ThreadPlacement, ThreadScope, WorkspaceOrigin, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, GitCommitReply, GitDiscardReply, GitDiffReply, GitStatusReply, GitPrReadReply, GitPrViewReply, GitRunLogReply, GitPrMergeReply, GitRepoReadReply, GitUpdateReply, GitStartOnReply, GitBranchCompareReply, GitMergeInReply, DETACHED_HEAD, leadBusyRefusal, childStartedLine, forkNeedsPushLine, FIX_CHECK_OR_CHILD, childOnNoBranchRefusal, mergeChildPrompt, mergeIntoOwnRefusal, noRemoteForTreeLine, notTheLeadsChildRefusal, pushedForChildLine, uncommittedStayed, type MergeInResult, type TreeChild, type TreeFact, type TreeRecord, PR_POLL_MS, type PullRequestPage, checkFailedPrompt, conflictsPrompt, checkNotFailedRefusal, childPushedLine, isPullRequestFact, mergeMethodRefusal, noPullRequestRefusal, noSuchCheckRefusal, notOpenRefusal, pullRequestStoppedLine, pullRequestUnreadLine, AUTO_MERGE_OFF_LINE, type FixResult, type MergeMethod, type MergeResult, type PullRequestFact, type PullRequestRecord, type PullRequestSeen, DRAFT_NOTES, cleanCheckoutLine, commitMessage, cutDiff, draftPrompt, type Checkout, type CheckoutReply, type CommitDraft, type CommitDrafter, type ViewedMarks, AGENTS_ON, agentsFrom, foldThreads, NAP_AFTER_MS, settingFor, runningOn as runningOnPlace, phaseHoldsSlot, placeAtLimitLine, placeSpendLimit, spendCapRefusal, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadKeyOf, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, SCOPED_MCP_ARG, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn, RUN_PERSONS_LINE, runOutputTail, type RunStep, type SessionRunEvent } from "@wsp/protocol";
-import { ASIDE_NO_SESSION_LINE, BLANK_ASIDE_LINE, asideUnsupportedLine, PLACE_WORKSPACE_PATH, THIS_COMPUTER, COPY_BUILD_FIX, copyAsksSignIns, refusal, copyFirstLine, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildOf, copyIsCurrent, type CopyBuild, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, serverIconsLeftLine, homeShortened, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, threadRunsOnLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, GONE_UNCHECKED, goneUnconfirmedLine, type GoneSeenBy, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, cloneFailedLine, cloneIntoNeeded, cloneIntoTakenLine, cloneUrlRefusal, intoIsHereLine, INTO_TAKES_A_REPO_LINE, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeBlocked, placeDaemonBehind, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeDaemonPaths, placeDialBackLine, placeWentAwayLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, workspaceLands, copyPathFor, folderSlug, type ProjectCopy, REWIND_LATEST_LINE, REWIND_NO_CHECKPOINT_LINE, REWIND_NO_UNDO_LINE, REWIND_OWN_FOLDER_LINE, REWIND_WORKING_LINE, rewindBesideLine, rewindChildrenLine, rewindNoAnchorLine, attachmentRecord, filesBlocked, isImage, sendFilesDir, filePathIn, landFilesLine, filesNotLandedLine, attachedFilesPrompt, dropFilesLine } from "@wsp/protocol";
+import { vaultUnlistedRefusal, ThreadPlacement, ThreadScope, WorkspaceOrigin, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, GitCommitReply, GitDiscardReply, GitDiffReply, GitStatusReply, GitPrReadReply, GitPrViewReply, GitRunLogReply, GitPrMergeReply, GitRepoReadReply, GitUpdateReply, GitStartOnReply, GitBranchCompareReply, GitMergeInReply, DETACHED_HEAD, leadBusyRefusal, childStartedLine, forkNeedsPushLine, FIX_CHECK_OR_CHILD, childOnNoBranchRefusal, mergeChildPrompt, mergeIntoOwnRefusal, noRemoteForTreeLine, notTheLeadsChildRefusal, pushedForChildLine, uncommittedStayed, type MergeInResult, type TreeChild, type TreeFact, type TreeRecord, PR_POLL_MS, type PullRequestPage, type PullRequestItem, type PullRequestSendResult, type PullRequestSent, GIT_DIFF_CAP_BYTES, pullRequestSendPrompt, checkFailedPrompt, conflictsPrompt, checkNotFailedRefusal, childPushedLine, isPullRequestFact, mergeMethodRefusal, noPullRequestRefusal, noSuchCheckRefusal, notOpenRefusal, pullRequestStoppedLine, pullRequestUnreadLine, AUTO_MERGE_OFF_LINE, type FixResult, type MergeMethod, type MergeResult, type PullRequestFact, type PullRequestRecord, type PullRequestSeen, DRAFT_NOTES, cleanCheckoutLine, commitMessage, cutDiff, draftPrompt, type Checkout, type CheckoutReply, type CommitDraft, type CommitDrafter, type ViewedMarks, AGENTS_ON, agentsFrom, foldThreads, NAP_AFTER_MS, settingFor, runningOn as runningOnPlace, phaseHoldsSlot, placeAtLimitLine, placeSpendLimit, spendCapRefusal, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadKeyOf, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, SCOPED_MCP_ARG, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn, RUN_PERSONS_LINE, runOutputTail, type RunStep, type SessionRunEvent } from "@wsp/protocol";
+import { ASIDE_NO_SESSION_LINE, BLANK_ASIDE_LINE, asideUnsupportedLine, PLACE_WORKSPACE_PATH, THIS_COMPUTER, COPY_BUILD_FIX, copyAsksSignIns, refusal, copyFirstLine, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildOf, copyIsCurrent, type CopyBuild, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, serverIconsLeftLine, homeShortened, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, threadRunsOnLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, GONE_UNCHECKED, goneUnconfirmedLine, type GoneSeenBy, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, cloneFailedLine, cloneIntoNeeded, cloneIntoTakenLine, cloneUrlRefusal, intoIsHereLine, INTO_TAKES_A_REPO_LINE, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeBlocked, placeDaemonBehind, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeDaemonPaths, placeDialBackLine, placeWentAwayLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspacePlace, workFolderIn, workspaceLands, copyPathFor, folderSlug, type ProjectCopy, REWIND_LATEST_LINE, REWIND_NO_CHECKPOINT_LINE, REWIND_NO_UNDO_LINE, REWIND_OWN_FOLDER_LINE, REWIND_WORKING_LINE, rewindBesideLine, rewindChildrenLine, rewindNoAnchorLine, attachmentRecord, filesBlocked, isImage, sendFilesDir, filePathIn, landFilesLine, filesNotLandedLine, attachedFilesPrompt, dropFilesLine } from "@wsp/protocol";
 import { agentsReads, type AgentsActs, type AgentsReader, type CallbackForwards, type ServerIcons, type ServersActs, type SignInAsk, type SkillAsk, type SkillsActs } from "./agents-read.js";
 import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from "./daemon-channel.js";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
 import { isNoProvider, isPlaceAbsent, projectStateKey, putFiles, type Copier } from "@wsp/engine";
 import { boxFullLine, DISK_FULL_PCT, diskFullLine, stopRefusedLine, threadMessages, threadSeed, workspaceMemMb } from "@wsp/protocol";
-import { accessMode, accessRefusal, agentOffLine, configDirLaunchRefusal, configDirRefusal, markedFor, openDefaults, resolveThreadDefaults, setupView, shapeModels, withCustomModels, type AccessChoice, type AgentLaunch, type AgentRow, type AgentSetupSet, type ProjectOverrides, type ResolvedFolder, type ThreadDefaults } from "@wsp/protocol";
+import { holdsRepo, ownerRepoOf, projectForRepo } from "@wsp/protocol";
+import { accessMode, accessRefusal, agentOffLine, configDirLaunchRefusal, configDirRefusal, markedFor, modelIdRefusal, openDefaults, resolveThreadDefaults, setupView, shapeModels, withCustomModels, type AccessChoice, type AgentLaunch, type AgentRow, type AgentSetupSet, type ProjectOverrides, type ResolvedFolder, type ThreadDefaults } from "@wsp/protocol";
 import { agentSetups, keyOf, realFolderHere, realFolderScript } from "./agent-setup.js";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
@@ -782,6 +783,8 @@ interface WorkspaceRecord extends Omit<WorkspaceView, "project"> {
   from?: WorkspaceFrom;
   /** A review workspace's review as the person shapes it before Post. */
   review?: ReviewDraft;
+  /** The items of its pull request's page sent to its agent, with when. */
+  prSent?: PullRequestSent[];
 }
 
 interface LiveWorkspace {
@@ -985,8 +988,9 @@ export interface HereDaemon {
 /** What the host wires for the seed half of an add: the menu for a folder on this computer, and the archive of
  * whichever rows the person ticked. Both read that folder, which is why neither is the runtime's own. */
 export interface SeedWiring {
-  plan(folder: string): Promise<SeedPlan>;
-  pack(o: { plan: SeedPlan; choice: SeedChoice }): Promise<{ tar: Buffer; files: number; bytes: number; commits: number; left: readonly string[] }>;
+  /** `homes` is each agent's folder on this computer as `agents.homesHere` answers it. */
+  plan(folder: string, homes: Readonly<Record<string, string>>): Promise<SeedPlan>;
+  pack(o: { plan: SeedPlan; choice: SeedChoice; homes: Readonly<Record<string, string>> }): Promise<{ tar: Buffer; files: number; bytes: number; commits: number; left: readonly string[] }>;
 }
 
 export interface RuntimeOptions {
@@ -1436,6 +1440,9 @@ export interface Runtime {
     serversIcon(host: string, refresh?: boolean): Promise<string | null>;
     /** Changes how one agent runs on one computer, checked first, and answers its row there, names only. */
     setup(placeId: string, agent: string, change: AgentSetupSet, origin?: Caller): Promise<AgentRow>;
+    /** Every catalog agent's config folder on this computer by id, where a launch here finds it: the one the person
+     * kept, refused in a launch's words once it leads out of the home, else the agent's own. */
+    homesHere(): Promise<Record<string, string>>;
   };
   /** Every verb takes where the request reached the host from as its last argument: here, this computer's own app,
    * CLI or MCP, or relayed from a machine. Absent reads here. A workspace whose kind takes no relayed request
@@ -1533,6 +1540,11 @@ export interface Runtime {
     /** The workspace's pull request page, read through the git host's command line on this computer, or the running
      * copy's where this computer has none; never kept. */
     pullRequestView(o: { workspaceId: string }, origin?: Caller): Promise<PullRequestPage>;
+    /** The workspace's pull request's diff against its base, read as the page is and cut at GIT_DIFF_CAP_BYTES. */
+    pullRequestDiff(o: { workspaceId: string }, origin?: Caller): Promise<GitPrDiffReply>;
+    /** Sends items of the page to the workspace's agent as one message, read off the page anew, into the thread a fix
+     * goes to; keeps each item sent with when. Answers once the message is on its way. */
+    pullRequestSend(o: { workspaceId: string; items: readonly PullRequestItem[] }, origin?: Caller): Promise<PullRequestSendResult>;
     /** Asks the workspace's agent to fix a failed check, named, with the failed steps of its log; with none, updates the
      * copy from its base and asks it to fix the conflicts where the merge had any, sending nothing when it merged
      * clean. Answers once the message is on its way, the turn going on without the caller. */
@@ -4580,6 +4592,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const was = entry.record.pr;
       if (was === undefined || was.state !== seen.state || was.number !== seen.number) {
         const settledAt = seen.state === "merged" ? { mergedAt: seen.readAt } : seen.state === "closed" ? { closedAt: seen.readAt } : {};
+        // What was sent belongs to the pull request it was read off; another one starts with nothing sent.
+        if (was !== undefined && was.number !== seen.number) delete entry.record.prSent;
         entry.record.pr = { number: seen.number, url: seen.url, state: seen.state, base: seen.base, ...settledAt };
         await persist(entry.record);
       }
@@ -4664,25 +4678,31 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     origin: Caller | undefined,
   ): Promise<{ outcome: "steered" | "queued" | "started"; threadId: string; harness: string }> => {
     const requestId = randomUUID();
-    let queuedNow: (() => void) | undefined;
-    const queued = new Promise<"queued">(resolve => {
-      queuedNow = () => resolve("queued");
+    let queuedNow: ((harness: string) => void) | undefined;
+    const queued = new Promise<{ queuedOn: string }>(resolve => {
+      queuedNow = harness => resolve({ queuedOn: harness });
     });
     const off = bus.on("session.queued", e => {
-      if (e.type === "session.queued" && e.requestId === requestId) queuedNow?.();
+      if (e.type === "session.queued" && e.requestId === requestId) queuedNow?.(e.harness);
     });
     try {
       const started = sessionsApi.start(workspaceId, { ...o, requestId }, origin);
       const first = await Promise.race([started, queued]);
-      if (first === "queued") {
+      if ("queuedOn" in first) {
         started.catch((e: unknown) => console.warn(`a message waiting in thread ${threadWord(o.thread ?? "")} was not sent: ${e instanceof Error ? e.message : String(e)}`));
-        return { outcome: "queued", threadId: o.thread!, harness: latestOn(o.thread!)?.harness ?? DEFAULT_AGENT.id };
+        return { outcome: "queued", threadId: o.thread!, harness: first.queuedOn };
       }
       const view = first.view();
       return { outcome: first.outcome === "steered" ? "steered" : "started", threadId: view.threadId ?? view.id, harness: view.harness };
     } finally {
       off();
     }
+  };
+
+  /** A message into the workspace's first thread, which is the one the work was opened in; one with none opens one. */
+  const toFirstThread = (workspaceId: string, prompt: string, origin: Caller | undefined): ReturnType<typeof sendDetached> => {
+    const first = [...sessions.values()].map(v => v.view).filter(v => v.workspaceId === workspaceId && v.threadId !== undefined).sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0))[0];
+    return sendDetached(workspaceId, { prompt, ...(first?.threadId !== undefined ? { thread: first.threadId } : {}) }, origin);
   };
 
   /** The line the machine's row carries while the runtime is doing something to its daemon; undefined clears it. */
@@ -6379,8 +6399,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * computers hold it, or the one named by name or id among them. A link is only ever matched to a project the
    * person added, and every later call names the repository off that project's record. */
   const projectByRepo = (repo: string, named: string | undefined): ProjectView => {
-    const matches = [...projectsHeld.values()].filter(p => ownerRepoOf(p.remote)?.toLowerCase() === repo.toLowerCase());
-    const picked = named === undefined ? (matches.find(p => p.computer === HERE_PLACE_ID) ?? matches[0]) : matches.find(p => p.id === named || p.name === named);
+    const held = [...projectsHeld.values()];
+    const picked = named === undefined ? projectForRepo(held, repo, HERE_PLACE_ID) : held.find(p => holdsRepo(p, repo) && (p.id === named || p.name === named));
     if (picked === undefined) throw Object.assign(new Error(START_WORDS.noProjectForRepo(repo)), { kind: "invalid" });
     return picked;
   };
@@ -7207,7 +7227,31 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const remote = projectHeld(entry.record.project).remote;
       const page = await readHost(entry, cwd => ({ op: "git.prView", cwd, remote, number }), r => GitPrViewReply.parse(r));
       const merge = await mergeSettings(remote).catch(() => undefined);
-      return { ...page, ...(merge !== undefined ? { merge } : {}) };
+      return { ...page, ...(merge !== undefined ? { merge } : {}), sent: entry.record.prSent ?? [] };
+    },
+
+    async pullRequestDiff({ workspaceId }, origin) {
+      const entry = await entryOf(workspaceId, origin);
+      const number = entry.record.pr?.number;
+      if (number === undefined) throw new Error(noPullRequestRefusal(entry.record.name));
+      const remote = projectHeld(entry.record.project).remote;
+      return readHost(entry, cwd => ({ op: "git.prDiff", cwd, remote, number, maxBytes: GIT_DIFF_CAP_BYTES }), r => GitPrDiffReply.parse(r));
+    },
+
+    async pullRequestSend({ workspaceId, items }, origin) {
+      const entry = await entryOf(workspaceId, origin);
+      await copyBlocked(entry);
+      const number = entry.record.pr?.number;
+      if (number === undefined) throw new Error(noPullRequestRefusal(entry.record.name));
+      const remote = projectHeld(entry.record.project).remote;
+      const page = await readHost(entry, cwd => ({ op: "git.prView", cwd, remote, number }), r => GitPrViewReply.parse(r));
+      const same = (a: PullRequestItem, b: PullRequestItem): boolean => a.kind === b.kind && a.id === b.id;
+      const asked = items.filter((item, n) => items.findIndex(other => same(item, other)) === n);
+      const said = await toFirstThread(workspaceId, pullRequestSendPrompt(page, asked, number), origin);
+      const at = clock.now();
+      entry.record.prSent = [...(entry.record.prSent ?? []).filter(s => !asked.some(i => same(i, s))), ...asked.map(i => ({ kind: i.kind, id: i.id, at }))];
+      await persist(entry.record);
+      return { outcome: said.outcome, threadId: said.threadId, agent: said.harness, sent: entry.record.prSent };
     },
 
     async fix({ workspaceId, check, child }, origin) {
@@ -7248,9 +7292,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         prompt = checkFailedPrompt({ check: failed, commit: { oid: fact.headOid, subject: fact.headSubject }, ...(log !== undefined ? { log } : {}) });
         base = fact.base;
       }
-      // The workspace's first thread takes the message, which is the one the work was opened in; one with none opens one.
-      const first = [...sessions.values()].map(v => v.view).filter(v => v.workspaceId === workspaceId && v.threadId !== undefined).sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0))[0];
-      const said = await sendDetached(workspaceId, { prompt, ...(first?.threadId !== undefined ? { thread: first.threadId } : {}) }, origin);
+      const said = await toFirstThread(workspaceId, prompt, origin);
       return { outcome: said.outcome, threadId: said.threadId, ...(check !== undefined ? { check } : {}), ...(child !== undefined ? { child } : {}), base, agent: said.harness };
     },
 
@@ -7681,7 +7723,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const read = await door.exec(placeId, realFolderScript(path), { timeoutMs: INLINE_EXEC_MS });
     if (read.exitCode === 3) throw Object.assign(new Error(read.stderr.trim()), { kind: "usage" });
     const [folder, home] = read.stdout.trim().split("\n");
-    if (read.exitCode !== 0 || folder === undefined || home === undefined || !home.startsWith("/")) throw new Error(`${door.nameOf(placeId)} did not say where ${path} is: ${read.stderr.trim() || `exit ${read.exitCode}`}`);
+    if (read.exitCode !== 0 || folder === undefined || home === undefined || !home.startsWith("/")) throw Object.assign(new Error(`${door.nameOf(placeId)} did not say where ${path} is: ${read.stderr.trim() || `exit ${read.exitCode}`}`), { kind: "invalid" });
     return { folder: posix.normalize(folder), home, kept: [join(home, ".wsp")] };
   };
 
@@ -7699,13 +7741,25 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const setupRefusal = async (entry: LiveWorkspace, named?: string): Promise<string | null> => {
     const harness = named ?? DEFAULT_AGENT.id;
     const kept = keptFolder(entry, harness);
-    if (kept === undefined) return null;
-    const { place, folder } = kept;
+    return kept === undefined ? null : keptRefusal(kept.place, harness, kept.folder);
+  };
+  const keptRefusal = async (place: string, harness: string, folder: string): Promise<string | null> => {
     const why = configDirRefusal(agentLabel(harness), folder, await configFolderOn(place, folder));
     const refused = why === null ? null : configDirLaunchRefusal(agentLabel(harness), harness, folder, why);
     if (refused === null) setupRefusals.delete(keyOf(place, harness));
     else setupRefusals.set(keyOf(place, harness), refused);
     return refused;
+  };
+  const homesHere = async (): Promise<Record<string, string>> => {
+    await ready();
+    const homes: Record<string, string> = {};
+    for (const { id } of CATALOG_AGENTS) {
+      const kept = setups.get(HERE_PLACE_ID, id)?.configDir;
+      const refused = kept === undefined ? null : await keptRefusal(HERE_PLACE_ID, id, kept);
+      if (refused !== null) throw Object.assign(new Error(refused), { kind: "usage" });
+      homes[id] = kept ?? local?.home(id) ?? agentHomes(homedir())[id]!;
+    }
+    return homes;
   };
   /** Settles at once where no config folder is kept, so a road with nothing to check waits on nothing more than before. */
   const confineSetup = (entry: LiveWorkspace, named?: string): Promise<void> =>
@@ -9068,7 +9122,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             // out yet, so this one waits for the moment it has one or is given up, and looks again.
             const launching = launchingOn(threadId);
             if (launching !== undefined && launching.turnId !== turnId) {
-              if (outcome === "started") bus.emit({ type: "session.queued", workspaceId, threadId, prompt: o.prompt, ...(o.requestId !== undefined ? { requestId: o.requestId } : {}) });
+              if (outcome === "started") bus.emit({ type: "session.queued", workspaceId, threadId, harness, prompt: o.prompt, ...(o.requestId !== undefined ? { requestId: o.requestId } : {}) });
               outcome = "queued";
               await launching.launch;
               refuse();
@@ -9100,7 +9154,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             recordSteer(running, running.handle.id, o);
             return { ...running.handle, outcome: "steered" };
           }
-          if (outcome === "started") bus.emit({ type: "session.queued", workspaceId, threadId, prompt: o.prompt, ...(o.requestId !== undefined ? { requestId: o.requestId } : {}) });
+          if (outcome === "started") bus.emit({ type: "session.queued", workspaceId, threadId, harness, prompt: o.prompt, ...(o.requestId !== undefined ? { requestId: o.requestId } : {}) });
           outcome = "queued";
           await running.handle.finished.catch(() => {});
           refuse();
@@ -10875,7 +10929,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     async seedPlan(source: string): Promise<SeedPlan> {
       await ready();
       const folder = folderNamed(source);
-      const plan = await seedWiring().plan(folder);
+      const plan = await seedWiring().plan(folder, await homesHere());
       const remembered = (await store.get(SEED_CHOICES, folder)) as SeedChoice | undefined;
       if (remembered === undefined) return plan;
       return { ...plan, remembered: true, files: plan.files.map(f => ({ ...f, ticked: f.kind !== "never" && remembered.files.includes(f.path) })) };
@@ -10981,7 +11035,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (!road.landsAtAdd({ seeding: seed !== undefined })) return keep({});
       report("planned", addingProjectLine(project.name, source, seed !== undefined));
       try {
-        const packed = seed === undefined ? undefined : await seedWiring().pack(seed);
+        const packed = seed === undefined ? undefined : await seedWiring().pack({ ...seed, homes: await homesHere() });
         // A login inside a folder they ticked stays on this computer: said as the pack finds it, so the terminal
         // watching the add reads it there and the answer's notice is the tool door's copy of the same fact.
         if (packed !== undefined && packed.left.length > 0) report("seeding", leftBehindLine(packed.left));
@@ -11499,16 +11553,22 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const said = access == null ? null : accessRefusal(table ?? { label: agentLabel(id), permissionModes: [] }, access);
       if (said !== null) throw usage(said);
     };
+    const model = (id: string): void => {
+      const said = modelIdRefusal(id);
+      if (said !== null) throw usage(said);
+    };
     if (patch.defaultAgent != null) agent(patch.defaultAgent);
     for (const [id, set] of Object.entries(patch.agentDefaults ?? {})) {
       if (set === null) continue;
       agent(id);
       word(id, set.access);
+      for (const named of [...(set.model == null ? [] : [set.model]), ...(set.models?.custom ?? [])]) model(named);
     }
     for (const [projectId, set] of Object.entries(patch.projectDefaults ?? {})) {
       if (set === null) continue;
       if (!projectsHeld.has(projectId)) throw usage(bareNoSuchProjectLine(projectId));
       if (set.agent != null) agent(set.agent);
+      if (set.model != null) model(set.model);
       const kept = next.projectDefaults[projectId];
       word(kept?.agent ?? defaultAgentOf(next, undefined), set.access);
     }
@@ -11582,7 +11642,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     devices: deviceDoor,
     ...(placeDoor !== undefined ? { places: placeDoor } : {}),
     hereChannel: async onEvent => channelOver(await localRoad(), THIS_COMPUTER, onEvent),
-    agents: agentsRead,
+    agents: { ...agentsRead, homesHere },
     preferences,
     usage,
     status: {
@@ -11611,9 +11671,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const table = HARNESS_CATALOGS.filter(c => c.harness in adapters && (entry === undefined || !agentOff(entry, c.harness)));
         // A record answers what its threads start at whether or not its machine is up; only the rest of the lists
         // waits on the binary, so a picker on a paused workspace still reads the access its next thread would run.
-        // An agent whose kept config folder is refused, or cannot be read there, answers with why instead of its lists.
+        // An agent whose kept config folder is refused, or cannot be read there, answers with why instead of its
+        // lists; a link that dropped under the check says its computer is not answering, since that is not the agent's.
+        const unchecked = (e: unknown, on: LiveWorkspace): string => {
+          const place = setupPlace(on);
+          if (isPlaceAbsent(e) && place !== undefined) return absentComputer(placeDoorOf().nameOf(place), null).said;
+          return e instanceof Error ? e.message : String(e);
+        };
         const listsOn = async (c: HarnessCatalog, on: LiveWorkspace): Promise<HarnessCatalog> => {
-          const refusal = await setupRefusal(on, c.harness).catch((e: unknown) => (e instanceof Error ? e.message : String(e)));
+          const refusal = await setupRefusal(on, c.harness).catch((e: unknown) => unchecked(e, on));
           return refusal !== null ? { ...c, refusal } : catalogOn(c, on, adapterFor(on, c.harness).adapter);
         };
         const lists = entry === undefined || entry.record.phase !== "running" ? table : await Promise.all(table.map(c => listsOn(c, entry)));

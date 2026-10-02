@@ -11,8 +11,8 @@ import { create } from "zustand";
 import type { AddRoad } from "./AddComputer.js";
 import { isSettingsGroupId, type SettingsGroupId } from "./groupIds.js";
 
-/** A page of Settings: a group, a computer's own page or a project's. */
-export type SettingsAt = { readonly kind: "group"; readonly group: SettingsGroupId } | { readonly kind: "computer"; readonly id: string } | { readonly kind: "project"; readonly id: string };
+/** A page of Settings: a group, a computer's own page, a project's or an agent's. */
+export type SettingsAt = { readonly kind: "group"; readonly group: SettingsGroupId } | { readonly kind: "computer"; readonly id: string } | { readonly kind: "project"; readonly id: string } | { readonly kind: "agent"; readonly id: string };
 
 /** The page a fresh window opens on. */
 export const FIRST_PAGE: SettingsAt = { kind: "group", group: "appearance" };
@@ -25,14 +25,17 @@ export function atId(at: SettingsAt): string {
 
 export const sameAt = (a: SettingsAt, b: SettingsAt): boolean => atId(a) === atId(b);
 
-/** The group a page belongs to: its own for a group page, Computers for a computer's, Projects for a project's. */
-export const groupOf = (at: SettingsAt): SettingsGroupId => (at.kind === "group" ? at.group : at.kind === "computer" ? "computers" : "projects");
+const GROUP_OF_PAGE = { computer: "computers", project: "projects", agent: "agents" } as const;
+
+/** The group a page belongs to: its own for a group page, Computers for a computer's, Projects for a project's,
+ * Agents for an agent's. */
+export const groupOf = (at: SettingsAt): SettingsGroupId => (at.kind === "group" ? at.group : GROUP_OF_PAGE[at.kind]);
 
 /** A page read back off storage, or nothing for a word that names no page. */
 export function parseAt(raw: string | null): SettingsAt | null {
   if (raw === null) return null;
   const [kind, id] = raw.includes(":") ? [raw.slice(0, raw.indexOf(":")), raw.slice(raw.indexOf(":") + 1)] : [raw, ""];
-  if ((kind === "computer" || kind === "project") && id !== "") return { kind, id };
+  if ((kind === "computer" || kind === "project" || kind === "agent") && id !== "") return { kind, id };
   return isSettingsGroupId(raw) ? { kind: "group", group: raw } : null;
 }
 
@@ -89,6 +92,14 @@ export interface SettingsState {
   /** The Add a computer panel asked for from the Computers page, on the road its button names or on the picker, keyed
    * by the ask so a second press is a fresh panel. Moving to another page shuts it. */
   readonly addAsked: { readonly road: AddRoad | null; readonly n: number } | null;
+  /** The Usage page's tab, kept while the window is open so coming back finds the same one. */
+  readonly usageTab: UsageTab;
+  /** The Agents page's tab and the computer it reads, kept while the window is open. Null reads the one wsp runs on. */
+  readonly agentsTab: AgentsTab;
+  readonly agentsPlace: string | null;
+  /** The page under the Agents page's tab that stands in place of its list: one server or skill, or an add. Moving to
+   * another page, tab or computer drops it. */
+  readonly agentsLevel: AgentsLevel | null;
   go(at: SettingsAt): void;
   setSearch(search: string): void;
   setReads(patch: Partial<SettingsReads>): void;
@@ -99,7 +110,21 @@ export interface SettingsState {
   hideBuild(placeId: string): void;
   askRecipe(placeId: string | null): void;
   askAdd(road: AddRoad | null): void;
+  pickUsageTab(tab: UsageTab): void;
+  pickAgentsTab(tab: AgentsTab): void;
+  pickAgentsPlace(placeId: string | null): void;
+  openAgentsLevel(level: AgentsLevel | null): void;
 }
+
+export type UsageTab = "used" | "limits";
+export type AgentsTab = "agents" | "servers" | "skills";
+
+/** A page under the Agents page's list, by its name for the crumb: one item of the tab's kind by its key, the tab's
+ * add, or one thing the add found, by its key and the search that found it. `up` is where the crumb's back goes. */
+export type AgentsLevel =
+  | { readonly kind: "item"; readonly key: string; readonly name: string }
+  | { readonly kind: "add"; readonly name: string; readonly query?: string }
+  | { readonly kind: "found"; readonly key: string; readonly name: string; readonly query: string; readonly up: AgentsLevel };
 
 export const useSettingsStore = create<SettingsState>(set => ({
   at: typeof window === "undefined" ? FIRST_PAGE : readStored(),
@@ -110,14 +135,31 @@ export const useSettingsStore = create<SettingsState>(set => ({
   buildShown: null,
   recipeAsked: null,
   addAsked: null,
+  usageTab: "used",
+  agentsTab: "agents",
+  agentsPlace: null,
+  agentsLevel: null,
   go(at) {
-    set({ at, search: "", recipeAsked: null, addAsked: null });
+    set({ at, search: "", recipeAsked: null, addAsked: null, agentsLevel: null });
     try {
       window.localStorage.setItem(AT_KEY, atId(at));
     } catch {
       // A browser that refuses storage keeps the page for this window alone.
     }
   },
+  pickUsageTab(usageTab) {
+    set({ usageTab });
+  },
+  pickAgentsTab(agentsTab) {
+    set({ agentsTab, agentsLevel: null });
+  },
+  pickAgentsPlace(agentsPlace) {
+    set({ agentsPlace, agentsLevel: null });
+  },
+  openAgentsLevel(agentsLevel) {
+    set({ agentsLevel });
+  },
+
   setSearch(search) {
     set({ search });
   },

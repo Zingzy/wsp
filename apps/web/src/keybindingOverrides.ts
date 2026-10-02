@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The person's own chords over the defaults. An override names one chord for a
 // command and replaces every default chord that command has, keeping the
-// default's when, so a chord moved off the terminal still reads only while the
-// terminal has focus. The chord reader is adapted from pingdotgg/t3code
+// when of its default on that chord, else of its first default, so a chord
+// moved off the terminal still reads only while the terminal has focus and a
+// chord moved back onto a default reads where that default did. The chord reader is adapted from pingdotgg/t3code
 // apps/web/src/components/settings/KeybindingsSettings.logic.ts at 57a66608
 // (MIT); the clash check asks whether two rules can fire in one context rather
 // than comparing their when text.
@@ -16,16 +17,33 @@ const isCommand = (id: string): id is KeybindingCommand => (KEYBINDING_COMMANDS 
 
 /** The rules with each override in place of its command's defaults. An override for a command this build does not
  * dispatch, or whose chord does not parse, is left out, so a hand-edited record cannot unbind a command. */
-export function rulesWith(defaults: ReadonlyArray<KeybindingRule>, overrides: Readonly<Record<string, string>>): KeybindingRule[] {
+export function rulesWith(defaults: ReadonlyArray<KeybindingRule>, overrides: Readonly<Record<string, string>>, platform = navigator.platform): KeybindingRule[] {
   const moved = Object.entries(overrides).filter((entry): entry is [KeybindingCommand, string] => isCommand(entry[0]) && parseKeybindingShortcut(entry[1]) !== null);
   if (moved.length === 0) return [...defaults];
   const commands = new Set(moved.map(([command]) => command));
   const kept = defaults.filter(rule => !commands.has(rule.command));
   const added = moved.map(([command, key]): KeybindingRule => {
-    const when = defaults.find(rule => rule.command === command)?.when;
+    const when = overrideWhen(defaults, command, key, platform);
     return when === undefined ? { key, command } : { key, command, when };
   });
   return [...kept, ...added];
+}
+
+/** The command's default rule on this chord, however the chord is spelled for the platform. */
+function defaultOn(defaults: ReadonlyArray<KeybindingRule>, command: KeybindingCommand, key: string, platform: string): KeybindingRule | undefined {
+  const shortcut = parseKeybindingShortcut(key);
+  if (shortcut === null) return undefined;
+  const chord = shortcutConflictKey(shortcut, platform);
+  return defaults.find(rule => {
+    const at = rule.command === command ? parseKeybindingShortcut(rule.key) : null;
+    return at !== null && shortcutConflictKey(at, platform) === chord;
+  });
+}
+
+/** The when a chord of the person's own takes for a command: its default's on the same chord, else its first
+ * default's. */
+function overrideWhen(defaults: ReadonlyArray<KeybindingRule>, command: KeybindingCommand, key: string, platform: string): string | undefined {
+  return (defaultOn(defaults, command, key, platform) ?? defaults.find(rule => rule.command === command))?.when;
 }
 
 const compiled = new WeakMap<object, ResolvedKeybindingsConfig>();
@@ -103,11 +121,12 @@ export interface ChordRead {
 }
 
 /** Why a command cannot take this chord, or null where it can: another command's rule holds it in a context both can
- * fire in, or a browser tab keeps it for its own, which is refused in the desktop too so one binding works in both. */
+ * fire in, or a browser tab keeps it for its own and it is none of the command's defaults, which is refused in the
+ * desktop too so one binding works in both. */
 export function chordRefusal(rules: ReadonlyArray<KeybindingRule>, command: KeybindingCommand, chord: string, read: ChordRead): string | null {
   const shortcut = parseKeybindingShortcut(chord);
   if (shortcut === null) return null;
-  const when = rules.find(rule => rule.command === command)?.when;
+  const when = overrideWhen(DEFAULT_KEYBINDINGS, command, chord, read.platform);
   const key = shortcutConflictKey(shortcut, read.platform);
   const holders = rules
     .filter(rule => rule.command !== command)
@@ -118,6 +137,7 @@ export function chordRefusal(rules: ReadonlyArray<KeybindingRule>, command: Keyb
     .map(rule => read.labelOf(rule.command));
   const named = [...new Set(holders)];
   if (named.length > 0) return CHORD_WORDS.taken(named);
-  if (browserTabClaimsShortcut(shortcut, read.platform)) return CHORD_WORDS.tabKeeps(formatShortcutLabel(shortcut, read.platform));
+  // A command's own default stands where it stood, so a chord moved off one goes back onto it.
+  if (browserTabClaimsShortcut(shortcut, read.platform) && defaultOn(DEFAULT_KEYBINDINGS, command, chord, read.platform) === undefined) return CHORD_WORDS.tabKeeps(formatShortcutLabel(shortcut, read.platform));
   return null;
 }

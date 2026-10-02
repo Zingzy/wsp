@@ -95,41 +95,27 @@ export function parseTimestampDate(isoDate: string): Date | null {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
-// Deliberately not the host locale: the tooltip's ordinal suffix and
-// day-before-month order below are English, so a localized month alone would
-// read "4th Juni 2026". Localizing the whole label is a separate change.
-const monthNameFormatter = new Intl.DateTimeFormat(APP_LOCALE, { month: "long" });
-
-function ordinalSuffix(day: number): string {
-  const lastTwo = day % 100;
-  if (lastTwo >= 11 && lastTwo <= 13) return "th";
-  switch (day % 10) {
-    case 1:
-      return "st";
-    case 2:
-      return "nd";
-    case 3:
-      return "rd";
-    default:
-      return "th";
-  }
-}
-
-/**
- * Long-form tooltip label, e.g. `12:04, 4th June`.
- * Renders the wall-clock time without seconds followed by the ordinal day and month name.
- */
-export function formatChatTimestampTooltip(
+/** A chat message's stamp: `Oct 1, 3:54 PM`, with the year once it is not this year's. */
+export function formatChatTimestamp(
   isoDate: string,
   timestampFormat: TimestampFormat,
+  nowMs: number = Date.now(),
 ): string {
   const date = parseTimestampDate(isoDate);
   if (!date) return "";
-  const time = formatShortTimestamp(isoDate, timestampFormat);
-  const day = date.getDate();
-  const month = monthNameFormatter.format(date);
-  const year = date.getFullYear();
-  return `${time}, ${day}${ordinalSuffix(day)} ${month} ${year}`;
+  const withYear = date.getFullYear() !== new Date(nowMs).getFullYear();
+  const cacheKey = `${timestampFormat}:chat:${withYear ? "year" : "no-year"}`;
+  let formatter = timestampFormatterCache.get(cacheKey);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat(timestampLocale, {
+      month: "short",
+      day: "numeric",
+      ...(withYear ? { year: "numeric" } : {}),
+      ...getTimestampFormatOptions(timestampFormat, false),
+    });
+    timestampFormatterCache.set(cacheKey, formatter);
+  }
+  return formatter.format(date);
 }
 
 export function formatShortTimestamp(isoDate: string, timestampFormat: TimestampFormat): string {
@@ -137,16 +123,6 @@ export function formatShortTimestamp(isoDate: string, timestampFormat: Timestamp
   if (!date) return "";
   return getTimestampFormatter(timestampFormat, false).format(date);
 }
-
-const numericDateFormatter = new Intl.DateTimeFormat(timestampLocale, {
-  month: "numeric",
-  day: "numeric",
-});
-const numericDateWithYearFormatter = new Intl.DateTimeFormat(timestampLocale, {
-  month: "numeric",
-  day: "numeric",
-  year: "numeric",
-});
 
 /**
  * How many local calendar days back a moment is: 0 today, 1 yesterday, more
@@ -160,30 +136,6 @@ export function daysBack(date: Date, nowMs: number = Date.now()): number {
   const startOfThatDay = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
   // Round so DST-shifted 23/25 hour days still count as whole days.
   return Math.round((startOfToday - startOfThatDay) / 86_400_000);
-}
-
-/**
- * Chat timestamp that adds the date once the message is no longer from today:
- * today `12:34 PM`, yesterday `yesterday at 12:34 PM`, older `8/13 12:34 PM`
- * (locale digit order), with the year included once the calendar year differs.
- */
-export function formatDayAwareTimestamp(
-  isoDate: string,
-  timestampFormat: TimestampFormat,
-  nowMs: number = Date.now(),
-): string {
-  const date = parseTimestampDate(isoDate);
-  if (!date) return "";
-  const time = getTimestampFormatter(timestampFormat, false).format(date);
-
-  const now = new Date(nowMs);
-  const dayDiff = daysBack(date, nowMs);
-
-  if (dayDiff <= 0) return time;
-  if (dayDiff === 1) return `yesterday at ${time}`;
-  const dateFormatter =
-    date.getFullYear() === now.getFullYear() ? numericDateFormatter : numericDateWithYearFormatter;
-  return `${dateFormatter.format(date)} ${time}`;
 }
 
 /**

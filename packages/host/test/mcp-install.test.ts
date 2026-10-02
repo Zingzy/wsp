@@ -330,16 +330,23 @@ describe("installing the MCP server for a local agent", () => {
     expect(nonsense.errors[0]).toContain("unknown command: nope");
   });
 
-  it("a host start brings the skill copies already on this computer up to its own, and writes none where there is none", () => {
-    const claude = join(home, ".claude", "skills", "wsp", "SKILL.md");
-    mkdirSync(dirname(claude), { recursive: true });
-    writeFileSync(claude, "the words of an older wsp\n");
-    // The copy that is there is rewritten; the agent that never took one is left alone.
-    expect(refreshSkills(home)).toEqual(["~/.claude/skills/wsp/SKILL.md"]);
-    expect(readFileSync(claude, "utf8")).toBe(WSP_SKILL);
-    expect(existsSync(join(home, ".codex", "skills", "wsp", "SKILL.md"))).toBe(false);
+  it("a host start brings up to its own the skill copies of the agents whose wsp entry names its state, and writes none elsewhere", () => {
+    const state = join(home, "wsp", "state.json");
+    installMcp("claude", mcpServerSpec(state), home);
+    installMcp("codex", mcpServerSpec(join(home, "other", "state.json")), home);
+    const copy = (agent: string): string => join(home, `.${agent}`, "skills", "wsp", "SKILL.md");
+    for (const agent of ["claude", "codex", "gemini"]) {
+      mkdirSync(dirname(copy(agent)), { recursive: true });
+      writeFileSync(copy(agent), "the words of an older wsp\n");
+    }
+    // Claude dials this state, so its copy is rewritten; Codex dials another host's, and Gemini holds no entry.
+    expect(refreshSkills(home, state)).toEqual(["~/.claude/skills/wsp/SKILL.md"]);
+    expect(readFileSync(copy("claude"), "utf8")).toBe(WSP_SKILL);
+    expect(readFileSync(copy("codex"), "utf8")).toBe("the words of an older wsp\n");
+    expect(readFileSync(copy("gemini"), "utf8")).toBe("the words of an older wsp\n");
+    expect(existsSync(join(home, ".pi", "agent", "skills", "wsp", "SKILL.md"))).toBe(false);
     // A copy that already matches is not rewritten, so a start says nothing about it.
-    expect(refreshSkills(home)).toEqual([]);
+    expect(refreshSkills(home, state)).toEqual([]);
   });
 
   it("what an install says: the agent and its file, the by-hand line when the server was not written, and where the skill went", () => {

@@ -38,6 +38,10 @@ export interface CommandPaletteSubmenuItem extends CommandPaletteItem {
   readonly addonIcon: ReactNode;
   readonly groups: ReadonlyArray<CommandPaletteGroup>;
   readonly initialQuery?: string;
+  /** The search field's ghost while the page is open, in place of the submenu's own, and what a search that finds
+   * nothing on it says. */
+  readonly placeholder?: string;
+  readonly emptyStateMessage?: string;
 }
 
 export interface CommandPaletteGroup {

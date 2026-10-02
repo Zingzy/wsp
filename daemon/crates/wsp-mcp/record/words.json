@@ -483,7 +483,6 @@
     "fixAsked": "{name}: asked {agent} to fix {check}",
     "fixConflicts": "{name}: asked {agent} to fix the conflicts with {base}",
     "fixNothing": "{name}: updated from {base}, nothing to fix",
-    "fixAgentDefault": "Claude Code",
     "fixMergeChild": "{name}: asked {agent} to merge {child}",
     "fixCheckOrChild": "name a failed check or a child to merge, not both",
     "merged": "{name}: merged #{number} ({method})",

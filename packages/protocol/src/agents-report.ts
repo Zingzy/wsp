@@ -13,6 +13,11 @@ import { AgentSetupView } from "./thread-defaults.js";
 export const AgentSignInState = z.enum(["signed-in", "vault-key", "none"]);
 export type AgentSignInState = z.infer<typeof AgentSignInState>;
 
+/** What an agent's own login there is, as its status command says it: a key, a plan's subscription, or another
+ * account's OAuth. Absent where the status names none; signed out is the row's sign-in word. */
+export const AgentSignInKind = z.enum(["api-key", "subscription", "oauth"]);
+export type AgentSignInKind = z.infer<typeof AgentSignInKind>;
+
 /** What a report is read off: a computer by the id places.list gives it (this one's included), with `project` one of
  * the projects on it by its id or its name, which is what an act on that project's skills and servers names; or one
  * workspace. */
@@ -62,6 +67,10 @@ export const AgentRow = z.object({
   /** How its sign-in there stands, in the status command's own terms (OAuth credentials, an API key and the variable
    * it came from); names only, never a value. */
   signInDetail: z.string().optional(),
+  /** What that login is, read off the same status, for a reader that draws the kind and never the sentence. */
+  signInKind: AgentSignInKind.optional(),
+  /** The plan that status names for the login, in the agent's own word (max, pro), where it names one. */
+  signInPlan: z.string().optional(),
   /** The newer version its vendor publishes and the command that installs it, which the person runs in a terminal
    * there: wsp never swaps a binary under a running thread. */
   update: z.object({ to: z.string(), command: z.string() }).optional(),

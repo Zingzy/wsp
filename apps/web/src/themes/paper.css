@@ -12,6 +12,7 @@
   --accent-foreground: oklch(21% 0.006 285.885);
   --primary: oklch(0.488 0.217 264);
   --primary-foreground: #fff;
+  --hero-field: var(--color-violet-600);
   --border: oklch(92% 0.004 286.32);
   --input: oklch(87.1% 0.006 286.286);
   /* Emerald and amber at 500 read 2.46:1 and 2.15:1 on white as fills; 600 clears the 3:1 graphics floor. */

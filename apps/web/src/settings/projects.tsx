@@ -7,9 +7,10 @@
 // and otherwise asks first and lands the runtime's answer as the toast.
 import { HueSelect, IconSelect } from "../projects/LookPicker.js";
 import { ProjectGlyph } from "../projects/look.js";
-import { useState } from "react";
+import { GlyphFrame } from "./grid.js";
+import { useEffect, useState } from "react";
 import { agentName } from "@wsp/catalog";
-import { HERE_PLACE_ID, fmtBytes, plural, projectInUseRefusal, type ProjectLook, type ProjectSource, type ProjectView } from "@wsp/protocol";
+import { ACCESS_CHOICES, HERE_PLACE_ID, accessRefusal, type AccessChoice, type ProjectLook, type ProjectOverridesPatch, type ProjectSource, type ProjectView, type ThreadDefaults } from "@wsp/protocol";
 import { AlertDialog, AlertDialogClose, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogPopup, AlertDialogTitle } from "../components/ui/alert-dialog.js";
 import { Button, DANGER_BUTTON, NEUTRAL_RING } from "../components/ui/button.js";
 import { AddButton } from "../components/ui/add-button.js";
@@ -17,10 +18,15 @@ import type { Api } from "../protocol/client.js";
 import { placeNames, projectComputerWord } from "../sidebar/workspaceRows.js";
 import { PROJECT_WORDS } from "../sidebar/words.js";
 import { RefusalSlot } from "./sheetParts.js";
-import { PROJECTS_WORDS, WHERE_WORDS } from "./format.js";
-import { builtWhen } from "./image.js";
+import { AGENTS_PAGE_WORDS, PROJECTS_WORDS, WHERE_WORDS } from "./format.js";
+import { AgentChoice, defaultAgentOf, modelLabel, newThreadPicks } from "./agents.js";
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../components/ui/select.js";
+import { SELECT_WIDTH } from "./layout.js";
 import { hereName, isProviderPlace, placeName } from "./places.js";
-import { Cards, type SettingsCardData, type SettingsItem } from "./rows.js";
+import { CARD_SURFACE, Card, Cards, HeadRow, Row, type SettingsCardData } from "./rows.js";
+import { VALUE } from "./format.js";
+import { cn } from "../lib/utils.js";
+import { useSidebarProjects } from "../protocol/store.js";
 import type { SettingsContext } from "./settingsContext.js";
 import type { SettingsAt } from "./settingsStore.js";
 
@@ -65,7 +71,7 @@ export function projectsCards(ctx: SettingsContext): SettingsCardData[] {
     return [{ id: "projects", items: [], under: <><RefusalSlot k="projects-refused" said={PROJECT_WORDS.notRead(said)} {...(fix === undefined ? {} : { fix })} />{under}</> }];
   }
   if (ctx.projects.length === 0) {
-    return [{ id: "projects", items: [{ kind: "row", id: "none", title: PROJECTS_WORDS.none, description: PROJECTS_WORDS.noneDescription, attrs: { "data-k": "projects-none" } }], under }];
+    return [{ id: "projects", items: [{ kind: "line", id: "none", label: `${PROJECTS_WORDS.none} ${PROJECTS_WORDS.noneDescription}`, empty: true, attrs: { "data-k": "projects-none" } }], under }];
   }
   return [
     {
@@ -77,7 +83,11 @@ export function projectsCards(ctx: SettingsContext): SettingsCardData[] {
           kind: "row" as const,
           id: project.id,
           title: project.name,
-          lead: <ProjectGlyph projectId={project.id} />,
+          lead: (
+            <GlyphFrame>
+              <ProjectGlyph projectId={project.id} />
+            </GlyphFrame>
+          ),
           description: [computer, sourceWord(project.source)],
           mono: true,
           // A project nothing stands on reads 0: the count is loaded, and a blank where a sibling reads 3 is a
@@ -136,32 +146,169 @@ function RemoveProjectControl({ project, refusal, line, api, onRemoved, failed, 
   );
 }
 
+/** A select that names what it inherits grows to say all of it, from the one width the rest take. */
+const INHERITS_WIDTH = cn(SELECT_WIDTH, "w-auto min-w-44 max-sm:w-auto max-sm:min-w-36");
+
+/** What each project's new threads start on as the host resolves it, read again whenever the record they are
+ * resolved from moves. */
+function useProjectDefaults(ctx: SettingsContext): Record<string, ThreadDefaults> | null {
+  const read = ctx.api?.projectsDefaults;
+  const [defaults, setDefaults] = useState<Record<string, ThreadDefaults> | null>(null);
+  const { defaultAgent, agentDefaults, projectDefaults } = ctx.preferences;
+  const moved = JSON.stringify([defaultAgent, agentDefaults, projectDefaults]);
+  useEffect(() => {
+    if (read === undefined) return;
+    let live = true;
+    read().then(
+      next => live && setDefaults(next),
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  }, [read, moved]);
+  return defaults;
+}
+
+/** New threads in this project: its own agent, model and access over each agent's, each row naming what it takes
+ * while unset and carrying the arrow back while set, written through the host's preferences. */
+function ProjectNewThreads({ project, ctx }: { project: ProjectView; ctx: SettingsContext }) {
+  const resolved = useProjectDefaults(ctx)?.[project.id];
+  const own = ctx.preferences.projectDefaults[project.id] ?? {};
+  const set = (patch: ProjectOverridesPatch): void => ctx.setPreferences({ projectDefaults: { [project.id]: patch } });
+  const globalAgent = defaultAgentOf(ctx.harnesses);
+  const agentId = resolved?.agent.value ?? own.agent ?? globalAgent?.harness;
+  const catalog = ctx.harnesses.find(c => c.harness === agentId);
+  if (globalAgent === undefined || catalog === undefined) return null;
+  const agentPicks = newThreadPicks(catalog);
+  // A word no agent, model or access is spelled as: the select's empty value reads as a placeholder.
+  const UNSET = "@unset";
+  const unsetAgent = PROJECTS_WORDS.inherits(globalAgent.label);
+  const unsetModel = agentPicks.model === undefined ? undefined : PROJECTS_WORDS.inherits(modelLabel(catalog, agentPicks.model));
+  const unsetAccess = agentPicks.access === undefined ? undefined : PROJECTS_WORDS.inherits(AGENTS_PAGE_WORDS.accessWords[agentPicks.access], catalog.label);
+  const models = [...catalog.models, ...(catalog.legacyModels ?? [])];
+  const accesses = ACCESS_CHOICES.filter(word => accessRefusal(catalog, word) === null);
+  const modelSet = own.model !== undefined && resolved?.model?.from === "project";
+  return (
+    <Card id="project-new-threads" head={PROJECTS_WORDS.newThreads}>
+      <Row
+        id="project-agent"
+        title={PROJECTS_WORDS.defaultAgent}
+        description={own.agent === undefined ? PROJECTS_WORDS.agentUnset : PROJECTS_WORDS.agentSet}
+        control={
+          <Select value={own.agent ?? UNSET} onValueChange={next => set({ agent: next === UNSET ? null : (next as string) })}>
+            <SelectTrigger size="sm" aria-label={PROJECTS_WORDS.defaultAgent} data-k="project-agent" className={INHERITS_WIDTH}>
+              <SelectValue>{(value: string) => (value === UNSET ? unsetAgent : <AgentChoice id={value} label={ctx.harnesses.find(c => c.harness === value)?.label ?? agentName(value)} />)}</SelectValue>
+            </SelectTrigger>
+            <SelectPopup>
+              <SelectItem value={UNSET}>{unsetAgent}</SelectItem>
+              {ctx.harnesses.map(c => (
+                <SelectItem key={c.harness} value={c.harness}>
+                  <AgentChoice id={c.harness} label={c.label} />
+                </SelectItem>
+              ))}
+            </SelectPopup>
+          </Select>
+        }
+        {...(own.agent === undefined ? {} : { reset: () => set({ agent: null }) })}
+      />
+      {unsetModel === undefined ? null : (
+        <Row
+          id="project-model"
+          title={PROJECTS_WORDS.model}
+          description={modelSet ? PROJECTS_WORDS.ownSet : PROJECTS_WORDS.ownUnset}
+          control={
+            <Select value={modelSet ? own.model! : UNSET} onValueChange={next => set({ model: next === UNSET ? null : (next as string) })}>
+              <SelectTrigger size="sm" aria-label={PROJECTS_WORDS.model} data-k="project-model" className={INHERITS_WIDTH}>
+                <SelectValue>{(value: string) => (value === UNSET ? unsetModel : modelLabel(catalog, value))}</SelectValue>
+              </SelectTrigger>
+              <SelectPopup>
+                <SelectItem value={UNSET}>{unsetModel}</SelectItem>
+                {models.map(m => (
+                  <SelectItem key={m.value} value={m.value}>
+                    {m.label}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
+          }
+          {...(modelSet ? { reset: () => set({ model: null }) } : {})}
+        />
+      )}
+      {unsetAccess === undefined ? null : (
+        <Row
+          id="project-access"
+          title={PROJECTS_WORDS.access}
+          description={own.access === undefined ? PROJECTS_WORDS.ownUnset : PROJECTS_WORDS.ownSet}
+          control={
+            <Select value={own.access ?? UNSET} onValueChange={next => set({ access: next === UNSET ? null : (next as AccessChoice) })}>
+              <SelectTrigger size="sm" aria-label={PROJECTS_WORDS.access} data-k="project-access" className={INHERITS_WIDTH}>
+                <SelectValue>{(value: string) => (value === UNSET ? unsetAccess : AGENTS_PAGE_WORDS.accessWords[value as AccessChoice])}</SelectValue>
+              </SelectTrigger>
+              <SelectPopup>
+                <SelectItem value={UNSET}>{unsetAccess}</SelectItem>
+                {accesses.map(word => (
+                  <SelectItem key={word} value={word}>
+                    {AGENTS_PAGE_WORDS.accessWords[word]}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
+          }
+          {...(own.access === undefined ? {} : { reset: () => set({ access: null }) })}
+        />
+      )}
+    </Card>
+  );
+}
+
 /** One project's own page. */
+/** The threads on a project's workspaces, off the sidebar's own snapshots so the page counts what the sidebar shows. */
+function ThreadCount({ project }: { project: Pick<ProjectView, "id"> }) {
+  const threads = useSidebarProjects()
+    .filter(snapshot => snapshot.workspace.project.id === project.id)
+    .flatMap(snapshot => snapshot.threads);
+  const running = threads.filter(thread => thread.status === "running").length;
+  return (
+    <span data-k="project-threads" className={VALUE}>
+      {PROJECTS_WORDS.threads(threads.length, running)}
+    </span>
+  );
+}
+
+/** The repository's page in the browser, where the remote is one a browser can open. */
+function RemoteOpen({ remote }: { remote: string }) {
+  const url = /^https?:\/\//.test(remote) ? remote : /^git@([^:]+):(.+?)(\.git)?$/.exec(remote)?.slice(1, 3).join("/");
+  if (url === undefined) return null;
+  const href = url.startsWith("http") ? url : `https://${url}`;
+  return (
+    <Button size="xs" variant="outline" data-k="remote-open" onClick={() => void window.open(href, "_blank", "noopener,noreferrer")}>
+      {PROJECTS_WORDS.open}
+    </Button>
+  );
+}
+
 export function ProjectPage({ project, ctx }: { project: ProjectView; ctx: SettingsContext }) {
   const place = ctx.places.find(p => p.id === project.computer);
   const computer = project.computer === HERE_PLACE_ID ? hereName(ctx.places) : place === undefined ? project.computer : placeName(place);
   const standing = workspacesOn(ctx, project);
-  const refusal = standing.length === 0 ? null : projectInUseRefusal(project.name, standing);
+  const refusal = standing.length === 0 ? null : PROJECTS_WORDS.inUse(standing.length);
   const line = removeLine(ctx, project);
-  const facts: SettingsItem[] = [
-    { kind: "line", id: "source", label: PROJECTS_WORDS.source, value: sourceWord(project.source), hover: PROJECTS_WORDS.sourceHover, attrs: { "data-k": "source" } },
-    { kind: "line", id: "computer", label: PROJECTS_WORDS.computer, value: computer, hover: PROJECTS_WORDS.computerHover, attrs: { "data-k": "computer" } },
-    { kind: "line", id: "remote", label: PROJECTS_WORDS.remote, value: project.remote, hover: PROJECTS_WORDS.remoteHover, attrs: { "data-k": "remote" } },
-    { kind: "line", id: "added", label: PROJECTS_WORDS.added, value: builtWhen(project.createdAt, ctx.now), hover: PROJECTS_WORDS.addedHover, attrs: { "data-k": "added" } },
-    ...(project.seeded === undefined
-      ? []
-      : [{ kind: "line" as const, id: "seeded", label: PROJECTS_WORDS.seeded, value: [plural(project.seeded.files, "file"), fmtBytes(project.seeded.bytes), `memory ${project.seeded.memory}`], hover: PROJECTS_WORDS.seededHover(hereName(ctx.places)), attrs: { "data-k": "seeded" } }]),
-  ];
-  const starts: SettingsItem[] = [
-    { kind: "row", id: "branch", title: PROJECTS_WORDS.branch, description: PROJECTS_WORDS.branchDescription, word: project.base ?? project.defaultBranch, attrs: { "data-k": "branch" } },
-    ...(project.lastAgent === undefined ? [] : [{ kind: "row" as const, id: "last-agent", title: PROJECTS_WORDS.lastAgent, description: PROJECTS_WORDS.lastAgentDescription, word: agentName(project.lastAgent), attrs: { "data-k": "last-agent" } }]),
-  ];
   const look = ctx.preferences.projectLook[project.id];
   const icon = look?.icon ?? "folder";
   const hue = look?.hue ?? "neutral";
   const setLook = (next: ProjectLook): void => ctx.setPreferences({ projectLook: { [project.id]: next } });
   const cards: SettingsCardData[] = [
-    { id: "facts", head: PROJECTS_WORDS.about, items: facts },
+    {
+      id: "project",
+      items: [],
+      body: (
+        <div className={cn(CARD_SURFACE, "flex flex-col [&>*+*]:border-t [&>*+*]:border-border/50")}>
+          <HeadRow glyph={<ProjectGlyph projectId={project.id} />} title={project.name} line={<span>{PROJECTS_WORDS.where(sourceWord(project.source), computer)}</span>} slot={<ThreadCount project={project} />} attrs={{ "data-k": "project-head" }} />
+          {project.remote === undefined || project.remote === "" ? null : <Row id="remote" title={PROJECTS_WORDS.repository} description={project.remote} mono control={<RemoteOpen remote={project.remote} />} attrs={{ "data-k": "remote" }} />}
+        </div>
+      ),
+    },
     {
       id: "look",
       head: PROJECTS_WORDS.look,
@@ -170,7 +317,6 @@ export function ProjectPage({ project, ctx }: { project: ProjectView; ctx: Setti
         { kind: "row", id: "hue", title: PROJECTS_WORDS.hue, description: PROJECTS_WORDS.hueDescription, control: <HueSelect hue={hue} onChange={next => setLook({ icon, hue: next })} /> },
       ],
     },
-    { id: "starts", head: PROJECTS_WORDS.newWorkspaces, items: starts },
     {
       id: "acts",
       items: [
@@ -184,5 +330,11 @@ export function ProjectPage({ project, ctx }: { project: ProjectView; ctx: Setti
       ],
     },
   ];
-  return <Cards cards={cards} />;
+  return (
+    <>
+      <Cards cards={cards.slice(0, 1)} />
+      <ProjectNewThreads project={project} ctx={ctx} />
+      <Cards cards={cards.slice(1)} />
+    </>
+  );
 }

@@ -51,7 +51,7 @@ import { HERE_PLACE_ID, namesPlace } from "./place-word.js";
 import { threadNeedsYou } from "./thread-state.js";
 import { Checkout } from "./changes.js";
 import { GitBranchCompareReply, GitMergeInReply, GitStartOnReply, TreeFact } from "./tree.js";
-import { GitPrReadReply, GitPrViewReply, GitPrMergeReply, GitRepoReadReply, GitRunLogReply, GitUpdateReply, MergeMethod, PullRequest, PullRequestSeen } from "./pull-request.js";
+import { GitPrReadReply, GitPrViewReply, GitPrMergeReply, GitRepoReadReply, GitRunLogReply, GitUpdateReply, MergeMethod, PullRequest, PullRequestItem, PullRequestSeen } from "./pull-request.js";
 import { GitIssueReadReply, GitPrCheckoutReply, GitPrDiffReply, GitPrReviewReply, ReviewDraft, WorkspaceFrom } from "./start.js";
 import { AGENTS_ON, NAP_AFTER_MAX_MS, placeAtLimitLine, placeFullLine } from "./place-state.js";
 import type { AbsentComputer } from "./workspace-state.js";
@@ -294,7 +294,7 @@ export const Capabilities = z.object({
   /** The machine is the person's own, kept: its files, its sign-ins and its git checkouts outlive every turn, and
    * wsp neither made it nor throws it away. False on a fork wsp made, where a turn that wrecks the disk costs a
    * rebuild and nothing else. Whether the access picker names the machine on the pick that asks nothing reads this;
-   * what a thread with no access word runs at is the kind's own row, read through workspaceAccess. */
+   * what a thread with no access word runs at is the person's default, which markedFor places. */
   kept: z.boolean(),
   /** The computer makes a workspace as a copy of itself with the project inside. A Linux box and a provider fork
    * yes; the computer the app runs on yes, by copying the project folder to a path of its own; a machine reached
@@ -525,8 +525,6 @@ export const ProjectView = z.object({
   /** The branch a new workspace starts on; absent is the remote's default branch, read at the clone. */
   base: z.string().optional(),
   createdAt: z.string(),
-  /** The agent the last thread on this project used; what run and the composer default to. */
-  lastAgent: z.string().optional(),
 });
 export type ProjectView = z.infer<typeof ProjectView>;
 
@@ -1156,6 +1154,8 @@ export const HarnessModel = HarnessOption.extend({
   contextWindows: z.array(z.string()).optional(),
   /** The model has a faster output the CLI turns on per turn; the composer offers Fast only on a model marked so. */
   fast: z.boolean().optional(),
+  /** An id the person added by hand that this list did not carry. */
+  added: z.literal(true).optional(),
 });
 export type HarnessModel = z.infer<typeof HarnessModel>;
 
@@ -1534,6 +1534,8 @@ export const SessionQueuedEvent = z.object({
   type: z.literal("session.queued"),
   workspaceId: z.string(),
   threadId: z.string(),
+  /** The agent the waiting message runs on: the thread's own. */
+  harness: z.string(),
   prompt: z.string(),
   /** The id the client minted for the sessions.start that waits. */
   requestId: z.string().optional(),
@@ -3899,15 +3901,23 @@ export const DaemonRequest = z.discriminatedUnion("op", [
     machineId: z.string().optional(),
   }),
   /** An issue, or a pull request read as the issue it also is, by number in the repository the remote names, answered
-   * as a GitIssueReadReply with each body cut as a page cuts it. */
+   * as a GitIssueReadReply with each body cut as a list cuts it. */
   z.object({ id: reqId, op: z.literal("git.issueRead"), cwd: z.string(), remote: z.string(), number: z.number().int().nonnegative(), machineId: z.string().optional() }),
   /** Puts the copy on a pull request's head branch through the git host's own command line, run inside the copy, the
    * host read off the copy's own remote; answered as a GitPrCheckoutReply naming the branch, which tracks where the
    * head lives. */
   z.object({ id: reqId, op: z.literal("git.prCheckout"), cwd: z.string(), number: z.number().int().nonnegative(), machineId: z.string().optional() }),
-  /** A pull request's diff against its base, cut on a file's boundary at REVIEW_DIFF_MAX_BYTES, answered as a
-   * GitPrDiffReply naming every file the cut left out. */
-  z.object({ id: reqId, op: z.literal("git.prDiff"), cwd: z.string(), remote: z.string(), number: z.number().int().nonnegative(), machineId: z.string().optional() }),
+  /** A pull request's diff against its base, cut on a file's boundary at maxBytes, never past GIT_DIFF_CAP_BYTES and
+   * REVIEW_DIFF_MAX_BYTES where absent, answered as a GitPrDiffReply naming every file the cut left out. */
+  z.object({
+    id: reqId,
+    op: z.literal("git.prDiff"),
+    cwd: z.string(),
+    remote: z.string(),
+    number: z.number().int().nonnegative(),
+    maxBytes: z.number().int().positive().optional(),
+    machineId: z.string().optional(),
+  }),
   /** Posts one review in one call pinned to the head named: the verdict, the body and every comment on a line, a comment
    * whose line falls outside the diff put into the body; answered as a GitPrReviewReply. A refusal is the command
    * line's own last line. */
@@ -4661,6 +4671,7 @@ const DAEMON_CONTENTS = [
   "ad16ee01ba69b4bd8339c8aa4753c2f3e46aa80c8d9f1ceeab9ca1038482f062",
   "409fce58696aaa20c7803f7a963841e4aacc0702a153ca6f916fba64f941bd16",
   "89e10a249a0e59670fc8fefec015f640d8f021d0b24bb34665412360cf6b999b",
+  "ffcede69616fafe56cf56a3ec668d56516c22b7c9f53fc5176621c902ad7e639",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -4961,7 +4972,16 @@ const DAEMON_CONTENTS = [
  * Version 110: A joined Mac reports which Mac it is: its place report carries the product name its registry gives, else
  * its model identifier, so the computer's row draws that Mac rather than a server. git.status counts the stashes a
  * repository holds, running or stopped, so a delete names them.
- * Version 111: the room check's refusal is a contract word, so the Mac's copy road says the same sentence. */
+ * Version 111: the room check's refusal is a contract word, so the Mac's copy road says the same sentence.
+ * Version 112: A pull request's page reads when it opened and settled, who merged it into which commit, its labels, the
+ * reviews asked for, each reviewer's latest verdict and its assignees; each commit's message body and, off one GraphQL
+ * read over gh's own first 100 commits, its parents, line counts and rolled-up checks, the newest 100 reviews' ids and
+ * whether each of the newest 100 threads is resolved, with a mark for each part read only in part; every page of its
+ * conversation and its line comments off the REST API, with each author's association with the repository, whether a
+ * bot wrote each comment and the face it shows, and each line comment's hunk, the comment it answers and its review. No
+ * body on the page is cut, and every host line's answer is read to 16 MB and refused past it. A check reads when it
+ * started and finished, a pull request the merge armed on it, and git.prDiff cuts at the bytes asked for, up to the cap
+ * a git.diff has, reading at most four times that before it stops gh and names the files it saw. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -6058,6 +6078,14 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** The workspace's pull request page, read through the git host's command line on this computer, or the running
    * copy's where this computer has none, and answered as a GitPrViewReply; never kept, so every ask reads it anew. */
   z.object({ id: reqId, op: z.literal("workspaces.pullRequestView"), workspaceId: z.string() }),
+  /** The workspace's pull request's diff against its base, read as the page is and cut on a file's boundary at
+   * GIT_DIFF_CAP_BYTES, answered as a GitPrDiffReply naming every file the cut left out. */
+  z.object({ id: reqId, op: z.literal("workspaces.pullRequestDiff"), workspaceId: z.string() }),
+  /** Sends items of the workspace's pull request page to its agent as one message, each with its author, its words
+   * and, for a comment on a line, its file, line and the diff's lines above it, numbered where there are several;
+   * the message joins the workspace's first thread as a fix's does. The host keeps what was sent, with when, and the
+   * page answers it. Answered as a PullRequestSendResult. */
+  z.object({ id: reqId, op: z.literal("workspaces.pullRequestSend"), workspaceId: z.string(), items: z.array(PullRequestItem).min(1) }),
   /** Asks the workspace's agent to fix a failed check, named, with its log's failed steps; with no check, updates the
    * copy from its base first and asks it to fix the conflicts where the merge had any. Answered as a FixResult at
    * once, the turn going on without the caller. */
@@ -6692,6 +6720,7 @@ export const DEVICE_OPS: readonly string[] = [
   "workspaces.checkout",
   "workspaces.viewed",
   "workspaces.pullRequestView",
+  "workspaces.pullRequestDiff",
   // A review draft's ticks, verdict and summary are a record on this computer, as a viewed mark is; its post is not
   // here, since posting under the person's name is the person's act.
   "workspaces.reviewDraft",
@@ -6962,7 +6991,7 @@ export { hereName, isHere, isProviderPlace, placeName, placeOf, workspaceCompute
 export { needsYouLine, threadNeedsYou, threadState, threadStateWord, threadUnread, threadUnseenAt, threadWordOf, waitingLine, type ThreadState } from "./thread-state.js";
 export { AGENTS_ON, CLOUD_CAP_DEFAULT, NAP_AFTER_MAX_MS, NAP_AFTER_MS, phaseHoldsSlot, placeAtLimitLine, placeCapOf, placeFullLine, placeSetRefusal, placeSettingKey, placeSettingsLine, placeTakes, settingFor, napMsOf, placeRoom, placeSpendLimit, runningOn, THREAD_MEM_MB, threadsAtOnce, workspacePlace, workspacePlaceId, type PlacedThread, type PlacedWorkspace } from "./place-state.js";
 export { MCP_SERVER_NAME, threadsFollowed, WSP_TOOL_TIMEOUT_SEC } from "./wsp-tools.js";
-export { type AbsentComputer, type AwayWord, absentComputer, actionRefusal, daemonSilent, ownDaemonDown, START_DAEMON_WORD, agentsKindRefusal, agentsMayDrive, awayMsOf, composerHeldLine, type CopyToDelete, deleteCopiesNotice, deleteNotice, unpushedLine, onDeleteOf, type StandsOn, UNNAMED_COMPUTER, goneRefusal, COMPUTER_LEFT, pausedOrPausing, notAnsweringYet, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, turnSpendWord, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, FORGET_NEEDS_GONE, goneRoadRefusal, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, workspaceAccess, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, whereWord, workspaceStateLine, workspaceStateOf, workspaceWord, type AbsentRoad, type AbsentRoadInput, absentRoad, BACK_OVER_SSH, backUrl, dialsBackWord, linkedOver, lastKnown, REPORTED_WORD, placeDialLine, placeNoDialLine, placeDialRoad, sshRoadOf, type PlaceDialRoad } from "./workspace-state.js";
+export { type AbsentComputer, type AwayWord, absentComputer, actionRefusal, daemonSilent, ownDaemonDown, START_DAEMON_WORD, agentsKindRefusal, agentsMayDrive, awayMsOf, composerHeldLine, type CopyToDelete, deleteCopiesNotice, deleteNotice, unpushedLine, onDeleteOf, type StandsOn, UNNAMED_COMPUTER, goneRefusal, COMPUTER_LEFT, pausedOrPausing, notAnsweringYet, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, turnSpendWord, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, FORGET_NEEDS_GONE, goneRoadRefusal, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, whereWord, workspaceStateLine, workspaceStateOf, workspaceWord, type AbsentRoad, type AbsentRoadInput, absentRoad, BACK_OVER_SSH, backUrl, dialsBackWord, linkedOver, lastKnown, REPORTED_WORD, placeDialLine, placeNoDialLine, placeDialRoad, sshRoadOf, type PlaceDialRoad } from "./workspace-state.js";
 export * from "./agents-report.js";
 export { contextWindowsFor, effortsFor, everyModel, listedPick, markedDefault, modelOf } from "./harness-picks.js";
 export * from "./thread-defaults.js";

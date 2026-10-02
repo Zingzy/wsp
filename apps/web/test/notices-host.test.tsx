@@ -334,7 +334,7 @@ describe("a workspace gone and a newer release", () => {
     expect(texts()).toEqual([HOST_NOTICE_WORDS.gone("api", "the provider no longer knows m1")]);
   });
 
-  it("a version said once is not said again by the next page, a newer one is, and About showing counts as said", () => {
+  it("a version said once is not said again by the next page, a newer one is, and General showing its Version card counts as said", () => {
     (window as unknown as { __WSP__?: unknown }).__WSP__ = { version: "0.1.0" };
     act(() => useStore.setState({ release: releaseView("0.2.0") }));
     expect(texts()).toEqual([HOST_NOTICE_WORDS.released("0.2.0")]);
@@ -345,7 +345,7 @@ describe("a workspace gone and a newer release", () => {
 
     act(() => {
       useStore.setState({ settingsOpen: true });
-      useSettingsStore.getState().go({ kind: "group", group: "about" });
+      useSettingsStore.getState().go({ kind: "group", group: "general" });
     });
     act(() => useStore.setState({ release: releaseView("0.4.0") }));
     act(() => useStore.setState({ settingsOpen: false }));
@@ -387,10 +387,10 @@ describe("a workspace gone and a newer release", () => {
     expect(notices()).toMatchObject([{ kind: "note", text: HOST_NOTICE_WORDS.released("0.2.0"), action: { word: "Get" } }]);
     act(() => notices()[0]!.action!.run());
     expect(open).toHaveBeenCalledWith("https://example.test/v0.2.0", "_blank", "noopener,noreferrer");
-    // About showing says it there instead.
+    // General showing says it on its Version card instead.
     act(() => {
       useStore.setState({ settingsOpen: true });
-      useSettingsStore.getState().go({ kind: "group", group: "about" });
+      useSettingsStore.getState().go({ kind: "group", group: "general" });
     });
     act(() => useStore.setState({ release: view("0.3.0") }));
     expect(notices()).toHaveLength(1);

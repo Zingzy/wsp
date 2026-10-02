@@ -10,7 +10,10 @@ import { randomUUID } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   AUTO_MERGE_OFF_LINE,
+  GIT_DIFF_CAP_BYTES,
   PR_POLL_MS,
+  noSuchItemRefusal,
+  pullRequestSendPrompt,
   checkNotFailedRefusal,
   childPushedLine,
   mergeMethodRefusal,
@@ -366,32 +369,107 @@ describe("settling on merge", () => {
   });
 });
 
+/** A page as git.prView answers it, its items off PR 772 of Zingzy/wsp: a bot's comment, a review, and a comment on a
+ * line with its hunk. */
+const PAGE = {
+  title: "t",
+  body: "b",
+  author: "octocat",
+  createdAt: "2026-09-30T10:00:00Z",
+  updatedAt: "2026-09-30T12:00:00Z",
+  labels: [],
+  reviewRequests: [],
+  latestReviews: [],
+  assignees: [],
+  commits: [{ oid: HEAD, subject: "Set .ci-status to 1", body: "", at: "2026-09-30T11:00:00Z", author: "octocat" }],
+  reviews: [{ id: 5324159317, author: "ana", state: "changes_requested", body: "Two things before this lands.", at: "t" }],
+  comments: [{ id: 5841958969, author: "vercel[bot]", association: "none", bot: true, body: "Deployment failed for project wsp-www.", url: "u", at: "t" }],
+  reviewComments: [
+    { id: 4109844888, path: "packages/engine/src/golden.ts", line: 111, side: "RIGHT", author: "Zingzy", association: "owner", bot: false, body: "Read it twice.", url: "u", at: "t", hunk: "@@ -1 +1 @@\n-a\n+b", resolved: false },
+  ],
+  files: [],
+};
+
 describe("the acts on a pull request", () => {
   it("reads the page over this computer's daemon, never kept", async () => {
-    const page = {
-      title: "t",
-      body: "b",
-      author: "octocat",
-      updatedAt: "2026-09-30T12:00:00Z",
-      commits: [{ oid: HEAD, subject: "Set .ci-status to 1", at: "2026-09-30T11:00:00Z", author: "octocat" }],
-      reviews: [],
-      comments: [],
-      reviewComments: [],
-      files: [],
-    };
     const merge = { methods: ["squash", "merge"], defaultMethod: "squash", autoMerge: true };
-    const daemons = fakeDaemons({ here: { "git.prView": () => ({ id: 1, ok: true, ...page }), "git.repoRead": () => ({ id: 1, ok: true, ...merge }) } });
+    const daemons = fakeDaemons({ here: { "git.prView": () => ({ id: 1, ok: true, ...PAGE }), "git.repoRead": () => ({ id: 1, ok: true, ...merge }) } });
     const { id, remote } = await withWorkspace(daemons);
     await rt!.workspaces.checkout(id);
     await until(async () => (await prOf(id))?.pr?.["number"] === 12);
-    // The pane offers the methods the repository allows, read once an hour on this computer.
-    expect(await rt!.workspaces.pullRequestView({ workspaceId: id })).toEqual({ ...page, merge });
+    // The pane offers the methods the repository allows, read once an hour on this computer, and nothing is sent yet.
+    expect(await rt!.workspaces.pullRequestView({ workspaceId: id })).toEqual({ ...PAGE, merge, sent: [] });
     await rt!.workspaces.pullRequestView({ workspaceId: id });
     expect(daemons.ops("here").filter(op => op === "git.repoRead")).toHaveLength(1);
     expect(daemons.frames.filter(f => f.frame["op"] === "git.prView")).toEqual([
       { road: "here", frame: { op: "git.prView", cwd: root, remote, number: 12 } },
       { road: "here", frame: { op: "git.prView", cwd: root, remote, number: 12 } },
     ]);
+  });
+
+  it("reads the diff over this computer's daemon at the cap a git.diff has, never kept", async () => {
+    const diff = { diff: "diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-one\n+two\n", truncated: false, left: [] };
+    const daemons = fakeDaemons({ here: { "git.prDiff": () => ({ id: 1, ok: true, ...diff }) } });
+    const { id, remote } = await withWorkspace(daemons);
+    await rt!.workspaces.checkout(id);
+    await until(async () => (await prOf(id))?.pr?.["number"] === 12);
+    expect(await rt!.workspaces.pullRequestDiff({ workspaceId: id })).toEqual(diff);
+    expect(daemons.frames.filter(f => f.frame["op"] === "git.prDiff")).toEqual([{ road: "here", frame: { op: "git.prDiff", cwd: root, remote, number: 12, maxBytes: GIT_DIFF_CAP_BYTES } }]);
+  });
+
+  it("sends the items named into the workspace's thread as one message, keeps them sent with when, and the page answers them", async () => {
+    const { clock, advance } = fakeClock();
+    const daemons = fakeDaemons({ here: { "git.prView": () => ({ id: 1, ok: true, ...PAGE }), "git.repoRead": () => ({ id: 1, ok: false, error: "no" }) as DaemonResponse } });
+    const agent = heldAgent();
+    const { id } = await withWorkspace(daemons, { adapters: { claude: agent.factory }, clock });
+    const lead = await rt!.sessions.start(id, { prompt: "set .ci-status to 1" });
+    const threadId = lead.view().threadId!;
+    agent.end(0);
+    await lead.finished;
+    await rt!.workspaces.checkout(id);
+    await until(async () => (await prOf(id))?.pr?.["number"] === 12);
+    const items = [{ kind: "reviewComment", id: 4109844888 }, { kind: "comment", id: 5841958969 }] as const;
+    const at = clock.now();
+    const sent = await rt!.workspaces.pullRequestSend({ workspaceId: id, items: [...items] });
+    expect(sent).toEqual({ outcome: "started", threadId, agent: "claude", sent: items.map(i => ({ ...i, at })) });
+    expect(agent.prompts[1]).toBe(pullRequestSendPrompt(PAGE, items, 12));
+    expect(agent.prompts[1]).toContain("From vercel[bot], from outside the repository:");
+    expect((await rt!.workspaces.pullRequestView({ workspaceId: id })).sent).toEqual(items.map(i => ({ ...i, at })));
+    // Kept on the workspace's record, so a host that restarts still says what was sent.
+    expect(await store.get("workspaces", id)).toMatchObject({ prSent: items.map(i => ({ ...i, at })) });
+    // A second send of one already sent moves its time and adds no second row; an item the page lacks sends nothing.
+    agent.end(1);
+    await until(async () => (await rt!.sessions.list()).every(v => v.status !== "running"));
+    advance(60_000);
+    const twice = { kind: "comment", id: 5841958969 } as const;
+    const again = await rt!.workspaces.pullRequestSend({ workspaceId: id, items: [twice, twice] });
+    expect(again.sent).toEqual([{ kind: "reviewComment", id: 4109844888, at }, { kind: "comment", id: 5841958969, at: at + 60_000 }]);
+    expect(agent.prompts[2]).toBe(pullRequestSendPrompt(PAGE, [twice], 12));
+    await expect(rt!.workspaces.pullRequestSend({ workspaceId: id, items: [{ kind: "review", id: 1 }] })).rejects.toThrow(noSuchItemRefusal({ kind: "review", id: 1 }));
+    expect(agent.prompts).toHaveLength(3);
+    agent.end(2);
+  });
+
+  it("drops what was sent once the workspace's pull request is another one", async () => {
+    const { clock, advance } = fakeClock();
+    let pr = open();
+    const daemons = fakeDaemons({ here: { "git.prRead": () => ({ id: 1, ok: true, pr }), "git.prView": () => ({ id: 1, ok: true, ...PAGE }), "git.repoRead": () => ({ id: 1, ok: false, error: "no" }) as DaemonResponse } });
+    const agent = heldAgent();
+    const { id } = await withWorkspace(daemons, { adapters: { claude: agent.factory }, clock });
+    await rt!.workspaces.checkout(id);
+    await until(async () => (await prOf(id))?.pr?.["number"] === 12);
+    await rt!.workspaces.pullRequestSend({ workspaceId: id, items: [{ kind: "comment", id: 5841958969 }] });
+    expect((await rt!.workspaces.pullRequestView({ workspaceId: id })).sent).toHaveLength(1);
+    // The same pull request read again keeps it.
+    advance(PR_POLL_MS);
+    await until(async () => daemons.frames.filter(f => f.frame["op"] === "git.prRead").length >= 2);
+    expect((await rt!.workspaces.pullRequestView({ workspaceId: id })).sent).toHaveLength(1);
+    pr = open({ number: 13, url: "https://github.com/wsp/pr-lab/pull/13" });
+    advance(PR_POLL_MS);
+    await until(async () => (await prOf(id))?.pr?.["number"] === 13);
+    expect((await rt!.workspaces.pullRequestView({ workspaceId: id })).sent).toEqual([]);
+    expect(await store.get("workspaces", id)).not.toHaveProperty("prSent");
+    agent.end(0);
   });
 
   it("sends a failed check's log into the workspace's thread as a message framed as a log, and answers at once", async () => {

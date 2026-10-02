@@ -3,17 +3,17 @@
 // composer included, the project the one choice on it. The task typed here names the workspace the send makes;
 // the picks made here move to that workspace and the message is queued on its
 // fresh thread, which sends it the moment the copy stands, so a person types once
-// and lands in the running thread. A send to several models makes one copy per
+// and lands in the running thread; the store keeps the message through a reload
+// until then. A send to several models makes one copy per
 // model and starts the thread in each at once, all under one attempt id, since a
 // queue drains only in a composer on screen and one copy at most is on screen;
 // the computer's free room is read first, and a send it has no room for is
 // refused before any copy is made.
-import { HERE_PLACE_ID, START_WORDS, githubLinkOf, kindForComputer, placeRoom, plural, workspaceAccess, type ProjectView } from "@wsp/protocol";
-import { ownerRepoOf } from "@wsp/catalog";
+import { HERE_PLACE_ID, START_WORDS, githubLinkOf, placeRoom, plural, projectForRepo, type ProjectView } from "@wsp/protocol";
 import { Button } from "../components/ui/button.js";
 import { RefusalSlot } from "../settings/sheetParts.js";
 import { EmptyThread } from "../components/chat/ChatView.js";
-import { HeroAtmosphere } from "../components/chat/EmptyHero.js";
+import { HeroField } from "../components/chat/EmptyHero.js";
 import { ChatComposer } from "../components/chat/ChatComposer.js";
 import { newId, useComposerDraft, useComposerDraftStore } from "../components/chat/composerDraftStore.js";
 import { attachmentOf, useComposerFilesStore } from "../components/chat/composerFiles.js";
@@ -63,7 +63,7 @@ export function ProjectHome({ projectId }: { projectId: string }) {
   const picked = useComposerOptions(key);
   // A link in the box names a project of its own, whichever home it was typed in: the send starts on that project.
   const link = githubLinkOf(useComposerDraft(key).prompt);
-  const linked = useStore(s => (link === undefined ? undefined : s.projects.find(p => ownerRepoOf(p.remote)?.toLowerCase() === link.repo.toLowerCase())));
+  const linked = useStore(s => (link === undefined ? undefined : projectForRepo(s.projects, link.repo, HERE_PLACE_ID)));
   if (project === undefined) return null;
 
   /** A start or a review off the link, through the host, which opens the thread it made. */
@@ -81,6 +81,7 @@ export function ProjectHome({ projectId }: { projectId: string }) {
         ...(kind === "start" && access !== undefined && access !== null ? { access } : {}),
       });
       useComposerDraftStore.getState().setDraft(key, { prompt: "", cursor: 0 });
+      useComposerOptionsStore.getState().drop(key, key);
       select(made.workspace.id, made.threadId);
       return null;
     } catch (e) {
@@ -93,15 +94,7 @@ export function ProjectHome({ projectId }: { projectId: string }) {
     if (asked !== undefined) return fromLink(asked.url, "start");
     const picks = useMultiPickStore.getState().byKey[key];
     if (picks !== undefined) return startSeveral(prompt, picks);
-    const workspaceId = await createWorkspace(project.id, nameOfTask(prompt));
-    if (workspaceId === null) return null;
-    useComposerOptionsStore.setState(s => {
-      const picked = s.byWorkspaceId[key];
-      return picked === undefined ? s : { byWorkspaceId: { ...s.byWorkspaceId, [workspaceId]: picked } };
-    });
-    const access = useStore.getState().preferences.access[key];
-    if (access !== undefined) void useStore.getState().setPreferences({ access: { [workspaceId]: access, [key]: null } });
-    useComposerDraftStore.getState().enqueue(workspaceId, prompt);
+    await createWorkspace(project.id, nameOfTask(prompt), undefined, { prompt, queuedFrom: key });
     return null;
   };
 
@@ -114,15 +107,14 @@ export function ProjectHome({ projectId }: { projectId: string }) {
     const attachments = (useComposerFilesStore.getState().pending[key] ?? []).map(attachmentOf);
     useComposerFilesStore.getState().sendAs(key, attempt);
     useMultiPickStore.getState().set(key, []);
-    const kind = kindForComputer(project.computer);
     await Promise.all(
       picks.map(async pick => {
         const name = `${nameOfTask(prompt)} (${pick.label})`;
-        const workspaceId = await createWorkspace(project.id, name);
+        const workspaceId = await createWorkspace(project.id, name, undefined, { prompt });
         if (workspaceId === null) return;
         const catalog = catalogs.find(c => c.harness === pick.harness);
         const own = { harness: pick.harness, model: pick.model };
-        const options = catalog === undefined ? own : startOptionsFrom(workspaceAccess(catalog, kind), { ...picked, ...own });
+        const options = catalog === undefined ? own : startOptionsFrom(catalog, { ...picked, ...own });
         const requestId = newId();
         launching(workspaceId, { requestId, title: prompt, harness: pick.harness });
         await api.startSession({ workspaceId, prompt, requestId, attempt, ...options, ...(attachments.length > 0 ? { attachments } : {}) }).catch((e: unknown) => {
@@ -131,12 +123,13 @@ export function ProjectHome({ projectId }: { projectId: string }) {
         });
       }),
     );
+    useComposerOptionsStore.getState().drop(key, key);
     return null;
   };
 
   return (
     <div data-k="project-home" className="relative isolate flex min-h-0 flex-1 flex-col justify-center gap-10 pb-[8vh]">
-      <HeroAtmosphere projectId={project.id} />
+      <HeroField />
       <EmptyThread name={project.name} projectId={project.id} picker={<HomeProjectPicker project={project} />} />
       <ChatComposer
         key={key}

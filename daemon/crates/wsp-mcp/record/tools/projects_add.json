@@ -221,9 +221,6 @@
             },
             "createdAt": {
               "type": "string"
-            },
-            "lastAgent": {
-              "type": "string"
             }
           },
           "required": [
@@ -475,9 +472,6 @@
               "type": "string"
             },
             "createdAt": {
-              "type": "string"
-            },
-            "lastAgent": {
               "type": "string"
             }
           },

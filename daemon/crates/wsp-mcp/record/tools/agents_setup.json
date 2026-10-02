@@ -130,6 +130,17 @@
             "signInDetail": {
               "type": "string"
             },
+            "signInKind": {
+              "type": "string",
+              "enum": [
+                "api-key",
+                "subscription",
+                "oauth"
+              ]
+            },
+            "signInPlan": {
+              "type": "string"
+            },
             "update": {
               "type": "object",
               "properties": {
@@ -329,6 +340,17 @@
               "type": "boolean"
             },
             "signInDetail": {
+              "type": "string"
+            },
+            "signInKind": {
+              "type": "string",
+              "enum": [
+                "api-key",
+                "subscription",
+                "oauth"
+              ]
+            },
+            "signInPlan": {
               "type": "string"
             },
             "update": {

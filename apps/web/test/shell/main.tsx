@@ -55,7 +55,13 @@
 // served the page, so the one line the app says about it can be measured; ?host=1 runs the host-event rules on a
 // prompt and a dead thread, so the notices they raise can be photographed; ?toast= takes &kind= and &action= for
 // each kind of notice; ?silent=1 has the running and the napping machine both read no daemon, under the app's own
-// workspace-line rule, so only the running one is said.
+// workspace-line rule, so only the running one is said. ?switcher=1 adds six
+// threads over two more projects, every workspace on a named computer and
+// each project a glyph and a hue of its own, so the switcher's row is full
+// past its six cards. ?pick=1 holds three projects, two on this Mac and one
+// on a joined box, with New thread set to ask, and opens the palette on the
+// page of projects it picks from; ?settings=general opens Settings on its
+// General page; ?panel=pr&ws=ws_a opens the Pull request pane on PR 838 (&pr=merged once merged).
 import { useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { DAEMON_UPDATING, DEFAULT_PREFERENCES, DEFAULT_THEME, DESKTOP_MAC_CLASS, GOLDEN_STAGE_WORDS, SIGN_IN_OPEN_STATE, THEME_PRESETS, vaultOverCapLine, type HarnessCatalog, type SessionEvent, type SessionView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
@@ -64,10 +70,14 @@ import { TooltipProvider } from "../../src/components/ui/tooltip";
 import type { Api, ProtocolEvent } from "../../src/protocol/client";
 import { getLive } from "../../src/machine/live";
 import { useStore } from "../../src/protocol/store";
+import { openCommandPalette } from "../../src/commandPaletteBus";
+import { openSettingsGroup } from "../../src/settings/openAt";
+import { SettingsPage } from "../../src/settings/SettingsPage";
 import { useHostNotices } from "../../src/notices/hostNotices.js";
 import { addNotice, type NoticeKind } from "../../src/notices/store.js";
 import { useWorkspaceLineNotices } from "../../src/notices/workspaceLines.js";
-import { useRightPanelStore } from "../../src/rightPanelStore";
+import { RIGHT_PANEL_WIDTH_STORAGE_KEY, useRightPanelStore } from "../../src/rightPanelStore";
+import { PR838_DIFF, PR838_FACT, PR838_MERGED, pr838FactLately, pr838Lately } from "../fixtures/pr838";
 import { getBrowser } from "../../src/browser/model";
 import { recentsKey } from "../../src/browser/recents";
 import { useBrowserTabs } from "../../src/browser/tabs";
@@ -152,6 +162,13 @@ const archived: SessionView[] = params.get("archived") !== "1"
       { id: "s5", threadId: "s5", workspaceId: "ws_a", harness: "claude", status: "completed", prompt: "Rotate the daemon token and restart the host.", startedBy: "person", startedAt: Date.now() - 3 * 24 * 60 * 60_000, endedAt: Date.now() - 2 * 24 * 60 * 60_000, readAt: Date.now() - 2 * 24 * 60 * 60_000 },
       { id: "s6", threadId: "s6", workspaceId: "ws_a", harness: "codex", status: "interrupted", prompt: "Drop the preview shim from the packing list.", startedBy: "cli", startedAt: Date.now() - 9 * 24 * 60 * 60_000, endedAt: Date.now() - 8 * 24 * 60 * 60_000, readAt: Date.now() - 8 * 24 * 60 * 60_000, settledAt: Date.now() - 7 * 24 * 60 * 60_000 },
     ];
+// ?tones=1 adds a thread that failed and one waiting on a question, so the sidebar shows every state word's tone.
+const toned: SessionView[] = params.get("tones") !== "1"
+  ? []
+  : [
+      { id: "s13", threadId: "s13", workspaceId: "ws_b", harness: "claude", status: "failed", prompt: "Rebuild the search index.", startedBy: "person", startedAt: Date.now() - 20 * 60_000, endedAt: Date.now() - 15 * 60_000 },
+      { id: "s14", threadId: "s14", workspaceId: "ws_a", harness: "claude", status: "running", prompt: "Write the release notes.", startedBy: "person", startedAt: Date.now() - 10 * 60_000, asking: "Which version goes out?" } as SessionView,
+    ];
 const sessions: SessionView[] = [
   // With ?projects=1 the first thread works in spoo and the second deep inside wsp, so both rows carry a project word.
   { id: "s1", threadId: "s1", workspaceId: "ws_a", harness: "claude", status: "running", prompt: "Now reply with exactly the word pong.", startedBy: "person", startedAt: Date.now() - 48 * 60_000, ...(projects ? { cwd: "/root/spoo" } : {}) },
@@ -159,7 +176,27 @@ const sessions: SessionView[] = [
   { id: "s3", threadId: "s3", workspaceId: "ws_b", harness: "codex", status: "completed", prompt: "Bump the lockfile and run the gate.", startedBy: "cli", startedAt: Date.now() - 90 * 60_000, endedAt: Date.now() - 80 * 60_000 },
   { id: "s4", threadId: "s4", workspaceId: "ws_b", harness: "claude", status: "interrupted", prompt: "Drop the old preview shim.", startedBy: "person", startedAt: Date.now() - 120 * 60_000, endedAt: Date.now() - 110 * 60_000 },
   ...archived,
+  ...toned,
 ];
+// ?switcher=1: two more projects, one of them on this computer, and the threads on them, ten in all with the four above.
+const switcher = params.get("switcher") === "1";
+if (switcher) {
+  const on = (place: string) => (w: WorkspaceView): WorkspaceView => ({ ...w, place });
+  workspaces.splice(0, workspaces.length, ...workspaces.map(on("p_hetzner")));
+  workspaces.push(
+    { ...view("ws_d", "billing"), place: "p_hetzner", project: { id: "pr_billing", name: "billing", path: "/root/billing", computer: "default" } },
+    { ...view("ws_e", "docs-site"), kind: "local", machineId: "local", golden: "", project: { id: "pr_docs", name: "docs-site", path: "/Users/zingzy/docs-site", computer: "default" } },
+  );
+  const ago = (m: number): number => Date.now() - m * 60_000;
+  sessions.push(
+    { id: "s7", threadId: "s7", workspaceId: "ws_d", harness: "claude", status: "running", prompt: "Retry the failed invoice webhooks from last night.", startedBy: "person", startedAt: ago(6) },
+    { id: "s8", threadId: "s8", workspaceId: "ws_d", harness: "codex", status: "completed", prompt: "Add a test for the proration rounding.", startedBy: "person", startedAt: ago(40), endedAt: ago(33) },
+    { id: "s9", threadId: "s9", workspaceId: "ws_e", harness: "claude", status: "completed", prompt: "Rewrite the install page for the new CLI.", startedBy: "person", startedAt: ago(15), endedAt: ago(9) },
+    { id: "s10", threadId: "s10", workspaceId: "ws_e", harness: "codex", status: "completed", prompt: "Fix the broken links in the changelog.", startedBy: "cli", startedAt: ago(70), endedAt: ago(66) },
+    { id: "s11", threadId: "s11", workspaceId: "ws_d", harness: "claude", status: "interrupted", prompt: "Move the tax tables into one module.", startedBy: "person", startedAt: ago(150), endedAt: ago(140) },
+    { id: "s12", threadId: "s12", workspaceId: "ws_e", harness: "claude", status: "completed", prompt: "Shrink the hero image under 200 KB.", startedBy: "person", startedAt: ago(200), endedAt: ago(190) },
+  );
+}
 
 // Two agents the composer can start a thread on, so its picker draws a coloured mark and a monochrome one. Codex
 // carries the effort lists its app-server reports, each model with the effort that model runs at, so the effort
@@ -597,6 +634,15 @@ if (toast !== null) addNotice({ kind: (params.get("kind") as NoticeKind | null) 
 // surfaces behind labs are shot, so labs is on unless ?labs=0 asks for the record a host without it serves.
 const sidebarWidth = params.get("sidebar");
 useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, theme, ...picks, labs: params.get("labs") !== "0", ...(sidebarWidth !== null ? { sidebarWidth: Number(sidebarWidth) } : {}), ...(params.get("spaces") === "1" ? { sidebarMode: "spaces" as const } : {}), ...(params.get("size") === "file" ? { terminalSize: "file" as const } : {}), ...(projects ? { project: { ws_a: "spoo", ws_m: "spoo" } } : {}) } });
+if (switcher) {
+  useStore.setState(s => ({
+    places: [
+      { id: "p_here", kind: "computer", name: "zingzy-mbp", default: true, present: true, takesForks: false },
+      { id: "p_hetzner", kind: "computer", name: "hetzner-box", default: false, present: true, takesForks: true },
+    ],
+    preferences: { ...s.preferences, projectLook: { pr_1: { icon: "rocket", hue: "violet" }, pr_billing: { icon: "database", hue: "amber" }, pr_docs: { icon: "book", hue: "teal" } } },
+  }));
+}
 // ?places=1 fills the places list with the worst row the spec draws, a computer away with a long name beside
 // this Mac and a provider, so the pane's rows can be measured against a full list at every window.
 if (params.get("places") === "1") {
@@ -628,7 +674,37 @@ function VersionRule() {
   useShellVersionEffect();
   return null;
 }
+// ?panel=pr opens the right panel at 480 px on the Pull request pane of the workspace ?ws names, over PR 838's page
+// moved in time to read as the mockup does; ?pr=merged has it merged, as the record keeps a settled one.
+if (params.get("panel") === "pr" && shown !== null) {
+  const pr = params.get("pr") === "merged" ? PR838_MERGED : pr838FactLately(Date.now());
+  const statuses = api.watchStatuses;
+  api.watchStatuses = async () => (await statuses()).map(s => (s.id === shown ? { ...s, pr, checkout: { branch: PR838_FACT.branch, ahead: 0, behind: 0, changed: 0, readAt: 1 } } : s));
+  const page = pr838Lately(Date.now());
+  api.pullRequestView = async () => page;
+  api.pullRequestDiff = async () => ({ diff: PR838_DIFF, truncated: false, left: [] });
+  api.pullRequestSend = async (_id, items) => {
+    page.sent = [...page.sent, ...items.map(i => ({ ...i, at: Date.now() }))];
+    return { outcome: "steered", threadId: "t1", agent: "claude", sent: page.sent };
+  };
+  window.localStorage.setItem(RIGHT_PANEL_WIDTH_STORAGE_KEY, "480");
+  useRightPanelStore.setState({ byWorkspaceId: {} });
+  useRightPanelStore.getState().open(shown, "pr");
+}
 useStore.getState().bind(api);
+if (params.get("pick") === "1") {
+  const recorded = (id: string, name: string, computer: string, path: string) => ({ id, name, computer, source: { kind: "folder" as const, path }, path, remote: "", defaultBranch: "main", memoryKey: `-${name}`, memoryDir: "/m", createdAt: "t" });
+  useStore.setState(s => ({
+    places: [
+      { id: "here", kind: "computer", name: "zingzy-mbp", label: "zingzy's MacBook Pro", default: true, present: true, mac: "macbook" },
+      { id: "p_hetzner", kind: "computer", name: "hetzner", default: false, present: true, takesForks: true },
+    ],
+    projects: [recorded("pr_wsp", "wsp", "here", "/Users/zingzy/wsp"), recorded("pr_spoo", "spoo", "here", "/Users/zingzy/spoo"), recorded("pr_landing", "spoo-landing", "p_hetzner", "/root/spoo-landing")],
+    preferences: { ...s.preferences, newThreadIn: "ask", projectLook: { pr_wsp: { icon: "rocket", hue: "teal" }, pr_spoo: { icon: "globe", hue: "violet" } } },
+  }));
+  setTimeout(() => openCommandPalette({ page: "new-thread" }), 200);
+}
+if (params.get("settings") === "general") openSettingsGroup("general");
 // ?init=building puts the init job mid-build on the store, as its events would, so the collapsed cloud row's progress
 // line can be measured and photographed; the fixture's golden is none, so the row is there.
 if (params.get("init") === "building") {
@@ -767,7 +843,9 @@ createRoot(document.getElementById("root")!).render(
     {params.get("version") === "behind" ? <VersionRule /> : null}
     {params.get("host") === "1" ? <HostRule /> : null}
     <AppShell>
-      {shown === null ? (
+      {params.get("settings") === "general" ? (
+        <SettingsPage />
+      ) : shown === null ? (
         <div />
       ) : (
         <div className="flex min-h-0 flex-1 flex-col" data-terminal-beside>

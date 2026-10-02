@@ -6,10 +6,13 @@
 
 use serde::de::IgnoredAny;
 use serde::Deserialize;
+use std::collections::HashMap;
+
 use wsp_frames::{
     numbers, CheckState, GitPrViewReply, GitRepoReadReply, HostItem, HostItemKind, IssueComment, IssueRead, MergeMethod, Mergeable,
-    PullRequest, PullRequestCheck, PullRequestCheckRun, PullRequestComment, PullRequestCommit, PullRequestFile, PullRequestFork,
-    PullRequestReview, PullRequestReviewComment, PullRequestState, ReviewComment, ReviewEvent, ReviewSide, ReviewState,
+    PullRequest, PullRequestAutoMerge, PullRequestCheck, PullRequestCheckRun, PullRequestComment, PullRequestCommit, PullRequestFile,
+    PullRequestFork, PullRequestLabel, PullRequestPageCut, PullRequestReview, PullRequestReviewComment, PullRequestReviewRequest,
+    PullRequestState, PullRequestVerdict, ReviewComment, ReviewEvent, ReviewSide, ReviewState,
 };
 
 use super::{Pick, PullRequests};
@@ -17,7 +20,7 @@ use super::{Pick, PullRequests};
 pub(crate) struct GitHub;
 
 /// The fields a read asks gh for, in gh's own spelling.
-const FIELDS: &str = "number,url,state,isDraft,baseRefName,headRefName,headRefOid,mergeable,mergeStateStatus,reviewDecision,additions,deletions,changedFiles,commits,author,isCrossRepository,maintainerCanModify,headRepositoryOwner";
+const FIELDS: &str = "number,url,state,isDraft,baseRefName,headRefName,headRefOid,mergeable,mergeStateStatus,reviewDecision,additions,deletions,changedFiles,commits,author,isCrossRepository,maintainerCanModify,headRepositoryOwner,autoMergeRequest";
 
 /// gh's JSON for one pull request; every word in it is the API's, in capitals.
 #[derive(Deserialize)]
@@ -54,6 +57,16 @@ struct GhPullRequest {
     #[serde(default)]
     maintainer_can_modify: bool,
     head_repository_owner: Option<GhLogin>,
+    auto_merge_request: Option<GhAutoMerge>,
+}
+
+/// A merge armed to land once the checks pass.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GhAutoMerge {
+    #[serde(default)]
+    merge_method: String,
+    enabled_by: Option<GhLogin>,
 }
 
 /// One commit of the list a read asks for, of which only the head's subject is kept.
@@ -67,7 +80,7 @@ struct GhHeadCommit {
 }
 
 /// The fields a check is asked for.
-const CHECK_FIELDS: &str = "name,bucket,link,workflow,description";
+const CHECK_FIELDS: &str = "name,bucket,link,workflow,description,startedAt,completedAt";
 
 /// gh's JSON for one check, with the one word gh folds every service's states into.
 #[derive(Deserialize)]
@@ -81,10 +94,20 @@ struct GhCheck {
     workflow: String,
     #[serde(default)]
     description: String,
+    #[serde(default, rename = "startedAt")]
+    started_at: String,
+    #[serde(default, rename = "completedAt")]
+    completed_at: String,
 }
 
-/// The fields a pull request's page asks for.
-const PAGE_FIELDS: &str = "title,body,author,updatedAt,commits,reviews,comments,files";
+/// The fields a pull request's page asks for; its conversation is read off the REST API, which says who is a bot.
+const PAGE_FIELDS: &str = "title,body,author,createdAt,updatedAt,closedAt,mergedAt,mergedBy,mergeCommit,labels,reviewRequests,latestReviews,assignees,commits,reviews,files";
+
+/// The one GraphQL read beside the page: each commit's parents, line counts and checks rolled into one word, over the
+/// same first 100 commits gh's own list holds; the newest 100 reviews' database ids, which the comments on lines name;
+/// and whether each of the newest 100 review threads is resolved, keyed on the thread's first comment. Each says
+/// whether there was more than it read.
+const GRAPH_QUERY: &str = "query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { commits(first: 100) { totalCount nodes { commit { oid additions deletions parents { totalCount } statusCheckRollup { state } } } } reviews(last: 100) { pageInfo { hasPreviousPage } nodes { id databaseId } } reviewThreads(last: 100) { pageInfo { hasPreviousPage } nodes { isResolved comments(first: 1) { nodes { databaseId } } } } } } }";
 
 #[derive(Deserialize)]
 struct GhLogin {
@@ -107,6 +130,8 @@ struct GhCommit {
     #[serde(default)]
     message_headline: String,
     #[serde(default)]
+    message_body: String,
+    #[serde(default)]
     committed_date: String,
     #[serde(default)]
     authors: Vec<GhCommitAuthor>,
@@ -115,7 +140,11 @@ struct GhCommit {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct GhReview {
+    #[serde(default)]
+    id: String,
     author: Option<GhLogin>,
+    #[serde(default)]
+    author_association: String,
     #[serde(default)]
     state: String,
     #[serde(default)]
@@ -144,6 +173,34 @@ struct GhFile {
 }
 
 #[derive(Deserialize)]
+struct GhLabel {
+    name: String,
+    #[serde(default)]
+    color: String,
+    #[serde(default)]
+    description: String,
+}
+
+/// A review asked for: a person, or a team, which has a slug and no login.
+#[derive(Deserialize)]
+struct GhRequested {
+    #[serde(default, rename = "__typename")]
+    kind: String,
+    #[serde(default)]
+    login: String,
+    #[serde(default)]
+    slug: String,
+    #[serde(default)]
+    name: String,
+}
+
+#[derive(Deserialize)]
+struct GhOid {
+    #[serde(default)]
+    oid: String,
+}
+
+#[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct GhPage {
     #[serde(default)]
@@ -152,15 +209,58 @@ struct GhPage {
     body: String,
     author: Option<GhLogin>,
     #[serde(default)]
+    created_at: String,
+    #[serde(default)]
     updated_at: String,
+    closed_at: Option<String>,
+    merged_at: Option<String>,
+    merged_by: Option<GhLogin>,
+    merge_commit: Option<GhOid>,
+    #[serde(default)]
+    labels: Vec<GhLabel>,
+    #[serde(default)]
+    review_requests: Vec<GhRequested>,
+    #[serde(default)]
+    latest_reviews: Vec<GhReview>,
+    #[serde(default)]
+    assignees: Vec<GhLogin>,
     #[serde(default)]
     commits: Vec<GhCommit>,
     #[serde(default)]
     reviews: Vec<GhReview>,
     #[serde(default)]
-    comments: Vec<GhComment>,
-    #[serde(default)]
     files: Vec<GhFile>,
+}
+
+/// Who wrote a comment as the REST API says it: the login, whether it is a person or a bot, and the face it shows.
+#[derive(Deserialize)]
+struct GhUser {
+    #[serde(default)]
+    login: String,
+    #[serde(default, rename = "type")]
+    kind: String,
+    #[serde(default)]
+    avatar_url: String,
+}
+
+/// Who, whether a bot, and the face, off a REST comment's user; a deleted account is nobody, no bot and no face.
+fn user_of(user: Option<GhUser>) -> (String, bool, Option<String>) {
+    user.map_or_else(|| (String::new(), false, None), |u| (u.login, u.kind == "Bot", some(u.avatar_url)))
+}
+
+/// The REST API's JSON for one comment in a pull request's conversation, which says who is a bot where gh's does not.
+#[derive(Deserialize)]
+struct GhIssueComment {
+    id: u64,
+    user: Option<GhUser>,
+    #[serde(default)]
+    author_association: String,
+    #[serde(default)]
+    body: String,
+    #[serde(default)]
+    html_url: String,
+    #[serde(default)]
+    created_at: String,
 }
 
 /// The REST API's JSON for one comment on a line; it is not in gh's pull request JSON at all.
@@ -171,13 +271,124 @@ struct GhLineComment {
     line: Option<u64>,
     original_line: Option<u64>,
     side: Option<String>,
-    user: Option<GhLogin>,
+    user: Option<GhUser>,
+    #[serde(default)]
+    author_association: String,
     #[serde(default)]
     body: String,
     #[serde(default)]
     html_url: String,
     #[serde(default)]
     created_at: String,
+    diff_hunk: Option<String>,
+    in_reply_to_id: Option<u64>,
+    pull_request_review_id: Option<u64>,
+}
+
+/// The GraphQL read's answer, down to the pull request.
+#[derive(Deserialize)]
+struct GhGraph {
+    data: Option<GhGraphData>,
+}
+
+#[derive(Deserialize)]
+struct GhGraphData {
+    repository: Option<GhGraphRepo>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GhGraphRepo {
+    pull_request: Option<GhGraphPr>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GhGraphPr {
+    #[serde(default)]
+    commits: GhNodes<GhGraphCommitNode>,
+    #[serde(default)]
+    reviews: GhNodes<GhGraphReview>,
+    #[serde(default)]
+    review_threads: GhNodes<GhGraphThread>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GhNodes<T> {
+    #[serde(default = "Vec::new")]
+    nodes: Vec<T>,
+    total_count: Option<u64>,
+    page_info: Option<GhPageInfo>,
+}
+
+impl<T> GhNodes<T> {
+    /// Whether the connection holds more before what was read.
+    fn more_before(&self) -> bool {
+        self.page_info.as_ref().is_some_and(|p| p.has_previous_page)
+    }
+}
+
+impl<T> Default for GhNodes<T> {
+    fn default() -> Self {
+        GhNodes { nodes: Vec::new(), total_count: None, page_info: None }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GhPageInfo {
+    #[serde(default)]
+    has_previous_page: bool,
+}
+
+#[derive(Deserialize)]
+struct GhGraphCommitNode {
+    commit: GhGraphCommit,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GhGraphCommit {
+    oid: String,
+    additions: Option<u64>,
+    deletions: Option<u64>,
+    parents: Option<GhCount>,
+    status_check_rollup: Option<GhRollup>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GhCount {
+    total_count: u64,
+}
+
+#[derive(Deserialize)]
+struct GhRollup {
+    #[serde(default)]
+    state: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GhGraphReview {
+    #[serde(default)]
+    id: String,
+    database_id: Option<u64>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GhGraphThread {
+    is_resolved: bool,
+    #[serde(default)]
+    comments: GhNodes<GhDatabaseId>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GhDatabaseId {
+    database_id: Option<u64>,
 }
 
 /// gh's JSON for a repository's merge settings.
@@ -285,6 +496,25 @@ fn check_state_of(bucket: &str) -> CheckState {
     }
 }
 
+/// An author's association with the repository in lower case, absent where the host answered none.
+fn association_of(word: String) -> Option<String> {
+    some(word.to_ascii_lowercase())
+}
+
+/// A commit's checks rolled into one word by the API; a word a later API adds reads as still running.
+fn rollup_of(word: &str) -> CheckState {
+    match word {
+        "SUCCESS" => CheckState::Pass,
+        "FAILURE" | "ERROR" => CheckState::Fail,
+        _ => CheckState::Pending,
+    }
+}
+
+/// A time gh printed, absent where it printed Go's zero time for one that has not come.
+fn time_of(at: String) -> Option<String> {
+    some(at).filter(|at| !at.starts_with("0001-"))
+}
+
 fn method_of(word: &str) -> Option<MergeMethod> {
     match word.to_ascii_uppercase().as_str() {
         "MERGE" => Some(MergeMethod::Merge),
@@ -390,6 +620,9 @@ impl PullRequests for GitHub {
                 owner: read.head_repository_owner.map(|o| o.login).unwrap_or_default(),
                 pushable: read.maintainer_can_modify,
             }),
+            auto_merge: read.auto_merge_request.and_then(|a| {
+                Some(PullRequestAutoMerge { method: method_of(&a.merge_method)?, by: a.enabled_by.map(|b| b.login).and_then(some) })
+            }),
         })
     }
 
@@ -408,6 +641,8 @@ impl PullRequests for GitHub {
                     workflow: some(c.workflow),
                     link: some(c.link),
                     description: some(c.description),
+                    started_at: time_of(c.started_at),
+                    completed_at: time_of(c.completed_at),
                 })
                 .collect(),
         )
@@ -441,54 +676,144 @@ impl PullRequests for GitHub {
     }
 
     fn line_comments_argv(&self, repo: &str, number: u64) -> Vec<String> {
-        words(&["api", &format!("repos/{repo}/pulls/{number}/comments?per_page=100")])
+        words(&["api", "--paginate", "--slurp", &format!("repos/{repo}/pulls/{number}/comments?per_page=100")])
     }
 
-    fn read_page(&self, page: &str, line_comments: &str) -> Option<GitPrViewReply> {
+    fn comments_argv(&self, repo: &str, number: u64) -> Vec<String> {
+        words(&["api", "--paginate", "--slurp", &format!("repos/{repo}/issues/{number}/comments?per_page=100")])
+    }
+
+    fn graph_argv(&self, repo: &str, number: u64) -> Vec<String> {
+        let (owner, name) = repo.split_once('/').unwrap_or((repo, ""));
+        let query = format!("query={GRAPH_QUERY}");
+        let (owner, name, number) = (format!("owner={owner}"), format!("name={name}"), format!("number={number}"));
+        words(&["api", "graphql", "-f", &query, "-f", &owner, "-f", &name, "-F", &number])
+    }
+
+    fn read_page(&self, page: &str, line_comments: &str, comments: &str, graph: &str) -> Option<GitPrViewReply> {
         let read: GhPage = serde_json::from_str(page.trim()).ok()?;
-        let lines: Vec<GhLineComment> = serde_json::from_str(line_comments.trim()).ok()?;
-        let cut = super::cut_body;
+        let lines: Vec<Vec<GhLineComment>> = serde_json::from_str(line_comments.trim()).ok()?;
+        let comments: Vec<Vec<GhIssueComment>> = serde_json::from_str(comments.trim()).ok()?;
+        let graph: GhGraph = serde_json::from_str(graph.trim()).ok()?;
+        let graph = graph.data?.repository?.pull_request?;
+        let cut = PullRequestPageCut {
+            commits: graph.commits.total_count.is_some_and(|total| total > read.commits.len() as u64).then_some(true),
+            reviews: graph.reviews.more_before().then_some(true),
+            threads: graph.review_threads.more_before().then_some(true),
+        };
+        let commits: HashMap<String, GhGraphCommit> = graph.commits.nodes.into_iter().map(|n| (n.commit.oid.clone(), n.commit)).collect();
+        let review_ids: HashMap<String, u64> = graph.reviews.nodes.into_iter().filter_map(|r| Some((r.id, r.database_id?))).collect();
+        let resolved: HashMap<u64, bool> =
+            graph.review_threads.nodes.into_iter().filter_map(|t| Some((t.comments.nodes.first()?.database_id?, t.is_resolved))).collect();
         Some(GitPrViewReply {
             title: read.title,
-            body: cut(&read.body),
+            body: read.body.trim().to_owned(),
             author: login(read.author),
+            created_at: read.created_at,
             updated_at: read.updated_at,
+            closed_at: read.closed_at.and_then(some),
+            merged_at: read.merged_at.and_then(some),
+            merged_by: read.merged_by.map(|m| m.login).and_then(some),
+            merge_commit: read.merge_commit.map(|m| m.oid).and_then(some),
+            labels: read
+                .labels
+                .into_iter()
+                .map(|l| PullRequestLabel { name: l.name, color: l.color, description: some(l.description) })
+                .collect(),
+            review_requests: read
+                .review_requests
+                .into_iter()
+                .map(|r| {
+                    let team = r.kind == "Team";
+                    let name = if !team {
+                        r.login
+                    } else if r.slug.is_empty() {
+                        r.name
+                    } else {
+                        r.slug
+                    };
+                    PullRequestReviewRequest { name, team }
+                })
+                .collect(),
+            latest_reviews: read
+                .latest_reviews
+                .into_iter()
+                .map(|r| PullRequestVerdict {
+                    author: login(r.author),
+                    state: r.state.to_ascii_lowercase(),
+                    at: r.submitted_at.unwrap_or_default(),
+                })
+                .collect(),
+            assignees: read.assignees.into_iter().map(|a| a.login).collect(),
             commits: read
                 .commits
                 .into_iter()
-                .map(|c| PullRequestCommit {
-                    oid: c.oid,
-                    subject: c.message_headline,
-                    at: c.committed_date,
-                    author: commit_author(c.authors),
+                .map(|c| {
+                    let graph = commits.get(&c.oid);
+                    PullRequestCommit {
+                        subject: c.message_headline,
+                        body: c.message_body,
+                        at: c.committed_date,
+                        author: commit_author(c.authors),
+                        parents: graph.and_then(|g| g.parents.as_ref()).map(|p| p.total_count),
+                        additions: graph.and_then(|g| g.additions),
+                        deletions: graph.and_then(|g| g.deletions),
+                        check: graph.and_then(|g| g.status_check_rollup.as_ref()).map(|r| rollup_of(&r.state)),
+                        oid: c.oid,
+                    }
                 })
                 .collect(),
             reviews: read
                 .reviews
                 .into_iter()
                 .map(|r| PullRequestReview {
+                    id: review_ids.get(&r.id).copied(),
+                    association: association_of(r.author_association),
                     author: login(r.author),
                     state: r.state.to_ascii_lowercase(),
-                    body: cut(&r.body),
+                    body: r.body.trim().to_owned(),
                     at: r.submitted_at.unwrap_or_default(),
                 })
                 .collect(),
-            comments: read
-                .comments
+            comments: comments
                 .into_iter()
-                .map(|c| PullRequestComment { author: login(c.author), body: cut(&c.body), at: c.created_at })
+                .flatten()
+                .map(|c| {
+                    let (author, bot, avatar) = user_of(c.user);
+                    PullRequestComment {
+                        id: c.id,
+                        author,
+                        association: association_of(c.author_association),
+                        bot,
+                        avatar,
+                        body: c.body.trim().to_owned(),
+                        url: c.html_url,
+                        at: c.created_at,
+                    }
+                })
                 .collect(),
             review_comments: lines
                 .into_iter()
-                .map(|c| PullRequestReviewComment {
-                    id: c.id,
-                    path: c.path,
-                    line: c.line.or(c.original_line),
-                    side: c.side,
-                    author: login(c.user),
-                    body: cut(&c.body),
-                    url: c.html_url,
-                    at: c.created_at,
+                .flatten()
+                .map(|c| {
+                    let (author, bot, avatar) = user_of(c.user);
+                    PullRequestReviewComment {
+                        resolved: resolved.get(&c.in_reply_to_id.unwrap_or(c.id)).copied(),
+                        association: association_of(c.author_association),
+                        id: c.id,
+                        path: c.path,
+                        line: c.line.or(c.original_line),
+                        side: c.side,
+                        author,
+                        bot,
+                        avatar,
+                        body: c.body.trim().to_owned(),
+                        url: c.html_url,
+                        at: c.created_at,
+                        hunk: c.diff_hunk.and_then(some),
+                        reply_to: c.in_reply_to_id,
+                        review_id: c.pull_request_review_id,
+                    }
                 })
                 .collect(),
             files: read
@@ -496,6 +821,7 @@ impl PullRequests for GitHub {
                 .into_iter()
                 .map(|f| PullRequestFile { path: f.path, additions: f.additions, deletions: f.deletions })
                 .collect(),
+            cut: (cut != PullRequestPageCut::default()).then_some(cut),
         })
     }
 
@@ -665,7 +991,10 @@ pub(crate) mod tests {
             GitHub.create_argv("main", "work", Some("a title"), Some("a body")),
             ["pr", "create", "--base", "main", "--head", "work", "--fill", "--title", "a title", "--body", "a body"]
         );
-        assert_eq!(GitHub.checks_argv("o/r", 12), ["pr", "checks", "12", "-R", "o/r", "--json", "name,bucket,link,workflow,description"]);
+        assert_eq!(
+            GitHub.checks_argv("o/r", 12),
+            ["pr", "checks", "12", "-R", "o/r", "--json", "name,bucket,link,workflow,description,startedAt,completedAt"]
+        );
         assert_eq!(GitHub.behind_argv("o/r", "main", "abc123"), ["api", "repos/o/r/compare/main...abc123", "--jq", ".behind_by"]);
         // A branch name is git's to allow: a `#`, a `%` or a space in it is escaped so the path is not cut there, and a
         // slash stays the separator GitHub reads in a branch name.
@@ -674,9 +1003,23 @@ pub(crate) mod tests {
         assert_eq!(GitHub.behind_argv("o/r", "release/1.0", "ab")[1], "repos/o/r/compare/release/1.0...ab");
         assert_eq!(
             GitHub.page_argv("o/r", 12),
-            ["pr", "view", "12", "-R", "o/r", "--json", "title,body,author,updatedAt,commits,reviews,comments,files"]
+            [
+                "pr",
+                "view",
+                "12",
+                "-R",
+                "o/r",
+                "--json",
+                "title,body,author,createdAt,updatedAt,closedAt,mergedAt,mergedBy,mergeCommit,labels,reviewRequests,latestReviews,assignees,commits,reviews,files"
+            ]
         );
-        assert_eq!(GitHub.line_comments_argv("o/r", 12), ["api", "repos/o/r/pulls/12/comments?per_page=100"]);
+        // Every page of both, gathered into one array of pages, so no list stops at the first hundred.
+        assert_eq!(GitHub.line_comments_argv("o/r", 12), ["api", "--paginate", "--slurp", "repos/o/r/pulls/12/comments?per_page=100"]);
+        assert_eq!(GitHub.comments_argv("o/r", 12), ["api", "--paginate", "--slurp", "repos/o/r/issues/12/comments?per_page=100"]);
+        assert_eq!(
+            GitHub.graph_argv("Zingzy/wsp", 772),
+            ["api", "graphql", "-f", &format!("query={GRAPH_QUERY}"), "-f", "owner=Zingzy", "-f", "name=wsp", "-F", "number=772"]
+        );
         assert_eq!(GitHub.log_argv("o/r", 36, 109), ["run", "view", "36", "-R", "o/r", "--job", "109", "--log-failed"]);
     }
 
@@ -821,32 +1164,211 @@ pub(crate) mod tests {
         assert_eq!(run_of("https://github.com/o/r/actions/runs/12"), None);
     }
 
+    /// What gh 2.97 answered for PR 772 of Zingzy/wsp on 2026-10-02 to the page's four lines: the view, the comments on
+    /// its lines and in its conversation off the REST API, and the GraphQL read.
+    const PAGE_772: &str = include_str!("../../tests/gh/pr772-page.json");
+    const LINES_772: &str = include_str!("../../tests/gh/pr772-line-comments.json");
+    const COMMENTS_772: &str = include_str!("../../tests/gh/pr772-comments.json");
+    const GRAPH_772: &str = include_str!("../../tests/gh/pr772-graph.json");
+    const CHECKS_772: &str = include_str!("../../tests/gh/pr772-checks.json");
+
+    fn page_772() -> GitPrViewReply {
+        GitHub.read_page(PAGE_772, LINES_772, COMMENTS_772, GRAPH_772).unwrap()
+    }
+
     #[test]
-    fn a_page_reads_its_parts_and_a_line_comment_off_the_rest_api_with_its_line_or_the_one_it_was_on() {
-        let page = r#"{"title":"Round the total","body":"Why it changed","author":{"login":"cid"},"updatedAt":"2026-09-28T13:00:00Z","commits":[{"oid":"abc","messageHeadline":"Round once","committedDate":"2026-09-28T10:00:00Z","authors":[{"name":"Dana","email":"d@e","login":"dana"}]},{"oid":"def","messageHeadline":"Fix","committedDate":"2026-09-28T10:01:00Z","authors":[{"name":"Eli","email":"e@e","login":""}]}],"reviews":[{"author":{"login":"ana"},"state":"CHANGES_REQUESTED","body":"see line 3","submittedAt":"2026-09-28T11:00:00Z"}],"comments":[{"author":{"login":"bo"},"body":"thanks","createdAt":"2026-09-28T12:00:00Z"}],"files":[{"path":"check.sh","additions":2,"deletions":1}]}"#;
-        let lines = r#"[{"id":7,"path":"check.sh","line":3,"original_line":3,"side":"RIGHT","user":{"login":"ana"},"body":"exit 1 here","html_url":"https://github.com/o/r/pull/12#discussion_r7","created_at":"2026-09-28T11:00:00Z"},{"id":8,"path":"old.sh","line":null,"original_line":9,"side":"LEFT","user":{"login":"ana"},"body":"gone","html_url":"u","created_at":"t"}]"#;
-        let read = GitHub.read_page(page, lines).unwrap();
-        assert_eq!((read.title.as_str(), read.body.as_str()), ("Round the total", "Why it changed"));
-        assert_eq!((read.author.as_str(), read.updated_at.as_str()), ("cid", "2026-09-28T13:00:00Z"));
+    fn a_page_reads_when_it_opened_and_settled_and_no_body_on_it_is_cut() {
+        let read = page_772();
+        assert_eq!(read.title, "wsp-map#1235: a delete says gone only when the provider's reads agree");
+        assert_eq!(read.author, "Zingzy");
+        assert_eq!((read.created_at.as_str(), read.closed_at.as_deref()), ("2026-09-26T01:29:01Z", Some("2026-09-26T03:58:27Z")));
+        // Closed by a squash landing, so nothing merged it on GitHub.
+        assert_eq!((read.merged_at.as_deref(), read.merged_by.as_deref(), read.merge_commit.as_deref()), (None, None, None));
+        assert!(read.labels.is_empty() && read.review_requests.is_empty() && read.latest_reviews.is_empty() && read.assignees.is_empty());
+        // The first review's body is past the 4,000 characters a list keeps, and the page keeps it whole.
+        assert_eq!(read.reviews[0].body.chars().count(), 7116);
+        assert!(!read.reviews[0].body.ends_with('…'));
+    }
+
+    #[test]
+    fn each_commit_carries_its_body_and_off_the_graphql_read_its_parents_its_lines_and_its_checks() {
+        let read = page_772();
+        let first = &read.commits[0];
         assert_eq!(
-            read.commits,
+            (first.oid.as_str(), first.subject.as_str()),
+            ("ed1c5067088b8e8cc872dc6a38b2de332ffd39ec", "fix(engine): a kill is done only when reads agree the machine is gone")
+        );
+        assert_eq!(first.body.chars().count(), 438);
+        // A commit no check ran on rolls up to nothing.
+        assert_eq!((first.parents, first.additions, first.deletions, first.check), (Some(1), Some(148), Some(35), None));
+        let merge = &read.commits[1];
+        assert_eq!((merge.parents, merge.additions, merge.deletions, merge.check), (Some(2), Some(786), Some(93), Some(CheckState::Pass)));
+    }
+
+    #[test]
+    fn a_review_carries_the_id_its_line_comments_name() {
+        let read = page_772();
+        let ids: Vec<Option<u64>> = read.reviews.iter().map(|r| r.id).collect();
+        assert_eq!(ids, [Some(5324159317), Some(5324405558), Some(5324405617)]);
+        assert_eq!(read.review_comments[0].review_id, Some(5324159317));
+        assert_eq!((read.reviews[1].state.as_str(), read.reviews[1].association.as_deref()), ("commented", Some("owner")));
+    }
+
+    #[test]
+    fn a_conversation_comment_says_who_whether_a_bot_wrote_it_and_the_face_github_shows() {
+        let read = page_772();
+        let bot = &read.comments[0];
+        assert_eq!((bot.id, bot.author.as_str(), bot.bot), (5841958969, "vercel[bot]", true));
+        assert_eq!(bot.association.as_deref(), Some("none"));
+        assert_eq!(bot.avatar.as_deref(), Some("https://avatars.githubusercontent.com/in/8329?v=4"));
+        assert_eq!(bot.url, "https://github.com/Zingzy/wsp/pull/772#issuecomment-5841958969");
+        assert_eq!(bot.at, "2026-09-26T01:29:03Z");
+        let person = &read.comments[1];
+        assert_eq!((person.author.as_str(), person.bot, person.association.as_deref()), ("Zingzy", false, Some("owner")));
+        assert_eq!(person.avatar.as_deref(), Some("https://avatars.githubusercontent.com/u/90309290?v=4"));
+        assert_eq!(read.comments.len(), 4);
+    }
+
+    #[test]
+    fn a_line_comment_carries_its_hunk_the_comment_it_answers_and_its_threads_resolution() {
+        let read = page_772();
+        let first = &read.review_comments[0];
+        assert_eq!(
+            (first.id, first.path.as_str(), first.line, first.reply_to),
+            (4109844888, "packages/engine/src/golden.ts", Some(111), None)
+        );
+        let hunk = first.hunk.as_deref().unwrap();
+        assert!(hunk.starts_with("@@ -105"), "{hunk}");
+        assert_eq!(hunk.len(), 490);
+        assert_eq!((first.bot, first.resolved, first.association.as_deref()), (false, Some(false), Some("owner")));
+        let reply = &read.review_comments[2];
+        assert_eq!((reply.id, reply.reply_to, reply.review_id), (4110044839, Some(4109844888), Some(5324405558)));
+        assert_eq!(reply.resolved, Some(false));
+    }
+
+    /// The thread ids and states GitHub answered for cli/cli PR 14519 on 2026-10-02, whose threads are resolved but one;
+    /// the comments are those threads' first comments and two replies, by their real ids, their words left out.
+    #[test]
+    fn a_resolved_thread_reads_resolved_on_its_first_comment_and_every_reply() {
+        let graph = include_str!("../../tests/gh/pr14519-graph.json");
+        let lines = r#"[[{"id":4106126529,"path":"a.go","line":null,"original_line":40,"side":"RIGHT","user":{"login":"Copilot","type":"Bot","avatar_url":"https://avatars.githubusercontent.com/in/946600?v=4"},"body":"b","html_url":"u","created_at":"t","pull_request_review_id":5319607822,"diff_hunk":"@@ -1 +1 @@"},{"id":4106458120,"in_reply_to_id":4106126529,"path":"a.go","line":null,"original_line":40,"side":"RIGHT","user":{"login":"waldyrious","type":"User"},"body":"b","html_url":"u","created_at":"t","pull_request_review_id":5319993594},{"id":4107865905,"path":"a.go","line":null,"original_line":39,"side":"RIGHT","user":{"login":"BagToad","type":"User"},"body":"b","html_url":"u","created_at":"t","pull_request_review_id":5321772694},{"id":4108367439,"in_reply_to_id":4107865905,"path":"a.go","line":null,"original_line":39,"side":"RIGHT","user":{"login":"waldyrious","type":"User"},"body":"b","html_url":"u","created_at":"t","pull_request_review_id":5322381916},{"id":1,"path":"a.go","line":1,"side":"RIGHT","user":null,"body":"b","html_url":"u","created_at":"t"}]]"#;
+        let page = r#"{"title":"t","body":"","author":{"login":"waldyrious"},"createdAt":"c","updatedAt":"u","commits":[],"reviews":[],"files":[]}"#;
+        let read = GitHub.read_page(page, lines, "[[]]", graph).unwrap();
+        let resolved: Vec<Option<bool>> = read.review_comments.iter().map(|c| c.resolved).collect();
+        // A comment whose thread the read did not hold says nothing of its thread.
+        assert_eq!(resolved, [Some(true), Some(true), Some(false), Some(false), None]);
+        let copilot = &read.review_comments[0];
+        assert_eq!((copilot.author.as_str(), copilot.bot, copilot.line), ("Copilot", true, Some(40)));
+        assert_eq!(copilot.avatar.as_deref(), Some("https://avatars.githubusercontent.com/in/946600?v=4"));
+        // A comment GitHub gave no association for says none rather than a guess.
+        assert_eq!(
+            (read.review_comments[4].author.as_str(), read.review_comments[4].bot, read.review_comments[4].association.as_deref()),
+            ("", false, None)
+        );
+    }
+
+    /// The fields cli/cli PR 14543 answered with on 2026-10-02, cut to the ones read here.
+    #[test]
+    fn labels_the_reviews_asked_the_verdicts_the_assignees_and_the_merge_are_read_off_ghs_json() {
+        let page = r#"{"title":"chore(deps): bump the codeql-actions group with 3 updates","body":"","author":{"id":"x","is_bot":true,"login":"app/dependabot"},"createdAt":"2026-09-28T14:06:19Z","updatedAt":"2026-09-29T10:34:00Z","closedAt":"2026-09-29T10:34:00Z","mergedAt":"2026-09-29T10:34:00Z","mergedBy":{"id":"MDQ6VXNlcjE2MTE1MTA=","is_bot":false,"login":"williammartin","name":"William Martin"},"mergeCommit":{"oid":"1cd39adbf03b0afc7c4600ad829fd3f196335800"},"labels":[{"id":"LA_kwDODKw3uc8AAAABYP6ixA","name":"dependencies","description":"Pull requests that update a dependency file","color":"0366d6"},{"id":"LA_kwDODKw3uc8AAAABYP6iyg","name":"github_actions","description":"","color":"000000"}],"reviewRequests":[{"__typename":"User","login":"BagToad"},{"__typename":"Team","name":"CLI","slug":"cli/code-reviewers"}],"latestReviews":[{"id":"","author":{"login":"williammartin"},"authorAssociation":"MEMBER","body":"","submittedAt":"2026-09-29T10:33:52Z","includesCreatedEdit":false,"reactionGroups":[],"state":"APPROVED","commit":{"oid":""}}],"assignees":[{"id":"x","login":"BagToad","name":"Kynan Ware"}],"commits":[],"reviews":[],"files":[]}"#;
+        let graph =
+            r#"{"data":{"repository":{"pullRequest":{"commits":{"nodes":[]},"reviews":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}}"#;
+        let read = GitHub.read_page(page, "[[]]", "[[]]", graph).unwrap();
+        assert_eq!(
+            (read.merged_by.as_deref(), read.merge_commit.as_deref()),
+            (Some("williammartin"), Some("1cd39adbf03b0afc7c4600ad829fd3f196335800"))
+        );
+        assert_eq!(read.merged_at.as_deref(), Some("2026-09-29T10:34:00Z"));
+        assert_eq!(
+            read.labels,
             [
-                PullRequestCommit {
-                    oid: "abc".into(),
-                    subject: "Round once".into(),
-                    at: "2026-09-28T10:00:00Z".into(),
-                    author: "dana".into()
+                PullRequestLabel {
+                    name: "dependencies".into(),
+                    color: "0366d6".into(),
+                    description: Some("Pull requests that update a dependency file".into())
                 },
-                PullRequestCommit { oid: "def".into(), subject: "Fix".into(), at: "2026-09-28T10:01:00Z".into(), author: "Eli".into() }
+                PullRequestLabel { name: "github_actions".into(), color: "000000".into(), description: None },
             ]
         );
-        assert_eq!((read.reviews[0].author.as_str(), read.reviews[0].state.as_str()), ("ana", "changes_requested"));
-        assert_eq!((read.comments[0].author.as_str(), read.comments[0].body.as_str()), ("bo", "thanks"));
-        assert_eq!(read.files, [PullRequestFile { path: "check.sh".into(), additions: 2, deletions: 1 }]);
-        assert_eq!((read.review_comments[0].line, read.review_comments[0].side.as_deref()), (Some(3), Some("RIGHT")));
-        assert_eq!(read.review_comments[1].line, Some(9));
-        assert_eq!(read.review_comments[0].url, "https://github.com/o/r/pull/12#discussion_r7");
-        assert!(GitHub.read_page(page, "Not Found").is_none());
+        assert_eq!(
+            read.review_requests,
+            [
+                PullRequestReviewRequest { name: "BagToad".into(), team: false },
+                PullRequestReviewRequest { name: "cli/code-reviewers".into(), team: true }
+            ]
+        );
+        assert_eq!(
+            read.latest_reviews,
+            [PullRequestVerdict { author: "williammartin".into(), state: "approved".into(), at: "2026-09-29T10:33:52Z".into() }]
+        );
+        assert_eq!(read.assignees, ["BagToad"]);
+        // A page whose GraphQL read holds no pull request is not a page this reads.
+        assert!(GitHub.read_page(page, "[[]]", "[[]]", r#"{"data":{"repository":{"pullRequest":null}}}"#).is_none());
+        assert!(GitHub.read_page(page, "[[]]", "Not Found", graph).is_none());
+        assert!(GitHub.read_page(page, "Not Found", "[[]]", graph).is_none());
+    }
+
+    /// The same comments on PR 772's lines as gh answered them three to a page: the pages read as one list.
+    #[test]
+    fn the_comments_of_every_page_read_as_one_list_and_past_a_hundred_nothing_is_left_out() {
+        let paged = include_str!("../../tests/gh/pr772-line-comments-pages-of-3.json");
+        let read = GitHub.read_page(PAGE_772, paged, COMMENTS_772, GRAPH_772).unwrap();
+        assert_eq!(read.review_comments, page_772().review_comments);
+        assert_eq!(read.review_comments.len(), 4);
+        let comment = |id: u64| {
+            format!(
+                r#"{{"id":{id},"user":{{"login":"ana","type":"User"}},"author_association":"MEMBER","body":"b","html_url":"u","created_at":"t"}}"#
+            )
+        };
+        let page = |ids: std::ops::Range<u64>| format!("[{}]", ids.map(comment).collect::<Vec<_>>().join(","));
+        let pages = format!("[{},{}]", page(1..101), page(101..151));
+        let read = GitHub.read_page(PAGE_772, LINES_772, &pages, GRAPH_772).unwrap();
+        assert_eq!(read.comments.len(), 150);
+        assert_eq!((read.comments[0].id, read.comments[149].id), (1, 150));
+        assert_eq!(read.cut, None);
+    }
+
+    /// A pull request past what the GraphQL read holds says which parts it holds only in part: commits past gh's first
+    /// hundred, which carry no lines or checks, and reviews and threads before the newest hundred.
+    #[test]
+    fn a_page_read_only_in_part_says_which_parts() {
+        assert_eq!(page_772().cut, None);
+        let past = GRAPH_772
+            .replace(r#""totalCount":2,"#, r#""totalCount":113,"#)
+            .replace(r#""reviews":{"pageInfo":{"hasPreviousPage":false}"#, r#""reviews":{"pageInfo":{"hasPreviousPage":true}"#)
+            .replace(r#""reviewThreads":{"pageInfo":{"hasPreviousPage":false}"#, r#""reviewThreads":{"pageInfo":{"hasPreviousPage":true}"#);
+        assert_ne!(past, GRAPH_772);
+        let read = GitHub.read_page(PAGE_772, LINES_772, COMMENTS_772, &past).unwrap();
+        assert_eq!(read.cut, Some(PullRequestPageCut { commits: Some(true), reviews: Some(true), threads: Some(true) }));
+        let threads_only = GRAPH_772
+            .replace(r#""reviewThreads":{"pageInfo":{"hasPreviousPage":false}"#, r#""reviewThreads":{"pageInfo":{"hasPreviousPage":true}"#);
+        let read = GitHub.read_page(PAGE_772, LINES_772, COMMENTS_772, &threads_only).unwrap();
+        assert_eq!(read.cut, Some(PullRequestPageCut { commits: None, reviews: None, threads: Some(true) }));
+    }
+
+    #[test]
+    fn a_check_says_when_it_started_and_finished_and_one_not_started_says_neither() {
+        let checks = GitHub.read_checks(CHECKS_772).unwrap();
+        assert_eq!(checks[0].name, "Linux daemon aarch64-unknown-linux-musl");
+        assert_eq!(
+            (checks[0].started_at.as_deref(), checks[0].completed_at.as_deref()),
+            (Some("2026-09-26T03:05:23Z"), Some("2026-09-26T03:06:59Z"))
+        );
+        // gh prints Go's zero time for a check that has not started or not finished.
+        let queued = r#"[{"bucket":"pending","name":"e2e","link":"","workflow":"ci","description":"","startedAt":"0001-01-01T00:00:00Z","completedAt":"0001-01-01T00:00:00Z"}]"#;
+        let queued = GitHub.read_checks(queued).unwrap();
+        assert_eq!((queued[0].started_at.as_deref(), queued[0].completed_at.as_deref()), (None, None));
+    }
+
+    #[test]
+    fn a_merge_armed_to_land_names_its_method_and_who_armed_it() {
+        let armed = r#"{"number":5,"url":"u","state":"OPEN","autoMergeRequest":{"authorEmail":null,"commitBody":null,"commitHeadline":null,"mergeMethod":"SQUASH","enabledAt":"2026-09-29T10:00:00Z","enabledBy":{"login":"Zingzy"}}}"#;
+        assert_eq!(
+            GitHub.read(armed).unwrap().auto_merge,
+            Some(PullRequestAutoMerge { method: MergeMethod::Squash, by: Some("Zingzy".into()) })
+        );
+        assert_eq!(GitHub.read(r#"{"number":5,"url":"u","state":"OPEN","autoMergeRequest":null}"#).unwrap().auto_merge, None);
+        assert!(FIELDS.ends_with(",autoMergeRequest"));
     }
 
     #[test]

@@ -7,6 +7,9 @@
 // to live.
 import {
   AccountView,
+  AgentRow,
+  type AgentSetupSet,
+  ThreadDefaults,
   AgentsReport,
   AgentsSignInEvent,
   ServerToolsAnswer,
@@ -25,6 +28,9 @@ import {
   FixResult,
   MergeInResult,
   PullRequestPage,
+  GitPrDiffReply,
+  PullRequestSendResult,
+  type PullRequestItem,
   GitUpdateReply,
   MergeResult,
   ReviewDraft,
@@ -69,6 +75,7 @@ import {
   SshHostSuggestion,
   PlaceSpend,
   AccountsAnswer,
+  ResetAnswer,
   ReadingsAnswer,
   UsedAnswer,
   type UsageRange,
@@ -76,6 +83,8 @@ import {
   PlaceAddJob,
   PlaceUpdateReply,
   PlaceView,
+  type PlaceSettingsAsk,
+  type PlaceSettingWord,
   ProjectView,
   type InitScreenId,
   type Attachment,
@@ -431,6 +440,10 @@ export interface Api {
   viewed?(id: string, mark?: { path: string; blob: string | null }): Promise<ViewedMarks>;
   /** The workspace's pull request page, read anew on every ask, with the merge methods the repository allows. */
   pullRequestView?(id: string): Promise<PullRequestPage>;
+  /** The workspace's pull request's diff against its base as the git host holds it, cut on a file's boundary. */
+  pullRequestDiff?(id: string): Promise<GitPrDiffReply>;
+  /** Sends items of the pull request's page to the workspace's agent as one message, as a fix is sent. */
+  pullRequestSend?(id: string, items: readonly PullRequestItem[]): Promise<PullRequestSendResult>;
   /** Asks the workspace's agent to fix a failed check, or to merge a child whose merge stopped, or, with neither, updates it
    * from its base and sends the conflicts. */
   fix?(id: string, check?: string, child?: string): Promise<FixResult>;
@@ -472,9 +485,16 @@ export interface Api {
    * again. Answers what the daemon half came to where it ran, the recipe job as it stands when the reply goes out
    * and, where no job started, why. A client without it holds Update rather than offering one that asks nobody. */
   placesUpdate?(placeId: string): Promise<PlaceUpdateReply>;
+  /** Sets what a person may set on one place, a word under `reset` taking that one back to its default, and answers
+   * the row as it now reads. A client without it draws the settings as words with no control. */
+  placesSet?(placeId: string, ask: PlaceSettingsAsk, reset?: ReadonlyArray<PlaceSettingWord>): Promise<PlaceView>;
   /** What stands on one computer or workspace for the agents: each agent, every skill, every MCP server. A read never
    * wakes a napping machine. A client without it draws no report. */
   agentsRead?(target: AgentsTarget): Promise<AgentsReport>;
+  /** Sets how one agent runs on one computer and answers its row as that computer's read now gives it, its variables
+   * by name alone. A variable's value is refused off the host's own socket. A client without it draws the setup as
+   * words with no control. */
+  agentsSetup?(placeId: string, agent: string, change: AgentSetupSet): Promise<AgentRow>;
   /** Starts one MCP server there once, or asks its address once, for its tools and its sign-in; the host keeps the
    * answer an hour unless `refresh`. A client without it holds List tools. */
   serversTools?(target: AgentsTarget, agent: string, name: string, refresh?: boolean): Promise<ServerToolsAnswer>;
@@ -611,8 +631,8 @@ export interface Api {
    * them every add over ssh the host is running and the last it finished. Optional so a fixture with no Settings
    * page need not fake it. */
   placesList?(): Promise<{ places: PlaceView[]; adds: PlaceAddJob[] }>;
-  /** Every project this wsp holds, which is what the new-workspace dialog picks one of. Optional so a fixture that
-   * makes no workspace need not fake it; without it the dialog says there is no project yet. */
+  /** Every project this wsp holds, which is what New thread opens on and the palette's page of projects lists.
+   * Optional so a fixture that makes no workspace need not fake it. */
   projectsList?(): Promise<ProjectView[]>;
   /** Records a project: a folder on the computer running the host, or a repository address on the computer named.
    * The host answers the record it kept, so the sidebar draws the project before anything is cloned. Optional so a
@@ -622,6 +642,9 @@ export interface Api {
    * still stands on, naming them. Optional so a fixture that removes none need not fake it; without it the row's
    * Remove project is held. */
   projectsRemove?(projectId: string): Promise<{ said: string | undefined }>;
+  /** What a new thread on each project starts on, by project id, each value with where it came from. Optional so a
+   * fixture with no project page need not fake it; without it the page's rows name nothing they inherit. */
+  projectsDefaults?(): Promise<Record<string, ThreadDefaults>>;
   /** Where a workspace of this project would land and what that computer offers: the computer's name, and the
    * flags the row's own words about the copy's ports and the state word's pause mode are read off. Refused in the
    * runtime's own sentence where that computer forks nothing. Optional so a fixture with no landing need not fake
@@ -714,6 +737,9 @@ export interface Api {
   usageUsed?(range: UsageRange, split: UsageSplit): Promise<UsedAnswer>;
   /** Every sign-in wsp knows, one row per account, with its limits as the agent last reported them. */
   usageAccounts?(): Promise<AccountsAnswer>;
+  /** Spends one banked reset of the account named by its key, on the person's own road: what it came to, the sentence
+   * the command line prints for it, and the account row as it now reads. */
+  usageReset?(account: string): Promise<ResetAnswer>;
   /** A computer's readings over a range, folded into the range's step; none where its daemon kept none. */
   placesReadings?(placeId: string, range: UsageRange): Promise<ReadingsAnswer>;
   /** Moves head to a version in the manifest; workspaces already forked keep their image. */
@@ -817,6 +843,8 @@ export function makeApi(c: ProtocolClient): Api {
     commitDraft: async (id, paths) => CommitDraft.parse(await c.request("workspaces.commitDraft", { workspaceId: id, ...(paths !== undefined ? { paths: [...paths] } : {}) })),
     viewed: async (id, mark) => ViewedMarks.parse(await c.request("workspaces.viewed", { workspaceId: id, ...(mark ?? {}) })),
     pullRequestView: async id => PullRequestPage.parse(await c.request("workspaces.pullRequestView", { workspaceId: id })),
+    pullRequestDiff: async id => GitPrDiffReply.parse(await c.request("workspaces.pullRequestDiff", { workspaceId: id })),
+    pullRequestSend: async (id, items) => PullRequestSendResult.parse(await c.request("workspaces.pullRequestSend", { workspaceId: id, items: [...items] })),
     fix: async (id, check, child) => FixResult.parse(await c.request("workspaces.fix", { workspaceId: id, ...(check !== undefined ? { check } : {}), ...(child !== undefined ? { child } : {}) })),
     mergeIn: async (id, child) => MergeInResult.parse(await c.request("workspaces.mergeIn", { workspaceId: id, child })),
     merge: async (id, o) => MergeResult.parse(await c.request("workspaces.merge", { workspaceId: id, ...o })),
@@ -892,6 +920,7 @@ export function makeApi(c: ProtocolClient): Api {
     },
     projectsList: async () => ProjectView.array().parse((await c.request<{ projects?: unknown }>("projects.list")).projects),
     projectsAdd: async (source, on, into) => ProjectView.parse((await c.request<{ project?: unknown }>("projects.add", { source, ...(on === undefined ? {} : { on }), ...(into === undefined ? {} : { into }) })).project),
+    projectsDefaults: async () => Object.fromEntries(Object.entries((await c.request<{ defaults?: Record<string, unknown> }>("projects.defaults")).defaults ?? {}).map(([id, defaults]) => [id, ThreadDefaults.parse(defaults)])),
     projectsRemove: async projectId => {
       const reply = await c.request<{ said?: unknown }>("projects.remove", { projectId });
       return { said: typeof reply.said === "string" ? reply.said : undefined };
@@ -936,7 +965,9 @@ export function makeApi(c: ProtocolClient): Api {
     dialPlace: async placeId => PlaceDial.parse(await c.request<Record<string, unknown>>("places.dial", { placeId })),
     // Parsed, not trusted: the word the row's state slot reads is built from the job this answers with.
     placesUpdate: async placeId => PlaceUpdateReply.parse(await c.request<Record<string, unknown>>("places.update", { placeId })),
+    placesSet: async (placeId, ask, reset) => PlaceView.parse((await c.request<{ place: unknown }>("places.set", { placeId, ...ask, ...(reset === undefined || reset.length === 0 ? {} : { reset: [...reset] }) })).place),
     agentsRead: async target => AgentsReport.parse((await c.request<{ report?: unknown }>("agents.read", { target })).report),
+    agentsSetup: async (placeId, agent, change) => AgentRow.parse((await c.request<{ agent?: unknown }>("agents.setup", { placeId, agent, ...change })).agent),
     skillsSearch: async q => {
       const skills = (await c.request<{ skills?: unknown }>("skills.search", { q })).skills;
       return (Array.isArray(skills) ? skills : []).map(hit => SkillHit.parse(hit));
@@ -997,6 +1028,7 @@ export function makeApi(c: ProtocolClient): Api {
     spend: async () => PlaceSpend.array().parse((await c.request<{ places?: unknown }>("cost.spend")).places),
     usageUsed: async (range, split) => UsedAnswer.parse((await c.request<{ used?: unknown }>("usage.used", { range, split, outside: true })).used),
     usageAccounts: async () => AccountsAnswer.parse(await c.request<unknown>("usage.accounts")),
+    usageReset: async account => ResetAnswer.parse(await c.request<unknown>("usage.reset", { account })),
     placesReadings: async (placeId, range) => ReadingsAnswer.parse(await c.request<unknown>("places.readings", { placeId, range })),
     // Parsed, not trusted: the lineage renders and forks only snapshots the wire type vouches for.
     snapshotWorkspace: async id => ProjectGolden.parse((await c.request<{ projectGolden?: unknown }>("workspaces.snapshot", { workspaceId: id })).projectGolden),

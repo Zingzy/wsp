@@ -549,13 +549,14 @@ describe("a relayed permission prompt on the wire", () => {
 
 describe("session.queued", () => {
   it("is a pushed event, not a session event: a start waiting behind the thread's running turn, with the send's request id, never in history", () => {
-    const queued = { type: "session.queued", workspaceId: "ws_1", threadId: "thread_0001", prompt: "and then this", requestId: "req_8" };
+    const queued = { type: "session.queued", workspaceId: "ws_1", threadId: "thread_0001", harness: "codex", prompt: "and then this", requestId: "req_8" };
     expect(EventUnion.parse(queued)).toEqual(queued);
     expect(EventUnion.parse({ ...queued, seq: 4 })).toEqual({ ...queued, seq: 4 });
     const { requestId: _r, ...plain } = queued;
     expect(EventUnion.parse(plain)).toEqual(plain);
     expect(() => EventUnion.parse({ ...queued, prompt: undefined })).toThrow();
     expect(() => EventUnion.parse({ ...queued, threadId: undefined })).toThrow();
+    expect(() => EventUnion.parse({ ...queued, harness: undefined })).toThrow();
     expect(() => SessionEvent.parse(queued)).toThrow();
   });
 });
@@ -903,6 +904,8 @@ describe("runtime wire types", () => {
       // A fix starts the agent's turn and spends on a model, an update runs git in the copy, and a merge acts on the
       // git host as the person.
       "workspaces.fix", "workspaces.update", "workspaces.merge", "workspaces.mergeIn",
+      // A send of a pull request's comments starts the agent's turn, as a fix does.
+      "workspaces.pullRequestSend",
       // A start and a review make a copy and start an agent, and a post writes on the git host as the person.
       "workspaces.start", "workspaces.review", "workspaces.reviewPost",
       // A reset spends what the person's plan has banked, with no undo.

@@ -364,15 +364,31 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
     const PANE_ONLY: Record<string, string> = {
       "workspaces.checkout": "the branch line and the pull request word a tile reads, and a lead's children with their branches, which the host pushes on every status; an agent reads its own with git and gh in its copy and its children with threads",
       "workspaces.pullRequestView": "the pull request's page the pane shows; an agent reads its pull request with gh in its copy",
+      "workspaces.pullRequestDiff": "the diff the pane's Files tab draws; an agent reads its pull request's diff with gh pr diff in its copy",
+      "workspaces.pullRequestSend": "the pane's Send to agent on a comment, a person handing a reviewer's words to the workspace's thread as a fix is handed; an agent reads its pull request's comments with gh, and one thread hands another words with wsp send",
       "workspaces.viewed": "a viewed mark is one person's place in a review; an agent reads the diff whole with git and marks nothing",
       "fs.write": "the pane's save of an edit made inside the diff; the command line reaches a file through wsp exec",
       "places.readings": "a computer's chart over a day, a week or a month; wsp computers prints its cores and memory now",
     };
-    for (const [op, why] of Object.entries(PANE_ONLY)) {
+    // The workspace ops a window sends that are no pane's: a row's buttons and a window's own bookkeeping.
+    const ROW_ONLY: Record<string, string> = {
+      "workspaces.get": "a window reads one workspace by its id; a verb names a workspace by the person's word through workspaces.resolve",
+      "workspaces.restartDaemon": "the row's restart of this computer's own daemon, a repair a person makes in front of the row",
+      "workspaces.stopWake": "the row's stop on a wake that keeps asking the provider, a person's call while they watch it",
+      "workspaces.upgrade": "the row's upgrade of a machine onto a fresh fork of its image, a person's call on a stale machine",
+      "workspaces.look": "a workspace's colour and icon are how one person's sidebar draws it",
+      "workspaces.touch": "a window's word that the person typed through a road the runtime cannot see; a verb's own acts reach the runtime already",
+      "workspaces.portReach": "the Ports pane's road to one port for its preview; an agent reaches its own ports from inside the workspace",
+      "workspaces.portProbe": "the Ports pane's one fetch of a port's route to show what answers; an agent fetches its own ports from inside the workspace",
+    };
+    for (const [op, why] of Object.entries({ ...PANE_ONLY, ...ROW_ONLY })) {
       expect([...RUNTIME_OPS, ...DAEMON_FRAME_OPS], `${op} is served`).toContain(op);
-      expect(verbs.includes(`"${op}"`), `${op} is sent by a verb, so it is no longer the pane's alone`).toBe(false);
+      expect(verbs.includes(`"${op}"`), `${op} is sent by a verb, so it is no longer a window's alone`).toBe(false);
       expect(why, `${op} says why it has no verb`).toMatch(/\S/);
     }
+    // Every workspace op no verb sends is listed with its reason, so a new one sits in neither only by failing here.
+    const unlisted = RUNTIME_OPS.filter(op => op.startsWith("workspaces.") && !verbs.includes(`"${op}"`) && !(op in PANE_ONLY) && !(op in ROW_ONLY));
+    expect(unlisted).toEqual([]);
   });
 
   it("every command line is a verb table entry or a command carrying why it has no tool, so a new command sits in neither only by failing here", () => {

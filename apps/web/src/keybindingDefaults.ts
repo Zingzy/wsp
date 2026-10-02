@@ -8,10 +8,10 @@
 // mod+n so a label reads it; a browser tab keeps mod+t for its own new tab,
 // so mod+n stays for the app in a tab. A Control chord is the terminal's while it has
 // focus, and Tab and the digits with mod are the browser's inside a tab, where
-// keybindings.ts drops them. The Tab pair is bound twice, once per sidebar
-// body, since in Spaces the one workspace on screen makes its threads what a
-// walk steps through; the mod arrows carry the workspace switch in both
-// bodies. They hold mod on purpose: an Option arrow alone is the word move in
+// keybindings.ts drops them. The Tab pair is bound twice: inside a right
+// panel of several tabs, a terminal there included, it steps the panel's
+// tabs and the switcher stands down, and everywhere else it opens the
+// switcher, which the mod arrows open there too. They hold mod on purpose: an Option arrow alone is the word move in
 // every text field on macOS, and a switch that lands the caret in a composer
 // would then work once. On macOS that same chord is a browser's own tab
 // switch, so keybindings.ts drops it in a tab as it drops the Tab pair. The
@@ -64,8 +64,10 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+shift+e", command: "thread.settle", when: "!terminalFocus" },
   { key: "mod+alt+u", command: "thread.nextNeedsYou", when: "!terminalFocus" },
   { key: "mod+o", command: "editor.open", when: "!terminalOwnsMod" },
-  { key: "ctrl+tab", command: "workspace.next", when: "!terminalFocus" },
-  { key: "ctrl+shift+tab", command: "workspace.previous", when: "!terminalFocus" },
+  { key: "ctrl+tab", command: "workspace.next", when: "!terminalFocus && !panelTabsFocus" },
+  { key: "ctrl+shift+tab", command: "workspace.previous", when: "!terminalFocus && !panelTabsFocus" },
+  { key: "ctrl+tab", command: "rightPanel.nextTab", when: "panelTabsFocus" },
+  { key: "ctrl+shift+tab", command: "rightPanel.previousTab", when: "panelTabsFocus" },
   ...WORKSPACE_SELECT_SLOTS.map(slot => ({ key: `mod+${slot}`, command: workspaceSelectCommand(slot), when: "!terminalOwnsMod" })),
 ];
 

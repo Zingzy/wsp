@@ -610,6 +610,14 @@ describe("the MCP server over the host", () => {
     expect(made.structured).toEqual({ threadId: row!.threadId, workspaceId: alpha!.id, harness: "codex", text: "codex: write tests", outcome: "started" });
   });
 
+  it("run with no agent on a project whose default agent is Codex opens the thread on Codex", async () => {
+    await call("projects_set", { project: cloud.name, agent: "codex" });
+    await call("new", { name: "alpha" });
+    const made = await call("run", { workspace: "alpha", task: "write tests" });
+    expect([made.isError, made.text]).toEqual([false, "codex: write tests"]);
+    expect(claude.starts).toEqual([]);
+  });
+
   it("run takes a title, which names the thread as a person's from the first second", async () => {
     await call("new", { name: "alpha" });
     const [alpha] = await rt.workspaces.list();

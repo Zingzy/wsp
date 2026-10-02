@@ -6,6 +6,7 @@ import { ProjectHue, ProjectIcon } from "@wsp/protocol";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../components/ui/select.js";
 import { cn } from "../lib/utils.js";
 import { PROJECT_GLYPHS, PROJECT_HUES } from "./look.js";
+import { SELECT_WIDTH } from "../settings/layout.js";
 
 const word = (name: string): string => name.charAt(0).toUpperCase() + name.slice(1);
 
@@ -31,7 +32,7 @@ function HueOption({ hue }: { hue: ProjectHue }) {
 export function IconSelect({ icon, hue, onChange, className }: { icon: ProjectIcon; hue: ProjectHue; onChange: (icon: ProjectIcon) => void; className?: string }) {
   return (
     <Select value={icon} onValueChange={next => onChange(ProjectIcon.parse(next))}>
-      <SelectTrigger size="sm" aria-label="Icon" data-k="project-icon" className={cn("w-40", className)}>
+      <SelectTrigger size="sm" aria-label="Icon" data-k="project-icon" className={cn(SELECT_WIDTH, className)}>
         <SelectValue>{(value: ProjectIcon) => <IconOption icon={value} hue={hue} />}</SelectValue>
       </SelectTrigger>
       <SelectPopup>
@@ -48,7 +49,7 @@ export function IconSelect({ icon, hue, onChange, className }: { icon: ProjectIc
 export function HueSelect({ hue, onChange, className }: { hue: ProjectHue; onChange: (hue: ProjectHue) => void; className?: string }) {
   return (
     <Select value={hue} onValueChange={next => onChange(ProjectHue.parse(next))}>
-      <SelectTrigger size="sm" aria-label="Colour" data-k="project-hue" className={cn("w-40", className)}>
+      <SelectTrigger size="sm" aria-label="Colour" data-k="project-hue" className={cn(SELECT_WIDTH, className)}>
         <SelectValue>{(value: ProjectHue) => <HueOption hue={value} />}</SelectValue>
       </SelectTrigger>
       <SelectPopup>

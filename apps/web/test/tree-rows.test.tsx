@@ -156,7 +156,7 @@ describe("the lead's rows", () => {
 
   it("hands a stopped merge to the lead's agent on the second keycap", async () => {
     vi.useRealTimers();
-    const fix = vi.fn(async () => ({ outcome: "started", base: "tree/lead", child: "stuck", agent: "claude" }));
+    const fix = vi.fn(async () => ({ outcome: "started" as const, threadId: "t1", base: "tree/lead", child: "stuck", agent: "claude" }));
     useStore.setState({ api: { fix } } as never);
     render(<TreeRows lead={LEAD} tree={tree([child("stuck", { conflicts: ["lead.txt"] })])} rows={[{ thread: thread("stuck", "stuck"), place: "Solari" }]} />);
     fireEvent.click(rowOf("stuck").querySelector("button")!);

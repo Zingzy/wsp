@@ -144,6 +144,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
 @theme inline {
   --color-zinc-25: oklch(99.2% 0 0);
   --animate-skeleton: skeleton 2s infinite linear;
+  --animate-settle-in: settle-in 180ms cubic-bezier(0.23, 1, 0.32, 1) both;
+  --animate-sub-open: sub-open 140ms cubic-bezier(0.23, 1, 0.32, 1) backwards;
   /* Duty-cycled indicator animations: long holds with stepped ramps, so the
      compositor updates discrete frames instead of every vsync. */
   --animate-ghost-pulse: ghost-pulse 2.4s infinite;
@@ -171,9 +173,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
   --color-status-working: var(--status-working);
   --color-status-failed: var(--status-failed);
   --color-status-done: var(--status-done);
-  --color-pr-open: var(--status-done);
   --color-pr-merged: var(--pr-merged);
-  --color-pr-closed: var(--status-failed);
   --color-info-foreground: var(--info-foreground);
   --color-info: var(--info);
   --color-destructive-foreground: var(--destructive-foreground);
@@ -221,6 +221,18 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
   --radius-xl: calc(var(--radius) + 4px);
   --radius-2xl: calc(var(--radius) + 8px);
   --radius-3xl: calc(var(--radius) + 12px);
+  @keyframes settle-in {
+    from {
+      opacity: 0;
+      transform: translateY(3px);
+    }
+  }
+  @keyframes sub-open {
+    from {
+      height: 0;
+      opacity: 0;
+    }
+  }
   @keyframes skeleton {
     /* Transform-only so the highlight sweep stays on the compositor, then a
        long hold with the band parked off-screen instead of a constant shimmer. */
@@ -1244,6 +1256,87 @@ code {
   overflow-wrap: anywhere;
 }
 
+/* The Pull request pane's bodies, in its own 480 px column: 14 px at 1.55, the foreground ink, inline code as a
+   quiet tint with no edge. A comment's headings hold at body size, since a cold review opens on ## and a column
+   this narrow cannot take an 18 px head per comment; the description keeps the chat's ladder. */
+.chat-markdown.pr-md {
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--foreground);
+}
+
+.chat-markdown.pr-md p {
+  margin: 0 0 0.6em;
+}
+
+.chat-markdown.pr-md > :last-child {
+  margin-bottom: 0;
+}
+
+.chat-markdown.pr-md ul {
+  padding-left: 18px;
+}
+
+.chat-markdown.pr-md ul,
+.chat-markdown.pr-md ol {
+  margin: 0.3em 0 0.6em;
+}
+
+.chat-markdown.pr-md li + li {
+  margin-top: 5px;
+}
+
+.chat-markdown.pr-md strong {
+  font-weight: 600;
+}
+
+.chat-markdown.pr-md :not(pre) > code {
+  border: 0;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--foreground) 6%, transparent);
+  padding: 1px 5px;
+  font-size: 12.5px;
+}
+
+.chat-markdown.pr-md-said h1,
+.chat-markdown.pr-md-said h2,
+.chat-markdown.pr-md-said h3,
+.chat-markdown.pr-md-said h4,
+.chat-markdown.pr-md-said h5,
+.chat-markdown.pr-md-said h6 {
+  margin: 1em 0 0.4em;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.chat-markdown.pr-md-said > :first-child {
+  margin-top: 0;
+}
+
+.chat-markdown.pr-md-line {
+  font-size: 13.5px;
+}
+
+@keyframes pr-word-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.pr-word-pulse {
+  animation: pr-word-pulse 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pr-word-pulse {
+    animation: none;
+  }
+}
+
 /* Prompt-stash save acknowledgement: the new count fades up from just below
    its resting position, once, then stops. One-shot and event-driven (React
    remounts the element by key on each stash) — no continuous animation. */
@@ -1583,9 +1676,9 @@ html.desktop-mac.dark [data-preview-panel-mode="inline"]:has([data-terminal-tran
 }
 
 /* Over the glass the sidebar's quiet text and glyphs have no solid card
-   behind them: one step up, the rows' words and the prose whole, and the
-   counts nearly opaque, keep them at AA over a white desktop, where the
-   glass reads as mid grey. */
+   behind them: one step up, the rows' words and the prose whole, the
+   counts nearly opaque and the state words a tint lighter, keep them at AA
+   over a white desktop, where the glass reads as mid grey. */
 .desktop-mac [data-app-sidebar] {
   @variant dark {
     --muted-foreground: var(--glass-ink);
@@ -1595,6 +1688,9 @@ html.desktop-mac.dark [data-preview-panel-mode="inline"]:has([data-terminal-tran
     --sidebar-row-rest: var(--glass-ink);
     --sidebar-prose: var(--glass-ink);
     --top-row-meta-alpha: 90%;
+    --status-working: #fbcfe8;
+    --status-failed: #ffc9c9;
+    --status-input: #c6d2ff;
   }
 }
 
@@ -1628,4 +1724,10 @@ html.desktop-mac:not(.dark):has([data-terminal-translucent]) :is([data-right-pan
     opacity: 0;
     transform: translateY(-4px);
   }
+}
+
+/* A rolling digit's column, 0 to 9 one a line, drawn as content so the element's own text stays the digit. */
+.digit-strip::before {
+  content: "0\A 1\A 2\A 3\A 4\A 5\A 6\A 7\A 8\A 9";
+  white-space: pre;
 }

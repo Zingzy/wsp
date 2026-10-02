@@ -4,7 +4,7 @@
 // callback forward did not land), and the tool's own status command that
 // proves the login. Nothing here reads the tool's output beyond the status
 // lines named below.
-import type { SignInFinish, SignInRoad } from "@wsp/protocol";
+import type { AgentSignInKind, SignInFinish, SignInRoad } from "@wsp/protocol";
 import { CLAUDE_CONFIG_REL, CLAUDE_KEY_FILE, GUEST_HOME } from "./roads.js";
 
 export interface StatusCheck {
@@ -17,6 +17,10 @@ export interface StatusCheck {
   /** Which of a tool's login sources the status says is in use, for the row; `secrets` maps a name the
    * secrets step set on the machine to the file it was cut from. Absent or undefined: the row names none. */
   detail?(output: string, secrets: ReadonlyMap<string, string>): string | undefined;
+  /** What kind of login the status says is in use, where it says one: the field a reader draws in place of the detail. */
+  kind?(output: string): AgentSignInKind | undefined;
+  /** The plan the status names for that login, in its own word (max, pro), where it names one. */
+  plan?(output: string): string | undefined;
   /** Why a status was refused when its own words would not say; absent, the row says the command said not signed in. */
   why?(output: string): string | undefined;
 }
@@ -253,12 +257,21 @@ export function secretNamed(output: string, secrets: ReadonlyMap<string, string>
   return undefined;
 }
 
+/** The one word the gemini line echoed last: the cached sign-in's file, or the key's name. */
+const geminiFound = (output: string): string | undefined => output.trim().split(/\s+/).at(-1);
+const GEMINI_KEYS = new Set(["GEMINI_API_KEY", "GOOGLE_API_KEY"]);
+
 /** What the gemini line echoed: the cached Google sign-in, or the key it found. */
 export function geminiSource(output: string, secrets: ReadonlyMap<string, string>): string | undefined {
-  const found = output.trim().split(/\s+/).at(-1);
+  const found = geminiFound(output);
   if (found === "oauth_creds.json") return "OAuth credentials";
-  if (found === "GEMINI_API_KEY" || found === "GOOGLE_API_KEY") return keyFrom(found, secrets);
+  if (found !== undefined && GEMINI_KEYS.has(found)) return keyFrom(found, secrets);
   return undefined;
+}
+
+function geminiKind(output: string): AgentSignInKind | undefined {
+  const found = geminiFound(output);
+  return found === "oauth_creds.json" ? "oauth" : found !== undefined && GEMINI_KEYS.has(found) ? "api-key" : undefined;
 }
 
 /** The JSON claude auth status printed, when it did. */
@@ -291,6 +304,29 @@ export function claudeSource(output: string, secrets: ReadonlyMap<string, string
 
 /** What the status says when the token is what signed the tool in; the sign-in stage's own word for a held token. */
 export const TOKEN_SOURCE = "the token from this computer";
+
+/** The plan claude auth status names a browser sign-in's account by (subscriptionType, measured "max" on 2.1.259). */
+function claudePlan(output: string): string | undefined {
+  const status = claudeStatus(output);
+  const plan = status?.["subscriptionType"];
+  return status?.["apiKeySource"] === undefined && typeof plan === "string" && plan !== "" ? plan : undefined;
+}
+
+/** A key where the status names one; the long-lived token only a plan mints, and a browser sign-in whose account names
+ * its plan, are a subscription; a browser sign-in naming none is plain OAuth. */
+function claudeKind(output: string): AgentSignInKind | undefined {
+  const status = claudeStatus(output);
+  if (status?.["apiKeySource"] === "ANTHROPIC_API_KEY") return "api-key";
+  if (status?.["loggedIn"] !== true) return undefined;
+  if (status["authMethod"] === "oauth_token") return "subscription";
+  if (status["authMethod"] === "claude.ai") return claudePlan(output) !== undefined ? "subscription" : "oauth";
+  return undefined;
+}
+
+/** codex login status's own two lines for a login (codex-rs cli/src/login.rs): a ChatGPT plan, or a key. */
+function codexKind(output: string): AgentSignInKind | undefined {
+  return /Logged in using ChatGPT/.test(output) ? "subscription" : /Logged in using an API key/.test(output) ? "api-key" : undefined;
+}
 
 /** The sign-in rows of the entries that have one, by the tool's name; a row's words are the wizard's. */
 export const SIGN_IN_ROWS = {
@@ -395,7 +431,7 @@ export const SIGN_IN_ROWS = {
     tokenEnv: "CLAUDE_CODE_OAUTH_TOKEN",
     token: /sk-ant-oat01-[A-Za-z0-9_-]{20,}/,
     keyEnv: "ANTHROPIC_API_KEY",
-    status: { command: "claude auth status", signedIn: claudeSignedIn, detail: claudeSource },
+    status: { command: "claude auth status", signedIn: claudeSignedIn, detail: claudeSource, kind: claudeKind, plan: claudePlan },
     sources: [],
     stateOnMachine: [],
   },
@@ -410,7 +446,7 @@ export const SIGN_IN_ROWS = {
     // The one-time code 0.155.1 prints for its device page; read outside the URLs, so no query string is taken for it.
     code: /\b[A-Z0-9]{4,}-[A-Z0-9]{4,}\b/,
     shared: { dir: "codex", file: "auth.json", target: `${GUEST_HOME}/.codex/auth.json`, homeEnv: "CODEX_HOME" },
-    status: { command: "codex login status", signedIn: ok(/Logged in using/) },
+    status: { command: "codex login status", signedIn: ok(/Logged in using/), kind: codexKind },
     stateOnMachine: [],
   },
   // Gemini CLI 0.59.0 asks about the folder before anything else, and then which sign-in to take, with Google's
@@ -425,7 +461,7 @@ export const SIGN_IN_ROWS = {
       { asks: /Do you trust the files in this folder\?/, flag: "--skip-trust" },
       { asks: /How would you like to authenticate for this project\?/, answer: "\r" },
     ],
-    status: { command: GEMINI_STATUS, signedIn: ok(), detail: geminiSource },
+    status: { command: GEMINI_STATUS, signedIn: ok(), detail: geminiSource, kind: geminiKind },
     stateOnMachine: [".gemini/oauth_creds.json"],
   },
   // Both counts print on exit 0; a provider key exported on the machine is listed under Environment and counts as a login.

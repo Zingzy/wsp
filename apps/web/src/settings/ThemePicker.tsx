@@ -94,9 +94,26 @@ function ThemeCard({ theme, chosen, onPreview }: { theme: Theme; chosen: boolean
   );
 }
 
+/** The side wsp draws: System, Light or Dark, each as a small window. */
+export function ModePicker({ picks, onChange }: { picks: ThemePicks; onChange: (patch: PreferencesPatch) => void }) {
+  return (
+    <RadioGroupPrimitive data-k="mode-picker" aria-label={SETTINGS_WORDS.mode} value={picks.theme} onValueChange={theme => onChange({ theme: theme as ThemePreference })} className="grid grid-cols-3 gap-3 max-sm:gap-2">
+      {MODES.map(mode => (
+        <ModeTile key={mode} mode={mode} picks={picks} />
+      ))}
+    </RadioGroupPrimitive>
+  );
+}
+
+/** The side a pick is shown on now: System reads the computer's side. */
+export function shownSide(picks: ThemePicks, systemDark: boolean): ThemeSide {
+  return picks.theme === "system" ? (systemDark ? "dark" : "light") : picks.theme;
+}
+
+/** The themes of the side drawn, one card each; a pointer over a card shows this window in it. */
 export function ThemePicker({ picks, onChange }: { picks: ThemePicks; onChange: (patch: PreferencesPatch) => void }) {
   const systemDark = useMediaQuery(SYSTEM_DARK_QUERY);
-  const shown: ThemeSide = picks.theme === "system" ? (systemDark ? "dark" : "light") : picks.theme;
+  const shown = shownSide(picks, systemDark);
   const field = PICK_FIELD[shown];
   // The window back on the picks while a preview stands: the pointer leaving the cards, the window losing focus or the
   // pointer under a card, and the page going.
@@ -125,12 +142,7 @@ export function ThemePicker({ picks, onChange }: { picks: ThemePicks; onChange: 
     window.requestAnimationFrame(() => html.classList.remove("no-transitions"));
   };
   return (
-    <div data-k="theme-picker" className="flex flex-col gap-6">
-      <RadioGroupPrimitive aria-label={SETTINGS_WORDS.theme} value={picks.theme} onValueChange={theme => onChange({ theme: theme as ThemePreference })} className="grid grid-cols-3 gap-4 max-sm:gap-2">
-        {MODES.map(mode => (
-          <ModeTile key={mode} mode={mode} picks={picks} />
-        ))}
-      </RadioGroupPrimitive>
+    <div data-k="theme-picker">
       <RadioGroupPrimitive
         aria-label={SETTINGS_WORDS.themesOf(THEME_WORDS[shown])}
         value={picks[field]}

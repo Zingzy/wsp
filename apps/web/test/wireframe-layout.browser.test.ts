@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The sidebar of thread tiles in a real Chromium, on the wireframe page's
-// fixed store: every tile is 52 px and every one-line row (search, head, the
-// Settled fold) 36 at three sidebar widths and in the 390 px sheet; every row
+// fixed store: every tile is 52 px, every one-line row (search, head) 36 and
+// every section head 28 at three sidebar widths and in the 390 px sheet; every row
 // and every status slot ends at one right edge; each child list steps 16 px in
 // and draws its rail the height of its item, stopping at the 15 px tick on the
-// last one; nothing but the Settled word wears caps; the head sits in the
+// last one; nothing wears caps; the head sits in the
 // fixed header over the scrolling tiles; the state words read at AA on a flat
 // tile and on the lifted one; the one lifted tile stands off the ground on
 // both sides, on light by a darker fill with a hairline edge; no plus stands
@@ -23,12 +23,11 @@
 // the small mono labels, no cut segment, no sideways scroll, the muted words
 // at AA, a held control further down the opacity ramp than a live one, no group row lifted
 // while the results stand and a dimmed row standing back by opacity on both
-// sides, the sub-rows holding their room so picking a group moves no row below
-// it, the Light pick drawing the page light, Restore defaults only off the
+// sides, one group's sub-rows open at a time right under it, the Light pick drawing the page light, Restore defaults only off the
 // defaults, the region right of the sidebar whole with the panel back on the
 // chord, and Add a computer's roads laid out on Computers. A computer's page
-// is photographed to its foot at both widths, in a window tall enough to hold
-// it, since its acts are under its agent rows. Vite serves test/wireframe to Playwright's
+// stands on one left edge and is photographed to its foot at both widths, in a window tall enough to hold
+// it, since Remove stands at its foot. Vite serves test/wireframe to Playwright's
 // browser, so like the shell layout test it runs only when asked for
 // (WSP_RENDER=1) and skips without Playwright's Chromium on the machine.
 import { mkdirSync } from "node:fs";
@@ -48,13 +47,16 @@ const SHOTS_DIR = join(tmpdir(), "wsp-render");
 const THEMES = ["dark", "light"] as const;
 const WIDTHS = [220, 256, 480] as const;
 const ONE_LINE = 36;
-/** A thread tile: three rows of 14, 18 and 14 px with 3 px between, 8 px in. */
+/** A thread tile: two rows of 14 and 18 px with 4 px between, 8 px in. */
 const TILE = 52;
+/** A section's head over its tiles, Needs you or the Settled fold: its name, a hairline and a chevron. */
+const SECTION_HEAD = 28;
+const HEIGHT = { one: ONE_LINE, tile: TILE, section: SECTION_HEAD } as const;
 
 /** Every row of the sidebar by what it is, with its box and the box of the status slot on its first row. */
 interface RowRead {
   id: string;
-  kind: "one" | "tile";
+  kind: keyof typeof HEIGHT;
   height: number;
   left: number;
   right: number;
@@ -103,14 +105,14 @@ describe.skipIf(renderSkipped !== undefined)("the sidebar of thread tiles laid o
         const id = el.dataset["rowId"] ?? el.dataset["k"] ?? (el.hasAttribute("data-search-row") ? "search" : el.hasAttribute("data-thread-launch") ? "launch" : "?");
         const box = el.getBoundingClientRect();
         const slot = el.querySelector<HTMLElement>("[data-thread-status]");
-        const tile = el.querySelector("[data-tile-where]") !== null;
-        return { id, kind: tile ? "tile" : "one", height: box.height, left: box.left, right: box.right, slotRight: slot === null ? null : slot.getBoundingClientRect().right } as const;
+        const kind = el.querySelector("[data-tile-where]") !== null ? "tile" : el.querySelector("[data-section-rule]") !== null ? "section" : "one";
+        return { id, kind, height: box.height, left: box.left, right: box.right, slotRight: slot === null ? null : slot.getBoundingClientRect().right } as const;
       });
     });
 
   const expectOneGrammar = (read: RowRead[], where: string): void => {
     expect(read.length, where).toBeGreaterThan(2);
-    for (const row of read) expect(row.height, `${row.id} at ${where}`).toBe(row.kind === "tile" ? TILE : ONE_LINE);
+    for (const row of read) expect(row.height, `${row.id} at ${where}`).toBe(HEIGHT[row.kind]);
     // Every row ends at one x whatever its depth: the tree takes its room from the left alone.
     const rights = new Set(read.filter(row => row.id !== "search" && row.id !== "project-switcher").map(row => Math.round(row.right)));
     expect([...rights], `right edges at ${where}`).toHaveLength(1);
@@ -118,7 +120,7 @@ describe.skipIf(renderSkipped !== undefined)("the sidebar of thread tiles laid o
     expect(slots.size, `slot edges at ${where}`).toBeLessThanOrEqual(1);
   };
 
-  it("every tile is 52 px and every one-line row 36 at 220, 256 and 480, every row and every slot ending at one x, each child 16 px in, in both themes", async () => {
+  it("every tile is 52 px, every one-line row 36 and every section head 28 at 220, 256 and 480, every row and every slot ending at one x, each child 16 px in, in both themes", async () => {
     for (const theme of THEMES) {
       for (const width of WIDTHS) {
         await open("sidebar", theme, `&sidebar=${width}`);
@@ -127,8 +129,9 @@ describe.skipIf(renderSkipped !== undefined)("the sidebar of thread tiles laid o
         const read = await rows();
         console.info(`rows at ${width} ${theme}: ${JSON.stringify(read.map(r => [r.id, r.height, Math.round(r.left)]))}`);
         expectOneGrammar(read, `${width} ${theme}`);
-        expect(read.filter(row => row.kind === "tile").map(row => row.id)).toEqual(["thread:th_box", "thread:th_lead", "thread:th_build", "thread:th_review", "thread:th_child"]);
-        expect(read.at(-1)!.id).toBe("settled");
+        // The tree holding the thread that asks stands under Needs you, over the bare list; nothing here is settled yet.
+        expect(read.filter(row => row.kind === "section").map(row => row.id)).toEqual(["section:needs-you"]);
+        expect(read.filter(row => row.kind === "tile").map(row => row.id)).toEqual(["thread:th_lead", "thread:th_build", "thread:th_review", "thread:th_child", "thread:th_box", "thread:th_quiet"]);
         // The depth reads in the left edge: 16 px a level, 12 of indent and 4 past the rail.
         const at = (id: string) => read.find(row => row.id === id)!.left;
         expect(Math.round(at("thread:th_build") - at("thread:th_lead"))).toBe(16);
@@ -219,7 +222,7 @@ describe.skipIf(renderSkipped !== undefined)("the sidebar of thread tiles laid o
       expect(fade.duration.split(", ")[0], fade.id).toBe("0.15s");
     }
     expect(fades.some(f => f.id.startsWith("thread:"))).toBe(true);
-    expect(fades.some(f => f.id === "settled")).toBe(true);
+    expect(fades.some(f => f.id === "section:needs-you")).toBe(true);
   }, 30_000);
 
   it("the one lifted tile stands off the ground on both sides: on light a fill one step darker with a hairline edge at 1.2 to 1 or better, on dark the fill alone", async () => {
@@ -441,16 +444,16 @@ const SETTINGS_SCREENS = [
   ["settings-appearance", "[data-settings-at=appearance]"],
   ["settings-light-picked", "[data-settings-at=appearance]"],
   ["settings-computers", "[data-settings-at=computers] [data-place-row=solari]"],
-  ["settings-computer", "[data-settings-at='computer:p_spoo'] [data-grid='agents'] [data-grid-row]"],
-  ["settings-computer-failed", "[data-settings-at='computer:p_lab'] [data-k=agents-misses]"],
-  ["settings-this-mac", "[data-settings-at='computer:here'] [data-grid='agents'] [data-grid-row]"],
+  ["settings-computer", "[data-settings-at='computer:p_spoo'] [data-k=remove-line]"],
+  ["settings-computer-failed", "[data-settings-at='computer:p_lab'] [data-k=place-sentence]"],
+  ["settings-this-mac", "[data-settings-at='computer:here'] [data-grid='threads-here'] [data-thread-row]"],
   ["settings-cloud", "[data-settings-at='computer:solari'] [data-k=remove-line]"],
   ["settings-projects", "[data-settings-at=projects] [data-project-row=pr_landing]"],
-  ["settings-project", "[data-settings-at='project:pr_spoo'] [data-k=seeded]"],
+  ["settings-project", "[data-settings-at='project:pr_spoo'] [data-k=project-threads]"],
   ["settings-devices", "[data-settings-at=devices] [data-device-row=d_3]"],
   ["settings-account", "[data-settings-at=account] [data-k=account-action]"],
   ["settings-keybindings", "[data-settings-at=keybindings] [data-slot=kbd]"],
-  ["settings-about", "[data-settings-at=about] [data-k=app-version]"],
+  ["settings-version", "[data-settings-at=general] [data-k=version]"],
   ["settings-usage", "[data-settings-at=usage] [data-used-row=codex]"],
   ["settings-search", "[data-settings-at=search] [data-settings-row=server-icons]"],
   ["settings-over-panel", "[data-settings-at=appearance]"],
@@ -659,37 +662,38 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
     }
   }, 300_000);
 
-  it("About while behind in the app on its own host: Get, Downloading held, then Quit and open, nothing cut, photographed", async () => {
+  it("General's Version card while behind in the app on its own host: Get, Downloading held, then Quit and open, nothing cut, photographed", async () => {
     for (const theme of THEMES) {
-      await open("settings-about-behind", theme, "[data-settings-at=about] [data-k=latest-version]");
+      await open("settings-version-behind", theme, "[data-settings-at=general] [data-k=version]");
       const get = page!.locator("[data-k=get-release]");
       await page!.waitForFunction(() => document.querySelector<HTMLElement>("[data-k=get-release]")?.title !== "");
       expect(await get.textContent()).toBe("Get 0.3.0");
-      expect((await read()).cutWords, `words cut at settings-about-behind ${theme}`).toEqual([]);
-      await shot(`settings-about-behind-1280-${theme}`);
+      expect((await read()).cutWords, `words cut at settings-version-behind ${theme}`).toEqual([]);
+      await shot(`settings-version-behind-1280-${theme}`);
       await get.click();
       await page!.waitForSelector("[data-k=get-release]:disabled");
       expect(await get.textContent()).toBe("Downloading");
-      expect((await read()).cutWords, `words cut at settings-about-downloading ${theme}`).toEqual([]);
-      await shot(`settings-about-downloading-1280-${theme}`);
+      expect((await read()).cutWords, `words cut at settings-version-downloading ${theme}`).toEqual([]);
+      await shot(`settings-version-downloading-1280-${theme}`);
       await page!.evaluate(() => (window as unknown as { finishBundle: () => void }).finishBundle());
       await page!.waitForSelector("[data-k=get-release]:not(:disabled)");
       expect(await get.textContent()).toBe("Quit and open");
-      expect((await read()).cutWords, `words cut at settings-about-kept ${theme}`).toEqual([]);
-      await shot(`settings-about-kept-1280-${theme}`);
+      expect((await read()).cutWords, `words cut at settings-version-kept ${theme}`).toEqual([]);
+      await shot(`settings-version-kept-1280-${theme}`);
     }
   }, 120_000);
 
-  it("About with newer files under the running host: Restart host in Get's place, nothing cut, photographed", async () => {
+  it("General's Version card with newer files under the running host: Restart host in Get's place, nothing cut, photographed", async () => {
     for (const theme of THEMES) {
-      await open("settings-about-restart", theme, "[data-settings-at=about] [data-k=restart-host]");
-      expect(await page!.locator("[data-settings-card=about] button").allTextContents()).toEqual(["Restart host", "Releases"]);
-      expect((await read()).cutWords, `words cut at settings-about-restart ${theme}`).toEqual([]);
-      await shot(`settings-about-restart-1280-${theme}`);
+      await open("settings-version-restart", theme, "[data-settings-at=general] [data-k=restart-host]");
+      // A computer here runs an older wsp, so its line stands in a card of its own under the version, What's new under both.
+      expect(await page!.locator("[data-settings-card^=version] button").allTextContents()).toEqual(["Restart host", "What's new"]);
+      expect((await read()).cutWords, `words cut at settings-version-restart ${theme}`).toEqual([]);
+      await shot(`settings-version-restart-1280-${theme}`);
     }
   }, 120_000);
 
-  it("photographs a computer's page to its foot at both widths, so its agents, its servers, its threads and Remove are read", async () => {
+  it("photographs a computer's page to its foot at both widths, so its limits, its agents' link, its image, its threads and Remove are read", async () => {
     for (const theme of THEMES) {
       for (const screen of FOOT_SCREENS) {
         const waitFor = SETTINGS_SCREENS.find(([name]) => name === screen)![1];
@@ -708,18 +712,62 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
     }
   }, 180_000);
 
-  it("holds the room for the sub-rows whichever group is open, so picking Computers moves no group under it", async () => {
-    const tops = (): Promise<Record<string, number>> =>
-      page!.evaluate(() =>
-        Object.fromEntries([...document.querySelectorAll<HTMLElement>("[data-slot=sidebar] [data-sidebar-row]")].map(el => [el.dataset["rowId"] ?? "?", Math.round(el.getBoundingClientRect().top)])),
-      );
+  it("stands a computer's page on one left edge: every section's and list's head on the cards' outer edge, and every row's first mark or word the card's hairline and its 20 px inset in, at both widths", async () => {
+    for (const screen of ["settings-computer", "settings-computer-failed", "settings-this-mac", "settings-cloud"] as const) {
+      const waitFor = SETTINGS_SCREENS.find(([name]) => name === screen)![1];
+      for (const size of FOOT_SIZES) {
+        await open(screen, "dark", waitFor, size);
+        const edges = await page!.evaluate(() => {
+          const pageEl = document.querySelector<HTMLElement>("[data-settings-page]")!;
+          const left = (el: Element): number => Math.round(el.getBoundingClientRect().left);
+          // A row's lead is the first box down its first children that stands in from the row's own edge.
+          const lead = (row: HTMLElement): number => {
+            let el: Element | null = row;
+            while (el !== null && left(el) <= left(row)) el = el.firstElementChild;
+            return el === null ? NaN : left(el);
+          };
+          const rows = [...pageEl.querySelectorAll<HTMLElement>("[data-settings-row], [data-grid-row], [data-thread-row], [data-k=remove-line], [data-k=computer-head]")];
+          return {
+            heads: [...pageEl.querySelectorAll("[data-settings-head], [data-grid-head] > span:first-child")].map(left),
+            cards: [...pageEl.querySelectorAll<HTMLElement>("[data-settings-card] > div, [data-grid] > div:not([data-grid-head]), [data-k=remove-line]")].filter(el => getComputedStyle(el).borderLeftWidth === "1px").map(left),
+            leads: rows.map(row => [row.dataset["settingsRow"] ?? row.dataset["threadRow"] ?? row.dataset["k"] ?? "grid-row", lead(row)] as const),
+          };
+        });
+        console.info(`${screen} at ${size.width} edges: ${JSON.stringify(edges)}`);
+        const edge = edges.cards[0]!;
+        expect(edges.cards.length, screen).toBeGreaterThan(1);
+        expect(new Set([...edges.cards, ...edges.heads]), `${screen} at ${size.width}`).toEqual(new Set([edge]));
+        expect(edges.leads.length, screen).toBeGreaterThan(1);
+        for (const [id, x] of edges.leads) expect(x, `${id} on ${screen} at ${size.width}`).toBe(edge + 21);
+      }
+    }
+  }, 120_000);
+
+  it("opens one group's sub-rows at a time: picking Computers folds Appearance's sections and lists the computers right under it, 36 px apart", async () => {
+    const tops = (): Promise<[string, number][]> =>
+      page!.evaluate(() => [...document.querySelectorAll<HTMLElement>("[data-slot=sidebar] [data-sidebar-row]")].map(el => [el.dataset["rowId"] ?? "?", Math.round(el.getBoundingClientRect().top)] as [string, number]));
     await open("settings-appearance", "dark", "[data-settings-at=appearance]");
     const before = await tops();
-    expect(Object.keys(before)).toContain("computer:p_spoo");
+    expect(before.some(([id]) => id.startsWith("section:"))).toBe(true);
+    expect(before.some(([id]) => id.startsWith("computer:"))).toBe(false);
     await page!.locator("[data-k=settings-computers]").click();
     await page!.waitForSelector("[data-settings-at=computers]");
+    // The group's list grows to its height in 140 ms; the rows are read once it stands.
+    await page!.waitForTimeout(400);
     const after = await tops();
-    for (const [id, top] of Object.entries(before)) expect(after[id], `${id} stayed where it was`).toBe(top);
+    const ids = after.map(([id]) => id);
+    expect(ids.some(id => id.startsWith("section:"))).toBe(false);
+    const at = ids.indexOf("group:computers");
+    const computers = ids.filter(id => id.startsWith("computer:"));
+    expect(computers.length).toBeGreaterThan(1);
+    // The computers follow their group with nothing between, and the next group follows them.
+    expect(ids.slice(at + 1, at + 1 + computers.length)).toEqual(computers);
+    expect(ids[at + 1 + computers.length]).toBe("group:projects");
+    // The computers stand one under the other from the group's own row down, 36 px apart, no gap opening among them.
+    const steps = ids.slice(at, at + 1 + computers.length).map(id => after.find(([i]) => i === id)![1]);
+    expect(new Set(steps.slice(1).map((top, i) => top - steps[i]!))).toEqual(new Set([ONE_LINE]));
+    // The groups above the one that opened stand where they were.
+    for (const [id, top] of before.filter(([id]) => id === "group:general" || id === "group:appearance")) expect(after.find(([i]) => i === id)![1], `${id} stayed where it was`).toBe(top);
   }, 60_000);
 
   it("the Light theme picked on the dark side draws the page light, and Restore defaults stands only off the defaults and puts the page back", async () => {

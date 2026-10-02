@@ -1,38 +1,48 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The palette's item list over the sidebar's project snapshots: the shell's
-// own actions, the selected workspace's actions from the workspace registry,
-// one row per workspace to switch to, recent threads at rest, every thread
+// own actions, the page of projects New thread picks from, the selected
+// workspace's actions from the workspace registry, one row per workspace to
+// switch to, recent threads at rest, every thread
 // whose title holds the typed query and every other one whose messages hold
 // it, as the host found them. Pure apart from the callbacks it is handed, so
 // the list is testable without the dialog.
-import { ArrowDownIcon, ArrowUpIcon, ChevronDownIcon, ChevronUpIcon, FileTextIcon, FolderIcon, FolderPlusIcon, MonitorIcon, PanelLeftIcon, PanelRightIcon, PlusIcon, SettingsIcon } from "lucide-react";
+import { ArrowDownIcon, ArrowLeftIcon, ArrowUpIcon, BookOpenIcon, BugIcon, ChevronDownIcon, ChevronUpIcon, FileTextIcon, FolderIcon, FolderOpenIcon, FolderPlusIcon, GithubIcon, MonitorIcon, PanelLeftIcon, PanelRightIcon, PlusIcon, SettingsIcon } from "lucide-react";
+import type { ReactNode } from "react";
+import { REPO } from "../../../../../packages/wspx/scripts/bundles.mjs";
 import { agentName } from "@wsp/catalog";
-import { PLACES_WORDS, type PlaceView, type SessionSearchHit } from "@wsp/protocol";
+import { HERE_PLACE_ID, PLACES_WORDS, type PlaceView, type ProjectView, type SessionSearchHit } from "@wsp/protocol";
 import { THREAD_WORDS } from "../../actions/format.js";
 import { resolveActions, type ResolvedAction } from "../../actions/registry.js";
 import { workspaceActions, workspaceTarget, type WorkspaceVerbs } from "../../actions/workspaceActions.js";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot } from "../../adapt/index.js";
-import { WORKSPACE_SELECT_SLOTS, workspaceSelectCommand } from "../../keybindingTypes.js";
+import { browserTabClaimsShortcut, formatShortcutLabel, matchesShortcut, type ShortcutEventLike } from "../../keybindings.js";
+import { isDesktopShell } from "../../lib/desktopShell.js";
+import { WORKSPACE_SELECT_SLOTS, workspaceSelectCommand, type KeybindingShortcut } from "../../keybindingTypes.js";
+import { ProjectGlyph } from "../../projects/look.js";
 import { SETTINGS_WORDS, onName } from "../../settings/format.js";
 import { groupNames } from "../../settings/groups.js";
 import { absenceOf } from "../../settings/places.js";
 import { threadWalk } from "../../shell/shellCommands.js";
 import { searchSidebarThreadsByTitle } from "../../sidebar/Sidebar.logic.js";
 import { currentWorkspaceId } from "../../adapt/workspaces.js";
-import { threadTree, workspaceOf } from "../../sidebar/threadTree.js";
-import { computerName } from "../../sidebar/workspaceRows.js";
-import { NEW_WORKSPACE, PROJECT_WORDS } from "../../sidebar/words.js";
+import { inProjectOrder, threadTree, workspaceOf } from "../../sidebar/threadTree.js";
+import { computerName, placeNames } from "../../sidebar/workspaceRows.js";
+import { NEW_WORKSPACE, PROJECT_WORDS, SWITCHER_WORDS } from "../../sidebar/words.js";
+import { RowComputer } from "../chat/ComposerCheckoutRow.js";
 import { HarnessMark } from "../chat/HarnessMark.js";
 import { Facts } from "../Facts.js";
 import { restingAge } from "../status/restingAge.js";
 import { LINE_SLOT_CLASS, ThreadStatus } from "../status/ThreadStatus.js";
-import { type CommandPaletteActionItem, ITEM_ICON_CLASS, RECENT_THREAD_LIMIT } from "./CommandPalette.logic.js";
+import { CommandShortcut } from "../ui/command.js";
+import { type CommandPaletteActionItem, type CommandPaletteSubmenuItem, ITEM_ICON_CLASS, RECENT_THREAD_LIMIT } from "./CommandPalette.logic.js";
 
 export interface PaletteHandlers {
   readonly selectWorkspace: (workspaceId: string) => void;
   readonly selectThread: (workspaceId: string, threadId: string | null) => void;
-  /** Opens the New thread dialog on the named project, the one the selected copy is of, else the dialog's own pick. */
-  readonly newWorkspace: (project?: string) => void;
+  /** New thread as Cmd+T opens it: the project the person is in, or the page of projects where they asked to pick. */
+  readonly newThread: () => void;
+  /** Opens one project's New thread page. */
+  readonly openProjectHome: (projectId: string) => void;
   readonly toggleSidebar: () => void;
   readonly toggleRightPanel: (workspaceId: string) => void;
   /** One step down the sidebar's workspaces, and back up; both wrap. */
@@ -56,6 +66,11 @@ export interface PaletteItemsInput {
   /** The threads whose messages the host found the query in, for that query. */
   readonly messageHits: ReadonlyArray<SessionSearchHit>;
   readonly canCreate: boolean;
+  /** Every project this host holds, in the person's order, which the page New thread picks from lists. */
+  readonly recorded: readonly ProjectView[];
+  readonly projectOrder: readonly string[];
+  /** Whether New thread asks for the project every time, so its row opens the page rather than leaving. */
+  readonly asks: boolean;
   readonly handlers: PaletteHandlers;
   readonly verbs: WorkspaceVerbs;
   /** The computers and providers this host holds, for the one reading of a workspace whose computer is not
@@ -64,12 +79,19 @@ export interface PaletteItemsInput {
 }
 
 export interface PaletteItems {
-  readonly actionItems: ReadonlyArray<CommandPaletteActionItem>;
+  readonly actionItems: ReadonlyArray<CommandPaletteActionItem | CommandPaletteSubmenuItem>;
   readonly workspaceItems: ReadonlyArray<CommandPaletteActionItem>;
   readonly recentThreadItems: ReadonlyArray<CommandPaletteActionItem>;
   readonly threadSearchItems: ReadonlyArray<CommandPaletteActionItem>;
   readonly messageSearchItems: ReadonlyArray<CommandPaletteActionItem>;
 }
+
+/** The pages about wsp itself, reached from here since Settings has no About page. */
+const LINKS = [
+  { value: "action:github", title: "wsp on GitHub", terms: ["github", "source", "repo", "about", "licence", "license"], Icon: GithubIcon, url: REPO },
+  { value: "action:docs", title: "wsp docs", terms: ["docs", "documentation", "help", "manual"], Icon: BookOpenIcon, url: "https://wsp.apidocumentation.com" },
+  { value: "action:report-bug", title: "Report a bug", terms: ["bug", "issue", "report", "feedback", "help"], Icon: BugIcon, url: `${REPO}/issues/new` },
+];
 
 const sync = (fn: () => void) => async (): Promise<void> => {
   fn();
@@ -92,20 +114,78 @@ function actionItem(action: ResolvedAction, description: string): CommandPalette
   };
 }
 
-function actionItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
+/** The value of the row that opens the page of projects, which the palette also opens on straight from Cmd+T. */
+export const NEW_THREAD_PAGE = "page:new-thread";
+
+/** The chord that picks the page's nth row: the platform's mod and the row's place in the list. */
+const pickShortcut = (n: number): KeybindingShortcut => ({ key: String(n), metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, modKey: true });
+
+/** Whether the page's mod digits reach it here; a browser tab keeps them for its own tabs. */
+const pickKeysReach = (): boolean => isDesktopShell() || !browserTabClaimsShortcut(pickShortcut(1));
+
+/** The row a key event picks on the page, 1 to 9, by the same chords its rows' labels name; null for any other key
+ * and wherever the chords do not reach. */
+export function pickedRow(event: ShortcutEventLike): number | null {
+  if (!pickKeysReach()) return null;
+  return WORKSPACE_SELECT_SLOTS.find(n => matchesShortcut(event, pickShortcut(n))) ?? null;
+}
+
+/** Where a project is: the computer it is on as the row under the composer names it, with its glyph where it is
+ * not the one the app runs on, and its folder. */
+function projectWhere(project: ProjectView, places: readonly PlaceView[], named: ReadonlyMap<string, string>): ReactNode {
+  const place = project.computer === HERE_PLACE_ID ? undefined : places.find(p => p.id === project.computer);
+  const computer = named.get(project.computer) ?? (project.computer === HERE_PLACE_ID ? "" : project.computer);
+  // The row's own fact, without the height and inset it takes under the composer.
+  const at = computer === "" ? null : <RowComputer name={computer} place={place} className="h-auto px-0 sm:h-auto" />;
+  return <Facts parts={[at, project.path]} className="overflow-hidden" />;
+}
+
+/** The page New thread picks a project from: every project in the person's order, the first nine on a pick key. */
+function newThreadPage(input: PaletteItemsInput): CommandPaletteSubmenuItem {
+  const named = placeNames(input.places);
+  const keyed = pickKeysReach();
+  const items = inProjectOrder(input.recorded, project => project.id, input.projectOrder).map((project, index): CommandPaletteActionItem => ({
+    kind: "action",
+    value: `project:${project.id}`,
+    searchTerms: [project.name, named.get(project.computer) ?? "", project.path],
+    icon: <ProjectGlyph projectId={project.id} />,
+    title: project.name,
+    description: projectWhere(project, input.places, named),
+    ...(keyed && index < WORKSPACE_SELECT_SLOTS.length ? { titleTrailingContent: <CommandShortcut>{formatShortcutLabel(pickShortcut(index + 1))}</CommandShortcut> } : {}),
+    run: sync(() => input.handlers.openProjectHome(project.id)),
+  }));
+  return {
+    kind: "submenu",
+    value: NEW_THREAD_PAGE,
+    searchTerms: ["new thread in", "new thread on", "pick a project", "new chat in"],
+    icon: <FolderOpenIcon className={ITEM_ICON_CLASS} />,
+    title: `${NEW_WORKSPACE} in...`,
+    description: "Pick the project first",
+    disabled: !input.canCreate || items.length === 0,
+    addonIcon: <ArrowLeftIcon className="text-icon-muted" />,
+    placeholder: `${SWITCHER_WORDS.search}...`,
+    emptyStateMessage: "No matching projects.",
+    groups: [{ value: "projects", label: SWITCHER_WORDS.list, items }],
+  };
+}
+
+function actionItems(input: PaletteItemsInput): Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> {
   const { handlers, selectedId } = input;
   const selected = selectedId === null ? null : (input.projects.find(project => project.id === selectedId) ?? null);
-  const items: CommandPaletteActionItem[] = [
+  const items: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [
     {
       kind: "action",
-      value: "action:new-workspace",
+      value: "action:new-thread",
       searchTerms: ["new thread", "new chat", "new task", "create task"],
       icon: <PlusIcon className={ITEM_ICON_CLASS} />,
       title: NEW_WORKSPACE,
-      description: input.canCreate ? "One piece of work on one project" : "Not connected to the runtime",
-      disabled: !input.canCreate,
-      run: sync(() => handlers.newWorkspace(selected?.workspace.project?.id)),
+      description: !input.canCreate ? "Not connected to the runtime" : input.recorded.length === 0 ? "Add a project first" : "One piece of work on one project",
+      disabled: !input.canCreate || input.recorded.length === 0,
+      // Asking keeps the palette up, on the page of projects.
+      ...(input.asks ? { keepOpen: true } : {}),
+      run: sync(handlers.newThread),
     },
+    newThreadPage(input),
     {
       kind: "action",
       value: "action:add-project",
@@ -128,7 +208,7 @@ function actionItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
     });
   }
   if (selected !== null) {
-    // The one New thread row is the dialog's, opened on this copy's project; the copy's own act stays off the palette.
+    // The one New thread row is the one above, which opens on a project; the copy's own act stays off the palette.
     items.push(...resolveActions(workspaceActions, workspaceTarget(selected.workspace, selected.status, input.places), input.verbs).filter(action => action.id !== "new-thread").map(action => actionItem(action, selected.displayName)));
   }
 
@@ -211,6 +291,15 @@ function actionItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
       shortcutCommand: "settings.toggle",
       run: sync(handlers.openSettings),
     },
+    ...LINKS.map(({ value, title, terms, Icon, url }) => ({
+      kind: "action" as const,
+      value,
+      searchTerms: terms,
+      icon: <Icon className={ITEM_ICON_CLASS} />,
+      title,
+      description: url.replace("https://", ""),
+      run: sync(() => void window.open(url, "_blank", "noopener,noreferrer")),
+    })),
     {
       kind: "action",
       value: "action:toggle-right-panel",

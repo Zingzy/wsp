@@ -11,6 +11,7 @@ import {
   DEFAULT_PREFERENCES,
   markedDefault,
   markedFor,
+  modelIdRefusal,
   openDefaults,
   Preferences,
   PreferencesPatch,
@@ -123,6 +124,28 @@ describe("the model, effort and access a new thread starts on", () => {
     const d = resolveThreadDefaults({ firstAgent: "claude", catalogOf: () => shaped, prefs: set });
     expect(d.model).toEqual({ value: "opus-next", from: "default" });
     expect(startPicks(markedFor(shaped, d), {}, true).model).toBe("opus-next");
+  });
+});
+
+describe("a model id typed by hand", () => {
+  it("takes the ids agents run, a provider's path, a tag, a date and a window suffix", () => {
+    for (const id of ["claude-opus-5-5", "gpt-5.6-sol", "provider/model:tag", "openrouter/anthropic/claude-sonnet-4.5", "llama3.1:8b", "claude-3-5-sonnet@20240620", "claude-opus-4-5[1m]", "anthropic.claude-v2:1", "hf.co/user/model:Q4_K_M", "o3+high"]) expect(modelIdRefusal(id), id).toBeNull();
+  });
+
+  it("refuses an empty id, a space anywhere and a character no model id has, naming it", () => {
+    expect(modelIdRefusal("")).toBe("A model id cannot be empty");
+    for (const id of ["gpt 5", " gpt-5", "gpt-5\t", "gpt\n5"]) expect(modelIdRefusal(id), JSON.stringify(id)).toBe("No model id has a space in it");
+    expect(modelIdRefusal("gpt;rm")).toBe('No model id has ";" in it');
+    // A leading dash would be read as a flag on the agent's own line.
+    expect(modelIdRefusal("--dangerously-skip-permissions")).toBe('No model id starts with "-"');
+    expect(modelIdRefusal("a$b")).toBe('No model id has "$" in it');
+    expect(modelIdRefusal("modèle")).toBe('No model id has "è" in it');
+  });
+
+  it("marks the ids the person added that the list does not carry, and not one it does", () => {
+    const shaped = withCustomModels(CLAUDE, { custom: ["opus-next", "sonnet"] });
+    expect(shaped.models.find(m => m.value === "opus-next")).toMatchObject({ added: true });
+    expect(shaped.models.find(m => m.value === "sonnet")?.added).toBeUndefined();
   });
 });
 

@@ -8,6 +8,7 @@ import {
   START_WORDS,
   fromTaskPrompt,
   githubLinkOf,
+  projectForRepo,
   lineInDiff,
   reviewFromReply,
   reviewTaskPrompt,
@@ -208,5 +209,16 @@ describe("a workspace handed over any door", () => {
     const review = { verdict: "comment" as const, summary: "Fine.", comments: [], headOid: "abc", threadId: "t1", at: 1 };
     const view = { id: "ws_1", name: "Review #7", machineId: "local", phase: "running" as const, kind: "local" as const, golden: "", createdAt: "2026-09-29T00:00:00Z", project: { id: "pr_1", name: "lab", path: "/p", computer: "here" }, from, review };
     expect(WorkspaceOut.parse(view)).toMatchObject({ from, review });
+  });
+});
+
+describe("the project a link's repository names", () => {
+  const on = (id: string, computer: string, remote: string) => ({ id, computer, remote });
+  it("is this computer's where two computers hold the repository, and the other's where only it does", () => {
+    const box = on("pr_box", "p_spoo", "git@github.com:Dev/Shop.git");
+    const mac = on("pr_mac", "here", "https://github.com/dev/shop.git");
+    expect(projectForRepo([box, mac], "dev/shop", "here")?.id).toBe("pr_mac");
+    expect(projectForRepo([box], "DEV/shop", "here")?.id).toBe("pr_box");
+    expect(projectForRepo([box, mac], "dev/other", "here")).toBeUndefined();
   });
 });

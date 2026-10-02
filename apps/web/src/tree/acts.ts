@@ -25,7 +25,7 @@ export async function askLeadToMerge(lead: { id: string; name: string }, childId
   if (fix === undefined) return;
   try {
     const asked = await fix(lead.id, undefined, childId);
-    addNotice({ kind: "done", text: fixMergeChildLine(lead.name, agentName(asked.agent ?? ""), asked.child ?? childId), where: lead.name });
+    if (asked.outcome !== "updated") addNotice({ kind: "done", text: fixMergeChildLine(lead.name, agentName(asked.agent), asked.child ?? childId), where: lead.name });
   } catch (e) {
     noticeFailure(e, said => said, { where: lead.name });
   }

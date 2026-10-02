@@ -8,14 +8,14 @@
 // page is open.
 import { Fragment } from "react";
 import { ScrollArea } from "../components/ui/scroll-area.js";
+import { cn } from "../lib/utils.js";
 import { useIsMobile } from "../hooks/useMediaQuery.js";
 import { useStore } from "../protocol/store.js";
 import { AddProjectDialog } from "../sidebar/AddProjectDialog.js";
+import { AgentPage } from "./agentPage.js";
 import { ComputerPage } from "./computers.js";
-import { SETTINGS_WORDS, groupBlurbs } from "./format.js";
-import { PageHead } from "./grid.js";
+import { SETTINGS_WORDS } from "./format.js";
 import { drawnGroups, groupById, searchGroup } from "./groups.js";
-import { hereName } from "./places.js";
 import { ProjectPage } from "./projects.js";
 import { Card, Cards, Line, Row } from "./rows.js";
 import { useSettingsAt, useSettingsContext, type SettingsContext } from "./settingsContext.js";
@@ -65,19 +65,13 @@ function SearchPage({ ctx, query }: { ctx: SettingsContext; query: string }) {
 function Page({ at, ctx }: { at: SettingsAt; ctx: SettingsContext }) {
   if (at.kind === "group") {
     const group = groupById(at.group);
-    return (
-      <>
-        <PageHead title={group.name}>
-          <p className="text-[13px] text-muted-foreground">{groupBlurbs(hereName(ctx.places))[at.group]}</p>
-        </PageHead>
-        <Cards cards={group.cards(ctx)} />
-      </>
-    );
+    return <Cards cards={group.cards(ctx)} />;
   }
   if (at.kind === "computer") {
     const place = ctx.places.find(p => p.id === at.id);
     return place === undefined ? null : <ComputerPage place={place} ctx={ctx} />;
   }
+  if (at.kind === "agent") return <AgentPage id={at.id} ctx={ctx} />;
   const project = ctx.projects.find(p => p.id === at.id);
   return project === undefined ? null : <ProjectPage project={project} ctx={ctx} />;
 }
@@ -92,9 +86,11 @@ export function SettingsPage() {
   const isMobile = useIsMobile();
   // At a phone's width the results are in the sheet the field is in, so the centre keeps its page.
   const searching = search !== "" && !isMobile;
+  // Usage keeps the sizes it was locked at; every other page is drawn to the locked settings design.
+  const usage = !searching && at.kind === "group" && at.group === "usage";
   return (
     <ScrollArea className="min-h-0 flex-1">
-      <div data-settings-page data-settings-at={searching ? "search" : atId(at)} className="mx-auto flex w-full max-w-[760px] flex-col gap-8 px-8 pt-14 pb-12 max-sm:px-4 max-sm:pt-6">
+      <div data-settings-page data-settings-at={searching ? "search" : atId(at)} {...(usage ? { "data-locked": "" } : {})} className={cn("group/settings mx-auto flex w-full flex-col px-8 pb-12 max-sm:px-4 max-sm:pt-6", usage ? "max-w-[1080px] gap-12 pt-14" : "max-w-[760px] gap-[30px] pt-7")}>
         {searching ? <SearchPage ctx={ctx} query={search} /> : <Page key={atId(at)} at={at} ctx={ctx} />}
       </div>
       {addProjectAt === null ? null : (

@@ -62,7 +62,7 @@ describe("agent outcome words", () => {
 
   it("names each agent and what became of its sessions in one set of words, with the rollouts skipped and no counts", () => {
     expect(agentOutcomes([agent({ sessions: 2 })])).toBe("Claude Code moved");
-    expect(agentOutcomes([agent({ agent: "codex", outcome: "transcript-only", sessions: 1, skipped: 2 })])).toBe("Codex transcripts landed, not yet listed, 2 rollouts skipped");
+    expect(agentOutcomes([agent({ agent: "codex", outcome: "transcript-only", sessions: 1, skipped: 2 })])).toBe("Codex landed, not listed yet, 2 rollouts skipped");
     expect(agentOutcomes([agent({ agent: "gemini", outcome: "nothing", files: 0, bytes: 0 })])).toBe("Gemini CLI nothing to bring");
     expect(agentOutcomes([agent({ agent: "zed", outcome: "carried" })])).toBe("zed carried unchanged");
     expect(agentOutcomes([agent({ agent: "zed", outcome: "failed", error: "state.db locked" })])).toBe("zed failed: state.db locked");
@@ -71,7 +71,7 @@ describe("agent outcome words", () => {
   });
 
   it("gives a row's end the same words as the landed line", () => {
-    expect(agentOutcome(agent({ outcome: "transcript-only", skipped: 1 }))).toBe("transcripts landed, not yet listed, 1 rollout skipped");
+    expect(agentOutcome(agent({ outcome: "transcript-only", skipped: 1 }))).toBe("landed, not listed yet, 1 rollout skipped");
     expect(agentOutcome(agent({ outcome: "nothing" }))).toBe("nothing to bring");
     expect(agentOutcome(agent({ outcome: "failed", error: "locked" }))).toBe("failed: locked");
   });

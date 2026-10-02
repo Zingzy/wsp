@@ -59,12 +59,6 @@ export function remoteHost(remote: string): string | undefined {
   return host === undefined || host === "" ? undefined : host;
 }
 
-/** The `owner/repo` an https or ssh remote of a known host names, or nothing where the remote names no path. */
-export function ownerRepoOf(remote: string): string | undefined {
-  const path = remote.replace(/^[a-z+]+:\/\//, "").replace(/^[^@/]+@/, "").replace(/\.git$/, "").split(/[/:]/).slice(1).join("/");
-  return path === "" ? undefined : path;
-}
-
 /** Why a source this computer's image has no signed-in command for records nothing: the clone would be asked for a
  * password no box can answer, so the refusal names the command and the computer rather than failing inside a clone. */
 export const noGitCliLine = (host: GitHost, computer: string): string =>

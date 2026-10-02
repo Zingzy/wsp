@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Which threads were opened last, most recent first, so the switch chord in
-// Spaces walks the threads a person was just in rather than the sidebar's
-// order. Recorded off the store's own selection, whatever raised it, and
-// held here alone: the sidebar keeps drawing its order and never re-sorts
-// under a hand.
+// Which threads were opened last, most recent first, so the switch chord
+// walks the threads a person was just in rather than the sidebar's order.
+// Recorded off the store's own selection, whatever raised it, and held here
+// alone: the sidebar keeps drawing its order and never re-sorts under a hand.
 import { create } from "zustand";
 import { useStore } from "../protocol/store.js";
 import type { WalkableThread } from "./shellCommands.js";
@@ -13,10 +12,10 @@ export interface ThreadVisit {
   readonly threadId: string;
 }
 
-/** How many visits are kept; more than the switcher ever shows, so a thread that left the top five comes back. */
+/** How many visits are kept; more than the switcher ever shows, so a thread that left its row comes back. */
 export const THREAD_HISTORY_CAP = 20;
-/** How many threads the switcher walks: the last five opened. */
-export const SWITCHER_THREADS = 5;
+/** How many cards the switcher draws: one row whose titles still read at the narrowest window. */
+export const SWITCHER_THREADS = 6;
 
 interface ThreadHistoryState {
   recent: ReadonlyArray<ThreadVisit>;
@@ -37,8 +36,8 @@ export function trackThreadHistory(): () => void {
   });
 }
 
-/** The threads the switcher walks, out of the ones the space on screen can land on: the open one first, then the
- * rest in the order they were last opened, then the ones never opened in the sidebar's order, cut at five. */
+/** The threads the switcher walks, out of the ones it can land on: the open one first, then the rest in the order
+ * they were last opened, then the ones never opened in the sidebar's order, cut at SWITCHER_THREADS. */
 export function recentThreads(walk: ReadonlyArray<WalkableThread>, recent: ReadonlyArray<ThreadVisit>, selectedThreadId: string | null): WalkableThread[] {
   const ids = walk.map(thread => thread.threadId);
   const order = [...new Set([...(selectedThreadId !== null && ids.includes(selectedThreadId) ? [selectedThreadId] : []), ...recent.map(visit => visit.threadId).filter(id => ids.includes(id)), ...ids])];

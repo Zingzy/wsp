@@ -8,6 +8,7 @@ import { DraftInput } from "../components/ui/draft-input.js";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../components/ui/select.js";
 import { desktopBridge } from "../lib/desktopShell.js";
 import { FONT_WORDS } from "./format.js";
+import { SELECT_WIDTH } from "./layout.js";
 
 let families: Promise<string[]> | undefined;
 
@@ -43,12 +44,12 @@ export function FontPicker({ id, label, value, onChange }: { id: string; label: 
   }, []);
 
   if (listed === "typed") {
-    return <DraftInput data-k={id} aria-label={label} size="sm" className="w-48 max-sm:w-36" placeholder={FONT_WORDS.default} value={value} onCommit={next => onChange(next.trim())} />;
+    return <DraftInput data-k={id} aria-label={label} size="sm" className={SELECT_WIDTH} placeholder={FONT_WORDS.default} value={value} onCommit={next => onChange(next.trim())} />;
   }
   const options = listed === null || value === "" || listed.includes(value) ? (listed ?? []) : [value, ...listed];
   return (
     <Select value={value} onValueChange={next => onChange(typeof next === "string" ? next : "")}>
-      <SelectTrigger size="sm" aria-label={label} data-k={id} className="w-48 max-sm:w-36">
+      <SelectTrigger size="sm" aria-label={label} data-k={id} className={SELECT_WIDTH}>
         <SelectValue>{(picked: string) => (picked === "" ? FONT_WORDS.default : picked)}</SelectValue>
       </SelectTrigger>
       <SelectPopup>

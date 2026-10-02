@@ -26,10 +26,22 @@ import { StyledDiffCodeView, type StyledDiffCodeViewOptions } from "./StyledDiff
 
 interface DiffCommentAnnotationEntry {
   id: string;
-  kind: "draft" | "comment";
+  kind: "draft" | "comment" | "note";
   range: SelectedLineRange;
   rangeLabel: string;
   text: string;
+  render?: () => ReactNode;
+}
+
+/** A comment written elsewhere, a pull request's on its host, standing on its line; its owner draws it. */
+export interface DiffLineNote {
+  readonly id: string;
+  readonly filePath: string;
+  readonly side: AnnotationSide;
+  readonly line: number;
+  /** What the drawing reads, so the view draws it again when it moves. */
+  readonly version: string;
+  readonly render: () => ReactNode;
 }
 
 interface DiffCommentAnnotationGroup {
@@ -85,7 +97,8 @@ interface AnnotatableCodeViewProps {
   sectionTitle: string;
   /** Comments already taken for this view; the owner keeps them wherever it likes. */
   reviewComments: ReadonlyArray<ReviewCommentContext>;
-  onAddReviewComment: (comment: ReviewCommentContext) => void;
+  /** Absent where nothing is written here: no line takes a new comment. */
+  onAddReviewComment?: (comment: ReviewCommentContext) => void;
   onRemoveReviewComment: (commentId: string) => void;
   options: StyledDiffCodeViewOptions<DiffCommentAnnotationGroup>;
   viewerRef?: Ref<AnnotatableCodeViewHandle>;
@@ -101,6 +114,10 @@ interface AnnotatableCodeViewProps {
   editing?: ReadonlySet<string>;
   /** Every change to a file open in the editor, with its whole new contents. */
   onEditChange?: (fileKey: string, contents: string) => void;
+  /** Comments already on the lines, read from elsewhere and drawn by the owner. */
+  lineNotes?: ReadonlyArray<DiffLineNote>;
+  /** Appended to the viewer's own stylesheet, for chrome the viewer draws that an owner restyles. */
+  unsafeCSSExtra?: string;
 }
 
 interface DiffSelectionContext {
@@ -122,6 +139,8 @@ export function AnnotatableCodeView({
   renderHeaderMetadata,
   editing,
   onEditChange,
+  lineNotes,
+  unsafeCSSExtra,
 }: AnnotatableCodeViewProps) {
   const [selectedLines, setSelectedLines] = useState<{
     id: string;
@@ -155,8 +174,14 @@ export function AnnotatableCodeView({
               text: comment.text,
             });
           }, []);
+        const noted = (lineNotes ?? [])
+          .filter((note) => note.filePath === filePath)
+          .reduce<DiffCommentLineAnnotation[]>((annotations, note) => {
+            const range: SelectedLineRange = { start: note.line, end: note.line, side: note.side };
+            return appendAnnotationEntry(annotations, range, { id: note.id, kind: "note", range, rangeLabel: String(note.line), text: note.version, render: note.render });
+          }, persisted);
         const annotations =
-          draft?.fileKey === fileKey ? [...persisted, draft.annotation] : persisted;
+          draft?.fileKey === fileKey ? [...noted, draft.annotation] : noted;
         const edit = editing?.has(fileKey) === true;
         return {
           id: fileKey,
@@ -176,7 +201,7 @@ export function AnnotatableCodeView({
           ),
         };
       }),
-    [draft, editing, files, reviewComments, sectionId],
+    [draft, editing, files, lineNotes, reviewComments, sectionId],
   );
 
   const removeEntry = useCallback(
@@ -208,7 +233,7 @@ export function AnnotatableCodeView({
         range: entry.range,
         text,
       });
-      if (comment) onAddReviewComment(comment);
+      if (comment) onAddReviewComment?.(comment);
       setSelectedLines(null);
       setDraft(null);
       setDraftText("");
@@ -255,13 +280,14 @@ export function AnnotatableCodeView({
       key={codeViewKey}
       {...(viewerRef ? { viewerRef } : {})}
       {...(className ? { className } : {})}
+      {...(unsafeCSSExtra !== undefined ? { unsafeCSSExtra } : {})}
       items={items}
       selectedLines={selectedLines}
       onSelectedLinesChange={setSelectedLines}
       options={{
         ...options,
-        enableGutterUtility: !hasOpenComment,
-        enableLineSelection: !hasOpenComment,
+        enableGutterUtility: onAddReviewComment !== undefined && !hasOpenComment,
+        enableLineSelection: onAddReviewComment !== undefined && !hasOpenComment,
         onGutterUtilityClick: beginComment,
       }}
       {...(onEditChange !== undefined
@@ -284,7 +310,9 @@ export function AnnotatableCodeView({
           <div
             className={hasDraft ? "py-1" : "divide-y divide-border/30 border-y border-border/30"}
           >
-            {annotation.metadata.entries.map((entry) => (
+            {annotation.metadata.entries.map((entry) => entry.kind === "note" ? (
+              <div key={entry.id}>{entry.render?.()}</div>
+            ) : (
               <DiffCommentAnnotation
                 key={entry.id}
                 kind={entry.kind}

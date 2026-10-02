@@ -5,6 +5,7 @@
 // gives the page.
 import { DESKTOP_MAC_CLASS } from "@wsp/protocol";
 import { createRoot } from "react-dom/client";
+import { GlassGround } from "../../src/components/GlassGround";
 import { ComposerSurface } from "../../src/components/chat/ComposerSurface";
 import "../../src/index.css";
 import "../../src/themes/index";
@@ -18,6 +19,7 @@ const TEXT = Array.from({ length: 700 }, (_, i) => `line${i % 9} word`).join(" "
 
 createRoot(document.getElementById("root")!).render(
   <>
+    <GlassGround />
     <p className="fixed inset-0 m-0 p-3 text-sm text-foreground">{TEXT}</p>
     <div data-glass="composer" className="fixed top-[100px] left-[100px] w-[320px]">
       <ComposerSurface.Shell>

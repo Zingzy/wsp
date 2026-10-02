@@ -10,7 +10,7 @@ import { DownloadIcon, PowerIcon, PowerOffIcon, ScrollTextIcon, Trash2Icon } fro
 import { agentName, catalogEntry, isSystemSkill, ownSkillFolder, type AgentEntry } from "@wsp/catalog";
 import type { AgentsProject, AgentsReport, SkillHit, SkillRow } from "@wsp/protocol";
 import { AGENTS_LIST_WORDS as W, compactCount, holdAll, inProject, notYet, onImage, pickOf, skillKey, whereNow, type RowAct, type RowsContext, type SkillActs, type SkillPicks } from "../agentsRows.js";
-import { byName, kind, matchesAny, projectGroups, rowKey, type AddModule, type Choice, type DetailView, type Fact, type GroupBy, type GroupView, type KindModule, type Status } from "./kind.js";
+import { byName, kind, matchesAny, projectGroups, rowKey, type AddModule, type Choice, type DetailView, type Fact, type GroupView, type KindModule, type Status } from "./kind.js";
 
 /** The folder a skill really lives in: the one that is no link, else the first. */
 const realPath = (row: SkillRow): string => (row.paths.find(p => p.linkTo === undefined) ?? row.paths[0])?.path ?? "";
@@ -146,7 +146,7 @@ function adder(ctx: RowsContext): AddModule | undefined {
       const search = skills.searchOf(q);
       const rows = hitsOf(q).map(hit => {
         const there = installedAs(hit, report, undefined) !== undefined;
-        return { key: hit.id, title: hit.skillId, subtext: hit.source, fact: there ? W.installed : compactCount(hit.installs), ...(there ? { dim: true } : {}) };
+        return { key: hit.id, title: hit.skillId, subtext: hit.source, fact: there ? W.installed : compactCount(hit.installs) };
       });
       if (search?.error !== undefined) return { reading: false, rows: [], empty: search.error };
       return { reading: search === undefined || search.reading, rows, ...(search?.hits !== undefined && rows.length === 0 ? { empty: W.noHits(q) } : {}) };
@@ -160,35 +160,19 @@ function adder(ctx: RowsContext): AddModule | undefined {
 
 export const SKILLS_KIND: KindModule<SkillRow> = {
   id: "skills",
-  icon: ScrollTextIcon,
-  word: "Skills",
-  noun: n => `${n} ${n === 1 ? "skill" : "skills"}`,
   search: "Search skills",
   add: "Add skill",
-  line: project => ["Skills on ", project === undefined ? "" : `, for ${project}`],
-  rowHeight: "h-14",
-  groupings: ["none", "agent", "source"],
-  defaultGroup: shell => (shell === "page" ? "source" : "none"),
   items: (report: AgentsReport) => [...report.skills].sort(byName),
-  count: items => items.length,
   key: rowId,
   matches: (row, q) => matchesAny(q, row.name, row.description, realPath(row), row.project?.name, ...agentsOf(row).map(agentName)),
-  groups: (items, by: GroupBy): GroupView<SkillRow>[] => {
-    if (by === "agent") {
-      const agents = [...new Set(items.flatMap(agentsOf))];
-      const shared = items.filter(s => agentsOf(s).length === 0);
-      return [...agents.map(agent => ({ id: `agent-${agent}`, label: agentName(agent), items: items.filter(s => agentsOf(s).includes(agent)) })), ...(shared.length === 0 ? [] : [{ id: "shared", label: W.shared, items: shared }])];
-    }
-    if (by === "source") {
-      const sources = SOURCES.flatMap(g => {
-        const hit = items.filter(s => sourceOf(s) === g.source);
-        return hit.length === 0 ? [] : [{ id: `source-${g.source}`, label: g.label, items: hit }];
-      });
-      return [...sources, ...projectGroups(items.filter(s => sourceOf(s) === "project"))];
-    }
-    return [{ id: "all", items }];
+  groups: (items): GroupView<SkillRow>[] => {
+    const sources = SOURCES.flatMap(g => {
+      const hit = items.filter(s => sourceOf(s) === g.source);
+      return hit.length === 0 ? [] : [{ id: `source-${g.source}`, label: g.label, items: hit }];
+    });
+    return [...sources, ...projectGroups(items.filter(s => sourceOf(s) === "project"))];
   },
-  row: row => ({ key: rowId(row), title: row.name, lead: { kind: "glyph", icon: ScrollTextIcon }, marks: agentsOf(row), subtext: realPath(row), ...(isOff(row) ? { off: true } : {}) }),
+  row: row => ({ key: rowId(row), title: row.name, lead: { kind: "glyph", icon: ScrollTextIcon }, marks: agentsOf(row), subtext: realPath(row) }),
   detail: (row, ctx) => {
     const source = sourceOf(row);
     // The shared folder first, then each agent's own, every one by its own path alone.
@@ -203,7 +187,7 @@ export const SKILLS_KIND: KindModule<SkillRow> = {
             : { id: "status", label: W.status, status: isOff(row) ? OFF : ON };
     const facts: Fact[] = [
       status,
-      ...(row.description === undefined ? [] : [{ id: "description", label: W.description, value: row.description }]),
+      ...(row.description === undefined ? [] : [{ id: "description", label: W.description, value: row.description, prose: true }]),
       ...ordered.map((p, at) => ({ id: `path-${at}`, label: at === 0 ? W.path : "", value: p.path, copy: true, ...(p.agent === undefined ? { fact: W.shared } : { agent: p.agent }) })),
     ];
     const skills = ctx.skills;
@@ -220,7 +204,6 @@ export const SKILLS_KIND: KindModule<SkillRow> = {
     };
   },
   empty: on => `No skills on ${on} yet.`,
-  none: "no skills",
   adder,
 };
 

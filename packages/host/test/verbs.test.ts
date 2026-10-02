@@ -1821,6 +1821,17 @@ describe("wsp verbs over the host", () => {
     expect(await rt.sessions.list()).toHaveLength(1);
   });
 
+  it("run without an agent on a project whose default agent is Codex runs Codex, and a model named alone is read against Codex's list", async () => {
+    expect((await run("projects", "set", cloud.name, "--agent", "codex")).code).toBe(0);
+    await run("new", "alpha");
+    const ok = await run("run", "alpha", "hello");
+    expect([ok.code, ok.io.lines.at(-1)]).toEqual([0, "codex: hello"]);
+    const modelled = await run("run", "alpha", "--model", "gpt-5.6-sol", "again");
+    expect([modelled.code, modelled.io.errors]).toEqual([0, []]);
+    expect((await rt.sessions.list()).map(r => r.harness)).toEqual(["codex", "codex"]);
+    expect(claude.starts).toEqual([]);
+  });
+
   it.runIf(CLOUD_ON)("fork --send under an agent the host has no adapter for is refused naming the agents it has, and no machine is minted", async () => {
     await run("new", "alpha");
     withDaemonRoads(backend);

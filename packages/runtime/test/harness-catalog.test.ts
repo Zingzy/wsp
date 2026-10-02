@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { parseCatalogProbe } from "@wsp/adapter-claude";
 import { CLAUDE_CODE, THREAD_AGENTS } from "@wsp/catalog";
-import { HarnessCatalog, catalogSourceLine, effortsFor, everyModel, workspaceAccess, listedPick, markedDefault, modelOf, noModelsLine, startPicks, THIS_COMPUTER, type HarnessCatalogProbe } from "@wsp/protocol";
+import { HarnessCatalog, catalogSourceLine, effortsFor, everyModel, listedPick, markedDefault, modelOf, noModelsLine, startPicks, THIS_COMPUTER, type HarnessCatalogProbe } from "@wsp/protocol";
 import { HARNESS_CATALOGS, catalogFromProbe, harnessCatalog, smallestModel } from "../src/harness-catalog.js";
 
 /** The agents whose models no table can list: the machine's own providers, or an account's. */
@@ -232,8 +232,6 @@ describe("the access a thread starts at, and wsp's words for it", () => {
       expect(catalog.permissionModes.map(o => o.value), catalog.harness).toContain(catalog.bypassMode);
       expect(markedDefault(catalog.permissionModes)?.value, catalog.harness).toBe(catalog.bypassMode);
       expect(catalog.permissionModes.filter(o => o.isDefault), catalog.harness).toHaveLength(1);
-      // The kind no longer moves the mark: the person's defaults do, through markedFor.
-      expect(workspaceAccess(catalog, "local")).toBe(catalog);
     }
     expect(HARNESS_CATALOGS.filter(c => c.permissionModes.length > 0).map(c => [c.harness, c.bypassMode])).toEqual([
       ["claude", "bypassPermissions"],

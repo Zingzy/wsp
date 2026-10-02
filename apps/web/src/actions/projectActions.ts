@@ -3,7 +3,7 @@
 // sidebar and the palette offer for one project. A project is where a piece of
 // work starts and what a workspace is made of; nothing here touches a machine.
 import { PlusIcon, SettingsIcon, Trash2Icon } from "lucide-react";
-import { projectInUseRefusal } from "@wsp/protocol";
+import { PROJECTS_WORDS } from "../settings/format.js";
 import { NEW_WORKSPACE, PROJECT_WORDS } from "../sidebar/words.js";
 import type { ActionEntry } from "./registry.js";
 
@@ -16,8 +16,8 @@ export interface ProjectTarget {
 }
 
 export interface ProjectVerbs {
-  /** Opens the dialog that asks the one question, with this project picked. */
-  readonly newWorkspace: (projectId: string) => void;
+  /** Opens this project's New thread page. */
+  readonly newThread: (projectId: string) => void;
   /** Opens the project's own page in Settings. */
   readonly openSettings: (projectId: string) => void;
   /** Forgets the project; absent on a client whose host cannot, and the row says so. */
@@ -36,7 +36,7 @@ export const projectActions: ReadonlyArray<ActionEntry<ProjectTarget, ProjectVer
     title: () => NEW_WORKSPACE,
     rowLabel: target => `${NEW_WORKSPACE} on ${target.name}`,
     refusal: () => null,
-    run: (target, verbs) => verbs.newWorkspace(target.id),
+    run: (target, verbs) => verbs.newThread(target.id),
   },
   {
     id: "project-settings",
@@ -56,10 +56,9 @@ export const projectActions: ReadonlyArray<ActionEntry<ProjectTarget, ProjectVer
     searchTerms: ["remove project", "forget project"],
     title: () => PROJECT_WORDS.remove,
     rowLabel: target => `${PROJECT_WORDS.remove} ${target.name}`,
-    // The runtime refuses a project a workspace stands on and names them; the row says that sentence before the
-    // click rather than after it.
+    // The runtime refuses a project a workspace stands on; the row says so before the click rather than after it.
     refusal: (target, verbs) =>
-      target.workspaces.length > 0 ? projectInUseRefusal(target.name, target.workspaces) : verbs.removeProject === undefined ? CLIENT_CANNOT_REMOVE_PROJECT : null,
+      target.workspaces.length > 0 ? PROJECTS_WORDS.inUse(target.workspaces.length) : verbs.removeProject === undefined ? CLIENT_CANNOT_REMOVE_PROJECT : null,
     run: (target, verbs) => verbs.removeProject?.(target.id),
   },
 ];

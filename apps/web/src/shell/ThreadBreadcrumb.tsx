@@ -16,10 +16,56 @@ import { threadState, threadWordOf, waitingLine } from "@wsp/protocol";
 import { useCreation, useFirstRun, useOpenThread, useSelectedId, useSelectedWorkspaceId, useSettingsOpen, useSidebarProjects, useStore, useWorkspace } from "../protocol/store.js";
 import { ThreadLink } from "../components/ThreadLink.js";
 import { cn } from "../lib/utils.js";
+import { useState } from "react";
+import { PencilIcon } from "lucide-react";
+import type { ThreadView } from "@wsp/protocol";
+import { openContextMenu } from "../actions/contextMenu.js";
+import { CLIENT_CANNOT_RENAME, THREAD_WORDS } from "../actions/format.js";
+import type { ResolvedAction } from "../actions/registry.js";
+import { RowNameInput } from "../sidebar/RowNameInput.js";
 import { SettingsCrumbs } from "../settings/SettingsCrumbs.js";
 import { openedBy } from "../sidebar/threadTree.js";
 
 const NEW_THREAD = "New thread";
+
+/** The open thread's title in the top bar, which sits in the window's drag region: a double-click there would zoom the
+ * window, so the title takes itself out of the region and a double-click, or Rename on its menu, makes it the same
+ * name box a sidebar row opens. */
+function ThreadTitle({ workspaceId, thread, className }: { workspaceId: string | null; thread: ThreadView; className?: string }) {
+  const canRename = useStore(s => s.api?.renameSession !== undefined);
+  const renameThread = useStore(s => s.renameThread);
+  const [editing, setEditing] = useState<"no" | "open" | "saving">("no");
+  if (editing !== "no" && workspaceId !== null)
+    return (
+      <span data-breadcrumb-thread className={cn("flex h-6 min-w-0 flex-1 text-sm font-medium [-webkit-app-region:no-drag]", className)}>
+        <RowNameInput
+          name={thread.title}
+          label={THREAD_WORDS.rename}
+          saving={editing === "saving"}
+          onCancel={() => setEditing("no")}
+          onRename={title => {
+            setEditing("saving");
+            void renameThread({ sessionId: thread.sessionId, workspaceId, harness: thread.harness, title }).then(named => setEditing(named ? "no" : "open"));
+          }}
+        />
+      </span>
+    );
+  const open = canRename && workspaceId !== null ? () => setEditing("open") : undefined;
+  const menu: ResolvedAction = { id: "rename", group: "edit", icon: PencilIcon, destructive: false, searchTerms: [], title: THREAD_WORDS.rename, rowLabel: THREAD_WORDS.rename, buttonWord: null, hint: null, refusal: open === undefined ? CLIENT_CANNOT_RENAME : null, run: async () => open?.() };
+  return (
+    <span
+      data-breadcrumb-thread
+      className={cn("truncate font-medium text-foreground [-webkit-app-region:no-drag]", className)}
+      onDoubleClick={event => {
+        event.preventDefault();
+        open?.();
+      }}
+      onContextMenu={event => void openContextMenu(event, [menu])}
+    >
+      {thread.title}
+    </span>
+  );
+}
 
 export function ThreadBreadcrumb() {
   const creation = useCreation(useSelectedId());
@@ -63,9 +109,7 @@ export function ThreadBreadcrumb() {
             <>
               {/* The thread on screen is the last thing to give way: beside an opener it keeps its whole measure and
                   the opener is what the room is taken from, capped so a long one cannot push the rest off the line. */}
-              <span data-breadcrumb-thread className={cn("truncate font-medium text-foreground", opener !== undefined && "max-w-[70%] shrink-0")}>
-                {thread.title}
-              </span>
+              <ThreadTitle workspaceId={workspaceId} thread={thread} className={cn(opener !== undefined && "max-w-[70%] shrink-0")} />
               {threadState(thread) === "waiting" ? (
                 <span className="shrink-0 font-mono text-[11px] text-muted-foreground" title={waitingLine(thread)}>
                   {threadWordOf(thread)}

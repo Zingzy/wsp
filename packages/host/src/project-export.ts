@@ -203,15 +203,15 @@ async function land(req: LandRequest, homes: Readonly<Record<string, string>>): 
   }
 }
 
-/** This computer's side of project.export; `homes` is each agent's home here by catalog id, the production caller's
- * under the real home directory, so a test never writes the homes on this computer. */
-export function projectLander(homes: Readonly<Record<string, string>>): ProjectLander {
+/** This computer's side of project.export; `homes` answers each agent's home here by catalog id at each landing, the
+ * production caller's where a launch here finds it, so a test never writes the homes on this computer. */
+export function projectLander(homes: () => Promise<Readonly<Record<string, string>>>): ProjectLander {
   return {
     caches: CACHE_RULE,
     probe: async dest => {
       const at = filesAt(destination(dest));
       return at === undefined ? undefined : { files: at.files };
     },
-    land: req => land(req, homes),
+    land: async req => land(req, req.state === undefined ? {} : await homes()),
   };
 }

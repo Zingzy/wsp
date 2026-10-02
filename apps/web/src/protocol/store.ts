@@ -3,7 +3,7 @@
 // contract components code against.
 import { useEffect, useMemo } from "react";
 import { create } from "zustand";
-import { applyPreferencesPatch, kindForComputer, threadsFollowed, workspaceAccess, type AbsentComputer, type BringBackResult, foldThreads, goldenHead, threadKeyOf, workspaceStateOf, type AppAddress, type Capabilities, copyBuildOf, type GoldenStageEvent, type HarnessCatalog, type InitJob, type InitSetup, type PlaceView, type PortForward, type ProjectView, type Preferences, type PreferencesPatch, type ReleaseView, type SessionView, type ThreadMarks, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceProject, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView, type PlaceDial, type WorkspaceLanding, type ReviewDraft } from "@wsp/protocol";
+import { applyPreferencesPatch, threadsFollowed, type AbsentComputer, type BringBackResult, foldThreads, goldenHead, threadKeyOf, workspaceStateOf, type AppAddress, type Capabilities, copyBuildOf, type GoldenStageEvent, type HarnessCatalog, type InitJob, type InitSetup, type PlaceView, type PlaceSettingsAsk, type PlaceSettingWord, type PortForward, type ProjectView, type Preferences, type PreferencesPatch, type ReleaseView, type SessionView, type ThreadMarks, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceProject, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView, type PlaceDial, type WorkspaceLanding, type ReviewDraft } from "@wsp/protocol";
 import { noSuchThreadLine, renameNotTakenLine } from "../actions/format.js";
 import { readAddress, readProjectHome, writeAddress, writeProjectHome } from "./address.js";
 import { deriveSidebarProjects, sidebarWorkspaceOrder } from "../adapt/workspaces.js";
@@ -12,13 +12,14 @@ import { DisconnectedError, RequestError, type Api, type ConnStatus, type Protoc
 import { failureOf, type Failure } from "./failure.js";
 import { addNotice, noticeFailure } from "../notices/store.js";
 import { lastWorkspaceId, rememberWorkspace } from "./lastWorkspace.js";
+import { keepCreations, keptCreations } from "./keptCreations.js";
 import { clearLegacyPreferences, legacyPreferences } from "./legacyPreferences.js";
 import { bootPreferences, rememberFirstPaint } from "./firstPaint.js";
 import { applyAddStage, takeAdds } from "../settings/adds.js";
 import { WHERE_WORDS } from "../settings/format.js";
 import { absenceOf, placeName, placeNamed } from "../settings/places.js";
 import { sameAt, useSettingsStore, type SettingsAt } from "../settings/settingsStore.js";
-import { imageBuildFrame } from "../shell/creationLog.js";
+import { QUIET_MS, imageBuildFrame } from "../shell/creationLog.js";
 import { requestNewThread } from "../shell/shellRequests.js";
 import { useSignInStore } from "../shell/signInStore.js";
 import { newId, useComposerDraftStore } from "../components/chat/composerDraftStore.js";
@@ -58,6 +59,14 @@ export interface Creation {
   readonly golden?: string;
   /** The size the person picked; absent, the golden's. */
   readonly size?: WorkspaceSize;
+  /** The message that asked for this work, drawn as the thread's first message while the machine is made. */
+  readonly asked?: string;
+  /** The asked message goes to the workspace's queue once it is up, and the row is kept in local storage until then;
+   * absent, the caller sends it itself. */
+  readonly queued?: true;
+  /** A kept row the host has said nothing about since this window connected, long enough that its create may be one
+   * nobody will answer for: it can be dismissed. */
+  readonly quiet?: true;
   /** The computer the work lands on, which is the project's own, by the id its row carries. The image build's own
    * frames name their place, so this is what says which are this create's. */
   readonly where?: string;
@@ -66,6 +75,13 @@ export interface Creation {
   readonly lines: ReadonlyArray<CreationLine>;
   /** Set once the create was refused; the lines keep the failing one. */
   readonly failed: CreateRefusal | null;
+}
+
+/** The message a create was asked with. With `queuedFrom`, the page it was sent from: that page's picks go with it, and
+ * the message waits on the workspace's queue; without, the caller sends it once the workspace is up. */
+export interface Asked {
+  readonly prompt: string;
+  readonly queuedFrom?: string;
 }
 
 export interface CreateRefusal {
@@ -195,8 +211,9 @@ interface State {
   setPreferences(patch: PreferencesPatch): Promise<void>;
   /** Starts a workspace for one piece of work on the project named, by the project's id, selects its row and follows
    * it through the stage events; resolves with the runtime's id for the new workspace, or null when the create was
-   * refused. `picked` carries a project image or a size only where the person chose one. */
-  createWorkspace(project: string, name: string, picked?: { golden?: string; size?: WorkspaceSize }): Promise<string | null>;
+   * refused. `picked` carries a project image or a size only where the person chose one; `asked` is the message the
+   * work was asked with, which the creation view draws until the workspace is up. */
+  createWorkspace(project: string, name: string, picked?: { golden?: string; size?: WorkspaceSize }, asked?: Asked): Promise<string | null>;
   /** Records a project and answers the record the host kept: a folder on this computer, or a repository address on
    * the computer named. The row arrives by the project.added event too; this is what the first run and the sheet
    * wait on. Null on a client that cannot record one. */
@@ -240,6 +257,9 @@ interface State {
    * onto that row, so the word in the row's state slot is the job's own. A refusal is the host's own sentence in
    * a notice. */
   updatePlace(placeId: string): Promise<void>;
+  /** Sets a computer's own settings, or takes the ones named under `reset` back to their defaults, and puts the row
+   * the host answers in place of the one held. A refusal is the host's own sentence in a notice. */
+  setPlace(placeId: string, ask: PlaceSettingsAsk, reset?: ReadonlyArray<PlaceSettingWord>): Promise<void>;
   applyEvent(e: ProtocolEvent): void;
   /** Rows come from the runtime (only it knows harness and final status); events say when to ask. */
   reloadSessions(workspaceId: string): Promise<void>;
@@ -330,11 +350,21 @@ function firstRow(s: Pick<State, "workspaces" | "statuses" | "sessions">): strin
   return sidebarWorkspaceOrder(s)[0] ?? null;
 }
 
+/** The agent, the model and the access picked on one page, handed to the page the send goes on under. */
+function movePicks(from: string, to: string): void {
+  useComposerOptionsStore.getState().move(from, to);
+  const access = useStore.getState().preferences.access[from];
+  if (access !== undefined) void useStore.getState().setPreferences({ access: { [to]: access, [from]: null } });
+}
+
 /** A creation's page keys its draft, its waiting messages and its picks by the creation's key; the workspace takes
- * them all, so what waited goes with the agent and the model picked over it. */
+ * them all, so what waited goes with the agent and the model picked over it. A queued asked message goes first, and
+ * only while the row stands, since every caller takes the row away straight after. */
 function handOver(key: string, workspaceId: string): void {
   const drafts = useComposerDraftStore.getState();
   drafts.rekeyQueue(key, workspaceId);
+  const creation = useStore.getState().creations.find(c => c.key === key);
+  if (creation?.queued === true && creation.asked !== undefined) drafts.enqueue(workspaceId, creation.asked, "head");
   const draft = drafts.drafts[key];
   if (draft !== undefined) {
     useComposerDraftStore.setState(s => {
@@ -342,19 +372,12 @@ function handOver(key: string, workspaceId: string): void {
       return { drafts: { ...rest, [workspaceId]: draft } };
     });
   }
-  useComposerOptionsStore.setState(s => {
-    const picked = s.byWorkspaceId[key];
-    return picked === undefined ? s : { byWorkspaceId: { ...s.byWorkspaceId, [workspaceId]: picked } };
-  });
-  const access = useStore.getState().preferences.access[key];
-  if (access !== undefined) void useStore.getState().setPreferences({ access: { [workspaceId]: access, [key]: null } });
+  movePicks(key, workspaceId);
   // The lists the creation's composer drew stand for the workspace until its machine answers with its own, so the
   // footer it lands with is the one that was on screen.
   const s = useStore.getState();
-  const project = s.projects.find(p => p.id === s.creations.find(c => c.key === key)?.project);
-  if (project !== undefined && s.harnessesByWorkspace[workspaceId] === undefined) {
-    const kind = kindForComputer(project.computer);
-    useStore.setState(now => ({ harnessesByWorkspace: { ...now.harnessesByWorkspace, [workspaceId]: now.harnesses.map(c => workspaceAccess(c, kind)) } }));
+  if (s.creations.some(c => c.key === key) && s.harnessesByWorkspace[workspaceId] === undefined) {
+    useStore.setState(now => ({ harnessesByWorkspace: { ...now.harnessesByWorkspace, [workspaceId]: now.harnesses } }));
   }
 }
 
@@ -375,9 +398,39 @@ function dropWaiting(key: string): void {
   });
   if (useStore.getState().preferences.access[key] !== undefined) void useStore.getState().setPreferences({ access: { [key]: null } });
 }
+
+/** The rows a page before this one left kept, which no create in flight here will answer for. */
+const keptAtLoad = keptCreations();
+const restored = new Set(keptAtLoad.map(c => c.key));
+/** Kept rows refused before this page loaded: the host keeps a refused create in memory alone, so after a restart
+ * it no longer knows the workspace a Dismiss asks it to delete. */
+const refusedBeforeLoad = new Set(keptAtLoad.filter(c => c.failed !== null).map(c => c.key));
+
+/** Whether a workspace is the one a row was making: by the id once its stages named it, before that, for a kept row
+ * alone, by the name and the project it was asked with, the name being one no other workspace holds. A row this page
+ * asked for needs no name, since its create's reply names the workspace. */
+const madeAs = (c: Creation, w: WorkspaceView): boolean =>
+  c.workspaceId === w.id || (c.workspaceId === null && c.failed === null && restored.has(c.key) && c.name === w.name && c.project === w.project.id);
+
+/** The row with a word from the host on it: whatever it said, the create is alive. */
+function heardFrom(c: Creation): Creation {
+  if (c.quiet === undefined) return c;
+  const { quiet: _quiet, ...rest } = c;
+  return rest;
+}
+
+/** The rows a reload must not lose: a queued message lives nowhere else. A row whose name a workspace made before it
+ * was asked for already holds is refused by the host, and kept it could be taken for that workspace after a reload. */
+const toKeep = (s: Pick<State, "creations" | "workspaces">): Creation[] =>
+  s.creations.filter(c => c.queued === true && !s.workspaces.some(w => w.name === c.name && w.id !== c.workspaceId && Date.parse(w.createdAt) < c.askedAt));
+
 /** Sets on their way to the host. While one is, a reply or a preferences.changed for an earlier set would paint an
  * older record over the one the person sees; the last reply, or the record read after a refusal, settles it. */
 let preferenceSetsInFlight = 0;
+
+/** Whether a record moved what the host's agent lists are marked and shaped by: the default agent, or an agent's own
+ * defaults and picker. */
+const agentListsMoved = (a: Preferences, b: Preferences): boolean => a.defaultAgent !== b.defaultAgent || JSON.stringify(a.agentDefaults) !== JSON.stringify(b.agentDefaults);
 /** Every init.job view taken so far. The setup snapshot read on a connect is a view of the moment it was asked
  * for, so a job started or ended between the ask and the reply would be painted over by the older one; a snapshot
  * that raced a view is dropped and the view stands. Dropping it loses nothing because the reply and the events
@@ -389,6 +442,16 @@ let initJobViews = 0;
 export const GOLDEN_FRAMES_KEPT = 64;
 
 export const useStore = create<State>((set, get) => {
+  /** A record the host answered, and its agent lists read again where it moved what they are marked by. */
+  const preferencesLanded = (preferences: Preferences, before: Preferences): void => {
+    set({ preferences });
+    const api = get().api;
+    if (!agentListsMoved(before, preferences) || api?.listHarnesses === undefined) return;
+    void api
+      .listHarnesses()
+      .then(harnesses => set({ harnesses }))
+      .catch(() => {});
+  };
   const patchCreation = (key: string, patch: (c: Creation) => Creation): void => {
     set(s => ({ creations: s.creations.map(c => (c.key === key ? patch(c) : c)) }));
   };
@@ -403,6 +466,17 @@ export const useStore = create<State>((set, get) => {
       freshThread: opened || s.freshThread,
     }));
     if (opened) writeAddress({ workspaceId });
+  };
+  /** Kept rows heard of since the window last connected, and the wait after which the rest can be dismissed. */
+  const heard = new Set<string>();
+  let quietTimer: ReturnType<typeof setTimeout> | undefined;
+  const armQuiet = (): void => {
+    clearTimeout(quietTimer);
+    heard.clear();
+    if (!get().creations.some(c => restored.has(c.key))) return;
+    quietTimer = setTimeout(() => {
+      set(s => ({ creations: s.creations.map(c => (restored.has(c.key) && c.failed === null && !heard.has(c.key) ? { ...c, quiet: true as const } : c)) }));
+    }, QUIET_MS);
   };
   const runCreation = async (key: string, project: string, name: string, picked?: { golden?: string; size?: WorkspaceSize }): Promise<string | null> => {
     const api = get().api;
@@ -516,6 +590,7 @@ export const useStore = create<State>((set, get) => {
   };
   // What bind fetches and a reconnect fetches again: the list plus the status snapshot that also arms status.subscribe.
   const pull = (api: Api): void => {
+    armQuiet();
     void get().refresh().catch((e: unknown) => noticeFailure(e, said => `Workspaces not read: ${said}`));
     void api
       .watchStatuses()
@@ -609,7 +684,7 @@ export const useStore = create<State>((set, get) => {
     projectHome: readProjectHome(),
     selectedThreadId: null,
     freshThread: false,
-    creations: [],
+    creations: keptAtLoad,
     sessions: {},
     launches: {},
     ready: false,
@@ -637,6 +712,7 @@ export const useStore = create<State>((set, get) => {
     },
     setConn(conn) {
       set({ conn });
+      if (conn !== "live") clearTimeout(quietTimer);
       const api = get().api;
       if (conn === "live" && api) pull(api);
     },
@@ -664,12 +740,13 @@ export const useStore = create<State>((set, get) => {
     toggleSettings() { set(s => ({ settingsOpen: !s.settingsOpen, addComputerOpen: s.settingsOpen ? false : s.addComputerOpen })); },
     async setPreferences(patch) {
       const api = get().api;
+      const before = get().preferences;
       set(s => ({ preferences: applyPreferencesPatch(s.preferences, patch) }));
       if (!api?.setPreferences) return;
       preferenceSetsInFlight++;
       try {
         const { notice, ...preferences } = await api.setPreferences(patch);
-        if (--preferenceSetsInFlight === 0) set({ preferences });
+        if (--preferenceSetsInFlight === 0) preferencesLanded(preferences, before);
         if (notice !== undefined) addNotice({ kind: "error", text: notice });
       } catch (e) {
         preferenceSetsInFlight--;
@@ -678,7 +755,7 @@ export const useStore = create<State>((set, get) => {
         if (preferenceSetsInFlight === 0) void api.preferences?.().then(preferences => set({ preferences })).catch(() => {});
       }
     },
-    async createWorkspace(project, name, picked) {
+    async createWorkspace(project, name, picked, asked) {
       // The computer is the project's own, so the row that waits on an image build is keyed by it and nothing asks
       // the person where the work goes. Nothing is refused here: a project on this computer forks nothing, and a
       // project on a computer with no image is refused by the runtime in its own sentence on the creation view.
@@ -686,10 +763,12 @@ export const useStore = create<State>((set, get) => {
       if (!get().api) return null;
       // Unique across reloads: a draft or a waiting message persisted under a key must never meet another creation.
       const key = `${CREATION_PREFIX}${newId()}`;
+      if (asked?.queuedFrom !== undefined) movePicks(asked.queuedFrom, key);
+      const said = asked === undefined ? {} : { asked: asked.prompt, ...(asked.queuedFrom !== undefined ? { queued: true as const } : {}) };
       set(s => ({
         creations: [
           ...s.creations,
-          { key, name, project, askedAt: Date.now(), ...(picked?.golden !== undefined ? { golden: picked.golden } : {}), ...(picked?.size !== undefined ? { size: picked.size } : {}), ...(computer !== undefined ? { where: computer } : {}), workspaceId: null, lines: NO_LINES, failed: null },
+          { key, name, project, askedAt: Date.now(), ...(picked?.golden !== undefined ? { golden: picked.golden } : {}), ...(picked?.size !== undefined ? { size: picked.size } : {}), ...said, ...(computer !== undefined ? { where: computer } : {}), workspaceId: null, lines: NO_LINES, failed: null },
         ],
         selectedId: key,
         selectedThreadId: null,
@@ -737,15 +816,19 @@ export const useStore = create<State>((set, get) => {
       const creation = get().creations.find(c => c.key === key);
       // A row another client started carries no project, so there is nothing here to ask again.
       if (!creation || creation.project === undefined) return;
+      refusedBeforeLoad.delete(key);
       patchCreation(key, c => ({ ...c, workspaceId: null, lines: NO_LINES, failed: null }));
       await runCreation(key, creation.project, creation.name, { ...(creation.golden !== undefined ? { golden: creation.golden } : {}), ...(creation.size !== undefined ? { size: creation.size } : {}) });
     },
     dismissCreation(key) {
-      // The runtime holds a create that failed with the id its stages carried, so every client's row goes with it.
-      const workspaceId = get().creations.find(c => c.key === key)?.workspaceId ?? null;
+      // The runtime holds a create that failed with the id its stages carried, so every client's row goes with it. A
+      // quiet row's create may still be running, and only the row goes.
+      const creation = get().creations.find(c => c.key === key);
+      const workspaceId = creation !== undefined && creation.failed !== null ? creation.workspaceId : null;
       dropWaiting(key);
       const deleting = get().api?.deleteWorkspace;
-      if (workspaceId !== null && deleting !== undefined) void deleting(workspaceId).catch((e: unknown) => noticeFailure(e));
+      const forgotten = refusedBeforeLoad.delete(key);
+      if (workspaceId !== null && deleting !== undefined) void deleting(workspaceId).catch((e: unknown) => (forgotten ? undefined : noticeFailure(e)));
       set(s => {
         const project = s.creations.find(c => c.key === key)?.project;
         // The next row is one of the same project's, never the sidebar's first, which may be another project's.
@@ -779,6 +862,11 @@ export const useStore = create<State>((set, get) => {
         // row of its own. A list it refused says nothing, and the sends in flight stand until a start or an end.
         ...(answered === null ? {} : { launches: {} }),
       });
+      // A kept row whose workspace was made while no page here was open to hear it becomes that workspace now.
+      for (const c of get().creations) {
+        const made = workspaces.find(w => madeAs(c, w));
+        if (made !== undefined) finishCreation(c.key, made.id);
+      }
       if (open.toast !== undefined) addNotice({ kind: "error", text: open.toast });
       if (selectedId === null || !workspaces.some(w => w.id === selectedId)) return;
       // The chat for the workspace clears itself when it takes this, whether it is mounted yet or not.
@@ -838,6 +926,7 @@ export const useStore = create<State>((set, get) => {
       if (!api?.forgetThread) return false;
       try {
         await api.forgetThread(threadId);
+        if (get().selectedThreadId === threadId) set({ selectedThreadId: null });
         await get().reloadSessions(workspaceId);
         return true;
       } catch (e: unknown) {
@@ -971,6 +1060,16 @@ export const useStore = create<State>((set, get) => {
         noticeFailure(e);
       }
     },
+    async setPlace(placeId, ask, reset) {
+      const api = get().api;
+      if (api?.placesSet === undefined) return;
+      try {
+        const place = await api.placesSet(placeId, ask, reset);
+        set(s => ({ places: s.places.map(p => (p.id === placeId ? place : p)) }));
+      } catch (e) {
+        noticeFailure(e);
+      }
+    },
     applyWorkspace(workspace) {
       set(s => ({
         workspaces: s.workspaces.map(w => (w.id === workspace.id ? { ...w, ...workspace } : w)),
@@ -1010,10 +1109,14 @@ export const useStore = create<State>((set, get) => {
             const { [e.workspaceId]: _r, ...sessions } = s.sessions;
             const { [e.workspaceId]: _b, ...broughtBack } = s.broughtBack;
             const creation = s.creations.find(c => c.workspaceId === e.workspaceId);
+            const workspaces = s.workspaces.filter(x => x.id !== e.workspaceId);
+            // A page open on the workspace goes with it, or the centre keeps drawing a thread the host no longer has.
+            const left = s.selectedId === e.workspaceId ? { selectedId: firstRow({ workspaces, statuses, sessions }), selectedThreadId: null } : {};
             return {
-              workspaces: s.workspaces.filter(x => x.id !== e.workspaceId),
+              workspaces,
               creations: s.creations.filter(c => c !== creation),
               ...(creation !== undefined && s.selectedId === creation.key ? { selectedId: null } : {}),
+              ...left,
               statuses,
               costs,
               spending,
@@ -1074,7 +1177,8 @@ export const useStore = create<State>((set, get) => {
             const line = own === undefined ? undefined : imageBuildFrame(e, at === undefined ? word : placeName(at));
             if (own === undefined || line === undefined) return { goldenFrames };
             const logged: CreationLine = { stage: "image", at: new Date().toISOString(), elapsedMs: Date.now() - own.askedAt, ...line };
-            return { goldenFrames, creations: s.creations.map(c => (c === own ? { ...c, lines: [...c.lines, logged] } : c)) };
+            heard.add(own.key);
+            return { goldenFrames, creations: s.creations.map(c => (c === own ? { ...heardFrom(c), lines: [...c.lines, logged] } : c)) };
           });
           return;
         }
@@ -1096,12 +1200,13 @@ export const useStore = create<State>((set, get) => {
             if (own === undefined) {
               return { creations: [...s.creations, { key: `${CREATION_PREFIX}${e.workspaceId}`, name: e.name, askedAt: Date.now() - e.elapsedMs, workspaceId: e.workspaceId, lines: [line], failed }] };
             }
-            return { creations: s.creations.map(c => (c === own ? { ...c, workspaceId: e.workspaceId, lines: [...c.lines, line], failed: c.failed ?? failed } : c)) };
+            heard.add(own.key);
+            return { creations: s.creations.map(c => (c === own ? { ...heardFrom(c), workspaceId: e.workspaceId, lines: [...c.lines, line], failed: c.failed ?? failed } : c)) };
           });
           return;
         }
         case "workspace.created": {
-          const creation = get().creations.find(c => c.workspaceId === e.workspace.id);
+          const creation = get().creations.find(c => madeAs(c, e.workspace));
           if (creation !== undefined) handOver(creation.key, e.workspace.id);
           set(s => {
             const rest = s.workspaces.filter(x => x.id !== e.workspace.id);
@@ -1185,7 +1290,7 @@ export const useStore = create<State>((set, get) => {
           return;
         }
         case "preferences.changed":
-          if (preferenceSetsInFlight === 0) set({ preferences: e.preferences });
+          if (preferenceSetsInFlight === 0) preferencesLanded(e.preferences, get().preferences);
           return;
         case "release.changed":
           set({ release: e.release });
@@ -1215,6 +1320,9 @@ useStore.subscribe((s, prev) => {
 // Every change to the record, the host's or a pick painted ahead of it, is what the next load paints first.
 useStore.subscribe((s, prev) => {
   if (s.preferences !== prev.preferences) rememberFirstPaint(s.preferences);
+});
+useStore.subscribe((s, prev) => {
+  if (s.creations !== prev.creations || s.workspaces !== prev.workspaces) keepCreations(toKeep(s));
 });
 
 /** Every workspace with its threads, as the sidebar's rows read them, for the surfaces that need the whole fleet
@@ -1292,8 +1400,8 @@ export function useGoldenFrames(): Record<string, GoldenStageEvent[]> { return u
 export function useHarnessCatalogs(workspaceId: string | null): HarnessCatalog[] {
   return useStore(s => catalogsIn(s, workspaceId));
 }
-export function useHarnessCatalog(harness: string, workspaceId: string | null = null): HarnessCatalog | null {
-  return useStore(s => catalogIn(s, workspaceId, harness));
+export function useHarnessCatalog(harness: string | null, workspaceId: string | null = null): HarnessCatalog | null {
+  return useStore(s => (harness === null ? null : catalogIn(s, workspaceId, harness)));
 }
 
 type Catalogs = Pick<State, "harnesses" | "harnessesByWorkspace">;
@@ -1325,6 +1433,9 @@ export const catalogsIn = (s: Catalogs, workspaceId: string | null): HarnessCata
 const PROJECT_HOME_PREFIX = "project:";
 export const projectHomeKey = (projectId: string): string => `${PROJECT_HOME_PREFIX}${projectId}`;
 export const isProjectHomeKey = (key: string): boolean => key.startsWith(PROJECT_HOME_PREFIX);
+/** The project a composer's send lands in: its home's, the creation's, or the workspace's own. */
+export const projectOfKey = (s: Pick<State, "workspaces" | "creations">, key: string): string | undefined =>
+  isProjectHomeKey(key) ? key.slice(PROJECT_HOME_PREFIX.length) : (s.creations.find(c => c.key === key)?.project ?? s.workspaces.find(w => w.id === key)?.project?.id);
 /** A workspace being made reads the lists as its project's home does, since they are what its workspace is picked from. */
 const CREATION_PREFIX = "creating:";
 export const isCreationKey = (key: string): boolean => key.startsWith(CREATION_PREFIX);
@@ -1338,11 +1449,6 @@ export function useOpenThread(workspaceId: string | null): ThreadView | null {
   const threadId = useSelectedThreadId();
   return useMemo(() => (threadId === null ? null : foldThreads(sessions).find(t => t.threadId === threadId) ?? null), [sessions, threadId]);
 }
-/** The workspace's most recent session row, running or not; null before its first session this runtime remembers. */
-export function useLatestSession(id: string | null): SessionView | null {
-  return useStore(s => (id ? s.sessions[id]?.at(-1) ?? null : null));
-}
-
 /** Every turn the runtime holds for one thread, oldest first: what that thread has already run with, which is what a
  * composer reads its pickers off, its running turn included, so a second thread running in the same workspace paints
  * neither. A view holding no thread of its own carries the workspace's id as its key, which no row carries: there the

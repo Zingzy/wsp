@@ -7462,7 +7462,7 @@ describe("a start on a thread whose turn is running", () => {
     expect(h.starts.map(s => s.prompt)).toEqual(["one"]);
     expect(second).toBeUndefined();
     // The wait is announced at once, so a caller can say it is waiting before the reply comes.
-    expect(events.filter(e => e.type === "session.queued")).toEqual([{ type: "session.queued", workspaceId: ws.id, threadId: first.view().threadId, prompt: "two", requestId: "req_2", seq: expect.any(Number) }]);
+    expect(events.filter(e => e.type === "session.queued")).toEqual([{ type: "session.queued", workspaceId: ws.id, threadId: first.view().threadId, harness: "claude", prompt: "two", requestId: "req_2", seq: expect.any(Number) }]);
     h.end(0, "one done");
     await pending;
     expect(second!.outcome).toBe("queued");

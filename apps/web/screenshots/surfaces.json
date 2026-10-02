@@ -388,7 +388,7 @@
         "1440:row-id=thread:redirect",
         "surface-launch=agents"
       ],
-      "wait": "agents-row"
+      "wait": "agent-row"
     },
     {
       "name": "mcp-servers-here",
@@ -609,7 +609,7 @@
         "1440:row-id=thread:redirect",
         "surface-launch=agents",
         "segment=servers",
-        "k=agents-add"
+        "k=kind-add"
       ],
       "wait": "k=add-server-go",
       "settleMs": 700
@@ -787,31 +787,15 @@
       "wait": "k=chord-refused"
     },
     {
-      "name": "settings-about",
+      "name": "settings-version",
       "at": "/",
       "steps": [
         "390:key:Escape",
         "390:sidebar=trigger",
         "k=settings-row",
-        "k=settings-about"
+        "k=settings-general"
       ],
-      "wait": "settings-at=about"
-    },
-    {
-      "name": "new-workspace",
-      "at": "/",
-      "steps": [
-        "k=project-switcher",
-        "switcher-option=pr_spoo",
-        "k=new-workspace"
-      ],
-      "wait": "k=landing",
-      "settleMs": 700,
-      "widths": [
-        1440
-      ],
-      "reason": "The New thread dialog is 440px at every desktop width, opened from the sidebar's project picker, which 390 hides behind its toggle. Judged against the mockup's 1440 render.",
-      "fixture": "mac-and-boxes"
+      "wait": "settings-at=general"
     },
     {
       "name": "first-run",
@@ -839,9 +823,10 @@
         "switcher-option=pr_spoo",
         "menu:k=project-switcher",
         "menu-item=new-workspace",
+        "390:key:Escape",
+        "testid=composer-editor",
         "type:pricing page",
-        "k=create",
-        "390:key:Escape"
+        "key:Enter"
       ],
       "wait": "testid=workspace-creation",
       "settleMs": 700,
@@ -863,9 +848,10 @@
         "switcher-option=pr_api",
         "menu:k=project-switcher",
         "menu-item=new-workspace",
+        "390:key:Escape",
+        "testid=composer-editor",
         "type:pricing page",
-        "k=create",
-        "390:key:Escape"
+        "key:Enter"
       ],
       "wait": "creation-refused",
       "settleMs": 700,
@@ -887,9 +873,10 @@
         "switcher-option=pr_api",
         "menu:k=project-switcher",
         "menu-item=new-workspace",
-        "type:pricing page",
-        "k=create",
         "390:key:Escape",
+        "testid=composer-editor",
+        "type:pricing page",
+        "key:Enter",
         "k=setting-up"
       ],
       "wait": "creation-refused",

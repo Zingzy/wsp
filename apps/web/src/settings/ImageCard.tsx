@@ -14,7 +14,7 @@
 // the page, and on the card the time and the rate stand beside the press,
 // since a build bills where it runs. While the image builds anywhere, every
 // press that would start another build is held with where it is building.
-import { FileIcon, PencilIcon } from "lucide-react";
+import { FileIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { INIT_ROW_STATES, copyAsksSignIns, initAgentStep, initJobBuilding, initJobOver, initSignInWaitedOn, signInWaitLine, type PlaceView, type SealedImageView } from "@wsp/protocol";
 import { Button } from "../components/ui/button.js";
@@ -22,7 +22,6 @@ import type { ChipItem } from "../components/ui/chips.js";
 import { Spinner } from "../components/ui/spinner.js";
 import { failureOf, type Failure } from "../protocol/failure.js";
 import { useGoldenFrames, useStore } from "../protocol/store.js";
-import { requestNewWorkspace } from "../shell/shellRequests.js";
 import { FACT, WHERE_WORDS } from "./format.js";
 import { builtWhen, copyCost, IMAGE_WORDS, recipeNames } from "./image.js";
 import { ImageBuild } from "./ImageBuild.js";
@@ -144,10 +143,7 @@ export function ImageCard({ place, name, state, view, ctx, row: asRow = false }:
               chips: imageChips(state, ctx.now),
               press: {
                 word: IMAGE_WORDS.startTask,
-                run: () => {
-                  useStore.getState().closeSettings();
-                  requestNewWorkspace(project.id);
-                },
+                run: () => useStore.getState().openProjectHome(project.id),
               },
             };
     }
@@ -185,7 +181,6 @@ export function ImageCard({ place, name, state, view, ctx, row: asRow = false }:
   };
   const edit = (
     <Button data-k="edit-recipe" size="xs" variant="outline" held={buildHeld !== undefined} onClick={openRecipe}>
-      <PencilIcon aria-hidden className="size-3.5" />
       {IMAGE_WORDS.holdsEdit}
     </Button>
   );

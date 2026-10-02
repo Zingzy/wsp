@@ -30,6 +30,7 @@ import { useContextMenuStore } from "../src/actions/contextMenu.js";
 import { requestRenameWorkspace } from "../src/shell/shellRequests.js";
 import { ContextMenuHost } from "../src/actions/ContextMenuHost.js";
 import { TERMINAL_WORDS, THREAD_WORDS, WORKSPACE_WORDS } from "../src/actions/format.js";
+import { PROJECTS_WORDS } from "../src/settings/format.js";
 import { NEW_WORKSPACE, PROJECT_WORDS } from "../src/sidebar/words.js";
 import { SidebarProvider } from "../src/components/ui/sidebar.js";
 import { WorkspaceTerminalDrawer } from "../src/components/WorkspaceTerminalDrawer.js";
@@ -328,9 +329,9 @@ describe("a project's menu", () => {
     rightClick(Array.from(document.querySelectorAll<HTMLElement>("[data-sidebar-search] button")).find(b => b.textContent?.startsWith("the-project"))!);
     await screen.findByRole("menu");
     expect(labels()).toEqual([NEW_WORKSPACE, PROJECT_WORDS.settings, PROJECT_WORDS.remove]);
-    // Two workspaces stand on it, so the runtime's own sentence holds the removal back before any click.
+    // Two workspaces stand on it, so the removal is held back before any click, by count rather than by name.
     expect(item(PROJECT_WORDS.remove).getAttribute("aria-disabled")).toBe("true");
-    expect(refusalOf(PROJECT_WORDS.remove)).toContain("workspaces standing on it");
+    expect(refusalOf(PROJECT_WORDS.remove)).toBe(PROJECTS_WORDS.inUse(2));
     // Project settings opens Settings on the project's own page, where its look is picked.
     fireEvent.click(item(PROJECT_WORDS.settings));
     await waitFor(() => expect(useStore.getState().settingsOpen).toBe(true));

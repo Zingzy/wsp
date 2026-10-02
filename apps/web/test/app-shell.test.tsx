@@ -448,7 +448,7 @@ describe("the header row", () => {
 
   it("the compose glyph sits in the search row and opens New thread on the selected workspace's project rather than inside it, and stays live on New thread itself", async () => {
     await mountShell();
-    act(() => useStore.setState({ projects: [{ id: "pr_1", name: "the-project", computer: "here", source: { kind: "folder", path: "/root" }, path: "/root", remote: "", defaultBranch: "main", memoryKey: "-root", memoryDir: "/root/memory", createdAt: "t" }] }));
+    act(() => useStore.setState({ projects: [{ id: "pr_1", name: "the-project", computer: "here", source: { kind: "folder", path: "/root" }, path: "/root", remote: "", defaultBranch: "main", memoryKey: "-root", memoryDir: "/root/memory", createdAt: "t" }], preferences: { ...useStore.getState().preferences, newThreadIn: "current" } }));
     const seen: string[] = [];
     const off = onNewThreadRequest(d => seen.push(d.workspaceId));
     const compose = screen.getByRole("button", { name: "New thread" });
@@ -516,6 +516,29 @@ describe("the breadcrumb of a thread an agent opened", () => {
     const alone = crumb().querySelector<HTMLElement>("[data-breadcrumb-thread]")!;
     expect(alone.className).not.toContain("shrink-0");
     expect(alone.className).not.toContain("max-w-");
+  });
+
+  it("the open thread's title leaves the window's drag region, and a double-click makes it the name box with the title selected", async () => {
+    const renamed: string[] = [];
+    useStore.getState().bind({ ...fakeApi([view("ws_a", "api"), view("ws_b", "box")]), renameSession: async (_session: string, title: string) => (renamed.push(title), { outcome: "renamed" }) } as never);
+    render(
+      <AppShell>
+        <div>center content</div>
+      </AppShell>,
+    );
+    await waitFor(() => expect(useStore.getState().selectedId).not.toBeNull());
+    act(() => useStore.setState({ sessions: { ws_a: [rows[0]!], ws_b: [rows[1]!] } }));
+    act(() => useStore.getState().select("ws_a", LEAD));
+    const title = await waitFor(() => crumb().querySelector<HTMLElement>("[data-breadcrumb-thread]")!);
+    // The bar is the window's drag region, where a double-click zooms the window: the title takes itself out of it.
+    expect(title.className).toContain("[-webkit-app-region:no-drag]");
+    fireEvent.doubleClick(title);
+    const box = await waitFor(() => crumb().querySelector<HTMLInputElement>("[data-breadcrumb-thread] input")!);
+    expect(box.value).toBe("queue migration across three services");
+    expect([box.selectionStart, box.selectionEnd]).toEqual([0, box.value.length]);
+    fireEvent.keyDown(box, { key: "Escape" });
+    await waitFor(() => expect(crumb().querySelector("[data-breadcrumb-thread] input")).toBeNull());
+    expect(renamed).toEqual([]);
   });
 
   it("the opener is the page's own address for that thread and takes the person back to it", async () => {

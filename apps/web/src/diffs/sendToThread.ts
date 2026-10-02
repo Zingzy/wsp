@@ -11,10 +11,3 @@ export function sendToThread(workspaceId: string, quote: string): void {
   const prompt = draft === "" ? `${quote}\n\n` : `${draft}\n\n${quote}\n\n`;
   store.setDraft(workspaceId, { prompt, cursor: prompt.length });
 }
-
-/** A comment left on a line of a pull request, as the thread reads it: where it is, who left it, and its words
- * quoted, so the agent reads them as the reviewer's and not as the person's own. */
-export function prCommentQuote(c: { path: string; line?: number | undefined; author: string; body: string }): string {
-  const at = c.line === undefined ? c.path : `${c.path}:${c.line}`;
-  return [`${c.author} commented on ${at} in the pull request:`, ...c.body.split("\n").map(line => `> ${line}`)].join("\n");
-}

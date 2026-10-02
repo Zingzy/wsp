@@ -24,6 +24,8 @@ export interface StatusKind {
   /** The elapsed time since the latest turn began stands in the word's place, which is then read to a screen
    * reader alone. */
   readonly timed?: boolean;
+  /** The glyph alone shows, the word read to a screen reader alone. */
+  readonly glyphOnly?: boolean;
   /** The crab walks beside it. */
   readonly crab?: boolean;
   /** The thread's age is its only text. */

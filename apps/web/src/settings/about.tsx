@@ -1,21 +1,21 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Settings > About: the two halves of one release that can run apart, one
-// line each, the newest release as the host last read it, the computers whose
-// daemon is behind, and the road to the next release under them: in the app
-// on its own host the shell downloads and opens it, anywhere else Get is a
-// link. Once newer files are installed under a running host, Restart host
-// stands in Get's place. A browser tab has no shell half and shows the host's
-// line alone.
-import { placeDaemonBehind, releaseAbove, releaseWord, type BundleOutcome, type DesktopBridge, type ReleaseLatest, type ReleaseView } from "@wsp/protocol";
+// Settings > General's Version card: the version this wsp runs, whether a
+// newer release waits, and the road to it: in the app on its own host the shell
+// downloads and opens it, anywhere else Get is a link. Once newer files are
+// installed under a running host, Restart host stands in Get's place. The app's
+// half and the host's get a line each only once they run apart.
+import { placeDaemonBehind, releaseAbove, type BundleOutcome, type DesktopBridge, type ReleaseLatest, type ReleaseView } from "@wsp/protocol";
 import { useEffect, useState } from "react";
 import { onAnotherComputer } from "../boot.js";
+import { Mark } from "../brand/Brand.js";
 import { Button } from "../components/ui/button.js";
 import { desktopBridge } from "../lib/desktopShell.js";
 import { RELEASES } from "../../../../packages/wspx/scripts/bundles.mjs";
 import { releaseAhead } from "../shell/shellVersion.js";
 import { ABOUT_WORDS } from "./format.js";
+import { GlyphFrame } from "./grid.js";
 import { builtWhen } from "./image.js";
-import type { SettingsCardData, SettingsLineData } from "./rows.js";
+import type { SettingsCardData, SettingsItem } from "./rows.js";
 import type { SettingsContext } from "./settingsContext.js";
 
 const releaseBehind = (ctx: SettingsContext): ReleaseLatest | undefined => releaseAhead(ctx.release, ctx.shell);
@@ -105,37 +105,64 @@ function GetRelease({ latest, appBehind, failed }: { latest: ReleaseLatest; appB
   );
 }
 
-export function aboutCards(ctx: SettingsContext): SettingsCardData[] {
+/** The line under the version: whether a newer release waits, as the host last read it. */
+function stateLine(release: ReleaseView | null, behind: ReleaseLatest | undefined): string {
+  if (behind !== undefined) return ABOUT_WORDS.available(behind.version);
+  if (release === null || release.state === "checking") return ABOUT_WORDS.checking;
+  if (release.state === "off") return ABOUT_WORDS.checksOff;
+  return release.latest === undefined ? ABOUT_WORDS.notChecked : ABOUT_WORDS.upToDate;
+}
+
+/** General's Version card: the one number while the two halves agree, the step to the next release where there is
+ * one, and the release's notes a click away. */
+export function versionCards(ctx: SettingsContext): SettingsCardData[] {
   const { inShell, app, host } = ctx.shell;
   const { release } = ctx;
   const behind = releaseBehind(ctx);
+  const apart = inShell && app !== undefined && host !== undefined && app !== host;
   const late = ctx.places.filter(place => placeDaemonBehind(place) !== undefined).map(place => place.name);
   const hover = release === null ? undefined : latestHover(release, ctx.now);
-  const lines: SettingsLineData[] = [
-    ...(inShell ? [{ kind: "line" as const, id: "app-version", label: ABOUT_WORDS.app, value: app ?? ABOUT_WORDS.unknown, hover: ABOUT_WORDS.appHover, attrs: { "data-k": "app-version" } }] : []),
-    { kind: "line", id: "host-version", label: ABOUT_WORDS.host, value: host ?? ABOUT_WORDS.unknown, hover: hostHover(release), attrs: { "data-k": "host-version" } },
-    ...(release === null ? [] : [{ kind: "line" as const, id: "latest-version", label: ABOUT_WORDS.latest, value: releaseWord(release), valueClass: behind === undefined ? ("fact" as const) : ("value" as const), ...(hover === undefined ? {} : { hover }), attrs: { "data-k": "latest-version" } }]),
-    ...(late.length === 0 ? [] : [{ kind: "line" as const, id: "computers-behind", label: ABOUT_WORDS.computersBehind, value: String(late.length), valueClass: "fact" as const, hover: ABOUT_WORDS.behindHover(late), attrs: { "data-k": "computers-behind" } }]),
-  ];
-  return [
+  const notes = release?.latest?.url ?? RELEASES;
+  const step = restartShown(release) ? (
+    <Button size="xs" variant="outline" data-k="restart-host" title={ABOUT_WORDS.restartHover} onClick={() => void ctx.api?.hostRestart?.().catch(ctx.failed)}>
+      {ABOUT_WORDS.restartHost}
+    </Button>
+  ) : behind === undefined ? null : (
+    <GetRelease key={behind.version} latest={behind} appBehind={inShell && app !== undefined && release !== null && releaseAbove(release, app)} failed={ctx.failed} />
+  );
+  const row: SettingsItem[] = [
     {
-      id: "about",
-      items: lines,
-      under: (
-        <>
-          {restartShown(release) ? (
-            <Button size="xs" variant="outline" data-k="restart-host" title={ABOUT_WORDS.restartHover} onClick={() => void ctx.api?.hostRestart?.().catch(ctx.failed)}>
-              {ABOUT_WORDS.restartHost}
-            </Button>
-          ) : behind === undefined ? null : <GetRelease key={behind.version} latest={behind} appBehind={inShell && app !== undefined && release !== null && releaseAbove(release, app)} failed={ctx.failed} />}
-          <Button size="xs" variant="outline" data-k="releases" onClick={() => openPage(RELEASES)}>
-            {ABOUT_WORDS.releases}
-          </Button>
-        </>
+      kind: "row",
+      id: "version",
+      title: ABOUT_WORDS.wsp,
+      lead: (
+        <GlyphFrame>
+          <Mark className="size-4 text-foreground" />
+        </GlyphFrame>
       ),
+      mark: host ?? app ?? ABOUT_WORDS.unknown,
+      description: stateLine(release, behind),
+      ...(step === null ? {} : { control: step }),
+      attrs: { "data-k": "version" },
     },
   ];
+  const lines: SettingsItem[] = [
+    ...(apart
+      ? [
+          { kind: "line" as const, id: "app-version", label: ABOUT_WORDS.app, value: app, hover: ABOUT_WORDS.appHover, attrs: { "data-k": "app-version" } },
+          { kind: "line" as const, id: "host-version", label: ABOUT_WORDS.host, value: host, hover: hostHover(release), attrs: { "data-k": "host-version" } },
+        ]
+      : []),
+    ...(late.length === 0 ? [] : [{ kind: "line" as const, id: "computers-behind", label: ABOUT_WORDS.computersBehind, value: String(late.length), valueClass: "fact" as const, hover: ABOUT_WORDS.behindHover(late), attrs: { "data-k": "computers-behind" } }]),
+  ];
+  const whatsNew = (
+    <Button size="xs" variant="outline" data-k="whats-new" {...(hover === undefined ? {} : { title: hover })} onClick={() => openPage(notes)}>
+      {ABOUT_WORDS.whatsNew}
+    </Button>
+  );
+  // A card holds rows or lines, never both: the parts that run apart stand in a card of their own under the version.
+  return [{ id: "version", head: ABOUT_WORDS.title, items: row, ...(lines.length === 0 ? { under: whatsNew } : {}) }, ...(lines.length === 0 ? [] : [{ id: "version-parts", items: lines, under: whatsNew }])];
 }
 
-/** The About row's one word in the settings sidebar: the newer version while this page is behind it. */
-export const aboutMeta = (ctx: SettingsContext): string | undefined => releaseBehind(ctx)?.version;
+/** General's one word in the settings sidebar: the newer version while this wsp is behind it. */
+export const versionMeta = (ctx: SettingsContext): string | undefined => releaseBehind(ctx)?.version;

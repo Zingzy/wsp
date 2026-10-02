@@ -13,7 +13,6 @@ type CommandPaletteContentProps = Omit<ComponentProps<typeof Command>, "children
   readonly inputAccessory?: ReactNode;
   readonly inputProps: ComponentProps<typeof CommandInput>;
   readonly panelClassName?: string;
-  readonly showBackHint?: boolean;
   readonly testId?: string;
 };
 
@@ -30,7 +29,6 @@ export function CommandPaletteContent({
   inputAccessory,
   inputProps,
   panelClassName,
-  showBackHint,
   testId,
   ...commandProps
 }: CommandPaletteContentProps) {
@@ -43,7 +41,7 @@ export function CommandPaletteContent({
         </div>
         <CommandPanel className={panelClassName}>{children}</CommandPanel>
         <CommandFooter className="gap-3 max-sm:flex-col max-sm:items-start">
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
             <KbdGroup className="items-center gap-1.5">
               <Kbd>
                 <ArrowUpIcon />
@@ -57,12 +55,6 @@ export function CommandPaletteContent({
               <KbdGroup className="items-center gap-1.5">
                 <Kbd>Enter</Kbd>
                 <span>{footerActionLabel}</span>
-              </KbdGroup>
-            ) : null}
-            {showBackHint ? (
-              <KbdGroup className="items-center gap-1.5">
-                <Kbd>Backspace</Kbd>
-                <span>Back</span>
               </KbdGroup>
             ) : null}
             <KbdGroup className="items-center gap-1.5">

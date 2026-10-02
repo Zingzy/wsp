@@ -1,50 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Requests the palette, the shortcuts and the action registries raise for
 // another region to fulfil, as window events so the raiser does not own that
-// region's state. The sidebar answers new-workspace, add-project, forget-
-// workspace and the project trips with its dialogs and sheets, and
-// rename-workspace with the name box on that row; new-thread waits for a chat
-// container to subscribe. Composer
-// focus is held rather than broadcast: the workspace switch selects and asks
-// in one handler, and the composer it names remounts after that handler
-// returns.
+// region's state. The sidebar answers add-project, forget-workspace and the
+// project trips with its dialogs and sheets, and rename-workspace with the
+// name box on that row; new-thread waits for a chat container to subscribe.
+// Composer focus is held rather than broadcast: the workspace switch selects
+// and asks in one handler, and the composer it names remounts after that
+// handler returns.
 import type { LookPart } from "@wsp/protocol";
 
-const NEW_WORKSPACE_EVENT = "wsp:new-workspace";
 const NEW_THREAD_EVENT = "wsp:new-thread";
 const ADD_PROJECT_EVENT = "wsp:add-project";
 
 export interface NewThreadRequest {
   readonly workspaceId: string;
-}
-
-/** Which project the new workspace goes on, where the raiser names one. */
-export interface NewWorkspaceRequest {
-  readonly project?: string;
-}
-
-let newWorkspaceListeners = 0;
-/** A request raised while no sidebar stands to answer it, as from a Settings page, which the sidebar's place is
- * given to: answered by the next sidebar to listen. */
-let heldNewWorkspace: NewWorkspaceRequest | null = null;
-
-export function requestNewWorkspace(project?: string): void {
-  const detail: NewWorkspaceRequest = project === undefined ? {} : { project };
-  if (newWorkspaceListeners === 0) heldNewWorkspace = detail;
-  else window.dispatchEvent(new CustomEvent(NEW_WORKSPACE_EVENT, { detail }));
-}
-
-export function onNewWorkspaceRequest(listener: (detail: NewWorkspaceRequest) => void): () => void {
-  const handler = (event: Event) => listener((event as CustomEvent<NewWorkspaceRequest | null>).detail ?? {});
-  window.addEventListener(NEW_WORKSPACE_EVENT, handler);
-  newWorkspaceListeners += 1;
-  const held = heldNewWorkspace;
-  heldNewWorkspace = null;
-  if (held !== null) listener(held);
-  return () => {
-    window.removeEventListener(NEW_WORKSPACE_EVENT, handler);
-    newWorkspaceListeners -= 1;
-  };
 }
 
 /** Asks for the sheet that records a project; the sidebar answers, since the row it appears in is its own. */

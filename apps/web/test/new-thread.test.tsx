@@ -1,19 +1,21 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // New thread from Cmd+T or the palette opens on a project, never inside the
 // last workspace: the project the sidebar is filtered to, else the last one
-// used. The heading's project name is the project picker, one line under the
-// box says where the thread will run, the header reads New thread, and the
+// used, or, where the person asked to pick every time, the palette's page of
+// projects. The heading's project name is the project picker, one line under
+// the box says where the thread will run, the header reads New thread, and the
 // composer's footer carries no project chip and no folder walker. A New thread
 // from a workspace's own menu still opens in that workspace.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { DEFAULT_PREFERENCES, type HarnessCatalog, type PlaceView, type ProjectView, type WorkspaceView } from "@wsp/protocol";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { DEFAULT_PREFERENCES, type HarnessCatalog, type PlaceView, type Preferences, type ProjectView, type WorkspaceView } from "@wsp/protocol";
 import { Shell } from "../src/App.js";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { useComposerDraftStore } from "../src/components/chat/composerDraftStore.js";
 import { useComposerOptionsStore } from "../src/components/chat/composerOptionsStore.js";
 import { useMultiPickStore } from "../src/components/chat/composerMultiPick.js";
+import { openCommandPalette } from "../src/commandPaletteBus.js";
 import { runShellCommand } from "../src/shell/shellCommands.js";
 import { onAddProjectRequest } from "../src/shell/shellRequests.js";
 import { PROJECT_PICK_KEY } from "../src/sidebar/picks.js";
@@ -67,9 +69,9 @@ const CLAUDE: HarnessCatalog = {
   images: true,
 };
 
-function fakeApi(projects: ProjectView[]): Api {
+function fakeApi(projects: ProjectView[], preferences: Preferences): Api {
   return {
-    preferences: async () => DEFAULT_PREFERENCES,
+    preferences: async () => preferences,
     listHarnesses: async () => [CLAUDE],
     portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/`, expiresAt: Date.now() + 3_600_000 }),
     daemon: noDaemonApi,
@@ -103,11 +105,15 @@ beforeEach(() => {
   useComposerOptionsStore.setState({ byWorkspaceId: {}, pickedOn: {} });
   useMultiPickStore.setState({ byKey: {} });
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  delete window.wsp;
+});
 
-async function mount(projects: ProjectView[] = [WSP, SPOO]) {
-  useStore.setState({ api: null, conn: "live", workspaces: [], statuses: {}, creations: [], sessions: {}, ready: false, selectedId: null, selectedThreadId: null, projectHome: null, freshThread: false, preferences: DEFAULT_PREFERENCES, projects: [], places: [], landings: {} });
-  useStore.getState().bind(fakeApi(projects));
+async function mount(projects: ProjectView[] = [WSP, SPOO], preferences: Preferences = CURRENT) {
+  useStore.setState({ api: null, conn: "live", workspaces: [], statuses: {}, creations: [], sessions: {}, ready: false, selectedId: null, selectedThreadId: null, projectHome: null, freshThread: false, preferences, projects: [], places: [], landings: {} });
+  useStore.getState().bind(fakeApi(projects, preferences));
   render(<Shell />);
   await waitFor(() => expect(useStore.getState().ready).toBe(true));
   act(() => useStore.setState({ projects, places: PLACES }));
@@ -119,6 +125,16 @@ const cmdT = () => act(() => runShellCommand("chat.new", { workspaceId: useStore
 const crumb = () => document.querySelector("[data-thread-breadcrumb]")!.textContent;
 const heading = () => screen.getByRole("heading", { level: 1 });
 const where = () => document.querySelector<HTMLElement>("[data-new-thread-where]");
+const palette = () => document.querySelector<HTMLElement>("[data-command-palette]");
+const search = () => palette()!.querySelector<HTMLInputElement>("input")!;
+const paletteRows = () => [...palette()!.querySelectorAll<HTMLElement>("[data-slot=command-item]")];
+const rowTitle = (row: HTMLElement) => row.querySelector("span.truncate")?.textContent;
+const projectRows = () => [...palette()!.querySelectorAll<HTMLElement>("[data-palette-group=projects] [data-slot=command-item]")];
+const ASK: Preferences = { ...DEFAULT_PREFERENCES, newThreadIn: "ask" };
+const CURRENT: Preferences = { ...DEFAULT_PREFERENCES, newThreadIn: "current" };
+/** The desktop shell, told apart by the bridge its preload puts on the page; a browser tab keeps the mod digits. */
+const asDesktopShell = (): void => void (window.wsp = {});
+const modDigit = (n: number) => fireEvent.keyDown(search(), { key: String(n), code: `Digit${n}`, metaKey: true });
 
 describe("New thread from Cmd+T", () => {
   it("with All projects opens the last project used, not the last workspace's thread view", async () => {
@@ -129,6 +145,7 @@ describe("New thread from Cmd+T", () => {
     expect(heading().textContent).toBe("What should we build in wsp?");
     expect(crumb()).toBe("New thread");
     expect(document.body.textContent).not.toContain("What should we build in Plan batch 10");
+    expect(palette()).toBeNull();
   });
 
   it("with one project filtered in the sidebar opens that project", async () => {
@@ -192,7 +209,7 @@ describe("New thread from Cmd+T", () => {
     expect(where()!.closest("button")).toBeNull();
   });
 
-  it("the box carries model, effort with its brain, attach and send; under it the computer, access and branch, no folder path, and no project chip", async () => {
+  it("the box carries model, effort with its brain, access, attach and send; under it the computer and branch, no folder path, and no project chip", async () => {
     await mount();
     cmdT();
     const effort = await waitFor(() => document.querySelector<HTMLElement>('[data-composer-picker="reasoning"]')!);
@@ -202,9 +219,9 @@ describe("New thread from Cmd+T", () => {
     expect(document.querySelector('[data-composer-picker="project"]')).toBeNull();
     expect(screen.queryByText("other folder")).toBeNull();
     const strip = document.querySelector<HTMLElement>("[data-composer-checkout]")!;
-    expect(strip.querySelector('[data-composer-picker="access"]')).not.toBeNull();
+    expect(strip.querySelector('[data-composer-picker="access"]')).toBeNull();
     const footer = document.querySelector<HTMLElement>("[data-chat-composer-footer]")!;
-    expect(footer.querySelector('[data-composer-picker="access"]')).toBeNull();
+    expect(footer.querySelector('[data-composer-picker="access"]')).not.toBeNull();
     expect(strip.dataset["composerFolder"]).toBeDefined();
     expect(strip.textContent).not.toContain(strip.dataset["composerFolder"]!);
     expect(strip.querySelector("[data-composer-computer]")).not.toBeNull();
@@ -219,5 +236,133 @@ describe("New thread from a workspace's own menu", () => {
     await waitFor(() => expect(crumb()).toBe("New thread"));
     expect(heading().textContent).toBe("What should we build in wsp?");
     expect(document.querySelector('[data-composer-picker="project"]')).toBeNull();
+  });
+});
+
+describe("New thread when the setting asks every time", () => {
+  it("Cmd+T opens the palette on the projects page: each project's glyph, name, computer and folder, and the first nine keyed", async () => {
+    vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
+    asDesktopShell();
+    await mount([WSP, SPOO, WSP_ON_SPOO], { ...ASK, projectLook: { [SPOO.id]: { icon: "rocket", hue: "teal" } } });
+    cmdT();
+    await waitFor(() => expect(palette()).not.toBeNull());
+    expect(useStore.getState()).toMatchObject({ selectedId: PLANNER.id, projectHome: null });
+    expect(palette()!.querySelector("[data-palette-group=projects] [data-slot=command-group-label]")?.textContent).toBe("Projects");
+    expect(projectRows().map(rowTitle)).toEqual(["wsp", "py_spoo_url", "wsp"]);
+    const [here, spoo, there] = projectRows();
+    expect(spoo!.querySelector("svg.lucide-rocket")?.getAttribute("data-hue")).toBe("teal");
+    expect(here!.querySelector("[data-item-description]")?.textContent).toBe(`this Mac ${WSP.path}`);
+    expect(here!.querySelector("[data-item-description] [data-computer-glyph]")).toBeNull();
+    expect(there!.querySelector("[data-item-description]")?.textContent).toBe(`spoo ${WSP_ON_SPOO.path}`);
+    expect(there!.querySelector("[data-item-description] [data-computer-glyph]")).not.toBeNull();
+    expect(projectRows().map(row => row.querySelector("[data-slot=command-shortcut]")?.textContent)).toEqual(["⌘1", "⌘2", "⌘3"]);
+    expect(search().getAttribute("placeholder")).toBe("Search projects...");
+    expect(palette()!.querySelector("[data-slot=autocomplete-start-addon] svg.lucide-arrow-left")).not.toBeNull();
+    expect([...palette()!.querySelectorAll("[data-slot=command-footer] [data-slot=kbd-group] > span")].map(hint => hint.textContent)).toEqual(["Navigate", "Select", "Close"]);
+  });
+
+  it("asks for the project by default: Cmd+T on preferences that name no choice opens the projects page", async () => {
+    await mount([WSP, SPOO], DEFAULT_PREFERENCES);
+    cmdT();
+    await waitFor(() => expect(palette()).not.toBeNull());
+    expect(projectRows().map(rowTitle)).toEqual(expect.arrayContaining([WSP.name, SPOO.name]));
+  });
+
+  it("Cmd and a digit open that row's project while the page is open, and the chord leaves the sidebar's rows alone", async () => {
+    vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
+    asDesktopShell();
+    await mount([WSP, SPOO], ASK);
+    cmdT();
+    await waitFor(() => expect(palette()).not.toBeNull());
+    modDigit(2);
+    await waitFor(() => expect(palette()).toBeNull());
+    expect(useStore.getState()).toMatchObject({ projectHome: SPOO.id, selectedId: null });
+    expect(heading().textContent).toBe("What should we build in py_spoo_url?");
+  });
+
+  it("in a browser tab, which keeps Cmd and a digit for its own tabs, the rows offer no key", async () => {
+    vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
+    await mount([WSP, SPOO], ASK);
+    cmdT();
+    await waitFor(() => expect(projectRows().map(rowTitle)).toEqual(["wsp", "py_spoo_url"]));
+    expect(palette()!.querySelector("[data-slot=command-shortcut]")).toBeNull();
+  });
+
+  it("typing narrows the list and Enter opens the highlighted project", async () => {
+    await mount([WSP, SPOO], ASK);
+    cmdT();
+    await waitFor(() => expect(palette()).not.toBeNull());
+    fireEvent.change(search(), { target: { value: "spoo" } });
+    await waitFor(() => expect(projectRows().map(rowTitle)).toEqual(["py_spoo_url"]));
+    fireEvent.keyDown(search(), { key: "Enter" });
+    await waitFor(() => expect(palette()).toBeNull());
+    expect(useStore.getState().projectHome).toBe(SPOO.id);
+  });
+
+  it("the back arrow before the search is a button that goes back to the palette's root", async () => {
+    await mount([WSP, SPOO], ASK);
+    cmdT();
+    await waitFor(() => expect(palette()).not.toBeNull());
+    const back = document.querySelector<HTMLButtonElement>("[data-k=palette-back]")!;
+    expect(back.getAttribute("aria-label")).toBe("Back");
+    fireEvent.click(back);
+    await waitFor(() => expect(projectRows()).toEqual([]));
+    expect(paletteRows().map(rowTitle)).toEqual(expect.arrayContaining(["New thread in..."]));
+  });
+
+  it("Backspace on an empty search goes back to the palette's root, and Esc closes it with nothing opened", async () => {
+    await mount([WSP, SPOO], ASK);
+    cmdT();
+    await waitFor(() => expect(palette()).not.toBeNull());
+    fireEvent.change(search(), { target: { value: "w" } });
+    fireEvent.keyDown(search(), { key: "Backspace" });
+    expect(projectRows().length).toBeGreaterThan(0);
+    fireEvent.change(search(), { target: { value: "" } });
+    fireEvent.keyDown(search(), { key: "Backspace" });
+    await waitFor(() => expect(projectRows()).toEqual([]));
+    expect(paletteRows().map(rowTitle)).toEqual(expect.arrayContaining(["New thread", "New thread in..."]));
+    expect(search().getAttribute("placeholder")).toBe("Search commands, tasks, and threads...");
+    fireEvent.keyDown(search(), { key: "Escape" });
+    await waitFor(() => expect(palette()).toBeNull());
+    expect(useStore.getState()).toMatchObject({ selectedId: PLANNER.id, projectHome: null });
+  });
+
+  it("the sidebar's new thread button asks too", async () => {
+    await mount([WSP, SPOO], ASK);
+    fireEvent.click(screen.getByRole("button", { name: "New thread" }));
+    await waitFor(() => expect(projectRows().map(rowTitle)).toEqual(["wsp", "py_spoo_url"]));
+    expect(useStore.getState().projectHome).toBeNull();
+  });
+});
+
+describe("New thread from the palette", () => {
+  const openPalette = () => act(() => openCommandPalette());
+  const rowNamed = (title: string) => paletteRows().find(row => rowTitle(row) === title)!;
+
+  it("New thread in... always opens the projects page, and a click on a row opens that project", async () => {
+    await mount();
+    openPalette();
+    await waitFor(() => expect(palette()).not.toBeNull());
+    fireEvent.click(rowNamed("New thread in..."));
+    await waitFor(() => expect(projectRows().map(rowTitle)).toEqual(["wsp", "py_spoo_url"]));
+    fireEvent.click(projectRows()[1]!);
+    await waitFor(() => expect(palette()).toBeNull());
+    expect(useStore.getState().projectHome).toBe(SPOO.id);
+  });
+
+  it("the plain New thread follows the setting: the project you're in opens straight away, Ask every time opens the page", async () => {
+    await mount();
+    openPalette();
+    await waitFor(() => expect(palette()).not.toBeNull());
+    fireEvent.click(rowNamed("New thread"));
+    await waitFor(() => expect(palette()).toBeNull());
+    expect(useStore.getState().projectHome).toBe(WSP.id);
+    cleanup();
+    await mount([WSP, SPOO], ASK);
+    openPalette();
+    await waitFor(() => expect(palette()).not.toBeNull());
+    fireEvent.click(rowNamed("New thread"));
+    await waitFor(() => expect(projectRows().map(rowTitle)).toEqual(["wsp", "py_spoo_url"]));
+    expect(useStore.getState().projectHome).toBeNull();
   });
 });

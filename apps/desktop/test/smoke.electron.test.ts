@@ -1225,13 +1225,13 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     await notice.waitFor();
     expect(await notice.textContent()).toContain(`this app is ${VERSION}, the host is 9.9.9: get the new app`);
     expect(await notice.locator("[data-notice-action]").textContent()).toBe(GET_THE_APP_WORD);
-    // The settings page names both halves as well, on About, so the notice is never the only place the numbers are.
+    // The settings page names both halves as well, on General's Version card, so the notice is never the only place the numbers are.
     // The palette's Settings row is the road through it.
     await win.keyboard.press("Meta+k");
     await win.locator("[data-command-palette]").getByText(SETTINGS_WORDS.title, { exact: true }).click();
     await win.waitForSelector("[data-settings-page]");
-    await win.locator("[data-k=settings-about]").click();
-    await win.waitForSelector("[data-settings-at=about]");
+    await win.locator("[data-k=settings-general]").click();
+    await win.waitForSelector("[data-settings-at=general]");
     expect(await win.locator("[data-k=app-version] [data-settings-word]").textContent()).toBe(VERSION);
     expect(await win.locator("[data-k=host-version] [data-settings-word]").textContent()).toBe("9.9.9");
   });

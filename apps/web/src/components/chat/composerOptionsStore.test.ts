@@ -5,8 +5,8 @@ import { useComposerOptionsStore } from "./composerOptionsStore";
 const KEY = useComposerOptionsStore.persist.getOptions().name!;
 
 /** What another tab, an older build or a hand-edited profile can leave under this key. */
-async function stored(state: unknown): Promise<ReturnType<typeof useComposerOptionsStore.getState>> {
-  window.localStorage.setItem(KEY, JSON.stringify({ state, version: 1 }));
+async function stored(state: unknown, version = useComposerOptionsStore.persist.getOptions().version): Promise<ReturnType<typeof useComposerOptionsStore.getState>> {
+  window.localStorage.setItem(KEY, JSON.stringify({ state, version }));
   await useComposerOptionsStore.persist.rehydrate();
   return useComposerOptionsStore.getState();
 }
@@ -25,6 +25,22 @@ describe("the composer's picks as they come back off local storage", () => {
     expect(state.byWorkspaceId).toEqual({ ws_a: { model: "claude-opus-5", contextWindow: "1m", effort: "low" } });
     // The access has no value here, only the thread it was picked on: its mode lives on the host's record.
     expect(state.pickedOn).toEqual({ ws_a: { model: "t1", contextWindow: "t2", effort: "t3", permissionMode: "t4" } });
+  });
+
+  it("drops the picks a build kept for every next thread of a workspace, which would stand over the defaults", async () => {
+    const state = await stored({ byWorkspaceId: { "project:pr_1": { harness: "claude" }, ws_a: { model: "claude-opus-5" } }, pickedOn: { ws_a: { model: "t1" } } }, 1);
+    expect([state.byWorkspaceId, state.pickedOn]).toEqual([{}, {}]);
+  });
+
+  it("hands a draft's picks and its stamps to the workspace its send made, and drops what a send carried and nothing of another thread's", () => {
+    const { pick, move, drop } = useComposerOptionsStore.getState();
+    pick("project:pr_1", "harness", "codex");
+    pick("project:pr_1", "effort", "low", "project:pr_1");
+    move("project:pr_1", "ws_a");
+    expect(useComposerOptionsStore.getState()).toMatchObject({ byWorkspaceId: { ws_a: { harness: "codex", effort: "low" } }, pickedOn: { ws_a: { effort: "ws_a" } } });
+    pick("ws_a", "model", "claude-opus-5", "t1");
+    drop("ws_a", "ws_a");
+    expect(useComposerOptionsStore.getState()).toMatchObject({ byWorkspaceId: { ws_a: { model: "claude-opus-5" } }, pickedOn: { ws_a: { model: "t1" } } });
   });
 
   it("drops a thread record of the wrong shape rather than handing the pickers a value that is not a thread", async () => {

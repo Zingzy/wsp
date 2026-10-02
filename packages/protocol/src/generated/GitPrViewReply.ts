@@ -2,11 +2,20 @@
 import type { PullRequestComment } from "./PullRequestComment.js";
 import type { PullRequestCommit } from "./PullRequestCommit.js";
 import type { PullRequestFile } from "./PullRequestFile.js";
+import type { PullRequestLabel } from "./PullRequestLabel.js";
+import type { PullRequestPageCut } from "./PullRequestPageCut.js";
 import type { PullRequestReview } from "./PullRequestReview.js";
 import type { PullRequestReviewComment } from "./PullRequestReviewComment.js";
+import type { PullRequestReviewRequest } from "./PullRequestReviewRequest.js";
+import type { PullRequestVerdict } from "./PullRequestVerdict.js";
 
 /**
- * A pull request as its page reads: title, body, the author and when it was last updated, commits, reviews, the
- * conversation, the comments on lines and the files, every body cut at GIT_PR_LIST_BODY_CAP.
+ * A pull request as its page reads: title, body, the author, when it opened, last moved and settled, who merged it
+ * into which commit, labels, the reviews asked for and each reviewer's latest verdict, assignees, commits, reviews,
+ * the conversation, the comments on lines and the files. No body on it is cut.
  */
-export type GitPrViewReply = { title: string, body: string, author: string, updatedAt: string, commits: Array<PullRequestCommit>, reviews: Array<PullRequestReview>, comments: Array<PullRequestComment>, reviewComments: Array<PullRequestReviewComment>, files: Array<PullRequestFile>, };
+export type GitPrViewReply = { title: string, body: string, author: string, createdAt: string, updatedAt: string, closedAt?: string, mergedAt?: string, mergedBy?: string, mergeCommit?: string, labels: Array<PullRequestLabel>, reviewRequests: Array<PullRequestReviewRequest>, latestReviews: Array<PullRequestVerdict>, assignees: Array<string>, commits: Array<PullRequestCommit>, reviews: Array<PullRequestReview>, comments: Array<PullRequestComment>, reviewComments: Array<PullRequestReviewComment>, files: Array<PullRequestFile>, 
+/**
+ * What the read left out, where it reached a cap; absent where it read everything.
+ */
+cut?: PullRequestPageCut, };

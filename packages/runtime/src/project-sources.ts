@@ -5,8 +5,8 @@
 // through where it goes through one rather than through git. The add asks a
 // module through PROJECT_SOURCES; nothing outside this file decides by a
 // source's kind. Adding a source is a module and its row.
-import { GIT_HOSTS, gitHostOf, noGitCliLine, ownerRepoOf, type GitHost } from "@wsp/catalog";
-import { noRemoteLine, projectNameOf, shellLine, type ProjectSource, type SeedPlan } from "@wsp/protocol";
+import { GIT_HOSTS, gitHostOf, noGitCliLine, type GitHost } from "@wsp/catalog";
+import { noRemoteLine, ownerRepoOf, projectNameOf, shellLine, type ProjectSource, type SeedPlan } from "@wsp/protocol";
 
 /** What a source resolved to on this computer: the remote whichever computer holds the project will clone, the
  * branch its HEAD names, the project's own name, and the seed menu where the source is a folder here. */

@@ -192,15 +192,16 @@ describe("every row the surfaces list aims at", () => {
   });
 });
 
-describe("a surface that presses New workspace", () => {
+describe("a surface that presses New thread on a project", () => {
   it("picks one of its fixture's projects first, since the sidebar draws the control only while a project is picked", () => {
     const SURFACES = JSON.parse(readFileSync(join(HERE, "surfaces.json"), "utf8")).surfaces;
-    const pressing = SURFACES.filter(s => (s.steps ?? []).includes("k=new-workspace"));
+    const press = steps => steps.findIndex(step => step === "k=new-workspace" || step === "menu-item=new-workspace");
+    const pressing = SURFACES.filter(s => press(s.steps ?? []) >= 0);
     expect(pressing.length).toBeGreaterThan(0);
     for (const surface of pressing) {
       const steps = surface.steps;
       const projects = Object.keys(fixtureState(surface.fixture ?? "mac-in-use").projects ?? {});
-      const picked = steps.slice(0, steps.indexOf("k=new-workspace")).find(word => word.startsWith("switcher-option="));
+      const picked = steps.slice(0, press(steps)).find(word => word.startsWith("switcher-option="));
       expect([surface.name, projects.includes(picked?.slice("switcher-option=".length))]).toEqual([surface.name, true]);
     }
   });

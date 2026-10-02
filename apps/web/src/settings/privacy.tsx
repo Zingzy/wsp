@@ -26,6 +26,7 @@ export function privacyCards(ctx: SettingsContext): SettingsCardData[] {
           title: PRIVACY_WORDS.serverIcons,
           description: PRIVACY_WORDS.serverIconsDescription,
           control: <Switch data-k="server-icons" aria-label={PRIVACY_WORDS.serverIcons} checked={preferences.serverIcons} onCheckedChange={serverIcons => setPreferences({ serverIcons })} />,
+          ...(preferences.serverIcons === DEFAULT_PREFERENCES.serverIcons ? {} : { reset: () => setPreferences({ serverIcons: DEFAULT_PREFERENCES.serverIcons }) }),
         },
         {
           kind: "row",
@@ -44,6 +45,7 @@ export function privacyCards(ctx: SettingsContext): SettingsCardData[] {
           title: PRIVACY_WORDS.usageLogs,
           description: PRIVACY_WORDS.usageLogsDescription(hereName(ctx.places)),
           control: <Switch data-k="usage-logs" aria-label={PRIVACY_WORDS.usageLogs} checked={preferences.usageLogs} onCheckedChange={usageLogs => setPreferences({ usageLogs })} />,
+          ...(preferences.usageLogs === DEFAULT_PREFERENCES.usageLogs ? {} : { reset: () => setPreferences({ usageLogs: DEFAULT_PREFERENCES.usageLogs }) }),
         },
       ],
     },

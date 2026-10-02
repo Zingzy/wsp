@@ -19,7 +19,7 @@ import type { SettingsCardData, SettingsLineData } from "./rows.js";
 import type { SettingsContext } from "./settingsContext.js";
 
 /** The cards, each the commands it lists in the order they are read. */
-const SHELL: readonly KeybindingCommand[] = ["commandPalette.toggle", "files.quickOpen", "files.search", "settings.toggle", "sidebar.toggle", "terminal.toggle", "rightPanel.toggle", "preview.toggle"];
+const SHELL: readonly KeybindingCommand[] = ["commandPalette.toggle", "files.quickOpen", "files.search", "settings.toggle", "sidebar.toggle", "terminal.toggle", "rightPanel.toggle", "rightPanel.nextTab", "rightPanel.previousTab", "preview.toggle"];
 const WORK: readonly KeybindingCommand[] = ["chat.new", "workspace.next", "workspace.previous", "thread.next", "thread.previous", "thread.settle", "thread.nextNeedsYou", "editor.open", workspaceSelectCommand(WORKSPACE_SELECT_SLOTS[0])];
 const TERMINAL: readonly KeybindingCommand[] = ["terminal.split", "terminal.new", "terminal.zoomIn", "terminal.zoomOut", "terminal.zoomReset"];
 
@@ -80,7 +80,7 @@ function fixedLines(read: KeybindingsRead, sendWith: SendKey): SettingsLineData[
 
 export function keybindingCards(rules: ReadonlyArray<KeybindingRule>, read: KeybindingsRead, edit?: KeybindingsEdit, sendWith: SendKey = DEFAULT_PREFERENCES.sendWith): SettingsCardData[] {
   return [
-    { id: "shell", items: linesOf(rules, SHELL, read, edit) },
+    { id: "shell", head: KEYBINDINGS_WORDS.windowAndPanels, items: linesOf(rules, SHELL, read, edit) },
     { id: "work", head: KEYBINDINGS_WORDS.workspacesAndThreads, items: linesOf(rules, WORK, read, edit) },
     { id: "terminal", head: KEYBINDINGS_WORDS.terminal, items: linesOf(rules, TERMINAL, read, edit) },
     { id: "fixed", head: KEYBINDINGS_WORDS.fixed, items: fixedLines(read, sendWith) },
@@ -89,7 +89,7 @@ export function keybindingCards(rules: ReadonlyArray<KeybindingRule>, read: Keyb
 
 export function keybindingsCards(ctx: SettingsContext): SettingsCardData[] {
   const overrides = ctx.preferences.keybindings;
-  return keybindingCards(rulesWith(DEFAULT_KEYBINDINGS, overrides), { platform: ctx.platform, desktopShell: ctx.desktopShell }, { overrides, write: ctx.setPreferences }, ctx.preferences.sendWith);
+  return keybindingCards(rulesWith(DEFAULT_KEYBINDINGS, overrides, ctx.platform), { platform: ctx.platform, desktopShell: ctx.desktopShell }, { overrides, write: ctx.setPreferences }, ctx.preferences.sendWith);
 }
 
 /** The one patch Restore defaults writes: every command back on its defaults. */

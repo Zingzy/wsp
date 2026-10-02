@@ -17,7 +17,7 @@ export { folderName } from "@wsp/protocol";
 /** The web's one set of words for what became of an agent's sessions, short enough for a row's end. */
 const OUTCOME_WORDS: Record<Exclude<ProjectAgentOutcome, "failed">, string> = {
   moved: "moved",
-  "transcript-only": "transcripts landed, not yet listed",
+  "transcript-only": "landed, not listed yet",
   carried: "carried unchanged",
   nothing: "nothing to bring",
 };

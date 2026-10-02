@@ -110,6 +110,23 @@ describe("deriveSidebarProjects", () => {
     expect(p!.threads.map(t => [t.title, t.project])).toEqual([["in spoo", "spoo"], ["deep in wsp", "spoo"], ["elsewhere", "spoo"], ["nowhere yet", "spoo"]]);
   });
 
+  it("a thread carries the host's sentence for an agent it will not start there, off its latest turn, and none where nothing stops it", () => {
+    const refused = "Claude Code does not start with its config folder ~/x: it is not under the home folder /root.";
+    const [p] = deriveSidebarProjects({
+      workspaces: [LIVE_WORKSPACE_1],
+      sessions: {
+        [LIVE_WS]: [
+          { id: "s1", workspaceId: LIVE_WS, harness: "claude", status: "failed", threadId: "thr_a", prompt: "go", startedAt: 1_000, endedAt: 2_000, setupRefusal: refused },
+          { id: "s2", workspaceId: LIVE_WS, harness: "codex", status: "completed", threadId: "thr_b", prompt: "fine", startedAt: 3_000, endedAt: 4_000 },
+        ],
+      },
+    });
+    expect(p!.threads.map(t => [t.id, t.setupRefusal])).toEqual([
+      ["thr_a", refused],
+      ["thr_b", undefined],
+    ]);
+  });
+
   it("turns sharing a threadId fold into one thread titled by the opening prompt, in the state of the latest turn", () => {
     const [p] = deriveSidebarProjects({
       workspaces: [LIVE_WORKSPACE_1],

@@ -291,9 +291,9 @@ describe("index.css", () => {
       }
 
       /* Over the glass the sidebar's quiet text and glyphs have no solid card
-         behind them: one step up, the rows' words and the prose whole, and the
-         counts nearly opaque, keep them at AA over a white desktop, where the
-         glass reads as mid grey. */
+         behind them: one step up, the rows' words and the prose whole, the
+         counts nearly opaque and the state words a tint lighter, keep them at AA
+         over a white desktop, where the glass reads as mid grey. */
       .desktop-mac [data-app-sidebar] {
         @variant dark {
           --muted-foreground: var(--glass-ink);
@@ -303,6 +303,9 @@ describe("index.css", () => {
           --sidebar-row-rest: var(--glass-ink);
           --sidebar-prose: var(--glass-ink);
           --top-row-meta-alpha: 90%;
+          --status-working: #fbcfe8;
+          --status-failed: #ffc9c9;
+          --status-input: #c6d2ff;
         }
       }
 
@@ -336,6 +339,12 @@ describe("index.css", () => {
           opacity: 0;
           transform: translateY(-4px);
         }
+      }
+
+      /* A rolling digit's column, 0 to 9 one a line, drawn as content so the element's own text stays the digit. */
+      .digit-strip::before {
+        content: "0\\A 1\\A 2\\A 3\\A 4\\A 5\\A 6\\A 7\\A 8\\A 9";
+        white-space: pre;
       }
       "
     `);

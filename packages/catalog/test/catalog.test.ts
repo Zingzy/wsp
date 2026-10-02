@@ -246,6 +246,51 @@ describe("catalog", () => {
     for (const [name, row] of Object.entries(SIGN_IN_ROWS)) expect(catalogEntry(name)?.signIn, name).toBe(row);
   });
 
+  it("answers each agent's sign-in kind off its own status where the status names one, and names why where it cannot", () => {
+    const KINDS: Record<string, ReadonlyArray<[string, string | undefined]>> = {
+      claude: [
+        ['{"loggedIn":true,"authMethod":"claude.ai","subscriptionType":"max"}', "subscription"],
+        ['{"loggedIn":true,"authMethod":"claude.ai"}', "oauth"],
+        ['{"loggedIn":true,"authMethod":"oauth_token"}', "subscription"],
+        ['{"loggedIn":true,"authMethod":"none","apiKeySource":"ANTHROPIC_API_KEY"}', "api-key"],
+        ['{"loggedIn":false,"authMethod":"none"}', undefined],
+      ],
+      codex: [
+        ["Logged in using ChatGPT", "subscription"],
+        ["Logged in using an API key - sk-proj-***abcd", "api-key"],
+        ["Not logged in", undefined],
+      ],
+      gemini: [
+        ["oauth_creds.json", "oauth"],
+        ["GEMINI_API_KEY", "api-key"],
+        ["", undefined],
+      ],
+    };
+    // Their status says signed in or not and never which kind of login it is.
+    const SILENT: Record<string, string> = {
+      opencode: "auth list counts credentials and keys together",
+      cursor: "status names the account and not how it signed in",
+      pi: "--list-models names providers, not how each signed in",
+      hermes: "auth list counts credentials and keys together",
+    };
+    for (const agent of CATALOG_AGENTS) {
+      const kind = agent.signIn.status?.kind;
+      if (agent.signIn.status === undefined || SILENT[agent.id] !== undefined) {
+        expect(kind, agent.id).toBeUndefined();
+        continue;
+      }
+      expect(KINDS[agent.id], `${agent.id} has no kinds recorded`).toBeDefined();
+      for (const [output, said] of KINDS[agent.id]!) expect(kind?.(output), `${agent.id}: ${output}`).toBe(said);
+    }
+  });
+
+  it("names Claude Code's plan off its own status where the account names one, and none for a key", () => {
+    const plan = catalogEntry("claude")!.signIn.status?.plan;
+    expect(plan?.('{"loggedIn":true,"authMethod":"claude.ai","subscriptionType":"max"}')).toBe("max");
+    expect(plan?.('{"loggedIn":true,"authMethod":"claude.ai"}')).toBeUndefined();
+    expect(plan?.('{"loggedIn":true,"apiKeySource":"ANTHROPIC_API_KEY","subscriptionType":"max"}')).toBeUndefined();
+  });
+
   it("files one sign-in row per login id, and a keys row beside a login whose key files travel only by copy", () => {
     // Every entry with a login or a note about having none has a row under its login id; a plain tool has none.
     for (const e of CATALOG) {

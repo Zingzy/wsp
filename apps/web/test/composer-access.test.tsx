@@ -8,7 +8,7 @@
 // the workspace has spoken.
 import { act, render } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { workspaceAccess, type HarnessCatalog, type WorkspaceView } from "@wsp/protocol";
+import type { HarnessCatalog, WorkspaceView } from "@wsp/protocol";
 import { harnessCatalog } from "@wsp/runtime";
 import { catalogIn, catalogsIn, useStore } from "../src/protocol/store.js";
 import { effectivePicks } from "../src/components/chat/composerPicks.js";
@@ -19,10 +19,6 @@ const WS = "ws_a";
 
 /** The runtime's own table, which is what the host answers before any machine has been asked. */
 const TABLE = harnessCatalog("claude")!;
-/** The same table as the runtime hands it out for a workspace on this computer. */
-const THIS_MAC = workspaceAccess(TABLE, "local");
-/** And for a machine wsp forked, where the pick that asks nothing names no computer of theirs. */
-const FORK = workspaceAccess(TABLE, "cloud");
 
 interface Catalogs {
   harnesses: HarnessCatalog[];
@@ -47,12 +43,8 @@ describe("the access pick reads the workspace's own catalog and no other", () =>
     expect(catalogIn(store(), WS, "claude")?.efforts).toEqual(TABLE.efforts);
   });
 
-  it("reads Bypass on this computer, where the person asked for no prompts", () => {
-    expect(access(store([THIS_MAC]))).toBe("bypassPermissions");
-  });
-
-  it("reads what a fork's own catalog marks", () => {
-    expect(access(store([FORK]))).toBe("bypassPermissions");
+  it("reads what the workspace's own catalog marks", () => {
+    expect(access(store([TABLE]))).toBe("bypassPermissions");
   });
 
   it("hands back one array per reading, so the composer's selector settles", () => {
@@ -99,7 +91,7 @@ describe("the composer's access button", () => {
     expect(document.querySelector('[data-composer-picker="model"]')).not.toBeNull();
     expect(accessButton()?.dataset["access"]).toBeUndefined();
 
-    act(() => useStore.setState({ harnessesByWorkspace: { [WS]: [THIS_MAC] } }));
+    act(() => useStore.setState({ harnessesByWorkspace: { [WS]: [TABLE] } }));
     expect(accessButton()?.dataset["access"]).toBe("bypassPermissions");
     // The button wears the CLI's own short word; the machine it names is read in the menu.
     expect(accessButton()?.textContent).toBe("Bypass");

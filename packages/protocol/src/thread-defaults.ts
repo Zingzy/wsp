@@ -236,10 +236,23 @@ export function openDefaults(catalog: HarnessCatalog, defaults: Omit<ThreadDefau
   return { ...(model !== undefined ? { model } : {}), ...(effort !== undefined ? { effort } : {}) };
 }
 
+/** Every character a model id is spelled with across the agents: a provider's path, a tag, a date, a window suffix
+ * (claude-opus-4-5[1m], provider/model:tag, claude-3-5-sonnet@20240620). */
+const MODEL_ID_CHAR = /[A-Za-z0-9._\-:/@+[\]]/;
+
+/** Why an id typed by hand is no model id, or null: the page asks it under the field and the host where it keeps one. */
+export function modelIdRefusal(id: string): string | null {
+  if (id === "") return "A model id cannot be empty";
+  if (/\s/.test(id)) return "No model id has a space in it";
+  if (id.startsWith("-")) return 'No model id starts with "-"';
+  const odd = [...id].find(c => !MODEL_ID_CHAR.test(c));
+  return odd === undefined ? null : `No model id has ${JSON.stringify(odd)} in it`;
+}
+
 /** The catalog with the person's own model ids added after the binary's, so a start and a default may name one. */
 export function withCustomModels(catalog: HarnessCatalog, picker: ModelPicker | undefined): HarnessCatalog {
   const known = new Set(everyModel(catalog).map(m => m.value));
-  const added = (picker?.custom ?? []).filter(id => !known.has(id)).map(id => ({ value: id, label: id }));
+  const added = (picker?.custom ?? []).filter(id => !known.has(id)).map(id => ({ value: id, label: id, added: true as const }));
   return added.length === 0 ? catalog : { ...catalog, models: [...catalog.models, ...added] };
 }
 

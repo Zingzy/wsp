@@ -5,7 +5,7 @@
 import { act, configure, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_PREFERENCES, PLACES_WORDS, type SessionView, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, PLACES_WORDS, type ProjectView, type SessionView, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { WORKSPACE_WORDS } from "../src/actions/format.js";
 import { RECENT_THREAD_LIMIT } from "../src/components/palette/CommandPalette.logic.js";
 import { GROUP_LABEL } from "../src/lib/microLabel.js";
@@ -17,7 +17,7 @@ import { useRightPanelStore } from "../src/rightPanelStore.js";
 import { AppShell } from "../src/shell/AppShell.js";
 import { KeybindingDispatcher } from "../src/shell/KeybindingDispatcher.js";
 import { cancelWorkspaceSwitch, stepInOrder } from "../src/shell/shellCommands.js";
-import { onComposerFocusRequest, onNewThreadRequest, onNewWorkspaceRequest } from "../src/shell/shellRequests.js";
+import { onComposerFocusRequest, onNewThreadRequest } from "../src/shell/shellRequests.js";
 import { NEW_WORKSPACE, PROJECT_WORDS } from "../src/sidebar/words.js";
 import { useTerminalDrawerStore } from "../src/terminal/drawerStore.js";
 import { provideTerminals, WorkspaceTerminals } from "../src/terminal/link.js";
@@ -57,6 +57,8 @@ const session = (id: string, workspaceId: string, prompt: string, over: Partial<
 });
 
 const CAPS = caps();
+/** The project both workspaces are copies of, as the host records it. */
+const PROJECT: ProjectView = { id: "pr_1", name: "the-project", computer: "default", source: { kind: "folder", path: "/root" }, path: "/root", remote: "", defaultBranch: "main", memoryKey: "-root", memoryDir: "/m", createdAt: "t" };
 
 function fakeApi(workspaces: WorkspaceView[], sessions: SessionView[]): Api & { nap: ReturnType<typeof vi.fn> } {
   return {
@@ -145,7 +147,7 @@ configure({ asyncUtilTimeout: 10_000 });
 beforeEach(() => {
   window.localStorage.clear();
   vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
-  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, selectedId: null, creations: [], sessions: {}, ready: false, preferences: { ...DEFAULT_PREFERENCES, labs: true }, settingsOpen: false });
+  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, selectedId: null, creations: [], sessions: {}, ready: false, preferences: { ...DEFAULT_PREFERENCES, labs: true }, settingsOpen: false, projects: [], projectHome: null });
   clearNotices();
   useRightPanelStore.setState({ byWorkspaceId: {} });
   useTerminalDrawerStore.setState({ byWorkspaceId: {} });
@@ -158,6 +160,9 @@ afterEach(() => {
   // The switcher's hold outlives a render: a test that left the overlay up ate the next one's chord.
   cancelWorkspaceSwitch();
 });
+
+/** A thread on each workspace, which is what the switch chord walks between. */
+const ONE_THREAD_EACH = [session("s_a", "ws_a", "fix the port list", { threadId: "thr_a" }), session("s_b", "ws_b", "bump the lockfile", { threadId: "thr_b" })];
 
 async function mountShell(sessions: SessionView[] = []) {
   const api = fakeApi([view("ws_a", "api"), view("ws_b", "worker")], sessions);
@@ -336,6 +341,7 @@ describe("command palette", () => {
     // No flag over the page: the row stands for everybody.
     useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: false } });
     await mountShell();
+    act(() => useStore.setState({ projects: [PROJECT] }));
     mod("k");
     await waitFor(() => expect(palette()).not.toBeNull());
     const row = inPalette().getByText("Settings", { selector: "[data-slot=command-item] span" }).closest("[data-slot=command-item]")!;
@@ -357,14 +363,6 @@ describe("command palette", () => {
     expect(useStore.getState().settingsOpen).toBe(false);
   });
 
-  it("opens the new-workspace dialog through the sidebar", async () => {
-    await mountShell();
-    mod("k");
-    await waitFor(() => expect(palette()).not.toBeNull());
-    fireEvent.click(screen.getByText(NEW_WORKSPACE, { selector: "[data-slot=command-item] span" }));
-    await waitFor(() => expect(screen.getByRole("dialog", { name: NEW_WORKSPACE })).toBeTruthy());
-  });
-
   it("while a creation row is selected, the shortcuts act on no workspace: no thread request, no drawer, no panel", async () => {
     await mountShell();
     const seen: string[] = [];
@@ -380,20 +378,19 @@ describe("command palette", () => {
     off();
   });
 
-  it("offers one New thread row, which opens the dialog on the selected copy's project and starts nothing in the copy", async () => {
+  it("offers one New thread row, which opens New thread on the selected copy's project and starts nothing in the copy", async () => {
     await mountShell();
+    act(() => useStore.setState({ projects: [PROJECT], preferences: { ...useStore.getState().preferences, newThreadIn: "current" } }));
     const threads: string[] = [];
     const offThreads = onNewThreadRequest(d => threads.push(d.workspaceId));
-    const asked: Array<string | undefined> = [];
-    const offAsked = onNewWorkspaceRequest(d => asked.push(d.project));
     mod("k");
     await waitFor(() => expect(palette()).not.toBeNull());
     const rows = inPalette().getAllByText(NEW_WORKSPACE, { selector: "[data-slot=command-item] span" });
     expect(rows).toHaveLength(1);
     fireEvent.click(rows[0]!);
-    expect(asked).toEqual(["pr_1"]);
+    await waitFor(() => expect(palette()).toBeNull());
+    expect(useStore.getState()).toMatchObject({ projectHome: "pr_1", selectedId: null });
     expect(threads).toEqual([]);
-    offAsked();
     offThreads();
   });
 
@@ -658,10 +655,10 @@ describe("default shortcuts", () => {
   });
 
   it("a ctrl+tab tap walks the sidebar's workspaces and wraps, and ctrl+shift+tab walks back", async () => {
-    await mountShell();
+    await mountShell(ONE_THREAD_EACH);
     const restore = asDesktopShell();
     try {
-      expect(useStore.getState().selectedId).toBe("ws_a");
+      act(() => useStore.getState().select("ws_a", "thr_a"));
       ctrlTab();
       ctrlUp();
       await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_b"));
@@ -707,10 +704,10 @@ describe("default shortcuts", () => {
   });
 
   it("the mod arrows walk the workspaces in either body, and a browser tab on macOS keeps them for its own tabs", async () => {
-    await mountShell();
+    await mountShell(ONE_THREAD_EACH);
     const restore = asDesktopShell();
     try {
-      expect(useStore.getState().selectedId).toBe("ws_a");
+      act(() => useStore.getState().select("ws_a", "thr_a"));
       spaceArrow("ArrowRight");
       spaceArrowUp();
       await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_b"));
@@ -731,15 +728,15 @@ describe("default shortcuts", () => {
   });
 
 
-  it("in the list the Tab pair is still the workspace switch, and it never moves a thread", async () => {
+  it("the Tab pair lands on a thread the sidebar lists, never on a workspace alone", async () => {
     await mountShell([session("s1", "ws_a", "fix the port list", { threadId: "thr_1" }), session("s2", "ws_a", "bump the lockfile", { threadId: "thr_2" })]);
     const restore = asDesktopShell();
     try {
-      useStore.getState().select("ws_a");
+      useStore.getState().select("ws_b");
       ctrlTab();
       ctrlUp();
-      await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_b"));
-      expect(useStore.getState().selectedThreadId).toBeNull();
+      await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_a"));
+      expect(["thr_1", "thr_2"]).toContain(useStore.getState().selectedThreadId);
     } finally {
       restore();
     }
@@ -919,7 +916,7 @@ describe("typing contexts", () => {
   });
 
   it("switches twice in a row from inside a text field, where a bare option arrow is still that field's word move", async () => {
-    await mountShell();
+    await mountShell(ONE_THREAD_EACH);
     const restore = asDesktopShell();
     const box = document.createElement("textarea");
     document.body.appendChild(box);
@@ -927,7 +924,7 @@ describe("typing contexts", () => {
     try {
       // The row this walk starts from is named rather than inherited: the workspace a load opens on is the one this
       // browser had open last, so a test that assumed the first row read the row another test left behind.
-      useStore.getState().select("ws_a");
+      useStore.getState().select("ws_a", "thr_a");
       await settle();
       // The composer takes the caret after every switch, so the second press of the chord is the one that proves it.
       spaceArrow("ArrowRight", box);
@@ -949,6 +946,7 @@ describe("typing contexts", () => {
   it("holds the rows of the four nouns with no flag over any of them, and no Spaces row among them", async () => {
     useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: false } });
     await mountShell();
+    act(() => useStore.setState({ projects: [PROJECT] }));
     mod("k");
     await waitFor(() => expect(palette()).not.toBeNull());
     const titles = Array.from(palette()!.querySelectorAll("[data-slot=command-item] span")).map(el => el.textContent ?? "");

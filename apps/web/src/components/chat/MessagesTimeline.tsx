@@ -95,7 +95,7 @@ import {
 } from "./MessagesTimeline.logic";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "../../lib/utils";
-import { formatChatTimestampTooltip, formatDayAwareTimestamp } from "../../lib/timestampFormat";
+import { formatChatTimestamp } from "../../lib/timestampFormat";
 import { formatWorkspaceRelativePath } from "../../lib/filePathDisplay";
 import { AssistantSelectionToolbar, QUOTE_SOURCE_ATTRIBUTE, type QuotedSelection } from "./AssistantSelectionToolbar";
 
@@ -995,6 +995,10 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
   );
 });
 
+/** The person's message: what the transcript draws, and what a workspace still being made draws for the message that
+ * asked for it. */
+export const PERSON_BUBBLE = "relative max-w-[80%] rounded-2xl bg-message p-3 text-message-foreground";
+
 function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
   // The pixels are this tab's, held under the request id its own send carried; a transcript from a reload or another
@@ -1004,7 +1008,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
   return (
     <div className="group flex flex-col items-end gap-1">
       <div
-        className="relative max-w-[80%] rounded-2xl bg-message p-3 text-message-foreground"
+        className={PERSON_BUBBLE}
         {...(row.message.steered === true ? { "data-user-message-steered": "true", title: COMPOSER_WORDS.sentWhileWorking } : {})}
       >
         <ChatFileRow records={row.message.attachments ?? []} files={files} />
@@ -1016,14 +1020,9 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
       </div>
       <div className="flex w-full max-w-[80%] items-center justify-end pe-1 text-xs tabular-nums opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100">
         <div className="flex shrink-0 items-center gap-2">
-          <Tooltip>
-            <TooltipTrigger render={<p className="text-muted-foreground text-xs tabular-nums" />}>
-              {formatDayAwareTimestamp(row.message.createdAt, ctx.timestampFormat)}
-            </TooltipTrigger>
-            <TooltipPopup>
-              {formatChatTimestampTooltip(row.message.createdAt, ctx.timestampFormat)}
-            </TooltipPopup>
-          </Tooltip>
+          <p className="text-muted-foreground text-xs tabular-nums">
+            {formatChatTimestamp(row.message.createdAt, ctx.timestampFormat)}
+          </p>
           <div className="flex items-center gap-0.5">
             {row.message.text.trim().length > 0 && (
               <MessageCopyButton text={row.message.text} variant="ghost" />
@@ -1101,22 +1100,15 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
           onOpenTurnDiff={ctx.onOpenTurnDiff}
         />
         {row.showAssistantMeta ? (
-          <div data-reply-meta className="mt-1.5 flex flex-wrap items-center gap-x-3.5 gap-y-1 text-[13px] tabular-nums opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover/assistant:opacity-100">
+          <div data-reply-meta className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] tabular-nums opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover/assistant:opacity-100">
             <span className="flex items-center gap-0.5">
               <AssistantCopyButton row={row} />
               {ctx.rewindableMessageIds.has(row.message.id) ? <RewindButton messageId={row.message.id} /> : null}
             </span>
             {!row.message.streaming && (
-              <Tooltip>
-                <TooltipTrigger
-                  render={<p data-reply-time className="whitespace-nowrap text-muted-foreground tabular-nums" />}
-                >
-                  {formatDayAwareTimestamp(row.message.updatedAt, ctx.timestampFormat)}
-                </TooltipTrigger>
-                <TooltipPopup>
-                  {formatChatTimestampTooltip(row.message.updatedAt, ctx.timestampFormat)}
-                </TooltipPopup>
-              </Tooltip>
+              <p data-reply-time className="whitespace-nowrap text-muted-foreground tabular-nums">
+                {formatChatTimestamp(row.message.updatedAt, ctx.timestampFormat)}
+              </p>
             )}
           </div>
         ) : null}

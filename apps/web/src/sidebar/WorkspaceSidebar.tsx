@@ -41,12 +41,11 @@ import { cn } from "../lib/utils.js";
 import { addNotice } from "../notices/store.js";
 import { catalogIn, useLaunches, useProjectsRead, useProjectsRefused, useReady, useSelectedId, useSelectedThreadId, useSelectedWorkspaceId, useSidebarProjects, useStore, useWorkspace, type Creation } from "../protocol/store.js";
 import { hostAsleep } from "../boot.js";
-import { onAddProjectRequest, onForgetWorkspaceRequest, onNewWorkspaceRequest, onProjectTripRequest, onRenameWorkspaceRequest, requestAddProject, type ProjectTripRequest } from "../shell/shellRequests.js";
+import { onAddProjectRequest, onForgetWorkspaceRequest, onProjectTripRequest, onRenameWorkspaceRequest, requestAddProject, type ProjectTripRequest } from "../shell/shellRequests.js";
 import { useShortcutLabel } from "../shell/useKeybindings.js";
 import { ExportProjectDialog } from "./ExportProjectDialog.js";
 import { ForwardsList } from "./ForwardsList.js";
 import { AddProjectDialog } from "./AddProjectDialog.js";
-import { NewWorkspaceDialog } from "./NewWorkspaceDialog.js";
 import { ProjectSwitcher } from "./ProjectSwitcher.js";
 import { ComputerSwitcher } from "./ComputerSwitcher.js";
 import { COMPUTER_PICK_KEY, PROJECT_PICK_KEY, pickCodec, underPicks } from "./picks.js";
@@ -99,13 +98,6 @@ const holds = (node: TileNode, threadId: string): boolean => node.thread.id === 
 /** Every tile a tree holds, itself included; a group's head is no tile. */
 const tileCount = (node: TileNode): number => (node.thread.groupTitle === undefined ? 1 : 0) + node.children.reduce((sum, child) => sum + tileCount(child), 0);
 
-/** The new-workspace dialog open on one project, keyed per opening so its field resets. */
-interface DialogState {
-  readonly key: number;
-  /** The project the plus was pressed on; the dialog picks it, and with none it picks the first there is. */
-  readonly project: string | null;
-}
-
 /** A project trip's dialog open for one workspace; keyed per opening so its folder and plan reset. */
 interface ProjectTripState extends ProjectTripRequest {
   readonly key: number;
@@ -147,13 +139,12 @@ export function WorkspaceSidebar() {
   const ready = useReady();
   const projectsRead = useProjectsRead();
   const projectsRefused = useProjectsRefused();
-  const createWorkspace = useStore(s => s.createWorkspace);
   const removeProject = useStore(s => s.removeProject);
+  const openProjectHome = useStore(s => s.openProjectHome);
   // Where a workspace can go: the same list Settings draws, so a tile and that table never name a computer twice.
   const places = useStore(s => s.places);
   // What a workspace is made of. Named apart from the sidebar's own `projects`, which are its workspace snapshots.
   const recorded = useStore(s => s.projects);
-  const landings = useStore(s => s.landings);
   const loadLanding = useStore(s => s.loadLanding);
   const selectedId = useSelectedId();
   const selectedThreadId = useSelectedThreadId();
@@ -168,7 +159,6 @@ export function WorkspaceSidebar() {
   const settledOpen = !folded.includes("settled");
   const [pickStored, setPickStored] = useLocalStorage<string | null>(PROJECT_PICK_KEY, null, pickCodec);
   const [computerStored, setComputerStored] = useLocalStorage<string | null>(COMPUTER_PICK_KEY, null, pickCodec);
-  const [dialog, setDialog] = useState<DialogState | null>(null);
   const [addProject, setAddProject] = useState<number | null>(null);
   const [trip, setTrip] = useState<ProjectTripState | null>(null);
   /** The root whose snooze is being picked, by fold key. */
@@ -228,7 +218,14 @@ export function WorkspaceSidebar() {
     return ((selectedThreadId === null ? undefined : runs.threads.find(t => t.threadId === selectedThreadId)) ?? topSidebarThread(runs.threads))?.id ?? null;
   }, [fleet, selectedId, selectedThreadId]);
   const settleAfter = useStore(s => s.preferences.settleAfter);
-  const tiles = useMemo(() => sidebarTiles(projects, { picked: picked?.project.id ?? null, nowMs, open, settleMs: SETTLE_MS[settleAfter] }), [projects, picked, nowMs, open, settleAfter]);
+  // Nothing moves under the reader: a thread opened from the live list stays there while it is read, and one opened
+  // from Settled stays in Settled, so which group it was in is read once, when it is opened.
+  const [held, setHeld] = useState<{ open: string | null; held: string | null }>({ open: null, held: null });
+  if (held.open !== open) {
+    const folded = open !== null && sidebarTiles(projects, { picked: null, nowMs, settleMs: SETTLE_MS[settleAfter] }).settled.some(node => treeThreadIds(node).includes(open));
+    setHeld({ open, held: folded ? null : open });
+  }
+  const tiles = useMemo(() => sidebarTiles(projects, { picked: picked?.project.id ?? null, nowMs, open: held.held, settleMs: SETTLE_MS[settleAfter] }), [projects, picked, nowMs, held.held, settleAfter]);
   // One landing per project, for the pause mode a copy's phase verb reads. Asked here, where the tiles are drawn,
   // so no tile asks for itself.
   useEffect(() => {
@@ -237,12 +234,6 @@ export function WorkspaceSidebar() {
   const tripTarget = trip === null ? undefined : workspaces.find(w => w.id === trip.workspaceId);
   const forgetTargets = forgetting === null ? [] : fleet.filter(p => forgetting.workspaceIds.includes(p.id));
 
-  const openDialog = (project: string | null): void => setDialog({ key: Date.now(), project });
-  // The palette's New workspace lands on the project the head names while one is picked, as the head's plus does.
-  const openDialogForPick = (project?: string): void => openDialog(project ?? picked?.project.id ?? null);
-  const openDialogRef = useRef(openDialogForPick);
-  openDialogRef.current = openDialogForPick;
-  useEffect(() => onNewWorkspaceRequest(({ project }) => openDialogRef.current(project)), []);
   useEffect(() => onAddProjectRequest(() => setAddProject(Date.now())), []);
   useEffect(() => onForgetWorkspaceRequest(({ workspaceId, act }) => setForgetting({ workspaceIds: [workspaceId], act })), []);
   useEffect(() => onProjectTripRequest(request => setTrip({ ...request, key: Date.now() })), []);
@@ -265,11 +256,6 @@ export function WorkspaceSidebar() {
   renameOnTileRef.current = renameOnTile;
   useEffect(() => onRenameWorkspaceRequest(({ workspaceId }) => renameOnTileRef.current(workspaceId)), []);
 
-  const create = async (name: string, project: string): Promise<void> => {
-    setDialog(null);
-    await createWorkspace(project, name);
-  };
-
   // A refused rebuild says so by the copy's name, which no tile carries on its face.
   const rebuild = async (workspaceId: string): Promise<void> => {
     const project = projects.find(p => p.id === workspaceId);
@@ -282,7 +268,7 @@ export function WorkspaceSidebar() {
   };
   const verbs = { ...defaultVerbs, rebuild: api?.rebuild ? rebuild : undefined };
   const projectVerbs: ProjectVerbs = {
-    newWorkspace: project => openDialog(project),
+    newThread: openProjectHome,
     openSettings: openProjectSettings,
     ...(api?.projectsRemove === undefined ? {} : { removeProject: (project: string) => void removeProject(project) }),
   };
@@ -535,7 +521,7 @@ export function WorkspaceSidebar() {
         named={named}
         pick={picked?.project ?? null}
         onPick={setPickStored}
-        onNewWorkspace={openDialog}
+        onNewThread={openProjectHome}
         onAddProject={() => setAddProject(Date.now())}
         onContextMenu={(event, projectId) => {
           const group = groups.find(g => g.project.id === projectId);
@@ -632,17 +618,6 @@ export function WorkspaceSidebar() {
           <SidebarCorner />
         </SidebarChromeFooter>
       </div>
-      {dialog ? (
-        <NewWorkspaceDialog
-          key={dialog.key}
-          projects={recorded}
-          landings={landings}
-          places={places}
-          picked={dialog.project}
-          onCreate={(name, project) => void create(name, project)}
-          onCancel={() => setDialog(null)}
-        />
-      ) : null}
       {addProject !== null ? <AddProjectDialog key={addProject} onClose={() => setAddProject(null)} /> : null}
       {snoozing !== null ? (
         <SnoozeDialog

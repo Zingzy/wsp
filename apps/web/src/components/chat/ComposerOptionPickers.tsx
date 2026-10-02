@@ -12,13 +12,13 @@
 // the one pick that says what the agent may touch. No button shrinks: the row wraps
 // before any of them is cut, so every pick reads whole down to a centre column
 // of about 300 px (measured 2026-09-09); the shell keeps the column wider
-// than that beside the inline panel. A pick is remembered per
-// workspace and rides the next sessions.start, except that a thread that has
+// than that beside the inline panel. A pick belongs to the
+// draft it was made on and rides that draft's sessions.start, which takes it
+// away, so the next draft opens on the defaults; a thread that has
 // run keeps the agent and the access its own rows carry: the model, its
 // window and the effort a pick made on such a thread still ride its next
 // send, the agent and the access never do. The access pick is
-// the exception: it is remembered on the host's own record, so the next thread
-// here starts at it whichever client or CLI opens it, and on a thread that has
+// kept on the host's own record rather than in this browser, and on a thread that has
 // run it goes through the access verb, the one road that changes a thread's
 // access, so that thread's next turn runs at it; where the harness takes a
 // mode change mid-turn it reaches the turn in front of the person too, the
@@ -27,9 +27,8 @@
 import { BrainIcon, ChevronDownIcon, CircleSlashIcon, HandIcon, LockIcon, LockOpenIcon, PenLineIcon, PencilRulerIcon, ShieldIcon, SparklesIcon, ZapIcon, type LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { DEFAULT_AGENT } from "@wsp/catalog";
-import { ACCESS_REFUSED_LINE, accessReachLine, kindForComputer, workspaceAccess, contextWindowsFor, effortsFor, movesRunningAccess, type HarnessCatalog, type HarnessModel, type HarnessOption, type ProjectView, type SessionView } from "@wsp/protocol";
-import { useProject } from "../../files/root";
-import { projectHomeKey, useHarnessCatalog, useHarnessCatalogs, useLatestSession, useProjects, useStore, useThreadSessions, useWorkspace } from "../../protocol/store";
+import { ACCESS_REFUSED_LINE, HERE_PLACE_ID, accessReachLine, githubLinkOf, projectForRepo, contextWindowsFor, effortsFor, markedFor, movesRunningAccess, resolveThreadDefaults, type DefaultsAsk, type HarnessCatalog, type HarnessModel, type HarnessOption, type SessionView } from "@wsp/protocol";
+import { isProjectHomeKey, projectHomeKey, projectOfKey, useHarnessCatalog, useHarnessCatalogs, useStore, useThreadSessions, useWorkspace } from "../../protocol/store";
 import { useComputerName } from "../../sidebar/workspaceRows";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
@@ -42,8 +41,6 @@ import { effectivePicks, pickedFor, resolveModel, startOptionsFrom, threadPicks,
 import { ACCESS_WORD, accessLabel, REASONING_WORD, reasoningLabel } from "./format";
 import type { ChatThreadHandle } from "./useChatThread";
 import { ROW_ITEM_CLASS } from "./ComposerCheckoutRow";
-
-export const DEFAULT_HARNESS = DEFAULT_AGENT.id;
 
 /** One object for a workspace nobody has picked on, so the selector hands the hook the same reference every render. */
 const NO_THREADS: PickThreads = {};
@@ -79,32 +76,24 @@ export interface ComposerPicks {
   readonly latestRow: SessionView | null;
 }
 
-/** The agent the project's last thread ran, where the agents here carry it: what a fresh thread opens on, so a
- * second piece of work on a project opens where the first one left off instead of on the catalog's first row. An
- * agent the record names that this workspace has no catalog for is dropped, since a composer pointed at one would
- * draw no pickers at all. */
-export function rememberedAgent(project: Pick<ProjectView, "lastAgent"> | undefined, catalogs: ReadonlyArray<HarnessCatalog>): string | undefined {
-  const last = project?.lastAgent;
-  return last !== undefined && catalogs.some(entry => entry.harness === last) ? last : undefined;
+/** What the one rule reads for a composer's next thread: the person's defaults and the overrides of the project its
+ * send lands in. Read off the record the app holds, so a default changed in Settings reaches an open composer. */
+function useDefaultsAsk(workspaceId: string): Pick<DefaultsAsk, "prefs" | "project"> {
+  // A GitHub link in New thread starts its thread on the project that holds the repository, so its defaults show.
+  const repo = useComposerDraftStore(s => (isProjectHomeKey(workspaceId) ? githubLinkOf(s.drafts[workspaceId]?.prompt ?? "")?.repo : undefined));
+  const projectId = useStore(s => (repo === undefined ? undefined : projectForRepo(s.projects, repo, HERE_PLACE_ID)?.id) ?? projectOfKey(s, workspaceId));
+  const defaultAgent = useStore(s => s.preferences.defaultAgent);
+  const agentDefaults = useStore(s => s.preferences.agentDefaults);
+  const project = useStore(s => (projectId === undefined ? undefined : s.preferences.projectDefaults[projectId]));
+  return useMemo(() => ({ prefs: { ...(defaultAgent !== undefined ? { defaultAgent } : {}), agentDefaults }, ...(project !== undefined ? { project } : {}) }), [agentDefaults, defaultAgent, project]);
 }
 
-/** The one offer: taken the first time nothing says which agent to run, and given back when the person types. It
- * is not given back by the pick itself, which is the person reading that agent's models. The store holds the mark,
- * so the offer does not come back when the composer is remounted by a switch of threads, nor when the box is
- * emptied again. */
-/** The record for the workspace's own project, which is where its remembered agent is written. */
-function useProjectRecord(workspaceId: string): ProjectView | undefined {
-  const ref = useProject(workspaceId);
-  const projects = useProjects();
-  return ref === null ? undefined : projects.find(entry => entry.id === ref.id);
-}
-
-/** The composer's picks for a workspace, and the catalog they read from: the machine's once it answered, else the table's. */
+/** The composer's picks for a workspace, and the catalog they read from: the machine's once it answered, else the
+ * table's. A thread that has run keeps its own agent; any other opens on the agent picked for this draft, else on
+ * the one the defaults name, its lists marked with what the defaults pick, so the pickers show what the host starts. */
 export function useComposerPicks(workspaceId: string, thread: ChatThreadHandle): ComposerPicks {
-  const latest = useLatestSession(workspaceId);
   const catalogs = useHarnessCatalogs(workspaceId);
-  const project = useProjectRecord(workspaceId);
-  const remembered = rememberedAgent(project, catalogs);
+  const ask = useDefaultsAsk(workspaceId);
   const kept = useComposerOptions(workspaceId);
   const rows = useThreadSessions(workspaceId, thread.threadKey);
   const pickedOn = useComposerOptionsStore(s => s.pickedOn[workspaceId] ?? NO_THREADS);
@@ -115,15 +104,11 @@ export function useComposerPicks(workspaceId: string, thread: ChatThreadHandle):
   const own = thread.view.agent ?? rows.at(-1)?.harness;
   const pinned = own !== undefined && !thread.fresh && (thread.view.entries.length > 0 || thread.view.running);
   const latestRow = pinned ? rows.at(-1) ?? null : null;
-  const harness = (pinned ? own : picked.harness ?? latest?.harness ?? remembered) ?? DEFAULT_HARNESS;
+  // The agent the host marks is its own answer with no project read, so the rule here falls back where the host's does.
+  const fallback = catalogs.find(c => c.isDefault === true)?.harness ?? catalogs[0]?.harness ?? DEFAULT_AGENT.id;
+  const harness = pinned ? own : picked.harness ?? resolveThreadDefaults({ firstAgent: fallback, catalogOf: id => catalogs.find(c => c.harness === id), ...ask }).agent.value;
   const listed = useHarnessCatalog(harness, workspaceId);
-  // A home's lists were read against no machine; the kind of workspace its send makes decides the mode it starts at.
-  const homeKind = useStore(s => {
-    const made = s.creations.find(c => c.key === workspaceId)?.project;
-    const home = s.projects.find(p => projectHomeKey(p.id) === workspaceId || p.id === made);
-    return home === undefined ? null : kindForComputer(home.computer);
-  });
-  const catalog = useMemo(() => (listed === null || homeKind === null ? listed : workspaceAccess(listed, homeKind)), [homeKind, listed]);
+  const catalog = useMemo(() => (listed === null ? null : markedFor(listed, resolveThreadDefaults({ firstAgent: harness, named: harness, catalogOf: () => listed, ...ask }))), [ask, harness, listed]);
   const model = useMemo(() => (catalog === null ? null : resolveModel(catalog, { picked: picked.model, thread: onThread.model })), [catalog, picked.model, onThread.model]);
   const picks = useMemo(() => (catalog === null ? null : effectivePicks(catalog, { picked, thread: onThread })), [catalog, picked, onThread]);
   const startOptions = useMemo(() => (catalog === null ? {} : startOptionsFrom(catalog, picked, onThread)), [catalog, picked, onThread]);
@@ -287,12 +272,15 @@ function AccessPicker({
   /** What a pick does to the turn running now, over the access list; nothing while no turn runs and the pick only starts one. */
   note,
   onPickAccess,
+  inBar = false,
 }: {
   modes: ReadonlyArray<HarnessOption>;
   picks: ResolvedPicks;
   refused: string | null;
   note: string | null;
   onPickAccess: (mode: string) => void;
+  /** In the box beside the model and the effort, at their size, rather than in the strip under it. */
+  inBar?: boolean;
 }) {
   const shown = picks.permissionMode;
   const access = modes.find(o => o.value === shown);
@@ -302,15 +290,15 @@ function AccessPicker({
     <Menu>
       <MenuTrigger
         render={<Button type="button" variant="ghost" size="xs" />}
-        className={cn(ROW_ITEM_CLASS, "hover:text-foreground", refused !== null && "text-error-foreground hover:text-error-foreground")}
+        className={cn(inBar ? triggerClass : cn(ROW_ITEM_CLASS, "hover:text-foreground"), refused !== null && "text-error-foreground hover:text-error-foreground")}
         aria-label={`${ACCESS_WORD}: ${label}`}
         data-composer-picker="access"
         data-access={shown ?? undefined}
         {...(refused !== null ? { "data-access-refused": refused, title: refused } : {})}
       >
-        <Icon className="size-3 shrink-0" aria-hidden />
+        <Icon className={cn(inBar ? "size-4" : "size-3", "shrink-0")} aria-hidden />
         <span className="truncate">{label}</span>
-        <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
+        <ChevronDownIcon className={cn("shrink-0", inBar ? "size-3.5 opacity-60" : "size-3 opacity-50")} />
       </MenuTrigger>
       <MenuPopup align="start" side="top" className="w-64">
         <MenuGroup>
@@ -332,7 +320,7 @@ function AccessPicker({
 }
 
 /** The hairline between two pickers of the bar, so each reads as its own control. */
-const BarRule = () => <span aria-hidden className="mx-1.5 h-5 w-px shrink-0 bg-border" />;
+export const BarRule = () => <span aria-hidden className="mx-1.5 h-5 w-px shrink-0 bg-border" />;
 
 /** The thread an access pick is put to through the access verb, once it has run: the runtime's id for one of its
  * rows, which is what sessions.access takes, and the turn running now where one is, which the refusal note belongs
@@ -430,8 +418,8 @@ export function ComposerOptionPickers({
   );
 }
 
-/** The access picker, sized for the strip under the box. */
-export function ComposerAccessPicker({ workspaceId, thread, onPickAccess, refused }: { workspaceId: string; thread: ChatThreadHandle; onPickAccess: (mode: string) => void; refused: string | null }) {
+/** The access picker, sized for the strip under the box, or for the box's own bar where it stands there. */
+export function ComposerAccessPicker({ workspaceId, thread, onPickAccess, refused, inBar = false }: { workspaceId: string; thread: ChatThreadHandle; onPickAccess: (mode: string) => void; refused: string | null; inBar?: boolean }) {
   const { catalog, picks } = useComposerPicks(workspaceId, thread);
   if (catalog === null || picks === null || catalog.permissionModes.length === 0) return null;
   return (
@@ -441,6 +429,7 @@ export function ComposerAccessPicker({ workspaceId, thread, onPickAccess, refuse
       refused={refused}
       note={thread.view.running ? accessReachLine(movesRunningAccess(catalog)) : null}
       onPickAccess={onPickAccess}
+      inBar={inBar}
     />
   );
 }

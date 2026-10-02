@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // A skill's SKILL.md in a real Chromium, through the renderer's restricted
 // mode: a file out to fetch an image, run a script and open files on this
-// computer draws no image, no script, no file chip and no link but the one
-// web page and the one heading, shows the raw HTML as its own text, and asks
-// nothing of the image's host while it renders. Run twice: an installed
+// computer draws no image, no script, no file chip and no link but the web
+// page, the image's address on a host that is not GitHub's and the one
+// heading, shows the raw HTML as its own text, and asks nothing of the
+// image's host while it renders. Run twice: an installed
 // skill's preview and a skills.sh result's before install. Vite serves
 // test/wireframe, so it runs only when asked for (WSP_RENDER=1).
 import { dirname, resolve } from "node:path";
@@ -41,9 +42,9 @@ describe.skipIf(renderSkipped !== undefined)("a skill's SKILL.md rendered restri
     });
     await page.addInitScript(() => window.localStorage.clear());
     await page.goto(`${base}?screen=skill-preview&theme=dark`);
-    await page.waitForSelector("[data-agents-row]");
+    await page.waitForSelector("[data-agent-row]");
     const at = page.locator('[data-agents-width="480"]');
-    await at.locator("[data-segment]").filter({ has: page.locator('[aria-label="Skills"]') }).click();
+    await at.getByRole("radio", { name: /^Skills/ }).click();
     return { asked, at };
   };
 
@@ -64,12 +65,13 @@ describe.skipIf(renderSkipped !== undefined)("a skill's SKILL.md rendered restri
     expect(read.chips).toBe(0);
     expect(read.text).toContain('<img src="https://example.test/p.gif">');
     expect(read.text).toContain("<script>alert(1)</script>");
-    expect(read.anchors.map(a => a.href)).toEqual(["https://skills.sh", "#usage"]);
-    expect(read.anchors[0]).toMatchObject({ target: "_blank", rel: "noopener noreferrer" });
+    // An image off GitHub's own hosts is a link to its address under its alt text, opened only by a click.
+    expect(read.anchors.map(a => a.href)).toEqual(["https://example.test/p.gif", "https://skills.sh", "#usage"]);
+    expect(read.anchors[0]).toMatchObject({ text: "pixel", target: "_blank", rel: "noopener noreferrer" });
+    expect(read.anchors[1]).toMatchObject({ target: "_blank", rel: "noopener noreferrer" });
     for (const bad of ["./scripts/run.py", "/Users/zingzy/.zshrc", "file:///etc/hosts"]) expect(read.text, bad).toContain(bad);
     for (const word of ["run", "abs", "hosts"]) expect(read.text).toContain(word);
-    // The image stands as its alt text and its address, and the inline path as plain code.
-    expect(read.text).toContain("pixel https://example.test/p.gif");
+    // The inline path stands as plain code.
     expect(await body.locator("code", { hasText: "/etc/hosts" }).count()).toBe(1);
     expect(asked).toEqual([]);
     // A link keeps the hover that says where it goes, favicon or none, so a label cannot hide its address.
@@ -79,16 +81,16 @@ describe.skipIf(renderSkipped !== undefined)("a skill's SKILL.md rendered restri
 
   it("draws an installed skill's hostile SKILL.md as text but for one web link and one heading link, and fetches nothing", async () => {
     const { asked, at } = await open();
-    await at.locator('[data-agents-row="skill-user-frontend-design"] [data-row-trigger]').click();
+    await at.locator('[data-settings-row="skill-user-frontend-design"] [data-settings-title]').click();
     await eightFacts(at, asked);
   });
 
   it("draws a skills.sh result's hostile SKILL.md before install the same way", async () => {
     const { asked, at } = await open();
-    await at.locator("[data-k=agents-add]").click();
+    await at.locator("[data-k=kind-add]").click();
     await at.locator("[data-k=add-search]").fill("pdf");
     await at.locator("[data-k=add-search]").press("Enter");
-    await at.locator('[data-add-row="anthropics/skills/pdf"] [data-row-trigger]').click();
+    await at.locator('[data-found-row="anthropics/skills/pdf"]').click();
     await eightFacts(at, asked);
   });
 });

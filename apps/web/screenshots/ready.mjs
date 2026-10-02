@@ -29,9 +29,9 @@ export const APP_UP = "[data-shell-center]";
 export const FAILED_ON_THE_PAGE = ['[data-notice][data-kind="error"]', "[data-creation-refused]", "[data-refused]", '[role="alert"]'];
 
 /** The marks a read still on its way wears: a skeleton bar (`components/ui/skeleton.tsx`) where a list has not come,
- * and a status still `checking` (`StatusView`) where a connect has not answered. A shot showing either photographed
+ * and a state still `checking` (`StatusWord`) where a connect has not answered. A shot showing either photographed
  * the page before it was the page its surface is named for. */
-export const STILL_LOADING = ['[data-slot="skeleton"]', '[data-k="status"][data-state="checking"]'];
+export const STILL_LOADING = ['[data-slot="skeleton"]', '[data-state="checking"][data-tone]'];
 
 /** The failures a shot must not show: every one but the one its surface waits for. */
 export const failuresToCheck = shot => FAILED_ON_THE_PAGE.filter(selector => selector !== shot.wait);

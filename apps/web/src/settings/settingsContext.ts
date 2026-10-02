@@ -4,7 +4,7 @@
 // page, and the acts a row can raise. A page is a plain function of this, so
 // the search can walk every group's rows with one call each and the sidebar
 // can dim a group with no match.
-import type { AccountView, PlaceView, Preferences, PreferencesPatch, ProjectView, ReleaseView, SessionView, WorkspaceLanding, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
+import type { AccountView, HarnessCatalog, PlaceView, Preferences, PreferencesPatch, ProjectView, ReleaseView, SessionView, WorkspaceLanding, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
 import { useNowMinute } from "../hooks/useNowMinute.js";
 import { isDesktopShell } from "../lib/desktopShell.js";
 import type { Api } from "../protocol/client.js";
@@ -24,6 +24,9 @@ export interface SettingsContext {
   /** The same for the project list and the Projects page. */
   readonly projectsRefused: Failure | null;
   readonly projects: ReadonlyArray<ProjectView>;
+  /** The agents a thread can run on, as the host lists them for a new thread: each one's lists marked with the person's
+   * defaults, the default agent marked. */
+  readonly harnesses: ReadonlyArray<HarnessCatalog>;
   readonly workspaces: ReadonlyArray<WorkspaceView>;
   readonly sessions: Readonly<Record<string, SessionView[]>>;
   readonly statuses: Readonly<Record<string, WorkspaceStatus>>;
@@ -59,6 +62,7 @@ export function useSettingsContext(): SettingsContext {
   const placesRefused = useStore(s => s.placesRefused);
   const projectsRefused = useStore(s => s.projectsRefused);
   const projects = useStore(s => s.projects);
+  const harnesses = useStore(s => s.harnesses);
   const workspaces = useStore(s => s.workspaces);
   const sessions = useStore(s => s.sessions);
   const statuses = useStore(s => s.statuses);
@@ -75,6 +79,7 @@ export function useSettingsContext(): SettingsContext {
     placesRefused,
     projectsRefused,
     projects: inProjectOrder(projects, project => project.id, preferences.projectOrder),
+    harnesses,
     workspaces,
     sessions,
     statuses,

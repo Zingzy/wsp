@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   APP_LOCALE,
-  formatDayAwareTimestamp,
+  formatChatTimestamp,
   formatElapsedDurationLabel,
   formatExpiresInLabel,
   formatRelativeTime,
@@ -116,57 +116,6 @@ describe("formatExpiresInLabel", () => {
   });
 });
 
-describe("formatDayAwareTimestamp", () => {
-  // Instants are built with the local-time Date constructor so the
-  // calendar-day boundaries hold in any test timezone or locale.
-  const iso = (y: number, monthIndex: number, d: number, h: number, mi: number) =>
-    new Date(y, monthIndex, d, h, mi).toISOString();
-  const now = new Date(2026, 7, 14, 12, 0).getTime();
-  const time = (isoDate: string) => formatShortTimestamp(isoDate, "12-hour");
-
-  it("shows time only for today", () => {
-    const messageAt = iso(2026, 7, 14, 9, 30);
-    expect(formatDayAwareTimestamp(messageAt, "12-hour", now)).toBe(time(messageAt));
-  });
-
-  it("labels the previous calendar day as yesterday even when under 24h old", () => {
-    const messageAt = iso(2026, 7, 13, 23, 30);
-    const justPastMidnight = new Date(2026, 7, 14, 0, 30).getTime();
-    expect(formatDayAwareTimestamp(messageAt, "12-hour", justPastMidnight)).toBe(
-      `yesterday at ${time(messageAt)}`,
-    );
-  });
-
-  it("prefixes older same-year messages with the numeric date", () => {
-    const messageAt = iso(2026, 7, 12, 12, 34);
-    // The app's own locale, not the shell's: the date a stamp carries is the app's shape wherever the run started,
-    // and an expectation built from the runtime's locale passes on one computer and fails on the next.
-    const datePart = new Intl.DateTimeFormat(APP_LOCALE, {
-      month: "numeric",
-      day: "numeric",
-    }).format(new Date(messageAt));
-    expect(formatDayAwareTimestamp(messageAt, "12-hour", now)).toBe(
-      `${datePart} ${time(messageAt)}`,
-    );
-  });
-
-  it("includes the year once the calendar year differs", () => {
-    const messageAt = iso(2025, 11, 31, 18, 0);
-    const datePart = new Intl.DateTimeFormat(APP_LOCALE, {
-      month: "numeric",
-      day: "numeric",
-      year: "numeric",
-    }).format(new Date(messageAt));
-    expect(formatDayAwareTimestamp(messageAt, "12-hour", now)).toBe(
-      `${datePart} ${time(messageAt)}`,
-    );
-  });
-
-  it("returns an empty string for invalid input", () => {
-    expect(formatDayAwareTimestamp("not-a-date", "12-hour", now)).toBe("");
-  });
-});
-
 describe("invalid timestamp inputs", () => {
   it("returns an empty short timestamp instead of throwing", () => {
     expect(formatShortTimestamp("not-a-date", "12-hour")).toBe("");
@@ -230,5 +179,25 @@ describe("formatElapsedDurationLabel", () => {
     expect(formatElapsedDurationLabel("2026-04-07T11:45:00.000Z")).toBe("15m");
     expect(formatElapsedDurationLabel("2026-04-07T06:00:00.000Z")).toBe("6h");
     expect(formatElapsedDurationLabel("2026-04-03T12:00:00.000Z")).toBe("4d");
+  });
+});
+
+describe("formatChatTimestamp", () => {
+  const at = (y: number, m: number, d: number, h: number, min: number): string => new Date(y, m, d, h, min).toISOString();
+  const now = new Date(2026, 9, 2, 12, 0).getTime();
+
+  it("says the day and the time with no year inside the current year", () => {
+    expect(formatChatTimestamp(at(2026, 9, 1, 15, 54), "12-hour", now)).toBe("Oct 1, 3:54 PM");
+    expect(formatChatTimestamp(at(2026, 9, 1, 15, 54), "24-hour", now)).toBe("Oct 1, 15:54");
+  });
+
+  it("carries the year once the stamp is from another year, even a day across New Year", () => {
+    const newYear = new Date(2027, 0, 2, 9, 0).getTime();
+    expect(formatChatTimestamp(at(2026, 11, 30, 23, 5), "12-hour", newYear)).toBe("Dec 30, 2026, 11:05 PM");
+    expect(formatChatTimestamp(at(2027, 0, 1, 23, 5), "12-hour", newYear)).toBe("Jan 1, 11:05 PM");
+  });
+
+  it("says nothing for a stamp it cannot read", () => {
+    expect(formatChatTimestamp("not a date", "12-hour", now)).toBe("");
   });
 });

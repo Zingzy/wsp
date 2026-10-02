@@ -855,6 +855,26 @@ describe("store sessions", () => {
     emit({ type: "workspace.deleted", workspaceId: "ws_a" });
     expect(useStore.getState().sessions).toEqual({});
   });
+
+  it("workspace.deleted moves a selection off the workspace it took to the sidebar's top row", async () => {
+    const { api, emit } = fakeApi([view("ws_a"), view("ws_b")], [{ id: "s1", workspaceId: "ws_a", harness: "claude", status: "completed" }]);
+    useStore.getState().bind(api);
+    await flush();
+    useStore.setState({ selectedId: "ws_a", selectedThreadId: "s1" });
+    emit({ type: "workspace.deleted", workspaceId: "ws_a" });
+    expect(useStore.getState().selectedId).toBe("ws_b");
+    expect(useStore.getState().selectedThreadId).toBeNull();
+  });
+
+  it("forgetting the thread on screen leaves its workspace with no thread picked", async () => {
+    const { api } = fakeApi([view("ws_a")], [{ id: "s1", workspaceId: "ws_a", harness: "claude", status: "completed" }]);
+    api.forgetThread = async () => {};
+    useStore.getState().bind(api);
+    await flush();
+    useStore.setState({ selectedId: "ws_a", selectedThreadId: "s1" });
+    expect(await useStore.getState().forgetThread({ threadId: "s1", workspaceId: "ws_a" })).toBe(true);
+    expect(useStore.getState().selectedThreadId).toBeNull();
+  });
 });
 
 describe("store connection", () => {

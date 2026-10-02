@@ -29,8 +29,11 @@ export const DiffStatLabel = memo(function DiffStatLabel(props: {
   /** The add in green and the delete in red wherever a line count shows (the owner's ruling on #1560); neutral only
    * where a caller asks for a count at rest. */
   tone?: "neutral" | "diff";
+  /** Whole figures with their thousands apart and a true minus, where a count is read and not glanced at. */
+  whole?: boolean;
 }) {
-  const { additions, deletions, className, showParentheses = false, layout = "aligned", tone = "diff" } = props;
+  const { additions, deletions, className, showParentheses = false, layout = "aligned", tone = "diff", whole = false } = props;
+  const figure = whole ? (n: number) => n.toLocaleString("en-US") : formatCompactDiffCount;
   const addInk = tone === "diff" ? "text-success" : "text-muted-foreground";
   const delInk = tone === "diff" ? "text-error-foreground" : "text-muted-foreground";
   return (
@@ -47,10 +50,10 @@ export const DiffStatLabel = memo(function DiffStatLabel(props: {
         )}
       >
         <span aria-hidden="true" className={cn("font-mono", addInk)}>
-          +{formatCompactDiffCount(additions)}
+          +{figure(additions)}
         </span>
         <span aria-hidden="true" className={cn("font-mono", delInk)}>
-          -{formatCompactDiffCount(deletions)}
+          {whole ? "\u2212" : "-"}{figure(deletions)}
         </span>
       </span>
       {showParentheses && <span className="text-muted-foreground">)</span>}

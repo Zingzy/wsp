@@ -1,18 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// One kind of thing the agents manager lists (agents, MCP servers, skills):
-// its tab, its rows, its groups, its detail and its acts, pure over one
-// report. The manager draws every kind through this one shape, so a kind is
-// its module and one line in the registry.
+// One kind of thing the agents lists draw (agents, tool servers, skills): its
+// rows, its groups, its detail and its acts, pure over one report. Settings
+// and a task's panel draw every kind through this one shape, so a kind is its
+// module and one line in the registry.
 import type { LucideIcon } from "lucide-react";
-import type { ComponentType, RefObject } from "react";
+import type { ComponentType } from "react";
 import type { BrandMark } from "@wsp/catalog";
 import type { AgentsProject, AgentsReport } from "@wsp/protocol";
 import type { DocState, FlowView, PickOption, RowAct, RowsContext } from "../agentsRows.js";
-
-export type GroupBy = "none" | "agent" | "source" | "scope";
-
-/** Which host draws the manager: a task's panel or a computer's page, where a kind can group by default otherwise. */
-export type AgentsShell = "panel" | "page";
 
 /** What leads a row or a detail's head: an agent's own mark, a server's box with its registered brand mark, else its own
  * icon where it has a host, else the glyph; or the kind's glyph. */
@@ -43,14 +38,10 @@ export interface RowView {
   readonly marks?: readonly string[];
   /** The one fact under the name. */
   readonly subtext?: string;
-  /** Not on the computer: the name faded and the subtext the catalog's sentence, not a fact. */
-  readonly available?: boolean;
   /** A line under the subtext: its dot and word. */
   readonly status?: Status;
-  /** The one step the row offers at its right end; pressing it opens the detail as well, unless it acts in place. */
+  /** The one step the row offers at its right end. */
   readonly quick?: RowAct;
-  /** Turned off: the name faded and `off` at the right end. */
-  readonly off?: boolean;
 }
 
 /** One line of a detail: the label, its value in the mono, and after it the reason or the state in the muted mono. */
@@ -73,27 +64,18 @@ export interface Fact {
   readonly href?: string;
   /** The value is a whole line a person pastes, drawn in a copy row. */
   readonly line?: boolean;
+  /** The value is a sentence, which a settings page draws in its sans rather than the mono. */
+  readonly prose?: boolean;
 }
 
-/** One line of a list a row's own level draws under its body: a name in the mono, a fact after it in the muted mono,
- * and what it is under both. */
-export interface UnderItem {
-  readonly name: string;
-  readonly fact?: string;
-  readonly about?: string;
-}
-
-/** One row of the level under a detail, and what its own level says whole: its body, then a labelled list (a tool's
- * parameters). */
+/** One row of what a detail lists under it: a server's tool by its name, what it does under that. */
 export interface UnderRow {
   readonly key: string;
   readonly title: string;
   readonly subtext?: string;
-  readonly body?: string;
-  readonly list?: { readonly label: string; readonly items: readonly UnderItem[] };
 }
 
-/** A further level under a detail where a kind has one (a server's tools): its rows, each opening its body. */
+/** What a detail lists under it where a kind has such a list (a server's tools), with when it was read. */
 export interface UnderLevel {
   readonly title: string;
   readonly reading: boolean;
@@ -145,8 +127,6 @@ export interface AddRow {
   readonly title: string;
   readonly subtext?: string;
   readonly fact?: string;
-  /** Already on the computer: the row dims, and still opens. */
-  readonly dim?: boolean;
 }
 
 export interface AddLevel {
@@ -168,19 +148,18 @@ export interface AddModule {
   detail(key: string, query: string, report: AgentsReport | null, ctx: RowsContext): DetailView | undefined;
 }
 
-/** What a kind's add form is handed: the report it adds beside, the list's context, the field focus lands on when
- * the level opens, and the road back to the list once the host took it. */
+/** What a kind's add form is handed: the report it adds beside, the list's context, and the road back to the list
+ * once the host took it. */
 export interface AddFormProps {
   readonly report: AgentsReport | null;
   readonly ctx: RowsContext;
-  readonly first: RefObject<HTMLElement | null>;
   readonly done: () => void;
 }
 
-/** A kind's add level as a form in place of the list, where what is added is typed rather than found. */
+/** A kind's add as a page of its own, where what is added is typed rather than found. */
 export interface AddForm {
   readonly title: string;
-  readonly Form: ComponentType<AddFormProps>;
+  readonly Page: ComponentType<AddFormProps>;
 }
 
 export interface GroupView<T> {
@@ -191,41 +170,21 @@ export interface GroupView<T> {
   readonly items: readonly T[];
 }
 
-/** The roads a detail's acts open inside the manager. */
-export interface DetailNav {
-  readonly openUnder: () => void;
-}
-
 export interface KindModule<T> {
   readonly id: string;
-  readonly icon: LucideIcon;
-  readonly word: string;
-  /** The count as a word, for the toolbar when the tab drops its count. */
-  readonly noun: (n: number) => string;
   /** The search field's placeholder; absent, the tab has no search. */
   readonly search?: string;
   /** The toolbar's Add, naming the one thing a press adds; absent, the tab has no Add. */
   readonly add?: string;
-  /** The line under the tabs saying what the list holds, around the computer's name: the words before and after it,
-   * which name the project where the list holds its rows. */
-  readonly line: (project: string | undefined) => readonly [string, string];
-  /** The one height every row of the kind stands at. */
-  readonly rowHeight: string;
-  readonly groupings: readonly GroupBy[];
-  readonly defaultGroup: (shell: AgentsShell) => GroupBy;
   items(report: AgentsReport, ctx: RowsContext): readonly T[];
-  /** What the tab's count says: the rows on the computer, not the ones it could install. */
-  count(items: readonly T[]): number;
   key(item: T): string;
   matches(item: T, query: string): boolean;
-  groups(items: readonly T[], by: GroupBy, ctx: RowsContext): readonly GroupView<T>[];
+  groups(items: readonly T[]): readonly GroupView<T>[];
   row(item: T, ctx: RowsContext): RowView;
-  detail(item: T, ctx: RowsContext, nav: DetailNav): DetailView;
+  detail(item: T, ctx: RowsContext): DetailView;
   /** What the kind asks of the host each time its tab shows a report. */
   shown?(items: readonly T[], ctx: RowsContext): void;
   empty(on: string): string;
-  /** The page-level empty's ghost word. */
-  none: string;
   /** What the toolbar's Add opens where the kind has a road to add one: a search of where its things come from, or a
    * form for what a person types. */
   adder?: (ctx: RowsContext) => AddModule | undefined;

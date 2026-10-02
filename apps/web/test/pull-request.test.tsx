@@ -1,19 +1,41 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The pull request in the app: the pane's rows off the page the host reads and the fact it pushes, a failed check's
-// fix button, a line comment's Send to thread writing the quote into the composer, Merge offered only where the pull
-// request can land with a menu of the repository's methods, the conflict's fix, the thread header's git button, and
-// the composer's branch line, and Update from the base in the pane while the branch is behind.
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fixAskedLine, updateConflictsLine, type Checkout, type PullRequestFact, type PullRequestPage, type WorkspaceStatus } from "@wsp/protocol";
-import { useComposerDraftStore } from "../src/components/chat/composerDraftStore.js";
+// The Pull request pane: the head with the state word in its hue, the three tabs with their counts, comments and
+// reviews as markdown, one timeline in time order with pushes folded and threads under their review, the 12-line
+// clamp, the merge box's rows and their acts, the commits by day with merges marked, a file opening its diff in place
+// with its comments on their lines, the sends to the agent one at a time and all at once; then the thread header's
+// git button.
+import { cloneElement } from "react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
+import { fixAskedLine, updateConflictsLine, type Checkout, type PullRequestFact, type PullRequestKept, type PullRequestPage, type WorkspaceStatus } from "@wsp/protocol";
 import { useNotices } from "../src/notices/store.js";
 import { useStore } from "../src/protocol/store.js";
 import { useDiffStore } from "../src/diffs/store.js";
+import { PanelStripSlot } from "../src/components/PanelStripSlot.js";
 import { GitSplit } from "../src/pull-request/GitSplit.js";
 import { PullRequestSurface } from "../src/pull-request/PullRequestSurface.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
 import { resetSurfaces, view, WS } from "./surface-harness.js";
+
+const codeViews = vi.hoisted(() => ({ last: null as null | { files: { filePath: string }[]; lineNotes?: { filePath: string; line: number; side: string; render: () => unknown }[]; renderHeaderMetadata?: () => unknown; renderHeaderPrefix?: () => unknown; unsafeCSSExtra?: string } }));
+vi.mock("../src/components/diffs/AnnotatableCodeView.js", () => ({
+  AnnotatableCodeView: (props: NonNullable<typeof codeViews.last>) => {
+    codeViews.last = props;
+    return (
+      <div data-code-view={props.files.map(f => f.filePath).join(",")}>
+        {props.renderHeaderPrefix?.() as React.ReactNode}
+        {props.renderHeaderMetadata?.() as React.ReactNode}
+        {props.lineNotes?.map(n => <div key={`${n.filePath}:${n.line}`}>{n.render() as React.ReactNode}</div>)}
+      </div>
+    );
+  },
+}));
+vi.mock("../src/components/ui/tooltip.js", () => ({
+  Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  TooltipTrigger: ({ render: element, children }: { render: React.ReactElement<{ children?: React.ReactNode }>; children?: React.ReactNode }) => (children === undefined ? element : cloneElement(element, {}, children)),
+  TooltipPopup: ({ children }: { children: React.ReactNode }) => <span role="tooltip">{children}</span>,
+}));
+vi.mock("../src/components/DiffWorkerPoolProvider.js", () => ({ DiffWorkerPoolProvider: ({ children }: { children: React.ReactNode }) => children }));
 
 const fact = (over: Partial<PullRequestFact> = {}): PullRequestFact => ({
   number: 12,
@@ -29,8 +51,8 @@ const fact = (over: Partial<PullRequestFact> = {}): PullRequestFact => ({
   mergeState: "clean",
   review: "none",
   checks: [
-    { name: "ci", workflow: "ci", state: "fail", run: { runId: 1, jobId: 2 }, link: "https://github.com/o/r/actions/runs/1/job/2" },
-    { name: "lint", workflow: "ci", state: "pass" },
+    { name: "ci", workflow: "ci", state: "fail", run: { runId: 1, jobId: 2 }, link: "https://github.com/o/r/actions/runs/1/job/2", startedAt: "2026-09-28T10:00:00Z", completedAt: "2026-09-28T10:16:00Z" },
+    { name: "lint", workflow: "lint", state: "pass" },
   ],
   additions: 120,
   deletions: 30,
@@ -41,21 +63,41 @@ const fact = (over: Partial<PullRequestFact> = {}): PullRequestFact => ({
   ...over,
 });
 
+const HUNK = "@@ -1,2 +1,3 @@\n #!/bin/sh\n-exit 0\n+echo checking\n+exit 1";
 const PAGE: PullRequestPage = {
   title: "Set .ci-status back to 0",
-  body: "The check failed.",
+  body: "The check **failed**.",
   author: "cass",
+  createdAt: "2026-09-28T09:00:00Z",
   updatedAt: "2026-09-28T12:00:00Z",
-  commits: [
-    { oid: "abc1234def", subject: "Set ci status", at: "2026-09-28T10:00:00Z", author: "cass" },
-    { oid: "def5678abc", subject: "Merge branch 'main' into fix", at: "2026-09-28T10:30:00Z", author: "cass" },
+  labels: [{ name: "host", color: "5ee9b5" }],
+  reviewRequests: [{ name: "octocat", team: false }],
+  latestReviews: [
+    { author: "ana", state: "changes_requested", at: "2026-09-28T11:00:00Z" },
+    { author: "dee", state: "approved", at: "2026-09-28T11:30:00Z" },
   ],
-  reviews: [{ author: "ana", state: "changes_requested", body: "see line 3", at: "2026-09-28T11:00:00Z" }],
-  comments: [{ author: "bo", body: "thanks", at: "2026-09-28T12:00:00Z" }],
-  reviewComments: [{ id: 7, path: "check.sh", line: 3, side: "RIGHT", author: "ana", body: "exit 1 here\nnot 0", url: "https://github.com/o/r/pull/12#discussion_r7", at: "2026-09-28T11:00:00Z" }],
+  assignees: [],
+  commits: [
+    { oid: "abc1234def", subject: "Set ci status", body: "Why it moved.", at: "2026-09-28T10:00:00Z", author: "cass", parents: 1, additions: 1688, deletions: 117 },
+    { oid: "def5678abc", subject: "merge: origin/main into fix", body: "", at: "2026-09-28T10:30:00Z", author: "cass", parents: 2, additions: 40, deletions: 9 },
+  ],
+  reviews: [
+    { id: 50, author: "ana", state: "changes_requested", body: "## Cold review\n\nsee `check.sh`", at: "2026-09-28T11:00:00Z" },
+    { id: 51, author: "cass", state: "commented", body: "", at: "2026-09-28T11:40:00Z" },
+  ],
+  comments: [
+    { id: 1, author: "vercel", bot: true, avatar: "https://avatars.githubusercontent.com/in/8329", body: "Deployed", url: "u1", at: "2026-09-28T09:30:00Z" },
+    { id: 2, author: "bo", bot: false, body: "thanks, **fixed**", url: "u2", at: "2026-09-28T12:00:00Z" },
+  ],
+  reviewComments: [
+    { id: 7, path: "check.sh", line: 3, side: "RIGHT", author: "ana", bot: false, body: "exit 1 here", url: "u7", at: "2026-09-28T11:00:00Z", hunk: HUNK, reviewId: 50, resolved: false },
+    { id: 8, path: "check.sh", line: 3, side: "RIGHT", author: "cass", bot: false, body: "Done", url: "u8", at: "2026-09-28T11:40:00Z", replyTo: 7, reviewId: 51, resolved: false },
+  ],
   files: [{ path: "check.sh", additions: 2, deletions: 1 }],
   merge: { methods: ["merge", "squash"], defaultMethod: "squash", autoMerge: true },
+  sent: [],
 };
+const DIFF = "diff --git a/check.sh b/check.sh\nindex 1..2 100644\n--- a/check.sh\n+++ b/check.sh\n@@ -1,2 +1,3 @@\n #!/bin/sh\n-exit 0\n+echo checking\n+exit 1\n";
 
 const statusWith = (pr: WorkspaceStatus["pr"]): WorkspaceStatus =>
   ({ ...view, machineState: "running", reach: { state: "reachable" }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0, ...(pr !== undefined ? { pr } : {}) }) as WorkspaceStatus;
@@ -63,166 +105,361 @@ const statusWith = (pr: WorkspaceStatus["pr"]): WorkspaceStatus =>
 function withApi(pr: WorkspaceStatus["pr"], page: PullRequestPage = PAGE) {
   const api = {
     pullRequestView: vi.fn(async () => page),
+    pullRequestDiff: vi.fn(async () => ({ diff: DIFF, truncated: false, left: [] as string[] })),
+    pullRequestSend: vi.fn(async (_id: string, items: readonly { kind: "comment" | "review" | "reviewComment"; id: number }[]) => ({ outcome: "steered" as const, threadId: "t1", agent: "claude", sent: items.map(i => ({ ...i, at: Date.now() - 120_000 })) })),
     fix: vi.fn(async (_id: string, check?: string) => ({ outcome: "started" as const, threadId: "t1", base: "main", agent: "claude", ...(check !== undefined ? { check } : {}) })),
     merge: vi.fn(async () => ({ number: 12, method: "squash" as const, merged: true, autoArmed: false })),
     update: vi.fn(async () => ({ base: "main", merged: false, commits: 0, conflicts: ["README.md"] })),
   };
-  act(() => useStore.setState({ api: api as never, statuses: { [WS]: statusWith(pr) } }));
+  act(() => useStore.setState({ api: api as never, statuses: { [WS]: statusWith(pr) }, sessions: { [WS]: [{ id: "s1", workspaceId: WS, harness: "claude", status: "done", threadId: "t1", startedAt: 1 }] } as never }));
   return api;
 }
+
+async function pane(pr: WorkspaceStatus["pr"] = fact(), page: PullRequestPage = PAGE) {
+  const api = withApi(pr, page);
+  const utils = render(<PullRequestSurface workspaceId={WS} />);
+  await waitFor(() => expect(utils.container.querySelector("[data-pr-title]")?.textContent).toBe(page.title));
+  return { api, ...utils };
+}
+const q = <T extends Element = HTMLElement>(c: ParentNode, sel: string): T => {
+  const found = c.querySelector<T>(sel);
+  if (found === null) throw new Error(`nothing at ${sel}`);
+  return found;
+};
+
+/** What a row says, its faces' initials left out. */
+const said = (el: Element): string => {
+  const copy = el.cloneNode(true) as Element;
+  for (const face of copy.querySelectorAll("[data-pr-face]")) face.remove();
+  return copy.textContent ?? "";
+};
 
 beforeEach(() => {
   resetSurfaces();
   useNotices.setState({ notices: [], toasts: [], unread: 0 });
-  useComposerDraftStore.setState({ drafts: {} } as never);
+  codeViews.last = null;
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
-describe("the Pull request pane", () => {
-  it("heads with the number in its state's ink, the state, author and stats, then Overview holds the body, checks, review and comments", async () => {
-    const api = withApi(fact());
-    const { container } = render(<PullRequestSurface workspaceId={WS} />);
-    await waitFor(() => expect(container.querySelector("[data-pr-title]")?.textContent).toBe("Set .ci-status back to 0"));
+describe("the Pull request pane's head", () => {
+  it("names the title, who opened it with their face and when, the number as a quiet link out, the word, the branches, the labels and who was asked", async () => {
+    const { container, api } = await pane();
     expect(api.pullRequestView).toHaveBeenCalledWith(WS);
-    const head = container.querySelector<HTMLElement>("[data-pr-head]")!;
-    expect(head.textContent!.split("Set .ci-status back to 0")).toHaveLength(2);
-    expect(head.textContent!.split("#12")).toHaveLength(2);
-    const number = container.querySelector<HTMLAnchorElement>("[data-pr-number]")!;
-    expect([number.textContent, number.getAttribute("href"), number.dataset["prState"]]).toEqual(["#12", "https://github.com/o/r/pull/12", "open"]);
-    expect(number.className).toContain("text-pr-open");
-    // The state word, the author and the stats sit as quiet facts; the updated time is there and reads as some age.
-    expect(container.querySelector("[data-pr-word]")!.textContent).toBe("Checks failed");
-    expect(container.querySelector("[data-pr-author]")!.textContent).toBe("cass");
-    expect(container.querySelector("[data-pr-updated]")!.textContent).not.toBe("");
-    expect([...container.querySelectorAll("[data-pr-facts] span")].map(n => n.textContent)).toEqual(expect.arrayContaining(["+120 -30", "9 files", "4 commits"]));
-    // Overview is the tab that opens; the body renders and the checks stand, the failure first and open with its fix.
-    expect(container.querySelector("[data-pr-body]")!.textContent).toContain("The check failed.");
-    const checks = [...container.querySelectorAll<HTMLElement>("[data-pr-check]")];
-    // The mark is the state; the word stands only on the failure, which is the row that opens.
-    expect(checks.map(c => [c.dataset["prCheck"], c.querySelector("[data-pr-check-state]")?.textContent ?? null, c.dataset["open"] ?? null])).toEqual([
-      ["ci", "Failed", "true"],
-      ["lint", null, null],
-    ]);
-    expect(checks.every(c => c.querySelector("[data-pr-check-mark] svg, svg[data-pr-check-mark]") !== null)).toBe(true);
-    expect(container.querySelectorAll("[data-pr-fix]")).toHaveLength(1);
-    expect(checks[0]!.querySelector("[data-pr-fix]")).not.toBeNull();
-    expect(container.querySelector("[data-pr-review]")!.textContent).toContain("Changes requested");
-    // The conversation is its own group, and a comment on a line keeps its own.
-    expect(container.querySelector("[data-pr-conversation]")!.textContent).toContain("bo");
-    expect(container.querySelector("[data-pr-conversation]")!.textContent).toContain("thanks");
-    expect(container.querySelector("[data-pr-comment='7']")!.textContent).toContain("check.sh:3");
-    // No section is ruled off in the pane's own chrome.
-    expect(container.querySelector("[data-pr-head]")!.innerHTML).not.toMatch(/border-b|rounded-full/);
+    const head = q(container, "[data-pr-head]");
+    expect(said(q(head, "[data-pr-by]"))).toMatch(/^cass opened \d+ d ago$/);
+    expect(q(head, "[data-pr-by] [data-pr-face='cass'] img").getAttribute("src")).toBe("https://github.com/cass.png?size=32");
+    const number = q<HTMLAnchorElement>(head, "[data-pr-number]");
+    expect([number.textContent, number.getAttribute("href")]).toEqual(["#12", "https://github.com/o/r/pull/12"]);
+    expect(number.className).toContain("text-muted-foreground");
+    expect(q(head, "[data-pr-branches]").textContent).toBe("main ← fix/ci");
+    const label = q(head, "[data-pr-label='host']");
+    expect([label.textContent, (label.querySelector("i") as HTMLElement).style.background]).toEqual(["host", "rgb(94, 233, 181)"]);
+    expect(said(q(head, "[data-pr-asks]"))).toBe("Review asked of octocat");
   });
 
-  it("shows the commits on a rail, a merge commit's dot hollow, with author and a relative time", async () => {
-    withApi(fact());
-    const { container } = render(<PullRequestSurface workspaceId={WS} />);
-    await waitFor(() => expect(container.querySelector("[data-pr-tabs]")).not.toBeNull());
-    fireEvent.click(container.querySelector('[data-segment="commits"]')!);
-    const commits = await waitFor(() => {
-      const rows = [...container.querySelectorAll<HTMLElement>("[data-pr-commit]")];
-      expect(rows).toHaveLength(2);
-      return rows;
-    });
-    expect(commits.map(c => c.dataset["prCommit"])).toEqual(["abc1234def", "def5678abc"]);
-    expect(commits[0]!.textContent).toContain("Set ci status");
-    expect(commits[0]!.textContent).toContain("cass");
-    // Only the merge commit's dot is hollow.
-    expect(commits[0]!.querySelector("[data-pr-commit-merge]")).toBeNull();
-    expect(commits[1]!.querySelector("[data-pr-commit-merge]")).not.toBeNull();
+  it("wears red only for a failure or a conflict, green only approved, violet merged, muted open and closed, and pulses while checks run", async () => {
+    const tone = (): [string, string, boolean] => {
+      const w = q(document.body, "[data-k='pr-word']");
+      return [w.textContent!, w.dataset["tone"]!, w.querySelector(".pr-word-pulse") !== null];
+    };
+    await pane();
+    expect(tone()).toEqual(["Checks failed", "bad", false]);
+    const states: [WorkspaceStatus["pr"], [string, string, boolean]][] = [
+      [fact({ checks: [] }), ["Open", "quiet", false]],
+      [fact({ checks: [], mergeable: "conflicting" }), ["Conflicts with main", "bad", false]],
+      [fact({ checks: [{ name: "ci", state: "pending" }] }), ["Checks running", "run", true]],
+      [fact({ checks: [], review: "approved" }), ["Approved", "ok", false]],
+      [fact({ checks: [], review: "changes_asked" }), ["Changes asked for", "warn", false]],
+      [{ number: 12, url: "u", state: "merged", base: "main", readAt: 1 } satisfies PullRequestKept, ["Merged", "merged", false]],
+      [{ number: 12, url: "u", state: "closed", base: "main", readAt: 1 } satisfies PullRequestKept, ["Closed", "quiet", false]],
+    ];
+    for (const [pr, want] of states) {
+      act(() => useStore.setState({ statuses: { [WS]: statusWith(pr) } }));
+      expect(tone()).toEqual(want);
+    }
   });
 
-  it("shows the changed files as the tree, with the additions green and the deletions red", async () => {
-    withApi(fact());
-    const { container } = render(<PullRequestSurface workspaceId={WS} />);
-    await waitFor(() => expect(container.querySelector("[data-pr-tabs]")).not.toBeNull());
-    fireEvent.click(container.querySelector('[data-segment="files"]')!);
-    const files = await waitFor(() => {
-      const el = container.querySelector<HTMLElement>("[data-pr-files]");
-      expect(el).not.toBeNull();
-      return el!;
-    });
-    // The colors are on the rows themselves, not the header alone: the file's own count is green and red.
-    const row = files.querySelector<HTMLElement>("[data-changed-file='check.sh']")!;
-    expect(row).not.toBeNull();
-    expect(row.querySelector(".text-success")).not.toBeNull();
-    expect(row.querySelector(".text-error-foreground")).not.toBeNull();
+  it("scrolls to the merge box from the state word, from any tab", async () => {
+    const scrolled = vi.fn();
+    const was = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = scrolled;
+    onTestFinished(() => void (Element.prototype.scrollIntoView = was));
+    const { container } = await pane();
+    fireEvent.click(q(container, "[data-segment='files']"));
+    fireEvent.click(q(container, "[data-pr-word-to-box]"));
+    await waitFor(() => expect(scrolled).toHaveBeenCalledTimes(1));
+    expect(scrolled.mock.contexts[0]).toBe(q(container, "[data-pr-merge-box]"));
   });
 
-  it("clamps a long body with the fade and Show more, and a press lifts the fade", async () => {
-    withApi(fact(), { ...PAGE, body: "word ".repeat(200) });
-    const { container } = render(<PullRequestSurface workspaceId={WS} />);
-    await waitFor(() => expect(container.querySelector("[data-pr-body]")).not.toBeNull());
-    expect(container.querySelector("[data-pr-body-fade]")).not.toBeNull();
-    const toggle = container.querySelector<HTMLButtonElement>("[data-pr-show-more]")!;
-    expect(toggle).not.toBeNull();
-    fireEvent.click(toggle);
-    expect(container.querySelector("[data-pr-body-fade]")).toBeNull();
-  });
-
-  it("sends a failed check to the agent in one press and says so with the command line's line", async () => {
+  it("stands its refresh in the panel's tab strip, and a press reads the page again", async () => {
+    const strip = document.createElement("div");
+    document.body.append(strip);
+    onTestFinished(() => strip.remove());
     const api = withApi(fact());
-    const { container } = render(<PullRequestSurface workspaceId={WS} />);
-    await waitFor(() => expect(container.querySelector("[data-pr-fix='ci']")).not.toBeNull());
-    fireEvent.click(container.querySelector("[data-pr-fix='ci']")!);
+    render(
+      <PanelStripSlot.Provider value={strip}>
+        <PullRequestSurface workspaceId={WS} />
+      </PanelStripSlot.Provider>,
+    );
+    await waitFor(() => expect(api.pullRequestView).toHaveBeenCalledTimes(1));
+    expect(document.querySelector("[data-pr-tabs] [data-pr-refresh]")).toBeNull();
+    fireEvent.click(q(strip, "[data-pr-refresh]"));
+    await waitFor(() => expect(api.pullRequestView).toHaveBeenCalledTimes(2));
+  });
+
+  it("counts each tab: the comments and reviews, the commits, the files", async () => {
+    const { container } = await pane();
+    expect([...container.querySelectorAll("[data-segment]")].map(s => s.textContent)).toEqual(["Conversation3", "Commits2", "Files1"]);
+  });
+});
+
+describe("the Conversation tab", () => {
+  it("renders the description, the comments and the reviews as markdown, a comment's head held at the body's size", async () => {
+    const { container } = await pane();
+    expect(q(container, "[data-pr-body] strong").textContent).toBe("failed");
+    const review = q(container, "[data-pr-entry='review']");
+    expect(q(review, ".pr-md-said h2").textContent).toBe("Cold review");
+    expect(q(review, ".pr-md-said code").textContent).toBe("check.sh");
+    expect(review.textContent).not.toContain("##");
+    const comments = [...container.querySelectorAll<HTMLElement>("[data-pr-entry='comment']")];
+    expect(q(comments.at(-1)!, "strong").textContent).toBe("fixed");
+    expect(container.querySelectorAll("[data-pr-timeline] .whitespace-pre-wrap:not([data-pr-thread-code] *)")).toHaveLength(0);
+  });
+
+  it("puts the entries in time order, the commits between two of them as one push, each thread under its review with its code", async () => {
+    const { container } = await pane();
+    expect([...container.querySelectorAll<HTMLElement>("[data-pr-entry]")].map(e => e.dataset["prEntry"])).toEqual(["comment", "push", "review", "comment"]);
+    const push = q(container, "[data-pr-entry='push']");
+    expect(push.textContent).toContain("pushed 2 commits");
+    expect([...push.querySelectorAll<HTMLElement>("[data-pr-pushed]")].map(r => r.textContent)).toEqual(["abc1234Set ci status", "def5678merge: origin/main into fix"]);
+    const thread = q(q(container, "[data-pr-entry='review']"), "[data-pr-thread]");
+    expect([...thread.querySelectorAll("[data-pr-line-comment]")].map(r => r.getAttribute("data-pr-line-comment"))).toEqual(["7", "8"]);
+    expect([...thread.querySelectorAll<HTMLElement>("[data-pr-thread-code] [data-line]")].map(l => [l.dataset["line"], l.textContent])).toEqual([
+      ["del", "2- exit 0"],
+      ["add", "2+ echo checking"],
+      ["add", "3+ exit 1"],
+    ]);
+  });
+
+  it("folds a bot's notice to one line with its own face, its words a press away", async () => {
+    const { container } = await pane();
+    const bot = q(container, "[data-pr-entry='comment'][data-quiet]");
+    expect(bot.textContent).toContain("vercel");
+    expect(bot.textContent).toContain("left a notice");
+    expect(bot.textContent).not.toContain("Deployed");
+    expect(q(bot, "[data-pr-face='vercel'] img").getAttribute("src")).toBe("https://avatars.githubusercontent.com/in/8329");
+    fireEvent.click(q(bot, "[data-pr-notice-toggle]"));
+    expect(bot.textContent).toContain("Deployed");
+  });
+
+  it("names a deleted account and asks GitHub for no face for it", async () => {
+    const { container } = await pane(fact(), { ...PAGE, comments: [{ id: 3, author: "", bot: false, body: "gone", url: "u3", at: "2026-09-28T12:00:00Z" }] });
+    const entry = q(container, "[data-pr-entry='comment']");
+    expect(q(entry, "[data-pr-entry-head] b").textContent).toBe("a deleted account");
+    const face = q(entry, "[data-pr-face]");
+    expect(face.querySelector("img")).toBeNull();
+    expect(container.querySelector("img[src='https://github.com/.png?size=48']")).toBeNull();
+    cleanup();
+    const app = await pane(fact(), { ...PAGE, comments: [{ id: 4, author: "renovate[bot]", bot: false, body: "bump", url: "u4", at: "2026-09-28T12:00:00Z" }] });
+    expect(q(app.container, "[data-pr-face='renovate[bot]']").querySelector("img")).toBeNull();
+  });
+
+  it("says once where the host read only the latest reviews and review threads, and not where it read them all", async () => {
+    const { container } = await pane(fact(), { ...PAGE, cut: { reviews: true, threads: true } });
+    expect([...container.querySelectorAll("[data-pr-cut]")].map(n => n.textContent)).toEqual(["Showing the latest 100 reviews", "Showing the latest 100 review threads"]);
+    cleanup();
+    const whole = await pane();
+    expect(whole.container.querySelector("[data-pr-cut]")).toBeNull();
+  });
+
+  it("clamps a body taller than twelve lines with the fade and Show more, and a press lifts the fade", async () => {
+    vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(function (this: HTMLElement) {
+      return this.parentElement?.hasAttribute("data-pr-clamp") === true ? 900 : 0;
+    });
+    const { container } = await pane(fact(), { ...PAGE, body: "word ".repeat(400) });
+    const body = q(container, "[data-pr-body]");
+    expect(body.querySelector("[data-pr-clamp-fade]")?.className).toContain("max-h-[300px]");
+    fireEvent.click(q(body, "[data-pr-show-more]"));
+    expect(body.querySelector("[data-pr-clamp-fade]")).toBeNull();
+    expect(q(body, "[data-pr-show-more]").textContent).toBe("Show less");
+  });
+
+  it("leaves a short body whole, with no Show more", async () => {
+    const { container } = await pane();
+    expect(container.querySelector("[data-pr-body] [data-pr-show-more]")).toBeNull();
+  });
+
+  it("sends one item to the agent from its head, named on the tooltip, and says when once sent", async () => {
+    const { container, api } = await pane();
+    const send = q<HTMLButtonElement>(container, "[data-pr-send='comment:2']");
+    expect(send.getAttribute("aria-label")).toBe("Send to Claude Code");
+    expect(send.querySelector("[data-harness-mark='claude']")).not.toBeNull();
+    fireEvent.click(send);
+    await waitFor(() => expect(api.pullRequestSend).toHaveBeenCalledWith(WS, [{ kind: "comment", id: 2 }]));
+    await waitFor(() => expect(container.querySelector("[data-pr-send='comment:2']")).toBeNull());
+    expect(q(q(container, "[data-pr-entry='comment']:not([data-quiet])"), "[data-pr-sent]").textContent).toBe("Sent 2 m ago");
+  });
+});
+
+describe("the merge box", () => {
+  const box = (c: HTMLElement) => q(c, "[data-pr-merge-box]");
+  const row = (c: HTMLElement, k: string) => q(box(c), `[data-pr-box-row='${k}']`);
+
+  it("stands after the timeline under its own head, the checks counted on one line with a failure open under it", async () => {
+    const { container } = await pane();
+    const timeline = q(container, "[data-pr-timeline]");
+    expect(timeline.compareDocumentPosition(box(container)) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(box(container).querySelector("h3")!.textContent).toBe("Merge");
+    expect(row(container, "checks").textContent).toBe("Checks1 passed, 1 failed");
+    expect(row(container, "check:ci").textContent).toContain("ci, failed after 16 min");
+    expect(row(container, "checks:pass").textContent).toBe("1 passedlint");
+    fireEvent.click(q(box(container), "[data-pr-checks]"));
+    expect(box(container).querySelector("[data-pr-box-row='check:ci']")).toBeNull();
+  });
+
+  it("sends a failed check to the agent, wearing the agent's mark, and says so with the command line's line", async () => {
+    const { container, api } = await pane();
+    const fix = q(box(container), "[data-pr-fix='ci']");
+    expect(fix.querySelector("[data-harness-mark='claude']")).not.toBeNull();
+    fireEvent.click(fix);
     await waitFor(() => expect(api.fix).toHaveBeenCalledWith(WS, "ci"));
     await waitFor(() => expect(useNotices.getState().notices[0]?.text).toBe(fixAskedLine("api", "Claude Code", "ci")));
   });
 
-  it("puts a line comment into the composer for the person to send, under what is already typed, and sends nothing", async () => {
-    const api = withApi(fact());
-    act(() => useComposerDraftStore.getState().setDraft(WS, { prompt: "look at this", cursor: 12 }));
-    const { container } = render(<PullRequestSurface workspaceId={WS} />);
-    await waitFor(() => expect(container.querySelector("[data-pr-send='7']")).not.toBeNull());
-    fireEvent.click(container.querySelector("[data-pr-send='7']")!);
-    expect(useComposerDraftStore.getState().drafts[WS]?.prompt).toBe("look at this\n\nana commented on check.sh:3 in the pull request:\n> exit 1 here\n> not 0\n\n");
-    expect(api.fix).not.toHaveBeenCalled();
+  it("says each reviewer's standing verdict beside their faces, and offers Review with an agent", async () => {
+    const { container } = await pane();
+    const review = row(container, "review");
+    expect(review.textContent).toContain("ana asked for changes, dee approved");
+    expect([...review.querySelectorAll("[data-pr-faces] [data-pr-face]")].map(f => f.getAttribute("data-pr-face"))).toEqual(["ana", "dee"]);
+    expect(within(review).getByRole("button", { name: "Review with an agent" })).not.toBeNull();
   });
 
-  it("offers Merge only where it can land, as a menu of the repository's methods with its default first", async () => {
-    const api = withApi(fact({ checks: [{ name: "lint", state: "pass" }] }));
-    const { container, rerender } = render(<PullRequestSurface workspaceId={WS} />);
-    // Until the page says which methods the repository allows, Merge is one button taking its default.
-    await waitFor(() => expect(container.querySelector("[data-pr-title]")?.textContent).toBe(PAGE.title));
-    await waitFor(() => expect(container.querySelector("[data-pr-merge]")).not.toBeNull());
-    fireEvent.click(container.querySelector("[data-pr-merge]")!);
+  it("counts the unresolved comments not yet sent, and sends them all as one message", async () => {
+    const { container, api } = await pane();
+    const comments = row(container, "comments");
+    expect(comments.textContent).toContain("2 unresolved");
+    fireEvent.click(q(comments, "[data-pr-send-all]"));
+    await waitFor(() =>
+      expect(api.pullRequestSend).toHaveBeenCalledWith(WS, [
+        { kind: "reviewComment", id: 7 },
+        { kind: "reviewComment", id: 8 },
+      ]),
+    );
+    await waitFor(() => expect(box(container).querySelector("[data-pr-box-row='comments']")).toBeNull());
+  });
+
+  it("offers Update from main while behind, the fix on a conflict, and says what holds the merge", async () => {
+    const { container, api } = await pane(fact({ checks: [], behindBase: 2 }));
+    expect(row(container, "base").textContent).toContain("2 commits behind");
+    expect(row(container, "hold").textContent).toBe("Ready to merge");
+    fireEvent.click(screen.getByText("Update from main"));
+    await waitFor(() => expect(api.update).toHaveBeenCalledWith(WS));
+    await waitFor(() => expect(useNotices.getState().notices[0]?.text).toBe(updateConflictsLine("api", "main", ["README.md"])));
+    act(() => useStore.setState({ statuses: { [WS]: statusWith(fact({ checks: [], behindBase: 2, mergeable: "conflicting" })) } }));
+    await waitFor(() => expect(row(container, "base").textContent).toContain("Conflicts"));
+    expect(screen.queryByText("Update from main")).toBeNull();
+    expect(row(container, "hold").textContent).toBe("Held until the conflicts are fixed");
+    fireEvent.click(q(row(container, "base"), "[data-pr-fix-conflicts]"));
+    await waitFor(() => expect(api.fix).toHaveBeenCalledWith(WS, undefined));
+    act(() => useStore.setState({ statuses: { [WS]: statusWith(fact({ checks: [], behindBase: 0 })) } }));
+    await waitFor(() => expect(box(container).querySelector("[data-pr-box-row='base']")).toBeNull());
+  });
+
+  it("holds Merge while a check failed, offers the repository's methods with its default first once it can land, and the wait while checks run", async () => {
+    const { container, api } = await pane();
+    expect(q<HTMLButtonElement>(box(container), "[data-pr-merge]").dataset["held"]).toBe("true");
+    expect(row(container, "hold").textContent).toBe("Held until the checks pass");
+    act(() => useStore.setState({ statuses: { [WS]: statusWith(fact({ checks: [{ name: "lint", state: "pass" }] })) } }));
+    await waitFor(() => expect(q(box(container), "[data-pr-merge]").dataset["held"]).toBeUndefined());
+    fireEvent.click(q(box(container), "[data-pr-merge]"));
     const items = await waitFor(() => {
       const found = [...document.querySelectorAll<HTMLElement>("[data-pr-merge-method]")];
-      expect(found.length).toBe(2);
+      expect(found).toHaveLength(2);
       return found;
     });
     expect(items.map(i => i.dataset["prMergeMethod"])).toEqual(["squash", "merge"]);
     fireEvent.click(items[1]!);
     await waitFor(() => expect(api.merge).toHaveBeenCalledWith(WS, { method: "merge", head: fact().headOid }));
-    // A failed check or a conflict offers no merge; running checks offer the wait where the repository merges by itself.
-    act(() => useStore.setState({ statuses: { [WS]: statusWith(fact()) } }));
-    rerender(<PullRequestSurface workspaceId={WS} />);
-    await waitFor(() => expect(container.querySelector("[data-pr-merge]")).toBeNull());
     act(() => useStore.setState({ statuses: { [WS]: statusWith(fact({ checks: [{ name: "ci", state: "pending" }] })) } }));
-    await waitFor(() => expect(container.querySelector("[data-pr-merge-when]")).not.toBeNull());
-    expect(container.querySelector("[data-pr-merge]")).toBeNull();
-    fireEvent.click(container.querySelector("[data-pr-merge-when]")!);
+    fireEvent.click(await waitFor(() => q(box(container), "[data-pr-merge-when]")));
     await waitFor(() => expect(api.merge).toHaveBeenLastCalledWith(WS, { whenChecksPass: true, head: fact().headOid }));
+    act(() => useStore.setState({ statuses: { [WS]: statusWith(fact({ checks: [{ name: "ci", state: "pending" }], autoMerge: { method: "squash", by: "cass" } })) } }));
+    await waitFor(() => expect(row(container, "hold").textContent).toBe("Merges by squash when checks pass"));
+    expect(box(container).querySelector("[data-pr-merge-when]")).toBeNull();
   });
 
-  it("offers one Merge where the repository allows one method, and the fix for a conflict with the base", async () => {
-    const api = withApi(fact({ mergeable: "conflicting", checks: [] }), { ...PAGE, merge: { methods: ["squash"], defaultMethod: "squash", autoMerge: false } });
-    const { container } = render(<PullRequestSurface workspaceId={WS} />);
-    await waitFor(() => expect(container.querySelector("[data-pr-title]")?.textContent).toBe(PAGE.title));
-    await waitFor(() => expect(container.querySelector("[data-pr-fix-conflicts]")).not.toBeNull());
-    expect(container.querySelector("[data-pr-word]")!.textContent).toBe("Conflicts with main");
-    expect(container.querySelector("[data-pr-merge]")).toBeNull();
-    fireEvent.click(container.querySelector("[data-pr-fix-conflicts]")!);
-    await waitFor(() => expect(api.fix).toHaveBeenCalledWith(WS, undefined));
-    act(() => useStore.setState({ statuses: { [WS]: statusWith(fact({ checks: [] })) } }));
-    await waitFor(() => expect(container.querySelector("[data-pr-merge]")).not.toBeNull());
-    fireEvent.click(container.querySelector("[data-pr-merge]")!);
-    await waitFor(() => expect(api.merge).toHaveBeenCalledWith(WS, { head: fact().headOid }));
-    expect(document.querySelector("[data-pr-merge-method]")).toBeNull();
+  it("says a merged pull request merged, by whom and when, the commit it landed as, and links out", async () => {
+    const merged: PullRequestKept = { number: 12, url: "https://github.com/o/r/pull/12", state: "merged", base: "main", mergedAt: Date.now() - 4 * 86_400_000, readAt: 1 };
+    const { container } = await pane(merged, { ...PAGE, mergedBy: "cass", mergedAt: new Date(Date.now() - 4 * 86_400_000).toISOString(), mergeCommit: "cfa39fab3cfa39fab3" });
+    expect(said(row(container, "settled"))).toBe("Merged by cass4 d ago");
+    expect(row(container, "landed").textContent).toBe("Landed on main as cfa39fa");
+    expect(q<HTMLAnchorElement>(box(container), "[data-pr-open-github]").getAttribute("href")).toBe("https://github.com/o/r/pull/12");
+    expect(box(container).querySelector("[data-pr-merge]")).toBeNull();
+  });
+});
+
+describe("the Commits tab", () => {
+  it("lists the commits by day, newest first, a merge marked with the branch it brought and no lines, every other row with its lines", async () => {
+    const { container } = await pane();
+    fireEvent.click(q(container, "[data-segment='commits']"));
+    const rows = [...container.querySelectorAll<HTMLElement>("[data-pr-commit]")];
+    expect(rows.map(r => r.dataset["prCommit"])).toEqual(["def5678abc", "abc1234def"]);
+    expect(container.querySelectorAll("[data-pr-day]")).toHaveLength(1);
+    expect([rows[0]!.dataset["merge"], q(rows[0]!, "[data-pr-commit-from]").textContent, q(rows[0]!, "[data-pr-commit-lines]").textContent]).toEqual(["true", "main", ""]);
+    expect(rows[0]!.querySelector("[data-pr-commit-merge]")).not.toBeNull();
+    expect([rows[1]!.dataset["merge"], q(rows[1]!, "[data-pr-commit-lines]").textContent, rows[1]!.querySelector("[data-pr-face='cass']") !== null]).toEqual([undefined, "+1,688\u2212117", true]);
+    expect(q(rows[1]!, "[role=tooltip] [data-pr-commit-ago]").textContent).toMatch(/ago$/);
+    fireEvent.click(q(rows[1]!, "button"));
+    expect(q(rows[1]!, "[data-pr-commit-body]").textContent).toBe("Why it moved.");
+    expect(container.querySelector("[data-pr-cut]")).toBeNull();
   });
 
-  it("says why there is nothing to show where the pull request could not be read", () => {
+  it("says at the foot where the host read only the first 100 commits", async () => {
+    const { container } = await pane(fact(), { ...PAGE, cut: { commits: true } });
+    fireEvent.click(q(container, "[data-segment='commits']"));
+    const note = q(container, "[data-pr-commits] [data-pr-cut]");
+    expect(note.textContent).toBe("Showing the first 100 commits");
+    expect(q(container, "[data-pr-commits]").lastElementChild).toBe(note);
+  });
+});
+
+describe("the Files tab", () => {
+  it("opens a file's diff under its row, read once from the host, with its comments on their lines and a road to the Changes pane", async () => {
+    const { container, api } = await pane();
+    fireEvent.click(q(container, "[data-segment='files']"));
+    expect(api.pullRequestDiff).not.toHaveBeenCalled();
+    fireEvent.click(q(container, "[data-changed-file='check.sh']"));
+    const opened = await waitFor(() => q(container, "[data-pr-file-diff='check.sh'] [data-code-view]"));
+    expect(opened.dataset["codeView"]).toBe("check.sh");
+    expect(opened.querySelector("[data-pr-file-glyph]")).not.toBeNull();
+    expect(codeViews.last!.unsafeCSSExtra).toContain("[data-change-icon] { display: none");
+    expect(api.pullRequestDiff).toHaveBeenCalledTimes(1);
+    expect(codeViews.last!.lineNotes!.map(n => [n.filePath, n.line, n.side])).toEqual([["check.sh", 3, "additions"]]);
+    expect([...opened.querySelectorAll("[data-pr-line-comment]")].map(r => r.getAttribute("data-pr-line-comment"))).toEqual(["7", "8"]);
+    fireEvent.click(q(opened, "[data-pr-open-changes]"));
+    expect(useDiffStore.getState().scopeByWorkspaceId[WS]).toBe("branch");
+    expect(useRightPanelStore.getState().byWorkspaceId[WS]?.activeSurfaceId).toBe("diff");
+    fireEvent.click(q(container, "[data-changed-file='check.sh']"));
+    expect(container.querySelector("[data-pr-file-diff]")).toBeNull();
+    fireEvent.click(q(container, "[data-changed-file='check.sh']"));
+    await waitFor(() => q(container, "[data-pr-file-diff='check.sh'] [data-code-view]"));
+    expect(api.pullRequestDiff).toHaveBeenCalledTimes(1);
+  });
+
+  it("says why where the host cut the diff before the file", async () => {
+    const { container, api } = await pane();
+    api.pullRequestDiff.mockResolvedValueOnce({ diff: "", truncated: true, left: ["check.sh"] });
+    fireEvent.click(q(container, "[data-segment='files']"));
+    fireEvent.click(q(container, "[data-changed-file='check.sh']"));
+    await waitFor(() => expect(q(container, "[data-pr-file-diff='check.sh']").textContent).toBe("The diff was cut at 2 MB before this file"));
+  });
+});
+
+describe("a pull request that could not be read", () => {
+  it("says why there is nothing to show", () => {
     withApi({ why: "no signed-in command line for github.com is on this computer, so the pull request is not read", readAt: 1 });
     const { container } = render(<PullRequestSurface workspaceId={WS} />);
     expect(container.textContent).toBe("no signed-in command line for github.com is on this computer, so the pull request is not read");
@@ -273,25 +510,5 @@ describe("the thread header's git button", () => {
   it("draws nothing where the checkout is not read", () => {
     withApi(fact());
     expect(render(<GitSplit workspaceId={WS} />).container.innerHTML).toBe("");
-  });
-});
-
-describe("Update from the base in the Pull request pane", () => {
-  it("is offered only while the branch is behind its base, and names the files that conflict with the fix beside them", async () => {
-    const api = withApi(fact({ checks: [], behindBase: 2 }));
-    render(<PullRequestSurface workspaceId={WS} />);
-    fireEvent.click(await screen.findByText("Update from main"));
-    await waitFor(() => expect(api.update).toHaveBeenCalledWith(WS));
-    await waitFor(() => expect(useNotices.getState().notices[0]?.text).toBe(updateConflictsLine("api", "main", ["README.md"])));
-    const notice = useNotices.getState().notices[0]!;
-    expect(notice.action?.word).toBe("Ask your agent to fix");
-    notice.action!.run();
-    await waitFor(() => expect(api.fix).toHaveBeenCalledWith(WS, undefined));
-    act(() => useStore.setState({ statuses: { [WS]: statusWith(fact({ checks: [], behindBase: 0 })) } }));
-    await waitFor(() => expect(screen.queryByText("Update from main")).toBeNull());
-    // A conflict with the base is the fix's, which tries the same update first.
-    act(() => useStore.setState({ statuses: { [WS]: statusWith(fact({ checks: [], behindBase: 2, mergeable: "conflicting" })) } }));
-    await waitFor(() => expect(document.querySelector("[data-pr-fix-conflicts]")).not.toBeNull());
-    expect(screen.queryByText("Update from main")).toBeNull();
   });
 });

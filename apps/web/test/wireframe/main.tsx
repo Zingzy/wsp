@@ -4,7 +4,7 @@
 // workspace on a second computer, a workspace an agent forked, a project
 // nobody has started work on and a first run that has been refused are all
 // states a person meets and none of them can be staged on the owner's own
-// machine, so the real sidebar, the real dialog and the real first run are fed
+// machine, so the real sidebar and the real first run are fed
 // records here instead of pixels being drawn by hand.
 //
 // ?screen=<name> picks one, ?theme=light the light side, ?lightTheme= and ?darkTheme= each side's theme by id,
@@ -27,8 +27,6 @@
 //   sidebar-hosts    the sidebar screen in a desktop window that knows a second
 //                    host, so the foot names the computer this window is on
 //   switcher-open    the sidebar screen with the switcher's menu open
-//   dialog           New workspace over that sidebar with three projects, so
-//                    the pick is the segmented control
 //   first-run        the first run with nothing typed
 //   first-run-refused    the runtime's own sentence in the slot under the button
 //   first-run-starting   Start held while the create runs
@@ -51,10 +49,10 @@
 //   settings-devices      three devices paired, one of them this browser
 //   settings-account      the one Account row, not signed in
 //   settings-keybindings  the chords, in a desktop shell
-//   settings-about        the two halves of the release, in a desktop shell
-//   settings-about-behind the same with 0.3.0 out, the app on its own host, whose
+//   settings-version      General with its Version card, app and host on one release, in a desktop shell
+//   settings-version-behind the same with 0.3.0 out, the app on its own host, whose
 //                         shell holds the bundle's download until the test lets it go
-//   settings-about-restart 0.3.0 installed under the running 0.2.0 host, which a restart brings back
+//   settings-version-restart 0.3.0 installed under the running 0.2.0 host, which a restart brings back
 //   settings-search       "icons" typed in the field
 //   settings-over-panel   a workspace's panel open, then Settings over it
 //   settings-add-computer Computers scrolled to Add a computer, the ssh road open
@@ -70,6 +68,13 @@
 //   settings-add-cloud    the cloud road, where a key saved for Boat lists it and
 //                         draws its Image card (&image=none as above)
 //   settings-remove-computer  the Remove dialog over the box's page
+//   settings-agents       the Agents page on this Mac: the default agent, then Claude Code
+//                         with an update out, Codex, and OpenCode not installed
+//   settings-agent        Claude Code's own page on this Mac, with launch words and two variables
+//   settings-agents-servers  the Tool servers tab on this Mac: every server state, the person's own and a project's
+//   settings-agents-skills   the Skills tab on this Mac: a shared skill, wsp's own, a plugin's and a project's
+//   settings-project-overrides  wsp's page with Codex set as its agent, its model and access
+//                         left to Codex's own
 //   settings-image-nothing, -copy, -copying, -stopped, -stale, -ready  the box's
 //                         page with its Image card in that state, or the cloud's
 //                         with &computer=solari; settings-computer is the box's
@@ -90,13 +95,10 @@
 //   bring-back-absent    the same on a workspace whose computer is not
 //                        answering, which says what that computer says
 //   bring-back-roadless  the same on a wsp whose host carries no such request
-//   agents-widths    the agents manager off one report as the page at its
-//                    card's width and a phone's (760, 696, 358) and as the
-//                    panel at the widths its shape changes over (520, 480,
-//                    380 and its 360 floor)
-//   agents-states    the manager on this Mac at the panel's floor and the
-//                    page's card, its servers in every state a connect
-//                    answers, a Sign in waiting on the browser
+//   agents-widths    the Agents tab of the panel of a task on this Mac at
+//                    480 and at its 360 floor: Claude Code with an update
+//                    out, Codex waiting on a sign-in, OpenCode not checked
+//                    and Pi to install, every server state a connect answers
 //   panel-agents     the task on the box selected, its panel open on Agents
 //                    (&fork=solari: the same task a fork at Solari, whose one
 //                    act is Edit image)
@@ -107,22 +109,17 @@
 import { createRoot } from "react-dom/client";
 import { CATALOG_AGENTS, agentName } from "@wsp/catalog";
 import { manyAgents } from "./agents";
-import { DEFAULT_PREFERENCES, copyFirstLine, hostnameSetLine, type HarnessCatalog, GOLDEN_STAGE_WORDS, MACHINE_ROW_LABEL, STOP_LEFT_MACHINE_LINE, hereWord, startingLine, type AgentsSignInEvent, type Capabilities, type DeviceView, type InitAgent, type InitJob, type InitRow, type InitScreen, type PlaceAddJob, type PlaceAddStep, type PlaceProvision, type PlaceView, type ProjectView, type SealedImage, type SessionView, type WorkspaceLanding, type WorkspaceView } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, copyFirstLine, hostnameSetLine, type HarnessCatalog, GOLDEN_STAGE_WORDS, MACHINE_ROW_LABEL, STOP_LEFT_MACHINE_LINE, hereWord, startingLine, type AgentsSignInEvent, type Capabilities, type DeviceView, type InitAgent, type InitJob, type InitRow, type InitScreen, type PlaceAddJob, type PlaceAddStep, type PlaceProvision, type PlaceView, type ProjectView, type SealedImage, type SessionView, type ThreadDefaults, type WorkspaceLanding, type WorkspaceView } from "@wsp/protocol";
 import { AppShell } from "../../src/shell/AppShell";
 import { FirstRun } from "../../src/shell/FirstRun";
-import { AgentsManager, type AgentsShell } from "../../src/components/agents/AgentsManager";
-import { useServerTools } from "../../src/components/agents/useServerTools";
-import { useServerActs } from "../../src/components/agents/useServerActs";
-import { useSkillActs } from "../../src/components/agents/useSkillActs";
-import { useAgentActs } from "../../src/components/agents/useAgentActs";
+import { AgentsSurface } from "../../src/components/agents/AgentsSurface";
 import { SettingsPage } from "../../src/settings/SettingsPage";
-import { AGENTS_PAGE_REPORT, AGENTS_REPORT, HOSTILE_SKILL_MD, SERVER_TOOLS, SKILL_HITS, SKILL_PREVIEWS } from "../fixtures/agents-report";
+import { HARNESSES } from "../fixtures/harnesses";
+import { AGENTS_PAGE_REPORT, AGENTS_REPORT, AGENTS_SETUP_REPORT, AGENTS_TOOLS_REPORT, HOSTILE_SKILL_MD, SERVER_TOOLS, SKILL_HITS, SKILL_PREVIEWS } from "../fixtures/agents-report";
 import { useSettingsStore, type SettingsAt } from "../../src/settings/settingsStore";
 import { applyTheme, useThemeEffect } from "../../src/settings/theme";
 import { useHostNotices } from "../../src/notices/hostNotices";
 import { WorkspaceCreation } from "../../src/shell/WorkspaceCreation";
-import { NewWorkspaceDialog } from "../../src/sidebar/NewWorkspaceDialog";
-import { requestNewWorkspace } from "../../src/shell/shellRequests";
 import { RequestError, type Api } from "../../src/protocol/client";
 import { useCreation, useStore } from "../../src/protocol/store";
 import { useAdds } from "../../src/settings/adds";
@@ -299,7 +296,21 @@ const box = (id: string, name: string, over: Partial<PlaceView>): PlaceView =>
  * done, one still running and one that lost two rows, and the cloud account whose key this host holds. */
 const COMPUTERS: PlaceView[] = [
   { id: "here", kind: "computer", name: "zingzy-mbp", default: false, present: true, os: "macOS 26.4", shape: { cpu: 10, memMb: 16384 }, diskFreeBytes: 214 * GB, takesForks: false } as PlaceView,
-  box("p_spoo", "spoo", { default: true, provision: provision({}), road: { ssh: "root@spoo", from: "127.0.0.1", back: { boxPort: 4640 } } }),
+  // What the host's row says of what a person may set on spoo: threads at once at the shape's default, a nap window
+  // set off its default, the agents switch, and the update its older daemon takes.
+  box("p_spoo", "spoo", {
+    default: true,
+    provision: provision({}),
+    road: { ssh: "root@spoo", from: "127.0.0.1", back: { boxPort: 4640 } },
+    cap: { threads: 3 },
+    capDefault: { threads: 3 },
+    settings: { napMs: 30 * 60_000 },
+    napMs: 30 * 60_000,
+    napDefault: 20 * 60_000,
+    spawn: { spawn: true, maxMachines: 3, maxDepth: 1 },
+    spawnDefault: { spawn: true, maxMachines: 3, maxDepth: 1 },
+    behind: { word: "daemon 40, host 111", fix: "wsp add spoo --update", act: "update" },
+  }),
   box("p_dev4", "dev4", { provision: provision({ state: "running", finishedAt: undefined, at: { label: "uv", index: 3, of: 7 } }) }),
   box("p_lab", "lab", {
     provision: provision({
@@ -394,9 +405,9 @@ const SETTINGS_SCREENS: Record<string, SettingsAt> = {
   "settings-privacy": { kind: "group", group: "privacy" },
   "settings-usage": { kind: "group", group: "usage" },
   "settings-keybindings": { kind: "group", group: "keybindings" },
-  "settings-about": { kind: "group", group: "about" },
-  "settings-about-behind": { kind: "group", group: "about" },
-  "settings-about-restart": { kind: "group", group: "about" },
+  "settings-version": { kind: "group", group: "general" },
+  "settings-version-behind": { kind: "group", group: "general" },
+  "settings-version-restart": { kind: "group", group: "general" },
   "settings-search": { kind: "group", group: "appearance" },
   "settings-over-panel": { kind: "group", group: "appearance" },
   "settings-add-computer": { kind: "group", group: "computers" },
@@ -404,6 +415,11 @@ const SETTINGS_SCREENS: Record<string, SettingsAt> = {
   "settings-computers-refused": { kind: "group", group: "computers" },
   ...Object.fromEntries(ADD_SCREENS.map(name => [name, { kind: "group", group: "computers" } as SettingsAt])),
   "settings-remove-computer": { kind: "computer", id: "p_spoo" },
+  "settings-agents": { kind: "group", group: "agents" },
+  "settings-agent": { kind: "agent", id: "claude" },
+  "settings-agents-servers": { kind: "group", group: "agents" },
+  "settings-agents-skills": { kind: "group", group: "agents" },
+  "settings-project-overrides": { kind: "project", id: "pr_wsp" },
   ...Object.fromEntries(IMAGE_SCREENS.map(name => [name, { kind: "computer", id: imageAt.id } as SettingsAt])),
 };
 const settingsAt = SETTINGS_SCREENS[screen];
@@ -511,13 +527,23 @@ const CREATING_CATALOG: HarnessCatalog = {
   images: true,
 };
 const creatingScreen = screen === "creating" || screen === "creating-refused";
+/** The screens about what a new thread starts on: the Agents page, Claude Code's own page, and wsp's page with Codex
+ * set as its agent, which read the host's own lists and this Mac's agents. */
+const agentScreen = ["settings-agents", "settings-agent", "settings-project-overrides"].includes(screen);
+/** The Agents page's Tool servers and Skills tabs, which read every server and skill on this Mac. */
+const toolsScreen = screen === "settings-agents-servers" || screen === "settings-agents-skills";
+/** wsp's own overrides on the screen about them: its agent set to Codex, its model and access left to Codex's own. */
+const OVERRIDES = screen === "settings-project-overrides" ? { projectDefaults: { pr_wsp: { agent: "codex" } } } : {};
+const PROJECT_DEFAULTS: Record<string, ThreadDefaults> = {
+  pr_wsp: { agent: { value: "codex", from: "project" }, model: { value: "gpt-5.6-sol", from: "catalog" }, effort: { value: "low", from: "catalog" }, access: { value: "full", mode: "danger-full-access", from: "catalog" } },
+};
 const drawsSidebar = !firstRunScreens.includes(screen);
 /** The screens about the sidebar's shape with fewer records: nothing at all, and one project alone. */
 const emptyScreen = screen === "sidebar-empty";
 const oneProject = screen === "sidebar-one-project";
 /** On a settings screen spoo carries what its own page reads: the branch a workspace starts on, the last agent and
  * what the seed carried. */
-const SPOO_RECORDED: ProjectView = settings ? { ...SPOO, base: "main", lastAgent: "claude", seeded: { files: 412, bytes: 3_250_000, memory: "landed", memoryFiles: 3, commits: 9, at: AT } } : SPOO;
+const SPOO_RECORDED: ProjectView = settings ? { ...SPOO, base: "main", seeded: { files: 412, bytes: 3_250_000, memory: "landed", memoryFiles: 3, commits: 9, at: AT } } : SPOO;
 const RECORDED: ProjectView[] = emptyScreen ? [] : oneProject ? [SPOO] : [SPOO_RECORDED, WSP, LANDING];
 
 /** The workspaces this screen's store holds, which is also what the fake host answers with: a bind that answered
@@ -537,10 +563,11 @@ const HELD_SESSIONS: Record<string, SessionView[]> = Object.fromEntries(Object.e
  * OpenCode with no plan limit, and a week at his size, nearly all of it read from cache. */
 const DAY_MS = 86_400_000;
 const USAGE_ANSWERS = {
+  usageReset: async () => ({ outcome: "reset" as const, said: "Reset used: Codex with ChatGPT Plus's windows start again now, 1 left" }),
   usageAccounts: async () => ({
     accounts: [
       { key: "claude:vault-key", agent: "claude", label: "Claude Code with an API key", computers: ["Boat", "zingzy's MacBook Pro"], note: "pays per token, no plan limit" },
-      { key: "codex:acct_7f3", agent: "codex", label: "Codex with ChatGPT Plus", computers: ["zingzy's MacBook Pro"], plan: "plus", windows: [{ kind: "session", usedPercent: 62, resetsAt: Date.parse(AT) + 2.5 * 3_600_000 }, { kind: "week", usedPercent: 18, resetsAt: Date.parse(AT) + 3 * DAY_MS }], status: "ok", readAt: Date.parse(AT) },
+      { key: "codex:acct_7f3", agent: "codex", label: "Codex with ChatGPT Plus", computers: ["zingzy's MacBook Pro"], plan: "plus", credits: { count: 2, nextExpiresAt: Date.parse(AT) + 21 * DAY_MS, readAt: Date.parse(AT) }, windows: [{ kind: "session", usedPercent: 62, resetsAt: Date.parse(AT) + 2.5 * 3_600_000 }, { kind: "week", usedPercent: 18, resetsAt: Date.parse(AT) + 3 * DAY_MS }], status: "ok", readAt: Date.parse(AT) },
       { key: "opencode@here", agent: "opencode", label: "OpenCode signed in on zingzy's MacBook Pro", computers: ["zingzy's MacBook Pro"], note: "reports no plan limit" },
     ],
   }),
@@ -590,7 +617,8 @@ const api = {
   ...(screen === "settings-computers-refused" ? { sshHosts: async () => Promise.reject(new RequestError("~/.ssh/config: permission denied")) } : {}),
   projectsList: async () => (drawsSidebar ? RECORDED : []),
   workspacesLanding: async (project: string) => landings[project] ?? landings["pr_spoo"]!,
-  listHarnesses: async () => (creatingScreen ? [CREATING_CATALOG] : []),
+  listHarnesses: async () => (creatingScreen ? [CREATING_CATALOG] : agentScreen || toolsScreen ? HARNESSES : []),
+  ...(agentScreen ? { projectsDefaults: async () => PROJECT_DEFAULTS, agentsSetup: async (_placeId: string, agent: string) => AGENTS_SETUP_REPORT.agents.find(row => row.id === agent)! } : {}),
   initGet: async () => ({
     keys: { solari: settings || params.get("fork") === "solari" },
     home: "/Users/dev",
@@ -629,7 +657,7 @@ const api = {
   initStart: async () => new Promise<never>(() => {}),
   initDraft: async () => new Promise<never>(() => {}),
   hostTerminalConfig: async () => ({ files: [] }),
-  agentsRead: async () => (params.get("projects") === "1" ? AGENTS_PAGE_REPORT : AGENTS_REPORT),
+  agentsRead: async () => (screen === "agents-widths" || screen === "skill-preview" ? PANEL_REPORT : toolsScreen ? AGENTS_TOOLS_REPORT : agentScreen ? AGENTS_SETUP_REPORT : params.get("projects") === "1" ? AGENTS_PAGE_REPORT : AGENTS_REPORT),
   serversIcon: async (host: string) => SERVER_ICON[host]?.() ?? null,
   // wsp's own server is still being asked, so a row reads checking; any other server answers with one tool.
   serversTools: async (_target: unknown, _agent: string, name: string) =>
@@ -684,11 +712,11 @@ const api = {
 if (screen === "sidebar-hosts") {
   window.wsp = { hosts: async () => ({ here: hereWord(true), current: null, hosts: [{ alias: "spoo", url: "wss://spoo.example/ws" }] }) };
 }
-if (screen === "settings-keybindings" || screen === "settings-about" || screen === "settings-about-behind" || screen === "settings-about-restart") {
+if (screen === "settings-keybindings" || screen === "settings-version" || screen === "settings-version-behind" || screen === "settings-version-restart") {
   window.wsp = { version: "0.2.0" };
   (window as unknown as { __WSP__?: { paired: boolean; version: string } }).__WSP__ = { paired: true, version: "0.2.0" };
 }
-if (screen === "settings-about-behind") {
+if (screen === "settings-version-behind") {
   const held = window as unknown as { finishBundle?: () => void };
   window.wsp = {
     ...window.wsp,
@@ -704,19 +732,20 @@ const pick = params.get("pick");
 if (pick !== null) window.localStorage.setItem("wsp:sidebar-project", JSON.stringify(pick));
 const sidebarWidth = params.get("sidebar");
 // The page Settings opens on, as this window would remember it, and the one screen with text in the field.
-if (settingsAt !== undefined) useSettingsStore.setState({ at: settingsAt, search: screen === "settings-search" ? "icons" : "" });
+if (settingsAt !== undefined) useSettingsStore.setState({ at: settingsAt, search: screen === "settings-search" ? "icons" : "", ...(toolsScreen ? { agentsTab: screen === "settings-agents-servers" ? ("servers" as const) : ("skills" as const) } : {}) });
 useStore.setState({
   conn: "live",
   ready: true,
   projectsRead: true,
-  preferences: { ...DEFAULT_PREFERENCES, ...picks, ...(sidebarWidth !== null ? { sidebarWidth: Number(sidebarWidth) } : {}), ...(screen === "settings-light-picked" ? { theme: "light" as const } : {}) },
+  preferences: { ...DEFAULT_PREFERENCES, ...picks, ...OVERRIDES, ...(sidebarWidth !== null ? { sidebarWidth: Number(sidebarWidth) } : {}), ...(screen === "settings-light-picked" ? { theme: "light" as const } : {}) },
+  ...(agentScreen || toolsScreen ? { harnesses: HARNESSES } : {}),
   places: computers,
   settingsOpen: settings,
   addComputerOpen: screen === "settings-add-computer" || screen === "settings-add-computer-failed" || screen === "settings-computers-refused" || ADD_SCREENS.includes(screen),
   release:
-    screen === "settings-about-behind"
+    screen === "settings-version-behind"
       ? { state: "read", latest: { version: "0.3.0", tag: "v0.3.0", url: "https://github.com/Zingzy/wsp/releases/tag/v0.3.0", publishedAt: AT }, checkedAt: AT, triedAt: AT }
-      : screen === "settings-about-restart"
+      : screen === "settings-version-restart"
         ? { state: "read", latest: { version: "0.3.0", tag: "v0.3.0", url: "https://github.com/Zingzy/wsp/releases/tag/v0.3.0", publishedAt: AT }, checkedAt: AT, triedAt: AT, installed: "0.3.0", update: "npm i -g @zingzy/wsp@0.3.0", shape: "service" }
         : null,
   projects: drawsSidebar ? RECORDED : [],
@@ -762,61 +791,16 @@ useRightPanelStore.setState({
   byWorkspaceId: Object.fromEntries([...HELD.map(w => w.id), CREATED_ID].map(id => [id, screen === "settings-over-panel" && id === "ws_copy" ? openPanel : screen === "panel-agents" && id === "ws_box" ? agentsPanel : shutPanel])),
 });
 
-/** The widths the agents manager is measured at: the page's column, its card and a phone's page, and the panel over
- * the widths its tabs change shape at down to its floor. */
-const AGENTS_WIDTHS: readonly { shell: AgentsShell; width: number }[] = [
-  { shell: "page", width: 760 },
-  { shell: "page", width: 696 },
-  { shell: "page", width: 358 },
-  { shell: "panel", width: 520 },
-  { shell: "panel", width: 480 },
-  { shell: "panel", width: 380 },
-  { shell: "panel", width: 360 },
-];
+/** The panel's widths: the one it opens at and its floor. */
+const PANEL_WIDTHS = [480, 360] as const;
+/** The task on this Mac's own read: Claude Code with an update out beside the agents of the shared report. */
+const PANEL_REPORT = { ...AGENTS_REPORT, target: { workspaceId: "ws_copy" }, reach: "here" as const, agents: AGENTS_REPORT.agents.map(a => (a.id === "claude" ? { ...a, update: { to: "2.1.290", command: "claude update" } } : a)) };
 function AgentsWidths() {
-  const tools = useServerTools(AGENTS_REPORT.target);
-  const skills = useSkillActs(AGENTS_REPORT.target);
-  const servers = useServerActs(AGENTS_REPORT.target);
   return (
-    <div className="flex flex-col gap-10 bg-background p-4">
-      {AGENTS_WIDTHS.map(w => (
-        <div key={w.width} data-agents-width={w.width} data-shell={w.shell} style={{ width: w.width }}>
-          <AgentsManager
-            shell={w.shell}
-            head={w.shell === "panel" ? { computer: "spoo", project: { name: "wsp", path: "~/wsp" }, open: () => {} } : { line: "Agents, MCP servers and skills on spoo." }}
-            report={AGENTS_REPORT}
-            reading={false}
-            on="spoo"
-            ctx={{ where: "box", computer: "spoo", ...(tools === undefined ? {} : { tools }), ...(skills === undefined ? {} : { skills }), ...(servers === undefined ? {} : { servers }) }}
-            onRefresh={() => {}}
-            now={Date.parse(AGENTS_REPORT.readAt)}
-          />
-        </div>
-      ))}
-    </div>
-  );
-}
-
-/** This Mac's report, its servers answering in every state a connect gives: connected with its tools, failed, needs
- * sign-in, signed in by its harness, and still checking, beside one turned off and a project's never asked. */
-const STATES_REPORT = { ...AGENTS_REPORT, target: { placeId: "here" }, reach: "here" as const };
-function AgentsStates() {
-  const tools = useServerTools(STATES_REPORT.target);
-  const acts = useAgentActs(STATES_REPORT.target);
-  return (
-    <div className="flex flex-col gap-10 bg-background p-4">
-      {([{ shell: "panel", width: 360 }, { shell: "page", width: 696 }] as const).map(w => (
-        <div key={w.width} data-agents-width={w.width} data-shell={w.shell} style={{ width: w.width }}>
-          <AgentsManager
-            shell={w.shell}
-            head={w.shell === "panel" ? { computer: "this Mac", project: { name: "wsp", path: "~/wsp" } } : { line: "Agents, MCP servers and skills on this Mac." }}
-            report={STATES_REPORT}
-            reading={false}
-            on="this Mac"
-            ctx={{ where: "here", ...(tools === undefined ? {} : { tools }), ...(acts === undefined ? {} : { acts }) }}
-            onRefresh={() => {}}
-            now={Date.parse(AGENTS_REPORT.readAt)}
-          />
+    <div className="flex h-dvh items-start gap-10 bg-background p-4">
+      {PANEL_WIDTHS.map(width => (
+        <div key={width} data-agents-width={width} style={{ width }} className="flex h-full flex-col border-x border-border/50">
+          <AgentsSurface workspaceId="ws_copy" />
         </div>
       ))}
     </div>
@@ -867,8 +851,6 @@ createRoot(document.getElementById("root")!).render(
   <>
     {screen === "agents-widths" || screen === "skill-preview" ? (
       <AgentsWidths />
-    ) : screen === "agents-states" ? (
-      <AgentsStates />
     ) : firstRunScreens.includes(screen) ? (
       <div className="flex h-dvh flex-col">
         <FirstRun />
@@ -879,7 +861,6 @@ createRoot(document.getElementById("root")!).render(
         <Centre />
       </AppShell>
     )}
-    {screen === "dialog" ? <NewWorkspaceDialog projects={[SPOO, WSP, LANDING]} landings={landings} places={places} picked={null} onCreate={() => {}} onCancel={() => {}} /> : null}
   </>,
 );
 
@@ -910,7 +891,6 @@ setTimeout(() => {
       document.querySelector<HTMLButtonElement>('[aria-label="Collapse webhook retries"]')?.click();
     }, 250);
   }
-  if (screen === "dialog") requestNewWorkspace();
   // The row a shot wants open, and the dialog opened from the row that is open: the table is drawn from a read
   // that lands after this page does, so each click is tried until its row is there.
   const clickWhenThere = (css: string, then?: () => void): void => {

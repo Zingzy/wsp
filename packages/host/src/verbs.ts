@@ -19,7 +19,7 @@ import { StringDecoder } from "node:string_decoder";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import WebSocket from "ws";
 import { z } from "zod";
-import { CATALOG_AGENTS, DEFAULT_AGENT, ROAD_MODULES, THREAD_AGENTS, agentName, catalogEntry, isRoad } from "@wsp/catalog";
+import { CATALOG_AGENTS, ROAD_MODULES, THREAD_AGENTS, agentName, catalogEntry, isRoad } from "@wsp/catalog";
 import { nodeHost, readGhosttyConfig, type Platform } from "@wsp/collect";
 import { freshEphemeral, keyFingerprint, makeSeal, openFrame, sealKeys, sharedSecret, signPlaceBytes, verifyPlaceBytes, SEAL_REFUSAL, type PlaceKeyPair, type Seal } from "@wsp/keys";
 import {
@@ -305,6 +305,7 @@ import {
   GitDiscardReply,
   committedLine,
   discardedLine,
+  FIX_RESULT_FIELDS,
   FixResult,
   FIX_CHECK_OR_CHILD,
   MergeInResult,
@@ -1465,7 +1466,9 @@ async function committed(client: HostClient, workspaceId: string, message: strin
 
 /** A fix asked of the host, one road for the command line and the tool. */
 async function askedToFix(client: HostClient, workspaceId: string, check: string | undefined, child?: string): Promise<FixResult> {
-  return FixResult.parse(await client.request("workspaces.fix", { workspaceId, ...(check !== undefined ? { check } : {}), ...(child !== undefined ? { child } : {}) }));
+  const read = FixResult.safeParse(await client.request("workspaces.fix", { workspaceId, ...(check !== undefined ? { check } : {}), ...(child !== undefined ? { child } : {}) }));
+  if (!read.success) throw new Error(otherVersion("workspaces.fix"));
+  return read.data;
 }
 
 /** A merge of a child into its lead asked of the host, the lead woken first; one road for the command line and the tool. */
@@ -1478,7 +1481,7 @@ async function mergedIn(client: HostClient, leadRef: string, child: string, said
 /** What a fix reads as: which agent was asked to fix what, or that the update left nothing to fix. */
 function fixLine(workspace: string, asked: FixResult): string {
   if (asked.outcome === "updated") return fixNothingLine(workspace, asked.base);
-  const agent = agentName(asked.agent ?? DEFAULT_AGENT.id);
+  const agent = agentName(asked.agent);
   if (asked.child !== undefined) return fixMergeChildLine(workspace, agent, asked.child);
   return asked.check !== undefined ? fixAskedLine(workspace, agent, asked.check) : fixConflictsLine(workspace, agent, asked.base);
 }
@@ -3829,7 +3832,7 @@ export const ALL_VERBS: readonly Verb[] = [
       return 0;
     },
     tool: tool({
-      description: `The coding agents the catalog knows, as they stand on one computer or workspace: whether each is on that login's PATH and where, the version its command answers, the newest its vendor publishes as this host last read it (asked of npm, GitHub or the vendor from this host alone, kept a day, never with Newest agent versions off in Settings > Privacy or WSP_UPDATE_CHECK=0) and the version wsp's install pins, its sign-in there (signed in, your key from this host's vault, not signed in, or unknown) and how it stands in the status command's own words (signInDetail), how a person signs it in, whether one of its MCP config files names the wsp server, the vendor's own command that brings it up to the newest where it is older (update, which wsp shows and never runs), and on a computer how the person set it to run there (setup: on or off, the program, the config folder, the launch words and the names of its variables, never a value). ${AGENTS_READ_WORDS}`,
+      description: `The coding agents the catalog knows, as they stand on one computer or workspace: whether each is on that login's PATH and where, the version its command answers, the newest its vendor publishes as this host last read it (asked of npm, GitHub or the vendor from this host alone, kept a day, never with Newest agent versions off in Settings > Privacy or WSP_UPDATE_CHECK=0) and the version wsp's install pins, its sign-in there (signed in, your key from this host's vault, not signed in, or unknown) and how it stands in the status command's own words (signInDetail), the kind of that login (signInKind: api-key, subscription or oauth) and the plan it names (signInPlan), how a person signs it in, whether one of its MCP config files names the wsp server, the vendor's own command that brings it up to the newest where it is older (update, which wsp shows and never runs), and on a computer how the person set it to run there (setup: on or off, the program, the config folder, the launch words and the names of its variables, never a value). ${AGENTS_READ_WORDS}`,
       input: { workspace: AgentsWorkspaceIn, on: AgentsOnIn },
       output: { ...AGENTS_FRAME, agents: z.array(AgentRow) },
       call: async ({ workspace, on }, deps) => {
@@ -4982,7 +4985,7 @@ export const ALL_VERBS: readonly Verb[] = [
           .optional()
           .describe("a child of this workspace whose merge into it stopped on conflicts: its agent is asked to fetch the child's branch, merge it with a merge commit and resolve them; never with check"),
       },
-      output: FixResult.shape,
+      output: FIX_RESULT_FIELDS,
       call: async ({ workspace: ref, check, child }, deps) => {
         if (check !== undefined && child !== undefined) throw new Error(FIX_CHECK_OR_CHILD);
         const client = await deps.client();

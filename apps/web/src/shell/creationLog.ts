@@ -21,6 +21,10 @@ export const CREATE_STEP_WORDS: Record<WorkspaceCreateStage, string> = {
 
 /** What a creation says before the runtime has reported a step, which on a copy here is all it ever says. */
 export const CREATE_ASKED = "Asking wsp to start it";
+/** How long a kept row waits after the window connects for a word from the host before it can be dismissed. */
+export const QUIET_MS = 30_000;
+/** Under a kept row wsp has said nothing about for that wait. */
+export const CREATE_QUIET = `Nothing has come from wsp about this for ${QUIET_MS / 1000} seconds, and it may have stopped. Copy your message before you dismiss it.`;
 
 /** A step's words: the table's for a create's stage, and an image build's own line, which already carries the
  * protocol's stage words, capitalised. */

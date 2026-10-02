@@ -14,6 +14,7 @@ import { MCP_SERVER_NAME, mcpServerCommandLine, nextInsideAgentLine, WSP_TOOL_TI
 import { placeSections, removeSections } from "./agents-md.js";
 import { daemonBinaryHere } from "./assets.js";
 import { SKILL_NAME, WSP_SKILL } from "./skill.js";
+import { realState } from "./serving-home.js";
 import { VERSION } from "./version.js";
 
 /** The name the server has in every agent's config; the protocol's, since the runtime builds a launch that carries
@@ -169,30 +170,53 @@ export function mcpServerSpec(statePath: string, run: RunningWsp = runningWsp(),
 
 /** Brings the wsp tools a config already holds up to this computer's binary, where the entry is this wsp's own node
  * line and the binary carries the tool server, so a config written before the switch stops keeping a node process
- * up for every session. The state and the host the line named stay named. A line this wsp did not write (another
- * command, the desktop's shim, npx's) is left as it is. Answers the files rewritten, `~/`-relative. */
+ * up for every session. Only a line naming this state file moves, and the host it named stays named. A line this
+ * wsp did not write (another command, the desktop's shim, npx's) is left as it is. Answers the files rewritten,
+ * `~/`-relative. */
 export function refreshServers(home: string, statePath: string, run: RunningWsp): string[] {
   if (configBinary(run) === false) return [];
   const node = mcpServerCommand({ ...run, toolServer: false });
   const written: string[] = [];
   for (const agent of MCP_AGENTS) {
     const file = mcpConfigFile(agent, home);
-    if (!existsSync(file.abs)) continue;
-    const was = readFileSync(file.abs);
-    const held = agent.mcp.format.read(was.toString("utf8"), home).find(s => s.name === MCP_SERVER_NAME && s.scope === "user")?.transport;
-    if (held?.kind !== "stdio" || held.command !== node.command || !node.args.every((word, i) => held.args[i] === word)) continue;
-    const rest = held.args.slice(node.args.length);
-    const named = (flag: string): string | undefined => {
-      const at = rest.indexOf(flag);
-      return at === -1 ? undefined : rest[at + 1];
-    };
-    const host = named("--host");
-    const server = mcpServerSpec(named("--state") ?? statePath, run, host !== undefined ? { host } : {});
+    const entry = wspEntry(agent, file, home);
+    if (entry === undefined || !namesState(entry.held, statePath)) continue;
+    const { was, held } = entry;
+    if (held.command !== node.command || !node.args.every((word, i) => held.args[i] === word)) continue;
+    const host = flagOf(held.args.slice(node.args.length), "--host");
+    const server = mcpServerSpec(flagOf(held.args, "--state")!, run, host !== undefined ? { host } : {});
     const placed = agent.mcp.format.place(was.toString("utf8"), MCP_SERVER_NAME, { kind: "stdio", command: server.command, args: [...server.args], env: held.env, toolTimeoutSec: WSP_TOOL_TIMEOUT_SEC });
     writeConfigHere(file.abs, home, configSum(was), placed.text, p => tilde(home, p));
     written.push(file.tilde);
   }
   return written;
+}
+
+/** The wsp server the agent's config file under `home` holds for the whole login, as written there. */
+function wspEntry(agent: McpAgent, file: { abs: string }, home: string): { was: Buffer; held: { command: string; args: readonly string[]; env: Readonly<Record<string, string>> } } | undefined {
+  if (!existsSync(file.abs)) return undefined;
+  const was = readFileSync(file.abs);
+  const held = agent.mcp.format.read(was.toString("utf8"), home).find(s => s.name === MCP_SERVER_NAME && s.scope === "user")?.transport;
+  return held?.kind === "stdio" ? { was, held } : undefined;
+}
+
+const flagOf = (args: readonly string[], flag: string): string | undefined => {
+  const at = args.indexOf(flag);
+  return at === -1 ? undefined : args[at + 1];
+};
+
+/** Whether a wsp line names this state file, the two read as the file system knows them: an agent dials the host on
+ * the state its entry names, so that host alone keeps the agent's wsp files up to date. */
+const namesState = (held: { args: readonly string[] }, statePath: string): boolean => {
+  const named = flagOf(held.args, "--state");
+  return named !== undefined && realState(named) === realState(statePath);
+};
+
+/** Whether the agent's wsp entry under `home` names this state file. */
+function dialsState(agent: AgentEntry, home: string, statePath: string): boolean {
+  const mcp = MCP_AGENTS.find(a => a.id === agent.id);
+  const entry = mcp === undefined ? undefined : wspEntry(mcp, mcpConfigFile(mcp, home), home);
+  return entry !== undefined && namesState(entry.held, statePath);
 }
 
 /** The one line a refresh of the configs says, and only where it rewrote one. */
@@ -228,13 +252,15 @@ function installSkill(agent: AgentEntry, home: string): string {
   return file.tilde;
 }
 
-/** Brings every skill copy already on this computer up to this wsp's, and writes none where there is none: a copy
- * an install wrote once falls behind the binary at the next release, and an agent reading the old words calls a
- * verb that is gone. Answers the files it rewrote, `~/`-relative. An agent that never took the skill is left alone,
- * since writing one uninvited puts wsp in a folder nobody asked it into. */
-export function refreshSkills(home: string): string[] {
+/** Brings up to this wsp's the skill copy of every agent whose wsp entry names this state file, and writes none where
+ * there is none: a copy an install wrote once falls behind the binary at the next release, and an agent reading the
+ * old words calls a verb that is gone. Answers the files it rewrote, `~/`-relative. An agent that never took the
+ * skill is left alone, since writing one uninvited puts wsp in a folder nobody asked it into, and so is one that
+ * dials another host, whose copy is that host's to keep. */
+export function refreshSkills(home: string, statePath: string): string[] {
   const written: string[] = [];
   for (const agent of CATALOG_AGENTS) {
+    if (!dialsState(agent, home, statePath)) continue;
     const file = skillFile(agent, home);
     try {
       if (readFileSync(file.abs, "utf8") === WSP_SKILL) continue;

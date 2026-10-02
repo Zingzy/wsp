@@ -20,6 +20,7 @@ import { Crab } from "../components/status/Crab.js";
 import type { ThreadStatusInput } from "../components/status/kinds/index.js";
 import { ThreadStatus } from "../components/status/ThreadStatus.js";
 import { threadStatusOf } from "../components/status/threadStatusOf.js";
+import { FAILED } from "../components/status/kinds/failed.js";
 import { RESTING } from "../components/status/kinds/resting.js";
 import { STARTING } from "../components/status/kinds/starting.js";
 import { SidebarMenuButton } from "../components/ui/sidebar.js";
@@ -32,6 +33,7 @@ import { tileCardLines, tilePrIcon, type TileCardLine } from "./tileCard.js";
 import type { TileCheckout } from "./tileCheckout.js";
 import { SNOOZE_WORDS } from "./words.js";
 import type { LinkDown } from "../terminal/paneWords.js";
+import { LINK_DOWN_WORDS } from "../adapt/terminal-pane.js";
 import { ONE_LINE_ROW_CLASS, TILE_CLASS, TILE_ROW_ONE_CLASS, TILE_ROW_TWO_CLASS, TILE_TITLE_CLASS, threadRowId } from "./rowGrammar.js";
 
 /** Where a tile's thread runs, as row one names it: the project and the computer by the names a person reads, either
@@ -221,8 +223,11 @@ export function ThreadTile({
     model,
     pr: checkout.pr,
     changed: checkout.changed,
-    notes: [snoozed ? SNOOZE_WORDS.workingHover(snoozedWorking) : thread.asking, ...checkout.counts, checkout.why ?? null],
+    notes: [snoozed ? SNOOZE_WORDS.workingHover(snoozedWorking) : thread.asking, thread.setupRefusal ?? null, ...checkout.counts, checkout.why ?? null],
   });
+  // An agent the host refuses to start there speaks in the link-down slot, under any state of the thread's own.
+  const down: LinkDown | undefined =
+    status === RESTING && linkDown !== undefined ? linkDown : thread.setupRefusal !== undefined && (status === RESTING || status.id === FAILED.id) ? { word: LINK_DOWN_WORDS.refused, sentence: thread.setupRefusal } : undefined;
   const frame = {
     card,
     place,
@@ -258,9 +263,9 @@ export function ThreadTile({
         status={
           snoozed ? (
             <SnoozedWorking count={snoozedWorking} />
-          ) : status === RESTING && linkDown !== undefined ? (
-            <span data-thread-status="link-down" title={linkDown.sentence} className="inline-flex shrink-0 items-center whitespace-nowrap">
-              {linkDown.word}
+          ) : down !== undefined ? (
+            <span data-thread-status={down === linkDown ? "link-down" : "setup-refused"} title={down.sentence} className="inline-flex shrink-0 items-center whitespace-nowrap">
+              {down.word}
             </span>
           ) : (
             <ThreadStatus thread={thread} age={time} settled={settled} />

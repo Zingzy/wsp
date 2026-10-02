@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Every button that says Add on a settings page or in the agents manager is
-// the one shared Add button: each group's page, a computer's page and a
-// project's page, the Add a computer panel on every road, and the manager in a
-// task's panel on every tab and at its add level.
+// Every button that says Add on a settings page or in the agents panel is the
+// one shared Add button: each group's page, a computer's page and a project's
+// page, the Add a computer panel on every road, and the agents in a task's
+// panel on every tab, on every item's page and at its add.
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { InitSetup, PlaceView, ProjectView, WorkspaceView } from "@wsp/protocol";
@@ -36,7 +36,7 @@ const api = () =>
 
 /** A button's word as a person hears it: its name where the word is hidden, else its text. */
 const wordOf = (b: HTMLButtonElement): string => (b.getAttribute("aria-label") ?? b.textContent ?? "").trim();
-const addsOn = (): HTMLButtonElement[] => [...document.querySelectorAll<HTMLButtonElement>("[data-settings-page] button, [data-agents-manager] button, [data-slot=dialog-popup] button")].filter(b => wordOf(b).startsWith("Add"));
+const addsOn = (): HTMLButtonElement[] => [...document.querySelectorAll<HTMLButtonElement>("[data-settings-page] button, [data-agents-panel] button, [data-slot=dialog-popup] button")].filter(b => wordOf(b).startsWith("Add"));
 /** Rows that carry their plus and stay rows: the Add a project sheet's side list ends in Add a computer. */
 const SIDE_ROWS = ["[data-slot=dialog-popup] aside [data-k=add-computer]"];
 /** The Add buttons standing now that are drawn some other way, by word. */
@@ -102,7 +102,7 @@ const keycap = (b: Element | null): void => {
   expect(cls.filter(c => /^(sm:)?h-(6|7|9|10)$|^(sm:)?text-xs$/.test(c))).toEqual([]);
 };
 
-/** The agents manager where it stands now, in a task's panel on this computer. */
+/** The agents panel where it stands now, in a task's panel on this computer. */
 const mountPanel = async (): Promise<void> => {
   useStore.setState({ api: api(), places: [here], workspaces: [MINE] });
   render(
@@ -114,7 +114,7 @@ const mountPanel = async (): Promise<void> => {
 };
 
 describe("the one size of the shared Add button", () => {
-  it("is the 32 px keycap on the key road, the ssh road, the manager's head and the first run", async () => {
+  it("is the 32 px keycap on the key road, the ssh road and the first run", async () => {
     mountSettings({ api: api(), at: { kind: "group", group: "computers" } });
     await settle();
     fireEvent.click(screen.getByRole("button", { name: ADD_COMPUTER_WORDS.addCloud }));
@@ -126,22 +126,21 @@ describe("the one size of the shared Add button", () => {
     await settle();
     keycap(document.querySelector("[data-k='ssh-add']"));
     cleanup();
-    await mountPanel();
-    const tabs = document.querySelectorAll<HTMLElement>("[data-agents-manager] [data-slot=segmented-control] [role=radio]");
-    fireEvent.click(tabs[1]!);
-    await settle();
-    keycap(document.querySelector("[data-k=agents-add]"));
-    cleanup();
     render(<FirstRun />);
     keycap(document.querySelector("[data-k=add-project]"));
     expect(document.querySelector("[data-k=add-project]")?.hasAttribute("data-add-button")).toBe(true);
   });
 });
 
-describe("the shared Add button in the agents manager", () => {
-  it("is every Add on each tab, at the add level and in the Add an MCP server form", async () => {
+describe("the shared Add button in the agents panel", () => {
+  it("is every Add on each tab, on every item's page, at the add and in the Add a tool server form", async () => {
     await mountPanel();
-    const tabs = (): HTMLElement[] => [...document.querySelectorAll<HTMLElement>("[data-agents-manager] [data-slot=segmented-control] [role=radio]")];
+    const tabs = (): HTMLElement[] => [...document.querySelectorAll<HTMLElement>("[data-agents-panel] [data-slot=segmented-control] [role=radio]")];
+    const rows = (): HTMLElement[] => [...document.querySelectorAll<HTMLElement>("[data-agents-panel] [data-settings-card]:not([data-settings-card=not-read]) [data-settings-row] [data-settings-title]")];
+    const back = async (): Promise<void> => {
+      fireEvent.click(document.querySelector<HTMLButtonElement>("[data-agents-panel] [data-k=agents-back]")!);
+      await settle();
+    };
     const names = tabs().map(t => t.textContent ?? "");
     expect(names.length).toBe(3);
     const seen = new Set<string>();
@@ -150,25 +149,23 @@ describe("the shared Add button in the agents manager", () => {
       await settle();
       expect({ name, strays: strays() }).toEqual({ name, strays: [] });
       addsOn().forEach(b => seen.add(wordOf(b)));
-      const rows = document.querySelectorAll("[data-agents-row]").length;
-      for (let row = 0; row < rows; row++) {
-        fireEvent.click(document.querySelectorAll<HTMLButtonElement>("[data-agents-row] [data-row-trigger]")[row]!);
+      const count = rows().length;
+      for (let row = 0; row < count; row++) {
+        fireEvent.click(rows()[row]!);
         await settle();
         expect({ name, row, strays: strays() }).toEqual({ name, row, strays: [] });
         addsOn().forEach(b => seen.add(wordOf(b)));
-        fireEvent.click(document.querySelector<HTMLButtonElement>("[data-level-head] button")!);
-        await settle();
+        await back();
       }
-      const add = document.querySelector<HTMLButtonElement>("[data-k=agents-add]");
+      const add = document.querySelector<HTMLButtonElement>("[data-agents-panel] [data-k=kind-add]");
       if (add === null || add.disabled) continue;
       fireEvent.click(add);
       await settle();
       document.querySelectorAll<HTMLButtonElement>("[data-k=add-server-pair-add]").forEach(b => fireEvent.click(b));
       expect({ name, level: "add", strays: strays() }).toEqual({ name, level: "add", strays: [] });
       addsOn().forEach(b => seen.add(wordOf(b)));
-      fireEvent.click(document.querySelector<HTMLButtonElement>("[data-level-head] button")!);
-      await settle();
+      await back();
     }
-    expect([...seen]).toEqual(expect.arrayContaining(["Add the wsp tools", "Add skill", "Add MCP server", "Add server"]));
+    expect([...seen]).toEqual(expect.arrayContaining(["Add the wsp tools", "Add skill", "Add a tool server", "Add server"]));
   });
 });

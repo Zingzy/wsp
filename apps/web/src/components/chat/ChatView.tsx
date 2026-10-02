@@ -10,7 +10,7 @@
 // Under the transcript stand the threads this one's agent opened, one line each
 // with where it runs and its status, and the footer weighs the turn's own cost
 // against what those threads spent.
-import { HeroAtmosphere, HeroMark } from "./EmptyHero.js";
+import { HeroField, HeroMark } from "./EmptyHero.js";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowDownIcon } from "lucide-react";
 import type { LegendListRef } from "@legendapp/list/react";
@@ -35,7 +35,6 @@ import { useNewThreadRequests } from "./newThreadRequests";
 import { useChatThread, type ChatThreadHandle } from "./useChatThread";
 import { rewindableReplies, type RewindableReply } from "./RewindDialog";
 import { requestRewind } from "../../shell/shellRequests";
-import { DEFAULT_HARNESS } from "./ComposerOptionPickers";
 import { TRANSCRIPT_LOADING } from "../../transcript-words";
 import { useAppDark } from "../../settings/theme";
 import { insertIntoComposer } from "./composerInsert";
@@ -116,7 +115,9 @@ export function ChatView({
   }, [cwd, thread.thread, view.runs, workspaceId]);
   const turnRows = useThreadSessions(workspaceId, threadKey);
   useReadStamp(turnRows);
-  const catalog = useHarnessCatalog(turnRows.at(-1)?.harness ?? DEFAULT_HARNESS, workspaceId);
+  // The agent this thread ran on, which a rewind names; a thread with no turn has none.
+  const agent = turnRows.at(-1)?.harness ?? view.agent;
+  const catalog = useHarnessCatalog(agent, workspaceId);
   // What each turn changed hangs under that turn's last reply, and opens the Changes pane on the turn's own range.
   // Keyed on what it draws rather than on the entries, so a streamed chunk hands the timeline the same map.
   const diffPlaces = view.turns.flatMap(turn => {
@@ -189,13 +190,13 @@ export function ChatView({
   const showTranscript = thread.hydrated && !empty;
   // Rewind to here stands on each earlier reply that kept something to go back to, and opens the one dialog.
   const cutsConversation = catalog?.rewindsConversation === true;
-  const rewindable = useMemo(() => (api?.rewindThread === undefined ? new Map<string, RewindableReply>() : rewindableReplies(view.turns, view.entries, cutsConversation)), [api, view.turns, view.entries, cutsConversation]);
+  const rewindable = useMemo(() => (api?.rewindThread === undefined || agent === null ? new Map<string, RewindableReply>() : rewindableReplies(view.turns, view.entries, cutsConversation)), [agent, api, view.turns, view.entries, cutsConversation]);
   // The set and the handler reach every row through the timeline's shared context, so they move only when which
   // replies can be rewound moves, never on a streamed chunk: a settled reply would redraw on every one.
   const rewindableKey = [...rewindable.keys()].join("\n");
   const rewindableIds = useMemo(() => new Set(rewindableKey === "" ? [] : rewindableKey.split("\n")), [rewindableKey]);
-  const rewindRef = useRef({ rewindable, threadId: turnRows.at(-1)?.threadId ?? threadId, agent: catalog?.label ?? turnRows.at(-1)?.harness ?? DEFAULT_HARNESS, cutsConversation });
-  rewindRef.current = { rewindable, threadId: turnRows.at(-1)?.threadId ?? threadId, agent: catalog?.label ?? turnRows.at(-1)?.harness ?? DEFAULT_HARNESS, cutsConversation };
+  const rewindRef = useRef({ rewindable, threadId: turnRows.at(-1)?.threadId ?? threadId, agent: catalog?.label ?? agent ?? "", cutsConversation });
+  rewindRef.current = { rewindable, threadId: turnRows.at(-1)?.threadId ?? threadId, agent: catalog?.label ?? agent ?? "", cutsConversation };
   const onRewind = useCallback(
     (messageId: string) => {
       const now = rewindRef.current;
@@ -234,7 +235,7 @@ export function ChatView({
           // A fresh thread centres the headline and the composer as one stack; the composer glides to its dock
           // when the first message goes.
           <>
-            <HeroAtmosphere {...(workspace?.project?.id === undefined ? {} : { projectId: workspace.project.id })} />
+            <HeroField />
             <div className="absolute inset-x-0 bottom-[calc(var(--empty-lift)+var(--chat-composer-inset)+2.5rem)]">
               <EmptyThread name={workspace?.project.name ?? workspaceId} {...(workspace?.project?.id === undefined ? {} : { projectId: workspace.project.id })} />
             </div>

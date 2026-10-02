@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The words the settings page and its palette row say, one place, keyed by the
 // preference value where a value has words of its own.
-import { fmtPx, listWords, offlineFor, placeUpdateLine, type MidTurn, type NotifyChoice, type OnQuit, type PlaceDialRoad, type PlaceProvisionRow, type SendKey, type SettleAfter, type TerminalSizeSource, type ThemePreference } from "@wsp/protocol";
+import { fmtPx, listWords, offlineFor, placeUpdateLine, type MidTurn, type NewThreadIn, type NotifyChoice, type OnQuit, type PlaceDialRoad, type PlaceProvisionRow, type SendKey, type SettleAfter, type TerminalSizeSource, type ThemePreference } from "@wsp/protocol";
 
 /** The muted mono a state word or a description of machine words wears, and the foreground mono a value a person
  * reads wears: an address, a size, a path, a time, a version. Two class strings the page, the sheet and the first
  * run all draw with, so one type ladder holds across them. */
-export const FACT = "font-mono text-[11px] tabular-nums text-muted-foreground";
-export const VALUE = "font-mono text-xs tabular-nums text-foreground";
+export const FACT = "text-[13px] tabular-nums text-muted-foreground";
+export const VALUE = "text-sm tabular-nums text-foreground";
 
 /** A fact's slot where its words may take two lines: exactly two of the line's own line heights, held whether the
  * words take one line or two, and cut at the second with the whole on the element's hover text. The height is read
@@ -21,9 +21,12 @@ export const SETTINGS_WORDS = {
   searchPage: "Search",
   nothingMatches: "Nothing matches.",
   back: "Back",
+  backTo: (group: string): string => `Back to ${group}`,
   restore: "Restore defaults",
+  resetRow: "Back to the default",
   appearance: "Appearance",
   theme: "Theme",
+  mode: "Mode",
   /** The grid of one side's themes, named by the side's word. */
   themesOf: (side: string) => `${side} themes`,
 } as const;
@@ -48,7 +51,8 @@ export const FONT_WORDS = {
 
 /** Settings > Appearance's theme section. */
 export const THEME_SECTION_WORDS = {
-  lede: "The side wsp draws, and the theme on each side. Point at a theme to see this window in it.",
+  lede: "Point at a theme to see this window in it.",
+  modeLede: (here: string): string => `Light, dark, or whichever side ${here === "" ? "this computer" : here} is on.`,
 } as const;
 
 /** Settings > Appearance's glass section, which holds the Transparency switch. */
@@ -72,25 +76,11 @@ export const onceNamed = (here: string, sentence: (here: string) => string): str
  * is left ending on a dangling "on". */
 export const onName = (name: string): string => onceNamed(name, n => ` on ${n}`);
 
-/** The sentence under each settings page's name: what the page is for, before any row. `here` is the name of the
- * computer the host runs on. */
-export const groupBlurbs = (here: string) => ({
-  general: onceNamed(here, h => `How wsp behaves on ${h}.`),
-  appearance: "How wsp looks, on every screen that opens it.",
-  computers: onceNamed(here, h => `The computers your threads run on, and the clouds that lend them machines. ${h} is the first one.`),
-  projects: "The repos wsp makes tasks from, each on one computer.",
-  devices: "The phones and other computers paired with this wsp.",
-  account: "Your sign-in, which lets your other devices find this wsp.",
-  usage: "What each account may still use, and the tokens your agents used and what they cost.",
-  privacy: "What wsp asks of services outside your computers, and what it reads on this one.",
-  keybindings: "The keys wsp answers to.",
-  about: "Which wsp this is.",
-});
-
 /** What the Computers pages say beyond the words the wire already carries in PLACES_WORDS: the list row, a
  * computer's own page, its agents and the Remove dialog, which are this build's and are drawn nowhere else. No
  * word is in both. */
 export const WHERE_WORDS = {
+  runningHere: (n: number): string => (n === 0 ? "Nothing running" : `${n} ${n === 1 ? "thread" : "threads"} running`),
   /** A place list the host refused, said where the list would stand. */
   notRead: (said: string) => `Computers not read: ${said}`,
   /** Puts this wsp's daemon on that computer and runs the recipe there again. One word in both states, held and
@@ -117,7 +107,7 @@ export const WHERE_WORDS = {
   cannotDial: "This wsp cannot dial a computer from here.",
   cannotSaveKey: "This wsp cannot save a key from here.",
   /** The first cell of each list's header row, which is the only name a section has. */
-  heads: { computer: "Computer", cores: "Cores", memory: "Memory", threads: "Threads", cloud: "Cloud", agents: "Agents", version: "Version", servers: "MCP servers", image: "Image", threadsHere: "Threads running here" },
+  heads: { computer: "Computer", cores: "Cores", memory: "Memory", threads: "Threads", cloud: "Cloud", agents: "Agents", version: "Version", servers: "Tool servers", image: "Image", threadsHere: "Threads running here" },
   yourImage: "Your image",
 } as const;
 
@@ -217,7 +207,6 @@ export const ACCOUNT_WORDS = {
   reachable: "Reachable from another device outside your network. Not from the app yet.",
 } as const;
 
-/** Settings > Privacy: what this wsp asks of a service outside the person's computers. */
 /** Settings > General. */
 export const GENERAL_WORDS = {
   composer: "Composer",
@@ -236,6 +225,9 @@ export const GENERAL_WORDS = {
   planAlerts: "When a plan window runs low",
   planAlertsDescription: "At 70% and 90% of a window, once each, and when an account is blocked.",
   threads: "Threads",
+  newThreadIn: "New thread starts in",
+  newThreadInDescription: "Ask every time lists your projects before a new thread opens.",
+  newThreadInChoices: { current: "Current project", ask: "Ask every time" } satisfies Record<NewThreadIn, string>,
   settleAfter: "Settle a thread after",
   settleAfterDescription: "A read thread moves to Settled once it has been quiet this long.",
   settleChoices: { "15m": "15 minutes", "1h": "1 hour", "2h": "2 hours", "1d": "1 day", never: "Never" } satisfies Record<SettleAfter, string>,
@@ -292,9 +284,92 @@ export const DEVICES_WORDS = {
   refused: "Who is paired is read on the computer running wsp.",
 } as const;
 
+/** Settings > Agents: its title, the computer it reads and its three lists. */
+export const AGENTS_PAGE_WORDS = {
+  title: "Agents",
+  computer: "Computer",
+  tab: "Show",
+  tabs: { agents: "Agents", servers: "Tool servers", skills: "Skills" },
+  onComputer: (name: string): string => `Agents, tool servers and skills on ${name}`,
+  onComputerDescription: "Installed agents, their sign-ins, and the tools and skills they get.",
+  newThreads: "New threads",
+  defaultAgent: "Default agent",
+  defaultAgentDescription: "A project can set its own.",
+  on: (name: string): string => `On ${name}`,
+  /** The first card's head on the Tool servers and Skills tabs: its group, on the computer read. */
+  groupOn: (group: string, name: string): string => `${group} on ${name}`,
+  /** A state with the figure it answered with: a server connected with its tools. */
+  stateWith: (state: string, count: string): string => `${state} with ${count}`,
+  details: "Details",
+  /** The head over what the host could not read on the computer. */
+  notRead: "Not read",
+  skillFile: "SKILL.md",
+  removeName: (act: string, name: string): string => `${act} ${name}`,
+  notListed: "Not listed yet.",
+  notInstalled: "Not installed here",
+  checkedNow: (when: string): string => `checked ${when}`,
+  readAgain: "Read the agents again",
+  /** A model at the effort a new thread runs it at. */
+  atEffort: (model: string, effort: string | undefined): string => (effort === undefined ? model : `${model} at ${effort.toLowerCase()} effort`),
+  /** An access word as its own quiet fact. */
+  accessFact: (word: string): string => `${word.toLowerCase()} access`,
+  update: "Update",
+  updateTo: (version: string): string => `Update to ${version}`,
+  updateCopied: (command: string, computer: string): string => `Copied ${command}. Run it in a terminal on ${computer}.`,
+  turnOn: (agent: string, computer: string): string => `${agent} on ${computer}`,
+  /** How an agent's own login there stands, by the kind of login its status names. */
+  signedInAs: { "api-key": "Signed in with an API key", subscription: "Signed in with a subscription", oauth: "Signed in with OAuth" },
+  signedInWith: "Signed in with ",
+  model: "Model",
+  modelDescription: "The composer still changes it for one thread.",
+  effort: "Effort",
+  access: "Access",
+  accessDescription: (agent: string): string => `A project can set its own. Passed to ${agent} at every launch.`,
+  accessWords: { ask: "Ask", "auto-edit": "Auto-edit", full: "Full", plan: "Plan" },
+  models: "Models",
+  modelsDescription: "The ones switched on are the composer's picker, in this order.",
+  defaultModel: "default",
+  noThreadsYet: (agent: string): string => `wsp starts no threads on ${agent} yet, so it has nothing here to set.`,
+  reorder: (model: string): string => `Drag to reorder ${model}, or use the arrow keys`,
+  modelIdPlaceholder: "Add a model by its id",
+  /** What the page of an agent wsp starts no thread on holds, as a search row says it. */
+  agentHeadLine: "Version, sign-in, update and whether it is on",
+  /** An id the person added that the agent's own list of every model it runs leaves out; still run as named. */
+  notInList: (agent: string): string => `Not in ${agent}'s list`,
+  edit: "Edit",
+  change: "Change",
+  howItRuns: "How it runs",
+  program: "Program",
+  configFolder: "Config folder",
+  ownFolder: (agent: string): string => `${agent}'s own folder`,
+  launchArguments: "Launch arguments",
+  argumentsCount: (n: number): string => (n === 0 ? "No arguments." : `${n} ${n === 1 ? "argument" : "arguments"}.`),
+  environment: "Environment",
+  variablesCount: (n: number): string => (n === 0 ? "No variables." : `${n} ${n === 1 ? "variable" : "variables"}, values hidden.`),
+  save: "Save",
+  cancel: "Cancel",
+  putBack: (agent: string): string => `Use ${agent}'s own`,
+  programSheet: (agent: string, computer: string): string => `The program run in ${agent}'s place on ${computer}: a path, or a word on its PATH.`,
+  configSheet: (agent: string, computer: string): string => `The folder on ${computer} ${agent} keeps its config, sessions and sign-in in, under that computer's home.`,
+  argumentsSheet: (agent: string, computer: string): string => `Words added to every launch of ${agent} on ${computer}, as a shell would split them.`,
+  argumentsUnclosed: "A quote is never closed.",
+  environmentSheet: (agent: string, computer: string): string => `Variables every launch of ${agent} on ${computer} carries. A value is typed here once and never shown again.`,
+  variableName: "Name",
+  variableValue: "Value",
+  addVariable: "Add",
+  removeVariable: (name: string): string => `Remove ${name}`,
+  noVariables: "No variables yet.",
+  shown: (model: string): string => `Show ${model}`,
+  modelId: "Model id",
+  addModel: "Add",
+  removeModel: (model: string): string => `Remove ${model}`,
+} as const;
+
 /** Settings > Usage: its title and the words the lists carry beyond the wire's own in USAGE_WORDS. */
 export const USAGE_PAGE_WORDS = {
   title: "Usage",
+  tabs: { used: "Usage", limits: "Limits" },
+  tab: "Show",
   limits: "Limits",
   session: "Session",
   week: "Week",
@@ -307,15 +382,41 @@ export const USAGE_PAGE_WORDS = {
   cached: "Cached",
   price: "Price",
   noAccounts: "No agent is signed in on any computer.",
+  /** A read the host refused or never answered, said as that rather than as an empty answer. */
+  limitsRefused: (said: string): string => `The plan limits could not be read: ${said}`,
+  usedRefused: (said: string): string => `The usage could not be read: ${said}`,
+  windows: { session: "5-hour", week: "Week", week_opus: "Week, Opus", week_sonnet: "Week, Sonnet", month: "Month" } as Partial<Record<string, string>>,
+  reached: "Limit reached",
+  left: "left",
+  runsOut: (when: string): string => `Runs out ${when}`,
+  aheadOfPace: (resets: string): string => `Ahead of pace${resets === "" ? "" : `, ${resets}`}`,
+  underPace: (resets: string): string => `Under pace${resets === "" ? "" : `, ${resets}`}`,
+  onPace: (resets: string): string => `On pace${resets === "" ? "" : `, ${resets}`}`,
+  accounts: (n: number, agent: string): string => `${n} ${agent} accounts`,
+  burn: (tokens: string, threads: number): string => `Using ${tokens} tokens a minute across ${threads} ${threads === 1 ? "thread" : "threads"}`,
+  checked: (when: string): string => `checked ${when}`,
+  noPlanLimit: "No plan limit",
   noLimit: (agents: readonly string[]): string => `${listWords(agents)} ${agents.length === 1 ? "reports" : "report"} no plan limit.`,
   ranges: { day: "Today", week: "7 days", month: "30 days" },
   splits: { agent: "Agent", account: "Account", computer: "Computer", project: "Project", model: "Model" },
+  estimate: "API estimate",
+  atListPrice: "at list price",
+  turns: "Turns",
+  turnsNote: "in threads wsp ran",
+  cacheHit: "Cache hit",
+  saved: (amount: string): string => `${amount} saved`,
+  cacheWrite: "Cache write",
+  fromCache: (share: string): string => `${share} read from cache`,
+  chartHead: { day: "Tokens an hour", week: "Tokens a day", month: "Tokens a day" },
+  by: (split: string): string => `By ${split.toLowerCase()}`,
+  mix: "Where the tokens went",
+  agentAndModel: "Agent and model",
+  allOf: { agent: "All agents together", account: "All accounts together", computer: "All computers together", project: "All projects together", model: "All models together" },
 } as const;
 
 /** Settings > Projects: the list, a project's own page and its one act. */
 export const PROJECTS_WORDS = {
   look: "Look",
-  about: "About",
   icon: "Icon",
   iconDescription: "Drawn beside the project in the sidebar and the switcher.",
   hue: "Colour",
@@ -330,28 +431,36 @@ export const PROJECTS_WORDS = {
   computer: "Computer",
   computerHover: "Where the project lives and where its tasks run.",
   remote: "Remote",
+  repository: "Repository",
+  open: "Open",
+  where: (source: string, computer: string): string => `${source} on ${computer}`,
+  threads: (n: number, running: number): string => `${n} ${n === 1 ? "thread" : "threads"}${running === 0 ? "" : `, ${running} running`}`,
   remoteHover: "The repository it was cloned from.",
-  added: "Added",
-  addedHover: "When it was recorded.",
-  seeded: "Seeded",
-  seededHover: (here: string): string => onceNamed(here, h => `What the seed carried from ${h}, once.`),
   newWorkspaces: "New tasks",
-  branch: "Branch",
-  branchDescription: "Where a new task starts.",
-  lastAgent: "Last agent",
-  lastAgentDescription: "What a new thread on it defaults to.",
   remove: "Remove",
   removeTitle: (name: string): string => `Remove ${name}`,
   removeAsk: (name: string): string => `Remove ${name}?`,
+  /** Only the count: a project can carry dozens of workspaces, and their names are the Workspaces list's to show. */
+  inUse: (n: number): string => `${n === 1 ? "A workspace still uses it" : `${n} workspaces still use it`}. Delete ${n === 1 ? "it" : "them"} first.`,
   /** One line by the computer's kind, matching the runtime's three landings. */
   removeHere: "Its record leaves this wsp. Your folder stays as it is.",
   removeOnComputer: (computer: string): string => `Its record leaves this wsp, and wsp's own clone of it on ${computer} goes with it.`,
   removeAtCloud: (cloud: string): string => `Its record leaves this wsp, and its image at ${cloud} with it.`,
+  newThreads: "New threads in this project",
+  defaultAgent: "Default agent",
+  model: "Model",
+  access: "Access",
+  agentSet: "Set here for this project. The arrow goes back to the default for every project.",
+  agentUnset: "Unset, so a new thread takes the default for every project.",
+  ownSet: "Set here for this project. The arrow goes back to the agent's own.",
+  ownUnset: "Unset, so a new thread takes the agent's own.",
+  inherits: (value: string, from?: string): string => (from === undefined ? `Default (${value})` : `Default (${value}, from ${from})`),
 } as const;
 
 /** Settings > Keybindings: the four cards' heads and the three keys that are not rules. */
 export const KEYBINDINGS_WORDS = {
   title: "Keybindings",
+  windowAndPanels: "Window and panels",
   workspacesAndThreads: "Tasks and threads",
   terminal: "Terminal, while it has focus",
   fixed: "Fixed",
@@ -360,9 +469,16 @@ export const KEYBINDINGS_WORDS = {
   leaveSettings: "Leave Settings",
 } as const;
 
-/** Settings > About: the two halves of one release, and the road to the next. */
+/** Settings > General's Version card: the two halves of one release, and the road to the next. */
 export const ABOUT_WORDS = {
-  title: "About",
+  title: "Version",
+  wsp: "wsp",
+  upToDate: "Up to date",
+  available: (version: string): string => `${version} is out`,
+  checking: "Checking for updates",
+  checksOff: "Update checks are off",
+  notChecked: "Not checked yet",
+  whatsNew: "What's new",
   app: "App",
   appHover: "The desktop shell holding this window.",
   host: "Host",
@@ -396,3 +512,34 @@ export const PROVISION_OUTCOME_WORDS: Record<PlaceProvisionRow["outcome"], strin
   failed: "failed",
   skipped: "set aside",
 };
+
+/** A computer's own page: whether it runs an older wsp, the limits a person sets on it, and whether its threads may
+ * open threads. `here` is the name of the computer the host runs on, never "this Mac". */
+export const COMPUTER_PAGE_WORDS = {
+  behindTitle: (here: string): string => `Runs an older wsp than ${here}`,
+  behindUpdate: (name: string, here: string): string => `Threads still run there. Updating installs ${here}'s version on ${name} and restarts it; running threads carry on.`,
+  behindHereTitle: "Runs an older wsp than this app",
+  behindInstall: (fix: string): string => `Threads still run. Run ${fix} in a terminal to bring it level.`,
+  update: (name: string): string => `Update wsp on ${name}`,
+  updating: "Updating",
+  limits: "Limits",
+  threadsAtOnce: "Threads at once",
+  threadsLine: (n: number, name: string, mem: string): string => `New threads wait past this. The default is one thread for every 2.5 GB of this computer's memory, so ${n} on ${name}'s ${mem}.`,
+  threadsLineBare: "New threads wait past this.",
+  fewer: "One fewer",
+  more: "One more",
+  napTitle: "Nap a quiet workspace after",
+  napLine: "A workspace with no running turn stops and wakes on the next message.",
+  napNever: "Never",
+  threadsHere: "Threads here",
+  spawnTitle: "Agents may start agents",
+  spawnLine: (machines: number, depth: number): string => `A thread here may open threads of its own: up to ${machines} ${machines === 1 ? "machine" : "machines"}, ${depth === 1 ? "one level deep" : `${depth} levels deep`}.`,
+} as const;
+
+/** The Limits tab's banked resets line: what is banked, and the one act that spends one after asking. */
+export const RESET_LINE_WORDS = {
+  resets: "Resets",
+  use: "Use reset",
+  using: "Using reset",
+  cancel: "Cancel",
+} as const;

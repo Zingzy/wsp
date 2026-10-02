@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The export dialog in a real Chromium, both themes: one container whose
-// sections are told apart by a hairline and a small label alone, no section
-// with a fill or a border colour of its own, no step ledger, every agent and
+// sections are told apart by space and a small label alone, no section
+// with a fill or a border of its own, no step ledger, every agent and
 // summary row one height, the ticks on the neutral ramp, the one slot above
 // the footer empty at rest, reading the step at AA mid-download and the landed
 // line at done, the refusal for an existing destination the one loud line and
@@ -33,13 +33,17 @@ interface Box {
 }
 
 const SOURCE = "/Users/me/code/spoo";
-const LANDED = "spoo is at /Users/me/code/spoo on this Mac.";
+/** The computer the harness's host runs on, which the landed line names. */
+const HERE = "zingzy-mbp";
+const LANDED = `spoo is at /Users/me/code/spoo on ${HERE}.`;
 const REFUSED = "/Users/me/code/spoo already exists on this computer with 1204 files; export with replace to overwrite it";
 const LONG = "/Users/me/code/clients/northwind-traders/platform/services/billing-reconciliation/workers/nightly-settlements-batch/spoo";
 const DOWNLOADING = "Downloading the folder, 31 MB";
 const NOT_LANDED = "when it lands";
-/** Two lines of the status line's text, its floor; a third line grows it past this. */
+/** The pitch of the summary's rows. */
 const ROW = 28;
+/** Two lines of the status line's 18 px text, its floor; a third line grows it past this. */
+const SLOT = 36;
 const SECTIONS = ["[data-k=source]", "[data-k=dest]", "[data-k=agents]", "[data-k=summary]"] as const;
 
 describe.skipIf(renderSkipped !== undefined)("the export dialog laid out in Chromium", () => {
@@ -108,17 +112,17 @@ describe.skipIf(renderSkipped !== undefined)("the export dialog laid out in Chro
     const summary = await boxes("[data-k=files], [data-k=caches]");
     expect(summary).toHaveLength(2);
     expect(new Set(heights(summary)).size).toBe(1);
-    expect(new Set(heights(await boxes("[data-k=source] label, [data-k=dest] p, [data-k=agents] p, [data-k=summary] p"))).size).toBe(1);
+    // Every section's label, its first line; the note under Sessions wraps with the dialog's width.
+    expect(new Set(heights(await boxes(SECTIONS.map(s => `${s} > :first-child`).join(", ")))).size).toBe(1);
     expect(await page!.locator("[data-step]").count()).toBe(0);
 
-    // One container: every section is dressed alike, a hairline above and no fill or border colour of its own.
+    // One container: every section is dressed alike, no hairline between them and no fill or border of its own.
     for (const prop of ["background-color", "border-top-color", "border-left-width", "border-radius"]) {
       const values = await Promise.all(SECTIONS.map(s => style(s, prop)));
       expect(new Set(values.flat()).size, prop).toBe(1);
     }
     expect((await style("[data-k=agents]", "background-color"))[0]).toBe("rgba(0, 0, 0, 0)");
-    expect((await style("[data-k=source]", "border-top-width"))[0]).toBe("0px");
-    expect((await style("[data-k=dest]", "border-top-width"))[0]).toBe("1px");
+    for (const section of SECTIONS) expect((await style(section, "border-top-width"))[0], section).toBe("0px");
 
     // The ticks fill from the neutral ramp: a checked one is the text colour, not the accent the Export key carries.
     const foreground = (await style("[data-k=agents] li > span", "color"))[0];
@@ -139,7 +143,7 @@ describe.skipIf(renderSkipped !== undefined)("the export dialog laid out in Chro
 
     await dialog.screenshot({ path: join(SHOTS, `export-open-${theme}.png`) });
     const before = await frame();
-    expect(Math.round(before["progress"]!.height)).toBeGreaterThanOrEqual(ROW);
+    expect(Math.round(before["progress"]!.height)).toBeGreaterThanOrEqual(SLOT);
     const quiet = await textColor("[role=status]");
 
     await page!.locator("button:has-text('Export')").click();
@@ -160,7 +164,7 @@ describe.skipIf(renderSkipped !== undefined)("the export dialog laid out in Chro
     const after = await frame();
     expect(after).toEqual(still(before, after["button"]!));
     expect(await textColor("[role=status]")).toBe(quiet);
-    expect(await page!.locator("[data-k=outcome]").allTextContents()).toEqual(["moved", "transcripts landed, not yet listed, 1 rollout skipped", "nothing to bring"]);
+    expect(await page!.locator("[data-k=outcome]").allTextContents()).toEqual(["moved", "landed, not listed yet, 1 rollout skipped", "nothing to bring"]);
     expect(await whole("[data-k=outcome]")).toEqual([true, true, true]);
     expect(await page!.locator("[data-k=files]").textContent()).toBe("1202 files 38 MB");
     expect(await page!.locator("[data-k=caches]").textContent()).toBe("4 folders");
@@ -179,7 +183,7 @@ describe.skipIf(renderSkipped !== undefined)("the export dialog laid out in Chro
     const dialog = page!.locator("[role=dialog]");
     const before = await frame();
     const quiet = await textColor("[role=status]");
-    const hairlines = await Promise.all(SECTIONS.map(s => style(s, "border-top-color")));
+    const edges = await Promise.all(SECTIONS.map(s => style(s, "border-top-color")));
 
     await page!.locator("button:has-text('Export')").click();
     await page!.waitForFunction(line => document.querySelector("[role=status]")?.textContent === line, REFUSED);
@@ -187,7 +191,7 @@ describe.skipIf(renderSkipped !== undefined)("the export dialog laid out in Chro
     expect(refused).toEqual(still(before, refused["button"]!));
     expect(await textColor("[role=status]")).not.toBe(quiet);
     expect(await page!.locator("[role=progressbar]").count()).toBe(0);
-    expect(await Promise.all(SECTIONS.map(s => style(s, "border-top-color")))).toEqual(hairlines);
+    expect(await Promise.all(SECTIONS.map(s => style(s, "border-top-color")))).toEqual(edges);
     const loud = await contrast("[role=status]");
     console.info(`${theme}: the refusal reads at ${loud.join(", ")} to 1`);
     for (const ratio of loud) expect(ratio).toBeGreaterThanOrEqual(4.5);
@@ -234,7 +238,7 @@ describe.skipIf(renderSkipped !== undefined)("the export dialog laid out in Chro
     await open(`theme=${theme}&exists=1&long=1`, LONG);
     const dialog = page!.locator("[role=dialog]");
     const before = await frame();
-    expect(Math.round((await box("[role=status]")).height)).toBe(ROW);
+    expect(Math.round((await box("[role=status]")).height)).toBe(SLOT);
 
     await page!.locator("button:has-text('Export')").click();
     await page!.waitForFunction(path => document.querySelector("[role=status]")?.textContent?.startsWith(path), LONG);
@@ -246,7 +250,7 @@ describe.skipIf(renderSkipped !== undefined)("the export dialog laid out in Chro
     await dialog.screenshot({ path: join(SHOTS, `export-refused-long-${theme}.png`) });
 
     await page!.locator("button:has-text('Replace and export')").click();
-    await page!.waitForFunction(path => document.querySelector("[role=status]")?.textContent === `spoo is at ${path} on this Mac.`, LONG);
+    await page!.waitForFunction(([path, here]) => document.querySelector("[role=status]")?.textContent === `spoo is at ${path} on ${here}.`, [LONG, HERE] as const);
     expect(await uncut("[role=status]")).toBe(true);
     expect(await whole("[data-k=outcome]")).toEqual([true, true, true]);
   }, 40_000);

@@ -925,8 +925,7 @@ const orchestrator = () => {
 };
 
 /** This computer with an image sealed and two computers of the person's own joined to it, both running Docker, and
- * no workspace on either yet: the person the New workspace dialog is written for, who has somewhere to put one and
- * has to pick. What the dialog and the creation log are photographed from. */
+ * no workspace on either yet: a person with somewhere to put one. What the creation log is photographed from. */
 const macAndBoxes = () =>
   store({
     projects: [project("spoo", HERE, 60 * 20)],

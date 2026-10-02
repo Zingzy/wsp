@@ -22,6 +22,7 @@ import { ScrollArea } from "./ui/scroll-area";
 import { PanelTabCloseButton } from "./ui/panel-tab-close-button";
 
 import { PreviewPanelShell, type PreviewPanelMode } from "./preview/PreviewPanelShell";
+import { PanelStripSlot } from "./PanelStripSlot";
 
 /** A launcher tile's surface: the right panel keeps its own, apart from the settings cards'. */
 export const TILE_SURFACE = "overflow-hidden rounded-[10px] border border-border bg-card";
@@ -324,6 +325,7 @@ function SurfaceIcon({ surface }: { surface: RightPanelSurface }) {
 export function RightPanelTabs(props: RightPanelTabsProps) {
   const tabListRef = useRef<HTMLDivElement>(null);
   const [addSurfaceMenuOpen, setAddSurfaceMenuOpen] = useState(false);
+  const [stripSlot, setStripSlot] = useState<HTMLDivElement | null>(null);
 
   const addSurfaceActions = surfaceActions(props);
 
@@ -460,13 +462,14 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             ) : null}
           </div>
         </ScrollArea>
+        <div ref={setStripSlot} data-right-panel-strip-slot className="flex shrink-0 items-center empty:hidden" />
         {props.layoutControls}
       </div>
-      <div className="flex min-h-0 flex-1 flex-col" data-right-panel-surface-content>
+      <div className="flex min-h-0 flex-1 flex-col outline-none" data-right-panel-surface-content tabIndex={-1}>
         {props.activeSurfaceId === null ? (
           <RightPanelEmptyState actions={addSurfaceActions} />
         ) : (
-          props.children
+          <PanelStripSlot.Provider value={stripSlot}>{props.children}</PanelStripSlot.Provider>
         )}
       </div>
     </PreviewPanelShell>

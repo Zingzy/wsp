@@ -13,8 +13,7 @@ export async function askToFix(workspaceId: string, name: string, check?: string
   if (fix === undefined) return;
   try {
     const asked = await fix(workspaceId, check);
-    const agent = agentName(asked.agent ?? "");
-    const text = asked.outcome === "updated" ? fixNothingLine(name, asked.base) : asked.check !== undefined ? fixAskedLine(name, agent, asked.check) : fixConflictsLine(name, agent, asked.base);
+    const text = asked.outcome === "updated" ? fixNothingLine(name, asked.base) : asked.check !== undefined ? fixAskedLine(name, agentName(asked.agent), asked.check) : fixConflictsLine(name, agentName(asked.agent), asked.base);
     addNotice({ kind: "done", text, where: name });
   } catch (e) {
     noticeFailure(e, said => said, { where: name });

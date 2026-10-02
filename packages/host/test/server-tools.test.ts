@@ -347,6 +347,14 @@ describe("one MCP server's tools, on the person's ask", () => {
     expect(readFileSync(join(f.home, "family.pids"), "utf8").trim().split("\n").map(Number).filter(running), "left running after the host's bound").toEqual([]);
   }, 20_000);
 
+  it("says a server whose command is not there was not found, rather than the shell's 127", async () => {
+    const f = fixture();
+    const gone = join(f.bin, "gone");
+    f.config({ gone: { command: gone, args: [] } });
+    const reader = agentsReader({ vault: () => ({}), here: () => here(f) });
+    expect(await reader.tools({ kind: "here" }, { key: "here", agent: "claude", name: "gone" })).toMatchObject({ auth: "failed", refused: `${gone} was not found` });
+  });
+
   it("says a server exited before it answered, with what it said on stderr in the host's log alone, keeps that until a refresh, and refuses a name no config has", async () => {
     const f = fixture();
     f.config({ crash: { command: join(f.bin, "crash"), args: [] } });
