@@ -22,7 +22,9 @@
             "runId": 36495564111,
             "jobId": 109174214002
           },
-          "link": "https://github.com/Zingzy/wsp-pr-lab/actions/runs/36495564111/job/109174214002"
+          "link": "https://github.com/Zingzy/wsp-pr-lab/actions/runs/36495564111/job/109174214002",
+          "startedAt": "2026-09-28T10:00:00Z",
+          "completedAt": "2026-09-28T10:16:00Z"
         },
         {
           "name": "buildkite/wsp",
@@ -48,7 +50,11 @@
       "deletions": 30,
       "changedFiles": 9,
       "commits": 4,
-      "behindBase": 3
+      "behindBase": 3,
+      "autoMerge": {
+        "method": "squash",
+        "by": "ana"
+      }
     }
   },
   {

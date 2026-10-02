@@ -58,10 +58,13 @@ pub(crate) trait PullRequests: Sync {
     fn read_compare(&self, stdout: &str) -> Option<(u64, u64, String)>;
     /// Whether a line refused because the host lacks what it named, off what the program said.
     fn not_found(&self, stderr: &str) -> bool;
-    /// The two lines a pull request's page is read from: its own JSON, and the comments left on its lines.
+    /// The four lines a pull request's page is read from: its own JSON, the comments left on its lines, the comments
+    /// in its conversation, and what only the host's API answers of its commits, reviews and threads.
     fn page_argv(&self, repo: &str, number: u64) -> Vec<String>;
     fn line_comments_argv(&self, repo: &str, number: u64) -> Vec<String>;
-    fn read_page(&self, page: &str, line_comments: &str) -> Option<GitPrViewReply>;
+    fn comments_argv(&self, repo: &str, number: u64) -> Vec<String>;
+    fn graph_argv(&self, repo: &str, number: u64) -> Vec<String>;
+    fn read_page(&self, page: &str, line_comments: &str, comments: &str, graph: &str) -> Option<GitPrViewReply>;
     /// The line that prints the failed steps of one job of one run.
     fn log_argv(&self, repo: &str, run_id: u64, job_id: u64) -> Vec<String>;
     /// The line that merges, or arms a merge for when the checks pass, only while the head is the commit named.
@@ -164,8 +167,17 @@ async fn cli_for<R: Runs>(runner: &R, ask: &Ask<'_>) -> Result<(&'static dyn Pul
     Ok((host, repo))
 }
 
+/// The most one host line's answer is read to: past it the line is stopped and the read refused, since no answer this
+/// module reads comes near it and a line that keeps printing would otherwise be held whole in memory.
+const HOST_CLI_MAX_BYTES: usize = 16 * 1024 * 1024;
+
+/// The most of a pull request's diff read off its line before the cut on a file's boundary: past it the line is
+/// stopped and the diff reads cut, naming the files it saw.
+const PR_DIFF_READ_MAX_BYTES: usize = 4 * numbers::GIT_DIFF_CAP_BYTES;
+
 /// One host command line, run the way the runner runs a program: in the folder asked, at the work score every
-/// command of ours runs at, with nothing of the line interpolated into a shell.
+/// command of ours runs at, with nothing of the line interpolated into a shell, and its answer read to
+/// HOST_CLI_MAX_BYTES and refused past it.
 ///
 /// A program that is there and answers its own not-signed-in code is the same refusal a program that is not there
 /// at all is: the push has landed either way and the pull request waits for a signed-in command line. Decided
@@ -176,12 +188,28 @@ async fn run_cli<R: Runs>(
     ask: &Ask<'_>,
     args: &[String],
 ) -> Result<(Option<i32>, String, String), OpError> {
+    let (code, stdout, stderr, stopped) = run_cli_within(runner, host, ask, args, HOST_CLI_MAX_BYTES).await?;
+    if stopped {
+        let cap = HOST_CLI_MAX_BYTES / (1024 * 1024);
+        return Err(OpError::plain(format!("{} printed more than {cap} MB for one read and was stopped", host.program())));
+    }
+    Ok((code, stdout, stderr))
+}
+
+/// The same line read to the bytes given, answering whether it was stopped there.
+async fn run_cli_within<R: Runs>(
+    runner: &R,
+    host: &'static dyn PullRequests,
+    ask: &Ask<'_>,
+    args: &[String],
+    max_bytes: usize,
+) -> Result<(Option<i32>, String, String, bool), OpError> {
     let line: Vec<&str> = args.iter().map(String::as_str).collect();
-    let done = runner.run(ask.cwd, host.program(), &line, None, None).await?;
-    if done.code.is_some() && done.code == host.sign_in_exit() {
+    let done = runner.run(ask.cwd, host.program(), &line, None, Some(max_bytes)).await?;
+    if !done.truncated && done.code.is_some() && done.code == host.sign_in_exit() {
         return Err(OpError::coded(DaemonErrorCode::NoHostCli, words::no_host_cli(host.host())));
     }
-    Ok((done.code, String::from_utf8_lossy(&done.stdout).into_owned(), done.stderr))
+    Ok((done.code, String::from_utf8_lossy(&done.stdout).into_owned(), done.stderr, done.truncated))
 }
 
 /// The first line a command line said that is not blank, off stderr before stdout.
@@ -278,18 +306,25 @@ pub(crate) async fn open<R: Runs>(
     }
 }
 
-/// A pull request's page: title, body, commits, reviews, the conversation, the comments on its lines and its files.
+/// A pull request's page: title, body, commits, reviews, the conversation, the comments on its lines and its files,
+/// read off four lines run at once, any of which refused refuses the page.
 pub(crate) async fn page<R: Runs>(runner: &R, ask: &Ask<'_>, number: u64) -> Result<GitPrViewReply, OpError> {
     let (host, repo) = cli_for(runner, ask).await?;
-    let (code, page, said) = run_cli(runner, host, ask, &host.page_argv(&repo, number)).await?;
-    if code != Some(0) {
-        return Err(refused_by(host, &page, &said));
+    let lines = [
+        host.page_argv(&repo, number),
+        host.line_comments_argv(&repo, number),
+        host.comments_argv(&repo, number),
+        host.graph_argv(&repo, number),
+    ];
+    let said = futures_util::future::try_join_all(lines.iter().map(|argv| run_cli(runner, host, ask, argv))).await?;
+    let mut answers = Vec::with_capacity(lines.len());
+    for (code, stdout, stderr) in said {
+        if code != Some(0) {
+            return Err(refused_by(host, &stdout, &stderr));
+        }
+        answers.push(stdout);
     }
-    let (code, lines, said) = run_cli(runner, host, ask, &host.line_comments_argv(&repo, number)).await?;
-    if code != Some(0) {
-        return Err(refused_by(host, &lines, &said));
-    }
-    host.read_page(&page, &lines)
+    host.read_page(&answers[0], &answers[1], &answers[2], &answers[3])
         .ok_or_else(|| OpError::plain(format!("{} answered with a pull request page this does not read", host.program())))
 }
 
@@ -411,15 +446,19 @@ pub(crate) async fn checkout<R: Runs>(runner: &R, cwd: &Path, number: u64) -> Re
     Ok(GitPrCheckoutReply { branch: crate::bring_back::branch_at(runner, cwd).await? })
 }
 
-/// A pull request's diff, cut on a file's boundary at REVIEW_DIFF_MAX_BYTES with every file the cut left out named.
-pub(crate) async fn diff<R: Runs>(runner: &R, ask: &Ask<'_>, number: u64) -> Result<GitPrDiffReply, OpError> {
+/// A pull request's diff, cut on a file's boundary at the bytes asked for, never past GIT_DIFF_CAP_BYTES and at
+/// REVIEW_DIFF_MAX_BYTES where none were asked, with every file the cut left out named; a line that printed past
+/// PR_DIFF_READ_MAX_BYTES is stopped there and names only the files it printed.
+pub(crate) async fn diff<R: Runs>(runner: &R, ask: &Ask<'_>, number: u64, max_bytes: Option<u64>) -> Result<GitPrDiffReply, OpError> {
     let (host, repo) = cli_for(runner, ask).await?;
-    let (code, stdout, stderr) = run_cli(runner, host, ask, &host.diff_argv(&repo, number)).await?;
-    if code != Some(0) {
+    let (code, stdout, stderr, stopped) = run_cli_within(runner, host, ask, &host.diff_argv(&repo, number), PR_DIFF_READ_MAX_BYTES).await?;
+    if !stopped && code != Some(0) {
         return Err(refused_by(host, &stdout, &stderr));
     }
-    let (diff, truncated, left) = cut_diff(&stdout, numbers::REVIEW_DIFF_MAX_BYTES);
-    Ok(GitPrDiffReply { diff, truncated, left })
+    let max =
+        max_bytes.map_or(numbers::REVIEW_DIFF_MAX_BYTES, |m| usize::try_from(m).unwrap_or(usize::MAX).min(numbers::GIT_DIFF_CAP_BYTES));
+    let (diff, truncated, left) = cut_diff(&stdout, max);
+    Ok(GitPrDiffReply { diff, truncated: truncated || stopped, left })
 }
 
 /// One review posted whole, so a half-made review is never seen: the pull request's files read first, each comment
@@ -523,7 +562,7 @@ pub(crate) fn cut_diff(diff: &str, max: usize) -> (String, bool, Vec<String>) {
     (diff[..kept].to_owned(), true, left)
 }
 
-/// A body as a list or a page carries it: at most GIT_PR_LIST_BODY_CAP characters, the cut marked with an ellipsis.
+/// A body as a list carries it: at most GIT_PR_LIST_BODY_CAP characters, the cut marked with an ellipsis.
 pub(crate) fn cut_body(body: &str) -> String {
     let body = body.trim();
     match body.char_indices().nth(numbers::GIT_PR_LIST_BODY_CAP) {
@@ -541,7 +580,7 @@ mod tests {
     use wsp_frames::{CheckState, Mergeable, ReviewSide as Side};
 
     const FIELDS: &str =
-        "number,url,state,isDraft,baseRefName,headRefName,headRefOid,mergeable,mergeStateStatus,reviewDecision,additions,deletions,changedFiles,commits,author,isCrossRepository,maintainerCanModify,headRepositoryOwner";
+        "number,url,state,isDraft,baseRefName,headRefName,headRefOid,mergeable,mergeStateStatus,reviewDecision,additions,deletions,changedFiles,commits,author,isCrossRepository,maintainerCanModify,headRepositoryOwner,autoMergeRequest";
 
     #[test]
     fn the_host_name_is_read_off_a_url_and_off_the_scp_form_alike() {
@@ -705,7 +744,10 @@ mod tests {
         let calls = runner.asked();
         assert!(calls.iter().all(|c| c.program == "gh" && c.cwd == "/Users/p"), "a call ran git or ran somewhere else");
         assert_eq!(calls[0].args, ["pr", "view", "ticket/batch9-git", "-R", "Zingzy/wsp", "--json", FIELDS]);
-        assert_eq!(calls[1].args, ["pr", "checks", "870", "-R", "Zingzy/wsp", "--json", "name,bucket,link,workflow,description"]);
+        assert_eq!(
+            calls[1].args,
+            ["pr", "checks", "870", "-R", "Zingzy/wsp", "--json", "name,bucket,link,workflow,description,startedAt,completedAt"]
+        );
         assert_eq!(
             calls[2].args,
             ["api", "repos/Zingzy/wsp/compare/main...ec5c10de663bd1860925ad42e9580bab4eb1d377", "--jq", ".behind_by"]
@@ -825,14 +867,34 @@ mod tests {
         assert_eq!(refused.asked().len(), 1);
     }
 
+    const NO_GRAPH: &str =
+        r#"{"data":{"repository":{"pullRequest":{"commits":{"nodes":[]},"reviews":{"nodes":[]},"reviewThreads":{"nodes":[]}}}}}"#;
+
     #[tokio::test]
-    async fn a_page_reads_two_lines_and_the_repository_two_more() {
+    async fn a_page_reads_four_lines_and_the_repository_two_more() {
         let ask = Ask { cwd: Path::new("/Users/p"), remote_url: "https://github.com/o/r" };
-        let runner = Recorded::new(&["gh"])
-            .answering(vec![(0, r#"{"title":"t","body":"b","commits":[],"reviews":[],"comments":[],"files":[]}"#), (0, "[]")]);
+        let runner = Recorded::new(&["gh"]).answering(vec![
+            (0, r#"{"title":"t","body":"b","commits":[],"reviews":[],"files":[]}"#),
+            (0, "[[]]"),
+            (0, "[[]]"),
+            (0, NO_GRAPH),
+        ]);
         let read = page(&runner, &ask, 12).await.unwrap();
         assert_eq!((read.title.as_str(), read.review_comments.len()), ("t", 0));
-        assert_eq!(runner.asked()[1].args, ["api", "repos/o/r/pulls/12/comments?per_page=100"]);
+        let calls = runner.asked();
+        assert_eq!(calls.len(), 4);
+        assert_eq!(calls[1].args, ["api", "--paginate", "--slurp", "repos/o/r/pulls/12/comments?per_page=100"]);
+        assert_eq!(calls[2].args, ["api", "--paginate", "--slurp", "repos/o/r/issues/12/comments?per_page=100"]);
+        assert_eq!(calls[3].args[..2], ["api", "graphql"]);
+        assert_eq!(calls[3].args[4..], ["-f", "owner=o", "-f", "name=r", "-F", "number=12"]);
+        // Any of the four refused is the page refused, in gh's own last line.
+        let refused = Recorded::new(&["gh"]).answering_said(vec![
+            (0, r#"{"title":"t","body":"b","commits":[],"reviews":[],"files":[]}"#, ""),
+            (0, "[[]]", ""),
+            (0, "[[]]", ""),
+            (1, "", "gh: Resource not accessible by integration"),
+        ]);
+        assert_eq!(page(&refused, &ask, 12).await.unwrap_err().message, "gh said: gh: Resource not accessible by integration");
         let runner = Recorded::new(&["gh"]).answering(vec![
             (0, r#"{"mergeCommitAllowed":true,"squashMergeAllowed":true,"rebaseMergeAllowed":false,"viewerDefaultMergeMethod":"SQUASH"}"#),
             (0, "true\n"),
@@ -951,6 +1013,64 @@ mod tests {
         assert_eq!(kept.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), ["a"]);
         assert_eq!(folded, ["b", "c"]);
         assert_eq!(body, "Summary.\n\ncheck.sh:10: outside\nother.sh:1: not in the diff");
+    }
+
+    /// The pane's diff asks for the cap a git.diff has, a reviewer's task for the one its prompt can carry, and an ask
+    /// past the cap is held to it.
+    #[tokio::test]
+    async fn a_diff_is_cut_at_the_bytes_asked_for_never_past_the_cap_and_at_the_reviews_where_none_is_asked() {
+        let ask = Ask { cwd: Path::new("/Users/p"), remote_url: "https://github.com/o/r" };
+        let file = |name: &str, bytes: usize| {
+            format!("diff --git a/{name} b/{name}\n--- a/{name}\n+++ b/{name}\n@@ -0,0 +1 @@\n+{}\n", "x".repeat(bytes))
+        };
+        let whole = [file("a.txt", 60 * 1024), file("b.txt", 60 * 1024)].concat();
+        let runner = Recorded::new(&["gh"]).answering(vec![(0, &whole), (0, &whole), (0, &whole)]);
+        let review = diff(&runner, &ask, 7, None).await.unwrap();
+        assert_eq!((review.truncated, review.left.as_slice()), (true, ["b.txt".to_owned()].as_slice()));
+        let pane = diff(&runner, &ask, 7, Some(numbers::GIT_DIFF_CAP_BYTES as u64)).await.unwrap();
+        assert_eq!((pane.diff.len(), pane.truncated), (whole.len(), false));
+        let held = diff(&runner, &ask, 7, Some(u64::MAX)).await.unwrap();
+        assert!(!held.truncated);
+        assert_eq!(runner.asked()[0].args, ["pr", "diff", "7", "-R", "o/r"]);
+        let past = [file("a.txt", 1024 * 1024), file("b.txt", 1024 * 1024)].concat();
+        let runner = Recorded::new(&["gh"]).answering(vec![(0, &past)]);
+        let held = diff(&runner, &ask, 7, Some(u64::MAX)).await.unwrap();
+        assert_eq!((held.truncated, held.left.as_slice()), (true, ["b.txt".to_owned()].as_slice()));
+    }
+
+    /// A gh whose diff and page run on past the read caps: ten files of 1.5 MB each, and a page of 17 MB.
+    fn endless_gh() -> tempfile::TempDir {
+        let dir = tempfile::Builder::new().prefix("wsp-endless-gh-").tempdir().unwrap();
+        let at = dir.path().join("gh");
+        std::fs::write(
+            &at,
+            concat!(
+                "#!/bin/sh\n",
+                "case \"$1 $2\" in\n",
+                "  'pr diff') for f in 01 02 03 04 05 06 07 08 09 10; do\n",
+                "      printf 'diff --git a/f%s b/f%s\\n--- a/f%s\\n+++ b/f%s\\n@@ -0,0 +1 @@\\n+' $f $f $f $f\n",
+                "      head -c 1572864 /dev/zero | tr '\\0' x; printf '\\n'; done;;\n",
+                "  'pr view') printf '{\"title\":\"'; head -c 17825792 /dev/zero | tr '\\0' x;;\n",
+                "esac\n",
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&at, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        dir
+    }
+
+    #[tokio::test]
+    async fn a_diff_past_the_read_cap_reads_cut_naming_only_the_files_gh_printed_before_it_was_stopped() {
+        let gh = endless_gh();
+        let runner = with_gh(&gh);
+        let ask = Ask { cwd: gh.path(), remote_url: "git@github.com:o/r.git" };
+        let read = diff(&runner, &ask, 7, Some(numbers::GIT_DIFF_CAP_BYTES as u64)).await.unwrap();
+        assert!(read.truncated);
+        assert!(read.diff.starts_with("diff --git a/f01 b/f01") && read.diff.len() < numbers::GIT_DIFF_CAP_BYTES);
+        // 8 MB is read: five whole files and the start of the sixth, and nothing of the four gh never got to print.
+        assert_eq!(read.left, ["f02", "f03", "f04", "f05", "f06"]);
+        let page = page(&runner, &ask, 7).await.unwrap_err();
+        assert_eq!(page.message, "gh printed more than 16 MB for one read and was stopped");
     }
 
     #[test]

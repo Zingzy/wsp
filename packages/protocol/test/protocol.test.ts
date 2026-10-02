@@ -904,6 +904,8 @@ describe("runtime wire types", () => {
       // A fix starts the agent's turn and spends on a model, an update runs git in the copy, and a merge acts on the
       // git host as the person.
       "workspaces.fix", "workspaces.update", "workspaces.merge", "workspaces.mergeIn",
+      // A send of a pull request's comments starts the agent's turn, as a fix does.
+      "workspaces.pullRequestSend",
       // A start and a review make a copy and start an agent, and a post writes on the git host as the person.
       "workspaces.start", "workspaces.review", "workspaces.reviewPost",
       // A reset spends what the person's plan has banked, with no undo.

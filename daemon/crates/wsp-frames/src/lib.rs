@@ -57,9 +57,10 @@ pub use reply::{
     GitPrReviewReply, GitPrViewReply, GitPushReply, GitRepoReadReply, GitRestoreReply, GitRunLogReply, GitSnapshotReply, GitStartOnReply,
     GitStatusEntry, GitStatusReply, GitUpdateReply, HostFolder, HostFolderListing, HostItem, InboxRescanReply, IssueComment, IssueRead,
     ListeningPort, ManifestEntry, ManifestGetReply, ManifestRecordReply, ManifestRestartScriptReply, PlaceLeaveReply, PlaceUpdateReply,
-    PortsWatchReply, ProcInspectReply, PtyAttachReply, PtyCreateReply, PtyListEntry, PtyListReply, PullRequest, PullRequestCheck,
-    PullRequestCheckRun, PullRequestComment, PullRequestCommit, PullRequestFile, PullRequestFork, PullRequestReview,
-    PullRequestReviewComment, Reply, SshStartReply, SysHistoryReply, SysPoint, True,
+    PortsWatchReply, ProcInspectReply, PtyAttachReply, PtyCreateReply, PtyListEntry, PtyListReply, PullRequest, PullRequestAutoMerge,
+    PullRequestCheck, PullRequestCheckRun, PullRequestComment, PullRequestCommit, PullRequestFile, PullRequestFork, PullRequestLabel,
+    PullRequestPageCut, PullRequestReview, PullRequestReviewComment, PullRequestReviewRequest, PullRequestVerdict, Reply, SshStartReply,
+    SysHistoryReply, SysPoint, True,
 };
 pub use request::{DaemonOp, DaemonRequest, ReviewComment, DAEMON_OPS, GUEST_OPS};
 pub use shell::shell_quote;

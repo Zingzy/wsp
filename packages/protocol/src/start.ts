@@ -3,6 +3,7 @@
 // of what the person pasted, what the record keeps of where the work came from, the task each start opens its thread
 // with, the review the host reads off the reviewer's reply, and the words every road says them in.
 import { z } from "zod";
+import { fenceFor, oneLine } from "./quote.js";
 
 const count = z.number().int().nonnegative();
 
@@ -104,17 +105,6 @@ function headWithin(text: string, max: number): { text: string; cut: boolean } {
   const bytes = new TextEncoder().encode(text);
   if (bytes.length <= max) return { text, cut: false };
   return { text: new TextDecoder().decode(bytes.subarray(0, max)).replace(/�+$/, ""), cut: true };
-}
-
-/** Text off the network folded onto one line. */
-function oneLine(text: string): string {
-  return text.replace(/\s+/g, " ").trim();
-}
-
-/** A fence one backtick longer than any run of backticks inside the text, so nothing in it can close the fence. */
-function fenceFor(text: string): string {
-  const longest = Math.max(0, ...[...text.matchAll(/`+/g)].map(m => m[0].length));
-  return "`".repeat(Math.max(3, longest + 1));
 }
 
 /** What a thread started from an issue or a pull request opens with: the title, the body, each comment as its author

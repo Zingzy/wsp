@@ -143,6 +143,12 @@
                   },
                   "description": {
                     "type": "string"
+                  },
+                  "startedAt": {
+                    "type": "string"
+                  },
+                  "completedAt": {
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -183,6 +189,26 @@
               "required": [
                 "owner",
                 "pushable"
+              ],
+              "additionalProperties": false
+            },
+            "autoMerge": {
+              "type": "object",
+              "properties": {
+                "method": {
+                  "type": "string",
+                  "enum": [
+                    "merge",
+                    "squash",
+                    "rebase"
+                  ]
+                },
+                "by": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "method"
               ],
               "additionalProperties": false
             }
@@ -373,6 +399,12 @@
                   },
                   "description": {
                     "type": "string"
+                  },
+                  "startedAt": {
+                    "type": "string"
+                  },
+                  "completedAt": {
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -413,6 +445,26 @@
               "required": [
                 "owner",
                 "pushable"
+              ],
+              "additionalProperties": false
+            },
+            "autoMerge": {
+              "type": "object",
+              "properties": {
+                "method": {
+                  "type": "string",
+                  "enum": [
+                    "merge",
+                    "squash",
+                    "rebase"
+                  ]
+                },
+                "by": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "method"
               ],
               "additionalProperties": false
             }

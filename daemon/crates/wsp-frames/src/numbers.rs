@@ -113,7 +113,7 @@ pub const FS_LIST_CAP_ENTRIES: usize = 10_000;
 pub const FS_FILES_CAP_ENTRIES: usize = 20_000;
 /// Open pull requests, and open issues, one git.prList asks its host for.
 pub const GIT_PR_LIST_CAP: usize = 50;
-/// Characters of an item's body a git.prList carries, and of every body a git.prView carries.
+/// Characters of an item's body a git.prList carries, and of every body a git.issueRead carries.
 pub const GIT_PR_LIST_BODY_CAP: usize = 4000;
 /// Lines of a failed job's log a git.runLog carries, counted from its end, where the failure is.
 pub const CHECK_LOG_LINES: usize = 300;

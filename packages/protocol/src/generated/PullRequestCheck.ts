@@ -6,4 +6,8 @@ import type { PullRequestCheckRun } from "./PullRequestCheckRun.js";
  * One check on a pull request's head: its name, the workflow it runs in, its state, and for a job the host runs
  * itself the run and the job whose failed log can be read; a check another service reports carries its link alone.
  */
-export type PullRequestCheck = { name: string, workflow?: string, state: CheckState, run?: PullRequestCheckRun, link?: string, description?: string, };
+export type PullRequestCheck = { name: string, workflow?: string, state: CheckState, run?: PullRequestCheckRun, link?: string, description?: string, 
+/**
+ * When it started and when it finished, as ISO times; absent while it has not.
+ */
+startedAt?: string, completedAt?: string, };

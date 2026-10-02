@@ -3,28 +3,97 @@
     "title": "Set .ci-status back to 0",
     "body": "The check failed on \"exit 1\"…",
     "author": "ana",
+    "createdAt": "2026-09-28T09:00:00Z",
     "updatedAt": "2026-09-28T12:00:00Z",
+    "closedAt": "2026-09-28T13:00:00Z",
+    "mergedAt": "2026-09-28T13:00:00Z",
+    "mergedBy": "bo",
+    "mergeCommit": "0f6de7b4f0aef53a94505efc2d57e87c578196f7",
+    "labels": [
+      {
+        "name": "dependencies",
+        "color": "0366d6",
+        "description": "Pull requests that update a dependency file"
+      },
+      {
+        "name": "go",
+        "color": "16e2e2"
+      }
+    ],
+    "reviewRequests": [
+      {
+        "name": "babakks",
+        "team": false
+      },
+      {
+        "name": "cli/core",
+        "team": true
+      }
+    ],
+    "latestReviews": [
+      {
+        "author": "bo",
+        "state": "approved",
+        "at": "2026-09-28T12:30:00Z"
+      }
+    ],
+    "assignees": [
+      "ana"
+    ],
     "commits": [
       {
         "oid": "abc",
         "subject": "Set ci status",
+        "body": "The check reads the file.",
         "at": "2026-09-28T10:00:00Z",
+        "author": "ana",
+        "parents": 1,
+        "additions": 2,
+        "deletions": 1,
+        "check": "fail"
+      },
+      {
+        "oid": "def",
+        "subject": "Merge main",
+        "body": "",
+        "at": "2026-09-28T10:30:00Z",
         "author": "ana"
       }
     ],
     "reviews": [
       {
+        "id": 5324159317,
         "author": "ana",
+        "association": "member",
         "state": "changes_requested",
         "body": "see line 3",
         "at": "2026-09-28T11:00:00Z"
+      },
+      {
+        "author": "bo",
+        "state": "approved",
+        "body": "",
+        "at": "2026-09-28T12:30:00Z"
       }
     ],
     "comments": [
       {
-        "author": "bo",
-        "body": "thanks",
+        "id": 5835049811,
+        "author": "github-actions[bot]",
+        "association": "none",
+        "bot": true,
+        "avatar": "https://avatars.githubusercontent.com/in/15368?v=4",
+        "body": "Deployed ✓",
+        "url": "https://github.com/o/r/pull/12#issuecomment-5835049811",
         "at": "2026-09-28T12:00:00Z"
+      },
+      {
+        "id": 5835081370,
+        "author": "bo",
+        "bot": false,
+        "body": "thanks",
+        "url": "https://github.com/o/r/pull/12#issuecomment-5835081370",
+        "at": "2026-09-28T12:01:00Z"
       }
     ],
     "reviewComments": [
@@ -34,17 +103,26 @@
         "line": 3,
         "side": "RIGHT",
         "author": "ana",
+        "association": "owner",
+        "bot": false,
+        "avatar": "https://avatars.githubusercontent.com/u/1?v=4",
         "body": "exit 1 here",
         "url": "https://github.com/o/r/pull/12#discussion_r7",
-        "at": "2026-09-28T11:00:00Z"
+        "at": "2026-09-28T11:00:00Z",
+        "hunk": "@@ -1,2 +1,3 @@\n a\n+b\n c",
+        "reviewId": 5324159317,
+        "resolved": false
       },
       {
         "id": 8,
         "path": "old.sh",
-        "author": "ana",
+        "author": "bo",
+        "bot": false,
         "body": "gone",
         "url": "u",
-        "at": "t"
+        "at": "t",
+        "replyTo": 7,
+        "resolved": true
       }
     ],
     "files": [
@@ -53,13 +131,22 @@
         "additions": 2,
         "deletions": 1
       }
-    ]
+    ],
+    "cut": {
+      "commits": true,
+      "threads": true
+    }
   },
   {
     "title": "",
     "body": "",
     "author": "",
+    "createdAt": "",
     "updatedAt": "",
+    "labels": [],
+    "reviewRequests": [],
+    "latestReviews": [],
+    "assignees": [],
     "commits": [],
     "reviews": [],
     "comments": [],
