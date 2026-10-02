@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The merge box: its own section after the timeline ends, under a Settings head, one card of rows. The checks fold
-// under one line that counts them, a failure open with its fix; the review says each reviewer's standing verdict;
-// the base says how far behind it is with the update; one sentence says what holds the merge; the buttons stand in
-// the last row. A settled pull request says it merged or closed, with when, and the link out.
+// Status: where the pull request stands now, first under the tabs, under a Settings head, one card of rows. The checks
+// are always its first row, folded under one line that counts them with a failure open with its fix; the review says
+// each reviewer's standing verdict; the base says how far behind it is with the update; one sentence says what holds
+// the merge; the buttons stand in the last row. A settled pull request says it merged or closed, with when, and the
+// link out.
 import { ArrowUpIcon, ChevronDownIcon, ChevronRightIcon, CircleCheckIcon, CircleDashedIcon, CircleMinusIcon, CircleXIcon, ExternalLinkIcon, GitBranchIcon, GitMergeIcon, GitPullRequestClosedIcon, MessageSquareIcon, ScanEyeIcon, type LucideIcon } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { START_WORDS, isPullRequestFact, type CheckState, type PullRequestCheck, type PullRequestFact, type PullRequestKept, type PullRequestItem, type PullRequestPage } from "@wsp/protocol";
 import { Button } from "../components/ui/button.js";
 import { formatRelativeTimeLabel } from "../lib/timestampFormat.js";
@@ -14,7 +15,7 @@ import { SECTION_HEAD } from "../settings/layout.js";
 import { askToFix, updateFromBase } from "./acts.js";
 import type { Tone } from "./conversation.logic.js";
 import { BOX_BUTTON, MergeControls } from "./MergeControls.js";
-import { AgentMark, Faces, Who } from "./parts.js";
+import { AgentMark, Faces, Hover, Who } from "./parts.js";
 import { openComments } from "./conversation.logic.js";
 import { CHECK_COUNT_WORDS, PR_WORDS, TONE_INK, authorName, spacedAgo, spanWord } from "./words.js";
 
@@ -60,14 +61,16 @@ export function holdLine(fact: PullRequestFact): string {
   return W.ready;
 }
 
-function BoxRow({ k, lead, label, value, end, sub = false, top = false, className }: { k: string; lead?: ReactNode; label: ReactNode; value?: ReactNode; end?: ReactNode; sub?: boolean; /** A label of several lines: the lead stands on its first line, not the middle of the block. */ top?: boolean; className?: string }) {
+/** One row of the card, every part on its first 20 px line: a label of several lines keeps its mark on the first, and
+ * a button stands in the line's height rather than pushing the row taller. */
+function BoxRow({ k, lead, label, value, end, sub = false, className }: { k: string; lead?: ReactNode; label: ReactNode; value?: ReactNode; end?: ReactNode; sub?: boolean; className?: string }) {
   return (
-    <div data-pr-box-row={k} className={cn("flex items-center gap-3 px-3.5 text-[13px]", sub ? "min-h-9 bg-foreground/[0.02] py-2 pl-[39px]" : "min-h-12 py-2.5", className)}>
-      <span className={cn("flex min-w-0 flex-1", top ? "items-start [&>svg]:mt-[3.5px]" : "items-center", sub ? "gap-2 [&>svg]:size-[13px]" : "gap-2.5 [&>svg]:size-[15px]", "[&>svg]:shrink-0")}>
+    <div data-pr-box-row={k} className={cn("flex items-start gap-3 text-[13px] leading-5 [&>button]:-my-1 [&>svg]:mt-[2.5px] [&>svg]:shrink-0", sub ? "min-h-9 bg-foreground/[0.02] py-2 pr-3.5 pl-[39px]" : "min-h-12 p-3.5", className)}>
+      <span className={cn("flex min-w-0 flex-1 items-start leading-5 [&>svg]:shrink-0", sub ? "gap-2 [&>svg]:mt-[3.5px] [&>svg]:size-[13px]" : "gap-2.5 [&>svg]:mt-[2.5px] [&>svg]:size-[15px]")}>
         {lead}
         {label}
       </span>
-      {value === undefined ? null : <span className="text-muted-foreground">{value}</span>}
+      {value === undefined ? null : <span className="leading-5 text-muted-foreground">{value}</span>}
       {end}
     </div>
   );
@@ -95,10 +98,9 @@ function CheckRows({ checks, open, onToggle, workspaceId, name, agent }: { check
                   key={`fail:${c.name}`}
                   k={`check:${c.name}`}
                   sub
-                  top
                   lead={<CircleXIcon aria-hidden className={TONE_INK.bad} />}
                   label={
-                    <span data-pr-check={c.name} className="flex min-w-0 flex-col items-start gap-1.5 leading-5">
+                    <span data-pr-check={c.name} className="flex min-w-0 flex-col items-start gap-1.5 leading-5 [&>small]:leading-[18px] [&>span:last-child]:mt-0.5">
                       {c.link === undefined ? <span>{c.name}</span> : <a href={c.link} target="_blank" rel="noopener noreferrer" className="hover:underline">{c.name}</a>}
                       {failedNote(c) === undefined ? null : <small className="text-xs text-muted-foreground">{failedNote(c)}</small>}
                       <span>
@@ -134,7 +136,7 @@ function reviewSentence(verdicts: readonly { author: string; approved: boolean }
   return verdicts.map(v => `${authorName(v.author)} ${v.approved ? "approved" : "asked for changes"}`).join(", ");
 }
 
-export function MergeBox(o: {
+export function StatusBox(o: {
   workspaceId: string;
   name: string;
   seen: PullRequestFact | PullRequestKept;
@@ -150,8 +152,12 @@ export function MergeBox(o: {
   const fact = isPullRequestFact(seen) ? seen : null;
   const settled = seen.state !== "open";
   const [checksOpen, setChecksOpen] = useState(!settled);
-  const checks = fact?.checks ?? [];
+  // The checks fold shut as the pull request settles, and open again should it reopen.
+  useEffect(() => setChecksOpen(!settled), [settled]);
+  const checks = fact?.checks ?? (isPullRequestFact(seen) ? [] : (seen.checks ?? []));
   const rows: ReactNode[] = [];
+
+  if (checks.length > 0) rows.push(<CheckRows key="checks" checks={checks} open={checksOpen} onToggle={() => setChecksOpen(v => !v)} workspaceId={workspaceId} name={name} agent={agent} />);
 
   if (seen.state === "merged" || seen.state === "closed") {
     const merged = seen.state === "merged";
@@ -167,7 +173,7 @@ export function MergeBox(o: {
         lead={<Mark aria-hidden className={TONE_INK[merged ? "merged" : "quiet"]} />}
         label={
           by === undefined || by === "" ? (
-            merged ? PR_WORDS.merged : PR_WORDS.closed
+            merged ? PR_WORDS.merged : PR_WORDS.closedNotMerged
           ) : (
             <span className="flex min-w-0 items-center gap-1.5">
               {PR_WORDS.mergedBy} <Who login={by} size={18} />
@@ -192,7 +198,6 @@ export function MergeBox(o: {
       );
     }
   }
-  if (checks.length > 0) rows.push(<CheckRows key="checks" checks={checks} open={checksOpen} onToggle={() => setChecksOpen(v => !v)} workspaceId={workspaceId} name={name} agent={agent} />);
 
   if (fact !== null && fact.state === "open") {
     const verdicts = page === null ? [] : verdictsOf(page.latestReviews);
@@ -213,10 +218,11 @@ export function MergeBox(o: {
           ? {}
           : {
               end: (
-                <Button type="button" variant="outline" data-pr-review-agent className={BOX_BUTTON} onClick={o.onReview}>
-                  <ScanEyeIcon aria-hidden />
-                  {START_WORDS.reviewWithAgent}
-                </Button>
+                <Hover words={START_WORDS.reviewWithAgent}>
+                  <Button type="button" variant="outline" size="icon" data-pr-review-agent aria-label={START_WORDS.reviewWithAgent} className="size-7 rounded-[7px] [&_svg]:size-[13px]" onClick={o.onReview}>
+                    <ScanEyeIcon aria-hidden />
+                  </Button>
+                </Hover>
               ),
             })}
       />,
@@ -295,8 +301,8 @@ export function MergeBox(o: {
   }
 
   return (
-    <section data-pr-merge-box className="mt-2.5 flex scroll-mt-4 flex-col gap-2.5">
-      <h3 className={SECTION_HEAD}>{PR_WORDS.heads.merge}</h3>
+    <section data-pr-status className="flex flex-col gap-2.5">
+      <h3 className={SECTION_HEAD}>{PR_WORDS.heads.status}</h3>
       <div className={cn(CARD_SURFACE, "flex flex-col [&>*+*]:border-t [&>*+*]:border-border/50")}>{rows}</div>
     </section>
   );

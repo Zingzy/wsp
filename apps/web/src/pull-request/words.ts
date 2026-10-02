@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The pull request's buttons and heads in the app, one word for each act wherever it shows: the pane, the thread's
 // row and the composer's branch line say the same. The state words themselves are the protocol's; the ink each one
-// wears is here: open and closed muted, green only approved, red only failed or conflicts, violet merged, and the
-// running dot pulses.
+// wears is here, as GitHub draws them: open and approved green, closed, failed and conflicts red, merged violet,
+// changes asked for amber, a draft muted, and the running dot pulses.
 import { pullRequestKey, pullRequestWord, type CheckState, type MergeMethod, type PullRequestKey, type PullRequestSeen } from "@wsp/protocol";
 import type { Tone } from "./conversation.logic.js";
 
@@ -17,8 +17,7 @@ export const PR_WORDS = {
   sendToAgent: (agent: string): string => `Send to ${agent}`,
   sendAll: "Send to agent",
   refresh: "Refresh",
-  reading: "Reading the pull request",
-  heads: { draft: "Draft review", merge: "Merge" },
+  heads: { draft: "Draft review", status: "Status", activity: "Activity" },
   tabs: { conversation: "Conversation", commits: "Commits", files: "Files" },
   showMore: "Show more",
   showLess: "Show less",
@@ -67,7 +66,17 @@ export const PR_WORDS = {
   behind: (n: number): string => `${n} ${n === 1 ? "commit" : "commits"} behind`,
   conflicts: "Conflicts",
   merged: "Merged",
-  closed: "Closed",
+  closedNotMerged: "Closed, not merged",
+  noDescription: "No description.",
+  replyTo: (who: string): string => `Reply to ${who}`,
+  reply: "Reply",
+  resolve: "Resolve",
+  unresolve: "Unresolve",
+  resolved: "Resolved",
+  commentCount: (n: number): string => (n === 1 ? "1 comment" : `${n} comments`),
+  cancel: "Cancel",
+  send: "Send",
+  addReaction: "Add a reaction",
 } as const;
 
 /** Each check state as the merge box's checks line counts it. */

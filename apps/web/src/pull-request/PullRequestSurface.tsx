@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The Pull request pane as a small GitHub view in the Settings grammar: a head with the state glyph in its frame, the
 // title, who opened it, the number as a link out, the one word with its dot and the branches; then three tabs with
-// their counts. Conversation is the description and one timeline, then the merge box as its own section; Commits is
+// their counts. Conversation is Status first, then the description, then Activity, the conversation alone; Commits is
 // one rail by day; Files is the tree, a file opening its diff in place. The page is read as the pane opens and on its
 // refresh, never kept; the head reads the fact the host pushes on the workspace's status.
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -22,7 +22,9 @@ import { Skeleton } from "../components/ui/skeleton.js";
 import { Timeline, sendRoad } from "./Conversation.js";
 import { conversationCount } from "./conversation.logic.js";
 import { Files, type DiffRead } from "./Files.js";
-import { MergeBox } from "./MergeBox.js";
+import { StatusBox } from "./Status.js";
+import { usePageActs } from "./pageActs.js";
+import { SECTION_HEAD } from "../settings/layout.js";
 import { Clamped, CommitsSkeleton, CutNote, FilesSkeleton, Hover, PrMarkdown, StateWord, TimelineSkeleton, Who, usePrAgent } from "./parts.js";
 import { ReviewDialog } from "./ReviewDialog.js";
 import { ReviewDraftSection } from "./ReviewDraftSection.js";
@@ -59,8 +61,6 @@ function PullRequestPane({ workspaceId }: { workspaceId: string }) {
   const [tab, setTab] = useState<Tab>("conversation");
   const [reviewing, setReviewing] = useState(false);
   const [diff, setDiff] = useState<DiffRead | null>(null);
-  const box = useRef<HTMLDivElement>(null);
-  const [toBox, setToBox] = useState(0);
   const name = workspace?.name ?? workspaceId;
   const project = projects.find(p => p.id === workspace?.project.id);
   const base = isPullRequestNamed(seen) ? seen.base : (project?.base ?? project?.defaultBranch ?? "main");
@@ -85,10 +85,6 @@ function PullRequestPane({ workspaceId }: { workspaceId: string }) {
     };
     // The page is read as the pane opens, on its refresh, and when the pull request's number moves.
   }, [view, workspaceId, asked, isPullRequestNamed(seen) ? seen.number : null]);
-
-  useEffect(() => {
-    if (toBox > 0) box.current?.querySelector("[data-pr-merge-box]")?.scrollIntoView?.({ block: "start", behavior: "smooth" });
-  }, [toBox]);
 
   const refresh = useCallback(() => {
     setAsked(n => n + 1);
@@ -128,6 +124,7 @@ function PullRequestPane({ workspaceId }: { workspaceId: string }) {
     [workspaceId, name],
   );
   const canSend = useStore(s => s.api?.pullRequestSend !== undefined);
+  const acts = usePageActs(workspaceId, name, page?.postsAsYou === true, setPage);
 
   if (!isPullRequestNamed(seen)) {
     if (seen !== undefined && "why" in seen)
@@ -168,7 +165,7 @@ function PullRequestPane({ workspaceId }: { workspaceId: string }) {
   ];
 
   return (
-    <div ref={box} data-pr-pane className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto px-4 pt-4 pb-5">
+    <div data-pr-pane className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto px-4 pt-4 pb-5">
       <div data-pr-head className="flex flex-col gap-2.5">
         <div className="grid grid-cols-[32px_minmax(0,1fr)_auto] items-start gap-3">
           <GlyphFrame>
@@ -190,17 +187,9 @@ function PullRequestPane({ workspaceId }: { workspaceId: string }) {
           </a>
         </div>
         <div data-pr-state-row className="flex h-5 min-w-0 items-center justify-between gap-3.5 pl-11">
-          <button
-            type="button"
-            data-pr-word-to-box
-            className="flex h-5 cursor-pointer items-center rounded-sm leading-5 transition-opacity duration-150 hover:opacity-75 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-            onClick={() => {
-              setTab("conversation");
-              setToBox(n => n + 1);
-            }}
-          >
+          <span className="flex h-5 items-center leading-5">
             <StateWord word={word} tone={tone} hollow={hollow} />
-          </button>
+          </span>
           {branch === undefined ? null : (
             <span data-pr-branches className="flex min-w-0 items-center gap-1.5 font-mono text-xs leading-5 text-muted-foreground">
               <GitBranchIcon aria-hidden className="size-[13px] shrink-0" />
@@ -256,7 +245,12 @@ function PullRequestPane({ workspaceId }: { workspaceId: string }) {
 
       {tab !== "conversation" ? null : (
         <>
-          {page === null || page.body === "" ? null : (
+          <StatusBox workspaceId={workspaceId} name={name} seen={seen} page={page} base={base} agent={agent} reviewing={reviewWorkspace} onReview={() => setReviewing(true)} {...(canSend ? { sendAll: sendItems } : {})} sending={sending} />
+          {page === null ? null : page.body.trim() === "" ? (
+            <p data-pr-no-body className="text-[13px] text-muted-foreground">
+              {PR_WORDS.noDescription}
+            </p>
+          ) : (
             <div data-pr-body>
               <Clamped>
                 <PrMarkdown text={page.body} />
@@ -264,16 +258,18 @@ function PullRequestPane({ workspaceId }: { workspaceId: string }) {
             </div>
           )}
           {reviewWorkspace ? <ReviewDraftSection workspaceId={workspaceId} name={name} fact={fact} head={PR_WORDS.heads.draft} /> : null}
-          {page?.cut?.reviews === true ? <CutNote words={PR_WORDS.cut.reviews} /> : null}
-          {page?.cut?.threads === true ? <CutNote words={PR_WORDS.cut.threads} /> : null}
-          {page === null ? <TimelineSkeleton /> : <Timeline page={page} agent={agent} of={of} />}
-          <MergeBox workspaceId={workspaceId} name={name} seen={seen} page={page} base={base} agent={agent} reviewing={reviewWorkspace} onReview={() => setReviewing(true)} {...(canSend ? { sendAll: sendItems } : {})} sending={sending} />
+          <section data-pr-activity className="flex flex-col gap-2.5">
+            <h3 className={SECTION_HEAD}>{PR_WORDS.heads.activity}</h3>
+            {page?.cut?.reviews === true ? <CutNote words={PR_WORDS.cut.reviews} /> : null}
+            {page?.cut?.threads === true ? <CutNote words={PR_WORDS.cut.threads} /> : null}
+            <div className="mt-0.5">{page === null ? <TimelineSkeleton /> : <Timeline page={page} agent={agent} of={of} acts={acts} onOpenCommits={() => setTab("commits")} />}</div>
+          </section>
         </>
       )}
 
       {tab !== "commits" ? null : page === null ? <CommitsSkeleton /> : <Commits commits={page.commits} cut={page.cut?.commits === true} />}
 
-      {tab !== "files" ? null : page === null ? <FilesSkeleton /> : <Files workspaceId={workspaceId} page={page} theme={dark ? "dark" : "light"} read={diff} readDiff={readDiff} agent={agent} of={of} />}
+      {tab !== "files" ? null : page === null ? <FilesSkeleton /> : <Files workspaceId={workspaceId} page={page} theme={dark ? "dark" : "light"} read={diff} readDiff={readDiff} agent={agent} of={of} acts={acts} />}
     </div>
   );
 }

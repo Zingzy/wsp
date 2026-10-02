@@ -61,7 +61,8 @@
 // past its six cards. ?pick=1 holds three projects, two on this Mac and one
 // on a joined box, with New thread set to ask, and opens the palette on the
 // page of projects it picks from; ?settings=general opens Settings on its
-// General page; ?panel=pr&ws=ws_a opens the Pull request pane on PR 838 (&pr=merged once merged).
+// General page; ?panel=pr&ws=ws_a opens the Pull request pane on PR 838 (&pr=merged once merged, &pr=closed as it
+// stands, closed with its checks kept).
 import { useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { DAEMON_UPDATING, DEFAULT_PREFERENCES, DEFAULT_THEME, DESKTOP_MAC_CLASS, GOLDEN_STAGE_WORDS, SIGN_IN_OPEN_STATE, THEME_PRESETS, vaultOverCapLine, type HarnessCatalog, type SessionEvent, type SessionView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
@@ -77,7 +78,7 @@ import { useHostNotices } from "../../src/notices/hostNotices.js";
 import { addNotice, type NoticeKind } from "../../src/notices/store.js";
 import { useWorkspaceLineNotices } from "../../src/notices/workspaceLines.js";
 import { RIGHT_PANEL_WIDTH_STORAGE_KEY, useRightPanelStore } from "../../src/rightPanelStore";
-import { PR838_DIFF, PR838_FACT, PR838_MERGED, pr838FactLately, pr838Lately } from "../fixtures/pr838";
+import { PR838_CLOSED, PR838_DIFF, PR838_FACT, PR838_MERGED, PR838_PAGE, pr838FactLately, pr838Lately } from "../fixtures/pr838";
 import { getBrowser } from "../../src/browser/model";
 import { recentsKey } from "../../src/browser/recents";
 import { useBrowserTabs } from "../../src/browser/tabs";
@@ -677,16 +678,43 @@ function VersionRule() {
 // ?panel=pr opens the right panel at 480 px on the Pull request pane of the workspace ?ws names, over PR 838's page
 // moved in time to read as the mockup does; ?pr=merged has it merged, as the record keeps a settled one.
 if (params.get("panel") === "pr" && shown !== null) {
-  const pr = params.get("pr") === "merged" ? PR838_MERGED : pr838FactLately(Date.now());
+  const pr = params.get("pr") === "merged" ? PR838_MERGED : params.get("pr") === "closed" ? PR838_CLOSED : pr838FactLately(Date.now());
   const statuses = api.watchStatuses;
   api.watchStatuses = async () => (await statuses()).map(s => (s.id === shown ? { ...s, pr, checkout: { branch: PR838_FACT.branch, ahead: 0, behind: 0, changed: 0, readAt: 1 } } : s));
-  const page = pr838Lately(Date.now());
+  const read = params.get("pr") === "closed" ? { ...PR838_PAGE, body: "" } : pr838Lately(Date.now());
+  // One line comment staged on 838's own diff, with reactions, so the Files tab's thread can be shot as the mockup draws it.
+  const staged = {
+    id: 838260,
+    nodeId: "PRRC_staged",
+    threadId: "PRRT_staged",
+    path: "apps/web/src/sidebar/Sidebar.logic.ts",
+    line: 260,
+    side: "RIGHT",
+    author: "Zingzy",
+    bot: false,
+    body: "Should-fix: a failed thread never folds by time here, but `isThreadSettleable` below lets Settle all read take it. Say in the sidebar test which rule wins.",
+    url: "",
+    at: read.comments[0]?.at ?? new Date().toISOString(),
+    resolved: false,
+    reactions: [{ content: "+1" as const, count: 2, mine: true }, { content: "eyes" as const, count: 1, mine: false }],
+  };
+  const page = { ...read, reviewComments: [...read.reviewComments, staged], postsAsYou: true };
   api.pullRequestView = async () => page;
   api.pullRequestDiff = async () => ({ diff: PR838_DIFF, truncated: false, left: [] });
   api.pullRequestSend = async (_id, items) => {
     page.sent = [...page.sent, ...items.map(i => ({ ...i, at: Date.now() }))];
     return { outcome: "steered", threadId: "t1", agent: "claude", sent: page.sent };
   };
+  // A reply into a thread lands as a line comment under it, one in the conversation as a comment, as GitHub answers.
+  api.pullRequestReply = async (_id, o) => {
+    const at = new Date().toISOString();
+    const root = page.reviewComments.find(c => c.id === o.replyTo);
+    return o.replyTo === undefined || root === undefined
+      ? { comment: { id: Date.now(), author: "Zingzy", bot: false, body: o.body, url: "", at } }
+      : { reviewComment: { ...root, id: Date.now(), author: "Zingzy", body: o.body, url: "", at, replyTo: root.id, ...(o.threadId !== undefined ? { threadId: o.threadId } : {}), reactions: [] } };
+  };
+  api.pullRequestResolve = async (_id, threadId, resolved) => ({ threadId, resolved });
+  api.pullRequestReact = async (_id, o) => ({ subject: o.subject, reactions: [{ content: o.content, count: 1, mine: o.on }] });
   window.localStorage.setItem(RIGHT_PANEL_WIDTH_STORAGE_KEY, "480");
   useRightPanelStore.setState({ byWorkspaceId: {} });
   useRightPanelStore.getState().open(shown, "pr");
