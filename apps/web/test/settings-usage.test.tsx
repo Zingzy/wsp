@@ -285,9 +285,21 @@ describe("Usage: limits", () => {
     await mountLimits({ usageAccounts: async () => ({ accounts: [] }) } as Partial<Api>);
     expect(text($("[data-k=no-accounts]"))).toBe(USAGE_PAGE_WORDS.noAccounts);
   });
+
+  it("says a refused read as refused, never as no agent signed in", async () => {
+    await mountLimits({ usageAccounts: async () => Promise.reject(new Error("the host is not answering")) } as Partial<Api>);
+    expect(text($("[data-k=limits-refused]"))).toBe(USAGE_PAGE_WORDS.limitsRefused("the host is not answering"));
+    expect($("[data-k=no-accounts]")).toBeNull();
+  });
 });
 
 describe("Usage: used", () => {
+  it("says a refused read as refused rather than a skeleton that never ends", async () => {
+    await mount({ usageUsed: async () => Promise.reject(new Error("the host is not answering")) } as Partial<Api>);
+    expect(text($("[data-k=used-refused]"))).toBe(USAGE_PAGE_WORDS.usedRefused("the host is not answering"));
+    expect(document.querySelector("[data-usage-section=used] [aria-busy=true]")).toBeNull();
+  });
+
   it("totals the range: the tokens with the cached share, the API estimate at list price and the cache hit, and no threads or turns it was not sent", async () => {
     await mount();
     expect(stat("stat-tokens")).toEqual([USAGE_PAGE_WORDS.tokens, "7.35B", USAGE_PAGE_WORDS.fromCache("93.9%")]);

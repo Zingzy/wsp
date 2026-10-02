@@ -33,6 +33,8 @@ const ROW_NUMBER = "font-mono text-sm tabular-nums";
 const BARE_TABLE = "flex flex-col border-b border-border/50 [&>*]:border-t [&>*]:border-border/50";
 const QUIET = "text-[13px] leading-5 text-muted-foreground";
 const WIDE_ONLY = "max-sm:hidden";
+/** A refusal's own sentence, or the bare error where it carries none. */
+const saidOf = (e: unknown): string => (e instanceof Error && e.message !== "" ? e.message : String(e));
 
 /** A state word as the page draws it, capitalised: the wire's words are the command line's, in its lower case. */
 const stateWord = (word: string): string => (word === "" ? "" : word[0]!.toUpperCase() + word.slice(1));
@@ -60,12 +62,18 @@ function UsagePage({ ctx }: { ctx: SettingsContext }) {
   const [split, setSplit] = useState<UsageSplit>("agent");
   const [accounts, setAccounts] = useState<AccountsAnswer | null>(null);
   const [used, setUsed] = useState<UsedAnswer | null>(null);
+  const [accountsRefused, setAccountsRefused] = useState<string | null>(null);
+  const [usedRefused, setUsedRefused] = useState<string | null>(null);
 
   useEffect(() => {
     let live = true;
     void api?.usageAccounts?.().then(
-      answer => live && setAccounts(answer),
-      () => live && setAccounts({ accounts: [] }),
+      answer => {
+        if (!live) return;
+        setAccountsRefused(null);
+        setAccounts(answer);
+      },
+      (e: unknown) => live && setAccountsRefused(saidOf(e)),
     );
     return () => {
       live = false;
@@ -75,8 +83,16 @@ function UsagePage({ ctx }: { ctx: SettingsContext }) {
   useEffect(() => {
     let live = true;
     void api?.usageUsed?.(range, split).then(
-      answer => live && setUsed(answer),
-      () => live && setUsed(null),
+      answer => {
+        if (!live) return;
+        setUsedRefused(null);
+        setUsed(answer);
+      },
+      (e: unknown) => {
+        if (!live) return;
+        setUsed(null);
+        setUsedRefused(saidOf(e));
+      },
     );
     return () => {
       live = false;
@@ -100,7 +116,7 @@ function UsagePage({ ctx }: { ctx: SettingsContext }) {
 
   return (
     <div key={tab} className="flex animate-settle-in flex-col gap-8 motion-reduce:animate-none">
-      {tab === "limits" ? <Limits accounts={accounts?.accounts ?? null} now={ctx.now} onAccount={row => setAccounts(held => (held === null ? held : { ...held, accounts: held.accounts.map(a => (a.key === row.key ? row : a)) }))} /> : <Used used={used} models={models} range={range} split={split} onRange={setRange} onSplit={setSplit} ctx={ctx} />}
+      {tab === "limits" ? <Limits accounts={accounts?.accounts ?? null} refused={accountsRefused} now={ctx.now} onAccount={row => setAccounts(held => (held === null ? held : { ...held, accounts: held.accounts.map(a => (a.key === row.key ? row : a)) }))} /> : <Used used={used} refused={usedRefused} models={models} range={range} split={split} onRange={setRange} onSplit={setSplit} ctx={ctx} />}
     </div>
   );
 }
@@ -292,7 +308,15 @@ function AccountLine({ row }: { row: AccountRow }) {
   );
 }
 
-function Limits({ accounts, now, onAccount }: { accounts: ReadonlyArray<AccountRow> | null; now: number; onAccount: (row: AccountRow) => void }) {
+function Limits({ accounts, refused, now, onAccount }: { accounts: ReadonlyArray<AccountRow> | null; refused: string | null; now: number; onAccount: (row: AccountRow) => void }) {
+  if (accounts === null && refused !== null)
+    return (
+      <Card id="usage-limits">
+        <p data-k="limits-refused" className={cn(QUIET, CARD_PAD, "py-5")}>
+          {W.limitsRefused(refused)}
+        </p>
+      </Card>
+    );
   // Until the accounts arrive the card holds one row's room, so nothing moves when they land.
   if (accounts === null) return <LimitsSkeleton />;
   const windowed = accounts.filter(row => (row.windows ?? []).some(w => POOLED_KINDS.includes(w.kind)));
@@ -619,7 +643,7 @@ function LimitsSkeleton() {
   );
 }
 
-function Used({ used, models, range, split, onRange, onSplit, ctx }: { used: UsedAnswer | null; models: readonly UsedRow[]; range: UsageRange; split: UsageSplit; onRange: (r: UsageRange) => void; onSplit: (s: UsageSplit) => void; ctx: SettingsContext }) {
+function Used({ used, refused, models, range, split, onRange, onSplit, ctx }: { used: UsedAnswer | null; refused: string | null; models: readonly UsedRow[]; range: UsageRange; split: UsageSplit; onRange: (r: UsageRange) => void; onSplit: (s: UsageSplit) => void; ctx: SettingsContext }) {
   const controls = (
     <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
       <SegmentedControl data-k="usage-range" aria-label={W.range} value={range} segments={RANGES} onChange={onRange} className="h-9" segmentClassName="px-3.5 text-sm max-sm:px-2" />
@@ -630,7 +654,13 @@ function Used({ used, models, range, split, onRange, onSplit, ctx }: { used: Use
     return (
       <section data-usage-section="used" aria-label={W.used} className="flex flex-col gap-10">
         {controls}
-        <UsedSkeleton range={range} />
+        {refused === null ? (
+          <UsedSkeleton range={range} />
+        ) : (
+          <p data-k="used-refused" className={cn(QUIET, "py-5")}>
+            {W.usedRefused(refused)}
+          </p>
+        )}
       </section>
     );
   const tokensOf = (row: UsedRow): number => row.tokens.input + row.tokens.output;

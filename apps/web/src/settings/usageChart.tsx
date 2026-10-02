@@ -144,14 +144,15 @@ export function UsageChart({ steps, lines, stepWord, ticks }: { steps: readonly 
 
   const inks = useRef(new Map<string, SVGGElement>());
   const byTotal = [...lines].sort((a, b) => total(b) - total(a));
-  const painted = useRef({ fills: byTotal, scale });
-  painted.current = { fills: byTotal, scale };
+  // The resize observer is set up once, so it reads the latest frame through this ref rather than the first render's.
+  const painted = useRef({ fills: byTotal, scale, points: frame.points });
+  painted.current = { fills: byTotal, scale, points: frame.points };
   const paint = (): void => {
     const el = canvas.current;
     if (el === null) return;
     const fills = painted.current.fills.map(line => {
       const g = inks.current.get(line.key);
-      return { points: frame.points.get(line.key) ?? line.points, ink: g === undefined ? "currentColor" : getComputedStyle(g).color };
+      return { points: painted.current.points.get(line.key) ?? line.points, ink: g === undefined ? "currentColor" : getComputedStyle(g).color };
     });
     paintDither(el, fills, painted.current.scale);
   };

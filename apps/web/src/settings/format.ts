@@ -382,6 +382,9 @@ export const USAGE_PAGE_WORDS = {
   cached: "Cached",
   price: "Price",
   noAccounts: "No agent is signed in on any computer.",
+  /** A read the host refused or never answered, said as that rather than as an empty answer. */
+  limitsRefused: (said: string): string => `The plan limits could not be read: ${said}`,
+  usedRefused: (said: string): string => `The usage could not be read: ${said}`,
   windows: { session: "5-hour", week: "Week", week_opus: "Week, Opus", week_sonnet: "Week, Sonnet", month: "Month" } as Partial<Record<string, string>>,
   reached: "Limit reached",
   left: "left",
