@@ -6,7 +6,7 @@
 // thread runs it with, each opening that agent's own page; an agent that is
 // not there offers its install. The other two tabs are the agents manager for
 // that one kind, so their details, acts and sign-ins are the panel's own.
-import { BotIcon, ScrollTextIcon, ServerIcon } from "lucide-react";
+import { BotIcon, CircleArrowUpIcon, RotateCwIcon, ScrollTextIcon, ServerIcon } from "lucide-react";
 import { HERE_PLACE_ID, accessWord, effortsFor, markedDefault, modelOf, type AccessChoice, type AgentRow, type HarnessCatalog, type PlaceView } from "@wsp/protocol";
 import { agentName } from "@wsp/catalog";
 import { copyText } from "../actions/clipboard.js";
@@ -25,12 +25,14 @@ import { useServerTools } from "../components/agents/useServerTools.js";
 import { useSkillActs } from "../components/agents/useSkillActs.js";
 import { HarnessMark } from "../components/chat/HarnessMark.js";
 import { Button } from "../components/ui/button.js";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
+import { cn } from "../lib/utils.js";
 import { SegmentedControl } from "../components/ui/segmented-control.js";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../components/ui/select.js";
 import { useStore } from "../protocol/store.js";
 import { ComputerGlyph } from "./ComputerGlyph.js";
 import { wordOnly } from "./computers.js";
-import { AGENTS_PAGE_WORDS as W, capitalised } from "./format.js";
+import { ABOUT_WORDS, AGENTS_PAGE_WORDS as W, capitalised } from "./format.js";
 import { GlyphFrame } from "./grid.js";
 import { SELECT_WIDTH } from "./layout.js";
 import { absentOf, isProviderPlace, placeName } from "./places.js";
@@ -200,7 +202,35 @@ function NewThreadsCard({ ctx }: { ctx: SettingsContext }) {
   );
 }
 
-/** One agent on the picked computer: its row, and under it its sign-in while one runs. */
+/** The list's one way of saying an agent's state: its word in the page's own ink, then the dot the agents panel
+ * uses, green signed in, amber waiting on the person, grey not installed. */
+const STATUS_DOT = { good: "bg-success", waiting: "bg-warning", quiet: "bg-foreground/30" } as const;
+function AgentStatus({ word, tone }: { word: string; tone: keyof typeof STATUS_DOT }) {
+  return (
+    <span data-k="agent-status" data-tone={tone} className="inline-flex items-center gap-2 text-[13px] leading-5 text-muted-foreground">
+      {word}
+      <span aria-hidden className={cn("size-2 shrink-0 rounded-full", STATUS_DOT[tone])} />
+    </span>
+  );
+}
+
+/** A newer version waiting: a small arrow that copies the agent's own update line, its version on the hover. */
+function UpdateMark({ row, computer, ctx }: { row: AgentRow; computer: string; ctx: SettingsContext }) {
+  const update = row.update;
+  if (update === undefined) return null;
+  const said = W.updateTo(update.to);
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<Button variant="ghost" size="icon-xs" data-k="agent-update" aria-label={said} onClick={() => void copyText(update.command).then(() => ctx.done(W.updateCopied(update.command, computer)), ctx.failed)} />}>
+        <CircleArrowUpIcon aria-hidden className="size-3.5 text-muted-foreground" />
+      </TooltipTrigger>
+      <TooltipPopup side="top">{said}</TooltipPopup>
+    </Tooltip>
+  );
+}
+
+/** One agent on the picked computer, kept to what tells it apart in a list: its version, whether it can run and
+ * the one step it needs; how it runs is its own page's. Under it, its sign-in while one runs. */
 function AgentLine({ row, rows, computer, ctx }: { row: AgentRow; rows: RowsContext; computer: string; ctx: SettingsContext }) {
   const item = { row };
   const kindRow = AGENTS_KIND.row(item, rows);
@@ -211,24 +241,39 @@ function AgentLine({ row, rows, computer, ctx }: { row: AgentRow; rows: RowsCont
     </GlyphFrame>
   );
   if (!row.installed) {
-    return <Row id={row.id} title={row.name} lead={lead} description={W.notInstalled} {...(kindRow.quick === undefined ? {} : { control: <ActButton act={wordOnly(kindRow.quick)} /> })} attrs={{ "data-agent-row": row.id }} />;
+    // The line under the name says it; the slot holds only the step, at the chevron's place in the column.
+    return (
+      <Row
+        id={row.id}
+        title={row.name}
+        lead={lead}
+        description={W.notInstalledShort}
+        {...(kindRow.quick === undefined ? {} : { control: <ActButton act={wordOnly(kindRow.quick)} /> })}
+        attrs={{ "data-agent-row": row.id }}
+      />
+    );
   }
   const catalog = ctx.harnesses.find(c => c.harness === row.id);
-  const runs = catalog === undefined ? [] : runsWith(catalog);
-  // The sign-in is the row's act only while it is the step to take; the update otherwise.
   const step = kindRow.quick !== undefined && (kindRow.quick.id === "sign-in" || kindRow.quick.id === "cancel") && (kindRow.quick.run !== undefined || kindRow.quick.busy === true) ? kindRow.quick : undefined;
-  const control = step !== undefined ? <ActButton act={wordOnly(step)} /> : row.update === undefined ? undefined : <UpdateButton row={row} computer={computer} label={W.update} ctx={ctx} />;
+  const waiting = waitingFlow(flow);
+  const tone = waiting || row.signIn === "none" ? "waiting" : row.signIn === "unknown" ? "quiet" : "good";
+  const word = waiting ? capitalised(AGENTS_LIST_WORDS.waitingOnYou) : capitalised(signInWord(row));
   return (
     <>
       <Row
         id={row.id}
         title={row.name}
         lead={lead}
-        {...(row.version === undefined ? {} : { mark: row.version })}
-        word={waitingFlow(flow) ? capitalised(AGENTS_LIST_WORDS.waitingOnYou) : signInShort(row)}
-        wordClass="fact"
-        description={runs}
-        {...(control === undefined ? {} : { control })}
+        description={row.version === undefined ? "" : `v${row.version}`}
+        control={
+          <span className="flex items-center gap-3">
+            <UpdateMark row={row} computer={computer} ctx={ctx} />
+            {step === undefined ? null : <ActButton act={wordOnly(step)} />}
+            <AgentStatus word={word} tone={tone} />
+            {/* A row that opens no page holds the chevron's room, so every status ends at one x. */}
+            {catalog === undefined ? <span aria-hidden className="w-3.5 shrink-0" /> : null}
+          </span>
+        }
         {...(catalog === undefined ? {} : { open: () => ctx.go({ kind: "agent", id: row.id }) })}
         attrs={{ "data-agent-row": row.id }}
       />
@@ -241,10 +286,30 @@ function AgentLine({ row, rows, computer, ctx }: { row: AgentRow; rows: RowsCont
   );
 }
 
+/** The list's head: the computer it reads, when it was last read, and Read again, which asks at once. */
+function OnHead({ name, readAt, reading, now, refresh }: { name: string; readAt: number | null; reading: boolean; now: number; refresh: () => void }) {
+  return (
+    <span className="flex w-full items-center gap-3">
+      <span className="min-w-0 flex-1 truncate">{W.on(name)}</span>
+      {readAt === null ? null : (
+        <span data-k="agents-read-at" className="shrink-0 text-[12.5px] font-normal text-muted-foreground">
+          {W.checkedNow(ABOUT_WORDS.readWhen(Math.max(0, now - readAt)))}
+        </span>
+      )}
+      <Tooltip>
+        <TooltipTrigger render={<Button variant="ghost" size="icon-xs" data-k="agents-refresh" aria-label={W.readAgain} disabled={reading} onClick={refresh} />}>
+          <RotateCwIcon aria-hidden className={cn("size-3.5", reading && "animate-spin motion-reduce:animate-none")} />
+        </TooltipTrigger>
+        <TooltipPopup side="top">{W.readAgain}</TooltipPopup>
+      </Tooltip>
+    </span>
+  );
+}
+
 /** The agents tab: new threads' agent, then every agent on the picked computer, installed first. */
 function AgentsTabBody({ place, ctx }: { place: PlaceView; ctx: SettingsContext }) {
   const target = { placeId: place.id };
-  const { report, reading, error } = useAgentsReport(target);
+  const { report, reading, error, readAt, refresh } = useAgentsReport(target);
   const acts = useAgentActs(target);
   const here = place.id === HERE_PLACE_ID;
   const name = placeName(place);
@@ -259,7 +324,7 @@ function AgentsTabBody({ place, ctx }: { place: PlaceView; ctx: SettingsContext 
         {report === null && reading ? (
           <Card id="agents-on" head={W.on(name)} body={<RowSkeleton k="agents-reading" />} />
         ) : (
-          <Card id="agents-on" head={W.on(name)}>
+          <Card id="agents-on" head={<OnHead name={name} readAt={readAt} reading={reading} now={ctx.now} refresh={refresh} />}>
             {agents.map(row => (
               <AgentLine key={row.id} row={row} rows={rows} computer={name} ctx={ctx} />
             ))}

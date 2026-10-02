@@ -294,6 +294,9 @@ export const AGENTS_PAGE_WORDS = {
   defaultAgentDescription: "A project can set its own.",
   on: (name: string): string => `On ${name}`,
   notInstalled: "Not installed here",
+  notInstalledShort: "Not installed",
+  checkedNow: (when: string): string => `checked ${when}`,
+  readAgain: "Read the agents again",
   /** A model at the effort a new thread runs it at. */
   atEffort: (model: string, effort: string | undefined): string => (effort === undefined ? model : `${model} at ${effort.toLowerCase()} effort`),
   /** An access word as its own quiet fact. */

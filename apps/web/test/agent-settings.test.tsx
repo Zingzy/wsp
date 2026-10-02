@@ -96,22 +96,40 @@ describe("the Agents page", () => {
     const { api, reads } = agentsApi();
     await mount(api, { kind: "group", group: "agents" });
     expect(reads).toEqual([{ placeId: "here" }]);
-    expect(page().querySelector("[data-settings-card='agents-on'] [data-settings-head]")?.textContent).toBe(`On ${MAC}`);
+    const head = page().querySelector("[data-settings-card='agents-on'] [data-settings-head]")!;
+    expect(head.querySelector("span > span")?.textContent).toBe(`On ${MAC}`);
+    expect(head.querySelector("[data-k=agents-read-at]")?.textContent).toBe("checked just now");
+    expect(head.querySelector("[data-k=agents-refresh]")).not.toBeNull();
     const claude = rowOf("claude")!;
     expect(claude.querySelector("[data-settings-title]")?.textContent).toBe("Claude Code");
-    expect(claude.querySelector("[data-settings-mark]")?.textContent).toBe("2.1.286");
-    // Three kinds of fact, three places: the sign-in where the row's state sits, the model at its effort under the name,
-    // and the access beside it held apart by space, never by a comma.
-    expect(wordOf("claude")).toBe("API key");
-    expect([...rowOf("claude")!.querySelectorAll("[data-settings-description] > span")].map(s => s.textContent)).toEqual(["Opus 5.5 at high effort", "full access"]);
-    expect(wordOf("codex")).toBe("OAuth credentials");
-    expect([...rowOf("codex")!.querySelectorAll("[data-settings-description] > span")].map(s => s.textContent)).toEqual(["GPT-5.6-Sol at low effort", "full access"]);
-    for (const id of ["claude", "codex"]) expect(rowOf(id)!.textContent).not.toContain(",");
-    expect(descriptionOf("opencode")).toBe(W.notInstalled);
+    // The list keeps to what tells an agent apart: its version under the name and its state with its dot; how it
+    // runs is its own page's, so no model, effort or access stands on the row.
+    expect(descriptionOf("claude")).toBe("v2.1.286");
+    const status = (id: string): HTMLElement | null => rowOf(id)!.querySelector<HTMLElement>("[data-k=agent-status]");
+    expect(status("claude")?.textContent).toBe("Signed in");
+    expect(status("claude")?.dataset["tone"]).toBe("good");
+    expect(status("codex")?.textContent).toBe("Signed in");
+    expect(rowOf("claude")!.textContent).not.toContain("effort");
+    expect(rowOf("claude")!.textContent).not.toContain("access");
+    // Not installed: the line says it, and the slot holds only Install.
+    expect(descriptionOf("opencode")).toBe(W.notInstalledShort);
     expect(rowOf("opencode")!.querySelector("[data-k=act-install]")?.textContent).toBe("Install");
+    expect(status("opencode")).toBeNull();
     fireEvent.click(claude);
     await settle();
     expect(pageAt()).toBe("agent:claude");
+  });
+
+  it("reads a computer's agents once while the reading is fresh, and again on the refresh in the list's head", async () => {
+    const { api, reads } = agentsApi();
+    await mount(api, { kind: "group", group: "agents" });
+    expect(reads.length).toBe(1);
+    cleanup();
+    await mount(api, { kind: "group", group: "agents" });
+    expect(reads.length).toBe(1);
+    await act(async () => void fireEvent.click(page().querySelector("[data-k=agents-refresh]")!));
+    await settle();
+    expect(reads.length).toBe(2);
   });
 
   it("copies the vendor's own update for the person to run, without opening the agent's page", async () => {

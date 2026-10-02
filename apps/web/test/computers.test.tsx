@@ -573,8 +573,8 @@ describe("the Agents page on a computer", () => {
     const claude = installed.find(a => a.id === "claude")!;
     expect(agentRow("claude").querySelector("[data-settings-title]")?.textContent).toBe(claude.name);
     expect(agentRow("claude").querySelector("svg")).not.toBeNull();
-    expect(agentRow("claude").querySelector("[data-settings-mark]")?.textContent).toBe(claude.version);
-    expect(agentRow("claude").querySelector("[data-settings-word]")?.textContent).toBe(capitalised(AGENTS_LIST_WORDS.signedIn));
+    expect(agentRow("claude").querySelector("[data-settings-description]")?.textContent).toBe(`v${claude.version}`);
+    expect(agentRow("claude").querySelector("[data-k=agent-status]")?.textContent).toBe(capitalised(AGENTS_LIST_WORDS.signedIn));
     expect(document.querySelector("[data-settings-page] [data-agents-manager]")).toBeNull();
     topBarTab("servers");
     expect(picked()).toBe("servers");
@@ -596,7 +596,7 @@ describe("the Agents page on a computer", () => {
     };
     useStore.setState({ places: [here, box] });
     await mountAgents(computersApi({ agentsRead: async () => report, agentsSignIn } as unknown as Partial<Api>).api, "p_2");
-    const state = (): string | undefined => agentRow("claude").querySelector("[data-settings-word]")?.textContent ?? undefined;
+    const state = (): string | undefined => agentRow("claude").querySelector("[data-k=agent-status]")?.textContent ?? undefined;
     expect(state()).toBe(capitalised(AGENTS_LIST_WORDS.needsSignIn));
     const signIn = agentRow("claude").querySelector<HTMLElement>("[data-settings-slot] [data-k='act-sign-in']")!;
     expect(signIn.textContent).toBe("Sign in");
