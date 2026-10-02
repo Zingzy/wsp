@@ -10,7 +10,7 @@ import { ProjectGlyph } from "../projects/look.js";
 import { GlyphFrame } from "./grid.js";
 import { useEffect, useState } from "react";
 import { agentName } from "@wsp/catalog";
-import { ACCESS_CHOICES, HERE_PLACE_ID, accessRefusal, projectInUseRefusal, type AccessChoice, type ProjectLook, type ProjectOverridesPatch, type ProjectSource, type ProjectView, type ThreadDefaults } from "@wsp/protocol";
+import { ACCESS_CHOICES, HERE_PLACE_ID, accessRefusal, type AccessChoice, type ProjectLook, type ProjectOverridesPatch, type ProjectSource, type ProjectView, type ThreadDefaults } from "@wsp/protocol";
 import { AlertDialog, AlertDialogClose, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogPopup, AlertDialogTitle } from "../components/ui/alert-dialog.js";
 import { Button, DANGER_BUTTON, NEUTRAL_RING } from "../components/ui/button.js";
 import { AddButton } from "../components/ui/add-button.js";
@@ -292,7 +292,7 @@ export function ProjectPage({ project, ctx }: { project: ProjectView; ctx: Setti
   const place = ctx.places.find(p => p.id === project.computer);
   const computer = project.computer === HERE_PLACE_ID ? hereName(ctx.places) : place === undefined ? project.computer : placeName(place);
   const standing = workspacesOn(ctx, project);
-  const refusal = standing.length === 0 ? null : projectInUseRefusal(project.name, standing);
+  const refusal = standing.length === 0 ? null : PROJECTS_WORDS.inUse(standing.length);
   const line = removeLine(ctx, project);
   const look = ctx.preferences.projectLook[project.id];
   const icon = look?.icon ?? "folder";

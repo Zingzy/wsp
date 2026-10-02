@@ -420,6 +420,8 @@ export const PROJECTS_WORDS = {
   remove: "Remove",
   removeTitle: (name: string): string => `Remove ${name}`,
   removeAsk: (name: string): string => `Remove ${name}?`,
+  /** Only the count: a project can carry dozens of workspaces, and their names are the Workspaces list's to show. */
+  inUse: (n: number): string => `${n === 1 ? "A workspace still uses it" : `${n} workspaces still use it`}. Delete ${n === 1 ? "it" : "them"} first.`,
   /** One line by the computer's kind, matching the runtime's three landings. */
   removeHere: "Its record leaves this wsp. Your folder stays as it is.",
   removeOnComputer: (computer: string): string => `Its record leaves this wsp, and wsp's own clone of it on ${computer} goes with it.`,

@@ -145,6 +145,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
   --color-zinc-25: oklch(99.2% 0 0);
   --animate-skeleton: skeleton 2s infinite linear;
   --animate-settle-in: settle-in 180ms cubic-bezier(0.23, 1, 0.32, 1) both;
+  --animate-sub-open: sub-open 140ms cubic-bezier(0.23, 1, 0.32, 1) backwards;
   /* Duty-cycled indicator animations: long holds with stepped ramps, so the
      compositor updates discrete frames instead of every vsync. */
   --animate-ghost-pulse: ghost-pulse 2.4s infinite;
@@ -226,6 +227,12 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
     from {
       opacity: 0;
       transform: translateY(3px);
+    }
+  }
+  @keyframes sub-open {
+    from {
+      height: 0;
+      opacity: 0;
     }
   }
   @keyframes skeleton {

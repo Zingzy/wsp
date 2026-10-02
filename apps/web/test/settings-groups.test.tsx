@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from "v
 import { DEFAULT_KEYBINDINGS, parseKeybindingShortcut } from "../src/keybindingDefaults.js";
 import { KEYBINDING_COMMANDS, type KeybindingCommand } from "../src/keybindingTypes.js";
 import type { BundleOutcome, DesktopBridge, DeviceView, PlaceView, ProjectView, ReleaseView, WorkspaceView } from "@wsp/protocol";
-import { DAEMON_VERSION, DEFAULT_PREFERENCES, DEVICES_TICKET_REFUSAL, HOST_NO_RESTART_LINE, UP_RESTART_LINE, fmtBytes, projectInUseRefusal } from "@wsp/protocol";
+import { DAEMON_VERSION, DEFAULT_PREFERENCES, DEVICES_TICKET_REFUSAL, HOST_NO_RESTART_LINE, UP_RESTART_LINE, fmtBytes } from "@wsp/protocol";
 import { DisconnectedError, RequestError, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { EDITOR_SSH_WORDS } from "../src/files/EditorConsent.js";
@@ -134,7 +134,7 @@ describe("Projects", () => {
     expect(remove().className).not.toMatch(/warning|bg-destructive/);
     expect(remove().className).toContain("disabled:opacity-64");
     expect(remove().className).toContain("border-input");
-    expect(descriptionOf("remove")).toBe(projectInUseRefusal("spoo", ["pricing page"]));
+    expect(descriptionOf("remove")).toBe(PROJECTS_WORDS.inUse(1));
     // A project on a joined computer: the line names wsp's own clone there.
     act(() => useSettingsStore.getState().go({ kind: "project", id: "pr_landing" }));
     await settle();

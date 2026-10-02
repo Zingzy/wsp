@@ -7,11 +7,13 @@
 import { placeDaemonBehind, releaseAbove, type BundleOutcome, type DesktopBridge, type ReleaseLatest, type ReleaseView } from "@wsp/protocol";
 import { useEffect, useState } from "react";
 import { onAnotherComputer } from "../boot.js";
+import { Mark } from "../brand/Brand.js";
 import { Button } from "../components/ui/button.js";
 import { desktopBridge } from "../lib/desktopShell.js";
 import { RELEASES } from "../../../../packages/wspx/scripts/bundles.mjs";
 import { releaseAhead } from "../shell/shellVersion.js";
 import { ABOUT_WORDS } from "./format.js";
+import { GlyphFrame } from "./grid.js";
 import { builtWhen } from "./image.js";
 import type { SettingsCardData, SettingsItem } from "./rows.js";
 import type { SettingsContext } from "./settingsContext.js";
@@ -133,6 +135,11 @@ export function versionCards(ctx: SettingsContext): SettingsCardData[] {
       kind: "row",
       id: "version",
       title: ABOUT_WORDS.wsp,
+      lead: (
+        <GlyphFrame>
+          <Mark className="size-4 text-foreground" />
+        </GlyphFrame>
+      ),
       mark: host ?? app ?? ABOUT_WORDS.unknown,
       description: stateLine(release, behind),
       ...(step === null ? {} : { control: step }),

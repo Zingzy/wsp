@@ -29,6 +29,8 @@ import { atId, groupOf, sameAt, useSettingsStore, type SettingsAt } from "./sett
 /** How far a row with no match for the typed text stands back. Opacity, not another ink: the sidebar's rest ink
  * is darker than its muted ink on the dark side, so dimming by ink read brighter there and did nothing on light. */
 const DIMMED = "opacity-50";
+/** A group's list opens as one block, its height growing from nothing so the groups under it slide rather than jump. */
+const OPENS = "animate-sub-open overflow-hidden [interpolate-size:allow-keywords] motion-reduce:animate-none";
 
 /** A computer's own icon on its row, off the places list the row was made from. */
 function SubComputerGlyph({ id }: { id: string }) {
@@ -211,7 +213,7 @@ export function SettingsSidebar() {
           )}
         </SidebarMenuButton>
         {trail.length === 0 ? null : (
-          <ul data-k="settings-trail" className="ml-[14px] flex min-w-0 flex-col">
+          <ul data-k="settings-trail" className={cn("ml-[14px] flex min-w-0 flex-col", OPENS)}>
             {trail.map(card => (
               <li key={card.id}>
                 <SidebarMenuButton
@@ -230,7 +232,7 @@ export function SettingsSidebar() {
           </ul>
         )}
         {under.length === 0 ? null : (
-          <ul className="ml-[14px] flex min-w-0 flex-col">
+          <ul className={cn("ml-[14px] flex min-w-0 flex-col", OPENS)}>
             {under.map(sub => (
               <li key={atId(sub.at)}>
                 {/* A sub-row dims with its group: lit under a dimmed head it reads as the one thing that matched. */}
@@ -262,7 +264,7 @@ export function SettingsSidebar() {
       return [
         <li key={group.id} className="flex flex-col">
           <span className="flex h-7 items-center px-2 text-[13px] text-sidebar-muted-foreground">{group.name}</span>
-          <ul className="ml-[14px] flex min-w-0 flex-col">
+          <ul className={cn("ml-[14px] flex min-w-0 flex-col", OPENS)}>
             {items.map(item => (
               <li key={item.id}>
                 <SidebarMenuButton
