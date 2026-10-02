@@ -179,7 +179,7 @@ function PullRequestPane({ workspaceId }: { workspaceId: string }) {
               {page?.title ?? fact?.headSubject ?? PR_WORDS.row(seen.number)}
             </h2>
             {author === undefined || author === "" ? null : (
-              <div data-pr-by className="text-[13px] leading-5 text-muted-foreground">
+              <div data-pr-by className="mt-1 text-[13px] leading-5 text-muted-foreground">
                 <Who login={author} /> {opened === "" ? null : <span data-pr-when>{PR_WORDS.opened(opened)}</span>}
               </div>
             )}
@@ -189,11 +189,11 @@ function PullRequestPane({ workspaceId }: { workspaceId: string }) {
             <ExternalLinkIcon aria-hidden className="size-3" />
           </a>
         </div>
-        <div className="flex min-w-0 items-baseline justify-between gap-3.5 pl-11">
+        <div data-pr-state-row className="flex h-5 min-w-0 items-center justify-between gap-3.5 pl-11">
           <button
             type="button"
             data-pr-word-to-box
-            className="cursor-pointer rounded-sm transition-opacity duration-150 hover:opacity-75 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            className="flex h-5 cursor-pointer items-center rounded-sm leading-5 transition-opacity duration-150 hover:opacity-75 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
             onClick={() => {
               setTab("conversation");
               setToBox(n => n + 1);
@@ -202,7 +202,7 @@ function PullRequestPane({ workspaceId }: { workspaceId: string }) {
             <StateWord word={word} tone={tone} hollow={hollow} />
           </button>
           {branch === undefined ? null : (
-            <span data-pr-branches className="flex min-w-0 items-center gap-1.5 font-mono text-xs text-muted-foreground">
+            <span data-pr-branches className="flex min-w-0 items-center gap-1.5 font-mono text-xs leading-5 text-muted-foreground">
               <GitBranchIcon aria-hidden className="size-[13px] shrink-0" />
               <span className="min-w-0 truncate">{`${base} ← ${branch}`}</span>
             </span>

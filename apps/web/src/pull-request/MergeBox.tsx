@@ -60,10 +60,10 @@ export function holdLine(fact: PullRequestFact): string {
   return W.ready;
 }
 
-function BoxRow({ k, lead, label, value, end, sub = false, className }: { k: string; lead?: ReactNode; label: ReactNode; value?: ReactNode; end?: ReactNode; sub?: boolean; className?: string }) {
+function BoxRow({ k, lead, label, value, end, sub = false, top = false, className }: { k: string; lead?: ReactNode; label: ReactNode; value?: ReactNode; end?: ReactNode; sub?: boolean; /** A label of several lines: the lead stands on its first line, not the middle of the block. */ top?: boolean; className?: string }) {
   return (
     <div data-pr-box-row={k} className={cn("flex items-center gap-3 px-3.5 text-[13px]", sub ? "min-h-9 bg-foreground/[0.02] py-2 pl-[39px]" : "min-h-12 py-2.5", className)}>
-      <span className={cn("flex min-w-0 flex-1 items-center", sub ? "gap-2 [&>svg]:size-[13px]" : "gap-2.5 [&>svg]:size-[15px]", "[&>svg]:shrink-0")}>
+      <span className={cn("flex min-w-0 flex-1", top ? "items-start [&>svg]:mt-[3.5px]" : "items-center", sub ? "gap-2 [&>svg]:size-[13px]" : "gap-2.5 [&>svg]:size-[15px]", "[&>svg]:shrink-0")}>
         {lead}
         {label}
       </span>
@@ -95,9 +95,10 @@ function CheckRows({ checks, open, onToggle, workspaceId, name, agent }: { check
                   key={`fail:${c.name}`}
                   k={`check:${c.name}`}
                   sub
+                  top
                   lead={<CircleXIcon aria-hidden className={TONE_INK.bad} />}
                   label={
-                    <span data-pr-check={c.name} className="flex min-w-0 flex-col gap-1.5">
+                    <span data-pr-check={c.name} className="flex min-w-0 flex-col items-start gap-1.5 leading-5">
                       {c.link === undefined ? <span>{c.name}</span> : <a href={c.link} target="_blank" rel="noopener noreferrer" className="hover:underline">{c.name}</a>}
                       {failedNote(c) === undefined ? null : <small className="text-xs text-muted-foreground">{failedNote(c)}</small>}
                       <span>
