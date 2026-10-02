@@ -11,6 +11,7 @@ import {
   type ResolvedKeybindingsConfig,
 } from "./keybindingTypes.js";
 import { isDesktopShell } from "./lib/desktopShell.js";
+import { isPanelTabsFocused } from "./lib/panelFocus.js";
 import { isMacPlatform } from "./lib/utils.js";
 
 export interface ShortcutEventLike {
@@ -35,6 +36,8 @@ export interface ShortcutMatchContext {
   terminalOpen: boolean;
   previewFocus: boolean;
   previewOpen: boolean;
+  /** Focus is inside the right panel, a terminal in it included, and the panel holds more than one tab. */
+  panelTabsFocus: boolean;
   /**
    * Derived, never passed: a focused terminal owns mod chords where mod is
    * Control, which the shell reads. On macOS mod is Command, which no shell
@@ -191,6 +194,7 @@ function resolveContext(
     terminalOpen: false,
     previewFocus: false,
     previewOpen: false,
+    panelTabsFocus: false,
     desktopShell: isDesktopShell(),
     ...options?.context,
     terminalFocus,
@@ -280,19 +284,24 @@ export function resolveShortcutCommand(
   return null;
 }
 
+/** The commands a terminal hands on whatever their chord holds, so the panel's tab step leaves a terminal in it. */
+const TERMINAL_PASSES: ReadonlySet<KeybindingCommand> = new Set(["rightPanel.nextTab", "rightPanel.previousTab"]);
+
 /**
- * A Command chord the rules bind while a terminal has focus. The surface lets
- * it bubble to the dispatcher instead of encoding it. Control and Option
- * chords are the terminal's on every platform, so a Control-based mod never
- * claims one.
+ * A chord the rules bind while a terminal has focus that the surface lets
+ * bubble to the dispatcher instead of encoding it: a Command chord, or the
+ * panel's tab step while the terminal sits in a panel of several tabs.
+ * Control and Option chords are otherwise the terminal's on every platform,
+ * so a Control-based mod never claims one.
  */
 export function isTerminalAppShortcut(
   event: ShortcutEventLike,
   keybindings: ResolvedKeybindingsConfig = DEFAULT_RESOLVED_KEYBINDINGS,
   platform = navigator.platform,
 ): boolean {
-  if (!event.metaKey) return false;
-  return resolveShortcutCommand(event, keybindings, { platform, context: { terminalFocus: true } }) !== null;
+  if (!event.metaKey && !event.ctrlKey) return false;
+  const command = resolveShortcutCommand(event, keybindings, { platform, context: { terminalFocus: true, panelTabsFocus: isPanelTabsFocused() } });
+  return command !== null && (event.metaKey || TERMINAL_PASSES.has(command));
 }
 
 function formatShortcutKeyLabel(key: string): string {

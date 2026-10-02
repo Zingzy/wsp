@@ -159,6 +159,9 @@ afterEach(() => {
   cancelWorkspaceSwitch();
 });
 
+/** A thread on each workspace, which is what the switch chord walks between. */
+const ONE_THREAD_EACH = [session("s_a", "ws_a", "fix the port list", { threadId: "thr_a" }), session("s_b", "ws_b", "bump the lockfile", { threadId: "thr_b" })];
+
 async function mountShell(sessions: SessionView[] = []) {
   const api = fakeApi([view("ws_a", "api"), view("ws_b", "worker")], sessions);
   useStore.getState().bind(api);
@@ -658,10 +661,10 @@ describe("default shortcuts", () => {
   });
 
   it("a ctrl+tab tap walks the sidebar's workspaces and wraps, and ctrl+shift+tab walks back", async () => {
-    await mountShell();
+    await mountShell(ONE_THREAD_EACH);
     const restore = asDesktopShell();
     try {
-      expect(useStore.getState().selectedId).toBe("ws_a");
+      act(() => useStore.getState().select("ws_a", "thr_a"));
       ctrlTab();
       ctrlUp();
       await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_b"));
@@ -707,10 +710,10 @@ describe("default shortcuts", () => {
   });
 
   it("the mod arrows walk the workspaces in either body, and a browser tab on macOS keeps them for its own tabs", async () => {
-    await mountShell();
+    await mountShell(ONE_THREAD_EACH);
     const restore = asDesktopShell();
     try {
-      expect(useStore.getState().selectedId).toBe("ws_a");
+      act(() => useStore.getState().select("ws_a", "thr_a"));
       spaceArrow("ArrowRight");
       spaceArrowUp();
       await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_b"));
@@ -731,15 +734,15 @@ describe("default shortcuts", () => {
   });
 
 
-  it("in the list the Tab pair is still the workspace switch, and it never moves a thread", async () => {
+  it("the Tab pair lands on a thread the sidebar lists, never on a workspace alone", async () => {
     await mountShell([session("s1", "ws_a", "fix the port list", { threadId: "thr_1" }), session("s2", "ws_a", "bump the lockfile", { threadId: "thr_2" })]);
     const restore = asDesktopShell();
     try {
-      useStore.getState().select("ws_a");
+      useStore.getState().select("ws_b");
       ctrlTab();
       ctrlUp();
-      await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_b"));
-      expect(useStore.getState().selectedThreadId).toBeNull();
+      await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_a"));
+      expect(["thr_1", "thr_2"]).toContain(useStore.getState().selectedThreadId);
     } finally {
       restore();
     }
@@ -919,7 +922,7 @@ describe("typing contexts", () => {
   });
 
   it("switches twice in a row from inside a text field, where a bare option arrow is still that field's word move", async () => {
-    await mountShell();
+    await mountShell(ONE_THREAD_EACH);
     const restore = asDesktopShell();
     const box = document.createElement("textarea");
     document.body.appendChild(box);
@@ -927,7 +930,7 @@ describe("typing contexts", () => {
     try {
       // The row this walk starts from is named rather than inherited: the workspace a load opens on is the one this
       // browser had open last, so a test that assumed the first row read the row another test left behind.
-      useStore.getState().select("ws_a");
+      useStore.getState().select("ws_a", "thr_a");
       await settle();
       // The composer takes the caret after every switch, so the second press of the chord is the one that proves it.
       spaceArrow("ArrowRight", box);

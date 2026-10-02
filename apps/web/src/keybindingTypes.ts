@@ -24,6 +24,8 @@ export const KEYBINDING_COMMANDS = [
   "terminal.zoomOut",
   "terminal.zoomReset",
   "rightPanel.toggle",
+  "rightPanel.nextTab",
+  "rightPanel.previousTab",
   "preview.toggle",
   "commandPalette.toggle",
   "files.quickOpen",

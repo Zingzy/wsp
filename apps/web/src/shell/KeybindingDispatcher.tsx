@@ -12,12 +12,16 @@ import { useSidebar } from "../components/ui/sidebar.js";
 import { eventHoldKeys, resolveShortcutCommand } from "../keybindings.js";
 import type { ResolvedKeybindingsConfig } from "../keybindingTypes.js";
 import { desktopBridge } from "../lib/desktopShell.js";
+import { isPanelTabsFocused } from "../lib/panelFocus.js";
 import { isPreviewFocused } from "../lib/previewFocus.js";
 import { isTerminalFocused } from "../lib/terminalFocus.js";
 import { useSelectedWorkspaceId, useStore } from "../protocol/store.js";
 import { cancelWorkspaceSwitch, commitWorkspaceSwitch, runShellCommand, type ShellCommandTarget } from "./shellCommands.js";
 import { useKeybindings } from "./useKeybindings.js";
 import { releasesSwitchHold, useWorkspaceSwitcher } from "./workspaceSwitcher.js";
+
+/** Where focus is, read on every chord: the rules' when clauses name these. */
+const focusContext = () => ({ terminalFocus: isTerminalFocused(), previewFocus: isPreviewFocused(), panelTabsFocus: isPanelTabsFocused() });
 
 export function KeybindingDispatcher({ keybindings: given }: { keybindings?: ResolvedKeybindingsConfig }) {
   const live = useKeybindings();
@@ -45,9 +49,7 @@ export function KeybindingDispatcher({ keybindings: given }: { keybindings?: Res
         useStore.getState().closeSettings();
         return;
       }
-      const command = resolveShortcutCommand(event, keybindings, {
-        context: { terminalFocus: isTerminalFocused(), previewFocus: isPreviewFocused() },
-      });
+      const command = resolveShortcutCommand(event, keybindings, { context: focusContext() });
       if (command === null) return;
       // An unchorded key inside an input is the user's text, whatever a rule says.
       const chorded = event.metaKey || event.ctrlKey;
@@ -95,9 +97,7 @@ export function KeybindingDispatcher({ keybindings: given }: { keybindings?: Res
     window.addEventListener("focusin", scheduleReport);
     window.addEventListener("focusout", scheduleReport);
     const stopChords = onShellChord(chord => {
-      const command = resolveShortcutCommand(chord, keybindings, {
-        context: { terminalFocus: isTerminalFocused(), previewFocus: isPreviewFocused() },
-      });
+      const command = resolveShortcutCommand(chord, keybindings, { context: focusContext() });
       if (command !== null) runShellCommand(command, target.current, eventHoldKeys(chord));
     });
     return () => {

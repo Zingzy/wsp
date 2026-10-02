@@ -544,6 +544,8 @@ describe("Keybindings", () => {
     expect(label("editor.open")).toEqual([["⌘O"]]);
     expect(label("chat.new")).toEqual([["⌘N"], ["⌘T"]]);
     expect(label("workspace.next")).toEqual([["⌥⌘Right"], ["⌃Tab"]]);
+    expect(label("rightPanel.nextTab")).toEqual([["⌃Tab"]]);
+    expect(label("rightPanel.previousTab")).toEqual([["⌃⇧Tab"]]);
     expect(label("terminal.zoomIn")).toEqual([["⌘="], ["⇧⌘="]]);
     expect(label("workspace.select.1")).toEqual([["⌘1"], ["⌘9"]]);
     // On another platform the same rules read Ctrl.
@@ -553,11 +555,12 @@ describe("Keybindings", () => {
     const tab = { platform: "MacIntel", desktopShell: false };
     expect(label("chat.new", tab)).toEqual([["⌘N"]]);
     expect(label("workspace.next", tab)).toEqual([]);
+    expect(label("rightPanel.nextTab", tab)).toEqual([]);
     expect(label("thread.next", tab)).toEqual([["⌥⌘Down"]]);
     expect(label("workspace.select.1", tab)).toEqual([]);
     const cards = keybindingCards(DEFAULT_KEYBINDINGS, mac);
     expect(cards.map(card => card.head)).toEqual([KEYBINDINGS_WORDS.windowAndPanels, KEYBINDINGS_WORDS.workspacesAndThreads, KEYBINDINGS_WORDS.terminal, KEYBINDINGS_WORDS.fixed]);
-    expect(cards[0]!.items.map(item => (item.kind === "line" ? item.label : ""))).toEqual(["Search", "Find a file", "Search in files", "Settings", "Toggle the sidebar", "Toggle the terminal drawer", "Toggle the right panel", "Toggle the preview"]);
+    expect(cards[0]!.items.map(item => (item.kind === "line" ? item.label : ""))).toEqual(["Search", "Find a file", "Search in files", "Settings", "Toggle the sidebar", "Toggle the terminal drawer", "Toggle the right panel", "Next panel tab", "Previous panel tab", "Toggle the preview"]);
     expect(cards[1]!.items.map(item => (item.kind === "line" ? item.label : ""))).toEqual(["New thread", "Next task", "Previous task", "Next thread", "Previous thread", "Settle thread", "Next thread that needs you", "Open in editor", JUMP_WORD]);
     expect(cards[3]!.items.map(item => (item.kind === "line" ? [item.label, item.keys] : []))).toEqual([
       [KEYBINDINGS_WORDS.sendMessage, [["Enter"]]],

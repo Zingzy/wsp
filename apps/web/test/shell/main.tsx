@@ -55,7 +55,10 @@
 // served the page, so the one line the app says about it can be measured; ?host=1 runs the host-event rules on a
 // prompt and a dead thread, so the notices they raise can be photographed; ?toast= takes &kind= and &action= for
 // each kind of notice; ?silent=1 has the running and the napping machine both read no daemon, under the app's own
-// workspace-line rule, so only the running one is said.
+// workspace-line rule, so only the running one is said. ?switcher=1 adds six
+// threads over two more projects, every workspace on a named computer and
+// each project a glyph and a hue of its own, so the switcher's row is full
+// past its six cards.
 import { useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { DAEMON_UPDATING, DEFAULT_PREFERENCES, DEFAULT_THEME, DESKTOP_MAC_CLASS, GOLDEN_STAGE_WORDS, SIGN_IN_OPEN_STATE, THEME_PRESETS, vaultOverCapLine, type HarnessCatalog, type SessionEvent, type SessionView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
@@ -160,6 +163,25 @@ const sessions: SessionView[] = [
   { id: "s4", threadId: "s4", workspaceId: "ws_b", harness: "claude", status: "interrupted", prompt: "Drop the old preview shim.", startedBy: "person", startedAt: Date.now() - 120 * 60_000, endedAt: Date.now() - 110 * 60_000 },
   ...archived,
 ];
+// ?switcher=1: two more projects, one of them on this computer, and the threads on them, ten in all with the four above.
+const switcher = params.get("switcher") === "1";
+if (switcher) {
+  const on = (place: string) => (w: WorkspaceView): WorkspaceView => ({ ...w, place });
+  workspaces.splice(0, workspaces.length, ...workspaces.map(on("p_hetzner")));
+  workspaces.push(
+    { ...view("ws_d", "billing"), place: "p_hetzner", project: { id: "pr_billing", name: "billing", path: "/root/billing", computer: "default" } },
+    { ...view("ws_e", "docs-site"), kind: "local", machineId: "local", golden: "", project: { id: "pr_docs", name: "docs-site", path: "/Users/zingzy/docs-site", computer: "default" } },
+  );
+  const ago = (m: number): number => Date.now() - m * 60_000;
+  sessions.push(
+    { id: "s7", threadId: "s7", workspaceId: "ws_d", harness: "claude", status: "running", prompt: "Retry the failed invoice webhooks from last night.", startedBy: "person", startedAt: ago(6) },
+    { id: "s8", threadId: "s8", workspaceId: "ws_d", harness: "codex", status: "completed", prompt: "Add a test for the proration rounding.", startedBy: "person", startedAt: ago(40), endedAt: ago(33) },
+    { id: "s9", threadId: "s9", workspaceId: "ws_e", harness: "claude", status: "completed", prompt: "Rewrite the install page for the new CLI.", startedBy: "person", startedAt: ago(15), endedAt: ago(9) },
+    { id: "s10", threadId: "s10", workspaceId: "ws_e", harness: "codex", status: "completed", prompt: "Fix the broken links in the changelog.", startedBy: "cli", startedAt: ago(70), endedAt: ago(66) },
+    { id: "s11", threadId: "s11", workspaceId: "ws_d", harness: "claude", status: "interrupted", prompt: "Move the tax tables into one module.", startedBy: "person", startedAt: ago(150), endedAt: ago(140) },
+    { id: "s12", threadId: "s12", workspaceId: "ws_e", harness: "claude", status: "completed", prompt: "Shrink the hero image under 200 KB.", startedBy: "person", startedAt: ago(200), endedAt: ago(190) },
+  );
+}
 
 // Two agents the composer can start a thread on, so its picker draws a coloured mark and a monochrome one. Codex
 // carries the effort lists its app-server reports, each model with the effort that model runs at, so the effort
@@ -597,6 +619,15 @@ if (toast !== null) addNotice({ kind: (params.get("kind") as NoticeKind | null) 
 // surfaces behind labs are shot, so labs is on unless ?labs=0 asks for the record a host without it serves.
 const sidebarWidth = params.get("sidebar");
 useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, theme, ...picks, labs: params.get("labs") !== "0", ...(sidebarWidth !== null ? { sidebarWidth: Number(sidebarWidth) } : {}), ...(params.get("spaces") === "1" ? { sidebarMode: "spaces" as const } : {}), ...(params.get("size") === "file" ? { terminalSize: "file" as const } : {}), ...(projects ? { project: { ws_a: "spoo", ws_m: "spoo" } } : {}) } });
+if (switcher) {
+  useStore.setState(s => ({
+    places: [
+      { id: "p_here", kind: "computer", name: "zingzy-mbp", default: true, present: true, takesForks: false },
+      { id: "p_hetzner", kind: "computer", name: "hetzner-box", default: false, present: true, takesForks: true },
+    ],
+    preferences: { ...s.preferences, projectLook: { pr_1: { icon: "rocket", hue: "violet" }, pr_billing: { icon: "database", hue: "amber" }, pr_docs: { icon: "book", hue: "teal" } } },
+  }));
+}
 // ?places=1 fills the places list with the worst row the spec draws, a computer away with a long name beside
 // this Mac and a provider, so the pane's rows can be measured against a full list at every window.
 if (params.get("places") === "1") {

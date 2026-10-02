@@ -1,20 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The hold-to-switch overlay: ctrl+tab with the key still down puts it up,
 // tab and shift+tab walk it, letting the key go opens the highlighted
-// workspace, Escape and a lost window leave everything where it was, and a
-// tap is a walk of one followed by a release, which paints nothing. The cards
-// read the sidebar's own order and threads, and carry three parts: the picture
-// well, the workspace name and the open thread's title. In Spaces the same
-// chord walks the last five threads opened in the space on screen: a hold
-// shows them, letting go lands on the highlighted one, a tap is the thread
-// before this one.
+// thread, Escape and a lost window leave everything where it was, and a tap
+// is a walk of one followed by a release, which paints nothing. The cards are
+// the threads the sidebar lists, Settled left out, most recently opened
+// first with the open one at the head, at most six in one row; each carries
+// the picture well, holding the project's glyph until a picture lands, the
+// thread's title and its line in the sans. The thread chord walks the same
+// overlay over the threads of the workspace on screen.
 import { act, cleanup, configure, fireEvent, render, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_PREFERENCES, type PlaceView, type SessionView, type WorkspaceView } from "@wsp/protocol";
 import { deriveSidebarProjects } from "../src/adapt/index.js";
 import { buildPaletteItems } from "../src/components/palette/paletteItems.js";
-import { buildSwitcherCards, type SwitcherCard } from "../src/components/switcher/switcherCards.js";
+import { buildSwitcherCards } from "../src/components/switcher/switcherCards.js";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
@@ -22,7 +22,7 @@ import { ROW_META_CLASS } from "../src/sidebar/rowGrammar.js";
 import { AppShell } from "../src/shell/AppShell.js";
 import { onComposerFocusRequest } from "../src/shell/shellRequests.js";
 import { loadPagePreviews, useWorkspacePreviews } from "../src/shell/workspacePreviews.js";
-import { recentThreads, useThreadHistory } from "../src/shell/threadHistory.js";
+import { recentThreads, SWITCHER_THREADS, useThreadHistory } from "../src/shell/threadHistory.js";
 import { releasesSwitchHold, stepSwitcherAt, SWITCHER_PAINT_DELAY_MS, useWorkspaceSwitcher } from "../src/shell/workspaceSwitcher.js";
 import { useTerminalDrawerStore } from "../src/terminal/drawerStore.js";
 import { caps } from "./caps.js";
@@ -50,13 +50,13 @@ const session = (id: string, workspaceId: string, prompt: string, startedAt: num
   startedAt,
   endedAt: startedAt + 60_000,
 });
+/** A thread the runtime stamped an id on, which is what a card lands on. */
+const thread = (threadId: string, workspaceId: string, prompt: string, minutesAgo: number): SessionView => ({ ...session(`s_${threadId}`, workspaceId, prompt, Date.now() - minutesAgo * 60_000), threadId });
 
-// Made in that order, so the sidebar draws them in it whatever the ids sort to, and the one turn any of them has
-// run sits on the middle row, where it moves nothing.
 const WORKSPACES = [view("ws_a", "api", "running", "2026-09-01T01:00:00Z"), view("ws_b", "web", "running", "2026-09-01T02:00:00Z"), view("ws_c", "old", "napping", "2026-09-01T03:00:00Z")];
-const SESSIONS = [session("s1", "ws_b", "Bump the lockfile and run the gate.", Date.parse("2026-09-01T02:30:00Z"))];
+const SESSIONS = [thread("t_a", "ws_a", "Fix the login redirect.", 10), thread("t_b", "ws_b", "Bump the lockfile and run the gate.", 20), thread("t_c", "ws_c", "Write the release notes.", 30)];
 
-function fakeApi(): Api {
+function fakeApi(sessions: SessionView[] = SESSIONS): Api {
   return {
     listWorkspaces: async () => WORKSPACES,
     getWorkspace: async id => WORKSPACES.find(w => w.id === id)!,
@@ -73,14 +73,14 @@ function fakeApi(): Api {
     listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
     snapshotStorage: async () => null,
     rollbackSnapshot: async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" }),
-    listSessions: async () => SESSIONS,
+    listSessions: async () => sessions,
     subscribe: () => () => {},
     getGolden: async () => undefined,
   };
 }
 
 const tab = (mods: { shiftKey?: boolean } = {}) => fireEvent.keyDown(window, { key: "Tab", code: "Tab", ctrlKey: true, ...mods });
-/** The switch between spaces, as macOS spells it here; the platform is mocked to MacIntel for the file. */
+/** The switch as the mod arrows spell it on macOS; the platform is mocked to MacIntel for the file. */
 const spaceArrow = (name: "ArrowLeft" | "ArrowRight") => fireEvent.keyDown(window, { key: name, code: name, metaKey: true, altKey: true });
 const release = () => fireEvent.keyUp(window, { key: "Control" });
 const releaseSpaceArrow = () => fireEvent.keyUp(window, { key: "Alt" });
@@ -93,17 +93,15 @@ const asDesktopShell = (bridge: Partial<Window["wsp"]> = {}): (() => void) => {
 };
 
 const overlay = () => document.querySelector<HTMLElement>("[data-workspace-switcher]");
-const cardIds = (): string[] => [...document.querySelectorAll<HTMLElement>("[data-workspace-card]")].map(el => el.dataset["workspaceCard"]!);
-const highlightedCard = (): string | null => document.querySelector<HTMLElement>("[data-workspace-card][aria-selected=true]")?.dataset["workspaceCard"] ?? null;
-const card = (workspaceId: string): HTMLElement | null => document.querySelector<HTMLElement>(`[data-workspace-card='${workspaceId}']`);
-const cardText = (workspaceId: string, part: string): string =>
-  document.querySelector<HTMLElement>(`[data-workspace-card='${workspaceId}'] [data-card-${part}]`)?.textContent ?? "";
-const cardPartClass = (workspaceId: string, part: string): string =>
-  document.querySelector<HTMLElement>(`[data-workspace-card='${workspaceId}'] [data-card-${part}]`)?.className ?? "";
+const cardIds = (): string[] => [...document.querySelectorAll<HTMLElement>("[data-thread-card]")].map(el => el.dataset["threadCard"]!);
+const highlightedCard = (): string | null => document.querySelector<HTMLElement>("[data-thread-card][aria-selected=true]")?.dataset["threadCard"] ?? null;
+const card = (threadId: string): HTMLElement | null => document.querySelector<HTMLElement>(`[data-thread-card='${threadId}']`);
+const cardPart = (threadId: string, part: string): HTMLElement | null => document.querySelector<HTMLElement>(`[data-thread-card='${threadId}'] [data-card-${part}]`);
 /** The parts a card is built of, in the order it draws them; a child that is no named part reads as "?". */
-const cardParts = (workspaceId: string): string[] =>
-  [...(card(workspaceId)?.children ?? [])].map(el => el.getAttributeNames().find(name => name.startsWith("data-card-"))?.slice("data-card-".length) ?? "?");
+const cardParts = (threadId: string): string[] =>
+  [...(card(threadId)?.children ?? [])].map(el => el.getAttributeNames().find(name => name.startsWith("data-card-"))?.slice("data-card-".length) ?? "?");
 const settle = () => act(() => new Promise<void>(resolve => setTimeout(resolve, 0)));
+const opened = () => ({ workspaceId: useStore.getState().selectedId, threadId: useStore.getState().selectedThreadId });
 
 vi.setConfig({ testTimeout: 15_000 });
 configure({ asyncUtilTimeout: 10_000 });
@@ -116,6 +114,7 @@ beforeEach(() => {
   useRightPanelStore.setState({ byWorkspaceId: {} });
   useTerminalDrawerStore.setState({ byWorkspaceId: {} });
   useWorkspacePreviews.setState({ images: {} });
+  useThreadHistory.setState({ recent: [] });
   useWorkspaceSwitcher.getState().close();
 });
 
@@ -124,15 +123,21 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-async function mountShell(): Promise<void> {
-  useStore.getState().bind(fakeApi());
+const visit = (workspaceId: string, threadId: string): void => {
+  act(() => useStore.getState().select(workspaceId, threadId));
+};
+
+/** The shell over the three threads, opened oldest first so the last opened is t_a, the one on screen. */
+async function mountShell(sessions: SessionView[] = SESSIONS): Promise<void> {
+  useStore.getState().bind(fakeApi(sessions));
   render(
     <AppShell>
       <div>center content</div>
     </AppShell>,
   );
   await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_a"));
-  await waitFor(() => expect(useStore.getState().sessions["ws_b"]?.length).toBe(1));
+  await waitFor(() => expect(Object.values(useStore.getState().sessions).flat()).toHaveLength(sessions.length));
+  for (const at of [...sessions].reverse()) if (at.threadId !== undefined) visit(at.workspaceId, at.threadId);
 }
 
 /** The caret asks for one workspace from this call on; one left pending by an earlier test is dropped. */
@@ -144,16 +149,32 @@ const watchComposerFocus = (workspaceId: string): { asks: string[]; off: () => v
 };
 
 describe("the workspace switcher overlay", () => {
-  it("goes up on ctrl+tab while the key is held, one card per workspace in sidebar order, and selects nothing yet", async () => {
+  it("goes up on ctrl+tab while the key is held, one card per thread most recently opened first, the open one first and the one before it highlighted, and selects nothing yet", async () => {
     await mountShell();
     const restore = asDesktopShell();
     try {
+      expect(opened()).toEqual({ workspaceId: "ws_a", threadId: "t_a" });
       expect(overlay()).toBeNull();
       tab();
       await waitFor(() => expect(overlay()).not.toBeNull());
-      expect(cardIds()).toEqual(["ws_a", "ws_b", "ws_c"]);
-      expect(highlightedCard()).toBe("ws_b");
-      expect(useStore.getState().selectedId).toBe("ws_a");
+      expect(cardIds()).toEqual(["t_a", "t_b", "t_c"]);
+      expect(highlightedCard()).toBe("t_b");
+      expect(opened()).toEqual({ workspaceId: "ws_a", threadId: "t_a" });
+    } finally {
+      restore();
+    }
+  });
+
+  it("orders by when each thread was last opened, not by the sidebar's order, so a hold walks back in time", async () => {
+    await mountShell();
+    const restore = asDesktopShell();
+    try {
+      visit("ws_c", "t_c");
+      visit("ws_b", "t_b");
+      tab();
+      await waitFor(() => expect(overlay()).not.toBeNull());
+      expect(cardIds()).toEqual(["t_b", "t_c", "t_a"]);
+      expect(highlightedCard()).toBe("t_c");
     } finally {
       restore();
     }
@@ -177,7 +198,7 @@ describe("the workspace switcher overlay", () => {
         vi.advanceTimersByTime(1);
       });
       expect(overlay()).not.toBeNull();
-      expect(highlightedCard()).toBe("ws_b");
+      expect(highlightedCard()).toBe("t_b");
     } finally {
       vi.useRealTimers();
       restore();
@@ -200,7 +221,7 @@ describe("the workspace switcher overlay", () => {
       act(() => {
         release();
       });
-      expect(useStore.getState().selectedId).toBe("ws_b");
+      expect(opened()).toEqual({ workspaceId: "ws_b", threadId: "t_b" });
       act(() => {
         vi.advanceTimersByTime(SWITCHER_PAINT_DELAY_MS * 4);
       });
@@ -232,7 +253,7 @@ describe("the workspace switcher overlay", () => {
         vi.advanceTimersByTime(20);
       });
       expect(overlay()).not.toBeNull();
-      expect(highlightedCard()).toBe("ws_c");
+      expect(highlightedCard()).toBe("t_c");
     } finally {
       vi.useRealTimers();
       restore();
@@ -244,30 +265,30 @@ describe("the workspace switcher overlay", () => {
     const restore = asDesktopShell();
     try {
       tab();
-      await waitFor(() => expect(highlightedCard()).toBe("ws_b"));
+      await waitFor(() => expect(highlightedCard()).toBe("t_b"));
       tab();
-      await waitFor(() => expect(highlightedCard()).toBe("ws_c"));
+      await waitFor(() => expect(highlightedCard()).toBe("t_c"));
       tab();
-      await waitFor(() => expect(highlightedCard()).toBe("ws_a"));
+      await waitFor(() => expect(highlightedCard()).toBe("t_a"));
       tab({ shiftKey: true });
-      await waitFor(() => expect(highlightedCard()).toBe("ws_c"));
-      expect(cardIds()).toEqual(["ws_a", "ws_b", "ws_c"]);
-      expect(useStore.getState().selectedId).toBe("ws_a");
+      await waitFor(() => expect(highlightedCard()).toBe("t_c"));
+      expect(cardIds()).toEqual(["t_a", "t_b", "t_c"]);
+      expect(opened()).toEqual({ workspaceId: "ws_a", threadId: "t_a" });
     } finally {
       restore();
     }
   });
 
-  it("commits on the hold being let go: the highlighted workspace opens and its composer is asked for the caret", async () => {
+  it("commits on the hold being let go: the highlighted thread opens in its workspace and its composer is asked for the caret", async () => {
     await mountShell();
     const restore = asDesktopShell();
     const { asks, off } = watchComposerFocus("ws_c");
     try {
       tab();
       tab();
-      await waitFor(() => expect(highlightedCard()).toBe("ws_c"));
+      await waitFor(() => expect(highlightedCard()).toBe("t_c"));
       release();
-      await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_c"));
+      await waitFor(() => expect(opened()).toEqual({ workspaceId: "ws_c", threadId: "t_c" }));
       expect(overlay()).toBeNull();
       expect(asks).toEqual(["ws_c"]);
     } finally {
@@ -276,14 +297,17 @@ describe("the workspace switcher overlay", () => {
     }
   });
 
-  it("a tap is one step and a release, so it still switches at once", async () => {
+  it("a tap is one step and a release, so it still switches at once, and a second tap comes back", async () => {
     await mountShell();
     const restore = asDesktopShell();
     try {
       tab();
       release();
-      await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_b"));
+      await waitFor(() => expect(opened()).toEqual({ workspaceId: "ws_b", threadId: "t_b" }));
       expect(overlay()).toBeNull();
+      tab();
+      release();
+      await waitFor(() => expect(opened()).toEqual({ workspaceId: "ws_a", threadId: "t_a" }));
     } finally {
       restore();
     }
@@ -295,13 +319,13 @@ describe("the workspace switcher overlay", () => {
     try {
       tab();
       tab();
-      await waitFor(() => expect(highlightedCard()).toBe("ws_c"));
+      await waitFor(() => expect(highlightedCard()).toBe("t_c"));
       escape();
       await waitFor(() => expect(overlay()).toBeNull());
-      expect(useStore.getState().selectedId).toBe("ws_a");
+      expect(opened()).toEqual({ workspaceId: "ws_a", threadId: "t_a" });
       release();
       await settle();
-      expect(useStore.getState().selectedId).toBe("ws_a");
+      expect(opened()).toEqual({ workspaceId: "ws_a", threadId: "t_a" });
     } finally {
       restore();
     }
@@ -315,7 +339,7 @@ describe("the workspace switcher overlay", () => {
       await waitFor(() => expect(overlay()).not.toBeNull());
       fireEvent.blur(window);
       await waitFor(() => expect(overlay()).toBeNull());
-      expect(useStore.getState().selectedId).toBe("ws_a");
+      expect(opened()).toEqual({ workspaceId: "ws_a", threadId: "t_a" });
     } finally {
       restore();
     }
@@ -326,10 +350,40 @@ describe("the workspace switcher overlay", () => {
     tab();
     await settle();
     expect(overlay()).toBeNull();
-    expect(useStore.getState().selectedId).toBe("ws_a");
+    expect(opened()).toEqual({ workspaceId: "ws_a", threadId: "t_a" });
   });
 
-  it("carries the workspace name and the open thread's title in muted mono, and no cost, state word or open word", async () => {
+  it("draws at most six cards, the six opened last, every one the same box", async () => {
+    const many = Array.from({ length: 12 }, (_, n) => thread(`t_${n}`, WORKSPACES[n % 3]!.id, `Thread ${n}.`, n + 1));
+    await mountShell(many);
+    const restore = asDesktopShell();
+    try {
+      tab();
+      await waitFor(() => expect(overlay()).not.toBeNull());
+      expect(SWITCHER_THREADS).toBe(6);
+      expect(cardIds()).toEqual(many.slice(0, 6).map(at => at.threadId));
+      expect(new Set(cardIds().map(id => card(id)!.className.replace("bg-foreground/[0.09]", "").trim())).size).toBe(1);
+    } finally {
+      restore();
+    }
+  });
+
+  it("leaves out the threads the sidebar folds into Settled, however recently they were opened", async () => {
+    const done = { ...thread("t_done", "ws_b", "An old settled thread.", 60), readAt: Date.now() - 50 * 60_000, settledAt: Date.now() - 40 * 60_000 };
+    await mountShell([...SESSIONS, done]);
+    const restore = asDesktopShell();
+    try {
+      visit("ws_b", "t_done");
+      visit("ws_a", "t_a");
+      tab();
+      await waitFor(() => expect(overlay()).not.toBeNull());
+      expect(cardIds()).toEqual(["t_a", "t_b", "t_c"]);
+    } finally {
+      restore();
+    }
+  });
+
+  it("carries the thread's title and under it a sans line in the muted ink, the same three parts on every card, and no cost", async () => {
     await mountShell();
     const restore = asDesktopShell();
     try {
@@ -339,82 +393,75 @@ describe("the workspace switcher overlay", () => {
       });
       tab();
       await waitFor(() => expect(overlay()).not.toBeNull());
-      expect(cardText("ws_b", "name")).toBe("web");
-      expect(cardText("ws_b", "thread")).toBe("Bump the lockfile and run the gate.");
-      expect(cardText("ws_a", "thread")).toBe("No threads yet");
-      // The name is sans at a row's weight; the thread's title is the muted mono line under it.
-      expect(cardPartClass("ws_b", "name")).not.toContain("font-mono");
-      expect(cardPartClass("ws_b", "name")).not.toContain("font-medium");
-      expect(cardPartClass("ws_b", "thread")).toContain(ROW_META_CLASS);
-      // Two parts here and no third, since this bridge answers for no picture, and the same two on every card.
-      expect(cardParts("ws_b")).toEqual(["name", "thread"]);
-      expect(document.querySelectorAll("[data-card-meta], [data-card-line]").length).toBe(0);
-      expect(card("ws_a")?.textContent).toBe("apiNo threads yet");
-      expect(card("ws_b")?.textContent).toBe("webBump the lockfile and run the gate.");
-      expect(card("ws_c")?.textContent).toBe("oldNo threads yet");
+      expect(cardPart("t_b", "name")?.textContent).toBe("Bump the lockfile and run the gate.");
+      const line = cardPart("t_b", "thread")!;
+      expect(line.className).toContain("text-muted-foreground");
+      expect(line.className).not.toContain(ROW_META_CLASS);
+      expect(line.outerHTML).not.toContain("font-mono");
+      expect(line.textContent).not.toMatch(/\$|1\.23|this Mac|\u2014/);
+      for (const id of ["t_a", "t_b", "t_c"]) expect(cardParts(id)).toEqual(["preview", "name", "thread"]);
+      // One box for every card; the highlight is a fill and nothing else.
+      expect(new Set(cardIds().map(id => card(id)!.className.replace("bg-foreground/[0.09]", "").trim())).size).toBe(1);
+      expect(new Set(cardIds().map(id => cardPart(id, "preview")!.className)).size).toBe(1);
     } finally {
       restore();
     }
   });
 
-  it("draws the picture well above the name and the title where the shell can answer for one, and asks it to photograph the workspace being left", async () => {
+  it("holds the project's glyph in its hue in a well with no picture, never a line saying there is none", async () => {
+    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: true, projectLook: { pr_1: { icon: "rocket", hue: "violet" } } } });
     await mountShell();
-    const capturePreview = vi.fn(async () => undefined);
-    const workspacePreview = vi.fn(async (id: string) => (id === "ws_b" ? "data:image/png;base64,AAA" : undefined));
-    const restore = asDesktopShell({ capturePreview, workspacePreview });
-    try {
-      tab();
-      await waitFor(() => expect(document.querySelectorAll("[data-card-preview]").length).toBe(3));
-      await waitFor(() => expect(document.querySelector<HTMLImageElement>("[data-workspace-card='ws_b'] img")?.src).toBe("data:image/png;base64,AAA"));
-      expect(document.querySelector("[data-workspace-card='ws_a'] [data-card-preview]")?.textContent).toBe("No capture yet");
-      expect(cardParts("ws_b")).toEqual(["preview", "name", "thread"]);
-      release();
-      await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_b"));
-      expect(capturePreview).toHaveBeenCalledWith("ws_a");
-    } finally {
-      restore();
-    }
-  });
-
-  it("has no picture well where the bridge cannot answer for one, even in the desktop shell", async () => {
-    await mountShell();
-    const restore = asDesktopShell({ workspacePreview: async () => undefined });
-    try {
-      tab();
-      await waitFor(() => expect(document.querySelectorAll("[data-card-preview]").length).toBe(3));
-      escape();
-      await waitFor(() => expect(overlay()).toBeNull());
-    } finally {
-      restore();
-    }
-    // The same shell without the call: the chord still reaches the page, and the cards are text alone.
-    const bare = asDesktopShell();
+    const restore = asDesktopShell();
     try {
       tab();
       await waitFor(() => expect(overlay()).not.toBeNull());
-      expect(document.querySelectorAll("[data-card-preview]").length).toBe(0);
+      const well = cardPart("t_b", "preview")!;
+      expect(well.textContent).toBe("");
+      const glyph = well.querySelector("svg")!;
+      expect(glyph.getAttribute("data-hue")).toBe("violet");
+      expect(glyph.getAttribute("class")).toContain("text-violet-500");
+      expect(glyph.getAttribute("class")).toContain("lucide-rocket");
+      expect(document.body.textContent).not.toContain("No capture yet");
     } finally {
-      bare();
+      restore();
+    }
+  });
+
+  it("draws the thread's picture where the shell holds one, and asks it to photograph the thread being left", async () => {
+    await mountShell();
+    const capturePreview = vi.fn(async () => undefined);
+    const workspacePreview = vi.fn(async (id: string) => (id === "t_b" ? "data:image/png;base64,AAA" : undefined));
+    const restore = asDesktopShell({ capturePreview, workspacePreview });
+    try {
+      tab();
+      await waitFor(() => expect(card("t_b")?.querySelector("img")?.getAttribute("src")).toBe("data:image/png;base64,AAA"));
+      expect(cardPart("t_a", "preview")?.querySelector("svg")).not.toBeNull();
+      expect(cardParts("t_b")).toEqual(["preview", "name", "thread"]);
+      release();
+      await waitFor(() => expect(opened()).toEqual({ workspaceId: "ws_b", threadId: "t_b" }));
+      expect(capturePreview).toHaveBeenCalledWith("t_a");
+    } finally {
+      restore();
     }
   });
 });
 
 describe("loadPagePreviews", () => {
   it("keeps what the shell still answers for and drops what it has let go at its own cap", async () => {
-    useWorkspacePreviews.setState({ images: { ws_a: "data:image/png;base64,OLD" } });
-    const restore = asDesktopShell({ workspacePreview: async id => (id === "ws_b" ? "data:image/png;base64,NEW" : undefined) });
+    useWorkspacePreviews.setState({ images: { t_a: "data:image/png;base64,OLD" } });
+    const restore = asDesktopShell({ workspacePreview: async id => (id === "t_b" ? "data:image/png;base64,NEW" : undefined) });
     try {
-      await loadPagePreviews(["ws_a", "ws_b"]);
-      expect(useWorkspacePreviews.getState().images).toEqual({ ws_b: "data:image/png;base64,NEW" });
+      await loadPagePreviews(["t_a", "t_b"]);
+      expect(useWorkspacePreviews.getState().images).toEqual({ t_b: "data:image/png;base64,NEW" });
     } finally {
       restore();
     }
   });
 
   it("touches nothing where the shell cannot answer at all", async () => {
-    useWorkspacePreviews.setState({ images: { ws_a: "data:image/png;base64,OLD" } });
-    await loadPagePreviews(["ws_a", "ws_b"]);
-    expect(useWorkspacePreviews.getState().images).toEqual({ ws_a: "data:image/png;base64,OLD" });
+    useWorkspacePreviews.setState({ images: { t_a: "data:image/png;base64,OLD" } });
+    await loadPagePreviews(["t_a", "t_b"]);
+    expect(useWorkspacePreviews.getState().images).toEqual({ t_a: "data:image/png;base64,OLD" });
   });
 });
 
@@ -426,14 +473,14 @@ describe("the card the space arrows put up", () => {
     try {
       spaceArrow("ArrowRight");
       await waitFor(() => expect(overlay()).not.toBeNull());
-      expect(cardIds()).toEqual(["ws_a", "ws_b", "ws_c"]);
-      expect(highlightedCard()).toBe("ws_b");
+      expect(cardIds()).toEqual(["t_a", "t_b", "t_c"]);
+      expect(highlightedCard()).toBe("t_b");
       // The other switch chord's own hold is not this walk's, so letting it go leaves the card up.
       release();
       await settle();
       expect(useWorkspaceSwitcher.getState().open).toBe(true);
       releaseSpaceArrow();
-      await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_b"));
+      await waitFor(() => expect(opened()).toEqual({ workspaceId: "ws_b", threadId: "t_b" }));
       expect(overlay()).toBeNull();
       expect(asks).toEqual(["ws_b"]);
     } finally {
@@ -447,9 +494,9 @@ describe("the card the space arrows put up", () => {
     const restore = asDesktopShell();
     try {
       spaceArrow("ArrowLeft");
-      await waitFor(() => expect(highlightedCard()).toBe("ws_c"));
+      await waitFor(() => expect(highlightedCard()).toBe("t_c"));
       releaseSpaceArrow();
-      await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_c"));
+      await waitFor(() => expect(opened()).toEqual({ workspaceId: "ws_c", threadId: "t_c" }));
     } finally {
       restore();
     }
@@ -457,7 +504,7 @@ describe("the card the space arrows put up", () => {
     tab();
     await settle();
     expect(useWorkspaceSwitcher.getState().open).toBe(false);
-    expect(useStore.getState().selectedId).toBe("ws_c");
+    expect(opened()).toEqual({ workspaceId: "ws_c", threadId: "t_c" });
   });
 
   it("keeps Shift for the step back, so letting Shift go mid-walk commits nothing", async () => {
@@ -465,41 +512,21 @@ describe("the card the space arrows put up", () => {
     const restore = asDesktopShell();
     try {
       tab({ shiftKey: true });
-      await waitFor(() => expect(highlightedCard()).toBe("ws_c"));
+      await waitFor(() => expect(highlightedCard()).toBe("t_c"));
       fireEvent.keyUp(window, { key: "Shift" });
       await settle();
       expect(useWorkspaceSwitcher.getState().open).toBe(true);
-      expect(useStore.getState().selectedId).toBe("ws_a");
+      expect(opened()).toEqual({ workspaceId: "ws_a", threadId: "t_a" });
       release();
-      await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_c"));
-    } finally {
-      restore();
-    }
-  });
-
-  it("is the same jump the Tab pair makes: the sidebar draws one body, so both chords walk the workspaces", async () => {
-    await mountShell();
-    const restore = asDesktopShell();
-    try {
-      tab();
-      await waitFor(() => expect(overlay()).not.toBeNull());
-      expect(cardIds()).toEqual(["ws_a", "ws_b", "ws_c"]);
-      release();
-      await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_b"));
-      spaceArrow("ArrowRight");
-      await waitFor(() => expect(overlay()).not.toBeNull());
-      expect(cardIds()).toEqual(["ws_a", "ws_b", "ws_c"]);
-      releaseSpaceArrow();
-      await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_c"));
+      await waitFor(() => expect(opened()).toEqual({ workspaceId: "ws_c", threadId: "t_c" }));
     } finally {
       restore();
     }
   });
 });
 
-describe("the thread switcher", () => {
-  const thread = (id: string, title: string, minutesAgo: number): SessionView => ({ ...session(`s_${id}`, "ws_a", title, Date.now() - minutesAgo * 60_000), threadId: id });
-  const SIX = [1, 2, 3, 4, 5, 6].map(n => thread(`thr_${n}`, `thread ${n}`, n));
+describe("the thread chord", () => {
+  const SIX = [1, 2, 3, 4, 5, 6].map(n => thread(`thr_${n}`, "ws_a", `thread ${n}`, n));
 
   /** The walk as a person makes it: the mod arrows under the pair that walks the workspaces, held while the overlay
    * stands and landed on the hold coming up. Shift is no part of it here, since down and up are the two ways. */
@@ -521,7 +548,7 @@ describe("the thread switcher", () => {
       </AppShell>,
     );
     await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_a"));
-    await waitFor(() => expect(useStore.getState().sessions["ws_a"]?.length).toBe(threads.length));
+    await waitFor(() => expect(Object.values(useStore.getState().sessions).flat()).toHaveLength(threads.length));
     return asDesktopShell();
   }
   const visit = (threadId: string): void => {
@@ -530,15 +557,16 @@ describe("the thread switcher", () => {
   const threadCards = (): string[] => [...document.querySelectorAll<HTMLElement>("[data-thread-card]")].map(el => el.dataset["threadCard"]!);
   const highlightedThread = (): string | null => document.querySelector<HTMLElement>("[data-thread-card][aria-selected=true]")?.dataset["threadCard"] ?? null;
 
-  it("held, the walk puts up the last five threads opened, the open one first and the one before it highlighted; tab walks on and letting go lands there", async () => {
-    const restore = await mountThreads(SIX);
+  it("held, the walk puts up the threads of the workspace on screen, the open one first and the one before it highlighted; the arrows walk on and letting go lands there", async () => {
+    const restore = await mountThreads([...SIX, thread("thr_web", "ws_b", "A thread on another workspace.", 0)]);
     try {
+      act(() => useStore.getState().select("ws_b", "thr_web"));
       for (const id of ["thr_6", "thr_5", "thr_4", "thr_3", "thr_2", "thr_1"]) visit(id);
       threadStep();
       await waitFor(() => expect(overlay()).not.toBeNull());
-      // Five cards, most recent first, and no picture well on any: the threads all share one page.
-      expect(threadCards()).toEqual(["thr_1", "thr_2", "thr_3", "thr_4", "thr_5"]);
-      expect(document.querySelectorAll("[data-card-preview]")).toHaveLength(0);
+      // The workspace's six, most recent first, the other workspace's thread left to the switch chord.
+      expect(threadCards()).toEqual(["thr_1", "thr_2", "thr_3", "thr_4", "thr_5", "thr_6"]);
+      expect(document.querySelectorAll("[data-card-preview]")).toHaveLength(6);
       expect(highlightedThread()).toBe("thr_2");
       expect(document.querySelector("[data-thread-card='thr_2'] [data-card-name]")?.textContent).toBe("thread 2");
       // Under the title the agent's mark, the computer by its name and the one status slot, nothing joined.
@@ -588,7 +616,7 @@ describe("the thread switcher", () => {
         releaseThread();
       });
       expect(useStore.getState().selectedThreadId).toBe("thr_5");
-      // Shift and a tap is the far end of the five.
+      // Shift and a tap is the far end of the six.
       act(() => {
         threadStep({ shiftKey: true });
       });
@@ -613,14 +641,14 @@ describe("the thread switcher", () => {
       expect(useStore.getState().selectedThreadId).toBeNull();
       threadStep();
       await waitFor(() => expect(overlay()).not.toBeNull());
-      expect(threadCards()).toEqual(["thr_5", "thr_3", "thr_1", "thr_2", "thr_4"]);
+      expect(threadCards()).toEqual(["thr_5", "thr_3", "thr_1", "thr_2", "thr_4", "thr_6"]);
       expect(highlightedThread()).toBe("thr_5");
       releaseThread();
       await waitFor(() => expect(useStore.getState().selectedThreadId).toBe("thr_5"));
       act(() => useStore.getState().select("ws_a"));
       threadStep({ shiftKey: true });
       releaseThread();
-      await waitFor(() => expect(useStore.getState().selectedThreadId).toBe("thr_4"));
+      await waitFor(() => expect(useStore.getState().selectedThreadId).toBe("thr_6"));
     } finally {
       restore();
     }
@@ -674,31 +702,14 @@ describe("releasesSwitchHold", () => {
 });
 
 describe("buildSwitcherCards", () => {
-  const titleOn = (card: SwitcherCard | undefined): string | null | undefined => (card?.threadId === null ? card.threadTitle : undefined);
-  const projects = deriveSidebarProjects({ workspaces: WORKSPACES, sessions: { ws_b: SESSIONS } });
+  const projects = deriveSidebarProjects({ workspaces: WORKSPACES, sessions: { ws_a: [SESSIONS[0]!], ws_b: [SESSIONS[1]!], ws_c: [SESSIONS[2]!] } });
 
-  it("keeps the order it is given, drops an id the snapshot no longer holds, and carries the three parts alone", () => {
-    const cards = buildSwitcherCards({ places: [], projects, targets: ["ws_c", "ws_gone", "ws_a"].map(workspaceId => ({ workspaceId, threadId: null })), images: {}, currentId: "ws_a", pinnedThreadId: null });
-    expect(cards.map(c => c.workspaceId)).toEqual(["ws_c", "ws_a"]);
-    expect(Object.keys(cards[0]!)).toEqual(["workspaceId", "threadId", "name", "threadTitle", "image"]);
-  });
-
-  it("names the thread the sidebar draws at the top of the workspace, not the first row the fold happens to hand back", () => {
-    const older = session("s_old", "ws_a", "The oldest thread.", Date.parse("2026-09-01T01:00:00Z"));
-    const working = { ...session("s_new", "ws_a", "The working thread.", Date.parse("2026-09-01T02:00:00Z")), status: "running" as const, endedAt: undefined };
-    const snapshot = deriveSidebarProjects({ workspaces: WORKSPACES, sessions: { ws_a: [older, working] } });
-    const cards = buildSwitcherCards({ places: [], projects: snapshot, targets: [{ workspaceId: "ws_a", threadId: null }], images: {}, currentId: null, pinnedThreadId: null });
-    expect(titleOn(cards[0])).toBe("The working thread.");
-  });
-
-  it("takes the thread the sidebar pins over the top one, for the workspace the pin belongs to", () => {
-    const older = session("s_old", "ws_a", "The oldest thread.", Date.parse("2026-09-01T01:00:00Z"));
-    const newer = session("s_new", "ws_a", "The newest thread.", Date.parse("2026-09-01T02:00:00Z"));
-    const snapshot = deriveSidebarProjects({ workspaces: WORKSPACES, sessions: { ws_a: [older, newer] } });
-    const pinned = buildSwitcherCards({ places: [], projects: snapshot, targets: [{ workspaceId: "ws_a", threadId: null }], images: {}, currentId: "ws_a", pinnedThreadId: "s_old" });
-    expect(titleOn(pinned[0])).toBe("The oldest thread.");
-    const elsewhere = buildSwitcherCards({ places: [], projects: snapshot, targets: [{ workspaceId: "ws_a", threadId: null }], images: {}, currentId: "ws_b", pinnedThreadId: "s_old" });
-    expect(titleOn(elsewhere[0])).toBe("The newest thread.");
+  it("keeps the order it is given, drops a thread the snapshot no longer holds, and carries its parts alone", () => {
+    const targets = [{ workspaceId: "ws_c", threadId: "t_c" }, { workspaceId: "ws_b", threadId: "t_gone" }, { workspaceId: "ws_gone", threadId: "t_b" }, { workspaceId: "ws_a", threadId: "t_a" }];
+    const cards = buildSwitcherCards({ places: [], projects, targets, images: { t_a: "data:image/png;base64,AAA" } });
+    expect(cards.map(c => c.threadId)).toEqual(["t_c", "t_a"]);
+    expect(Object.keys(cards[0]!)).toEqual(["workspaceId", "threadId", "name", "thread", "place", "projectId", "image"]);
+    expect(cards.map(c => [c.projectId, c.image])).toEqual([["pr_1", null], ["pr_1", "data:image/png;base64,AAA"]]);
   });
 
   it("says where a thread on this computer runs only once the name is known, never leaving a line on a dangling on", () => {
@@ -708,10 +719,7 @@ describe("buildSwitcherCards", () => {
     const projects = deriveSidebarProjects({ workspaces: [here], sessions: { ws_a: [lead, child] } });
     const MAC: PlaceView = { id: "here", kind: "computer", name: "zingzy-mbp", label: "zingzy's MacBook Pro", default: true };
     const palette = (places: PlaceView[]) => buildPaletteItems({ projects, selectedId: null, query: "", messageHits: [], canCreate: false, handlers: {} as never, verbs: {} as never, places });
-    const card = (places: PlaceView[]) => {
-      const found = buildSwitcherCards({ places, projects, targets: [{ workspaceId: "ws_a", threadId: "thr_kid" }], images: {}, currentId: null, pinnedThreadId: null })[0]!;
-      return found.threadId === null ? null : found.place;
-    };
+    const card = (places: PlaceView[]) => buildSwitcherCards({ places, projects, targets: [{ workspaceId: "ws_a", threadId: "thr_kid" }], images: {} })[0]!.place;
     const said = (node: ReactNode): HTMLElement => render(<>{node}</>).container;
     for (const item of [...palette([]).workspaceItems, ...palette([]).recentThreadItems]) expect(said(item.description).textContent).not.toMatch(/ on\s*$|this computer/);
     expect(card([])).toBe("");
@@ -744,13 +752,12 @@ describe("buildSwitcherCards", () => {
     for (const workspace of items.workspaceItems) expect(render(<>{workspace.icon}</>).container.querySelector(".rounded-full")).toBeNull();
   });
 
-  it("a thread target is a card of the thread's title over where it came from, with no picture well, and a thread that has gone leaves none", () => {
-    const thread = { ...session("s_t", "ws_a", "The thread.", Date.parse("2026-09-01T02:00:00Z")), threadId: "thr_t", startedBy: "cli" as const };
-    const snapshot = deriveSidebarProjects({ workspaces: WORKSPACES, sessions: { ws_a: [thread] } });
-    const cards = buildSwitcherCards({ places: [], projects: snapshot, targets: [{ workspaceId: "ws_a", threadId: "thr_t" }, { workspaceId: "ws_a", threadId: "thr_gone" }], images: { ws_a: "data:image/png;base64,AAA" }, currentId: "ws_a", pinnedThreadId: null });
+  it("a thread that has gone since the overlay froze leaves no card", () => {
+    const at = { ...session("s_t", "ws_a", "The thread.", Date.parse("2026-09-01T02:00:00Z")), threadId: "thr_t", startedBy: "cli" as const };
+    const snapshot = deriveSidebarProjects({ workspaces: WORKSPACES, sessions: { ws_a: [at] } });
+    const cards = buildSwitcherCards({ places: [], projects: snapshot, targets: [{ workspaceId: "ws_a", threadId: "thr_t" }, { workspaceId: "ws_a", threadId: "thr_gone" }], images: {} });
     expect(cards).toHaveLength(1);
-    expect(cards[0]).toMatchObject({ workspaceId: "ws_a", threadId: "thr_t", name: "The thread." });
-    expect(Object.keys(cards[0]!)).toEqual(["workspaceId", "threadId", "name", "thread", "place"]);
-    expect(cards[0]!.threadId === null ? null : cards[0]!.thread.threadId).toBe("thr_t");
+    expect(cards[0]).toMatchObject({ workspaceId: "ws_a", threadId: "thr_t", name: "The thread.", image: null });
+    expect(cards[0]!.thread.threadId).toBe("thr_t");
   });
 });

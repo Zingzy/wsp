@@ -334,6 +334,30 @@ describe("the switch chords over the sidebar's one body", () => {
   });
 });
 
+describe("the Tab pair inside the right panel", () => {
+  const resolve = (event: ShortcutEventLike, platform: string, context: Record<string, boolean> = {}) =>
+    resolveShortcutCommand(event, DEFAULT_RESOLVED_KEYBINDINGS, { platform, context });
+  const DESKTOP = { desktopShell: true };
+  const tab = (mods: Partial<ShortcutEventLike> = {}) => key("Tab", { ctrlKey: true, code: "Tab", ...mods });
+
+  it("steps the panel's tabs while focus is in a panel of several, a terminal there included, on both platforms", () => {
+    for (const platform of [MAC, LINUX]) {
+      for (const terminalFocus of [false, true]) {
+        expect(resolve(tab(), platform, { ...DESKTOP, panelTabsFocus: true, terminalFocus })).toBe("rightPanel.nextTab");
+        expect(resolve(tab({ shiftKey: true }), platform, { ...DESKTOP, panelTabsFocus: true, terminalFocus })).toBe("rightPanel.previousTab");
+      }
+    }
+  });
+
+  it("leaves the pair the switcher's everywhere else, and the browser's in a tab", () => {
+    expect(resolve(tab(), MAC, DESKTOP)).toBe("workspace.next");
+    expect(resolve(tab({ shiftKey: true }), LINUX, DESKTOP)).toBe("workspace.previous");
+    expect(resolve(tab(), MAC, { panelTabsFocus: true })).toBeNull();
+    expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "rightPanel.nextTab", { platform: MAC, context: { ...DESKTOP, panelTabsFocus: true } })).toBe("⌃Tab");
+    expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "workspace.next", { platform: MAC, context: DESKTOP })).toBe("⌃Tab");
+  });
+});
+
 describe("the hold a chord carries", () => {
   it("is the modifiers the event really holds, without Shift, which only picks the direction", () => {
     expect(eventHoldKeys({ metaKey: false, ctrlKey: true, shiftKey: false, altKey: false })).toEqual(["Control"]);
@@ -432,10 +456,28 @@ describe("a person's own chords over the defaults", () => {
     expect(shortcutLabelForCommand(compiled, "chat.new", { platform: MAC, context: { desktopShell: true } })).toBe("⌥⌘N");
   });
 
-  it("reads one when off a command's defaults, which holds because every command's default chords share one", () => {
+  it("gives an override the when of its command's default on that chord, else the command's first default's", () => {
     const whens = new Map<string, Set<string | undefined>>();
     for (const rule of DEFAULT_KEYBINDINGS) whens.set(rule.command, (whens.get(rule.command) ?? new Set()).add(rule.when));
-    expect([...whens].filter(([, set]) => set.size > 1).map(([command]) => command)).toEqual([]);
+    // The switch is the one command whose chords differ: its Tab pair stands down inside a panel of several tabs.
+    expect([...whens].filter(([, set]) => set.size > 1).map(([command]) => command)).toEqual(["workspace.previous", "workspace.next"]);
+    const whenOf = (overrides: Record<string, string>, platform: string) => rulesWith(DEFAULT_KEYBINDINGS, overrides, platform).find(rule => rule.command === "workspace.next")?.when;
+    expect(whenOf({ "workspace.next": "ctrl+tab" }, MAC)).toBe("!terminalFocus && !panelTabsFocus");
+    // Off macOS a captured Control chord is spelled with mod, and it is the same chord.
+    expect(whenOf({ "workspace.next": "mod+tab" }, LINUX)).toBe("!terminalFocus && !panelTabsFocus");
+    expect(whenOf({ "workspace.next": "mod+alt+n" }, MAC)).toBe("!terminalFocus");
+  });
+
+  it("takes Next panel tab and the switch back onto ctrl+tab after either moved off it, since the two never fire together", () => {
+    expect(chordRefusal(DEFAULT_KEYBINDINGS, "rightPanel.nextTab", "ctrl+tab", read)).toBeNull();
+    expect(chordRefusal(DEFAULT_KEYBINDINGS, "workspace.next", "ctrl+tab", read)).toBeNull();
+    const panelMoved = rulesWith(DEFAULT_KEYBINDINGS, { "rightPanel.nextTab": "mod+alt+m" }, MAC);
+    expect(chordRefusal(panelMoved, "rightPanel.nextTab", "ctrl+tab", read)).toBeNull();
+    expect(chordRefusal(rulesWith(DEFAULT_KEYBINDINGS, { "rightPanel.nextTab": "mod+alt+m" }, LINUX), "rightPanel.nextTab", "mod+tab", { ...read, platform: LINUX })).toBeNull();
+    const switchMoved = rulesWith(DEFAULT_KEYBINDINGS, { "workspace.next": "mod+alt+n" }, MAC);
+    expect(chordRefusal(switchMoved, "workspace.next", "ctrl+tab", read)).toBeNull();
+    // A third command still finds the chord held, by both.
+    expect(chordRefusal(DEFAULT_KEYBINDINGS, "sidebar.toggle", "ctrl+tab", read)).toBe("Taken by Next task and Next panel tab");
   });
 
   it("drops an override for a command it does not know or a chord that does not parse, and no override is the defaults", () => {
@@ -476,7 +518,8 @@ describe("a person's own chords over the defaults", () => {
     expect(chordRefusal(DEFAULT_KEYBINDINGS, "sidebar.toggle", "mod+shift+t", read)).toBeNull();
     expect(chordRefusal(DEFAULT_KEYBINDINGS, "sidebar.toggle", "mod+t", read)).toBe("Taken by New thread");
     expect(chordRefusal(rulesWith(DEFAULT_KEYBINDINGS, { "chat.new": "mod+alt+n" }), "sidebar.toggle", "mod+t", read)).toBe("A browser tab keeps ⌘T for itself");
-    expect(chordRefusal(DEFAULT_KEYBINDINGS, "preview.toggle", "ctrl+tab", { ...read, platform: LINUX })).toBe("Taken by Next task");
-    expect(chordRefusal(rulesWith(DEFAULT_KEYBINDINGS, { "workspace.next": "mod+alt+n" }), "preview.toggle", "ctrl+tab", { ...read, platform: LINUX })).toBe("A browser tab keeps Ctrl+Tab for itself");
+    expect(chordRefusal(DEFAULT_KEYBINDINGS, "preview.toggle", "ctrl+tab", { ...read, platform: LINUX })).toBe("Taken by Next task and Next panel tab");
+    const moved = rulesWith(DEFAULT_KEYBINDINGS, { "workspace.next": "mod+alt+n", "rightPanel.nextTab": "mod+alt+m" });
+    expect(chordRefusal(moved, "preview.toggle", "ctrl+tab", { ...read, platform: LINUX })).toBe("A browser tab keeps Ctrl+Tab for itself");
   });
 });

@@ -462,7 +462,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
         </ScrollArea>
         {props.layoutControls}
       </div>
-      <div className="flex min-h-0 flex-1 flex-col" data-right-panel-surface-content>
+      <div className="flex min-h-0 flex-1 flex-col outline-none" data-right-panel-surface-content tabIndex={-1}>
         {props.activeSurfaceId === null ? (
           <RightPanelEmptyState actions={addSurfaceActions} />
         ) : (

@@ -270,17 +270,15 @@ function isSnoozed(node: TileNode): boolean {
   return node.thread.thread?.snoozedUntil != null && !needs(node);
 }
 
+/** Every tile of the live list in the order it draws them, each tree's children under its root. */
+export function drawnTiles(live: ReadonlyArray<TileNode>): TileItem[] {
+  return live.flatMap(({ thread, children }) => [thread, ...drawnTiles(children)]);
+}
+
 /** The next tile after the one named, in the order the live list draws them, children included, whose thread needs
  * the person, wrapping to the top; the first there is when the one named is not drawn or none is named. */
 export function nextNeedsYou(live: ReadonlyArray<TileNode>, fromId: string | null): TileItem | undefined {
-  const drawn: TileItem[] = [];
-  const walk = (nodes: ReadonlyArray<TileNode>): void => {
-    for (const { thread, children } of nodes) {
-      drawn.push(thread);
-      walk(children);
-    }
-  };
-  walk(live);
+  const drawn = drawnTiles(live);
   const at = drawn.findIndex(item => item.id === fromId);
   return [...drawn.slice(at + 1), ...drawn.slice(0, at + 1)].find(item => item.thread?.needsYou === true);
 }
