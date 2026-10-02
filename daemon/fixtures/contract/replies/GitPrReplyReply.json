@@ -1,0 +1,35 @@
+[
+  {
+    "comment": {
+      "id": 5952733077,
+      "nodeId": "IC_kwDOULIAx88AAAABYsB0lQ",
+      "author": "Zingzy",
+      "association": "owner",
+      "bot": false,
+      "avatar": "https://avatars.githubusercontent.com/u/90309290?v=4",
+      "body": "Fixed in 9703d1f.",
+      "url": "https://github.com/o/r/pull/12#issuecomment-5952733077",
+      "at": "2026-10-02T12:00:00Z",
+      "reactions": []
+    }
+  },
+  {
+    "reviewComment": {
+      "id": 4110044839,
+      "nodeId": "PRRC_kwDOULIAx87091Cn",
+      "path": "check.sh",
+      "line": 3,
+      "side": "RIGHT",
+      "author": "Zingzy",
+      "association": "owner",
+      "bot": false,
+      "body": "Done.",
+      "url": "u",
+      "at": "t",
+      "hunk": "@@ -1 +1 @@\n-a\n+b",
+      "replyTo": 7,
+      "reviewId": 5324405558,
+      "reactions": []
+    }
+  }
+]

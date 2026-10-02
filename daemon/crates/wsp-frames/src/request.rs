@@ -6,7 +6,9 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::validate::{bounded, bounded_opt, capped_list, exec_timeout, sha256_hex, upload_word};
-use crate::{FsReadEncoding, FsSearchMode, GitDiffScope, GuestKind, MergeMethod, ProcSignal, RequestId, ReviewEvent, ReviewSide};
+use crate::{
+    FsReadEncoding, FsSearchMode, GitDiffScope, GuestKind, MergeMethod, ProcSignal, ReactionContent, RequestId, ReviewEvent, ReviewSide,
+};
 
 /// One request on an authed socket: the id the reply echoes and the op with its parameters.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -431,6 +433,56 @@ pub enum DaemonOp {
         #[ts(optional)]
         machine_id: Option<String>,
     },
+    /// Posts a reply as the signed-in person: under the comment on a line reply_to names, or a new comment in the
+    /// conversation where it names none, the body sent as typed on stdin.
+    #[serde(rename = "git.prReply", rename_all = "camelCase")]
+    GitPrReply {
+        cwd: String,
+        remote: String,
+        number: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        reply_to: Option<u64>,
+        /// The thread a line reply goes into, by its node id, which the answer carries back.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        thread_id: Option<String>,
+        #[serde(deserialize_with = "bounded::<_, 0, { crate::numbers::PR_REPLY_BODY_MAX }>")]
+        body: String,
+        /// The workspace this frame is for, as on fs.list above.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        machine_id: Option<String>,
+    },
+    /// Resolves or unresolves a review thread by its node id as the signed-in person, once a read found the thread on
+    /// the pull request numbered.
+    #[serde(rename = "git.prResolve", rename_all = "camelCase")]
+    GitPrResolve {
+        cwd: String,
+        remote: String,
+        number: u64,
+        thread_id: String,
+        resolved: bool,
+        /// The workspace this frame is for, as on fs.list above.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        machine_id: Option<String>,
+    },
+    /// Adds one reaction to the item a node id names, or takes it off, as the signed-in person, once a read found the
+    /// item on the pull request numbered.
+    #[serde(rename = "git.prReact", rename_all = "camelCase")]
+    GitPrReact {
+        cwd: String,
+        remote: String,
+        number: u64,
+        subject: String,
+        content: ReactionContent,
+        on: bool,
+        /// The workspace this frame is for, as on fs.list above.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        machine_id: Option<String>,
+    },
     /// Posts one review in one call, its verdict, its body and its comments on lines, pinned to the head named; a
     /// comment whose line is outside the diff goes into the body.
     #[serde(rename = "git.prReview", rename_all = "camelCase")]
@@ -661,7 +713,7 @@ pub struct ReviewComment {
     pub body: String,
 }
 
-pub const DAEMON_OPS: [&str; 64] = [
+pub const DAEMON_OPS: [&str; 67] = [
     "pty.create",
     "pty.attach",
     "pty.detach",
@@ -726,6 +778,9 @@ pub const DAEMON_OPS: [&str; 64] = [
     "git.prCheckout",
     "git.prDiff",
     "git.prReview",
+    "git.prReply",
+    "git.prResolve",
+    "git.prReact",
 ];
 
 /// The five of those that belong to the road a client of this machine dials in on: a guest process's two and the

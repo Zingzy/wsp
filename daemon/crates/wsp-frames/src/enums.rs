@@ -137,6 +137,28 @@ pub enum CheckState {
     Cancelled,
 }
 
+/// The eight reactions GitHub offers, by the REST API's names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub enum ReactionContent {
+    #[serde(rename = "+1")]
+    ThumbsUp,
+    #[serde(rename = "-1")]
+    ThumbsDown,
+    #[serde(rename = "laugh")]
+    Laugh,
+    #[serde(rename = "hooray")]
+    Hooray,
+    #[serde(rename = "confused")]
+    Confused,
+    #[serde(rename = "heart")]
+    Heart,
+    #[serde(rename = "rocket")]
+    Rocket,
+    #[serde(rename = "eyes")]
+    Eyes,
+}
+
 /// How a pull request lands on its base: a merge commit, one squashed commit, or its commits rebased on top.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]

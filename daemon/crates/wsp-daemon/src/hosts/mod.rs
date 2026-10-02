@@ -8,8 +8,9 @@ use std::path::Path;
 
 use wsp_frames::{
     numbers, words, DaemonErrorCode, GitBranchCompareReply, GitIssueReadReply, GitPrCheckoutReply, GitPrDiffReply, GitPrListReply,
-    GitPrMergeReply, GitPrReply, GitPrReviewReply, GitPrViewReply, GitRepoReadReply, GitRunLogReply, HostItem, HostItemKind, IssueRead,
-    MergeMethod, PullRequest, PullRequestCheck, PullRequestState, ReviewComment, ReviewEvent, ReviewSide,
+    GitPrMergeReply, GitPrReactReply, GitPrReply, GitPrReplyReply, GitPrResolveReply, GitPrReviewReply, GitPrViewReply, GitRepoReadReply,
+    GitRunLogReply, HostItem, HostItemKind, IssueRead, MergeMethod, PullRequest, PullRequestCheck, PullRequestReaction, PullRequestState,
+    ReactionContent, ReviewComment, ReviewEvent, ReviewSide,
 };
 
 use crate::git::Runs;
@@ -101,6 +102,24 @@ pub(crate) trait PullRequests: Sync {
     fn review_argv(&self, repo: &str, number: u64) -> Vec<String>;
     fn review_input(&self, head_oid: &str, event: ReviewEvent, body: &str, comments: &[ReviewComment]) -> String;
     fn read_review_url(&self, stdout: &str) -> Option<String>;
+
+    /// The line that posts a reply as the signed-in person, its JSON on stdin: under the comment on a line reply_to
+    /// names, or a new comment in the conversation; that JSON; and the new comment it answered with.
+    fn reply_argv(&self, repo: &str, number: u64, reply_to: Option<u64>) -> Vec<String>;
+    fn reply_input(&self, body: &str) -> String;
+    fn read_reply(&self, stdout: &str, on_a_line: bool, thread_id: Option<&str>) -> Option<GitPrReplyReply>;
+    /// The read of which pull request a node sits on, and its repository and number where it is a review thread, or
+    /// where it is something a reaction may name; nothing for any other node.
+    fn scope_argv(&self, id: &str) -> Vec<String>;
+    fn read_scope(&self, stdout: &str, thread: bool) -> Option<(String, u64)>;
+    /// The line that resolves or unresolves a review thread by its node id, and where the thread stands after.
+    fn resolve_argv(&self, thread_id: &str, resolved: bool) -> Vec<String>;
+    fn read_resolve(&self, stdout: &str) -> Option<GitPrResolveReply>;
+    /// The line that adds a reaction to the item a node id names or takes it off, and every reaction on it after.
+    fn react_argv(&self, subject: &str, content: ReactionContent, on: bool) -> Vec<String>;
+    fn read_react(&self, stdout: &str) -> Option<Vec<PullRequestReaction>>;
+    /// Whether a word has the shape of this host's node ids, which is all a write naming one may carry.
+    fn is_node_id(&self, id: &str) -> bool;
 }
 
 /// Every git host wsp knows a command line for.
@@ -188,7 +207,7 @@ async fn run_cli<R: Runs>(
     ask: &Ask<'_>,
     args: &[String],
 ) -> Result<(Option<i32>, String, String), OpError> {
-    let (code, stdout, stderr, stopped) = run_cli_within(runner, host, ask, args, HOST_CLI_MAX_BYTES).await?;
+    let (code, stdout, stderr, stopped) = run_cli_within(runner, host, ask, args, None, HOST_CLI_MAX_BYTES).await?;
     if stopped {
         let cap = HOST_CLI_MAX_BYTES / (1024 * 1024);
         return Err(OpError::plain(format!("{} printed more than {cap} MB for one read and was stopped", host.program())));
@@ -196,16 +215,17 @@ async fn run_cli<R: Runs>(
     Ok((code, stdout, stderr))
 }
 
-/// The same line read to the bytes given, answering whether it was stopped there.
+/// The same line, fed what input is given on stdin, read to the bytes given, answering whether it was stopped there.
 async fn run_cli_within<R: Runs>(
     runner: &R,
     host: &'static dyn PullRequests,
     ask: &Ask<'_>,
     args: &[String],
+    input: Option<&[u8]>,
     max_bytes: usize,
 ) -> Result<(Option<i32>, String, String, bool), OpError> {
     let line: Vec<&str> = args.iter().map(String::as_str).collect();
-    let done = runner.run(ask.cwd, host.program(), &line, None, Some(max_bytes)).await?;
+    let done = runner.run(ask.cwd, host.program(), &line, input, Some(max_bytes)).await?;
     if !done.truncated && done.code.is_some() && done.code == host.sign_in_exit() {
         return Err(OpError::coded(DaemonErrorCode::NoHostCli, words::no_host_cli(host.host())));
     }
@@ -451,7 +471,8 @@ pub(crate) async fn checkout<R: Runs>(runner: &R, cwd: &Path, number: u64) -> Re
 /// PR_DIFF_READ_MAX_BYTES is stopped there and names only the files it printed.
 pub(crate) async fn diff<R: Runs>(runner: &R, ask: &Ask<'_>, number: u64, max_bytes: Option<u64>) -> Result<GitPrDiffReply, OpError> {
     let (host, repo) = cli_for(runner, ask).await?;
-    let (code, stdout, stderr, stopped) = run_cli_within(runner, host, ask, &host.diff_argv(&repo, number), PR_DIFF_READ_MAX_BYTES).await?;
+    let (code, stdout, stderr, stopped) =
+        run_cli_within(runner, host, ask, &host.diff_argv(&repo, number), None, PR_DIFF_READ_MAX_BYTES).await?;
     if !stopped && code != Some(0) {
         return Err(refused_by(host, &stdout, &stderr));
     }
@@ -495,6 +516,112 @@ pub(crate) async fn review<R: Runs>(
     }
     let url = host.read_review_url(&stdout).unwrap_or_default();
     Ok(GitPrReviewReply { url, folded })
+}
+
+/// A write that names a node id refuses one of any other shape before anything runs, so nothing but an id reaches the
+/// variable it is sent in.
+fn node_id_of(host: &'static dyn PullRequests, id: &str) -> Result<(), OpError> {
+    if host.is_node_id(id) {
+        Ok(())
+    } else {
+        let shown: String = id.chars().take(64).collect();
+        Err(OpError::coded(DaemonErrorCode::BadRequest, format!("{shown:?} is not a {} node id", host.host())))
+    }
+}
+
+/// A node a write names, read first for the pull request it sits on and refused unless that is the repository's pull
+/// request numbered: the shape of an id says nothing of whose it is.
+async fn in_scope<R: Runs>(
+    runner: &R,
+    host: &'static dyn PullRequests,
+    ask: &Ask<'_>,
+    repo: &str,
+    number: u64,
+    id: &str,
+    thread: bool,
+) -> Result<(), OpError> {
+    node_id_of(host, id)?;
+    let (code, stdout, stderr) = run_cli(runner, host, ask, &host.scope_argv(id)).await?;
+    if code != Some(0) {
+        return Err(refused_by(host, &stdout, &stderr));
+    }
+    match host.read_scope(&stdout, thread) {
+        Some((at, n)) if at.eq_ignore_ascii_case(repo) && n == number => Ok(()),
+        _ => {
+            let what = if thread { "review thread" } else { "comment or review" };
+            Err(OpError::coded(DaemonErrorCode::BadRequest, format!("that is not a {what} on #{number} of {repo}")))
+        }
+    }
+}
+
+/// The refusal a write answered with, or what it printed where it did not.
+async fn write<R: Runs>(
+    runner: &R,
+    host: &'static dyn PullRequests,
+    ask: &Ask<'_>,
+    args: &[String],
+    input: Option<&[u8]>,
+) -> Result<String, OpError> {
+    let (code, stdout, stderr, stopped) = run_cli_within(runner, host, ask, args, input, HOST_CLI_MAX_BYTES).await?;
+    if stopped || code != Some(0) {
+        return Err(refused_by(host, &stdout, &stderr));
+    }
+    Ok(stdout)
+}
+
+/// A reply posted as the signed-in person, its body on stdin as typed: under the comment on a line reply_to names, or
+/// a new comment in the conversation. Answered with the new comment, a line reply in the thread named and unresolved,
+/// since a reply leaves a thread as GitHub reads it.
+pub(crate) async fn reply<R: Runs>(
+    runner: &R,
+    ask: &Ask<'_>,
+    number: u64,
+    reply_to: Option<u64>,
+    thread_id: Option<&str>,
+    body: &str,
+) -> Result<GitPrReplyReply, OpError> {
+    let (host, repo) = cli_for(runner, ask).await?;
+    if let Some(thread) = thread_id {
+        node_id_of(host, thread)?;
+    }
+    let input = host.reply_input(body);
+    let stdout = write(runner, host, ask, &host.reply_argv(&repo, number, reply_to), Some(input.as_bytes())).await?;
+    host.read_reply(&stdout, reply_to.is_some(), thread_id)
+        .ok_or_else(|| OpError::plain(format!("{} posted the reply and answered with a comment this does not read", host.program())))
+}
+
+/// A review thread resolved or unresolved as the signed-in person, by its node id; answered with where it stands.
+pub(crate) async fn resolve<R: Runs>(
+    runner: &R,
+    ask: &Ask<'_>,
+    number: u64,
+    thread_id: &str,
+    resolved: bool,
+) -> Result<GitPrResolveReply, OpError> {
+    let (host, repo) = cli_for(runner, ask).await?;
+    in_scope(runner, host, ask, &repo, number, thread_id, true).await?;
+    let stdout = write(runner, host, ask, &host.resolve_argv(thread_id, resolved), None).await?;
+    host.read_resolve(&stdout)
+        .ok_or_else(|| OpError::plain(format!("{} answered the resolve with a thread this does not read", host.program())))
+}
+
+/// A reaction added to the item a node id names, or taken off, as the signed-in person; answered with every reaction
+/// on the item now.
+pub(crate) async fn react<R: Runs>(
+    runner: &R,
+    ask: &Ask<'_>,
+    number: u64,
+    subject: &str,
+    content: ReactionContent,
+    on: bool,
+) -> Result<GitPrReactReply, OpError> {
+    let (host, repo) = cli_for(runner, ask).await?;
+    in_scope(runner, host, ask, &repo, number, subject, false).await?;
+    let stdout = write(runner, host, ask, &host.react_argv(subject, content, on), None).await?;
+    let reactions = host
+        .read_react(&stdout)
+        .ok_or_else(|| OpError::plain(format!("{} answered the reaction with reactions this does not read", host.program())))?;
+    Ok(GitPrReactReply { subject: subject.to_owned(), reactions })
 }
 
 /// Whether a line on a side of a file stands inside one of its patch's hunks, which is the only place a git host takes
@@ -1036,6 +1163,103 @@ mod tests {
         let runner = Recorded::new(&["gh"]).answering(vec![(0, &past)]);
         let held = diff(&runner, &ask, 7, Some(u64::MAX)).await.unwrap();
         assert_eq!((held.truncated, held.left.as_slice()), (true, ["b.txt".to_owned()].as_slice()));
+    }
+
+    /// Every write is one gh line, as the signed-in person: a reply's body rides stdin as JSON whatever it says, a node
+    /// id of any other shape is refused before anything runs, a refusal is gh's own last line, and a gh nobody signed
+    /// in reads as the not-read sentence.
+    #[tokio::test]
+    async fn a_write_is_one_gh_line_its_words_on_stdin_and_a_node_id_of_another_shape_runs_nothing() {
+        let ask = Ask { cwd: Path::new("/Users/p"), remote_url: "https://github.com/o/r" };
+        let posted = r#"{"id":9,"node_id":"IC_kwDOx","user":{"login":"Zingzy","type":"User"},"author_association":"OWNER","body":"done","html_url":"u","created_at":"t"}"#;
+        let runner = Recorded::new(&["gh"]).answering(vec![(0, posted)]);
+        let body = "done\n\"} mutation { x }";
+        let read = reply(&runner, &ask, 12, None, None, body).await.unwrap();
+        assert_eq!(read.comment.map(|c| (c.id, c.node_id)), Some((9, Some("IC_kwDOx".to_owned()))));
+        let calls = runner.asked();
+        assert_eq!(calls[0].args, ["api", "--method", "POST", "repos/o/r/issues/12/comments", "--input", "-"]);
+        let sent: serde_json::Value = serde_json::from_slice(calls[0].stdin.as_deref().unwrap()).unwrap();
+        assert_eq!(sent, serde_json::json!({ "body": body }));
+        let refused = Recorded::new(&["gh"]).answering_said(vec![(1, "", "gh: Validation Failed (HTTP 422)")]);
+        assert_eq!(reply(&refused, &ask, 12, Some(7), None, "x").await.unwrap_err().message, "gh said: gh: Validation Failed (HTTP 422)");
+        assert_eq!(refused.asked()[0].args[3], "repos/o/r/pulls/12/comments/7/replies");
+        let resolved = r#"{"data":{"resolveReviewThread":{"thread":{"id":"PRRT_kwDOULIAx86mM5yP","isResolved":true}}}}"#;
+        let runner = Recorded::new(&["gh"]).answering(vec![(0, &scope("PullRequestReviewThread", "o/r", 12)), (0, resolved)]);
+        let read = resolve(&runner, &ask, 12, "PRRT_kwDOULIAx86mM5yP", true).await.unwrap();
+        assert_eq!((read.thread_id.as_str(), read.resolved), ("PRRT_kwDOULIAx86mM5yP", true));
+        let calls = runner.asked();
+        assert_eq!(calls.len(), 2);
+        assert!(calls[0].args[3].starts_with("query=query($id: ID!) { node(id: $id)"), "the scope is read first");
+        assert_eq!(calls[1].args.last().map(String::as_str), Some("id=PRRT_kwDOULIAx86mM5yP"));
+        let reacted = r#"{"data":{"addReaction":{"subject":{"reactionGroups":[{"content":"EYES","viewerHasReacted":true,"reactors":{"totalCount":1}}]}}}}"#;
+        let runner = Recorded::new(&["gh"]).answering(vec![(0, &scope("IssueComment", "O/R", 12)), (0, reacted)]);
+        let read = react(&runner, &ask, 12, "IC_kwDOx", ReactionContent::Eyes, true).await.unwrap();
+        assert_eq!(read.subject, "IC_kwDOx");
+        assert_eq!(read.reactions, [PullRequestReaction { content: ReactionContent::Eyes, count: 1, mine: true }]);
+        for bad in ["PRRT_x\") { deleteRepository", "a b", ""] {
+            let runner = Recorded::new(&["gh"]);
+            assert_eq!(resolve(&runner, &ask, 12, bad, true).await.unwrap_err().code, Some(DaemonErrorCode::BadRequest), "{bad}");
+            assert_eq!(
+                react(&runner, &ask, 12, bad, ReactionContent::Heart, false).await.unwrap_err().code,
+                Some(DaemonErrorCode::BadRequest),
+                "{bad}"
+            );
+            assert!(runner.asked().is_empty(), "{bad}");
+        }
+        let signed_out = Recorded::new(&["gh"]).answering_said(vec![(4, "", SIGN_IN_SAID)]);
+        let err = reply(&signed_out, &ask, 12, None, None, "x").await.unwrap_err();
+        assert_eq!((err.code, err.message), (Some(DaemonErrorCode::NoHostCli), words::no_host_cli("github.com")));
+        // A bad id is named in the refusal, cut short, never whole.
+        let long = "x ".repeat(200);
+        let said = resolve(&Recorded::new(&["gh"]), &ask, 12, &long, true).await.unwrap_err().message;
+        assert!(said.len() < 120, "{said}");
+    }
+
+    /// The scope read's answer for a node of the kind given on the repository and pull request given.
+    fn scope(kind: &str, repo: &str, number: u64) -> String {
+        format!(
+            r#"{{"data":{{"node":{{"__typename":"{kind}","pullRequest":{{"number":{number},"repository":{{"nameWithOwner":"{repo}"}}}}}}}}}}"#
+        )
+    }
+
+    /// The shape of an id says nothing of whose it is: a thread or a comment on another pull request, in this
+    /// repository or another, or a node of another kind, is refused before the mutation runs.
+    #[tokio::test]
+    async fn a_resolve_or_a_reaction_on_a_node_of_another_pull_request_is_refused_before_the_mutation() {
+        let ask = Ask { cwd: Path::new("/Users/p"), remote_url: "https://github.com/o/r" };
+        for (kind, repo, number) in
+            [("PullRequestReviewThread", "o/r", 13), ("PullRequestReviewThread", "other/r", 12), ("IssueComment", "o/r", 12)]
+        {
+            let runner = Recorded::new(&["gh"]).answering(vec![(0, &scope(kind, repo, number)), (0, "{}")]);
+            let err = resolve(&runner, &ask, 12, "PRRT_kwDOx", true).await.unwrap_err();
+            assert_eq!(
+                (err.code, err.message.as_str()),
+                (Some(DaemonErrorCode::BadRequest), "that is not a review thread on #12 of o/r"),
+                "{kind} {repo} {number}"
+            );
+            assert_eq!(runner.asked().len(), 1, "the mutation ran for {kind} on {repo}#{number}");
+        }
+        for (kind, repo, number) in [("IssueComment", "o/r", 99), ("PullRequestReview", "x/y", 12), ("PullRequestReviewThread", "o/r", 12)]
+        {
+            let runner = Recorded::new(&["gh"]).answering(vec![(0, &scope(kind, repo, number)), (0, "{}")]);
+            let err = react(&runner, &ask, 12, "IC_kwDOx", ReactionContent::Heart, true).await.unwrap_err();
+            assert_eq!(
+                (err.code, err.message.as_str()),
+                (Some(DaemonErrorCode::BadRequest), "that is not a comment or review on #12 of o/r"),
+                "{kind} {repo} {number}"
+            );
+            assert_eq!(runner.asked().len(), 1, "the mutation ran for {kind} on {repo}#{number}");
+        }
+        let gone = Recorded::new(&["gh"]).answering_said(vec![(
+            1,
+            r#"{"data":{"node":null}}"#,
+            "gh: Could not resolve to a node with the global id of 'IC_x'",
+        )]);
+        assert_eq!(
+            react(&gone, &ask, 12, "IC_x", ReactionContent::Heart, true).await.unwrap_err().message,
+            "gh said: gh: Could not resolve to a node with the global id of 'IC_x'"
+        );
+        assert_eq!(gone.asked().len(), 1);
     }
 
     /// A gh whose diff and page run on past the read caps: ten files of 1.5 MB each, and a page of 17 MB.

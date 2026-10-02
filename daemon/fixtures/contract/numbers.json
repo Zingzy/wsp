@@ -1,6 +1,7 @@
 {
   "daemonVersion": 112,
   "execBodyMax": 16384,
+  "prReplyBodyMax": 65536,
   "guestMessageCapBytes": 4194304,
   "guestQueueCapFrames": 256,
   "guestInFlightCapBytes": 16777216,

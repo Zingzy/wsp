@@ -305,6 +305,9 @@ async fn handle_op(conn: &Arc<Conn>, ctx: &Arc<Ctx>, frame: &Value, id: Option<R
             | "git.prCheckout"
             | "git.prDiff"
             | "git.prReview"
+            | "git.prReply"
+            | "git.prResolve"
+            | "git.prReact"
             | "git.prList"
             | "git.discard"
             | "git.commit"
@@ -985,6 +988,27 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
             };
             answer(id, read.await)
         }
+        DaemonOp::GitPrReply { cwd, remote, number, reply_to, thread_id, body, machine_id } => {
+            let posted = async {
+                let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Works).await?;
+                hosts::reply(&runner, &hosts::Ask { cwd: &at, remote_url: &remote }, number, reply_to, thread_id.as_deref(), &body).await
+            };
+            answer(id, posted.await)
+        }
+        DaemonOp::GitPrResolve { cwd, remote, number, thread_id, resolved, machine_id } => {
+            let done = async {
+                let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Works).await?;
+                hosts::resolve(&runner, &hosts::Ask { cwd: &at, remote_url: &remote }, number, &thread_id, resolved).await
+            };
+            answer(id, done.await)
+        }
+        DaemonOp::GitPrReact { cwd, remote, number, subject, content, on, machine_id } => {
+            let done = async {
+                let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Works).await?;
+                hosts::react(&runner, &hosts::Ask { cwd: &at, remote_url: &remote }, number, &subject, content, on).await
+            };
+            answer(id, done.await)
+        }
         DaemonOp::GitPrReview { cwd, remote, number, head_oid, event, body, comments, machine_id } => {
             let posted = async {
                 let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Works).await?;
@@ -1445,6 +1469,9 @@ mod tests {
             "git.prCheckout",
             "git.prDiff",
             "git.prReview",
+            "git.prReply",
+            "git.prResolve",
+            "git.prReact",
             "git.prList",
             "git.discard",
             "git.commit",

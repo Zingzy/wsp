@@ -5,6 +5,7 @@ import type { GitDiffScope } from "./GitDiffScope.js";
 import type { GuestKind } from "./GuestKind.js";
 import type { MergeMethod } from "./MergeMethod.js";
 import type { ProcSignal } from "./ProcSignal.js";
+import type { ReactionContent } from "./ReactionContent.js";
 import type { ReviewComment } from "./ReviewComment.js";
 import type { ReviewEvent } from "./ReviewEvent.js";
 
@@ -162,6 +163,22 @@ machineId?: string, } | { "op": "git.prCheckout", cwd: string, number: number,
  * The workspace this frame is for, as on fs.list above.
  */
 machineId?: string, } | { "op": "git.prDiff", cwd: string, remote: string, number: number, maxBytes?: number, 
+/**
+ * The workspace this frame is for, as on fs.list above.
+ */
+machineId?: string, } | { "op": "git.prReply", cwd: string, remote: string, number: number, replyTo?: number, 
+/**
+ * The thread a line reply goes into, by its node id, which the answer carries back.
+ */
+threadId?: string, body: string, 
+/**
+ * The workspace this frame is for, as on fs.list above.
+ */
+machineId?: string, } | { "op": "git.prResolve", cwd: string, remote: string, number: number, threadId: string, resolved: boolean, 
+/**
+ * The workspace this frame is for, as on fs.list above.
+ */
+machineId?: string, } | { "op": "git.prReact", cwd: string, remote: string, number: number, subject: string, content: ReactionContent, on: boolean, 
 /**
  * The workspace this frame is for, as on fs.list above.
  */

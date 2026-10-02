@@ -231,7 +231,7 @@ import type {
 } from "@wsp/protocol";
 import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding } from "./project-landing.js";
 import { projectRemote, projectSource } from "./project-sources.js";
-import { vaultUnlistedRefusal, ThreadPlacement, ThreadScope, WorkspaceOrigin, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, GitCommitReply, GitDiscardReply, GitDiffReply, GitStatusReply, GitPrReadReply, GitPrViewReply, GitRunLogReply, GitPrMergeReply, GitRepoReadReply, GitUpdateReply, GitStartOnReply, GitBranchCompareReply, GitMergeInReply, DETACHED_HEAD, leadBusyRefusal, childStartedLine, forkNeedsPushLine, FIX_CHECK_OR_CHILD, childOnNoBranchRefusal, mergeChildPrompt, mergeIntoOwnRefusal, noRemoteForTreeLine, notTheLeadsChildRefusal, pushedForChildLine, uncommittedStayed, type MergeInResult, type TreeChild, type TreeFact, type TreeRecord, PR_POLL_MS, type PullRequestPage, type PullRequestItem, type PullRequestSendResult, type PullRequestSent, GIT_DIFF_CAP_BYTES, pullRequestSendPrompt, checkFailedPrompt, conflictsPrompt, checkNotFailedRefusal, childPushedLine, isPullRequestFact, mergeMethodRefusal, noPullRequestRefusal, noSuchCheckRefusal, notOpenRefusal, pullRequestStoppedLine, pullRequestUnreadLine, AUTO_MERGE_OFF_LINE, type FixResult, type MergeMethod, type MergeResult, type PullRequestFact, type PullRequestRecord, type PullRequestSeen, DRAFT_NOTES, cleanCheckoutLine, commitMessage, cutDiff, draftPrompt, type Checkout, type CheckoutReply, type CommitDraft, type CommitDrafter, type ViewedMarks, AGENTS_ON, agentsFrom, foldThreads, NAP_AFTER_MS, settingFor, runningOn as runningOnPlace, phaseHoldsSlot, placeAtLimitLine, placeSpendLimit, spendCapRefusal, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadKeyOf, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, SCOPED_MCP_ARG, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn, RUN_PERSONS_LINE, runOutputTail, type RunStep, type SessionRunEvent } from "@wsp/protocol";
+import { vaultUnlistedRefusal, ThreadPlacement, ThreadScope, WorkspaceOrigin, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, GitCommitReply, GitDiscardReply, GitDiffReply, GitStatusReply, GitPrReadReply, GitPrViewReply, GitRunLogReply, GitPrMergeReply, GitRepoReadReply, GitUpdateReply, GitStartOnReply, GitBranchCompareReply, GitMergeInReply, DETACHED_HEAD, leadBusyRefusal, childStartedLine, forkNeedsPushLine, FIX_CHECK_OR_CHILD, childOnNoBranchRefusal, mergeChildPrompt, mergeIntoOwnRefusal, noRemoteForTreeLine, notTheLeadsChildRefusal, pushedForChildLine, uncommittedStayed, type MergeInResult, type TreeChild, type TreeFact, type TreeRecord, PR_POLL_MS, type PullRequestPage, GitPrReplyReply, GitPrResolveReply, GitPrReactReply, REPLY_EMPTY_LINE, pullRequestPostLine, type ReactionContent, type PullRequestItem, type PullRequestSendResult, type PullRequestSent, GIT_DIFF_CAP_BYTES, pullRequestSendPrompt, checkFailedPrompt, conflictsPrompt, checkNotFailedRefusal, childPushedLine, isPullRequestFact, mergeMethodRefusal, noPullRequestRefusal, noSuchCheckRefusal, notOpenRefusal, pullRequestStoppedLine, pullRequestUnreadLine, AUTO_MERGE_OFF_LINE, type FixResult, type MergeMethod, type MergeResult, type PullRequestFact, type PullRequestRecord, type PullRequestSeen, DRAFT_NOTES, cleanCheckoutLine, commitMessage, cutDiff, draftPrompt, type Checkout, type CheckoutReply, type CommitDraft, type CommitDrafter, type ViewedMarks, AGENTS_ON, agentsFrom, foldThreads, NAP_AFTER_MS, settingFor, runningOn as runningOnPlace, phaseHoldsSlot, placeAtLimitLine, placeSpendLimit, spendCapRefusal, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadKeyOf, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, SCOPED_MCP_ARG, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn, RUN_PERSONS_LINE, runOutputTail, type RunStep, type SessionRunEvent } from "@wsp/protocol";
 import { ASIDE_NO_SESSION_LINE, BLANK_ASIDE_LINE, asideUnsupportedLine, PLACE_WORKSPACE_PATH, THIS_COMPUTER, COPY_BUILD_FIX, copyAsksSignIns, refusal, copyFirstLine, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildOf, copyIsCurrent, type CopyBuild, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, serverIconsLeftLine, homeShortened, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, threadRunsOnLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, GONE_UNCHECKED, goneUnconfirmedLine, type GoneSeenBy, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, cloneFailedLine, cloneIntoNeeded, cloneIntoTakenLine, cloneUrlRefusal, intoIsHereLine, INTO_TAKES_A_REPO_LINE, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeBlocked, placeDaemonBehind, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeDaemonPaths, placeDialBackLine, placeWentAwayLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspacePlace, workFolderIn, workspaceLands, copyPathFor, folderSlug, type ProjectCopy, REWIND_LATEST_LINE, REWIND_NO_CHECKPOINT_LINE, REWIND_NO_UNDO_LINE, REWIND_OWN_FOLDER_LINE, REWIND_WORKING_LINE, rewindBesideLine, rewindChildrenLine, rewindNoAnchorLine, attachmentRecord, filesBlocked, isImage, sendFilesDir, filePathIn, landFilesLine, filesNotLandedLine, attachedFilesPrompt, dropFilesLine } from "@wsp/protocol";
 import { agentsReads, type AgentsActs, type AgentsReader, type CallbackForwards, type ServerIcons, type ServersActs, type SignInAsk, type SkillAsk, type SkillsActs } from "./agents-read.js";
 import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from "./daemon-channel.js";
@@ -1545,6 +1545,13 @@ export interface Runtime {
     /** Sends items of the page to the workspace's agent as one message, read off the page anew, into the thread a fix
      * goes to; keeps each item sent with when. Answers once the message is on its way. */
     pullRequestSend(o: { workspaceId: string; items: readonly PullRequestItem[] }, origin?: Caller): Promise<PullRequestSendResult>;
+    /** Posts a reply as the person through this computer's signed-in command line alone: under the comment on a line
+     * replyTo names, in the thread threadId names, or a new comment in the conversation. */
+    pullRequestReply(o: { workspaceId: string; replyTo?: number; threadId?: string; body: string }, origin?: Caller): Promise<GitPrReplyReply>;
+    /** Resolves or unresolves a review thread by its node id as the person. */
+    pullRequestResolve(o: { workspaceId: string; threadId: string; resolved: boolean }, origin?: Caller): Promise<GitPrResolveReply>;
+    /** Adds a reaction to the item a node id names, or takes it off, as the person. */
+    pullRequestReact(o: { workspaceId: string; subject: string; content: ReactionContent; on: boolean }, origin?: Caller): Promise<GitPrReactReply>;
     /** Asks the workspace's agent to fix a failed check, named, with the failed steps of its log; with none, updates the
      * copy from its base and asks it to fix the conflicts where the merge had any, sending nothing when it merged
      * clean. Answers once the message is on its way, the turn going on without the caller. */
@@ -4537,13 +4544,36 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * record on either road, never the copy's own configuration, which the agent writes. The copy's gh is on a PATH its
    * agent can write, so a read through it is the agent's word: a forged merged there settles the tree and naps its
    * machine, and nothing past that, which is why a merge never takes this road. */
-  const readHost = async <T>(entry: LiveWorkspace, frame: (cwd: string) => DaemonFrame, parse: (reply: Record<string, unknown>) => T): Promise<T> => {
+  const readHost = async <T>(entry: LiveWorkspace, frame: (cwd: string) => DaemonFrame, parse: (reply: Record<string, unknown>) => T): Promise<T> =>
+    (await readHostOn(entry, frame, parse)).read;
+
+  /** The same read, saying whether it was this computer's own command line that answered. */
+  const readHostOn = async <T>(entry: LiveWorkspace, frame: (cwd: string) => DaemonFrame, parse: (reply: Record<string, unknown>) => T): Promise<{ read: T; here: boolean }> => {
     try {
-      return await onThisComputer(async (ask, home) => parse(await ask(frame(home))));
+      return { read: await onThisComputer(async (ask, home) => parse(await ask(frame(home)))), here: true };
     } catch (e) {
       if (!isNoHostCli(e) || !copyReadsHost(entry)) throw e;
     }
-    return withDaemon(entry, async ask => parse(await ask(frame(checkoutOf(entry.record)))));
+    return { read: await withDaemon(entry, async ask => parse(await ask(frame(checkoutOf(entry.record))))), here: false };
+  };
+
+  /** The workspace with the pull request it has, by number, and its project's remote; refused where it has none. */
+  const pullRequestOn = async (workspaceId: string, origin: Caller | undefined): Promise<{ entry: LiveWorkspace; remote: string; number: number }> => {
+    const entry = await entryOf(workspaceId, origin);
+    const number = entry.record.pr?.number;
+    if (number === undefined) throw new Error(noPullRequestRefusal(entry.record.name));
+    return { entry, remote: projectHeld(entry.record.project).remote, number };
+  };
+
+  /** A write on the git host as the person, through this computer's own signed-in command line alone, as a merge and
+   * a review post are: a copy's gh sits on a PATH its agent can write, so nothing posts as the person through it. */
+  const postAsPerson = async <T>(remote: string, frame: (cwd: string) => DaemonFrame, parse: (reply: Record<string, unknown>) => T): Promise<T> => {
+    try {
+      return await onThisComputer(async (ask, home) => parse(await ask(frame(home))));
+    } catch (e) {
+      if (isNoHostCli(e)) throw new Error(pullRequestPostLine(hostOfRemote(remote)));
+      throw e;
+    }
   };
 
   /** The host a project's remote lives on, as a sentence about its command line names it. */
@@ -4594,7 +4624,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const settledAt = seen.state === "merged" ? { mergedAt: seen.readAt } : seen.state === "closed" ? { closedAt: seen.readAt } : {};
         // What was sent belongs to the pull request it was read off; another one starts with nothing sent.
         if (was !== undefined && was.number !== seen.number) delete entry.record.prSent;
-        entry.record.pr = { number: seen.number, url: seen.url, state: seen.state, base: seen.base, ...settledAt };
+        // A settled one is never read again, so the checks the read that saw it settle found are the ones it keeps.
+        const checks = seen.state !== "open" ? { checks: seen.checks } : {};
+        entry.record.pr = { number: seen.number, url: seen.url, state: seen.state, base: seen.base, ...settledAt, ...checks };
         await persist(entry.record);
       }
     }
@@ -7221,29 +7253,37 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
 
     async pullRequestView({ workspaceId }, origin) {
-      const entry = await entryOf(workspaceId, origin);
-      const number = entry.record.pr?.number;
-      if (number === undefined) throw new Error(noPullRequestRefusal(entry.record.name));
-      const remote = projectHeld(entry.record.project).remote;
-      const page = await readHost(entry, cwd => ({ op: "git.prView", cwd, remote, number }), r => GitPrViewReply.parse(r));
+      const { entry, remote, number } = await pullRequestOn(workspaceId, origin);
+      const { read: page, here } = await readHostOn(entry, cwd => ({ op: "git.prView", cwd, remote, number }), r => GitPrViewReply.parse(r));
       const merge = await mergeSettings(remote).catch(() => undefined);
-      return { ...page, ...(merge !== undefined ? { merge } : {}), sent: entry.record.prSent ?? [] };
+      return { ...page, ...(merge !== undefined ? { merge } : {}), sent: entry.record.prSent ?? [], postsAsYou: here };
     },
 
     async pullRequestDiff({ workspaceId }, origin) {
-      const entry = await entryOf(workspaceId, origin);
-      const number = entry.record.pr?.number;
-      if (number === undefined) throw new Error(noPullRequestRefusal(entry.record.name));
-      const remote = projectHeld(entry.record.project).remote;
+      const { entry, remote, number } = await pullRequestOn(workspaceId, origin);
       return readHost(entry, cwd => ({ op: "git.prDiff", cwd, remote, number, maxBytes: GIT_DIFF_CAP_BYTES }), r => GitPrDiffReply.parse(r));
     },
 
+    async pullRequestReply({ workspaceId, replyTo, threadId, body }, origin) {
+      if (body.trim() === "") throw Object.assign(new Error(REPLY_EMPTY_LINE), { kind: "invalid" });
+      const { remote, number } = await pullRequestOn(workspaceId, origin);
+      const where = { ...(replyTo !== undefined ? { replyTo } : {}), ...(threadId !== undefined ? { threadId } : {}) };
+      return postAsPerson(remote, cwd => ({ op: "git.prReply", cwd, remote, number, ...where, body }), r => GitPrReplyReply.parse(r));
+    },
+
+    async pullRequestResolve({ workspaceId, threadId, resolved }, origin) {
+      const { remote, number } = await pullRequestOn(workspaceId, origin);
+      return postAsPerson(remote, cwd => ({ op: "git.prResolve", cwd, remote, number, threadId, resolved }), r => GitPrResolveReply.parse(r));
+    },
+
+    async pullRequestReact({ workspaceId, subject, content, on }, origin) {
+      const { remote, number } = await pullRequestOn(workspaceId, origin);
+      return postAsPerson(remote, cwd => ({ op: "git.prReact", cwd, remote, number, subject, content, on }), r => GitPrReactReply.parse(r));
+    },
+
     async pullRequestSend({ workspaceId, items }, origin) {
-      const entry = await entryOf(workspaceId, origin);
+      const { entry, remote, number } = await pullRequestOn(workspaceId, origin);
       await copyBlocked(entry);
-      const number = entry.record.pr?.number;
-      if (number === undefined) throw new Error(noPullRequestRefusal(entry.record.name));
-      const remote = projectHeld(entry.record.project).remote;
       const page = await readHost(entry, cwd => ({ op: "git.prView", cwd, remote, number }), r => GitPrViewReply.parse(r));
       const same = (a: PullRequestItem, b: PullRequestItem): boolean => a.kind === b.kind && a.id === b.id;
       const asked = items.filter((item, n) => items.findIndex(other => same(item, other)) === n);

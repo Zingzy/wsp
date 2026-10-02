@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize, Serializer};
 use ts_rs::TS;
 
 use crate::{
-    CheckState, DaemonErrorCode, FsEntryType, HostItemKind, MachineErrorKind, MergeMethod, Mergeable, PullRequestState, RequestId,
-    ReviewState, Usage,
+    CheckState, DaemonErrorCode, FsEntryType, HostItemKind, MachineErrorKind, MergeMethod, Mergeable, PullRequestState, ReactionContent,
+    RequestId, ReviewState, Usage,
 };
 
 /// The literal `true` the ok envelope carries.
@@ -736,6 +736,10 @@ pub struct PullRequestReview {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub id: Option<u64>,
+    /// Its node id, which a reaction names.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub node_id: Option<String>,
     pub author: String,
     /// The author's association with the repository, GitHub's word in lower case: owner, member, collaborator,
     /// contributor, first_time_contributor, first_timer, mannequin or none.
@@ -746,6 +750,10 @@ pub struct PullRequestReview {
     pub state: String,
     pub body: String,
     pub at: String,
+    /// Every reaction left on it; none is no list.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub reactions: Option<Vec<PullRequestReaction>>,
 }
 
 /// A reviewer's latest verdict on a pull request.
@@ -765,6 +773,9 @@ pub struct PullRequestVerdict {
 #[serde(rename_all = "camelCase")]
 pub struct PullRequestComment {
     pub id: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub node_id: Option<String>,
     pub author: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -776,6 +787,10 @@ pub struct PullRequestComment {
     pub body: String,
     pub url: String,
     pub at: String,
+    /// Every reaction left on it; none is no list.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub reactions: Option<Vec<PullRequestReaction>>,
 }
 
 /// One comment left on a line of a pull request's diff: the file and line it is on, the line it was on once the line
@@ -787,6 +802,9 @@ pub struct PullRequestComment {
 #[serde(rename_all = "camelCase")]
 pub struct PullRequestReviewComment {
     pub id: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub node_id: Option<String>,
     pub path: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -817,6 +835,56 @@ pub struct PullRequestReviewComment {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub resolved: Option<bool>,
+    /// The node id of its review thread, which resolving names, on its first comment and on every reply.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub thread_id: Option<String>,
+    /// Every reaction left on it; none is no list.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub reactions: Option<Vec<PullRequestReaction>>,
+}
+
+/// One reaction left on an item: which, how many left it, and whether the person signed in to the host's command line
+/// is one of them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestReaction {
+    pub content: ReactionContent,
+    pub count: u64,
+    pub mine: bool,
+}
+
+/// A reply posted as the person: the new comment in the conversation, or the new comment under a thread on a line.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct GitPrReplyReply {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub comment: Option<PullRequestComment>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub review_comment: Option<PullRequestReviewComment>,
+}
+
+/// A review thread resolved or unresolved as the person: its node id and where it stands now.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct GitPrResolveReply {
+    pub thread_id: String,
+    pub resolved: bool,
+}
+
+/// A reaction added or taken off as the person: the item's node id and every reaction on it now.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct GitPrReactReply {
+    pub subject: String,
+    pub reactions: Vec<PullRequestReaction>,
 }
 
 /// One label on a pull request: its name, its colour as six hex digits, and what it means where its repository says.
@@ -905,6 +973,9 @@ pub struct PullRequestPageCut {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub threads: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub comments: Option<bool>,
 }
 
 /// The failed steps of one job's log, its last CHECK_LOG_LINES lines at most; truncated where there were more.

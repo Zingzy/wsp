@@ -1,0 +1,39 @@
+[
+  {
+    "id": 1,
+    "op": "git.prReact",
+    "cwd": "/Users/p",
+    "remote": "git@github.com:Zingzy/wsp-pr-lab.git",
+    "subject": "IC_kwDOULIAx88AAAABXM_oAA",
+    "content": "THUMBS_UP",
+    "on": true,
+    "number": 772
+  },
+  {
+    "id": 1,
+    "op": "git.prReact",
+    "cwd": "/Users/p",
+    "remote": "git@github.com:Zingzy/wsp-pr-lab.git",
+    "subject": "IC_kwDOULIAx88AAAABXM_oAA",
+    "content": "+1",
+    "number": 772
+  },
+  {
+    "id": 1,
+    "op": "git.prReact",
+    "cwd": "/Users/p",
+    "remote": "git@github.com:Zingzy/wsp-pr-lab.git",
+    "content": "+1",
+    "on": true,
+    "number": 772
+  },
+  {
+    "id": 1,
+    "op": "git.prReact",
+    "cwd": "/Users/p",
+    "remote": "git@github.com:Zingzy/wsp-pr-lab.git",
+    "subject": "IC_kwDOULIAx88AAAABXM_oAA",
+    "content": "+1",
+    "on": true
+  }
+]

@@ -30,6 +30,10 @@ import {
   PullRequestPage,
   GitPrDiffReply,
   PullRequestSendResult,
+  GitPrReplyReply,
+  GitPrResolveReply,
+  GitPrReactReply,
+  type ReactionContent,
   type PullRequestItem,
   GitUpdateReply,
   MergeResult,
@@ -444,6 +448,12 @@ export interface Api {
   pullRequestDiff?(id: string): Promise<GitPrDiffReply>;
   /** Sends items of the pull request's page to the workspace's agent as one message, as a fix is sent. */
   pullRequestSend?(id: string, items: readonly PullRequestItem[]): Promise<PullRequestSendResult>;
+  /** Posts a reply as the person: under the comment on a line replyTo names, or a new comment in the conversation. */
+  pullRequestReply?(id: string, o: { replyTo?: number; threadId?: string; body: string }): Promise<GitPrReplyReply>;
+  /** Resolves or unresolves a review thread by its node id as the person. */
+  pullRequestResolve?(id: string, threadId: string, resolved: boolean): Promise<GitPrResolveReply>;
+  /** Adds a reaction to the item a node id names, or takes it off, as the person. */
+  pullRequestReact?(id: string, o: { subject: string; content: ReactionContent; on: boolean }): Promise<GitPrReactReply>;
   /** Asks the workspace's agent to fix a failed check, or to merge a child whose merge stopped, or, with neither, updates it
    * from its base and sends the conflicts. */
   fix?(id: string, check?: string, child?: string): Promise<FixResult>;
@@ -844,6 +854,9 @@ export function makeApi(c: ProtocolClient): Api {
     viewed: async (id, mark) => ViewedMarks.parse(await c.request("workspaces.viewed", { workspaceId: id, ...(mark ?? {}) })),
     pullRequestView: async id => PullRequestPage.parse(await c.request("workspaces.pullRequestView", { workspaceId: id })),
     pullRequestDiff: async id => GitPrDiffReply.parse(await c.request("workspaces.pullRequestDiff", { workspaceId: id })),
+    pullRequestReply: async (id, o) => GitPrReplyReply.parse(await c.request("workspaces.pullRequestReply", { workspaceId: id, ...o })),
+    pullRequestResolve: async (id, threadId, resolved) => GitPrResolveReply.parse(await c.request("workspaces.pullRequestResolve", { workspaceId: id, threadId, resolved })),
+    pullRequestReact: async (id, o) => GitPrReactReply.parse(await c.request("workspaces.pullRequestReact", { workspaceId: id, ...o })),
     pullRequestSend: async (id, items) => PullRequestSendResult.parse(await c.request("workspaces.pullRequestSend", { workspaceId: id, items: [...items] })),
     fix: async (id, check, child) => FixResult.parse(await c.request("workspaces.fix", { workspaceId: id, ...(check !== undefined ? { check } : {}), ...(child !== undefined ? { child } : {}) })),
     mergeIn: async (id, child) => MergeInResult.parse(await c.request("workspaces.mergeIn", { workspaceId: id, child })),
