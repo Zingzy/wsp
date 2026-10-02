@@ -9,15 +9,14 @@
 // sentence. A variable's value is typed once into a password field and is
 // never drawn, kept or sent anywhere but that one set.
 import { useEffect, useState, type ReactNode } from "react";
-import { ArrowDownIcon, ArrowUpIcon, XIcon } from "lucide-react";
-import { ACCESS_CHOICES, accessRefusal, agentEnvRefusal, commandWords, configDirSignInLine, effortsFor, everyModel, modelOf, shellLine, type AccessChoice, type AgentDefaultsPatch, type AgentSetupSet, type HarnessCatalog, type ModelPicker } from "@wsp/protocol";
+import { ArrowUpIcon, XIcon } from "lucide-react";
+import { ACCESS_CHOICES, accessRefusal, agentEnvRefusal, commandWords, configDirSignInLine, effortsFor, modelOf, shellLine, type AccessChoice, type AgentDefaultsPatch, type AgentSetupSet, type HarnessCatalog, type ModelPicker } from "@wsp/protocol";
 import { agentName, catalogEntry } from "@wsp/catalog";
 import type { AccountRow } from "@wsp/protocol";
 import { Spaced } from "../components/ui/spaced.js";
 import { useAgentsReport } from "../components/agents/useAgentsReport.js";
 import { HarnessMark } from "../components/chat/HarnessMark.js";
 import { Button } from "../components/ui/button.js";
-import { Checkbox } from "../components/ui/checkbox.js";
 import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../components/ui/dialog.js";
 import { Input } from "../components/ui/input.js";
 import { SegmentedControl } from "../components/ui/segmented-control.js";
@@ -28,7 +27,7 @@ import { failureOf } from "../protocol/failure.js";
 import { useStore } from "../protocol/store.js";
 import { AgentsControls, UpdateButton, newThreadPicks, signInHead, usePickedPlace } from "./agents.js";
 import { AGENTS_PAGE_WORDS as W } from "./format.js";
-import { SELECT_WIDTH } from "./layout.js";
+import { CARD_INSET, ROW_FLOOR, SELECT_WIDTH } from "./layout.js";
 import { placeName } from "./places.js";
 import { CARD_SURFACE, Card, HeadRow, Row } from "./rows.js";
 import type { SettingsContext } from "./settingsContext.js";
@@ -212,85 +211,77 @@ function EnvironmentSheet({ label, computer, names, save, onClose }: { label: st
 
 /** The models the picker lists: each shown or hidden, moved up or down, and ids of the person's own added or taken
  * away, written as one picker record. */
-function ModelsSheet({ catalog, picker, save, onClose }: { catalog: HarnessCatalog; picker: ModelPicker | undefined; save: (models: ModelPicker | null) => Promise<Written>; onClose: () => void }) {
-  const custom = new Set(picker?.custom ?? []);
-  const [items, setItems] = useState(() => [...pickerModels(catalog).map(m => ({ value: m.value, label: m.label, shown: true })), ...(catalog.hiddenModels ?? []).map(m => ({ value: m.value, label: m.label, shown: false }))]);
-  const [mine, setMine] = useState<ReadonlySet<string>>(custom);
-  const [moved, setMoved] = useState(false);
-  const [id, setId] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [refusal, setRefusal] = useState<Refusal | null>(null);
-  const move = (at: number, by: -1 | 1): void => {
-    setItems(list => {
-      const next = [...list];
-      const [item] = next.splice(at, 1);
-      next.splice(at + by, 0, item!);
-      return next;
-    });
-    setMoved(true);
+/** Models: every model the agent offers, the picker's own first in its order, then the ones hidden from it; each set
+ * in or out of the picker, moved up, or, where the person added it by id, removed. Each change writes the agent's
+ * picker into preferences at once and the page draws the record the host answers. */
+function ModelsCard({ catalog, ctx }: { catalog: HarnessCatalog; ctx: SettingsContext }) {
+  const id = catalog.harness;
+  const picker = ctx.preferences.agentDefaults[id]?.models;
+  const custom = picker?.custom ?? [];
+  const items = [...pickerModels(catalog).map(m => ({ value: m.value, label: m.label, shown: true })), ...(catalog.hiddenModels ?? []).map(m => ({ value: m.value, label: m.label, shown: false }))];
+  const fallback = newThreadPicks(catalog).model;
+  const [typed, setTyped] = useState("");
+  const write = (next: ReadonlyArray<{ value: string; shown: boolean }>, ids: readonly string[], moved: boolean): void => {
+    const hide = next.filter(m => !m.shown).map(m => m.value);
+    const order = moved ? next.filter(m => m.shown).map(m => m.value) : (picker?.order ?? []);
+    const kept: ModelPicker = { ...(hide.length === 0 ? {} : { hide }), ...(order.length === 0 ? {} : { order }), ...(ids.length === 0 ? {} : { custom: [...ids] }) };
+    ctx.setPreferences({ agentDefaults: { [id]: { models: Object.keys(kept).length === 0 ? null : kept } } });
   };
+  const toggle = (value: string, on: boolean): void => write(items.map(m => (m.value === value ? { ...m, shown: on } : m)), custom, false);
+  const up = (at: number): void => {
+    const next = [...items];
+    const [item] = next.splice(at, 1);
+    next.splice(at - 1, 0, item!);
+    write(next, custom, true);
+  };
+  const remove = (value: string): void => write(items.filter(m => m.value !== value), custom.filter(v => v !== value), picker?.order !== undefined);
   const add = (): void => {
-    const value = id.trim();
-    if (value === "" || items.some(m => m.value === value)) return setId("");
-    setItems(list => [...list, { value, label: value, shown: true }]);
-    setMine(m => new Set([...m, value]));
-    setId("");
+    const value = typed.trim();
+    setTyped("");
+    if (value === "" || items.some(m => m.value === value)) return;
+    write([...items, { value, shown: true }], [...custom, value], picker?.order !== undefined);
   };
-  const onSave = (): void => {
-    const hide = items.filter(m => !m.shown).map(m => m.value);
-    const order = moved ? items.filter(m => m.shown).map(m => m.value) : (picker?.order ?? []);
-    const ids = items.filter(m => mine.has(m.value)).map(m => m.value);
-    const next: ModelPicker = { ...(hide.length === 0 ? {} : { hide }), ...(order.length === 0 ? {} : { order }), ...(ids.length === 0 ? {} : { custom: ids }) };
-    setSaving(true);
-    setRefusal(null);
-    void save(Object.keys(next).length === 0 ? null : next).then(answer => {
-      setSaving(false);
-      if (answer === null) onClose();
-      else setRefusal(answer);
-    });
-  };
+  if (items.length === 0) return null;
   return (
-    <Sheet k="agent-models" title={W.models} line={W.modelsSheet(catalog.label)} open onClose={onClose} onSave={onSave} saving={saving} refusal={refusal}>
-      <ul data-k="agent-models-list" className="flex flex-col">
-        {items.map((m, at) => (
-          <li key={m.value} data-model={m.value} className="flex h-9 items-center gap-3 border-border/60 border-b last:border-transparent">
-            <Checkbox aria-label={W.shown(m.label)} checked={m.shown} onCheckedChange={on => setItems(list => list.map(x => (x.value === m.value ? { ...x, shown: on === true } : x)))} />
-            <span className={cn("min-w-0 flex-1 truncate text-[13px]", m.shown ? "text-foreground" : "text-muted-foreground")}>{m.label}</span>
-            <Button type="button" variant="ghost" size="icon-xs" aria-label={W.moveUp(m.label)} disabled={at === 0} onClick={() => move(at, -1)}>
-              <ArrowUpIcon aria-hidden />
-            </Button>
-            <Button type="button" variant="ghost" size="icon-xs" aria-label={W.moveDown(m.label)} disabled={at === items.length - 1} onClick={() => move(at, 1)}>
-              <ArrowDownIcon aria-hidden />
-            </Button>
-            {mine.has(m.value) ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                aria-label={W.removeModel(m.label)}
-                onClick={() => {
-                  setItems(list => list.filter(x => x.value !== m.value));
-                  setMine(s => new Set([...s].filter(v => v !== m.value)));
-                }}
-              >
-                <XIcon aria-hidden />
-              </Button>
-            ) : null}
-          </li>
-        ))}
-      </ul>
-      <div className="flex items-center gap-2">
-        <Input data-k="agent-models-id" nativeInput autoComplete="off" spellCheck={false} value={id} placeholder={W.modelId} aria-label={W.modelId} onChange={event => setId(event.target.value)} onKeyDown={event => (event.key === "Enter" ? (event.preventDefault(), add()) : undefined)} className={cn(FIELD, "min-w-0 flex-1")} />
-        <Button type="button" variant="outline" data-k="agent-models-add" disabled={id.trim() === ""} onClick={add}>
+    <Card id="agent-models" head={W.models} lede={W.modelsDescription}>
+      {items.map((m, at) => (
+        <Row
+          key={m.value}
+          id={`model-${m.value}`}
+          title={m.label}
+          {...(m.value === fallback ? { mark: W.defaultModel } : {})}
+          description={m.label === m.value ? "" : m.value}
+          mono
+          control={
+            <span className="flex items-center gap-1">
+              {at === 0 || !m.shown ? null : (
+                <Button type="button" variant="ghost" size="icon-xs" aria-label={W.moveUp(m.label)} data-k="model-up" onClick={() => up(at)}>
+                  <ArrowUpIcon aria-hidden />
+                </Button>
+              )}
+              {custom.includes(m.value) ? (
+                <Button type="button" variant="ghost" size="icon-xs" aria-label={W.removeModel(m.label)} data-k="model-remove" onClick={() => remove(m.value)}>
+                  <XIcon aria-hidden />
+                </Button>
+              ) : null}
+              <Switch className="ml-2" data-k="model-shown" aria-label={W.shown(m.label)} checked={m.shown} onCheckedChange={on => toggle(m.value, on)} />
+            </span>
+          }
+          attrs={{ "data-model": m.value }}
+        />
+      ))}
+      <div data-k="agent-models-add-row" className={cn("flex items-center gap-2 py-3", CARD_INSET, ROW_FLOOR)}>
+        <Input data-k="agent-models-id" nativeInput autoComplete="off" spellCheck={false} value={typed} placeholder={W.modelIdPlaceholder} aria-label={W.modelId} onChange={event => setTyped(event.target.value)} onKeyDown={event => (event.key === "Enter" ? (event.preventDefault(), add()) : undefined)} className={cn(FIELD, "h-[30px] min-w-0 flex-1 [&_input]:h-[28px] [&_input]:leading-[28px] sm:[&_input]:h-[28px] sm:[&_input]:leading-[28px]")} />
+        <Button type="button" variant="outline" size="xs" data-k="agent-models-add" disabled={typed.trim() === ""} onClick={add}>
           {W.addModel}
         </Button>
       </div>
-    </Sheet>
+    </Card>
   );
 }
 
 /** New threads: model and effort, access, the picker's models; the same on every computer, kept in preferences. */
-function NewThreads({ catalog, ctx, openModels }: { catalog: HarnessCatalog; ctx: SettingsContext; openModels: () => void }) {
+function NewThreads({ catalog, ctx }: { catalog: HarnessCatalog; ctx: SettingsContext }) {
   const id = catalog.harness;
   const own = ctx.preferences.agentDefaults[id] ?? {};
   const picks = newThreadPicks(catalog);
@@ -356,25 +347,11 @@ function NewThreads({ catalog, ctx, openModels }: { catalog: HarnessCatalog; ctx
         }
         {...(own.access === undefined ? {} : { reset: () => set({ access: null }) })}
       />
-      {models.length === 0 ? null : (
-        <Row
-          id="agent-models"
-          title={W.models}
-          description={W.modelsDescription}
-          word={W.modelsShown(models.length, everyModel(catalog).length)}
-          wordClass="fact"
-          control={
-            <Button size="xs" variant="outline" data-k="agent-models-edit" onClick={openModels}>
-              {W.edit}
-            </Button>
-          }
-        />
-      )}
     </Card>
   );
 }
 
-type SheetOpen = "program" | "config" | "args" | "env" | "models" | null;
+type SheetOpen = "program" | "config" | "args" | "env" | null;
 
 /** One agent's page, for the computer the Agents page has picked. */
 /** The account this agent is signed in as on the computer the page reads, off the host's usage accounts: its plan in
@@ -472,7 +449,8 @@ export function AgentPage({ id, ctx }: { id: string; ctx: SettingsContext }) {
           />
         </div>
       </section>
-      {catalog === undefined ? null : <NewThreads catalog={catalog} ctx={ctx} openModels={() => setSheet("models")} />}
+      {catalog === undefined ? null : <NewThreads catalog={catalog} ctx={ctx} />}
+      {catalog === undefined ? null : <ModelsCard catalog={catalog} ctx={ctx} />}
       {row === undefined || setupView === undefined ? null : (
         <Card id="agent-runs" head={W.howItRuns}>
           <Row
@@ -535,17 +513,6 @@ export function AgentPage({ id, ctx }: { id: string; ctx: SettingsContext }) {
         />
       ) : null}
       {sheet === "env" && setupView !== undefined ? <EnvironmentSheet label={label} computer={computer} names={setupView.envNames} save={env => written({ env })()} onClose={close} /> : null}
-      {sheet === "models" && catalog !== undefined ? (
-        <ModelsSheet
-          catalog={catalog}
-          picker={ctx.preferences.agentDefaults[id]?.models}
-          save={async models => {
-            ctx.setPreferences({ agentDefaults: { [id]: { models } } });
-            return null;
-          }}
-          onClose={close}
-        />
-      ) : null}
     </>
   );
 }
