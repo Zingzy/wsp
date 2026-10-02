@@ -2,10 +2,10 @@
 // The composer's row of pickers: the agent and its model, the reasoning, the
 // access, and the folder. Base UI's menu and popover never settle
 // under jsdom, so both are stood in by a plain open/closed context.
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_PREFERENCES, type HarnessCatalog, type ProjectOverrides, type SessionView, type WorkspaceView } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, type HarnessCatalog, type ProjectOverrides, type ProjectView, type SessionView, type WorkspaceView } from "@wsp/protocol";
 
 vi.mock("../ui/menu", () => {
   const Ctx = createContext<{ open: boolean; set: (open: boolean) => void }>({ open: false, set: () => {} });
@@ -69,7 +69,7 @@ vi.mock("../ui/popover", () => {
   return { Popover, PopoverTrigger, PopoverPopup };
 });
 
-import { useStore } from "../../protocol/store";
+import { projectHomeKey, useStore } from "../../protocol/store";
 import { useComposerDraftStore } from "./composerDraftStore";
 import { useComposerOptionsStore } from "./composerOptionsStore";
 import { ComposerAccessPicker, ComposerOptionPickers } from "./ComposerOptionPickers";
@@ -252,6 +252,28 @@ describe("the agent a fresh thread opens on", () => {
     draw({ catalogs: [CLAUDE, CODEX] });
     expect(model().dataset["harness"]).toBe("claude");
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("is the linked project's own once a GitHub link in New thread names it, since the send starts there", () => {
+    const home = projectHomeKey(PROJECT.id);
+    // Two computers hold the linked repository; the send starts on this computer's, as the host's start does.
+    const onBox = { id: "pr_box", name: "other", path: "/other", computer: "p_box", remote: "git@github.com:dev/other.git" };
+    const other = { id: "pr_2", name: "other", path: "/other", computer: "here", remote: "https://github.com/dev/Other.git" };
+    useStore.setState({
+      conn: "closed",
+      workspaces: [],
+      projects: [{ ...PROJECT, remote: "https://github.com/dev/the-project.git" }, onBox, other] as unknown as ProjectView[],
+      preferences: { ...DEFAULT_PREFERENCES, projectDefaults: { [onBox.id]: { agent: "claude" }, [other.id]: { agent: "codex" } } },
+      harnesses: [CLAUDE, CODEX],
+    });
+    const fresh = { ...thread, threadKey: home } as ChatThreadHandle;
+    render(<ComposerOptionPickers workspaceId={home} thread={fresh} />);
+    expect(model().dataset["harness"]).toBe("claude");
+    act(() => useComposerDraftStore.getState().setDraft(home, { prompt: "https://github.com/dev/other/issues/4", cursor: 0 }));
+    expect(model().dataset["harness"]).toBe("codex");
+    // A link to a repository no project holds leaves the home's own defaults.
+    act(() => useComposerDraftStore.getState().setDraft(home, { prompt: "https://github.com/dev/nowhere/issues/4", cursor: 0 }));
+    expect(model().dataset["harness"]).toBe("claude");
   });
 
   it("leaves the menu shut where the project names an agent", () => {

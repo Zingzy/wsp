@@ -27,8 +27,8 @@
 import { BrainIcon, ChevronDownIcon, CircleSlashIcon, HandIcon, LockIcon, LockOpenIcon, PenLineIcon, PencilRulerIcon, ShieldIcon, SparklesIcon, ZapIcon, type LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { DEFAULT_AGENT } from "@wsp/catalog";
-import { ACCESS_REFUSED_LINE, accessReachLine, contextWindowsFor, effortsFor, markedFor, movesRunningAccess, resolveThreadDefaults, type DefaultsAsk, type HarnessCatalog, type HarnessModel, type HarnessOption, type SessionView } from "@wsp/protocol";
-import { projectHomeKey, projectOfKey, useHarnessCatalog, useHarnessCatalogs, useStore, useThreadSessions, useWorkspace } from "../../protocol/store";
+import { ACCESS_REFUSED_LINE, HERE_PLACE_ID, accessReachLine, githubLinkOf, projectForRepo, contextWindowsFor, effortsFor, markedFor, movesRunningAccess, resolveThreadDefaults, type DefaultsAsk, type HarnessCatalog, type HarnessModel, type HarnessOption, type SessionView } from "@wsp/protocol";
+import { isProjectHomeKey, projectHomeKey, projectOfKey, useHarnessCatalog, useHarnessCatalogs, useStore, useThreadSessions, useWorkspace } from "../../protocol/store";
 import { useComputerName } from "../../sidebar/workspaceRows";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
@@ -79,7 +79,9 @@ export interface ComposerPicks {
 /** What the one rule reads for a composer's next thread: the person's defaults and the overrides of the project its
  * send lands in. Read off the record the app holds, so a default changed in Settings reaches an open composer. */
 function useDefaultsAsk(workspaceId: string): Pick<DefaultsAsk, "prefs" | "project"> {
-  const projectId = useStore(s => projectOfKey(s, workspaceId));
+  // A GitHub link in New thread starts its thread on the project that holds the repository, so its defaults show.
+  const repo = useComposerDraftStore(s => (isProjectHomeKey(workspaceId) ? githubLinkOf(s.drafts[workspaceId]?.prompt ?? "")?.repo : undefined));
+  const projectId = useStore(s => (repo === undefined ? undefined : projectForRepo(s.projects, repo, HERE_PLACE_ID)?.id) ?? projectOfKey(s, workspaceId));
   const defaultAgent = useStore(s => s.preferences.defaultAgent);
   const agentDefaults = useStore(s => s.preferences.agentDefaults);
   const project = useStore(s => (projectId === undefined ? undefined : s.preferences.projectDefaults[projectId]));

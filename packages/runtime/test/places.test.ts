@@ -4983,6 +4983,7 @@ describe("the agents on a computer you own", () => {
   it("read an agent's config folder again on that computer before each launch there, and refuse one that now leads out of its home", async () => {
     const boxHome = mkdtempSync(joinPath(tmpdir(), "wsp-box-home-"));
     const outside = mkdtempSync(joinPath(tmpdir(), "wsp-outside-"));
+    let flaky = false;
     try {
       mkdirSync(joinPath(boxHome, "real"));
       const starts: string[] = [];
@@ -5009,6 +5010,7 @@ describe("the agents on a computer you own", () => {
           c.onFrame(raw => {
             const frame = raw as unknown as Record<string, unknown>;
             if (frame["op"] !== "exec") return;
+            if (flaky) return c.say({ id: frame["id"], ok: true, exitCode: 1, stdout: "", stderr: "realpath: no such folder", truncated: false });
             const stdout = execFileSync("/bin/bash", ["-c", String(frame["cmd"])], { env: { HOME: boxHome, PATH: "/usr/bin:/bin" }, encoding: "utf8" });
             c.say({ id: frame["id"], ok: true, exitCode: 0, stdout, stderr: "", truncated: false });
           });
@@ -5028,6 +5030,13 @@ describe("the agents on a computer you own", () => {
       const row = (await runtime.sessions.list(ws.id))[0]!;
       await expect(runtime.sessions.rename(row.id, "named")).rejects.toMatchObject({ kind: "usage", message: expect.stringContaining(`Claude Code does not start with its config folder ${kept}`) });
       expect((await runtime.harnesses.list(ws.id)).find(c => c.harness === "claude")?.refusal).toContain(`Claude Code does not start with its config folder ${kept}`);
+      // The box answering that it could not read the folder is its own word, kept as it said it.
+      flaky = true;
+      expect((await runtime.harnesses.list(ws.id)).find(c => c.harness === "claude")?.refusal).toBe(`srv did not say where ${kept} is: realpath: no such folder`);
+      // A link that drops under the check is the computer's state, never the agent's refusal.
+      client.ws.close();
+      await until(async () => (await placesOf()).find(p => p.id === placeId)?.present === false);
+      expect((await runtime.harnesses.list(ws.id)).find(c => c.harness === "claude")?.refusal).toBe(absentComputer("srv", null).said);
     } finally {
       rmSync(boxHome, { recursive: true, force: true });
       rmSync(outside, { recursive: true, force: true });

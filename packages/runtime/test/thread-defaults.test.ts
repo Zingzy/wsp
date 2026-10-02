@@ -142,6 +142,18 @@ describe("what a new thread starts on", () => {
     await expect(rt.sessions.start(ws.id, { prompt: "three", model: "claude-nope" })).rejects.toThrow(/is not one claude takes/);
   });
 
+  it("refuses a model id no agent runs where it is kept, and stores nothing of that change", async () => {
+    await expect(rt.preferences.set({ agentDefaults: { claude: { models: { custom: ["claude opus"] } } } })).rejects.toMatchObject({ message: "No model id has a space in it", kind: "usage" });
+    await expect(rt.preferences.set({ agentDefaults: { codex: { model: "gpt;5" } } })).rejects.toMatchObject({ message: 'No model id has ";" in it', kind: "usage" });
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
+    await expect(rt.preferences.set({ projectDefaults: { [ws.project.id]: { model: "-m x" } } })).rejects.toMatchObject({ message: "No model id has a space in it", kind: "usage" });
+    await expect(rt.preferences.set({ projectDefaults: { [ws.project.id]: { model: "-x" } } })).rejects.toMatchObject({ message: 'No model id starts with "-"', kind: "usage" });
+    expect((await rt.preferences.get()).agentDefaults).toEqual({});
+    expect((await rt.preferences.get()).projectDefaults).toEqual({});
+    await rt.preferences.set({ agentDefaults: { claude: { models: { custom: ["provider/model:tag"] } } } });
+    expect((await rt.preferences.get()).agentDefaults["claude"]?.models?.custom).toEqual(["provider/model:tag"]);
+  });
+
   it("an agent turned off on this computer leaves the lists, a start naming it is refused naming the computer, and the default moves on", async () => {
     const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
     await rt.agents.setup(HERE_PLACE_ID, "claude", { on: false });

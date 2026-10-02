@@ -32,6 +32,22 @@ export function githubLinkOf(text: string): GithubLink | undefined {
   return { host: "github.com", repo: `${owner}/${name}`, kind, number: Number(number), url: `https://github.com/${owner}/${name}/${path}/${number}` };
 }
 
+/** The `owner/repo` an https or ssh remote of a known host names, or nothing where the remote names no path. */
+export function ownerRepoOf(remote: string): string | undefined {
+  const path = remote.replace(/^[a-z+]+:\/\//, "").replace(/^[^@/]+@/, "").replace(/\.git$/, "").split(/[/:]/).slice(1).join("/");
+  return path === "" ? undefined : path;
+}
+
+/** Whether a project's remote is that repository, case aside. */
+export const holdsRepo = (project: { remote: string }, repo: string): boolean => ownerRepoOf(project.remote)?.toLowerCase() === repo.toLowerCase();
+
+/** The project a link's repository names: where two computers hold it, the one on the computer `here` names, else the
+ * first. The host's start and the app's New thread read this one rule, so the box shows the project the send lands on. */
+export function projectForRepo<P extends { remote: string; computer: string }>(projects: readonly P[], repo: string, here: string): P | undefined {
+  const matches = projects.filter(p => holdsRepo(p, repo));
+  return matches.find(p => p.computer === here) ?? matches[0];
+}
+
 /** Where a workspace's work came from: an issue or a pull request started on, or a pull request under review. A pull
  * request's head names its branch, and the fork it lives on where it is not the repository's own, pushable where its
  * author allowed edits from maintainers. */

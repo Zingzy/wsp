@@ -170,8 +170,16 @@ describe("the agents report off this computer and off a workspace", () => {
     const read = await agentsReader({ vault: () => ({ OPENAI_API_KEY: "sk-x" }), here: () => here(at) }).read({ kind: "here" });
     const agent = (id: string) => read.agents.find(a => a.id === id)!;
     expect(agent("claude").signInDetail).toBe("OAuth credentials");
+    // The fixture's browser sign-in names no plan, so it is plain OAuth with no plan word.
+    expect(agent("claude").signInKind).toBe("oauth");
+    expect(agent("claude").signInPlan).toBeUndefined();
+    // Its key is the vault's, so its own status names no login and no kind.
     expect(agent("codex").signInDetail).toBeUndefined();
+    expect(agent("codex").signInKind).toBeUndefined();
     expect(JSON.stringify(read)).not.toContain("sk-x");
+    writeStub(join(at.bin, "claude"), `#!/bin/sh\ncase "$1" in --version) echo "2.1.281 (Claude Code)";; auth) echo '{"loggedIn": true, "authMethod": "claude.ai", "subscriptionType": "max"}';; *) exit 2;; esac\n`);
+    const planned = (await agentsReader({ vault: () => ({}), here: () => here(at) }).read({ kind: "here" })).agents.find(a => a.id === "claude")!;
+    expect(planned).toMatchObject({ signInKind: "subscription", signInPlan: "max" });
   });
 
   it("reads past a wrapper another app put first on the PATH to the binary behind it, and names the app", async () => {

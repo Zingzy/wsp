@@ -1154,6 +1154,8 @@ export const HarnessModel = HarnessOption.extend({
   contextWindows: z.array(z.string()).optional(),
   /** The model has a faster output the CLI turns on per turn; the composer offers Fast only on a model marked so. */
   fast: z.boolean().optional(),
+  /** An id the person added by hand that this list did not carry. */
+  added: z.literal(true).optional(),
 });
 export type HarnessModel = z.infer<typeof HarnessModel>;
 

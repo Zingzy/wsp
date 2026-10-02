@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CODE_SIZES, DEFAULT_PREFERENCES, TEXT_SIZES, type PlaceView, type ProjectView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
 import { useStore } from "../src/protocol/store.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
-import { ABOUT_WORDS, FONT_WORDS, GLASS_WORDS, THEME_SECTION_WORDS, THEME_WORDS, TRANSPARENCY_WORDS, SETTINGS_WORDS } from "../src/settings/format.js";
+import { ABOUT_WORDS, AGENTS_PAGE_WORDS, FONT_WORDS, GLASS_WORDS, THEME_SECTION_WORDS, THEME_WORDS, TRANSPARENCY_WORDS, SETTINGS_WORDS } from "../src/settings/format.js";
 import { SETTINGS_GROUPS } from "../src/settings/groups.js";
 import { useSettingsStore } from "../src/settings/settingsStore.js";
 import { SYSTEM_DARK_QUERY, useFontEffect, useThemeEffect } from "../src/settings/theme.js";
@@ -22,6 +22,7 @@ import { runShellCommand } from "../src/shell/shellCommands.js";
 import { THEMES } from "../src/themes/index.js";
 import { useTerminalDrawerStore } from "../src/terminal/drawerStore.js";
 import { AGENTS_REPORT } from "./fixtures/agents-report.js";
+import { HARNESSES } from "./fixtures/harnesses.js";
 import { crumb, descriptionOf, liftedRowIds, lineLabels, mountSettings, pageAt, resetSettings, rowOf, rowTitles, settingsApi, settle, sidebarRowIds } from "./settings-harness.js";
 
 const FILE: TerminalConfig = { files: ["/Users/dev/.config/ghostty/config"], fontFamily: [], fontSize: 16, palette: Array<null>(16).fill(null) };
@@ -220,6 +221,47 @@ describe("search over a computer", () => {
     await settle();
     fireEvent.change(field(), { target: { value: "spoo" } });
     expect(rowTitles()).toEqual(["spoo"]);
+  });
+});
+
+describe("search over the agents", () => {
+  it("finds the default agent, each agent by its name and by the rows of its page, and opens that agent's page", async () => {
+    useStore.setState({ places: [here], projects: [], harnesses: HARNESSES });
+    mountSettings({ api: settingsApi().api });
+    await settle();
+    const hits = (): string[] => [...document.querySelectorAll("[data-settings-card='search-agents'] [data-settings-title]")].map(title => title.textContent ?? "");
+    fireEvent.change(field(), { target: { value: "launch arguments" } });
+    expect(hits()).toEqual(["Claude Code", "Codex", "OpenCode"]);
+    fireEvent.change(field(), { target: { value: "Config folder" } });
+    expect(hits()).toEqual(["Claude Code", "Codex", "OpenCode"]);
+    fireEvent.change(field(), { target: { value: "codex" } });
+    expect(hits()).toEqual(["Codex"]);
+    fireEvent.change(field(), { target: { value: "default agent" } });
+    expect(hits()).toEqual([AGENTS_PAGE_WORDS.defaultAgent]);
+    fireEvent.change(field(), { target: { value: "codex" } });
+    await act(async () => void fireEvent.click(rowOf("codex")!));
+    await settle();
+    expect(pageAt()).toBe("agent:codex");
+  });
+
+  it("finds the page of an agent no thread runs on once the picked computer's read found it installed, and not one it did not", async () => {
+    useStore.setState({ places: [here], projects: [], harnesses: HARNESSES });
+    const gemini = { id: "gemini", name: "Gemini CLI", installed: true, version: "0.59.0", road: "own" as const, signIn: "signed-in" as const, signInRoad: "code" as const, wspTools: false };
+    mountSettings({ api: settingsApi({ agentsRead: async () => ({ ...AGENTS_REPORT, agents: [...AGENTS_REPORT.agents, gemini] }) }).api, at: { kind: "group", group: "agents" } });
+    await settle();
+    const hits = (): string[] => [...document.querySelectorAll("[data-settings-card='search-agents'] [data-settings-title]")].map(title => title.textContent ?? "");
+    fireEvent.change(field(), { target: { value: "gemini" } });
+    expect(hits()).toEqual(["Gemini CLI"]);
+    expect(descriptionOf("gemini")).toBe(AGENTS_PAGE_WORDS.agentHeadLine);
+    fireEvent.change(field(), { target: { value: "launch arguments" } });
+    expect(hits()).toEqual(["Claude Code", "Codex", "OpenCode"]);
+    // Pi is in the report but not installed, so it has no page.
+    fireEvent.change(field(), { target: { value: "pi" } });
+    expect(hits()).not.toContain("Pi");
+    await act(async () => void fireEvent.change(field(), { target: { value: "gemini" } }));
+    await act(async () => void fireEvent.click(rowOf("gemini")!));
+    await settle();
+    expect(pageAt()).toBe("agent:gemini");
   });
 });
 

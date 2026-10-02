@@ -168,3 +168,4 @@ export function startOptionsFrom(catalog: HarnessCatalog, picked: ComposerOption
     ...(contextWindow !== undefined ? { contextWindow } : {}),
   };
 }
+

@@ -2,7 +2,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { homedir, hostname, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, posix, resolve as resolvePathOn } from "node:path";
-import { CATALOG_AGENTS, DEFAULT_AGENT, GUEST_HOME, type ThreadAgent, PATH_BOUND_DIR_NAMES, TOOL_PREFIX, catalogIdOfRow, gitHostOf, ownerRepoOf, remoteHost, serverValuesOf, guestEnv, installEnv, installHomes, loginHomeIn, sharedOn } from "@wsp/catalog";
+import { CATALOG_AGENTS, DEFAULT_AGENT, GUEST_HOME, type ThreadAgent, PATH_BOUND_DIR_NAMES, TOOL_PREFIX, catalogIdOfRow, gitHostOf, remoteHost, serverValuesOf, guestEnv, installEnv, installHomes, loginHomeIn, sharedOn } from "@wsp/catalog";
 import {
   BUILDER_IDLE_MS,
   DAEMON_PORT,
@@ -239,7 +239,8 @@ import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
 import { isNoProvider, isPlaceAbsent, projectStateKey, putFiles, type Copier } from "@wsp/engine";
 import { boxFullLine, DISK_FULL_PCT, diskFullLine, stopRefusedLine, threadMessages, threadSeed, workspaceMemMb } from "@wsp/protocol";
-import { accessMode, accessRefusal, agentOffLine, configDirLaunchRefusal, configDirRefusal, markedFor, openDefaults, resolveThreadDefaults, setupView, shapeModels, withCustomModels, type AccessChoice, type AgentLaunch, type AgentRow, type AgentSetupSet, type ProjectOverrides, type ResolvedFolder, type ThreadDefaults } from "@wsp/protocol";
+import { holdsRepo, ownerRepoOf, projectForRepo } from "@wsp/protocol";
+import { accessMode, accessRefusal, agentOffLine, configDirLaunchRefusal, configDirRefusal, markedFor, modelIdRefusal, openDefaults, resolveThreadDefaults, setupView, shapeModels, withCustomModels, type AccessChoice, type AgentLaunch, type AgentRow, type AgentSetupSet, type ProjectOverrides, type ResolvedFolder, type ThreadDefaults } from "@wsp/protocol";
 import { agentSetups, keyOf, realFolderHere, realFolderScript } from "./agent-setup.js";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
@@ -6379,8 +6380,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * computers hold it, or the one named by name or id among them. A link is only ever matched to a project the
    * person added, and every later call names the repository off that project's record. */
   const projectByRepo = (repo: string, named: string | undefined): ProjectView => {
-    const matches = [...projectsHeld.values()].filter(p => ownerRepoOf(p.remote)?.toLowerCase() === repo.toLowerCase());
-    const picked = named === undefined ? (matches.find(p => p.computer === HERE_PLACE_ID) ?? matches[0]) : matches.find(p => p.id === named || p.name === named);
+    const held = [...projectsHeld.values()];
+    const picked = named === undefined ? projectForRepo(held, repo, HERE_PLACE_ID) : held.find(p => holdsRepo(p, repo) && (p.id === named || p.name === named));
     if (picked === undefined) throw Object.assign(new Error(START_WORDS.noProjectForRepo(repo)), { kind: "invalid" });
     return picked;
   };
@@ -7681,7 +7682,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const read = await door.exec(placeId, realFolderScript(path), { timeoutMs: INLINE_EXEC_MS });
     if (read.exitCode === 3) throw Object.assign(new Error(read.stderr.trim()), { kind: "usage" });
     const [folder, home] = read.stdout.trim().split("\n");
-    if (read.exitCode !== 0 || folder === undefined || home === undefined || !home.startsWith("/")) throw new Error(`${door.nameOf(placeId)} did not say where ${path} is: ${read.stderr.trim() || `exit ${read.exitCode}`}`);
+    if (read.exitCode !== 0 || folder === undefined || home === undefined || !home.startsWith("/")) throw Object.assign(new Error(`${door.nameOf(placeId)} did not say where ${path} is: ${read.stderr.trim() || `exit ${read.exitCode}`}`), { kind: "invalid" });
     return { folder: posix.normalize(folder), home, kept: [join(home, ".wsp")] };
   };
 
@@ -11499,16 +11500,22 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const said = access == null ? null : accessRefusal(table ?? { label: agentLabel(id), permissionModes: [] }, access);
       if (said !== null) throw usage(said);
     };
+    const model = (id: string): void => {
+      const said = modelIdRefusal(id);
+      if (said !== null) throw usage(said);
+    };
     if (patch.defaultAgent != null) agent(patch.defaultAgent);
     for (const [id, set] of Object.entries(patch.agentDefaults ?? {})) {
       if (set === null) continue;
       agent(id);
       word(id, set.access);
+      for (const named of [...(set.model == null ? [] : [set.model]), ...(set.models?.custom ?? [])]) model(named);
     }
     for (const [projectId, set] of Object.entries(patch.projectDefaults ?? {})) {
       if (set === null) continue;
       if (!projectsHeld.has(projectId)) throw usage(bareNoSuchProjectLine(projectId));
       if (set.agent != null) agent(set.agent);
+      if (set.model != null) model(set.model);
       const kept = next.projectDefaults[projectId];
       word(kept?.agent ?? defaultAgentOf(next, undefined), set.access);
     }
@@ -11611,9 +11618,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const table = HARNESS_CATALOGS.filter(c => c.harness in adapters && (entry === undefined || !agentOff(entry, c.harness)));
         // A record answers what its threads start at whether or not its machine is up; only the rest of the lists
         // waits on the binary, so a picker on a paused workspace still reads the access its next thread would run.
-        // An agent whose kept config folder is refused, or cannot be read there, answers with why instead of its lists.
+        // An agent whose kept config folder is refused, or cannot be read there, answers with why instead of its
+        // lists; a link that dropped under the check says its computer is not answering, since that is not the agent's.
+        const unchecked = (e: unknown, on: LiveWorkspace): string => {
+          const place = setupPlace(on);
+          if (isPlaceAbsent(e) && place !== undefined) return absentComputer(placeDoorOf().nameOf(place), null).said;
+          return e instanceof Error ? e.message : String(e);
+        };
         const listsOn = async (c: HarnessCatalog, on: LiveWorkspace): Promise<HarnessCatalog> => {
-          const refusal = await setupRefusal(on, c.harness).catch((e: unknown) => (e instanceof Error ? e.message : String(e)));
+          const refusal = await setupRefusal(on, c.harness).catch((e: unknown) => unchecked(e, on));
           return refusal !== null ? { ...c, refusal } : catalogOn(c, on, adapterFor(on, c.harness).adapter);
         };
         const lists = entry === undefined || entry.record.phase !== "running" ? table : await Promise.all(table.map(c => listsOn(c, entry)));

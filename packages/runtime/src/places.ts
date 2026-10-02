@@ -1995,13 +1995,22 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     },
 
     async exec(placeId, cmd, execOpts) {
-      const reach = live.get(placeId)?.reach;
-      if (reach === undefined) throw new Error(absentComputer((await recordOf(placeId))?.name ?? placeId, null).sentence);
-      const answer = await reach.request("exec", {
-        cmd,
-        ...(execOpts.timeoutMs !== undefined ? { timeoutMs: execOpts.timeoutMs } : {}),
-        ...(execOpts.stdin !== undefined ? { stdin: Buffer.from(execOpts.stdin).toString("base64") } : {}),
-      });
+      const held = live.get(placeId);
+      const absent = async (): Promise<PlaceAbsentError> => new PlaceAbsentError(absentComputer((await recordOf(placeId))?.name ?? placeId, null).sentence);
+      if (held === undefined) throw await absent();
+      let answer: Record<string, unknown>;
+      try {
+        answer = await held.reach.request("exec", {
+          cmd,
+          ...(execOpts.timeoutMs !== undefined ? { timeoutMs: execOpts.timeoutMs } : {}),
+          ...(execOpts.stdin !== undefined ? { stdin: Buffer.from(execOpts.stdin).toString("base64") } : {}),
+        });
+      } catch (e) {
+        // The socket it rode still open is the computer answering for itself; one that went is the link.
+        const now = live.get(placeId);
+        if (now?.reach === held.reach && now.socket.readyState === now.socket.OPEN) throw e;
+        throw await absent();
+      }
       return { exitCode: Number(answer["exitCode"] ?? -1), stdout: String(answer["stdout"] ?? ""), stderr: String(answer["stderr"] ?? "") };
     },
 

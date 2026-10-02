@@ -6,7 +6,7 @@
 // variable's value is typed once and never drawn again.
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_PREFERENCES, ENV_VALUE_REFUSAL, accessRefusal, agentEnvRefusal, configDirSignInLine, type AgentSetupSet, type AgentsTarget, type Preferences, type PlaceView, type ProjectView, type ThreadDefaults } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, ENV_VALUE_REFUSAL, accessRefusal, agentEnvRefusal, configDirSignInLine, modelIdRefusal, type AgentSetupSet, type AgentsTarget, type Preferences, type PlaceView, type ProjectView, type ThreadDefaults } from "@wsp/protocol";
 import { RequestError, type Api } from "../src/protocol/client.js";
 import { catalogEntry } from "@wsp/catalog";
 import { useNotices } from "../src/notices/store.js";
@@ -194,9 +194,24 @@ describe("an agent's page", () => {
     const account = { key: "codex:acct-1", agent: "codex", label: "Codex with ChatGPT Plus", computers: [MAC], plan: "plus", address: "me@example.test", status: "ok" as const };
     await mount(agentsApi({ usageAccounts: async () => ({ accounts: [account] }) }).api, { kind: "agent", id: "codex" });
     const head = control("agent-head");
+    // A subscription is named by its plan where the host read one.
+    expect(head.querySelector("[data-settings-description] [title]")?.textContent).toBe("Signed in with ChatGPT Plus");
     expect(head.querySelector("[data-k=agent-plan]")?.textContent).toBe("ChatGPT Plus");
     expect(head.querySelector("[data-k=agent-address]")?.textContent).toBe("me@example.test");
     expect(head.querySelector("[data-settings-description]")?.textContent).not.toContain(",");
+  });
+
+  it.each([
+    [{ signInKind: "subscription", signInDetail: "the token from this computer" }, "Signed in with a subscription"],
+    [{ signInKind: "oauth", signInDetail: "OAuth credentials" }, "Signed in with OAuth"],
+    [{ signInKind: "subscription", signInDetail: "OAuth credentials", signInPlan: "max" }, "Signed in with Claude Max"],
+    // A sentence with no kind beside it is not read for one.
+    [{ signInKind: undefined, signInDetail: "API key from ANTHROPIC_API_KEY on the machine" }, "Signed in"],
+  ] as const)("says the sign-in by the kind the host answered and never by the words of its sentence: %o", async (claude, said) => {
+    const { signInKind: _kind, ...bare } = CLAUDE;
+    const row = { ...bare, signInDetail: claude.signInDetail, ...(claude.signInKind === undefined ? {} : { signInKind: claude.signInKind }), ...("signInPlan" in claude ? { signInPlan: claude.signInPlan } : {}) };
+    await mount(agentsApi({ agentsRead: async () => ({ ...REPORT, agents: [row, ...REPORT.agents.slice(1)] }) }).api, atClaude);
+    expect(control("agent-head").querySelector("[data-settings-description] [title]")?.textContent).toBe(said);
   });
 
   it("says a refused turn-off in the host's own words", async () => {
@@ -281,6 +296,39 @@ describe("an agent's page", () => {
     fireEvent.change(page().querySelector("[data-k=agent-models-id]")!, { target: { value: "claude-opus-6-preview" } });
     await act(async () => void fireEvent.click(page().querySelector("[data-k=agent-models-add]")!));
     expect(written(made.sets)).toEqual({ hide: HIDDEN, custom: ["claude-opus-6-preview"] });
+  });
+
+  it("refuses an id no model has under the field and writes nothing, and takes the field again once it is changed", async () => {
+    const made = agentsApi();
+    await mount(made.api, atClaude);
+    const field = page().querySelector<HTMLInputElement>("[data-k=agent-models-id]")!;
+    fireEvent.change(field, { target: { value: "claude opus" } });
+    await act(async () => void fireEvent.click(page().querySelector("[data-k=agent-models-add]")!));
+    expect(page().querySelector("[data-k=agent-models-refusal]")?.textContent).toBe(modelIdRefusal("claude opus"));
+    expect(field.value).toBe("claude opus");
+    expect(made.sets).toEqual([]);
+    fireEvent.change(field, { target: { value: "provider/model:tag" } });
+    expect(page().querySelector("[data-k=agent-models-refusal]")).toBeNull();
+    await act(async () => void fireEvent.keyDown(field, { key: "Enter" }));
+    expect(made.sets).toEqual([{ agentDefaults: { claude: { models: { hide: ["claude-opus-4-8", "claude-sonnet-4-5"], custom: ["provider/model:tag"] } } } }]);
+  });
+
+  it("says an id the agent's own list leaves out is not in it, where the agent lists its models, and says nothing where it cannot", async () => {
+    const added = { value: "gpt-next", label: "gpt-next", added: true as const };
+    const harnesses = [{ ...CLAUDE_CATALOG, models: [...CLAUDE_CATALOG.models, { ...added, value: "claude-next", label: "claude-next" }] }, { ...CODEX_CATALOG, models: [...CODEX_CATALOG.models, added] }, HARNESSES[2]!];
+    const prefs = { ...DEFAULT_PREFERENCES, labs: false, agentDefaults: { claude: { models: { custom: ["claude-next"] } }, codex: { models: { custom: ["gpt-next"] } } } };
+    const desc = (id: string): string | null | undefined => page().querySelector(`[data-settings-card='agent-models'] [data-model='${id}'] [data-settings-description]`)?.textContent;
+    useStore.setState({ preferences: prefs, harnesses });
+    await mount(agentsApi({}, prefs).api, { kind: "agent", id: "codex" });
+    expect(desc("gpt-next")).toBe("Not in Codex's list");
+    expect(page().querySelector("[data-settings-card='agent-models'] [data-model='gpt-next'] [data-k=model-remove]")).not.toBeNull();
+    cleanup();
+    resetSettings();
+    useStore.setState({ places: [here], preferences: prefs, harnesses });
+    await mount(agentsApi({}, prefs).api, atClaude);
+    const row = page().querySelector("[data-settings-card='agent-models'] [data-model='claude-next']");
+    expect(row).not.toBeNull();
+    expect(row?.textContent).not.toContain("list");
   });
 
   it("says where the program and the config folder are and how many words and variables every launch carries", async () => {

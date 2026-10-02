@@ -16,6 +16,9 @@ const readAts = new Map<string, number>();
 /** How long a reading stands before showing the page asks for another; Read again asks at once. */
 export const FRESH_MS = 5 * 60_000;
 
+/** The report this window last read off a target, without asking for one: what a settings search reads. */
+export const keptAgentsReport = (target: AgentsTarget): AgentsReport | undefined => lastReports.get(JSON.stringify(target));
+
 /** Forgets every report this window kept, for a test that starts from a first window. */
 export const forgetAgentsReports = (): void => {
   lastReports.clear();

@@ -196,6 +196,8 @@ export async function readAgents(host: Host, o: { user: string; vault: Readonly<
     const signIn: AgentRow["signIn"] = box !== undefined ? (box.signIns?.[a.id] ?? "unknown") : status === undefined ? "unknown" : ownLogin ? "signed-in" : vaultSignIn(a.id, o.vault);
     // The status module's own words for how the login stands, which name a variable and never hold its value.
     const signInDetail = ownLogin ? a.signIn.status?.detail?.(status!.output, new Map()) : undefined;
+    const signInKind = ownLogin ? a.signIn.status?.kind?.(status!.output) : undefined;
+    const signInPlan = ownLogin ? a.signIn.status?.plan?.(status!.output) : undefined;
     return {
       id: a.id,
       name: a.name,
@@ -209,6 +211,8 @@ export async function readAgents(host: Host, o: { user: string; vault: Readonly<
       signInRoad: signInRoadOf(a.signIn),
       wspTools: servers.wsp.has(a.id),
       ...(found && signInDetail !== undefined ? { signInDetail } : {}),
+      ...(found && signInKind !== undefined ? { signInKind } : {}),
+      ...(found && signInPlan !== undefined ? { signInPlan } : {}),
     };
   });
   const serverRows = recipe === undefined ? servers.rows : servers.rows.map(r => (r.scope === "project" ? r : { ...r, inRecipe: recipe.has(mcpRowId(r.agent, r.scope === "home", r.name)) }));

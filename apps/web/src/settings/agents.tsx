@@ -8,7 +8,7 @@
 // the same grammar, each opening its item's own page. A task's panel draws
 // the same agent cards and tabs.
 import { BotIcon, CircleArrowUpIcon, ScrollTextIcon, ServerIcon } from "lucide-react";
-import { HERE_PLACE_ID, accessWord, effortsFor, markedDefault, modelOf, type AccessChoice, type AgentRow, type HarnessCatalog, type PlaceView } from "@wsp/protocol";
+import { HERE_PLACE_ID, accessWord, effortsFor, listWords, markedDefault, modelOf, type AccessChoice, type AgentRow, type HarnessCatalog, type PlaceView } from "@wsp/protocol";
 import { agentName } from "@wsp/catalog";
 import { copyText } from "../actions/clipboard.js";
 import { ActButton } from "../components/agents/agentsParts.js";
@@ -17,7 +17,7 @@ import { AGENTS_KIND, signInWord } from "../components/agents/kinds/agents.js";
 import { AGENTS_KINDS } from "../components/agents/kinds/index.js";
 import { SignInFlowView } from "../components/agents/SignInFlowView.js";
 import { useAgentActs } from "../components/agents/useAgentActs.js";
-import { useAgentsReport } from "../components/agents/useAgentsReport.js";
+import { keptAgentsReport, useAgentsReport } from "../components/agents/useAgentsReport.js";
 import { HarnessMark } from "../components/chat/HarnessMark.js";
 import { Button } from "../components/ui/button.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
@@ -32,7 +32,7 @@ import { GlyphFrame } from "./grid.js";
 import { SELECT_WIDTH } from "./layout.js";
 import { absentOf, isProviderPlace, placeName } from "./places.js";
 import { Card, Row, RowSkeleton } from "./rows.js";
-import type { SettingsCardData } from "./rows.js";
+import type { SettingsCardData, SettingsRowData } from "./rows.js";
 import type { SettingsContext } from "./settingsContext.js";
 import { useSettingsStore, type AgentsTab, type SettingsAt } from "./settingsStore.js";
 
@@ -82,25 +82,16 @@ export function runsWith(catalog: HarnessCatalog): string[] {
   return [...(picks.model === undefined ? [] : [W.atEffort(modelLabel(catalog, picks.model), effort)]), ...(picks.access === undefined ? [] : [W.accessFact(W.accessWords[picks.access])])];
 }
 
-/** How an agent's sign-in stands, short, for its row on the list: the kind of sign-in where its status said one. */
-export function signInShort(row: Pick<AgentRow, "signIn" | "signInDetail">): string {
-  if (row.signInDetail === undefined) return capitalised(signInWord(row));
-  return capitalised(row.signInDetail.split(" from ")[0]!.replace(/^the /, ""));
-}
-
-/** The kind of sign-in as a sentence takes it, with its article: "an API key", "OAuth credentials". */
-const signInKind = (detail: string): string => {
-  const kind = detail.split(" from ")[0]!;
-  return kind.startsWith("API key") ? `an ${kind}` : kind;
-};
-
-/** How an agent's sign-in stands for the head of its page, short as the line says it and whole as its hover does, with
- * the computer named where the status says "the machine". */
-export function signInHead(row: Pick<AgentRow, "signIn" | "signInDetail">, computer: string): { line: string; whole: string } {
+/** How an agent's sign-in stands for the head of its page, off the kind the host answered: a subscription by its plan
+ * where the host read one, `plan` the plan's word, and the host's whole sentence on the hover with the computer named
+ * where it says "the machine". */
+export function signInHead(row: Pick<AgentRow, "signIn" | "signInDetail" | "signInKind">, computer: string, plan?: string): { line: string; whole: string; plan?: string } {
+  const kind = row.signInKind;
+  const planned = plan !== undefined && (kind === "subscription" || (kind === undefined && row.signIn === "signed-in"));
+  const line = planned ? `${W.signedInWith}${plan}` : kind !== undefined ? W.signedInAs[kind] : capitalised(signInWord(row));
   const detail = row.signInDetail;
-  if (detail === undefined) return { line: capitalised(signInWord(row)), whole: capitalised(signInWord(row)) };
-  const named = detail.replace(/\bthe machine\b/g, computer);
-  return { line: `Signed in with ${signInKind(detail)}`, whole: `Signed in with ${detail.startsWith("API key") ? "an " : ""}${named}` };
+  const whole = detail === undefined ? line : `${W.signedInWith}${kind === "api-key" ? "an " : ""}${detail.replace(/\bthe machine\b/g, computer)}`;
+  return { line, whole, ...(planned ? { plan } : {}) };
 }
 
 /** The vendor's own update for an agent, copied for the person to run on that computer: wsp never swaps a binary
@@ -337,6 +328,35 @@ function AgentsPage({ ctx }: { ctx: SettingsContext }) {
   );
 }
 
+/** What an agent's own page holds, as its row in a search says it, so a search for any of them finds the agent: every
+ * row for an agent a thread runs on, and the head alone for one wsp starts no thread on. */
+const AGENT_PAGE_LINE = capitalised(listWords([W.model, W.effort, W.access, W.models, W.program, W.configFolder, W.launchArguments, W.environment].map(word => word.toLowerCase())));
+
+const agentSearchRow = (ctx: SettingsContext, id: string, label: string, description: string): SettingsRowData => ({
+  kind: "row",
+  id,
+  title: label,
+  lead: (
+    <GlyphFrame>
+      <HarnessMark harness={id} label={label} className="size-4" />
+    </GlyphFrame>
+  ),
+  description,
+  open: () => ctx.go({ kind: "agent", id }),
+});
+
+/** The rows a search finds on the Agents page: the default agent, and one per agent page there is, each opening it:
+ * the agents a thread runs on, then every other agent the picked computer's last read found installed. */
+const agentsSearch = (ctx: SettingsContext): SettingsRowData[] => {
+  const installed = keptAgentsReport({ placeId: useSettingsStore.getState().agentsPlace ?? HERE_PLACE_ID })?.agents ?? [];
+  const others = installed.filter(row => row.installed && !ctx.harnesses.some(c => c.harness === row.id));
+  return [
+    { kind: "row", id: "default-agent", title: W.defaultAgent, description: W.defaultAgentDescription, open: () => ctx.go({ kind: "group", group: "agents" }) },
+    ...ctx.harnesses.map(catalog => agentSearchRow(ctx, catalog.harness, catalog.label, AGENT_PAGE_LINE)),
+    ...others.map(row => agentSearchRow(ctx, row.id, row.name, W.agentHeadLine)),
+  ];
+};
+
 export function agentsCards(ctx: SettingsContext): SettingsCardData[] {
-  return [{ id: "agents", items: [], body: <AgentsPage ctx={ctx} /> }];
+  return [{ id: "agents", items: [], search: agentsSearch(ctx), body: <AgentsPage ctx={ctx} /> }];
 }

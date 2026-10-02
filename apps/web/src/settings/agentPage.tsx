@@ -10,7 +10,7 @@
 // never drawn, kept or sent anywhere but that one set.
 import { useEffect, useState, type DragEvent, type ReactNode } from "react";
 import { GripVerticalIcon, XIcon } from "lucide-react";
-import { ACCESS_CHOICES, accessRefusal, agentEnvRefusal, commandWords, configDirSignInLine, effortsFor, modelOf, shellLine, type AccessChoice, type AgentDefaultsPatch, type AgentSetupSet, type HarnessCatalog, type ModelPicker } from "@wsp/protocol";
+import { ACCESS_CHOICES, accessRefusal, agentEnvRefusal, commandWords, configDirSignInLine, effortsFor, modelIdRefusal, modelOf, shellLine, type AccessChoice, type AgentDefaultsPatch, type AgentSetupSet, type HarnessCatalog, type ModelPicker } from "@wsp/protocol";
 import { agentName, catalogEntry } from "@wsp/catalog";
 import type { AccountRow } from "@wsp/protocol";
 import { Spaced } from "../components/ui/spaced.js";
@@ -220,9 +220,12 @@ function ModelsCard({ catalog, ctx }: { catalog: HarnessCatalog; ctx: SettingsCo
   const id = catalog.harness;
   const picker = ctx.preferences.agentDefaults[id]?.models;
   const custom = picker?.custom ?? [];
-  const items = [...pickerModels(catalog).map(m => ({ value: m.value, label: m.label, shown: true })), ...(catalog.hiddenModels ?? []).map(m => ({ value: m.value, label: m.label, shown: false }))];
+  const items = [...pickerModels(catalog).map(m => ({ value: m.value, label: m.label, added: m.added === true, shown: true })), ...(catalog.hiddenModels ?? []).map(m => ({ value: m.value, label: m.label, added: m.added === true, shown: false }))];
   const fallback = newThreadPicks(catalog).model;
   const [typed, setTyped] = useState("");
+  const [refused, setRefused] = useState<string | null>(null);
+  // Only an agent whose binary's list is every model it runs has a list an added id can be missing from.
+  const notListed = (m: (typeof items)[number]): boolean => m.added && catalog.legacyListed === true;
   const write = (next: ReadonlyArray<{ value: string; shown: boolean }>, ids: readonly string[], moved: boolean): void => {
     const hide = next.filter(m => !m.shown).map(m => m.value);
     const order = moved ? next.filter(m => m.shown).map(m => m.value) : (picker?.order ?? []);
@@ -249,9 +252,12 @@ function ModelsCard({ catalog, ctx }: { catalog: HarnessCatalog; ctx: SettingsCo
   const remove = (value: string): void => write(items.filter(m => m.value !== value), custom.filter(v => v !== value), picker?.order !== undefined);
   const add = (): void => {
     const value = typed.trim();
+    if (value === "") return;
+    const said = modelIdRefusal(value);
+    if (said !== null) return setRefused(said);
     setTyped("");
-    if (value === "" || items.some(m => m.value === value)) return;
-    write([...items, { value, shown: true }], [...custom, value], picker?.order !== undefined);
+    if (items.some(m => m.value === value)) return;
+    write([...items, { value, label: value, added: true, shown: true }], [...custom, value], picker?.order !== undefined);
   };
   if (items.length === 0) return null;
   return (
@@ -293,7 +299,7 @@ function ModelsCard({ catalog, ctx }: { catalog: HarnessCatalog; ctx: SettingsCo
             )
           }
           {...(m.value === fallback ? { mark: W.defaultModel, markWord: true as const } : {})}
-          description={m.label === m.value ? "" : m.value}
+          description={notListed(m) ? W.notInList(catalog.label) : m.label === m.value ? "" : m.value}
           control={
             <span className="flex items-center gap-1">
               {custom.includes(m.value) ? (
@@ -309,11 +315,31 @@ function ModelsCard({ catalog, ctx }: { catalog: HarnessCatalog; ctx: SettingsCo
         </div>
       ))}
       <div data-k="agent-models-add-row" className={cn("flex items-center gap-2 py-3", CARD_INSET, ROW_FLOOR)}>
-        <Input data-k="agent-models-id" nativeInput autoComplete="off" spellCheck={false} value={typed} placeholder={W.modelIdPlaceholder} aria-label={W.modelId} onChange={event => setTyped(event.target.value)} onKeyDown={event => (event.key === "Enter" ? (event.preventDefault(), add()) : undefined)} className={cn(FIELD, "h-[30px] min-w-0 flex-1 font-sans [&_input]:h-[28px] [&_input]:font-sans [&_input]:leading-[28px] sm:[&_input]:h-[28px] sm:[&_input]:leading-[28px]")} />
+        <Input
+          data-k="agent-models-id"
+          nativeInput
+          autoComplete="off"
+          spellCheck={false}
+          value={typed}
+          placeholder={W.modelIdPlaceholder}
+          aria-label={W.modelId}
+          {...(refused === null ? {} : { "aria-invalid": true })}
+          onChange={event => {
+            setTyped(event.target.value);
+            setRefused(null);
+          }}
+          onKeyDown={event => (event.key === "Enter" ? (event.preventDefault(), add()) : undefined)}
+          className={cn(FIELD, "h-[30px] min-w-0 flex-1 font-sans [&_input]:h-[28px] [&_input]:font-sans [&_input]:leading-[28px] sm:[&_input]:h-[28px] sm:[&_input]:leading-[28px]")}
+        />
         <Button type="button" variant="outline" size="xs" data-k="agent-models-add" disabled={typed.trim() === ""} onClick={add}>
           {W.addModel}
         </Button>
       </div>
+      {refused === null ? null : (
+        <div className={cn("-mt-3", CARD_INSET)}>
+          <RefusalSlot k="agent-models-refusal" said={refused} />
+        </div>
+      )}
     </Card>
   );
 }
@@ -464,6 +490,9 @@ export function AgentPage({ id, ctx }: { id: string; ctx: SettingsContext }) {
       .finally(() => setBusy(false));
   };
   const setupView = row?.setup;
+  // The agent's own status on that computer names its plan first; the usage accounts' reading stands in where it does not.
+  const plan = row?.signInPlan ?? (account?.plan === "" ? undefined : account?.plan);
+  const head = row === undefined ? undefined : signInHead(row, computer, plan === undefined ? undefined : planWord(plan, agent?.planBrand));
   const close = (): void => setSheet(null);
   return (
     <>
@@ -475,13 +504,19 @@ export function AgentPage({ id, ctx }: { id: string; ctx: SettingsContext }) {
             title={label}
             {...(row?.version === undefined ? {} : { mark: row.version })}
             line={
-              row === undefined ? undefined : row.installed ? (
+              row === undefined || head === undefined ? undefined : row.installed ? (
                 <Spaced
                   parts={[
-                    <span key="sign-in" title={signInHead(row, computer).whole}>
-                      {signInHead(row, computer).line}
+                    <span key="sign-in" title={head.whole}>
+                      {head.plan === undefined ? (
+                        head.line
+                      ) : (
+                        <>
+                          {W.signedInWith}
+                          <span data-k="agent-plan">{head.plan}</span>
+                        </>
+                      )}
                     </span>,
-                    ...(account?.plan === undefined || account.plan === "" ? [] : [<span key="plan" data-k="agent-plan">{planWord(account.plan, agent?.planBrand)}</span>]),
                     ...(account?.address === undefined ? [] : [<span key="address" data-k="agent-address">{account.address}</span>]),
                   ]}
                 />

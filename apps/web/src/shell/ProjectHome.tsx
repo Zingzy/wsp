@@ -9,8 +9,7 @@
 // queue drains only in a composer on screen and one copy at most is on screen;
 // the computer's free room is read first, and a send it has no room for is
 // refused before any copy is made.
-import { HERE_PLACE_ID, START_WORDS, githubLinkOf, placeRoom, plural, type ProjectView } from "@wsp/protocol";
-import { ownerRepoOf } from "@wsp/catalog";
+import { HERE_PLACE_ID, START_WORDS, githubLinkOf, placeRoom, plural, projectForRepo, type ProjectView } from "@wsp/protocol";
 import { Button } from "../components/ui/button.js";
 import { RefusalSlot } from "../settings/sheetParts.js";
 import { EmptyThread } from "../components/chat/ChatView.js";
@@ -64,7 +63,7 @@ export function ProjectHome({ projectId }: { projectId: string }) {
   const picked = useComposerOptions(key);
   // A link in the box names a project of its own, whichever home it was typed in: the send starts on that project.
   const link = githubLinkOf(useComposerDraft(key).prompt);
-  const linked = useStore(s => (link === undefined ? undefined : s.projects.find(p => ownerRepoOf(p.remote)?.toLowerCase() === link.repo.toLowerCase())));
+  const linked = useStore(s => (link === undefined ? undefined : projectForRepo(s.projects, link.repo, HERE_PLACE_ID)));
   if (project === undefined) return null;
 
   /** A start or a review off the link, through the host, which opens the thread it made. */

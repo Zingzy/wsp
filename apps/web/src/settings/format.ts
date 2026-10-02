@@ -317,6 +317,9 @@ export const AGENTS_PAGE_WORDS = {
   updateTo: (version: string): string => `Update to ${version}`,
   updateCopied: (command: string, computer: string): string => `Copied ${command}. Run it in a terminal on ${computer}.`,
   turnOn: (agent: string, computer: string): string => `${agent} on ${computer}`,
+  /** How an agent's own login there stands, by the kind of login its status names. */
+  signedInAs: { "api-key": "Signed in with an API key", subscription: "Signed in with a subscription", oauth: "Signed in with OAuth" },
+  signedInWith: "Signed in with ",
   model: "Model",
   modelDescription: "The composer still changes it for one thread.",
   effort: "Effort",
@@ -329,6 +332,10 @@ export const AGENTS_PAGE_WORDS = {
   noThreadsYet: (agent: string): string => `wsp starts no threads on ${agent} yet, so it has nothing here to set.`,
   reorder: (model: string): string => `Drag to reorder ${model}, or use the arrow keys`,
   modelIdPlaceholder: "Add a model by its id",
+  /** What the page of an agent wsp starts no thread on holds, as a search row says it. */
+  agentHeadLine: "Version, sign-in, update and whether it is on",
+  /** An id the person added that the agent's own list of every model it runs leaves out; still run as named. */
+  notInList: (agent: string): string => `Not in ${agent}'s list`,
   edit: "Edit",
   change: "Change",
   howItRuns: "How it runs",
