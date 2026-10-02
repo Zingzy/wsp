@@ -245,7 +245,7 @@ function SettingUpCentre({ creation }: { creation: Creation }) {
         {shown.map((line, i) => (
           <li
             key={taken.length - shown.length + i}
-            className={cn("flex items-baseline gap-2 text-[13px] leading-5", i === last ? (failed === null ? "text-foreground" : "text-status-failed") : "text-muted-foreground/70")}
+            className={cn("flex items-baseline gap-2 text-[13px] leading-5", i === last ? (failed === null ? "text-foreground" : "text-status-failed") : "text-muted-foreground")}
           >
             <span data-step-words>{stepWords(line)}</span>
             <span data-step-time className="font-mono text-xs tabular-nums text-muted-foreground">
