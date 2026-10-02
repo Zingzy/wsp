@@ -185,6 +185,15 @@ describe("an agent's page", () => {
     expect(document.querySelector("[data-k=settings-up]")).toBeNull();
   });
 
+  it("heads with the plan and the address the agent is signed in as on that computer, where the host read them", async () => {
+    const account = { key: "codex:acct-1", agent: "codex", label: "Codex with ChatGPT Plus", computers: [MAC], plan: "plus", address: "me@example.test", status: "ok" as const };
+    await mount(agentsApi({ usageAccounts: async () => ({ accounts: [account] }) }).api, { kind: "agent", id: "codex" });
+    const head = control("agent-head");
+    expect(head.querySelector("[data-k=agent-plan]")?.textContent).toBe("ChatGPT Plus");
+    expect(head.querySelector("[data-k=agent-address]")?.textContent).toBe("me@example.test");
+    expect(head.querySelector("[data-settings-description]")?.textContent).not.toContain(",");
+  });
+
   it("says a refused turn-off in the host's own words", async () => {
     const made = agentsApi({ agentsSetup: async () => Promise.reject(new RequestError("only a socket holding this host's own token may set that")) });
     await mount(made.api, atClaude);

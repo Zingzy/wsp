@@ -12,6 +12,8 @@ import { useEffect, useState, type ReactNode } from "react";
 import { ArrowDownIcon, ArrowUpIcon, XIcon } from "lucide-react";
 import { ACCESS_CHOICES, accessRefusal, agentEnvRefusal, commandWords, configDirSignInLine, effortsFor, everyModel, modelOf, shellLine, type AccessChoice, type AgentDefaultsPatch, type AgentSetupSet, type HarnessCatalog, type ModelPicker } from "@wsp/protocol";
 import { agentName, catalogEntry } from "@wsp/catalog";
+import type { AccountRow } from "@wsp/protocol";
+import { Spaced } from "../components/ui/spaced.js";
 import { useAgentsReport } from "../components/agents/useAgentsReport.js";
 import { HarnessMark } from "../components/chat/HarnessMark.js";
 import { Button } from "../components/ui/button.js";
@@ -375,6 +377,30 @@ function NewThreads({ catalog, ctx, openModels }: { catalog: HarnessCatalog; ctx
 type SheetOpen = "program" | "config" | "args" | "env" | "models" | null;
 
 /** One agent's page, for the computer the Agents page has picked. */
+/** The account this agent is signed in as on the computer the page reads, off the host's usage accounts: its plan in
+ * the vendor's own words and the address it signed in as, where the host read them; null until read, or none. */
+function useAccountOn(agent: string, computer: string): AccountRow | null {
+  const api = useStore(s => s.api);
+  const [accounts, setAccounts] = useState<readonly AccountRow[]>([]);
+  useEffect(() => {
+    let live = true;
+    void api?.usageAccounts?.().then(
+      answer => live && setAccounts(answer.accounts),
+      () => live && setAccounts([]),
+    );
+    return () => {
+      live = false;
+    };
+  }, [api]);
+  return accounts.find(a => a.agent === agent && a.computers.includes(computer)) ?? null;
+}
+
+/** The plan word a vendor names its plan by: ChatGPT Plus, Claude Max. */
+const planWord = (plan: string, brand: string | undefined): string => {
+  const word = plan[0]!.toUpperCase() + plan.slice(1);
+  return brand === undefined ? word : `${brand} ${word}`;
+};
+
 export function AgentPage({ id, ctx }: { id: string; ctx: SettingsContext }) {
   const place = usePickedPlace();
   const target = place === undefined ? null : { placeId: place.id };
@@ -385,6 +411,7 @@ export function AgentPage({ id, ctx }: { id: string; ctx: SettingsContext }) {
   const row = report?.agents.find(a => a.id === id);
   const setup = useSetup(place?.id, id, refresh);
   useEffect(() => setSheet(null), [place?.id]);
+  const account = useAccountOn(id, place === undefined ? "" : placeName(place));
   if (place === undefined) return null;
   const label = catalog?.label ?? row?.name ?? agentName(id);
   const computer = placeName(place);
@@ -418,7 +445,21 @@ export function AgentPage({ id, ctx }: { id: string; ctx: SettingsContext }) {
             glyph={<HarnessMark harness={id} label={label} className="size-4" />}
             title={label}
             {...(row?.version === undefined ? {} : { mark: row.version })}
-            line={row === undefined ? undefined : row.installed ? <span title={signInHead(row, computer).whole}>{signInHead(row, computer).line}</span> : W.notInstalled}
+            line={
+              row === undefined ? undefined : row.installed ? (
+                <Spaced
+                  parts={[
+                    <span key="sign-in" title={signInHead(row, computer).whole}>
+                      {signInHead(row, computer).line}
+                    </span>,
+                    ...(account?.plan === undefined || account.plan === "" ? [] : [<span key="plan" data-k="agent-plan">{planWord(account.plan, agent?.planBrand)}</span>]),
+                    ...(account?.address === undefined ? [] : [<span key="address" data-k="agent-address" className="font-mono">{account.address}</span>]),
+                  ]}
+                />
+              ) : (
+                W.notInstalled
+              )
+            }
             slot={
               row === undefined || !row.installed ? undefined : (
                 <span className="flex items-center gap-3">

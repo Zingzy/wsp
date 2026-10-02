@@ -268,8 +268,8 @@ function AgentLine({ row, rows, computer, ctx }: { row: AgentRow; rows: RowsCont
         control={
           <span className="flex items-center gap-3">
             <UpdateMark row={row} computer={computer} ctx={ctx} />
-            {step === undefined ? null : <ActButton act={wordOnly(step)} />}
-            <AgentStatus word={word} tone={tone} />
+            {/* A step to take is its own word; the status stands only where there is none. */}
+            {step === undefined ? <AgentStatus word={word} tone={tone} /> : <ActButton act={wordOnly(step)} />}
             {/* A row that opens no page holds the chevron's room, so every status ends at one x. */}
             {catalog === undefined ? <span aria-hidden className="w-3.5 shrink-0" /> : null}
           </span>

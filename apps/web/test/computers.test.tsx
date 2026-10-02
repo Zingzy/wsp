@@ -597,7 +597,8 @@ describe("the Agents page on a computer", () => {
     useStore.setState({ places: [here, box] });
     await mountAgents(computersApi({ agentsRead: async () => report, agentsSignIn } as unknown as Partial<Api>).api, "p_2");
     const state = (): string | undefined => agentRow("claude").querySelector("[data-k=agent-status]")?.textContent ?? undefined;
-    expect(state()).toBe(capitalised(AGENTS_LIST_WORDS.needsSignIn));
+    // The Sign in button is the word; no status stands beside it.
+    expect(state()).toBeUndefined();
     const signIn = agentRow("claude").querySelector<HTMLElement>("[data-settings-slot] [data-k='act-sign-in']")!;
     expect(signIn.textContent).toBe("Sign in");
     fireEvent.click(signIn);
