@@ -4671,6 +4671,7 @@ const DAEMON_CONTENTS = [
   "ad16ee01ba69b4bd8339c8aa4753c2f3e46aa80c8d9f1ceeab9ca1038482f062",
   "409fce58696aaa20c7803f7a963841e4aacc0702a153ca6f916fba64f941bd16",
   "89e10a249a0e59670fc8fefec015f640d8f021d0b24bb34665412360cf6b999b",
+  "ffcede69616fafe56cf56a3ec668d56516c22b7c9f53fc5176621c902ad7e639",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -4971,7 +4972,16 @@ const DAEMON_CONTENTS = [
  * Version 110: A joined Mac reports which Mac it is: its place report carries the product name its registry gives, else
  * its model identifier, so the computer's row draws that Mac rather than a server. git.status counts the stashes a
  * repository holds, running or stopped, so a delete names them.
- * Version 111: the room check's refusal is a contract word, so the Mac's copy road says the same sentence. */
+ * Version 111: the room check's refusal is a contract word, so the Mac's copy road says the same sentence.
+ * Version 112: A pull request's page reads when it opened and settled, who merged it into which commit, its labels, the
+ * reviews asked for, each reviewer's latest verdict and its assignees; each commit's message body and, off one GraphQL
+ * read over gh's own first 100 commits, its parents, line counts and rolled-up checks, the newest 100 reviews' ids and
+ * whether each of the newest 100 threads is resolved, with a mark for each part read only in part; every page of its
+ * conversation and its line comments off the REST API, with each author's association with the repository, whether a
+ * bot wrote each comment and the face it shows, and each line comment's hunk, the comment it answers and its review. No
+ * body on the page is cut, and every host line's answer is read to 16 MB and refused past it. A check reads when it
+ * started and finished, a pull request the merge armed on it, and git.prDiff cuts at the bytes asked for, up to the cap
+ * a git.diff has, reading at most four times that before it stops gh and names the files it saw. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
