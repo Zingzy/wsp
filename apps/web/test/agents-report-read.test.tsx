@@ -3,8 +3,9 @@
 // sentence with no bars standing for ever, a second visit to a target draws
 // the report kept from the first while the new read runs, and a client with
 // no such read says so instead of waiting.
+import { FRESH_MS } from "../src/components/agents/useAgentsReport.js";
 import { act, cleanup, render } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentsReport, AgentsTarget } from "@wsp/protocol";
 import { AgentsManager } from "../src/components/agents/AgentsManager.js";
 import { AGENTS_LIST_WORDS } from "../src/components/agents/agentsRows.js";
@@ -47,6 +48,9 @@ describe("a report's read", () => {
     const first = render(<Read target={{ placeId: "p_spoo" }} />);
     await settle();
     first.unmount();
+    // A reading stands FRESH_MS; past it the next visit draws the kept report while it reads again.
+    const now = Date.now();
+    vi.spyOn(Date, "now").mockReturnValue(now + FRESH_MS + 1);
     render(<Read target={{ placeId: "p_spoo" }} />);
     await settle();
     expect(reads).toHaveLength(2);

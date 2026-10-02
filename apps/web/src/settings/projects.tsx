@@ -10,7 +10,7 @@ import { ProjectGlyph } from "../projects/look.js";
 import { GlyphFrame } from "./grid.js";
 import { useEffect, useState } from "react";
 import { agentName } from "@wsp/catalog";
-import { ACCESS_CHOICES, HERE_PLACE_ID, accessRefusal, fmtBytes, plural, projectInUseRefusal, type AccessChoice, type ProjectLook, type ProjectOverridesPatch, type ProjectSource, type ProjectView, type ThreadDefaults } from "@wsp/protocol";
+import { ACCESS_CHOICES, HERE_PLACE_ID, accessRefusal, projectInUseRefusal, type AccessChoice, type ProjectLook, type ProjectOverridesPatch, type ProjectSource, type ProjectView, type ThreadDefaults } from "@wsp/protocol";
 import { AlertDialog, AlertDialogClose, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogPopup, AlertDialogTitle } from "../components/ui/alert-dialog.js";
 import { Button, DANGER_BUTTON, NEUTRAL_RING } from "../components/ui/button.js";
 import { AddButton } from "../components/ui/add-button.js";
@@ -22,9 +22,8 @@ import { AGENTS_PAGE_WORDS, PROJECTS_WORDS, WHERE_WORDS } from "./format.js";
 import { AgentChoice, defaultAgentOf, modelLabel, newThreadPicks } from "./agents.js";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../components/ui/select.js";
 import { SELECT_WIDTH } from "./layout.js";
-import { builtWhen } from "./image.js";
 import { hereName, isProviderPlace, placeName } from "./places.js";
-import { CARD_SURFACE, Card, Cards, HeadRow, Row, type SettingsCardData, type SettingsItem } from "./rows.js";
+import { CARD_SURFACE, Card, Cards, HeadRow, Row, type SettingsCardData } from "./rows.js";
 import { VALUE } from "./format.js";
 import { cn } from "../lib/utils.js";
 import { useSidebarProjects } from "../protocol/store.js";
@@ -295,13 +294,6 @@ export function ProjectPage({ project, ctx }: { project: ProjectView; ctx: Setti
   const standing = workspacesOn(ctx, project);
   const refusal = standing.length === 0 ? null : projectInUseRefusal(project.name, standing);
   const line = removeLine(ctx, project);
-  const facts: SettingsItem[] = [
-    { kind: "line", id: "branch", label: PROJECTS_WORDS.branch, value: project.base ?? project.defaultBranch, hover: PROJECTS_WORDS.branchDescription, attrs: { "data-k": "branch" } },
-    { kind: "line", id: "added", label: PROJECTS_WORDS.added, value: builtWhen(project.createdAt, ctx.now), hover: PROJECTS_WORDS.addedHover, attrs: { "data-k": "added" } },
-    ...(project.seeded === undefined
-      ? []
-      : [{ kind: "line" as const, id: "seeded", label: PROJECTS_WORDS.seeded, value: [plural(project.seeded.files, "file"), fmtBytes(project.seeded.bytes), `memory ${project.seeded.memory}`], hover: PROJECTS_WORDS.seededHover(hereName(ctx.places)), attrs: { "data-k": "seeded" } }]),
-  ];
   const look = ctx.preferences.projectLook[project.id];
   const icon = look?.icon ?? "folder";
   const hue = look?.hue ?? "neutral";
@@ -312,12 +304,11 @@ export function ProjectPage({ project, ctx }: { project: ProjectView; ctx: Setti
       items: [],
       body: (
         <div className={cn(CARD_SURFACE, "flex flex-col [&>*+*]:border-t [&>*+*]:border-border/50")}>
-          <HeadRow glyph={<ProjectGlyph projectId={project.id} />} title={project.name} line={<span className="font-mono">{PROJECTS_WORDS.where(sourceWord(project.source), computer)}</span>} slot={<ThreadCount project={project} />} attrs={{ "data-k": "project-head" }} />
+          <HeadRow glyph={<ProjectGlyph projectId={project.id} />} title={project.name} line={<span>{PROJECTS_WORDS.where(sourceWord(project.source), computer)}</span>} slot={<ThreadCount project={project} />} attrs={{ "data-k": "project-head" }} />
           {project.remote === undefined || project.remote === "" ? null : <Row id="remote" title={PROJECTS_WORDS.repository} description={project.remote} mono control={<RemoteOpen remote={project.remote} />} attrs={{ "data-k": "remote" }} />}
         </div>
       ),
     },
-    { id: "facts", head: PROJECTS_WORDS.about, items: facts },
     {
       id: "look",
       head: PROJECTS_WORDS.look,

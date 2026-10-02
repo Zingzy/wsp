@@ -121,11 +121,9 @@ describe("Projects", () => {
     expect(head.querySelector("[data-settings-description]")?.textContent).toBe(PROJECTS_WORDS.where("/Users/dev/spoo", "zingzy's MacBook Pro"));
     expect(head.querySelector("[data-k=project-threads]")?.textContent).toBe(PROJECTS_WORDS.threads(0, 0));
     expect(descriptionOf("remote")).toBe("https://github.com/dev/spoo.git");
-    expect(lineLabels()).toEqual([PROJECTS_WORDS.branch, PROJECTS_WORDS.added, PROJECTS_WORDS.seeded]);
-    expect(wordOf("branch")).toBe("release");
-    expect(wordOf("added")).toMatch(/^Sep 12 \d\d:\d\d$/);
-    expect(wordOf("seeded")).toBe(`412 files ${fmtBytes(3_250_000)} memory landed`);
-    expect([...document.querySelectorAll("[data-settings-page] [data-settings-head]")].map(h => h.textContent)).toEqual([PROJECTS_WORDS.about, PROJECTS_WORDS.look]);
+    // The page keeps to the project and what new threads in it take; no About card of facts.
+    expect(lineLabels()).toEqual([]);
+    expect([...document.querySelectorAll("[data-settings-page] [data-settings-head]")].map(h => h.textContent)).toEqual([PROJECTS_WORDS.look]);
     expect(rowTitles()).toEqual([PROJECTS_WORDS.repository, PROJECTS_WORDS.icon, PROJECTS_WORDS.hue, "Remove spoo"]);
     expect(rowOf("last-agent")).toBeNull();
     // A workspace stands on it: the button is held with no title and the refusal is the description.
@@ -141,7 +139,6 @@ describe("Projects", () => {
     act(() => useSettingsStore.getState().go({ kind: "project", id: "pr_landing" }));
     await settle();
     expect(document.querySelector("[data-settings-page] [data-k=project-head] [data-settings-description]")?.textContent).toContain("on spoo");
-    expect(wordOf("branch")).toBe("main");
     expect(rowOf("last-agent")).toBeNull();
     expect(descriptionOf("remove")).toBe(PROJECTS_WORDS.removeOnComputer("spoo"));
     expect(remove().hasAttribute("disabled")).toBe(false);
@@ -215,7 +212,9 @@ describe("Devices", () => {
     expect(descriptionOf("d_1")).toMatch(/^paired Sep 1 \d\d:\d\d seen 1[12] min ago$/);
     // A device heard from inside the minute says so in words rather than as a span of zero.
     expect(descriptionOf("d_2")).toMatch(/^paired Sep 1 \d\d:\d\d seen just now$/);
-    expect(rowOf("d_1")?.querySelector("[data-settings-description]")?.className).toContain("font-mono");
+    // Facts read in the page's own sans, held to columns by their tabular figures.
+    expect(rowOf("d_1")?.querySelector("[data-settings-description]")?.className).toContain("tabular-nums");
+    expect(rowOf("d_1")?.querySelector("[data-settings-description]")?.className).not.toContain("font-mono");
     // The door to the confirmation is neutral where it stands and red only under the pointer; the act itself, in
     // the dialog, is the one red thing at rest.
     const revoke = rowOf("d_1")!.querySelector<HTMLElement>("[data-k=revoke]")!;
@@ -718,7 +717,7 @@ describe("General's Version card", () => {
     expect(lineLabels()).toEqual([ABOUT_WORDS.app, ABOUT_WORDS.host]);
     expect(wordOf("app-version")).toBe("0.1.3");
     expect(wordOf("host-version")).toBe("0.1.5");
-    expect(lineOf("host-version")?.querySelector("[data-settings-word]")?.className).toContain("font-mono");
+    expect(lineOf("host-version")?.querySelector("[data-settings-word]")?.className).not.toContain("font-mono");
     shell("0.1.5", "0.1.5");
     await remount();
     expect(lineLabels()).toEqual([]);

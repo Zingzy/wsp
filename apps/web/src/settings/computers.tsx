@@ -481,7 +481,7 @@ export function ComputerPage({ place, ctx }: { place: PlaceView; ctx: SettingsCo
     <>
       <section data-settings-card="computer" className="flex flex-col gap-3">
         <div className={CARD_SURFACE}>
-          <HeadRow glyph={<ComputerGlyph place={place} className="size-4 text-foreground/80" />} title={name} {...(shapeLine(place) === "" ? {} : { line: <span className="font-mono">{shapeLine(place)}</span> })} slot={<RunningHere place={place} ctx={ctx} />} attrs={{ "data-k": "computer-head" }} />
+          <HeadRow glyph={<ComputerGlyph place={place} className="size-4 text-foreground/80" />} title={name} {...(shapeLine(place) === "" ? {} : { line: shapeLine(place) })} slot={<RunningHere place={place} ctx={ctx} />} attrs={{ "data-k": "computer-head" }} />
           {cloud ? null : <BehindRow place={place} ctx={ctx} />}
         </div>
         <PlaceStateLine place={place} ctx={ctx} />

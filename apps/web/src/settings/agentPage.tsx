@@ -482,7 +482,7 @@ export function AgentPage({ id, ctx }: { id: string; ctx: SettingsContext }) {
                       {signInHead(row, computer).line}
                     </span>,
                     ...(account?.plan === undefined || account.plan === "" ? [] : [<span key="plan" data-k="agent-plan">{planWord(account.plan, agent?.planBrand)}</span>]),
-                    ...(account?.address === undefined ? [] : [<span key="address" data-k="agent-address" className="font-mono">{account.address}</span>]),
+                    ...(account?.address === undefined ? [] : [<span key="address" data-k="agent-address">{account.address}</span>]),
                   ]}
                 />
               ) : (
@@ -503,8 +503,13 @@ export function AgentPage({ id, ctx }: { id: string; ctx: SettingsContext }) {
       </section>
       {catalog === undefined ? null : <NewThreads catalog={catalog} ctx={ctx} />}
       {catalog === undefined ? null : <ModelsCard catalog={catalog} ctx={ctx} />}
-      {row === undefined && reading ? <RunsSkeleton /> : null}
-      {row === undefined || setupView === undefined ? null : (
+      {catalog === undefined && row !== undefined && row.installed ? (
+        <p data-k="agent-no-threads" className="-mt-2 px-1 text-[13px] leading-5 text-muted-foreground">
+          {W.noThreadsYet(label)}
+        </p>
+      ) : null}
+      {catalog !== undefined && row === undefined && reading ? <RunsSkeleton /> : null}
+      {catalog === undefined || row === undefined || setupView === undefined ? null : (
         <Card id="agent-runs" head={W.howItRuns}>
           <Row
             id="agent-program"

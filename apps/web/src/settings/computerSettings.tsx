@@ -62,7 +62,7 @@ function Stepper({ value, label, onChange }: { value: number; label: string; onC
       <Button variant="ghost" size="icon-xs" aria-label={W.fewer} disabled={value <= 1} onClick={() => onChange(value - 1)} className="h-full rounded-r-none">
         <MinusIcon aria-hidden className="size-3.5" />
       </Button>
-      <span data-k="threads-at-once-value" className="min-w-8 px-1 text-center font-mono text-[13px] tabular-nums text-foreground">
+      <span data-k="threads-at-once-value" className="min-w-8 px-1 text-center text-[13px] tabular-nums text-foreground">
         {value}
       </span>
       <Button variant="ghost" size="icon-xs" aria-label={W.more} onClick={() => onChange(value + 1)} className="h-full rounded-l-none">

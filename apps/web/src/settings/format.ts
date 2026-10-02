@@ -6,8 +6,8 @@ import { fmtPx, listWords, offlineFor, placeUpdateLine, type MidTurn, type Notif
 /** The muted mono a state word or a description of machine words wears, and the foreground mono a value a person
  * reads wears: an address, a size, a path, a time, a version. Two class strings the page, the sheet and the first
  * run all draw with, so one type ladder holds across them. */
-export const FACT = "font-mono text-[13px] tabular-nums text-muted-foreground";
-export const VALUE = "font-mono text-sm tabular-nums text-foreground";
+export const FACT = "text-[13px] tabular-nums text-muted-foreground";
+export const VALUE = "text-sm tabular-nums text-foreground";
 
 /** A fact's slot where its words may take two lines: exactly two of the line's own line heights, held whether the
  * words take one line or two, and cut at the second with the whole on the element's hover text. The height is read
@@ -314,6 +314,7 @@ export const AGENTS_PAGE_WORDS = {
   models: "Models",
   modelsDescription: "The ones switched on are the composer's picker, in this order.",
   defaultModel: "default",
+  noThreadsYet: (agent: string): string => `wsp starts no threads on ${agent} yet, so it has nothing here to set.`,
   reorder: (model: string): string => `Drag to reorder ${model}, or use the arrow keys`,
   modelIdPlaceholder: "Add a model by its id",
   edit: "Edit",
@@ -394,7 +395,6 @@ export const USAGE_PAGE_WORDS = {
 /** Settings > Projects: the list, a project's own page and its one act. */
 export const PROJECTS_WORDS = {
   look: "Look",
-  about: "About",
   icon: "Icon",
   iconDescription: "Drawn beside the project in the sidebar and the switcher.",
   hue: "Colour",
@@ -414,13 +414,7 @@ export const PROJECTS_WORDS = {
   where: (source: string, computer: string): string => `${source} on ${computer}`,
   threads: (n: number, running: number): string => `${n} ${n === 1 ? "thread" : "threads"}${running === 0 ? "" : `, ${running} running`}`,
   remoteHover: "The repository it was cloned from.",
-  added: "Added",
-  addedHover: "When it was recorded.",
-  seeded: "Seeded",
-  seededHover: (here: string): string => onceNamed(here, h => `What the seed carried from ${h}, once.`),
   newWorkspaces: "New tasks",
-  branch: "Branch",
-  branchDescription: "Where a new task starts.",
   lastAgent: "Last agent",
   lastAgentDescription: "What a new thread on it defaults to.",
   remove: "Remove",

@@ -253,7 +253,6 @@ function AgentLine({ row, rows, computer, ctx }: { row: AgentRow; rows: RowsCont
       />
     );
   }
-  const catalog = ctx.harnesses.find(c => c.harness === row.id);
   const step = kindRow.quick !== undefined && (kindRow.quick.id === "sign-in" || kindRow.quick.id === "cancel") && (kindRow.quick.run !== undefined || kindRow.quick.busy === true) ? kindRow.quick : undefined;
   const waiting = waitingFlow(flow);
   const tone = waiting || row.signIn === "none" ? "waiting" : row.signIn === "unknown" ? "quiet" : "good";
@@ -270,11 +269,9 @@ function AgentLine({ row, rows, computer, ctx }: { row: AgentRow; rows: RowsCont
             <UpdateMark row={row} computer={computer} ctx={ctx} />
             {/* A step to take is its own word; the status stands only where there is none. */}
             {step === undefined ? <AgentStatus word={word} tone={tone} /> : <ActButton act={wordOnly(step)} />}
-            {/* A row that opens no page holds the chevron's room, so every status ends at one x. */}
-            {catalog === undefined ? <span aria-hidden className="w-3.5 shrink-0" /> : null}
           </span>
         }
-        {...(catalog === undefined ? {} : { open: () => ctx.go({ kind: "agent", id: row.id }) })}
+        open={() => ctx.go({ kind: "agent", id: row.id })}
         attrs={{ "data-agent-row": row.id }}
       />
       {flow === undefined ? null : (
