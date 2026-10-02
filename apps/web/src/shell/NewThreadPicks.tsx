@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // New thread's one choice, the project: which project Cmd+T and the new-thread
-// button open on, the heading's picker that changes it, and the line under
+// button open on, or the palette's list of projects where the person asked to
+// pick every time, the heading's picker that changes it, and the line under
 // the box naming the computer the thread will run on. A thread started here
 // makes its own copy of the project, so it never lands inside another
 // thread's workspace. Picking another computer is --on as the command line
@@ -8,6 +9,7 @@
 import { ChevronDownIcon, PlusIcon } from "lucide-react";
 import { useEffect, useMemo } from "react";
 import type { ProjectView } from "@wsp/protocol";
+import { openCommandPalette } from "../commandPaletteBus.js";
 import { Menu, MenuItem, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuSeparator, MenuTrigger } from "../components/ui/menu.js";
 import { usePlaces, useProjects, useStore } from "../protocol/store.js";
 import { storedPicks } from "../sidebar/picks.js";
@@ -29,7 +31,9 @@ export function newThreadProject(): string | null {
 
 export function openNewThread(): void {
   const project = newThreadProject();
-  if (project !== null) useStore.getState().openProjectHome(project);
+  if (project === null) return;
+  if (useStore.getState().preferences.newThreadIn === "ask") openCommandPalette({ page: "new-thread" });
+  else useStore.getState().openProjectHome(project);
 }
 
 const pickerClass = "inline-flex max-w-64 items-baseline gap-1 border-foreground/60 border-b border-dotted align-baseline outline-none transition-colors hover:border-foreground focus-visible:border-foreground";

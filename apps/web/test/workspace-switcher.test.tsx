@@ -13,6 +13,7 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_PREFERENCES, type PlaceView, type SessionView, type WorkspaceView } from "@wsp/protocol";
 import { deriveSidebarProjects } from "../src/adapt/index.js";
+import type { CommandPaletteActionItem } from "../src/components/palette/CommandPalette.logic.js";
 import { buildPaletteItems } from "../src/components/palette/paletteItems.js";
 import { buildSwitcherCards } from "../src/components/switcher/switcherCards.js";
 import type { Api } from "../src/protocol/client.js";
@@ -718,7 +719,7 @@ describe("buildSwitcherCards", () => {
     const child = { ...session("s_kid", "ws_a", "The child.", Date.parse("2026-09-01T02:00:00Z")), threadId: "thr_kid", parentThreadId: "thr_lead", startedBy: "agent" as const };
     const projects = deriveSidebarProjects({ workspaces: [here], sessions: { ws_a: [lead, child] } });
     const MAC: PlaceView = { id: "here", kind: "computer", name: "zingzy-mbp", label: "zingzy's MacBook Pro", default: true };
-    const palette = (places: PlaceView[]) => buildPaletteItems({ projects, selectedId: null, query: "", messageHits: [], canCreate: false, handlers: {} as never, verbs: {} as never, places });
+    const palette = (places: PlaceView[]) => buildPaletteItems({ projects, selectedId: null, query: "", messageHits: [], canCreate: false, recorded: [], projectOrder: [], asks: false, handlers: {} as never, verbs: {} as never, places });
     const card = (places: PlaceView[]) => buildSwitcherCards({ places, projects, targets: [{ workspaceId: "ws_a", threadId: "thr_kid" }], images: {} })[0]!.place;
     const said = (node: ReactNode): HTMLElement => render(<>{node}</>).container;
     for (const item of [...palette([]).workspaceItems, ...palette([]).recentThreadItems]) expect(said(item.description).textContent).not.toMatch(/ on\s*$|this computer/);
@@ -732,8 +733,8 @@ describe("buildSwitcherCards", () => {
   it("offers Copy as Markdown for the thread on screen, and nothing where no thread is open", async () => {
     const copyThreadMarkdown = vi.fn(async () => {});
     const items = (copy: (() => Promise<void>) | null) =>
-      buildPaletteItems({ projects: [], selectedId: null, query: "", messageHits: [], canCreate: false, handlers: { copyThreadMarkdown: copy } as never, verbs: {} as never, places: [] }).actionItems;
-    const copy = items(copyThreadMarkdown).find(item => item.title === "Copy as Markdown")!;
+      buildPaletteItems({ projects: [], selectedId: null, query: "", messageHits: [], canCreate: false, recorded: [], projectOrder: [], asks: false, handlers: { copyThreadMarkdown: copy } as never, verbs: {} as never, places: [] }).actionItems;
+    const copy = items(copyThreadMarkdown).find((item): item is CommandPaletteActionItem => item.kind === "action" && item.title === "Copy as Markdown")!;
     expect(copy.disabled).not.toBe(true);
     await copy.run();
     expect(copyThreadMarkdown).toHaveBeenCalledTimes(1);
@@ -743,7 +744,7 @@ describe("buildSwitcherCards", () => {
   it("a thread in the palette wears the agent's mark and the one status slot, and a workspace no dot for its state", () => {
     const running = { ...session("s_run", "ws_a", "The running one.", Date.now() - 125_000), status: "running" as const, endedAt: undefined };
     const projects = deriveSidebarProjects({ workspaces: WORKSPACES, sessions: { ws_a: [running] } });
-    const items = buildPaletteItems({ projects, selectedId: null, query: "", messageHits: [], canCreate: false, handlers: {} as never, verbs: {} as never, places: [] });
+    const items = buildPaletteItems({ projects, selectedId: null, query: "", messageHits: [], canCreate: false, recorded: [], projectOrder: [], asks: false, handlers: {} as never, verbs: {} as never, places: [] });
     const item = items.recentThreadItems.find(found => found.title === "The running one.")!;
     expect(render(<>{item.icon}</>).container.querySelector("[data-harness-mark='claude']")).not.toBeNull();
     const slot = render(<>{item.titleTrailingContent}</>).container.querySelector<HTMLElement>("[data-thread-status]")!;

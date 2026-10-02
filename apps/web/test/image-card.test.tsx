@@ -2,7 +2,7 @@
 // The Image card on a computer's page: one state each, read off the image
 // view, the init job and the frames the store keeps; Copy sends image.build and
 // nothing else bills; a refused press lands in the slot in its two halves; a
-// sealed frame reads the image again; the ready card starts a task there.
+// sealed frame reads the image again; the ready card opens New thread on the project that lands there.
 import { act, cleanup, fireEvent, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { COPY_BUILD_FIX, DEFAULT_PREFERENCES, copyBuildingLine, copyStoppedLine, fmtRate, type GoldenStageEvent, type InitJob, type InitSetup, type PlaceView, type SealedImage, type SealedImageBuilt, type SealedImageCopy, type SealedImageView } from "@wsp/protocol";
@@ -253,9 +253,8 @@ describe("the Image card", () => {
     expect(press().textContent).toBe(IMAGE_WORDS.startTask);
     fireEvent.click(press());
     await settle();
-    expect(useStore.getState().settingsOpen).toBe(false);
-    const dialog = await screen.findByRole("dialog");
-    expect(dialog.querySelector<HTMLElement>("[data-segment=pr_box]")!.getAttribute("aria-checked")).toBe("true");
+    expect(useStore.getState()).toMatchObject({ settingsOpen: false, projectHome: "pr_box", selectedId: null });
+    expect(screen.queryByRole("dialog")).toBeNull();
     cleanup();
     resetSettings();
     useStore.setState({ places: [here, box, solari], projects: [project("pr_mac", "here")] });
@@ -281,7 +280,6 @@ describe("the Image card", () => {
     expect(press().hasAttribute("data-held")).toBe(false);
     fireEvent.click(press());
     await settle();
-    const dialog = await screen.findByRole("dialog");
-    expect(dialog.querySelector<HTMLElement>("[data-segment=pr_cloud]")!.getAttribute("aria-checked")).toBe("true");
+    expect(useStore.getState()).toMatchObject({ settingsOpen: false, projectHome: "pr_cloud" });
   });
 });

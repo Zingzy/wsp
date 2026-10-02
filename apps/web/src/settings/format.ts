@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The words the settings page and its palette row say, one place, keyed by the
 // preference value where a value has words of its own.
-import { fmtPx, listWords, offlineFor, placeUpdateLine, type MidTurn, type NotifyChoice, type OnQuit, type PlaceDialRoad, type PlaceProvisionRow, type SendKey, type SettleAfter, type TerminalSizeSource, type ThemePreference } from "@wsp/protocol";
+import { fmtPx, listWords, offlineFor, placeUpdateLine, type MidTurn, type NewThreadIn, type NotifyChoice, type OnQuit, type PlaceDialRoad, type PlaceProvisionRow, type SendKey, type SettleAfter, type TerminalSizeSource, type ThemePreference } from "@wsp/protocol";
 
 /** The muted mono a state word or a description of machine words wears, and the foreground mono a value a person
  * reads wears: an address, a size, a path, a time, a version. Two class strings the page, the sheet and the first
@@ -225,6 +225,9 @@ export const GENERAL_WORDS = {
   planAlerts: "When a plan window runs low",
   planAlertsDescription: "At 70% and 90% of a window, once each, and when an account is blocked.",
   threads: "Threads",
+  newThreadIn: "New thread starts in",
+  newThreadInDescription: "Ask every time lists your projects before a new thread opens.",
+  newThreadInChoices: { current: "Current project", ask: "Ask every time" } satisfies Record<NewThreadIn, string>,
   settleAfter: "Settle a thread after",
   settleAfterDescription: "A read thread moves to Settled once it has been quiet this long.",
   settleChoices: { "15m": "15 minutes", "1h": "1 hour", "2h": "2 hours", "1d": "1 day", never: "Never" } satisfies Record<SettleAfter, string>,

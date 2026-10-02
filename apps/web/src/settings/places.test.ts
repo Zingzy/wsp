@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { DAEMON_VERSION, JOINED_COMPUTER, PLACE_BLOCKED_WORD, absentComputer, placeDaemonBehind, type PlaceProvision, type PlaceView, type SealedImageCopy, type WorkspaceView } from "@wsp/protocol";
 import { copyOn } from "./image.js";
-import { NOTHING_HELD, PLACE_KIND_WORDS, PROJECT_PICK_WORDS, hereName, outcomeWord, placeName, placeOf, placeStateCell, removeSentence, removeTitle, whereSegments } from "./places.js";
+import { NOTHING_HELD, PLACE_KIND_WORDS, hereName, outcomeWord, placeName, placeOf, placeStateCell, removeSentence, removeTitle } from "./places.js";
 
 const NOW = Date.parse("2026-09-12T12:00:00.000Z");
 const ago = (ms: number): string => new Date(NOW - ms).toISOString();
@@ -84,23 +84,8 @@ describe("the remove sentence", () => {
   });
 });
 
-describe("the rows the New workspace dialog offers, and what each says", () => {
+describe("the copy of the image a computer holds", () => {
   const copy = (place: string, version: number): SealedImageCopy => ({ place, version, snapshotId: `snap_${place}`, builtAt: ago(60_000) });
-
-  it("offers every computer and provider that takes a workspace, never the computer the app runs on", () => {
-    // This computer runs Docker here: it can hold copies of the image, and it is still never somewhere to put
-    // another workspace, since its local mode is already the one it can be.
-    expect(whereSegments([{ ...here, engine: "docker" }, hetzner, laptop, ascii]).map(p => p.id)).toEqual(["p_1", "p_2", "box"]);
-  });
-
-  it("offers nothing at all where this computer is the only row there is", () => {
-    expect(whereSegments([{ ...here, engine: "docker" }])).toEqual([]);
-  });
-
-  it("says there is no project to make a workspace of yet, and the line that records one", () => {
-    expect(PROJECT_PICK_WORDS.noneYet).toBe("No projects yet, and a task is a copy of one.");
-    expect(PROJECT_PICK_WORDS.addOne).toBe("Record one with wsp add <folder> here, or wsp add <url> --on <computer> there.");
-  });
 
   it("reads a copy by the word it names its place with, the id or the name alike", () => {
     expect(copyOn([copy("p_1", 2)], hetzner)?.version).toBe(2);

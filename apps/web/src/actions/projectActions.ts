@@ -16,8 +16,8 @@ export interface ProjectTarget {
 }
 
 export interface ProjectVerbs {
-  /** Opens the dialog that asks the one question, with this project picked. */
-  readonly newWorkspace: (projectId: string) => void;
+  /** Opens this project's New thread page. */
+  readonly newThread: (projectId: string) => void;
   /** Opens the project's own page in Settings. */
   readonly openSettings: (projectId: string) => void;
   /** Forgets the project; absent on a client whose host cannot, and the row says so. */
@@ -36,7 +36,7 @@ export const projectActions: ReadonlyArray<ActionEntry<ProjectTarget, ProjectVer
     title: () => NEW_WORKSPACE,
     rowLabel: target => `${NEW_WORKSPACE} on ${target.name}`,
     refusal: () => null,
-    run: (target, verbs) => verbs.newWorkspace(target.id),
+    run: (target, verbs) => verbs.newThread(target.id),
   },
   {
     id: "project-settings",

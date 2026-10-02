@@ -54,7 +54,7 @@ const USAGE = `usage: node drive.mjs <session> goto <url>
        node drive.mjs <session> quit   (closes this session's window)
 
        steps join with the word then, and run in one browser life:
-       node drive.mjs <session> click "New workspace" then shot new-workspace.png`;
+       node drive.mjs <session> click "New thread" then shot new-thread.png`;
 
 const NAME = /^[a-z0-9][a-z0-9-]*$/;
 /** The window every session opens at: a laptop's, which is what the app lays out for by default. */

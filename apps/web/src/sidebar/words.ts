@@ -9,14 +9,9 @@
 import { threadStateWord } from "@wsp/protocol";
 import { onceNamed } from "../settings/format.js";
 
-/** The one word for the act, read by the plus on a project, the palette row and the dialog's own title: three
+/** The one word for the act, read by the plus on a project, the project's menu and the palette's row: three
  * surfaces offering one act, so none of them can name it differently. */
 export const NEW_WORKSPACE = "New thread";
-
-/** The one question a workspace is made by, asked on the first run and in the dialog: one question, one wording,
- * and its ghost is a piece of work rather than a name shaped like a machine's. */
-export const WORK_QUESTION = "What are you working on";
-export const WORK_GHOST = "pricing page";
 
 /** The screen a person meets on a wsp that holds no project: one folder, one question, one key. Its button says
  * Start, since the screen has one act and its title says what that act starts. */
@@ -55,9 +50,6 @@ export const COMPUTER_SWITCHER_WORDS = {
   list: "Computers",
   settingsOf: SWITCHER_WORDS.settingsOf,
 } as const;
-
-/** Why Create waits on the one question the dialog asks. */
-export const SAY_THE_WORK = "Say what you are working on first.";
 
 /** The sheet that records a project: one source on one computer, and nothing else. The computer pick appears only
  * where there is a computer beyond this one and the source is a repository address, which is what says which road

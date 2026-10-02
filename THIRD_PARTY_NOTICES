@@ -16,8 +16,8 @@ here are included or relied upon under their own licenses, reproduced below.
    wsp's own),
    apps/web/src/work-log,
    apps/web/src/sidebar (the sidebar logic, thread sort, status
-   indicators, favicon and chrome; the WorkspaceSidebar container, the
-   new-workspace dialog and workspaceRows.ts are wsp's own),
+   indicators, favicon and chrome; the WorkspaceSidebar container and
+   workspaceRows.ts are wsp's own),
    apps/web/src/components/palette (the palette chrome, results and
    logic; the CommandPalette container and paletteItems.tsx are wsp's own),
    apps/web/src/hooks, apps/web/src/lib (utils, timestampFormat,

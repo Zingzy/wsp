@@ -310,7 +310,7 @@ describe("General", () => {
     await settle();
     const heads = [...document.querySelectorAll("[data-settings-page] > section[data-settings-card] [data-settings-head]")].map(h => h.textContent);
     expect(heads).toEqual(["Composer", "Notifications", "Threads", "Open in", "Startup and quit", ABOUT_WORDS.title]);
-    expect(rowTitles()).toEqual(["Send with", "A message while a thread works", "When a thread needs you", "When a thread finishes", "When a plan window runs low", "Settle a thread after", "Ask before deleting", "Open files in", AWAKE_WORDS.keepAwake(""), ABOUT_WORDS.wsp]);
+    expect(rowTitles()).toEqual(["Send with", "A message while a thread works", "When a thread needs you", "When a thread finishes", "When a plan window runs low", "New thread starts in", "Settle a thread after", "Ask before deleting", "Open files in", AWAKE_WORDS.keepAwake(""), ABOUT_WORDS.wsp]);
     // On the defaults no row carries the arrow that puts it back.
     expect(document.querySelectorAll("[data-settings-page] [data-k=row-reset]")).toHaveLength(0);
     expect(descriptionOf("send-with")).toBe("The other key makes a new line. Keys read as this computer's: ⌘ on a Mac, Ctrl elsewhere.");
@@ -318,13 +318,14 @@ describe("General", () => {
     expect(descriptionOf("notify-needs")).toBe("A question, a permission prompt, a sign-in.");
     expect(descriptionOf("notify-done")).toBe("Off keeps ten running threads from pinging you ten times.");
     expect(descriptionOf("plan-alerts")).toBe("At 70% and 90% of a window, once each, and when an account is blocked.");
+    expect(descriptionOf("new-thread-in")).toBe("Ask every time lists your projects before a new thread opens.");
     expect(descriptionOf("settle-after")).toBe("A read thread moves to Settled once it has been quiet this long.");
     expect(descriptionOf("ask-delete")).toBe("A workspace with unpushed work always asks.");
     // The defaults: Enter, Queue, notify and sound for a need, nothing for a finish, alerts on, two hours, asks.
     const checked = (k: string) => document.querySelector(`[data-k=${k}] [data-checked]`)?.textContent;
     expect([checked("send-with"), checked("mid-turn")]).toEqual(["Enter", "Queue"]);
     const said = (k: string) => document.querySelector(`[data-settings-page] [data-k=${k}]`)?.textContent;
-    expect([said("notify-needs"), said("notify-done"), said("settle-after")]).toEqual(["Notify and sound", "Off", "2 hours"]);
+    expect([said("notify-needs"), said("notify-done"), said("new-thread-in"), said("settle-after")]).toEqual(["Notify and sound", "Off", "Current project", "2 hours"]);
     expect(document.querySelector("[data-k=plan-alerts]")!.getAttribute("aria-checked")).toBe("true");
     expect(document.querySelector("[data-k=ask-delete]")!.getAttribute("aria-checked")).toBe("true");
   });
@@ -351,7 +352,9 @@ describe("General", () => {
     await settle();
     expect(await pickOption(document.querySelector("[data-settings-page] [data-k=settle-after]")!, "Never")).toEqual(["15 minutes", "1 hour", "2 hours", "1 day", "Never"]);
     await settle();
-    expect(sets).toEqual([{ notifyDone: "sound" }, { settleAfter: "never" }]);
+    expect(await pickOption(document.querySelector("[data-settings-page] [data-k=new-thread-in]")!, "Ask every time")).toEqual(["Current project", "Ask every time"]);
+    await settle();
+    expect(sets).toEqual([{ notifyDone: "sound" }, { settleAfter: "never" }, { newThreadIn: "ask" }]);
     cleanup();
   });
 
@@ -381,12 +384,12 @@ describe("General", () => {
   });
 
   it("puts an arrow on each row off its default, and the arrow writes that one field back", async () => {
-    const { api, sets } = settingsApi({ editorList: async () => [] } as Partial<Api>, { ...DEFAULT_PREFERENCES, labs: false, sendWith: "mod-enter", notifyDone: "notify", settleAfter: "1d", askDelete: false });
-    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, sendWith: "mod-enter", notifyDone: "notify", settleAfter: "1d", askDelete: false } });
+    const { api, sets } = settingsApi({ editorList: async () => [] } as Partial<Api>, { ...DEFAULT_PREFERENCES, labs: false, sendWith: "mod-enter", notifyDone: "notify", newThreadIn: "ask", settleAfter: "1d", askDelete: false });
+    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, sendWith: "mod-enter", notifyDone: "notify", newThreadIn: "ask", settleAfter: "1d", askDelete: false } });
     mountSettings({ api, at: { kind: "group", group: "general" } });
     await settle();
     const arrowed = [...document.querySelectorAll("[data-settings-page] [data-k=row-reset]")].map(b => b.closest("[data-settings-row]")!.getAttribute("data-settings-row"));
-    expect(arrowed).toEqual(["send-with", "notify-done", "settle-after", "ask-delete"]);
+    expect(arrowed).toEqual(["send-with", "notify-done", "new-thread-in", "settle-after", "ask-delete"]);
     fireEvent.click(rowOf("settle-after")!.querySelector<HTMLElement>("[data-k=row-reset]")!);
     await settle();
     expect(sets).toEqual([{ settleAfter: "2h" }]);

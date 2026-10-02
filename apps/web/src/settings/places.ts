@@ -5,9 +5,6 @@
 // state word after a name, how long a computer has been away and an hourly
 // rate are all the protocol's (absentComputer, fmtSize, fmtBytes, offlineFor,
 // fmtRate) and are not copied here.
-//
-// The New workspace dialog's Where control reads its rows and its caption from
-// the bottom of this file rather than wording a second set of place facts.
 import { FREE_WORD, JOINED_COMPUTER, hereName, isHere, isProviderPlace, placeName, placeOf, absentComputer, placeDaemonBehind, awayMsOf, chargesNothing, daemonSilent, fmtBytes, fmtRate, imageCopyStaysLine, isLocalWorkspace, landsOn, namesPlace, ownDaemonDown, plural, provisionWord, type AbsentComputer, type CpuWord, type InitSetup, type PlaceKind, type PlaceProvisionRow, type PlaceView, type ProjectView, type SealedImageCopy, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { agentName } from "@wsp/catalog";
 import { PLACE_STATE_WORDS, PROVISION_OUTCOME_WORDS, capitalised } from "./format.js";
@@ -71,15 +68,6 @@ export const removeTitle = (place: PlaceView): string => `Remove ${placeName(pla
  * of row, so a third kind is a row here and nowhere else. A computer of the person's own is the protocol's own
  * phrase for a joined computer, the one both the row and every sentence about it read. */
 export const PLACE_KIND_WORDS: Record<PlaceKind, string> = { computer: JOINED_COMPUTER, provider: "cloud" };
-
-/** What the computer a landing names is called on a screen: the row this host holds for it, named the one way every
- * surface names a computer, else the word the landing itself carried. The runtime answers the id of the computer
- * the host runs on there, and an id is no word for a person to read. */
-export function landingName(places: readonly PlaceView[], landing: { readonly place?: string; readonly name: string }): string {
-  const word = landing.place ?? landing.name;
-  const row = places.find(place => place.id === word || namesPlace(place, word));
-  return row === undefined ? landing.name : placeName(row);
-}
 
 /** Whether this row is the place a word names, read the one way every reader of a place word reads it: the id the
  * wire keys it by, or the name a person types. The image record's copies and the build's own frames both carry the
@@ -151,21 +139,6 @@ export function placeStateCell(place: PlaceView, absent: AbsentComputer | null, 
   if (unsigned.length > 0) return { kind: "sign-in", why: PLACE_STATE_WORDS.needsSignIn(unsigned) };
   return { kind: "word", word: PLACE_STATE_WORDS.ready };
 }
-
-/** The rows the New workspace dialog offers as somewhere to put one, in the list's own order. The computer the host
- * runs on is never among them: it is already the one workspace it can be. */
-export const whereSegments = (places: readonly PlaceView[]): PlaceView[] => places.filter((place, at) => at !== 0 && placeTakesWorkspaces(place));
-
-/** The project pick on the new-workspace dialog: a workspace is one project's copy, so the project is what the
- * dialog asks for and the computer comes with it. With no project there is nothing to make a workspace of, and the
- * two notes say so and what records one, in the command line's own words. */
-export const PROJECT_PICK_WORDS = {
-  label: "Project",
-  noneYet: "No projects yet, and a task is a copy of one.",
-  addOne: "Record one with wsp add <folder> here, or wsp add <url> --on <computer> there.",
-} as const;
-
-
 
 /** The word for what one row of the recipe came to, or nothing for a row no job carried. A present row's note is
  * the one thing its read has to say beyond the outcome, which is a command answering from outside the directories

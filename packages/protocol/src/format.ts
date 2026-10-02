@@ -129,7 +129,7 @@ export function fmtMemGb(memMb: number): string {
 /** What one of a machine's cpus is called: a provider's are virtual, this computer's are the cores it has. */
 export type CpuWord = "vCPU" | "cores";
 
-/** A size as the sidebar row, the Machine tab and the new-workspace form show it: "2 vCPU, 4 GB", or "10 cores, 16 GB"
+/** A size as the sidebar row and the Machine tab show it: "2 vCPU, 4 GB", or "10 cores, 16 GB"
  * in the word the machine's kind has for a cpu. A size offer is always a provider's, so the provider's word is the default. */
 /** The size joins its words with no-break spaces, so a sentence carrying it never breaks between a number and its unit. */
 export function fmtSize(size: WorkspaceSize, cpu: CpuWord = "vCPU"): string {

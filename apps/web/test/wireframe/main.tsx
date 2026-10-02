@@ -4,7 +4,7 @@
 // workspace on a second computer, a workspace an agent forked, a project
 // nobody has started work on and a first run that has been refused are all
 // states a person meets and none of them can be staged on the owner's own
-// machine, so the real sidebar, the real dialog and the real first run are fed
+// machine, so the real sidebar and the real first run are fed
 // records here instead of pixels being drawn by hand.
 //
 // ?screen=<name> picks one, ?theme=light the light side, ?lightTheme= and ?darkTheme= each side's theme by id,
@@ -27,8 +27,6 @@
 //   sidebar-hosts    the sidebar screen in a desktop window that knows a second
 //                    host, so the foot names the computer this window is on
 //   switcher-open    the sidebar screen with the switcher's menu open
-//   dialog           New workspace over that sidebar with three projects, so
-//                    the pick is the segmented control
 //   first-run        the first run with nothing typed
 //   first-run-refused    the runtime's own sentence in the slot under the button
 //   first-run-starting   Start held while the create runs
@@ -129,8 +127,6 @@ import { useSettingsStore, type SettingsAt } from "../../src/settings/settingsSt
 import { applyTheme, useThemeEffect } from "../../src/settings/theme";
 import { useHostNotices } from "../../src/notices/hostNotices";
 import { WorkspaceCreation } from "../../src/shell/WorkspaceCreation";
-import { NewWorkspaceDialog } from "../../src/sidebar/NewWorkspaceDialog";
-import { requestNewWorkspace } from "../../src/shell/shellRequests";
 import { RequestError, type Api } from "../../src/protocol/client";
 import { useCreation, useStore } from "../../src/protocol/store";
 import { useAdds } from "../../src/settings/adds";
@@ -919,7 +915,6 @@ createRoot(document.getElementById("root")!).render(
         <Centre />
       </AppShell>
     )}
-    {screen === "dialog" ? <NewWorkspaceDialog projects={[SPOO, WSP, LANDING]} landings={landings} places={places} picked={null} onCreate={() => {}} onCancel={() => {}} /> : null}
   </>,
 );
 
@@ -950,7 +945,6 @@ setTimeout(() => {
       document.querySelector<HTMLButtonElement>('[aria-label="Collapse webhook retries"]')?.click();
     }, 250);
   }
-  if (screen === "dialog") requestNewWorkspace();
   // The row a shot wants open, and the dialog opened from the row that is open: the table is drawn from a read
   // that lands after this page does, so each click is tried until its row is there.
   const clickWhenThere = (css: string, then?: () => void): void => {

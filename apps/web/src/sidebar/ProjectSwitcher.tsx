@@ -21,7 +21,7 @@ export function ProjectSwitcher({
   named,
   pick,
   onPick,
-  onNewWorkspace,
+  onNewThread,
   onAddProject,
   onContextMenu,
   onReorder,
@@ -32,7 +32,7 @@ export function ProjectSwitcher({
   /** The project the tree is filtered to, or null for every project. */
   pick: ProjectRef | null;
   onPick: (projectId: string | null) => void;
-  onNewWorkspace: (projectId: string) => void;
+  onNewThread: (projectId: string) => void;
   onAddProject: () => void;
   /** The picked project's own menu, which the head offers while it stands in for that project's row. */
   onContextMenu: (event: MouseEvent<HTMLElement>, projectId: string) => void;
@@ -70,7 +70,7 @@ export function ProjectSwitcher({
                       data-k="new-workspace"
                       data-project={pick.id}
                       aria-label={NEW_WORKSPACE}
-                      onClick={() => onNewWorkspace(pick.id)}
+                      onClick={() => onNewThread(pick.id)}
                     />
                   }
                 >

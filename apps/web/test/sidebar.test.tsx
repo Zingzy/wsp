@@ -12,7 +12,7 @@ import { RequestError, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { placeName } from "../src/settings/places.js";
 import { statusOf } from "./workspace-status.js";
-import { onNewThreadRequest, requestNewWorkspace } from "../src/shell/shellRequests.js";
+import { onNewThreadRequest } from "../src/shell/shellRequests.js";
 import { WorkspaceSidebar } from "../src/sidebar/WorkspaceSidebar.js";
 import { useSettingsStore } from "../src/settings/settingsStore.js";
 import { COMPUTER_SWITCHER_WORDS, NEW_WORKSPACE, PROJECT_WORDS, SWITCHER_WORDS } from "../src/sidebar/words.js";
@@ -82,8 +82,7 @@ type FakeApi = Api & {
 function fakeApi(workspaces: WorkspaceView[], statuses: WorkspaceStatus[], sessions: SessionView[] = []): FakeApi {
   return {
     listWorkspaces: vi.fn(async () => workspaces),
-    // Two rows: this computer, which is never somewhere to put a workspace, and the provider this host forks on,
-    // which is the row the New workspace dialog checks.
+    // Two rows: this computer, which is never somewhere to put a workspace, and the provider this host forks on.
     placesList: vi.fn(async () => ({ places: PLACES, adds: [] })),
     projectsList: vi.fn(async () => PROJECTS),
     getWorkspace: vi.fn(async id => workspaces.find(w => w.id === id)!),
@@ -595,17 +594,24 @@ describe("the project switcher", () => {
     expect(rowIds()).toEqual(["thread:thr_2"]);
     expect(depthOf(rowOf("world"))).toBe(0);
     expect(window.localStorage.getItem("wsp:sidebar-project")).toBe('"pr_2"');
-    // The head stands in for the project's row: its plus is New workspace on that project.
+    // The head stands in for the project's row: its plus is New thread on that project, which opens its New thread
+    // page and asks nothing, as does New thread on the project's own menu.
     const plus = head().parentElement!.querySelector<HTMLElement>("[data-k=new-workspace]")!;
     expect(plus.dataset["project"]).toBe("pr_2");
     expect(plus.getAttribute("aria-label")).toBe(NEW_WORKSPACE);
     // Nothing at rest at every width, the phone's sheet included, where the kit alone would stand it up.
     expect(plus.className).toMatch(/(^|\s)opacity-0(\s|$)/);
+    act(() => useStore.setState({ preferences: { ...useStore.getState().preferences, newThreadIn: "ask" } }));
     fireEvent.click(plus);
-    const dialog = await screen.findByRole("dialog");
-    expect(dialog.querySelector<HTMLElement>("[data-segment=pr_2]")!.getAttribute("aria-checked")).toBe("true");
-    fireEvent.click(within(dialog).getByRole("button", { name: /Cancel/ }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(useStore.getState()).toMatchObject({ projectHome: "pr_2", selectedId: null });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    act(() => useStore.setState({ projectHome: null }));
+    fireEvent.contextMenu(head());
+    await waitFor(() => expect(useContextMenuStore.getState().menu).not.toBeNull());
+    expect(useContextMenuStore.getState().menu!.items.find(item => item.id === "new-workspace")?.label).toBe(NEW_WORKSPACE);
+    act(() => useContextMenuStore.getState().choose("new-workspace"));
+    await waitFor(() => expect(useStore.getState().projectHome).toBe("pr_2"));
+    expect(screen.queryByRole("dialog")).toBeNull();
     // Back to every project: the rows return and the pick leaves this window's storage.
     fireEvent.click(head());
     fireEvent.click(within(menu()!).getByRole("option", { name: SWITCHER_WORDS.all }));
@@ -643,16 +649,6 @@ describe("the project switcher", () => {
     expect(head().textContent).toBe("wsp");
     expect(rowIds()).toEqual(["thread:thr_2"]);
     expect(document.activeElement).toBe(head());
-  });
-
-  it("while a project is picked the palette's New workspace opens the dialog on that project, as the head's plus does", async () => {
-    await two();
-    fireEvent.click(head());
-    fireEvent.click(within(menu()!).getByRole("option", { name: /^wsp/ }));
-    act(() => requestNewWorkspace());
-    const dialog = await screen.findByRole("dialog");
-    expect(dialog.querySelector<HTMLElement>("[data-segment=pr_2]")!.getAttribute("aria-checked")).toBe("true");
-    expect(dialog.querySelector<HTMLElement>("[data-segment=pr_1]")!.getAttribute("aria-checked")).toBe("false");
   });
 
   it("picking a project changes what the sidebar lists and nothing else: the selected thread stays open and the sidebar then draws no lifted row", async () => {

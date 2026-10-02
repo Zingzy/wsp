@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The sidebar's pure logic: the copied t3code sort, search, traversal and
-// pill rollup over wsp thread snapshots, plus our row labels and the
-// new-workspace helpers.
+// pill rollup over wsp thread snapshots, plus our row labels.
 import { describe, expect, it } from "vitest";
 import { SETTLE_MS, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot } from "../src/adapt/index.js";

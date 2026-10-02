@@ -2,7 +2,10 @@
 // The palette container: one dialog over the copied content and results,
 // items from the store's workspaces and sessions, opened through the bus. What
 // the person types is asked of the host's message search once the typing
-// pauses, and the answer is kept for the query it answered.
+// pauses, and the answer is kept for the query it answered. A submenu row
+// opens its page over the root, Backspace on an empty search goes back, and
+// the page of projects New thread picks from takes the mod digits for its
+// first nine rows while it is open.
 // The workspace rows come from the workspace registry, so they run what the
 // sidebar's buttons and menus run.
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
@@ -16,25 +19,28 @@ import { copyText } from "../../actions/clipboard.js";
 import { useRightPanelStore } from "../../rightPanelStore.js";
 import { cycleThreadInSpace, goToAdjacentWorkspace, goToWorkspace } from "../../shell/shellCommands.js";
 import { useKeybindings } from "../../shell/useKeybindings.js";
-import { requestAddProject, requestNewWorkspace } from "../../shell/shellRequests.js";
+import { openNewThread } from "../../shell/NewThreadPicks.js";
+import { requestAddProject } from "../../shell/shellRequests.js";
 import { CommandDialog, CommandDialogPopup } from "../ui/command.js";
 import { useSidebar } from "../ui/sidebar.js";
 import {
   buildRootGroups,
   filterCommandPaletteGroups,
   getCommandPaletteInputPlaceholder,
+  getCommandPaletteMode,
   type CommandPaletteActionItem,
   type CommandPaletteGroup,
   type CommandPaletteSubmenuItem,
 } from "./CommandPalette.logic.js";
 import { CommandPaletteContent } from "./CommandPaletteContent.js";
 import { CommandPaletteResults } from "./CommandPaletteResults.js";
-import { buildPaletteItems, type PaletteHandlers } from "./paletteItems.js";
+import { NEW_THREAD_PAGE, buildPaletteItems, pickedRow, type PaletteHandlers } from "./paletteItems.js";
 
 const NO_ITEMS: ReadonlyArray<CommandPaletteActionItem> = [];
 const NO_HITS: ReadonlyArray<SessionSearchHit> = [];
 /** How long the typing rests before the words go to the host. */
 const MESSAGE_SEARCH_WAIT_MS = 200;
+const PAGES = { "new-thread": NEW_THREAD_PAGE } as const;
 
 export function CommandPalette({ keybindings: given }: { keybindings?: ResolvedKeybindingsConfig }) {
   const live = useKeybindings();
@@ -42,6 +48,8 @@ export function CommandPalette({ keybindings: given }: { keybindings?: ResolvedK
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [highlightedItemValue, setHighlightedItemValue] = useState<string | null>(null);
+  /** The submenu pages open over the root, by their rows' values, the one on screen last. */
+  const [pages, setPages] = useState<ReadonlyArray<string>>([]);
   const { toggleSidebar } = useSidebar();
   const api = useStore(s => s.api);
   const workspaces = useStore(s => s.workspaces);
@@ -49,6 +57,10 @@ export function CommandPalette({ keybindings: given }: { keybindings?: ResolvedK
   const select = useStore(s => s.select);
   const openSettings = useStore(s => s.openSettings);
   const openAddComputer = useStore(s => s.openAddComputer);
+  const openProjectHome = useStore(s => s.openProjectHome);
+  const recorded = useStore(s => s.projects);
+  const projectOrder = useStore(s => s.preferences.projectOrder);
+  const asks = useStore(s => s.preferences.newThreadIn === "ask");
   const selectedId = useSelectedWorkspaceId();
   const selectedThreadId = useSelectedThreadId();
   const toggleRightPanel = useRightPanelStore(s => s.toggleVisibility);
@@ -63,6 +75,7 @@ export function CommandPalette({ keybindings: given }: { keybindings?: ResolvedK
         }
         setQuery(detail.query ?? "");
         setHighlightedItemValue(null);
+        setPages(detail.page === undefined ? [] : [PAGES[detail.page]]);
         setOpen(true);
       }),
     [],
@@ -70,7 +83,7 @@ export function CommandPalette({ keybindings: given }: { keybindings?: ResolvedK
 
   const projects = useSidebarProjects();
   const [found, setFound] = useState<{ query: string; hits: ReadonlyArray<SessionSearchHit> } | null>(null);
-  const words = query.startsWith(">") ? "" : query.trim();
+  const words = pages.length > 0 || query.startsWith(">") ? "" : query.trim();
   useEffect(() => {
     const search = api?.searchMessages;
     if (!open || search === undefined || words.length < 2) return;
@@ -93,7 +106,8 @@ export function CommandPalette({ keybindings: given }: { keybindings?: ResolvedK
     () => ({
       selectWorkspace: goToWorkspace,
       selectThread: select,
-      newWorkspace: project => requestNewWorkspace(project),
+      newThread: openNewThread,
+      openProjectHome,
       toggleSidebar,
       toggleRightPanel,
       nextWorkspace: () => goToAdjacentWorkspace(1),
@@ -108,14 +122,22 @@ export function CommandPalette({ keybindings: given }: { keybindings?: ResolvedK
           ? null
           : async () => await copyText(threadMarkdown(threadMessages(await api.sessionHistory(selectedId), selectedThreadId))),
     }),
-    [api, openAddComputer, openSettings, select, selectedId, selectedThreadId, toggleRightPanel, toggleSidebar],
+    [api, openAddComputer, openProjectHome, openSettings, select, selectedId, selectedThreadId, toggleRightPanel, toggleSidebar],
   );
   const items = useMemo(
-    () => buildPaletteItems({ projects, selectedId, query, messageHits, canCreate: api !== null, handlers, verbs, places }),
-    [api, handlers, messageHits, places, projects, query, selectedId, verbs],
+    () => buildPaletteItems({ projects, selectedId, query, messageHits, canCreate: api !== null, recorded, projectOrder, asks, handlers, verbs, places }),
+    [api, asks, handlers, messageHits, places, projectOrder, projects, query, recorded, selectedId, verbs],
   );
+  // A page whose row is gone or held, as the last project's removal leaves it, reads as the root.
+  const page = useMemo(() => {
+    const at = pages.at(-1);
+    const row = items.actionItems.find((item): item is CommandPaletteSubmenuItem => item.kind === "submenu" && item.value === at);
+    return row === undefined || row.disabled ? null : row;
+  }, [items, pages]);
+  const mode = getCommandPaletteMode({ currentView: page });
 
   const groups = useMemo<CommandPaletteGroup[]>(() => {
+    if (page !== null) return filterCommandPaletteGroups({ activeGroups: page.groups, query, isInSubmenu: true, projectSearchItems: NO_ITEMS, threadSearchItems: NO_ITEMS });
     const root = buildRootGroups({ actionItems: items.actionItems, recentThreadItems: items.recentThreadItems });
     if (items.workspaceItems.length > 0) {
       root.splice(1, 0, { value: "workspaces", label: "Tasks", items: items.workspaceItems });
@@ -128,16 +150,30 @@ export function CommandPalette({ keybindings: given }: { keybindings?: ResolvedK
       threadSearchItems: items.threadSearchItems,
       messageSearchItems: items.messageSearchItems,
     });
-  }, [items, query]);
+  }, [items, page, query]);
 
   const close = (): void => {
     setOpen(false);
     setQuery("");
     setHighlightedItemValue(null);
+    setPages([]);
+  };
+
+  const openPage = (item: CommandPaletteSubmenuItem): void => {
+    setPages(open => [...open, item.value]);
+    setQuery(item.initialQuery ?? "");
+    setHighlightedItemValue(null);
+  };
+
+  const back = (): void => {
+    setPages(open => open.slice(0, -1));
+    setQuery("");
+    setHighlightedItemValue(null);
   };
 
   const executeItem = (item: CommandPaletteActionItem | CommandPaletteSubmenuItem): void => {
-    if (item.disabled || item.kind !== "action") return;
+    if (item.disabled) return;
+    if (item.kind === "submenu") return openPage(item);
     if (!item.keepOpen) close();
     void item.run().catch((error: unknown) => {
       noticeFailure(error, said => `${String(item.title)}: ${said}`);
@@ -145,7 +181,22 @@ export function CommandPalette({ keybindings: given }: { keybindings?: ResolvedK
   };
 
   const onInputKeyDown = (event: KeyboardEvent<HTMLInputElement>): void => {
-    if (event.key !== "Enter" || event.defaultPrevented) return;
+    if (event.defaultPrevented) return;
+    if (page !== null && event.key === "Backspace" && query === "") {
+      event.preventDefault();
+      back();
+      return;
+    }
+    const digit = page === null ? null : pickedRow(event);
+    if (page !== null && digit !== null) {
+      // Taken here, so the shell's own mod digits never switch the workspace under the page.
+      event.preventDefault();
+      const row = page.groups.flatMap(group => group.items)[digit - 1];
+      const shown = groups.some(group => group.items.some(item => item.value === row?.value));
+      if (row !== undefined && shown) executeItem(row);
+      return;
+    }
+    if (event.key !== "Enter") return;
     const highlighted = groups.flatMap(group => group.items).find(item => item.value === highlightedItemValue);
     if (!highlighted) return;
     event.preventDefault();
@@ -162,8 +213,20 @@ export function CommandPalette({ keybindings: given }: { keybindings?: ResolvedK
       >
         <CommandPaletteContent
           aria-label="Command palette"
-          footerActionLabel="Run"
-          inputProps={{ placeholder: getCommandPaletteInputPlaceholder("root"), onKeyDown: onInputKeyDown }}
+          footerActionLabel={page === null ? "Run" : "Select"}
+          inputProps={{
+            placeholder: page?.placeholder ?? getCommandPaletteInputPlaceholder(mode),
+            onKeyDown: onInputKeyDown,
+            ...(page === null
+              ? {}
+              : {
+                  startAddon: (
+                    <button type="button" data-k="palette-back" aria-label="Back" className="-m-1 flex cursor-pointer rounded-md p-1 transition-colors duration-150 hover:bg-accent [&_svg]:hover:text-foreground" onMouseDown={event => event.preventDefault()} onClick={back}>
+                      {page.addonIcon}
+                    </button>
+                  ),
+                }),
+          }}
           mode="none"
           onItemHighlighted={value => setHighlightedItemValue(typeof value === "string" ? value : null)}
           onValueChange={value => {
@@ -171,9 +234,11 @@ export function CommandPalette({ keybindings: given }: { keybindings?: ResolvedK
             setQuery(value);
           }}
           panelClassName="max-h-[min(28rem,70vh)]"
+          showBackHint={page !== null}
           value={query}
         >
           <CommandPaletteResults
+            {...(page?.emptyStateMessage === undefined ? {} : { emptyStateMessage: page.emptyStateMessage })}
             groups={groups}
             highlightedItemValue={highlightedItemValue}
             isActionsOnly={query.startsWith(">")}

@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Settings > General, in the order a person reaches for it: the composer's
 // send key and what a message does while a thread works; how each kind of
-// moment is said outside the app; when a read thread settles and whether a
-// delete asks; the editor Open in editor opens a file in, picked from the
+// moment is said outside the app; what New thread opens on, when a read
+// thread settles and whether a delete asks; the editor Open in editor opens a file in, picked from the
 // editors installed on the computer the host runs on, and whether it opens a
 // workspace on another computer over ssh; and what quitting the desktop app
 // does, whether wsp starts at login and whether the app keeps this computer
 // awake while a thread works on it. A row off its default carries the arrow
 // that puts it back.
-import { DEFAULT_PREFERENCES, NOTIFY_CHOICES, ON_QUIT_CHOICES, SETTLE_CHOICES, type EditorId, type NotifyChoice, type PreferencesPatch } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, NEW_THREAD_IN_CHOICES, NOTIFY_CHOICES, ON_QUIT_CHOICES, SETTLE_CHOICES, type EditorId, type NotifyChoice, type PreferencesPatch } from "@wsp/protocol";
 import { SegmentedControl } from "../components/ui/segmented-control.js";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../components/ui/select.js";
 import { Switch } from "../components/ui/switch.js";
@@ -26,7 +26,7 @@ import { SELECT_WIDTH } from "./layout.js";
 const W = GENERAL_WORDS;
 const SELECT_CLASS = SELECT_WIDTH;
 
-type GeneralField = "sendWith" | "midTurn" | "notifyNeeds" | "notifyDone" | "planAlerts" | "settleAfter" | "askDelete" | "onQuit" | "keepAwake";
+type GeneralField = "sendWith" | "midTurn" | "notifyNeeds" | "notifyDone" | "planAlerts" | "newThreadIn" | "settleAfter" | "askDelete" | "onQuit" | "keepAwake";
 
 /** The arrow a row off the record's default carries, which writes that one field back. */
 const resetOf = (ctx: SettingsContext, field: GeneralField): Pick<SettingsRowData, "reset"> =>
@@ -89,6 +89,7 @@ export function generalCards(ctx: SettingsContext): SettingsCardData[] {
       id: "threads",
       head: W.threads,
       items: [
+        row("new-thread-in", W.newThreadIn, W.newThreadInDescription, <ChoiceSelect k="new-thread-in" label={W.newThreadIn} value={p.newThreadIn} choices={NEW_THREAD_IN_CHOICES} words={W.newThreadInChoices} onChange={newThreadIn => set({ newThreadIn })} />, resetOf(ctx, "newThreadIn")),
         row("settle-after", W.settleAfter, W.settleAfterDescription, <ChoiceSelect k="settle-after" label={W.settleAfter} value={p.settleAfter} choices={SETTLE_CHOICES} words={W.settleChoices} onChange={settleAfter => set({ settleAfter })} />, resetOf(ctx, "settleAfter")),
         row("ask-delete", W.askDelete, W.askDeleteDescription, <Switch data-k="ask-delete" aria-label={W.askDelete} checked={p.askDelete} onCheckedChange={askDelete => set({ askDelete })} />, resetOf(ctx, "askDelete")),
       ],

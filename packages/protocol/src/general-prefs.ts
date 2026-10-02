@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The choices on Settings > General that shape how the app behaves: which key
 // sends, what a message does while a turn runs, which moments are said outside
-// the app and how, when a read thread settles, whether a delete asks, and what
-// a quit does. They ride the one preferences record, so every window and the
+// the app and how, what New thread opens on, when a read thread settles,
+// whether a delete asks, and what a quit does. They ride the one preferences record, so every window and the
 // desktop shell read the same answer.
 import { z } from "zod";
 
@@ -42,6 +42,11 @@ export const ON_QUIT_CHOICES = ["ask", "keep", "stop"] as const;
 export const OnQuit = z.enum(ON_QUIT_CHOICES);
 export type OnQuit = z.infer<typeof OnQuit>;
 
+export const NEW_THREAD_IN_CHOICES = ["current", "ask"] as const;
+/** What New thread opens on: the project the person is in, or the list of projects to pick one from. */
+export const NewThreadIn = z.enum(NEW_THREAD_IN_CHOICES);
+export type NewThreadIn = z.infer<typeof NewThreadIn>;
+
 /** The record's General fields with their defaults, the one list both the schema and the defaults are read off. */
 export const GENERAL_DEFAULTS = {
   sendWith: "enter",
@@ -52,6 +57,7 @@ export const GENERAL_DEFAULTS = {
   settleAfter: "2h",
   askDelete: true,
   onQuit: "ask",
+  newThreadIn: "current",
 } as const satisfies Record<string, unknown>;
 
 /** Each defaulted, so a record from a host older than the field parses on the wire. */
@@ -64,6 +70,7 @@ export const GENERAL_FIELDS = {
   settleAfter: SettleAfter.default(GENERAL_DEFAULTS.settleAfter),
   askDelete: z.boolean().default(GENERAL_DEFAULTS.askDelete),
   onQuit: OnQuit.default(GENERAL_DEFAULTS.onQuit),
+  newThreadIn: NewThreadIn.default(GENERAL_DEFAULTS.newThreadIn),
 };
 
 export type GeneralPreferences = { [K in keyof typeof GENERAL_FIELDS]: z.infer<(typeof GENERAL_FIELDS)[K]> };
@@ -79,5 +86,6 @@ export function patchedGeneral(current: GeneralPreferences, patch: Partial<Gener
     settleAfter: patch.settleAfter ?? current.settleAfter,
     askDelete: patch.askDelete ?? current.askDelete,
     onQuit: patch.onQuit ?? current.onQuit,
+    newThreadIn: patch.newThreadIn ?? current.newThreadIn,
   };
 }

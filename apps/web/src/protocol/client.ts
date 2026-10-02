@@ -624,8 +624,8 @@ export interface Api {
    * them every add over ssh the host is running and the last it finished. Optional so a fixture with no Settings
    * page need not fake it. */
   placesList?(): Promise<{ places: PlaceView[]; adds: PlaceAddJob[] }>;
-  /** Every project this wsp holds, which is what the new-workspace dialog picks one of. Optional so a fixture that
-   * makes no workspace need not fake it; without it the dialog says there is no project yet. */
+  /** Every project this wsp holds, which is what New thread opens on and the palette's page of projects lists.
+   * Optional so a fixture that makes no workspace need not fake it. */
   projectsList?(): Promise<ProjectView[]>;
   /** Records a project: a folder on the computer running the host, or a repository address on the computer named.
    * The host answers the record it kept, so the sidebar draws the project before anything is cloned. Optional so a

@@ -172,7 +172,9 @@ function matchesShortcutModifiers(
   );
 }
 
-function matchesShortcut(
+/** Whether a key event is this chord, its modifiers read the platform's way: the one match every rule and every
+ * fixed chord a surface offers reads. */
+export function matchesShortcut(
   event: ShortcutEventLike,
   shortcut: KeybindingShortcut,
   platform = navigator.platform,

@@ -22,7 +22,6 @@ import type { ChipItem } from "../components/ui/chips.js";
 import { Spinner } from "../components/ui/spinner.js";
 import { failureOf, type Failure } from "../protocol/failure.js";
 import { useGoldenFrames, useStore } from "../protocol/store.js";
-import { requestNewWorkspace } from "../shell/shellRequests.js";
 import { FACT, WHERE_WORDS } from "./format.js";
 import { builtWhen, copyCost, IMAGE_WORDS, recipeNames } from "./image.js";
 import { ImageBuild } from "./ImageBuild.js";
@@ -144,10 +143,7 @@ export function ImageCard({ place, name, state, view, ctx, row: asRow = false }:
               chips: imageChips(state, ctx.now),
               press: {
                 word: IMAGE_WORDS.startTask,
-                run: () => {
-                  useStore.getState().closeSettings();
-                  requestNewWorkspace(project.id);
-                },
+                run: () => useStore.getState().openProjectHome(project.id),
               },
             };
     }

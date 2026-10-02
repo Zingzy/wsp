@@ -37,9 +37,9 @@ export const ROW_ITEM_CLASS = "inline-flex h-7 shrink-0 items-center gap-1 round
 const BRANCH_NOTE = "The folder's branch as the task reports it. Nothing here switches it; check out another branch from the terminal.";
 
 /** The computer the thread runs on: its icon, as the Computers page draws it, and its name, the row's first item. */
-export function RowComputer({ name, place, children }: { name: string; place: PlaceView | undefined; children?: ReactNode }) {
+export function RowComputer({ name, place, children, className }: { name: string; place: PlaceView | undefined; children?: ReactNode; className?: string }) {
   return (
-    <span data-composer-computer className={ROW_ITEM_CLASS}>
+    <span data-composer-computer className={cn(ROW_ITEM_CLASS, className)}>
       {place === undefined ? null : <ComputerGlyph place={place} className="size-3" />}
       <span className="min-w-0 max-w-60 truncate">{name}</span>
       {children}

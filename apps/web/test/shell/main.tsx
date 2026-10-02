@@ -58,7 +58,10 @@
 // workspace-line rule, so only the running one is said. ?switcher=1 adds six
 // threads over two more projects, every workspace on a named computer and
 // each project a glyph and a hue of its own, so the switcher's row is full
-// past its six cards.
+// past its six cards. ?pick=1 holds three projects, two on this Mac and one
+// on a joined box, with New thread set to ask, and opens the palette on the
+// page of projects it picks from; ?settings=general opens Settings on its
+// General page.
 import { useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { DAEMON_UPDATING, DEFAULT_PREFERENCES, DEFAULT_THEME, DESKTOP_MAC_CLASS, GOLDEN_STAGE_WORDS, SIGN_IN_OPEN_STATE, THEME_PRESETS, vaultOverCapLine, type HarnessCatalog, type SessionEvent, type SessionView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
@@ -67,6 +70,9 @@ import { TooltipProvider } from "../../src/components/ui/tooltip";
 import type { Api, ProtocolEvent } from "../../src/protocol/client";
 import { getLive } from "../../src/machine/live";
 import { useStore } from "../../src/protocol/store";
+import { openCommandPalette } from "../../src/commandPaletteBus";
+import { openSettingsGroup } from "../../src/settings/openAt";
+import { SettingsPage } from "../../src/settings/SettingsPage";
 import { useHostNotices } from "../../src/notices/hostNotices.js";
 import { addNotice, type NoticeKind } from "../../src/notices/store.js";
 import { useWorkspaceLineNotices } from "../../src/notices/workspaceLines.js";
@@ -660,6 +666,19 @@ function VersionRule() {
   return null;
 }
 useStore.getState().bind(api);
+if (params.get("pick") === "1") {
+  const recorded = (id: string, name: string, computer: string, path: string) => ({ id, name, computer, source: { kind: "folder" as const, path }, path, remote: "", defaultBranch: "main", memoryKey: `-${name}`, memoryDir: "/m", createdAt: "t" });
+  useStore.setState(s => ({
+    places: [
+      { id: "here", kind: "computer", name: "zingzy-mbp", label: "zingzy's MacBook Pro", default: true, present: true, mac: "macbook" },
+      { id: "p_hetzner", kind: "computer", name: "hetzner", default: false, present: true, takesForks: true },
+    ],
+    projects: [recorded("pr_wsp", "wsp", "here", "/Users/zingzy/wsp"), recorded("pr_spoo", "spoo", "here", "/Users/zingzy/spoo"), recorded("pr_landing", "spoo-landing", "p_hetzner", "/root/spoo-landing")],
+    preferences: { ...s.preferences, newThreadIn: "ask", projectLook: { pr_wsp: { icon: "rocket", hue: "teal" }, pr_spoo: { icon: "globe", hue: "violet" } } },
+  }));
+  setTimeout(() => openCommandPalette({ page: "new-thread" }), 200);
+}
+if (params.get("settings") === "general") openSettingsGroup("general");
 // ?init=building puts the init job mid-build on the store, as its events would, so the collapsed cloud row's progress
 // line can be measured and photographed; the fixture's golden is none, so the row is there.
 if (params.get("init") === "building") {
@@ -798,7 +817,9 @@ createRoot(document.getElementById("root")!).render(
     {params.get("version") === "behind" ? <VersionRule /> : null}
     {params.get("host") === "1" ? <HostRule /> : null}
     <AppShell>
-      {shown === null ? (
+      {params.get("settings") === "general" ? (
+        <SettingsPage />
+      ) : shown === null ? (
         <div />
       ) : (
         <div className="flex min-h-0 flex-1 flex-col" data-terminal-beside>

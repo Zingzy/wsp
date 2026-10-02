@@ -43,7 +43,7 @@ export function CommandPaletteContent({
         </div>
         <CommandPanel className={panelClassName}>{children}</CommandPanel>
         <CommandFooter className="gap-3 max-sm:flex-col max-sm:items-start">
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
             <KbdGroup className="items-center gap-1.5">
               <Kbd>
                 <ArrowUpIcon />
