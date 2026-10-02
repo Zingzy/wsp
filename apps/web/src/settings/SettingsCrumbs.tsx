@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The breadcrumb over the settings page: Settings, inert on every page since
-// there is no page under it; the group, the one link on a computer's or a
-// project's page, back to its list; and the page itself in the foreground ink
-// at medium weight, as the thread crumb is. While the field holds text the
-// page is Search. The left crumbs give way first when the line is short.
+// there is no page under it; the group, the one link on a computer's, a
+// project's or an agent's page, back to its list, with the back chevron before
+// the trail that says so; and the page itself in the foreground ink at medium
+// weight, as the thread crumb is. While the field holds text the page is
+// Search. The left crumbs give way first when the line is short.
 import { agentName } from "@wsp/catalog";
+import { ChevronLeftIcon } from "lucide-react";
+import { Button } from "../components/ui/button.js";
 import { ProjectGlyph } from "../projects/look.js";
 import { useIsMobile } from "../hooks/useMediaQuery.js";
 import { useStore } from "../protocol/store.js";
@@ -28,8 +31,14 @@ export function SettingsCrumbs() {
   const place = at.kind === "computer" ? places.find(p => p.id === at.id) : undefined;
   const project = at.kind === "project" ? projects.find(p => p.id === at.id) : undefined;
   const page = place !== undefined ? placeName(place) : at.kind === "agent" ? (harnesses.find(c => c.harness === at.id)?.label ?? agentName(at.id)) : project?.name;
+  const under = !searching && page !== undefined;
   return (
     <>
+      {under ? (
+        <Button variant="ghost" size="icon-xs" data-k="settings-up" aria-label={SETTINGS_WORDS.backTo(group.name)} title={SETTINGS_WORDS.backTo(group.name)} className="-ml-1 shrink-0 text-muted-foreground hover:text-foreground" onClick={() => go({ kind: "group", group: group.id })}>
+          <ChevronLeftIcon aria-hidden className="size-4" />
+        </Button>
+      ) : null}
       <span data-breadcrumb-settings className="min-w-0 truncate text-muted-foreground">
         {SETTINGS_WORDS.title}
       </span>

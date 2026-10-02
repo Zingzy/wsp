@@ -21,6 +21,7 @@ export const SETTINGS_WORDS = {
   searchPage: "Search",
   nothingMatches: "Nothing matches.",
   back: "Back",
+  backTo: (group: string): string => `Back to ${group}`,
   restore: "Restore defaults",
   resetRow: "Back to the default",
   appearance: "Appearance",

@@ -153,6 +153,20 @@ describe("an agent's page", () => {
     expect(made.reads.length).toBe(2);
   });
 
+  it("goes back to the Agents list from the chevron before the trail, and draws each agent's own mark in its sidebar row", async () => {
+    await mount(agentsApi().api, atClaude);
+    const back = document.querySelector<HTMLElement>("[data-k=settings-up]")!;
+    expect(back.getAttribute("aria-label")).toBe("Back to Agents");
+    const claudeRow = document.querySelector<HTMLElement>("[data-row-id='agent:claude']")!;
+    // Not a bare child of the row, whose rule greys a bare icon, so the agent's own inks stand.
+    expect(claudeRow.querySelector(":scope > [data-harness-mark]")).toBeNull();
+    expect(claudeRow.querySelector("[data-harness-mark=claude]")).not.toBeNull();
+    await act(async () => void fireEvent.click(back));
+    await settle();
+    expect(useSettingsStore.getState().at).toEqual({ kind: "group", group: "agents" });
+    expect(document.querySelector("[data-k=settings-up]")).toBeNull();
+  });
+
   it("says a refused turn-off in the host's own words", async () => {
     const made = agentsApi({ agentsSetup: async () => Promise.reject(new RequestError("only a socket holding this host's own token may set that")) });
     await mount(made.api, atClaude);

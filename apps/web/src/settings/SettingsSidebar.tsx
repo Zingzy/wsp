@@ -9,6 +9,7 @@
 // shutting the sheet. ArrowUp and ArrowDown walk the rows in visual order, as
 // the workspace sidebar's do.
 import { ProjectGlyph } from "../projects/look.js";
+import { HarnessMark } from "../components/chat/HarnessMark.js";
 import { ComputerGlyph } from "./ComputerGlyph.js";
 import { ArrowLeftIcon, SearchIcon } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
@@ -236,6 +237,12 @@ export function SettingsSidebar() {
                 <SidebarMenuButton size="sm" isActive={lifting && sameAt(at, sub.at)} data-sidebar-row data-row-id={atId(sub.at)} data-depth={1} {...(dimmed ? { "data-dimmed": "" } : {})} onClick={() => go(sub.at)} className={cn(ONE_LINE_ROW_CLASS, dimmed && DIMMED)}>
                   {sub.at.kind === "project" ? <ProjectGlyph projectId={sub.at.id} /> : null}
                   {sub.at.kind === "computer" ? <SubComputerGlyph id={sub.at.id} /> : null}
+                  {/* Held in a span, so the row's rule that greys a bare icon leaves the agent's own inks alone. */}
+                  {sub.at.kind === "agent" ? (
+                    <span className="flex shrink-0">
+                      <HarnessMark harness={sub.at.id} label={sub.name} className="size-4" />
+                    </span>
+                  ) : null}
                   <span className="min-w-0 flex-1 truncate">{sub.name}</span>
                 </SidebarMenuButton>
               </li>
