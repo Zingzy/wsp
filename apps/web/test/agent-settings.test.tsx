@@ -140,7 +140,11 @@ describe("an agent's page", () => {
     expect(document.querySelector("[data-breadcrumb-page]")?.textContent).toBe("Claude Code");
     const head = control("agent-head");
     expect(head.querySelector("[data-settings-mark]")?.textContent).toBe("2.1.286");
-    expect(head.querySelector("[data-settings-description]")?.textContent).toBe("Signed in with an API key from ANTHROPIC_API_KEY on the machine");
+    // The mock's short form on the line, the whole of it on the hover with the computer named, never "the machine".
+    const line = head.querySelector<HTMLElement>("[data-settings-description] [title]")!;
+    expect(line.textContent).toBe("Signed in with an API key");
+    expect(line.getAttribute("title")).toBe(`Signed in with an API key from ANTHROPIC_API_KEY on ${MAC}`);
+    expect(document.body.innerHTML).not.toContain("on the machine");
     expect(head.querySelector("[data-k=agent-update]")?.textContent).toBe("Update to 2.1.290");
     const switchEl = head.querySelector<HTMLElement>("[data-k=agent-on]")!;
     await act(async () => void fireEvent.click(switchEl));
@@ -228,7 +232,8 @@ describe("an agent's page", () => {
     await mount(api, atClaude);
     expect(page().querySelector("[data-settings-card='agent-runs'] [data-settings-head]")?.textContent).toBe(W.howItRuns);
     expect(descriptionOf("agent-program")).toBe("~/.local/bin/claude");
-    expect(descriptionOf("agent-config")).toBe("~/.claude");
+    // The host answers no folder while none is set, so the page spells no path of its own.
+    expect(descriptionOf("agent-config")).toBe(W.ownFolder("Claude Code"));
     expect(descriptionOf("agent-args")).toBe("2 arguments.");
     expect(descriptionOf("agent-env")).toBe("2 variables, values hidden.");
     expect(rowOf("agent-args")!.querySelector("[data-k=row-reset]")).not.toBeNull();
@@ -347,6 +352,16 @@ describe("an agent's page", () => {
 });
 
 describe("a project's new threads", () => {
+  it("reads a model kept for another agent as unset, with no arrow", async () => {
+    const record = { ...DEFAULT_PREFERENCES, labs: false, projectDefaults: { pr_wsp: { agent: "codex", model: "claude-fable-5-1" } } };
+    useStore.setState({ preferences: record });
+    const { api } = agentsApi({ projectsDefaults: async () => ({ pr_wsp: { agent: { value: "codex", from: "project" }, model: { value: "gpt-5.6-sol", from: "catalog" }, access: { value: "full", mode: "danger-full-access", from: "catalog" } } }) }, record);
+    await mount(api, { kind: "project", id: "pr_wsp" });
+    expect(control("project-model").textContent).toBe("Default (GPT-5.6-Sol)");
+    expect(descriptionOf("project-model")).toBe(P.ownUnset);
+    expect(rowOf("project-model")!.querySelector("[data-k=row-reset]")).toBeNull();
+  });
+
   const atWsp: SettingsAt = { kind: "project", id: "pr_wsp" };
   const resolved = (over: Partial<ThreadDefaults> = {}): Record<string, ThreadDefaults> => ({
     pr_wsp: { agent: { value: "claude", from: "default" }, model: { value: "claude-opus-5-5", from: "catalog" }, effort: { value: "high", from: "catalog" }, access: { value: "full", mode: "bypassPermissions", from: "catalog" }, ...over },
@@ -386,6 +401,20 @@ describe("a project's new threads", () => {
     await pickOption(control("project-model"), "GPT-5.6-Terra");
     await settle();
     expect(sets.at(-1)).toEqual({ projectDefaults: { pr_wsp: { model: "gpt-5.6-terra" } } });
+  });
+});
+
+describe("a row that opens a page and acts", () => {
+  it("opens on a press anywhere but its control, whatever element the control is", async () => {
+    const { Row } = await import("../src/settings/rows.js");
+    const opened: string[] = [];
+    const { render } = await import("@testing-library/react");
+    render(<Row id="r" title="Claude Code" description="Opus 5.5 at high effort" control={<span role="switch" aria-checked="true" data-k="ctl" tabIndex={0} />} open={() => opened.push("open")} />);
+    fireEvent.click(document.querySelector("[data-k=ctl]")!);
+    expect(opened).toEqual([]);
+    fireEvent.click(document.querySelector("[data-settings-title]")!);
+    fireEvent.click(document.querySelector("[data-settings-slot] svg")!);
+    expect(opened).toEqual(["open", "open"]);
   });
 });
 

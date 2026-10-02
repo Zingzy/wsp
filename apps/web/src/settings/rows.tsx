@@ -145,7 +145,11 @@ export function Row({ id, title, lead, mark, description, chips, mono = false, w
             {word}
           </span>
         )}
-        {control}
+        {control === undefined ? null : (
+          <span data-settings-control className="contents">
+            {control}
+          </span>
+        )}
         {open === undefined ? null : <ChevronRightIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />}
       </div>
     );
@@ -200,7 +204,7 @@ export function Row({ id, title, lead, mark, description, chips, mono = false, w
         data-settings-row={id}
         className={cn("flex flex-col justify-center py-3", CARD_INSET, ROW_FLOOR, OPENS_CLASS)}
         onClick={event => {
-          if (!(event.target instanceof Element && event.target.closest("button, a, input") !== null)) open();
+          if (!(event.target instanceof Element && event.target.closest("[data-settings-control]") !== null)) open();
         }}
         onKeyDown={event => {
           if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {

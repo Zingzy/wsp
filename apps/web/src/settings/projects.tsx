@@ -233,7 +233,7 @@ function ProjectNewThreads({ project, ctx }: { project: ProjectView; ctx: Settin
               </SelectPopup>
             </Select>
           }
-          {...(own.model === undefined ? {} : { reset: () => set({ model: null }) })}
+          {...(modelSet ? { reset: () => set({ model: null }) } : {})}
         />
       )}
       {unsetAccess === undefined ? null : (

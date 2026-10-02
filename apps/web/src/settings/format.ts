@@ -315,6 +315,7 @@ export const AGENTS_PAGE_WORDS = {
   howItRuns: "How it runs",
   program: "Program",
   configFolder: "Config folder",
+  ownFolder: (agent: string): string => `${agent}'s own folder`,
   launchArguments: "Launch arguments",
   argumentsCount: (n: number): string => (n === 0 ? "No arguments." : `${n} ${n === 1 ? "argument" : "arguments"}.`),
   environment: "Environment",

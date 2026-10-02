@@ -24,7 +24,7 @@ import { Switch } from "../components/ui/switch.js";
 import { cn } from "../lib/utils.js";
 import { failureOf } from "../protocol/failure.js";
 import { useStore } from "../protocol/store.js";
-import { AgentsControls, UpdateButton, newThreadPicks, signInLong, usePickedPlace } from "./agents.js";
+import { AgentsControls, UpdateButton, newThreadPicks, signInHead, usePickedPlace } from "./agents.js";
 import { AGENTS_PAGE_WORDS as W } from "./format.js";
 import { SELECT_WIDTH } from "./layout.js";
 import { placeName } from "./places.js";
@@ -418,7 +418,7 @@ export function AgentPage({ id, ctx }: { id: string; ctx: SettingsContext }) {
             glyph={<HarnessMark harness={id} label={label} className="size-4" />}
             title={label}
             {...(row?.version === undefined ? {} : { mark: row.version })}
-            line={row === undefined ? undefined : <span title={row.installed ? signInLong(row) : W.notInstalled}>{row.installed ? signInLong(row) : W.notInstalled}</span>}
+            line={row === undefined ? undefined : row.installed ? <span title={signInHead(row, computer).whole}>{signInHead(row, computer).line}</span> : W.notInstalled}
             slot={
               row === undefined || !row.installed ? undefined : (
                 <span className="flex items-center gap-3">
@@ -445,8 +445,8 @@ export function AgentPage({ id, ctx }: { id: string; ctx: SettingsContext }) {
           <Row
             id="agent-config"
             title={W.configFolder}
-            description={setupView.configDir ?? (agent === undefined ? "" : `~/${agent.stateHome}`)}
-            mono
+            description={setupView.configDir ?? W.ownFolder(label)}
+            mono={setupView.configDir !== undefined}
             control={<ChangeButton k="agent-config-change" word={W.change} held={setup === undefined} onClick={() => setSheet("config")} />}
             {...(setupView.configDir === undefined ? {} : { reset: direct({ configDir: null }) })}
           />
@@ -469,7 +469,7 @@ export function AgentPage({ id, ctx }: { id: string; ctx: SettingsContext }) {
           title={W.configFolder}
           line={W.configSheet(label, computer)}
           initial={setupView.configDir ?? ""}
-          placeholder={agent === undefined ? "" : `~/${agent.stateHome}`}
+          placeholder=""
           save={value => written(value === "" ? { configDir: null } : { configDir: value }, value === "" ? undefined : () => ctx.done(configDirSignInLine(label)))()}
           {...(setupView.configDir === undefined ? {} : { putBack: written({ configDir: null }) })}
           putBackWord={W.putBack(label)}

@@ -92,13 +92,19 @@ export function signInShort(row: Pick<AgentRow, "signIn" | "signInDetail">): str
   return capitalised(row.signInDetail.split(" from ")[0]!.replace(/^the /, ""));
 }
 
-/** How an agent's sign-in stands, whole, for the head of its page. */
-export function signInLong(row: Pick<AgentRow, "signIn" | "signInDetail">): string {
+/** The kind of sign-in as a sentence takes it, with its article: "an API key", "OAuth credentials". */
+const signInKind = (detail: string): string => {
+  const kind = detail.split(" from ")[0]!;
+  return kind.startsWith("API key") ? `an ${kind}` : kind;
+};
+
+/** How an agent's sign-in stands for the head of its page, short as the line says it and whole as its hover does, with
+ * the computer named where the status says "the machine". */
+export function signInHead(row: Pick<AgentRow, "signIn" | "signInDetail">, computer: string): { line: string; whole: string } {
   const detail = row.signInDetail;
-  if (detail === undefined) return capitalised(signInWord(row));
-  // A word in capitals keeps them (API key, OAuth); a word that only starts the sentence does not.
-  const lead = /^[A-Z][a-z]/.test(detail) ? `${detail.charAt(0).toLowerCase()}${detail.slice(1)}` : detail;
-  return `Signed in with ${detail.startsWith("API key") ? "an " : ""}${lead}`;
+  if (detail === undefined) return { line: capitalised(signInWord(row)), whole: capitalised(signInWord(row)) };
+  const named = detail.replace(/\bthe machine\b/g, computer);
+  return { line: `Signed in with ${signInKind(detail)}`, whole: `Signed in with ${detail.startsWith("API key") ? "an " : ""}${named}` };
 }
 
 /** The vendor's own update for an agent, copied for the person to run on that computer: wsp never swaps a binary
