@@ -130,20 +130,30 @@ export const PULL_REQUEST_WORDS = {
 /** Each check's state as a row says it, standing alone. */
 export const CHECK_STATE_WORDS: Record<CheckState, string> = { pass: "Passed", fail: "Failed", pending: "Running", skipped: "Skipped", cancelled: "Cancelled" };
 
-/** The one word a pull request reads as, the first that holds of: merged, closed, conflicts, checks failed, checks
- * running, changes asked for, approved, draft, open. One that could not be read is not read. */
+/** Where a pull request stands, the one key its word and its ink are read off. */
+export type PullRequestKey = keyof typeof PULL_REQUEST_WORDS;
+
+/** The first that holds of: merged, closed, conflicts, checks failed, checks running, changes asked for, approved,
+ * draft, open. One that could not be read is not read. */
+export function pullRequestKey(seen: PullRequestSeen): PullRequestKey {
+  if (!isPullRequestNamed(seen)) return "unread";
+  if (seen.state === "merged") return "merged";
+  if (seen.state === "closed") return "closed";
+  if (!isPullRequestFact(seen)) return "open";
+  if (seen.mergeable === "conflicting") return "conflicts";
+  if (seen.checks.some(c => c.state === "fail")) return "failed";
+  if (seen.checks.some(c => c.state === "pending")) return "running";
+  if (seen.review === "changes_asked") return "changesAsked";
+  if (seen.review === "approved") return "approved";
+  if (seen.draft) return "draft";
+  return "open";
+}
+
+/** The one word a pull request reads as, off its key. */
 export function pullRequestWord(seen: PullRequestSeen): string {
-  if (!isPullRequestNamed(seen)) return PULL_REQUEST_WORDS.unread;
-  if (seen.state === "merged") return PULL_REQUEST_WORDS.merged;
-  if (seen.state === "closed") return PULL_REQUEST_WORDS.closed;
-  if (!isPullRequestFact(seen)) return PULL_REQUEST_WORDS.open;
-  if (seen.mergeable === "conflicting") return PULL_REQUEST_WORDS.conflicts(seen.base);
-  if (seen.checks.some(c => c.state === "fail")) return PULL_REQUEST_WORDS.failed;
-  if (seen.checks.some(c => c.state === "pending")) return PULL_REQUEST_WORDS.running;
-  if (seen.review === "changes_asked") return PULL_REQUEST_WORDS.changesAsked;
-  if (seen.review === "approved") return PULL_REQUEST_WORDS.approved;
-  if (seen.draft) return PULL_REQUEST_WORDS.draft;
-  return PULL_REQUEST_WORDS.open;
+  const key = pullRequestKey(seen);
+  if (key === "conflicts") return PULL_REQUEST_WORDS.conflicts(isPullRequestNamed(seen) ? seen.base : "");
+  return PULL_REQUEST_WORDS[key];
 }
 
 /** A word as it stands alone at the head of a slot: the settled fold's Merged and Closed. */
@@ -154,12 +164,6 @@ export function capitalised(word: string): string {
 /** Whether a merge can be offered on it now: open, the host says it merges, and no check has failed. */
 export function pullRequestMergeable(fact: PullRequestFact): boolean {
   return fact.state === "open" && fact.mergeable === "mergeable" && !fact.checks.some(c => c.state === "fail");
-}
-
-/** The same count row a pull request's pane and its thread row read: `+120 -30  9 files  4 commits`. */
-export function pullRequestCounts(fact: Pick<PullRequest, "additions" | "deletions" | "changedFiles" | "commits">): string[] {
-  const n = (k: number, one: string): string => `${k} ${one}${k === 1 ? "" : "s"}`;
-  return [`+${fact.additions} -${fact.deletions}`, n(fact.changedFiles, "file"), n(fact.commits, "commit")];
 }
 
 /** What a workspace's pull request reads as where the git host's own signed-in command line is on neither this

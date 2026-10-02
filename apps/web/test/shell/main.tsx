@@ -61,7 +61,7 @@
 // past its six cards. ?pick=1 holds three projects, two on this Mac and one
 // on a joined box, with New thread set to ask, and opens the palette on the
 // page of projects it picks from; ?settings=general opens Settings on its
-// General page.
+// General page; ?panel=pr&ws=ws_a opens the Pull request pane on PR 838 (&pr=merged once merged).
 import { useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { DAEMON_UPDATING, DEFAULT_PREFERENCES, DEFAULT_THEME, DESKTOP_MAC_CLASS, GOLDEN_STAGE_WORDS, SIGN_IN_OPEN_STATE, THEME_PRESETS, vaultOverCapLine, type HarnessCatalog, type SessionEvent, type SessionView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
@@ -76,7 +76,8 @@ import { SettingsPage } from "../../src/settings/SettingsPage";
 import { useHostNotices } from "../../src/notices/hostNotices.js";
 import { addNotice, type NoticeKind } from "../../src/notices/store.js";
 import { useWorkspaceLineNotices } from "../../src/notices/workspaceLines.js";
-import { useRightPanelStore } from "../../src/rightPanelStore";
+import { RIGHT_PANEL_WIDTH_STORAGE_KEY, useRightPanelStore } from "../../src/rightPanelStore";
+import { PR838_DIFF, PR838_FACT, PR838_MERGED, pr838FactLately, pr838Lately } from "../fixtures/pr838";
 import { getBrowser } from "../../src/browser/model";
 import { recentsKey } from "../../src/browser/recents";
 import { useBrowserTabs } from "../../src/browser/tabs";
@@ -672,6 +673,23 @@ if (params.get("places") === "1") {
 function VersionRule() {
   useShellVersionEffect();
   return null;
+}
+// ?panel=pr opens the right panel at 480 px on the Pull request pane of the workspace ?ws names, over PR 838's page
+// moved in time to read as the mockup does; ?pr=merged has it merged, as the record keeps a settled one.
+if (params.get("panel") === "pr" && shown !== null) {
+  const pr = params.get("pr") === "merged" ? PR838_MERGED : pr838FactLately(Date.now());
+  const statuses = api.watchStatuses;
+  api.watchStatuses = async () => (await statuses()).map(s => (s.id === shown ? { ...s, pr, checkout: { branch: PR838_FACT.branch, ahead: 0, behind: 0, changed: 0, readAt: 1 } } : s));
+  const page = pr838Lately(Date.now());
+  api.pullRequestView = async () => page;
+  api.pullRequestDiff = async () => ({ diff: PR838_DIFF, truncated: false, left: [] });
+  api.pullRequestSend = async (_id, items) => {
+    page.sent = [...page.sent, ...items.map(i => ({ ...i, at: Date.now() }))];
+    return { outcome: "steered", threadId: "t1", agent: "claude", sent: page.sent };
+  };
+  window.localStorage.setItem(RIGHT_PANEL_WIDTH_STORAGE_KEY, "480");
+  useRightPanelStore.setState({ byWorkspaceId: {} });
+  useRightPanelStore.getState().open(shown, "pr");
 }
 useStore.getState().bind(api);
 if (params.get("pick") === "1") {

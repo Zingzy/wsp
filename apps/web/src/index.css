@@ -173,9 +173,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
   --color-status-working: var(--status-working);
   --color-status-failed: var(--status-failed);
   --color-status-done: var(--status-done);
-  --color-pr-open: var(--status-done);
   --color-pr-merged: var(--pr-merged);
-  --color-pr-closed: var(--status-failed);
   --color-info-foreground: var(--info-foreground);
   --color-info: var(--info);
   --color-destructive-foreground: var(--destructive-foreground);
@@ -1256,6 +1254,87 @@ code {
 .chat-markdown .chat-markdown-table-container[data-expanded="true"] td {
   max-width: 24rem;
   overflow-wrap: anywhere;
+}
+
+/* The Pull request pane's bodies, in its own 480 px column: 14 px at 1.55, the foreground ink, inline code as a
+   quiet tint with no edge. A comment's headings hold at body size, since a cold review opens on ## and a column
+   this narrow cannot take an 18 px head per comment; the description keeps the chat's ladder. */
+.chat-markdown.pr-md {
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--foreground);
+}
+
+.chat-markdown.pr-md p {
+  margin: 0 0 0.6em;
+}
+
+.chat-markdown.pr-md > :last-child {
+  margin-bottom: 0;
+}
+
+.chat-markdown.pr-md ul {
+  padding-left: 18px;
+}
+
+.chat-markdown.pr-md ul,
+.chat-markdown.pr-md ol {
+  margin: 0.3em 0 0.6em;
+}
+
+.chat-markdown.pr-md li + li {
+  margin-top: 5px;
+}
+
+.chat-markdown.pr-md strong {
+  font-weight: 600;
+}
+
+.chat-markdown.pr-md :not(pre) > code {
+  border: 0;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--foreground) 6%, transparent);
+  padding: 1px 5px;
+  font-size: 12.5px;
+}
+
+.chat-markdown.pr-md-said h1,
+.chat-markdown.pr-md-said h2,
+.chat-markdown.pr-md-said h3,
+.chat-markdown.pr-md-said h4,
+.chat-markdown.pr-md-said h5,
+.chat-markdown.pr-md-said h6 {
+  margin: 1em 0 0.4em;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.chat-markdown.pr-md-said > :first-child {
+  margin-top: 0;
+}
+
+.chat-markdown.pr-md-line {
+  font-size: 13.5px;
+}
+
+@keyframes pr-word-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.pr-word-pulse {
+  animation: pr-word-pulse 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pr-word-pulse {
+    animation: none;
+  }
 }
 
 /* Prompt-stash save acknowledgement: the new count fades up from just below

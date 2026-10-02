@@ -13,10 +13,10 @@ import {
   isPullRequestNamed,
   mergedLine,
   noSuchItemRefusal,
-  pullRequestCounts,
   pullRequestSendPrompt,
   SENT_HUNK_LINES,
   pullRequestMergeable,
+  pullRequestKey,
   pullRequestWord,
   tailWithin,
   updateConflictsLine,
@@ -71,6 +71,12 @@ describe("the one word a pull request reads as", () => {
     expect(pullRequestWord({ ...fact, checks: [check("skipped"), check("cancelled")] })).toBe("open");
   });
 
+  it("reads its word off one key, which the pane's ink reads too", () => {
+    const conflicting = { ...fact, mergeable: "conflicting" as const, base: "develop" };
+    expect([pullRequestKey(fact), pullRequestKey(conflicting), pullRequestKey({ ...fact, checks: [check("pending")] })]).toEqual(["open", "conflicts", "running"]);
+    expect(pullRequestWord(conflicting)).toBe("conflicts with develop");
+  });
+
   it("is not read where the host could not read it, and a fact is told from the sentence by its number", () => {
     const unread = { why: "no signed-in command line for github.com is on this computer, so the pull request is not read", readAt: 2 };
     expect(pullRequestWord(unread)).toBe("not read");
@@ -103,11 +109,6 @@ describe("what it offers", () => {
     expect(pullRequestMergeable({ ...fact, mergeable: "unknown" })).toBe(false);
     expect(pullRequestMergeable({ ...fact, state: "closed" })).toBe(false);
     expect(pullRequestMergeable({ ...fact, checks: [check("pending")] })).toBe(true);
-  });
-
-  it("counts its size as the pane's row reads it", () => {
-    expect(pullRequestCounts(fact)).toEqual(["+120 -30", "9 files", "4 commits"]);
-    expect(pullRequestCounts({ additions: 1, deletions: 0, changedFiles: 1, commits: 1 })).toEqual(["+1 -0", "1 file", "1 commit"]);
   });
 });
 

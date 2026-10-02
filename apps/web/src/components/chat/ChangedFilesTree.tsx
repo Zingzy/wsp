@@ -11,6 +11,7 @@ import {
   ChevronsUpDownIcon,
   ChevronRightIcon,
   FileDiffIcon,
+  FileIcon,
   FolderIcon,
   FolderClosedIcon,
   GitBranchIcon,
@@ -125,8 +126,18 @@ export const ChangedFilesTree = memo(function ChangedFilesTree(props: {
   renderFileLead?: ((path: string) => ReactNode) | undefined;
   /** What stands at a file row's end, as the Changes pane's per-file controls do. */
   renderFileControls?: ((path: string) => ReactNode) | undefined;
+  /** The pull request pane's rows: 30 px, the names in the pane's 13 px sans, the counts in 12 px mono. */
+  look?: "card" | "pane";
+  /** The file open under its row, and what stands under that row, as the pull request pane's diff does. */
+  openPath?: string | undefined;
+  renderUnderFile?: ((path: string) => ReactNode) | undefined;
 }) {
-  const { files, allDirectoriesExpanded, onOpenTurnDiff, onOpenFile, resolvedTheme, turnId, statTone = "diff", renderFileLead, renderFileControls } = props;
+  const { files, allDirectoriesExpanded, onOpenTurnDiff, onOpenFile, resolvedTheme, turnId, statTone = "diff", renderFileLead, renderFileControls, look = "card", openPath, renderUnderFile } = props;
+  const pane = look === "pane";
+  const ROW = pane ? "h-[30px] gap-2 rounded-md px-1.5 hover:bg-foreground/[0.04]" : "gap-1.5 rounded-xl py-1 pr-3 hover:bg-accent/60";
+  const NAME = pane ? "truncate text-[13px] text-foreground" : "truncate font-mono text-[11px] text-muted-foreground group-hover:text-foreground/90";
+  const STAT = pane ? "ml-auto shrink-0 font-mono text-xs tabular-nums [&_[role=group]]:gap-2" : "ml-auto shrink-0 font-mono text-[11px] tabular-nums";
+  const ICON = pane ? "size-3.5 shrink-0 text-muted-foreground/70" : "size-3.5 shrink-0 text-muted-foreground/75";
   const openFile = (path: string): void => {
     if (onOpenFile !== undefined) onOpenFile(path);
     else if (onOpenTurnDiff !== undefined && turnId !== undefined) onOpenTurnDiff(turnId, path);
@@ -166,8 +177,8 @@ export const ChangedFilesTree = memo(function ChangedFilesTree(props: {
     [allDirectoriesExpanded, expansionStateKey],
   );
 
-  const renderTreeNode = (node: TurnDiffTreeNode, depth: number) => {
-    const leftPadding = 8 + depth * 14;
+  const renderTreeNode = (node: TurnDiffTreeNode, depth: number): ReactNode => {
+    const leftPadding = pane ? 6 + depth * 18 : 8 + depth * 14;
     if (node.kind === "directory") {
       const isExpanded = expandedDirectories[node.path] ?? allDirectoriesExpanded;
       return (
@@ -175,7 +186,7 @@ export const ChangedFilesTree = memo(function ChangedFilesTree(props: {
           <button
             type="button"
             data-scroll-anchor-ignore
-            className="group flex w-full items-center gap-1.5 rounded-xl py-1 pr-3 text-left transition-colors hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className={cn("group flex w-full items-center text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", ROW)}
             style={{ paddingLeft: `${leftPadding}px` }}
             onClick={() => toggleDirectory(node.path)}
           >
@@ -186,22 +197,22 @@ export const ChangedFilesTree = memo(function ChangedFilesTree(props: {
                 isExpanded && "rotate-90",
               )}
             />
-            {isExpanded ? (
-              <FolderIcon className="size-3.5 shrink-0 text-muted-foreground/75" />
+            {isExpanded || pane ? (
+              <FolderIcon className={ICON} />
             ) : (
-              <FolderClosedIcon className="size-3.5 shrink-0 text-muted-foreground/75" />
+              <FolderClosedIcon className={ICON} />
             )}
-            <span className="truncate font-mono text-[11px] text-muted-foreground group-hover:text-foreground/90">
+            <span className={NAME}>
               {node.name}
             </span>
             {hasNonZeroStat(node.stat) && (
-              <span className="ml-auto shrink-0 font-mono text-[11px] tabular-nums">
-                <DiffStatLabel additions={node.stat.additions} deletions={node.stat.deletions} tone={statTone} />
+              <span className={STAT}>
+                <DiffStatLabel additions={node.stat.additions} deletions={node.stat.deletions} tone={statTone} {...(pane ? { layout: "inline" as const, whole: true } : {})} />
               </span>
             )}
           </button>
           {isExpanded && (
-            <div className="space-y-0.5">
+            <div className={pane ? "mt-px flex flex-col gap-px" : "space-y-0.5"}>
               {node.children.map((childNode) => renderTreeNode(childNode, depth + 1))}
             </div>
           )}
@@ -215,33 +226,47 @@ export const ChangedFilesTree = memo(function ChangedFilesTree(props: {
         key={`file:${node.path}`}
         type="button"
         {...(slotted ? {} : { "data-changed-file": node.path })}
+        {...(pane ? { "aria-expanded": openPath === node.path } : {})}
         className={cn(
-          "group flex items-center gap-1.5 rounded-xl py-1 pr-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-          slotted ? "min-w-0 flex-1" : "w-full hover:bg-accent/60",
+          "group flex items-center text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          slotted ? "min-w-0 flex-1 gap-1.5 rounded-xl py-1 pr-3" : cn("w-full", ROW),
+          pane && openPath === node.path && "bg-foreground/[0.05]",
         )}
         style={{ paddingLeft: slotted ? undefined : `${leftPadding}px` }}
         onClick={() => openFile(node.path)}
       >
-        {hasDirectoryNodes || depth > 0 ? (
+        {!pane && (hasDirectoryNodes || depth > 0) ? (
           <span aria-hidden="true" className="size-3.5 shrink-0" />
         ) : null}
-        <PierreEntryIcon
-          pathValue={node.path}
-          kind="file"
-          theme={resolvedTheme}
-          className="size-3.5 text-muted-foreground/70"
-        />
-        <span className="truncate font-mono text-[11px] text-muted-foreground group-hover:text-foreground/90">
+        {pane ? (
+          <FileIcon aria-hidden className={ICON} />
+        ) : (
+          <PierreEntryIcon
+            pathValue={node.path}
+            kind="file"
+            theme={resolvedTheme}
+            className="size-3.5 text-muted-foreground/70"
+          />
+        )}
+        <span className={NAME}>
           {node.name}
         </span>
         {node.stat && (
-          <span className="ml-auto shrink-0 font-mono text-[11px] tabular-nums">
-            <DiffStatLabel additions={node.stat.additions} deletions={node.stat.deletions} tone={statTone} />
+          <span className={STAT}>
+            <DiffStatLabel additions={node.stat.additions} deletions={node.stat.deletions} tone={statTone} {...(pane ? { layout: "inline" as const, whole: true } : {})} />
           </span>
         )}
       </button>
     );
-    if (!slotted) return row;
+    if (!slotted) {
+      const under = renderUnderFile?.(node.path);
+      return under === undefined || under === null ? row : (
+        <div key={`file:${node.path}`}>
+          {row}
+          {under}
+        </div>
+      );
+    }
     // The row's own controls sit beside its button rather than inside it: a button holds no other button.
     return (
       <div key={`file:${node.path}`} data-changed-file={node.path} className="flex items-center gap-1 rounded-xl transition-colors hover:bg-accent/60" style={{ paddingLeft: `${leftPadding}px` }}>
@@ -252,7 +277,7 @@ export const ChangedFilesTree = memo(function ChangedFilesTree(props: {
     );
   };
 
-  return <div className="space-y-0.5">{treeNodes.map((node) => renderTreeNode(node, 0))}</div>;
+  return <div className={pane ? "flex flex-col gap-px" : "space-y-0.5"}>{treeNodes.map((node) => renderTreeNode(node, 0))}</div>;
 });
 
 function collectDirectoryPaths(nodes: ReadonlyArray<TurnDiffTreeNode>): string[] {

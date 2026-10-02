@@ -14,7 +14,8 @@ import { sendToThread } from "../diffs/sendToThread.js";
 import { formatRelativeTimeLabel } from "../lib/timestampFormat.js";
 import { addNotice, noticeFailure } from "../notices/store.js";
 import { useStore } from "../protocol/store.js";
-import { PR_WORDS } from "./words.js";
+import { SEND_TO_THREAD } from "../diffs/words.js";
+import { PrMarkdown } from "./parts.js";
 
 const ROW = "flex min-w-0 items-start gap-3 rounded-[var(--control-radius)] px-2 py-2 transition-colors duration-150 hover:bg-accent";
 const NOTE = "text-[11px] leading-[14px] text-muted-foreground";
@@ -82,11 +83,11 @@ export function ReviewDraftSection({ workspaceId, name, fact, head }: { workspac
             <Checkbox className="mt-0.5" checked={c.on} aria-label={`Keep ${c.path}:${c.line}`} onCheckedChange={on => void edit({ on: [{ id: c.id, on: on === true }] })} />
             <div className="flex min-w-0 flex-1 flex-col gap-0.5">
               <span className="min-w-0 truncate font-mono text-[13px] text-foreground tabular-nums">{`${c.path}:${c.line}`}</span>
-              <span className="whitespace-pre-wrap text-[12px] leading-4 text-muted-foreground">{c.body}</span>
+              <PrMarkdown text={c.body} said line />
               {c.inSummary === true ? <span className={NOTE}>{START_WORDS.toSummary}</span> : null}
               <span className="mt-1">
                 <Button type="button" size="xs" variant="ghost" onClick={() => sendToThread(workspaceId, `About ${c.path}:${c.line} in your review: ${c.body}`)}>
-                  {PR_WORDS.sendToThread}
+                  {SEND_TO_THREAD}
                 </Button>
               </span>
             </div>

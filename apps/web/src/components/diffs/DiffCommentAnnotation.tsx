@@ -2,6 +2,7 @@
 import { MessageCircle, Trash2 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
+import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Textarea } from "../ui/textarea";
 
@@ -14,8 +15,21 @@ interface DiffCommentSecondaryAction {
   readonly onAction: (text: string) => void;
 }
 
+/** A comment someone wrote on the host, drawn as the pull request's own thread draws it: their face, their name, a
+ * note beside it, when, an act at the end and the words. */
+interface DiffCommentSaid {
+  readonly author: string;
+  readonly face: ReactNode;
+  readonly at: string;
+  readonly note?: ReactNode;
+  readonly action?: ReactNode;
+  readonly body: ReactNode;
+}
+
 interface DiffCommentAnnotationProps {
   kind: "draft" | "comment";
+  /** For a comment written on the host rather than here: drawn with who wrote it, and nothing to edit or delete. */
+  said?: DiffCommentSaid;
   rangeLabel: string;
   text: string;
   onTextChange?: (text: string) => void;
@@ -41,10 +55,34 @@ export function DiffCommentAnnotation({
   submitLabel = "Comment",
   pending = false,
   secondaryAction,
+  said,
 }: DiffCommentAnnotationProps) {
   const [localDraftText, setLocalDraftText] = useState("");
   const displayedText = kind === "draft" && !onTextChange ? localDraftText : text;
   const trimmedText = displayedText.trim();
+
+  if (kind === "comment" && said !== undefined) {
+    return (
+      <div
+        data-diff-comment-annotation
+        data-diff-comment-said={said.author}
+        className="group/comment grid min-w-0 grid-cols-[20px_minmax(0,1fr)] gap-2.5 px-3 pt-2.5 pb-3 font-sans text-foreground"
+        contentEditable={false}
+        onPointerDown={(event) => event.stopPropagation()}
+      >
+        {said.face}
+        <div className="min-w-0">
+          <div className="flex min-h-5 min-w-0 items-baseline gap-2 text-[13px] leading-5">
+            <b className="truncate font-medium">{said.author}</b>
+            {said.note === undefined ? null : <span className="ml-auto text-xs whitespace-nowrap text-muted-foreground">{said.note}</span>}
+            <span className={cn("font-mono text-xs whitespace-nowrap text-muted-foreground", said.note === undefined ? "ml-auto" : "ml-2.5")}>{said.at}</span>
+            {said.action}
+          </div>
+          {said.body}
+        </div>
+      </div>
+    );
+  }
 
   if (kind === "comment") {
     return (
