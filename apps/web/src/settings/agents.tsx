@@ -5,17 +5,16 @@
 // per agent on that computer with its version, its sign-in and what a new
 // thread runs it with, each opening that agent's own page; an agent that is
 // not there offers its install. The other two tabs draw their kind's rows in
-// the same grammar, each opening its item's own page.
+// the same grammar, each opening its item's own page. A task's panel draws
+// the same agent cards and tabs.
 import { BotIcon, CircleArrowUpIcon, ScrollTextIcon, ServerIcon } from "lucide-react";
 import { HERE_PLACE_ID, accessWord, effortsFor, markedDefault, modelOf, type AccessChoice, type AgentRow, type HarnessCatalog, type PlaceView } from "@wsp/protocol";
 import { agentName } from "@wsp/catalog";
 import { copyText } from "../actions/clipboard.js";
 import { ActButton } from "../components/agents/agentsParts.js";
-import { AGENTS_LIST_WORDS, recipeMissLines, refusedLines, waitingFlow, type RefusedLine, type RowsContext } from "../components/agents/agentsRows.js";
+import { AGENTS_LIST_WORDS, heldReason, recipeMissLines, refusedLines, waitingFlow, type RefusedLine, type RowsContext } from "../components/agents/agentsRows.js";
 import { AGENTS_KIND, signInWord } from "../components/agents/kinds/agents.js";
-import { SERVERS } from "../components/agents/kinds/servers.js";
-import { SKILLS } from "../components/agents/kinds/skills.js";
-import type { AnyKind } from "../components/agents/kinds/kind.js";
+import { AGENTS_KINDS } from "../components/agents/kinds/index.js";
 import { SignInFlowView } from "../components/agents/SignInFlowView.js";
 import { useAgentActs } from "../components/agents/useAgentActs.js";
 import { useAgentsReport } from "../components/agents/useAgentsReport.js";
@@ -28,7 +27,7 @@ import { useStore } from "../protocol/store.js";
 import { ComputerGlyph } from "./ComputerGlyph.js";
 import { wordOnly } from "./computers.js";
 import { AGENTS_PAGE_WORDS as W, capitalised } from "./format.js";
-import { KindTab, NotReadCard, OnHead, StatusWord } from "./agentKinds.js";
+import { KindTab, NotReadCard, OnHead, StatusWord, StepMark, UNDER_ROW, computerHead, type KindRead, type OnComputer } from "./agentKinds.js";
 import { GlyphFrame } from "./grid.js";
 import { SELECT_WIDTH } from "./layout.js";
 import { absentOf, isProviderPlace, placeName } from "./places.js";
@@ -37,8 +36,7 @@ import type { SettingsCardData } from "./rows.js";
 import type { SettingsContext } from "./settingsContext.js";
 import { useSettingsStore, type AgentsTab, type SettingsAt } from "./settingsStore.js";
 
-const KIND_OF: Record<Exclude<AgentsTab, "agents">, AnyKind> = { servers: SERVERS, skills: SKILLS };
-const TABS: ReadonlyArray<{ value: AgentsTab; label: React.ReactNode }> = [
+export const AGENTS_TABS: ReadonlyArray<{ value: AgentsTab; label: React.ReactNode }> = [
   { value: "agents", label: <><BotIcon aria-hidden className="size-3.5" />{W.tabs.agents}</> },
   { value: "servers", label: <><ServerIcon aria-hidden className="size-3.5" />{W.tabs.servers}</> },
   { value: "skills", label: <><ScrollTextIcon aria-hidden className="size-3.5" />{W.tabs.skills}</> },
@@ -154,7 +152,7 @@ export function AgentsControls({ tabs = true }: { tabs?: boolean }) {
           </SelectPopup>
         </Select>
       )}
-      {tabs ? <SegmentedControl data-k="agents-tabs" aria-label={W.tab} value={tab} segments={TABS} onChange={pickTab} className="h-8" segmentClassName="gap-1.5 whitespace-nowrap px-3 text-[13px]" /> : null}
+      {tabs ? <SegmentedControl data-k="agents-tabs" aria-label={W.tab} value={tab} segments={AGENTS_TABS} onChange={pickTab} className="h-8" segmentClassName="gap-1.5 whitespace-nowrap px-3 text-[13px]" /> : null}
     </div>
   );
 }
@@ -198,14 +196,17 @@ function NewThreadsCard({ ctx }: { ctx: SettingsContext }) {
   );
 }
 
+/** What a row says after a press of its own: the line it copied, or why the press failed. */
+export type Notify = Pick<SettingsContext, "done" | "failed">;
+
 /** A newer version waiting: a small arrow that copies the agent's own update line, its version on the hover. */
-function UpdateMark({ row, computer, ctx }: { row: AgentRow; computer: string; ctx: SettingsContext }) {
+function UpdateMark({ row, computer, notify }: { row: AgentRow; computer: string; notify: Notify }) {
   const update = row.update;
   if (update === undefined) return null;
   const said = W.updateTo(update.to);
   return (
     <Tooltip>
-      <TooltipTrigger render={<Button variant="ghost" size="icon-xs" data-k="agent-update" aria-label={said} onClick={() => void copyText(update.command).then(() => ctx.done(W.updateCopied(update.command, computer)), ctx.failed)} />}>
+      <TooltipTrigger render={<Button variant="ghost" size="icon-xs" data-k="agent-update" aria-label={said} onClick={() => void copyText(update.command).then(() => notify.done(W.updateCopied(update.command, computer)), notify.failed)} />}>
         <CircleArrowUpIcon aria-hidden className="size-3.5 text-muted-foreground" />
       </TooltipTrigger>
       <TooltipPopup side="top">{said}</TooltipPopup>
@@ -213,31 +214,40 @@ function UpdateMark({ row, computer, ctx }: { row: AgentRow; computer: string; c
   );
 }
 
-/** One agent on the picked computer, kept to what tells it apart in a list: its version, whether it can run and
- * the one step it needs; how it runs is its own page's. Under it, its sign-in while one runs. */
-function AgentLine({ row, rows, computer, ctx }: { row: AgentRow; rows: RowsContext; computer: string; ctx: SettingsContext }) {
+/** One agent on the computer read, kept to what tells it apart in a list: its version, whether it can run and the
+ * one step it needs; how it runs is its own page's. Before the state, a small mark for a newer version and, in a
+ * task's panel on this computer, one that starts it in the task's terminal. Under it, its sign-in while one runs.
+ * An agent not installed says who it is, since its card already says it is not there. */
+function AgentLine({ row, rows, computer, notify, open }: { row: AgentRow; rows: RowsContext; computer: string; notify: Notify; open: (() => void) | undefined }) {
   const item = { row };
   const kindRow = AGENTS_KIND.row(item, rows);
-  const flow = AGENTS_KIND.detail(item, rows, { openUnder: () => {} }).flow;
+  const flow = AGENTS_KIND.detail(item, rows).flow;
+  const opens = open === undefined ? {} : { open };
   const lead = (
     <GlyphFrame>
       <HarnessMark harness={row.id} label={row.name} className="size-4" />
     </GlyphFrame>
   );
   if (!row.installed) {
-    // The line under the name says it; the slot holds only the step, at the chevron's place in the column.
+    // The line under the name says it; the slot holds only the step, at the chevron's place in the column. Where every
+    // act is another page's, or the computer is away, it holds none.
+    const install = heldReason(rows) === undefined ? kindRow.quick : undefined;
     return (
       <Row
         id={row.id}
         title={row.name}
         lead={lead}
-        description={W.notInstalledShort}
-        {...(kindRow.quick === undefined ? {} : { control: <ActButton act={wordOnly(kindRow.quick)} /> })}
+        description={kindRow.subtext ?? ""}
+        clip
+        {...(install === undefined ? {} : { control: <ActButton act={wordOnly(install)} /> })}
+        {...opens}
         attrs={{ "data-agent-row": row.id }}
       />
     );
   }
-  const step = kindRow.quick !== undefined && (kindRow.quick.id === "sign-in" || kindRow.quick.id === "cancel") && (kindRow.quick.run !== undefined || kindRow.quick.busy === true) ? kindRow.quick : undefined;
+  const quick = kindRow.quick;
+  const step = quick !== undefined && (quick.id === "sign-in" || quick.id === "cancel") && (quick.run !== undefined || quick.busy === true) ? quick : undefined;
+  const terminal = quick?.id === "open-terminal" && quick.run !== undefined ? quick : undefined;
   const waiting = waitingFlow(flow);
   const tone = waiting || row.signIn === "none" ? "waiting" : row.signIn === "unknown" ? "quiet" : "good";
   const word = waiting ? capitalised(AGENTS_LIST_WORDS.waitingOnYou) : capitalised(signInWord(row));
@@ -247,19 +257,25 @@ function AgentLine({ row, rows, computer, ctx }: { row: AgentRow; rows: RowsCont
         id={row.id}
         title={row.name}
         lead={lead}
-        description={row.version === undefined ? "" : `v${row.version}`}
+        description={kindRow.subtext ?? ""}
         control={
           <span className="flex items-center gap-3">
-            <UpdateMark row={row} computer={computer} ctx={ctx} />
+            {/* The marks stand as one group, their own boxes their padding. */}
+            {row.update === undefined && terminal === undefined ? null : (
+              <span className="flex items-center gap-0.5">
+                <UpdateMark row={row} computer={computer} notify={notify} />
+                {terminal === undefined ? null : <StepMark act={terminal} />}
+              </span>
+            )}
             {/* A step to take is its own word; the status stands only where there is none. */}
             {step === undefined ? <StatusWord word={word} tone={tone} /> : <ActButton act={wordOnly(step)} />}
           </span>
         }
-        open={() => ctx.go({ kind: "agent", id: row.id })}
+        {...opens}
         attrs={{ "data-agent-row": row.id }}
       />
       {flow === undefined ? null : (
-        <div className="pr-5 pb-3 pl-[64px]">
+        <div className={UNDER_ROW}>
           <SignInFlowView view={flow} label={row.name} />
         </div>
       )}
@@ -267,32 +283,43 @@ function AgentLine({ row, rows, computer, ctx }: { row: AgentRow; rows: RowsCont
   );
 }
 
-/** The agents tab: new threads' agent, then every agent on the picked computer, installed first. */
+/** The agents on one computer: the first card names it with when it was read and its refresh, then the agents the
+ * catalog could install there in a card of their own, then what the host could not read there. */
+export function AgentsCards({ read, rows, on, now, misses, notify, openOf }: { read: KindRead; rows: RowsContext; on: OnComputer; now: number; misses: readonly RefusedLine[]; notify: Notify; openOf: (row: AgentRow) => (() => void) | undefined }) {
+  const { report, reading, error, readAt, refresh } = read;
+  const name = on.name;
+  const installed = report === null ? [] : report.agents.filter(a => a.installed);
+  const available = report === null ? [] : report.agents.filter(a => !a.installed);
+  const lines: RefusedLine[] = [...(report === null ? [] : refusedLines(report.refused)), ...misses, ...(report === null && error !== null ? [{ id: "read-refused", label: error }] : [])];
+  const line = (row: AgentRow) => <AgentLine key={row.id} row={row} rows={rows} computer={name} notify={notify} open={openOf(row)} />;
+  return (
+    <div className="flex flex-col gap-[30px]">
+      {report === null && reading ? (
+        <Card id="agents-on" head={W.on(name)} body={<RowSkeleton k="agents-reading" />} />
+      ) : (
+        <Card id="agents-on" head={<OnHead head={computerHead(W.on(name), on)} readAt={readAt} reading={reading} now={now} refresh={refresh} {...(on.stale === undefined ? {} : { stale: on.stale })} />}>
+          {installed.map(line)}
+        </Card>
+      )}
+      {available.length === 0 ? null : <Card id="agents-available" head={AGENTS_LIST_WORDS.availableToInstall}>{available.map(line)}</Card>}
+      <NotReadCard lines={lines} />
+    </div>
+  );
+}
+
+/** The agents tab: new threads' agent, then the agents on the picked computer and the ones it could install. */
 function AgentsTabBody({ place, ctx }: { place: PlaceView; ctx: SettingsContext }) {
   const target = { placeId: place.id };
-  const { report, reading, error, readAt, refresh } = useAgentsReport(target);
+  const read = useAgentsReport(target);
   const acts = useAgentActs(target);
   const here = place.id === HERE_PLACE_ID;
   const name = placeName(place);
   const away = here ? null : absentOf(place, ctx.now);
   const rows: RowsContext = { where: here ? "here" : "box", ...(here ? {} : { computer: name }), heldWhy: away?.away ?? null, on: name, ...(acts === undefined ? {} : { acts }) };
-  const agents = report === null ? [] : [...report.agents.filter(a => a.installed), ...report.agents.filter(a => !a.installed)];
-  const lines: RefusedLine[] = [...(report === null ? [] : refusedLines(report.refused)), ...recipeMissLines(place.provision?.rows ?? []), ...(report === null && error !== null ? [{ id: "read-refused", label: error }] : [])];
   return (
     <>
       <NewThreadsCard ctx={ctx} />
-      <div className="flex flex-col gap-[30px]">
-        {report === null && reading ? (
-          <Card id="agents-on" head={W.on(name)} body={<RowSkeleton k="agents-reading" />} />
-        ) : (
-          <Card id="agents-on" head={<OnHead head={W.on(name)} readAt={readAt} reading={reading} now={ctx.now} refresh={refresh} />}>
-            {agents.map(row => (
-              <AgentLine key={row.id} row={row} rows={rows} computer={name} ctx={ctx} />
-            ))}
-          </Card>
-        )}
-        <NotReadCard lines={lines} />
-      </div>
+      <AgentsCards read={read} rows={rows} on={{ name }} now={ctx.now} misses={recipeMissLines(place.provision?.rows ?? [])} notify={ctx} openOf={row => (row.installed ? () => ctx.go({ kind: "agent", id: row.id }) : undefined)} />
     </>
   );
 }
@@ -305,7 +332,7 @@ function AgentsPage({ ctx }: { ctx: SettingsContext }) {
   return (
     <div className="flex flex-col gap-[30px]">
       <AgentsControls tabs={tab === "agents" || level === null} />
-      {tab === "agents" ? <AgentsTabBody place={place} ctx={ctx} /> : <KindTab key={`${place.id}:${tab}`} place={place} kind={KIND_OF[tab]} ctx={ctx} />}
+      {tab === "agents" ? <AgentsTabBody place={place} ctx={ctx} /> : <KindTab key={`${place.id}:${tab}`} place={place} kind={AGENTS_KINDS[tab]} ctx={ctx} />}
     </div>
   );
 }

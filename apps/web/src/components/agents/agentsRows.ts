@@ -23,16 +23,8 @@ export const saysNotAnswering = (awayMs: number | null): boolean => awayMs === n
 export const AGENTS_LIST_WORDS = {
   section: "Agents, tool servers and skills",
   readAgain: "Read again",
-  readAgo: (span: string): string => `read ${span} ago`,
   paused: "paused",
   notAnswering: "not answering",
-  retry: "Retry",
-  back: (to: string): string => `Back to ${to}`,
-  groupAndSort: "Group and sort",
-  groupBy: "Group by",
-  sortBy: "Sort by",
-  name: "Name",
-  of: (shown: number, all: number): string => `${shown} of ${all}`,
   nothingMatches: (q: string): string => `Nothing matches "${q}".`,
   openComputer: (computer: string): string => `Open ${computer} in Settings`,
   signedIn: "signed in",
@@ -45,6 +37,7 @@ export const AGENTS_LIST_WORDS = {
   yourKey: "your key",
   notChecked: "not checked",
   notInstalled: "not installed",
+  availableToInstall: "Available to install",
   signIn: "Sign in",
   cancel: "Cancel",
   update: "Update",
@@ -55,10 +48,8 @@ export const AGENTS_LIST_WORDS = {
   turnOff: "Turn off",
   reconnect: "Reconnect",
   addTools: "Add the wsp tools",
-  listTools: "List tools",
   check: "Check",
   checkStarts: (computer: string): string => `Check starts it on ${computer}`,
-  viewTools: "View tools",
   listing: "Listing",
   toolsOf: (name: string): string => `Tools of ${name}`,
   toolsCount: (n: number): string => `${n} ${n === 1 ? "tool" : "tools"}`,
@@ -103,8 +94,6 @@ export const AGENTS_LIST_WORDS = {
   threadsNotYet: "not yet in wsp",
   description: "Description",
   path: "Path",
-  parameters: "Parameters",
-  required: "required",
   shared: "shared",
   command: "Command",
   url: "URL",
@@ -195,8 +184,6 @@ export interface RowAct {
   readonly run?: () => void;
   /** Its road is running: the label says so beside a spinner. */
   readonly busy?: boolean;
-  /** Taken from a row it leaves the list standing, as nothing follows it to watch. */
-  readonly inPlace?: boolean;
   /** An act after which something does not come back asks once first, in these words. */
   readonly confirm?: { readonly title: string; readonly body: string };
 }
@@ -368,7 +355,7 @@ export interface RowsContext {
   readonly servers?: ServerActs;
   /** Types a line into a terminal of the task on this computer, for a sign-in only the person can finish. */
   readonly typeInTerminal?: (line: string) => void;
-  /** The computer as the manager's lines name it; the manager fills it in. */
+  /** The computer as the lists' words name it, which the host of the lists fills in. */
   readonly on?: string;
   /** Where a sign-in page that returns to localhost reaches, as the host said on the report. */
   readonly reach?: PageReach;
@@ -420,7 +407,7 @@ export function signInAct(id: string, start: SignInStart | undefined, ctx: RowsC
   const acts = ctx.acts;
   const flow = acts?.flowOf(id);
   const view = flow === undefined || acts === undefined ? {} : { flow: { flow, code: (code: string) => acts.code(id, code), save: (key: string) => acts.save(id, key) } };
-  if (runningFlow(flow) && acts !== undefined) return { act: { id: "cancel", label: AGENTS_LIST_WORDS.cancel, icon: XIcon, run: () => acts.cancel(id), inPlace: true }, ...view };
+  if (runningFlow(flow) && acts !== undefined) return { act: { id: "cancel", label: AGENTS_LIST_WORDS.cancel, icon: XIcon, run: () => acts.cancel(id) }, ...view };
   const run = start === undefined ? undefined : start.kind === "terminal" ? (ctx.typeInTerminal === undefined ? undefined : () => ctx.typeInTerminal!(start.line)) : acts === undefined ? undefined : () => acts.start(id, start);
   return { act: { id: "sign-in", label: AGENTS_LIST_WORDS.signIn, icon: LogInIcon, ...(run === undefined ? {} : { run }) }, ...view };
 }

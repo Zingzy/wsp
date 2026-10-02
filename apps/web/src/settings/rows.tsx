@@ -110,8 +110,10 @@ export const CARD_SURFACE = "overflow-hidden rounded-[11px] border border-border
 const TITLE_CLASS = SETTING_TITLE;
 const LABEL_CLASS = "text-sm leading-5 text-foreground";
 const DESCRIPTION_CLASS = "max-w-xl text-[13px] leading-[1.45] text-muted-foreground";
-/** The text and what acts on it, each in a column of its own from 640 px, one over the other under it. */
-const SPLIT_CLASS = "flex flex-col gap-3 sm:grid sm:grid-cols-[minmax(0,1fr)_minmax(10rem,auto)] sm:items-center sm:gap-5";
+/** The text and what acts on it, each in a column of its own from 640 px, one over the other under it. The slot's
+ * floor lines controls up down a page's card; a narrower host moves both floors, --settings-slot and --settings-text,
+ * so a name keeps its room and a long state wraps instead. */
+const SPLIT_CLASS = "flex flex-col gap-3 sm:grid sm:grid-cols-[minmax(var(--settings-text,0px),1fr)_minmax(var(--settings-slot,10rem),auto)] sm:items-center sm:gap-5";
 /** The hover a row that opens a page takes: the sidebar rows' step, in the same 150 ms. */
 const OPENS_CLASS = "w-full cursor-pointer text-left transition-colors duration-150 hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset";
 
@@ -155,7 +157,8 @@ export function Row({ id, title, lead, mark, markWord, description, chips, mono 
             {control}
           </span>
         )}
-        {open === undefined ? null : <ChevronRightIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />}
+        {/* A panel at its narrowest gives the chevron's room to the name and the state; the row's hover still says it opens. */}
+        {open === undefined ? null : <ChevronRightIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground @max-[25rem]/panel:hidden" />}
       </div>
     );
   const text = (
@@ -270,7 +273,8 @@ export function Line({ id, label, value, valueClass = "value", keys, keysJoiner,
   return (
     <div data-settings-line={id} className={cn("flex flex-col justify-center py-3", CARD_INSET, LINE_FLOOR)} {...(hover === undefined ? {} : { title: hover })} {...attrs}>
       <div className={right === null ? undefined : "flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between sm:gap-8"}>
-        <span data-settings-label className={cn(empty === true ? NOTE : LABEL_CLASS, "min-w-0 break-words")}>
+        {/* A label keeps its words whole up to half the line, so the value is what wraps where the line is narrow. */}
+        <span data-settings-label className={cn(empty === true ? NOTE : LABEL_CLASS, "min-w-0 break-words", right !== null && "sm:max-w-1/2 sm:shrink-0")}>
           {label}
         </span>
         {right === null ? null : <span className="flex min-w-0 sm:justify-end">{right}</span>}

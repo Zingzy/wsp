@@ -1,23 +1,21 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Skills from the app: a skill's detail draws its SKILL.md under the facts,
-// read by the host once, in the renderer's restricted mode; Turn off and on
-// and Remove go to the host, Remove only once its confirmation is taken; the
-// skill wsp writes and a plugin's offer nothing and a project's is held from
-// turning off; Add a skill replaces the list with a search the host sends to
-// skills.sh, and a result opens its detail with its SKILL.md before install,
-// the agents to put it in and, from a task's panel, the project.
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+// Skills in a task's panel: a skill's page draws its SKILL.md, read by the
+// host once, in the renderer's restricted mode; its switch and Remove go to
+// the host, Remove only once its confirmation is taken; the skill wsp writes
+// and a plugin's offer nothing and a project's has no switch; Add skill opens
+// a search the host sends to skills.sh, and a result opens its page with its
+// SKILL.md before install, the agents to put it in and the project.
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentsReport, AgentsTarget, SkillHit, SkillPreview } from "@wsp/protocol";
-import { AgentsManager } from "../src/components/agents/AgentsManager.js";
+import { AgentsPanel } from "../src/components/agents/AgentsPanel.js";
 import { AGENTS_LIST_WORDS as W, type RowsContext } from "../src/components/agents/agentsRows.js";
 import { useSkillActs } from "../src/components/agents/useSkillActs.js";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { AGENTS_REPORT } from "./fixtures/agents-report.js";
 import { pickOption } from "./select.js";
-
-const NOW = Date.parse("2026-09-24T12:03:00.000Z");
+import { back, factsOf, head, headAct, headActs, headTitle, NOW, openRow, panel, rowOf, tab } from "./agents-panel-harness.js";
 const SKILL_MD = "---\nname: frontend-design\ndescription: Design frontends\n---\n# Frontend design\n\nPick a bold direction.\n";
 const HITS: SkillHit[] = [
   { id: "anthropics/skills/pdf", source: "anthropics/skills", skillId: "pdf", name: "pdf", installs: 3_612_000 },
@@ -26,7 +24,7 @@ const HITS: SkillHit[] = [
 
 function List({ report = AGENTS_REPORT, ctx = {} }: { report?: AgentsReport; ctx?: Partial<RowsContext> }) {
   const skills = useSkillActs(report.target);
-  return <AgentsManager shell="page" head={{ line: "x" }} report={report} reading={false} on="spoo" ctx={{ where: "box", heldWhy: null, ...ctx, ...(skills === undefined ? {} : { skills }) }} onRefresh={() => {}} now={NOW} />;
+  return <AgentsPanel on={{ name: "spoo" }} read={{ report, reading: false, error: null, readAt: NOW, refresh: () => {} }} ctx={{ where: "box", heldWhy: null, ...ctx, ...(skills === undefined ? {} : { skills }) }} now={NOW} />;
 }
 
 type Settle<T> = { resolve(v: T): void; reject(e: Error): void };
@@ -62,16 +60,13 @@ const settle = async (): Promise<void> => {
     for (let i = 0; i < 4; i++) await new Promise(r => setTimeout(r, 0));
   });
 };
-const tab = (name: string): void => void fireEvent.click(screen.getByRole("radio", { name: new RegExp(`^${name}`) }));
-const rowEl = (key: string): HTMLElement => document.querySelector<HTMLElement>(`[data-agents-row="${key}"]`)!;
-const detail = (): HTMLElement => document.querySelector<HTMLElement>("[data-agents-detail]")!;
-const openRow = (key: string): HTMLElement => {
-  fireEvent.click(rowEl(key).querySelector<HTMLButtonElement>("[data-row-trigger]")!);
-  return detail();
-};
-const acts = (): string[] => [...detail().querySelectorAll<HTMLElement>("[data-detail-acts] button")].map(b => b.textContent ?? "");
-const actIn = (id: string): HTMLButtonElement => detail().querySelector<HTMLButtonElement>(`[data-detail-acts] [data-k=act-${id}]`)!;
-const typeSearch = (value: string): void => void fireEvent.change(document.querySelector<HTMLInputElement>("[data-k=add-search]")!, { target: { value } });
+const FRONTEND = "skill-user-frontend-design";
+const preview = (): HTMLElement | null => panel().querySelector<HTMLElement>("[data-settings-card=kind-doc]");
+const typeSearch = (value: string): void => void fireEvent.change(panel().querySelector<HTMLInputElement>("[data-k=add-search]")!, { target: { value } });
+const add = (): HTMLButtonElement => panel().querySelector<HTMLButtonElement>("[data-k=kind-add]")!;
+const turn = (): HTMLButtonElement | null => head().querySelector<HTMLButtonElement>("[data-k=kind-on]");
+const removeAct = (): HTMLButtonElement => panel().querySelector<HTMLButtonElement>("[data-settings-card=kind-remove] [data-k=act-remove]")!;
+const found = (key: string): HTMLElement => panel().querySelector<HTMLElement>(`[data-found-row="${key}"]`)!;
 
 afterEach(() => {
   cleanup();
@@ -80,219 +75,212 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("a skill's detail", () => {
-  it("draws its SKILL.md under the facts, its frontmatter off, read by the host once as the detail opens", async () => {
+describe("a skill's page", () => {
+  it("draws its SKILL.md, its frontmatter off, read by the host once as the page opens", async () => {
     const h = host();
     render(<List />);
     tab("Skills");
-    openRow("skill-user-frontend-design");
+    openRow(FRONTEND);
     await settle();
     expect(h.previews).toEqual([[{ placeId: "p_spoo" }, "frontend-design", false]]);
-    const body = detail().querySelector<HTMLElement>("[data-k=skill-preview-body]")!;
+    const body = preview()!.querySelector<HTMLElement>("[data-k=skill-preview-body]")!;
     expect(body.querySelector("h1")?.textContent).toBe("Frontend design");
     expect(body.textContent).not.toContain("description: Design frontends");
-    expect(detail().querySelector("[data-k=skill-preview-cut]")).toBeNull();
-    fireEvent.click(detail().querySelector<HTMLButtonElement>("[data-k=agents-back]")!);
-    openRow("skill-user-frontend-design");
+    expect(preview()!.querySelector("[data-k=skill-preview-cut]")).toBeNull();
+    back();
+    openRow(FRONTEND);
     await settle();
     expect(h.previews).toHaveLength(1);
   });
 
-  it("reads the SKILL.md again off the new computer when the target under an open detail changes", async () => {
+  it("reads the SKILL.md again off the new computer when the target under an open page changes", async () => {
     const h = host();
     const { rerender } = render(<List />);
     tab("Skills");
-    openRow("skill-user-frontend-design");
+    openRow(FRONTEND);
     await settle();
     rerender(<List report={{ ...AGENTS_REPORT, target: { placeId: "p_other" } }} />);
     await settle();
     expect(h.previews.map(([target]) => target)).toEqual([{ placeId: "p_spoo" }, { placeId: "p_other" }]);
-    expect(detail().querySelector("[data-k=skill-preview-body] h1")?.textContent).toBe("Frontend design");
+    expect(preview()!.querySelector("[data-k=skill-preview-body] h1")?.textContent).toBe("Frontend design");
   });
 
   it("says how much of a long SKILL.md it shows, and the host's sentence where the read was refused", async () => {
     host({ preview: { text: "# big\n", size: 130 * 1024 } });
     render(<List />);
     tab("Skills");
-    openRow("skill-user-frontend-design");
+    openRow(FRONTEND);
     await settle();
-    expect(detail().querySelector("[data-k=skill-preview-cut]")?.textContent).toBe("shows the first 64 KB of 130 KB");
+    expect(preview()!.querySelector("[data-k=skill-preview-cut]")?.textContent).toBe("shows the first 64 KB of 130 KB");
     cleanup();
     useStore.setState({ api: { skillsPreview: async () => Promise.reject(new Error("The SKILL.md of pdf could not be read.")) } as unknown as Api });
     render(<List />);
     tab("Skills");
-    openRow("skill-user-frontend-design");
+    openRow(FRONTEND);
     await settle();
-    expect(detail().querySelector("[data-k=skill-preview-refused]")?.textContent).toContain("The SKILL.md of pdf could not be read.");
+    expect(preview()!.querySelector("[data-k=skill-preview-refused]")?.textContent).toContain("The SKILL.md of pdf could not be read.");
   });
 
-  it("turns a skill off through the host, holds the act while it runs, and reads off on the row and in the detail once the report says so", async () => {
+  it("turns a skill off through the host from its switch, holds it while it runs, and reads off once the report says so", async () => {
     const h = host();
     const { rerender } = render(<List />);
     tab("Skills");
-    openRow("skill-user-frontend-design");
-    expect(acts()).toEqual([W.turnOff, W.remove]);
-    fireEvent.click(actIn("turn-off"));
+    openRow(FRONTEND);
+    expect(turn()?.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(turn()!);
     expect(h.toggles).toEqual([["frontend-design", false, false]]);
-    expect(actIn("turn-off").disabled).toBe(true);
+    expect(turn()?.hasAttribute("data-disabled") || turn()?.getAttribute("aria-disabled") === "true" || turn()?.disabled).toBe(true);
     await act(async () => h.pending[0]!.resolve());
     const off: AgentsReport = { ...AGENTS_REPORT, skills: AGENTS_REPORT.skills.map(s => (s.name === "frontend-design" ? { ...s, paths: s.paths.map(p => ({ ...p, off: true as const })) } : s)) };
     rerender(<List report={off} />);
-    expect(detail().querySelector("[data-fact=status] [data-status-word]")?.textContent).toBe("off");
-    expect(acts()).toEqual([W.turnOn, W.remove]);
-    fireEvent.click(actIn("turn-on"));
+    expect(turn()?.getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(turn()!);
     expect(h.toggles.at(-1)).toEqual(["frontend-design", false, true]);
     await act(async () => h.pending[1]!.reject(new Error("mv: Permission denied")));
-    expect(detail().querySelector("[data-k=detail-refused]")?.textContent).toContain("mv: Permission denied");
-    fireEvent.click(detail().querySelector<HTMLButtonElement>("[data-k=agents-back]")!);
-    expect(rowEl("skill-user-frontend-design").querySelector("[data-row-word] [data-status-word]")?.textContent).toBe("off");
-    expect(rowEl("skill-user-frontend-design").querySelector("[data-row-title]")?.className).toContain("text-foreground/70");
+    expect(panel().querySelector("[data-k=kind-refused]")?.textContent).toContain("mv: Permission denied");
+    back();
+    expect(rowOf(FRONTEND).querySelector<HTMLButtonElement>("[data-k=kind-on]")?.getAttribute("aria-checked")).toBe("false");
   });
 
   it("removes a skill only once the confirmation is taken, whose own button is the red one", async () => {
     const h = host();
     render(<List />);
     tab("Skills");
-    openRow("skill-user-frontend-design");
-    fireEvent.click(actIn("remove"));
+    openRow(FRONTEND);
+    fireEvent.click(removeAct());
     expect(h.removes).toEqual([]);
-    expect(await screen.findByText("Remove frontend-design?")).toBeTruthy();
-    expect(screen.getByText("Its folder and every link to it leave spoo.")).toBeTruthy();
+    const asking = await screen.findByRole("alertdialog");
+    expect(within(asking).getByText("Remove frontend-design?")).toBeTruthy();
+    expect(within(asking).getByText("Its folder and every link to it leave spoo.")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: W.cancel }));
     await settle();
     expect(h.removes).toEqual([]);
-    fireEvent.click(actIn("remove"));
-    const go = await screen.findByRole("button", { name: W.remove, hidden: false });
-    const confirm = document.querySelector<HTMLButtonElement>("[data-k=confirm-remove-go]")!;
-    expect(confirm).toBe(go);
+    fireEvent.click(removeAct());
+    const dialog = await screen.findByRole("alertdialog");
+    const confirm = within(dialog).getByRole("button", { name: W.remove });
+    expect(confirm.getAttribute("data-k")).toBe("confirm-remove-go");
     expect(confirm.className).toContain("bg-destructive");
-    expect(actIn("remove").className).not.toContain("bg-destructive");
+    expect(removeAct().className).not.toContain("bg-destructive");
     fireEvent.click(confirm);
     expect(h.removes).toEqual(["frontend-design"]);
   });
 
-  it("offers nothing on the skill wsp writes or a plugin's, and holds a project's Turn off with where it lives", async () => {
+  it("offers nothing on the skill wsp writes or a plugin's, and no switch on a project's, which lives in its repo", () => {
     const h = host();
     render(<List />);
     tab("Skills");
-    openRow("skill-user-wsp");
-    expect(acts()).toEqual([]);
-    fireEvent.click(detail().querySelector<HTMLButtonElement>("[data-k=agents-back]")!);
-    openRow("skill-plugin-pdf");
-    expect(acts()).toEqual([]);
-    fireEvent.click(detail().querySelector<HTMLButtonElement>("[data-k=agents-back]")!);
-    openRow("skill-project-pr_wsp-wsp-review");
-    expect(actIn("turn-off").disabled).toBe(true);
-    expect(detail().querySelector("[data-act-hover=turn-off]")?.getAttribute("title")).toBe("lives in the repo at ~/wsp/.agents/skills/wsp-review");
-    fireEvent.click(actIn("turn-off"));
+    for (const key of ["skill-user-wsp", "skill-plugin-pdf", "skill-project-pr_wsp-wsp-review"]) {
+      openRow(key);
+      expect(turn(), key).toBeNull();
+      expect(headActs(), key).toEqual([]);
+      back();
+    }
     expect(h.toggles).toEqual([]);
   });
 });
 
 describe("Add a skill", () => {
-  it("replaces the list with a search the host sends to skills.sh once the person pauses, and never an empty one", async () => {
+  it("opens a search the host sends to skills.sh once the person pauses, and never an empty one", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const h = host();
     render(<List />);
     tab("Skills");
-    const add = document.querySelector<HTMLButtonElement>("[data-k=agents-add]")!;
-    expect(add.disabled).toBe(false);
-    fireEvent.click(add);
-    expect(document.querySelector("[data-agents-add] [data-k=detail-title]")?.textContent).toBe(W.addSkill);
-    expect(document.activeElement).toBe(document.querySelector("[data-k=add-search]"));
-    expect(document.querySelector("[data-k=add-empty]")?.textContent).toBe(W.typeToSearch);
+    expect(add().disabled).toBe(false);
+    fireEvent.click(add());
+    expect(panel().querySelector("[data-k=agents-back]")?.textContent).toBe("Skills");
+    expect(panel().querySelector<HTMLInputElement>("[data-k=add-search]")?.placeholder).toBe(W.searchSkillsSh);
+    expect(panel().querySelector("[data-settings-line=add-none]")?.textContent).toBe(W.typeToSearch);
     typeSearch("p");
     typeSearch("pd");
     typeSearch("pdf");
     expect(h.searches).toEqual([]);
-    expect(document.querySelector("[data-k=add-reading]")).not.toBeNull();
     await act(async () => void vi.advanceTimersByTime(260));
     await settle();
     expect(h.searches).toEqual(["pdf"]);
-    const rows = [...document.querySelectorAll<HTMLElement>("[data-add-row]")];
-    expect(rows.map(r => [r.querySelector("[data-add-title]")?.textContent, r.querySelector("[data-add-subtext]")?.textContent, r.querySelector("[data-add-fact]")?.textContent])).toEqual([
+    const rows = [...panel().querySelectorAll<HTMLElement>("[data-found-row]")];
+    expect(rows.map(r => [r.querySelector("[data-settings-title]")?.textContent, r.querySelector("[data-settings-description]")?.textContent, r.querySelector("[data-settings-word]")?.textContent])).toEqual([
       ["pdf", "anthropics/skills", "3.6M"],
       ["frontend-design", "acme/kit", W.installed],
     ]);
-    expect(rows[1]!.className).toContain("opacity-60");
     typeSearch("   ");
     await act(async () => void vi.advanceTimersByTime(260));
     expect(h.searches).toEqual(["pdf"]);
     typeSearch("zzz");
-    fireEvent.keyDown(document.querySelector("[data-k=add-search]")!, { key: "Enter" });
+    fireEvent.keyDown(panel().querySelector("[data-k=add-search]")!, { key: "Enter" });
     await settle();
     expect(h.searches).toEqual(["pdf", "zzz"]);
-    expect(document.querySelector("[data-k=add-empty]")?.textContent).toBe(W.noHits("zzz"));
+    expect(panel().querySelector("[data-settings-line=add-none]")?.textContent).toBe(W.noHits("zzz"));
   });
 
   it("says why a search came back with nothing where the host refused it", async () => {
     host({ searchFails: "skills.sh did not answer: getaddrinfo ENOTFOUND skills.sh" });
     render(<List />);
     tab("Skills");
-    fireEvent.click(document.querySelector<HTMLButtonElement>("[data-k=agents-add]")!);
+    fireEvent.click(add());
     typeSearch("pdf");
-    fireEvent.keyDown(document.querySelector("[data-k=add-search]")!, { key: "Enter" });
+    fireEvent.keyDown(panel().querySelector("[data-k=add-search]")!, { key: "Enter" });
     await settle();
-    expect(document.querySelector("[data-k=add-empty]")?.textContent).toBe("skills.sh did not answer: getaddrinfo ENOTFOUND skills.sh");
+    expect(panel().querySelector("[data-settings-line=add-none]")?.textContent).toBe("skills.sh did not answer: getaddrinfo ENOTFOUND skills.sh");
   });
 
-  it("opens a result's detail with its SKILL.md off skills.sh before install, the agents to tick, and Install with the picks", async () => {
+  it("opens a result's page with its SKILL.md off skills.sh before install, the agents to switch on, and Install with the picks, the back going to what was found", async () => {
     const h = host();
     render(<List />);
     tab("Skills");
-    fireEvent.click(document.querySelector<HTMLButtonElement>("[data-k=agents-add]")!);
+    fireEvent.click(add());
     typeSearch("pdf");
-    fireEvent.keyDown(document.querySelector("[data-k=add-search]")!, { key: "Enter" });
+    fireEvent.keyDown(panel().querySelector("[data-k=add-search]")!, { key: "Enter" });
     await settle();
-    fireEvent.click(document.querySelector<HTMLButtonElement>('[data-add-row="anthropics/skills/pdf"] [data-row-trigger]')!);
+    fireEvent.click(found("anthropics/skills/pdf"));
     await settle();
     expect(h.gets).toEqual(["anthropics/skills/pdf"]);
-    expect(detail().querySelector("[data-k=detail-title]")?.textContent).toBe("pdf");
-    expect([...detail().querySelectorAll<HTMLElement>("[data-fact]")].map(f => (f.querySelector("[data-fact-value]") ?? f.querySelector("[data-status-word]"))?.textContent)).toEqual([W.notInstalled, "anthropics/skills", "3.6M"]);
-    expect(detail().querySelector("[data-k=skill-preview-body] h1")?.textContent).toBe("pdf");
-    expect(acts()).toEqual(["Install pdf"]);
-    // Codex and OpenCode read the shared folder, so they stand ticked and held; Claude Code takes a link of its own.
-    const option = (id: string): HTMLElement => detail().querySelector<HTMLElement>(`[data-choice=agents] [data-choice-option=${id}]`)!;
-    expect([...detail().querySelectorAll<HTMLElement>("[data-choice=agents] [data-choice-option]")].map(o => o.dataset["choiceOption"])).toEqual(["claude", "codex", "opencode"]);
-    expect(option("codex").getAttribute("title")).toBe(W.readsShared);
-    expect(detail().querySelector("[data-k=where-pick]")?.textContent).toBe(W.global);
-    fireEvent.click(option("claude").querySelector("button,[role=checkbox]")!);
-    fireEvent.click(actIn("install"));
+    expect(headTitle()).toBe("pdf");
+    expect(factsOf().map(f => f[1])).toEqual(["anthropics/skills", "3.6M"]);
+    expect(preview()!.querySelector("[data-k=skill-preview-body] h1")?.textContent).toBe("pdf");
+    expect(headActs()).toEqual(["Install pdf"]);
+    // Codex and OpenCode read the shared folder, so they stand on and held; Claude Code takes a link of its own.
+    const option = (id: string): HTMLElement => panel().querySelector<HTMLElement>(`[data-settings-row="choice-agents-${id}"]`)!;
+    expect(["claude", "codex", "opencode"].map(id => option(id) !== null)).toEqual([true, true, true]);
+    expect(option("codex").querySelector("[data-settings-description]")?.textContent).toBe(W.readsShared);
+    expect(panel().querySelector("[data-k=where-pick]")?.textContent).toBe(W.global);
+    fireEvent.click(option("claude").querySelector("[data-k=choice-on]")!);
+    fireEvent.click(headAct("install")!);
     expect(h.adds).toEqual([["anthropics/skills/pdf", [], false]]);
-    fireEvent.click(detail().querySelector<HTMLButtonElement>("[data-k=agents-back]")!);
-    expect(document.querySelector("[data-agents-add]")).not.toBeNull();
+    const backButton = panel().querySelector<HTMLButtonElement>("[data-k=agents-back]")!;
+    expect(backButton.textContent).toBe(W.addSkill);
+    back();
+    expect(panel().querySelector<HTMLInputElement>("[data-k=add-search]")?.value).toBe("pdf");
+    expect(found("anthropics/skills/pdf")).not.toBeNull();
   });
 
   it("from a task's panel, asks whether it goes in the project, and a skill already there is held", async () => {
     const h = host();
     render(<List ctx={{ where: "here" }} />);
     tab("Skills");
-    fireEvent.click(document.querySelector<HTMLButtonElement>("[data-k=agents-add]")!);
+    fireEvent.click(add());
     typeSearch("pdf");
-    fireEvent.keyDown(document.querySelector("[data-k=add-search]")!, { key: "Enter" });
+    fireEvent.keyDown(panel().querySelector("[data-k=add-search]")!, { key: "Enter" });
     await settle();
-    fireEvent.click(document.querySelector<HTMLButtonElement>('[data-add-row="anthropics/skills/pdf"] [data-row-trigger]')!);
-    await pickOption(detail().querySelector("[data-k=where-pick]")!, /^wsp/);
-    fireEvent.click(actIn("install"));
+    fireEvent.click(found("anthropics/skills/pdf"));
+    await pickOption(panel().querySelector("[data-k=where-pick]")!, /^wsp/);
+    fireEvent.click(headAct("install")!);
     expect(h.adds).toEqual([["anthropics/skills/pdf", ["claude"], true]]);
-    fireEvent.click(detail().querySelector<HTMLButtonElement>("[data-k=agents-back]")!);
-    fireEvent.click(document.querySelector<HTMLButtonElement>('[data-add-row="acme/kit/frontend-design"] [data-row-trigger]')!);
-    expect(detail().querySelector("[data-fact=status] [data-status-word]")?.textContent).toBe(W.installed);
-    expect(actIn("install").disabled).toBe(true);
-    expect(detail().querySelector("[data-act-hover=install]")?.getAttribute("title")).toBe("already on spoo");
+    back();
+    fireEvent.click(found("acme/kit/frontend-design"));
+    expect(head().querySelector("[data-k=kind-status]")?.textContent).toBe("Installed");
+    expect(headAct("install")).toBeNull();
   });
 
   it("holds Add where the client carries no skills road, and a task on a box holds it for that box's page", () => {
     useStore.setState({ api: {} as unknown as Api });
     render(<List />);
     tab("Skills");
-    expect(document.querySelector<HTMLButtonElement>("[data-k=agents-add]")!.disabled).toBe(true);
+    expect(add().disabled).toBe(true);
     cleanup();
     host();
     render(<List ctx={{ where: "box-task", computer: "spoo" }} />);
     tab("Skills");
-    const add = document.querySelector<HTMLButtonElement>("[data-k=agents-add]")!;
-    expect(add.disabled).toBe(true);
-    expect(add.parentElement?.getAttribute("title")).toBe("on spoo's page");
+    expect(add().disabled).toBe(true);
+    expect(add().closest("[title]")?.getAttribute("title")).toBe("on spoo's page");
   });
 });

@@ -388,7 +388,7 @@
         "1440:row-id=thread:redirect",
         "surface-launch=agents"
       ],
-      "wait": "agents-row"
+      "wait": "agent-row"
     },
     {
       "name": "mcp-servers-here",
@@ -609,7 +609,7 @@
         "1440:row-id=thread:redirect",
         "surface-launch=agents",
         "segment=servers",
-        "k=agents-add"
+        "k=kind-add"
       ],
       "wait": "k=add-server-go",
       "settleMs": 700

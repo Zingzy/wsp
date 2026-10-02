@@ -39,9 +39,9 @@ describe("an Edit image outside the Image card", () => {
       </TooltipProvider>,
     );
     await settle();
-    // A fork's one act on every row is Edit image, since what it holds is the image's.
-    fireEvent.click(document.querySelector<HTMLElement>('[data-agents-row="agent-claude"] [data-row-trigger]')!);
-    const edit = [...document.querySelectorAll<HTMLButtonElement>("[data-agents-detail] [data-detail-acts] button")];
+    // A fork's one act on every item's page is Edit image, since what it holds is the image's.
+    fireEvent.click(document.querySelector<HTMLElement>('[data-agent-row="claude"] [data-settings-title]')!);
+    const edit = [...document.querySelectorAll<HTMLButtonElement>("[data-k=kind-head] [data-k^=act-]")];
     expect(edit.map(b => b.textContent)).toEqual([AGENTS_LIST_WORDS.editImage]);
     fireEvent.click(edit[0]!);
     expect(useStore.getState().settingsOpen).toBe(true);
@@ -57,14 +57,12 @@ describe("an Edit image outside the Image card", () => {
       </TooltipProvider>,
     );
     await settle();
-    fireEvent.click(document.querySelector<HTMLElement>('[data-agents-row="agent-claude"] [data-row-trigger]')!);
-    const edit = document.querySelector<HTMLElement>("[data-agents-detail] [data-detail-acts] [title]");
-    expect(edit?.getAttribute("title")).toBe(AGENTS_LIST_WORDS.editImageHeld);
-    fireEvent.click(document.querySelector<HTMLElement>("[data-agents-detail] [data-detail-acts] button")!);
-    expect(useStore.getState().settingsOpen).toBe(false);
-    fireEvent.click(document.querySelector<HTMLElement>("[data-k=agents-back]")!);
     fireEvent.click(screen.getByRole("radio", { name: /^Skills/ }));
-    expect(document.querySelector("[data-k=agents-add]")?.parentElement?.getAttribute("title")).toBe(AGENTS_LIST_WORDS.editImageHeld);
+    const edit = document.querySelector<HTMLButtonElement>("[data-k=kind-add]")!;
+    expect(edit.textContent).toBe(AGENTS_LIST_WORDS.editImage);
+    expect(edit.closest("[title]")?.getAttribute("title")).toBe(AGENTS_LIST_WORDS.editImageHeld);
+    fireEvent.click(edit);
+    expect(useStore.getState().settingsOpen).toBe(false);
   });
 
   it("lands on that computer's page, which draws your image as one row and no recipe, and drops the ask", async () => {

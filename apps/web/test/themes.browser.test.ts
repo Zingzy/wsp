@@ -26,7 +26,7 @@ const SHOTS = join(tmpdir(), "wsp-render", "themes");
 const SCREENS = [
   { name: "thread", page: "shell", query: "ws=ws_a&chat=1", ready: ".chat-markdown .shiki" },
   { name: "computers", page: "wireframe", query: "screen=settings-computers", ready: "[data-settings-page]" },
-  { name: "agents-panel", page: "wireframe", query: "screen=panel-agents", ready: "[data-agents-row]" },
+  { name: "agents-panel", page: "wireframe", query: "screen=panel-agents", ready: "[data-agent-row]" },
   { name: "settings", page: "wireframe", query: "screen=settings-appearance", ready: "[data-k=theme-picker]" },
 ] as const;
 

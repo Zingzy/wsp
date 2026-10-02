@@ -574,11 +574,8 @@ describe("the Agents page on a computer", () => {
     expect(agentRow("claude").querySelector("svg")).not.toBeNull();
     expect(agentRow("claude").querySelector("[data-settings-description]")?.textContent).toBe(`v${claude.version}`);
     expect(agentRow("claude").querySelector("[data-k=agent-status]")?.textContent).toBe(capitalised(AGENTS_LIST_WORDS.signedIn));
-    expect(document.querySelector("[data-settings-page] [data-agents-manager]")).toBeNull();
     topBarTab("servers");
     expect(picked()).toBe("servers");
-    // The page draws one kind at a time in its own rows; the panel's manager stands nowhere on it.
-    expect(document.querySelector("[data-settings-page] [data-agents-manager]")).toBeNull();
     expect(rowKeys().length).toBeGreaterThan(0);
     expect(rowKeys().every(k => k.startsWith("server-"))).toBe(true);
     expect(stateLine(rowKeys()[0]!)).not.toBe("");
@@ -639,7 +636,6 @@ describe("the Agents page on a computer", () => {
     useStore.setState({ places: [here, box] });
     await mountComputers(computersApi({ agentsRead: async (target: AgentsTarget) => (asked.push(target), AGENTS_REPORT) }).api, { kind: "computer", id: "p_2" });
     // The computer's page draws no list of its own: one row hands it to the Agents page.
-    expect(document.querySelector("[data-settings-page] [data-agents-manager]")).toBeNull();
     expect(document.querySelector("[data-settings-page] [data-grid='agents']")).toBeNull();
     expect(asked).toEqual([]);
     const row = document.querySelector<HTMLElement>("[data-settings-page] [data-k=agents-on]")!;
@@ -660,7 +656,6 @@ describe("the Agents page on a computer", () => {
     expect(picked()).toBe("skills");
     expect(rowKeys().length).toBeGreaterThan(0);
     expect(rowKeys().every(k => k.startsWith("skill-"))).toBe(true);
-    expect(document.querySelector("[data-settings-page] [data-agents-manager]")).toBeNull();
   });
 });
 

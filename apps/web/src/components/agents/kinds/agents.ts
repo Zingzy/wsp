@@ -3,7 +3,7 @@
 // catalog could put there. An installed row says its version and its sign-in
 // state under its name, and offers Sign in where none stands, else Open in
 // terminal; the detail says who the agent is and the rest, next step first.
-import { BotIcon, CircleArrowUpIcon, DownloadIcon, SquareTerminalIcon, Trash2Icon } from "lucide-react";
+import { CircleArrowUpIcon, DownloadIcon, SquareTerminalIcon, Trash2Icon } from "lucide-react";
 import { catalogEntry, installShown, runsThreads, type AgentEntry } from "@wsp/catalog";
 import { compareVersions, MCP_SERVER_NAME, type AgentRow, type AgentsReport } from "@wsp/protocol";
 import { AGENTS_LIST_WORDS as W, agentSignInStart, editImageAct, heldReason, holdAll, notYet, onImage, signInAct, waitingFlow, type RowAct, type RowsContext } from "../agentsRows.js";
@@ -48,7 +48,7 @@ const agentEntry = (id: string): AgentEntry | undefined => {
 function openAct(row: AgentRow, ctx: RowsContext): RowAct {
   const bin = agentEntry(row.id)?.bin ?? row.id;
   const typeIn = ctx.typeInTerminal;
-  return { id: "open-terminal", label: W.openInTerminal, icon: SquareTerminalIcon, inPlace: true, ...(typeIn === undefined ? { hover: W.fromPanel } : { run: () => typeIn(bin) }) };
+  return { id: "open-terminal", label: W.openInTerminal, icon: SquareTerminalIcon, ...(typeIn === undefined ? { hover: W.fromPanel } : { run: () => typeIn(bin) }) };
 }
 
 /** Every act the agent offers where the list stands, next step first. */
@@ -109,25 +109,17 @@ function installFact(entry: AgentEntry | undefined): Fact[] {
 
 export const AGENTS_KIND: KindModule<AgentItem> = {
   id: "agents",
-  icon: BotIcon,
-  word: "Agents",
-  noun: n => `${n} ${n === 1 ? "agent" : "agents"}`,
-  line: () => ["Agents on ", ""],
-  rowHeight: "h-[72px]",
-  groupings: [],
-  defaultGroup: () => "none",
   items: (report: AgentsReport) =>
     report.agents.map(row => {
       const toolsFile = report.servers.find(s => s.agent === row.id && s.name === MCP_SERVER_NAME)?.file;
       return { row, ...(toolsFile === undefined ? {} : { toolsFile }) };
     }),
-  count: items => items.filter(i => i.row.installed).length,
   key: item => rowId(item.row),
   matches: (item, q) => matchesAny(q, item.row.name, item.row.version),
   groups: items => {
     const installed = items.filter(i => i.row.installed);
     const available = items.filter(i => !i.row.installed);
-    return [...(installed.length === 0 ? [] : [{ id: "installed", items: installed }]), ...(available.length === 0 ? [] : [{ id: "available", label: "Available to install", items: available }])];
+    return [...(installed.length === 0 ? [] : [{ id: "installed", items: installed }]), ...(available.length === 0 ? [] : [{ id: "available", label: W.availableToInstall, items: available }])];
   },
   row: (item, ctx) => {
     const { row } = item;
@@ -135,13 +127,13 @@ export const AGENTS_KIND: KindModule<AgentItem> = {
     const quick = onImage(ctx) || waitingFlow(flow) ? undefined : step;
     if (!row.installed) {
       const about = agentEntry(row.id)?.about.description;
-      return { key: rowId(row), title: row.name, lead: { kind: "agent", agent: row.id }, available: true, ...(about === undefined ? {} : { subtext: about }), ...(quick === undefined ? {} : { quick }) };
+      return { key: rowId(row), title: row.name, lead: { kind: "agent", agent: row.id }, ...(about === undefined ? {} : { subtext: about }), ...(quick === undefined ? {} : { quick }) };
     }
     return {
       key: rowId(row),
       title: row.name,
       lead: { kind: "agent", agent: row.id },
-      ...(row.version === undefined ? {} : { subtext: row.version }),
+      ...(row.version === undefined ? {} : { subtext: `v${row.version}` }),
       status: waitingFlow(flow) ? { ...signInStatus(row), words: W.waitingOnYou } : signInStatus(row),
       ...(quick === undefined ? {} : { quick }),
     };
@@ -173,7 +165,6 @@ export const AGENTS_KIND: KindModule<AgentItem> = {
     };
   },
   empty: on => `No agents found on ${on}.`,
-  none: "no agents",
 };
 
 export const AGENTS = kind(AGENTS_KIND);

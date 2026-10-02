@@ -1,25 +1,109 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Add an MCP server as a page under Settings > Agents: the same form as the
-// panel's, in the page's rows. The agent whose config takes it, its name, a
-// command or an address, where it goes, then its variables or headers, each
-// value masked and held here alone until the host takes it once. The file it
-// lands in stands beside Add server, and the host's refusal under it.
+// Add a tool server as a page, in the settings pages' rows: the agent whose
+// config takes it, its name, a command or an address, where it goes, then its
+// variables or headers, each value masked and held here alone until the host
+// takes it once and writes it into that agent's own file. The file it lands in
+// stands beside Add server, following the agent and where, and the host's
+// refusal under it.
 import { XIcon } from "lucide-react";
-import { agentName } from "@wsp/catalog";
-import { useServerAdd } from "../components/agents/AddServerForm.js";
+import { useState } from "react";
+import { MCP_AGENTS, agentName } from "@wsp/catalog";
+import { commandWords, unclosedQuoteRefusal, type AgentsProject, type AgentsReport, type ServerAdd } from "@wsp/protocol";
 import { HarnessMark } from "../components/chat/HarnessMark.js";
-import { AGENTS_LIST_WORDS as W } from "../components/agents/agentsRows.js";
+import { AGENTS_LIST_WORDS as W, inProject, pickOf, whereNow, type ProjectPick } from "../components/agents/agentsRows.js";
 import type { AddFormProps } from "../components/agents/kinds/kind.js";
 import { AddButton } from "../components/ui/add-button.js";
 import { Button } from "../components/ui/button.js";
 import { Input } from "../components/ui/input.js";
 import { SegmentedControl } from "../components/ui/segmented-control.js";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../components/ui/select.js";
-import { cn } from "../lib/utils.js";
+import { cn, errorText } from "../lib/utils.js";
 import { FACT } from "./format.js";
 import { CARD_INSET, ROW_FIELD, ROW_FLOOR, SELECT_WIDTH } from "./layout.js";
 import { Card, Line, Row } from "./rows.js";
 import { RefusalSlot } from "./sheetParts.js";
+
+type Road = "command" | "address";
+
+interface Pair {
+  readonly id: number;
+  readonly name: string;
+  readonly value: string;
+}
+
+/** The agents there whose config wsp writes servers into, in the catalog's order. */
+const serverAgents = (report: AgentsReport | null): string[] => MCP_AGENTS.filter(a => report?.agents.some(r => r.id === a.id && r.installed) === true).map(a => a.id);
+
+/** The file an add for this agent lands in: the one the report already read servers from, else the first the agent
+ * reads; a project's own file under that project's folder. */
+function fileOf(agent: string, project: AgentsProject | undefined, report: AgentsReport | null): string | undefined {
+  const entry = MCP_AGENTS.find(a => a.id === agent);
+  if (entry === undefined) return undefined;
+  if (project !== undefined) {
+    const own = report?.servers.find(r => r.agent === agent && inProject(r, project))?.file;
+    const first = entry.mcp.projectFiles?.[0];
+    return own ?? (first === undefined ? undefined : `${project.path}/${first}`);
+  }
+  return report?.servers.find(r => r.agent === agent && r.scope === "user")?.file ?? entry.mcp.files[0];
+}
+
+/** What an add has typed so far, the file it lands in, and the one submit that hands it to the host: shared by every
+ * place the form is drawn. `agents` is empty, or `servers` absent, where nothing there takes a server. */
+function useServerAdd({ report, ctx, done }: AddFormProps) {
+  const agents = serverAgents(report);
+  const [agent, setAgent] = useState<string>(agents[0] ?? "");
+  const [name, setName] = useState("");
+  const [road, setRoad] = useState<Road>("command");
+  const [command, setCommand] = useState("");
+  const [url, setUrl] = useState("");
+  const [pairs, setPairs] = useState<readonly Pair[]>([]);
+  const [next, setNext] = useState(0);
+  const [picked, setPicked] = useState<ProjectPick | undefined>(undefined);
+  const [adding, setAdding] = useState(false);
+  const [refused, setRefused] = useState<string | undefined>(undefined);
+  const servers = ctx.servers;
+  const on = ctx.on ?? ctx.computer ?? "";
+
+  const named = pairs.filter(p => p.name.trim() !== "" || p.value !== "");
+  const where = whereNow(report, picked, on);
+  const project = where.project;
+  const ready = where.lost === undefined && agent !== "" && name.trim() !== "" && (road === "command" ? command.trim() !== "" : url.trim() !== "") && named.every(p => p.name.trim() !== "") && !adding;
+  const file = where.lost === undefined ? fileOf(agent, project, report) : undefined;
+
+  const submit = (): void => {
+    if (!ready || servers === undefined) return;
+    const words = road === "command" ? commandWords(command) : [];
+    if (words === undefined) return setRefused(unclosedQuoteRefusal);
+    if (new Set(named.map(p => p.name.trim())).size < named.length) return setRefused(W.twoPairsOneName(road));
+    const values = Object.fromEntries(named.map(p => [p.name.trim(), p.value]));
+    const [program = "", ...args] = words;
+    const ask: ServerAdd = {
+      agent,
+      name: name.trim(),
+      ...(project === undefined ? {} : { project: true }),
+      ...(road === "command" ? { command: program, args, ...(named.length > 0 ? { env: values } : {}) } : { url: url.trim(), ...(named.length > 0 ? { headers: values } : {}) }),
+    };
+    setAdding(true);
+    setRefused(undefined);
+    servers.add(ask, project).then(done, (e: unknown) => {
+      setAdding(false);
+      setRefused(errorText(e));
+    });
+  };
+
+  const pick = (to: Road): void => {
+    // Variables and headers are not the same thing, so a switch of road starts them over.
+    if (to !== road) setPairs([]);
+    setRoad(to);
+  };
+  const setPair = (id: number, change: Partial<Pair>): void => setPairs(all => all.map(p => (p.id === id ? { ...p, ...change } : p)));
+  const addPair = (): void => {
+    setPairs(all => [...all, { id: next, name: "", value: "" }]);
+    setNext(n => n + 1);
+  };
+  const dropPair = (id: number): void => setPairs(all => all.filter(x => x.id !== id));
+  return { agents, servers, on, agent, setAgent, name, setName, road, pick, command, setCommand, url, setUrl, pairs, setPair, addPair, dropPair, where, setPicked: (v: string) => setPicked(pickOf(report, v)), ready, file, adding, refused, submit };
+}
 
 const AgentChoice = ({ id }: { id: string }) => (
   <span className="flex min-w-0 items-center gap-[7px]">

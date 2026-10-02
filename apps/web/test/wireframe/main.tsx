@@ -95,13 +95,10 @@
 //   bring-back-absent    the same on a workspace whose computer is not
 //                        answering, which says what that computer says
 //   bring-back-roadless  the same on a wsp whose host carries no such request
-//   agents-widths    the agents manager off one report as the page at its
-//                    card's width and a phone's (760, 696, 358) and as the
-//                    panel at the widths its shape changes over (520, 480,
-//                    380 and its 360 floor)
-//   agents-states    the manager on this Mac at the panel's floor and the
-//                    page's card, its servers in every state a connect
-//                    answers, a Sign in waiting on the browser
+//   agents-widths    the Agents tab of the panel of a task on this Mac at
+//                    480 and at its 360 floor: Claude Code with an update
+//                    out, Codex waiting on a sign-in, OpenCode not checked
+//                    and Pi to install, every server state a connect answers
 //   panel-agents     the task on the box selected, its panel open on Agents
 //                    (&fork=solari: the same task a fork at Solari, whose one
 //                    act is Edit image)
@@ -115,11 +112,7 @@ import { manyAgents } from "./agents";
 import { DEFAULT_PREFERENCES, copyFirstLine, hostnameSetLine, type HarnessCatalog, GOLDEN_STAGE_WORDS, MACHINE_ROW_LABEL, STOP_LEFT_MACHINE_LINE, hereWord, startingLine, type AgentsSignInEvent, type Capabilities, type DeviceView, type InitAgent, type InitJob, type InitRow, type InitScreen, type PlaceAddJob, type PlaceAddStep, type PlaceProvision, type PlaceView, type ProjectView, type SealedImage, type SessionView, type ThreadDefaults, type WorkspaceLanding, type WorkspaceView } from "@wsp/protocol";
 import { AppShell } from "../../src/shell/AppShell";
 import { FirstRun } from "../../src/shell/FirstRun";
-import { AgentsManager, type AgentsShell } from "../../src/components/agents/AgentsManager";
-import { useServerTools } from "../../src/components/agents/useServerTools";
-import { useServerActs } from "../../src/components/agents/useServerActs";
-import { useSkillActs } from "../../src/components/agents/useSkillActs";
-import { useAgentActs } from "../../src/components/agents/useAgentActs";
+import { AgentsSurface } from "../../src/components/agents/AgentsSurface";
 import { SettingsPage } from "../../src/settings/SettingsPage";
 import { HARNESSES } from "../fixtures/harnesses";
 import { AGENTS_PAGE_REPORT, AGENTS_REPORT, AGENTS_SETUP_REPORT, AGENTS_TOOLS_REPORT, HOSTILE_SKILL_MD, SERVER_TOOLS, SKILL_HITS, SKILL_PREVIEWS } from "../fixtures/agents-report";
@@ -664,7 +657,7 @@ const api = {
   initStart: async () => new Promise<never>(() => {}),
   initDraft: async () => new Promise<never>(() => {}),
   hostTerminalConfig: async () => ({ files: [] }),
-  agentsRead: async () => (toolsScreen ? AGENTS_TOOLS_REPORT : agentScreen ? AGENTS_SETUP_REPORT : params.get("projects") === "1" ? AGENTS_PAGE_REPORT : AGENTS_REPORT),
+  agentsRead: async () => (screen === "agents-widths" || screen === "skill-preview" ? PANEL_REPORT : toolsScreen ? AGENTS_TOOLS_REPORT : agentScreen ? AGENTS_SETUP_REPORT : params.get("projects") === "1" ? AGENTS_PAGE_REPORT : AGENTS_REPORT),
   serversIcon: async (host: string) => SERVER_ICON[host]?.() ?? null,
   // wsp's own server is still being asked, so a row reads checking; any other server answers with one tool.
   serversTools: async (_target: unknown, _agent: string, name: string) =>
@@ -798,61 +791,16 @@ useRightPanelStore.setState({
   byWorkspaceId: Object.fromEntries([...HELD.map(w => w.id), CREATED_ID].map(id => [id, screen === "settings-over-panel" && id === "ws_copy" ? openPanel : screen === "panel-agents" && id === "ws_box" ? agentsPanel : shutPanel])),
 });
 
-/** The widths the agents manager is measured at: the page's column, its card and a phone's page, and the panel over
- * the widths its tabs change shape at down to its floor. */
-const AGENTS_WIDTHS: readonly { shell: AgentsShell; width: number }[] = [
-  { shell: "page", width: 760 },
-  { shell: "page", width: 696 },
-  { shell: "page", width: 358 },
-  { shell: "panel", width: 520 },
-  { shell: "panel", width: 480 },
-  { shell: "panel", width: 380 },
-  { shell: "panel", width: 360 },
-];
+/** The panel's widths: the one it opens at and its floor. */
+const PANEL_WIDTHS = [480, 360] as const;
+/** The task on this Mac's own read: Claude Code with an update out beside the agents of the shared report. */
+const PANEL_REPORT = { ...AGENTS_REPORT, target: { workspaceId: "ws_copy" }, reach: "here" as const, agents: AGENTS_REPORT.agents.map(a => (a.id === "claude" ? { ...a, update: { to: "2.1.290", command: "claude update" } } : a)) };
 function AgentsWidths() {
-  const tools = useServerTools(AGENTS_REPORT.target);
-  const skills = useSkillActs(AGENTS_REPORT.target);
-  const servers = useServerActs(AGENTS_REPORT.target);
   return (
-    <div className="flex flex-col gap-10 bg-background p-4">
-      {AGENTS_WIDTHS.map(w => (
-        <div key={w.width} data-agents-width={w.width} data-shell={w.shell} style={{ width: w.width }}>
-          <AgentsManager
-            shell={w.shell}
-            head={w.shell === "panel" ? { computer: "spoo", project: { name: "wsp", path: "~/wsp" }, open: () => {} } : { line: "Agents, MCP servers and skills on spoo." }}
-            report={AGENTS_REPORT}
-            reading={false}
-            on="spoo"
-            ctx={{ where: "box", computer: "spoo", ...(tools === undefined ? {} : { tools }), ...(skills === undefined ? {} : { skills }), ...(servers === undefined ? {} : { servers }) }}
-            onRefresh={() => {}}
-            now={Date.parse(AGENTS_REPORT.readAt)}
-          />
-        </div>
-      ))}
-    </div>
-  );
-}
-
-/** This Mac's report, its servers answering in every state a connect gives: connected with its tools, failed, needs
- * sign-in, signed in by its harness, and still checking, beside one turned off and a project's never asked. */
-const STATES_REPORT = { ...AGENTS_REPORT, target: { placeId: "here" }, reach: "here" as const };
-function AgentsStates() {
-  const tools = useServerTools(STATES_REPORT.target);
-  const acts = useAgentActs(STATES_REPORT.target);
-  return (
-    <div className="flex flex-col gap-10 bg-background p-4">
-      {([{ shell: "panel", width: 360 }, { shell: "page", width: 696 }] as const).map(w => (
-        <div key={w.width} data-agents-width={w.width} data-shell={w.shell} style={{ width: w.width }}>
-          <AgentsManager
-            shell={w.shell}
-            head={w.shell === "panel" ? { computer: "this Mac", project: { name: "wsp", path: "~/wsp" } } : { line: "Agents, MCP servers and skills on this Mac." }}
-            report={STATES_REPORT}
-            reading={false}
-            on="this Mac"
-            ctx={{ where: "here", ...(tools === undefined ? {} : { tools }), ...(acts === undefined ? {} : { acts }) }}
-            onRefresh={() => {}}
-            now={Date.parse(AGENTS_REPORT.readAt)}
-          />
+    <div className="flex h-dvh items-start gap-10 bg-background p-4">
+      {PANEL_WIDTHS.map(width => (
+        <div key={width} data-agents-width={width} style={{ width }} className="flex h-full flex-col border-x border-border/50">
+          <AgentsSurface workspaceId="ws_copy" />
         </div>
       ))}
     </div>
@@ -903,8 +851,6 @@ createRoot(document.getElementById("root")!).render(
   <>
     {screen === "agents-widths" || screen === "skill-preview" ? (
       <AgentsWidths />
-    ) : screen === "agents-states" ? (
-      <AgentsStates />
     ) : firstRunScreens.includes(screen) ? (
       <div className="flex h-dvh flex-col">
         <FirstRun />

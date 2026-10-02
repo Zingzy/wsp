@@ -18,7 +18,7 @@ import { A_MESSAGE, APP_UP, FAILED_ON_THE_PAGE, failuresToCheck, NOT_READY_NAMES
 import { render } from "@testing-library/react";
 import { createElement } from "react";
 import { Skeleton } from "../src/components/ui/skeleton";
-import { StatusView } from "../src/components/agents/agentsParts";
+import { StatusWord } from "../src/settings/agentKinds";
 import { NO_FINDER_CHOOSER, PASTE_THIS, homeOf, keptLog, labLines, launchDiesLine, parseArgs as parseLabArgs, pointerPath, stopLab, whyALaunchDies, whyNotOursToRemove } from "./lab.mjs";
 
 describe("the fixtures a lab serves", () => {
@@ -396,7 +396,7 @@ describe("the failures a shot must not show", () => {
     const still = STILL_LOADING.join(", ");
     const shown = parts => render(createElement("div", null, ...parts)).container.querySelectorAll(still).length;
     expect(shown([createElement(Skeleton)])).toBe(1);
-    const status = state => createElement(StatusView, { status: { state, tone: "quiet", words: state } });
+    const status = state => createElement(StatusWord, { word: state, tone: "quiet", state });
     expect([shown([status("checking")]), shown([status("connected")])]).toEqual([1, 0]);
   });
 });

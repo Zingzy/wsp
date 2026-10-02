@@ -41,9 +41,9 @@ describe.skipIf(renderSkipped !== undefined)("a skill's SKILL.md rendered restri
     });
     await page.addInitScript(() => window.localStorage.clear());
     await page.goto(`${base}?screen=skill-preview&theme=dark`);
-    await page.waitForSelector("[data-agents-row]");
+    await page.waitForSelector("[data-agent-row]");
     const at = page.locator('[data-agents-width="480"]');
-    await at.locator("[data-segment]").filter({ has: page.locator('[aria-label="Skills"]') }).click();
+    await at.getByRole("radio", { name: /^Skills/ }).click();
     return { asked, at };
   };
 
@@ -79,16 +79,16 @@ describe.skipIf(renderSkipped !== undefined)("a skill's SKILL.md rendered restri
 
   it("draws an installed skill's hostile SKILL.md as text but for one web link and one heading link, and fetches nothing", async () => {
     const { asked, at } = await open();
-    await at.locator('[data-agents-row="skill-user-frontend-design"] [data-row-trigger]').click();
+    await at.locator('[data-settings-row="skill-user-frontend-design"] [data-settings-title]').click();
     await eightFacts(at, asked);
   });
 
   it("draws a skills.sh result's hostile SKILL.md before install the same way", async () => {
     const { asked, at } = await open();
-    await at.locator("[data-k=agents-add]").click();
+    await at.locator("[data-k=kind-add]").click();
     await at.locator("[data-k=add-search]").fill("pdf");
     await at.locator("[data-k=add-search]").press("Enter");
-    await at.locator('[data-add-row="anthropics/skills/pdf"] [data-row-trigger]').click();
+    await at.locator('[data-found-row="anthropics/skills/pdf"]').click();
     await eightFacts(at, asked);
   });
 });

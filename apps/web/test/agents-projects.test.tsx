@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// A computer's page covers every project on it: its MCP servers and skills
-// stand under Global, then one group per project by name with its folder; a
-// server or skill of one name in two projects is two rows; an act on a
-// project's row names that project to the host, and the report read again is
-// the computer's. A tool's own level lists its parameters. Add a tool server
-// and Add a skill ask where it goes: the home, or one of the projects.
+// The agents panel over a read that covers every project on a computer: its
+// tool servers and skills stand under Global, then one card per project by
+// name with its folder; a server or skill of one name in two projects is two
+// rows; an act on a project's row names that project to the host, and the
+// report read again is the computer's. Add a tool server and Add a skill ask
+// where it goes: the home, or one of the projects.
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import type { AgentsProject, AgentsReport, AgentsTarget, McpRow, ServerAdd, ServerAsk, ServerToolsAnswer, SkillHit, SkillRow } from "@wsp/protocol";
-import { AgentsManager } from "../src/components/agents/AgentsManager.js";
+import { AgentsPanel } from "../src/components/agents/AgentsPanel.js";
 import { AGENTS_LIST_WORDS as W } from "../src/components/agents/agentsRows.js";
 import { useServerActs } from "../src/components/agents/useServerActs.js";
 import { useServerTools } from "../src/components/agents/useServerTools.js";
@@ -16,6 +16,7 @@ import { useSkillActs } from "../src/components/agents/useSkillActs.js";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { pickOption } from "./select.js";
+import { back, headAct, openRow, panel } from "./agents-panel-harness.js";
 
 const NOW = Date.parse("2026-09-25T12:03:00.000Z");
 const READ_AT = "2026-09-25T12:00:00.000Z";
@@ -65,14 +66,10 @@ function Page({ report = REPORT }: { report?: AgentsReport }) {
   const skills = useSkillActs(REPORT.target);
   const tools = useServerTools(REPORT.target);
   return (
-    <AgentsManager
-      shell="page"
-      head={{ line: "x" }}
-      report={report}
-      reading={false}
-      on="spoo"
+    <AgentsPanel
+      on={{ name: "spoo" }}
+      read={{ report, reading: false, error: null, readAt: NOW, refresh: () => {} }}
       ctx={{ where: "box", heldWhy: null, ...(servers === undefined ? {} : { servers }), ...(skills === undefined ? {} : { skills }), ...(tools === undefined ? {} : { tools }) }}
-      onRefresh={() => {}}
       now={NOW}
     />
   );
@@ -101,24 +98,22 @@ function host() {
 }
 
 const tab = (name: string): void => void fireEvent.click(screen.getByRole("radio", { name: new RegExp(`^${name}`) }));
+/** Each card of rows: its id, its head, and the rows it holds. */
 const groups = (): [string | null, string | null, string[]][] =>
-  [...document.querySelectorAll<HTMLElement>("[data-agents-group]")].map(g => [
-    g.getAttribute("data-agents-group"),
-    g.querySelector("[data-group-label]")?.textContent ?? null,
-    [...g.querySelectorAll("[data-agents-row]")].map(r => r.getAttribute("data-agents-row")!),
+  [...panel().querySelectorAll<HTMLElement>("[data-settings-card^=kind-]")].map(g => [
+    g.getAttribute("data-settings-card"),
+    g.querySelector("[data-settings-head]")?.textContent ?? null,
+    [...g.querySelectorAll("[data-settings-row]")].map(r => r.getAttribute("data-settings-row")!),
   ]);
-const open = (key: string): HTMLElement => {
-  fireEvent.click(document.querySelector<HTMLElement>(`[data-agents-row="${key}"] [data-row-trigger]`)!);
-  return document.querySelector<HTMLElement>("[data-agents-detail]")!;
-};
-const remove = async (detail: HTMLElement): Promise<void> => {
-  fireEvent.click(detail.querySelector<HTMLButtonElement>("[data-detail-acts] [data-k=act-remove]")!);
+const remove = async (): Promise<void> => {
+  fireEvent.click(panel().querySelector<HTMLButtonElement>("[data-settings-card=kind-remove] [data-k=act-remove]")!);
   fireEvent.click(await screen.findByRole("button", { name: W.remove }));
 };
+const add = (): void => void fireEvent.click(panel().querySelector<HTMLButtonElement>("[data-k=kind-add]")!);
 /** Picks where an add goes, answering every option the pick offered, each as it reads. */
 const pickWhere = (name: string): Promise<string[]> => pickOption(document.querySelector("[data-k=where-pick]")!, new RegExp(`^${name}`));
 const whereTrigger = (): string | null | undefined => document.querySelector("[data-k=where-pick]")?.textContent;
-const lostLine = (): string | null | undefined => document.querySelector("[data-k=where-pick-lost]")?.textContent;
+const lost = (project: string): boolean => panel().textContent?.includes(W.projectLeft(project, "spoo")) === true;
 const settle = async (): Promise<void> => {
   await act(async () => {
     for (let i = 0; i < 4; i++) await new Promise(r => setTimeout(r, 0));
@@ -130,26 +125,26 @@ afterEach(() => {
   useStore.setState({ api: null });
 });
 
-describe("a computer's page over its projects", () => {
+describe("a read over a computer's projects", () => {
   it("stands its servers under Global, then each project by name with its folder, one row per project for one name", () => {
     host();
     render(<Page />);
     tab("Tool servers");
     expect(groups()).toEqual([
-      ["global", "Global", ["server-global-notion-stdio-npx notion-mcp"]],
-      ["project-pr_app", "app~/code/app", ["server-project-pr_app-db-stdio-npx db-mcp"]],
-      ["project-pr_www", "www~/code/www", ["server-project-pr_www-db-stdio-npx db-mcp"]],
+      ["kind-global", "Global on spoochecked just now", ["server-global-notion-stdio-npx notion-mcp"]],
+      ["kind-project-pr_app", "app~/code/app", ["server-project-pr_app-db-stdio-npx db-mcp"]],
+      ["kind-project-pr_www", "www~/code/www", ["server-project-pr_www-db-stdio-npx db-mcp"]],
     ]);
   });
 
-  it("stands its skills by source with one group per project, and the search finds a project by its name", () => {
+  it("stands its skills by source with one card per project, and the search finds a project by its name", () => {
     host();
     render(<Page />);
     tab("Skills");
     expect(groups()).toEqual([
-      ["source-user", "Global", ["skill-user-pdf"]],
-      ["project-pr_app", "app~/code/app", ["skill-project-pr_app-deploy"]],
-      ["project-pr_www", "www~/code/www", ["skill-project-pr_www-deploy"]],
+      ["kind-source-user", "Global on spoochecked just now", ["skill-user-pdf"]],
+      ["kind-project-pr_app", "app~/code/app", ["skill-project-pr_app-deploy"]],
+      ["kind-project-pr_www", "www~/code/www", ["skill-project-pr_www-deploy"]],
     ]);
     fireEvent.change(screen.getByPlaceholderText("Search skills"), { target: { value: "www" } });
     expect(groups().flatMap(g => g[2])).toEqual(["skill-project-pr_www-deploy"]);
@@ -159,12 +154,15 @@ describe("a computer's page over its projects", () => {
     const h = host();
     render(<Page />);
     tab("Tool servers");
-    await remove(open("server-project-pr_www-db-stdio-npx db-mcp"));
-    fireEvent.click(document.querySelector<HTMLButtonElement>("[data-k=agents-back]")!);
-    await remove(open("server-global-notion-stdio-npx notion-mcp"));
-    fireEvent.click(document.querySelector<HTMLButtonElement>("[data-k=agents-back]")!);
+    openRow("server-project-pr_www-db-stdio-npx db-mcp");
+    await remove();
+    back();
+    openRow("server-global-notion-stdio-npx notion-mcp");
+    await remove();
+    back();
     tab("Skills");
-    await remove(open("skill-project-pr_app-deploy"));
+    openRow("skill-project-pr_app-deploy");
+    await remove();
     await settle();
     expect(h.removes).toEqual([
       [{ placeId: "p_spoo", project: "pr_www" }, { agent: "claude", name: "db", scope: "project" }],
@@ -173,43 +171,33 @@ describe("a computer's page over its projects", () => {
     ]);
   });
 
-  it("asks a project's server for its tools in that project, and a tool's own level lists its parameters with their type and whether a call needs them", async () => {
+  it("asks a project's server for its tools in that project, and lists each tool with what it does", async () => {
     const h = host();
     render(<Page />);
     tab("Tool servers");
-    const detail = open("server-project-pr_app-db-stdio-npx db-mcp");
-    fireEvent.click(detail.querySelector<HTMLButtonElement>("[data-detail-acts] [data-k=act-list-tools]")!);
+    openRow("server-project-pr_app-db-stdio-npx db-mcp");
+    fireEvent.click(panel().querySelector<HTMLButtonElement>("[data-settings-card=kind-under] [data-k=agents-refresh]")!);
     const db = h.tools.filter(t => t.name === "db");
     expect(db.map(t => [t.target, t.name])).toEqual([[{ placeId: "p_spoo", project: "pr_app" }, "db"]]);
-    db[0]!.answer({
-      auth: "connected",
-      tools: [{ name: "query", description: "Runs one query", params: [{ name: "sql", type: "string", required: true, description: "The query to run" }, { name: "limit", type: "integer", required: false }, { name: "raw", required: false }] }],
-      readAt: READ_AT,
-    });
+    db[0]!.answer({ auth: "connected", tools: [{ name: "query", description: "Runs one query", params: [{ name: "sql", type: "string", required: true }] }], readAt: READ_AT });
     await settle();
-    fireEvent.click(document.querySelector<HTMLButtonElement>("[data-under-row=query] button")!);
-    const level = document.querySelector<HTMLElement>("[data-agents-under-row]")!;
-    expect(level.querySelector("[data-k=under-list] h4")?.textContent).toBe(W.parameters);
-    expect([...level.querySelectorAll("[data-under-item]")].map(i => [...i.querySelectorAll("span")].map(s => s.textContent))).toEqual([
-      ["sqlstring, required", "sql", "string, required", "The query to run"],
-      ["limitinteger", "limit", "integer"],
-      ["raw", "raw"],
-    ]);
+    const tool = panel().querySelector<HTMLElement>("[data-settings-card=kind-under] [data-settings-row=under-query]")!;
+    expect([tool.querySelector("[data-settings-title]")?.textContent, tool.querySelector("[data-settings-description]")?.textContent]).toEqual(["query", "Runs one query"]);
   });
 
-  it("adds an MCP server to the home or to the project picked, each by its folder, and names that project to the host", async () => {
+  it("adds a tool server to the home or to the project picked, the file following it, and names that project to the host", async () => {
     const h = host();
     render(<Page />);
     tab("Tool servers");
-    fireEvent.click(document.querySelector<HTMLButtonElement>("[data-k=agents-add]")!);
-    expect(document.querySelector("[data-k=where-pick]")?.textContent).toBe(W.global);
-    expect(document.querySelector("[data-k=add-server-file]")?.textContent).toBe("~/.claude.json");
-    expect(await pickWhere("www")).toEqual([W.global, "app~/code/app", "www~/code/www"]);
-    expect(whereTrigger()).toBe("www~/code/www");
-    expect(document.querySelector("[data-k=add-server-file]")?.textContent).toBe("~/code/www/.mcp.json");
-    fireEvent.change(document.querySelector<HTMLInputElement>("[data-k=add-server-name]")!, { target: { value: "acme" } });
-    fireEvent.change(document.querySelector<HTMLInputElement>("[data-k=add-server-command]")!, { target: { value: "uvx acme" } });
-    fireEvent.click(document.querySelector<HTMLButtonElement>("[data-k=add-server-go]")!);
+    add();
+    expect(whereTrigger()).toBe(W.global);
+    expect(panel().querySelector("[data-k=add-server-file]")?.textContent).toBe("~/.claude.json");
+    expect(await pickWhere("www")).toEqual([W.global, "app", "www"]);
+    expect(whereTrigger()).toBe("www");
+    expect(panel().querySelector("[data-k=add-server-file]")?.textContent).toBe("~/code/www/.mcp.json");
+    fireEvent.change(panel().querySelector<HTMLInputElement>("[data-k=add-server-name]")!, { target: { value: "acme" } });
+    fireEvent.change(panel().querySelector<HTMLInputElement>("[data-k=add-server-command]")!, { target: { value: "uvx acme" } });
+    fireEvent.click(panel().querySelector<HTMLButtonElement>("[data-k=add-server-go]")!);
     await settle();
     expect(h.adds).toEqual([[{ placeId: "p_spoo", project: "pr_www" }, { agent: "claude", name: "acme", project: true, command: "uvx", args: ["acme"] }]]);
   });
@@ -218,17 +206,17 @@ describe("a computer's page over its projects", () => {
     const h = host();
     render(<Page />);
     tab("Skills");
-    fireEvent.click(document.querySelector<HTMLButtonElement>("[data-k=agents-add]")!);
-    fireEvent.change(document.querySelector<HTMLInputElement>("[data-k=add-search]")!, { target: { value: "pdf" } });
-    fireEvent.keyDown(document.querySelector("[data-k=add-search]")!, { key: "Enter" });
+    add();
+    fireEvent.change(panel().querySelector<HTMLInputElement>("[data-k=add-search]")!, { target: { value: "pdf" } });
+    fireEvent.keyDown(panel().querySelector("[data-k=add-search]")!, { key: "Enter" });
     await settle();
-    fireEvent.click(document.querySelector<HTMLButtonElement>('[data-add-row="anthropics/skills/pdf"] [data-row-trigger]')!);
-    const detail = (): HTMLElement => document.querySelector<HTMLElement>("[data-agents-detail]")!;
-    const status = (): string | null | undefined => detail().querySelector("[data-fact=status] [data-status-word]")?.textContent;
-    expect(status()).toBe(W.installed);
+    fireEvent.click(panel().querySelector<HTMLElement>('[data-found-row="anthropics/skills/pdf"]')!);
+    const status = (): string | null | undefined => panel().querySelector("[data-k=kind-head] [data-k=kind-status]")?.textContent;
+    expect(status()).toBe("Installed");
+    expect(headAct("install")).toBeNull();
     await pickWhere("app");
-    expect(status()).toBe(W.notInstalled);
-    fireEvent.click(detail().querySelector<HTMLButtonElement>("[data-detail-acts] [data-k=act-install]")!);
+    expect(headAct("install")?.textContent).toBe("Install pdf");
+    fireEvent.click(headAct("install")!);
     await settle();
     expect(h.adds).toEqual([[{ placeId: "p_spoo", project: "pr_app" }, "anthropics/skills/pdf", ["claude"], true]]);
   });
@@ -237,24 +225,24 @@ describe("a computer's page over its projects", () => {
     const h = host();
     const { rerender } = render(<Page />);
     tab("Tool servers");
-    fireEvent.click(document.querySelector<HTMLButtonElement>("[data-k=agents-add]")!);
+    add();
     await pickWhere("www");
-    fireEvent.change(document.querySelector<HTMLInputElement>("[data-k=add-server-name]")!, { target: { value: "acme" } });
-    fireEvent.change(document.querySelector<HTMLInputElement>("[data-k=add-server-command]")!, { target: { value: "uvx acme" } });
+    fireEvent.change(panel().querySelector<HTMLInputElement>("[data-k=add-server-name]")!, { target: { value: "acme" } });
+    fireEvent.change(panel().querySelector<HTMLInputElement>("[data-k=add-server-command]")!, { target: { value: "uvx acme" } });
     rerender(<Page report={without(WWW)} />);
-    expect(lostLine()).toBe("www is no longer on spoo; pick where it goes.");
+    expect(lost("www")).toBe(true);
     expect(whereTrigger()).not.toContain("pr_www");
     expect(whereTrigger()).not.toContain(W.global);
-    expect(document.querySelector("[data-k=add-server-file]")?.textContent).not.toBe("~/.claude.json");
-    const go = document.querySelector<HTMLButtonElement>("[data-k=add-server-go]")!;
+    expect(panel().querySelector("[data-k=add-server-file]")?.textContent).not.toBe("~/.claude.json");
+    const go = panel().querySelector<HTMLButtonElement>("[data-k=add-server-go]")!;
     expect(go.disabled).toBe(true);
     fireEvent.click(go);
-    fireEvent.keyDown(document.querySelector("[data-k=add-server-command]")!, { key: "Enter" });
+    fireEvent.keyDown(panel().querySelector("[data-k=add-server-command]")!, { key: "Enter" });
     await settle();
     expect(h.adds).toEqual([]);
     await pickWhere("app");
-    expect(lostLine()).toBeUndefined();
-    fireEvent.click(document.querySelector<HTMLButtonElement>("[data-k=add-server-go]")!);
+    expect(lost("www")).toBe(false);
+    fireEvent.click(panel().querySelector<HTMLButtonElement>("[data-k=add-server-go]")!);
     await settle();
     expect(h.adds).toEqual([[{ placeId: "p_spoo", project: "pr_app" }, { agent: "claude", name: "acme", project: true, command: "uvx", args: ["acme"] }]]);
   });
@@ -263,20 +251,18 @@ describe("a computer's page over its projects", () => {
     const h = host();
     const { rerender } = render(<Page />);
     tab("Skills");
-    fireEvent.click(document.querySelector<HTMLButtonElement>("[data-k=agents-add]")!);
-    fireEvent.change(document.querySelector<HTMLInputElement>("[data-k=add-search]")!, { target: { value: "pdf" } });
-    fireEvent.keyDown(document.querySelector("[data-k=add-search]")!, { key: "Enter" });
+    add();
+    fireEvent.change(panel().querySelector<HTMLInputElement>("[data-k=add-search]")!, { target: { value: "pdf" } });
+    fireEvent.keyDown(panel().querySelector("[data-k=add-search]")!, { key: "Enter" });
     await settle();
-    fireEvent.click(document.querySelector<HTMLButtonElement>('[data-add-row="anthropics/skills/pdf"] [data-row-trigger]')!);
+    fireEvent.click(panel().querySelector<HTMLElement>('[data-found-row="anthropics/skills/pdf"]')!);
     await pickWhere("app");
-    expect(whereTrigger()).toBe("app~/code/app");
+    expect(whereTrigger()).toBe("app");
     rerender(<Page report={without(APP)} />);
-    expect(lostLine()).toBe("app is no longer on spoo; pick where it goes.");
+    expect(lost("app")).toBe(true);
     expect(whereTrigger()).not.toContain("pr_app");
     expect(whereTrigger()).not.toContain(W.global);
-    const install = document.querySelector<HTMLButtonElement>("[data-agents-detail] [data-detail-acts] [data-k=act-install]")!;
-    expect(install.disabled).toBe(true);
-    fireEvent.click(install);
+    expect(headAct("install")).toBeNull();
     await settle();
     expect(h.adds).toEqual([]);
   });

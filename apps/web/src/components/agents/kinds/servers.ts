@@ -1,22 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The MCP servers tab: one entry per server across agents, folded where two
+// The Tool servers tab: one entry per server across agents, folded where two
 // agents in one scope name the same server with the same command or address.
-// The row says where it is reached and its state as a dot and a word; the
+// The row says where it is reached and its state as a word and a dot; the
 // detail is the /mcp view: status, command, names, each agent's file, the
 // tools, and the next step first. A server's state is what its one tools
 // connect answered, asked when the tab shows it for the person's own servers,
-// a command only on this computer and elsewhere on Check, and on List tools
-// for a project's; no press but a sign-in, Reconnect or Read
-// again asks again, so opening the tools changes nothing. Turn off and on and
-// Remove act on every agent the entry is set up for, and Add an MCP server is
-// a form in place of the list.
-import { ActivityIcon, PlugIcon, PowerIcon, PowerOffIcon, RefreshCwIcon, ServerIcon, Trash2Icon, WrenchIcon } from "lucide-react";
+// a command only on this computer and elsewhere on Check, and from the tools'
+// refresh for a project's; no press but a sign-in, Reconnect or a refresh asks
+// again, so opening a server changes nothing. Turn off and on and Remove act
+// on every agent the entry is set up for, and Add a tool server is a form.
+import { ActivityIcon, PowerIcon, PowerOffIcon, RefreshCwIcon, ServerIcon, Trash2Icon } from "lucide-react";
 import { agentName, mcpSwitch, serverMark } from "@wsp/catalog";
-import type { AgentsProject, AgentsReport, McpRow, McpTool, McpToolParam, ServerToolsAnswer } from "@wsp/protocol";
+import type { AgentsProject, AgentsReport, McpRow, McpTool, ServerToolsAnswer } from "@wsp/protocol";
 import { AGENTS_LIST_WORDS as W, editImageAct, heldReason, holdAll, notYet, onImage, serverSignInStart, signInAct, waitingFlow, type FlowView, type RowAct, type RowsContext, type ToolsState } from "../agentsRows.js";
-import { AddServerForm } from "../AddServerForm.js";
 import { AddServerRows } from "../../../settings/AddServerRows.js";
-import { byName, kind, matchesAny, projectGroups, rowKey, type Fact, type GroupBy, type GroupView, type KindModule, type Lead, type ServerState, type Status, type UnderRow } from "./kind.js";
+import { byName, kind, matchesAny, projectGroups, rowKey, type Fact, type GroupView, type KindModule, type Lead, type ServerState, type Status, type UnderRow } from "./kind.js";
 
 /** Where a server is set up: the person's own files, or the project's. */
 type Scope = "global" | "project";
@@ -131,7 +129,7 @@ export function statusOf(s: Standing): Status {
 }
 
 /** The acts, next step first, and the sign-in flow standing for any of the entry's agents. */
-function actsOf(entry: ServerEntry, ctx: RowsContext, openUnder: () => void) {
+function actsOf(entry: ServerEntry, ctx: RowsContext) {
   const all = standings(entry, ctx);
   const worst = worstOf(all);
   const asked = askedOf(all);
@@ -142,30 +140,14 @@ function actsOf(entry: ServerEntry, ctx: RowsContext, openUnder: () => void) {
     label: W.check,
     icon: ActivityIcon,
     hover: W.startsOnce,
-    inPlace: true,
     ...(tools === undefined ? {} : { run: () => entry.rows.forEach(r => tools.list(r)) }),
   };
   const waitsForCheck = asked?.answer === undefined && asked?.listing !== true && entry.rows.some(r => heldCommand(r, ctx));
   // A fork is a copy of the image, so its one act besides Check is the image's.
   if (onImage(ctx)) return { all, worst, asked, acts: [...(waitsForCheck ? [check] : []), editImageAct(ctx)], signIns: new Map<string, RowAct>(), flow: undefined };
   const primary = asked?.row ?? worst.row;
-  const list: RowAct = {
-    id: "list-tools",
-    label: W.listTools,
-    icon: WrenchIcon,
-    hover: W.startsOnce,
-    ...(tools === undefined
-      ? {}
-      : {
-          run: () => {
-            tools.list(primary);
-            openUnder();
-          },
-        }),
-  };
   const listing = asked?.listing === true;
   const reconnect: RowAct = { id: "reconnect", label: listing ? W.listing : W.reconnect, icon: RefreshCwIcon, ...(listing ? { busy: true } : tools === undefined ? {} : { run: () => tools.list(worst.state === "failed" ? worst.row : primary, true) }) };
-  const view: RowAct = { id: "view-tools", label: W.viewTools, icon: WrenchIcon, ...(asked?.answer?.holder !== undefined && asked.answer.tools === undefined ? { hover: W.holdsSignIn(agentName(asked.answer.holder)) } : {}), run: openUnder };
   const servers = ctx.servers;
   const busy = servers?.busyOf(entry.key) === true;
   // A server turns off only where every agent it is set up for keeps a switch per server.
@@ -203,70 +185,32 @@ function actsOf(entry: ServerEntry, ctx: RowsContext, openUnder: () => void) {
           : worst.state === "checking"
             ? [turnOff, remove]
             : asked?.answer !== undefined
-              ? [view, ...withSignIn, reconnect, turnOff, remove]
+              ? [...withSignIn, reconnect, turnOff, remove]
               : entry.rows.some(r => heldCommand(r, ctx))
                 ? [check, turnOff, remove]
-                : [list, ...withSignIn, turnOff, remove];
-  // Opening the tools reads the answer already here, so it stands wherever the other acts are held.
-  const held = holdAll(acts, ctx).map(a => (a.id === view.id ? view : a));
-  return { all, worst, asked, acts: held, signIns, flow: heldReason(ctx) === undefined ? flow : undefined };
+                : [...withSignIn, turnOff, remove];
+  return { all, worst, asked, acts: holdAll(acts, ctx), signIns, flow: heldReason(ctx) === undefined ? flow : undefined };
 }
 
-const NO_NAV = (): void => {};
-
-/** A tool as a row of its server's tools, and its own level: the description whole, then each parameter by name with
- * its type and whether a call needs it. */
-function toolRow(tool: McpTool): UnderRow {
-  const facts = (p: McpToolParam): string | undefined => [p.type, p.required ? W.required : undefined].filter(w => w !== undefined).join(", ") || undefined;
-  return {
-    key: tool.name,
-    title: tool.name,
-    ...(tool.description === undefined ? {} : { subtext: tool.description, body: tool.description }),
-    ...(tool.params === undefined
-      ? {}
-      : {
-          list: {
-            label: W.parameters,
-            items: tool.params.map(p => {
-              const fact = facts(p);
-              return { name: p.name, ...(fact === undefined ? {} : { fact }), ...(p.description === undefined ? {} : { about: p.description }) };
-            }),
-          },
-        }),
-  };
-}
+/** A tool as a row of its server's tools: its name, and what it does under it. */
+const toolRow = (tool: McpTool): UnderRow => ({ key: tool.name, title: tool.name, ...(tool.description === undefined ? {} : { subtext: tool.description }) });
 
 /** Global first, then one group per project, each by its name with its folder. */
-function scopeGroups(items: readonly ServerEntry[], ctx: RowsContext): GroupView<ServerEntry>[] {
+function scopeGroups(items: readonly ServerEntry[]): GroupView<ServerEntry>[] {
   const global = items.filter(e => e.scope === "global");
   return [...(global.length === 0 ? [] : [{ id: "global", label: "Global", items: global }]), ...projectGroups(items.filter(e => e.scope === "project"))];
 }
 
 export const SERVERS_KIND: KindModule<ServerEntry> = {
   id: "servers",
-  icon: PlugIcon,
-  word: "Tool servers",
-  noun: n => `${n} ${n === 1 ? "server" : "servers"}`,
   search: "Search tool servers",
   add: "Add a tool server",
-  line: project => ["Tool servers on ", project === undefined ? "" : `, for ${project}`],
-  rowHeight: "h-[84px]",
-  groupings: ["scope", "agent", "none"],
-  defaultGroup: () => "scope",
   items: (report: AgentsReport) => foldServers(report.servers).sort(byName),
-  count: items => items.length,
   key: entry => entry.key,
   matches: (entry, q) => matchesAny(q, entry.name, entry.reach, entry.project?.name, ...entry.rows.flatMap(r => [agentName(r.agent), r.file])),
-  groups: (items, by: GroupBy, ctx) => {
-    if (by === "none") return [{ id: "all", items }];
-    if (by === "agent") {
-      const agents = [...new Set(items.flatMap(e => e.rows.map(r => r.agent)))];
-      return agents.map(agent => ({ id: `agent-${agent}`, label: agentName(agent), items: items.filter(e => e.rows.some(r => r.agent === agent)) }));
-    }
-    return scopeGroups(items, ctx);
-  },
+  groups: scopeGroups,
   row: (entry, ctx) => {
-    const { worst, acts, flow } = actsOf(entry, ctx, NO_NAV);
+    const { worst, acts, flow } = actsOf(entry, ctx);
     const status = statusOf(worst);
     const step =
       worst.state === "needs-sign-in" ? acts.find(a => a.id === "sign-in" || a.id === "cancel") : worst.state === "failed" ? acts.find(a => a.id === "reconnect") : worst.state === "off" ? acts.find(a => a.id === "turn-on") : acts.find(a => a.id === "check");
@@ -281,8 +225,8 @@ export const SERVERS_KIND: KindModule<ServerEntry> = {
       ...(quick === undefined ? {} : { quick }),
     };
   },
-  detail: (entry, ctx, nav) => {
-    const { all, worst, asked, acts, signIns, flow } = actsOf(entry, ctx, nav.openUnder);
+  detail: (entry, ctx) => {
+    const { all, worst, asked, acts, signIns, flow } = actsOf(entry, ctx);
     const listed = asked?.answer?.tools;
     // The detail's Tools line carries the count, so its status says the word alone.
     const { count: _count, ...status } = statusOf(worst);
@@ -347,8 +291,7 @@ export const SERVERS_KIND: KindModule<ServerEntry> = {
     for (const row of entries.flatMap(e => e.rows)) if (checksOnShow(row, ctx) && tools.of(row)?.listing !== true) tools.list(row);
   },
   empty: on => `No tool servers on ${on} yet.`,
-  none: "no tool servers",
-  form: ctx => (ctx.servers === undefined || onImage(ctx) ? undefined : { title: W.addServer, Form: AddServerForm, Page: AddServerRows }),
+  form: ctx => (ctx.servers === undefined || onImage(ctx) ? undefined : { title: W.addServer, Page: AddServerRows }),
 };
 
 export const SERVERS = kind(SERVERS_KIND);

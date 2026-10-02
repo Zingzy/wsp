@@ -307,7 +307,6 @@ export const AGENTS_PAGE_WORDS = {
   removeName: (act: string, name: string): string => `${act} ${name}`,
   notListed: "Not listed yet.",
   notInstalled: "Not installed here",
-  notInstalledShort: "Not installed",
   checkedNow: (when: string): string => `checked ${when}`,
   readAgain: "Read the agents again",
   /** A model at the effort a new thread runs it at. */

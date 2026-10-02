@@ -87,7 +87,6 @@ afterEach(() => {
 describe("the Tool servers tab", () => {
   it("puts the person's own servers under the computer's name and a project's under its own, each row with its reach, its agents and its state in words", async () => {
     await mountTab(toolsApi().api, "servers");
-    expect(document.querySelector("[data-settings-page] [data-agents-manager]")).toBeNull();
     expect(headOf("kind-global")).toContain(`Global on ${MAC}`);
     expect(card("kind-global").querySelector("[data-k=agents-read-at]")?.textContent).toBe("checked just now");
     expect(card("kind-global").querySelector("[data-k=agents-refresh]")).not.toBeNull();

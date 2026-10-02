@@ -8,6 +8,7 @@ import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_PREFERENCES, ENV_VALUE_REFUSAL, accessRefusal, agentEnvRefusal, configDirSignInLine, type AgentSetupSet, type AgentsTarget, type Preferences, type PlaceView, type ProjectView, type ThreadDefaults } from "@wsp/protocol";
 import { RequestError, type Api } from "../src/protocol/client.js";
+import { catalogEntry } from "@wsp/catalog";
 import { useNotices } from "../src/notices/store.js";
 import { useStore } from "../src/protocol/store.js";
 import { AGENTS_PAGE_WORDS as W, PROJECTS_WORDS as P } from "../src/settings/format.js";
@@ -111,8 +112,12 @@ describe("the Agents page", () => {
     expect(status("codex")?.textContent).toBe("Signed in");
     expect(rowOf("claude")!.textContent).not.toContain("effort");
     expect(rowOf("claude")!.textContent).not.toContain("access");
-    // Not installed: the line says it, and the slot holds only Install.
-    expect(descriptionOf("opencode")).toBe(W.notInstalledShort);
+    // Not installed: a card of its own says it, the line says who the agent is, and the slot holds only Install.
+    expect(document.querySelector("[data-settings-card=agents-on] [data-settings-row=opencode]")).toBeNull();
+    expect(document.querySelector("[data-settings-card=agents-available] [data-settings-head]")?.textContent).toBe("Available to install");
+    const opencode = catalogEntry("opencode");
+    expect(descriptionOf("opencode")).toBe(opencode?.kind === "agent" ? opencode.about.description : "");
+    expect(descriptionOf("opencode")).not.toBe("");
     expect(rowOf("opencode")!.querySelector("[data-k=act-install]")?.textContent).toBe("Install");
     expect(status("opencode")).toBeNull();
     fireEvent.click(claude);

@@ -328,8 +328,6 @@ interface KindLine {
   readonly flow?: FlowView;
 }
 
-const NO_NAV = { openUnder: () => {} };
-
 /** An act as its word alone, as every act on the settings grid is: the plus is Add's and no other button wears a glyph. */
 export const wordOnly = ({ icon: _icon, ...act }: RowAct): RowAct => act;
 
@@ -338,7 +336,7 @@ export const wordOnly = ({ icon: _icon, ...act }: RowAct): RowAct => act;
 function kindLines<T>(kind: KindModule<T>, items: readonly T[], ctx: RowsContext, version: (item: T) => string | undefined): KindLine[] {
   return items.map(item => {
     const row = kind.row(item, ctx);
-    const flow = kind.detail(item, ctx, NO_NAV).flow;
+    const flow = kind.detail(item, ctx).flow;
     const v = version(item);
     const act = row.quick !== undefined && (row.quick.run !== undefined || row.quick.busy === true) ? wordOnly(row.quick) : undefined;
     return { key: row.key, title: row.title, lead: row.lead, ...(row.status === undefined || row.status.state === "unknown" ? {} : { note: capitalised(row.status.words) }), ...(v === undefined ? {} : { version: v }), ...(act === undefined ? {} : { act }), ...(flow === undefined ? {} : { flow }) };
@@ -367,12 +365,11 @@ function KindGrid({ id, head, lines }: { id: string; head: string; lines: readon
   );
 }
 
-
 /** The agents installed there and the MCP servers set up there, off one report. */
 function ReportLists({ report, ctx }: { report: AgentsReport; ctx: RowsContext }) {
   const agents = AGENTS_KIND.items(report, ctx).filter(item => item.row.installed);
   const servers = SERVERS_KIND.items(report, ctx);
-  // Each time a report stands, the servers kind asks what it checks there, as the manager's tab does.
+  // Each time a report stands, the servers kind asks what it checks there, as its tab does.
   const shown = useRef<() => void>(() => {});
   shown.current = () => SERVERS_KIND.shown?.(servers, ctx);
   useEffect(() => shown.current(), [report]);
@@ -384,7 +381,6 @@ function ReportLists({ report, ctx }: { report: AgentsReport; ctx: RowsContext }
     </>
   );
 }
-
 
 const RUNNING_HERE = new Set([WORKING.id, NEEDS_YOU.id]);
 

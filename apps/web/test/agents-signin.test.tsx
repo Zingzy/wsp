@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Sign in from an agent's or a server's row or detail: the device road
-// draws the code the tool printed and Open under the detail's acts, Cancel
-// stands first while it runs and stops it on the host, the paste road a field
-// whose code goes back to the tool, a failure the tool's own words; a token
-// row asks for the paste under the line that mints it; a row that asks the
-// person to pick hands them the line for their terminal; Add the wsp tools
-// writes on this Mac and is held anywhere else; a report reads again when the
-// host says the agents there changed.
+// Sign in from an agent's or a server's row or page in the task's panel: the
+// device road draws the code the tool printed and Open under the row or the
+// page's head, Cancel stands in Sign in's place while it runs and stops it on
+// the host, the paste road a field whose code goes back to the tool, a failure
+// the tool's own words; a token row asks for the paste under the line that
+// mints it; a row that asks the person to pick hands them the line for their
+// terminal; Add the wsp tools writes on this computer and is held anywhere
+// else; a report reads again when the host says the agents there changed.
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentsReport, AgentsSignInEvent, AgentsTarget } from "@wsp/protocol";
-import { AgentsManager } from "../src/components/agents/AgentsManager.js";
+import { AgentsPanel } from "../src/components/agents/AgentsPanel.js";
 import { AGENTS_LIST_WORDS, serverSignInStart, type AgentsWhere } from "../src/components/agents/agentsRows.js";
 import { useAgentActs } from "../src/components/agents/useAgentActs.js";
 import { forgetAgentsReports, useAgentsReport } from "../src/components/agents/useAgentsReport.js";
@@ -18,20 +18,15 @@ import { makeApi, type Api, type ProtocolClient } from "../src/protocol/client.j
 import type { ProtocolEvent } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { AGENTS_REPORT } from "./fixtures/agents-report.js";
-
-const NOW = Date.parse("2026-09-24T12:03:00.000Z");
+import { back, flow, head, headAct, NOW, openRow, panel, rowOf, stateOf, stepOf } from "./agents-panel-harness.js";
 
 function List({ where = "box", report = AGENTS_REPORT, typeInTerminal }: { where?: AgentsWhere; report?: AgentsReport; typeInTerminal?: (line: string) => void }) {
   const acts = useAgentActs(report.target);
   return (
-    <AgentsManager
-      shell="page"
-      head={{ line: "x" }}
-      report={report}
-      reading={false}
-      on="spoo"
+    <AgentsPanel
+      on={{ name: "spoo" }}
+      read={{ report, reading: false, error: null, readAt: NOW, refresh: () => {} }}
       ctx={{ where, ...(where === "box" ? { computer: "spoo" } : {}), heldWhy: null, ...(acts === undefined ? {} : { acts }), ...(typeInTerminal === undefined ? {} : { typeInTerminal }) }}
-      onRefresh={() => {}}
       now={NOW}
     />
   );
@@ -72,14 +67,8 @@ const settle = async (): Promise<void> => {
     for (let i = 0; i < 4; i++) await new Promise(r => setTimeout(r, 0));
   });
 };
-const rowEl = (id: string): HTMLElement => document.querySelector<HTMLElement>(`[data-agents-row="${id}"]`)!;
-const detail = (): HTMLElement => document.querySelector<HTMLElement>("[data-agents-detail]")!;
-const openRow = (id: string): HTMLElement => {
-  fireEvent.click(rowEl(id).querySelector<HTMLButtonElement>("[data-row-trigger]")!);
-  return detail();
-};
-const back = (): void => void fireEvent.click(detail().querySelector<HTMLButtonElement>("[data-k=agents-back]")!);
-const actIn = (act: string): HTMLButtonElement => detail().querySelector<HTMLButtonElement>(`[data-detail-acts] [data-k=act-${act}]`)!;
+const actIn = (act: string): HTMLButtonElement => headAct(act)!;
+const opened = (): boolean => panel().querySelector("[data-k=kind-head]") !== null;
 const LINEAR = "server-global-linear-http-mcp.linear.app";
 const NOTION = "server-global-notion-http-mcp.notion.com";
 
@@ -91,46 +80,47 @@ afterEach(() => {
 });
 
 describe("signing an agent in from its row", () => {
-  it("runs a device road from the row's Sign in, opens the detail on the code the tool printed and Open, and waits on the person", async () => {
+  it("runs a device road from the row's Sign in, draws the code the tool printed and Open under the row, and waits on the person", async () => {
     const h = host();
     const opened = vi.spyOn(window, "open").mockReturnValue(null);
     render(<List />);
-    fireEvent.click(rowEl("agent-codex").querySelector<HTMLButtonElement>("[data-row-slot] [data-k=act-sign-in]")!);
+    fireEvent.click(stepOf("codex", "sign-in")!);
     await settle();
     expect(h.started.map(s => [s.target, s.agent, s.server])).toEqual([[{ placeId: "p_spoo" }, "codex", undefined]]);
-    const flow = detail().querySelector<HTMLElement>("[data-k=sign-in-flow]")!;
-    expect(flow).not.toBeNull();
+    const drawn = flow()!;
+    expect(drawn).not.toBeNull();
+    expect(rowOf("codex").nextElementSibling?.contains(drawn), "the flow stands under its row").toBe(true);
     // A device code is typed on the page, so only the code's line stands, from the press on.
-    expect(flow.querySelectorAll("[data-sign-in-line]")).toHaveLength(1);
-    // While it runs, Cancel is the next step.
-    expect(detail().querySelector("[data-detail-acts] button")?.textContent).toBe(AGENTS_LIST_WORDS.cancel);
+    expect(drawn.querySelectorAll("[data-sign-in-line]")).toHaveLength(1);
+    // While it runs, Cancel stands in Sign in's place.
+    expect(stepOf("codex", "cancel")?.textContent).toBe(AGENTS_LIST_WORDS.cancel);
     act(() => h.started[0]!.step({ state: "waiting", url: "https://auth.openai.com/codex/device", code: "ABCD-12345", paste: false }));
-    expect(flow.querySelector("[data-k=sign-in-code]")?.textContent).toBe("ABCD-12345");
-    expect(flow.querySelector("[data-k=code-field]")).toBeNull();
-    expect(flow.querySelectorAll("[data-sign-in-line]")).toHaveLength(1);
-    const openButton = flow.querySelector<HTMLButtonElement>("[data-k=sign-in-open]")!;
+    expect(drawn.querySelector("[data-k=sign-in-code]")?.textContent).toBe("ABCD-12345");
+    expect(drawn.querySelector("[data-k=code-field]")).toBeNull();
+    expect(drawn.querySelectorAll("[data-sign-in-line]")).toHaveLength(1);
+    const openButton = drawn.querySelector<HTMLButtonElement>("[data-k=sign-in-open]")!;
     expect(openButton.textContent).toBe("Open");
     expect(openButton.querySelector("svg")).not.toBeNull();
     fireEvent.click(openButton);
     expect(opened).toHaveBeenCalledWith("https://auth.openai.com/codex/device", "_blank", "noopener,noreferrer");
-    back();
-    expect(rowEl("agent-codex").querySelector("[data-row-status] [data-status-word]")?.textContent).toBe(AGENTS_LIST_WORDS.waitingOnYou);
-    openRow("agent-codex");
+    expect(stateOf("codex")).toEqual(["Waiting on you", "waiting"]);
+    openRow("codex");
+    expect(head().parentElement?.parentElement?.querySelector("[data-k=sign-in-flow]")).not.toBeNull();
     act(() => h.started[0]!.step({ state: "signed-in" }));
-    expect(detail().querySelector("[data-k=sign-in-flow]")).toBeNull();
+    expect(flow()).toBeNull();
   });
 
   it("keeps the field's line standing from the press for a sign-in whose page hands a code back, through every state it takes", async () => {
     const h = host();
     const coded = { ...AGENTS_REPORT, agents: AGENTS_REPORT.agents.map(a => (a.id === "codex" ? { ...a, signInRoad: "code" as const } : a)) };
     render(<List report={coded} />);
-    openRow("agent-codex");
+    openRow("codex");
     fireEvent.click(actIn("sign-in"));
     await settle();
-    const lines = (): number => detail().querySelectorAll("[data-k=sign-in-flow] [data-sign-in-line]").length;
+    const lines = (): number => flow()?.querySelectorAll("[data-sign-in-line]").length ?? 0;
     expect(lines()).toBe(2);
     act(() => h.started[0]!.step({ state: "waiting", url: "https://auth.openai.com/oauth/authorize", paste: true }));
-    expect(detail().querySelector("[data-k=code-field]")).not.toBeNull();
+    expect(flow()!.querySelector("[data-k=code-field]")).not.toBeNull();
     expect(lines()).toBe(2);
     act(() => h.started[0]!.step({ state: "failed", said: "code expired" }));
     expect(lines()).toBe(2);
@@ -138,22 +128,22 @@ describe("signing an agent in from its row", () => {
     act(() => useStore.setState({ api: { ...useStore.getState().api!, agentsSignIn: async () => Promise.reject(new Error("not connected")) } as unknown as Api }));
     fireEvent.click(actIn("sign-in"));
     await settle();
-    expect(detail().querySelector("[data-k=sign-in-refused]")?.textContent).toContain("not connected");
+    expect(flow()!.querySelector("[data-k=sign-in-refused]")?.textContent).toContain("not connected");
     expect(lines()).toBe(2);
   });
 
   it("stops a running sign-in on the host from Cancel and drops what it drew, and a step or an answer for it after that is dropped too", async () => {
     const h = host();
     render(<List />);
-    openRow("agent-codex");
+    openRow("codex");
     fireEvent.click(actIn("sign-in"));
     await settle();
     fireEvent.click(actIn("cancel"));
     expect(h.stopped).toEqual(["si_1"]);
-    expect(detail().querySelector("[data-k=sign-in-flow]")).toBeNull();
+    expect(flow()).toBeNull();
     expect(actIn("sign-in")).not.toBeNull();
     act(() => h.started[0]!.step({ state: "waiting", url: "https://auth.openai.com/codex/device", code: "LATE-00000" }));
-    expect(detail().querySelector("[data-k=sign-in-flow]")).toBeNull();
+    expect(flow()).toBeNull();
     // Cancelled before the host answered the start: the run it answers with is stopped at once.
     let answer: (v: { signInId: string; stop: () => void; off: () => void }) => void = () => {};
     const late: string[] = [];
@@ -162,27 +152,26 @@ describe("signing an agent in from its row", () => {
     fireEvent.click(actIn("cancel"));
     await act(async () => answer({ signInId: "si_late", stop: () => void late.push("si_late"), off: () => {} }));
     expect(late).toEqual(["si_late"]);
-    expect(detail().querySelector("[data-k=sign-in-flow]")).toBeNull();
+    expect(flow()).toBeNull();
   });
 
   it("stops a running sign-in from the row's Cancel and leaves the list standing", async () => {
     const h = host();
     render(<List />);
-    fireEvent.click(rowEl("agent-codex").querySelector<HTMLButtonElement>("[data-row-slot] [data-k=act-sign-in]")!);
+    fireEvent.click(stepOf("codex", "sign-in")!);
     await settle();
-    back();
-    fireEvent.click(rowEl("agent-codex").querySelector<HTMLButtonElement>("[data-row-slot] [data-k=act-cancel]")!);
+    fireEvent.click(stepOf("codex", "cancel")!);
     expect(h.stopped).toEqual(["si_1"]);
-    expect(document.querySelector("[data-agents-detail]")).toBeNull();
-    expect(rowEl("agent-codex").querySelector("[data-row-slot] [data-k=act-sign-in]")).not.toBeNull();
+    expect(opened()).toBe(false);
+    expect(stepOf("codex", "sign-in")).not.toBeNull();
   });
 
   it("stops the sign-in on the host when the target changes or the panel closes, and only stops listening to one that ended", async () => {
     const h = host();
     const { rerender, unmount } = render(<List />);
     const press = async (): Promise<void> => {
-      if (document.querySelector("[data-agents-detail]") !== null) back();
-      fireEvent.click(rowEl("agent-codex").querySelector<HTMLButtonElement>("[data-row-slot] [data-k=act-sign-in]")!);
+      if (opened()) back();
+      fireEvent.click(stepOf("codex", "sign-in")!);
       await settle();
     };
     await press();
@@ -202,11 +191,11 @@ describe("signing an agent in from its row", () => {
     const h = host();
     render(<List />);
     fireEvent.click(screen.getByRole("radio", { name: /^Tool servers/ }));
-    fireEvent.click(rowEl(LINEAR).querySelector<HTMLButtonElement>("[data-row-slot] [data-k=act-sign-in]")!);
+    fireEvent.click(stepOf(LINEAR, "sign-in")!);
     await settle();
     expect(h.started.map(s => [s.agent, s.server])).toEqual([["claude", "linear"]]);
     act(() => h.started[0]!.step({ state: "waiting", url: "https://claude.ai/oauth/authorize?code=true", paste: true }));
-    const field = detail().querySelector<HTMLInputElement>("[data-k=code-field]")!;
+    const field = flow()!.querySelector<HTMLInputElement>("[data-k=code-field]")!;
     // An MCP sign-in has no code: what goes back is the address the browser landed on.
     expect(field.placeholder).toBe("The address your browser landed on");
     expect(field.getAttribute("aria-label")).toBe("linear: The address your browser landed on");
@@ -215,7 +204,7 @@ describe("signing an agent in from its row", () => {
     await settle();
     expect(h.codes).toEqual([["si_1", "http://localhost:4711/callback?code=x"]]);
     act(() => h.started[0]!.step({ state: "failed", said: "Authentication failed: invalid code" }));
-    expect(detail().querySelector("[data-k=sign-in-refused]")?.textContent).toContain("Authentication failed: invalid code");
+    expect(flow()!.querySelector("[data-k=sign-in-refused]")?.textContent).toContain("Authentication failed: invalid code");
   });
 
   it("asks a token row for the paste under the line that mints it, keeps the host's refusal, and closes once the key is kept", async () => {
@@ -229,43 +218,44 @@ describe("signing an agent in from its row", () => {
     });
     // Signed out, since a signed-in agent is offered no Sign in.
     render(<List report={{ ...AGENTS_REPORT, agents: AGENTS_REPORT.agents.map(a => (a.id === "claude" ? { ...a, signIn: "none" as const } : a)) }} />);
-    openRow("agent-claude");
+    openRow("claude");
     fireEvent.click(actIn("sign-in"));
-    const flow = detail().querySelector<HTMLElement>("[data-k=sign-in-flow]")!;
-    expect(flow.querySelector("[data-k=sign-in-mint]")?.textContent).toBe("claude setup-token");
-    const field = flow.querySelector<HTMLInputElement>("[data-k=sign-in-key]")!;
+    const drawn = flow()!;
+    expect(drawn.querySelector("[data-k=sign-in-mint]")?.textContent).toBe("claude setup-token");
+    const field = drawn.querySelector<HTMLInputElement>("[data-k=sign-in-key]")!;
     expect(field.type).toBe("password");
     fireEvent.change(field, { target: { value: "sk-ant-api03-nope" } });
-    const save = flow.querySelector<HTMLButtonElement>("[data-k=sign-in-save]")!;
+    const save = drawn.querySelector<HTMLButtonElement>("[data-k=sign-in-save]")!;
     expect(save.querySelector("svg")).not.toBeNull();
     fireEvent.click(save);
     await settle();
-    expect(flow.querySelector("[data-k=sign-in-refused]")?.textContent).toContain("That is not a Claude Code token.");
+    expect(drawn.querySelector("[data-k=sign-in-refused]")?.textContent).toContain("That is not a Claude Code token.");
     refuse = false;
     fireEvent.change(field, { target: { value: "sk-ant-oat01-ok" } });
-    fireEvent.click(flow.querySelector<HTMLButtonElement>("[data-k=sign-in-save]")!);
+    fireEvent.click(drawn.querySelector<HTMLButtonElement>("[data-k=sign-in-save]")!);
     await settle();
     expect(keys).toEqual([["claude", "sk-ant-oat01-ok"]]);
-    expect(detail().querySelector("[data-k=sign-in-flow]")).toBeNull();
+    expect(flow()).toBeNull();
   });
 
   it("hands a row that asks the person to pick the line for their terminal, and types it into a task's own terminal", async () => {
     const h = host();
     const { unmount } = render(<List />);
-    openRow("agent-opencode");
+    openRow("opencode");
     fireEvent.click(actIn("sign-in"));
-    expect(detail().querySelector("[data-k=sign-in-line]")?.textContent).toBe("wsp add spoo --sign-in opencode");
+    expect(flow()?.querySelector("[data-k=sign-in-line]")?.textContent).toBe("wsp add spoo --sign-in opencode");
     unmount();
     render(<List where="here" />);
-    openRow("agent-opencode");
+    openRow("opencode");
     fireEvent.click(actIn("sign-in"));
-    expect(detail().querySelector("[data-k=sign-in-line]")?.textContent).toBe("wsp agents signin opencode");
+    expect(flow()?.querySelector("[data-k=sign-in-line]")?.textContent).toBe("wsp agents signin opencode");
     cleanup();
     const typed: string[] = [];
     render(<List where="here" typeInTerminal={line => void typed.push(line)} />);
-    openRow("agent-opencode");
-    const button = actIn("sign-in");
     // The word is Sign in whatever road it takes; this one types the agent's own sign-in into the task's terminal.
+    expect(stepOf("opencode", "sign-in")?.textContent).toBe(AGENTS_LIST_WORDS.signIn);
+    openRow("opencode");
+    const button = actIn("sign-in");
     expect(button.textContent).toBe(AGENTS_LIST_WORDS.signIn);
     fireEvent.click(button);
     expect(typed).toEqual(["opencode auth login"]);
@@ -277,23 +267,23 @@ describe("signing an agent in from its row", () => {
     const opened = vi.spyOn(window, "open").mockReturnValue(null);
     render(<List where="here" report={{ ...AGENTS_REPORT, target: { placeId: "here" }, reach: "here" }} />);
     fireEvent.click(screen.getByRole("radio", { name: /^Tool servers/ }));
-    fireEvent.click(rowEl(LINEAR).querySelector<HTMLButtonElement>("[data-row-slot] [data-k=act-sign-in]")!);
+    fireEvent.click(stepOf(LINEAR, "sign-in")!);
     await settle();
     expect(h.started.map(s => [s.target, s.agent, s.server])).toEqual([[{ placeId: "here" }, "claude", "linear"]]);
-    const flow = detail().querySelector<HTMLElement>("[data-k=sign-in-flow]")!;
-    expect(flow.querySelector("[data-k=sign-in-browser]")?.textContent).toBe("Finish in your browser");
-    expect(flow.querySelector("[data-k=sign-in-open]")).toBeNull();
-    expect(detail().querySelector("[data-detail-acts] button")?.textContent).toBe(AGENTS_LIST_WORDS.cancel);
+    const drawn = flow()!;
+    expect(drawn.querySelector("[data-k=sign-in-browser]")?.textContent).toBe("Finish in your browser");
+    expect(drawn.querySelector("[data-k=sign-in-open]")).toBeNull();
+    expect(stepOf(LINEAR, "cancel")?.textContent).toBe(AGENTS_LIST_WORDS.cancel);
     act(() => h.started[0]!.step({ state: "waiting", url: "https://mcp.linear.app/authorize?client_id=x", paste: false }));
-    expect(flow.querySelector("[data-k=sign-in-browser]")?.textContent).toBe("Finish in your browser");
-    expect(flow.querySelector("[data-k=code-field]")).toBeNull();
-    const page = flow.querySelector<HTMLButtonElement>("[data-k=sign-in-open]")!;
+    expect(drawn.querySelector("[data-k=sign-in-browser]")?.textContent).toBe("Finish in your browser");
+    expect(drawn.querySelector("[data-k=code-field]")).toBeNull();
+    const page = drawn.querySelector<HTMLButtonElement>("[data-k=sign-in-open]")!;
     expect(page.textContent).toBe("Open the page");
     fireEvent.click(page);
     expect(opened).toHaveBeenCalledWith("https://mcp.linear.app/authorize?client_id=x", "_blank", "noopener,noreferrer");
     act(() => h.started[0]!.step({ state: "failed", said: "Authentication failed: access denied" }));
-    expect(flow.querySelector("[data-k=sign-in-browser]")).toBeNull();
-    expect(detail().querySelector("[data-k=sign-in-refused]")?.textContent).toContain("Authentication failed: access denied");
+    expect(drawn.querySelector("[data-k=sign-in-browser]")).toBeNull();
+    expect(flow()!.querySelector("[data-k=sign-in-refused]")?.textContent).toContain("Authentication failed: access denied");
   });
 
   it("hands a server whose page returns to localhost on another computer the harness's own line, from that agent's own line in a folded entry", async () => {
@@ -301,9 +291,9 @@ describe("signing an agent in from its row", () => {
     render(<List />);
     fireEvent.click(screen.getByRole("radio", { name: /^Tool servers/ }));
     openRow(NOTION);
-    fireEvent.click(detail().querySelector<HTMLButtonElement>("[data-fact=config-codex] [data-k=act-sign-in]")!);
-    expect(detail().querySelector("[data-k=sign-in-line]")?.textContent).toBe("codex mcp login 'notion'");
-    expect(detail().querySelector("[data-k=sign-in-why]")?.textContent).toBe("Its page returns to localhost, which wsp does not carry back to spoo yet. Run this in a terminal on spoo:");
+    fireEvent.click(panel().querySelector<HTMLButtonElement>("[data-settings-line=fact-config-codex] [data-k=act-sign-in]")!);
+    expect(flow()?.querySelector("[data-k=sign-in-line]")?.textContent).toBe("codex mcp login 'notion'");
+    expect(flow()?.querySelector("[data-k=sign-in-why]")?.textContent).toBe("Its page returns to localhost, which wsp does not carry back to spoo yet. Run this in a terminal on spoo:");
   });
 
   it("runs a server's sign-in on a joined computer the host relays and waits on the browser, taking the landed address only when the host asks", async () => {
@@ -311,19 +301,19 @@ describe("signing an agent in from its row", () => {
     render(<List report={{ ...AGENTS_REPORT, reach: "relay" }} />);
     fireEvent.click(screen.getByRole("radio", { name: /^Tool servers/ }));
     openRow(NOTION);
-    fireEvent.click(detail().querySelector<HTMLButtonElement>("[data-fact=config-codex] [data-k=act-sign-in]")!);
+    fireEvent.click(panel().querySelector<HTMLButtonElement>("[data-settings-line=fact-config-codex] [data-k=act-sign-in]")!);
     await settle();
     expect(h.started.map(s => [s.target, s.agent, s.server])).toEqual([[AGENTS_REPORT.target, "codex", "notion"]]);
-    const flow = detail().querySelector<HTMLElement>("[data-k=sign-in-flow]")!;
-    expect(flow.querySelector("[data-k=sign-in-line]")).toBeNull();
+    const drawn = flow()!;
+    expect(drawn.querySelector("[data-k=sign-in-line]")).toBeNull();
     const page = "https://mcp.notion.com/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A43117%2Fcallback";
     act(() => h.started[0]!.step({ state: "waiting", url: page, paste: false }));
-    expect(flow.querySelector("[data-k=sign-in-browser]")?.textContent).toBe("Finish in your browser");
-    expect(flow.querySelector("[data-k=sign-in-open]")?.textContent).toBe("Open the page");
-    expect(flow.querySelector("[data-k=code-field]")).toBeNull();
+    expect(drawn.querySelector("[data-k=sign-in-browser]")?.textContent).toBe("Finish in your browser");
+    expect(drawn.querySelector("[data-k=sign-in-open]")?.textContent).toBe("Open the page");
+    expect(drawn.querySelector("[data-k=code-field]")).toBeNull();
     // This computer could not listen on the page's port, so the host asks for the address the browser landed on.
     act(() => h.started[0]!.step({ state: "waiting", url: page, paste: true }));
-    const field = flow.querySelector<HTMLInputElement>("[data-k=code-field]")!;
+    const field = drawn.querySelector<HTMLInputElement>("[data-k=code-field]")!;
     expect(field.getAttribute("aria-label") ?? field.placeholder).toContain(AGENTS_LIST_WORDS.landedAddress);
   });
 });
@@ -338,16 +328,15 @@ describe("a server's sign-in road", () => {
 });
 
 describe("the wsp tools and the report after a write", () => {
-  it("writes the wsp tools into an agent's config on this Mac and holds the act on a box", async () => {
+  it("writes the wsp tools into an agent's config on this computer and holds the act on a box", async () => {
     const h = host();
     const { unmount } = render(<List />);
-    openRow("agent-opencode");
-    const held = actIn("add-tools");
-    expect(held.disabled).toBe(true);
-    expect(held.closest("[title]")?.getAttribute("title")).toBe(AGENTS_LIST_WORDS.toolsHereOnly);
+    openRow("opencode");
+    // A held act is no act on the page: Add the wsp tools waits for this computer.
+    expect(actIn("add-tools")).toBeNull();
     unmount();
     render(<List where="here" report={{ ...AGENTS_REPORT, target: { placeId: "here" } }} />);
-    openRow("agent-opencode");
+    openRow("opencode");
     fireEvent.click(actIn("add-tools"));
     await settle();
     expect(h.added).toEqual([[{ placeId: "here" }, "opencode"]]);
