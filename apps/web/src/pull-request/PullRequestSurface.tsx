@@ -18,11 +18,12 @@ import { GlyphFrame } from "../settings/grid.js";
 import { useAppDark } from "../settings/theme.js";
 import { useProjects, useStatus, useStore, useWorkspace } from "../protocol/store.js";
 import { Commits } from "./Commits.js";
+import { Skeleton } from "../components/ui/skeleton.js";
 import { Timeline, sendRoad } from "./Conversation.js";
 import { conversationCount } from "./conversation.logic.js";
 import { Files, type DiffRead } from "./Files.js";
 import { MergeBox } from "./MergeBox.js";
-import { Clamped, CutNote, Hover, PrMarkdown, StateWord, Who, usePrAgent } from "./parts.js";
+import { Clamped, CommitsSkeleton, CutNote, FilesSkeleton, Hover, PrMarkdown, StateWord, TimelineSkeleton, Who, usePrAgent } from "./parts.js";
 import { ReviewDialog } from "./ReviewDialog.js";
 import { ReviewDraftSection } from "./ReviewDraftSection.js";
 import { PR_WORDS, TONE_INK, pullRequestTone, spacedAgo } from "./words.js";
@@ -129,9 +130,24 @@ function PullRequestPane({ workspaceId }: { workspaceId: string }) {
   const canSend = useStore(s => s.api?.pullRequestSend !== undefined);
 
   if (!isPullRequestNamed(seen)) {
+    if (seen !== undefined && "why" in seen)
+      return (
+        <div data-pr-pane className="flex h-full min-h-0 flex-col px-4 py-6 text-[13px] text-muted-foreground">
+          {seen.why}
+        </div>
+      );
+    // Not read yet: the pane's own shape, the head over the timeline, so nothing moves when the pull request lands.
     return (
-      <div data-pr-pane className="flex h-full min-h-0 flex-col px-4 py-6 text-[13px] text-muted-foreground">
-        {seen !== undefined && "why" in seen ? seen.why : PR_WORDS.reading}
+      <div data-pr-pane aria-busy="true" className="flex h-full min-h-0 flex-col gap-5 px-4 py-5">
+        <div className="grid grid-cols-[32px_minmax(0,1fr)] gap-3">
+          <Skeleton className="size-8 rounded-[9px]" />
+          <div className="flex flex-col gap-2 pt-1">
+            <Skeleton className="h-3.5 w-4/5" />
+            <Skeleton className="h-3 w-1/3" />
+          </div>
+        </div>
+        <Skeleton className="h-9 w-full rounded-[10px]" />
+        <TimelineSkeleton />
       </div>
     );
   }
@@ -173,11 +189,11 @@ function PullRequestPane({ workspaceId }: { workspaceId: string }) {
             <ExternalLinkIcon aria-hidden className="size-3" />
           </a>
         </div>
-        <div className="flex min-w-0 items-center justify-between gap-3.5 pl-11">
+        <div className="flex min-w-0 items-baseline justify-between gap-3.5 pl-11">
           <button
             type="button"
             data-pr-word-to-box
-            className="-mx-1.5 cursor-pointer rounded-md px-1.5 py-0.5 transition-colors duration-150 hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            className="cursor-pointer rounded-sm transition-opacity duration-150 hover:opacity-75 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
             onClick={() => {
               setTab("conversation");
               setToBox(n => n + 1);
@@ -250,14 +266,14 @@ function PullRequestPane({ workspaceId }: { workspaceId: string }) {
           {reviewWorkspace ? <ReviewDraftSection workspaceId={workspaceId} name={name} fact={fact} head={PR_WORDS.heads.draft} /> : null}
           {page?.cut?.reviews === true ? <CutNote words={PR_WORDS.cut.reviews} /> : null}
           {page?.cut?.threads === true ? <CutNote words={PR_WORDS.cut.threads} /> : null}
-          {page === null ? null : <Timeline page={page} agent={agent} of={of} />}
+          {page === null ? <TimelineSkeleton /> : <Timeline page={page} agent={agent} of={of} />}
           <MergeBox workspaceId={workspaceId} name={name} seen={seen} page={page} base={base} agent={agent} reviewing={reviewWorkspace} onReview={() => setReviewing(true)} {...(canSend ? { sendAll: sendItems } : {})} sending={sending} />
         </>
       )}
 
-      {tab !== "commits" ? null : page === null ? <p className="text-[13px] text-muted-foreground">{PR_WORDS.reading}</p> : <Commits commits={page.commits} cut={page.cut?.commits === true} />}
+      {tab !== "commits" ? null : page === null ? <CommitsSkeleton /> : <Commits commits={page.commits} cut={page.cut?.commits === true} />}
 
-      {tab !== "files" ? null : page === null ? <p className="text-[13px] text-muted-foreground">{PR_WORDS.reading}</p> : <Files workspaceId={workspaceId} page={page} theme={dark ? "dark" : "light"} read={diff} readDiff={readDiff} agent={agent} of={of} />}
+      {tab !== "files" ? null : page === null ? <FilesSkeleton /> : <Files workspaceId={workspaceId} page={page} theme={dark ? "dark" : "light"} read={diff} readDiff={readDiff} agent={agent} of={of} />}
     </div>
   );
 }

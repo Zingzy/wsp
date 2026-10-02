@@ -160,7 +160,7 @@ describe("the Pull request pane's head", () => {
     expect(said(q(head, "[data-pr-asks]"))).toBe("Review asked of octocat");
   });
 
-  it("wears red only for a failure or a conflict, green only approved, violet merged, muted open and closed, and pulses while checks run", async () => {
+  it("wears GitHub's meanings: green open and approved, red closed, failed or conflicting, violet merged, muted draft, and pulses while checks run", async () => {
     const tone = (): [string, string, boolean] => {
       const w = q(document.body, "[data-k='pr-word']");
       return [w.textContent!, w.dataset["tone"]!, w.querySelector(".pr-word-pulse") !== null];
@@ -168,13 +168,13 @@ describe("the Pull request pane's head", () => {
     await pane();
     expect(tone()).toEqual(["Checks failed", "bad", false]);
     const states: [WorkspaceStatus["pr"], [string, string, boolean]][] = [
-      [fact({ checks: [] }), ["Open", "quiet", false]],
+      [fact({ checks: [] }), ["Open", "ok", false]],
       [fact({ checks: [], mergeable: "conflicting" }), ["Conflicts with main", "bad", false]],
       [fact({ checks: [{ name: "ci", state: "pending" }] }), ["Checks running", "run", true]],
       [fact({ checks: [], review: "approved" }), ["Approved", "ok", false]],
       [fact({ checks: [], review: "changes_asked" }), ["Changes asked for", "warn", false]],
       [{ number: 12, url: "u", state: "merged", base: "main", readAt: 1 } satisfies PullRequestKept, ["Merged", "merged", false]],
-      [{ number: 12, url: "u", state: "closed", base: "main", readAt: 1 } satisfies PullRequestKept, ["Closed", "quiet", false]],
+      [{ number: 12, url: "u", state: "closed", base: "main", readAt: 1 } satisfies PullRequestKept, ["Closed", "bad", false]],
     ];
     for (const [pr, want] of states) {
       act(() => useStore.setState({ statuses: { [WS]: statusWith(pr) } }));

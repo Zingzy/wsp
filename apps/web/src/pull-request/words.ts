@@ -104,7 +104,7 @@ export const TONE_INK: Record<Tone, string> = {
 };
 
 /** The tone each place a pull request stands in wears. */
-const KEY_TONE: Record<PullRequestKey, Tone> = { merged: "merged", closed: "quiet", conflicts: "bad", failed: "bad", running: "run", changesAsked: "warn", approved: "ok", draft: "quiet", open: "quiet", unread: "quiet" };
+const KEY_TONE: Record<PullRequestKey, Tone> = { merged: "merged", closed: "bad", conflicts: "bad", failed: "bad", running: "run", changesAsked: "warn", approved: "ok", draft: "quiet", open: "ok", unread: "quiet" };
 
 /** The pull request's one word with the tone it wears; hollow for a draft and for one that could not be read. */
 export function pullRequestTone(seen: PullRequestSeen): { word: string; tone: Tone; hollow: boolean } {

@@ -3,6 +3,7 @@
 // drawn by the code view the Changes pane draws with, the comments on its lines standing on them. One file is open at
 // a time; its head hands the whole branch to the Changes pane.
 import { ChevronsDownUpIcon, ChevronsUpDownIcon, FileIcon } from "lucide-react";
+import { Skeleton } from "../components/ui/skeleton.js";
 import { useMemo, useState, type ReactNode } from "react";
 import type { PullRequestPage } from "@wsp/protocol";
 import { ChangedFilesTree } from "../components/chat/ChangedFilesTree.js";
@@ -62,7 +63,14 @@ function FileDiff({ path, read, comments, theme, onOpenChanges, agent, of }: { p
   return (
     <div data-pr-file-diff={path} className="mt-1.5 mb-1 overflow-clip rounded-lg border border-border bg-card">
       {read.state === "reading" ? (
-        quiet(PR_WORDS.reading)
+        <div data-pr-skeleton="diff" aria-busy="true" className="flex flex-col gap-2 px-3 py-3">
+          {[0.62, 0.8, 0.44, 0.7, 0.36].map((w, i) => (
+            <div key={i} className="grid grid-cols-[28px_minmax(0,1fr)] items-center gap-3">
+              <Skeleton className="h-2.5 w-5 justify-self-end" />
+              <Skeleton className="h-2.5" style={{ width: `${w * 100}%` }} />
+            </div>
+          ))}
+        </div>
       ) : read.state === "refused" ? (
         quiet(read.said)
       ) : file === undefined ? (
