@@ -22,7 +22,7 @@ if (renderSkipped !== undefined) console.info(`agent settings render test skippe
 /** Each screen by the card it waits on and the rows it must draw. */
 const SCREENS = [
   { screen: "settings-agents", ready: "[data-agent-row='claude']", rows: ["default-agent", "claude", "codex", "opencode"] },
-  { screen: "settings-agent", ready: "[data-settings-row='agent-env']", rows: ["agent-model", "agent-access", "agent-models", "agent-program", "agent-config", "agent-args", "agent-env"] },
+  { screen: "settings-agent", ready: "[data-settings-row='agent-env']", rows: ["agent-model", "agent-access", "model-claude-opus-5-5", "model-claude-haiku-4-5-20251001", "agent-program", "agent-config", "agent-args", "agent-env"] },
   { screen: "settings-agents-servers", ready: "[data-kind-row='server-global-airtable-stdio-npx -y airtable-mcp-server']", rows: ["server-global-airtable-stdio-npx -y airtable-mcp-server", "server-global-sentry-http-mcp.sentry.dev"] },
   { screen: "settings-agents-skills", ready: "[data-kind-row='skill-user-frontend-design']", rows: ["skill-user-frontend-design", "skill-user-wsp", "skill-plugin-pdf"] },
   { screen: "settings-project-overrides", ready: "[data-settings-row='project-access']", rows: ["project-agent", "project-model", "project-access"] },
@@ -62,7 +62,7 @@ describe.skipIf(renderSkipped !== undefined)("the agents settings pages in Chrom
       };
     });
 
-  for (const sheet of ["env", "models"] as const) {
+  for (const sheet of ["env", "args"] as const) {
     for (const width of [1280, 390] as const) {
       it.each(["dark", "light"] as const)(`the ${sheet} sheet at ${width} in the %s theme stands inside the window`, async theme => {
         const page = await browser!.newPage({ viewport: { width, height: 900 } });

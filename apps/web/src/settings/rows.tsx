@@ -306,7 +306,7 @@ export function Cards({ cards }: { cards: ReadonlyArray<SettingsCardData> }) {
 }
 
 /** The row a computer's or a project's page opens on: its glyph in its frame, its name, one line of one kind of
- * fact under it, and a figure or an act at the right. It stands in place of a page title, since the top bar's
+ * fact under it that wraps where the row is narrow, and a figure or an act at the right. It stands in place of a page title, since the top bar's
  * crumbs already name the page. */
 export function HeadRow({ glyph, title, mark, line, slot, attrs }: { glyph: ReactNode; title: string; /** One mono fact after the name (an agent's version), or the marks of the agents a thing is set up for. */ mark?: ReactNode; line?: ReactNode; slot?: ReactNode; attrs?: Record<string, string> }) {
   return (
@@ -325,7 +325,7 @@ export function HeadRow({ glyph, title, mark, line, slot, attrs }: { glyph: Reac
             )}
           </span>
           {line === undefined ? null : (
-            <span data-settings-description className={cn(NOTE, "truncate")}>
+            <span data-settings-description className={NOTE}>
               {line}
             </span>
           )}

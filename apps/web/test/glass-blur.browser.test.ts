@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The Mac window hands the page a transparent ground over macOS's own vibrancy, and the page draws no blur of its
-// own: a pane that sits over text stands on its material instead. Photographs the glass page on a transparent ground
-// in a real Chromium, reads that no pane carries a backdrop filter, and compares the pixel-to-pixel contrast under
-// each pane with the bare text beside it. Runs only when asked for (WSP_RENDER=1) and skips without
+// own but the composer's: a pane that sits over text stands on its material instead, and the composer frosts what
+// is under it over the glass's own ground, the filter the page holds once. Photographs the glass page on a
+// transparent ground in a real Chromium, reads which panes carry a backdrop filter, and compares the pixel-to-pixel
+// contrast under each pane with the bare text beside it. Runs only when asked for (WSP_RENDER=1) and skips without
 // Playwright's Chromium.
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -59,7 +60,7 @@ describe.skipIf(renderSkipped !== undefined)("frosted panes over a transparent p
     );
   }
 
-  it.each(["dark", "light"] as const)("in the %s theme no pane draws a blur of its own, and the text under the composer and a surface-glass pane stays out of sight", async theme => {
+  it.each(["dark", "light"] as const)("in the %s theme no pane but the composer draws a blur, the composer's over the glass's ground, and the text under the composer and a surface-glass pane stays out of sight", async theme => {
     await page!.goto(`${base}?theme=${theme}`);
     await page!.waitForSelector("[data-glass=surface]");
     const shot = await page!.screenshot({ omitBackground: true });
@@ -69,19 +70,17 @@ describe.skipIf(renderSkipped !== undefined)("frosted panes over a transparent p
     const composer = await edgeEnergy(shot, inner(100));
     const surface = await edgeEnergy(shot, inner(500));
     const filters = await page!.evaluate(() =>
-      [...document.querySelectorAll<HTMLElement>("[data-glass], [data-glass] *")].flatMap(el => [getComputedStyle(el).backdropFilter, getComputedStyle(el, "::before").backdropFilter]).filter(f => f !== "none" && f !== ""),
+      [...document.querySelectorAll<HTMLElement>("[data-glass], [data-glass] *")].flatMap(el =>
+        (["", "::before"] as const).flatMap(pseudo => {
+          const filter = getComputedStyle(el, pseudo).backdropFilter;
+          return filter === "none" || filter === "" ? [] : [{ pane: el.closest<HTMLElement>("[data-glass]")!.dataset["glass"], filter }];
+        }),
+      ),
     );
-    expect(filters).toEqual([]);
-    // Standing whole, the composer takes a ground, never its tint: the card in the light, the raised material in the dark.
-    const composerGround = await page!.evaluate(ground => {
-      const probe = document.createElement("div");
-      probe.style.background = `color-mix(in srgb, var(${ground}) 100%, transparent)`;
-      document.body.append(probe);
-      const want = getComputedStyle(probe).backgroundColor;
-      probe.remove();
-      return { want, got: getComputedStyle(document.querySelector("[data-glass=composer] [data-slot=composer-shell]")!, "::before").backgroundColor };
-    }, theme === "dark" ? "--material-raised" : "--card");
-    expect(composerGround.got).toBe(composerGround.want);
+    expect(filters.map(f => f.pane)).toEqual(["composer"]);
+    // The blur stands on the glass's ground, which keeps the sharp text the window lays under it out of sight.
+    expect(filters[0]!.filter).toMatch(/^blur\(\d+px\) .*url\("#glass-ground"\)$/);
+    expect(await page!.locator("filter#glass-ground").count()).toBe(1);
     expect(bare).toBeGreaterThan(10);
     expect({ composer: composer / bare < 0.02, surface: surface / bare < 0.02 }, JSON.stringify({ bare, composer, surface })).toEqual({ composer: true, surface: true });
   });

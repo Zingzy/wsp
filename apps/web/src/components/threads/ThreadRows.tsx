@@ -45,7 +45,7 @@ export function ThreadRows({ label, rows, className }: { label: string; rows: Re
 }
 
 /** One thread's line; a press anywhere on it opens the thread, as its title does, except on the act it offers. */
-export function ThreadRow({ thread, place, branch, note, act }: ThreadRowItem) {
+export function ThreadRow({ thread, place, branch, note, act, className }: ThreadRowItem & { className?: string }) {
   const select = useStore(s => s.select);
   const threadId = thread.threadId;
   return (
@@ -55,6 +55,7 @@ export function ThreadRow({ thread, place, branch, note, act }: ThreadRowItem) {
         "flex min-w-0 items-center gap-2.5 rounded-[var(--control-radius)] px-2 text-sm transition-colors duration-150 hover:bg-accent",
         note === undefined ? "h-9" : "min-h-12 py-1.5",
         threadId !== null && "cursor-pointer",
+        className,
       )}
       {...(threadId === null
         ? {}

@@ -399,7 +399,7 @@ function ThreadsHere({ place, ctx }: { place: PlaceView; ctx: SettingsContext })
   return (
     <Grid id="threads-here" head={<GridHead cells={[{ word: WHERE_WORDS.heads.threadsHere }]} />}>
       {rows.map(row => (
-        <ThreadRow key={row.thread.id} {...row} />
+        <ThreadRow key={row.thread.id} {...row} className={CARD_INSET} />
       ))}
     </Grid>
   );

@@ -622,8 +622,8 @@ function LimitsSkeleton() {
 function Used({ used, models, range, split, onRange, onSplit, ctx }: { used: UsedAnswer | null; models: readonly UsedRow[]; range: UsageRange; split: UsageSplit; onRange: (r: UsageRange) => void; onSplit: (s: UsageSplit) => void; ctx: SettingsContext }) {
   const controls = (
     <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-      <SegmentedControl data-k="usage-range" aria-label={W.range} value={range} segments={RANGES} onChange={onRange} className="h-9" segmentClassName="px-3.5 text-sm" />
-      <SegmentedControl data-k="usage-split" aria-label={W.split} value={split} segments={SPLITS} onChange={onSplit} className="h-9" segmentClassName="px-3.5 text-sm" />
+      <SegmentedControl data-k="usage-range" aria-label={W.range} value={range} segments={RANGES} onChange={onRange} className="h-9" segmentClassName="px-3.5 text-sm max-sm:px-2" />
+      <SegmentedControl data-k="usage-split" aria-label={W.split} value={split} segments={SPLITS} onChange={onSplit} className="h-9" segmentClassName="px-3.5 text-sm max-sm:px-2" />
     </div>
   );
   if (used === null)

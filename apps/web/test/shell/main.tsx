@@ -161,6 +161,13 @@ const archived: SessionView[] = params.get("archived") !== "1"
       { id: "s5", threadId: "s5", workspaceId: "ws_a", harness: "claude", status: "completed", prompt: "Rotate the daemon token and restart the host.", startedBy: "person", startedAt: Date.now() - 3 * 24 * 60 * 60_000, endedAt: Date.now() - 2 * 24 * 60 * 60_000, readAt: Date.now() - 2 * 24 * 60 * 60_000 },
       { id: "s6", threadId: "s6", workspaceId: "ws_a", harness: "codex", status: "interrupted", prompt: "Drop the preview shim from the packing list.", startedBy: "cli", startedAt: Date.now() - 9 * 24 * 60 * 60_000, endedAt: Date.now() - 8 * 24 * 60 * 60_000, readAt: Date.now() - 8 * 24 * 60 * 60_000, settledAt: Date.now() - 7 * 24 * 60 * 60_000 },
     ];
+// ?tones=1 adds a thread that failed and one waiting on a question, so the sidebar shows every state word's tone.
+const toned: SessionView[] = params.get("tones") !== "1"
+  ? []
+  : [
+      { id: "s13", threadId: "s13", workspaceId: "ws_b", harness: "claude", status: "failed", prompt: "Rebuild the search index.", startedBy: "person", startedAt: Date.now() - 20 * 60_000, endedAt: Date.now() - 15 * 60_000 },
+      { id: "s14", threadId: "s14", workspaceId: "ws_a", harness: "claude", status: "running", prompt: "Write the release notes.", startedBy: "person", startedAt: Date.now() - 10 * 60_000, asking: "Which version goes out?" } as SessionView,
+    ];
 const sessions: SessionView[] = [
   // With ?projects=1 the first thread works in spoo and the second deep inside wsp, so both rows carry a project word.
   { id: "s1", threadId: "s1", workspaceId: "ws_a", harness: "claude", status: "running", prompt: "Now reply with exactly the word pong.", startedBy: "person", startedAt: Date.now() - 48 * 60_000, ...(projects ? { cwd: "/root/spoo" } : {}) },
@@ -168,6 +175,7 @@ const sessions: SessionView[] = [
   { id: "s3", threadId: "s3", workspaceId: "ws_b", harness: "codex", status: "completed", prompt: "Bump the lockfile and run the gate.", startedBy: "cli", startedAt: Date.now() - 90 * 60_000, endedAt: Date.now() - 80 * 60_000 },
   { id: "s4", threadId: "s4", workspaceId: "ws_b", harness: "claude", status: "interrupted", prompt: "Drop the old preview shim.", startedBy: "person", startedAt: Date.now() - 120 * 60_000, endedAt: Date.now() - 110 * 60_000 },
   ...archived,
+  ...toned,
 ];
 // ?switcher=1: two more projects, one of them on this computer, and the threads on them, ten in all with the four above.
 const switcher = params.get("switcher") === "1";

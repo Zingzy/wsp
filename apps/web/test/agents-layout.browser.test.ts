@@ -2,9 +2,11 @@
 // The agents panel in a real Chromium, since jsdom lays nothing out. At the
 // panel's 480 and its 360 floor, on every tab and on an item's page, nothing
 // stands wider than the panel and no name breaks inside a word; in the real
-// right panel the tabs stay at the top while the list scrolls under them.
+// right panel the tabs stay at the top while the list scrolls under them; an
+// agent's device sign-in stands under its row as the code's one line, and a
+// server's browser sign-in as its two.
 // Photographs of every tab and an item's page of each kind at 480 and 360 in
-// both themes, and the real right panel. Vite serves test/wireframe, so like
+// both themes, the sign-in, and the real right panel. Vite serves test/wireframe, so like
 // the other render tests it runs only when asked for (WSP_RENDER=1) and skips
 // without Playwright's Chromium.
 import { mkdirSync } from "node:fs";
@@ -128,6 +130,48 @@ describe.skipIf(renderSkipped !== undefined)("the agents panel laid out in Chrom
     expect(panel.offset).toBe(0);
     expect(panel.inside).toBe(false);
   });
+
+  it("draws a device sign-in under the agent's row, the code on its one 40 px line inside the panel, at 480 and 360 in both themes, photographed", async () => {
+    for (const theme of ["dark", "light"] as const) {
+      for (const width of WIDTHS) {
+        await open(`screen=agents-widths&theme=${theme}`);
+        await page!.waitForSelector("[data-agent-row]");
+        await at(width).locator("[data-agent-row='codex'] [data-k=act-sign-in]").click();
+        const flow = at(width).locator("[data-k=sign-in-flow]");
+        await flow.locator("[data-k=sign-in-code]").waitFor();
+        // A device code is typed on its page, so the flow holds the code's line and no field's.
+        const read = await flow.evaluate(el => {
+          const row = el.closest("[data-agents-width]")!.querySelector("[data-agent-row='codex']")!.getBoundingClientRect();
+          const box = el.getBoundingClientRect();
+          return { lines: [...el.querySelectorAll("[data-sign-in-line]")].map(line => Math.round(line.getBoundingClientRect().height)), under: box.top >= row.bottom - 0.5, fits: el.scrollWidth <= el.clientWidth, right: box.right <= el.closest("[data-agents-width]")!.getBoundingClientRect().right + 0.5 };
+        });
+        expect(read, `${width} ${theme}`).toEqual({ lines: [40], under: true, fits: true, right: true });
+        expect(await page!.evaluate(() => document.documentElement.classList.contains("dark"))).toBe(theme === "dark");
+        await at(width).screenshot({ path: join(SHOTS_DIR, `agents-signin-${width}-${theme}.png`), animations: "disabled" });
+      }
+    }
+  }, 120_000);
+
+  it("draws a server's browser sign-in under its row: Finish in your browser with its Open on one 40 px line and the address field on another, inside the panel at 480 and 360 in both themes, photographed", async () => {
+    const row = "server-global-linear-http-mcp.linear.app";
+    for (const theme of ["dark", "light"] as const) {
+      for (const width of WIDTHS) {
+        await open(`screen=agents-widths&theme=${theme}`);
+        await page!.waitForSelector("[data-agent-row]");
+        await pickTab(width, "Tool servers");
+        await at(width).locator(`[data-kind-row="${row}"] [data-k=act-sign-in]`).click();
+        const flow = at(width).locator("[data-k=sign-in-flow]");
+        await flow.locator("[data-k=sign-in-open]").waitFor();
+        const read = await flow.evaluate((el, id) => {
+          const rowBox = el.closest("[data-agents-width]")!.querySelector(`[data-kind-row="${id}"]`)!.getBoundingClientRect();
+          const box = el.getBoundingClientRect();
+          return { words: el.querySelector("[data-k=sign-in-browser]")?.textContent, lines: [...el.querySelectorAll("[data-sign-in-line]")].map(line => Math.round(line.getBoundingClientRect().height)), under: box.top >= rowBox.bottom - 0.5, fits: el.scrollWidth <= el.clientWidth, right: box.right <= el.closest("[data-agents-width]")!.getBoundingClientRect().right + 0.5 };
+        }, row);
+        expect(read, `${width} ${theme}`).toEqual({ words: "Finish in your browser", lines: [40, 40], under: true, fits: true, right: true });
+        await at(width).screenshot({ path: join(SHOTS_DIR, `agents-signin-browser-${width}-${theme}.png`), animations: "disabled" });
+      }
+    }
+  }, 120_000);
 
   it("photographs every tab and an item's page of each kind at 480 and 360 in both themes", async () => {
     for (const theme of ["dark", "light"] as const) {

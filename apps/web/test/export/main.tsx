@@ -100,7 +100,8 @@ const api: Api = {
   },
 };
 
-useStore.setState({ conn: "live", workspaces: [workspace] });
+// The computer the host runs on, which the dialog's sentences name.
+useStore.setState({ conn: "live", workspaces: [workspace], places: [{ id: "here", kind: "computer", name: "zingzy-mbp", default: true }] });
 useRootStore.getState().follow(workspace.id, SOURCE);
 useStore.getState().bind(api);
 createRoot(document.getElementById("root")!).render(

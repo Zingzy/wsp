@@ -291,9 +291,9 @@ describe("index.css", () => {
       }
 
       /* Over the glass the sidebar's quiet text and glyphs have no solid card
-         behind them: one step up, the rows' words and the prose whole, and the
-         counts nearly opaque, keep them at AA over a white desktop, where the
-         glass reads as mid grey. */
+         behind them: one step up, the rows' words and the prose whole, the
+         counts nearly opaque and the state words a tint lighter, keep them at AA
+         over a white desktop, where the glass reads as mid grey. */
       .desktop-mac [data-app-sidebar] {
         @variant dark {
           --muted-foreground: var(--glass-ink);
@@ -303,6 +303,9 @@ describe("index.css", () => {
           --sidebar-row-rest: var(--glass-ink);
           --sidebar-prose: var(--glass-ink);
           --top-row-meta-alpha: 90%;
+          --status-working: #fbcfe8;
+          --status-failed: #ffc9c9;
+          --status-input: #c6d2ff;
         }
       }
 

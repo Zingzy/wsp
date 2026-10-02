@@ -289,7 +289,8 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
         expect(row.markSize).toEqual([12, 12]);
         expect(row.bare).toBe(true);
       }
-      expect(rows.some(row => /^\d+[smh]/.test(row.slot))).toBe(true);
+      // A working thread's slot carries how long it has run after its word; a finished one says Done until it is seen.
+      expect(rows.some(row => /\d+[smh]$/.test(row.slot))).toBe(true);
       // Claude's mark is its terracotta; OpenAI's is monochrome by design, so it takes the row's ink.
       const colours = new Map(rows.map(r => [r.mark, r.markColor]));
       expect(colours.size).toBe(2);
@@ -684,16 +685,16 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
     await page!.waitForSelector("text=Loading transcript", { state: "detached" });
     await page!.waitForSelector("[data-permission-prompt='ask_open'][data-permission-open='true']");
     await page!.locator("[data-composer-picker='access']").click();
-    await page!.waitForSelector("[data-composer-option='plan']");
+    await page!.waitForSelector("[data-composer-option='default']");
     // What the pick will do to the turn running now, read over the list before anything is picked.
     expect(await page!.locator("[data-composer-access-reach]").textContent()).toBe(accessReachLine(true));
 
-    await page!.locator("[data-composer-option='plan']").click();
-    await page!.waitForSelector(`[data-composer-picker='access'][data-access='plan']`);
+    await page!.locator("[data-composer-option='default']").click();
+    await page!.waitForSelector(`[data-composer-picker='access'][data-access='default']`);
     // The menu is gone on the pick: nothing of it is left over the page, visible or not.
     await page!.waitForSelector("[role=menu]", { state: "detached" });
 
-    // Plan says nothing about the write in front of the person, so the prompt stands and their click on it lands
+    // Default answers nothing the prompt offers, so the prompt stands and their click on it lands
     // rather than being eaten by a menu that stayed up.
     const allow = page!.locator("[data-permission-prompt='ask_open'] [data-permission-option='allow']");
     await allow.click({ timeout: 5_000 });
@@ -762,19 +763,19 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
   it("the composer's images are a row of square thumbnails above the text, each with its own remove, in both themes", async () => {
     for (const theme of ["dark", "light"] as const) {
       await page!.goto(`${base}?theme=${theme}&ws=ws_a`);
-      await page!.waitForSelector("[data-composer-image-picker]");
+      await page!.waitForSelector("[data-composer-file-picker]");
       const [empty] = await settledBoxes(["[data-chat-composer]"]);
       // The picker sits with the send at the right, first, before the send.
       const order = await page!.locator("[data-chat-composer-actions]").evaluate(el =>
-        [...el.querySelectorAll("button")].map(b => (b.hasAttribute("data-composer-image-picker") ? "picker" : b.getAttribute("type") === "submit" ? "send" : "?")),
+        [...el.querySelectorAll("button")].map(b => (b.hasAttribute("data-composer-file-picker") ? "picker" : b.getAttribute("type") === "submit" ? "send" : "?")),
       );
       expect(order).toEqual(["picker", "send"]);
-      expect(await page!.locator("[data-composer-images]").count()).toBe(0);
+      expect(await page!.locator("[data-composer-files]").count()).toBe(0);
 
       await page!.goto(`${base}?theme=${theme}&ws=ws_a&images=3`);
-      await page!.waitForSelector("[data-composer-images] [data-chat-image]");
-      await page!.waitForFunction(() => document.querySelectorAll("[data-composer-images] [data-chat-image]").length === 3);
-      const thumbs = await page!.locator("[data-composer-images] [data-chat-image]").evaluateAll(els =>
+      await page!.waitForSelector("[data-composer-files] [data-chat-image]");
+      await page!.waitForFunction(() => document.querySelectorAll("[data-composer-files] [data-chat-image]").length === 3);
+      const thumbs = await page!.locator("[data-composer-files] [data-chat-image]").evaluateAll(els =>
         els.map(el => {
           const r = el.getBoundingClientRect();
           const button = el.querySelector("button")!;
@@ -790,7 +791,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       expect(new Set(thumbs.map(t => t.radius)).size).toBe(1);
       expect(thumbs.map(t => t.removes)).toEqual([1, 1, 1]);
       // The row is above the text, inside the box, and the box grew by the row rather than the row escaping it.
-      const [row, editor, shell, grown] = await settledBoxes(["[data-composer-images]", "[data-chat-composer-form] [contenteditable]", "[data-slot=composer-shell]", "[data-chat-composer]"]);
+      const [row, editor, shell, grown] = await settledBoxes(["[data-composer-files]", "[data-chat-composer-form] [contenteditable]", "[data-slot=composer-shell]", "[data-chat-composer]"]);
       expect(row.y + row.height).toBeLessThanOrEqual(editor.y);
       expect(row.y).toBeGreaterThan(shell.y);
       expect(row.x + row.width).toBeLessThanOrEqual(shell.x + shell.width);
@@ -1010,11 +1011,11 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       await page!.waitForSelector("[data-context-menu]", { state: "detached" });
       // Focus goes back where it was: the row's own button under the pointer, which Chromium focused on the press.
       expect(await page!.evaluate(() => document.activeElement?.closest("[data-row-id='ws:ws_c']") !== null)).toBe(true);
-      // A root thread's tile carries its four verbs and then every one of its copy's.
+      // A root thread's tile carries its eight verbs and then every one of its copy's ten.
       const thread = await box("[data-row-id^='thread:']");
       await page!.mouse.click(thread.x + 20, thread.y + thread.height / 2, { button: "right" });
       await page!.waitForSelector("[data-context-menu]");
-      expect(await page!.locator("[data-context-menu] [role=menuitem]").count()).toBe(14);
+      expect(await page!.locator("[data-context-menu] [role=menuitem]").count()).toBe(18);
       await page!.screenshot({ path: join(SHOTS_DIR, `thread-context-menu-${theme}.png`), clip: { x: 0, y: 0, width: 520, height: 520 } });
       console.info(`thread context menu screenshot: ${join(SHOTS_DIR, `thread-context-menu-${theme}.png`)}`);
 
