@@ -234,7 +234,6 @@ export function CommandPalette({ keybindings: given }: { keybindings?: ResolvedK
             setQuery(value);
           }}
           panelClassName="max-h-[min(28rem,70vh)]"
-          showBackHint={page !== null}
           value={query}
         >
           <CommandPaletteResults

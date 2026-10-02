@@ -257,7 +257,7 @@ describe("New thread when the setting asks every time", () => {
     expect(projectRows().map(row => row.querySelector("[data-slot=command-shortcut]")?.textContent)).toEqual(["⌘1", "⌘2", "⌘3"]);
     expect(search().getAttribute("placeholder")).toBe("Search projects...");
     expect(palette()!.querySelector("[data-slot=autocomplete-start-addon] svg.lucide-arrow-left")).not.toBeNull();
-    expect([...palette()!.querySelectorAll("[data-slot=command-footer] [data-slot=kbd-group] > span")].map(hint => hint.textContent)).toEqual(["Navigate", "Select", "Back", "Close"]);
+    expect([...palette()!.querySelectorAll("[data-slot=command-footer] [data-slot=kbd-group] > span")].map(hint => hint.textContent)).toEqual(["Navigate", "Select", "Close"]);
   });
 
   it("Cmd and a digit open that row's project while the page is open, and the chord leaves the sidebar's rows alone", async () => {
