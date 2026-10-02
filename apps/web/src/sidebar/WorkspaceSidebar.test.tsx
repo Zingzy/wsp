@@ -602,14 +602,13 @@ describe("the sidebar's list of thread tiles", () => {
     expect(slot.dataset["tone"]).toBeUndefined();
   });
 
-  it("leaves the thread open in the centre on the list while it is read, and folds it once another is open", async () => {
+  it("leaves a settled thread in Settled when it is opened, so nothing moves under the reader", async () => {
     mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
     await act(async () => useStore.setState({ sessions: sessions([{ ws: "ws_a", id: "th_long", prompt: "a long read", status: "completed", startedAgo: 5 * HOUR, endedAgo: 4 * HOUR }]) } as never));
     await waitFor(() => expect(rowIds()).toEqual(["settled"]));
     act(() => useStore.getState().select("ws_a", "th_long"));
-    await waitFor(() => expect(rowIds()).toEqual(["thread:th_long", "settled"]));
-    act(() => useStore.getState().select(null));
-    await waitFor(() => expect(rowIds()).toEqual(["settled"]));
+    await act(() => new Promise(r => setTimeout(r, 0)));
+    expect(rowIds()).toEqual(["settled"]);
   });
 
   it("settles by hand at once, and a turn after the settle brings the thread back to the list", async () => {

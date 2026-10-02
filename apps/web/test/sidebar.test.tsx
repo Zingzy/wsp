@@ -965,6 +965,22 @@ describe("the settle pick", () => {
   });
 });
 
+describe("the open thread stays where it was opened", () => {
+  it("leaves a thread quiet past the settle pick in Settled when it is opened from there, its child and all", async () => {
+    const quiet = session("s2", "ws_a", { status: "completed", prompt: "done", threadId: "thr_2", startedAt: iso(-3 * 60 * 60_000), endedAt: iso(-90 * 60_000), readAt: iso(-90 * 60_000) });
+    const child = session("s3", "ws_a", { status: "completed", prompt: "helper", threadId: "thr_3", parentThreadId: "thr_2", startedAt: iso(-3 * 60 * 60_000), endedAt: iso(-100 * 60_000), readAt: iso(-100 * 60_000) });
+    act(() => useStore.setState({ preferences: { ...useStore.getState().preferences, settleAfter: "1h" } }));
+    await mount(fakeApi([API], [status(API)], [session("s1", "ws_a", { prompt: "hello", threadId: "thr_1", startedAt: iso(-60_000) }), quiet, child]), "hello");
+    fireEvent.click(screen.getByRole("button", { name: "Settled 2" }));
+    fireEvent.click(rowOf("done"));
+    await act(() => new Promise(r => setTimeout(r, 0)));
+    expect(screen.getByRole("button", { name: "Settled 2" })).toBeDefined();
+    fireEvent.click(rowOf("helper"));
+    await act(() => new Promise(r => setTimeout(r, 0)));
+    expect(screen.getByRole("button", { name: "Settled 2" })).toBeDefined();
+  });
+});
+
 describe("the creation tile", () => {
   it("is a tile at the thread tile's height: where it will run, Starting with the crab, the name, the step in plain words; a refused create says Failed in the slot", async () => {
     await mount(fakeApi([COPIED], [status(COPIED)]), "api");

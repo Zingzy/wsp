@@ -228,7 +228,14 @@ export function WorkspaceSidebar() {
     return ((selectedThreadId === null ? undefined : runs.threads.find(t => t.threadId === selectedThreadId)) ?? topSidebarThread(runs.threads))?.id ?? null;
   }, [fleet, selectedId, selectedThreadId]);
   const settleAfter = useStore(s => s.preferences.settleAfter);
-  const tiles = useMemo(() => sidebarTiles(projects, { picked: picked?.project.id ?? null, nowMs, open, settleMs: SETTLE_MS[settleAfter] }), [projects, picked, nowMs, open, settleAfter]);
+  // Nothing moves under the reader: a thread opened from the live list stays there while it is read, and one opened
+  // from Settled stays in Settled, so which group it was in is read once, when it is opened.
+  const [held, setHeld] = useState<{ open: string | null; held: string | null }>({ open: null, held: null });
+  if (held.open !== open) {
+    const folded = open !== null && sidebarTiles(projects, { picked: null, nowMs, settleMs: SETTLE_MS[settleAfter] }).settled.some(node => treeThreadIds(node).includes(open));
+    setHeld({ open, held: folded ? null : open });
+  }
+  const tiles = useMemo(() => sidebarTiles(projects, { picked: picked?.project.id ?? null, nowMs, open: held.held, settleMs: SETTLE_MS[settleAfter] }), [projects, picked, nowMs, held.held, settleAfter]);
   // One landing per project, for the pause mode a copy's phase verb reads. Asked here, where the tiles are drawn,
   // so no tile asks for itself.
   useEffect(() => {
