@@ -1,0 +1,440 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Settings > Agents and each agent's own page, and a project's New threads:
+// what a new thread starts on and how an agent runs on a computer, each
+// control's request to the host as the host takes it, each refusal in the
+// host's own words, and the rows read back off what the host answers. A
+// variable's value is typed once and never drawn again.
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { DEFAULT_PREFERENCES, ENV_VALUE_REFUSAL, accessRefusal, agentEnvRefusal, configDirSignInLine, type AgentSetupSet, type AgentsTarget, type Preferences, type PlaceView, type ProjectView, type ThreadDefaults } from "@wsp/protocol";
+import { RequestError, type Api } from "../src/protocol/client.js";
+import { useNotices } from "../src/notices/store.js";
+import { useStore } from "../src/protocol/store.js";
+import { AGENTS_PAGE_WORDS as W, PROJECTS_WORDS as P } from "../src/settings/format.js";
+import { useSettingsStore, type SettingsAt } from "../src/settings/settingsStore.js";
+import { AGENTS_SETUP_REPORT } from "./fixtures/agents-report.js";
+import { CLAUDE_CATALOG, CODEX_CATALOG, HARNESSES } from "./fixtures/harnesses.js";
+import { descriptionOf, mountSettings, pageAt, resetSettings, rowOf, settingsApi, settle, sidebarRowIds, wordOf } from "./settings-harness.js";
+import { pickOption } from "./select.js";
+
+const MAC = "zingzy's MacBook Pro";
+const here: PlaceView = { id: "here", kind: "computer", name: "zingzy-mbp", label: MAC, default: true, present: true, takesForks: false, engine: "none", shape: { cpu: 8, memMb: 16384 } };
+
+const REPORT = AGENTS_SETUP_REPORT;
+const CLAUDE = REPORT.agents[0]!;
+
+const WSP: ProjectView = { id: "pr_wsp", name: "wsp", computer: "here", source: { kind: "folder", path: "~/wsp" }, path: "/Users/dev/wsp", remote: "https://github.com/Zingzy/wsp.git", defaultBranch: "main", memoryKey: "-Users-dev-wsp", memoryDir: "/Users/dev/.claude/projects/-Users-dev-wsp/memory", createdAt: "2026-09-12T11:00:00.000Z" };
+
+/** An api that answers the agents report, the lists and the setup writes, recording each setup it was asked. */
+function agentsApi(over: Partial<Api> = {}, record: Preferences = { ...DEFAULT_PREFERENCES, labs: false }) {
+  const setups: Array<[string, string, AgentSetupSet]> = [];
+  const reads: AgentsTarget[] = [];
+  let lists = 0;
+  const made = settingsApi(
+    {
+      agentsRead: async target => (reads.push(target), REPORT),
+      listHarnesses: async () => (lists++, HARNESSES),
+      agentsSetup: async (placeId, agent, change) => {
+        setups.push([placeId, agent, change]);
+        return CLAUDE;
+      },
+      ...over,
+    },
+    record,
+  );
+  return { ...made, setups, reads, lists: () => lists };
+}
+
+const mount = async (api: Api, at: SettingsAt): Promise<void> => {
+  mountSettings({ api, at });
+  await settle();
+};
+
+const page = (): HTMLElement => document.querySelector<HTMLElement>("[data-settings-page]")!;
+const control = (k: string): HTMLElement => page().querySelector<HTMLElement>(`[data-k="${k}"]`)!;
+const notices = (): string[] => useNotices.getState().notices.map(n => n.text);
+
+beforeEach(() => {
+  resetSettings();
+  useStore.setState({ places: [here], harnesses: HARNESSES, projects: [WSP] });
+  Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: vi.fn(async () => {}) } });
+});
+
+afterEach(() => {
+  cleanup();
+});
+
+describe("the Agents page", () => {
+  it("picks the agent a new thread starts on through the host, and the arrow takes the pick back", async () => {
+    const { api, sets } = agentsApi();
+    await mount(api, { kind: "group", group: "agents" });
+    const row = rowOf("default-agent")!;
+    expect(row.querySelector("[data-settings-title]")?.textContent).toBe(W.defaultAgent);
+    expect(descriptionOf("default-agent")).toBe(W.defaultAgentDescription);
+    expect(control("default-agent").textContent).toBe("Claude Code");
+    expect(row.querySelector("[data-k=row-reset]")).toBeNull();
+    await pickOption(control("default-agent"), "Codex");
+    await settle();
+    expect(sets).toEqual([{ defaultAgent: "codex" }]);
+    useStore.setState({ harnesses: [{ ...CLAUDE_CATALOG, isDefault: false }, { ...CODEX_CATALOG, isDefault: true }, HARNESSES[2]!] });
+    await settle();
+    expect(control("default-agent").textContent).toBe("Codex");
+    fireEvent.click(rowOf("default-agent")!.querySelector("[data-k=row-reset]")!);
+    await settle();
+    expect(sets.at(-1)).toEqual({ defaultAgent: null });
+  });
+
+  it("reads the agent lists again once the host answers a record whose agent defaults moved", async () => {
+    const made = agentsApi();
+    await mount(made.api, { kind: "group", group: "agents" });
+    await pickOption(control("default-agent"), "Codex");
+    await settle();
+    expect(made.lists()).toBe(1);
+  });
+
+  it("lists each agent on the picked computer with its version, sign-in and what a new thread runs it with, and opens its page", async () => {
+    const { api, reads } = agentsApi();
+    await mount(api, { kind: "group", group: "agents" });
+    expect(reads).toEqual([{ placeId: "here" }]);
+    expect(page().querySelector("[data-settings-card='agents-on'] [data-settings-head]")?.textContent).toBe(`On ${MAC}`);
+    const claude = rowOf("claude")!;
+    expect(claude.querySelector("[data-settings-title]")?.textContent).toBe("Claude Code");
+    expect(claude.querySelector("[data-settings-mark]")?.textContent).toBe("2.1.286");
+    // Three kinds of fact, three places: the sign-in where the row's state sits, the model at its effort under the name,
+    // and the access beside it held apart by space, never by a comma.
+    expect(wordOf("claude")).toBe("API key");
+    expect([...rowOf("claude")!.querySelectorAll("[data-settings-description] > span")].map(s => s.textContent)).toEqual(["Opus 5.5 at high effort", "full access"]);
+    expect(wordOf("codex")).toBe("OAuth credentials");
+    expect([...rowOf("codex")!.querySelectorAll("[data-settings-description] > span")].map(s => s.textContent)).toEqual(["GPT-5.6-Sol at low effort", "full access"]);
+    for (const id of ["claude", "codex"]) expect(rowOf(id)!.textContent).not.toContain(",");
+    expect(descriptionOf("opencode")).toBe(W.notInstalled);
+    expect(rowOf("opencode")!.querySelector("[data-k=act-install]")?.textContent).toBe("Install");
+    fireEvent.click(claude);
+    await settle();
+    expect(pageAt()).toBe("agent:claude");
+  });
+
+  it("copies the vendor's own update for the person to run, without opening the agent's page", async () => {
+    const { api } = agentsApi();
+    await mount(api, { kind: "group", group: "agents" });
+    await act(async () => void fireEvent.click(rowOf("claude")!.querySelector("[data-k=agent-update]")!));
+    await settle();
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith("claude update");
+    expect(notices()).toContain(W.updateCopied("claude update", MAC));
+    expect(pageAt()).toBe("agents");
+  });
+
+  it("stands a sub-row under Agents in the sidebar for each agent a thread runs on", async () => {
+    const { api } = agentsApi();
+    await mount(api, { kind: "group", group: "agents" });
+    expect(sidebarRowIds()).toEqual(expect.arrayContaining(["agent:claude", "agent:codex", "agent:opencode"]));
+  });
+});
+
+describe("an agent's page", () => {
+  const atClaude: SettingsAt = { kind: "agent", id: "claude" };
+
+  it("heads with its version and how it is signed in, offers the update to the newer version, and turns it off on the picked computer through the host", async () => {
+    const made = agentsApi();
+    await mount(made.api, atClaude);
+    expect(document.querySelector("[data-breadcrumb-page]")?.textContent).toBe("Claude Code");
+    const head = control("agent-head");
+    expect(head.querySelector("[data-settings-mark]")?.textContent).toBe("2.1.286");
+    // The mock's short form on the line, the whole of it on the hover with the computer named, never "the machine".
+    const line = head.querySelector<HTMLElement>("[data-settings-description] [title]")!;
+    expect(line.textContent).toBe("Signed in with an API key");
+    expect(line.getAttribute("title")).toBe(`Signed in with an API key from ANTHROPIC_API_KEY on ${MAC}`);
+    expect(document.body.innerHTML).not.toContain("on the machine");
+    expect(head.querySelector("[data-k=agent-update]")?.textContent).toBe("Update to 2.1.290");
+    const switchEl = head.querySelector<HTMLElement>("[data-k=agent-on]")!;
+    await act(async () => void fireEvent.click(switchEl));
+    await settle();
+    expect(made.setups).toEqual([["here", "claude", { on: false }]]);
+    expect(made.reads.length).toBe(2);
+  });
+
+  it("says a refused turn-off in the host's own words", async () => {
+    const made = agentsApi({ agentsSetup: async () => Promise.reject(new RequestError("only a socket holding this host's own token may set that")) });
+    await mount(made.api, atClaude);
+    await act(async () => void fireEvent.click(control("agent-head").querySelector<HTMLElement>("[data-k=agent-on]")!));
+    await settle();
+    expect(notices().join("\n")).toContain("only a socket holding this host's own token may set that");
+  });
+
+  it("sets the model and its effort for every new thread, and the arrow takes both back", async () => {
+    const { api, sets } = agentsApi();
+    await mount(api, atClaude);
+    expect(control("agent-model").textContent).toBe("Opus 5.5");
+    expect(control("agent-effort").textContent).toBe("High");
+    expect(rowOf("agent-model")!.querySelector("[data-k=row-reset]")).toBeNull();
+    expect(descriptionOf("agent-model")).toBe(W.modelDescription);
+    await pickOption(control("agent-model"), "Fable 5.1");
+    await settle();
+    await pickOption(control("agent-effort"), "Max");
+    await settle();
+    expect(sets).toEqual([{ agentDefaults: { claude: { model: "claude-fable-5-1" } } }, { agentDefaults: { claude: { effort: "max" } } }]);
+    fireEvent.click(rowOf("agent-model")!.querySelector("[data-k=row-reset]")!);
+    await settle();
+    expect(sets.at(-1)).toEqual({ agentDefaults: { claude: { model: null, effort: null } } });
+  });
+
+  it("offers access as four words, holds the ones the agent takes none of with its own sentence, and writes a pick", async () => {
+    const { api, sets } = agentsApi();
+    await mount(api, atClaude);
+    const access = control("agent-access");
+    expect([...access.querySelectorAll("[data-segment]")].map(s => s.textContent)).toEqual(["Ask", "Auto-edit", "Full", "Plan"]);
+    expect(access.querySelector("[data-segment=full]")?.hasAttribute("data-checked")).toBe(true);
+    expect(access.querySelector("[data-segment=plan]")?.getAttribute("title")).toBe(accessRefusal(CLAUDE_CATALOG, "plan"));
+    expect(descriptionOf("agent-access")).toBe("A project can set its own. Passed to Claude Code at every launch.");
+    await act(async () => void fireEvent.click(access.querySelector("[data-segment=ask]")!));
+    await settle();
+    expect(sets).toEqual([{ agentDefaults: { claude: { access: "ask" } } }]);
+  });
+
+  it("says an access the host refused in the host's own words and shows the host's value again", async () => {
+    const refused = "Claude Code takes no plan access; it takes ask, auto-edit, full";
+    const { api } = agentsApi({ setPreferences: async () => Promise.reject(new RequestError(refused)) } as Partial<Api>);
+    await mount(api, atClaude);
+    await act(async () => void fireEvent.click(control("agent-access").querySelector("[data-segment=ask]")!));
+    await settle();
+    expect(notices().join("\n")).toContain(refused);
+  });
+
+  it("counts the models the picker lists, and its sheet hides one, moves one and adds one by id in one write", async () => {
+    const { api, sets } = agentsApi();
+    await mount(api, atClaude);
+    expect(wordOf("agent-models")).toBe("6 of 8");
+    fireEvent.click(control("agent-models-edit"));
+    const sheet = await screen.findByRole("dialog");
+    fireEvent.click(within(sheet).getByRole("checkbox", { name: W.shown("Haiku 4.5") }));
+    fireEvent.click(within(sheet).getByRole("button", { name: W.moveUp("Fable 5.1") }));
+    fireEvent.change(within(sheet).getByRole("textbox", { name: W.modelId }), { target: { value: "claude-opus-6-preview" } });
+    fireEvent.click(within(sheet).getByRole("button", { name: W.addModel }));
+    await act(async () => void fireEvent.click(within(sheet).getByRole("button", { name: W.save })));
+    await settle();
+    expect(sets).toEqual([
+      {
+        agentDefaults: {
+          claude: {
+            models: {
+              hide: ["claude-haiku-4-5-20251001", "claude-opus-4-8", "claude-sonnet-4-5"],
+              order: ["claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5", "claude-opus-5", "claude-sonnet-4-6", "claude-opus-6-preview"],
+              custom: ["claude-opus-6-preview"],
+            },
+          },
+        },
+      },
+    ]);
+  });
+
+  it("says where the program and the config folder are and how many words and variables every launch carries", async () => {
+    const { api } = agentsApi();
+    await mount(api, atClaude);
+    expect(page().querySelector("[data-settings-card='agent-runs'] [data-settings-head]")?.textContent).toBe(W.howItRuns);
+    expect(descriptionOf("agent-program")).toBe("~/.local/bin/claude");
+    // The host answers no folder while none is set, so the page spells no path of its own.
+    expect(descriptionOf("agent-config")).toBe(W.ownFolder("Claude Code"));
+    expect(descriptionOf("agent-args")).toBe("2 arguments.");
+    expect(descriptionOf("agent-env")).toBe("2 variables, values hidden.");
+    expect(rowOf("agent-args")!.querySelector("[data-k=row-reset]")).not.toBeNull();
+    expect(rowOf("agent-program")!.querySelector("[data-k=row-reset]")).toBeNull();
+  });
+
+  it("changes the program through agents.setup, reads the agent again, and keeps the sheet open on the host's refusal", async () => {
+    let refuse = true;
+    const asked: AgentSetupSet[] = [];
+    const made = agentsApi({
+      agentsSetup: async (_placeId, _agent, change) => {
+        asked.push(change);
+        if (refuse) throw new RequestError("~/bin/claude-wrap is not a program on zingzy-mbp", undefined, "Name a program on its PATH.");
+        return CLAUDE;
+      },
+    });
+    await mount(made.api, atClaude);
+    fireEvent.click(control("agent-program-change"));
+    const sheet = await screen.findByRole("dialog");
+    const field = within(sheet).getByRole("textbox", { name: W.program });
+    fireEvent.change(field, { target: { value: "~/bin/claude-wrap" } });
+    await act(async () => void fireEvent.click(within(sheet).getByRole("button", { name: W.save })));
+    await settle();
+    expect(asked).toEqual([{ program: "~/bin/claude-wrap" }]);
+    expect(sheet.querySelector("[data-k=agent-program-refusal]")?.textContent).toBe("~/bin/claude-wrap is not a program on zingzy-mbp Name a program on its PATH.");
+    refuse = false;
+    await act(async () => void fireEvent.click(within(sheet).getByRole("button", { name: W.save })));
+    await settle();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(made.reads.length).toBe(2);
+  });
+
+  it("points the config folder elsewhere and says the agent signs in again there", async () => {
+    const made = agentsApi();
+    await mount(made.api, atClaude);
+    fireEvent.click(control("agent-config-change"));
+    const sheet = await screen.findByRole("dialog");
+    fireEvent.change(within(sheet).getByRole("textbox", { name: W.configFolder }), { target: { value: "~/claude-wsp" } });
+    await act(async () => void fireEvent.click(within(sheet).getByRole("button", { name: W.save })));
+    await settle();
+    expect(made.setups).toEqual([["here", "claude", { configDir: "~/claude-wsp" }]]);
+    expect(notices()).toContain(configDirSignInLine("Claude Code"));
+  });
+
+  it("splits the launch words as a shell would, refuses a quote never closed before asking, and the arrow puts them back", async () => {
+    const made = agentsApi();
+    await mount(made.api, atClaude);
+    fireEvent.click(control("agent-args-edit"));
+    const sheet = await screen.findByRole("dialog");
+    const field = within(sheet).getByRole("textbox", { name: W.launchArguments });
+    expect((field as HTMLInputElement).value).toBe("--verbose --debug");
+    fireEvent.change(field, { target: { value: "--append-system-prompt 'be brief" } });
+    await act(async () => void fireEvent.click(within(sheet).getByRole("button", { name: W.save })));
+    expect(sheet.querySelector("[data-k=agent-args-refusal]")?.textContent).toBe(W.argumentsUnclosed);
+    expect(made.setups).toEqual([]);
+    fireEvent.change(field, { target: { value: "--append-system-prompt 'be brief'" } });
+    await act(async () => void fireEvent.click(within(sheet).getByRole("button", { name: W.save })));
+    await settle();
+    expect(made.setups).toEqual([["here", "claude", { args: ["--append-system-prompt", "be brief"] }]]);
+    fireEvent.click(rowOf("agent-args")!.querySelector("[data-k=row-reset]")!);
+    await settle();
+    expect(made.setups.at(-1)).toEqual(["here", "claude", { args: null }]);
+  });
+
+  it("lists variables by name alone, sends a typed value once and never draws it, takes one away, and refuses a process variable before asking", async () => {
+    const made = agentsApi();
+    await mount(made.api, atClaude);
+    fireEvent.click(control("agent-env-edit"));
+    const sheet = await screen.findByRole("dialog");
+    expect([...sheet.querySelectorAll<HTMLElement>("[data-env-name]")].map(li => li.dataset["envName"])).toEqual(["ANTHROPIC_BASE_URL", "FOO"]);
+    const name = within(sheet).getByRole("textbox", { name: W.variableName });
+    const value = sheet.querySelector<HTMLInputElement>("[data-k=agent-env-value] input, input[data-k=agent-env-value]")!;
+    expect(value.type).toBe("password");
+    fireEvent.change(name, { target: { value: "PATH" } });
+    fireEvent.change(value, { target: { value: "/tmp/evil" } });
+    fireEvent.click(within(sheet).getByRole("button", { name: W.addVariable }));
+    expect(sheet.querySelector("[data-k=agent-env-refusal]")?.textContent).toBe(agentEnvRefusal("PATH", "Claude Code"));
+    fireEvent.change(name, { target: { value: "SECRET_TOKEN" } });
+    fireEvent.change(value, { target: { value: "sk-ant-x" } });
+    fireEvent.click(within(sheet).getByRole("button", { name: W.addVariable }));
+    expect(value.value).toBe("");
+    expect(document.body.innerHTML).not.toContain("sk-ant-x");
+    fireEvent.click(within(sheet).getByRole("button", { name: W.removeVariable("FOO") }));
+    await act(async () => void fireEvent.click(within(sheet).getByRole("button", { name: W.save })));
+    await settle();
+    expect(made.setups).toEqual([["here", "claude", { env: { SECRET_TOKEN: "sk-ant-x", FOO: null } }]]);
+    expect(document.body.innerHTML).not.toContain("sk-ant-x");
+  });
+
+  it("says the host's refusal of a variable's value from a socket that is not its own, in its own words", async () => {
+    const made = agentsApi({ agentsSetup: async () => Promise.reject(new RequestError(ENV_VALUE_REFUSAL)) });
+    await mount(made.api, atClaude);
+    fireEvent.click(control("agent-env-edit"));
+    const sheet = await screen.findByRole("dialog");
+    fireEvent.change(within(sheet).getByRole("textbox", { name: W.variableName }), { target: { value: "SECRET_TOKEN" } });
+    fireEvent.change(sheet.querySelector<HTMLInputElement>("input[data-k=agent-env-value]")!, { target: { value: "sk-ant-x" } });
+    fireEvent.click(within(sheet).getByRole("button", { name: W.addVariable }));
+    await act(async () => void fireEvent.click(within(sheet).getByRole("button", { name: W.save })));
+    await settle();
+    expect(sheet.querySelector("[data-k=agent-env-refusal]")?.textContent).toBe(ENV_VALUE_REFUSAL);
+    expect(document.body.innerHTML).not.toContain("sk-ant-x");
+  });
+
+  it("reads the picked computer's own setup, and opens from the sidebar's sub-row", async () => {
+    const box: PlaceView = { id: "p_2", kind: "computer", name: "spoo", default: false, present: true, takesForks: true, engine: "none" };
+    useStore.setState({ places: [here, box] });
+    useSettingsStore.getState().pickAgentsPlace("p_2");
+    const made = agentsApi();
+    await mount(made.api, { kind: "group", group: "agents" });
+    fireEvent.click(document.querySelector<HTMLElement>("[data-slot=sidebar] [data-row-id='agent:codex']")!);
+    await settle();
+    expect(pageAt()).toBe("agent:codex");
+    expect(made.reads.at(-1)).toEqual({ placeId: "p_2" });
+    expect(control("agents-picker").textContent).toBe("spoo");
+  });
+});
+
+describe("a project's new threads", () => {
+  it("reads a model kept for another agent as unset, with no arrow", async () => {
+    const record = { ...DEFAULT_PREFERENCES, labs: false, projectDefaults: { pr_wsp: { agent: "codex", model: "claude-fable-5-1" } } };
+    useStore.setState({ preferences: record });
+    const { api } = agentsApi({ projectsDefaults: async () => ({ pr_wsp: { agent: { value: "codex", from: "project" }, model: { value: "gpt-5.6-sol", from: "catalog" }, access: { value: "full", mode: "danger-full-access", from: "catalog" } } }) }, record);
+    await mount(api, { kind: "project", id: "pr_wsp" });
+    expect(control("project-model").textContent).toBe("Default (GPT-5.6-Sol)");
+    expect(descriptionOf("project-model")).toBe(P.ownUnset);
+    expect(rowOf("project-model")!.querySelector("[data-k=row-reset]")).toBeNull();
+  });
+
+  const atWsp: SettingsAt = { kind: "project", id: "pr_wsp" };
+  const resolved = (over: Partial<ThreadDefaults> = {}): Record<string, ThreadDefaults> => ({
+    pr_wsp: { agent: { value: "claude", from: "default" }, model: { value: "claude-opus-5-5", from: "catalog" }, effort: { value: "high", from: "catalog" }, access: { value: "full", mode: "bypassPermissions", from: "catalog" }, ...over },
+  });
+
+  it("names what each unset row takes and where from, and sets the project's own agent through the host", async () => {
+    let reads = 0;
+    const { api, sets } = agentsApi({ projectsDefaults: async () => (reads++, resolved()) });
+    await mount(api, atWsp);
+    expect(page().querySelector("[data-settings-card='project-new-threads'] [data-settings-head]")?.textContent).toBe(P.newThreads);
+    expect(control("project-agent").textContent).toBe("Default (Claude Code)");
+    expect(control("project-model").textContent).toBe("Default (Opus 5.5)");
+    expect(control("project-access").textContent).toBe("Default (Full, from Claude Code)");
+    expect(descriptionOf("project-agent")).toBe(P.agentUnset);
+    expect(descriptionOf("project-model")).toBe(P.ownUnset);
+    expect(descriptionOf("project-access")).toBe(P.ownUnset);
+    for (const id of ["project-agent", "project-model", "project-access"]) expect(rowOf(id)!.querySelector("[data-k=row-reset]")).toBeNull();
+    await pickOption(control("project-agent"), "Codex");
+    await settle();
+    expect(sets).toEqual([{ projectDefaults: { pr_wsp: { agent: "codex" } } }]);
+    expect(reads).toBe(2);
+  });
+
+  it("draws a set row with its value, the set line and the arrow, which writes the field away", async () => {
+    const record = { ...DEFAULT_PREFERENCES, labs: false, projectDefaults: { pr_wsp: { agent: "codex", access: "ask" as const } } };
+    useStore.setState({ preferences: record });
+    const { api, sets } = agentsApi({ projectsDefaults: async () => resolved({ agent: { value: "codex", from: "project" }, model: { value: "gpt-5.6-sol", from: "catalog" }, access: { value: "ask", mode: "workspace-write", from: "project" } }) }, record);
+    await mount(api, atWsp);
+    expect(control("project-agent").textContent).toBe("Codex");
+    expect(descriptionOf("project-agent")).toBe(P.agentSet);
+    expect(control("project-model").textContent).toBe("Default (GPT-5.6-Sol)");
+    expect(control("project-access").textContent).toBe("Ask");
+    expect(descriptionOf("project-access")).toBe(P.ownSet);
+    fireEvent.click(rowOf("project-access")!.querySelector("[data-k=row-reset]")!);
+    await settle();
+    expect(sets).toEqual([{ projectDefaults: { pr_wsp: { access: null } } }]);
+    await pickOption(control("project-model"), "GPT-5.6-Terra");
+    await settle();
+    expect(sets.at(-1)).toEqual({ projectDefaults: { pr_wsp: { model: "gpt-5.6-terra" } } });
+  });
+});
+
+describe("a row that opens a page and acts", () => {
+  it("opens on a press anywhere but its control, whatever element the control is", async () => {
+    const { Row } = await import("../src/settings/rows.js");
+    const opened: string[] = [];
+    const { render } = await import("@testing-library/react");
+    render(<Row id="r" title="Claude Code" description="Opus 5.5 at high effort" control={<span role="switch" aria-checked="true" data-k="ctl" tabIndex={0} />} open={() => opened.push("open")} />);
+    fireEvent.click(document.querySelector("[data-k=ctl]")!);
+    expect(opened).toEqual([]);
+    fireEvent.click(document.querySelector("[data-settings-title]")!);
+    fireEvent.click(document.querySelector("[data-settings-slot] svg")!);
+    expect(opened).toEqual(["open", "open"]);
+  });
+});
+
+describe("the client's writes", () => {
+  it("sends agents.setup with the change beside the computer and the agent, and reads projects.defaults by project", async () => {
+    const { makeApi } = await import("../src/protocol/client.js");
+    const sent: Array<[string, unknown]> = [];
+    const client = {
+      request: async (op: string, body: unknown) => {
+        sent.push([op, body]);
+        return op === "agents.setup" ? { agent: CLAUDE } : { defaults: { pr_wsp: { agent: { value: "claude", from: "default" } } } };
+      },
+    };
+    const api = makeApi(client as never);
+    await expect(api.agentsSetup!("here", "claude", { env: { FOO: null } })).resolves.toEqual(CLAUDE);
+    await expect(api.projectsDefaults!()).resolves.toEqual({ pr_wsp: { agent: { value: "claude", from: "default" } } });
+    expect(sent).toEqual([
+      ["agents.setup", { placeId: "here", agent: "claude", env: { FOO: null } }],
+      ["projects.defaults", undefined],
+    ]);
+  });
+});
+

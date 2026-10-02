@@ -68,6 +68,17 @@ describe("a thread tile", () => {
     expect(slot().textContent).toContain("Failed");
   });
 
+  it("a thread whose agent the host refuses to start there says Refused in its slot with the host's sentence on its hover and its card", () => {
+    const sentence = "Claude Code does not start with its config folder ~/claude-wsp: it is not under the home folder /Users/dev. Set another with wsp agents setup claude --config, or put its own back with --reset config.";
+    mount({ over: { status: "failed", endedAt: "2026-09-17T00:05:00.000Z", setupRefusal: sentence } });
+    expect(slot().textContent).toBe("Refused");
+    expect(slot().dataset["threadStatus"]).toBe("setup-refused");
+    expect(slot().getAttribute("title")).toBe(sentence);
+    cleanup();
+    mount({ over: { status: "running", setupRefusal: sentence } });
+    expect(slot().textContent).not.toContain("Refused");
+  });
+
   it("in the Settled fold rests whatever its state: its age in the row's ink, no tone, no glyph, and a muted title", () => {
     mount({ over: { status: "failed", endedAt: "2026-09-17T00:05:00.000Z" }, settled: true });
     expect(slot().textContent).toBe("3m");

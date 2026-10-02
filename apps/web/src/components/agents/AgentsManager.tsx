@@ -458,24 +458,30 @@ export function AgentsManager({ shell, head, report, reading, error = null, on, 
       {/* The list's end keeps the rows' own side gutter under the last one. */}
       <div data-agents-body className={cn("flex flex-col pt-2 pb-2", !page && "min-h-0 flex-1 overflow-y-auto", dim && at.kind !== "list" && "opacity-50")}>
         {at.kind === "list" ? list : levelView}
-        {at.kind !== "list" || lines.length === 0 ? null : (
-          <div data-agents-refused className="mt-2 flex flex-col px-4">
-            {lines.map(line => (
-              <p key={line.id} data-refused-line={line.id} className="flex min-h-7 items-start gap-2 py-1.5">
-                <span data-refused-label className={cn(REFUSED_LINE, "min-w-0 [overflow-wrap:anywhere]", line.value !== undefined && "shrink-0 text-foreground")}>
-                  {line.label}
-                </span>
-                {line.value === undefined ? null : (
-                  <span data-refused-value className={cn(REFUSED_LINE, "min-w-0 flex-1 [overflow-wrap:anywhere]")}>
-                    {line.value}
-                  </span>
-                )}
-              </p>
-            ))}
-          </div>
-        )}
+        {at.kind !== "list" ? null : <RefusedLines lines={lines} className="mt-2 px-4" />}
       </div>
     </section>
+  );
+}
+
+/** The quiet lines under a list: each reader that could not answer and why, then each recipe row that did not land. */
+export function RefusedLines({ lines, className }: { lines: readonly RefusedLine[]; className?: string }) {
+  if (lines.length === 0) return null;
+  return (
+    <div data-agents-refused className={cn("flex flex-col", className)}>
+      {lines.map(line => (
+        <p key={line.id} data-refused-line={line.id} className="flex min-h-7 items-start gap-2 py-1.5">
+          <span data-refused-label className={cn(REFUSED_LINE, "min-w-0 [overflow-wrap:anywhere]", line.value !== undefined && "shrink-0 text-foreground")}>
+            {line.label}
+          </span>
+          {line.value === undefined ? null : (
+            <span data-refused-value className={cn(REFUSED_LINE, "min-w-0 flex-1 [overflow-wrap:anywhere]")}>
+              {line.value}
+            </span>
+          )}
+        </p>
+      ))}
+    </div>
   );
 }
 

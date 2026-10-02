@@ -145,7 +145,11 @@ export function Row({ id, title, lead, mark, description, chips, mono = false, w
             {word}
           </span>
         )}
-        {control}
+        {control === undefined ? null : (
+          <span data-settings-control className="contents">
+            {control}
+          </span>
+        )}
         {open === undefined ? null : <ChevronRightIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />}
       </div>
     );
@@ -183,12 +187,37 @@ export function Row({ id, title, lead, mark, description, chips, mono = false, w
       </div>
     </div>
   );
+  // A slot holding the chevron alone stays beside the words at every width: on a line of its own it reads as a stray.
+  const chevronOnly = word === undefined && control === undefined && open !== undefined;
   const body = slot === null ? text : (
-    <div className={SPLIT_CLASS}>
+    <div className={chevronOnly ? "flex items-center justify-between gap-5" : SPLIT_CLASS}>
       {text}
       {slot}
     </div>
   );
+  if (open !== undefined && control !== undefined) {
+    // A button may not hold a button, so a row that opens a page and acts as well is a link that leaves its control be.
+    return (
+      <div
+        role="link"
+        tabIndex={0}
+        data-settings-row={id}
+        className={cn("flex flex-col justify-center py-3", CARD_INSET, ROW_FLOOR, OPENS_CLASS)}
+        onClick={event => {
+          if (!(event.target instanceof Element && event.target.closest("[data-settings-control]") !== null)) open();
+        }}
+        onKeyDown={event => {
+          if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {
+            event.preventDefault();
+            open();
+          }
+        }}
+        {...attrs}
+      >
+        {body}
+      </div>
+    );
+  }
   if (open !== undefined) {
     return (
       <button type="button" data-settings-row={id} className={cn("flex flex-col justify-center py-3", CARD_INSET, ROW_FLOOR, OPENS_CLASS)} onClick={open} {...attrs}>
@@ -270,14 +299,21 @@ export function Cards({ cards }: { cards: ReadonlyArray<SettingsCardData> }) {
 /** The row a computer's or a project's page opens on: its glyph in its frame, its name, one line of one kind of
  * fact under it, and a figure or an act at the right. It stands in place of a page title, since the top bar's
  * crumbs already name the page. */
-export function HeadRow({ glyph, title, line, slot, attrs }: { glyph: ReactNode; title: string; line?: ReactNode; slot?: ReactNode; attrs?: Record<string, string> }) {
+export function HeadRow({ glyph, title, mark, line, slot, attrs }: { glyph: ReactNode; title: string; /** One mono fact after the name: an agent's version. */ mark?: string; line?: ReactNode; slot?: ReactNode; attrs?: Record<string, string> }) {
   return (
     <div data-settings-head-row className={cn("flex flex-wrap items-center justify-between gap-x-6 gap-y-2 py-4", CARD_INSET, ROW_FLOOR)} {...attrs}>
-      <span className="flex min-w-0 flex-1 items-center gap-3">
+      <span className="flex min-w-40 flex-1 items-center gap-3">
         <span className="flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-foreground/[0.04]">{glyph}</span>
         <span className="flex min-w-0 flex-col gap-0.5">
-          <span data-settings-title className={cn(LIST_TITLE, "truncate")}>
-            {title}
+          <span className="flex min-w-0 items-baseline gap-2">
+            <span data-settings-title className={cn(LIST_TITLE, "truncate")}>
+              {title}
+            </span>
+            {mark === undefined ? null : (
+              <span data-settings-mark className={cn(FACT, "shrink-0")}>
+                {mark}
+              </span>
+            )}
           </span>
           {line === undefined ? null : (
             <span data-settings-description className={cn(NOTE, "truncate")}>

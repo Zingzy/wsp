@@ -363,6 +363,9 @@ export interface SidebarThreadSnapshot {
   /** The lead of the permission prompt the thread is stopped on, as the protocol's fold reads it; null while it is
    * waiting on nobody. */
   readonly asking: string | null;
+  /** Why the thread's agent cannot start or read its own store on that computer now, in the host's words; absent while
+   * nothing stops it. */
+  readonly setupRefusal?: string;
   /** What the thread has spent, as the protocol's fold adds its rows up; null where no turn of it reported a
    * figure, which is not the same as nothing spent. */
   readonly costUsd: number | null;

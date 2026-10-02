@@ -12,6 +12,7 @@ import { cn } from "../lib/utils.js";
 import { useIsMobile } from "../hooks/useMediaQuery.js";
 import { useStore } from "../protocol/store.js";
 import { AddProjectDialog } from "../sidebar/AddProjectDialog.js";
+import { AgentPage } from "./agentPage.js";
 import { ComputerPage } from "./computers.js";
 import { SETTINGS_WORDS } from "./format.js";
 import { drawnGroups, groupById, searchGroup } from "./groups.js";
@@ -70,6 +71,7 @@ function Page({ at, ctx }: { at: SettingsAt; ctx: SettingsContext }) {
     const place = ctx.places.find(p => p.id === at.id);
     return place === undefined ? null : <ComputerPage place={place} ctx={ctx} />;
   }
+  if (at.kind === "agent") return <AgentPage id={at.id} ctx={ctx} />;
   const project = ctx.projects.find(p => p.id === at.id);
   return project === undefined ? null : <ProjectPage project={project} ctx={ctx} />;
 }

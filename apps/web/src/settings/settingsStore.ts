@@ -11,8 +11,8 @@ import { create } from "zustand";
 import type { AddRoad } from "./AddComputer.js";
 import { isSettingsGroupId, type SettingsGroupId } from "./groupIds.js";
 
-/** A page of Settings: a group, a computer's own page or a project's. */
-export type SettingsAt = { readonly kind: "group"; readonly group: SettingsGroupId } | { readonly kind: "computer"; readonly id: string } | { readonly kind: "project"; readonly id: string };
+/** A page of Settings: a group, a computer's own page, a project's or an agent's. */
+export type SettingsAt = { readonly kind: "group"; readonly group: SettingsGroupId } | { readonly kind: "computer"; readonly id: string } | { readonly kind: "project"; readonly id: string } | { readonly kind: "agent"; readonly id: string };
 
 /** The page a fresh window opens on. */
 export const FIRST_PAGE: SettingsAt = { kind: "group", group: "appearance" };
@@ -25,14 +25,17 @@ export function atId(at: SettingsAt): string {
 
 export const sameAt = (a: SettingsAt, b: SettingsAt): boolean => atId(a) === atId(b);
 
-/** The group a page belongs to: its own for a group page, Computers for a computer's, Projects for a project's. */
-export const groupOf = (at: SettingsAt): SettingsGroupId => (at.kind === "group" ? at.group : at.kind === "computer" ? "computers" : "projects");
+const GROUP_OF_PAGE = { computer: "computers", project: "projects", agent: "agents" } as const;
+
+/** The group a page belongs to: its own for a group page, Computers for a computer's, Projects for a project's,
+ * Agents for an agent's. */
+export const groupOf = (at: SettingsAt): SettingsGroupId => (at.kind === "group" ? at.group : GROUP_OF_PAGE[at.kind]);
 
 /** A page read back off storage, or nothing for a word that names no page. */
 export function parseAt(raw: string | null): SettingsAt | null {
   if (raw === null) return null;
   const [kind, id] = raw.includes(":") ? [raw.slice(0, raw.indexOf(":")), raw.slice(raw.indexOf(":") + 1)] : [raw, ""];
-  if ((kind === "computer" || kind === "project") && id !== "") return { kind, id };
+  if ((kind === "computer" || kind === "project" || kind === "agent") && id !== "") return { kind, id };
   return isSettingsGroupId(raw) ? { kind: "group", group: raw } : null;
 }
 
