@@ -79,12 +79,11 @@ export function newThreadPicks(catalog: HarnessCatalog): { model?: string; effor
 /** A model by the label its list gives it, else its id. */
 export const modelLabel = (catalog: HarnessCatalog, value: string): string => modelOf(catalog, value)?.label ?? value;
 
-/** The line of what a new thread runs an agent with: its model at its effort, and its access. */
-export function runsWithLine(catalog: HarnessCatalog): string | undefined {
+/** What a new thread runs an agent with, two kinds of fact held apart: its model at its effort, and its access. */
+export function runsWith(catalog: HarnessCatalog): string[] {
   const picks = newThreadPicks(catalog);
-  if (picks.model === undefined) return picks.access === undefined ? undefined : `${W.accessWords[picks.access].toLowerCase()} access`;
-  const effort = picks.effort === undefined ? undefined : catalog.efforts.find(o => o.value === picks.effort)?.label ?? picks.effort;
-  return W.runsWith(modelLabel(catalog, picks.model), effort, picks.access === undefined ? undefined : W.accessWords[picks.access]);
+  const effort = picks.effort === undefined ? undefined : (catalog.efforts.find(o => o.value === picks.effort)?.label ?? picks.effort);
+  return [...(picks.model === undefined ? [] : [W.atEffort(modelLabel(catalog, picks.model), effort)]), ...(picks.access === undefined ? [] : [W.accessFact(W.accessWords[picks.access])])];
 }
 
 /** How an agent's sign-in stands, short, for its row on the list: the kind of sign-in where its status said one. */
@@ -209,7 +208,7 @@ function AgentLine({ row, rows, computer, ctx }: { row: AgentRow; rows: RowsCont
     return <Row id={row.id} title={row.name} lead={lead} description={W.notInstalled} {...(kindRow.quick === undefined ? {} : { control: <ActButton act={wordOnly(kindRow.quick)} /> })} attrs={{ "data-agent-row": row.id }} />;
   }
   const catalog = ctx.harnesses.find(c => c.harness === row.id);
-  const runs = catalog === undefined ? undefined : runsWithLine(catalog);
+  const runs = catalog === undefined ? [] : runsWith(catalog);
   // The sign-in is the row's act only while it is the step to take; the update otherwise.
   const step = kindRow.quick !== undefined && (kindRow.quick.id === "sign-in" || kindRow.quick.id === "cancel") && (kindRow.quick.run !== undefined || kindRow.quick.busy === true) ? kindRow.quick : undefined;
   const control = step !== undefined ? <ActButton act={wordOnly(step)} /> : row.update === undefined ? undefined : <UpdateButton row={row} computer={computer} label={W.update} ctx={ctx} />;
@@ -220,7 +219,9 @@ function AgentLine({ row, rows, computer, ctx }: { row: AgentRow; rows: RowsCont
         title={row.name}
         lead={lead}
         {...(row.version === undefined ? {} : { mark: row.version })}
-        description={[waitingFlow(flow) ? capitalised(AGENTS_LIST_WORDS.waitingOnYou) : signInShort(row), ...(runs === undefined ? [] : [runs])].join(", ")}
+        word={waitingFlow(flow) ? capitalised(AGENTS_LIST_WORDS.waitingOnYou) : signInShort(row)}
+        wordClass="fact"
+        description={runs}
         {...(control === undefined ? {} : { control })}
         {...(catalog === undefined ? {} : { open: () => ctx.go({ kind: "agent", id: row.id }) })}
         attrs={{ "data-agent-row": row.id }}

@@ -574,7 +574,7 @@ describe("the Agents page on a computer", () => {
     expect(agentRow("claude").querySelector("[data-settings-title]")?.textContent).toBe(claude.name);
     expect(agentRow("claude").querySelector("svg")).not.toBeNull();
     expect(agentRow("claude").querySelector("[data-settings-mark]")?.textContent).toBe(claude.version);
-    expect(agentRow("claude").querySelector("[data-settings-description]")?.textContent).toBe(capitalised(AGENTS_LIST_WORDS.signedIn));
+    expect(agentRow("claude").querySelector("[data-settings-word]")?.textContent).toBe(capitalised(AGENTS_LIST_WORDS.signedIn));
     expect(document.querySelector("[data-settings-page] [data-agents-manager]")).toBeNull();
     topBarTab("servers");
     expect(picked()).toBe("servers");
@@ -596,8 +596,8 @@ describe("the Agents page on a computer", () => {
     };
     useStore.setState({ places: [here, box] });
     await mountAgents(computersApi({ agentsRead: async () => report, agentsSignIn } as unknown as Partial<Api>).api, "p_2");
-    const description = (): string | undefined => agentRow("claude").querySelector("[data-settings-description]")?.textContent ?? undefined;
-    expect(description()?.startsWith(capitalised(AGENTS_LIST_WORDS.needsSignIn))).toBe(true);
+    const state = (): string | undefined => agentRow("claude").querySelector("[data-settings-word]")?.textContent ?? undefined;
+    expect(state()).toBe(capitalised(AGENTS_LIST_WORDS.needsSignIn));
     const signIn = agentRow("claude").querySelector<HTMLElement>("[data-settings-slot] [data-k='act-sign-in']")!;
     expect(signIn.textContent).toBe("Sign in");
     fireEvent.click(signIn);
@@ -606,7 +606,7 @@ describe("the Agents page on a computer", () => {
     expect(document.querySelector("[data-settings-page] [data-k='sign-in-flow']")).not.toBeNull();
     // While the flow waits on the person its own controls are the step, and the row says so.
     expect(agentRow("claude").querySelector("[data-k='act-sign-in']")).toBeNull();
-    expect(description()?.startsWith(capitalised(AGENTS_LIST_WORDS.waitingOnYou))).toBe(true);
+    expect(state()).toBe(capitalised(AGENTS_LIST_WORDS.waitingOnYou));
   });
 
   it("puts the report's refusals under the list as quiet lines", async () => {

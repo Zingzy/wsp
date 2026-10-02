@@ -293,9 +293,10 @@ export const AGENTS_PAGE_WORDS = {
   defaultAgentDescription: "A project can set its own.",
   on: (name: string): string => `On ${name}`,
   notInstalled: "Not installed here",
-  /** An agent's model and effort and its access, as one line of what a new thread runs with. */
-  runsWith: (model: string, effort: string | undefined, access: string | undefined): string =>
-    [effort === undefined ? model : `${model} at ${effort.toLowerCase()} effort`, access === undefined ? undefined : `${access.toLowerCase()} access`].filter(part => part !== undefined).join(", "),
+  /** A model at the effort a new thread runs it at. */
+  atEffort: (model: string, effort: string | undefined): string => (effort === undefined ? model : `${model} at ${effort.toLowerCase()} effort`),
+  /** An access word as its own quiet fact. */
+  accessFact: (word: string): string => `${word.toLowerCase()} access`,
   update: "Update",
   updateTo: (version: string): string => `Update to ${version}`,
   updateCopied: (command: string, computer: string): string => `Copied ${command}. Run it in a terminal on ${computer}.`,

@@ -100,8 +100,13 @@ describe("the Agents page", () => {
     const claude = rowOf("claude")!;
     expect(claude.querySelector("[data-settings-title]")?.textContent).toBe("Claude Code");
     expect(claude.querySelector("[data-settings-mark]")?.textContent).toBe("2.1.286");
-    expect(descriptionOf("claude")).toBe("API key, Opus 5.5 at high effort, full access");
-    expect(descriptionOf("codex")).toBe("OAuth credentials, GPT-5.6-Sol at low effort, full access");
+    // Three kinds of fact, three places: the sign-in where the row's state sits, the model at its effort under the name,
+    // and the access beside it held apart by space, never by a comma.
+    expect(wordOf("claude")).toBe("API key");
+    expect([...rowOf("claude")!.querySelectorAll("[data-settings-description] > span")].map(s => s.textContent)).toEqual(["Opus 5.5 at high effort", "full access"]);
+    expect(wordOf("codex")).toBe("OAuth credentials");
+    expect([...rowOf("codex")!.querySelectorAll("[data-settings-description] > span")].map(s => s.textContent)).toEqual(["GPT-5.6-Sol at low effort", "full access"]);
+    for (const id of ["claude", "codex"]) expect(rowOf(id)!.textContent).not.toContain(",");
     expect(descriptionOf("opencode")).toBe(W.notInstalled);
     expect(rowOf("opencode")!.querySelector("[data-k=act-install]")?.textContent).toBe("Install");
     fireEvent.click(claude);
