@@ -241,31 +241,41 @@ describe("an agent's page", () => {
     expect(notices().join("\n")).toContain(refused);
   });
 
-  it("counts the models the picker lists, and its sheet hides one, moves one and adds one by id in one write", async () => {
-    const { api, sets } = agentsApi();
-    await mount(api, atClaude);
-    expect(wordOf("agent-models")).toBe("6 of 8");
-    fireEvent.click(control("agent-models-edit"));
-    const sheet = await screen.findByRole("dialog");
-    fireEvent.click(within(sheet).getByRole("checkbox", { name: W.shown("Haiku 4.5") }));
-    fireEvent.click(within(sheet).getByRole("button", { name: W.moveUp("Fable 5.1") }));
-    fireEvent.change(within(sheet).getByRole("textbox", { name: W.modelId }), { target: { value: "claude-opus-6-preview" } });
-    fireEvent.click(within(sheet).getByRole("button", { name: W.addModel }));
-    await act(async () => void fireEvent.click(within(sheet).getByRole("button", { name: W.save })));
-    await settle();
-    expect(sets).toEqual([
-      {
-        agentDefaults: {
-          claude: {
-            models: {
-              hide: ["claude-haiku-4-5-20251001", "claude-opus-4-8", "claude-sonnet-4-5"],
-              order: ["claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5", "claude-opus-5", "claude-sonnet-4-6", "claude-opus-6-preview"],
-              custom: ["claude-opus-6-preview"],
-            },
-          },
-        },
-      },
-    ]);
+  it("lists every model in its own section, the picker's first, and each hide, move and add writes at once", async () => {
+    const HIDDEN = ["claude-opus-4-8", "claude-sonnet-4-5"];
+    const SHOWN = ["claude-opus-5-5", "claude-fable-5-1", "claude-sonnet-5", "claude-haiku-4-5-20251001", "claude-opus-5", "claude-sonnet-4-6"];
+    const models = (): string[] => [...page().querySelectorAll<HTMLElement>("[data-settings-card='agent-models'] [data-model]")].map(r => r.dataset["model"] ?? "");
+    const rowOfModel = (id: string): HTMLElement => page().querySelector<HTMLElement>(`[data-settings-card='agent-models'] [data-model='${id}']`)!;
+    const written = (sets: unknown[]) => (sets.at(-1) as { agentDefaults: { claude: { models: unknown } } }).agentDefaults.claude.models;
+
+    let made = agentsApi();
+    await mount(made.api, atClaude);
+    expect(models()).toEqual([...SHOWN, ...HIDDEN]);
+    // The default stands beside the name, a word in the row's own ink, and the id under it in the same sans.
+    expect(rowOfModel("claude-opus-5-5").querySelector("[data-settings-mark]")?.textContent).toBe(W.defaultModel);
+    expect(rowOfModel("claude-opus-5-5").querySelector("[data-settings-mark]")?.className).not.toContain("font-mono");
+    expect(rowOfModel("claude-opus-5-5").querySelector("[data-settings-description]")?.className).not.toContain("font-mono");
+    expect(rowOfModel("claude-opus-4-8").querySelector("[data-k=model-grip]")).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await act(async () => void fireEvent.click(rowOfModel("claude-haiku-4-5-20251001").querySelector("[data-k=model-shown]")!));
+    expect(written(made.sets)).toEqual({ hide: ["claude-haiku-4-5-20251001", ...HIDDEN] });
+
+    cleanup();
+    resetSettings();
+    useStore.setState({ places: [here], harnesses: HARNESSES, projects: [WSP] });
+    made = agentsApi();
+    await mount(made.api, atClaude);
+    await act(async () => void fireEvent.keyDown(rowOfModel("claude-fable-5-1").querySelector("[data-k=model-grip]")!, { key: "ArrowUp" }));
+    expect(written(made.sets)).toEqual({ hide: HIDDEN, order: ["claude-fable-5-1", "claude-opus-5-5", ...SHOWN.slice(2)] });
+
+    cleanup();
+    resetSettings();
+    useStore.setState({ places: [here], harnesses: HARNESSES, projects: [WSP] });
+    made = agentsApi();
+    await mount(made.api, atClaude);
+    fireEvent.change(page().querySelector("[data-k=agent-models-id]")!, { target: { value: "claude-opus-6-preview" } });
+    await act(async () => void fireEvent.click(page().querySelector("[data-k=agent-models-add]")!));
+    expect(written(made.sets)).toEqual({ hide: HIDDEN, custom: ["claude-opus-6-preview"] });
   });
 
   it("says where the program and the config folder are and how many words and variables every launch carries", async () => {

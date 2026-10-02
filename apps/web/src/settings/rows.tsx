@@ -38,6 +38,8 @@ export interface SettingsRowData {
   readonly lead?: ReactNode;
   /** One mono word after the title, in the fact class: the default mark on a computer. */
   readonly mark?: string;
+  /** The mark in the row's own sans note ink rather than the mono fact, where it is a word and not a figure. */
+  readonly markWord?: true;
   /** One sentence, or machine words in the mono fact class where `mono` is set; a list is facts held apart by space. */
   readonly description: Words;
   /** The facts as chips in place of the description line, which stays the words a search reads. */
@@ -136,7 +138,7 @@ export function Card({ id, head, lede, under, body, children }: { id: string; he
 }
 
 /** One row: the title over its sentence, and beside them the slot, which stands under them below 640 px. */
-export function Row({ id, title, lead, mark, description, chips, mono = false, word, wordClass = "value", wordK, control, open, reset, tone, attrs }: Omit<SettingsRowData, "kind">) {
+export function Row({ id, title, lead, mark, markWord, description, chips, mono = false, word, wordClass = "value", wordK, control, open, reset, tone, attrs }: Omit<SettingsRowData, "kind">) {
   const slot =
     word === undefined && control === undefined && open === undefined ? null : (
       <div data-settings-slot className="flex min-w-0 items-center gap-3 sm:justify-end">
@@ -162,7 +164,7 @@ export function Row({ id, title, lead, mark, description, chips, mono = false, w
             {title}
           </span>
           {mark === undefined ? null : (
-            <span data-settings-mark className={cn(FACT, "shrink-0")}>
+            <span data-settings-mark className={cn(markWord === true ? NOTE : FACT, "shrink-0")}>
               {mark}
             </span>
           )}
