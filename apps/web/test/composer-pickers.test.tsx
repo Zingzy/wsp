@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The model, effort and access pickers inside the composer box: filled from
 // the catalog the workspace's machine reports (the table until it answers,
-// and marked when it never does), a pick rides the next sessions.start and is
-// remembered per workspace, the access pick on the host's own record and into
+// and marked when it never does), a new thread opens on the defaults read by
+// the one rule, a pick rides the draft's sessions.start and goes with it, the
+// access pick on the host's own record and into
 // a running turn where its harness takes one, a model narrows the effort and context sections,
 // favourites sort first, cmd-1 picks the first row, and the harness is
 // pinned once the thread has a turn. Base UI's menu and popover never settle
@@ -11,10 +12,10 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { ACCESS_REFUSED_LINE, DEFAULT_PREFERENCES, accessReachLine, applyPreferencesPatch, codexNotSignedInLine, workspaceAccess, type HarnessCatalog, type PreferencesPatch, type SessionAccessOutcome, type SessionEvent, type SessionView, type WorkspaceView } from "@wsp/protocol";
+import { ACCESS_REFUSED_LINE, DEFAULT_PREFERENCES, markedFor, resolveThreadDefaults, accessReachLine, applyPreferencesPatch, codexNotSignedInLine, type HarnessCatalog, type PreferencesPatch, type SessionAccessOutcome, type SessionEvent, type SessionView, type WorkspaceView } from "@wsp/protocol";
 
 vi.mock("../src/components/ui/menu.js", () => {
   const Ctx = createContext<{ open: boolean; set: (open: boolean) => void }>({ open: false, set: () => {} });
@@ -345,8 +346,8 @@ describe("composer pickers", () => {
     await typeInto(editor, "go");
     await press(editor, "Enter");
     await waitFor(() => expect(started).toHaveLength(1));
-    expect(started[0]).toMatchObject({ prompt: "go", model: "claude-opus-5", effort: "low", contextWindow: "200k", permissionMode: "acceptEdits" });
-    expect(started[0]?.harness).toBeUndefined();
+    // A send that opens a thread names the agent the box shows.
+    expect(started[0]).toMatchObject({ prompt: "go", harness: "claude", model: "claude-opus-5", effort: "low", contextWindow: "200k", permissionMode: "acceptEdits" });
   });
 
   it("shows the table, marked so, until the machine answers, and keeps it when the machine never does", async () => {
@@ -794,5 +795,132 @@ describe("composer pickers", () => {
     await setup(api);
     await waitFor(() => expect(document.querySelector("[data-composer-folder]")).not.toBeNull());
     expect(document.querySelector("[data-composer-picker]")).toBeNull();
+  });
+});
+
+const PROJECT = { id: "pr_1", name: "the-project", computer: "here", source: { kind: "folder" as const, path: "/root" }, path: "/root", remote: "https://github.com/dev/the-project.git", defaultBranch: "main", memoryKey: "-root", memoryDir: "/root/.claude-cfg/projects/-root/memory", createdAt: "t" };
+
+/** Each list as the host's harnesses.list marks it: the project's agent with its model, effort and access over the
+ * person's defaults, read by the one rule; a list read for no workspace knows no project. */
+function hostMarked(catalogs: HarnessCatalog[], projectId: string | undefined): HarnessCatalog[] {
+  const prefs = useStore.getState().preferences;
+  const project = projectId === undefined ? undefined : prefs.projectDefaults[projectId];
+  const ask = { catalogOf: (id: string) => catalogs.find(c => c.harness === id), prefs, ...(project !== undefined ? { project } : {}) };
+  const agent = resolveThreadDefaults({ firstAgent: catalogs[0]!.harness, ...ask }).agent.value;
+  return catalogs.map(c => ({ ...markedFor(c, resolveThreadDefaults({ firstAgent: c.harness, named: c.harness, ...ask })), ...(c.harness === agent ? { isDefault: true } : {}) }));
+}
+
+/** The fixture's host, its lists marked as the real one marks them. */
+function markedApi(opts: Parameters<typeof fixtureApi>[0]) {
+  const made = fixtureApi(opts);
+  made.api.listHarnesses = async workspaceId => hostMarked(opts.table, workspaceId === undefined ? undefined : (opts.workspace ?? BARE).project?.id);
+  return made;
+}
+
+const WORDS = { ask: "default", "auto-edit": "acceptEdits", full: "bypassPermissions" } as const;
+const CLAUDE_WORDS: HarnessCatalog = { ...CLAUDE, access: WORDS, permissionModes: [{ value: "default", label: "Ask" }, ...MODES] };
+const CODEX_WORDS: HarnessCatalog = { ...CODEX, access: { full: "danger-full-access" }, permissionModes: [{ value: "danger-full-access", label: "Full", isDefault: true }] };
+
+async function home(prefs: Partial<typeof DEFAULT_PREFERENCES>) {
+  const made = markedApi({ table: [CLAUDE_WORDS, CODEX_WORDS] });
+  useStore.setState({ conn: "connecting", workspaces: [], sessions: {}, harnesses: [], harnessesByWorkspace: {}, projects: [PROJECT], preferences: { ...DEFAULT_PREFERENCES, ...prefs } });
+  useStore.getState().bind(made.api);
+  useStore.getState().setConn("live");
+  const view = render(<ProjectHome projectId="pr_1" />);
+  await waitFor(() => expect(useStore.getState().harnesses.length).toBe(2));
+  await waitFor(() => expect(picker("model")).not.toBeNull());
+  return { ...made, view };
+}
+
+describe("a new thread opens on the defaults", () => {
+  it("New thread on a project whose default agent is Codex opens on Codex", async () => {
+    await home({ projectDefaults: { pr_1: { agent: "codex" } } });
+    expect(picker("model")?.dataset["harness"]).toBe("codex");
+  });
+
+  it("New thread opens on the default agent where the project names none", async () => {
+    await home({ defaultAgent: "codex" });
+    expect(picker("model")?.dataset["harness"]).toBe("codex");
+  });
+
+  it("New thread shows the project's model and access over the agent's own", async () => {
+    await home({ agentDefaults: { claude: { model: "claude-opus-5", access: "ask" } }, projectDefaults: { pr_1: { model: "claude-sonnet-5", access: "auto-edit" } } });
+    expect(pickerValue("model")).toBe("claude-sonnet-5");
+    expect(picked("access")).toBe("acceptEdits");
+  });
+
+  it("New thread shows the agent's own model, effort and access", async () => {
+    await home({ agentDefaults: { claude: { model: "claude-sonnet-5", effort: "low", access: "ask" } } });
+    expect(pickerValue("model")).toBe("claude-sonnet-5");
+    expect(picked("effort")).toBe("low");
+    expect(picked("access")).toBe("default");
+  });
+
+  it("an open New thread follows a default changed in Settings", async () => {
+    await home({});
+    expect(picker("model")?.dataset["harness"]).toBe("claude");
+    useStore.setState(s => ({ preferences: { ...s.preferences, projectDefaults: { pr_1: { agent: "codex" } } } }));
+    await waitFor(() => expect(picker("model")?.dataset["harness"]).toBe("codex"));
+  });
+
+  it("a pick made for a draft wins, goes with the send to the workspace it makes, and the next draft follows the defaults", async () => {
+    await home({ projectDefaults: { pr_1: { agent: "codex" } } });
+    expect(picker("model")?.dataset["harness"]).toBe("codex");
+    useComposerOptionsStore.getState().pick("project:pr_1", "harness", "claude");
+    useComposerOptionsStore.getState().pick("project:pr_1", "model", "claude-sonnet-5", "project:pr_1");
+    await waitFor(() => expect(pickerValue("model")).toBe("claude-sonnet-5"));
+    const editor = composerEditor();
+    await typeInto(editor, "fix the login test");
+    await press(editor, "Enter");
+    await waitFor(() => expect(useComposerDraftStore.getState().queues[WS]?.length).toBe(1));
+    expect(useComposerOptionsStore.getState().byWorkspaceId[WS]).toEqual({ harness: "claude", model: "claude-sonnet-5" });
+    expect(useComposerOptionsStore.getState().pickedOn[WS]).toEqual({ model: WS });
+    await waitFor(() => expect(picker("model")?.dataset["harness"]).toBe("codex"));
+    expect(useComposerOptionsStore.getState().byWorkspaceId["project:pr_1"]).toBeUndefined();
+  });
+
+  it("a model picked on a thread that ran does not stand over the default model of the workspace's next thread", async () => {
+    const { api } = markedApi({ table: [CLAUDE_WORDS, CODEX_WORDS], history: CHAT_STREAM, sessions: [{ id: "s0", workspaceId: WS, harness: "claude", status: "completed", threadId: "t1" }] });
+    useStore.setState({ projects: [PROJECT], freshThread: false, selectedId: WS });
+    await setup(api);
+    cleanup();
+    const ran = render(<WorkspaceThread workspaceId={WS} threadId="t1" />);
+    await waitFor(() => expect(picker("model")?.dataset["harness"]).toBe("claude"));
+    await openModelMenu();
+    fireEvent.click(option("claude-sonnet-5")!);
+    await waitFor(() => expect(pickerValue("model")).toBe("claude-sonnet-5"));
+    ran.unmount();
+    useStore.setState({ freshThread: true, selectedId: WS });
+    render(<WorkspaceThread workspaceId={WS} />);
+    await waitFor(() => expect(picker("model")).not.toBeNull());
+    expect(pickerValue("model")).toBe("claude-opus-5");
+  });
+
+  it("an agent picked for a workspace's new thread rides its send and is gone once the thread opens", async () => {
+    const { api, started } = markedApi({ table: [CLAUDE_WORDS, CODEX_WORDS] });
+    await setup(api);
+    useStore.setState({ projects: [PROJECT], preferences: { ...DEFAULT_PREFERENCES, projectDefaults: { pr_1: { agent: "codex" } } } });
+    await waitFor(() => expect(picker("model")?.dataset["harness"]).toBe("codex"));
+    act(() => useComposerOptionsStore.getState().pick(WS, "harness", "claude"));
+    await waitFor(() => expect(picker("model")?.dataset["harness"]).toBe("claude"));
+    await typeInto(composerEditor(), "go");
+    await press(composerEditor(), "Enter");
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(started[0]).toMatchObject({ harness: "claude" });
+    await waitFor(() => expect(useComposerOptionsStore.getState().byWorkspaceId[WS]).toBeUndefined());
+  });
+
+  it("a workspace's next thread opens on the project's default agent, not the agent of its last thread, and its send names it", async () => {
+    const { api, started } = markedApi({ table: [CLAUDE_WORDS, CODEX_WORDS], history: CHAT_STREAM, sessions: [{ id: "s0", workspaceId: WS, harness: "claude", status: "completed", threadId: "t1" }] });
+    await setup(api);
+    cleanup();
+    useStore.setState({ projects: [PROJECT], preferences: { ...DEFAULT_PREFERENCES, projectDefaults: { pr_1: { agent: "codex" } } }, freshThread: true, selectedId: WS });
+    render(<WorkspaceThread workspaceId={WS} />);
+    await waitFor(() => expect(picker("model")?.dataset["harness"]).toBe("codex"));
+    await typeInto(composerEditor(), "go");
+    await press(composerEditor(), "Enter");
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(started[0]).toMatchObject({ harness: "codex" });
+    expect(started[0]).not.toHaveProperty("thread");
   });
 });

@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { DEFAULT_AGENT } from "@wsp/catalog";
-import { DEFAULT_HARNESS } from "../src/components/chat/ComposerOptionPickers.js";
 import { ASIDE_COMMAND, HARNESS_CLIENTS, asideQuestion, catalogFor, catalogFromHarness, composerPlaceholder, deriveSession, harnessClient, offersSlashCommands, slashHoldLine } from "../src/adapt/index.js";
 import { CHAT_HARNESS, CHAT_STREAM } from "./fixtures/chat-stream.js";
 
@@ -13,8 +11,6 @@ describe("the client's harness registry", () => {
       for (const s of c.slashCommands) expect(s.name).not.toMatch(/^\//);
     }
     expect(harnessClient("hermes")).toBeUndefined();
-    // The composer's first pick is the catalog's default agent, the same fact the runtime starts an unnamed thread on.
-    expect(DEFAULT_HARNESS).toBe(DEFAULT_AGENT.id);
   });
 
   it("resolves a catalog by the harness id sessions.start uses, from the registered module alone", () => {

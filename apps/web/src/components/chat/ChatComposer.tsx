@@ -108,6 +108,7 @@ import { nextPastedTextName, pastesAsFile } from "./pastedText";
 import { buildComposerPromptHistoryEntries, stepComposerPromptHistory, type ComposerPromptHistoryPosition } from "./composerPromptHistory";
 import { EMPTY_DRAFT, newId, useComposerDraft, useComposerDraftStore, useComposerQueue, useComposerQueueHeld, type QueuedMessage } from "./composerDraftStore";
 import { ComposerAccessPicker, ComposerOptionPickers, useAccessPick, useComposerPicks, type AccessTarget } from "./ComposerOptionPickers";
+import { useComposerOptionsStore } from "./composerOptionsStore";
 import type { ComposerStart } from "./composerPicks";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
 import { ComposerModelChips } from "./ComposerModelChips";
@@ -524,10 +525,15 @@ export function ChatComposer({
             ...(into !== undefined ? { thread: into } : {}),
             ...folderStart,
             ...(attachments.length > 0 ? { attachments } : {}),
+            // A send that opens a thread names the agent the box shows, so the thread runs on what the person read.
+            ...(into === undefined ? { harness: harnessId } : {}),
             ...sendPicks(pinned, startOptions),
             ...(fastOn ? { fast: true } : {}),
           }),
         )
+        .then(() => {
+          if (into === undefined) useComposerOptionsStore.getState().drop(workspaceId, threadKey);
+        })
         .catch((err: unknown) => {
           setSending(false);
           launched(workspaceId, requestId);

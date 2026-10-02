@@ -117,12 +117,6 @@ export const WORKSPACE_KIND_WORDS: Record<WorkspaceKind, WorkspaceKindWords> = {
   local: { machine: THIS_COMPUTER, rowReadsMachine: true, cpu: "cores", where: THIS_COMPUTER, driven: false, daemon: true, metrics: "host", processes: "daemon", projectSources: ["git", "github", "gitlab", "folder"], copiesFolder: true, agents: true, onDelete: { asked: COMPUTER_LEFT, done: () => `its ${COMPUTER_LEFT}` }, panel: "What this Mac is running, its projects and how it is doing." },
 };
 
-/** The catalog unchanged, whatever the kind: the access a thread starts at is the person's, set per agent and per
- * project and placed by markedFor, and no kind of machine holds one of its own. */
-export function workspaceAccess(catalog: HarnessCatalog, _kind: WorkspaceKind): HarnessCatalog {
-  return catalog;
-}
-
 export function kindWords(kind: WorkspaceKind): WorkspaceKindWords {
   return WORKSPACE_KIND_WORDS[kind];
 }

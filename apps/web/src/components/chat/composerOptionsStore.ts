@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The last harness, model, effort and context window picked per workspace,
-// kept in local storage so the next thread in that workspace starts the same
-// way. A key absent means nothing was picked and the CLI's own default runs.
+// The harness, model, effort and context window picked on a composer, kept in
+// local storage by workspace until the send they were picked for opens its
+// thread. A key absent means nothing was picked and the defaults run.
 // Values are the harness's slugs; the runtime passes them through unchanged.
-// The access pick is the one whose value is not here: the host reads it too, to
-// open a thread nobody named an access for, so it lives on the preferences
-// record and useComposerOptions folds it in beside these; the thread it was
-// picked on is kept here with the others, since that record holds no room for
-// one.
+// The access pick is the one whose value is not here: it lives on the host's
+// preferences record, so every window of this host shows it, and
+// useComposerOptions folds it in beside these; the thread it was picked on is
+// kept here with the others, since that record holds no room for one.
 import { useMemo } from "react";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
@@ -44,6 +43,11 @@ interface ComposerOptionsState {
    * thread B, and A's button is back on its own model, which is where a thread that ran belongs anyway. */
   pickedOn: Record<string, PickThreads>;
   pick: (workspaceId: string, key: ComposerPickKey, value: string, thread?: string) => void;
+  /** Hands a draft's picks to the key its send went on under, each stamp of that draft with them. */
+  move: (from: string, to: string) => void;
+  /** Takes away what a send that opened a thread carried: the agent and every pick made on the draft, so the next
+   * draft here opens on the defaults. Picks made on other threads stay theirs. */
+  drop: (workspaceId: string, draft: string) => void;
 }
 
 function normalizeThreads(persisted: unknown): Record<string, PickThreads> {
@@ -101,13 +105,42 @@ export const useComposerOptionsStore = create<ComposerOptionsState>()(
           if (!moved && marks === undefined) return s;
           return { ...(moved ? { byWorkspaceId: { ...s.byWorkspaceId, [workspaceId]: { ...current, [key]: value } } } : {}), ...marks };
         }),
+      move: (from, to) =>
+        set(s => {
+          const { [from]: picked, ...byWorkspaceId } = s.byWorkspaceId;
+          const { [from]: threads, ...pickedOn } = s.pickedOn;
+          if (picked === undefined && threads === undefined) return s;
+          const stamps = Object.fromEntries(Object.entries(threads ?? {}).map(([key, thread]) => [key, thread === from ? to : thread]));
+          return { byWorkspaceId: picked === undefined ? byWorkspaceId : { ...byWorkspaceId, [to]: picked }, pickedOn: threads === undefined ? pickedOn : { ...pickedOn, [to]: stamps } };
+        }),
+      drop: (workspaceId, draft) => {
+        const threads = get().pickedOn[workspaceId] ?? NO_THREADS;
+        if (threads.permissionMode === draft && useStore.getState().preferences.access[workspaceId] !== undefined) void useStore.getState().setPreferences({ access: { [workspaceId]: null } });
+        set(s => {
+          const kept: ComposerOptions = { ...s.byWorkspaceId[workspaceId] };
+          const stamps: PickThreads = { ...threads };
+          delete kept.harness;
+          for (const key of THREAD_SCOPED_PICKS) {
+            if (stamps[key] !== draft) continue;
+            delete kept[key];
+            delete stamps[key];
+          }
+          const { [workspaceId]: _picked, ...byWorkspaceId } = s.byWorkspaceId;
+          const { [workspaceId]: _threads, ...pickedOn } = s.pickedOn;
+          return {
+            byWorkspaceId: Object.keys(kept).length === 0 ? byWorkspaceId : { ...byWorkspaceId, [workspaceId]: kept },
+            pickedOn: Object.keys(stamps).length === 0 ? pickedOn : { ...pickedOn, [workspaceId]: stamps },
+          };
+        });
+      },
     }),
     {
       name: STORAGE_KEY,
-      version: 1,
+      version: 2,
       storage: createJSONStorage(() => window.localStorage),
       partialize: s => ({ byWorkspaceId: s.byWorkspaceId, pickedOn: s.pickedOn }),
-      migrate: normalizePersisted,
+      // Version 1 kept a pick for every next thread of a workspace, which stood over the defaults; none is a draft's.
+      migrate: () => ({ byWorkspaceId: {}, pickedOn: {} }),
       // migrate runs only on a version change; a bad shape stored at this version must be caught on every hydrate.
       merge: (persisted, current) => ({ ...current, ...normalizePersisted(persisted) }),
     },

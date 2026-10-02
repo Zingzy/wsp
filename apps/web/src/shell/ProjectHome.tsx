@@ -8,7 +8,7 @@
 // queue drains only in a composer on screen and one copy at most is on screen;
 // the computer's free room is read first, and a send it has no room for is
 // refused before any copy is made.
-import { HERE_PLACE_ID, START_WORDS, githubLinkOf, kindForComputer, placeRoom, plural, workspaceAccess, type ProjectView } from "@wsp/protocol";
+import { HERE_PLACE_ID, START_WORDS, githubLinkOf, placeRoom, plural, type ProjectView } from "@wsp/protocol";
 import { ownerRepoOf } from "@wsp/catalog";
 import { Button } from "../components/ui/button.js";
 import { RefusalSlot } from "../settings/sheetParts.js";
@@ -81,6 +81,7 @@ export function ProjectHome({ projectId }: { projectId: string }) {
         ...(kind === "start" && access !== undefined && access !== null ? { access } : {}),
       });
       useComposerDraftStore.getState().setDraft(key, { prompt: "", cursor: 0 });
+      useComposerOptionsStore.getState().drop(key, key);
       select(made.workspace.id, made.threadId);
       return null;
     } catch (e) {
@@ -95,10 +96,7 @@ export function ProjectHome({ projectId }: { projectId: string }) {
     if (picks !== undefined) return startSeveral(prompt, picks);
     const workspaceId = await createWorkspace(project.id, nameOfTask(prompt), undefined, prompt);
     if (workspaceId === null) return null;
-    useComposerOptionsStore.setState(s => {
-      const picked = s.byWorkspaceId[key];
-      return picked === undefined ? s : { byWorkspaceId: { ...s.byWorkspaceId, [workspaceId]: picked } };
-    });
+    useComposerOptionsStore.getState().move(key, workspaceId);
     const access = useStore.getState().preferences.access[key];
     if (access !== undefined) void useStore.getState().setPreferences({ access: { [workspaceId]: access, [key]: null } });
     useComposerDraftStore.getState().enqueue(workspaceId, prompt);
@@ -114,7 +112,6 @@ export function ProjectHome({ projectId }: { projectId: string }) {
     const attachments = (useComposerFilesStore.getState().pending[key] ?? []).map(attachmentOf);
     useComposerFilesStore.getState().sendAs(key, attempt);
     useMultiPickStore.getState().set(key, []);
-    const kind = kindForComputer(project.computer);
     await Promise.all(
       picks.map(async pick => {
         const name = `${nameOfTask(prompt)} (${pick.label})`;
@@ -122,7 +119,7 @@ export function ProjectHome({ projectId }: { projectId: string }) {
         if (workspaceId === null) return;
         const catalog = catalogs.find(c => c.harness === pick.harness);
         const own = { harness: pick.harness, model: pick.model };
-        const options = catalog === undefined ? own : startOptionsFrom(workspaceAccess(catalog, kind), { ...picked, ...own });
+        const options = catalog === undefined ? own : startOptionsFrom(catalog, { ...picked, ...own });
         const requestId = newId();
         launching(workspaceId, { requestId, title: prompt, harness: pick.harness });
         await api.startSession({ workspaceId, prompt, requestId, attempt, ...options, ...(attachments.length > 0 ? { attachments } : {}) }).catch((e: unknown) => {
@@ -131,6 +128,7 @@ export function ProjectHome({ projectId }: { projectId: string }) {
         });
       }),
     );
+    useComposerOptionsStore.getState().drop(key, key);
     return null;
   };
 

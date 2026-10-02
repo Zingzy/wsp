@@ -5,7 +5,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { HarnessCatalog, ProjectView, SessionView, WorkspaceView } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, type HarnessCatalog, type ProjectOverrides, type SessionView, type WorkspaceView } from "@wsp/protocol";
 
 vi.mock("../ui/menu", () => {
   const Ctx = createContext<{ open: boolean; set: (open: boolean) => void }>({ open: false, set: () => {} });
@@ -122,18 +122,6 @@ const WORKSPACE: WorkspaceView = {
   createdAt: "2026-09-01T00:00:00Z",
 };
 
-const record = (lastAgent?: string): ProjectView =>
-  ({
-    ...PROJECT,
-    source: { kind: "folder", path: "/root" },
-    remote: null,
-    defaultBranch: null,
-    memoryKey: "k",
-    memoryDir: "/root",
-    createdAt: "2026-09-01T00:00:00Z",
-    ...(lastAgent === undefined ? {} : { lastAgent }),
-  }) as unknown as ProjectView;
-
 const CLAUDE: HarnessCatalog = {
   harness: "claude",
   label: "Claude Code",
@@ -156,14 +144,14 @@ const CODEX: HarnessCatalog = {
   permissionModes: [{ value: "read-only", label: "Read only", description: "Reads only" }, { value: "danger-full-access", label: "Full access", description: "Runs every tool without asking", isDefault: true }],
 };
 
-function draw(opts: { catalogs?: HarnessCatalog[]; project?: ProjectView; sessions?: SessionView[]; thread?: ChatThreadHandle } = {}) {
+function draw(opts: { catalogs?: HarnessCatalog[]; project?: ProjectOverrides; sessions?: SessionView[]; thread?: ChatThreadHandle } = {}) {
   const catalogs = opts.catalogs ?? [CLAUDE];
   useStore.setState({
     conn: "closed",
     workspaces: [WORKSPACE],
     statuses: {},
     sessions: opts.sessions === undefined ? {} : { [WS]: opts.sessions },
-    projects: opts.project === undefined ? [] : [opts.project],
+    preferences: { ...DEFAULT_PREFERENCES, projectDefaults: opts.project === undefined ? {} : { [PROJECT.id]: opts.project } },
     harnesses: catalogs,
     harnessesByWorkspace: { [WS]: catalogs },
   });
@@ -183,7 +171,7 @@ afterEach(() => {
   cleanup();
   useComposerDraftStore.setState({ drafts: {} });
   useComposerOptionsStore.setState({ byWorkspaceId: {}, pickedOn: {} });
-  useStore.setState({ workspaces: [], projects: [], harnesses: [], harnessesByWorkspace: {} });
+  useStore.setState({ workspaces: [], projects: [], harnesses: [], harnessesByWorkspace: {}, preferences: DEFAULT_PREFERENCES });
 });
 
 describe("the composer's reasoning and access buttons", () => {
@@ -255,24 +243,24 @@ describe("the agent a thread that has run keeps", () => {
 });
 
 describe("the agent a fresh thread opens on", () => {
-  it("is the one the project remembers", () => {
-    draw({ catalogs: [CLAUDE, CODEX], project: record("codex") });
+  it("is the one the project's defaults name", () => {
+    draw({ catalogs: [CLAUDE, CODEX], project: { agent: "codex" } });
     expect(model().dataset["harness"]).toBe("codex");
   });
 
-  it("is the catalog's first where the project remembers none, and the menu stays shut until the person opens it", () => {
-    draw({ catalogs: [CLAUDE, CODEX], project: record() });
+  it("is the catalog's first where nothing names one, and the menu stays shut until the person opens it", () => {
+    draw({ catalogs: [CLAUDE, CODEX] });
     expect(model().dataset["harness"]).toBe("claude");
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("leaves the menu shut where the project remembers an agent", () => {
-    draw({ catalogs: [CLAUDE, CODEX], project: record("codex") });
+  it("leaves the menu shut where the project names an agent", () => {
+    draw({ catalogs: [CLAUDE, CODEX], project: { agent: "codex" } });
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("stays open on the agent tab the person picks, so its models can be read", async () => {
-    draw({ catalogs: [CLAUDE, CODEX], project: record() });
+    draw({ catalogs: [CLAUDE, CODEX] });
     fireEvent.click(model());
     const rail = screen.getByRole("dialog");
     fireEvent.click(within(rail).getByRole("tab", { name: "Codex" }));

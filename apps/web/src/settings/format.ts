@@ -425,8 +425,6 @@ export const PROJECTS_WORDS = {
   threads: (n: number, running: number): string => `${n} ${n === 1 ? "thread" : "threads"}${running === 0 ? "" : `, ${running} running`}`,
   remoteHover: "The repository it was cloned from.",
   newWorkspaces: "New tasks",
-  lastAgent: "Last agent",
-  lastAgentDescription: "What a new thread on it defaults to.",
   remove: "Remove",
   removeTitle: (name: string): string => `Remove ${name}`,
   removeAsk: (name: string): string => `Remove ${name}?`,

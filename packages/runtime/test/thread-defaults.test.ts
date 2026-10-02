@@ -101,6 +101,13 @@ describe("what a new thread starts on", () => {
     expect((await rt.harnesses.list(ws.id)).find(c => c.isDefault === true)?.harness).toBe("claude");
   });
 
+  it("a project whose default agent is Codex runs Codex for a start that names none, with the default agent left on Claude", async () => {
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
+    await rt.preferences.set({ defaultAgent: "claude", projectDefaults: { [ws.project.id]: { agent: "codex" } } });
+    expect((await run(ws.id, { prompt: "one" })).harness).toBe("codex");
+    expect((await rt.projects.defaults())[ws.project.id]?.agent).toEqual({ value: "codex", from: "project" });
+  });
+
   it("runs the project's model and access over the agent's, the agent's over the catalog's, and a named pick over all", async () => {
     const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
     expect(await run(ws.id, { prompt: "one" })).toMatchObject({ model: "claude-opus-5-5", effort: "high", permissionMode: "bypassPermissions" });

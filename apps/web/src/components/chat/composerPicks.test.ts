@@ -164,8 +164,11 @@ describe("pickedFor", () => {
     expect(pickedFor({ model: "claude-fable-5-1", effort: "low" }, ran, {}, "t1")).toEqual({});
   });
 
-  it("keeps it for a thread that has not run and for the thread the pick was made on", () => {
-    expect(pickedFor({ model: "claude-fable-5-1" }, unrun, { model: "t9" }, "t1")).toEqual({ model: "claude-fable-5-1" });
+  it("keeps it on the thread it was made on, and a thread that has not run takes one the record names no thread for", () => {
+    expect(pickedFor({ model: "claude-fable-5-1" }, unrun, { model: "t1" }, "t1")).toEqual({ model: "claude-fable-5-1" });
+    expect(pickedFor({ permissionMode: "plan" }, unrun, {}, "t1")).toEqual({ permissionMode: "plan" });
+    // A new thread opens on the defaults, not on a model picked mid-way through another thread here.
+    expect(pickedFor({ model: "claude-fable-5-1" }, unrun, { model: "t9" }, "t1")).toEqual({});
     expect(pickedFor({ model: "claude-fable-5-1" }, ran, { model: "t1" }, "t1")).toEqual({ model: "claude-fable-5-1" });
     expect(pickedFor({ effort: "low" }, ran, { effort: "t1" }, "t1")).toEqual({ effort: "low" });
   });
@@ -178,9 +181,9 @@ describe("pickedFor", () => {
     expect(picked).toEqual({});
     expect(effectivePicks(CLAUDE, { picked, thread }).effort).toBe("high");
     expect(startOptionsFrom(CLAUDE, picked, thread)).toEqual({ model: "claude-opus-5", effort: "high" });
-    // On the thread it was picked on, and on one that has not run, it stands.
+    // On the thread it was picked on it stands, and a thread that has not run takes none picked on another.
     expect(pickedFor({ effort: "low" }, ran, { effort: "t1" }, "t1")).toEqual({ effort: "low" });
-    expect(pickedFor({ effort: "low" }, unrun, { effort: "t9" }, "t1")).toEqual({ effort: "low" });
+    expect(pickedFor({ effort: "low" }, unrun, { effort: "t9" }, "t1")).toEqual({});
   });
 
   it("drops an access picked on another thread, since it would move this thread's permissions on the next send", () => {
@@ -192,7 +195,7 @@ describe("pickedFor", () => {
     expect(effectivePicks(CLAUDE, { picked, thread }).permissionMode).toBe("plan");
     expect(startOptionsFrom(CLAUDE, picked, thread)).toEqual({ model: "claude-opus-5", permissionMode: "plan" });
     expect(pickedFor({ permissionMode: "bypassPermissions" }, ran, { permissionMode: "t1" }, "t1")).toEqual({ permissionMode: "bypassPermissions" });
-    expect(pickedFor({ permissionMode: "bypassPermissions" }, unrun, { permissionMode: "t9" }, "t1")).toEqual({ permissionMode: "bypassPermissions" });
+    expect(pickedFor({ permissionMode: "bypassPermissions" }, unrun, { permissionMode: "t9" }, "t1")).toEqual({});
   });
 
   it("drops a window picked on another thread, since it would drop this thread's own window on the next send", () => {
@@ -203,9 +206,9 @@ describe("pickedFor", () => {
     expect(picked).toEqual({});
     expect(startOptionsFrom(CLAUDE, picked, onOneM)).toEqual({ model: "claude-opus-5", contextWindow: "1m" });
     expect(effectivePicks(CLAUDE, { picked, thread: onOneM }).contextWindow).toBe("1m");
-    // On the thread the window was picked on, and on one that has not run, it stands.
+    // On the thread the window was picked on it stands, and a thread that has not run takes none picked on another.
     expect(pickedFor({ contextWindow: "200k" }, ran, { contextWindow: "t1" }, "t1")).toEqual({ contextWindow: "200k" });
-    expect(pickedFor({ contextWindow: "200k" }, unrun, { contextWindow: "t9" }, "t1")).toEqual({ contextWindow: "200k" });
+    expect(pickedFor({ contextWindow: "200k" }, unrun, { contextWindow: "t9" }, "t1")).toEqual({});
   });
 
   it("reads each pick on its own thread, so no pick carries another onto this one", () => {
@@ -252,7 +255,7 @@ describe("effectivePicks and startOptionsFrom", () => {
   });
 
   it("a remembered access mode this harness does not list shows the mode that will run, and is not sent as a pick", () => {
-    // A pick is remembered per workspace and the harnesses' mode lists are disjoint, so this is what a claude thread
+    // A draft keeps its picks across a switch of agent and the harnesses' mode lists are disjoint, so this is what a claude draft
     // shows after an access was picked on codex: the list's own default, which is what the start will run.
     expect(effectivePicks(CLAUDE, { picked: { permissionMode: "read-only" }, thread: {} }).permissionMode).toBe("bypassPermissions");
     expect(startOptionsFrom(CLAUDE, { permissionMode: "read-only", effort: "high" })).toEqual({ effort: "high" });
