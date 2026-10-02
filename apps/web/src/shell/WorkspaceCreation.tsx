@@ -21,7 +21,7 @@ import { cn } from "../lib/utils.js";
 import { usePlaces, useStore, type Creation, type CreationLine } from "../protocol/store.js";
 import { placeNames } from "../sidebar/workspaceRows.js";
 import { RunsOn } from "./NewThreadPicks.js";
-import { CREATE_ASKED, CREATE_STEP_WORDS, creationFolder, currentStep, stepTime, stepWords } from "./creationLog.js";
+import { CREATE_ASKED, CREATE_QUIET, CREATE_STEP_WORDS, creationFolder, currentStep, stepTime, stepWords } from "./creationLog.js";
 
 /** What the composer says over a message that waits for the machine. */
 export const creationWaitLine = (name: string): string => `Sends once ${name} is up`;
@@ -214,7 +214,8 @@ const CENTRE_STEPS = 5;
 
 /** The create's steps for a page that already shows the message that asked for it, standing in the middle of the room
  * the reply will take: the crab, the words and the time since the ask, then the latest steps, done ones quiet. A refused
- * create says so in the same place, its reason once, with Retry and Dismiss under it. */
+ * create says so in the same place, its reason once, with Retry and Dismiss under it; a kept row wsp has said nothing
+ * about for a while says so, with Dismiss alone, since its create may still be running. */
 function SettingUpCentre({ creation }: { creation: Creation }) {
   const retry = useStore(s => s.retryCreation);
   const dismiss = useStore(s => s.dismissCreation);
@@ -267,6 +268,15 @@ function SettingUpCentre({ creation }: { creation: Creation }) {
               Dismiss
             </Button>
           </div>
+        </>
+      ) : creation.quiet === true ? (
+        <>
+          <p data-creation-quiet className="text-sm leading-6 text-muted-foreground">
+            {CREATE_QUIET}
+          </p>
+          <Button variant="ghost" size="xs" onClick={() => dismiss(creation.key)}>
+            Dismiss
+          </Button>
         </>
       ) : null}
     </div>

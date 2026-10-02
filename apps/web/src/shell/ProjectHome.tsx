@@ -3,7 +3,8 @@
 // composer included, the project the one choice on it. The task typed here names the workspace the send makes;
 // the picks made here move to that workspace and the message is queued on its
 // fresh thread, which sends it the moment the copy stands, so a person types once
-// and lands in the running thread. A send to several models makes one copy per
+// and lands in the running thread; the store keeps the message through a reload
+// until then. A send to several models makes one copy per
 // model and starts the thread in each at once, all under one attempt id, since a
 // queue drains only in a composer on screen and one copy at most is on screen;
 // the computer's free room is read first, and a send it has no room for is
@@ -94,12 +95,7 @@ export function ProjectHome({ projectId }: { projectId: string }) {
     if (asked !== undefined) return fromLink(asked.url, "start");
     const picks = useMultiPickStore.getState().byKey[key];
     if (picks !== undefined) return startSeveral(prompt, picks);
-    const workspaceId = await createWorkspace(project.id, nameOfTask(prompt), undefined, prompt);
-    if (workspaceId === null) return null;
-    useComposerOptionsStore.getState().move(key, workspaceId);
-    const access = useStore.getState().preferences.access[key];
-    if (access !== undefined) void useStore.getState().setPreferences({ access: { [workspaceId]: access, [key]: null } });
-    useComposerDraftStore.getState().enqueue(workspaceId, prompt);
+    await createWorkspace(project.id, nameOfTask(prompt), undefined, { prompt, queuedFrom: key });
     return null;
   };
 
@@ -115,7 +111,7 @@ export function ProjectHome({ projectId }: { projectId: string }) {
     await Promise.all(
       picks.map(async pick => {
         const name = `${nameOfTask(prompt)} (${pick.label})`;
-        const workspaceId = await createWorkspace(project.id, name, undefined, prompt);
+        const workspaceId = await createWorkspace(project.id, name, undefined, { prompt });
         if (workspaceId === null) return;
         const catalog = catalogs.find(c => c.harness === pick.harness);
         const own = { harness: pick.harness, model: pick.model };
