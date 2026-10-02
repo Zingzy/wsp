@@ -214,7 +214,7 @@ function ResetLine({ row, now, onAccount }: { row: AccountRow; now: number; onAc
     <div data-usage-resets={row.key} className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 pt-3 text-[12.5px] text-muted-foreground">
       <span className="flex min-w-0 items-baseline gap-2">
         <span>{RESET_LINE_WORDS.resets}</span>
-        <span data-k="banked" className="font-mono text-foreground/80 tabular-nums">
+        <span data-k="banked" className="text-foreground/80 tabular-nums">
           {creditsWord(credits, now)}
         </span>
       </span>
