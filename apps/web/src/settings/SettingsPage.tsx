@@ -6,6 +6,7 @@
 // as a link and a card of the matching rows, live, so a pick made there is
 // made. The Add a project sheet mounts at page level and stands over whichever
 // page is open.
+import { PAGE_GAP } from "./layout.js";
 import { Fragment } from "react";
 import { ScrollArea } from "../components/ui/scroll-area.js";
 import { cn } from "../lib/utils.js";
@@ -90,7 +91,7 @@ export function SettingsPage() {
   const usage = !searching && at.kind === "group" && at.group === "usage";
   return (
     <ScrollArea className="min-h-0 flex-1">
-      <div data-settings-page data-settings-at={searching ? "search" : atId(at)} {...(usage ? { "data-locked": "" } : {})} className={cn("group/settings mx-auto flex w-full flex-col px-8 pb-12 max-sm:px-4 max-sm:pt-6", usage ? "max-w-[1080px] gap-12 pt-14" : "max-w-[760px] gap-[30px] pt-7")}>
+      <div data-settings-page data-settings-at={searching ? "search" : atId(at)} {...(usage ? { "data-locked": "" } : {})} className={cn("group/settings mx-auto flex w-full flex-col px-8 pb-12 max-sm:px-4 max-sm:pt-6", usage ? "max-w-[1080px] gap-12 pt-14" : cn("max-w-[760px] pt-7", PAGE_GAP))}>
         {searching ? <SearchPage ctx={ctx} query={search} /> : <Page key={atId(at)} at={at} ctx={ctx} />}
       </div>
       {addProjectAt === null ? null : (

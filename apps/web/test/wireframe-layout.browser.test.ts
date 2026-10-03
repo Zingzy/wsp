@@ -762,7 +762,7 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
     expect(computers.length).toBeGreaterThan(1);
     // The computers follow their group with nothing between, and the next group follows them.
     expect(ids.slice(at + 1, at + 1 + computers.length)).toEqual(computers);
-    expect(ids[at + 1 + computers.length]).toBe("group:projects");
+    expect(ids[at + 1 + computers.length]).toBe("group:recipes");
     // The computers stand one under the other from the group's own row down, 36 px apart, no gap opening among them.
     const steps = ids.slice(at, at + 1 + computers.length).map(id => after.find(([i]) => i === id)![1]);
     expect(new Set(steps.slice(1).map((top, i) => top - steps[i]!))).toEqual(new Set([ONE_LINE]));

@@ -70,10 +70,10 @@ afterEach(() => {
 });
 
 describe("the settings sidebar", () => {
-  it("lists the ten groups in order with Appearance the one lifted row on a fresh open", async () => {
+  it("lists the eleven groups in order with Appearance the one lifted row on a fresh open", async () => {
     mountSettings({ api: settingsApi().api });
     await settle();
-    expect(sidebarRowIds()).toEqual(["group:general", "group:appearance", "section:mode", "section:theme", "section:glass", "section:fonts", "group:agents", "group:computers", "group:projects", "group:usage", "group:keybindings", "group:privacy", "group:devices", "group:account"]);
+    expect(sidebarRowIds()).toEqual(["group:general", "group:appearance", "section:mode", "section:theme", "section:glass", "section:fonts", "group:agents", "group:computers", "group:recipes", "group:projects", "group:usage", "group:keybindings", "group:privacy", "group:devices", "group:account"]);
     expect(liftedRowIds()).toEqual(["group:appearance"]);
     // The field over the groups and Back at the foot with the chord that does the same.
     expect(field().getAttribute("placeholder")).toBe(SETTINGS_WORDS.search);
@@ -91,7 +91,7 @@ describe("the settings sidebar", () => {
     expect(pageAt()).toBe("computers");
     expect(crumb()).toBe("Settings/Computers");
     expect(liftedRowIds()).toEqual(["group:computers"]);
-    expect(sidebarRowIds()).toEqual(["group:general", "group:appearance", "group:agents", "group:computers", "computer:here", "computer:p_spoo", "group:projects", "group:usage", "group:keybindings", "group:privacy", "group:devices", "group:account"]);
+    expect(sidebarRowIds()).toEqual(["group:general", "group:appearance", "group:agents", "group:computers", "computer:here", "computer:p_spoo", "group:recipes", "group:projects", "group:usage", "group:keybindings", "group:privacy", "group:devices", "group:account"]);
     fireEvent.click(document.querySelector("[data-row-id='computer:p_spoo']")!);
     expect(pageAt()).toBe("computer:p_spoo");
     expect(crumb()).toBe("Settings/Computers/spoo");
@@ -126,18 +126,18 @@ describe("the settings sidebar", () => {
     mountSettings({ api: settingsApi().api });
     await settle();
     // Appearance is open on a fresh open, so its sections stand under it; a group with pages lists those instead.
-    const groups = ["group:general", "group:appearance", "section:mode", "section:theme", "section:glass", "section:fonts", "group:agents", "group:computers", "group:projects", "group:usage", "group:keybindings", "group:privacy", "group:devices", "group:account"];
+    const groups = ["group:general", "group:appearance", "section:mode", "section:theme", "section:glass", "section:fonts", "group:agents", "group:computers", "group:recipes", "group:projects", "group:usage", "group:keybindings", "group:privacy", "group:devices", "group:account"];
     expect(sidebarRowIds()).toEqual(groups);
     fireEvent.click(document.querySelector("[data-k=settings-computers]")!);
-    const computersOpen = ["group:general", "group:appearance", "group:agents", "group:computers", "computer:here", "computer:p_spoo", "group:projects", "group:usage", "group:keybindings", "group:privacy", "group:devices", "group:account"];
+    const computersOpen = ["group:general", "group:appearance", "group:agents", "group:computers", "computer:here", "computer:p_spoo", "group:recipes", "group:projects", "group:usage", "group:keybindings", "group:privacy", "group:devices", "group:account"];
     expect(sidebarRowIds()).toEqual(computersOpen);
     fireEvent.click(document.querySelector("[data-row-id='computer:p_spoo']")!);
     expect(sidebarRowIds()).toEqual(computersOpen);
     // The Agents page is one list under its top bar, so no section stands under its row.
     fireEvent.click(document.querySelector("[data-k=settings-agents]")!);
-    expect(sidebarRowIds()).toEqual(["group:general", "group:appearance", "group:agents", "group:computers", "group:projects", "group:usage", "group:keybindings", "group:privacy", "group:devices", "group:account"]);
+    expect(sidebarRowIds()).toEqual(["group:general", "group:appearance", "group:agents", "group:computers", "group:recipes", "group:projects", "group:usage", "group:keybindings", "group:privacy", "group:devices", "group:account"]);
     fireEvent.click(document.querySelector("[data-k=settings-projects]")!);
-    expect(sidebarRowIds()).toEqual(["group:general", "group:appearance", "group:agents", "group:computers", "group:projects", "project:pr_spoo", "group:usage", "group:keybindings", "group:privacy", "group:devices", "group:account"]);
+    expect(sidebarRowIds()).toEqual(["group:general", "group:appearance", "group:agents", "group:computers", "group:recipes", "group:projects", "project:pr_spoo", "group:usage", "group:keybindings", "group:privacy", "group:devices", "group:account"]);
   });
 
   it("ArrowDown and ArrowUp walk the sidebar's rows in visual order, from the field into the groups and their sub-rows", async () => {
@@ -192,7 +192,7 @@ describe("search", () => {
     expect(rowTitles()).toEqual([]);
     expect(document.querySelector("[data-k=search-group-general]")?.textContent).toBe("General");
     const dimmed = [...document.querySelectorAll<HTMLElement>("[data-slot=sidebar] [data-sidebar-row][data-dimmed]")].map(row => row.dataset["rowId"]);
-    expect(dimmed).toEqual(["group:appearance", "group:agents", "group:computers", "group:projects", "group:usage", "group:keybindings", "group:privacy", "group:devices", "group:account"]);
+    expect(dimmed).toEqual(["group:appearance", "group:agents", "group:computers", "group:recipes", "group:projects", "group:usage", "group:keybindings", "group:privacy", "group:devices", "group:account"]);
     // Standing back is an opacity, never another ink: the sidebar's rest ink is darker than its muted ink on the
     // dark side, so an ink swap read brighter there and did nothing at all on light.
     expect(document.querySelector<HTMLElement>("[data-row-id='group:appearance']")?.className).toContain("opacity-50");
