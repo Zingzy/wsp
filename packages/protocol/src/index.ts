@@ -1314,6 +1314,9 @@ export const HarnessCatalog = z.object({
   /** Whether rewinding a thread of this harness cuts its conversation too, in the harness's own history; absent is a
    * no, and a rewind there puts back the files alone while the harness keeps every turn it ran. */
   rewindsConversation: z.boolean().optional(),
+  /** Whether a rewind of this harness's thread cuts its conversation at a reply that named no anchor too, by counting
+   * the turns after it in the harness's own history; absent is a no, and such a reply offers its files alone. */
+  rewindsByCount: z.boolean().optional(),
   /** Set on the harness a start without one runs, so a client can pick its list without the catalog package. */
   isDefault: z.boolean().optional(),
   /** Why the binary described nothing, in its own adapter's words, when it ran and refused for a reason it can name
@@ -1786,6 +1789,8 @@ export const SessionCheckpointEvent = z.object({
   ...sessionScope,
   ref: z.string().optional(),
   anchor: z.string().optional(),
+  /** Why the harness cannot cut this thread's conversation, in its own clause, where it said so for this turn. */
+  kept: z.string().optional(),
 });
 export type SessionCheckpointEvent = z.infer<typeof SessionCheckpointEvent>;
 

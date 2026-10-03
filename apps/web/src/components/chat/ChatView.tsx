@@ -190,7 +190,8 @@ export function ChatView({
   const showTranscript = thread.hydrated && !empty;
   // Rewind to here stands on each earlier reply that kept something to go back to, and opens the one dialog.
   const cutsConversation = catalog?.rewindsConversation === true;
-  const rewindable = useMemo(() => (api?.rewindThread === undefined || agent === null ? new Map<string, RewindableReply>() : rewindableReplies(view.turns, view.entries, cutsConversation)), [agent, api, view.turns, view.entries, cutsConversation]);
+  const byCount = catalog?.rewindsByCount === true;
+  const rewindable = useMemo(() => (api?.rewindThread === undefined || agent === null ? new Map<string, RewindableReply>() : rewindableReplies(view.turns, view.entries, cutsConversation, byCount)), [agent, api, view.turns, view.entries, cutsConversation, byCount]);
   // The set and the handler reach every row through the timeline's shared context, so they move only when which
   // replies can be rewound moves, never on a streamed chunk: a settled reply would redraw on every one.
   const rewindableKey = [...rewindable.keys()].join("\n");
@@ -202,7 +203,7 @@ export function ChatView({
       const now = rewindRef.current;
       const reply = now.rewindable.get(messageId);
       if (reply === undefined || now.threadId === null) return;
-      requestRewind({ workspaceId, threadId: now.threadId, ...reply, cutsConversation: now.cutsConversation, agent: now.agent });
+      requestRewind({ workspaceId, threadId: now.threadId, ...reply, cutsConversation: now.cutsConversation && reply.kept === undefined, agent: now.agent });
     },
     [workspaceId],
   );

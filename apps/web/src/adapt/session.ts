@@ -454,7 +454,7 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
         // Taken once the turn is over, so a later turn may already be open: the row goes on its own turn's summary.
         const at = turns.findIndex(t => t.turnId === event.turnId);
         if (at < 0) continue;
-        const kept = { ...turns[at]!, checkpoint: { ref: event.ref ?? null, anchor: event.anchor ?? null } };
+        const kept = { ...turns[at]!, checkpoint: { ref: event.ref ?? null, anchor: event.anchor ?? null, ...(event.kept !== undefined ? { kept: event.kept } : {}) } };
         turns[at] = kept;
         if (turn !== null && turn.summary.turnId === event.turnId) turn.summary = kept;
         continue;
