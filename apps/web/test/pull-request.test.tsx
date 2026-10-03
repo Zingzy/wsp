@@ -457,19 +457,41 @@ describe("acting on the page as the person", () => {
     expect(thread.querySelector("[data-pr-reply]")).toBeNull();
   });
 
-  it("keeps the words and says why under the field when a reply is refused", async () => {
+  it("gives a plain comment no Reply but Quote reply, which fills the one comment box at Activity's foot, and a sent comment lands at the conversation's end", async () => {
+    const scrolled = vi.fn();
+    const was = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = scrolled;
+    onTestFinished(() => void (Element.prototype.scrollIntoView = was));
     const { container, api } = await pane(fact(), PAGE, { acts: true });
-    api.pullRequestReply.mockRejectedValueOnce(new Error(NOT_YOU));
     const comment = q(container, "[data-pr-entry='comment']:not([data-quiet])");
-    fireEvent.click(q(comment, "[data-pr-reply-open]"));
-    const field = q(comment, "[data-pr-reply]");
-    typeAndSend(field, "Thanks");
-    await waitFor(() => expect(q(field, "[data-pr-reply-refusal]").textContent).toBe(NOT_YOU));
-    expect(api.pullRequestReply).toHaveBeenCalledWith(WS, { body: "Thanks" });
-    expect(q<HTMLTextAreaElement>(field, "textarea").value).toBe("Thanks");
-    fireEvent.click(q(field, "[data-pr-reply-send]"));
-    await waitFor(() => expect(container.querySelector("[data-pr-entry][data-pr-entry='comment'] [data-pr-reply]")).toBeNull());
-    await waitFor(() => expect(container.querySelectorAll("[data-pr-entry='comment']:not([data-quiet])")).toHaveLength(2));
+    expect(comment.querySelector("[data-pr-reply-open], [data-pr-reply]")).toBeNull();
+    const box = q(container, "[data-pr-activity] > [data-pr-comment-box]");
+    expect(q(container, "[data-pr-activity]").lastElementChild).toBe(box);
+    const area = q<HTMLTextAreaElement>(box, "textarea");
+    expect([area.placeholder, area.value]).toEqual(["Leave a comment", ""]);
+    fireEvent.click(q(comment, "[data-pr-quote]"));
+    const quoted = "@bo\n\n> thanks, **fixed**\n\n";
+    await waitFor(() => expect(area.value).toBe(quoted));
+    expect([document.activeElement, area.selectionStart, scrolled.mock.contexts.at(-1)]).toEqual([area, quoted.length, area]);
+    fireEvent.change(area, { target: { value: `${quoted}Done.` } });
+    fireEvent.keyDown(area, { key: "Enter", metaKey: true });
+    await waitFor(() => expect(api.pullRequestReply).toHaveBeenCalledWith(WS, { body: `${quoted}Done.`.trim() }));
+    await waitFor(() => expect(area.value).toBe(""));
+    const comments = [...container.querySelectorAll<HTMLElement>("[data-pr-timeline] > [data-pr-entry]")];
+    expect(comments.at(-1)!.querySelector("[data-pr-entry-head] b")!.textContent).toBe("cass");
+  });
+
+  it("quotes a review's body the same way, and keeps the words and says why under the box when a comment is refused", async () => {
+    const { container, api } = await pane(fact(), PAGE, { acts: true });
+    fireEvent.click(q(container, "[data-pr-entry='review'] [data-pr-entry-head] [data-pr-quote]"));
+    const box = q(container, "[data-pr-comment-box]");
+    const area = q<HTMLTextAreaElement>(box, "textarea");
+    await waitFor(() => expect(area.value).toBe("@ana\n\n> ## Cold review\n> see `check.sh`\n\n"));
+    api.pullRequestReply.mockRejectedValueOnce(new Error(NOT_YOU));
+    fireEvent.click(q(box, "[data-pr-reply-send]"));
+    await waitFor(() => expect(q(box, "[data-pr-reply-refusal]").textContent).toBe(NOT_YOU));
+    expect(area.value).toBe("@ana\n\n> ## Cold review\n> see `check.sh`\n\n");
+    expect(box.querySelector("[data-pr-reply-cancel]")).toBeNull();
   });
 
   it("resolves a thread, which then folds to its path, Resolved and its count, and opens again to Unresolve", async () => {
@@ -521,13 +543,13 @@ describe("acting on the page as the person", () => {
     await waitFor(() => expect(useNotices.getState().notices.at(-1)?.text).toBe(NOT_YOU));
   });
 
-  it("draws no reactions row under a comment nobody reacted to, the add button and Reply only in its head on a hover", async () => {
+  it("draws no reactions row under a comment nobody reacted to, Quote reply and the add button only in its head on a hover", async () => {
     const { container } = await pane(fact(), PAGE, { acts: true });
     const entry = q(container, "[data-pr-entry='comment']:not([data-quiet])");
     expect(entry.querySelector("[data-pr-reactions]")).toBeNull();
     const acts = q(entry, "[data-pr-entry-head] [data-pr-head-acts]");
-    expect([acts.querySelector("[data-pr-react-add]") !== null, acts.querySelector("[data-pr-reply-open]") !== null]).toEqual([true, true]);
-    expect(acts.className).toMatch(/\babsolute\b.*\bopacity-0\b.*group-hover\/ev:opacity-100/);
+    expect([acts.querySelector("[data-pr-react-add]") !== null, acts.querySelector("[data-pr-quote]") !== null]).toEqual([true, true]);
+    expect(acts.className).toMatch(/\bw-0\b.*\bopacity-0\b.*group-hover\/ev:w-auto group-hover\/ev:opacity-100/);
   });
 
   it("ends every head's time on one edge: the hover's acts sit inside the time and take no width, as on a push line and a thread", async () => {
@@ -537,7 +559,7 @@ describe("acting on the page as the person", () => {
     for (const head of heads) {
       const time = head.lastElementChild as HTMLElement;
       expect([time.hasAttribute("data-pr-time"), time.className.includes("ml-auto") || head.querySelector("[data-pr-sent]") !== null]).toEqual([true, true]);
-      for (const act of head.querySelectorAll("[data-pr-head-acts]")) expect([act.parentElement, act.className.includes("absolute")]).toEqual([time, true]);
+      for (const act of head.querySelectorAll("[data-pr-head-acts]")) expect([act.parentElement, act.className.split(" ").includes("w-0")]).toEqual([time, true]);
     }
   });
 
@@ -589,7 +611,7 @@ describe("acting on the page as the person", () => {
       cleanup();
       const page = { ...PAGE, ...(postsAsYou === undefined ? {} : { postsAsYou }) };
       const { container } = await pane(fact(), page, { acts: true, posts: false });
-      expect(container.querySelector("[data-pr-thread-reply], [data-pr-thread-resolve], [data-pr-reply-open], [data-pr-react-add]")).toBeNull();
+      expect(container.querySelector("[data-pr-thread-reply], [data-pr-thread-resolve], [data-pr-quote], [data-pr-react-add], [data-pr-comment-box]")).toBeNull();
       expect(container.querySelectorAll("[data-pr-reactions='review:50'] [data-pr-reaction]")).toHaveLength(2);
       expect(q(container, "[data-pr-reactions='review:50'] [data-pr-reaction='+1']").tagName).toBe("SPAN");
     }
@@ -597,7 +619,7 @@ describe("acting on the page as the person", () => {
 
   it("draws no reply field, no Resolve and no add button where no host serves the writes, and the chips still stand", async () => {
     const { container } = await pane(fact(), { ...PAGE, postsAsYou: true });
-    expect(container.querySelector("[data-pr-thread-reply], [data-pr-thread-resolve], [data-pr-reply-open], [data-pr-react-add]")).toBeNull();
+    expect(container.querySelector("[data-pr-thread-reply], [data-pr-thread-resolve], [data-pr-quote], [data-pr-react-add], [data-pr-comment-box]")).toBeNull();
     expect(container.querySelectorAll("[data-pr-reactions='review:50'] [data-pr-reaction]")).toHaveLength(2);
   });
 
