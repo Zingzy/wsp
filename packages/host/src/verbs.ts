@@ -3481,7 +3481,6 @@ async function signInHere(ctx: VerbContext, target: AgentsTarget, ask: { agent: 
       line: SignInLine.parse(line),
       terminal: ctx.terminal ?? { input: process.stdin, output: process.stdout },
       open: ctx.open ?? (async () => false),
-      ...("placeId" in target && target.placeId !== HERE_PLACE_ID ? { bare: true } : {}),
     });
   } finally {
     await road.close();

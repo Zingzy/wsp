@@ -189,6 +189,7 @@ export function recipeShelf(o: { statePath: string; home: string; options?: () =
   const reading: RecipeReading = { home: o.home, tools: toolsHere };
   return {
     list: () => readRecipes(o.statePath),
+    read: word => readRecipe(o.statePath, word),
     get: async word => {
       const held = await readRecipe(o.statePath, word);
       return { ...held, hash: recipeHash(await resolveRecipe(held.file, reading)) };

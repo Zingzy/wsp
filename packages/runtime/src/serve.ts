@@ -41,8 +41,6 @@ import {
   PLACES_TICKET_REFUSAL,
   NO_RECIPES,
   RECIPES_TICKET_REFUSAL,
-  noSuchRecipeRefusal,
-  recipeSlug,
   noPicksRefusal,
   recipeFromHereRefusal,
   recipeSummary,
@@ -456,12 +454,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
     file: held.file,
   });
   /** The saved recipe a word names, its file and its slug, or the refusal naming the ones there are. */
-  const recipeNamed = async (word: string): Promise<{ slug: string; file: RecipeFile }> => {
-    const all = await recipes().list();
-    const found = all.find(r => r.slug === word || r.file.name === word || r.slug === recipeSlug(word));
-    if (found === undefined) throw Object.assign(new Error(noSuchRecipeRefusal(word, all.map(r => r.file.name))), { kind: "usage" });
-    return found;
-  };
+  const recipeNamed = (word: string): Promise<{ slug: string; file: RecipeFile }> => recipes().read(word);
   /** The computers that follow each recipe, empty on a runtime that holds no places. */
   const followers = async (): Promise<Map<string, string[]>> => (rt.places === undefined ? new Map() : rt.places.followers());
 

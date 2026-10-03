@@ -5,7 +5,7 @@
 // as the owner of the home. The pty is that computer's own, reached through
 // the host over the link it holds: nothing here dials it.
 import { loginSignIn } from "@wsp/catalog";
-import { lastLine, SIGN_IN_WAIT_MS, type AgentsTarget, type SignInLine } from "@wsp/protocol";
+import { lastLine, ptyBareOn, SIGN_IN_WAIT_MS, type AgentsTarget, type SignInLine } from "@wsp/protocol";
 import { relayPty, runQuiet, type PtyLink, type RelayTerminal } from "./signin-relay.js";
 import type { HostClient } from "./verbs.js";
 
@@ -52,6 +52,7 @@ export async function targetLink(client: HostClient, target: AgentsTarget): Prom
         return () => readers.delete(fn);
       },
       closed,
+      bare: ptyBareOn(target),
     },
     close: async () => {
       off();
@@ -71,8 +72,6 @@ export interface BoxSignIn {
   /** Opens a URL on this computer; the person presses o for it, as they do on a builder. */
   open(url: string): Promise<boolean>;
   timeoutMs?: number;
-  /** The pty is on a computer somebody owns, whose root home every workspace there writes: bash reads nothing there. */
-  bare?: boolean;
 }
 
 export interface BoxSignedIn {
@@ -96,7 +95,6 @@ export async function relaySignIn(o: BoxSignIn): Promise<BoxSignedIn> {
     open: o.open,
     ...(line.env !== undefined ? { env: line.env } : {}),
     timeoutMs: o.timeoutMs ?? BOX_SIGN_IN_MS,
-    ...(o.bare === true ? { bare: true } : {}),
   });
   const row = o.agent === undefined ? undefined : loginSignIn(o.agent);
   const check = row?.status;

@@ -1546,14 +1546,14 @@ async function setUpPlace(io: CliIO, opts: PlaceOpts, aim: HostAim, ref: string,
 }
 
 /** How the lines of one add or setup are said as they arrive: prose at a terminal, one frame a line under --json,
- * and a sign-in's page opened here where a person is at the terminal to finish it. */
+ * and a sign-in's page opened here where a person is at the terminal to finish it and did not say --later. */
 function setupSay(io: CliIO, flags: AddFlags, deps: PlaceDeps): { line(l: AddLine): void; wait(w: PlaceWait): void } {
   const opened = new Set<string>();
   return {
     line: l => io.log(flags.json === true ? jsonLine({ setup: l }) : addLineWords(l)),
     wait: w => {
       io.log(flags.json === true ? jsonLine({ waiting: w }) : waitWords(w));
-      if (flags.json !== true && io.isTTY === true && w.url !== undefined && w.state === "waiting" && !opened.has(w.url)) {
+      if (flags.json !== true && flags.later !== true && io.isTTY === true && w.url !== undefined && w.state === "waiting" && !opened.has(w.url)) {
         opened.add(w.url);
         void deps.open(w.url).catch(() => false);
       }
@@ -1681,7 +1681,7 @@ async function runBoxSignIn(io: CliIO, client: HostClient, place: PlaceView, age
   const { line } = await client.request<{ line: unknown }>("agents.signInLine", { target: { placeId: place.id }, agent });
   const road = await deps.placeLink(client, place.id);
   try {
-    const answer = await deps.signIn({ link: road.link, agent, line: SignInLine.parse(line), terminal: deps.terminal, open: deps.open, bare: true });
+    const answer = await deps.signIn({ link: road.link, agent, line: SignInLine.parse(line), terminal: deps.terminal, open: deps.open });
     io.log(answer.signedIn ? boxSignedInLine(place.name, agent, answer.detail) : boxNotSignedInLine(place.name, agent, answer.said));
     // That computer lists its logins only when it dials, so the host notes this one as the app's own sign-in does.
     if (answer.signedIn) await client.request("places.loginLanded", { placeId: place.id, agent });

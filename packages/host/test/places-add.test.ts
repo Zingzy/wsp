@@ -144,10 +144,12 @@ describe("wsp add <user@host> --recipe", () => {
     expect(io.lines).toContain("spoo: 1 installed: GitHub CLI");
   });
 
-  it("with --later leaves the sign-in waiting, says so at the end and exits 0", async () => {
-    const io = captured();
+  it("with --later leaves the sign-in waiting, opens no page even at a terminal, says so at the end and exits 0", async () => {
+    const io = { ...captured(), isTTY: true };
     const host = fakeHost({ signIn: true });
-    expect(await addCommand(io, opts(tmp("add-later")), ["root@10.0.0.9"], { recipe: "laptop", later: true }, deps(host.client))).toBe(0);
+    const opened: string[] = [];
+    expect(await addCommand(io, opts(tmp("add-later")), ["root@10.0.0.9"], { recipe: "laptop", later: true }, deps(host.client, opened))).toBe(0);
+    expect(opened).toEqual([]);
     expect(io.lines.at(-1)).toBe("  ? Codex waits on you to sign in at https://auth.openai.com/codex/device with code ABCD-EFGH");
   });
 

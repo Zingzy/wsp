@@ -704,6 +704,8 @@ export interface InitDoor {
  * computers follow each is the place records', which the runtime folds in. */
 export interface RecipeShelf {
   list(): Promise<{ slug: string; file: RecipeFile }[]>;
+  /** One recipe by its name or slug, as saved; refused naming the ones there are. */
+  read(word: string): Promise<{ slug: string; file: RecipeFile }>;
   /** One recipe by its name or slug, with the hash it resolves to on this computer now. */
   get(word: string): Promise<{ slug: string; file: RecipeFile; hash: string }>;
   /** Writes the recipe whole; refused for a name that makes no file name and for anything shaped like a secret. */

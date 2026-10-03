@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// V8 keeps a bundle's source two bytes a character once one character passes Latin-1, which cost the host 0.6 MB.
+// V8 keeps a bundle's source two bytes a character once one character passes Latin-1 (0.6 MB on the host); the build drops comments, so they are not read.
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";

@@ -1398,7 +1398,9 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       const token = vault()[GITHUB_TOKEN_ENV];
       if (token === undefined) return [{ id: "github", label: "GitHub", outcome: "failed", note: NO_GITHUB_TOKEN_LINE }];
       const res = await machine.exec(withEnvFromInput(`${pathLine(plan.path, plan.prefix)}\ngh auth status --hostname github.com 2>&1`), { timeoutMs: GITHUB_MS, stdin: envInput({ [GITHUB_TOKEN_ENV]: token }) });
-      return [res.exitCode === 0 ? { id: "github", label: "GitHub", outcome: "present", note: FROM_THE_VAULT } : { id: "github", label: "GitHub", outcome: "failed", note: lastLine(res.stdout) ?? `gh auth status exited ${res.exitCode}` }];
+      // gh names the token's scopes on its status, which the row carries so a person reads what a clone may reach.
+      const scopes = /Token scopes:\s*(.+)/.exec(res.stdout)?.[1]?.replace(/'/g, "").trim();
+      return [res.exitCode === 0 ? { id: "github", label: "GitHub", outcome: "present", note: `${FROM_THE_VAULT}${scopes === undefined || scopes === "" ? "" : `; token scopes: ${scopes}`}` } : { id: "github", label: "GitHub", outcome: "failed", note: lastLine(res.stdout) ?? `gh auth status exited ${res.exitCode}` }];
     };
 
     const end = async (failed?: string): Promise<void> => {

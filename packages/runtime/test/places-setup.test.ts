@@ -66,8 +66,12 @@ function answersFor(cmds: string[]) {
       if (frame["op"] === "machine.backend") return void c.say({ id: frame["id"], ok: true, ...FACTS });
       if (frame["op"] === "machine.capacity") return void c.say({ id: frame["id"], ok: true, cores: 2, memMb: 7600, memRoomMb: 6000, machineMemMb: 4096, diskFreeBytes: 19 * 1024 ** 3, images: [], machines: { running: 0, paused: 0 } });
       if (frame["op"] !== "exec") return;
-      cmds.push(String(frame["cmd"] ?? ""));
-      c.say({ id: frame["id"], ok: true, exitCode: 0, stdout: "", stderr: "", truncated: false });
+      const cmd = String(frame["cmd"] ?? "");
+      cmds.push(cmd);
+      // gh's own status off the token the run read on its input, as gh prints it.
+      const input = typeof frame["stdin"] === "string" ? Buffer.from(frame["stdin"], "base64").toString("utf8") : "";
+      const gh = cmd.includes("gh auth status") && input.includes("GH_TOKEN=") ? "github.com\n  - Logged in to github.com account dev (GH_TOKEN)\n  - Token scopes: 'gist', 'read:org', 'repo'\n" : "";
+      c.say({ id: frame["id"], ok: true, exitCode: 0, stdout: gh, stderr: "", truncated: false });
     });
   };
 }
@@ -314,6 +318,16 @@ describe("a computer added with its picks", () => {
     expect(row.setup?.steps.find(l => l.step === "clis")).toMatchObject({ state: "failed", note: "1 of 1 failed" });
     expect(placeWord(row, null).word).toBe("Ready");
     expect(ended(frames)).toEqual([expect.objectContaining({ end: "ready", said: "1 row did not install" })]);
+  });
+
+  it("signs GitHub in from the vault on the run's input alone, and names the token's scopes on its row", async () => {
+    const cmds: string[] = [];
+    await hosting({ provision: provisioner().wired, cmds, vault: { CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-x", GH_TOKEN: "ghp_vaulted" } });
+    const picks = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "vault" } }, configs: { github: { signin: "vault" } } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "github")).toMatchObject({ outcome: "present", note: expect.stringContaining("token scopes: gist, read:org, repo") });
+    expect(cmds.join("\n")).not.toContain("ghp_vaulted");
   });
 
   it("reads Needs you where a folder did not move, and the GitHub row where the vault holds no token", async () => {
