@@ -17,5 +17,13 @@
     "cwd": "/root/repo",
     "thread": 1,
     "turn": "turn_1"
+  },
+  {
+    "id": 1,
+    "op": "git.checkpoint",
+    "cwd": "/root/repo",
+    "thread": "thr_1",
+    "turn": "turn_1",
+    "scope": 7
   }
 ]

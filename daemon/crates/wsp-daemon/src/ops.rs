@@ -314,6 +314,11 @@ async fn handle_op(conn: &Arc<Conn>, ctx: &Arc<Ctx>, frame: &Value, id: Option<R
             | "fs.write"
             | "git.checkpoint"
             | "git.restore"
+            | "git.checkpointDrop"
+            | "git.worktrees"
+            | "git.branches"
+            | "git.switchNew"
+            | "git.fetchBranch"
             | "ports.watch"
             | "manifest.get"
             | "manifest.record"
@@ -863,20 +868,56 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
             };
             answer(id, wrote.await)
         }
-        DaemonOp::GitCheckpoint { cwd, thread, turn, machine_id } => {
+        DaemonOp::GitCheckpoint { cwd, thread, turn, scope, machine_id } => {
             // A read: a turn's end records its tree and must not start the workspace's quiet clock over.
             let taken = async {
                 let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Reads).await?;
-                git::checkpoint::checkpoint(&runner, &at, &thread, &turn).await
+                git::checkpoint::checkpoint(&runner, &at, scope.as_deref(), &thread, &turn).await
             };
             answer(id, taken.await)
         }
-        DaemonOp::GitRestore { cwd, checkpoint, machine_id } => {
+        DaemonOp::GitRestore { cwd, checkpoint, scope, machine_id } => {
             let restored = async {
                 let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Works).await?;
-                git::checkpoint::restore(&runner, &at, &checkpoint).await
+                git::checkpoint::restore(&runner, &at, scope.as_deref(), &checkpoint).await
             };
             answer(id, restored.await)
+        }
+        DaemonOp::GitCheckpointDrop { cwd, scope, thread, machine_id } => {
+            // A read as a checkpoint is: forgetting a thread is no work done in the workspace.
+            let dropped = async {
+                let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Reads).await?;
+                git::checkpoint::drop_thread(&runner, &at, scope.as_deref(), &thread).await
+            };
+            answer(id, dropped.await)
+        }
+        DaemonOp::GitWorktrees { cwd, machine_id } => {
+            let read = async {
+                let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Reads).await?;
+                git::branches::worktrees(&runner, &at).await
+            };
+            answer(id, read.await)
+        }
+        DaemonOp::GitBranches { cwd, machine_id } => {
+            let read = async {
+                let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Reads).await?;
+                git::branches::branches(&runner, &at).await
+            };
+            answer(id, read.await)
+        }
+        DaemonOp::GitSwitchNew { cwd, branch, machine_id } => {
+            let put = async {
+                let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Works).await?;
+                git::write::switch_new(&runner, &at, &branch).await
+            };
+            answer(id, put.await)
+        }
+        DaemonOp::GitFetchBranch { cwd, remote, branch, into, machine_id } => {
+            let fetched = async {
+                let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Works).await?;
+                git::write::fetch_branch(&runner, &at, &remote, &branch, into.as_deref()).await
+            };
+            answer(id, fetched.await)
         }
         DaemonOp::GitSnapshot { cwd, machine_id } => {
             let taken = async {
@@ -1478,6 +1519,11 @@ mod tests {
             "fs.write",
             "git.checkpoint",
             "git.restore",
+            "git.checkpointDrop",
+            "git.worktrees",
+            "git.branches",
+            "git.switchNew",
+            "git.fetchBranch",
             "fs.folders",
             "ports.watch",
             "manifest.get",

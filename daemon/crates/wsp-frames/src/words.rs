@@ -301,6 +301,22 @@ pub fn start_on_refused(branch: &str, said: &str) -> String {
     format!("the copy could not be put on {branch}: {said}")
 }
 
+/// What a branch name git would not take, or one that would read as a flag on git's own line, is refused with.
+pub fn not_a_branch_name(name: &str) -> String {
+    format!("{name} is not a name git takes for a branch")
+}
+
+/// What a folder git would not put on a new branch is refused with: git's own last line.
+pub fn switch_new_refused(branch: &str, said: &str) -> String {
+    format!("the folder could not be put on a new branch {branch}: {said}")
+}
+
+/// What a branch git would not fetch into its local branch is refused with: git's own last line, which names a
+/// branch checked out elsewhere or one the fetch would have to move backwards.
+pub fn fetch_branch_refused(branch: &str, said: &str) -> String {
+    format!("{branch} was not fetched: {said}")
+}
+
 /// Why a merge from a copy's folder is refused anywhere but the computer both copies sit on.
 pub const MERGE_FROM_HERE_ONLY: &str =
     "a merge from a copy's folder runs only on the computer the copies sit on; merge from the remote here";

@@ -570,7 +570,6 @@ async fn the_copy_verb_prints_one_json_line_and_takes_the_copy_away_again() {
 }
 
 /// A repo named `work` with one commit on main, inside `dir`.
-#[cfg(target_os = "macos")]
 fn repo_in(dir: &std::path::Path) -> std::path::PathBuf {
     let from = dir.join("work");
     std::fs::create_dir_all(&from).unwrap();
@@ -692,6 +691,83 @@ async fn the_copy_verb_removes_no_link_and_no_file_that_carries_a_copy_name() {
     assert!(from.join("README.md").is_file(), "the project a link pointed at went");
     assert!(elsewhere.path().join("kept").is_file(), "the folder a link pointed at went");
     assert!(to_project.is_symlink() && to_outside.is_symlink() && file.is_file());
+}
+
+fn git_in(at: &std::path::Path, args: &[&str]) -> String {
+    let out = std::process::Command::new("git").args(args).current_dir(at).output().unwrap();
+    assert!(out.status.success(), "{args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    String::from_utf8_lossy(&out.stdout).trim().to_owned()
+}
+
+/// The worktree verbs as the host runs them: one JSON line each on stdout, an existing branch checked out where its
+/// tip stands with the dependencies carried in, and a removal refused in one sentence while a file is uncommitted.
+#[tokio::test]
+async fn the_worktree_verb_makes_a_worktree_on_a_branch_and_removes_it_only_when_nothing_is_uncommitted() {
+    let dir = tempfile::tempdir().unwrap();
+    let from = repo_in(dir.path());
+    std::fs::write(from.join(".gitignore"), b"node_modules/\n*.local\n").unwrap();
+    git_in(&from, &["add", ".gitignore"]);
+    git_in(&from, &["commit", "--quiet", "-m", "ignore"]);
+    git_in(&from, &["checkout", "--quiet", "-b", "feat/ahead"]);
+    for n in 0..20 {
+        std::fs::write(from.join("README.md"), format!("{n}\n")).unwrap();
+        git_in(&from, &["commit", "--quiet", "-am", &format!("turn {n}")]);
+    }
+    let tip = git_in(&from, &["rev-parse", "feat/ahead"]);
+    git_in(&from, &["checkout", "--quiet", "main"]);
+    std::fs::create_dir_all(from.join("node_modules/pkg")).unwrap();
+    std::fs::write(from.join("node_modules/pkg/index.js"), b"dep\n").unwrap();
+    std::fs::write(from.join(".env.local"), b"KEY=1\n").unwrap();
+    let home = dir.path().join("home");
+    std::fs::create_dir_all(&home).unwrap();
+
+    let made = std::process::Command::new(BIN)
+        .args(["copy", "worktree", "--from"])
+        .arg(&from)
+        .arg("--home")
+        .arg(&home)
+        .args(["--project", "prj_1", "--branch", "feat/ahead", "--carry", "node_modules", "--carry", ".venv"])
+        .output()
+        .unwrap();
+    assert!(made.status.success(), "{}", String::from_utf8_lossy(&made.stderr));
+    let out = String::from_utf8_lossy(&made.stdout);
+    assert_eq!(out.lines().count(), 1, "{out}");
+    let report: Value = serde_json::from_str(out.trim()).unwrap_or_else(|e| panic!("{out}: {e}"));
+    let at = std::fs::canonicalize(&home).unwrap().join("worktrees/prj_1/feat-ahead");
+    assert_eq!(report["path"], at.display().to_string());
+    assert_eq!(report["branch"], "feat/ahead");
+    assert_eq!(report["made"], true);
+    assert_eq!(report["carried"], json!([".env.local", "node_modules"]));
+    assert_eq!(git_in(&from, &["rev-parse", "feat/ahead"]), tip, "the branch moved");
+    assert_eq!(git_in(&at, &["rev-parse", "HEAD"]), tip);
+    assert_eq!(std::fs::read_to_string(at.join("node_modules/pkg/index.js")).unwrap(), "dep\n");
+
+    let remove = || {
+        std::process::Command::new(BIN)
+            .args(["copy", "worktree-remove", "--from"])
+            .arg(&from)
+            .arg("--home")
+            .arg(&home)
+            .arg("--path")
+            .arg(&at)
+            .output()
+            .unwrap()
+    };
+    std::fs::write(at.join("notes.txt"), b"mine\n").unwrap();
+    let refused = remove();
+    assert_eq!(refused.status.code(), Some(1));
+    assert_eq!(
+        String::from_utf8_lossy(&refused.stderr).trim(),
+        format!("{} has 1 file not committed, so it was not removed; commit them, or remove it with --force", at.display())
+    );
+    assert!(at.join("notes.txt").is_file() && at.join("node_modules/pkg/index.js").is_file());
+    std::fs::remove_file(at.join("notes.txt")).unwrap();
+    let removed = remove();
+    assert!(removed.status.success(), "{}", String::from_utf8_lossy(&removed.stderr));
+    let gone: Value = serde_json::from_str(String::from_utf8_lossy(&removed.stdout).trim()).unwrap();
+    assert_eq!(gone, json!({ "path": at.display().to_string() }));
+    assert!(!at.exists());
+    assert_eq!(git_in(&from, &["rev-parse", "feat/ahead"]), tip);
 }
 
 /// What the tool server holds resident, off the kernel's own count: VmRSS on Linux, ps's rss column on the Mac.
