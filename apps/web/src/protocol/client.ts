@@ -92,6 +92,8 @@ import {
   PlaceAddJob,
   PlaceUpdateReply,
   PlaceView,
+  PlaceEstimate,
+  type PlaceSetupStep,
   type PlaceSettingsAsk,
   type PlaceSettingWord,
   ProjectView,
@@ -654,6 +656,12 @@ export interface Api {
   placesSetup?(ref: string, o: { choices?: RecipeFile; recipe?: string; addId?: string }): Promise<{ addId: string; place: PlaceView; setup?: PlaceSetup; said?: string }>;
   /** Moves a computer onto a saved recipe, or onto none. Absent until the host serves it; the picker is held. */
   placesFollow?(placeId: string, recipe: string): Promise<PlaceView>;
+  /** Skip for now on one row of a computer's setup, a sign-in that waits or a row that failed; answers its row. */
+  placesSkip?(placeId: string, row: string): Promise<PlaceView>;
+  /** The end of a computer's setup log, a step's own lines where one is named. */
+  placesSetupLog?(placeId: string, step?: PlaceSetupStep): Promise<string[]>;
+  /** What some picks weigh against a computer's room before Set up, by the computer or its pending add. */
+  placesEstimate?(ref: string, choices: RecipeFile): Promise<PlaceEstimate>;
   /** Keeps the picks so far on a pending add, and the recipe they started from. */
   placesChoose?(ref: string, choices: RecipeFile, recipe?: string): Promise<PendingComputer>;
   /** Every saved recipe, with what it holds and the computers that follow it. */
@@ -958,6 +966,13 @@ export function makeApi(c: ProtocolClient): Api {
       return { addId: String(read.addId), place: PlaceView.parse(read.place), ...(read.setup === undefined ? {} : { setup: PlaceSetup.parse(read.setup) }), ...(typeof read.said === "string" ? { said: read.said } : {}) };
     },
     placesChoose: async (ref, choices, recipe) => PendingComputer.parse((await c.request<{ pending?: unknown }>("places.choose", { ref, choices, ...(recipe === undefined ? {} : { recipe }) })).pending),
+    placesFollow: async (placeId, recipe) => PlaceView.parse((await c.request<{ place?: unknown }>("places.follow", { placeId, recipe })).place),
+    placesSkip: async (placeId, row) => PlaceView.parse((await c.request<{ place?: unknown }>("places.skip", { placeId, row })).place),
+    placesSetupLog: async (placeId, step) => {
+      const { lines } = await c.request<{ lines?: unknown }>("places.setupLog", { placeId, ...(step === undefined ? {} : { step }) });
+      return Array.isArray(lines) ? lines.map(String) : [];
+    },
+    placesEstimate: async (ref, choices) => PlaceEstimate.parse((await c.request<{ estimate?: unknown }>("places.estimate", { ref, choices })).estimate),
     recipesList: async () => RecipeView.array().parse((await c.request<{ recipes?: unknown }>("recipes.list")).recipes),
     recipesSave: async (name, from) => RecipeView.parse((await c.request<{ recipe?: unknown }>("recipes.save", { name, ...("file" in from ? { file: from.file } : { from: from.computer }) })).recipe),
     recipesRemove: async name => RecipeView.parse((await c.request<{ recipe?: unknown }>("recipes.remove", { name })).recipe),

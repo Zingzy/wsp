@@ -607,6 +607,57 @@ export async function provisionFiles(machine: Machine, o: { home: string; lands:
   }
 }
 
+/** What the run that takes a row's files off prints for each path, so no path of the person's reads as its own words. */
+export const UNLAND_MARK = "wsp-unland";
+
+/** The run that takes the files wsp landed under some destinations off that computer: a path whose bytes are still
+ * the ones wsp left goes, a path the person has written since stays and is named, and every line of the list for
+ * those destinations goes either way, since an edited file is no longer wsp's to manage. A path that climbs out with
+ * `..`, or that a link on the way would carry elsewhere, is never touched. Emptied folders under a destination go. */
+export function unlandScript(home: string, dests: readonly string[]): string {
+  const at = placeProvisionPaths(home);
+  const q = (s: string): string => shellQuote(s);
+  const patterns = dests.flatMap(d => [q(d), `${q(d)}/*`]);
+  return [
+    "set -u",
+    `home=${q(home)}; ledger=${q(at.landed)}`,
+    '[ -f "$ledger" ] || exit 0',
+    'canon=$(readlink -f -- "$home") || exit 1',
+    `tab=$(printf "${TAB}")`,
+    ': > "$ledger.new" || exit 1',
+    'while IFS="$tab" read -r rel from at; do',
+    `  case "$rel" in (${patterns.join("|")}) ;; (*) printf "%s${TAB}%s${TAB}%s${NL}" "$rel" "$from" "$at" >> "$ledger.new"; continue ;; esac`,
+    '  case "/$rel/" in (*/../*) continue ;; esac',
+    '  dest="$home/$rel"',
+    '  [ -e "$dest" ] || continue',
+    '  if [ "$(readlink -f -- "$dest")" = "$canon/$rel" ] && [ -f "$dest" ] && [ "$(sha256sum "$dest" | cut -d" " -f1)" = "$at" ]; then',
+    `    rm -f -- "$dest" && printf '${UNLAND_MARK}${TAB}gone${TAB}%s${NL}' "$rel"`,
+    "  else",
+    `    printf '${UNLAND_MARK}${TAB}kept${TAB}%s${NL}' "$rel"`,
+    "  fi",
+    'done < "$ledger"',
+    'mv "$ledger.new" "$ledger" || exit 1',
+    ...dests.map(d => `[ "$(readlink -f -- "$home/"${q(d)} 2>/dev/null)" = "$canon/"${q(d)} ] && find "$home/"${q(d)} -depth -type d -empty -delete 2>/dev/null`),
+    "exit 0",
+  ].join("\n");
+}
+
+/** Takes the files wsp landed under some destinations off that computer, answering the paths that went and the
+ * paths the person had written since, which stay. Nothing at all where the run did not happen. */
+export async function unlandFiles(machine: Machine, home: string, dests: readonly string[]): Promise<{ gone: string[]; kept: string[] } | undefined> {
+  if (dests.length === 0) return { gone: [], kept: [] };
+  const res = await machine.exec(unlandScript(home, dests), { timeoutMs: LAND_MS }).catch(() => undefined);
+  if (res === undefined || res.exitCode !== 0) return undefined;
+  const out = { gone: [] as string[], kept: [] as string[] };
+  for (const line of res.stdout.split("\n")) {
+    const [mark, how, ...rest] = line.split("\t");
+    if (mark !== UNLAND_MARK) continue;
+    if (how === "gone") out.gone.push(rest.join("\t"));
+    if (how === "kept") out.kept.push(rest.join("\t"));
+  }
+  return out;
+}
+
 /** Writes down what wsp owns on that computer and takes the tree that travelled away again. Nothing here fails
  * the job: a computer that would not keep the list is one whose files landed all the same, and the next run reads
  * its own copies as the person's, which keeps them rather than writing over them. */

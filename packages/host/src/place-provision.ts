@@ -11,14 +11,16 @@ import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { join, posix } from "node:path";
 import type { Manifest, ManifestEntry, Platform } from "@wsp/collect";
 import { expand } from "@wsp/collect";
-import { CATALOG_AGENTS, COMPILER_ROW, SHARED_SKILLS, TOOL_PREFIX, catalogIdOfRow, ownSkillFolder } from "@wsp/catalog";
+import { CATALOG_AGENTS, COMPILER_ROW, SHARED_SKILLS, TOOL_PREFIX, catalogEntry, catalogIdOfRow, installHomes, ownSkillFolder, roadModule } from "@wsp/catalog";
 import {
   agentStateFile,
   newSetupRun,
   parseMcpId,
   provisionPlanOf,
+  pathLine,
   provisionStep,
   tarOf,
+  toolUninstall,
   viaRoad,
   type BrewTable,
   type PackFiles,
@@ -27,13 +29,15 @@ import {
   type SkippedPath,
   type TarEntry,
 } from "@wsp/engine";
-import { agentOfRow, probePath, toolRowId, type Recipe, type RecipeFile } from "@wsp/protocol";
-import type { PlaceProvisioner } from "@wsp/runtime";
+import { agentOfRow, MCP_ID_PREFIX, probePath, toolRowId, type Recipe, type RecipeFile, type RecipeKind } from "@wsp/protocol";
+import type { PlaceProvisioner, PlaceUndo } from "@wsp/runtime";
 import { serverVault } from "./env-keys.js";
 import { brewTableFor, copyRows, planImport } from "./image-recipe.js";
-import { configTexts, type ConfigText } from "./recipe-configs.js";
+import { CONFIG_PATHS, configTexts, type ConfigText } from "./recipe-configs.js";
 import { folderFiles, LINKED_FOLDER_NOTE } from "./folder-files.js";
 import { loadRecipe, smallRecipePath } from "./recipe-file.js";
+import { estimatePicks } from "./pick-sizes.js";
+import { agentOwnPaths } from "./recipes.js";
 
 /** What the planner reads beside the picks: this computer's rungs and its Homebrew table, the same two readers wsp
  * init and a copy's build take. */
@@ -177,6 +181,22 @@ function shellPackage(picks: RecipeFile, manifest: Manifest, path: string, prefi
   return "cmd" in step ? [{ id: `configs/shell/${login}`, label: login, manager: "apt", ...step, bin: login }] : undefined;
 }
 
+/** gh, where the GitHub row signs it in and the picks carry no gh among their CLIs: the catalog's own road. */
+function githubTools(picks: RecipeFile, path: string, prefix: string): ProvisionPlan["github"] {
+  const signin = picks.configs.github?.signin;
+  if (picks.configs.github === undefined || signin === "skip" || picks.clis[GH] !== undefined) return undefined;
+  const entry = catalogEntry(GH);
+  if (entry === undefined) return undefined;
+  const step = viaRoad(entry.installRoad, entry.bin, path, prefix);
+  return "cmd" in step ? [{ id: `github/${GH}`, label: entry.name, manager: entry.installRoad.road, ...step, bin: entry.bin }] : undefined;
+}
+const GH = "gh";
+const GITHUB_ROW = "github";
+
+/** The steps whose plan reads this computer's manifest: the agents, the CLIs, the servers, the configs (the login
+ * shell), the floor and the machine context. */
+const READS_THIS_COMPUTER: ReadonlySet<string> = new Set(["floor", "agents", "clis", "mcp", "configs", "context"]);
+
 /** The picked plugins as the lines that put each on, by the agent's own commands there, each from the marketplace
  * this computer's index names for it. One whose marketplace this computer cannot name is set aside. */
 function pluginsOf(picks: RecipeFile, home: string): { plugins: NonNullable<ProvisionPlan["plugins"]>[number][]; skipped: { id: string; label: string; note: string }[] } {
@@ -191,6 +211,78 @@ function pluginsOf(picks: RecipeFile, home: string): { plugins: NonNullable<Prov
     else plugins.push({ id: `plugins/${name}`, label: name, cmd: road.install(name, source), asked: out => road.asked(out, name) });
   }
   return { plugins, skipped };
+}
+
+/** How one catalog row comes off a computer by its own road, on the job's PATH: the line, or why there is none. */
+function catalogUninstall(id: string, path: string, prefix: string): Pick<PlaceUndo, "cmd" | "note"> {
+  const entry = catalogEntry(id);
+  if (entry === undefined) return { note: `no road wsp knows takes ${id} off` };
+  const r = roadModule(entry.installRoad).uninstall(entry.installRoad, entry.bin, installHomes(prefix));
+  return "cmd" in r ? { cmd: `${pathLine(path, prefix)}\n${r.cmd}` } : { note: r.note };
+}
+
+/** What taking rows out of a computer's picks runs there, each answering for the rows it applied: a CLI and an
+ * agent by their own roads, a skill and a config by the files wsp landed for them, a plugin by its agent's command,
+ * a folder by its project record, a server by the servers step, which takes out what wsp wrote and is no longer
+ * picked. Planned off the picks as they were, since the row is no longer in the ones now. */
+export async function undoPlan(before: RecipeFile, removed: readonly { kind: RecipeKind; name: string }[], on: { home: string }, brew: () => Promise<BrewTable>): Promise<PlaceUndo[]> {
+  const { path, prefix } = placePaths(on.home);
+  const roots = skillRootsFor(before);
+  const out: PlaceUndo[] = [];
+  for (const { kind, name } of removed) {
+    const key = `${kind}/${name}`;
+    switch (kind) {
+      case "skills":
+        out.push({ key, label: name, ids: [key, ...roots.map(root => `files/${root}/${name}`)], dests: roots.map(root => `${root}/${name}`) });
+        break;
+      case "configs": {
+        if (name === "github") {
+          // gh comes off only where this row's own step put it on; a gh among the CLIs is that row's.
+          out.push({ key, label: "GitHub", ids: [key, GITHUB_ROW, `github/${GH}`], owner: `github/${GH}`, ...catalogUninstall(GH, path, prefix) });
+          break;
+        }
+        const dests = CONFIG_PATHS[name as keyof typeof CONFIG_PATHS] ?? [];
+        out.push({ key, label: name, ids: [key, ...dests.map(d => `files/${d}`)], dests });
+        if (name === "shell") {
+          for (const login of ["zsh", "fish"]) {
+            const apt = { road: "apt" as const, packages: [login] };
+            const r = roadModule(apt).uninstall(apt, login);
+            out.push({ key: `configs/shell/${login}`, label: login, ids: [`configs/shell/${login}`], owner: `configs/shell/${login}`, ...("cmd" in r ? { cmd: `${pathLine(path, prefix)}\n${r.cmd}` } : { note: r.note }) });
+          }
+        }
+        break;
+      }
+      case "clis": {
+        const row = before.clis[name];
+        if (row === undefined) break;
+        const id = toolRowId(row.via, name);
+        const r = toolUninstall({ rung: "tools", id, label: name, paths: [], bytes: 0, default: "bring", bring: true }, await brew(), path, prefix);
+        // A tool that took hold with a command of its own lets go of it first, while its command is still there.
+        const entry = catalogEntry(catalogIdOfRow({ id }) ?? "");
+        const off = entry?.kind === "tool" ? entry.hook?.off : undefined;
+        out.push({ key, label: name, ids: [id], owner: id, ...("cmd" in r ? { cmd: off === undefined ? r.cmd : `${pathLine(path, prefix)}\n${off} || true\n${r.cmd}` } : { note: r.note }) });
+        break;
+      }
+      case "agents": {
+        // Its own files wsp landed come off with it; a file it rewrites as it runs was never wsp's to keep.
+        const dests = agentOwnPaths(name).map(p => p.replace(/^~\//, ""));
+        out.push({ key, label: CATALOG_AGENTS.find(a => a.id === name)?.name ?? name, ids: [`agents/${name}`, `signins/${name}`, ...dests.map(d => `files/${d}`)], owner: `agents/${name}`, dests, ...catalogUninstall(name, path, prefix) });
+        break;
+      }
+      case "plugins": {
+        const road = CATALOG_AGENTS.find(a => a.plugins !== undefined && before.agents[a.id] !== undefined)?.plugins;
+        out.push({ key, label: name, ids: [key], owner: key, ...(road === undefined ? { note: "no picked agent takes plugins" } : { cmd: `${pathLine(path, prefix)}\n${road.uninstall(name)}` }) });
+        break;
+      }
+      case "folders":
+        out.push({ key, label: before.folders[name]?.name ?? name, ids: [key], owner: key, folder: name });
+        break;
+      case "mcp":
+        out.push({ key, label: name, ids: (before.mcp[name]?.agents ?? []).map(agent => `${MCP_ID_PREFIX}${agent}/${name}`) });
+        break;
+    }
+  }
+  return out;
 }
 
 /** The host's side of the setup job: the plan off a computer's picks, the floor alone for a computer that joined
@@ -212,11 +304,30 @@ export function placeProvisioner(o: ProvisionReaders): PlaceProvisioner {
       );
       return provisionPlanOf(imp, recipe.at, path, prefix);
     },
-    async setup(picks, on) {
+    async setup(picks, on, only) {
+      const { path, prefix } = placePaths(on.home);
+      // A sync of the skills, the plugins, GitHub or the folders alone reads nothing of this computer's managers,
+      // agents or servers: those are seconds of reading for rows that are not moving.
+      if (only !== undefined && ![...only].some(step => READS_THIS_COMPUTER.has(step))) {
+        const skills = skillsOf(picks, o.home);
+        const plugins = pluginsOf(picks, o.home);
+        const github = githubTools(picks, path, prefix);
+        return {
+          recipeAt: picks.name,
+          path,
+          prefix,
+          steps: [],
+          agents: 0,
+          compiler: false,
+          skipped: [...skills.skipped, ...plugins.skipped],
+          ...(skills.plan !== undefined ? { skills: skills.plan } : {}),
+          ...(plugins.plugins.length > 0 ? { plugins: plugins.plugins } : {}),
+          ...(github !== undefined ? { github } : {}),
+        };
+      }
       const manifest = await o.collect();
       const brew = await brewTableFor(manifest, o.brew);
       const rows = picksRows(manifest, picks, { home: o.home, brew });
-      const { path, prefix } = placePaths(on.home);
       const imp = planImport(
         rows.filter(e => e.bring === true),
         // The files that travel with an agent are its own: its settings, its standing instructions and its configs.
@@ -227,17 +338,21 @@ export function placeProvisioner(o: ProvisionReaders): PlaceProvisioner {
       const configs = configsOf(picks, o.home);
       const configTools = shellPackage(picks, manifest, path, prefix);
       const plugins = pluginsOf(picks, o.home);
+      const github = githubTools(picks, path, prefix);
       const plan = provisionPlanOf(imp, picks.name, path, prefix, {
         compiler: Object.values(picks.clis).some(row => row.needs?.includes(COMPILER_ROW) === true),
         ...(skills.plan !== undefined ? { skills: skills.plan } : {}),
         ...(configs !== undefined ? { configs } : {}),
         ...(configTools !== undefined ? { configTools } : {}),
         ...(plugins.plugins.length > 0 ? { plugins: plugins.plugins } : {}),
+        ...(github !== undefined ? { github } : {}),
       });
       return { ...plan, skipped: [...plan.skipped, ...skills.skipped, ...plugins.skipped] };
     },
     floor: (machine, on, stage) => provisionStep(machine, { ...placePaths(on.home), recipeAt: "floor", steps: [], agents: 0, compiler: false, skipped: [] }, "floor", newSetupRun(), stage, on),
     step: (machine, plan, step, run, stage, on) => provisionStep(machine, plan, step, run, stage, on),
+    estimate: async picks => estimatePicks(picks, o.home),
+    undo: async (before, removed, on) => undoPlan(before, removed, on, async () => brewTableFor(await o.collect(), o.brew)),
   };
 }
 

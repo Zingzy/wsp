@@ -39,6 +39,13 @@ export function ownerRepoOf(remote: string): string | undefined {
   return path === "" ? undefined : path;
 }
 
+/** The https address of a repository on GitHub, which an anonymous read can ask; nothing for any other host. */
+export function githubAddress(remote: string): string | undefined {
+  if (!/(^|[@/])github\.com[:/]/.test(remote)) return undefined;
+  const repo = ownerRepoOf(remote);
+  return repo === undefined ? undefined : `https://github.com/${repo}.git`;
+}
+
 /** Whether a project's remote is that repository, case aside. */
 export const holdsRepo = (project: { remote: string }, repo: string): boolean => ownerRepoOf(project.remote)?.toLowerCase() === repo.toLowerCase();
 

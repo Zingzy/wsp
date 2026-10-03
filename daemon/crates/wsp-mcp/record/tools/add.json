@@ -472,6 +472,12 @@
                     ],
                     "additionalProperties": false
                   }
+                },
+                "items": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "$ref": "#/properties/computer/properties/setup/properties/addId"
+                  }
                 }
               },
               "required": [
@@ -671,7 +677,12 @@
                       "type": "object",
                       "properties": {
                         "signin": {
-                          "$ref": "#/properties/computer/properties/picks/properties/agents/additionalProperties/properties/signin"
+                          "type": "string",
+                          "enum": [
+                            "vault",
+                            "machine",
+                            "skip"
+                          ]
                         }
                       },
                       "additionalProperties": false
@@ -688,6 +699,33 @@
             },
             "recipe": {
               "type": "string"
+            },
+            "sync": {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "behind",
+                    "running"
+                  ]
+                },
+                "changes": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/properties/computer/properties/setup/properties/addId"
+                  }
+                },
+                "since": {
+                  "$ref": "#/properties/computer/properties/setup/properties/addId"
+                }
+              },
+              "required": [
+                "state",
+                "changes",
+                "since"
+              ],
+              "additionalProperties": false
             },
             "cap": {
               "anyOf": [
@@ -819,6 +857,10 @@
                   "connect",
                   "host-key",
                   "check",
+                  "chip",
+                  "root",
+                  "system",
+                  "disk",
                   "reach",
                   "wsp",
                   "service",
@@ -1345,6 +1387,12 @@
                     ],
                     "additionalProperties": false
                   }
+                },
+                "items": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "$ref": "#/properties/computer/properties/setup/properties/addId"
+                  }
                 }
               },
               "required": [
@@ -1544,7 +1592,12 @@
                       "type": "object",
                       "properties": {
                         "signin": {
-                          "$ref": "#/properties/computer/properties/picks/properties/agents/additionalProperties/properties/signin"
+                          "type": "string",
+                          "enum": [
+                            "vault",
+                            "machine",
+                            "skip"
+                          ]
                         }
                       },
                       "additionalProperties": false
@@ -1561,6 +1614,33 @@
             },
             "recipe": {
               "type": "string"
+            },
+            "sync": {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "behind",
+                    "running"
+                  ]
+                },
+                "changes": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/properties/computer/properties/setup/properties/addId"
+                  }
+                },
+                "since": {
+                  "$ref": "#/properties/computer/properties/setup/properties/addId"
+                }
+              },
+              "required": [
+                "state",
+                "changes",
+                "since"
+              ],
+              "additionalProperties": false
             },
             "cap": {
               "anyOf": [
@@ -1692,6 +1772,10 @@
                   "connect",
                   "host-key",
                   "check",
+                  "chip",
+                  "root",
+                  "system",
+                  "disk",
                   "reach",
                   "wsp",
                   "service",

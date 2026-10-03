@@ -5,11 +5,12 @@ import { diskTone, sizeTone } from "../src/init-weight.js";
 const MIB = 1024 * 1024;
 
 describe("the tone a row's size takes", () => {
-  it("is the protocol's table on the terminal's colours: plain under 100 MB, yellow from 100, bright yellow from 300, red from a gigabyte", () => {
+  it("is the protocol's table on the terminal's colours: plain under 50 MB, yellow from 50, bright yellow from 200, red from a gigabyte", () => {
     expect(sizeTone(undefined)).toBeUndefined();
-    expect(sizeTone(100 * MIB - 1)).toBeUndefined();
-    expect(sizeTone(100 * MIB)).toBe("yellow");
-    expect(sizeTone(300 * MIB)).toBe("yellowBright");
+    expect(sizeTone(50 * MIB - 1)).toBeUndefined();
+    expect(sizeTone(50 * MIB)).toBe("yellow");
+    expect(sizeTone(200 * MIB - 1)).toBe("yellow");
+    expect(sizeTone(200 * MIB)).toBe("yellowBright");
     expect(sizeTone(1024 * MIB)).toBe("red");
   });
 });

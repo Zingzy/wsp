@@ -282,6 +282,7 @@ import {
   PlaceSpend,
   RecipeView,
   RECIPE_KINDS,
+  NO_RECIPE,
   type RecipeFile,
   setupWord,
   pendingWord,
@@ -809,6 +810,12 @@ export function computerLines(places: readonly PlaceView[], platform: "darwin" |
   return table([["COMPUTER", "KIND", "CORES", "MEMORY", "DISK FREE", "ENGINE", "COPIES", "PRESENT", "WORKSPACES", "THREADS", "MACHINES", "SPEND", "STATE", "LAST SEEN", "BEHIND", "IMAGE", "TOOLS", "AGENTS"], ...rows, ...waiting]);
 }
 
+/** What a computer set to follow a recipe prints: the recipe it follows now, or that it keeps what it has. */
+export const followLine = (computer: Pick<PlaceView, "name" | "recipe" | "sync">): string =>
+  computer.recipe === undefined || computer.recipe === NO_RECIPE
+    ? `${computer.name} follows no recipe; it keeps what it has`
+    : `${computer.name} follows ${computer.recipe}; a change to it reaches ${computer.name} on its own`;
+
 /** wsp recipes: one row per recipe, what it holds and the computers that follow it. */
 export function recipeLines(recipes: readonly RecipeView[]): string[] {
   if (recipes.length === 0) return ["No recipe is saved yet. The app's Add a computer saves one, and wsp recipes save <name> --from <computer> saves what a computer was set up with."];
@@ -908,8 +915,11 @@ const SETTING_RESETS = PlaceSettingWord.options.filter(word => CLOUD_ON || !CLOU
 
 /** One computer's settings made and reset by the host, answered as the row it now reads: by the id off the listing,
  * since two computers may share a name and the host keys by id. The row passes through as the host wrote it. */
-async function setComputer(client: HostClient, ref: string, set: PlaceSettingsAsk, reset: readonly PlaceSettingWord[]): Promise<PlaceView> {
+async function setComputer(client: HostClient, ref: string, set: PlaceSettingsAsk, reset: readonly PlaceSettingWord[], recipe?: string): Promise<PlaceView> {
   const place = await placeNamed(client, ref);
+  // The recipe first: a setting refused after it leaves the computer following what was named, which is said.
+  const followed = recipe === undefined ? undefined : (await client.request<{ place: PlaceView }>("places.follow", { placeId: place.id, recipe })).place;
+  if (followed !== undefined && Object.keys(set).length === 0 && reset.length === 0) return followed;
   return (await client.request<{ place: PlaceView }>("places.set", { placeId: place.id, ...set, ...(reset.length > 0 ? { reset } : {}) })).place;
 }
 
@@ -3754,13 +3764,14 @@ export const ALL_VERBS: readonly Verb[] = [
   {
     name: "computers set",
     cloudFlags: ["machines", "spend"],
-    usage: "wsp computers set <computer> [--threads <n>] [--machines <n>] [--spend <usd>] [--nap <minutes>|off] [--spawn on|off] [--max-machines <n>] [--max-depth <n>] [--reset <setting>]...",
-    about: "what you set on one of your computers: how many threads run there at once, how long a quiet machine there runs before it naps, whether agents there may start agents<!-- cloud -->, and on a cloud how many machines at once and how much it spends a day<!-- /cloud -->; --reset takes a setting back to its default",
+    usage: "wsp computers set <computer> [--threads <n>] [--machines <n>] [--spend <usd>] [--nap <minutes>|off] [--spawn on|off] [--max-machines <n>] [--max-depth <n>] [--recipe <name>|none] [--reset <setting>]...",
+    about: "what you set on one of your computers: how many threads run there at once, how long a quiet machine there runs before it naps, whether agents there may start agents, the recipe it follows<!-- cloud -->, and on a cloud how many machines at once and how much it spends a day<!-- /cloud -->; --reset takes a setting back to its default",
     page: "agent",
-    options: { threads: { type: "string" }, machines: { type: "string" }, spend: { type: "string" }, nap: { type: "string" }, spawn: { type: "string" }, "max-machines": { type: "string" }, "max-depth": { type: "string" }, reset: { type: "string", multiple: true } },
+    options: { threads: { type: "string" }, machines: { type: "string" }, spend: { type: "string" }, nap: { type: "string" }, spawn: { type: "string" }, "max-machines": { type: "string" }, "max-depth": { type: "string" }, recipe: { type: "string" }, reset: { type: "string", multiple: true } },
     run: async ctx => {
       const [ref, ...rest] = ctx.args;
       if (ref === undefined || rest.length > 0) throw usageRefusal("wsp computers set takes one computer.", usageIs(ctx));
+      const recipe = flag(ctx.flags, "recipe");
       const threads = flag(ctx.flags, "threads");
       const machines = flag(ctx.flags, "machines");
       const spend = flag(ctx.flags, "spend");
@@ -3772,8 +3783,8 @@ export const ALL_VERBS: readonly Verb[] = [
         ...(spend !== undefined ? { spendPerDayUsd: dollarsAsked(spend, ref) } : {}),
         ...(nap !== undefined ? { napMs: napMsOf(napAsked(nap, ref)) } : {}),
         ...(spawn !== undefined ? { spawn } : {}),
-      }, flagList(ctx.flags, "reset").map(word => oneOf("reset", SETTING_RESETS, word, ref)!));
-      ctx.out.emit({ computer }, placeSettingsLine(computer));
+      }, flagList(ctx.flags, "reset").map(word => oneOf("reset", SETTING_RESETS, word, ref)!), recipe);
+      ctx.out.emit({ computer }, recipe === undefined ? placeSettingsLine(computer) : followLine(computer));
       return 0;
     },
     tool: tool({
@@ -3788,10 +3799,11 @@ export const ALL_VERBS: readonly Verb[] = [
         spawn: z.enum(["on", "off"]).optional().describe("whether agents there may open threads and fork machines under the thread they run in, capped, where the folder or the machine they run in holds no switch of its own"),
         max_machines: z.number().int().min(0).optional().describe("how many machines may stand at once under one root thread there while spawn is on"),
         max_depth: z.number().int().min(1).optional().describe("how many levels deep the tree under a root thread there may go while spawn is on"),
+        recipe: z.string().optional().describe("the saved recipe it follows from now, as recipes lists it, or none: one it follows syncs to it, a change to the recipe reaching it with no step, and none keeps what it has"),
         reset: z.array(z.enum(SETTING_RESETS)).optional().describe("the settings to take back to their defaults, by the same words"),
       },
       output: { computer: PlaceView },
-      call: async ({ computer: ref, threads, machines, spend, nap, spawn: on, max_machines: maxMachines, max_depth: maxDepth, reset }, deps) => {
+      call: async ({ computer: ref, threads, machines, spend, nap, spawn: on, max_machines: maxMachines, max_depth: maxDepth, recipe, reset }, deps) => {
         const spawn = agentsAsked(on, maxMachines, maxDepth);
         const computer = await setComputer(await deps.client(), ref, {
           ...(threads !== undefined ? { threads } : {}),
@@ -3799,7 +3811,7 @@ export const ALL_VERBS: readonly Verb[] = [
           ...(spend !== undefined ? { spendPerDayUsd: spend } : {}),
           ...(nap !== undefined ? { napMs: napMsOf(nap) } : {}),
           ...(spawn !== undefined ? { spawn } : {}),
-        }, reset ?? []);
+        }, reset ?? [], recipe);
         return asJson({ computer });
       },
     }),
@@ -3875,7 +3887,7 @@ export const ALL_VERBS: readonly Verb[] = [
     },
     tool: tool({
       description:
-        "One recipe by its name: file is the recipe as saved, every row by kind (agents with signin vault or machine, mcp with the agents each server goes to, clis with via, the manager it came from, and needs where it builds with the C toolchain, skills with from, the folder it is read from here, plugins, folders with from, name, icon, hue and keep, configs git, shell and github), machines the computers that follow it, and hash what it resolves to on the computer the app runs on now: the versions, the skill folders and the configs read there, which a computer that applied it is held against.",
+        "One recipe by its name: file is the recipe as saved, every row by kind (agents with signin vault or machine, mcp with the agents each server goes to, clis with via, the manager it came from, and needs where it builds with the C toolchain, skills with from, the folder it is read from here, plugins, folders with from, name, icon, hue and keep, configs git, shell and github, github with signin vault, machine or skip), machines the computers that follow it, and hash what it resolves to on the computer the app runs on now: the versions, the skill folders and the configs read there, which a computer that applied it is held against.",
       input: { name: z.string().describe("the recipe's name, as recipes lists it") },
       output: { recipe: RecipeView, hash: z.string() },
       call: async ({ name }, deps) => {
@@ -6068,6 +6080,7 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   "worktree remove force": "remove it over files no commit holds, which go with it",
   "export from": "the folder on the machine to bring home; the project registered for the folder you named without it",
   "recipes save from": "the computer whose picks the recipe is saved from, by the name wsp computers shows; it follows the recipe from then on",
+  "computers set recipe": "the saved recipe it follows from now, by the name wsp recipes shows, or none to keep what it has and follow nothing",
   force: "build again even where the place already holds this version",
   hidden: "list the folders whose names start with a dot too",
   "usage range": "the days what was used is read over: day (today, the default), week (the last seven) or month (the last thirty); the accounts' limits are the same whatever it says",

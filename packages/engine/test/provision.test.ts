@@ -464,21 +464,27 @@ describe("the person's own files and their servers, on the same run", () => {
       },
     });
 
-  it("lands the agents' own files right after the agents, writes the servers after the files and the machine context after all of it", async () => {
+  it("installs the agents alone, lands their own files with the servers after the CLIs, and the machine context after all of it", async () => {
     const { machine, calls } = boxMachine();
-    const rows = await provisionBox(machine, withFilesAndServers([step({ id: "agents/codex", label: "Codex", bin: "codex" })]), () => {}, ON);
+    const plan = { ...withFilesAndServers([step({ id: "agents/codex", label: "Codex", bin: "codex" }), step({ id: "tools/apt/jq", label: "jq", bin: "jq" })]), agents: 1 };
+    const agents = await provisionStep(machine, plan, "agents", newSetupRun(), () => {}, ON);
+    expect(agents.map(r => r.id)).toEqual(["agents/codex"]);
+    expect(calls.some(c => c.includes("wsp-land"))).toBe(false);
+    calls.length = 0;
+    const rows = await provisionBox(machine, plan, () => {}, ON);
     const at = (needle: string): number => calls.findIndex(c => c.includes(needle));
     expect(at("install agents/codex")).toBeGreaterThan(-1);
-    expect(at("wsp-land")).toBeGreaterThan(at("install agents/codex"));
+    expect(at("wsp-land")).toBeGreaterThan(at("install tools/apt/jq"));
     expect(at("wsp_mcp_read")).toBeGreaterThan(at("wsp-land"));
     expect(at("echo WSP_CTX")).toBeGreaterThan(at("wsp_mcp_read"));
     // Every row says what it puts there, so the word on the computers row counts them by kind.
-    expect(rows.map(r => [r.id, r.kind])).toEqual([
-      ["agents/codex", undefined],
-      ["files/.claude-cfg/skills", "file"],
-      [`${MCP_ID_PREFIX}claude/github`, "server"],
+    expect(rows.map(r => [r.id, r.kind, r.step])).toEqual([
+      ["agents/codex", undefined, "agents"],
+      ["tools/apt/jq", undefined, "clis"],
+      ["files/.claude-cfg/skills", "file", "mcp"],
+      [`${MCP_ID_PREFIX}claude/github`, "server", "mcp"],
     ]);
-    expect(setupWord(ended, { hash: "h", at: "x", rows })).toBe("1 tool, 1 file, 1 MCP server ready");
+    expect(setupWord(ended, { hash: "h", at: "x", rows })).toBe("2 tools, 1 file, 1 MCP server ready");
   });
 
   it("counts the files and the servers in what the job says it is putting there, and says the row it is on in each loop of installs", async () => {
@@ -533,7 +539,7 @@ describe("the person's own files and their servers, on the same run", () => {
       ON,
     );
     const left = rows.filter(r => r.id.startsWith("left-out/"));
-    expect(left).toEqual([gem, pem].map((note, i) => ({ id: `left-out/${i}`, label: "~/.claude.json", outcome: "skipped", kind: "file", note, step: "agents" })));
+    expect(left).toEqual([gem, pem].map((note, i) => ({ id: `left-out/${i}`, label: "~/.claude.json", outcome: "skipped", kind: "file", note, step: "mcp" })));
     expect(said).toContain(`~/.claude.json: skipped (${gem})`);
   });
 
@@ -732,6 +738,34 @@ describe("the PATH every script of the job exports", () => {
     expect(res.status, res.stderr).toBe(0);
     expect(readFileSync(said, "utf8").trim()).toBe(`${TOOL_PREFIX}/uv/tools /usr/local/bin ${TOOL_PREFIX}/uv/python`);
     expect(existsSync(ran), "a row of the job ran the binary planted under the home").toBe(false);
+  });
+});
+
+describe("a CLI the catalog says takes hold with a command of its own", () => {
+  it("runs git-lfs's install system-wide once wsp put the row on, never on one the box had, and a hook that fails fails its row", async () => {
+    const lfs = step({ id: "tools/brew/git-lfs", label: "Git LFS", bin: "git-lfs" });
+    const jq = step({ id: "tools/brew/jq", label: "jq", bin: "jq" });
+    const { machine, calls } = boxMachine();
+    const rows = await provisionStep(machine, planOf([lfs, jq]), "clis", newSetupRun(), () => {}, ON);
+    expect(outcomes(rows)).toEqual([
+      ["tools/brew/git-lfs", "installed"],
+      ["tools/brew/jq", "installed"],
+    ]);
+    const hooks = calls.filter(c => c.includes("git lfs install"));
+    expect(hooks).toHaveLength(1);
+    expect(hooks[0]).toContain("git lfs install --system");
+    // The person's own ~/.gitconfig is the git row's file, so the filters go in the system's and never there.
+    expect(hooks[0]).not.toContain("--global");
+
+    // A git-lfs the box had before wsp is the person's own: its system gitconfig is not wsp's to write.
+    const theirs = boxMachine(cmd => (cmd.includes("wsp-present") || cmd.includes("command -v 'git-lfs'") ? { exitCode: 0, stdout: "wsp-present 0 /usr/bin/git-lfs\n", stderr: "" } : undefined));
+    const kept = await provisionStep(theirs.machine, planOf([lfs]), "clis", newSetupRun(), () => {}, ON);
+    expect(outcomes(kept)).toEqual([["tools/brew/git-lfs", "present"]]);
+    expect(theirs.calls.some(c => c.includes("git lfs install"))).toBe(false);
+
+    const refused = boxMachine(cmd => (cmd.includes("git lfs install") ? { exitCode: 2, stdout: "", stderr: "git: 'lfs' is not a git command" } : undefined));
+    const failed = await provisionStep(refused.machine, planOf([lfs]), "clis", newSetupRun(), () => {}, ON);
+    expect(failed).toEqual([expect.objectContaining({ id: "tools/brew/git-lfs", outcome: "failed", note: expect.stringContaining("git: 'lfs' is not a git command") })]);
   });
 });
 

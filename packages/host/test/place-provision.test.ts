@@ -14,7 +14,7 @@ import { nodeHost } from "@wsp/collect";
 import { boxGuest, cleanGuests } from "../../engine/test/box-guest.js";
 import { parseEnvFile, serverEnvFileFor } from "../src/env-keys.js";
 import { serversActs } from "../src/servers-acts.js";
-import { placeProvisioner } from "../src/place-provision.js";
+import { placeProvisioner, undoPlan } from "../src/place-provision.js";
 import { smallRecipePath } from "../src/recipe-file.js";
 import { FIXTURE, RECIPE } from "./init-fixture.js";
 
@@ -189,5 +189,80 @@ describe("the recipe this host holds, planned for a computer you own", () => {
     const plan = await planned();
     expect(plan.steps.some(t => t.id === "tools/brew/rectangle")).toBe(false);
     expect(plan.skipped).toEqual([]);
+  });
+});
+
+describe("a computer's picks planned for a sync", () => {
+  let dir: string;
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("plans the skills alone without reading this computer's managers, agents or servers, and reads them for a step that needs them", async () => {
+    dir = mkdtempSync(join(tmpdir(), "wsp-place-sync-plan-"));
+    const home = join(dir, "home");
+    mkdirSync(join(home, ".claude", "skills", "unslop"), { recursive: true });
+    writeFileSync(join(home, ".claude", "skills", "unslop", "SKILL.md"), "---\nname: unslop\n---\n");
+    let reads = 0;
+    const planner = placeProvisioner({ statePath: join(dir, "state.json"), home, platform: "linux", collect: async (): Promise<Manifest> => (reads++, FIXTURE), brew: async () => new Map() });
+    const picks = { name: "laptop", agents: { claude: { signin: "vault" as const } }, mcp: {}, clis: {}, skills: { unslop: { from: "~/.claude/skills" } }, plugins: {}, folders: {}, configs: {} };
+    const light = await planner.setup(picks, { home }, new Set(["skills"]));
+    expect(reads).toBe(0);
+    expect(light.steps).toEqual([]);
+    expect(light.skills?.lands.map(l => l.dest)).toEqual([".claude/skills/unslop"]);
+    await planner.setup(picks, { home }, new Set(["skills", "clis"]));
+    expect(reads).toBe(1);
+  });
+});
+
+describe("what taking rows out of a computer's picks runs there", () => {
+  it("takes gh off for the GitHub row only by the row that put gh on, and git-lfs's filters off before the tool", async () => {
+    const before = { name: "laptop", agents: {}, mcp: {}, clis: { "git-lfs": { via: "brew" }, gh: { via: "brew" } }, skills: {}, plugins: {}, folders: {}, configs: { github: { signin: "machine" as const } } };
+    const undo = await undoPlan(before, [{ kind: "configs", name: "github" }, { kind: "clis", name: "git-lfs" }], { home: "/root" }, async () => new Map());
+    const by = new Map(undo.map(u => [u.key, u]));
+    expect(by.get("configs/github")?.owner).toBe("github/gh");
+    const lfs = by.get("clis/git-lfs")?.cmd ?? "";
+    expect(lfs).toContain("git lfs uninstall --system");
+    expect(lfs.indexOf("git lfs uninstall --system")).toBeLessThan(lfs.indexOf("brew uninstall git-lfs"));
+  });
+
+  it("takes a CLI and an agent off by their own roads where they have one, a skill and an agent's own files by the ledger, a plugin by claude's command and a folder by its record", async () => {
+    const before = {
+      name: "laptop",
+      agents: { claude: { signin: "vault" as const } },
+      mcp: { linear: { agents: ["claude"] } },
+      clis: { cowsay: { via: "npm" }, jq: { via: "apt" } },
+      skills: { why: { from: "~/.claude/skills" } },
+      plugins: { "lint@acme": {} },
+      folders: { app: { from: "~/app", name: "app", keep: [] } },
+      configs: { git: {} },
+    };
+    const removed = [
+      { kind: "agents" as const, name: "claude" },
+      { kind: "clis" as const, name: "cowsay" },
+      { kind: "clis" as const, name: "jq" },
+      { kind: "skills" as const, name: "why" },
+      { kind: "plugins" as const, name: "lint@acme" },
+      { kind: "folders" as const, name: "app" },
+      { kind: "mcp" as const, name: "linear" },
+      { kind: "configs" as const, name: "git" },
+    ];
+    const undo = await undoPlan(before, removed, { home: "/root" }, async () => new Map());
+    const by = new Map(undo.map(u => [u.key, u]));
+    expect(by.get("agents/claude")).toMatchObject({ ids: expect.arrayContaining(["agents/claude", "signins/claude", "files/.claude/settings.json"]), dests: expect.arrayContaining([".claude/settings.json", ".claude/CLAUDE.md"]) });
+    expect(by.get("agents/claude")?.dests).not.toContain(".claude.json");
+    // Claude Code's script road names no uninstall, which its row says.
+    expect(by.get("agents/claude")?.note).toContain("no uninstaller");
+    expect(by.get("clis/cowsay")).toMatchObject({ ids: ["tools/npm/cowsay"], cmd: expect.stringContaining("npm uninstall -g cowsay") });
+    // A floor row is the base's and stays, which its row says.
+    expect(by.get("clis/jq")).toMatchObject({ ids: ["tools/apt/jq"], note: "jq is part of the base and stays" });
+    expect(by.get("skills/why")).toMatchObject({ dests: [".claude/skills/why"] });
+    expect(by.get("plugins/lint@acme")?.cmd).toContain("claude plugin uninstall 'lint@acme'");
+    expect(by.get("folders/app")).toMatchObject({ folder: "app", ids: ["folders/app"], owner: "folders/app" });
+    // A road runs only where the row it installed reads installed: the agent's own row, the CLI's tool row.
+    expect(by.get("agents/claude")?.owner).toBe("agents/claude");
+    expect(by.get("clis/cowsay")?.owner).toBe("tools/npm/cowsay");
+    expect(by.get("plugins/lint@acme")?.owner).toBe("plugins/lint@acme");
+    expect(by.get("mcp/linear")).toMatchObject({ ids: [`${MCP_ID_PREFIX}claude/linear`] });
+    expect(by.get("mcp/linear")?.cmd).toBeUndefined();
+    expect(by.get("configs/git")).toMatchObject({ dests: [".gitconfig", ".config/git/config", ".config/git/ignore", ".config/git/attributes"] });
   });
 });

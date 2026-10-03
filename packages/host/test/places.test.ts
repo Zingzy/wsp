@@ -103,6 +103,7 @@ import {
   addUndoneLine,
   addTakenLine,
   placeRootHomeRefusal,
+  PLACE_CHECK_SCRIPT,
 } from "../src/places.js";
 import { BackCutError, backBindLine, heldPlaceScript } from "../src/place-back.js";
 import { placeFilePath, placeKeyPath, placeLogPath, placeReport, placeService, readPlaceFile, sweepPlace as sweepPlaceHere, sweptLine, sweptSaid, writePlaceFile, type PlaceSweepOptions } from "../src/place-report.js";
@@ -576,7 +577,7 @@ describe("the table wsp places prints", () => {
     // A computer that keeps no image says nothing in that column in any state of the job, and the refusal a fork
     // there meets while the job runs is never one of them.
     expect(of(rows[1]!)).toEqual({ image: "", tools: "" });
-    expect(of({ ...rows[1]!, setup: job })).toEqual({ image: "", tools: "setting up the skills and the agents' own files" });
+    expect(of({ ...rows[1]!, setup: job })).toEqual({ image: "", tools: "setting up the skills" });
     expect(of({ ...rows[1]!, ...done })).toEqual({ image: "", tools: "1 tool ready" });
   });
 
@@ -1668,7 +1669,7 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
 
   /** A box that takes the deploy and answers the word it is told to say about its own chip, recording every script
    * run on it and every file landed there. `arch` is what its `uname -m` answered on the read that adopted it. */
-  function fakeBox(arch: string | undefined, shell = "bash", box: { reaches?: (url: string) => boolean; holds?: string; dials?: string; proxied?: boolean; home?: string } = {}): { backend: unknown; ran: string[]; landed: string[]; stages: string[]; stage: PlaceStaging } {
+  function fakeBox(arch: string | undefined, shell = "bash", box: { reaches?: (url: string) => boolean; holds?: string; dials?: string; proxied?: boolean; home?: string; checks?: string[] } = {}): { backend: unknown; ran: string[]; landed: string[]; stages: string[]; stage: PlaceStaging } {
     const ran: string[] = [];
     const landed: string[] = [];
     const stages: string[] = [];
@@ -1684,6 +1685,7 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
         ran.push(script);
         if (script.includes("PREFLIGHT_OK")) return { exitCode: 0, stdout: "PREFLIGHT_OK\n", stderr: "" };
         if (script === heldPlaceScript("/home/maya")) return { exitCode: 0, stdout: box.holds ?? "", stderr: "" };
+        if (script === PLACE_CHECK_SCRIPT) return { exitCode: 0, stdout: (box.checks ?? []).map(l => `wsp-check ${l}\n`).join(""), stderr: "" };
         const reached = reachAnswer(script, box.reaches);
         if (reached !== undefined) return reached;
         for (const line of [WSP_READY_LINE, PLACE_JOINED_LINE]) opts?.onLine?.(line);
@@ -1731,6 +1733,31 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
     const armDeploy = arm.ran.find(script => script.includes("uname -m"))!;
     expect(armDeploy).toContain(`  ${ARM.uname})`);
     expect(armDeploy).not.toContain(X86.uname);
+  });
+
+  it("says each check on a row of its own: the chip and system, root, systemd with cgroup v2 and the room, inside the one check step", async () => {
+    const box = fakeBox("x86_64", "bash", { checks: ["uid 0", "systemd yes", "cgroup2 yes", `free ${20 * 1024 ** 3}`] });
+    await placeInstaller({ backend: box.backend as never, ...assets(tmp("check-rows"), [X86]) })({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"] }, box.stage);
+    expect(box.stages.filter(line => /^(check|chip|root|system|disk) /.test(line))).toEqual([
+      "check running",
+      "chip done (x86_64)",
+      "root running",
+      "root done",
+      "system running",
+      "system done (systemd, cgroup v2)",
+      "disk running",
+      "disk done (20 GB free)",
+      "check done (root, systemd, cgroup v2, 20 GB free)",
+    ]);
+  });
+
+  it("fails the one check a box does not pass on its own row, with the sentence that names the fix", async () => {
+    const box = fakeBox("x86_64", "bash", { checks: ["uid 0", "systemd yes", "cgroup2 no"] });
+    await expect(placeInstaller({ backend: box.backend as never, ...assets(tmp("check-fails"), [X86]) })({ address: "root@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"] }, box.stage)).rejects.toThrow("no cgroup v2");
+    const rows = box.stages.filter(line => /^(root|system|disk) /.test(line));
+    expect(rows.slice(0, 3)).toEqual(["root running", "root done", "system running"]);
+    expect(rows[3]).toMatch(/^system failed \(root@box has no cgroup v2/);
+    expect(rows.some(line => line.startsWith("disk"))).toBe(false);
   });
 
   it("names the chip it picked on the install line, so a wrong one is read rather than worked out later", async () => {
@@ -2346,8 +2373,16 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
       "connect running",
       "connect done (Linux 6.8.0)",
       "host-key done (ssh-ed25519 SHA256:abc)",
-      // What the box must be before anything of wsp's goes on it; a box whose check said nothing is not refused.
+      // What the box must be before anything of wsp's goes on it, each check a row of its own inside the step; a box
+      // whose check said nothing is not refused.
       "check running",
+      "chip done (x86_64)",
+      "root running",
+      "root done",
+      "system running",
+      "system done",
+      "disk running",
+      "disk done",
       "check done",
       // What the box reached of this host's addresses, before anything of wsp's went onto it.
       "reach running",
