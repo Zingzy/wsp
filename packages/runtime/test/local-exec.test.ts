@@ -351,6 +351,21 @@ describe("a real turn's process group", () => {
     await launched.exited;
   }, 20_000);
 
+  it("an attach to a run whose input channel was never written ends it and answers gone, and one with a message attaches", async () => {
+    const factory = localExecStream({ root, runDir });
+    const unprompted = factory(`sleep 300 & echo $! > ${join(root, "child")}; cat > /dev/null`, { env: {}, input: [] });
+    const pid = await grandchild(join(root, "child"));
+    const prompted = factory("cat > /dev/null", { env: {}, input: ["hello"] });
+    const next = localExecStream({ root, runDir });
+    expect(await next.attach!(unprompted.run!, { input: true, startedAt: Date.now() })).toBe("gone");
+    await gone(pid);
+    expect(existsSync(`${unprompted.run!}.d`)).toBe(false);
+    const attached = await next.attach!(prompted.run!, { input: true, startedAt: Date.now() });
+    expect(attached).not.toBe("gone");
+    (attached as ExecStream).closeInput();
+    expect(await (attached as ExecStream).exited).toBe(0);
+  }, 20_000);
+
   it("an attach reading a long log from the first byte lets the loop turn between its chunks", async () => {
     // A host re-opening a turn reads its whole log, and read in one go 200 MB held the loop 3.7 s (measured
     // 2026-09-28), which is a host answering nothing to every window and every line at a terminal.

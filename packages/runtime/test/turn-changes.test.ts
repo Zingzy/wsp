@@ -73,17 +73,33 @@ function gated(o: { waitsForPrompt?: true } = {}): { factory: HarnessAdapterFact
 }
 
 let rt: Runtime | undefined;
+const roots: string[] = [];
 afterEach(async () => {
   await rt?.close();
   rt = undefined;
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-async function workspaceWith(daemon: ReturnType<typeof fakeDaemon>, adapter: HarnessAdapterFactory, turnSnapshotMs?: number) {
+/** A workspace on a box, or with here a copy of a repo on this computer, both with the case's daemon. */
+async function workspaceWith(daemon: ReturnType<typeof fakeDaemon>, adapter: HarnessAdapterFactory, turnSnapshotMs?: number, here = false) {
   const backend = stubBackend();
   backend.execImpl = tokenGuest;
-  rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: adapter }, daemonToken: DAEMON_TOKEN, daemonChannel: daemon.open, ...(turnSnapshotMs !== undefined ? { turnSnapshotMs } : {}) });
-  const ws = await createOn(rt, { golden: "snap_g", name: "changes" });
-  backend.machines[0]!.previewUrl = async () => ({ url: "http://127.0.0.1:7070", token: "e", expiresAt: Date.now() + 3_600_000 });
+  const snapshotWait = turnSnapshotMs !== undefined ? { turnSnapshotMs } : {};
+  let ws: Awaited<ReturnType<typeof createOn>>;
+  if (here) {
+    const root = mkdtempSync(join(tmpdir(), "wsp-turn-changes-"));
+    roots.push(root);
+    const folder = join(root, "work");
+    mkdirSync(folder, { recursive: true });
+    execFileSync("git", ["init", "-q", folder]);
+    const local = { ...fakeLocal(root), daemonRoad: async () => ({ url: "http://127.0.0.1:7070", expiresAt: Number.MAX_SAFE_INTEGER, daemonToken: DAEMON_TOKEN }) };
+    rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: adapter }, local, daemonToken: DAEMON_TOKEN, daemonChannel: daemon.open, ...snapshotWait });
+    ws = await createOn(rt, { on: HERE_PLACE_ID, name: "changes", project: (await projectOn(rt, HERE_PLACE_ID, realpathSync(folder))).id });
+  } else {
+    rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: adapter }, daemonToken: DAEMON_TOKEN, daemonChannel: daemon.open, ...snapshotWait });
+    ws = await createOn(rt, { golden: "snap_g", name: "changes" });
+    backend.machines[0]!.previewUrl = async () => ({ url: "http://127.0.0.1:7070", token: "e", expiresAt: Date.now() + 3_600_000 });
+  }
   const events: SessionEvent[] = [];
   /** Each turn's id by the prompt that opened it, off the start the runtime recorded. */
   const turnOf = new Map<string, string>();
@@ -120,11 +136,11 @@ describe("what a turn changed", () => {
     expect(events[0]).not.toHaveProperty("shared");
   });
 
-  it("starts an agent that takes its prompt late while the launch's snapshot is taken, and hands it the prompt once the snapshot is in", async () => {
+  it("on this computer starts an agent that takes its prompt late while the launch's snapshot is taken, and hands it the prompt once the snapshot is in", async () => {
     const files = [{ path: "README.md", kind: "modified", additions: 1, deletions: 0 }];
     const daemon = fakeDaemon({ files, hold: true });
     const agent = gated({ waitsForPrompt: true });
-    const { ws, events } = await workspaceWith(daemon, agent.factory);
+    const { ws, events } = await workspaceWith(daemon, agent.factory, undefined, true);
     const handle = await rt!.sessions.start(ws.id, { prompt: "edit the readme" });
     expect(agent.starts).toHaveLength(1);
     let prompted = false;
@@ -137,6 +153,33 @@ describe("what a turn changed", () => {
     await handle.finished;
     await until(() => events.length > 0);
     expect(events).toEqual([expect.objectContaining({ type: "session.changes", from: sha(1), to: sha(2), files })]);
+  });
+
+  it("on this computer hands an agent that takes its prompt late the prompt at the cap when the daemon never answers, and records nothing", async () => {
+    const daemon = fakeDaemon({ stall: true });
+    const agent = gated({ waitsForPrompt: true });
+    const { ws, events } = await workspaceWith(daemon, agent.factory, 30, true);
+    const handle = await rt!.sessions.start(ws.id, { prompt: "go" });
+    await agent.starts[0]!.promptAfter;
+    agent.release(0);
+    await handle.finished;
+    await new Promise(resolve => setTimeout(resolve, 60));
+    expect(daemon.frames.filter(f => f["op"] === "git.turn")).toEqual([]);
+    expect(events).toEqual([]);
+  });
+
+  it("on a box seeds the prompt at the launch of an agent that could take it late, the snapshot in first", async () => {
+    const daemon = fakeDaemon({ hold: true });
+    const agent = gated({ waitsForPrompt: true });
+    const { ws } = await workspaceWith(daemon, agent.factory);
+    const starting = rt!.sessions.start(ws.id, { prompt: "go" });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(agent.starts).toHaveLength(0);
+    daemon.letGo();
+    const handle = await starting;
+    expect(agent.starts[0]).not.toHaveProperty("promptAfter");
+    agent.release(0);
+    await handle.finished;
   });
 
   it("records nothing for a turn that changed nothing", async () => {

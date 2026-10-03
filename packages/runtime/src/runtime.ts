@@ -9070,6 +9070,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         throw e;
       }
       const { harness, adapter } = built;
+      // Only on this computer: a box keeps the prompt in its launch seed, since a write there is one more exec trip.
+      const promptsLate = adapter.waitsForPrompt === true && copiesFolder(entry.record.kind);
       // The wsp tools ride every launch, for a harness that takes servers with one: under the same name as the
       // person's own wsp server, which Claude Code's --mcp-config and Codex's -c overrides both replace while the
       // person's other servers stay (measured on 2.1.284 and 0.155.1 against the user-scope config; a project's own
@@ -9130,7 +9132,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       let imagesDir: string | undefined;
       let filePaths: string[] = [];
       let filesFolder: string | undefined;
-      // Every send takes one trip before its launch: its files land and its folder's snapshot is taken.
+      // Every send takes one trip before its launch: its files land and its folder's snapshot is taken, or only started
+      // where the agent takes its prompt late.
       let landed = false;
       let snapshot: { from: Promise<string | undefined>; cwd: string } | undefined;
       // This send's own folder on the machine, named by the request id it minted: the landing runs before any turn is
@@ -9198,7 +9201,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             filePaths = await landFiles(entry, landing, sendFilesDir(landing, threadId, o.requestId, randomUUID()), (o.attachments ?? []).filter(a => !isImage(a.mediaType)));
             if (filePaths.length > 0) filesFolder = landing;
             const from = snapshotOf(entry, landing);
-            if (adapter.waitsForPrompt !== true) await from;
+            if (!promptsLate) await from;
             snapshot = { from, cwd: landing };
             refuse();
             continue;
@@ -9255,7 +9258,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
               ...(images.length > 0 ? { images } : {}),
               ...(mcpServers !== undefined ? { mcpServers } : {}),
               ...(limitDetails ? { limitDetails: true as const } : {}),
-              ...(adapter.waitsForPrompt === true && snapshot !== undefined ? { promptAfter: snapshot.from.then(() => {}) } : {}),
+              ...(promptsLate && snapshot !== undefined ? { promptAfter: snapshot.from.then(() => {}) } : {}),
               // The thread's earlier turns as its transcript holds them, this one left out since its message follows.
               ...(resume !== undefined ? { seed: async () => threadSeed(threadMessages((await openTranscript(workspaceId)).filter(e => e.turnId !== turnId), threadId)) } : {}),
               onEvent,

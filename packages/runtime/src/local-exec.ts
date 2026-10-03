@@ -527,6 +527,11 @@ export function localExecStream(opts: LocalExecOptions, isWaiting?: TurnWaiting)
     // The claim is what says the run is still here, and this computer's own answer is the only one there is: a
     // folder that is gone is a run that is gone, and nothing else may end one.
     if (!existsSync(`${run}.d`)) return "gone";
+    // An empty channel is a launch whose host went before its prompt was written, and nothing will write it now.
+    if (input && existsSync(`${run}.in`) && statSync(`${run}.in`).size === 0) {
+      await reapRun(run);
+      return "gone";
+    }
     return open(run, input, { startedAt });
   };
 

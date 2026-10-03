@@ -7316,10 +7316,9 @@ describe("runtime session steer", () => {
     const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const handle = await rt.sessions.start(ws.id, { prompt: "go" });
     await vi.waitFor(() => expect(events.some(e => e.type === "session.start")).toBe(true));
-    await vi.waitFor(() => expect(appends).toHaveLength(1));
     exitFile = "1";
     expect(await rt.sessions.steer(handle.id, { prompt: "after exit" })).toEqual({ outcome: "not-running" });
-    expect(appends).toHaveLength(2);
+    expect(appends).toHaveLength(1);
     expect(events.some(e => e.type === "session.steer")).toBe(false);
     expect((await handle.finished).status).toBe("failed");
     expect((await rt.sessions.history(ws.id)).some(e => e.type === "session.steer")).toBe(false);
