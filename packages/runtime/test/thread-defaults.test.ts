@@ -142,6 +142,17 @@ describe("what a new thread starts on", () => {
     await expect(rt.sessions.start(ws.id, { prompt: "three", model: "claude-nope" })).rejects.toThrow(/is not one claude takes/);
   });
 
+  it("hands the agent's own lists beside the ones the picker shaped, so a client shapes a change off the agent's order", async () => {
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
+    const own = (await rt.harnesses.list(ws.id)).find(c => c.harness === "claude")!;
+    expect(own.unshaped).toBeUndefined();
+    const ids = own.models.map(m => m.value);
+    await rt.preferences.set({ agentDefaults: { claude: { models: { hide: [ids[1]!], order: [ids[2]!], custom: ["claude-opus-6-preview"] } } } });
+    const claude = (await rt.harnesses.list(ws.id)).find(c => c.harness === "claude")!;
+    expect(claude.unshaped?.models.map(m => m.value)).toEqual(ids);
+    expect(claude.unshaped?.legacyModels?.map(m => m.value)).toEqual(own.legacyModels?.map(m => m.value));
+  });
+
   it("refuses a model id no agent runs where it is kept, and stores nothing of that change", async () => {
     await expect(rt.preferences.set({ agentDefaults: { claude: { models: { custom: ["claude opus"] } } } })).rejects.toMatchObject({ message: "No model id has a space in it", kind: "usage" });
     await expect(rt.preferences.set({ agentDefaults: { codex: { model: "gpt;5" } } })).rejects.toMatchObject({ message: 'No model id has ";" in it', kind: "usage" });

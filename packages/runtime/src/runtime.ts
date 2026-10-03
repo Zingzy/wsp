@@ -11795,7 +11795,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const lists = entry === undefined || entry.record.phase !== "running" ? table : await Promise.all(table.map(c => listsOn(c, entry)));
         const project = entry === undefined ? undefined : prefs.projectDefaults[entry.record.project];
         const agent = defaultAgentOf(prefs, entry);
-        return lists.map(c => ({ ...shapeModels(defaultsOn(c, prefs, project).catalog, prefs.agentDefaults[c.harness]?.models), ...(c.harness === agent ? { isDefault: true } : {}) }));
+        return lists.map(c => {
+          const picker = prefs.agentDefaults[c.harness]?.models;
+          const unshaped = picker === undefined ? {} : { unshaped: { models: c.models, ...(c.legacyModels !== undefined ? { legacyModels: c.legacyModels } : {}) } };
+          return { ...shapeModels(defaultsOn(c, prefs, project).catalog, picker), ...unshaped, ...(c.harness === agent ? { isDefault: true } : {}) };
+        });
       },
     },
     golden,

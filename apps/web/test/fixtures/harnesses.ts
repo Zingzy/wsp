@@ -4,11 +4,26 @@
 // marked where a new thread starts (the model, its effort, the access that
 // asks nobody) and the default agent marked. Shared by the settings tests and
 // the wireframe.
-import type { HarnessCatalog, HarnessOption, Preferences } from "@wsp/protocol";
+import type { HarnessCatalog, HarnessModel, HarnessOption, Preferences } from "@wsp/protocol";
 
 const option = (value: string, label: string): HarnessOption => ({ value, label });
 const levels = (values: readonly string[], marked: string): HarnessOption[] => values.map(v => ({ ...option(v, v === "xhigh" ? "Extra high" : v.charAt(0).toUpperCase() + v.slice(1)), ...(v === marked ? { isDefault: true } : {}) }));
 const table = { source: "table" as const, contextWindows: [], steers: false, renames: false, images: false };
+
+const CLAUDE_MODELS: HarnessModel[] = [
+  { ...option("claude-opus-5-5", "Opus 5.5"), isDefault: true, fast: true, efforts: ["low", "medium", "high", "xhigh", "max"], contextWindows: ["200k", "1m"] },
+  { ...option("claude-fable-5-1", "Fable 5.1"), efforts: ["low", "medium", "high", "xhigh", "max"], contextWindows: ["200k", "1m"] },
+  { ...option("claude-sonnet-5", "Sonnet 5"), efforts: ["low", "medium", "high", "xhigh", "max"], contextWindows: [] },
+  { ...option("claude-haiku-4-5-20251001", "Haiku 4.5"), efforts: [], contextWindows: [] },
+];
+const CLAUDE_LEGACY: HarnessModel[] = [
+  { ...option("claude-opus-5", "Opus 5"), fast: true, efforts: ["low", "medium", "high", "xhigh", "max"], defaultEffort: "high", contextWindows: ["200k", "1m"] },
+  { ...option("claude-sonnet-4-6", "Sonnet 4.6"), efforts: ["low", "medium", "high", "max"], contextWindows: ["200k", "1m"] },
+];
+const CLAUDE_HIDDEN: HarnessModel[] = [
+  { ...option("claude-opus-4-8", "Opus 4.8"), fast: true, efforts: ["low", "medium", "high", "xhigh", "max"], defaultEffort: "high", contextWindows: ["200k", "1m"] },
+  { ...option("claude-sonnet-4-5", "Sonnet 4.5"), efforts: [], contextWindows: ["200k", "1m"] },
+];
 
 export const CLAUDE_CATALOG: HarnessCatalog = {
   ...table,
@@ -16,20 +31,10 @@ export const CLAUDE_CATALOG: HarnessCatalog = {
   label: "Claude Code",
   version: "--help 2.1.286, 2026-09-23",
   isDefault: true,
-  models: [
-    { ...option("claude-opus-5-5", "Opus 5.5"), isDefault: true, fast: true, efforts: ["low", "medium", "high", "xhigh", "max"], contextWindows: ["200k", "1m"] },
-    { ...option("claude-fable-5-1", "Fable 5.1"), efforts: ["low", "medium", "high", "xhigh", "max"], contextWindows: ["200k", "1m"] },
-    { ...option("claude-sonnet-5", "Sonnet 5"), efforts: ["low", "medium", "high", "xhigh", "max"], contextWindows: [] },
-    { ...option("claude-haiku-4-5-20251001", "Haiku 4.5"), efforts: [], contextWindows: [] },
-  ],
-  legacyModels: [
-    { ...option("claude-opus-5", "Opus 5"), fast: true, efforts: ["low", "medium", "high", "xhigh", "max"], defaultEffort: "high", contextWindows: ["200k", "1m"] },
-    { ...option("claude-sonnet-4-6", "Sonnet 4.6"), efforts: ["low", "medium", "high", "max"], contextWindows: ["200k", "1m"] },
-  ],
-  hiddenModels: [
-    { ...option("claude-opus-4-8", "Opus 4.8"), fast: true, efforts: ["low", "medium", "high", "xhigh", "max"], defaultEffort: "high", contextWindows: ["200k", "1m"] },
-    { ...option("claude-sonnet-4-5", "Sonnet 4.5"), efforts: [], contextWindows: ["200k", "1m"] },
-  ],
+  models: CLAUDE_MODELS,
+  legacyModels: CLAUDE_LEGACY,
+  hiddenModels: CLAUDE_HIDDEN,
+  unshaped: { models: CLAUDE_MODELS, legacyModels: [...CLAUDE_LEGACY, ...CLAUDE_HIDDEN] },
   efforts: levels(["low", "medium", "high", "xhigh", "max"], "high"),
   access: { ask: "default", "auto-edit": "acceptEdits", full: "bypassPermissions" },
   bypassMode: "bypassPermissions",
