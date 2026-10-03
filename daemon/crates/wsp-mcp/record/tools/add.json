@@ -472,6 +472,12 @@
                     ],
                     "additionalProperties": false
                   }
+                },
+                "items": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "$ref": "#/properties/computer/properties/setup/properties/addId"
+                  }
                 }
               },
               "required": [
@@ -693,6 +699,33 @@
             },
             "recipe": {
               "type": "string"
+            },
+            "sync": {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "behind",
+                    "running"
+                  ]
+                },
+                "changes": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/properties/computer/properties/setup/properties/addId"
+                  }
+                },
+                "since": {
+                  "$ref": "#/properties/computer/properties/setup/properties/addId"
+                }
+              },
+              "required": [
+                "state",
+                "changes",
+                "since"
+              ],
+              "additionalProperties": false
             },
             "cap": {
               "anyOf": [
@@ -1350,6 +1383,12 @@
                     ],
                     "additionalProperties": false
                   }
+                },
+                "items": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "$ref": "#/properties/computer/properties/setup/properties/addId"
+                  }
                 }
               },
               "required": [
@@ -1571,6 +1610,33 @@
             },
             "recipe": {
               "type": "string"
+            },
+            "sync": {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "behind",
+                    "running"
+                  ]
+                },
+                "changes": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/properties/computer/properties/setup/properties/addId"
+                  }
+                },
+                "since": {
+                  "$ref": "#/properties/computer/properties/setup/properties/addId"
+                }
+              },
+              "required": [
+                "state",
+                "changes",
+                "since"
+              ],
+              "additionalProperties": false
             },
             "cap": {
               "anyOf": [

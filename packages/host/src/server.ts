@@ -608,7 +608,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
       ...(opts.admitted !== undefined ? { admitted: opts.admitted } : {}),
       ...(opts.init !== undefined ? { init: opts.init } : {}),
       ...(doctor !== undefined ? { doctor } : {}),
-      ...(opts.statePath !== undefined ? { recipes: recipeShelf({ statePath: opts.statePath, home: homedir() }) } : {}),
+      ...(opts.statePath !== undefined && rt.recipes === undefined ? { recipes: recipeShelf({ statePath: opts.statePath, home: homedir() }) } : {}),
       log,
       ...(opts.release !== undefined ? { release: opts.release } : {}),
       ...(opts.restart !== undefined ? { restart: opts.restart } : {}),

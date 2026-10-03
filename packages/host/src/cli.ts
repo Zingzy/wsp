@@ -101,6 +101,7 @@ import { agentsReader } from "./agents-reader.js";
 import { skillsActs } from "./skills-acts.js";
 import { serverIcons } from "./server-icons.js";
 import { agentLatest } from "./agent-latest.js";
+import { keptTools, recipeShelf } from "./recipes.js";
 import { serversActs } from "./servers-acts.js";
 import { hostActs } from "./agents-signin.js";
 import { startHost, workspaceRoads, type HostDoctorReaders, type HostHandle } from "./server.js";
@@ -705,6 +706,7 @@ export function statesHere(statePath: string): string[] {
 
 /** The provider slot each runtime made here was wired with, so a host can swap the module in when a key is saved. */
 const PROVIDER_SLOTS = new WeakMap<Runtime, ProviderSlot>();
+
 /** The provider pick each runtime made here stands on: the module it forks on now, which names the place its copies
  * are filed under, and the environment that module was picked out of, which is also where the other places this
  * host can build at are read from. A swap moves both, so the backend, the place and the table never say different
@@ -775,6 +777,7 @@ export function makeRuntime(
   // The place this host's copies are filed under is the provider module it forks on, read at each call: a host that
   // starts with no key swaps its module in when one is saved, and its copies belong to the module that made them.
   const pick: ProviderPick = { id: wiredProviderId(env, modules), env, modules };
+  const tools = keptTools();
   const rt = createRuntime({
     noMachinesLine: noMachinesLine(modules),
     places: providerPlaces(
@@ -802,6 +805,8 @@ export function makeRuntime(
     // Read at every launch, never copied: a token minted after this host started is in the next turn, and nothing
     // of it is written to a machine.
     vault: () => vaultNow(statePath),
+    // The recipes beside the state, resolved against this computer with the managers' listing read once a day.
+    recipes: recipeShelf({ statePath, home: homedir(), tools: tools.tools }),
     // LiteLLM's price table off GitHub, once a day, nothing sent: the one read the usage ledger makes of the network.
     pricesFetch: async () => {
       const res = await fetch(PRICES_URL, { signal: AbortSignal.timeout(30_000) });

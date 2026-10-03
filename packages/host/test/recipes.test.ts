@@ -13,7 +13,7 @@ import { createRuntime, memoryStore, newPlaceKeyPair, serveRuntime, type Runtime
 import { WsClient } from "../../runtime/test/ws-client.js";
 import { gitCut, configTexts } from "../src/recipe-configs.js";
 import { recipeOptions } from "../src/recipe-options.js";
-import { readRecipe, readRecipes, recipeHash, recipeShelf, recipesDir, resolveRecipe, writeRecipe, type RecipeReading } from "../src/recipes.js";
+import { keptTools, readRecipe, readRecipes, recipeHash, recipeShelf, recipesDir, resolveRecipe, TOOLS_KEPT_MS, writeRecipe, type RecipeReading } from "../src/recipes.js";
 import { stubBackend } from "./stub-backend.js";
 
 let dir: string;
@@ -149,6 +149,26 @@ describe("a resolved recipe", () => {
     const before = await resolveRecipe(LAPTOP, reading());
     writeFileSync(join(home, ".ssh", "id_ed25519"), "two");
     expect((await resolveRecipe(LAPTOP, reading())).items["skills/unslop"]).toBe(before.items["skills/unslop"]);
+  });
+
+  it("moves no hash when this computer gains a tool the recipe does not hold", async () => {
+    const tools = [{ id: "tools/brew/gh", version: "2.80.0" }];
+    const before = recipeHash(await resolveRecipe(LAPTOP, reading(tools)));
+    expect(recipeHash(await resolveRecipe(LAPTOP, reading([...tools, { id: "tools/npm/cowsay", version: "1.6.0" }])))).toBe(before);
+  });
+
+  it("reads the managers once a day, and again when the watcher asks", async () => {
+    let reads = 0;
+    let now = 0;
+    const kept = keptTools(async () => (reads++, []), () => now);
+    await kept.tools();
+    await kept.tools();
+    expect(reads).toBe(1);
+    now = TOOLS_KEPT_MS;
+    await kept.tools();
+    expect(reads).toBe(2);
+    await kept.refresh();
+    expect(reads).toBe(3);
   });
 
   it("asks no manager anything when the recipe picks no CLI", async () => {
@@ -319,6 +339,26 @@ describe("a recipe taken away", () => {
     c.close();
     expect(Object.fromEntries(places.filter(p => p.recipe !== undefined).map(p => [p.name, p.recipe]))).toEqual({ spoo: NO_RECIPE, vps: NO_RECIPE, desk: "other" });
     expect(await readRecipes(statePath)).toEqual([]);
+  });
+
+  it("is followed by a computer the person sets to it, and followed by none again, by its name", async () => {
+    const store = memoryStore();
+    const at = new Date().toISOString();
+    await store.put("places", "p_1", { id: "p_1", name: "spoo", publicKey: "k", joinedAt: at, lastSeenAt: at, report: { name: "spoo", platform: "linux", arch: "x86_64", os: "Ubuntu", shape: { cpu: 2, memMb: 7700 }, login: { HOME: "/root" }, runsWorkspaces: true, engine: "none", daemonVersion: 1, wsp: ["/w"], agents: [] }, picks: LAPTOP, recipe: NO_RECIPE });
+    rt = createRuntime({ backend: stubBackend(), store, adapters: {}, placeLinks: { hostKey: newPlaceKeyPair(), here: () => ({ name: "mac" }), hostName: () => "mac" } });
+    srv = await serveRuntime(rt, { port: 0, authToken: "host-token", devices: rt.devices, recipes: recipeShelf({ statePath, home }) });
+    await writeRecipe(statePath, { ...LAPTOP, name: "Box" });
+    const c = await WsClient.connect(srv.port, { token: "host-token" });
+    const followed = await c.request("places.follow", { placeId: "p_1", recipe: "Box" });
+    expect(followed.ok, String(followed["error"])).toBe(true);
+    expect(followed["place"]).toMatchObject({ name: "spoo", recipe: "box" });
+    expect((await c.request("recipes.list"))["recipes"]).toEqual([expect.objectContaining({ slug: "box", machines: ["spoo"] })]);
+    const none = await c.request("places.follow", { placeId: "p_1", recipe: NO_RECIPE });
+    expect(none["place"]).toMatchObject({ recipe: NO_RECIPE });
+    const nowhere = await c.request("places.follow", { placeId: "p_1", recipe: "desk" });
+    expect(nowhere.ok).toBe(false);
+    expect(String(nowhere["error"])).toContain("no recipe named desk");
+    c.close();
   });
 
   it("is saved from a computer's own picks, and that computer follows it", async () => {

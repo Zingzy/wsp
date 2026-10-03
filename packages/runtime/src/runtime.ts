@@ -718,6 +718,9 @@ export interface RecipeShelf {
   save(file: unknown): Promise<{ slug: string; file: RecipeFile }>;
   remove(word: string): Promise<{ slug: string; file: RecipeFile }>;
   options(): Promise<RecipeOptions>;
+  /** One recipe by its slug as this computer has it now: what it holds for each row, and the hash a computer that
+   * follows it is held against. */
+  resolve(slug: string): Promise<{ file: RecipeFile; items: Record<string, string>; hash: string }>;
 }
 
 /** One agent's result with its catalog name, for the sentence the runtime says about it. */
@@ -1051,6 +1054,8 @@ export interface RuntimeOptions {
   /** The variables the vault hands a turn, read at each launch off the wsp home's .env, never copied: a token
    * minted after the host started reaches the next turn. Absent, turns get none. */
   vault?: () => Readonly<Record<string, string>>;
+  /** The recipes the host keeps beside its state, which the computers that follow one sync to. */
+  recipes?: RecipeShelf;
   /** Reads LiteLLM's price file, the one outbound read the usage ledger makes, once a day; absent, nothing is read and
    * no row is priced off a table. The host wires GitHub's copy of it. */
   pricesFetch?: () => Promise<unknown>;
@@ -1411,6 +1416,8 @@ export interface Runtime {
   /** The places this host holds, when one wired them: the handshake a joining computer takes, the links it keeps
    * and what a remove sweeps. Absent on a runtime wired without them. */
   readonly places?: PlaceDoor;
+  /** The recipes the host wired, which the ops serve and the computers that follow one sync to. */
+  readonly recipes?: RecipeShelf;
   /** One channel to the daemon of the computer this host runs on, the one its local workspace dials, for a terminal
    * that belongs to this computer rather than to a workspace on it. */
   hereChannel(onEvent: (event: Record<string, unknown>) => void): Promise<DaemonChannel>;
@@ -3212,6 +3219,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // The same vault a turn is launched with: the word a computer's row says about an agent's sign-in and the
       // secrets that turn actually gets are one reading, so a row cannot say a key stands that no turn would use.
       ...(opts.vault !== undefined ? { vault: opts.vault } : {}),
+      ...(opts.recipes !== undefined ? { recipes: () => opts.recipes } : {}),
       ...(opts.placeJoinWaitMs !== undefined ? { joinWaitMs: opts.placeJoinWaitMs } : {}),
       ...(opts.placeUpdateWaitMs !== undefined ? { updateWaitMs: opts.placeUpdateWaitMs } : {}),
       ...(opts.placeDialWaitMs !== undefined ? { dialWaitMs: opts.placeDialWaitMs } : {}),
@@ -3247,6 +3255,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           return { id: `folders/${key}`, label: project.name, outcome: "installed", ...(project.notice !== undefined ? { note: project.notice } : {}) };
         },
         folderRemote: async folder => (await remoteHere(folder.from.replace(/^~(?=\/|$)/, homedir()))).remote || undefined,
+        // A folder the recipe took out leaves this host's list; its checkout there is the person's and stays.
+        removeFolder: async (placeId, key, folder) => {
+          const name = folder.name ?? key;
+          const project = (await projectsDoor.list()).find(p => p.computer === placeId && p.name === name);
+          if (project === undefined) return;
+          const standing = [...live.values()].filter(e => e.record.project === project.id).map(e => e.record.name);
+          if (standing.length > 0) throw new Error(projectInUseRefusal(project.name, standing));
+          projectsHeld.delete(project.id);
+          await store.delete(PROJECTS, project.id);
+          bus.emit({ type: "project.removed", projectId: project.id });
+        },
       },
     });
     // The door's four events ride the one stream every other event rides, so the app follows a computer joining
@@ -12393,6 +12412,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     sessions: sessionsApi,
     devices: deviceDoor,
     ...(placeDoor !== undefined ? { places: placeDoor } : {}),
+    ...(opts.recipes !== undefined ? { recipes: opts.recipes } : {}),
     hereChannel: async onEvent => channelOver(await localRoad(), THIS_COMPUTER, onEvent),
     agents: { ...agentsRead, homesHere },
     preferences,

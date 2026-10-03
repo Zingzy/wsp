@@ -169,10 +169,26 @@ export const recipeHash = (resolved: ResolvedRecipe): string => createHash("sha2
 /** The tools rows this computer's managers list now, by the collector's own reader. */
 const toolsHere = (): Promise<Manifest["entries"]> => DETECTORS.tools(nodeHost(), []);
 
+/** How long the managers' listing stands before a resolve reads it again: every manager asked is seconds of work,
+ * the versions it gives move when the person upgrades, and the watcher reads them again at its own pace. */
+export const TOOLS_KEPT_MS = 24 * 60 * 60_000;
+
+/** The managers' listing read once and kept for TOOLS_KEPT_MS, read again at `refresh`. */
+export function keptTools(read: () => Promise<Manifest["entries"]> = toolsHere, now: () => number = Date.now): { tools(): Promise<Manifest["entries"]>; refresh(): Promise<Manifest["entries"]> } {
+  let held: { at: number; entries: Promise<Manifest["entries"]> } | undefined;
+  const refresh = (): Promise<Manifest["entries"]> => {
+    const entries = read();
+    held = { at: now(), entries };
+    entries.catch(() => (held = undefined));
+    return entries;
+  };
+  return { tools: () => (held !== undefined && now() - held.at < TOOLS_KEPT_MS ? held.entries : refresh()), refresh };
+}
+
 /** The host's shelf of recipes, as the runtime serves it: the files beside the state, and the options read off this
  * computer when the modal or a recipe opens. */
-export function recipeShelf(o: { statePath: string; home: string; options?: () => Promise<RecipeOptions> }): RecipeShelf {
-  const reading: RecipeReading = { home: o.home, tools: toolsHere };
+export function recipeShelf(o: { statePath: string; home: string; options?: () => Promise<RecipeOptions>; tools?: () => Promise<Manifest["entries"]> }): RecipeShelf {
+  const reading: RecipeReading = { home: o.home, tools: o.tools ?? toolsHere };
   return {
     list: () => readRecipes(o.statePath),
     read: word => readRecipe(o.statePath, word),
@@ -183,6 +199,11 @@ export function recipeShelf(o: { statePath: string; home: string; options?: () =
     save: file => writeRecipe(o.statePath, file),
     remove: word => deleteRecipe(o.statePath, word),
     options: o.options ?? (() => readRecipeOptions(nodeHost())),
+    resolve: async slug => {
+      const held = await readRecipe(o.statePath, slug);
+      const resolved = await resolveRecipe(held.file, reading);
+      return { file: held.file, items: resolved.items, hash: recipeHash(resolved) };
+    },
   };
 }
 

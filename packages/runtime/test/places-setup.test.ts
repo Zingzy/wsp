@@ -16,6 +16,7 @@ import {
   floorFailedLine,
   GITHUB_SKIPPED_LINE,
   NEEDS_GITHUB_LINE,
+  editedThereLine,
   noAgentLine,
   pendingHeldLine,
   placeProvisionPaths,
@@ -29,12 +30,14 @@ import {
   type PlaceProvisionRow,
   type PlaceSetupEvent,
   type PlaceSetupStep,
+  type PlaceSyncEvent,
   type PlaceView,
   type PlaceReport,
 } from "@wsp/protocol";
 import type { EngineStep, ProvisionPlan } from "@wsp/engine";
 import type { AgentsActs, SignInRun } from "../src/agents-read.js";
-import { ADD_STOPPED_LINE, PlaceProvisioningError, newPlaceKeyPair, type PlaceKeyPair, type PlaceProvisioner, type PlaceRecord, type PlaceUpdater, type PlaceUpdateRequest, type PlaceWiring } from "../src/places.js";
+import type { RecipeShelf } from "../src/runtime.js";
+import { ADD_STOPPED_LINE, PlaceProvisioningError, type PlaceUndo, newPlaceKeyPair, type PlaceKeyPair, type PlaceProvisioner, type PlaceRecord, type PlaceUpdater, type PlaceUpdateRequest, type PlaceWiring } from "../src/places.js";
 import { createRuntime, type LocalWiring, type Runtime } from "../src/runtime.js";
 import { localExecStream } from "../src/local-exec.js";
 import { fakeCopier, LocalBackend } from "@wsp/engine";
@@ -112,14 +115,16 @@ const ROWS: Partial<Record<EngineStep, PlaceProvisionRow[]>> = {
 
 /** A planner and the engine's steps as the host wires them, each step's rows under this test's hand: which steps
  * ran, in order, and a step held until the test lets it go. */
-function provisioner(o: { rows?: Partial<Record<EngineStep, PlaceProvisionRow[]>>; hold?: EngineStep; holds?: EngineStep[]; throws?: { step: EngineStep; error: Error } } = {}) {
+function provisioner(o: { rows?: Partial<Record<EngineStep, PlaceProvisionRow[]>>; hold?: EngineStep; holds?: EngineStep[]; throws?: { step: EngineStep; error: Error }; undo?: (removed: readonly { kind: string; name: string }[]) => PlaceUndo[] } = {}) {
   let release = (): void => {};
   const held = new Promise<void>(resolve => (release = resolve));
-  const each = new Map((o.holds ?? []).map(step => {
+  const each = new Map<EngineStep, { at: Promise<void>; let: () => void }>();
+  const arm = (step: EngineStep): void => {
     let let_ = (): void => {};
     const at = new Promise<void>(resolve => (let_ = resolve));
-    return [step, { at, let: let_ }] as const;
-  }));
+    each.set(step, { at, let: let_ });
+  };
+  for (const step of o.holds ?? []) arm(step);
   const ran: EngineStep[] = [];
   const floors: string[] = [];
   const picked: RecipeFile[] = [];
@@ -142,8 +147,13 @@ function provisioner(o: { rows?: Partial<Record<EngineStep, PlaceProvisionRow[]>
       if (o.throws?.step === step) throw o.throws.error;
       return rows[step] ?? [];
     },
+    undo: async (before, removed) => {
+      undone.push({ before, removed: removed.map(r => `${r.kind}/${r.name}`) });
+      return o.undo?.(removed) ?? [];
+    },
   };
-  return { wired, ran, floors, picked, release: () => release(), let: (step: EngineStep) => each.get(step)?.let() };
+  const undone: { before: RecipeFile; removed: string[] }[] = [];
+  return { wired, ran, floors, picked, undone, release: () => release(), let: (step: EngineStep) => each.get(step)?.let(), arm };
 }
 
 /** Sign-ins as the app's own road runs them, each waiting on the test: the page and the code, then the end. */
@@ -166,7 +176,7 @@ function signIns() {
 }
 
 /** A host with the setup wired, serving, and the road an add takes onto a computer that joins over the link. */
-async function hosting(o: { provision: PlaceProvisioner; store?: Store; cmds?: string[]; answer?: (cmd: string) => { exitCode: number; stdout?: string } | undefined; local?: boolean; acts?: AgentsActs; vault?: Record<string, string>; report?: PlaceReport; install?: PlaceWiring["install"]; undo?: PlaceWiring["undo"]; hostKey?: PlaceKeyPair; clock?: Clock; update?: PlaceUpdater }): Promise<{ hostKey: PlaceKeyPair; store: Store; frames: PlaceSetupEvent[]; joined: { placeId: string; pair: PlaceKeyPair }[] }> {
+async function hosting(o: { provision: PlaceProvisioner; recipes?: RecipeShelf; store?: Store; cmds?: string[]; answer?: (cmd: string) => { exitCode: number; stdout?: string } | undefined; local?: boolean; acts?: AgentsActs; vault?: Record<string, string>; report?: PlaceReport; install?: PlaceWiring["install"]; undo?: PlaceWiring["undo"]; hostKey?: PlaceKeyPair; clock?: Clock; update?: PlaceUpdater }): Promise<{ hostKey: PlaceKeyPair; store: Store; frames: PlaceSetupEvent[]; joined: { placeId: string; pair: PlaceKeyPair }[] }> {
   const hostKey = o.hostKey ?? newPlaceKeyPair();
   const joined: { placeId: string; pair: PlaceKeyPair }[] = [];
   const store = o.store ?? memoryStore();
@@ -178,6 +188,7 @@ async function hosting(o: { provision: PlaceProvisioner; store?: Store; cmds?: s
     ...(o.clock !== undefined ? { clock: o.clock } : {}),
     ...(o.acts !== undefined ? { agentsActs: o.acts } : {}),
     ...(o.local === true ? { local: localWiring() } : {}),
+    ...(o.recipes !== undefined ? { recipes: o.recipes } : {}),
     vault: () => o.vault ?? { CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-x" },
     placeLinks: {
       ...wiring(hostKey, undefined, o.update),
@@ -199,6 +210,8 @@ async function hosting(o: { provision: PlaceProvisioner; store?: Store; cmds?: s
   });
   const frames: PlaceSetupEvent[] = [];
   runtime.events.on("place.setup", e => void frames.push(e as PlaceSetupEvent));
+  syncs.length = 0;
+  runtime.events.on("place.sync", e => void syncs.push(e as PlaceSyncEvent));
   srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
   return { hostKey, store, frames, joined };
 }
@@ -247,6 +260,28 @@ const repos: string[] = [];
 afterEach(() => {
   for (const dir of repos.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
+
+/** Every sync frame the host running now put on its stream. */
+const syncs: PlaceSyncEvent[] = [];
+
+/** One saved recipe as this computer resolves it, which the test moves between syncs. */
+function shelf(file: RecipeFile, items: Record<string, string>) {
+  let now = { file, items, hash: "h1" };
+  let resolves = 0;
+  const recipes: RecipeShelf = {
+    list: async () => [{ slug: "laptop", file: now.file }],
+    read: async () => ({ slug: "laptop", file: now.file }),
+    get: async () => ({ slug: "laptop", file: now.file, hash: now.hash }),
+    save: async () => ({ slug: "laptop", file: now.file }),
+    remove: async () => ({ slug: "laptop", file: now.file }),
+    options: async () => ({ agents: [], mcp: [], clis: [], skills: [], plugins: [], configs: [] }),
+    resolve: async () => {
+      resolves++;
+      return now;
+    },
+  };
+  return { recipes, move: (next: RecipeFile, nextItems: Record<string, string>, hash: string) => void (now = { file: next, items: nextItems, hash }), resolves: () => resolves };
+}
 
 const rowOf = async (placeId: string): Promise<PlaceView> => (await runtime!.places!.list(Date.now())).find(p => p.id === placeId)!;
 const ended = (frames: readonly PlaceSetupEvent[]): PlaceSetupEvent[] => frames.filter(f => f.end !== undefined);
@@ -656,5 +691,139 @@ describe("a host that stops in the middle of a setup", () => {
     await until(() => s.started.length === 2);
     await until(async () => (await rowOf(place.id)).setup?.waiting[0]?.code === "CODE-2");
     expect((await rowOf(place.id)).setup?.waiting[0]?.state).toBe("waiting");
+  });
+});
+
+describe("a computer that follows a recipe", () => {
+  const V1 = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "vault" } }, clis: { jq: { via: "brew" } }, skills: { unslop: { from: "~/.claude/skills" } } });
+  const ITEMS = { "clis/jq": "1.7", "skills/unslop": "d1" };
+
+  /** A computer set up from the saved recipe and in step with it. */
+  async function following(o: { undo?: (removed: readonly { kind: string; name: string }[]) => PlaceUndo[]; answer?: (cmd: string) => { exitCode: number; stdout?: string } | undefined; cmds?: string[]; rows?: Partial<Record<EngineStep, PlaceProvisionRow[]>> } = {}) {
+    const p = provisioner({ ...(o.undo !== undefined ? { undo: o.undo } : {}), ...(o.rows !== undefined ? { rows: o.rows } : {}) });
+    const r = shelf(V1, ITEMS);
+    const host = await hosting({ provision: p.wired, recipes: r.recipes, ...(o.answer !== undefined ? { answer: o.answer } : {}), ...(o.cmds !== undefined ? { cmds: o.cmds } : {}) });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: V1, recipe: "laptop" }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    // The setup holds the computer against the recipe as resolved, so the sync its link starts finds nothing to do.
+    expect((await rowOf(place.id)).applied).toMatchObject({ hash: "h1", items: ITEMS });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    p.ran.length = 0;
+    return { p, r, host, placeId: place.id };
+  }
+
+  it("takes a skill added to the recipe with no step from the person, by the skills step alone", async () => {
+    const { p, r, placeId } = await following();
+    const V2 = { ...V1, skills: { ...V1.skills, why: { from: "~/.claude/skills" } } };
+    r.move(V2, { ...ITEMS, "skills/why": "d2" }, "h2");
+    expect(await runtime!.places!.recipeChanged("laptop")).toEqual(["spoo"]);
+    await until(async () => (await rowOf(placeId)).applied?.hash === "h2");
+    expect(p.ran).toEqual(["skills"]);
+    const row = await rowOf(placeId);
+    expect(row.picks).toEqual(V2);
+    expect(row.sync).toBeUndefined();
+    expect(row.applied?.items).toEqual({ ...ITEMS, "skills/why": "d2" });
+    // Behind with what moved, then the change under way, then in step with what it applied.
+    expect(syncs.map(f => (f.line !== undefined ? `${f.line.step} ${f.line.state}` : (f.sync?.state ?? (f.applied !== undefined ? "applied" : "in step"))))).toEqual(["behind", "running", "skills running", "skills done", "applied"]);
+    expect(syncs[0]?.sync?.changes).toEqual(["skills/why"]);
+    // The setup stands as it ended: a sync is not a setup, and its word never read Setting up.
+    expect(row.setup?.state).toBe("done");
+    expect(placeWord(row, null).word).toBe("Ready");
+  });
+
+  it("takes a skill taken out of the recipe off by the ledger, keeps a file edited there and says so on its row", async () => {
+    const cmds: string[] = [];
+    const { p, r, placeId } = await following({
+      cmds,
+      undo: () => [{ key: "skills/unslop", label: "unslop", ids: ["skills/unslop", "files/.claude/skills/unslop"], dests: [".claude/skills/unslop"] }],
+      answer: cmd => (cmd.includes("wsp-unland") ? { exitCode: 0, stdout: "wsp-unland\tgone\t.claude/skills/unslop/SKILL.md\nwsp-unland\tkept\t.claude/skills/unslop/notes.md\n" } : undefined),
+    });
+    r.move({ ...V1, skills: {} }, { "clis/jq": "1.7" }, "h3");
+    await runtime!.places!.recipeChanged("laptop");
+    await until(async () => (await rowOf(placeId)).applied?.hash === "h3");
+    expect(p.undone.map(u => u.removed)).toEqual([["skills/unslop"]]);
+    expect(p.undone[0]?.before).toEqual(V1);
+    expect(cmds.some(c => c.includes("wsp-unland") && c.includes("'.claude/skills/unslop'"))).toBe(true);
+    // No step runs for a removal alone.
+    expect(p.ran).toEqual([]);
+    expect((await rowOf(placeId)).applied?.rows.find(r => r.id === "skills/unslop")).toMatchObject({ outcome: "skipped", note: editedThereLine("spoo", [".claude/skills/unslop/notes.md"]) });
+  });
+
+  it("never takes off a row the computer had before wsp, and takes off one wsp put there by its own road", async () => {
+    const cmds: string[] = [];
+    const { r, placeId } = await following({
+      cmds,
+      rows: { clis: [{ id: "tools/brew/jq", label: "jq", outcome: "present" }] },
+      undo: removed => removed.map(c => ({ key: `${c.kind}/${c.name}`, label: c.name, ids: [c.kind === "clis" ? "tools/brew/jq" : "agents/claude"], cmd: `take-off-${c.name}` })),
+    });
+    // The setup read jq as already there and put claude on.
+    expect((await rowOf(placeId)).applied?.rows.find(r => r.id === "tools/brew/jq")?.outcome).toBe("present");
+    r.move({ ...V1, agents: {}, clis: {} }, { "skills/unslop": "d1" }, "h4");
+    await runtime!.places!.recipeChanged("laptop");
+    await until(async () => (await rowOf(placeId)).applied?.hash === "h4");
+    expect(cmds.filter(c => c.startsWith("take-off-"))).toEqual(["take-off-claude"]);
+    const rows = (await rowOf(placeId)).applied?.rows.map(r => r.id);
+    expect(rows).not.toContain("tools/brew/jq");
+    expect(rows).not.toContain("agents/claude");
+  });
+
+  it("does nothing on a computer that follows no recipe, and nothing when the recipe did not move", async () => {
+    const { p, r, placeId } = await following();
+    const before = r.resolves();
+    // Saved again with nothing changed: one read of the recipe, nothing run there.
+    await runtime!.places!.recipeChanged("laptop");
+    await new Promise(resolve => setTimeout(resolve, 30));
+    expect(p.ran).toEqual([]);
+    expect(r.resolves()).toBeGreaterThan(before);
+    await runtime!.places!.follow(placeId, "none");
+    r.move({ ...V1, skills: {} }, { "clis/jq": "1.7" }, "h5");
+    expect(await runtime!.places!.recipeChanged("laptop")).toEqual([]);
+    await new Promise(resolve => setTimeout(resolve, 30));
+    expect(p.ran).toEqual([]);
+    expect((await rowOf(placeId)).applied?.hash).toBe("h1");
+  });
+
+  it("reads Behind while its computer is away, and catches up once when it dials back", async () => {
+    const { p, r, host, placeId } = await following();
+    for (const ws of sockets.splice(0)) ws.close();
+    await until(async () => (await rowOf(placeId)).present === false);
+    r.move({ ...V1, skills: { ...V1.skills, why: { from: "~/.claude/skills" } } }, { ...ITEMS, "skills/why": "d2" }, "h6");
+    await runtime!.places!.recipeChanged("laptop");
+    await until(async () => (await rowOf(placeId)).sync?.state === "behind");
+    expect(p.ran).toEqual([]);
+    expect(placeWord({ ...(await rowOf(placeId)) }, null)).toEqual({ word: "Behind", sentence: "waiting to put on the recipe's 1 change: skills/why" });
+    await dialsBack(host.hostKey, placeId, host.joined[0]!.pair);
+    await until(async () => (await rowOf(placeId)).applied?.hash === "h6");
+    expect(p.ran).toEqual(["skills"]);
+    expect((await rowOf(placeId)).sync).toBeUndefined();
+  });
+
+  it("lands a folder a sync adds on a computer whose GitHub was signed in before, with no wait on a GitHub step it does not run", async () => {
+    const p = provisioner();
+    const withGitHub = { ...V1, configs: { github: { signin: "vault" as const } } };
+    const r = shelf(withGitHub, ITEMS);
+    const cmds: string[] = [];
+    await hosting({ provision: p.wired, recipes: r.recipes, cmds, vault: { CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-x", GH_TOKEN: "ghp_vaulted" } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: withGitHub, recipe: "laptop" }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    expect((await rowOf(place.id)).applied?.rows.find(row => row.id === "github")?.outcome).toBe("present");
+    r.move({ ...withGitHub, folders: { app: { from: "/nowhere/app", keep: [] } } }, ITEMS, "h9");
+    await runtime!.places!.recipeChanged("laptop");
+    await until(async () => (await rowOf(place.id)).applied?.hash === "h9");
+    expect((await rowOf(place.id)).applied?.rows.find(row => row.id === "folders/app")?.note).not.toBe(NEEDS_GITHUB_LINE);
+    expect(cmds.some(c => c.includes("ls-remote"))).toBe(false);
+  });
+
+  it("runs a change that landed mid-sync once more at its end", async () => {
+    const { p, r, placeId } = await following();
+    p.arm("skills");
+    r.move({ ...V1, skills: { ...V1.skills, why: { from: "~/.claude/skills" } } }, { ...ITEMS, "skills/why": "d2" }, "h7");
+    await runtime!.places!.recipeChanged("laptop");
+    await until(() => p.ran.includes("skills"));
+    r.move({ ...V1, skills: { ...V1.skills, why: { from: "~/.claude/skills" } } }, { ...ITEMS, "skills/why": "d3" }, "h8");
+    await runtime!.places!.recipeChanged("laptop");
+    p.let("skills");
+    await until(async () => (await rowOf(placeId)).applied?.hash === "h8");
+    expect(p.ran).toEqual(["skills", "skills"]);
   });
 });

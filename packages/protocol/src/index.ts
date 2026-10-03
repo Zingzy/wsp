@@ -3359,8 +3359,21 @@ export type PlaceSetup = z.infer<typeof PlaceSetup>;
 
 /** What the last setup came to: the hash of the picks it applied and every row's outcome, which a retry and the sync
  * read so a row the computer already had is never taken off it. */
-export const PlaceApplied = z.object({ hash: SETUP_TEXT, at: SETUP_TEXT, rows: z.array(PlaceProvisionRow) });
+export const PlaceApplied = z.object({
+  hash: SETUP_TEXT,
+  at: SETUP_TEXT,
+  rows: z.array(PlaceProvisionRow),
+  /** What this computer had for each row of the recipe it applied, keyed `<kind>/<row>` as a resolved recipe keys
+   * them: the sync reads what changed off these. Absent on a computer set up before the sync. */
+  items: z.record(SETUP_TEXT).optional(),
+});
 export type PlaceApplied = z.infer<typeof PlaceApplied>;
+
+/** A computer out of step with the recipe it follows: `behind` until the sync reaches it, `running` while the sync
+ * puts the change on it. `changes` names each row that moved, `<kind>/<row>`, added, changed or taken out. Absent on
+ * a computer in step. */
+export const PlaceSync = z.object({ state: z.enum(["behind", "running"]), changes: z.array(SETUP_TEXT), since: SETUP_TEXT });
+export type PlaceSync = z.infer<typeof PlaceSync>;
 
 /** How a setup ended, for the moment the person hears: ready, ready with something waiting on them or an important
  * row failed, or stopped by a step that blocks. */
@@ -3382,6 +3395,11 @@ export const PlaceSetupEvent = z.object({
   said: SETUP_NOTE,
 });
 export type PlaceSetupEvent = z.infer<typeof PlaceSetupEvent>;
+
+/** The sync on one computer moved: behind, under way with the step it is on, or in step again with what it applied.
+ * `sync` absent is a computer in step with its recipe. */
+export const PlaceSyncEvent = z.object({ type: z.literal("place.sync"), placeId: SETUP_TEXT, sync: PlaceSync.optional(), line: PlaceSetupLine.optional(), applied: PlaceApplied.optional() });
+export type PlaceSyncEvent = z.infer<typeof PlaceSyncEvent>;
 
 /** One line of an add as the command line and the tool stream it: a step of the install, then a step of the setup. */
 export const AddLine = PlaceSetupLine.extend({ step: z.union([PlaceAddStep, PlaceSetupStep]) });
@@ -3546,6 +3564,8 @@ export const PlaceView = z.object({
   picks: RecipeFile.optional(),
   /** The saved recipe this computer follows, by slug, or none; absent on a computer set up before recipes. */
   recipe: z.string().optional(),
+  /** Set while this computer is out of step with the recipe it follows. */
+  sync: PlaceSync.optional(),
   /** The number set on this place, else its kind's default; absent only on a computer that has not said its shape. */
   cap: PlaceCap.optional(),
   /** The cap this place takes when the person sets none: one thread per THREAD_MEM_MB of a computer's memory up to
@@ -3697,6 +3717,7 @@ export const EventUnion = z.discriminatedUnion("type", [
   InitNeedsYouEvent.extend(sequenced),
   PlaceStageEvent.extend(sequenced),
   PlaceSetupEvent.extend(sequenced),
+  PlaceSyncEvent.extend(sequenced),
   PlacePendingEvent.extend(sequenced),
   PlaceJoinedEvent.extend(sequenced),
   PlacePresentEvent.extend(sequenced),
@@ -5454,16 +5475,20 @@ export function setupWord(setup: PlaceSetup | undefined, applied?: PlaceApplied)
 }
 
 /** The words a computer's setup reads as, in the order they win. */
-export const SETUP_WORDS = { failed: "Setup failed", needsYou: "Needs you", pending: "Pending", settingUp: "Setting up", ready: "Ready" } as const;
+export const SETUP_WORDS = { failed: "Setup failed", needsYou: "Needs you", pending: "Pending", settingUp: "Setting up", behind: "Behind", ready: "Ready" } as const;
+
+/** What a computer out of step with its recipe says: the rows on their way, or under way. */
+export const syncLine = (sync: PlaceSync): string =>
+  `${sync.state === "running" ? "putting on" : "waiting to put on"} the recipe's ${plural(sync.changes.length, "change")}: ${nameList(sync.changes)}`;
 
 /** What a sign-in waiting on the person says, and the same once its page ran out. */
 export const waitLine = (w: PlaceWait): string => (w.state === "expired" ? `${w.label}'s sign-in ran out; a retry asks for a fresh code` : `${w.label} waits on you to sign in${w.url === undefined ? "" : ` at ${w.url}`}${w.code === undefined ? "" : ` with code ${w.code}`}`);
 
 /** One computer's word for its setup, the one rule the STATE column and the app's rows read: Setup failed, then
  * Needs you (a sign-in waits on the person, or a folder or the GitHub sign-in failed), then Pending (it joined and
- * waits on its picks, `pending` its add), then Offline (no link), then Setting up, then Behind (its daemon behind this
- * host's), then Ready. An add that never joined is a row of its own, read by pendingWord. */
-export function placeWord(place: Pick<PlaceView, "setup" | "applied" | "daemonVersion">, absent: AbsentComputer | null, pending?: PendingComputer): PlaceState {
+ * waits on its picks, `pending` its add), then Offline (no link), then Setting up, then Behind (a change to its recipe on
+ * its way, then its daemon behind this host's), then Ready. An add that never joined is a row of its own, read by pendingWord. */
+export function placeWord(place: Pick<PlaceView, "setup" | "applied" | "daemonVersion" | "sync">, absent: AbsentComputer | null, pending?: PendingComputer): PlaceState {
   const setup = place.setup;
   if (setup?.state === "failed") return { word: SETUP_WORDS.failed, ...(setup.said !== undefined ? { sentence: setup.said } : {}) };
   if (pending?.failed !== undefined) return pendingWord(pending);
@@ -5474,6 +5499,7 @@ export function placeWord(place: Pick<PlaceView, "setup" | "applied" | "daemonVe
   if (pending !== undefined) return pendingWord(pending);
   if (absent !== null) return { word: absent.away, sentence: absent.sentence };
   if (setup?.state === "running") return { word: SETUP_WORDS.settingUp, sentence: setupWord(setup) };
+  if (place.sync !== undefined) return { word: SETUP_WORDS.behind, sentence: syncLine(place.sync) };
   const behind = placeDaemonBehind(place);
   return behind === undefined ? { word: SETUP_WORDS.ready } : { word: behind };
 }
@@ -5557,6 +5583,11 @@ export const NO_SIGN_IN_ROAD = "this host runs no sign-in on a computer; sign in
 export const NO_FOLDER_ROAD = "this host moves no folder to a computer; add it with wsp add <folder> --on <computer>";
 export const NO_GITHUB_TOKEN_LINE = "this computer's vault holds no GitHub token: gh auth login here, then retry";
 export const noVaultTokenLine = (agent: string): string => `this computer's vault holds no token or key for ${agent}: wsp agents key ${agent}, then retry`;
+/** What a row the recipe took out says where a file of it stays, since the person has written it there since, and
+ * where its files could not be taken off at all. */
+export const editedThereLine = (name: string, kept: readonly string[]): string => `${nameList(kept)} ${kept.length === 1 ? "was" : "were"} edited on ${name}, so ${kept.length === 1 ? "it stays" : "they stay"} and wsp no longer manages ${kept.length === 1 ? "it" : "them"}`;
+export const UNLAND_FAILED_LINE = "its files could not be taken off there; wsp remove takes them";
+
 /** What the GitHub row says where the person skipped it, and a folder whose repository needs it to clone. */
 export const GITHUB_SKIPPED_LINE = "skipped; gh is not signed in there";
 export const NEEDS_GITHUB_LINE = "private; needs GitHub to clone";
@@ -6398,6 +6429,9 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * not take is refused. Answers `{ place: PlaceView }`, the row as it now reads. The person's own road only, as
    * every other place op is. */
   z.object({ id: reqId, op: z.literal("places.set"), placeId: z.string(), reset: z.array(PlaceSettingWord).optional() }).merge(PlaceSettingsAsk),
+  /** The saved recipe one computer follows from now, by its name or slug, or `none`: one it follows syncs to it, and
+   * one that follows none keeps what it has. Answers `{ place: PlaceView }`. The person's own road only. */
+  z.object({ id: reqId, op: z.literal("places.follow"), placeId: z.string(), recipe: z.string().min(1).max(200) }),
   /** A sign-in run at a terminal on one computer landed, as the tool's own status there said: the host notes the
    * file that agent's shared login writes, as the app's own sign-in does, so the listing says signed in before
    * that computer next reports. Answers `{}`. The person's own road only, as every other place op is. */

@@ -4,7 +4,7 @@
 // it is for is deciding whether a file there is theirs or wsp's own copy, and
 // only a shell reading the bytes decides that.
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -28,6 +28,7 @@ import {
   serverDigest,
   serversOutLines,
   standingDigests,
+  unlandFiles,
   unmergeServers,
   type FilesSay,
   type ProvisionLanding,
@@ -621,6 +622,51 @@ describe("the ownership read as the daemon on that computer renders it", () => {
     const path = join(CONTRACT, "landed-files.sh");
     expect(existsSync(path), `daemon/fixtures/contract/landed-files.sh is missing. The regenerated file is at ${regenerated}: copy it there and commit it`).toBe(true);
     expect(readFileSync(path, "utf8"), `daemon/fixtures/contract/landed-files.sh is behind the engine. The regenerated file is at ${regenerated}: copy it over and commit it`).toBe(text);
+  });
+});
+
+describe("taking a row's files off a computer once the recipe drops it", () => {
+  const digest = (text: string): string => createHash("sha256").update(text).digest("hex");
+
+  it("takes off what wsp left as it left it, keeps a file the person has written since, never follows a link or a climb out, and drops every line for the row", async () => {
+    const g = box();
+    write(g.root, ".claude/skills/a/SKILL.md", "a\n");
+    write(g.root, ".claude/skills/a/notes.md", "edited there\n");
+    write(g.root, ".claude/skills/b/SKILL.md", "b\n");
+    const outside = mkdtempSync(join(tmpdir(), "wsp-unland-outside-"));
+    g.dirs.push(outside);
+    writeFileSync(join(outside, "victim"), "v\n");
+    symlinkSync(outside, join(g.root, ".claude/skills/a/link"));
+    writeFileSync(join(outside, "climbed"), "c\n");
+    const ledger = placeProvisionPaths(g.root).landed;
+    const line = (rel: string, at: string): string => `${rel}\t${at}\t${at}\n`;
+    write(g.root, ledger.slice(g.root.length + 1), [
+      line(".claude/skills/a/SKILL.md", digest("a\n")),
+      line(".claude/skills/a/notes.md", digest("as wsp left it\n")),
+      line(".claude/skills/a/link/victim", digest("v\n")),
+      line(`.claude/skills/a/../../../${outside.split("/").slice(-1)[0]}/climbed`, digest("c\n")),
+      line(".claude/skills/b/SKILL.md", digest("b\n")),
+    ].join(""));
+
+    const out = await unlandFiles(g.machine, g.root, [".claude/skills/a"]);
+    expect(out).toEqual({ gone: [".claude/skills/a/SKILL.md"], kept: [".claude/skills/a/notes.md", ".claude/skills/a/link/victim"] });
+    expect(existsSync(join(g.root, ".claude/skills/a/SKILL.md"))).toBe(false);
+    expect(read(g.root, ".claude/skills/a/notes.md")).toBe("edited there\n");
+    expect(readFileSync(join(outside, "victim"), "utf8")).toBe("v\n");
+    expect(readFileSync(join(outside, "climbed"), "utf8")).toBe("c\n");
+    expect(read(g.root, ".claude/skills/b/SKILL.md")).toBe("b\n");
+    // The row's lines go, kept or gone, since an edited file is the person's now; the other row's line stays.
+    expect(readFileSync(ledger, "utf8")).toBe(line(".claude/skills/b/SKILL.md", digest("b\n")));
+  });
+
+  it("takes the emptied folder with the last file in it", async () => {
+    const g = box();
+    write(g.root, ".claude/skills/a/refs/one.md", "1\n");
+    const ledger = placeProvisionPaths(g.root).landed;
+    write(g.root, ledger.slice(g.root.length + 1), `.claude/skills/a/refs/one.md\t${digest("1\n")}\t${digest("1\n")}\n`);
+    expect(await unlandFiles(g.machine, g.root, [".claude/skills/a"])).toEqual({ gone: [".claude/skills/a/refs/one.md"], kept: [] });
+    expect(existsSync(join(g.root, ".claude/skills/a"))).toBe(false);
+    expect(existsSync(join(g.root, ".claude/skills"))).toBe(true);
   });
 });
 

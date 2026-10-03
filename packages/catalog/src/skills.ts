@@ -71,6 +71,8 @@ export interface PluginRoad {
   /** Why a plugin is set aside, off what its install printed, where it asked to run a command its marketplace
    * declares: a person accepts that command, never a setup. Nothing for any other outcome. */
   asked(out: string, plugin: string): string | undefined;
+  /** The line that takes one plugin off again, by the agent's own command. */
+  uninstall(plugin: string): string;
 }
 
 /** Claude Code's plugins (2.1.281): known_marketplaces.json keys each marketplace to a github repo or a URL, and the
@@ -91,6 +93,7 @@ export const CLAUDE_PLUGINS: PluginRoad = {
     const sha = /"shownCommand"\s*:\s*\{[^}]*"sha256"\s*:\s*"([0-9a-f]{64})"/.exec(out)?.[1];
     return sha === undefined ? undefined : `asks to run a command its marketplace declares; to accept it, run claude plugin install ${plugin} --accept-command ${sha} on that computer`;
   },
+  uninstall: plugin => `claude plugin uninstall ${shellQuote(plugin)} </dev/null`,
 };
 
 /** Where an install puts a skill for one agent, a project's with `project`: nothing where the agent reads the shared

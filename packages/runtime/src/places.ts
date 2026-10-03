@@ -72,6 +72,8 @@ import {
   noVaultTokenLine,
   GITHUB_SKIPPED_LINE,
   NEEDS_GITHUB_LINE,
+  UNLAND_FAILED_LINE,
+  editedThereLine,
   setupWidth,
   floorFailedLine,
   noAgentLine,
@@ -86,8 +88,11 @@ import {
   type PlaceSetup,
   type PlaceSetupEvent,
   type PlaceSetupLine,
+  type PlaceSync,
+  type PlaceSyncEvent,
   type PlaceSetupStep,
   type PlaceWait,
+  type RecipeKind,
   type SetupEnd,
   sshRoadOf,
   placeNoDialLine,
@@ -134,7 +139,7 @@ import {
   ownerRepoOf,
   shellQuote,
 } from "@wsp/protocol";
-import { GITHUB_TOKEN_ENV, LinkBackend, PlaceAbsentError, PlaceMachine, SSH_STORE_VARS, envInput, keyFingerprint, machineServerPort, newSetupRun, pathLine, plainPath, putFiles, serversOutLines, unmergeServers, withEnvFromInput, type EngineStep, type ExecResult, type Machine, type MachineBackend, type MachineLink, type ProvisionPlan, type ProvisionStage, type SetupRun } from "@wsp/engine";
+import { GITHUB_TOKEN_ENV, LinkBackend, unlandFiles, PlaceAbsentError, PlaceMachine, SSH_STORE_VARS, envInput, keyFingerprint, machineServerPort, newSetupRun, pathLine, plainPath, putFiles, serversOutLines, unmergeServers, withEnvFromInput, type EngineStep, type ExecResult, type Machine, type MachineBackend, type MachineLink, type ProvisionPlan, type ProvisionStage, type SetupRun } from "@wsp/engine";
 import { CATALOG_AGENTS, keyEnvOf, mintsToken, sharedFileIn, sharedOn } from "@wsp/catalog";
 import type { WebSocket } from "ws";
 import type { DeviceDoor } from "./devices.js";
@@ -143,6 +148,7 @@ import type { HereDaemon, PlaceBackends } from "./runtime.js";
 import type { DaemonChannel } from "./daemon-channel.js";
 import { connectDaemon, type DaemonReach } from "./reach.js";
 import { runGraph, type GraphStep } from "./setup-graph.js";
+import { recipeChanges, stepsFor, type RecipeChange } from "./recipe-sync.js";
 import { freshEphemeral, makeSeal, newPlaceKeyPair, sealKeys, sharedSecret, signPlaceBytes, verifyPlaceBytes, type PlaceKeyPair, type Seal } from "@wsp/keys";
 import type { Store } from "./store.js";
 
@@ -181,6 +187,8 @@ export interface PlaceRecord {
   picks?: RecipeFile;
   /** The saved recipe it follows, by slug, or none. */
   recipe?: string;
+  /** Set while it is out of step with that recipe. */
+  sync?: PlaceSync;
   /** When the report on this record was taken. Not lastSeenAt: that moves every minute while the link is held,
    * and the uptime in the report grows with the computer, so a row dating one by the other reads an hours-old
    * figure as a minutes-old one. */
@@ -279,9 +287,26 @@ export interface PlaceProvisioner {
   /** `on` is the computer the plan is for: its home is what every path of the job hangs off and what the PATH the
    * job's scripts export is read from, since a directory under it is one the workspaces there write. */
   plan(on: { home: string }): Promise<ProvisionPlan | { noRecipe: string }>;
-  setup(picks: RecipeFile, on: { home: string }): Promise<ProvisionPlan>;
+  /** `only` holds a sync to the steps it runs, so a plan for those alone reads no more of this computer than they need. */
+  setup(picks: RecipeFile, on: { home: string }, only?: ReadonlySet<PlaceSetupStep>): Promise<ProvisionPlan>;
   floor(machine: Machine, on: { home: string }, stage: ProvisionStage): Promise<PlaceProvisionRow[]>;
   step(machine: Machine, plan: ProvisionPlan, step: EngineStep, run: SetupRun, stage: ProvisionStage, on: { home: string }): Promise<PlaceProvisionRow[]>;
+  /** What taking rows out of a computer's picks runs there, planned off the picks as they were. Absent, a row taken
+   * out of a recipe stays where it is. */
+  undo?(before: RecipeFile, removed: readonly { kind: RecipeKind; name: string }[], on: { home: string }): Promise<PlaceUndo[]>;
+}
+
+/** Taking one row off a computer: the line its road takes it off by, the destinations its files landed at, or the
+ * folder whose project record goes with the folder left; `ids` are the applied rows it answers for, and a row the
+ * computer had before wsp (`present`) is never taken off. `note` is why nothing can be run for it. */
+export interface PlaceUndo {
+  key: string;
+  label: string;
+  ids: readonly string[];
+  cmd?: string;
+  dests?: readonly string[];
+  folder?: string;
+  note?: string;
 }
 
 /** One login over ssh as this host holds it: the address in the spelling a person would type back, and the key file
@@ -405,6 +430,8 @@ export interface PlaceRecording {
   addFolder?(placeId: string, key: string, folder: RecipeFile["folders"][string]): Promise<PlaceProvisionRow>;
   /** The remote a folder of this computer's clones from, read here; nothing where it has none. */
   folderRemote?(folder: RecipeFile["folders"][string]): Promise<string | undefined>;
+  /** Takes the project a folder became on that computer off this host's list, the folder itself left where it is. */
+  removeFolder?(placeId: string, key: string, folder: RecipeFile["folders"][string]): Promise<void>;
 }
 
 export interface PlaceDoorOptions {
@@ -422,7 +449,7 @@ export interface PlaceDoorOptions {
   /** How far an install on a computer this host has never met has got; the runtime puts these on its own stream. */
   onStage?: (event: PlaceStageEvent) => void;
   /** Every frame of a setup and every move of a pending add; the runtime puts these on its own stream. */
-  onSetup?: (event: PlaceSetupEvent | PlacePendingEvent) => void;
+  onSetup?: (event: PlaceSetupEvent | PlacePendingEvent | PlaceSyncEvent) => void;
   /** What a place's row says about its copy of the image while it is not standing: the stage of the build running
    * there, or the reason the last one stopped. The runtime holds the builds, so it answers; nothing for a copy that
    * stands. `stopped` says which of the two the line is. */
@@ -452,7 +479,15 @@ export interface PlaceDoorOptions {
    * the sign-in word a computer's row says for an agent that keeps no login of its own there. Absent is a vault
    * holding nothing, which is what a host wired without one has. */
   vault?: () => Readonly<Record<string, string>>;
+  /** The saved recipes as this computer has them now, by slug, which a computer that follows one is held against.
+   * Absent, nothing syncs. */
+  recipes?: () => RecipeResolver | undefined;
   now?: () => number;
+}
+
+/** A saved recipe resolved against this computer now: its file, what this computer has for each row, the hash. */
+export interface RecipeResolver {
+  resolve(slug: string): Promise<{ file: RecipeFile; items: Record<string, string>; hash: string }>;
 }
 
 /** The host's half of one handshake: what it answers the other end with, the bytes that end's own signature must
@@ -580,8 +615,12 @@ export interface PlaceDoor {
   /** Every place a word picks, by id or by the name the person gave it: none, one, or the two that share a name,
    * which is a refusal the caller writes with the ids in it. */
   find(ref: string): Promise<PlaceRecord[]>;
-  /** The saved recipe one computer follows from now, by slug, or none; answers its row. */
+  /** The saved recipe one computer follows from now, by slug, or none; answers its row. A computer that follows one
+   * syncs to it. */
   follow(placeId: string, recipe: string): Promise<PlaceView>;
+  /** A recipe changed, saved or edited on this computer: every computer that follows it that is out of step reads
+   * Behind with what moved and syncs after `afterMs`. Answers their names. */
+  recipeChanged(slug: string, afterMs?: number): Promise<string[]>;
   /** The computers that follow each saved recipe, by slug, by name. */
   followers(): Promise<Map<string, string[]>>;
   /** Takes every computer off one recipe, so each follows none; answers their names. */
@@ -862,6 +901,23 @@ const pendingView = (p: PendingRecord): PendingComputer => {
 export const ADD_STOPPED_LINE = "the host stopped while wsp was being installed there; what the install put there was taken back";
 export const ADD_STOPPED_FIX = "Add it again.";
 export const ADD_NOT_TAKEN_BACK_LINE = "the host stopped while wsp was being installed there, and what the install put there could not be taken back";
+
+/** One sync of a computer to the recipe it follows: the recipe as this computer has it now, what moved since the
+ * computer last applied one, the steps that carry it, and the picks the computer had, which the removals read. */
+interface SyncJob {
+  file: RecipeFile;
+  items: Record<string, string>;
+  hash: string;
+  changes: readonly RecipeChange[];
+  steps: ReadonlySet<PlaceSetupStep>;
+  /** The rows added or changed, by `<kind>/<row>`: the rows a step that would otherwise go over every row is held to. */
+  moved: ReadonlySet<string>;
+  before: RecipeFile;
+  state: PlaceSync;
+}
+
+/** How long one row's own removal gets on that computer. */
+const UNDO_MS = 300_000;
 
 /** A sign-in's failure this close to its wait running out reads as the wait running out. */
 const SIGN_IN_SLACK_MS = 5_000;
@@ -1213,11 +1269,16 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
 
   /** One write of a setup's state onto the record as it stands, since an attach's write of lastSeenAt goes on
    * beside it. */
-  const writeSetup = async (placeId: string, patch: Partial<Pick<PlaceRecord, "setup" | "applied" | "picks" | "recipe">>): Promise<void> => {
+  const writeSetup = async (placeId: string, patch: Partial<Pick<PlaceRecord, "setup" | "applied" | "picks" | "recipe" | "sync">>): Promise<void> => {
     const now = await recordOf(placeId);
     if (now === undefined) return;
-    await keep({ ...now, ...patch });
+    const next = { ...now, ...patch };
+    if ("sync" in patch && patch.sync === undefined) delete next.sync;
+    await keep(next);
   };
+
+  /** One move of a computer's sync on the stream every client watches. */
+  const syncFrame = (event: Omit<PlaceSyncEvent, "type">): void => opts.onSetup?.({ type: "place.sync", ...event });
 
   /** One frame of a setup on the stream whoever started it is watching. */
   const setupFrame = (event: Omit<PlaceSetupEvent, "type">): void => opts.onSetup?.({ type: "place.setup", ...event });
@@ -1266,19 +1327,28 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
    * since they stage in one folder there, the servers after the CLIs a server may run; the sign-ins started and left
    * waiting on the person; GitHub before the folders, so a private repository clones with it; the machine context
    * last, so it names what did not land. */
-  const runSetup = async (placeId: string, addId: string, picks: RecipeFile, done: ReadonlySet<PlaceSetupStep>, started: PlaceSetup, rerun: readonly PlaceWait[]): Promise<void> => {
+  const runSetup = async (placeId: string, addId: string, picks: RecipeFile, done: ReadonlySet<PlaceSetupStep>, started: PlaceSetup, rerun: readonly PlaceWait[], sync?: SyncJob): Promise<void> => {
     const provisioner = wiring.provision!;
     const record = (await recordOf(placeId))!;
     const home = record.report.login["HOME"]!;
     const machine = new PlaceMachine(linkTo(placeId), { id: record.name, home });
-    const log = provisionRecord(machine, home, `wsp ${wiring.hostName()} set up ${record.name} from ${picks.name} at ${started.startedAt}`);
-    const hash = picksHash(picks);
-    // The rows of the steps that already ended stand: a resume runs only what did not.
-    const rows: PlaceProvisionRow[] = (record.applied?.rows ?? []).filter(r => r.step !== undefined && done.has(r.step));
+    const log = provisionRecord(machine, home, `wsp ${wiring.hostName()} ${sync === undefined ? "set up" : "synced"} ${record.name} ${sync === undefined ? "from" : "to"} ${picks.name} at ${sync === undefined ? started.startedAt : new Date(clockNow()).toISOString()}`);
+    // A computer that follows a saved recipe is held against that recipe as this computer has it, so a sync after
+    // the setup finds nothing to do; one that follows none against the picks themselves.
+    const resolved = sync ?? (record.recipe === undefined || record.recipe === NO_RECIPE ? undefined : await opts.recipes?.()?.resolve(record.recipe).catch(() => undefined));
+    const hash = resolved?.hash ?? picksHash(picks);
+    // The rows of the steps that already ended stand: a resume runs only what did not. A sync keeps every row and
+    // writes each step's over its own.
+    const rows: PlaceProvisionRow[] = sync !== undefined ? [...(record.applied?.rows ?? [])] : (record.applied?.rows ?? []).filter(r => r.step !== undefined && done.has(r.step));
     let held = started;
     let ended = false;
     let writing: Promise<void> = Promise.resolve();
-    const applied = (): PlaceApplied => ({ hash, at: new Date(clockNow()).toISOString(), rows: [...rows] });
+    const applied = (): PlaceApplied => ({
+      hash,
+      at: new Date(clockNow()).toISOString(),
+      rows: [...new Map(rows.map(r => [r.id, r])).values()],
+      ...(resolved !== undefined ? { items: resolved.items } : {}),
+    });
     const push = (next: PlaceSetup): void => {
       held = next;
       writing = writing.then(() => writeSetup(placeId, { setup: next, applied: applied() })).catch(() => undefined);
@@ -1288,9 +1358,11 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     const line = (l: PlaceSetupLine): void => {
       if (l.state === "running") running.add(l.step);
       else running.delete(l.step);
-      push({ ...held, steps: held.steps.some(s => s.step === l.step) ? held.steps.map(s => (s.step === l.step ? l : s)) : [...held.steps, l] });
+      // A sync's steps are not the setup's: the setup stands as it ended, and the sync's own frames carry its lines.
+      push(sync !== undefined ? { ...held } : { ...held, steps: held.steps.some(s => s.step === l.step) ? held.steps.map(s => (s.step === l.step ? l : s)) : [...held.steps, l] });
       log.write(`${SETUP_STEP_WORDS[l.step]}: ${l.state}${l.note === undefined ? "" : ` (${l.note})`}`);
-      setupFrame({ addId, placeId, line: l, running: [...running] });
+      if (sync !== undefined) syncFrame({ placeId, sync: sync.state, line: l });
+      else setupFrame({ addId, placeId, line: l, running: [...running] });
     };
     const stage: ProvisionStage = detail => log.write(detail);
     const vault = (): Readonly<Record<string, string>> => opts.vault?.() ?? {};
@@ -1308,7 +1380,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     /** One step: marked running, run, its rows kept with the step on each, and marked done or failed with what it
      * took. A step that throws is one failed row, unless the computer stopped answering, which the job waits out. */
     const step = async (name: PlaceSetupStep, work: () => Promise<PlaceProvisionRow[]>): Promise<{ rows: PlaceProvisionRow[]; failed: boolean } | undefined> => {
-      if (done.has(name)) return undefined;
+      if (done.has(name) || (sync !== undefined && !sync.steps.has(name))) return undefined;
       const began = clockNow();
       line({ step: name, state: "running" });
       let got: PlaceProvisionRow[];
@@ -1402,6 +1474,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     const signIns = async (): Promise<PlaceProvisionRow[]> => {
       const out: PlaceProvisionRow[] = [];
       for (const [agent, row] of Object.entries(picks.agents)) {
+        if (sync !== undefined && !sync.changes.some(c => c.key === `agents/${agent}` && (c.how === "added" || c.how === "changed"))) continue;
         const label = CATALOG_AGENTS.find(a => a.id === agent)?.name ?? agent;
         if ((row.signin ?? "vault") === "machine") {
           agentSignIn(agent);
@@ -1419,7 +1492,8 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     const githubReady = new Promise<boolean>(resolve => (githubSettled = resolve));
     const githubWord = picks.configs.github?.signin ?? "vault";
     if (picks.configs.github === undefined) githubSettled(true);
-    else if (done.has("github") && !rerun.some(w => w.row === GITHUB_ROW)) githubSettled(rows.some(r => r.id === GITHUB_ROW && (r.outcome === "present" || r.outcome === "installed")));
+    // A step that will not run this time (it ended before a resume, or a sync does not carry it) settles off its row.
+    else if ((done.has("github") || (sync !== undefined && !sync.steps.has("github"))) && !rerun.some(w => w.row === GITHUB_ROW)) githubSettled(rows.some(r => r.id === GITHUB_ROW && (r.outcome === "present" || r.outcome === "installed")));
     /** Whether that settling is in yet, without waiting on it. */
     let githubKnown: boolean | undefined;
     void githubReady.then(ok => (githubKnown = ok));
@@ -1476,6 +1550,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     const folders = async (): Promise<PlaceProvisionRow[]> => {
       const out: PlaceProvisionRow[] = [];
       for (const [key, folder] of Object.entries(picks.folders)) {
+        if (sync !== undefined && !sync.moved.has(`folders/${key}`)) continue;
         const label = folder.name ?? key;
         if (githubKnown === true || !(await needsGitHub(folder))) {
           out.push(await addFolder(key, folder));
@@ -1492,9 +1567,46 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
 
     const end = async (failed?: string): Promise<void> => {
       ended = true;
+      if (sync !== undefined) {
+        // A sync leaves the computer in step whatever its rows came to: a row that failed stands with Retry, and the
+        // computer holds the recipe it applied.
+        await writing;
+        if (failed !== undefined) log.write(failed);
+        await writeSetup(placeId, { applied: applied(), picks, sync: undefined });
+        syncFrame({ placeId, applied: applied() });
+        return;
+      }
       push({ ...held, state: failed === undefined ? "done" : "failed", finishedAt: new Date(clockNow()).toISOString(), ...(failed !== undefined ? { said: failed } : {}) });
       await writing;
       setupFrame({ addId, placeId, ...(failed === undefined ? outcome() : { end: "failed", said: failed }) });
+    };
+
+    /** A sync's removals, before anything is planned: each row the recipe took out comes off by its own road, a row
+     * the computer had before wsp stays, and a file the person has written since stays and its row says so. */
+    const undo = async (): Promise<void> => {
+      const removed = sync?.changes.filter(c => c.how === "removed") ?? [];
+      if (sync === undefined || removed.length === 0 || provisioner.undo === undefined) return;
+      const planned = await provisioner.undo(sync.before, removed, { home });
+      for (const u of planned) {
+        // What wsp put there for the row, by its outcome: a row the computer had before wsp is never taken off.
+        const ours = rows.some(r => (u.ids.includes(r.id) || r.id === u.key) && r.outcome === "installed");
+        const left: PlaceProvisionRow[] = [];
+        if (u.dests !== undefined) {
+          const out = await unlandFiles(machine, home, u.dests);
+          if (out === undefined) left.push({ id: u.key, label: u.label, outcome: "failed", note: UNLAND_FAILED_LINE });
+          else if (out.kept.length > 0) left.push({ id: u.key, label: u.label, outcome: "skipped", note: editedThereLine(record.name, out.kept) });
+          stage(`${u.label}: ${out === undefined ? "its files were not taken off" : `${out.gone.length} files taken off, ${out.kept.length} kept`}`);
+        }
+        if (u.folder !== undefined && ours) await recording.removeFolder?.(placeId, u.folder, sync.before.folders[u.folder]!).catch((e: unknown) => stage(`${u.label}: ${firstLineOf(e)}`));
+        // A road with no way off says so on the row, where the person reads what stayed.
+        if (u.cmd === undefined && u.note !== undefined && ours) left.push({ id: u.key, label: u.label, outcome: "skipped", note: u.note });
+        if (u.cmd !== undefined && ours) {
+          const res = await machine.exec(u.cmd, { timeoutMs: UNDO_MS }).catch((e: unknown) => ({ exitCode: -1, stdout: "", stderr: firstLineOf(e) }));
+          if (res.exitCode !== 0) left.push({ id: u.key, label: u.label, outcome: "failed", note: `not taken off: ${lastLine(res.stderr || res.stdout) ?? `exit ${res.exitCode}`}` });
+          stage(`${u.label}: ${res.exitCode === 0 ? "taken off" : "not taken off"}`);
+        }
+        rows.splice(0, rows.length, ...rows.filter(r => !u.ids.includes(r.id) && r.id !== u.key), ...left);
+      }
     };
 
     const run = newSetupRun();
@@ -1505,7 +1617,10 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         else agentSignIn(w.row.slice("signins/".length));
       }
       if (picks.configs.github !== undefined && githubWord === "vault" && vault()[GITHUB_TOKEN_ENV] === undefined) await wiring.githubToken?.().catch(() => undefined);
-      const plan = await provisioner.setup(picks, { home });
+      await undo();
+      const planned = await provisioner.setup(picks, { home }, sync?.steps);
+      // A sync puts on only the plugins it added; the rest are there, and their install would run again.
+      const plan = sync === undefined || planned.plugins === undefined ? planned : { ...planned, plugins: planned.plugins.filter(p => sync.moved.has(p.id)) };
       const engine = (s: EngineStep) => () => provisioner.step(machine, plan, s, run, stage, { home });
       const floor = await step("floor", engine("floor"));
       if (floor?.failed === true) return await end(floorFailedLine(floor.rows));
@@ -1544,9 +1659,14 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       await step("context", engine("context"));
       await end();
     } catch (e) {
-      // A computer that stopped answering leaves the setup running on its record: its next link resumes it.
+      // A computer that stopped answering leaves the setup running on its record, and a sync behind: its next link
+      // takes either up again.
       if (e instanceof PlaceAbsentError) {
         await writing;
+        if (sync !== undefined) {
+          await writeSetup(placeId, { sync: { ...sync.state, state: "behind" } });
+          syncFrame({ placeId, sync: { ...sync.state, state: "behind" } });
+        }
         return;
       }
       await end(firstLineOf(e));
@@ -1576,12 +1696,88 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       const rerun = (record.setup?.waiting ?? []).filter(w => (w.row.startsWith("signins/") && done.has("signins")) || (w.row === GITHUB_ROW && done.has("github")));
       const setup: PlaceSetup = { state: "running", addId, startedAt: resuming?.startedAt ?? new Date(clockNow()).toISOString(), steps: resuming?.steps.filter(l => l.state === "done") ?? [], waiting: [] };
       await writeSetup(placeId, { setup, picks, ...(given !== undefined ? { recipe: given.recipe ?? NO_RECIPE } : {}) });
-      void runSetup(placeId, addId, picks, done, setup, rerun).finally(() => setting.delete(placeId));
+      void runSetup(placeId, addId, picks, done, setup, rerun).finally(() => {
+        setting.delete(placeId);
+        if (again.delete(placeId)) syncSoon(placeId, 0);
+      });
       return { setup };
     } catch (e) {
       setting.delete(placeId);
       throw e;
     }
+  };
+
+  /** The computers a change reached while a setup or a sync ran there, synced again once it ends. */
+  const again = new Set<string>();
+  /** The sync each computer has waiting to start, so a burst of changes is one sync. */
+  const syncTimers = new Map<string, NodeJS.Timeout>();
+
+  /** What moved between what a computer last applied and the recipe it follows as this computer has it now, or
+   * nothing where it follows none, is mid-setup, or that recipe will not resolve. */
+  const syncOf = async (record: PlaceRecord): Promise<{ resolved: Awaited<ReturnType<RecipeResolver["resolve"]>>; changes: RecipeChange[] } | undefined> => {
+    const slug = record.recipe;
+    const resolver = opts.recipes?.();
+    if (slug === undefined || slug === NO_RECIPE || resolver === undefined || record.picks === undefined || record.setup?.state !== "done") return undefined;
+    const resolved = await resolver.resolve(slug).catch(() => undefined);
+    if (resolved === undefined) return undefined;
+    if (resolved.hash === record.applied?.hash) return { resolved, changes: [] };
+    return { resolved, changes: recipeChanges(record.picks, record.applied?.items, resolved.file, resolved.items) };
+  };
+
+  /** A computer out of step reads Behind with what moved; one in step drops the word. */
+  const markSync = async (placeId: string, sync: PlaceSync | undefined): Promise<void> => {
+    const held = await recordOf(placeId);
+    if (held === undefined || (held.sync === undefined && sync === undefined)) return;
+    await writeSetup(placeId, { sync });
+    syncFrame({ placeId, ...(sync !== undefined ? { sync } : {}) });
+  };
+
+  /** One sync of a computer to the recipe it follows, one at a time per computer: a change that lands meanwhile runs
+   * it again once it ends. Only the difference goes: the rows the recipe took out come off, the rows it added or
+   * that changed here go on, and a sync with nothing moved runs nothing there. A computer that is not linked reads
+   * Behind and catches up when it dials back. */
+  const syncPlace = async (placeId: string): Promise<void> => {
+    if (setting.has(placeId)) {
+      again.add(placeId);
+      return;
+    }
+    setting.add(placeId);
+    try {
+      const record = await recordOf(placeId);
+      if (record === undefined || wiring.provision === undefined) return;
+      const read = await syncOf(record);
+      if (read === undefined) return;
+      const { resolved, changes } = read;
+      if (changes.length === 0) {
+        // In step, or moved in a way no row reads (the recipe's name): what it holds is what this computer has now.
+        if (record.applied !== undefined && record.applied.hash !== resolved.hash) await writeSetup(placeId, { applied: { ...record.applied, hash: resolved.hash, items: resolved.items }, picks: resolved.file });
+        await markSync(placeId, undefined);
+        return;
+      }
+      const state: PlaceSync = { state: "running", changes: changes.map(c => c.key), since: record.sync?.since ?? new Date(clockNow()).toISOString() };
+      if (!live.has(placeId) || record.report.login["HOME"] === undefined) {
+        await markSync(placeId, { ...state, state: "behind" });
+        return;
+      }
+      await markSync(placeId, state);
+      const moved = new Set(changes.filter(c => c.how !== "removed").map(c => c.key));
+      const started: PlaceSetup = record.setup!;
+      await runSetup(placeId, started.addId, resolved.file, new Set(), started, [], { ...resolved, changes, steps: stepsFor(changes, resolved.file), moved, before: record.picks!, state });
+    } finally {
+      setting.delete(placeId);
+      if (again.delete(placeId)) syncSoon(placeId, 0);
+    }
+  };
+
+  /** A sync of one computer after `afterMs`, the clock starting again at every ask. */
+  const syncSoon = (placeId: string, afterMs: number): void => {
+    clearTimeout(syncTimers.get(placeId));
+    const timer = setTimeout(() => {
+      syncTimers.delete(placeId);
+      void syncPlace(placeId).catch((e: unknown) => console.warn(`the sync of ${kept.get(placeId)?.name ?? placeId} stopped: ${firstLineOf(e)}`));
+    }, afterMs);
+    timer.unref?.();
+    syncTimers.set(placeId, timer);
   };
 
   /** The start above with its own refusal as a sentence: picks this host cannot plan are a computer that got
@@ -1842,6 +2038,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       ...(record.applied !== undefined ? { applied: record.applied } : {}),
       ...(record.picks !== undefined ? { picks: record.picks } : {}),
       ...(record.recipe !== undefined ? { recipe: record.recipe } : {}),
+      ...(record.sync !== undefined ? { sync: record.sync } : {}),
     };
   };
 
@@ -2088,6 +2285,8 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       // joined before the host stopped goes on, now that the computer can be reached.
       const current = await recordOf(placeId);
       if (current?.setup?.state === "running" && !setting.has(placeId)) void startedOrSaid(placeId, current.setup.addId);
+      // A computer that follows a recipe catches up on what changed while it was away, or since this host started.
+      else if (current?.recipe !== undefined && current.recipe !== NO_RECIPE && current.setup?.state === "done") syncSoon(placeId, 0);
       for (const pending of await pendingRecords()) if (pending.placeId === placeId && pending.step === "floor" && !flooring.has(pending.id)) void floorOnce(pending, placeId);
     },
 
@@ -2696,8 +2895,28 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     async follow(placeId, recipe) {
       const held = await recordOf(placeId);
       if (held === undefined) throw Object.assign(new Error(noSuchPlaceRefusal(placeId, (await records()).map(r => r.name))), { kind: "usage" });
-      const moved = await keep({ ...held, recipe });
+      const { sync: _behind, ...rest } = held;
+      // A computer that follows none keeps what it has and is in step with nothing; one that follows a recipe syncs.
+      const moved = await keep(recipe === NO_RECIPE ? { ...rest, recipe } : { ...held, recipe });
+      if (recipe === NO_RECIPE && held.sync !== undefined) syncFrame({ placeId });
+      if (recipe !== NO_RECIPE) syncSoon(placeId, 0);
       return viewOf(moved, await defaultId());
+    },
+
+    async recipeChanged(slug, afterMs = 0) {
+      const names: string[] = [];
+      for (const r of await records()) {
+        if (r.recipe !== slug) continue;
+        const read = await syncOf(r);
+        if (read === undefined || read.changes.length === 0) {
+          if (read !== undefined) syncSoon(r.id, afterMs);
+          continue;
+        }
+        names.push(r.name);
+        if (!setting.has(r.id)) await markSync(r.id, { state: "behind", changes: read.changes.map(c => c.key), since: r.sync?.since ?? new Date(clockNow()).toISOString() });
+        syncSoon(r.id, afterMs);
+      }
+      return names;
     },
 
     async followers() {
@@ -2724,6 +2943,8 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     },
 
     close: async () => {
+      for (const timer of syncTimers.values()) clearTimeout(timer);
+      syncTimers.clear();
       wiring.back?.close();
       for (const placeId of [...live.keys()]) cut(placeId, "this host is stopping");
       for (const placeId of [...waiting.keys()]) woken(placeId, false);

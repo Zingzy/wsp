@@ -39,6 +39,7 @@ import {
   DEVICE_REVOKED_REFUSAL,
   deviceAdmissionTranscript,
   PLACES_TICKET_REFUSAL,
+  NO_RECIPE,
   NO_RECIPES,
   RECIPES_TICKET_REFUSAL,
   noPicksRefusal,
@@ -443,8 +444,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
     return rt.places;
   };
   const recipes = (): RecipeShelf => {
-    if (opts.recipes === undefined) throw new Error(NO_RECIPES);
-    return opts.recipes;
+    const shelf = opts.recipes ?? rt.recipes;
+    if (shelf === undefined) throw new Error(NO_RECIPES);
+    return shelf;
   };
   /** One recipe as a client reads it: its file, the line of what it holds and the computers that follow it. */
   const recipeView = (held: { slug: string; file: RecipeFile }, followers: ReadonlyMap<string, string[]>): RecipeView => ({
@@ -984,6 +986,15 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, ...(await places().set(placeId, set, reset)) });
               return;
             }
+            case "places.follow": {
+              if (!ownRoad()) {
+                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
+                return;
+              }
+              const slug = msg.recipe === NO_RECIPE ? NO_RECIPE : (await recipeNamed(msg.recipe)).slug;
+              send({ id: msg.id, ok: true, place: await places().follow(msg.placeId, slug) });
+              return;
+            }
             case "places.loginLanded": {
               if (!ownRoad()) {
                 send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
@@ -1132,6 +1143,8 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 if (msg.from !== undefined && picks === undefined) throw Object.assign(new Error(noPicksRefusal(msg.from)), { kind: "usage" });
                 const held = await recipes().save(picks !== undefined ? { ...picks, name: msg.name } : { ...(msg.file as object), name: msg.name });
                 if (from?.placeId !== undefined) await places().follow(from.placeId, held.slug);
+                // Every computer that follows it takes the change, with no step from the person.
+                else if (rt.places !== undefined) await rt.places.recipeChanged(held.slug);
                 send({ id: msg.id, ok: true, recipe: recipeView(held, await followers()) });
               } else if (msg.op === "recipes.remove") {
                 const by = await followers();

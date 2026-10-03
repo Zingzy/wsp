@@ -191,3 +191,24 @@ describe("the recipe this host holds, planned for a computer you own", () => {
     expect(plan.skipped).toEqual([]);
   });
 });
+
+describe("a computer's picks planned for a sync", () => {
+  let dir: string;
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("plans the skills alone without reading this computer's managers, agents or servers, and reads them for a step that needs them", async () => {
+    dir = mkdtempSync(join(tmpdir(), "wsp-place-sync-plan-"));
+    const home = join(dir, "home");
+    mkdirSync(join(home, ".claude", "skills", "unslop"), { recursive: true });
+    writeFileSync(join(home, ".claude", "skills", "unslop", "SKILL.md"), "---\nname: unslop\n---\n");
+    let reads = 0;
+    const planner = placeProvisioner({ statePath: join(dir, "state.json"), home, platform: "linux", collect: async (): Promise<Manifest> => (reads++, FIXTURE), brew: async () => new Map() });
+    const picks = { name: "laptop", agents: { claude: { signin: "vault" as const } }, mcp: {}, clis: {}, skills: { unslop: { from: "~/.claude/skills" } }, plugins: {}, folders: {}, configs: {} };
+    const light = await planner.setup(picks, { home }, new Set(["skills"]));
+    expect(reads).toBe(0);
+    expect(light.steps).toEqual([]);
+    expect(light.skills?.lands.map(l => l.dest)).toEqual([".claude/skills/unslop"]);
+    await planner.setup(picks, { home }, new Set(["skills", "clis"]));
+    expect(reads).toBe(1);
+  });
+});
