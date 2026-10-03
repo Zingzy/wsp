@@ -35,7 +35,7 @@ import { ComputerSignIns } from "./ComputerSignIns.js";
 import { readRecipes, useRecipes } from "./recipesStore.js";
 import { ComputerGlyph, useComputerIcon } from "./ComputerGlyph.js";
 import { BehindRow, LimitsCard, SpawnCard } from "./computerSettings.js";
-import { ADD_COMPUTER_WORDS, AGENTS_PAGE_WORDS, FACT, PLACE_STATE_WORDS, WHERE_WORDS, capitalised } from "./format.js";
+import { ADD_COMPUTER_WORDS, AGENTS_PAGE_WORDS, PLACE_STATE_WORDS, WHERE_WORDS, capitalised } from "./format.js";
 import { Chevron, GlyphFrame, Grid, GridHead, GridName, GridRow, LIST_COLUMNS, Num, PAGE_COLUMNS, StateCell, wordOnly, type HeadCell } from "./grid.js";
 import { copyOn } from "./image.js";
 import { ImageCard, useImageStanding } from "./ImageCard.js";
@@ -528,7 +528,7 @@ export function ComputerPage({ place, ctx }: { place: PlaceView; ctx: SettingsCo
     <>
       <section data-settings-card="computer" className="flex flex-col gap-3">
         <div className={CARD_SURFACE}>
-          <HeadRow glyph={<ComputerGlyph place={place} className="size-4 text-foreground/80" />} title={name} {...(shapeLine(place) === "" ? {} : { line: shapeLine(place) })} {...(place.daemonVersion === undefined ? {} : { slot: <span data-k="daemon-version" className={FACT}>daemon {place.daemonVersion}</span> })} attrs={{ "data-k": "computer-head" }} />
+          <HeadRow glyph={<ComputerGlyph place={place} className="size-4 text-foreground/80" />} title={name} {...(shapeLine(place) === "" ? {} : { line: shapeLine(place) })} attrs={{ "data-k": "computer-head" }} />
           {cloud ? null : <BehindRow place={place} ctx={ctx} />}
         </div>
         <PlaceStateLine place={place} ctx={ctx} />

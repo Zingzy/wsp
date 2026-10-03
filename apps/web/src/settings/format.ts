@@ -133,6 +133,7 @@ export const ADD_COMPUTER_WORDS = {
   keepsGoing: "Setup keeps going. wsp pings you when it needs you.",
   signInLater: "You can sign in later in Settings.",
   tabOpened: "A tab opened in your browser.",
+  dialledBack: "Dialled back.",
   addCloud: "Add a cloud",
   replace: "Replace",
   signInsOn: (computer: string): string => `Sign-ins on ${computer}`,

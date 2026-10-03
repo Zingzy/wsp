@@ -102,6 +102,11 @@ describe("a setup as rows", () => {
     expect(rows.filter(r => r.id === "signins/codex").map(r => [r.state, r.wait?.code])).toEqual([["needs-you", "NEW-CODE"]]);
   });
 
+  it("says the install landed and dialled back, never with an internal word", () => {
+    const install = setupRows({ setup: RUNNING })[0]!;
+    expect([install.name, install.state, install.note]).toEqual(["Install wsp", "done", "Dialled back."]);
+  });
+
   it("names up to three of what a step put there, else the first two and how many more", () => {
     const row = (n: number) => ({ id: `clis/${n}`, label: `cli${n}`, outcome: "installed" as const, step: "clis" as const });
     const note = (n: number) => setupRows({ setup: { ...RUNNING, steps: [{ step: "clis", state: "done" }] }, applied: { hash: "h", at: "x", rows: Array.from({ length: n }, (_, i) => row(i + 1)) } }).find(r => r.id === "clis")?.note;

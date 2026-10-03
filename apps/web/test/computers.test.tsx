@@ -406,7 +406,8 @@ describe("a computer's own page", () => {
     const head = document.querySelector("[data-settings-page] [data-k=computer-head]")!;
     expect(head.querySelector("[data-settings-title]")?.textContent).toBe("hetzner");
     expect(head.querySelector("[data-settings-description]")?.textContent).toBe(`Ubuntu 24.04, ${box.shape!.cpu} cores, ${fmtMemGb(box.shape!.memMb)}`);
-    expect(head.querySelector("[data-k=daemon-version]")?.textContent).toBe(`daemon ${DAEMON_VERSION}`);
+    // The app never says an internal word: the daemon's version is the doctor's to say, not the page's head.
+    expect(head.textContent).not.toMatch(/daemon/i);
     // Ready draws no mark and has nothing to say.
     expect(document.querySelector("[data-k='place-state']")?.textContent).toBe("");
     expect(document.querySelector("[data-k='place-state'] [data-state-mark]")).toBeNull();

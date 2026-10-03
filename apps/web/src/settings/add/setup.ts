@@ -64,10 +64,10 @@ const nameList = (rows: readonly PlaceProvisionRow[]): string | undefined =>
 
 /** The setup on a computer as rows: Install wsp, then each step with the items of it that did not land under it,
  * the sign-ins under Agents. A step not started reads waiting; a sign-in that waits on the person carries its wait. */
-export function setupRows(place: Pick<PlaceView, "setup" | "applied" | "daemonVersion">): StepLine[] {
+export function setupRows(place: Pick<PlaceView, "setup" | "applied">): StepLine[] {
   const setup = place.setup;
   const rows = place.applied?.rows ?? [];
-  const out: StepLine[] = [{ id: "wsp", name: INSTALL, state: "done", ...(place.daemonVersion === undefined ? {} : { note: `Daemon ${place.daemonVersion}, dialled back.` }) }];
+  const out: StepLine[] = [{ id: "wsp", name: INSTALL, state: "done", note: ADD_COMPUTER_WORDS.dialledBack }];
   for (const { step, name } of SETUP_ROWS) {
     const line = setup?.steps.find(s => s.step === step);
     const mine = rows.filter(r => r.step === step);
