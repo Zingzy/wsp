@@ -83,7 +83,7 @@ describe("the lines wsp writes to codex app-server", () => {
       method: "turn/steer",
       params: { threadId: THREAD, expectedTurnId: TURN, input: [{ type: "text", text: "stop at 12" }] },
     });
-    expect(parsed(turnInterruptLine({ threadId: THREAD, turnId: TURN }))).toEqual({ id: REQUEST.interrupt, method: "turn/interrupt", params: { threadId: THREAD, turnId: TURN } });
+    expect(parsed(turnInterruptLine({ id: "wsp-interrupt-1", threadId: THREAD, turnId: TURN }))).toEqual({ id: "wsp-interrupt-1", method: "turn/interrupt", params: { threadId: THREAD, turnId: TURN } });
   });
 
   it("answers an approval with accept or decline alone, under the id the server asked with, string or number", () => {

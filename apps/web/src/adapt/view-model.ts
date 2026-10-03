@@ -189,7 +189,7 @@ export interface TurnSummary {
   readonly completedAt: string | null;
   /** What the turn kept to rewind to once it was over: the checkpoint of the files (null where none was taken) and
    * the harness's anchor for its end (null where it named none). Null until the turn's session.checkpoint lands. */
-  readonly checkpoint: { readonly ref: string | null; readonly anchor: string | null } | null;
+  readonly checkpoint: { readonly ref: string | null; readonly anchor: string | null; readonly kept?: string } | null;
 }
 
 export type ToolGroupAction = "read" | "edit" | "command" | "code-search" | "search" | "other" | "update";

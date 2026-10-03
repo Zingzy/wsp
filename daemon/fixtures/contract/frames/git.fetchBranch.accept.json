@@ -1,0 +1,18 @@
+[
+  {
+    "id": 1,
+    "op": "git.fetchBranch",
+    "cwd": "/Users/dev/wsp",
+    "remote": "origin",
+    "branch": "feat/pricing"
+  },
+  {
+    "id": 2,
+    "op": "git.fetchBranch",
+    "cwd": "/Users/dev/wsp",
+    "remote": "https://github.com/someone/wsp.git",
+    "branch": "main",
+    "into": "pr-1623",
+    "machineId": "wsp-a"
+  }
+]

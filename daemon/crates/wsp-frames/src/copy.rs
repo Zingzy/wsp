@@ -103,6 +103,37 @@ pub struct CopyReport {
     pub fell_back: Option<String>,
 }
 
+/// The one JSON line `wsp-daemon copy worktree` prints: the worktree a thread on `branch` works in, with what was
+/// carried into it when this call made it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct WorktreeReport {
+    pub path: String,
+    pub branch: String,
+    /// Whether wsp made this worktree, under the host's folder or a volume's own `.wsp`; false for one the person
+    /// made, which wsp uses and never removes.
+    pub made: bool,
+    /// The config files and directories carried in, relative to the worktree; empty where it was already there.
+    pub carried: Vec<String>,
+    /// The carried directories a clone could not take, so every byte of them was copied.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub plain: Vec<String>,
+    pub ms: u64,
+}
+
+/// The one JSON line `wsp-daemon copy worktree-remove` prints once the worktree is gone.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct WorktreeRemoval {
+    pub path: String,
+    /// The ref a detached worktree's commit was saved to before the worktree went; absent on a branch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub rescued: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

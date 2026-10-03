@@ -1616,6 +1616,19 @@ export function rewindNoAnchorLine(agent: string): string {
   return `${agent} left no point in that reply to cut its conversation at, so only the files can go back`;
 }
 
+/** A rewind whose harness kept the conversation whole, `why` in its own clause: what moved and what stayed. */
+export function rewindKeptLine(why: string, filesBack: boolean): string {
+  return `${why}; ${filesBack ? "the files went back and every turn stays" : "every turn stays"}`;
+}
+
+/** Why a Codex thread's conversation cannot be cut: the server cuts only the paginated history a Codex from 0.151.0
+ * on writes. */
+export const CODEX_LEGACY_HISTORY = "a Codex older than 0.151.0 made this thread and keeps its history in a form thread/revert cannot cut";
+
+/** A Codex rewind by count whose server lists fewer turns than the cut would take: cutting there would take the
+ * reply the person keeps too. */
+export const CODEX_FEWER_TURNS = "codex lists fewer turns in this thread than the rewind would cut, so it cut nothing";
+
 /** A rewind to the thread's latest reply, after which nothing stands to cut. */
 export const REWIND_LATEST_LINE = "that is the thread's latest reply, so nothing comes after it to rewind";
 
@@ -1635,8 +1648,9 @@ const turnsAfter = (turns: number): string => (turns === 1 ? "The turn after thi
 
 /** What a rewind to a reply takes, said before the click: how many turns go, whether the files go back, and what
  * Undo rewind brings back after. An agent that cuts no history of its own keeps every turn, and the note says so. */
-export function rewindNote(o: { turns: number; files: boolean; cutsConversation: boolean; agent: string }): string {
+export function rewindNote(o: { turns: number; files: boolean; cutsConversation: boolean; agent: string; kept?: string }): string {
   const undo = "Undo rewind puts them back until the next turn in this copy ends";
+  if (o.kept !== undefined) return `${o.kept.charAt(0).toUpperCase()}${o.kept.slice(1)}, so the conversation stays and the files go back to how they stood at this reply. ${WHOLE_COPY} ${undo}.`;
   if (!o.cutsConversation) return `${o.agent} keeps its own history, so the conversation stays and the files go back to how they stood at this reply. ${WHOLE_COPY} ${undo}.`;
   if (!o.files) return `${turnsAfter(o.turns)} the conversation; the files stay as they are.`;
   return `${turnsAfter(o.turns)} the conversation, and the files go back to how they stood at this reply. ${WHOLE_COPY} ${undo}; the conversation does not come back.`;

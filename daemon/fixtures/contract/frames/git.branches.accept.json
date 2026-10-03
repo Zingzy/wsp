@@ -1,0 +1,13 @@
+[
+  {
+    "id": 1,
+    "op": "git.branches",
+    "cwd": "/Users/dev/wsp"
+  },
+  {
+    "id": 2,
+    "op": "git.branches",
+    "cwd": "/root/wsp-boat",
+    "machineId": "wsp-a"
+  }
+]

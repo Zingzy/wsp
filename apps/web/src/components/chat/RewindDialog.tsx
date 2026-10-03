@@ -68,7 +68,7 @@ export function RewindDialogHost() {
     }
   };
 
-  const note = rewinding === null ? UNDO_REWIND_LINE : rewindNote({ turns: rewinding.turnsAfter, files, cutsConversation: rewinding.cutsConversation, agent: rewinding.agent });
+  const note = rewinding === null ? UNDO_REWIND_LINE : rewindNote({ turns: rewinding.turnsAfter, files, cutsConversation: rewinding.cutsConversation, agent: rewinding.agent, ...(rewinding.kept !== undefined ? { kept: rewinding.kept } : {}) });
   return (
     <AlertDialog open onOpenChange={next => (next ? undefined : close())}>
       <AlertDialogPopup>
@@ -110,25 +110,31 @@ export interface RewindableReply {
   readonly turnId: string;
   readonly turnsAfter: number;
   readonly files: boolean;
+  /** Why the agent cannot cut this thread's conversation, where it said so: the reply offers its files alone. */
+  readonly kept?: string;
 }
 
 /** The replies of a thread's earlier turns a rewind can go back to, by the message the button stands under: each such
  * turn's last reply, where the turn is over and kept something to rewind to (the files' checkpoint, or its anchor on
- * an agent that cuts its own history). The latest turn has nothing after it to cut. */
+ * an agent that cuts its own history, or any reply on an agent the host cuts by count). A thread its agent said it
+ * cannot cut offers the files alone. The latest turn has nothing after it to cut. */
 export function rewindableReplies(
-  turns: ReadonlyArray<{ readonly turnId: string; readonly state: string; readonly checkpoint: { readonly ref: string | null; readonly anchor: string | null } | null }>,
+  turns: ReadonlyArray<{ readonly turnId: string; readonly state: string; readonly checkpoint: { readonly ref: string | null; readonly anchor: string | null; readonly kept?: string } | null }>,
   entries: ReadonlyArray<{ readonly kind: string; readonly message?: { readonly id: string; readonly role: string; readonly turnId: string | null } }>,
   cutsConversation: boolean,
+  byCount = false,
 ): ReadonlyMap<string, RewindableReply> {
   const lastReply = new Map<string, string>();
   for (const entry of entries) if (entry.kind === "message" && entry.message?.role === "assistant" && entry.message.turnId !== null) lastReply.set(entry.message.turnId, entry.message.id);
+  const kept = turns.find(t => t.checkpoint?.kept !== undefined)?.checkpoint?.kept;
   const out = new Map<string, RewindableReply>();
   turns.forEach((turn, at) => {
-    if (at === turns.length - 1 || turn.state === "running" || turn.checkpoint === null) return;
-    const files = turn.checkpoint.ref !== null;
-    if (!files && !(cutsConversation && turn.checkpoint.anchor !== null)) return;
+    if (at === turns.length - 1 || turn.state === "running") return;
+    const files = (turn.checkpoint?.ref ?? null) !== null;
+    const cuts = kept === undefined && cutsConversation && ((turn.checkpoint?.anchor ?? null) !== null || byCount);
+    if (!files && !cuts) return;
     const reply = lastReply.get(turn.turnId);
-    if (reply !== undefined) out.set(reply, { turnId: turn.turnId, turnsAfter: turns.length - 1 - at, files });
+    if (reply !== undefined) out.set(reply, { turnId: turn.turnId, turnsAfter: turns.length - 1 - at, files, ...(kept !== undefined ? { kept } : {}) });
   });
   return out;
 }

@@ -233,7 +233,7 @@ import type {
 import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding } from "./project-landing.js";
 import { projectRemote, projectSource } from "./project-sources.js";
 import { vaultUnlistedRefusal, ThreadPlacement, ThreadScope, WorkspaceOrigin, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, GitCommitReply, GitDiscardReply, GitDiffReply, GitStatusReply, GitPrReadReply, GitPrViewReply, GitRunLogReply, GitPrMergeReply, GitRepoReadReply, GitUpdateReply, GitStartOnReply, GitBranchCompareReply, GitMergeInReply, DETACHED_HEAD, leadBusyRefusal, childStartedLine, forkNeedsPushLine, FIX_CHECK_OR_CHILD, childOnNoBranchRefusal, mergeChildPrompt, mergeIntoOwnRefusal, noRemoteForTreeLine, notTheLeadsChildRefusal, pushedForChildLine, uncommittedStayed, type MergeInResult, type TreeChild, type TreeFact, type TreeRecord, PR_POLL_MS, type PullRequestPage, GitPrReplyReply, GitPrResolveReply, GitPrReactReply, REPLY_EMPTY_LINE, pullRequestPostLine, type ReactionContent, type PullRequestItem, type PullRequestSendResult, type PullRequestSent, GIT_DIFF_CAP_BYTES, pullRequestSendPrompt, checkFailedPrompt, conflictsPrompt, checkNotFailedRefusal, childPushedLine, isPullRequestFact, mergeMethodRefusal, noPullRequestRefusal, noSuchCheckRefusal, notOpenRefusal, pullRequestStoppedLine, pullRequestUnreadLine, AUTO_MERGE_OFF_LINE, type FixResult, type MergeMethod, type MergeResult, type PullRequestFact, type PullRequestRecord, type PullRequestSeen, DRAFT_NOTES, cleanCheckoutLine, commitMessage, cutDiff, draftPrompt, type Checkout, type CheckoutReply, type CommitDraft, type CommitDrafter, type ViewedMarks, AGENTS_ON, agentsFrom, foldThreads, NAP_AFTER_MS, settingFor, runningOn as runningOnPlace, phaseHoldsSlot, placeAtLimitLine, placeSpendLimit, spendCapRefusal, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadKeyOf, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, SCOPED_MCP_ARG, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn, RUN_PERSONS_LINE, runOutputTail, type RunStep, type SessionRunEvent } from "@wsp/protocol";
-import { ASIDE_NO_SESSION_LINE, BLANK_ASIDE_LINE, asideUnsupportedLine, PLACE_WORKSPACE_PATH, THIS_COMPUTER, COPY_BUILD_FIX, copyAsksSignIns, refusal, copyFirstLine, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildOf, copyIsCurrent, type CopyBuild, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, serverIconsLeftLine, homeShortened, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, threadRunsOnLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, GONE_UNCHECKED, goneUnconfirmedLine, type GoneSeenBy, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, cloneFailedLine, cloneIntoNeeded, cloneIntoTakenLine, cloneUrlRefusal, intoIsHereLine, INTO_TAKES_A_REPO_LINE, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, startingLine, copyingFolderLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeBlocked, placeDaemonBehind, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeDaemonPaths, placeDialBackLine, placeWentAwayLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspacePlace, workFolderIn, workspaceLands, copyPathFor, folderSlug, type ProjectCopy, REWIND_LATEST_LINE, REWIND_NO_CHECKPOINT_LINE, REWIND_NO_UNDO_LINE, REWIND_OWN_FOLDER_LINE, REWIND_WORKING_LINE, rewindBesideLine, rewindChildrenLine, rewindNoAnchorLine, attachmentRecord, filesBlocked, isImage, sendFilesDir, filePathIn, landFilesLine, filesNotLandedLine, attachedFilesPrompt, dropFilesLine } from "@wsp/protocol";
+import { ASIDE_NO_SESSION_LINE, BLANK_ASIDE_LINE, asideUnsupportedLine, PLACE_WORKSPACE_PATH, THIS_COMPUTER, COPY_BUILD_FIX, copyAsksSignIns, refusal, copyFirstLine, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildOf, copyIsCurrent, type CopyBuild, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, serverIconsLeftLine, homeShortened, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, threadRunsOnLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, GONE_UNCHECKED, goneUnconfirmedLine, type GoneSeenBy, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, cloneFailedLine, cloneIntoNeeded, cloneIntoTakenLine, cloneUrlRefusal, intoIsHereLine, INTO_TAKES_A_REPO_LINE, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, startingLine, copyingFolderLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeBlocked, placeDaemonBehind, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeDaemonPaths, placeDialBackLine, placeWentAwayLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspacePlace, workFolderIn, workspaceLands, copyPathFor, folderSlug, type ProjectCopy, REWIND_LATEST_LINE, REWIND_NO_CHECKPOINT_LINE, REWIND_NO_UNDO_LINE, REWIND_OWN_FOLDER_LINE, REWIND_WORKING_LINE, rewindBesideLine, rewindChildrenLine, rewindKeptLine, rewindNoAnchorLine, attachmentRecord, filesBlocked, isImage, sendFilesDir, filePathIn, landFilesLine, filesNotLandedLine, attachedFilesPrompt, dropFilesLine } from "@wsp/protocol";
 import { agentsReads, type AgentsActs, type AgentsReader, type CallbackForwards, type ServerIcons, type ServersActs, type SignInAsk, type SkillAsk, type SkillsActs } from "./agents-read.js";
 import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from "./daemon-channel.js";
 import { templateHost } from "./host-id.js";
@@ -7721,6 +7721,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       ...(adapter.movesAccess === true ? { movesAccess: true } : {}),
       ...(adapter.aside !== undefined ? { asides: true } : {}),
       ...(adapter.resumesAt === true || adapter.revert !== undefined ? { rewindsConversation: true } : {}),
+      ...(adapter.revert !== undefined ? { rewindsByCount: true } : {}),
       ...(adapter.screenCommands !== undefined ? { screenCommands: [...adapter.screenCommands] } : {}),
     };
     if (adapter.probeCatalog === undefined) return Promise.resolve(known);
@@ -8347,7 +8348,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** What a rewind to a turn needs, kept once the turn is over: the checkout's tree through the workspace's own
    * daemon, and the harness's anchor. A checkout the daemon takes none of (not a repo, a daemon too old, a machine
    * gone) leaves the anchor alone; the turn itself is as it ended either way. */
-  const keepCheckpoint = async (entry: LiveWorkspace, turn: { sessionId: string; threadId: string; turnId: string; anchor?: string }): Promise<void> => {
+  const keepCheckpoint = async (entry: LiveWorkspace, turn: { sessionId: string; threadId: string; turnId: string; anchor?: string; kept?: string }): Promise<void> => {
     let ref: string | undefined;
     if (!ownFolder(entry.record)) {
       try {
@@ -8357,8 +8358,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         console.warn(noCheckpointLogLine(turn.threadId, entry.record.id, e instanceof Error ? e.message : String(e)));
       }
     }
-    if (ref === undefined && turn.anchor === undefined) return;
-    record({ type: "session.checkpoint", workspaceId: entry.record.id, sessionId: turn.sessionId, turnId: turn.turnId, threadId: turn.threadId, ...(ref !== undefined ? { ref } : {}), ...(turn.anchor !== undefined ? { anchor: turn.anchor } : {}) });
+    if (ref === undefined && turn.anchor === undefined && turn.kept === undefined) return;
+    record({ type: "session.checkpoint", workspaceId: entry.record.id, sessionId: turn.sessionId, turnId: turn.turnId, threadId: turn.threadId, ...(ref !== undefined ? { ref } : {}), ...(turn.anchor !== undefined ? { anchor: turn.anchor } : {}), ...(turn.kept !== undefined ? { kept: turn.kept } : {}) });
   };
   /** Recorded once the harness took the line, so the row sits where the turn could first see it. */
   /** The handle a start already taken answers with: the turn's own while it runs, and while it does not, one whose
@@ -8539,11 +8540,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     let ended = false;
     /** The harness's own name for where this turn ended, kept with the turn's checkpoint once it is over. */
     let anchor: string | undefined;
+    /** The harness's word that it cannot cut this thread's conversation, kept with the checkpoint as the anchor is. */
+    let keptWhy: string | undefined;
     let over = false;
     /** The turn is over however it ended: no rewind in this copy can be undone any more, since an undo would take
      * this turn's files with it, and what a rewind to this turn needs is kept, off the turn's road so nothing waits
      * on the machine. */
-    const turnOver = (named: string | undefined): void => {
+    const turnOver = (): void => {
       if (over) return;
       over = true;
       const undone: string[] = [];
@@ -8556,7 +8559,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         void persistSessions(workspaceId);
         bus.emit({ type: "thread.marked", workspaceId, threadIds: undone });
       }
-      void keepCheckpoint(entry, { sessionId: view.claudeSessionId ?? view.id, threadId, turnId, ...(named !== undefined ? { anchor: named } : {}) });
+      void keepCheckpoint(entry, { sessionId: view.claudeSessionId ?? view.id, threadId, turnId, ...(anchor !== undefined ? { anchor } : {}), ...(keptWhy !== undefined ? { kept: keptWhy } : {}) });
     };
     // The reply's status, held while the process still runs. Shared with this turn's session-map entry so runningOn
     // and the persisted row read it whether the harness emits its result synchronously in start() (before the entry
@@ -8788,6 +8791,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         }
         case "turn.anchor":
           anchor = event.anchor;
+          keptWhy = event.kept;
           return;
         case "subagent":
           // Counted apart from the deltas, so a run re-read from its first line writes none of these a second time and
@@ -8864,7 +8868,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             exitCode: event.exitCode,
             sawResult: event.sawResult,
           });
-          turnOver(anchor);
+          turnOver();
           readChanges(sessionId);
           return;
       }
@@ -8934,7 +8938,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       settleCut({ view, turnId, ...(notify !== undefined ? { notify } : {}), ...(notifyBy !== undefined ? { notifyBy } : {}), ...(notifyRoad !== undefined ? { notifyRoad } : {}), turnLive }, reason, () => reason);
       void persistSessions(workspaceId);
       void started.interrupt().catch(() => {});
-      turnOver(anchor);
+      turnOver();
     };
     // One row per turn, never two: the key the start road held this turn under goes as the harness's own takes over.
     if (turnId !== rowId) sessions.delete(turnId);
@@ -9819,10 +9823,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const agent = harnessCatalog(harness)?.label ?? harness;
       const files = opts.files === true;
       if (files && kept?.ref === undefined) throw conflict(REWIND_NO_CHECKPOINT_LINE);
-      const cutsConversation = adapter.resumesAt === true || adapter.revert !== undefined;
-      const firstCut = adapter.revert !== undefined ? keptOf(cut[0]!)?.anchor : undefined;
+      // A harness that said it cannot cut this thread keeps every turn: the files alone go back and it is not asked.
+      const uncut = events.find((e): e is Extract<SessionEvent, { type: "session.checkpoint" }> => e.type === "session.checkpoint" && e.threadId === threadId && e.kept !== undefined)?.kept;
+      if (uncut !== undefined && !files) throw conflict(rewindKeptLine(uncut, false));
+      const cutsConversation = (adapter.resumesAt === true || adapter.revert !== undefined) && uncut === undefined;
       if (adapter.resumesAt === true && kept?.anchor === undefined) throw conflict(rewindNoAnchorLine(agent));
-      if (adapter.revert !== undefined && firstCut === undefined) throw conflict(rewindNoAnchorLine(agent));
       if (!cutsConversation && !files) throw conflict(rewindNoAnchorLine(agent));
       if (files) besideRunning();
 
@@ -9830,9 +9835,25 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // the whole rewind refused, rather than a conversation cut over files that never moved.
       const moved = files ? await restore(kept!.ref!) : undefined;
       const before = moved === undefined ? undefined : String(moved["before"]);
-      if (adapter.revert !== undefined && firstCut !== undefined && latest?.claudeSessionId !== undefined) {
+      let keptWhy: string | undefined;
+      if (adapter.revert !== undefined && cutsConversation && latest?.claudeSessionId !== undefined) {
+        const firstCut = keptOf(cut[0]!)?.anchor;
+        // A turn that named no anchor is found by count among the harness's own, off each cut turn's anchor and end.
+        const endOf = (turnId: string): TurnResult | undefined => {
+          for (let i = events.length - 1; i >= 0; i--) {
+            const e = events[i]!;
+            if (e.type === "session.done" && e.turnId === turnId) return e.result;
+          }
+          return undefined;
+        };
+        const turnOf = (turnId: string): { anchor?: string; result?: TurnResult } => {
+          const anchor = keptOf(turnId)?.anchor;
+          const result = endOf(turnId);
+          return { ...(anchor !== undefined ? { anchor } : {}), ...(result !== undefined ? { result } : {}) };
+        };
         try {
-          await adapter.revert({ session: latest.claudeSessionId, beforeTurn: firstCut, cwd });
+          const answer = await adapter.revert({ session: latest.claudeSessionId, cwd, ...(firstCut !== undefined ? { beforeTurn: firstCut } : { turns: cut.map(turnOf) }) });
+          keptWhy = answer?.kept;
         } catch (e) {
           if (before !== undefined) await restore(before).catch((back: unknown) => console.warn(`the files of thread ${threadWord(threadId)} were not put back after a refused rewind: ${back instanceof Error ? back.message : String(back)}`));
           throw e;
@@ -9842,6 +9863,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       threadRecords.set(threadId, record);
       if (adapter.resumesAt === true) record.resumeAt = kept!.anchor!;
       if (before !== undefined) record.rewound = { before, at: clock.now() };
+      if (keptWhy !== undefined) {
+        await done();
+        throw conflict(rewindKeptLine(keptWhy, before !== undefined));
+      }
       if (cutsConversation) await dropFromTranscript(workspaceId, e => e.threadId === threadId && cut.includes(e.turnId ?? ""));
       await done();
       return { turns: cutsConversation ? cut.length : 0, ...(moved !== undefined ? { files: Number(moved["files"] ?? 0) } : {}) };

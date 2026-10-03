@@ -12,13 +12,13 @@ use serde::Serialize;
 use serde_json::Value;
 use wsp_frames::{
     guest_wsp_shim, landed_files_script, numbers, place_owned_paths, probe_path, words, BackendFacts, CopyReport, DaemonAuthRequest,
-    DaemonErrorResponse, DaemonEvent, DaemonRequest, FsFilesReply, GitBranchCompareReply, GitCheckpointReply, GitCommitReply,
-    GitDiscardReply, GitIssueReadReply, GitMergeInReply, GitPrCheckoutReply, GitPrDiffReply, GitPrListReply, GitPrMergeReply,
-    GitPrReactReply, GitPrReadReply, GitPrReply, GitPrReplyReply, GitPrResolveReply, GitPrReviewReply, GitPrViewReply, GitPushReply,
-    GitRepoReadReply, GitRestoreReply, GitRunLogReply, GitSnapshotReply, GitStartOnReply, GitUpdateReply, GuestCliMessage, GuestOpenReply,
-    HostFolderListing, MachineAnswersReply, MachineExecReply, MachineHandleReply, MachineLinkRequest, MachineListReply, MachineReachReply,
-    MachineReadingReply, MachineShapeReply, MachineStateReply, PlaceAuthRequest, PlaceCapacity, PlaceProveRequest, SshStartReply,
-    SysHistoryReply, DAEMON_OPS, MACHINE_OPS,
+    DaemonErrorResponse, DaemonEvent, DaemonRequest, FsFilesReply, GitBranchCompareReply, GitBranchesReply, GitCheckpointDropReply,
+    GitCheckpointReply, GitCommitReply, GitDiscardReply, GitIssueReadReply, GitMergeInReply, GitPrCheckoutReply, GitPrDiffReply,
+    GitPrListReply, GitPrMergeReply, GitPrReactReply, GitPrReadReply, GitPrReply, GitPrReplyReply, GitPrResolveReply, GitPrReviewReply,
+    GitPrViewReply, GitPushReply, GitRepoReadReply, GitRestoreReply, GitRunLogReply, GitSnapshotReply, GitStartOnReply, GitUpdateReply,
+    GitWorktreesReply, GuestCliMessage, GuestOpenReply, HostFolderListing, MachineAnswersReply, MachineExecReply, MachineHandleReply,
+    MachineLinkRequest, MachineListReply, MachineReachReply, MachineReadingReply, MachineShapeReply, MachineStateReply, PlaceAuthRequest,
+    PlaceCapacity, PlaceProveRequest, SshStartReply, SysHistoryReply, WorktreeRemoval, WorktreeReport, DAEMON_OPS, MACHINE_OPS,
 };
 
 fn fixtures() -> PathBuf {
@@ -203,6 +203,21 @@ fn every_reply_fixture_round_trips_through_the_reply_types() {
                 "CopyReport" => {
                     round_trip::<CopyReport>(&sample, &at);
                 }
+                "WorktreeReport" => {
+                    round_trip::<WorktreeReport>(&sample, &at);
+                }
+                "WorktreeRemoval" => {
+                    round_trip::<WorktreeRemoval>(&sample, &at);
+                }
+                "GitCheckpointDropReply" => {
+                    round_trip::<GitCheckpointDropReply>(&sample, &at);
+                }
+                "GitWorktreesReply" => {
+                    round_trip::<GitWorktreesReply>(&sample, &at);
+                }
+                "GitBranchesReply" => {
+                    round_trip::<GitBranchesReply>(&sample, &at);
+                }
                 "DaemonErrorResponse" => {
                     round_trip::<DaemonErrorResponse>(&sample, &at);
                 }
@@ -310,6 +325,11 @@ fn every_reply_fixture_round_trips_through_the_reply_types() {
         "GitDiscardReply",
         "GitBranchCompareReply",
         "GitCheckpointReply",
+        "GitCheckpointDropReply",
+        "GitWorktreesReply",
+        "GitBranchesReply",
+        "WorktreeReport",
+        "WorktreeRemoval",
         "GitMergeInReply",
         "GitPrListReply",
         "GitPrMergeReply",
