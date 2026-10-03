@@ -4719,6 +4719,7 @@ const DAEMON_CONTENTS = [
   "409fce58696aaa20c7803f7a963841e4aacc0702a153ca6f916fba64f941bd16",
   "89e10a249a0e59670fc8fefec015f640d8f021d0b24bb34665412360cf6b999b",
   "ffcede69616fafe56cf56a3ec668d56516c22b7c9f53fc5176621c902ad7e639",
+  "019c206265a45a72e87e3e436643cc96399b6ed44d5ae07de967b502e5742abc",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -5028,7 +5029,14 @@ const DAEMON_CONTENTS = [
  * bot wrote each comment and the face it shows, and each line comment's hunk, the comment it answers and its review. No
  * body on the page is cut, and every host line's answer is read to 16 MB and refused past it. A check reads when it
  * started and finished, a pull request the merge armed on it, and git.prDiff cuts at the bytes asked for, up to the cap
- * a git.diff has, reading at most four times that before it stops gh and names the files it saw. */
+ * a git.diff has, reading at most four times that before it stops gh and names the files it saw.
+ * Version 113: Writes on a pull request as the person signed in to gh: git.prReply posts a reply under a comment on a
+ * line or a new comment in the conversation, its body as typed on stdin and at most 65,536 characters, a line reply
+ * carrying back the thread it names; git.prResolve resolves or unresolves a review thread; and git.prReact adds or
+ * takes off a reaction. A resolve and a reaction name their thread or item by a node id, refused before anything runs
+ * where it is not one's shape, and refused before the mutation where a read finds it on any pull request but the
+ * repository's one numbered. A pull request's page reads each comment's, review's and line comment's node id and
+ * reactions, with whether the signed-in person left each, and each line comment's review thread by id. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary

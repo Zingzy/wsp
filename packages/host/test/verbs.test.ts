@@ -377,7 +377,8 @@ describe("wsp verbs over the host", () => {
 
     const raw = await run("workspaces", "--json");
     const rawRows = (json(raw.io)[0] as { workspaces: WorkspaceListing[] }).workspaces;
-    expect(listed.io.lines[0]).not.toContain(rawRows[0]!.machineId);
+    // Read by cell: the id is two characters, which a random folder name can hold.
+    expect(rows.flatMap(cells)).not.toContain(rawRows[0]!.machineId);
     expect(cells(rows[0]!)[3]).toBe(whereWord(rawRows[0]!));
     expect(cells(rows[1]!)[3]).toBe(whereWord(rawRows[1]!));
     expect(cells(rows[1]!)[6]).toBe(fmtSize(rawRows[1]!.size, kindWords("local").cpu));

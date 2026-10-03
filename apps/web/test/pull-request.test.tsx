@@ -481,6 +481,15 @@ describe("acting on the page as the person", () => {
     expect(comments.at(-1)!.querySelector("[data-pr-entry-head] b")!.textContent).toBe("cass");
   });
 
+  it("a quote reply keeps what the person already typed in the box and adds the quote after it", async () => {
+    const { container } = await pane(fact(), PAGE, { acts: true });
+    const comment = q(container, "[data-pr-entry='comment']:not([data-quiet])");
+    const area = q<HTMLTextAreaElement>(container, "[data-pr-activity] > [data-pr-comment-box] textarea");
+    fireEvent.change(area, { target: { value: "Two things.  " } });
+    fireEvent.click(q(comment, "[data-pr-quote]"));
+    await waitFor(() => expect(area.value).toBe("Two things.\n\n@bo\n\n> thanks, **fixed**\n\n"));
+  });
+
   it("quotes a review's body the same way, and keeps the words and says why under the box when a comment is refused", async () => {
     const { container, api } = await pane(fact(), PAGE, { acts: true });
     fireEvent.click(q(container, "[data-pr-entry='review'] [data-pr-entry-head] [data-pr-quote]"));

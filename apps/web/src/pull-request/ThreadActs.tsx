@@ -114,14 +114,15 @@ export function CommentBox({ text, setText, onSend, fieldRef }: { text: string; 
   );
 }
 
+/** How many of an item's lines a quote reply carries. */
+const QUOTE_LINES = 3;
+
 /** A quote reply's words: who it answers, then the item's first lines as a markdown quote, ready for the person's own. */
 export function quoteOf(author: string, body: string): string {
   const lines = body.trim().split("\n").filter(l => l.trim() !== "").slice(0, QUOTE_LINES);
   return `@${author}\n\n${lines.map(l => `> ${l}`).join("\n")}\n\n`;
 }
 
-/** How many of an item's lines a quote reply carries. */
-const QUOTE_LINES = 3;
 
 /** The add button and its eight: a 24 px icon in an item's head, shown on the item's hover beside the send. */
 export function ReactAdd({ reactions, onToggle }: { reactions: readonly PullRequestReaction[]; onToggle: (content: ReactionContent) => void }) {
