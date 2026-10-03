@@ -53,6 +53,8 @@ export type RewindRequest =
       /** Whether the thread's agent cuts its own history too, and its name for the note. */
       readonly cutsConversation: boolean;
       readonly agent: string;
+      /** Why the agent cannot cut this thread's conversation, in its words, where it said so. */
+      readonly kept?: string;
     }
   | { readonly kind: "undo"; readonly workspaceId: string; readonly threadId: string };
 
