@@ -1617,7 +1617,7 @@ const AssistantChangedFilesSection = memo(function AssistantChangedFilesSection(
 }) {
   if (!turnSummary) return null;
   const checkpointFiles = turnSummary.files;
-  // A turn that only moved HEAD still shows its card, for the one line naming the move.
+  // A turn that only moved HEAD still shows the one line naming the move.
   if (checkpointFiles.length === 0 && turnSummary.moved.length === 0) return null;
 
   return (
