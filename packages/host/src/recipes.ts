@@ -19,15 +19,28 @@ import { folderFiles } from "./folder-files.js";
 /** Where a host keeps its recipes: beside its state file, one file per recipe. */
 export const recipesDir = (statePath: string): string => join(dirname(statePath), "recipes");
 
-/** What a token looks like at its start, for the values the writer refuses. */
-const TOKEN_SHAPES = ["sk-ant-", "gho_", "ghp_"] as const;
+/** What a key or a token looks like, anywhere in a name or a value: OpenAI's and Anthropic's keys, Google's, GitHub's
+ * and GitLab's tokens, Slack's, an AWS access key id, a JWT and any private key's header. */
+const TOKEN_SHAPES: readonly RegExp[] = [
+  /(?<![A-Za-z0-9])sk-(?:proj-|ant-)?[A-Za-z0-9_-]{20,}/,
+  /(?<![A-Za-z0-9])AIza[A-Za-z0-9_-]{30,}/,
+  /(?<![A-Za-z0-9])github_pat_[A-Za-z0-9_]{20,}/,
+  /(?<![A-Za-z0-9])gh[opsur]_[A-Za-z0-9]{20,}/,
+  /(?<![A-Za-z0-9])glpat-[A-Za-z0-9_-]{20,}/,
+  /(?<![A-Za-z0-9])xox[abpr]-[A-Za-z0-9-]{10,}/,
+  /(?<![A-Za-z0-9])AKIA[0-9A-Z]{16}(?![A-Za-z0-9])/,
+  /(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/,
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
+];
+
+const tokenShaped = (text: string): boolean => TOKEN_SHAPES.some(shape => shape.test(text));
 
 const usage = (sentence: string): Error => Object.assign(new Error(sentence), { kind: "usage" });
 
 /** Why a recipe may not be written, or nothing: a key whose name says it is a secret, or a value shaped like a
  * token, at any depth, named by where it sits. */
 export function recipeSecretRefusal(file: unknown, at = ""): string | undefined {
-  if (typeof file === "string") return TOKEN_SHAPES.some(shape => file.startsWith(shape)) ? `${at || "the recipe"} holds a value shaped like a token; a recipe names things and never holds a secret` : undefined;
+  if (typeof file === "string") return tokenShaped(file) ? `${at || "the recipe"} holds a value shaped like a token; a recipe names things and never holds a secret` : undefined;
   if (Array.isArray(file)) {
     for (const [i, v] of file.entries()) {
       const said = recipeSecretRefusal(v, `${at}[${i}]`);
@@ -39,6 +52,7 @@ export function recipeSecretRefusal(file: unknown, at = ""): string | undefined 
   for (const [key, v] of Object.entries(file)) {
     const where = at === "" ? key : `${at}.${key}`;
     if (isSecretName(key)) return `${where} is named like a secret; a recipe names things and never holds a secret`;
+    if (tokenShaped(key)) return `${where} is a name shaped like a token; a recipe names things and never holds a secret`;
     const said = recipeSecretRefusal(v, where);
     if (said !== undefined) return said;
   }

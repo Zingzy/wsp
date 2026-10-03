@@ -55,10 +55,39 @@ describe("the recipe file", () => {
 
   it("refuses a key named like a secret and a value shaped like a token, and writes nothing", async () => {
     await expect(writeRecipe(statePath, { ...LAPTOP, mcp: { GITHUB_TOKEN: { agents: ["claude"] } } })).rejects.toThrow(/mcp.GITHUB_TOKEN is named like a secret/);
-    await expect(writeRecipe(statePath, { ...LAPTOP, folders: { wsp: { from: "ghp_0123456789abcdef", keep: [] } } })).rejects.toThrow(/folders.wsp.from holds a value shaped like a token/);
-    await expect(writeRecipe(statePath, { ...LAPTOP, name: "sk-ant-api03-x" })).rejects.toThrow(/shaped like a token/);
-    await expect(writeRecipe(statePath, { ...LAPTOP, folders: { wsp: { from: "~/wsp", keep: ["gho_x"] } } })).rejects.toThrow(/keep\[0\]/);
+    await expect(writeRecipe(statePath, { ...LAPTOP, folders: { wsp: { from: "ghp_16C7e42F292c6912E7710c838347Ae178B4a", keep: [] } } })).rejects.toThrow(/folders.wsp.from holds a value shaped like a token/);
+    await expect(writeRecipe(statePath, { ...LAPTOP, name: "sk-ant-api03-AbCdEfGhIjKlMnOpQrStUv" })).rejects.toThrow(/shaped like a token/);
+    await expect(writeRecipe(statePath, { ...LAPTOP, folders: { wsp: { from: "~/wsp", keep: ["gho_16C7e42F292c6912E7710c838347Ae178B4a"] } } })).rejects.toThrow(/keep\[0\]/);
     expect(existsSync(recipesDir(statePath))).toBe(false);
+  });
+
+  it("refuses every common token shape, anywhere in a value or as a row's name, and passes the words around them", async () => {
+    const shapes = [
+      "sk-ZQ8r2kLmN4pQ7sT1vX3yA5bC",
+      "sk-proj-ZQ8r2kLmN4pQ7sT1vX3yA5bC9dE",
+      "sk-ant-api03-ZQ8r2kLmN4pQ7sT1vX3yA5bC",
+      "AIzaSyD-9tSrke72PouQMnMX-a7eZSW0jkFMBWY",
+      "github_pat_11ABCDEFG0123456789_abcdefghijklmnop",
+      "ghp_16C7e42F292c6912E7710c838347Ae178B4a",
+      "gho_16C7e42F292c6912E7710c838347Ae178B4a",
+      "ghs_16C7e42F292c6912E7710c838347Ae178B4a",
+      "ghu_16C7e42F292c6912E7710c838347Ae178B4a",
+      "glpat-xxxxxxxxxxxxxxxxxxxx",
+      // Built here so the file holds no line a secret scanner reads as a live Slack token.
+      ["xoxb", "123456789012", "1234567890123", "AbCdEfGhIjKlMnOp"].join("-"),
+      ["xoxp", "123456789012", "1234567890123", "AbCdEfGhIjKl"].join("-"),
+      "AKIAIOSFODNN7EXAMPLE",
+      "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U",
+      "-----BEGIN OPENSSH PRIVATE KEY-----",
+      "-----BEGIN RSA PRIVATE KEY-----",
+    ];
+    for (const shape of shapes) {
+      await expect(writeRecipe(statePath, { ...LAPTOP, folders: { wsp: { from: `~/code/${shape}/x`, keep: [] } } }), shape).rejects.toThrow(/folders.wsp.from holds a value shaped like a token/);
+      await expect(writeRecipe(statePath, { ...LAPTOP, clis: { [shape]: { via: "brew" } } }), shape).rejects.toThrow(/shaped like a token/);
+    }
+    expect(existsSync(recipesDir(statePath))).toBe(false);
+    const plain = await writeRecipe(statePath, { ...LAPTOP, name: "desk session", skills: { "task-sk-notes": { from: "~/.claude/skills" }, "sk-learn": { from: "~/.claude/skills" } } });
+    expect(plain.file.name).toBe("desk session");
   });
 
   it("refuses a name that makes no file name, and a field nothing reads", async () => {
