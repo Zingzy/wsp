@@ -155,6 +155,7 @@ const CALLED: readonly Called[] = [
   { tool: "recipes_show", argv: ["recipes", "show", "laptop"], arguments: { name: "laptop" }, refused: true },
   { tool: "recipes_save", argv: ["recipes", "save", "laptop", "--from", "here"], arguments: { name: "laptop", from: "here" }, refused: true },
   { tool: "recipes_remove", argv: ["recipes", "remove", "laptop"], arguments: { name: "laptop" }, refused: true },
+  { tool: "add", argv: ["add", "nowhere", "--resume"], arguments: { address: "nowhere", resume: true }, refused: true },
   { tool: "usage", argv: ["usage"], arguments: {} },
   { tool: "usage", argv: ["usage", "--range", "week", "--by", "project"], arguments: { range: "week", by: "project" } },
   { tool: "workspaces", argv: ["workspaces"], arguments: {} },

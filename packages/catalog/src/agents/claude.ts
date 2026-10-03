@@ -6,7 +6,7 @@ import { CLAUDE_CONTEXT } from "../context.js";
 import { CLAUDE_HOOKS, CLAUDE_SETTINGS_FILE } from "../hooks.js";
 import { CLAUDE_MCP_CHECK } from "../mcp-check.js";
 import { CLAUDE_MCP_LOGIN } from "../mcp-login.js";
-import { CLAUDE_PLUGIN_SKILLS } from "../skills.js";
+import { CLAUDE_PLUGINS, CLAUDE_PLUGIN_SKILLS } from "../skills.js";
 import { MCP_SERVERS_JSON } from "../mcp.js";
 import { SIGN_IN_ROWS } from "../signin.js";
 
@@ -23,6 +23,7 @@ export const CLAUDE: AgentEntry = {
   // 2.1.281: ~/.claude/skills alone, links into the shared folder among them; plugins under their own folders.
   skillRoots: { user: [{ dir: "~/.claude/skills", lands: "link" }], project: [{ dir: ".claude/skills", lands: "link" }] },
   pluginSkills: CLAUDE_PLUGIN_SKILLS,
+  plugins: CLAUDE_PLUGINS,
   projectDocs: [AGENTS_MD, "CLAUDE.md"],
   // The slash is the skill's folder name, host's SKILL_NAME, which the catalog cannot import; mcp-install.test.ts pins this to it.
   firstMove: `/wsp ${SET_UP_WSP}`,

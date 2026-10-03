@@ -349,7 +349,7 @@ export function KindTab({ place, kind, ctx }: { place: PlaceView; kind: AnyKind;
   const { read, rows, name } = useKindRows(place, ctx);
   const level = useSettingsStore(s => s.agentsLevel);
   const open = useSettingsStore(s => s.openAgentsLevel);
-  return <KindPages kind={kind} read={read} rows={rows} on={{ name }} nav={{ level, open }} now={ctx.now} misses={recipeMissLines(place.provision?.rows ?? [])} />;
+  return <KindPages kind={kind} read={read} rows={rows} on={{ name }} nav={{ level, open }} now={ctx.now} misses={recipeMissLines(place.applied?.rows ?? [])} />;
 }
 
 /** One tab: its list, or the page of one of its items or of its add, as the nav names it. */

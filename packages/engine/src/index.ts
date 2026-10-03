@@ -35,6 +35,7 @@ export * from "./labels.js";
 export * from "./orphans.js";
 export * from "./golden-import.js";
 export * from "./provision.js";
+export * from "./run-env.js";
 export * from "./provision-files.js";
 export * from "./provision-mcp.js";
 export * from "./golden-diff.js";

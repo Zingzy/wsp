@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { AgentHere, InstallReport } from "@wsp/host";
-import type { BundleOutcome, ContextMenuItem, DesktopBridge, HostOutcome, HostsView, LinkTarget, LocalFontFace, OutsideLine, ShellChord, ThemePreference } from "@wsp/protocol";
+import type { BundleOutcome, ContextMenuItem, DesktopBridge, HostOutcome, HostsView, LinkTarget, LocalFontFace, OutsideLine, OutsideOpen, ShellChord, ThemePreference } from "@wsp/protocol";
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import { shellArgFrom } from "./shell-args.js";
 
@@ -51,8 +51,9 @@ const bridge: DesktopBridge & OnboardingBridge = {
     ipcRenderer.on("shell:open", listen);
     return () => ipcRenderer.off("shell:open", listen);
   },
-  onNeedsYouOpen: (handler: () => void): (() => void) => {
-    const listen = (): void => handler();
+  onNeedsYouOpen: (handler: (at?: OutsideOpen) => void): (() => void) => {
+    // What the click opens rides the event as the page said it: a setup's computer, or nothing for whatever it said last.
+    const listen = (_event: unknown, at?: OutsideOpen): void => handler(at);
     ipcRenderer.on("needs-you:open", listen);
     return () => ipcRenderer.off("needs-you:open", listen);
   },

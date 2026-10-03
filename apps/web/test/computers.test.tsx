@@ -7,7 +7,7 @@
 // that adds another computer.
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { type InitJob, COPY_CURRENT, DEFAULT_PREFERENCES, PLACES_TICKET_REFUSAL, PLACES_WORDS, PLACE_CONNECTS, PLACE_LOGIN_REFUSED_KIND, PlaceAddStep, absentRoad, fmtBytes, fmtMemGb, fmtSize, imageCopyStaysLine, placeAddSheetWord, placeDaemonBehind, placeNoDialLine, provisionWord, type AgentsReport, type AgentsTarget, type EventUnion, type InitSetup, type PlaceAddJob, type PlaceProvision, type PlaceView, type SealedImage, type SessionView, type WorkspaceStatus, type WorkspaceView, PLACE_INSTALL, PROVIDER_KEY_WORDS } from "@wsp/protocol";
+import { type InitJob, COPY_CURRENT, DEFAULT_PREFERENCES, PLACES_TICKET_REFUSAL, PLACES_WORDS, PLACE_CONNECTS, PLACE_LOGIN_REFUSED_KIND, PlaceAddStep, absentRoad, fmtBytes, fmtMemGb, fmtSize, imageCopyStaysLine, placeAddSheetWord, placeDaemonBehind, placeNoDialLine, setupWord, type AgentsReport, type AgentsTarget, type EventUnion, type InitSetup, type PlaceAddJob, type PlaceApplied, type PlaceSetup, type PlaceView, type SealedImage, type SessionView, type WorkspaceStatus, type WorkspaceView, PLACE_INSTALL, PROVIDER_KEY_WORDS } from "@wsp/protocol";
 import { render } from "@testing-library/react";
 import { makeApi, ProtocolClient, RequestError, type Api, type SshLogin } from "../src/protocol/client.js";
 import { useContextMenuStore } from "../src/actions/contextMenu.js";
@@ -228,34 +228,23 @@ describe("the Computers list", () => {
     expect(useSettingsStore.getState().reads.setup?.keys["box"]).toBe(true);
   });
 
-  it("reads the state cell in one order: blocked, not answering, the recipe on it, the daemon behind, a sign-in, then Ready", async () => {
-    const running: PlaceProvision = { state: "running", addId: "a_1", recipeAt: AT, startedAt: AT, rows: [], at: { label: "uv", index: 3, of: 7 } };
-    const failed: PlaceProvision = {
-      state: "done",
-      addId: "a_1",
-      recipeAt: AT,
-      startedAt: AT,
-      finishedAt: AT,
-      rows: [
-        { id: "tools/gh", label: "GitHub CLI", outcome: "failed", note: "no release for this chip" },
-        { id: "tools/uv", label: "uv", outcome: "failed", note: "the script exited 1" },
-        ...Array.from({ length: 5 }, (_, at) => ({ id: `tools/t${at}`, label: `t${at}`, outcome: "installed" as const })),
-      ],
-    };
-    const stuck = { ...box, id: "p_stuck", name: "stuck", blocked: "its login cannot run docker", provision: running };
-    const busy = { ...box, id: "p_busy", name: "busy", provision: running };
-    const broke = { ...box, id: "p_broke", name: "broke", provision: failed };
-    const gone = { ...laptop, id: "p_gone", name: "gone", provision: running };
+  it("reads the state cell in one order: blocked, a setup that failed or waits on the person, not answering, the setup running, the daemon behind, a sign-in, then Ready", async () => {
+    const running: PlaceSetup = { state: "running", addId: "a_1", startedAt: AT, steps: [{ step: "clis", state: "running" }], waiting: [] };
+    const failed: PlaceSetup = { state: "failed", addId: "a_1", startedAt: AT, finishedAt: AT, steps: [{ step: "floor", state: "failed" }], waiting: [], said: "the base tools did not install: curl" };
+    const stuck = { ...box, id: "p_stuck", name: "stuck", blocked: "its login cannot run docker", setup: running };
+    const busy = { ...box, id: "p_busy", name: "busy", setup: running };
+    const broke = { ...box, id: "p_broke", name: "broke", setup: failed };
+    const gone = { ...laptop, id: "p_gone", name: "gone", setup: running };
     const behind = { ...box, id: "p_old", name: "old", daemonVersion: 1 };
     const unsigned = { ...box, id: "p_sign", name: "sign", signIns: { claude: "signed-in", codex: "none" } } as PlaceView;
     useStore.setState({ places: [here, stuck, busy, broke, gone, behind, unsigned, box] });
     await mountComputers(computersApi().api);
     expect(stateOf("p_stuck")).toBe("Blocked");
     expect(listRow("p_stuck").getAttribute("title")).toBe("its login cannot run docker");
-    expect(stateOf("p_busy")).toBe("Building 3/7");
-    expect(listRow("p_busy").getAttribute("title")).toBe(provisionWord(running));
-    expect(stateOf("p_broke")).toBe("Failed");
-    expect(listRow("p_broke").getAttribute("title")).toBe("2 of 7 failed: GitHub CLI, uv");
+    expect(stateOf("p_busy")).toBe("Setting up");
+    expect(listRow("p_busy").getAttribute("title")).toBe(setupWord(running));
+    expect(stateOf("p_broke")).toBe("Setup failed");
+    expect(listRow("p_broke").getAttribute("title")).toBe("the base tools did not install: curl");
     expect(stateOf("p_gone")).toBe("No answer");
     // Behind with no road to update reads the word; the button stands only where a press can go.
     expect(stateOf("p_old")).toBe("Behind");
@@ -270,9 +259,9 @@ describe("the Computers list", () => {
 
   it("offers Update in the cell of a computer behind this wsp's daemon, puts it there on a press, and reads the job in the cell after", async () => {
     const asked: string[] = [];
-    const provision: PlaceProvision = { state: "running", addId: "a_2", recipeAt: AT, startedAt: AT, rows: [], at: { label: "uv", index: 3, of: 7 } };
+    const setup: PlaceSetup = { state: "running", addId: "a_2", startedAt: AT, steps: [{ step: "floor", state: "running" }], waiting: [] };
     const behind: PlaceView = { ...box, daemonVersion: 1 };
-    const api = computersApi({ placesUpdate: async (placeId: string) => (asked.push(placeId), { name: "hetzner", provision }) } as unknown as Partial<Api>).api;
+    const api = computersApi({ placesUpdate: async (placeId: string) => (asked.push(placeId), { name: "hetzner", setup }) } as unknown as Partial<Api>).api;
     useStore.setState({ places: [here, behind] });
     await mountComputers(api);
     const update = listRow("p_2").querySelector<HTMLElement>("[data-k='update']")!;
@@ -281,7 +270,7 @@ describe("the Computers list", () => {
     await waitFor(() => expect(asked).toEqual(["p_2"]));
     // The press is the button's own: the row does not open the page under it.
     expect(pageAt()).toBe("computers");
-    await waitFor(() => expect(useStore.getState().places.find(place => place.id === "p_2")?.provision).toEqual(provision));
+    await waitFor(() => expect(useStore.getState().places.find(place => place.id === "p_2")?.setup).toEqual(setup));
   });
 
   it("draws Add a computer under the computers and Add a cloud under the clouds, each opening the panel on its road, and a row opens its page", async () => {
@@ -632,12 +621,9 @@ describe("the Agents page on a computer", () => {
   });
 
   it("puts the report's refusals in a Not read card under the list, one row each", async () => {
-    const provision: PlaceProvision = {
-      state: "done",
-      addId: "a_1",
-      recipeAt: AT,
-      startedAt: AT,
-      finishedAt: AT,
+    const applied: PlaceApplied = {
+      hash: "h",
+      at: AT,
       rows: [
         { id: "agents/claude", label: "Claude Code", outcome: "installed" },
         { id: "agents/codex", label: "Codex", outcome: "failed", note: "npm exited 1" },
@@ -645,7 +631,7 @@ describe("the Agents page on a computer", () => {
         { id: "agents/mcp/linear", label: "linear", outcome: "skipped", kind: "server", note: "waited on GitHub CLI" },
       ],
     };
-    useStore.setState({ places: [here, { ...laptop, present: true, name: "spoo", provision }] });
+    useStore.setState({ places: [here, { ...laptop, present: true, name: "spoo", applied }] });
     await mountAgents(computersApi({ agentsRead: async () => ({ ...EMPTY_REPORT, refused: ["skills: the folder is not readable"] }) }).api, "p_1");
     // The report's refusals, then the recipe's rows that did not land there, a row each in a card of their own.
     expect(document.querySelector("[data-settings-card=not-read] [data-settings-head]")?.textContent).toBe(AGENTS_PAGE_WORDS.notRead);
@@ -934,14 +920,15 @@ describe("Add a computer on the page", () => {
     fireEvent.click(document.querySelector("[data-k='ssh-add']")!);
     stage(at.addId!, "connect", "done");
     stage(at.addId!, "host-key", "done");
+    stage(at.addId!, "check", "done");
     stage(at.addId!, "reach", "running");
     stage(at.addId!, "reach", "failed", "spoo cannot reach this computer at any of its addresses");
     await refuseWith(at, new RequestError("spoo cannot reach this computer at any of its addresses"));
     const states = plan().map(([, state]) => state);
-    expect(states).toEqual(["done", "done", "failed", ...PlaceAddStep.options.slice(3).map(() => "waiting")]);
+    expect(states).toEqual(["done", "done", "done", "failed", ...PlaceAddStep.options.slice(4).map(() => "waiting")]);
     const failed = document.querySelector("[data-k='plan'] li[data-state='failed']")!;
     expect(failed.querySelector("[data-k='step-failed']")?.className).toContain("destructive");
-    expect(document.querySelectorAll("[data-k='plan'] li[data-state='done'] svg")).toHaveLength(2);
+    expect(document.querySelectorAll("[data-k='plan'] li[data-state='done'] svg")).toHaveLength(3);
     expect(host().disabled).toBe(false);
   });
 

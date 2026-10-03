@@ -190,6 +190,14 @@
   "noReply": "thread {thread} has not replied yet",
   "newerTurn": "a newer turn is running; the reply above is the one before it",
   "noTerminalConfig": "No Ghostty config on this computer; the terminal pane keeps its defaults.",
+  "add": {
+    "refused": "add takes a computer over ssh, by user@host or by an alias from the ssh config, and {word} is not one. A project is recorded with projects_add; a provider's key and the join code another computer types are handed out at the host's own terminal, with wsp add.",
+    "providers": [
+      "box",
+      "solari"
+    ],
+    "ceilingMs": 600000
+  },
   "usages": {
     "computers": "wsp computers",
     "computers_set": "wsp computers set <computer> [--threads <n>] [--nap <minutes>|off] [--spawn on|off] [--max-machines <n>] [--max-depth <n>] [--reset <setting>]...",

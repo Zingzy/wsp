@@ -19,7 +19,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { LATEST_PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS } from "@modelcontextprotocol/sdk/types.js";
 import { CATALOG, agentName } from "@wsp/catalog";
 import { SEAL_REFUSAL } from "@wsp/keys";
-import { CLOUD_ENV, cloudFromEnv, placeSetRefusal, configDirSignInLine, EXIT_CODES, HERE_PLACE_ID, HOST_CLOSED_LINE, HOST_KEY_ENV, HOST_STOPPING_CLOSE, HOST_STOPPING_LINE, NOT_DELIVERED_LINE, HOST_TOKEN_ENV, HOST_URL_ENV, KIND_CLASS, TURN_TOKEN_ENV, LAUNCHED_WITH, LOOPBACK, SKILL_PREVIEW_BYTES, WS_PATH, isLoopback, isUrl, isWildcard, servedHostname, wsUrlOf, hostNoKeyLine, jsonLine, NEWER_TURN_LINE, noMessagesLine, noReplyLine, NO_TERMINAL_CONFIG_LINE, refusalLine, scopedNoPairLine, commandWords, authRefusal, deviceAuthOldHostLine, noSuchPlaceRefusal, pairKeyRefusal, SEAL_CLIENT, unclosedQuoteRefusal, validatorRefusal, RecipeFile, type PlaceSpend, type PlaceView, type ServerToolsAnswer } from "@wsp/protocol";
+import { CLOUD_ENV, cloudFromEnv, placeSetRefusal, configDirSignInLine, EXIT_CODES, HERE_PLACE_ID, HOST_CLOSED_LINE, HOST_KEY_ENV, HOST_STOPPING_CLOSE, HOST_STOPPING_LINE, NOT_DELIVERED_LINE, HOST_TOKEN_ENV, HOST_URL_ENV, KIND_CLASS, TURN_TOKEN_ENV, LAUNCHED_WITH, LOOPBACK, SKILL_PREVIEW_BYTES, WS_PATH, isLoopback, isUrl, isWildcard, servedHostname, wsUrlOf, hostNoKeyLine, jsonLine, NEWER_TURN_LINE, noMessagesLine, noReplyLine, NO_TERMINAL_CONFIG_LINE, refusalLine, scopedNoPairLine, commandWords, authRefusal, deviceAuthOldHostLine, noSuchPlaceRefusal, pairKeyRefusal, SEAL_CLIENT, unclosedQuoteRefusal, validatorRefusal, PROVIDER_KEY_WORDS, RecipeFile, type PendingComputer, type PlaceSpend, type PlaceView, type ServerToolsAnswer } from "@wsp/protocol";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { hostExitedLine, noHostAnsweredLine, startingHostLine, upArgs } from "../src/host-start.js";
 import { hostLogPath, hostTokenPath, lockPathFor, POLL_MS, SERVICE_WAIT_MS, STARTED_BY_ENV } from "../src/host-lock.js";
@@ -32,6 +32,7 @@ import { mcpServer, type Dialer } from "../src/mcp.js";
 import { recipeCases, TURN_ANSWERED, turnWords, type TurnCase } from "./mcp-record-turns.js";
 import { absolutePath, DEFAULTS_LABELS, defaultsValueLine, noDefaultsAnsweredLine, agentSetNothingLine, agentSetupNothingLine, defaultAgentLine, ENV_NAME_FIX, envNameLine, FROM_WORDS, newThreadsHeadLine, NOTHING_TO_SET_FIX, PICKER_WORDS, projectSetNothingLine, SETUP_WORDS, setupOnLine, startsOnLine, startsOnOwnLine, agentCopyWords, aimedBothLine, aimedUsage, c1Escaped, CLOSE_GRACE_MS, goneFromLine, hasTool, hostTokenMissingLine, isInAlsoLine, isInLine, noHostServingLine, noSkillHitsLine, notHeaderLine, otherVersion, PLACES_FIX, previewCutLine, projectOffComputerLine, projectScopeLine, projectUnnamedLine, SERVER_TOOL_COLUMNS, SKILL_HIT_COLUMNS, skillsShPlacelessLine, threadOf, toolLines, toolName, toolsAddedLine, toolsProjectBareLine, turnedInLine, turnedLine, UNAUTHORIZED_CLOSE, unsetVariableLine, VERBS, workspaceOf, type HostClient } from "../src/verbs.js";
 import { VERSION } from "../src/version.js";
+import { ADD_TOOL_FIX, ADD_TOOL_MS, addToolRefusal } from "../src/setup-follow.js";
 import { WORKSPACE_ANSWERED, workspaceWords } from "./mcp-record-workspaces.js";
 import { READS } from "./mcp-record-reads.js";
 
@@ -232,6 +233,7 @@ async function words(): Promise<Record<string, unknown>> {
     noReply: noReplyLine("{thread}"),
     newerTurn: NEWER_TURN_LINE,
     noTerminalConfig: NO_TERMINAL_CONFIG_LINE,
+    add: { refused: refusalLine(addToolRefusal("{word}"), ADD_TOOL_FIX), providers: Object.keys(PROVIDER_KEY_WORDS), ceilingMs: ADD_TOOL_MS },
     usages: Object.fromEntries(VERBS.filter(hasTool).flatMap(v => ("usage" in v ? [[toolName(v.name), v.usage]] : []))),
     defaults: {
       agentSetNothing: refusalLine(agentSetNothingLine, NOTHING_TO_SET_FIX),
@@ -447,6 +449,35 @@ const RECIPES: Answered = {
   recipes_remove: [{ case: "removed", arguments: { name: "laptop-one" }, replies: { "recipes.remove": reply({ recipe: RECIPE }) } }],
 };
 
+/** An add part way: picked, joined, its floor on, a step that failed for want of a word only the person has. */
+const PENDING: PendingComputer = {
+  id: "a_1",
+  address: "root@203.0.113.7",
+  sshPort: 2222,
+  name: "attic",
+  placeId: "place-9",
+  step: "choosing",
+  choices: RecipeFile.parse({ name: "laptop \u0085 \"one\" 🧪", clis: { ripgrep: { via: "brew" } } }),
+  startedAt: "2026-10-03T10:00:00.000Z",
+  failed: { said: "attic said \"no\"\nat the floor", fix: "Run it again." },
+};
+
+const WAIT = { row: "signins/codex", label: "Codex \u0085 \"cli\"", url: "https://auth.openai.com/codex/device", code: "ABCD-EFGH", expiresAt: "2026-10-03T10:15:00.000Z", state: "waiting" };
+const SETTING_UP = { ...PLACE, setup: { state: "running", addId: "a_1", startedAt: "2026-10-03T10:00:00.000Z", steps: [{ step: "floor", state: "done", ms: 41_000 }, { step: "signins", state: "running", note: "Codex \u0085 waits" }], waiting: [WAIT] } };
+const SET_UP = { ...PLACE, setup: { ...SETTING_UP.setup, state: "done", finishedAt: "2026-10-03T10:05:00.000Z", steps: [{ step: "floor", state: "done", ms: 41_000 }, { step: "folders", state: "failed", note: "api did not clone" }], waiting: [] }, applied: { hash: "h1", at: "2026-10-03T10:05:00.000Z", rows: [{ id: "tools/brew/gh", label: "GitHub CLI", outcome: "installed", step: "clis", ms: 1_500 }] } };
+
+/** The add tool reads the row its add or its resume made, and refuses a word that is no computer before asking. */
+const ADD: Answered = {
+  add: [
+    { case: "a sign-in waits on the person", arguments: { address: "root@203.0.113.7", recipe: "laptop-one", name: "attic", ssh_port: 2222, ssh_key: "/home/dev/.ssh/id", host_key: "ssh-ed25519 AAAA" }, replies: { "places.add": reply({ addId: "a_1", place: SETTING_UP }), "places.list": reply({ places: [SETTING_UP, CLOUD] }) } },
+    { case: "resumed past a wait to its end", arguments: { address: "attic", resume: true, later: true }, replies: { "places.setup": reply({ place: SETTING_UP }), "places.list": reply({ places: [CLOUD, SET_UP] }) } },
+    { case: "joined, waiting on its picks", arguments: { address: "attic" }, replies: { "places.add": reply({ addId: "a_1", place: PLACE, pending: PENDING }), "places.list": reply({ places: [PLACE] }) } },
+    { case: "a project's folder", arguments: { address: "/Users/dev/app" }, replies: {} },
+    { case: "a provider", arguments: { address: "solari" }, replies: {} },
+    { case: "the install refused", arguments: { address: "root@203.0.113.7" }, replies: { "places.add": refused("root@203.0.113.7 did not answer on port 22", "unreachable") } },
+  ],
+};
+
 /** The skill and server tools: every road to the target, each line the text says, and each refusal before the host
  * is asked. The host's rows come in an order of their own with a key no schema holds, which the answer drops. */
 const SKILLS_AND_SERVERS: Answered = {
@@ -563,6 +594,7 @@ const ANSWERED: Answered = {
   ...WORKSPACE_ANSWERED,
   computers: [
     { case: "rows", arguments: {}, replies: { "places.list": reply({ places: [PLACE, CLOUD] }), "cost.spend": reply({ places: [SPEND] }) } },
+    { case: "an add pending", arguments: {}, replies: { "places.list": reply({ places: [PLACE], pending: [PENDING] }), "cost.spend": reply({ places: [] }) } },
     { case: "empty", arguments: {}, replies: { "places.list": reply({ places: [] }), "cost.spend": reply({ places: [] }) } },
     { case: "refused", arguments: {}, replies: { "places.list": JSON.stringify({ id: 1, ok: false, error: "the token this line presented is not one this host holds", kind: "auth" }), "cost.spend": reply({ places: [] }) } },
   ],
@@ -577,6 +609,7 @@ const ANSWERED: Answered = {
     { case: "no such computer", arguments: { computer: "nowhere", threads: 1 }, replies: { "places.list": reply({ places: [PLACE, CLOUD] }) } },
   ],
   ...RECIPES,
+  ...ADD,
   usage: [
     {
       case: "an account read and one with no reading, and a day of use by agent",

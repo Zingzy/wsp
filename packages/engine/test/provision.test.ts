@@ -17,19 +17,19 @@ import {
   placeProvisionPaths,
   provisionCountWord,
   provisionLandedLine,
-  provisionLines,
+  setupLines,
   provisionListReadLine,
   provisionPackedLine,
   provisionServersLine,
   provisionShippedLine,
-  provisionWord,
+  setupWord,
   type PlaceProvisionRow,
 } from "@wsp/protocol";
 import { baseInstalls, baseVersionsCmd } from "../src/golden-base.js";
 import { PROFILE_PATH_FILE, TOOLS_PATH, agentInstallsFor, pathLine, toolInstallsFor, type RecipeEntry, type ToolInstall } from "../src/golden-import.js";
 import { FREE_KB_CMD } from "../src/golden-tools.js";
 import { MCP_SERVERS_JSON } from "@wsp/catalog";
-import { presentByWhatWaits, presentElsewhere, presentSteps, provisionBox, provisionCountsOf, provisionPlanOf, type ProvisionPlan } from "../src/provision.js";
+import { newSetupRun, presentByWhatWaits, presentElsewhere, presentSteps, provisionCountsOf, provisionPlanOf, provisionStep, type EngineStep, type ProvisionPlan, type ProvisionStage } from "../src/provision.js";
 import { OLD_APPEND_MARKS, READS_PER_EXEC } from "../src/exec-detached.js";
 import { SERVER_MARK } from "../src/provision-files.js";
 import { tarOf } from "../src/vault.js";
@@ -96,7 +96,19 @@ function boxMachine(answer: (cmd: string) => ExecResult | undefined = () => unde
 
 const step = (over: Partial<ToolInstall> & Pick<ToolInstall, "id" | "label">): ToolInstall => ({ manager: "script", cmd: `install ${over.id}`, ...over });
 
-const planOf = (steps: readonly ToolInstall[], skipped: ProvisionPlan["skipped"] = [], over: Partial<ProvisionPlan> = {}): ProvisionPlan => ({ recipeAt: "2026-09-17T10:00:00.000Z", path: TOOLS_PATH, steps, skipped, ...over });
+const planOf = (steps: readonly ToolInstall[], skipped: ProvisionPlan["skipped"] = [], over: Partial<ProvisionPlan> = {}): ProvisionPlan => ({ recipeAt: "2026-09-17T10:00:00.000Z", path: TOOLS_PATH, steps, skipped, agents: 0, compiler: false, ...over });
+
+/** The engine's steps of a setup in the order the job runs them, one run carried through all of them. */
+const ENGINE_STEPS: readonly EngineStep[] = ["floor", "agents", "clis", "mcp", "skills", "plugins", "configs", "context"];
+async function provisionBox(machine: Machine, plan: ProvisionPlan, stage: ProvisionStage, on: { home: string }): Promise<PlaceProvisionRow[]> {
+  const run = newSetupRun();
+  const rows: PlaceProvisionRow[] = [];
+  for (const step of ENGINE_STEPS) rows.push(...(await provisionStep(machine, plan, step, run, stage, on)));
+  return rows;
+}
+
+/** A setup that ended, for the words a row reads off it. */
+const ended = { state: "done" as const, addId: "a_1", startedAt: "x", steps: [], waiting: [] };
 
 /** The login the computer's own agent runs as, which is where the agents' folders are there. */
 const ON = { home: "/root" };
@@ -170,8 +182,8 @@ describe("what a computer already satisfies", () => {
     const rows = await provisionBox(machine, plan, () => {}, ON);
     expect(rows.map(r => r.id)).toEqual(plan.steps.map(s => s.id));
     expect(rows.every(r => r.outcome === "present")).toBe(true);
-    expect(provisionWord({ state: "done", addId: "a_1", recipeAt: plan.recipeAt, startedAt: "x", rows })).toBe(`${rows.length} tools ready`);
-    expect(provisionLines("spoo", { state: "done", addId: "a_1", recipeAt: plan.recipeAt, startedAt: "x", rows })[0]).toBe(`spoo: nothing installed, ${rows.length} already there`);
+    expect(setupWord(ended, { hash: "h", at: "x", rows })).toBe(`${rows.length} tools ready`);
+    expect(setupLines("spoo", ended, { hash: "h", at: "x", rows })[0]).toBe(`spoo: nothing installed, ${rows.length} already there`);
   });
 
   it("is a step whose only read is its version: the version it asks for, or any version at all where it asks for none", async () => {
@@ -438,6 +450,7 @@ describe("the person's own files and their servers, on the same run", () => {
   /** A plan whose files and servers are named, with a pack this computer answers without reading a disk. */
   const withFilesAndServers = (steps: readonly ToolInstall[]): ProvisionPlan =>
     planOf(steps, [], {
+      agents: steps.length,
       files: {
         lands: [{ id: "agents/claude", label: "Claude Code", dest: ".claude-cfg/skills" }],
         pack: async () => ({ tar: tarOf([{ path: ".claude-cfg/skills/why/SKILL.md", mode: 0o644, content: "why\n" }]), bytes: 1, unpacked: 1, skipped: [], cut: [], silenced: [], macPaths: [] }),
@@ -451,7 +464,7 @@ describe("the person's own files and their servers, on the same run", () => {
       },
     });
 
-  it("lands the files after the tools, writes the servers after the files and the machine context after all of it", async () => {
+  it("lands the agents' own files right after the agents, writes the servers after the files and the machine context after all of it", async () => {
     const { machine, calls } = boxMachine();
     const rows = await provisionBox(machine, withFilesAndServers([step({ id: "agents/codex", label: "Codex", bin: "codex" })]), () => {}, ON);
     const at = (needle: string): number => calls.findIndex(c => c.includes(needle));
@@ -465,10 +478,10 @@ describe("the person's own files and their servers, on the same run", () => {
       ["files/.claude-cfg/skills", "file"],
       [`${MCP_ID_PREFIX}claude/github`, "server"],
     ]);
-    expect(provisionWord({ state: "done", addId: "a_1", recipeAt: "x", startedAt: "y", rows })).toBe("1 tool, 1 file, 1 MCP server ready");
+    expect(setupWord(ended, { hash: "h", at: "x", rows })).toBe("1 tool, 1 file, 1 MCP server ready");
   });
 
-  it("counts the files and the servers in what the job says it is putting there, and in the rows it is on while it runs", async () => {
+  it("counts the files and the servers in what the job says it is putting there, and says the row it is on in each loop of installs", async () => {
     const plan = withFilesAndServers([step({ id: "agents/codex", label: "Codex", bin: "codex" })]);
     expect(provisionCountWord(provisionCountsOf(plan))).toBe("1 tool, 1 file, 1 MCP server");
     const { machine } = boxMachine();
@@ -476,9 +489,7 @@ describe("the person's own files and their servers, on the same run", () => {
     await provisionBox(machine, plan, (_detail, under) => {
       if (under !== undefined) at.push(`${under.index}/${under.of}: ${under.label}`);
     }, ON);
-    expect(at).toContain("1/3: Codex");
-    expect(at).toContain("2/3: your agents' files");
-    expect(at).toContain("3/3: MCP servers");
+    expect(at).toContain("1/1: Codex");
   });
 
   it("says each stage of the two rounds as a line of its own, in the order they happen", async () => {
@@ -522,7 +533,7 @@ describe("the person's own files and their servers, on the same run", () => {
       ON,
     );
     const left = rows.filter(r => r.id.startsWith("left-out/"));
-    expect(left).toEqual([gem, pem].map((note, i) => ({ id: `left-out/${i}`, label: "~/.claude.json", outcome: "skipped", kind: "file", note })));
+    expect(left).toEqual([gem, pem].map((note, i) => ({ id: `left-out/${i}`, label: "~/.claude.json", outcome: "skipped", kind: "file", note, step: "agents" })));
     expect(said).toContain(`~/.claude.json: skipped (${gem})`);
   });
 

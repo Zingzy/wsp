@@ -41,6 +41,8 @@ import {
   PLACES_TICKET_REFUSAL,
   NO_RECIPES,
   RECIPES_TICKET_REFUSAL,
+  noSuchRecipeRefusal,
+  recipeSlug,
   noPicksRefusal,
   recipeFromHereRefusal,
   recipeSummary,
@@ -453,6 +455,13 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
     machines: followers.get(held.slug) ?? [],
     file: held.file,
   });
+  /** The saved recipe a word names, its file and its slug, or the refusal naming the ones there are. */
+  const recipeNamed = async (word: string): Promise<{ slug: string; file: RecipeFile }> => {
+    const all = await recipes().list();
+    const found = all.find(r => r.slug === word || r.file.name === word || r.slug === recipeSlug(word));
+    if (found === undefined) throw Object.assign(new Error(noSuchRecipeRefusal(word, all.map(r => r.file.name))), { kind: "usage" });
+    return found;
+  };
   /** The computers that follow each recipe, empty on a runtime that holds no places. */
   const followers = async (): Promise<Map<string, string[]>> => (rt.places === undefined ? new Map() : rt.places.followers());
 
@@ -946,7 +955,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
                 return;
               }
-              send({ id: msg.id, ok: true, places: await places().list(now()), adds: places().adds() });
+              send({ id: msg.id, ok: true, places: await places().list(now()), adds: places().adds(), pending: await places().pending() });
               return;
             case "places.update": {
               if (!ownRoad()) {
@@ -1076,6 +1085,8 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 send({ id: msg.id, ok: false, error: PLACE_DOOR_UNSERVED });
                 return;
               }
+              // The recipe is read before anything is dialled, so a name that is not saved costs the box nothing.
+              const picked = msg.recipe === undefined ? undefined : await recipeNamed(msg.recipe);
               const at = await opts.door.open();
               const added = await places().add(
                 {
@@ -1088,10 +1099,20 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                   hostUrls: [...at.addresses, ...(at.relay === undefined ? [] : [at.relay])],
                   ...(at.backPort !== undefined ? { doorPort: at.backPort } : {}),
                   ...(at.relay !== undefined ? { relay: at.relay } : {}),
+                  ...(picked !== undefined ? { choices: picked.file, recipe: picked.slug } : {}),
                 },
                 now(),
               );
               send({ id: msg.id, ok: true, ...added });
+              return;
+            }
+            case "places.setup": {
+              if (!ownRoad()) {
+                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
+                return;
+              }
+              const picked = msg.recipe === undefined ? undefined : await recipeNamed(msg.recipe);
+              send({ id: msg.id, ok: true, ...(await places().setUp(msg.ref, { ...(picked !== undefined ? { choices: picked.file, recipe: picked.slug } : {}), ...(msg.addId !== undefined ? { addId: msg.addId } : {}) })) });
               return;
             }
             case "recipes.list":

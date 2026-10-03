@@ -1,58 +1,47 @@
 {
   "cloudOff": {
-    "name": "computers_set",
-    "description": "Sets what the person may set on one computer and answers its row as it now reads, the same row computers lists: threads, how many threads may run there at once, a new one waiting past it (one per 2.5 GB of that computer's memory up to its cores until it is set); nap, the minutes a workspace there with no window of its own runs with no turn and no work before it naps and stops costing anything, waking on the next message (20 until it is set, 0 never naps it), which every workspace there counts again from now and which the computer the app runs on does not take, since its workspaces are folders; spawn, max_machines and max_depth, what the agents on a workspace there that holds no switch of its own may ask of this host, as workspaces_agents names it for one workspace (on, up to 3 machines and one level deep, until it is set), read at every ask so a workspace made before the change follows it. A setting left out keeps what stands, and each word under reset takes that setting back to its default. The row carries cap, what runs there now, capDefault, what it reads by default, and settings, what the person set. A setting the computer's kind does not take, and a call that sets nothing, are refused in one line.",
+    "name": "add",
+    "description": "Adds a computer of the person's over ssh and sets it up from a saved recipe, as `wsp add <user@host> --recipe <name>` does: address is user@host or an alias from the ssh config, and the host logs in, checks it can run wsp there (root, systemd with cgroup v2, room on the disk), installs wsp, waits for it to dial back, then puts on the base tools and everything the recipe picks. With resume, address names a computer already added, or one that joined and waits on its picks, and sets it up again: from recipe where one is named, else from what it holds, running only what is missing, a sign-in that waited or ran out among it. This tool never waits on the person: it answers at the first sign-in waiting on them (the page and the code are in waiting, to hand over), at the end, or after ten minutes, and is called again with resume for the next of those; with later it does not stop at a sign-in and leaves it waiting. setup is the setup's steps as the computer's row holds them, each with its state and what it took; an install that fails is refused with the step it failed at. A computer this host has never dialled needs host_key, as the person read it off that computer, or the add is refused with the key it answered with. A project, a provider's key and the join code are not added here: projects_add records a project, and the other two belong at the host's own terminal.",
     "inputSchema": {
       "type": "object",
       "properties": {
-        "computer": {
+        "address": {
           "type": "string",
-          "description": "the computer, by the name computers lists or its id"
+          "description": "user@host, an alias from the ssh config, or with resume a computer already added"
         },
-        "threads": {
+        "recipe": {
+          "type": "string",
+          "description": "the saved recipe to set it up from, as recipes lists it"
+        },
+        "later": {
+          "type": "boolean",
+          "description": "go on past a sign-in that waits on the person and leave it waiting"
+        },
+        "resume": {
+          "type": "boolean",
+          "description": "set up a computer already added, or one that joined and waits on its picks"
+        },
+        "name": {
+          "type": "string",
+          "description": "what to call the computer here; what its address calls it without one"
+        },
+        "ssh_port": {
           "type": "integer",
           "minimum": 1,
-          "description": "how many threads may run on that computer at once"
+          "maximum": 65535,
+          "description": "the port ssh dials it on (default 22)"
         },
-        "nap": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 180,
-          "description": "the minutes a quiet workspace there runs before it naps; 0 never naps it"
-        },
-        "spawn": {
+        "ssh_key": {
           "type": "string",
-          "enum": [
-            "on",
-            "off"
-          ],
-          "description": "whether agents on a workspace there may open threads and fork machines under the thread they run in, capped, where the workspace holds no switch of its own"
+          "description": "the key file ssh logs in with"
         },
-        "max_machines": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "how many machines may stand at once under one root thread there while spawn is on"
-        },
-        "max_depth": {
-          "type": "integer",
-          "minimum": 1,
-          "description": "how many levels deep the tree under a root thread there may go while spawn is on"
-        },
-        "reset": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "enum": [
-              "threads",
-              "nap",
-              "spawn"
-            ]
-          },
-          "description": "the settings to take back to their defaults, by the same words"
+        "host_key": {
+          "type": "string",
+          "description": "the host key of a computer this one has never dialled, as read off that computer"
         }
       },
       "required": [
-        "computer"
+        "address"
       ],
       "additionalProperties": false,
       "$schema": "http://json-schema.org/draft-07/schema#"
@@ -818,10 +807,63 @@
             "default"
           ],
           "additionalProperties": false
+        },
+        "setup": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "step": {
+                "type": "string",
+                "enum": [
+                  "connect",
+                  "host-key",
+                  "check",
+                  "reach",
+                  "wsp",
+                  "service",
+                  "join",
+                  "floor",
+                  "agents",
+                  "signins",
+                  "clis",
+                  "skills",
+                  "mcp",
+                  "plugins",
+                  "configs",
+                  "folders",
+                  "github",
+                  "context"
+                ]
+              },
+              "state": {
+                "$ref": "#/properties/computer/properties/setup/properties/steps/items/properties/state"
+              },
+              "note": {
+                "$ref": "#/properties/computer/properties/setup/properties/finishedAt"
+              },
+              "ms": {
+                "$ref": "#/properties/computer/properties/setup/properties/steps/items/properties/ms"
+              }
+            },
+            "required": [
+              "step",
+              "state"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "waiting": {
+          "type": "array",
+          "items": {
+            "$ref": "#/properties/computer/properties/setup/properties/waiting/items"
+          }
         }
       },
       "required": [
-        "computer"
+        "computer",
+        "setup",
+        "waiting"
       ],
       "additionalProperties": false,
       "$schema": "http://json-schema.org/draft-07/schema#"
@@ -831,71 +873,48 @@
     }
   },
   "cloudOn": {
-    "name": "computers_set",
-    "description": "Sets what the person may set on one computer and answers its row as it now reads, the same row computers lists: threads, how many threads may run there at once, a new one waiting past it (one per 2.5 GB of that computer's memory up to its cores until it is set); nap, the minutes a workspace there with no window of its own runs with no turn and no work before it naps and stops costing anything, waking on the next message (20 until it is set, 0 never naps it), which every workspace there counts again from now and which the computer the app runs on does not take, since its workspaces are folders; spawn, max_machines and max_depth, what the agents on a workspace there that holds no switch of its own may ask of this host, as workspaces_agents names it for one workspace (on, up to 3 machines and one level deep, until it is set), read at every ask so a workspace made before the change follows it; machines and spend on a cloud, how many machines may run there at once and the dollars a day it may spend before it starts no new machine (3 and $10 until they are set). A setting left out keeps what stands, and each word under reset takes that setting back to its default. The row carries cap, what runs there now, capDefault, what it reads by default, and settings, what the person set. A setting the computer's kind does not take, and a call that sets nothing, are refused in one line.",
+    "name": "add",
+    "description": "Adds a computer of the person's over ssh and sets it up from a saved recipe, as `wsp add <user@host> --recipe <name>` does: address is user@host or an alias from the ssh config, and the host logs in, checks it can run wsp there (root, systemd with cgroup v2, room on the disk), installs wsp, waits for it to dial back, then puts on the base tools and everything the recipe picks. With resume, address names a computer already added, or one that joined and waits on its picks, and sets it up again: from recipe where one is named, else from what it holds, running only what is missing, a sign-in that waited or ran out among it. This tool never waits on the person: it answers at the first sign-in waiting on them (the page and the code are in waiting, to hand over), at the end, or after ten minutes, and is called again with resume for the next of those; with later it does not stop at a sign-in and leaves it waiting. setup is the setup's steps as the computer's row holds them, each with its state and what it took; an install that fails is refused with the step it failed at. A computer this host has never dialled needs host_key, as the person read it off that computer, or the add is refused with the key it answered with. A project, a provider's key and the join code are not added here: projects_add records a project, and the other two belong at the host's own terminal.",
     "inputSchema": {
       "type": "object",
       "properties": {
-        "computer": {
+        "address": {
           "type": "string",
-          "description": "the computer, by the name computers lists or its id"
+          "description": "user@host, an alias from the ssh config, or with resume a computer already added"
         },
-        "threads": {
-          "type": "integer",
-          "minimum": 1,
-          "description": "how many threads may run on that computer at once"
-        },
-        "machines": {
-          "type": "integer",
-          "minimum": 1,
-          "description": "how many machines may run on that cloud at once"
-        },
-        "spend": {
-          "type": "number",
-          "minimum": 0,
-          "description": "the dollars a day that cloud may spend before it starts no new machine"
-        },
-        "nap": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 180,
-          "description": "the minutes a quiet workspace there runs before it naps; 0 never naps it"
-        },
-        "spawn": {
+        "recipe": {
           "type": "string",
-          "enum": [
-            "on",
-            "off"
-          ],
-          "description": "whether agents on a workspace there may open threads and fork machines under the thread they run in, capped, where the workspace holds no switch of its own"
+          "description": "the saved recipe to set it up from, as recipes lists it"
         },
-        "max_machines": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "how many machines may stand at once under one root thread there while spawn is on"
+        "later": {
+          "type": "boolean",
+          "description": "go on past a sign-in that waits on the person and leave it waiting"
         },
-        "max_depth": {
+        "resume": {
+          "type": "boolean",
+          "description": "set up a computer already added, or one that joined and waits on its picks"
+        },
+        "name": {
+          "type": "string",
+          "description": "what to call the computer here; what its address calls it without one"
+        },
+        "ssh_port": {
           "type": "integer",
           "minimum": 1,
-          "description": "how many levels deep the tree under a root thread there may go while spawn is on"
+          "maximum": 65535,
+          "description": "the port ssh dials it on (default 22)"
         },
-        "reset": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "enum": [
-              "threads",
-              "machines",
-              "spend",
-              "nap",
-              "spawn"
-            ]
-          },
-          "description": "the settings to take back to their defaults, by the same words"
+        "ssh_key": {
+          "type": "string",
+          "description": "the key file ssh logs in with"
+        },
+        "host_key": {
+          "type": "string",
+          "description": "the host key of a computer this one has never dialled, as read off that computer"
         }
       },
       "required": [
-        "computer"
+        "address"
       ],
       "additionalProperties": false,
       "$schema": "http://json-schema.org/draft-07/schema#"
@@ -1661,10 +1680,63 @@
             "default"
           ],
           "additionalProperties": false
+        },
+        "setup": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "step": {
+                "type": "string",
+                "enum": [
+                  "connect",
+                  "host-key",
+                  "check",
+                  "reach",
+                  "wsp",
+                  "service",
+                  "join",
+                  "floor",
+                  "agents",
+                  "signins",
+                  "clis",
+                  "skills",
+                  "mcp",
+                  "plugins",
+                  "configs",
+                  "folders",
+                  "github",
+                  "context"
+                ]
+              },
+              "state": {
+                "$ref": "#/properties/computer/properties/setup/properties/steps/items/properties/state"
+              },
+              "note": {
+                "$ref": "#/properties/computer/properties/setup/properties/finishedAt"
+              },
+              "ms": {
+                "$ref": "#/properties/computer/properties/setup/properties/steps/items/properties/ms"
+              }
+            },
+            "required": [
+              "step",
+              "state"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "waiting": {
+          "type": "array",
+          "items": {
+            "$ref": "#/properties/computer/properties/setup/properties/waiting/items"
+          }
         }
       },
       "required": [
-        "computer"
+        "computer",
+        "setup",
+        "waiting"
       ],
       "additionalProperties": false,
       "$schema": "http://json-schema.org/draft-07/schema#"

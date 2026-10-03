@@ -133,7 +133,7 @@ function lastSaid(text: string, codes: readonly string[]): string | undefined {
 
 /** Runs the plan's line in a watched pty over the run's link, reporting each step, until the tool's own status says
  * signed in, the tool ends, the cap passes or the run is stopped. */
-export async function watchSignIn(plan: SignInPlan, run: SignInRun, o: { pollMs?: number; graceMs?: number; capMs?: number; flushMs?: number; now?: () => number } = {}): Promise<void> {
+export async function watchSignIn(plan: SignInPlan, run: SignInRun, o: { pollMs?: number; graceMs?: number; capMs?: number; flushMs?: number; now?: () => number; bare?: boolean } = {}): Promise<void> {
   const now = o.now ?? Date.now;
   const capMs = o.capMs ?? BOX_SIGN_IN_MS;
   const { link } = run;
@@ -180,6 +180,7 @@ export async function watchSignIn(plan: SignInPlan, run: SignInRun, o: { pollMs?
     questions: plan.questions,
     ...(line.env !== undefined ? { env: line.env } : {}),
     ...(o.flushMs !== undefined ? { flushMs: o.flushMs } : {}),
+    ...(o.bare === true ? { bare: true } : {}),
     onData: chunk => {
       if (seen.length < TEXT_CAP) seen += chunk;
       said = (said + chunk).slice(-TEXT_CAP);
@@ -245,7 +246,8 @@ export function hostActs(o: HostActsOptions): AgentsActs {
     signInLine: async (on, ask) => (await planSignIn(on, ask, { terminal: true })).line,
     signIn: async (on, ask) => {
       const plan = await planSignIn(on, ask);
-      return run => watchSignIn(plan, run);
+      // On a computer somebody owns the pty's bash reads nothing in the root home every workspace there writes.
+      return run => watchSignIn(plan, run, on.kind === "box" ? { bare: true } : {});
     },
     key: async (agent, key) => {
       const entry = agentOf(agent);

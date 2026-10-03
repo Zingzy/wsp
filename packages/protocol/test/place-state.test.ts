@@ -22,7 +22,7 @@ import {
   SPEND_LIMIT_LINE,
   spendCapRefusal,
   threadsAtOnce,
-  type PlaceProvision,
+  type PlaceSetup,
 } from "@wsp/protocol";
 
 const spoo: PlaceView = { id: "p_1", kind: "computer", name: "spoo", default: false, shape: { cpu: 2, memMb: 7885 }, daemonVersion: DAEMON_VERSION, cap: { threads: 2 }, running: 0 };
@@ -146,7 +146,7 @@ describe("what runs on a place", () => {
 });
 
 describe("the word a place's row says", () => {
-  const running: PlaceProvision = { state: "running", addId: "a_1", recipeAt: "2026-09-17T10:00:00.000Z", startedAt: "2026-09-17T10:01:00.000Z", rows: [], at: { label: "Codex", index: 3, of: 7 } };
+  const running: PlaceSetup = { state: "running", addId: "a_1", startedAt: "2026-09-17T10:01:00.000Z", steps: [{ step: "agents", state: "running" }], waiting: [] };
 
   it("reads Ready when nothing stands in the way", () => {
     expect(placeStateOf(spoo, null)).toEqual({ word: "Ready" });
@@ -183,16 +183,18 @@ describe("the word a place's row says", () => {
     expect(spendCapRefusal("solari", 10.02, 10)).toBe(`${SPEND_LIMIT_LINE} on solari ($10.02/$10); raise its spend per day or start the machine after midnight`);
   });
 
-  it("puts blocked, then not answering, then At limit, then Full, then the recipe, then behind", () => {
-    const all: PlaceView = { ...solari, blocked: "no overlay", running: 3, provision: running, daemonVersion: DAEMON_VERSION - 1 };
+  it("puts blocked, then not answering, then At limit, then Full, then the setup running, then behind", () => {
+    const all: PlaceView = { ...solari, blocked: "no overlay", running: 3, setup: running, daemonVersion: DAEMON_VERSION - 1 };
     const away = absentComputer("solari", null);
     expect(placeStateOf(all, away, 20)).toEqual({ word: PLACE_BLOCKED_WORD, sentence: "no overlay" });
     const { blocked: _b, ...unblocked } = all;
     expect(placeStateOf(unblocked, away, 20)).toEqual({ word: away.away, sentence: away.sentence });
     expect(placeStateOf(unblocked, null, 20).word).toBe("At limit");
     expect(placeStateOf(unblocked, null).word).toBe("Full");
-    expect(placeStateOf({ ...unblocked, running: 0 }, null).word).toBe("setting up 3/7: Codex");
-    const { provision: _p, ...settled } = unblocked;
+    expect(placeStateOf({ ...unblocked, running: 0 }, null)).toEqual({ word: "Setting up", sentence: "setting up the agents" });
+    // A setup that waits on the person, or failed, wins over the spend and the cap: nothing new runs there until it is through.
+    expect(placeStateOf({ ...unblocked, setup: { ...running, state: "failed", said: "no agent installed" } }, null, 20)).toEqual({ word: "Setup failed", sentence: "no agent installed" });
+    const { setup: _s, ...settled } = unblocked;
     expect(placeStateOf({ ...settled, running: 0 }, null).word).toBe(`daemon ${DAEMON_VERSION - 1}, host ${DAEMON_VERSION}`);
   });
 });

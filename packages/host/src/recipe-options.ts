@@ -5,13 +5,10 @@
 // configs. A Mac-only thing is never offered: a cask is no row at all, a
 // formula with no Linux build and a server bound to a macOS path are left out.
 import { posix } from "node:path";
-import { CATALOG_AGENTS, catalogEntry, catalogIdOfRow, hasLogin, keyEnvOf, mintsToken } from "@wsp/catalog";
+import { CATALOG_AGENTS, COMPILER_ROW, catalogEntry, catalogIdOfRow, hasLogin, keyEnvOf, mintsToken } from "@wsp/catalog";
 import { collect, detectSkills, expand, skillRoots, type Host, type Manifest } from "@wsp/collect";
 import { agentOfRow, MCP_ID_PREFIX, packageOf, type RecipeOptions, type RecipeSignIn, type SkillRow } from "@wsp/protocol";
 import { CONFIG_PATHS } from "./recipe-configs.js";
-
-/** The C toolchain's row, which the floor carries only for a picked row that names it. */
-export const COMPILER_ROW = "build-essential";
 
 /** Managers whose installs build from source, so a row of theirs needs the C toolchain on the box. */
 const COMPILING_MANAGERS = new Set(["cargo"]);

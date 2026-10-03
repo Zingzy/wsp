@@ -64,8 +64,8 @@ describe("the adds the app reads off the host", () => {
     push({ type: "place.stage", addId: "a_other", step: "connect", state: "done", note: "Debian 12" } as EventUnion);
     push({ type: "place.stage", addId: "a_other", step: "wsp", state: "running" } as EventUnion);
     expect(useAdds.getState().jobs["a_other"]?.steps).toEqual([{ step: "connect", state: "done", note: "Debian 12" }, { step: "wsp", state: "running" }]);
-    // The recipe behind a join is the computer's row's to say: no read, no line.
-    push({ type: "place.stage", addId: "a_nobody", step: "provision", state: "running", placeId: "p_9" } as EventUnion);
+    // The setup behind a join rides its own frames and is the computer's row's to say: no read, no line.
+    push({ type: "place.setup", addId: "a_nobody", placeId: "p_9", line: { step: "floor", state: "running" } } as EventUnion);
     await settle();
     expect(asked).toBe(2);
   });

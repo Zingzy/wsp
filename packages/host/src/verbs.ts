@@ -288,7 +288,11 @@ import {
   RecipeView,
   RECIPE_KINDS,
   type RecipeFile,
-  provisionWord,
+  setupWord,
+  pendingWord,
+  PendingComputer,
+  AddLine,
+  PlaceWait,
   spendMeterWord,
   namesPlace,
   noSuchPlaceRefusal,
@@ -363,6 +367,7 @@ import { watchBlock, watchOn, type WatchSignals } from "./watch.js";
 import { RecipeAnswer, RecipeScan, recipePrintout, scanPrintout } from "./recipe-answer.js";
 import { isRecipeTick, runRecipe, runScan, type ScanInput } from "./recipe-command.js";
 import { historyCache, smallRecipePath } from "./recipe-file.js";
+import { addComputer } from "./setup-follow.js";
 
 type Frame = Record<string, unknown> & { id?: string | number | null; ok?: boolean; type?: string };
 
@@ -772,7 +777,7 @@ export const hostPlatform = (): Platform => (platform() === "darwin" ? "darwin" 
  * since nothing about a machine exists there until one is forked. No row is marked default: which computer a
  * workspace lands on is its project's to say. The platform is handed in, since what this computer is called is
  * read where the host runs and not guessed here, and so is the spend, which is a read of its own. */
-export function computerLines(places: readonly PlaceView[], platform: "darwin" | "linux", spend: readonly PlaceSpend[] = []): string[] {
+export function computerLines(places: readonly PlaceView[], platform: "darwin" | "linux", spend: readonly PlaceSpend[] = [], pending: readonly PendingComputer[] = []): string[] {
   if (places.length === 0) return ["This host holds no computer. wsp add prints the join line for a computer you are sitting at."];
   const todayOf = (p: PlaceView): number | undefined => spend.find(s => s.place === p.id)?.todayUsd;
   const rows = places.map(p => [
@@ -791,14 +796,19 @@ export function computerLines(places: readonly PlaceView[], platform: "darwin" |
     p.kind === "provider" ? "" : (p.lastSeenAt ?? ""),
     placeDaemonBehind(p) ?? "",
     p.build ?? "",
-    // The recipe on that computer: what is being put on it, then what stands and what failed. Empty on a cloud
-    // and on this computer, which wsp installs nothing on.
-    provisionWord(p.provision),
+    // The setup on that computer: what is being put on it, then what stands and what failed. Empty on a cloud and
+    // on this computer, which wsp installs nothing on.
+    setupWord(p.setup, p.applied),
     // The agents on that computer, each at the version it answered with and the word for its sign-in. Empty on a
     // cloud account and on this computer, neither of which reports an agent.
     agentsCell(p),
   ]);
-  return table([["COMPUTER", "KIND", "CORES", "MEMORY", "DISK FREE", "ENGINE", "COPIES", "PRESENT", "WORKSPACES", "THREADS", "MACHINES", "SPEND", "STATE", "LAST SEEN", "BEHIND", "IMAGE", "TOOLS", "AGENTS"], ...rows]);
+  // An add that has not reached Set up is a row of its own until it does: its word and how far it got.
+  const waiting = pending.filter(p => p.placeId === undefined || !places.some(r => r.id === p.placeId)).map(p => {
+    const word = pendingWord(p);
+    return [p.name ?? p.address, "pending", "", "", "", "", "", "", "", "", "", "", word.word, "", "", "", word.sentence ?? "", ""];
+  });
+  return table([["COMPUTER", "KIND", "CORES", "MEMORY", "DISK FREE", "ENGINE", "COPIES", "PRESENT", "WORKSPACES", "THREADS", "MACHINES", "SPEND", "STATE", "LAST SEEN", "BEHIND", "IMAGE", "TOOLS", "AGENTS"], ...rows, ...waiting]);
 }
 
 /** wsp recipes: one row per recipe, what it holds and the computers that follow it. */
@@ -889,9 +899,9 @@ export function usageTableLines(read: { accounts: readonly AccountRow[]; used: U
 }
 
 /** What wsp computers answers: every row, and what each cloud has spent, both read on the road the list is. */
-async function readComputers(client: HostClient): Promise<{ computers: PlaceView[]; spend: PlaceSpend[] }> {
-  const [listed, spent] = await Promise.all([client.request<{ places: PlaceView[] }>("places.list"), client.request<{ places: PlaceSpend[] }>("cost.spend")]);
-  return { computers: listed.places, spend: spent.places };
+async function readComputers(client: HostClient): Promise<{ computers: PlaceView[]; spend: PlaceSpend[]; pending: PendingComputer[] }> {
+  const [listed, spent] = await Promise.all([client.request<{ places: PlaceView[]; pending?: PendingComputer[] }>("places.list"), client.request<{ places: PlaceSpend[] }>("cost.spend")]);
+  return { computers: listed.places, spend: spent.places, pending: listed.pending ?? [] };
 }
 
 /** The settings a reset takes in this process: a cloud's only where a cloud is registered. */
@@ -1100,7 +1110,15 @@ export interface CliOnlyVerb extends Omit<CliVerb, "tool"> {
   hostSide?: string;
 }
 
-export type Verb = CliVerb | ToolOnlyVerb | CliOnlyVerb;
+/** A tool whose command line is one of the shared parse's own commands, which runs that line at the terminal: one
+ * capability on both doors, the line's flags the tool's inputs. */
+export interface CommandToolVerb {
+  name: string;
+  tool: Tool;
+  command: true;
+}
+
+export type Verb = CliVerb | ToolOnlyVerb | CliOnlyVerb | CommandToolVerb;
 
 /** Why a verb's work is on the computer the wsp process runs on rather than on the host it drives: it reads this
  * computer's own package managers, agent history or terminal config. Read by the doors that serve a caller which is
@@ -3460,6 +3478,7 @@ async function signInHere(ctx: VerbContext, target: AgentsTarget, ask: { agent: 
       line: SignInLine.parse(line),
       terminal: ctx.terminal ?? { input: process.stdin, output: process.stdout },
       open: ctx.open ?? (async () => false),
+      ...("placeId" in target && target.placeId !== HERE_PLACE_ID ? { bare: true } : {}),
     });
   } finally {
     await road.close();
@@ -3752,14 +3771,14 @@ export const ALL_VERBS: readonly Verb[] = [
     run: async ctx => {
       if (ctx.args.length !== 0) throw usageRefusal("wsp computers takes no positional arguments.", usageIs(ctx));
       const read = await readComputers(await ctx.client());
-      ctx.out.emit(read, computerLines(read.computers, hostPlatform(), read.spend).join("\n"));
+      ctx.out.emit(read, computerLines(read.computers, hostPlatform(), read.spend, read.pending).join("\n"));
       return 0;
     },
     tool: tool({
       description:
-        "Every computer this host holds, which is the whole of where work can run: the computer the app runs on<!-- cloud -->, each box joined to it and each cloud account<!-- /cloud --><!-- no cloud --> and each box joined to it<!-- /no cloud -->. A row carries what that computer last reported (cores, memory, free disk, the engine it has for a project's own containers) and whether it is connected right now<!-- cloud -->; a cloud row carries its hourly rate<!-- /cloud -->. Every row carries its cap, threads at once on a computer<!-- cloud --> and machines at once and spend per day on a cloud<!-- /cloud --> (the number the person set, else one thread per 2.5 GB of memory up to its cores<!-- cloud -->, and 3 machines and $10 a day<!-- /cloud -->), and running, the threads running there now on a computer<!-- cloud --> or the machines holding a slot on a cloud<!-- /cloud -->; a row whose running meets its cap is full.<!-- cloud --> spend holds one row per cloud, what it has spent today (since midnight where the host runs) and this month and what it burns an hour now; a cloud whose spend today reaches its spend per day is at its limit and starts no new machine until midnight, while the machines already running there go on.<!-- /cloud --> A row whose copy of the image is building says which stage it is at, and one whose last build stopped says why. A computer is not a workspace: a project lives on a computer, and a workspace is a copy of that computer with the project inside, which wsp workspaces lists.",
+        "Every computer this host holds, which is the whole of where work can run: the computer the app runs on<!-- cloud -->, each box joined to it and each cloud account<!-- /cloud --><!-- no cloud --> and each box joined to it<!-- /no cloud -->. A row carries what that computer last reported (cores, memory, free disk, the engine it has for a project's own containers) and whether it is connected right now<!-- cloud -->; a cloud row carries its hourly rate<!-- /cloud -->. Every row carries its cap, threads at once on a computer<!-- cloud --> and machines at once and spend per day on a cloud<!-- /cloud --> (the number the person set, else one thread per 2.5 GB of memory up to its cores<!-- cloud -->, and 3 machines and $10 a day<!-- /cloud -->), and running, the threads running there now on a computer<!-- cloud --> or the machines holding a slot on a cloud<!-- /cloud -->; a row whose running meets its cap is full.<!-- cloud --> spend holds one row per cloud, what it has spent today (since midnight where the host runs) and this month and what it burns an hour now; a cloud whose spend today reaches its spend per day is at its limit and starts no new machine until midnight, while the machines already running there go on.<!-- /cloud --> A row whose copy of the image is building says which stage it is at, and one whose last build stopped says why. A computer is not a workspace: a project lives on a computer, and a workspace is a copy of that computer with the project inside, which wsp workspaces lists. pending holds every add that has not reached Set up: how far it got, what was chosen for it, and why it stopped where one did.",
       input: {},
-      output: { computers: z.array(PlaceView), spend: z.array(PlaceSpend) },
+      output: { computers: z.array(PlaceView), spend: z.array(PlaceSpend), pending: z.array(PendingComputer) },
       call: async (_args, deps) => asJson(await readComputers(await deps.client())),
     }),
   },
@@ -3814,6 +3833,39 @@ export const ALL_VERBS: readonly Verb[] = [
         }, reset ?? []);
         return asJson({ computer });
       },
+    }),
+  },
+  {
+    name: "add",
+    command: true,
+    tool: tool({
+      description:
+        "Adds a computer of the person's over ssh and sets it up from a saved recipe, as `wsp add <user@host> --recipe <name>` does: address is user@host or an alias from the ssh config, and the host logs in, checks it can run wsp there (root, systemd with cgroup v2, room on the disk), installs wsp, waits for it to dial back, then puts on the base tools and everything the recipe picks. With resume, address names a computer already added, or one that joined and waits on its picks, and sets it up again: from recipe where one is named, else from what it holds, running only what is missing, a sign-in that waited or ran out among it. This tool never waits on the person: it answers at the first sign-in waiting on them (the page and the code are in waiting, to hand over), at the end, or after ten minutes, and is called again with resume for the next of those; with later it does not stop at a sign-in and leaves it waiting. setup is the setup's steps as the computer's row holds them, each with its state and what it took; an install that fails is refused with the step it failed at. A computer this host has never dialled needs host_key, as the person read it off that computer, or the add is refused with the key it answered with. A project, a provider's key and the join code are not added here: projects_add records a project, and the other two belong at the host's own terminal.",
+      input: {
+        address: z.string().describe("user@host, an alias from the ssh config, or with resume a computer already added"),
+        recipe: z.string().optional().describe("the saved recipe to set it up from, as recipes lists it"),
+        later: z.boolean().optional().describe("go on past a sign-in that waits on the person and leave it waiting"),
+        resume: z.boolean().optional().describe("set up a computer already added, or one that joined and waits on its picks"),
+        name: z.string().optional().describe("what to call the computer here; what its address calls it without one"),
+        ssh_port: z.number().int().min(1).max(65535).optional().describe("the port ssh dials it on (default 22)"),
+        ssh_key: z.string().optional().describe("the key file ssh logs in with"),
+        host_key: z.string().optional().describe("the host key of a computer this one has never dialled, as read off that computer"),
+      },
+      output: { computer: PlaceView, setup: z.array(AddLine), waiting: z.array(PlaceWait) },
+      stream: ["setup", "waiting"],
+      call: async ({ address, recipe, later, resume, name, ssh_port: sshPort, ssh_key: keyPath, host_key: hostKey }, deps) =>
+        asJson(
+          await addComputer(await deps.client(), {
+            address,
+            ...(recipe !== undefined ? { recipe } : {}),
+            ...(later !== undefined ? { later } : {}),
+            ...(resume !== undefined ? { resume } : {}),
+            ...(name !== undefined ? { name } : {}),
+            ...(sshPort !== undefined ? { sshPort } : {}),
+            ...(keyPath !== undefined ? { keyPath } : {}),
+            ...(hostKey !== undefined ? { hostKey } : {}),
+          }),
+        ),
     }),
   },
   {

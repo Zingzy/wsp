@@ -31,7 +31,7 @@ afterEach(() => {
 });
 import { WebSocketServer } from "ws";
 import WebSocket from "ws";
-import { macKindOf, ALREADY_JOINED_LINE, DAEMON_VERSION, configHardLinkRefusal, backUrl, PLACE_LOGIN_REFUSED_KIND, hostKeyAsk, hostKeyMismatchRefusal, hostKeyUnconfirmedRefusal, hostKeyUnscannableRefusal, PLACE_ROOT_SHELLS, placeRootShellRefusal, addedProjectLine, addedProjectOn, agentsCell, placeCurrentLine, placeNoRecipeLine, placeProvisioningLine, provisionWord, type PlaceProvision, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, placeFileText, MCP_ID_PREFIX, placeDaemonBehind, placeDaemonPaths, placeKeptForLinkLine, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeProvisionPaths, placeUpdateLine, shellQuote, workFolderIn, wsUrlOf, type PlaceBack, type PlaceDoorView, type PlaceView, type SignInLine } from "@wsp/protocol";
+import { macKindOf, ALREADY_JOINED_LINE, DAEMON_VERSION, configHardLinkRefusal, backUrl, PLACE_LOGIN_REFUSED_KIND, hostKeyAsk, hostKeyMismatchRefusal, hostKeyUnconfirmedRefusal, hostKeyUnscannableRefusal, PLACE_ROOT_SHELLS, placeRootShellRefusal, addedProjectLine, addedProjectOn, agentsCell, placeCurrentLine, placeNoPicksLine, placeProvisioningLine, setupWord, RecipeFile, type PlaceProvisionRow, type PendingComputer, type PlaceSetup, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, placeFileText, MCP_ID_PREFIX, placeDaemonBehind, placeDaemonPaths, placeKeptForLinkLine, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeProvisionPaths, placeUpdateLine, shellQuote, workFolderIn, wsUrlOf, type PlaceBack, type PlaceDoorView, type PlaceView, type SignInLine } from "@wsp/protocol";
 import { CATALOG_AGENTS, CODEX_TOML } from "@wsp/catalog";
 import { PlaceAddTakenBackError, PlaceLoginRefusedError, freshEphemeral, makeSeal, sealKeys, sharedSecret, type PlaceBackHolder, type PlaceLogin, type PlaceStaging, type PlaceUpdateRequest, type Seal } from "@wsp/runtime";
 import { MissingKnownHostsError, missingKnownHostsLine, OWN_MARK, SshBackend, SSH_LINE_CAP, SSH_READ_SCRIPT, SSH_WORD_REFUSAL, keyFingerprint, sshWordReach, type SshLocalRun, type SshReach, type SshTransport } from "@wsp/engine";
@@ -98,7 +98,6 @@ import {
   updatedLines,
   SIGN_IN_FLAGS_REFUSAL,
   placeNoLoginsLine,
-  boxSignInLaterLine,
   boxSignedInLine,
   joinUnansweredLine,
   addUndoneLine,
@@ -508,20 +507,37 @@ describe("the table wsp places prints", () => {
     expect(placeLines([rows[2]!])[1]).not.toContain("daemon");
   });
 
-  it("says on the computers table what the recipe on that computer is doing, and nothing for a cloud or this Mac", () => {
-    const job: PlaceProvision = { state: "running", addId: "a_1", recipeAt: "2026-09-17T10:00:00.000Z", startedAt: "2026-09-17T10:01:00.000Z", rows: [], at: { label: "Codex", index: 3, of: 7 } };
-    const printed = computerLines([{ ...rows[1]!, provision: job }, rows[0]!, rows[2]!], "darwin");
+  it("says on the computers table what the setup on that computer is doing, and nothing for a cloud or this Mac", () => {
+    const job: PlaceSetup = { state: "running", addId: "a_1", startedAt: "2026-10-03T10:01:00.000Z", steps: [{ step: "agents", state: "running" }], waiting: [] };
+    const printed = computerLines([{ ...rows[1]!, setup: job }, rows[0]!, rows[2]!], "darwin");
     const header = printed[0]!;
     expect(header).toContain("TOOLS");
-    const column = (line: string): string => line.slice(header.indexOf("TOOLS")).trim();
+    const column = (line: string): string => line.slice(header.indexOf("TOOLS"), header.indexOf("AGENTS")).trim();
     // The word is the protocol's own, so this table and the app's row cannot say it two ways.
-    expect(column(printed[1]!)).toBe(provisionWord(job));
-    expect(column(printed[1]!)).toBe("setting up 3/7: Codex");
+    expect(column(printed[1]!)).toBe(setupWord(job));
+    expect(column(printed[1]!)).toBe("setting up the agents");
+    expect(printed[1]).toContain("Setting up");
     expect(column(printed[2]!)).toBe("");
     expect(column(printed[3]!)).toBe("");
     // Once it is over the same column says what stands.
-    const over = computerLines([{ ...rows[1]!, provision: { ...job, state: "done", at: undefined, rows: [{ id: "agents/codex", label: "Codex", outcome: "installed" }] } }], "darwin");
-    expect(over[1]!.slice(over[0]!.indexOf("TOOLS")).trim()).toBe("1 tool ready");
+    const over = computerLines([{ ...rows[1]!, setup: { ...job, state: "done", steps: [] }, applied: { hash: "h", at: "x", rows: [{ id: "agents/codex", label: "Codex", outcome: "installed" }] } }], "darwin");
+    expect(over[1]!.slice(over[0]!.indexOf("TOOLS"), over[0]!.indexOf("AGENTS")).trim()).toBe("1 tool ready");
+  });
+
+  it("lists every add that has not reached Set up below the computers, Pending with how far it got or Setup failed with why", () => {
+    const choices = RecipeFile.parse({ name: "spoo" });
+    const pending: PendingComputer[] = [
+      { id: "a_1", address: "root@10.0.0.9", name: "spoo", step: "choosing", choices, startedAt: "x", placeId: "p_9" },
+      { id: "a_2", address: "root@10.0.0.7", step: "check", choices, startedAt: "x", failed: { said: "root@10.0.0.7 runs no systemd" } },
+    ];
+    const printed = computerLines([rows[0]!], "darwin", [], pending);
+    const header = printed[0]!;
+    const state = (line: string): string => line.slice(header.indexOf("STATE"), header.indexOf("LAST SEEN")).trim();
+    expect(printed.slice(2).map(l => [l.split(/\s+/)[0], state(l)])).toEqual([
+      ["spoo", "Pending"],
+      ["root@10.0.0.7", "Setup failed"],
+    ]);
+    expect(printed[2]).toContain("joined; waiting on what goes on it");
   });
 
   it("says on the computers table which agents stand on a computer, at which version and signed in how", () => {
@@ -538,9 +554,9 @@ describe("the table wsp places prints", () => {
     expect(column(printed[3]!)).toBe("");
   });
 
-  it("says nothing in the image column across the three states of the recipe, while the tools column beside it says what is happening", () => {
-    const job: PlaceProvision = { state: "running", addId: "a_1", recipeAt: "2026-09-17T10:00:00.000Z", startedAt: "2026-09-17T10:01:00.000Z", rows: [], at: { label: "your agents' files", index: 36, of: 37 } };
-    const done: PlaceProvision = { ...job, state: "done", at: undefined, rows: [{ id: "agents/codex", label: "Codex", outcome: "installed" }] };
+  it("says nothing in the image column across the states of the setup, while the tools column beside it says what is happening", () => {
+    const job: PlaceSetup = { state: "running", addId: "a_1", startedAt: "2026-10-03T10:01:00.000Z", steps: [{ step: "skills", state: "running" }], waiting: [] };
+    const done = { setup: { ...job, state: "done" as const, steps: [] }, applied: { hash: "h", at: "x", rows: [{ id: "agents/codex", label: "Codex", outcome: "installed" as const }] } };
     const of = (place: PlaceView): { image: string; tools: string } => {
       const printed = computerLines([place], "darwin");
       const header = printed[0]!;
@@ -550,8 +566,8 @@ describe("the table wsp places prints", () => {
     // A computer that keeps no image says nothing in that column in any state of the job, and the refusal a fork
     // there meets while the job runs is never one of them.
     expect(of(rows[1]!)).toEqual({ image: "", tools: "" });
-    expect(of({ ...rows[1]!, provision: job })).toEqual({ image: "", tools: "setting up 36/37: your agents' files" });
-    expect(of({ ...rows[1]!, provision: done })).toEqual({ image: "", tools: "1 tool ready" });
+    expect(of({ ...rows[1]!, setup: job })).toEqual({ image: "", tools: "setting up the skills and the agents' own files" });
+    expect(of({ ...rows[1]!, ...done })).toEqual({ image: "", tools: "1 tool ready" });
   });
 
   it("says on the computers table how many threads run on a computer and machines on a cloud against its cap, and Full once the count meets it", () => {
@@ -1405,115 +1421,6 @@ describe("wsp add on a computer reached over ssh", () => {
     await expect(addCommand(io, opts(tmp("add-ssh-failed")), ["root@10.0.0.9"], addFlags("box", "2222", undefined), deps)).rejects.toThrow(sentence);
     expect(io.lines).toContain(`  x ${PLACE_ADD_WORDS.reach}`);
     expect([...io.lines, ...io.errors].filter(line => line.includes(sentence))).toEqual([]);
-  });
-
-  it("prints the recipe's own rows as they land, after the join lines and before the sign-in it needs them for", async () => {
-    const io = { ...captured(), isTTY: true, ask: async () => "no" };
-    const frames: ((frame: Record<string, unknown>) => void)[] = [];
-    const job: PlaceProvision = {
-      state: "running",
-      addId: "a_mine",
-      recipeAt: "2026-09-17T10:00:00.000Z",
-      startedAt: "2026-09-17T10:01:00.000Z",
-      rows: [],
-      at: { label: "Codex", index: 1, of: 2 },
-    };
-    const done: PlaceProvision = {
-      ...job,
-      state: "done",
-      at: undefined,
-      rows: [
-        { id: "agents/codex", label: "Codex", outcome: "installed" },
-        { id: "tools/brew/gh", label: "gh", outcome: "present" },
-      ],
-    };
-    const place: PlaceView = { id: "p_1", kind: "computer", name: "spoo", default: true, present: true, takesForks: true, agents: ["codex"], logins: "/wsp/logins" };
-    const client = {
-      request: async (op: string, params?: Record<string, unknown>) => {
-        if (op === "places.list") return { places: [{ ...place, provision: done }] } as Record<string, unknown>;
-        expect(op).toBe("places.add");
-        const addId = String(params!["addId"]);
-        for (const fn of frames) {
-          // The join's own steps and the recipe's rows ride the one stream: the step's words are said once and
-          // each row stands on its own line under it.
-          fn({ type: "place.stage", addId, step: "join", state: "done", note: "engine none" });
-          fn({ type: "place.stage", addId, step: "provision", state: "running", note: "2 tools from the recipe of 2026-09-17T10:00:00.000Z" });
-          fn({ type: "place.stage", addId, step: "provision", state: "running", note: "Codex: installed" });
-          fn({ type: "place.stage", addId, step: "provision", state: "done", note: "the rows are in" });
-        }
-        return { addId, place: { ...place, provision: job } } as Record<string, unknown>;
-      },
-      events: async () => {},
-      onFrame: (fn: (frame: Record<string, unknown>) => void) => {
-        frames.push(fn);
-        return () => frames.splice(frames.indexOf(fn), 1);
-      },
-      closeWords: () => "",
-      closed: Promise.resolve(),
-      close: () => {},
-      terminate: () => {},
-    };
-    const deps = { ...systemPlaceDeps, dial: async () => client as never };
-    expect(await addCommand(io, opts(tmp("add-recipe")), ["root@10.0.0.9"], {}, deps)).toBe(0);
-    const said = io.lines;
-    const at = (needle: string): number => said.findIndex(l => l.includes(needle));
-    expect(at("spoo joined this wsp")).toBeGreaterThanOrEqual(0);
-    // Each row on its own line as it lands, and the tally once the job is over, after the join's own lines.
-    expect(at("Codex: installed")).toBeGreaterThanOrEqual(0);
-    expect(at("spoo: 1 installed: Codex, 1 already there")).toBeGreaterThan(at("spoo joined this wsp"));
-    // The step's words are the protocol's and are said once, not once per row.
-    expect(said.filter(l => l.includes(PLACE_ADD_WORDS.provision))).toHaveLength(0);
-    // The sign-in on that computer comes after the rows: Codex cannot be signed in there before it is there.
-    expect(at("Sign Codex in on spoo now?")).toBe(-1);
-    expect(at(boxSignInLaterLine("spoo", "codex"))).toBeGreaterThan(at("spoo: 1 installed: Codex, 1 already there"));
-  });
-
-  it("offers the sign-in on that computer while the person is at this terminal, and says what threads read there when they are not", async () => {
-    const place: PlaceView = {
-      id: "p_1",
-      kind: "computer",
-      name: "box",
-      default: true,
-      present: true,
-      takesForks: true,
-      agents: ["claude", "codex"],
-      logins: "/wsp/logins",
-    };
-    const client = {
-      request: async (op: string) => (op === "agents.signInLine" ? { line: { command: "codex login --device-auth", prepare: "mkdir -p x" } } : ({ place, hostKey: "ssh-ed25519 SHA256:abc" } as Record<string, unknown>)),
-      events: async () => {},
-      onFrame: () => () => {},
-      closeWords: () => "",
-      closed: Promise.resolve(),
-      close: () => {},
-      terminate: () => {},
-    };
-    const asked: string[] = [];
-    const signedIn: { agent?: string; line: SignInLine }[] = [];
-    const deps = {
-      ...systemPlaceDeps,
-      dial: async () => client as never,
-      signIn: async (o: { agent?: string; line: SignInLine }) => {
-        signedIn.push({ agent: o.agent, line: o.line });
-        return { signedIn: true };
-      },
-    } as Parameters<typeof addCommand>[4];
-    const io = { ...captured(), isTTY: true, ask: async (q: string) => (asked.push(q), "yes") };
-    expect(await addCommand(io, opts(tmp("add-offer")), ["root@10.0.0.9"], {}, deps)).toBe(0);
-    // Only the agent whose login lives on that computer is offered; Claude Code's token is this computer's.
-    expect(asked).toHaveLength(1);
-    expect(asked[0]).toContain("Sign Codex in on box now?");
-    expect(signedIn).toEqual([{ agent: "codex", line: { command: "codex login --device-auth", prepare: "mkdir -p x" } }]);
-    expect(io.lines.join("\n")).toContain(boxSignedInLine("box", "codex"));
-    // Nobody at the keyboard: nothing is asked and nothing runs, and the line says what threads there read
-    // until it is signed in and how to sign it in later.
-    const quiet = captured();
-    expect(await addCommand(quiet, opts(tmp("add-quiet")), ["root@10.0.0.9"], {}, deps)).toBe(0);
-    expect(signedIn).toHaveLength(1);
-    expect(quiet.lines.join("\n")).toContain(boxSignInLaterLine("box", "codex"));
-    // In the person's words: the key they saved here, and nothing of where wsp keeps it.
-    expect(quiet.lines).toContain("Codex is not signed in on box. Until it is, threads there use the OPENAI_API_KEY saved on this computer. wsp add box --sign-in codex signs it in.");
-    expect(quiet.lines.join("\n")).not.toMatch(/vault/);
   });
 
   it("asks about the key of a computer this one has never dialled, sends the one it was answered with, and sends nothing off a terminal", async () => {
@@ -2429,6 +2336,9 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
       "connect running",
       "connect done (Linux 6.8.0)",
       "host-key done (ssh-ed25519 SHA256:abc)",
+      // What the box must be before anything of wsp's goes on it; a box whose check said nothing is not refused.
+      "check running",
+      "check done",
       // What the box reached of this host's addresses, before anything of wsp's went onto it.
       "reach running",
       "reach done (http://192.168.1.20:4400)",
@@ -3143,7 +3053,7 @@ describe("wsp add <place> --update", () => {
 
   /** A host whose update answers `reply` and, while it does, pushes the recipe's own rows back on the stream the
    * line minted. The listing it answers with carries the job as it stands once the rows have landed. */
-  const recipeClient = (reply: Record<string, unknown> | Error, listed: PlaceProvision) => {
+  const recipeClient = (reply: Record<string, unknown> | Error, listed: Pick<PlaceView, "setup" | "applied">) => {
     const asked: { op: string; params?: Record<string, unknown> }[] = [];
     const frames: ((frame: Record<string, unknown>) => void)[] = [];
     const rows: PlaceView[] = [{ id: "p_1", kind: "computer", name: "spoo", default: true, joinedAt: new Date(0).toISOString(), daemonVersion: DAEMON_VERSION }];
@@ -3153,16 +3063,16 @@ describe("wsp add <place> --update", () => {
         Promise.resolve({
           request: (op: string, params?: Record<string, unknown>) => {
             asked.push({ op, ...(params === undefined ? {} : { params }) });
-            // The row carries the job from the moment the first line started it, which is before this line asks.
-            if (op === "places.list") return Promise.resolve({ places: rows.map(r => (reply instanceof Error || asked.some(a => a.op === "places.update") ? { ...r, provision: listed } : r)) } as never);
+            // The row carries the setup from the moment the first line started it, which is before this line asks.
+            if (op === "places.list") return Promise.resolve({ places: rows.map(r => (reply instanceof Error || asked.some(a => a.op === "places.update") ? { ...r, ...listed } : r)) } as never);
             if (op !== "places.update") return Promise.reject(new Error(`unexpected op ${op}`));
             if (reply instanceof Error) return Promise.reject(reply);
             const addId = String(params!["addId"]);
             for (const fn of frames) {
-              for (const row of listed.rows) fn({ type: "place.stage", addId, step: "provision", state: "running", note: `${row.label}: ${row.outcome}` });
-              fn({ type: "place.stage", addId, step: "provision", state: listed.state === "done" ? "done" : "failed", note: "the rows are in" });
-              // Another computer's job on the same host is another stream, and this line prints none of it.
-              fn({ type: "place.stage", addId: "a_other", step: "provision", state: "running", note: "somebody else's row" });
+              for (const line of listed.setup?.steps ?? []) fn({ type: "place.setup", addId, placeId: "p_1", line });
+              fn({ type: "place.setup", addId, placeId: "p_1", end: listed.setup?.state === "failed" ? "failed" : "ready" });
+              // Another computer's setup on the same host is another stream, and this line prints none of it.
+              fn({ type: "place.setup", addId: "a_other", placeId: "p_2", line: { step: "clis", state: "failed", note: "somebody else's row" } });
             }
             return Promise.resolve(reply as never);
           },
@@ -3171,7 +3081,7 @@ describe("wsp add <place> --update", () => {
             frames.push(fn);
             return () => frames.splice(frames.indexOf(fn), 1);
           },
-          closed: Promise.resolve(),
+          closed: new Promise(() => {}),
           closeWords: () => "",
           close: () => {},
           drop: () => {},
@@ -3179,54 +3089,52 @@ describe("wsp add <place> --update", () => {
     };
   };
 
-  const jobOf = (rows: PlaceProvision["rows"], state: PlaceProvision["state"] = "done"): PlaceProvision => ({
-    state,
-    addId: "a_1",
-    recipeAt: "2026-09-17T10:00:00.000Z",
-    startedAt: "2026-09-17T10:01:00.000Z",
-    rows,
+  const setupOf = (rows: PlaceProvisionRow[], state: PlaceSetup["state"] = "done", said?: string): Pick<PlaceView, "setup" | "applied"> => ({
+    setup: { state, addId: "a_1", startedAt: "2026-10-03T10:01:00.000Z", steps: [{ step: "agents", state: "done", ms: 12_000 }], waiting: [], ...(said !== undefined ? { said } : {}) },
+    applied: { hash: "h", at: "2026-10-03T10:05:00.000Z", rows },
   });
+  const running = (listed: Pick<PlaceView, "setup">): PlaceSetup => ({ ...listed.setup!, state: "running" });
 
-  it("puts the recipe on a computer already running this daemon, saying so and then printing every row", async () => {
+  it("runs the setup again on a computer already running this daemon, saying so and then printing every step and the tally", async () => {
     const io = captured();
-    const job = jobOf([
+    const job = setupOf([
       { id: "agents/node", label: "Node 22.23.2", outcome: "present" },
       { id: "agents/codex", label: "Codex", outcome: "installed" },
     ]);
-    const fake = recipeClient({ name: "spoo", provision: { ...job, state: "running" } }, job);
+    const fake = recipeClient({ name: "spoo", setup: running(job) }, job);
     expect(await addCommand(io, opts(tmp("update-recipe")), ["spoo"], { update: true }, updateDeps(fake.dial))).toBe(0);
     const said = io.lines.join("\n");
     // No daemon half in the reply: the computer is current, and the line says so rather than refusing the update.
     expect(said).toContain(placeCurrentLine("spoo", DAEMON_VERSION));
-    expect(said).toContain("Codex: installed");
+    expect(said).toContain("  · the agents (12s)");
     expect(said).toContain("spoo: 1 installed: Codex, 1 already there");
     expect(said).not.toContain("somebody else's row");
     // The rows are read off the row the host keeps, which is what outlives the run.
     expect(fake.asked.map(a => a.op)).toEqual(["places.list", "places.update", "places.list"]);
   });
 
-  it("exits 1 naming the row that failed, and 0 when every row landed or was already there", async () => {
+  it("exits 1 where a step that blocks stopped it, and 0 where it finished, a row that failed and can be retried among it", async () => {
     const io = captured();
-    const failed = jobOf([
+    const failedRow = setupOf([
       { id: "agents/codex", label: "Codex", outcome: "installed" },
       { id: "tools/brew/gh", label: "gh", outcome: "failed", note: "brew answered 404" },
     ]);
-    const fake = recipeClient({ name: "spoo", provision: { ...failed, state: "running" } }, failed);
-    expect(await addCommand(io, opts(tmp("update-failed")), ["spoo"], { update: true }, updateDeps(fake.dial))).toBe(1);
+    const fake = recipeClient({ name: "spoo", setup: running(failedRow) }, failedRow);
+    expect(await addCommand(io, opts(tmp("update-failed")), ["spoo"], { update: true }, updateDeps(fake.dial))).toBe(0);
     expect(io.lines.join("\n")).toContain("x gh: brew answered 404");
-    const stopped = jobOf([{ id: "agents/codex", label: "Codex", outcome: "installed" }], "stopped");
-    const gone = recipeClient({ name: "spoo", provision: { ...stopped, state: "running" } }, { ...stopped, said: "spoo is not connected" });
+    const stopped = setupOf([{ id: "agents/codex", label: "Codex", outcome: "failed" }], "failed", "no agent installed: Codex");
+    const gone = recipeClient({ name: "spoo", setup: running(stopped) }, stopped);
     const quiet = captured();
     expect(await addCommand(quiet, opts(tmp("update-stopped")), ["spoo"], { update: true }, updateDeps(gone.dial))).toBe(1);
-    expect(quiet.lines.join("\n")).toContain("spoo: spoo is not connected");
+    expect(quiet.lines.join("\n")).toContain("spoo: no agent installed: Codex");
   });
 
-  it("returns on a computer whose recipe is already going on, in the one sentence, rather than waiting on a job it did not start", async () => {
+  it("returns on a computer whose setup is already going on, in the one sentence, rather than waiting on a job it did not start", async () => {
     const io = captured();
     // What the host answers a second update: the op's own refusal, while the listing's row still carries the job
     // the first line started. A line that followed that row would wait on a stream nothing of its own ends.
-    const job = jobOf([{ id: "agents/codex", label: "Codex", outcome: "installed" }], "running");
-    const busy = placeProvisioningLine("spoo", { label: "Codex", index: 1, of: 2 });
+    const job = setupOf([{ id: "agents/codex", label: "Codex", outcome: "installed" }], "running");
+    const busy = placeProvisioningLine("spoo", "agents");
     const fake = recipeClient(Object.assign(new Error(busy), { kind: "conflict" }), job);
     const code = await Promise.race([
       addCommand(io, opts(tmp("update-busy")), ["spoo"], { update: true }, updateDeps(fake.dial)),
@@ -3235,15 +3143,15 @@ describe("wsp add <place> --update", () => {
     expect(code).toBe(1);
     expect(io.errors.join("\n")).toContain(busy);
     // Nothing of the running job's tally is printed: those rows are not this line's to say.
-    expect(io.lines.join("\n")).not.toContain("Codex: installed");
+    expect(io.lines.join("\n")).not.toContain("installed: Codex");
     expect(fake.asked.map(a => a.op)).toEqual(["places.list", "places.update"]);
   });
 
-  it("says what a computer that got no recipe at all got, and exits 0: nothing failed", async () => {
+  it("says what a computer that got no setup got, and exits 0: nothing failed", async () => {
     const io = captured();
-    const fake = updateClient({ name: "spoo", said: placeNoRecipeLine("spoo", "/Users/lena/.wsp/recipe.json") });
+    const fake = updateClient({ name: "spoo", said: placeNoPicksLine("spoo") });
     expect(await addCommand(io, opts(tmp("update-norecipe")), ["spoo"], { update: true }, updateDeps(fake.dial))).toBe(0);
-    expect(io.lines.join("\n")).toContain("this computer has no recipe at /Users/lena/.wsp/recipe.json");
+    expect(io.lines.join("\n")).toContain("spoo has nothing picked to go on it");
     // Nothing to follow, so nothing is read again.
     expect(fake.asked.map(a => a.op)).toEqual(["places.list", "places.update"]);
   });

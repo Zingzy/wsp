@@ -13,7 +13,7 @@ import { daemonUnderTest, type DaemonUnderTest } from "../../daemon/test/harness
 import { assetDir, assetProof, daemonBinaryHere } from "../src/assets.js";
 import { hostPlatform } from "../src/verbs.js";
 import { DAEMON_TARGETS, daemonBinaryIn, daemonTargetHere, GUEST_DAEMON_TARGETS } from "../src/daemon-binary.js";
-import { agentSignInWord, agentVersionWord, probePath, doctorRowRefusal, EXIT_CODES, noSuchPlaceRefusal, noSuchProjectLine, plural, projectNeedsReaddLine, THIS_COMPUTER, type PlaceProvision, type ProjectView, HERE_PLACE_ID, HOMEBREW_PREFIX, DAEMON_MEMORY_MAX_PERCENT, DAEMON_UNIT, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_WSP_BIN, GUEST_WSP_PATH, guestWspShim, machineLacksShort, NO_SYSTEMD_LINE, placeUpdateLine, signInRefusalLine, wspBinIn, type HarnessCatalogAnswer, type PlaceCapacity, type PlaceView } from "@wsp/protocol";
+import { agentSignInWord, agentVersionWord, probePath, doctorRowRefusal, EXIT_CODES, noSuchPlaceRefusal, noSuchProjectLine, plural, projectNeedsReaddLine, THIS_COMPUTER, type PlaceApplied, type ProjectView, HERE_PLACE_ID, HOMEBREW_PREFIX, DAEMON_MEMORY_MAX_PERCENT, DAEMON_UNIT, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_WSP_BIN, GUEST_WSP_PATH, guestWspShim, machineLacksShort, NO_SYSTEMD_LINE, placeUpdateLine, signInRefusalLine, wspBinIn, type HarnessCatalogAnswer, type PlaceCapacity, type PlaceView } from "@wsp/protocol";
 import { copyKey, createRuntime, localExecStream, rotateDaemonTokenScript, writeDaemonTokenScript, type HarnessAdapterFactory, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { isReserved, LocalBackend, NoProviderBackend } from "@wsp/engine";
@@ -622,15 +622,8 @@ describe("the recipe's tools read from inside the workspace", () => {
 
   it("adds the computers row's own reading to a row it found missing that the row read present, and the line that reads the computer again", async () => {
     const machine = workspaceWith(scratch(["node"]));
-    const provision: PlaceProvision = {
-      state: "done",
-      addId: "a_1",
-      recipeAt: "2026-09-18T10:00:00.000Z",
-      startedAt: "2026-09-18T10:00:00.000Z",
-      finishedAt: "2026-09-18T10:04:00.000Z",
-      rows: [{ id: "tools/npm/agent-browser", label: "agent-browser", outcome: "present" }],
-    };
-    await expect(toolsInside(machine, plan, { name: "spoo", provision })).rejects.toThrow(
+    const applied: PlaceApplied = { hash: "h", at: "2026-09-18T10:04:00.000Z", rows: [{ id: "tools/npm/agent-browser", label: "agent-browser", outcome: "present" }] };
+    await expect(toolsInside(machine, plan, { name: "spoo", applied })).rejects.toThrow(
       "agent-browser (the computers row read it present at 2026-09-18T10:04:00.000Z; wsp add spoo --update reads it again) did not answer inside the workspace",
     );
   });
@@ -703,7 +696,7 @@ describe("the doctor's computer road", () => {
   }
 
   /** The one step of a plan these cases read inside: a command the workspace answers for, or does not. */
-  const onePlan: ProvisionPlan = { recipeAt: "2026-09-18T09:00:00.000Z", path: probePath(GUEST_HOME), skipped: [], steps: [{ id: "tools/npm/agent-browser", label: "agent-browser", manager: "npm", cmd: "install", bin: "agent-browser" }] };
+  const onePlan: ProvisionPlan = { recipeAt: "2026-09-18T09:00:00.000Z", path: probePath(GUEST_HOME), skipped: [], agents: 0, compiler: false, steps: [{ id: "tools/npm/agent-browser", label: "agent-browser", manager: "npm", cmd: "install", bin: "agent-browser" }] };
   const answering = () => ({ exitCode: 0, stdout: "wsp-present 0 /usr/local/bin/agent-browser\n", stderr: "" });
 
   it("proves the computer in order: it answers, the vault, the agents there, a workspace of a project whose checkout stands, the tools inside and the delete", async () => {
@@ -857,7 +850,7 @@ describe("which road wsp doctor takes", () => {
   it("with no word takes the local road here and no other: a computer somebody joined is proved by the host holding its link", async () => {
     const host = fakeHost([computer({ id: HERE_PLACE_ID, name: "this computer", kind: "computer", takesForks: false }), computer(), { id: "solari", kind: "provider", name: "solari", default: false }]);
     const io = captured();
-    expect(await doctor(host.rt, io, { vault: () => ({}), plan: async () => ({ recipeAt: "2026-09-18T09:00:00.000Z", path: probePath(GUEST_HOME), skipped: [], steps: [] }) })).toBe(0);
+    expect(await doctor(host.rt, io, { vault: () => ({}), plan: async () => ({ recipeAt: "2026-09-18T09:00:00.000Z", path: probePath(GUEST_HOME), skipped: [], steps: [], agents: 0, compiler: false }) })).toBe(0);
     expect(io.lines.some(l => l.includes(`proving a thread on ${THIS_COMPUTER}`))).toBe(true);
     // Nothing of the computer road runs in this process: its link is held by the host that computer dials.
     expect(io.lines.some(l => l.includes("a computer you added"))).toBe(false);
@@ -1043,7 +1036,7 @@ describe("the words wsp doctor says about itself", () => {
     // a host has to be up for it.
     expect(row.about).toContain("proved by the host that computer dials");
     // The line a person reads when they aim this at a host somewhere else: what it does here is what it says.
-    expect(row.cliOnly).toBe("runs for minutes, makes and deletes a workspace on the computer you named, and on a cloud account forks a live machine that bills while it runs; a person decides that at a terminal");
+    expect("cliOnly" in row ? row.cliOnly : undefined).toBe("runs for minutes, makes and deletes a workspace on the computer you named, and on a cloud account forks a live machine that bills while it runs; a person decides that at a terminal");
   });
 
   it("carries a row of its own for the two flags that shape which road it takes", () => {
