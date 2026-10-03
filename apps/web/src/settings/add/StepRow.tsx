@@ -60,3 +60,12 @@ export function RetryActs({ onRetry, busy = false }: { onRetry: () => void; busy
     </Button>
   );
 }
+
+/** Skip on a row that waits on the person or did not land: the host sets it aside and Settings finishes it later. */
+export function SkipAct({ word, onSkip, busy = false }: { word: string; onSkip: () => void; busy?: boolean }) {
+  return (
+    <Button size="xs" variant="ghost" data-k="skip" held={busy} onClick={onSkip}>
+      {word}
+    </Button>
+  );
+}

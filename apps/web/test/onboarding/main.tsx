@@ -221,6 +221,13 @@ const { api } = settingsApi({
   recipesOptions: async () => OPTIONS,
   recipesList: async () => (screen === "recipes-empty" ? [] : RECIPES),
   placesChoose: async () => pending[0]!,
+  placesSetupLog: async () => [
+    "2026-10-03T10:02:05Z [mcp] copying wsp, context7, gsc",
+    "2026-10-03T10:02:06Z [clis] apt-get install -y golang-go",
+    "2026-10-03T10:02:07Z [skills] copying 78 skills",
+    "2026-10-03T10:02:08Z [plugins] claude plugin install frontend-design@claude-plugins-official",
+    "2026-10-03T10:02:09Z [folders] git clone github.com/Zingzy/wsp",
+  ],
   placesEstimate: async () => ({ neededBytes: 3.9 * 1024 * MB, freeBytes: screen === "summary-disk" ? 2.1 * 1024 * MB : 61 * 1024 * MB, unmeasured: 0 }),
   placesList: async () => ({ places, adds: [], pending }),
   initGet: async () => null,

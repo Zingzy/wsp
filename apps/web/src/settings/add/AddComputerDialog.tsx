@@ -10,7 +10,7 @@
 // and the one act.
 import { CheckIcon, ExternalLinkIcon, ListChecksIcon, ServerIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { fmtBytes, fmtDuration, HERE_PLACE_ID, hereName, recipeCounts, recipeSummary, type PlaceView, type ProjectIcon, type RecipeFile, type RecipeOptions, type SshHostSuggestion } from "@wsp/protocol";
+import { fmtBytes, fmtDuration, HERE_PLACE_ID, hereName, recipeCounts, recipeSummary, type PlaceSetupStep, type PlaceView, type ProjectIcon, type RecipeFile, type RecipeOptions, type SshHostSuggestion } from "@wsp/protocol";
 import { agentName } from "@wsp/catalog";
 import { AddButton } from "../../components/ui/add-button.js";
 import { Button } from "../../components/ui/button.js";
@@ -33,12 +33,12 @@ import { placeName } from "../places.js";
 import { readRecipes, useRecipes } from "../recipesStore.js";
 import { Card, Line } from "../rows.js";
 import { CopyRow, RefusalSlot } from "../sheetParts.js";
-import { STEP_TITLES, askedHostKey, closeAdd, connect, firstPick, go, openSetup, readOptions, retrySetup, setPicks, setSaveAs, setUp, stepsFor, tooBig, useAddFlow, weigh, type AddStep } from "./addFlow.js";
+import { STEP_TITLES, askedHostKey, closeAdd, connect, firstPick, go, openSetup, readOptions, retrySetup, setPicks, skipRow, setSaveAs, setUp, stepsFor, tooBig, useAddFlow, weigh, type AddStep } from "./addFlow.js";
 import { everything, folderKey, githubPick, noPicks } from "./choices.js";
 import { AgentsPicks, Choice, ClisPicks, GitHubPicks, OtherPicks, PluginsPicks, ProjectsPicks, ServersPicks, SkillsPicks, type FolderOption } from "./PickLists.js";
 import { PickLine, PickRow } from "./PickRow.js";
-import { checkRows, setupCount, setupRows, setupStanding, type StepLine } from "./setup.js";
-import { RetryActs, StepRow } from "./StepRow.js";
+import { checkRows, setupCount, setupRows, setupStanding, stepOutput, type StepLine } from "./setup.js";
+import { RetryActs, SkipAct, StepRow } from "./StepRow.js";
 
 const GLYPH = "size-4 text-foreground/80";
 
@@ -226,9 +226,10 @@ function SummaryStep({ picks, box, place, here, recipeIcon }: { picks: RecipeFil
   );
 }
 
-/** A sign-in that waits on the person: the code, the tab opened again, and where it can be finished later. A wait
- * that ran out says so and is run again by Retry. */
-function WaitBlock({ row, onRetry }: { row: StepLine; onRetry: () => void }) {
+/** A sign-in that waits on the person: the code, the tab opened again, Skip for now, and where it can be finished
+ * later. A wait that ran out says so and is run again by Retry. */
+function WaitBlock({ row, onRetry, onSkip, busy }: { row: StepLine; onRetry: () => void; onSkip: () => void; busy: boolean }) {
+  const skip = <SkipAct word={ADD_COMPUTER_WORDS.skipForNow} onSkip={onSkip} busy={busy} />;
   const wait = row.wait!;
   if (wait.state === "expired") {
     return (
@@ -237,7 +238,8 @@ function WaitBlock({ row, onRetry }: { row: StepLine; onRetry: () => void }) {
           The sign-in page ran out.<span className="text-foreground"> Retry opens a fresh one.</span>
         </p>
         <div className="flex flex-wrap items-center gap-2">
-          <RetryActs onRetry={onRetry} />
+          <RetryActs onRetry={onRetry} busy={busy} />
+          {skip}
         </div>
       </>
     );
@@ -256,30 +258,41 @@ function WaitBlock({ row, onRetry }: { row: StepLine; onRetry: () => void }) {
             Open the tab again
           </Button>
         )}
+        {skip}
       </div>
       <p className={NOTE}>{ADD_COMPUTER_WORDS.signInLater}</p>
     </>
   );
 }
 
-/** The steps of a setup with what each row asks: Retry where a row did not land, the wait where a sign-in does. */
+/** The steps of a setup with what each row asks: Retry where a row did not land, Skip where it is an item the host can
+ * set aside, the wait where a sign-in does. */
 export function SetupList({ place, id = "setup", rows = setupRows(place) }: { place: PlaceView; id?: string; rows?: readonly StepLine[] }) {
   const api = useStore(s => s.api);
   const [refused, setRefused] = useState<Failure | null>(null);
   const [busy, setBusy] = useState(false);
-  const retry = (): void => {
+  const ask = (run: () => Promise<Failure | null>): void => {
     setBusy(true);
-    void retrySetup(api, place.id).then(failure => {
+    void run().then(failure => {
       setBusy(false);
       setRefused(failure);
     });
   };
+  const retry = (): void => ask(() => retrySetup(api, place.id));
+  const skip = (row: string) => (): void => ask(() => skipRow(api, place.id, row));
+  const acts = (row: StepLine): ReactNode =>
+    row.state !== "failed" || row.wait !== undefined ? undefined : (
+      <>
+        <RetryActs onRetry={retry} busy={busy} />
+        {row.sub === true ? <SkipAct word={ADD_COMPUTER_WORDS.skip} onSkip={skip(row.id)} busy={busy} /> : null}
+      </>
+    );
   return (
     <>
       <Grid id={id}>
         {rows.map(row => (
-          <StepRow key={row.id} row={row} {...(row.state === "failed" ? { acts: <RetryActs onRetry={retry} busy={busy} /> } : {})}>
-            {row.wait === undefined ? undefined : <WaitBlock row={row} onRetry={retry} />}
+          <StepRow key={row.id} row={row} acts={acts(row)}>
+            {row.wait === undefined ? undefined : <WaitBlock row={row} onRetry={retry} onSkip={skip(row.id)} busy={busy} />}
           </StepRow>
         ))}
       </Grid>
@@ -288,8 +301,57 @@ export function SetupList({ place, id = "setup", rows = setupRows(place) }: { pl
   );
 }
 
+/** How often the steps running are read off the box's setup log: one tail of the log a read, for every step at once. */
+const OUTPUT_EVERY_MS = 3000;
+
+/** The last line of output of each step running, read when the steps running change and on a timer while any runs,
+ * never on a render; a read still out when the next is due is not doubled. */
+function useStepOutput(placeId: string, running: string): Partial<Record<PlaceSetupStep, string>> {
+  const api = useStore(s => s.api);
+  const [out, setOut] = useState<Partial<Record<PlaceSetupStep, string>>>({});
+  useEffect(() => {
+    const read = api?.placesSetupLog;
+    if (running === "" || read === undefined) return;
+    let live = true;
+    let asking = false;
+    const tail = (): void => {
+      if (asking) return;
+      asking = true;
+      void read(placeId).then(
+        lines => {
+          asking = false;
+          if (!live) return;
+          const next = stepOutput(lines);
+          setOut(was => (JSON.stringify(was) === JSON.stringify(next) ? was : next));
+        },
+        () => {
+          asking = false;
+        },
+      );
+    };
+    tail();
+    const timer = setInterval(tail, OUTPUT_EVERY_MS);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, [api, placeId, running]);
+  return out;
+}
+
 function RunningView({ place }: { place: PlaceView }) {
-  const rows = setupRows(place);
+  const drawn = setupRows(place);
+  const output = useStepOutput(
+    place.id,
+    drawn
+      .filter(row => row.state === "working")
+      .map(row => row.id)
+      .join(" "),
+  );
+  const rows = drawn.map(row => {
+    const said = row.state === "working" ? output[row.id as PlaceSetupStep] : undefined;
+    return said === undefined ? row : { ...row, note: said };
+  });
   const asks = rows.find(row => row.state === "needs-you" || row.state === "failed")?.id;
   const shown = useRef(false);
   // The list opens on the first row that waits on the person, once, when it first appears, so a long run never hides

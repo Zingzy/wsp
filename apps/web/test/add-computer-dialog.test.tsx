@@ -12,6 +12,7 @@ import { RequestError, type Api, type SshLogin } from "../src/protocol/client.js
 import { useNotices } from "../src/notices/store.js";
 import { useStore } from "../src/protocol/store.js";
 import { closeAdd, openAdd, openPending, openSetup, useAddFlow } from "../src/settings/add/addFlow.js";
+import { stepOutput } from "../src/settings/add/setup.js";
 import { mountSettings, resetSettings, settingsApi, settle } from "./settings-harness.js";
 
 const here: PlaceView = { id: "here", kind: "computer", name: "zingzy-mbp", label: "zingzy's MacBook Pro", default: true, present: true, takesForks: false };
@@ -464,6 +465,79 @@ describe("Add a computer while the setup runs", () => {
     expect(row.querySelector("[data-k=step-refusal]")?.textContent).toBe("a link inside points at a folder");
     await press(row.querySelector("[data-k=retry]"));
     expect(fake.asked.setups).toEqual([{ ref: studio.id, o: {} }]);
+  });
+
+  it("offers Skip for now on a sign-in that waits and Skip on an item that failed, each answered onto the row", async () => {
+    const wait = { row: "signins/codex", label: "Codex", url: "https://auth.openai.com/device", code: "4F2K-9QJM", expiresAt: "2026-10-03T10:10:00.000Z", state: "waiting" as const };
+    const done: PlaceSetup = { ...RUNNING, state: "done", steps: [{ step: "floor", state: "done" }, { step: "skills", state: "failed", note: "1 of 2 failed" }], waiting: [wait] };
+    const applied: PlaceView["applied"] = { hash: "h", at: "x", rows: [{ id: "skills/a", label: "unslop", outcome: "installed", step: "skills" }, { id: "skills/b", label: "taste", outcome: "failed", step: "skills", note: "a link inside points at a folder" }] };
+    const skipped: { placeId: string; row: string }[] = [];
+    const fake = host({
+      placesSkip: async (placeId: string, row: string) => {
+        skipped.push({ placeId, row });
+        return placed({ ...done, waiting: [] }, { ...applied, rows: applied.rows.map(r => (r.id === row ? { ...r, outcome: "skipped" as const } : r)) });
+      },
+    } as Partial<Api>);
+    useStore.setState({ places: [here, placed(done, applied)] });
+    mountSettings({ api: fake.api, at: { kind: "group", group: "computers" } });
+    act(() => openSetup(studio.id));
+    await settle();
+    const signIn = (): HTMLElement | null => dialog()!.querySelector<HTMLElement>("[data-step-row='signins/codex']");
+    expect(signIn()!.querySelector("[data-k=skip]")?.textContent).toBe("Skip for now");
+    expect(signIn()!.textContent).toContain("You can sign in later in Settings.");
+    await press(signIn()!.querySelector("[data-k=skip]"));
+    expect(skipped).toEqual([{ placeId: studio.id, row: "signins/codex" }]);
+    expect(signIn()).toBeNull();
+    const failed = dialog()!.querySelector<HTMLElement>("[data-step-row='skills/b']")!;
+    expect([...failed.querySelectorAll("button")].map(b => b.textContent)).toEqual(["Retry", "Skip"]);
+    await press(failed.querySelector("[data-k=skip]"));
+    expect(skipped.at(-1)).toEqual({ placeId: studio.id, row: "skills/b" });
+    expect(dialog()!.querySelector("[data-step-row='skills/b']")).toBeNull();
+    expect(title()).toBe("studio is ready");
+  });
+
+  it("draws a running step's last line of output, read off the box's log on a timer and not on a render", async () => {
+    const reads: { placeId: string; step: string | undefined }[] = [];
+    const fake = host({
+      placesSetupLog: async (placeId: string, step?: string) => {
+        reads.push({ placeId, step });
+        return ["2026-10-04T10:00:00Z [floor] apt-get install curl", "2026-10-04T10:00:01Z [agents] the agents: running", "2026-10-04T10:00:02Z [agents] npm install -g @anthropic-ai/claude-code", "2026-10-04T10:00:03Z [agents] the agents: running"];
+      },
+    } as Partial<Api>);
+    useStore.setState({ places: [here, placed(RUNNING)] });
+    mountSettings({ api: fake.api, at: { kind: "group", group: "computers" } });
+    act(() => openSetup(studio.id));
+    await settle();
+    await waitFor(() => expect(dialog()!.querySelector("[data-step-row='agents']")?.textContent).toContain("npm install -g @anthropic-ai/claude-code"));
+    // A step that ended keeps its own note, never a line of output.
+    expect(dialog()!.querySelector("[data-step-row='floor']")?.textContent).not.toContain("apt-get");
+    expect(reads).toEqual([{ placeId: studio.id, step: undefined }]);
+    for (let i = 0; i < 3; i++) {
+      act(() => useStore.setState({ places: [here, placed({ ...RUNNING, steps: [...RUNNING.steps] })] }));
+      await settle();
+    }
+    expect(reads).toHaveLength(1);
+  });
+
+  it("keeps one line of output per step, the last, cut at its end", () => {
+    const long = `apt-get install -y ${"libssl-dev ".repeat(30)}`;
+    const out = stepOutput([`2026-10-04T10:00:00Z [clis] ${long}`, "2026-10-04T10:00:01Z [mcp] claude mcp add context7", "2026-10-04T10:00:02Z [mcp] the agents' own files and MCP servers: done (7 copied)", "not a line of the log"]);
+    expect(out.mcp).toBe("claude mcp add context7");
+    expect(out.clis).toHaveLength(120);
+    expect(out.clis!.endsWith("…")).toBe(true);
+    expect(Object.keys(out)).toEqual(["clis", "mcp"]);
+  });
+
+  it("draws every step a frame says is running with its own crab", async () => {
+    useStore.setState({ places: [here, placed(RUNNING)] });
+    mountSettings({ api: host().api, at: { kind: "group", group: "computers" } });
+    act(() => openSetup(studio.id));
+    await settle();
+    act(() => useStore.getState().applyEvent({ type: "place.setup", addId: RUNNING.addId, placeId: studio.id, line: { step: "mcp", state: "running" }, running: ["agents", "mcp", "clis", "skills"] } as EventUnion));
+    await settle();
+    const working = [...dialog()!.querySelectorAll<HTMLElement>("[data-step-row][data-state=working]")].map(r => r.dataset["stepRow"]);
+    expect(working).toEqual(["agents", "mcp", "clis", "skills"]);
+    expect(working.every(id => dialog()!.querySelector(`[data-step-row='${id}'] [data-state-mark=working]`) !== null)).toBe(true);
   });
 
   it("goes on to the ready page once every step is done, whose act starts a task on that computer", async () => {

@@ -240,6 +240,18 @@ export async function setUp(api: Api, setIcon: (slug: string, icon: ProjectIcon)
   );
 }
 
+/** Skip for now on one row of a computer's setup, a sign-in that waits or an item that failed: the host sets it aside
+ * and answers the computer's row, which stands at once. */
+export async function skipRow(api: Api | null, placeId: string, row: string): Promise<Failure | null> {
+  if (api?.placesSkip === undefined) return null;
+  try {
+    showSetup({ place: await api.placesSkip(placeId, row) });
+    return null;
+  } catch (e) {
+    return failureOf(e);
+  }
+}
+
 /** Retry on a computer whose setup missed something: the host runs again whatever is not there. */
 export async function retrySetup(api: Api | null, placeId: string): Promise<Failure | null> {
   if (api?.placesSetup === undefined) return null;
