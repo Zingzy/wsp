@@ -660,6 +660,52 @@ describe("interrupt", () => {
   });
 });
 
+describe("what ends a Codex turn", () => {
+  const statusOf = (type: string) => `{"method":"thread/status/changed","params":{"threadId":"${THREAD_ID}","status":{"type":"${type}"}}}`;
+  const running = (onInterrupt?: (self: Wire) => void) =>
+    launcher(seed => {
+      const w = wire({
+        onWrite: (message, self) => {
+          if (message.method === "thread/start") self.push(...opened());
+          if (message.method === "turn/start") self.push(turnStarted);
+          if (message.method === "turn/steer") self.push(`{"id":${JSON.stringify(message.id)},"result":{"turnId":"${TURN_ID}"}}`);
+          if (message.method === "turn/interrupt") onInterrupt?.(self);
+        },
+      });
+      for (const line of seed) void w.stream.write(line);
+      return w;
+    });
+  const pending = async (finished: Promise<unknown>, ms: number): Promise<boolean> => (await Promise.race([finished.then(() => false), new Promise<boolean>(r => setTimeout(() => r(true), ms))]));
+
+  it("only turn/completed: the thread going idle and its last message leave the turn open and a steer accepted", async () => {
+    const live = running();
+    const { events, onEvent } = collect();
+    const session = adapterOver(live).start({ prompt: "x", onEvent });
+    await until(() => events.some(e => e.type === "turn.anchor"));
+    live.wires[0]!.push(agentMessage("m1", "all done"), statusOf("idle"));
+    expect(await pending(session.finished, 50)).toBe(true);
+    expect(events.some(e => e.type === "turn.done")).toBe(false);
+    expect(await session.steer("one more thing")).toBe("accepted");
+    live.wires[0]!.push(completed("completed"));
+    expect(await session.finished).toMatchObject({ status: "completed", text: "all done" });
+  });
+
+  it("an interrupt's answer is not the turn's end: it stays open until turn/completed says interrupted", async () => {
+    const live = running(self => self.push('{"id":"wsp-interrupt","result":{}}'));
+    const { events, onEvent } = collect();
+    const session = adapterOver(live, { graceMs: 5_000 }).start({ prompt: "x", onEvent });
+    await until(() => events.some(e => e.type === "turn.anchor"));
+    const stopping = session.interrupt();
+    await until(() => live.wires[0]!.written.some(m => m.method === "turn/interrupt"));
+    expect(await pending(session.finished, 50)).toBe(true);
+    live.wires[0]!.push(completed("interrupted"));
+    await stopping;
+    expect(await session.finished).toEqual({ status: "interrupted" });
+    expect(events.at(-1)).toMatchObject({ type: "session.end", sawResult: true });
+    expect(live.wires[0]!.order).toEqual([]);
+  });
+});
+
 describe("a subagent's frames on its lead's stream", () => {
   // The shape of T3 Code's recorded multi-agent wire (codexMultiAgentWire.json, codex-cli 0.145.0, MIT): a child
   // thread's own turn/started, token usage, items and turn/completed arrive on the lead's stdout under the child's id.
