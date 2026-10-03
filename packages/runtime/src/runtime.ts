@@ -374,6 +374,8 @@ export interface HarnessStartOptions {
   /** On an agent whose plan banks resets: the turn reads each in full, since the account's last full read is missing
    * or a day old. Absent, it reads their count alone, which costs the agent's backend nothing more. */
   limitDetails?: true;
+  /** On an adapter that waits for its prompt: its CLI starts at once and is handed the prompt when this settles. */
+  promptAfter?: Promise<void>;
   onEvent: (event: AdapterEvent) => void;
 }
 
@@ -430,6 +432,9 @@ export interface HarnessAdapter {
   /** Whether an access picked while a turn runs reaches that turn, so the picker says what a pick does before it is
    * made. Absent means it does not, and a pick waits for the person's next message. */
   readonly movesAccess?: true;
+  /** A start takes promptAfter, so the launch's snapshot is taken while the CLI starts up and the agent, which touches
+   * no file before it has its prompt, gets it once the snapshot is in; absent, the snapshot is in before the launch. */
+  readonly waitsForPrompt?: true;
   /** Asks the binary on the workspace's machine what it takes: its lists, its own words for why it has none, or null
    * when it does not answer at all; absent, the table alone answers and nothing runs. */
   probeCatalog?(exec: (command: string) => Promise<string>): Promise<HarnessCatalogAnswer>;
@@ -7553,7 +7558,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   };
 
   /** One probe per harness per machine per TTL, a failed one included and one in flight shared: a binary that does
-   * not answer costs one exec, not one per composer mount. */
+   * not answer costs one exec, not one per composer mount. Past the TTL the lists held answer while the binary is
+   * asked again, so a send waits on a probe only the first time a machine is asked. */
   const catalogs = new Map<string, { at: number; catalog: Promise<HarnessCatalog> }>();
   const catalogOn = (table: HarnessCatalog, entry: LiveWorkspace, adapter: HarnessAdapter): Promise<HarnessCatalog> => {
     const machine = entry.machine;
@@ -7584,8 +7590,16 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           return known;
         },
       );
-    catalogs.set(key, { at: now, catalog });
-    return catalog;
+    if (hit === undefined) {
+      catalogs.set(key, { at: now, catalog });
+      return catalog;
+    }
+    const asking = { at: now, catalog: hit.catalog };
+    catalogs.set(key, asking);
+    void catalog.then(() => {
+      if (catalogs.get(key) === asking) asking.catalog = catalog;
+    });
+    return hit.catalog;
   };
 
   /** One title read per harness session per machine per TTL, a failed one included and one in flight shared: the
@@ -8326,7 +8340,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
      * a turn that landed none, whose harness read them inline or which carried none at all. */
     imagesDir?: string;
     /** The snapshot of the turn's folder taken as it launched, which the range of what it changed starts from. */
-    snapshot?: { from: string; cwd: string };
+    snapshot?: { from: Promise<string | undefined>; cwd: string };
     /** The box the turn's own exec stream reads to know it is waiting on something outside its own process: flipped
      * while a permission prompt of this turn stands open, and while its harness reports a command or a subagent it
      * started still running, so the turn's idle clock does not run out under a question nobody has answered yet nor
@@ -8343,9 +8357,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const readChanges = (sessionId: string): void => {
       if (changesRead || t.snapshot === undefined) return;
       changesRead = true;
-      const { from, cwd } = t.snapshot;
+      const { from: taken, cwd } = t.snapshot;
       const startedAt = view.startedAt ?? Date.now();
       void (async () => {
+        const from = await taken;
+        if (from === undefined) return;
         const to = await snapshotOf(entry, cwd);
         if (to === undefined) return;
         const range = await withDaemon(entry, ask => ask({ op: "git.turn", cwd, from, to })).catch((e: unknown) => {
@@ -9054,6 +9070,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         throw e;
       }
       const { harness, adapter } = built;
+      // Only on this computer: a box keeps the prompt in its launch seed, since a write there is one more exec trip.
+      const promptsLate = adapter.waitsForPrompt === true && copiesFolder(entry.record.kind);
       // The wsp tools ride every launch, for a harness that takes servers with one: under the same name as the
       // person's own wsp server, which Claude Code's --mcp-config and Codex's -c overrides both replace while the
       // person's other servers stay (measured on 2.1.284 and 0.155.1 against the user-scope config; a project's own
@@ -9114,9 +9132,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       let imagesDir: string | undefined;
       let filePaths: string[] = [];
       let filesFolder: string | undefined;
-      // Every send takes one trip before its launch: its files land and its folder's snapshot is taken.
+      // Every send takes one trip before its launch: its files land and its folder's snapshot is taken, or only started
+      // where the agent takes its prompt late.
       let landed = false;
-      let snapshot: { from: string; cwd: string } | undefined;
+      let snapshot: { from: Promise<string | undefined>; cwd: string } | undefined;
       // This send's own folder on the machine, named by the request id it minted: the landing runs before any turn is
       // registered, so two sends arriving together both pass the wait, and a folder they shared would leave the first
       // turn holding the second's picture.
@@ -9181,8 +9200,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             const landing = (resume !== undefined ? folderOf(workspaceId, resume) : undefined) ?? folder;
             filePaths = await landFiles(entry, landing, sendFilesDir(landing, threadId, o.requestId, randomUUID()), (o.attachments ?? []).filter(a => !isImage(a.mediaType)));
             if (filePaths.length > 0) filesFolder = landing;
-            const from = await snapshotOf(entry, landing);
-            snapshot = from === undefined ? undefined : { from, cwd: landing };
+            const from = snapshotOf(entry, landing);
+            if (!promptsLate) await from;
+            snapshot = { from, cwd: landing };
             refuse();
             continue;
           }
@@ -9238,6 +9258,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
               ...(images.length > 0 ? { images } : {}),
               ...(mcpServers !== undefined ? { mcpServers } : {}),
               ...(limitDetails ? { limitDetails: true as const } : {}),
+              ...(promptsLate && snapshot !== undefined ? { promptAfter: snapshot.from.then(() => {}) } : {}),
               // The thread's earlier turns as its transcript holds them, this one left out since its message follows.
               ...(resume !== undefined ? { seed: async () => threadSeed(threadMessages((await openTranscript(workspaceId)).filter(e => e.turnId !== turnId), threadId)) } : {}),
               onEvent,

@@ -1121,6 +1121,33 @@ describe("runtime session history", () => {
       await rt.close();
     });
 
+    it("past the TTL a session start answers off the lists it holds while the binary is asked again, and the next start reads the new answer", async () => {
+      const backend = stubBackend();
+      let asked: ((r: { exitCode: number; stdout: string; stderr: string }) => void) | undefined;
+      backend.execImpl = (_m, cmd) => {
+        if (!cmd.includes("claude --help")) return { exitCode: 0, stdout: "", stderr: "" };
+        if (probes(backend).length === 1) return { exitCode: 0, stdout: PROBE_OUTPUT, stderr: "" };
+        return new Promise(resolve => (asked = resolve));
+      };
+      const fc = fakeClock();
+      const m = manual();
+      const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: m.adapter }, clock: fc.clock });
+      const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+      expect((await rt.harnesses.list(ws.id)).find(c => c.harness === "claude")).toMatchObject({ source: "harness" });
+      fc.advance(CATALOG_TTL_MS);
+      const handle = await rt.sessions.start(ws.id, { prompt: "go", model: "claude-opus-5" });
+      expect(probes(backend)).toHaveLength(2);
+      expect(m.lastStart()).toMatchObject({ model: "claude-opus-5" });
+      m.done("ok");
+      m.end();
+      await handle.finished;
+      asked!({ exitCode: 0, stdout: "garbage\n", stderr: "" });
+      await new Promise(r => setImmediate(r));
+      expect((await rt.harnesses.list(ws.id)).find(c => c.harness === "claude")).toMatchObject({ source: "table" });
+      expect(probes(backend)).toHaveLength(2);
+      await rt.close();
+    });
+
     it("answers from the table, marked so, when the binary gives nothing or the exec fails, and does not ask again within the TTL", async () => {
       const backend = stubBackend();
       backend.execImpl = (_m, cmd) => {

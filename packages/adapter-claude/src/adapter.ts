@@ -36,6 +36,8 @@ export interface StartOptions {
   /** The thread so far as text, asked for only where the CLI holds no session under `resume`: the turn then runs in a
    * new session handed it ahead of the prompt. Absent, that turn fails with the CLI's own sentence. */
   seed?: () => Promise<string>;
+  /** The CLI starts at once and is handed the prompt when this settles; absent, the prompt is seeded at the launch. */
+  promptAfter?: Promise<void>;
   onEvent: (event: AdapterEvent) => void;
 }
 
@@ -121,6 +123,8 @@ export interface ClaudeAdapter {
   readonly attachments: "inline";
   /** The CLI takes MCP servers on the launch itself (--mcp-config), so a turn gets one whatever the config dir holds. */
   readonly mcpServers: true;
+  /** A start takes promptAfter: the CLI starts up before it reads its first message. */
+  readonly waitsForPrompt: true;
   /** An access picked while a turn runs reaches that turn: over the control channel, and on the prompt it is stopped on. */
   readonly movesAccess: true;
   /** The commands the CLI runs only in its own terminal; the composer keeps them out of its menu and sends none. */
@@ -1033,7 +1037,10 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       ...(deps.launch !== undefined ? { launch: deps.launch } : {}),
     });
     const launch = options.resume === undefined ? command : `${savedSpendCommand({ configDir: deps.configDir, sessionId: options.resume })}${command}`;
-    const stream = deps.exec(launch, { env: { ...env }, input: [userMessageLine(options.prompt, localId, options.images)] });
+    const line = userMessageLine(options.prompt, localId, options.images);
+    const stream = deps.exec(launch, { env: { ...env }, input: options.promptAfter === undefined ? [line] : [] });
+    // A CLI whose prompt never reached it would wait on its channel until the idle cut, so it is ended instead.
+    if (options.promptAfter !== undefined) void options.promptAfter.then(() => stream.write(line)).catch(() => stream.kill());
     return follow({ stream, localId, announced: false, fresh: options.resume === undefined, command: launch, onEvent: options.onEvent });
   };
 
@@ -1160,6 +1167,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     movesAccess: true,
     attachments: "inline",
     mcpServers: true,
+    waitsForPrompt: true,
     screenCommands: CLAUDE_SCREEN_COMMANDS,
     probeCatalog: exec => exec(catalogProbeCommand({ baseEnv: deps.baseEnv, ...(deps.launch !== undefined ? { launch: deps.launch } : {}) })).then(parseCatalogProbe),
     sessionTitle: (sessionId, exec) => exec(sessionTitleCommand({ configDir: deps.configDir, sessionId })).then(parseSessionTitle),
