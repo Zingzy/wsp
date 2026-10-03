@@ -15,12 +15,13 @@
 // plan running low, blocked or back is a notice and a notification with no
 // sound while the person keeps that switch on. The
 // dock's badge counts the threads waiting on the person.
-import { GET_THE_APP_WORD, NOTIFY_ME, setupNeedsYouLine, setupReadyLine, askingLine, exitLine, foldThreads, initJobBuilding, initNeedsYouLine, needsYouCount, outsideLine, planAlertLine, threadFinishedLine, threadKeyOf, threadStoppedLine, titleWithNeed, type OutsideLine, type OutsideMoment, type ReleaseView, type TurnResult } from "@wsp/protocol";
+import { GET_THE_APP_WORD, NOTIFY_ME, waitLine, setupNeedsYouLine, setupReadyLine, askingLine, exitLine, foldThreads, initJobBuilding, initNeedsYouLine, needsYouCount, outsideLine, planAlertLine, threadFinishedLine, threadKeyOf, threadStoppedLine, titleWithNeed, type OutsideLine, type OutsideMoment, type PlaceView, type ReleaseView, type TurnResult } from "@wsp/protocol";
 import { useCallback, useEffect, useRef } from "react";
 import type { ProtocolEvent } from "../protocol/client.js";
 import { threadRows, useProtocolEvents, useStore } from "../protocol/store.js";
 import { desktopBridge } from "../lib/desktopShell.js";
 import { placeName } from "../settings/places.js";
+import { openSetup, useAddFlow } from "../settings/add/addFlow.js";
 import { useSettingsStore } from "../settings/settingsStore.js";
 import { needsYouRoad, type NeedsYouRoad } from "../shell/needsYou.js";
 import { releaseAhead, shellVersions } from "../shell/shellVersion.js";
@@ -84,6 +85,8 @@ function buildOnScreen(placeId: string | undefined): boolean {
 
 function computerOnScreen(placeId: string | undefined): boolean {
   const s = useStore.getState();
+  const flow = useAddFlow.getState();
+  if (flow.open && placeId !== undefined && flow.placeId === placeId) return true;
   if (!s.settingsOpen) return false;
   const at = useSettingsStore.getState().at;
   return s.addComputerOpen || (at.kind === "group" && at.group === "computers") || (at.kind === "computer" && at.id === placeId);
@@ -103,6 +106,9 @@ const versionOnScreen = (): boolean => {
 };
 
 const openThread = (workspaceId: string, threadId: string | undefined): NoticeAction => ({ word: HOST_NOTICE_WORDS.open, run: () => useStore.getState().select(workspaceId, threadId ?? null) });
+/** A setup's notice opens Add a computer on that computer's running steps, where whatever it asks is answered. */
+const openSetupOf = (placeId: string): NoticeAction => ({ word: HOST_NOTICE_WORDS.open, run: () => openSetup(placeId) });
+
 const openComputer = (placeId: string | undefined): NoticeAction => ({
   word: HOST_NOTICE_WORDS.open,
   run: () => {
@@ -127,6 +133,29 @@ interface Held {
   released: string | undefined;
   /** Each running turn's result, by turn id, from its session.done until the session.end that always follows it. */
   results: Map<string, TurnResult>;
+  /** The sign-in waits said, by computer and sign-in row, with the computer and the run they were said for: each is
+   * said once while it stands. */
+  waits: Map<string, { placeId: string; addId: string }>;
+}
+
+/** The key a sign-in's wait is said under, one per computer and sign-in, so the frames it rides say it once. */
+const waitKey = (placeId: string, row: string): string => `${placeId}/${row}`;
+const waitNoticeKey = (key: string): string => `sign-in:${key}`;
+
+/** A wait said before that left its computer's record, the person signed in or the run moved on: its toast goes and
+ * the next wait for that sign-in is said again. */
+function settleWaits(h: Held, places: readonly PlaceView[]): void {
+  for (const [key, { placeId, addId }] of h.waits) {
+    const setup = places.find(p => p.id === placeId)?.setup;
+    // A record that has not caught up with the run that said the wait says nothing about it yet.
+    if (setup?.addId !== addId || setup.waiting.some(w => waitKey(placeId, w.row) === key && w.state === "waiting")) continue;
+    endWait(h, key);
+  }
+}
+
+function endWait(h: Held, key: string): void {
+  h.waits.delete(key);
+  useNotices.getState().end(waitNoticeKey(key));
 }
 
 function sayOutside(held: Held, opens: () => void, line: OutsideLine | undefined): void {
@@ -202,11 +231,25 @@ const RULES: { [T in ProtocolEvent["type"]]?: Rule<T> } = {
   },
   // A setup's end, said once it is over: failed, waiting on the person, or ready, inside the app and outside it.
   "place.setup": (e, held) => {
-    if (e.end === undefined || computerOnScreen(e.placeId)) return;
+    // A wait that ran out, or a run that ended, is said by the run's own words: the wait's toast goes.
+    if (e.wait?.state === "expired") endWait(held, waitKey(e.placeId, e.wait.row));
+    if (e.end !== undefined) for (const [key, at] of held.waits) if (at.placeId === e.placeId) endWait(held, key);
+    if ((e.end === undefined && e.wait?.state !== "waiting") || computerOnScreen(e.placeId)) return;
     const place = useStore.getState().places.find(p => p.id === e.placeId);
     if (place === undefined) return;
     const name = placeName(place);
-    const open = openComputer(e.placeId);
+    const open = openSetupOf(e.placeId);
+    if (e.end === undefined && e.wait !== undefined) {
+      // The runtime says a wait again as the relay reads its page and then its code: the toast takes the newest, and
+      // the person is told outside the app once.
+      const key = waitKey(e.placeId, e.wait.row);
+      const what = waitLine(e.wait);
+      addNotice({ kind: "waiting", key: waitNoticeKey(key), text: setupNeedsYouLine(name, what), where: name, action: open });
+      if (held.waits.has(key)) return;
+      held.waits.set(key, { placeId: e.placeId, addId: e.addId });
+      sayOutside(held, open.run, lineFor({ kind: "signIn", what: `${name}: ${what}` }));
+      return;
+    }
     if (e.end === "failed") {
       addNotice({ kind: "error", text: HOST_NOTICE_WORDS.notSetUp(name, e.said ?? ""), where: name, action: open });
       sayOutside(held, open.run, lineFor({ kind: "setupFailed", computer: name, said: e.said ?? "" }));
@@ -302,7 +345,7 @@ export function useHostNotices(): void {
   const needed = useStore(s => s.initJob?.needsYou !== undefined || Object.values(s.sessions).some(rows => rows.some(row => row.asking !== undefined)));
   // Counted where the rows land, so a window showing a thread, which moves its read stamp, takes it off the dock.
   const waiting = useStore(s => needsYouCount(Object.values(s.sessions).flat()));
-  const held = useRef<Held>({ road: null, opens: () => openComputer(undefined).run(), need: undefined, shown: false, jobsEnded: new Set(), released: undefined, results: new Map() });
+  const held = useRef<Held>({ road: null, opens: () => openComputer(undefined).run(), need: undefined, shown: false, jobsEnded: new Set(), released: undefined, results: new Map(), waits: new Map() });
   useEffect(() => {
     const h = held.current;
     const built = needsYouRoad(() => h.opens());
@@ -325,6 +368,7 @@ export function useHostNotices(): void {
     h.shown = buildOnScreen(useStore.getState().initJob?.place?.id);
     const offStore = useStore.subscribe((s, prev) => {
       if (s.release !== prev.release) sayRelease(h, s.release);
+      if (s.places !== prev.places && h.waits.size > 0) settleWaits(h, s.places);
       if (s.initJob !== prev.initJob && h.need !== undefined && s.initJob?.needsYou?.what !== h.need) {
         h.need = undefined;
         useNotices.getState().end(NEED_KEY);

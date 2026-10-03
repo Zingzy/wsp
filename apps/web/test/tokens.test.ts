@@ -346,6 +346,41 @@ describe("index.css", () => {
         content: "0\\A 1\\A 2\\A 3\\A 4\\A 5\\A 6\\A 7\\A 8\\A 9";
         white-space: pre;
       }
+
+      /* Add a computer's saved check: its stroke draws in over 600 ms as a save lands, then its ink settles to muted.
+         Once per save and nothing at rest; under reduced motion it is simply there, muted. */
+      @keyframes autosave-draw {
+        from {
+          stroke-dashoffset: 24;
+        }
+        to {
+          stroke-dashoffset: 0;
+        }
+      }
+      @keyframes autosave-settle {
+        0%,
+        60% {
+          color: var(--foreground);
+        }
+        100% {
+          color: var(--muted-foreground);
+        }
+      }
+      .autosave-check {
+        color: var(--muted-foreground);
+        animation: autosave-settle 1400ms ease-out both;
+      }
+      .autosave-check path {
+        stroke-dasharray: 24;
+        stroke-dashoffset: 0;
+        animation: autosave-draw 600ms cubic-bezier(0.16, 1, 0.3, 1) both;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .autosave-check,
+        .autosave-check path {
+          animation: none;
+        }
+      }
       "
     `);
   });

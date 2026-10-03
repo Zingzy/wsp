@@ -78,6 +78,7 @@ import { addedProjectLine, defaultSeedChoice, kindForComputer, ProjectAddEvent, 
   hostKeyMatches,
   hostKeyMismatchRefusal,
   hostKeyUnconfirmedRefusal,
+  PLACE_HOST_KEY_KIND,
   hostKeyUnscannableRefusal,
   KNOWN_HOSTS,
   PLACE_ROOT_SHELLS,
@@ -724,7 +725,8 @@ export function placeInstaller(deps: { backend?: SshBackend; sshWord?: SshWordRe
     // anything is dialled, so the app's sheet and an older client meet the same wall the command line does.
     if (req.hostKey === undefined && (await backend.keyFor(reach).catch(() => undefined)) === undefined) {
       const offered = await backend.offeredKeyFor(reach).catch((): { key?: string; stoppedBy?: string } => ({}));
-      throw new Error(offered.key === undefined ? hostKeyUnscannableRefusal(req.address, offered.stoppedBy) : hostKeyUnconfirmedRefusal(req.address, offered.key));
+      if (offered.key === undefined) throw new Error(hostKeyUnscannableRefusal(req.address, offered.stoppedBy));
+      throw Object.assign(new Error(hostKeyUnconfirmedRefusal(req.address, offered.key)), { kind: PLACE_HOST_KEY_KIND, hostKey: offered.key });
     }
     // The dial writes the box's key into this computer's own known_hosts on its way in, whether or not the login
     // that follows it stands, so the step is ticked off what the client holds afterwards and not off the login's

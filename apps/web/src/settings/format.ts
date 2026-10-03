@@ -80,7 +80,6 @@ export const onName = (name: string): string => onceNamed(name, n => ` on ${n}`)
  * computer's own page, its agents and the Remove dialog, which are this build's and are drawn nowhere else. No
  * word is in both. */
 export const WHERE_WORDS = {
-  runningHere: (n: number): string => (n === 0 ? "Nothing running" : `${n} ${n === 1 ? "thread" : "threads"} running`),
   /** A place list the host refused, said where the list would stand. */
   notRead: (said: string) => `Computers not read: ${said}`,
   /** Puts this wsp's daemon on that computer and runs the recipe there again. One word in both states, held and
@@ -107,7 +106,7 @@ export const WHERE_WORDS = {
   cannotDial: "This wsp cannot dial a computer from here.",
   cannotSaveKey: "This wsp cannot save a key from here.",
   /** The first cell of each list's header row, which is the only name a section has. */
-  heads: { computer: "Computer", cores: "Cores", memory: "Memory", threads: "Threads", cloud: "Cloud", agents: "Agents", version: "Version", servers: "Tool servers", image: "Image", threadsHere: "Threads running here" },
+  heads: { computer: "Computer", cores: "Cores", memory: "Memory", threads: "Threads", cloud: "Cloud", agents: "Agents", version: "Version", servers: "Tool servers", image: "Image", pending: "Pending", setup: "Setup" },
   yourImage: "Your image",
 } as const;
 
@@ -126,23 +125,21 @@ export const PLACE_STATE_WORDS = {
 /** What Add a computer says beyond PLACES_WORDS.sheet and the roads' own names. */
 export const ADD_COMPUTER_WORDS = {
   title: "Add a computer",
+  /** The dialog's sentences, each said once where the rows do not say it. */
+  where: "A Linux box you have root on.",
+  saved: "Saved, you can finish later",
+  canClose: "You can close this. Setup keeps going.",
+  restDone: "Everything else is done.",
+  keepsGoing: "Setup keeps going. wsp pings you when it needs you.",
+  signInLater: "You can sign in later in Settings.",
+  tabOpened: "A tab opened in your browser.",
+  dialledBack: "Dialled back.",
   addCloud: "Add a cloud",
-  user: "User",
-  host: "Host",
-  hostPlaceholder: "box.example.com or an ssh alias",
-  port: "Port",
-  addComputer: "Add computer",
-  whatHappens: "What happens",
   replace: "Replace",
-  adding: "Adding",
-  another: "Add another",
   signInsOn: (computer: string): string => `Sign-ins on ${computer}`,
   signInsWhy: (agents: readonly string[], computer: string): string =>
     `${new Intl.ListFormat("en", { type: "conjunction" }).format(agents)} ${agents.length === 1 ? "keeps" : "keep"} one login for every workspace on ${computer}, so sign in once here.`,
   suggested: "From your ssh config",
-  copy: "Copy",
-  copied: "Copied",
-  notCopied: "not copied",
   replaceKey: "Paste a new key to replace it",
   /** Said only once the host lists that cloud as a computer: a key kept is not yet a place to fork on. */
   keySaved: "key saved",
@@ -156,24 +153,10 @@ export const ADD_COMPUTER_WORDS = {
     fix: provider.keyConsole === undefined ? "Check it and paste it again." : `Check it at ${provider.keyConsole} and paste it again.`,
   }),
   hostsNotRead: (said: string): string => `Hosts from your ssh config not read: ${said}`,
-  installThere: "On that computer, install wsp",
-  joinThere: "Then run",
-  minting: "making a code",
-  codeLeft: (ms: number): string => {
-    const seconds = Math.ceil(ms / 1000);
-    return `code works for ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
-  },
-  expired: "code expired",
-  newCode: "New code",
-  noMint: "this wsp cannot make a join line from the app yet",
-  adds: "adds",
-  /** Why Add is held on a wsp whose host cannot log in over ssh yet. */
-  noRoad: "this wsp cannot log in over ssh yet",
   /** What to do about a login ssh would not take, short enough that what ssh said and this together stand on the
    * slot's two lines: a third line moves what is under them. There is no file picker on this road: the host reads
    * the ssh agent and config as they stand, so the key a box wants is named where every other ssh client reads it. */
   refusedFix: "Check the user and the address, or name a key in your ssh config.",
-  running: "closing keeps it going",
   /** An add the host no longer lists while nothing here waits on it: the host restarted, or never got the ask. */
   hostLost: "The host lost track of this add, so how it ended is not known; add it again if the computer is not listed.",
 } as const;

@@ -331,15 +331,44 @@ describe("makeApi wrappers", () => {
     await expect(api.addComputerOverSsh!({ address: "root@65.21.4.12" }, "a_mine")).rejects.toThrow();
   });
 
-  it("placesList reads the computers and the adds off one places.list, no adds from a host that sends none, and refuses a step the wire type does not vouch for", async () => {
+  it("placesList reads the computers, the adds and the pending adds off one places.list, none from a host that sends none, and refuses a step the wire type does not vouch for", async () => {
     const { api } = await connect();
     const job = { addId: "a_1", address: "root@spoo", startedAt: "2026-09-25T09:00:00.000Z", state: "failed", steps: [{ step: "wsp", state: "failed", note: "no curl" }], said: "spoo has no curl.", fix: "Install it." };
-    ScriptedSocket.reply = f => ({ id: f["id"], ok: true, places: [box], adds: [job] });
-    expect(await api.placesList!()).toEqual({ places: [box], adds: [job] });
+    const pending = { id: "a_2", address: "root@jump", step: "choosing", placeId: "p_jump", startedAt: "2026-09-25T09:00:00.000Z", choices: { name: "jump", agents: {}, mcp: {}, clis: {}, skills: {}, plugins: {}, folders: {}, configs: {} } };
+    ScriptedSocket.reply = f => ({ id: f["id"], ok: true, places: [box], adds: [job], pending: [pending] });
+    expect(await api.placesList!()).toEqual({ places: [box], adds: [job], pending: [pending] });
     ScriptedSocket.reply = f => ({ id: f["id"], ok: true, places: [box] });
-    expect(await api.placesList!()).toEqual({ places: [box], adds: [] });
+    expect(await api.placesList!()).toEqual({ places: [box], adds: [], pending: [] });
     ScriptedSocket.reply = f => ({ id: f["id"], ok: true, places: [box], adds: [{ ...job, steps: [{ step: "node", state: "running" }] }] });
     await expect(api.placesList!()).rejects.toThrow();
+  });
+
+  it("sends the host key the person trusted, the picks a setup and a pending add take, and reads the recipes back as the wire types vouch for them", async () => {
+    const { api, lastSent } = await connect();
+    const picks = { name: "jump", agents: { claude: { signin: "vault" as const } }, mcp: {}, clis: {}, skills: {}, plugins: {}, folders: {}, configs: {} };
+    const recipe = { name: "Builders", slug: "builders", summary: "1 agent", machines: ["spoo"], file: { ...picks, name: "Builders" } };
+    ScriptedSocket.reply = f =>
+      f["op"] === "places.add"
+        ? { id: f["id"], ok: true, place: box }
+        : f["op"] === "places.setup"
+          ? { id: f["id"], ok: true, addId: "a_9", place: box }
+          : f["op"] === "places.choose"
+            ? { id: f["id"], ok: true, pending: { id: "a_2", address: "root@jump", step: "choosing", startedAt: "x", choices: picks } }
+            : f["op"] === "recipes.list"
+              ? { id: f["id"], ok: true, recipes: [recipe] }
+              : { id: f["id"], ok: true, recipe };
+    await api.addComputerOverSsh!({ address: "root@jump", hostKey: "ED25519 SHA256:abc" }, "a_mine");
+    expect(lastSent()).toMatchObject({ op: "places.add", hostKey: "ED25519 SHA256:abc" });
+    expect(await api.placesSetup!("p_jump", { choices: picks })).toEqual({ addId: "a_9", place: box });
+    expect(lastSent()).toMatchObject({ op: "places.setup", ref: "p_jump", choices: picks });
+    expect((await api.placesChoose!("p_jump", picks, "builders")).choices).toEqual(picks);
+    expect(lastSent()).toMatchObject({ op: "places.choose", ref: "p_jump", recipe: "builders" });
+    expect(await api.recipesList!()).toEqual([recipe]);
+    expect(await api.recipesSave!("Builders", { computer: "p_jump" })).toEqual(recipe);
+    expect(lastSent()).toMatchObject({ op: "recipes.save", name: "Builders", from: "p_jump" });
+    await api.recipesSave!("Builders", { file: recipe.file });
+    expect(lastSent()).toMatchObject({ op: "recipes.save", name: "Builders", file: recipe.file });
+    expect(lastSent()["from"]).toBeUndefined();
   });
 });
 

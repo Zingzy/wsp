@@ -16,9 +16,9 @@ import { CARD_SURFACE } from "./rows.js";
 /** An act as its word alone, as every act on the settings grid is: the plus is Add's and no other button wears a glyph. */
 export const wordOnly = ({ icon: _icon, ...act }: RowAct): RowAct => act;
 
-/** The Computers page's template, shared by its two lists so the state column is one line across both. Below
- * 768 px the name, one load, the state and the chevron stand. */
-export const LIST_COLUMNS = "grid-cols-[minmax(0,1fr)_56px_72px_64px_100px_14px] max-md:grid-cols-[minmax(0,1fr)_auto_100px_14px]";
+/** The Computers page's template, shared by its lists so the state column is one line across them: a mark or the
+ * one act fits 72 px. Below 768 px the name, one load, the state and the chevron stand. */
+export const LIST_COLUMNS = "grid-cols-[minmax(0,1fr)_56px_72px_64px_72px_14px] max-md:grid-cols-[minmax(0,1fr)_auto_72px_14px]";
 /** A computer's or a cloud's page: the name, a version, and the action at the right. */
 export const PAGE_COLUMNS = "grid-cols-[minmax(0,1fr)_64px_280px] max-md:grid-cols-[minmax(0,1fr)_auto]";
 

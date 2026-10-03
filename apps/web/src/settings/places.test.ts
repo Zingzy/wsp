@@ -124,7 +124,7 @@ describe("which row a workspace stands on", () => {
 });
 
 describe("the state cell of a list row", () => {
-  const ready = { kind: "word", word: "Ready" };
+  const ready = { kind: "word", word: "Ready", mark: "ready" };
   it("says a computer behind this wsp's daemon as Update where the client can ask for one, else as Behind, the protocol's word on the hover", () => {
     const behind = { ...hetzner, daemonVersion: DAEMON_VERSION - 5 };
     expect(placeStateCell(behind, null, { canUpdate: true })).toEqual({ kind: "update", why: placeDaemonBehind(behind) });
@@ -133,13 +133,13 @@ describe("the state cell of a list row", () => {
 
   it("says a computer that is not answering first, since nothing can be put on a computer that is off", () => {
     const away = absentComputer("hetzner", 32 * 60 * 1000);
-    expect(placeStateCell({ ...hetzner, daemonVersion: DAEMON_VERSION - 5, present: false }, away, { canUpdate: true })).toEqual({ kind: "word", word: "No answer", why: away.sentence });
+    expect(placeStateCell({ ...hetzner, daemonVersion: DAEMON_VERSION - 5, present: false }, away, { canUpdate: true })).toEqual({ kind: "word", word: "No answer", why: away.sentence, mark: "offline" });
   });
 
   it("says a computer that cannot run workspaces is Blocked first, its reason on the hover, before not answering and before behind", () => {
     const blocked = { ...hetzner, daemonVersion: DAEMON_VERSION - 5, blocked: "hetzner cannot run wsp workspaces: it mounts cgroup v1 at /sys/fs/cgroup" };
-    expect(placeStateCell(blocked, null, { canUpdate: true })).toEqual({ kind: "word", word: "Blocked", why: blocked.blocked });
-    expect(placeStateCell({ ...blocked, present: false }, absentComputer("hetzner", 32 * 60 * 1000), { canUpdate: true })).toEqual({ kind: "word", word: "Blocked", why: blocked.blocked });
+    expect(placeStateCell(blocked, null, { canUpdate: true })).toEqual({ kind: "word", word: "Blocked", why: blocked.blocked, mark: "failed" });
+    expect(placeStateCell({ ...blocked, present: false }, absentComputer("hetzner", 32 * 60 * 1000), { canUpdate: true })).toEqual({ kind: "word", word: "Blocked", why: blocked.blocked, mark: "failed" });
   });
 
   it("offers Sign in where an agent there needs one, naming it, and reads Ready otherwise", () => {
@@ -153,9 +153,9 @@ describe("the state cell of a list row", () => {
     const running: PlaceSetup = { state: "running", addId: "a_1", startedAt: "x", steps: [{ step: "clis", state: "running" }], waiting: [] };
     const failed: PlaceSetup = { ...running, state: "failed", steps: [], said: "the base tools did not install: curl" };
     const waiting: PlaceSetup = { ...running, state: "done", steps: [], waiting: [{ row: "signins/codex", label: "Codex", expiresAt: "x", state: "waiting" }] };
-    expect(placeStateCell({ ...hetzner, setup: running, daemonVersion: 1 }, null, { canUpdate: true })).toEqual({ kind: "word", word: "Setting up", why: "setting up the CLIs" });
-    expect(placeStateCell({ ...hetzner, setup: failed }, null, { canUpdate: true })).toEqual({ kind: "word", word: "Setup failed", why: "the base tools did not install: curl" });
-    expect(placeStateCell({ ...laptop, setup: waiting }, absentComputer("old-macbook", null), { canUpdate: true })).toEqual({ kind: "word", word: "Needs you", why: "Codex waits on you to sign in" });
+    expect(placeStateCell({ ...hetzner, setup: running, daemonVersion: 1 }, null, { canUpdate: true })).toEqual({ kind: "word", word: "Setting up", why: "setting up the CLIs", mark: "working" });
+    expect(placeStateCell({ ...hetzner, setup: failed }, null, { canUpdate: true })).toEqual({ kind: "word", word: "Setup failed", why: "the base tools did not install: curl", mark: "failed" });
+    expect(placeStateCell({ ...laptop, setup: waiting }, absentComputer("old-macbook", null), { canUpdate: true })).toEqual({ kind: "word", word: "Needs you", why: "Codex waits on you to sign in", mark: "needs-you" });
     expect(placeStateCell({ ...laptop, setup: running }, absentComputer("old-macbook", null), { canUpdate: true })).toMatchObject({ word: "No answer" });
   });
 });
