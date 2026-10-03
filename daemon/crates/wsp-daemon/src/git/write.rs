@@ -10,6 +10,8 @@ use wsp_frames::{
     words, DaemonErrorCode, GitCommitReply, GitDiscardReply, GitMergeInReply, GitStartOnReply, GitStatusEntry, GitUpdateReply,
 };
 
+use wsp_runtime::copy_road::branch::worktrees_of;
+
 use super::{check, parse_porcelain_v2, run_git, stdout_text, GitResult, Runs};
 use crate::paths::OpError;
 
@@ -187,7 +189,7 @@ pub(crate) async fn start_on<R: Runs>(runner: &R, cwd: &Path, branch: &str) -> R
         return Err(OpError::plain(words::start_on_refused(branch, &last_line(&fetched))));
     }
     // Asked of git outright rather than left to checkout, which on some versions moves a branch another worktree holds.
-    let worktrees = run_git(runner, cwd, &["worktree", "list", "--porcelain"], None, None).await?;
+    let worktrees = run_git(runner, cwd, &["worktree", "list", "--porcelain", "-z"], None, None).await?;
     check(&worktrees, "worktree list")?;
     let top = run_git(runner, cwd, &["rev-parse", "--show-toplevel"], None, None).await?;
     check(&top, "rev-parse")?;
@@ -208,13 +210,78 @@ pub(crate) async fn start_on<R: Runs>(runner: &R, cwd: &Path, branch: &str) -> R
     Ok(GitStartOnReply { branch: branch.to_owned(), oid: stdout_text(&head).trim().to_owned() })
 }
 
-/// The worktree other than this one that has the branch checked out, off `worktree list --porcelain`.
+/// The worktree other than this one that has the branch checked out, off `worktree list --porcelain -z`.
 fn held_elsewhere(listing: &str, here: &str, branch: &str) -> Option<String> {
-    let wanted = format!("branch refs/heads/{branch}");
-    listing.split("\n\n").find_map(|block| {
-        let path = block.lines().find_map(|l| l.strip_prefix("worktree "))?;
-        (path != here && block.lines().any(|l| l == wanted)).then(|| path.to_owned())
-    })
+    worktrees_of(listing).into_iter().find(|w| w.path != here && w.branch.as_deref() == Some(branch)).map(|w| w.path)
+}
+
+/// The repository's own refusal where the folder is none, so a refusal there is not read as git's word on the branch.
+fn refused_outside_a_repo(res: &GitResult) -> Result<(), OpError> {
+    if res.stderr.to_ascii_lowercase().contains("not a git repository") {
+        return Err(super::not_a_repo());
+    }
+    Ok(())
+}
+
+/// A name git takes for a branch and that cannot read as a flag on git's own line.
+async fn branch_name<R: Runs>(runner: &R, cwd: &Path, name: &str) -> Result<(), OpError> {
+    let checked = run_git(runner, cwd, &["check-ref-format", &format!("refs/heads/{name}")], None, None).await?;
+    if name.starts_with('-') || checked.code != Some(0) {
+        return Err(OpError::coded(DaemonErrorCode::BadRequest, words::not_a_branch_name(name)));
+    }
+    Ok(())
+}
+
+/// Puts the checkout on a new branch made at its HEAD: every change in it, staged or not, comes along and nothing
+/// is reset, so the work in the folder moves onto the branch as it stands.
+pub(crate) async fn switch_new<R: Runs>(runner: &R, cwd: &Path, branch: &str) -> Result<GitStartOnReply, OpError> {
+    branch_name(runner, cwd, branch).await?;
+    let mut put = run_git(runner, cwd, &["switch", "-q", "-c", branch], None, None).await?;
+    if put.code != Some(0) && put.stderr.contains("index.lock") {
+        tokio::time::sleep(LOCK_WAIT).await;
+        put = run_git(runner, cwd, &["switch", "-q", "-c", branch], None, None).await?;
+    }
+    if put.code != Some(0) {
+        refused_outside_a_repo(&put)?;
+        return Err(OpError::plain(words::switch_new_refused(branch, &last_line(&put))));
+    }
+    let head = run_git(runner, cwd, &["rev-parse", "HEAD"], None, None).await?;
+    check(&head, "rev-parse")?;
+    Ok(GitStartOnReply { branch: branch.to_owned(), oid: stdout_text(&head).trim().to_owned() })
+}
+
+/// One branch of a remote, named or given by its URL, fetched into a local branch of this repository: made where it
+/// is not there and moved only forward where it is, never forced, so a branch the person holds is never reset and
+/// one checked out anywhere is git's to refuse.
+pub(crate) async fn fetch_branch<R: Runs>(
+    runner: &R,
+    cwd: &Path,
+    remote: &str,
+    branch: &str,
+    into: Option<&str>,
+) -> Result<GitStartOnReply, OpError> {
+    let into = into.unwrap_or(branch);
+    for name in [branch, into] {
+        branch_name(runner, cwd, name).await?;
+    }
+    if remote.is_empty() || remote.starts_with('-') {
+        return Err(OpError::coded(DaemonErrorCode::BadRequest, format!("{remote:?} is not a remote")));
+    }
+    let spec = format!("refs/heads/{branch}:refs/heads/{into}");
+    let fetched = run_git(runner, cwd, &["fetch", "--no-tags", "--", remote, &spec], None, None).await?;
+    if fetched.code != Some(0) {
+        if let Some(refusal) = crate::bring_back::no_credential(runner, cwd, remote, &fetched.stderr, words::no_start_credential).await? {
+            return Err(OpError::coded(DaemonErrorCode::NoGitCredential, refusal));
+        }
+        if fetched.stderr.contains("couldn't find remote ref") {
+            return Err(OpError::plain(words::start_on_no_branch(branch)));
+        }
+        refused_outside_a_repo(&fetched)?;
+        return Err(OpError::plain(words::fetch_branch_refused(into, &last_line(&fetched))));
+    }
+    let tip = run_git(runner, cwd, &["rev-parse", "--verify", &format!("refs/heads/{into}")], None, None).await?;
+    check(&tip, "rev-parse")?;
+    Ok(GitStartOnReply { branch: into.to_owned(), oid: stdout_text(&tip).trim().to_owned() })
 }
 
 /// Where a merge's other side is fetched from.
@@ -745,6 +812,63 @@ mod tests {
         let err = start_on(&Here::new(), &beside, "work").await.unwrap_err();
         assert!(err.message.starts_with("the copy could not be put on work: "), "{}", err.message);
         assert!(err.message.contains("work"), "{}", err.message);
+    }
+
+    #[tokio::test]
+    async fn a_new_branch_takes_every_change_in_the_folder_along_and_resets_nothing() {
+        let repo = Repo::with(&["a.txt", "b.txt"]);
+        let head = git(&repo.at(), &["rev-parse", "HEAD"]).trim().to_owned();
+        repo.put("a.txt", "edited");
+        repo.put("new.txt", "untracked");
+        git(&repo.at(), &["add", "b.txt"]);
+        repo.put("b.txt", "staged then edited");
+        let before = repo.short();
+        let done = switch_new(&Here::new(), &repo.at(), "feat/moved").await.unwrap();
+        assert_eq!(done, GitStartOnReply { branch: "feat/moved".to_owned(), oid: head.clone() });
+        assert_eq!(git(&repo.at(), &["symbolic-ref", "--short", "HEAD"]).trim(), "feat/moved");
+        assert_eq!(repo.short(), before, "the changes moved or went");
+        assert_eq!(git(&repo.at(), &["rev-parse", "main"]).trim(), head);
+        // A branch already there is refused in one sentence and the folder stays where it was.
+        let err = switch_new(&Here::new(), &repo.at(), "main").await.unwrap_err();
+        assert!(err.message.starts_with("the folder could not be put on a new branch main: "), "{}", err.message);
+        assert_eq!(git(&repo.at(), &["symbolic-ref", "--short", "HEAD"]).trim(), "feat/moved");
+        for bad in ["-f", "a..b", "x.lock"] {
+            let err = switch_new(&Here::new(), &repo.at(), bad).await.unwrap_err();
+            assert_eq!((err.code, err.message), (Some(DaemonErrorCode::BadRequest), words::not_a_branch_name(bad)));
+        }
+    }
+
+    #[tokio::test]
+    async fn a_fetched_branch_lands_in_a_local_branch_moves_only_forward_and_never_resets_one_the_person_has() {
+        let repo = Pushed::new();
+        repo.other_pushes("pr/one", "main", "pr.txt", "the pr's\n");
+        let tip = git(&repo.dir.path().join("other"), &["rev-parse", "HEAD"]).trim().to_owned();
+        let work = repo.work();
+        let done = fetch_branch(&Here::new(), &work, "origin", "pr/one", None).await.unwrap();
+        assert_eq!(done, GitStartOnReply { branch: "pr/one".to_owned(), oid: tip.clone() });
+        assert_eq!(git(&work, &["rev-parse", "refs/heads/pr/one"]).trim(), tip);
+        assert_eq!(git(&work, &["symbolic-ref", "--short", "HEAD"]).trim(), "work", "the folder stayed on its branch");
+        // By URL into a name of its own, as a fork's branch lands.
+        let url = repo.dir.path().join("origin.git");
+        let done = fetch_branch(&Here::new(), &work, url.to_str().unwrap(), "pr/one", Some("fork/pr-one")).await.unwrap();
+        assert_eq!(done.branch, "fork/pr-one");
+        // The person's own branch of the name, holding a commit the remote lacks, is refused and stays where it was.
+        git(&work, &["branch", "-f", "mine", "work"]);
+        let mine = git(&work, &["rev-parse", "mine"]).trim().to_owned();
+        let err = fetch_branch(&Here::new(), &work, "origin", "pr/one", Some("mine")).await.unwrap_err();
+        assert!(err.message.starts_with("mine was not fetched: "), "{}", err.message);
+        assert_eq!(git(&work, &["rev-parse", "mine"]).trim(), mine, "a branch the person has was reset");
+        // One checked out is refused by git, and a branch the remote lacks says so.
+        let err = fetch_branch(&Here::new(), &work, "origin", "main", Some("work")).await.unwrap_err();
+        assert!(err.message.starts_with("work was not fetched: "), "{}", err.message);
+        assert_eq!(
+            fetch_branch(&Here::new(), &work, "origin", "nowhere", None).await.unwrap_err().message,
+            words::start_on_no_branch("nowhere")
+        );
+        assert_eq!(
+            fetch_branch(&Here::new(), &work, "--upload-pack=x", "main", None).await.unwrap_err().code,
+            Some(DaemonErrorCode::BadRequest)
+        );
     }
 
     #[tokio::test]

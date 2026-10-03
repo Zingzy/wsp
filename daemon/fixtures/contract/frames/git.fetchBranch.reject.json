@@ -1,0 +1,22 @@
+[
+  {
+    "id": 1,
+    "op": "git.fetchBranch",
+    "cwd": "/Users/dev/wsp",
+    "branch": "main"
+  },
+  {
+    "id": 1,
+    "op": "git.fetchBranch",
+    "cwd": "/Users/dev/wsp",
+    "remote": "origin"
+  },
+  {
+    "id": 1,
+    "op": "git.fetchBranch",
+    "cwd": "/Users/dev/wsp",
+    "remote": "origin",
+    "branch": "main",
+    "into": 5
+  }
+]

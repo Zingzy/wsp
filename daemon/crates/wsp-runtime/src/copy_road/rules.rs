@@ -36,10 +36,16 @@ impl GitRun {
     pub fn out(&self) -> &str {
         self.stdout.trim()
     }
-    /// The last line git put its reason on, which is where git puts it.
+    /// The line git put its reason on: its first `fatal:` or `error:` line, else its last line that is not a hint.
+    /// The lines after the reason are advice (`hint:`, "use 'remove -f -f' to override"), never the reason.
     pub fn why(&self) -> String {
         let said = if self.stderr.trim().is_empty() { self.stdout.trim() } else { self.stderr.trim() };
-        said.lines().last().unwrap_or("").to_owned()
+        let lines = || said.lines().map(str::trim).filter(|l| !l.is_empty());
+        lines()
+            .find(|l| l.starts_with("fatal:") || l.starts_with("error:"))
+            .or_else(|| lines().rfind(|l| !l.starts_with("hint:")))
+            .unwrap_or("")
+            .to_owned()
     }
 }
 
@@ -323,17 +329,28 @@ pub const CONFIG_FILE_MAX: u64 = 1024 * 1024;
 /// an ignored directory is one entry ending in a slash, and the files listed beside it are the ones outside every
 /// such directory.
 pub fn config_files(from: &Path) -> Vec<String> {
+    config_files_in(from, &ignored(from))
+}
+
+/// The config files among a listing `ignored` read of this folder.
+pub fn config_files_in(from: &Path, listed: &[String]) -> Vec<String> {
+    listed
+        .iter()
+        .filter(|path| !path.ends_with('/'))
+        .filter(|path| path.rsplit('/').next().is_some_and(is_config_file))
+        .filter(|path| from.join(path).metadata().is_ok_and(|m| m.is_file() && m.len() <= CONFIG_FILE_MAX))
+        .cloned()
+        .collect()
+}
+
+/// Everything git ignores in this folder, an ignored directory as one entry ending in a slash and nothing under it
+/// listed; empty where git cannot say.
+pub fn ignored(from: &Path) -> Vec<String> {
     let Ok(read) = git(from, &["ls-files", "-o", "-i", "--exclude-standard", "--directory", "-z"], READ_MS) else { return Vec::new() };
     if !read.ok() {
         return Vec::new();
     }
-    read.stdout
-        .split('\0')
-        .filter(|path| !path.is_empty() && !path.ends_with('/'))
-        .filter(|path| path.rsplit('/').next().is_some_and(is_config_file))
-        .filter(|path| from.join(path).metadata().is_ok_and(|m| m.is_file() && m.len() <= CONFIG_FILE_MAX))
-        .map(str::to_owned)
-        .collect()
+    read.stdout.split('\0').filter(|path| !path.is_empty()).map(str::to_owned).collect()
 }
 
 /// A folder with a commit in it, which is the least a project is: what every road's tests copy.
@@ -522,6 +539,26 @@ mod tests {
         let mut found = config_files(&at);
         found.sort();
         assert_eq!(found, vec![".env.local".to_owned(), "apps/web/.env.local".to_owned()], "{found:?}");
+    }
+
+    #[test]
+    fn the_reason_is_gits_fatal_or_error_line_and_never_a_hint_or_an_override() {
+        let dir = tempfile::tempdir().unwrap();
+        let at = dir.path().join("work");
+        repo(&at);
+        let held = dir.path().join("held");
+        assert!(git(&at, &["worktree", "add", "--quiet", "-b", "held", &held.to_string_lossy()], WRITE_MS).unwrap().ok());
+        assert!(git(&at, &["worktree", "lock", &held.to_string_lossy()], READ_MS).unwrap().ok());
+        let locked = git(&at, &["worktree", "remove", &held.to_string_lossy()], WRITE_MS).unwrap();
+        assert!(!locked.ok());
+        assert_eq!(locked.why(), "fatal: cannot remove a locked working tree;", "{}", locked.stderr);
+        let head =
+            git(&at, &["worktree", "add", "--quiet", "-b", "HEAD", &dir.path().join("h").to_string_lossy(), "HEAD"], WRITE_MS).unwrap();
+        assert!(!head.ok());
+        assert_eq!(head.why(), "fatal: 'HEAD' is not a valid branch name", "{}", head.stderr);
+        // A line with neither mark is still read, and a hint is never the answer.
+        let said = GitRun { code: Some(1), stdout: String::new(), stderr: "something odd\nhint: try again\n".to_owned() };
+        assert_eq!(said.why(), "something odd");
     }
 
     #[test]

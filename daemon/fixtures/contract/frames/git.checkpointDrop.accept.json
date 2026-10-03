@@ -1,0 +1,16 @@
+[
+  {
+    "id": 1,
+    "op": "git.checkpointDrop",
+    "cwd": "/Users/dev/wsp",
+    "scope": "ws_7f3a",
+    "thread": "thr_01a0e365"
+  },
+  {
+    "id": 2,
+    "op": "git.checkpointDrop",
+    "cwd": "/root/wsp-boat",
+    "thread": "thr_01a0e365",
+    "machineId": "wsp-a"
+  }
+]
