@@ -6,14 +6,13 @@
 // grammar; the foot is Back and Continue beside the key that closes it. The
 // running view is the same rows in the same order, several running at once,
 // a row that needs the person opening under itself with its acts. When every
-// row is done, Next opens the ready page: the app's hero field behind the
-// box's name and the one act.
+// row is done, Next opens the ready page: a wash of the theme's hero ink from
+// the top edge behind the box's name and the one act.
 import { CheckIcon, ExternalLinkIcon, GitCommitHorizontalIcon, GithubIcon, ListChecksIcon, PlugIcon, PuzzleIcon, ScrollTextIcon, ServerIcon, SquareTerminalIcon, TerminalIcon } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { fmtBytes, type ProjectHue, type ProjectIcon, type SizeTone } from "@wsp/protocol";
 import { AgentMarks } from "../../components/agents/agentsParts.js";
 import { HarnessMark } from "../../components/chat/HarnessMark.js";
-import { HeroField } from "../../components/chat/EmptyHero.js";
 import { AddButton } from "../../components/ui/add-button.js";
 import { Button } from "../../components/ui/button.js";
 import { Dialog, DialogDescription, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../../components/ui/dialog.js";
@@ -451,13 +450,13 @@ function RunningView({ rows, blocked }: { rows: readonly StepLine[]; blocked: bo
   );
 }
 
-/** The page after every row is done: the hero field the app draws behind a fresh thread, a soft glow in the same ink,
- * the box's glyph and name, and the one act. */
+/** The page after every row is done: a wash in the theme's hero ink falling from the dialog's top edge like a
+ * ceiling light, brightest at the top centre and gone by the middle, then the box's glyph and name and the one act.
+ * One static gradient, nothing moves. */
 function ReadyPage() {
   return (
     <div data-k="ready-page" className="relative flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden rounded-xl px-6 py-12 text-center">
-      <HeroField />
-      <span aria-hidden className="pointer-events-none absolute left-1/2 top-1/2 -z-10 size-[420px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(closest-side,color-mix(in_srgb,var(--hero-field)_22%,transparent),transparent)]" />
+      <span aria-hidden data-k="ready-wash" className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-1/2 bg-[radial-gradient(70%_100%_at_50%_0%,color-mix(in_srgb,var(--hero-field)_32%,transparent),transparent_100%)]" />
       <span className="flex size-12 items-center justify-center rounded-lg border border-border bg-foreground/[0.04]">
         <ComputerGlyph place={STUDIO} className="size-6 text-foreground/80" />
       </span>
