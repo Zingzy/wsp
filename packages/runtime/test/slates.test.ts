@@ -92,7 +92,8 @@ describe("a thread's slate on the host", () => {
     const { ws, store, events, threadId, asThread } = await setup();
     const set = await rt!.slates.set({ lines: TRACKER }, asThread);
     expect(set).toMatchObject({ version: 1, problems: [] });
-    expect(set.sketch).toEqual(expect.any(String));
+    expect(set.sketch.split("\n")[0]).toMatch(/^slate v1 "Steps", \d+ pieces/);
+    expect(set.sketch).toContain("[progress meter]");
     expect(events.filter(e => e.type === "session.slate")).toMatchObject([{ type: "session.slate", threadId, cause: "set", version: 1, by: "agent" }]);
     expect((await rt!.sessions.history(ws.id)).some(e => e.type === "session.slate")).toBe(true);
 

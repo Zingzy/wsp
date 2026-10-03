@@ -3819,12 +3819,12 @@ const ifVersionOf = (ctx: VerbContext): number | undefined => {
 const slateWriteLine = (w: { sketch: string; warnings: readonly { code: string; message: string }[] }): string =>
   [w.sketch, ...w.warnings.map(p => `warning ${p.code}: ${p.message}`)].join("\n");
 
-const SLATE_CATALOG_PARTS = ["pieces", "piece", "sources", "source", "actions", "action", "steps", "step", "functions", "rules", "examples"] as const;
+const SLATE_CATALOG_PARTS = ["pieces", "piece", "sources", "source", "actions", "action", "kinds", "names", "functions", "rules", "examples", "error"] as const;
 
 /** The parts of the catalog that were asked for and the text form of them, the same on both doors. */
 function slateCatalogOf(ask: { piece?: string; source?: string; action?: string; step?: string; functions?: boolean; examples?: boolean }): Structured & { text: string } {
   const answer = slateCatalog(ask);
-  const parts = Object.fromEntries(SLATE_CATALOG_PARTS.flatMap(part => (answer[part] !== undefined ? [[part, answer[part]]] : [])));
+  const parts = Object.fromEntries(SLATE_CATALOG_PARTS.flatMap(part => (answer[part] !== undefined ? [[part, answer[part] as unknown]] : [])));
   return { text: answer.text, ...parts };
 }
 
@@ -3833,17 +3833,9 @@ function slateCatalogOf(ask: { piece?: string; source?: string; action?: string;
 function slateChecked(sent: { lines?: string; document?: Record<string, unknown> }): { ok: boolean; errors: SlateProblem[]; warnings: SlateProblem[]; document?: Slate; sketch: string } {
   const given = [sent.lines, sent.document].filter(v => v !== undefined).length;
   if (given !== 1) throw usageRefusal(`A601 action-arg: a slate check takes exactly one of lines or document, and this one has ${given === 0 ? "none" : "both"}:`, "send lines alone.");
-  let warnings: SlateProblem[] = [];
-  let input: unknown = sent.document;
-  if (sent.lines !== undefined) {
-    const compiled = compileSlate(sent.lines);
-    if (compiled.errors.length > 0 || compiled.document === undefined) return { ok: false, errors: compiled.errors, warnings: compiled.warnings, sketch: "" };
-    warnings = compiled.warnings;
-    input = compiled.document;
-  }
-  const checked = validateSlate(input);
-  const seen = new Set(warnings.map(w => JSON.stringify(w)));
-  warnings = [...warnings, ...checked.warnings.filter(w => !seen.has(JSON.stringify(w)))];
+  // The compiler validates what it compiles; a stored document is validated here.
+  const checked = sent.lines !== undefined ? compileSlate(sent.lines) : validateSlate(sent.document);
+  const warnings = checked.warnings;
   if (checked.errors.length > 0 || checked.document === undefined) return { ok: false, errors: checked.errors, warnings, sketch: "" };
   return { ok: true, errors: [], warnings, document: checked.document, sketch: sketchSlate(checked.document, checked.document.state ?? {}, { resolve: () => undefined }) };
 }

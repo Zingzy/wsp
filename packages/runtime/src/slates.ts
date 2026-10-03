@@ -136,17 +136,6 @@ function invalid(errors: SlateProblem[], warnings: SlateProblem[]): Error {
   return Object.assign(new Error(message), { kind: "invalid", errors: errors.slice(0, ERRORS_LISTED), warnings });
 }
 
-/** Problems from two passes over one document, each once. */
-const merged = (...lists: SlateProblem[][]): SlateProblem[] => {
-  const seen = new Set<string>();
-  return lists.flat().filter(p => {
-    const key = JSON.stringify(p);
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-};
-
 /** Every expression a document carries, from bindings, format holes and `when`: what its dependencies are read off. */
 function expressionsOf(doc: Slate): string[] {
   const found: string[] = [];
@@ -338,7 +327,9 @@ export function createSlates(deps: SlatesDeps): Slates {
 
   const contextOf = (views: Map<string, SlateJson | undefined>): SlateEvalContext => ({ resolve: path => resolveIn(views, path), now: deps.now() });
 
-  const sketchOf = async (r: SlateRecord): Promise<string> => sketchSlate(r.document, r.state, contextOf(await viewsFor(r)));
+  /** The sketch with the version in its header, which the record knows and the slate module is not told. */
+  const sketched = (r: SlateRecord, views: Map<string, SlateJson | undefined>): string => sketchSlate(r.document, r.state, contextOf(views)).replace(/^slate /, `slate v${r.version} `);
+  const sketchOf = async (r: SlateRecord): Promise<string> => sketched(r, await viewsFor(r));
 
   /** The paths a document binds, as the evaluator names them. */
   const boundPaths = (doc: Slate): string[] => [...new Set(expressionsOf(doc).flatMap(e => slateDependencies(e)))];
@@ -417,7 +408,7 @@ export function createSlates(deps: SlatesDeps): Slates {
     announce(r, cause, by, pieces);
     if (/\bpr\.checks\b/.test(JSON.stringify(next))) deps.watchPr?.(r.workspaceId);
     const views = await viewsFor(r);
-    return { version: r.version, sketch: sketchSlate(r.document, r.state, contextOf(views)), warnings, problems: problemsOf(r, views) };
+    return { version: r.version, sketch: sketched(r, views), warnings, problems: problemsOf(r, views) };
   };
 
   const exactlyOne = (named: Record<string, unknown>): void => {
@@ -437,19 +428,11 @@ export function createSlates(deps: SlatesDeps): Slates {
       return serial(threadId, async () => {
         const r = (await recordOf(threadId)) ?? freshRecord(threadId);
         checkVersion(r, p.ifVersion);
-        let warnings: SlateProblem[] = [];
-        let doc: Slate | undefined;
-        if (p.lines !== undefined) {
-          const compiled = compileSlate(p.lines);
-          if (compiled.errors.length > 0 || compiled.document === undefined) throw invalid(compiled.errors, compiled.warnings);
-          warnings = compiled.warnings;
-          doc = compiled.document;
-        }
-        const checked = validateSlate(doc ?? p.document);
-        if (checked.errors.length > 0 || checked.document === undefined) throw invalid(checked.errors, merged(warnings, checked.warnings));
-        warnings = merged(warnings, checked.warnings);
+        // The compiler validates what it compiles; a stored document is validated here.
+        const checked = p.lines !== undefined ? compileSlate(p.lines) : validateSlate(p.document);
+        if (checked.errors.length > 0 || checked.document === undefined) throw invalid(checked.errors, checked.warnings);
         if (byOf(caller) === "agent") spendWrite(threadId);
-        return writeDocument(r, checked.document, "set", byOf(caller), stateFor(r, checked.document), Object.keys(checked.document.pieces), warnings);
+        return writeDocument(r, checked.document, "set", byOf(caller), stateFor(r, checked.document), Object.keys(checked.document.pieces), checked.warnings);
       });
     },
 
@@ -471,13 +454,12 @@ export function createSlates(deps: SlatesDeps): Slates {
           if (bad.length > 0) throw invalid(bad.map(o => problem("P105", "unknown-op", `op ${o.i} is not a patch op: ${o.parsed.error?.issues[0]?.message ?? "unreadable"}`, { op: o.i })), []);
           ops = read.map(o => o.parsed.data!);
         }
+        // The patch is applied to a copy and the whole result validated there, all or nothing.
         const applied = applySlatePatch(r.document, r.state, ops);
         if (applied.errors.length > 0 || applied.document === undefined) throw invalid(applied.errors, applied.warnings);
-        const checked = validateSlate(applied.document);
-        if (checked.errors.length > 0 || checked.document === undefined) throw invalid(checked.errors, merged(applied.warnings, checked.warnings));
         if (byOf(caller) === "agent") spendWrite(threadId);
         const touched = [...new Set(ops.flatMap(op => ("id" in op ? [op.id] : [])))];
-        return writeDocument(r, checked.document, "patch", byOf(caller), applied.state ?? r.state, touched, merged(applied.warnings, checked.warnings));
+        return writeDocument(r, applied.document, "patch", byOf(caller), applied.state ?? r.state, touched, applied.warnings);
       });
     },
 
@@ -503,7 +485,7 @@ export function createSlates(deps: SlatesDeps): Slates {
         if (by === "agent") announce(r, "state", by, []);
         if (p.sketch !== true) return { version: r.version };
         const views = await viewsFor(r);
-        return { version: r.version, sketch: sketchSlate(r.document, r.state, contextOf(views)), problems: problemsOf(r, views) };
+        return { version: r.version, sketch: sketched(r, views), problems: problemsOf(r, views) };
       });
     },
 
@@ -528,7 +510,7 @@ export function createSlates(deps: SlatesDeps): Slates {
         problems: problemsOf(r, views),
         annotations: r.annotations,
         consents: r.consents,
-        ...(p.sketch !== false ? { sketch: sketchSlate(r.document, r.state, contextOf(views)) } : {}),
+        ...(p.sketch !== false ? { sketch: sketched(r, views) } : {}),
       };
     },
 
