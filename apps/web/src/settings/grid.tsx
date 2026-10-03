@@ -7,10 +7,14 @@
 // with what it says.
 import { ChevronRightIcon } from "lucide-react";
 import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
+import type { RowAct } from "../components/agents/agentsRows.js";
 import { cn } from "../lib/utils.js";
 import { VALUE } from "./format.js";
 import { CARD_INSET, LINE_FLOOR, LIST_TITLE, NOTE, ROW_FLOOR } from "./layout.js";
 import { CARD_SURFACE } from "./rows.js";
+
+/** An act as its word alone, as every act on the settings grid is: the plus is Add's and no other button wears a glyph. */
+export const wordOnly = ({ icon: _icon, ...act }: RowAct): RowAct => act;
 
 /** The Computers page's template, shared by its two lists so the state column is one line across both. Below
  * 768 px the name, one load, the state and the chevron stand. */

@@ -63,7 +63,6 @@ export function generalCards(ctx: SettingsContext): SettingsCardData[] {
   const picked = editors.find(editor => editor.id === p.editor) ?? editors[0];
   const nameOf = (id: EditorId): string => editors.find(editor => editor.id === id)?.name ?? id;
   const here = hereName(ctx.places);
-  const keepAwake = AWAKE_WORDS.keepAwake(here);
   const sendKeys = W.sendKeys(isMacPlatform(ctx.platform));
   const loginStart = ctx.reads.loginStart;
   const turnLogin = (on: boolean): void => void desktopBridge()?.setLoginStart?.(on).then(next => useSettingsStore.getState().setReads({ loginStart: next }), ctx.failed);
@@ -162,7 +161,8 @@ export function generalCards(ctx: SettingsContext): SettingsCardData[] {
                 loginStart ? {} : { reset: () => turnLogin(true) },
               ),
             ]),
-        row("keep-awake", keepAwake, AWAKE_WORDS.keepAwakeDescription, <Switch data-k="keep-awake" aria-label={keepAwake} checked={p.keepAwake} onCheckedChange={keepAwake => set({ keepAwake })} />, resetOf(ctx, "keepAwake")),
+        // The switch's title is the computer's name, so it stands only once that name is known.
+        ...(here === "" ? [] : [row("keep-awake", AWAKE_WORDS.keepAwake(here), AWAKE_WORDS.keepAwakeDescription, <Switch data-k="keep-awake" aria-label={AWAKE_WORDS.keepAwake(here)} checked={p.keepAwake} onCheckedChange={keepAwake => set({ keepAwake })} />, resetOf(ctx, "keepAwake"))]),
       ],
     },
   ];

@@ -10,7 +10,7 @@
 // never drawn, kept or sent anywhere but that one set.
 import { useEffect, useState, type DragEvent, type ReactNode } from "react";
 import { GripVerticalIcon, XIcon } from "lucide-react";
-import { ACCESS_CHOICES, accessRefusal, agentEnvRefusal, commandWords, configDirSignInLine, effortsFor, modelIdRefusal, modelOf, shellLine, type AccessChoice, type AgentDefaultsPatch, type AgentSetupSet, type HarnessCatalog, type ModelPicker } from "@wsp/protocol";
+import { ACCESS_CHOICES, accessRefusal, agentEnvRefusal, commandWords, configDirSignInLine, effortsFor, modelIdRefusal, modelOf, shapeModels, shellLine, withCustomModels, type AccessChoice, type AgentDefaultsPatch, type AgentSetupSet, type HarnessCatalog, type ModelPicker } from "@wsp/protocol";
 import { agentName, catalogEntry } from "@wsp/catalog";
 import type { AccountRow } from "@wsp/protocol";
 import { Spaced } from "../components/ui/spaced.js";
@@ -211,8 +211,6 @@ function EnvironmentSheet({ label, computer, names, save, onClose }: { label: st
   );
 }
 
-/** The models the picker lists: each shown or hidden, moved up or down, and ids of the person's own added or taken
- * away, written as one picker record. */
 /** Models: every model the agent offers, the picker's own first in its order, then the ones hidden from it; each set
  * in or out of the picker, moved up, or, where the person added it by id, removed. Each change writes the agent's
  * picker into preferences at once and the page draws the record the host answers. */
@@ -220,7 +218,9 @@ function ModelsCard({ catalog, ctx }: { catalog: HarnessCatalog; ctx: SettingsCo
   const id = catalog.harness;
   const picker = ctx.preferences.agentDefaults[id]?.models;
   const custom = picker?.custom ?? [];
-  const items = [...pickerModels(catalog).map(m => ({ value: m.value, label: m.label, added: m.added === true, shown: true })), ...(catalog.hiddenModels ?? []).map(m => ({ value: m.value, label: m.label, added: m.added === true, shown: false }))];
+  // Shaped off the picker as the store already holds it, so a press before the host's lists answer builds on the last.
+  const shaped = shapeModels(withCustomModels({ ...catalog, models: [...catalog.models, ...(catalog.hiddenModels ?? [])], hiddenModels: [] }, picker), picker);
+  const items = [...pickerModels(shaped).map(m => ({ value: m.value, label: m.label, added: m.added === true, shown: true })), ...(shaped.hiddenModels ?? []).map(m => ({ value: m.value, label: m.label, added: m.added === true, shown: false }))];
   const fallback = newThreadPicks(catalog).model;
   const [typed, setTyped] = useState("");
   const [refused, setRefused] = useState<string | null>(null);
@@ -417,7 +417,6 @@ function NewThreads({ catalog, ctx }: { catalog: HarnessCatalog; ctx: SettingsCo
 
 type SheetOpen = "program" | "config" | "args" | "env" | null;
 
-/** One agent's page, for the computer the Agents page has picked. */
 /** The account this agent is signed in as on the computer the page reads, off the host's usage accounts: its plan in
  * the vendor's own words and the address it signed in as, where the host read them; null until read, or none. */
 function useAccountOn(agent: string, computer: string): AccountRow | null {
@@ -456,6 +455,7 @@ function RunsSkeleton() {
   );
 }
 
+/** One agent's page, for the computer the Agents page has picked. */
 export function AgentPage({ id, ctx }: { id: string; ctx: SettingsContext }) {
   const place = usePickedPlace();
   const target = place === undefined ? null : { placeId: place.id };
@@ -492,7 +492,7 @@ export function AgentPage({ id, ctx }: { id: string; ctx: SettingsContext }) {
   const setupView = row?.setup;
   // The agent's own status on that computer names its plan first; the usage accounts' reading stands in where it does not.
   const plan = row?.signInPlan ?? (account?.plan === "" ? undefined : account?.plan);
-  const head = row === undefined ? undefined : signInHead(row, computer, plan === undefined ? undefined : planWord(plan, agent?.planBrand));
+  const head = row?.installed === true ? signInHead(row, computer, plan === undefined ? undefined : planWord(plan, agent?.planBrand)) : undefined;
   const close = (): void => setSheet(null);
   return (
     <>
@@ -504,7 +504,7 @@ export function AgentPage({ id, ctx }: { id: string; ctx: SettingsContext }) {
             title={label}
             {...(row?.version === undefined ? {} : { mark: row.version })}
             line={
-              row === undefined || head === undefined ? undefined : row.installed ? (
+              row === undefined ? undefined : head !== undefined ? (
                 <Spaced
                   parts={[
                     <span key="sign-in" title={head.whole}>

@@ -375,6 +375,31 @@ describe("a computer's own page", () => {
     expect(asked.at(-1)).toEqual(["p_2", { spawn: { spawn: false } }, []]);
   });
 
+  it("steps threads at once off the number it last sent while the host has not answered, so two quick presses land two up", async () => {
+    const asked: number[] = [];
+    const answers: Array<() => void> = [];
+    const row: PlaceView = { ...box, cap: { threads: 2 }, capDefault: { threads: 2 } };
+    useStore.setState({ places: [here, row] });
+    const api = computersApi({
+      agentsRead: async () => AGENTS_REPORT,
+      placesSet: (_placeId, ask) => {
+        asked.push(ask.threads!);
+        return new Promise(done => answers.push(() => done({ ...row, cap: { threads: ask.threads! }, settings: { threads: ask.threads! } })));
+      },
+    }).api;
+    await mountComputers(api, { kind: "computer", id: "p_2" });
+    const more = screen.getByRole("button", { name: COMPUTER_PAGE_WORDS.more });
+    await act(async () => fireEvent.click(more));
+    await act(async () => fireEvent.click(more));
+    expect(asked).toEqual([3, 4]);
+    expect(document.querySelector("[data-k=threads-at-once-value]")?.textContent).toBe("4");
+    await act(async () => answers.shift()!());
+    expect(document.querySelector("[data-k=threads-at-once-value]")?.textContent).toBe("4");
+    await act(async () => answers.shift()!());
+    await settle();
+    expect(document.querySelector("[data-k=threads-at-once-value]")?.textContent).toBe("4");
+  });
+
   const withWorkspaces = (): void => {
     useStore.setState({
       places: [here, laptop],

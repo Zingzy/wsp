@@ -263,6 +263,20 @@ describe("search over the agents", () => {
     await settle();
     expect(pageAt()).toBe("agent:gemini");
   });
+
+  it("finds the agents of the computer picked now, a pick made while the search is open included", async () => {
+    useStore.setState({ places: [here, box], projects: [], harnesses: HARNESSES });
+    const gemini = { id: "gemini", name: "Gemini CLI", installed: true, version: "0.59.0", road: "own" as const, signIn: "signed-in" as const, signInRoad: "code" as const, wspTools: false };
+    mountSettings({ api: settingsApi({ agentsRead: async target => ({ ...AGENTS_REPORT, agents: [...AGENTS_REPORT.agents, ...("placeId" in target && target.placeId === "here" ? [gemini] : [])] }) }).api, at: { kind: "group", group: "agents" } });
+    await settle();
+    await act(async () => useSettingsStore.getState().pickAgentsPlace(box.id));
+    await settle();
+    const hits = (): string[] => [...document.querySelectorAll("[data-settings-card='search-agents'] [data-settings-title]")].map(title => title.textContent ?? "");
+    await act(async () => void fireEvent.change(field(), { target: { value: "gemini" } }));
+    expect(hits()).toEqual([]);
+    await act(async () => useSettingsStore.getState().pickAgentsPlace(here.id));
+    expect(hits()).toEqual(["Gemini CLI"]);
+  });
 });
 
 describe("the row grammar", () => {
@@ -434,7 +448,7 @@ describe("Appearance", () => {
     expect(rowTitles()).toEqual([TRANSPARENCY_WORDS.title, FONT_WORDS.app, FONT_WORDS.textSize, FONT_WORDS.code, FONT_WORDS.codeSize]);
     const sections = [...document.querySelectorAll<HTMLElement>("[data-settings-page] [data-settings-card]")];
     expect(sections.map(c => [c.querySelector("[data-settings-head]")?.textContent, c.querySelector("[data-settings-lede]")?.textContent])).toEqual([
-      [SETTINGS_WORDS.mode, THEME_SECTION_WORDS.modeLede("")],
+      [SETTINGS_WORDS.mode, undefined],
       [SETTINGS_WORDS.themesOf(THEME_WORDS.light), THEME_SECTION_WORDS.lede],
       [GLASS_WORDS.head, GLASS_WORDS.lede],
       [FONT_WORDS.head, FONT_WORDS.lede],

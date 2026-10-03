@@ -33,9 +33,8 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { Switch } from "../components/ui/switch.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
 import { cn } from "../lib/utils.js";
-import { wordOnly } from "./computers.js";
 import { ABOUT_WORDS, AGENTS_PAGE_WORDS as W, FACT, VALUE, capitalised } from "./format.js";
-import { GlyphFrame } from "./grid.js";
+import { GlyphFrame, wordOnly } from "./grid.js";
 import { CARD_INSET, LINE_FLOOR, NOTE, SELECT_WIDTH } from "./layout.js";
 import { absentOf, placeName } from "./places.js";
 import { CARD_SURFACE, Card, HeadRow, Line, Row, RowSkeleton } from "./rows.js";

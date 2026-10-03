@@ -262,7 +262,6 @@ function ProjectNewThreads({ project, ctx }: { project: ProjectView; ctx: Settin
   );
 }
 
-/** One project's own page. */
 /** The threads on a project's workspaces, off the sidebar's own snapshots so the page counts what the sidebar shows. */
 function ThreadCount({ project }: { project: Pick<ProjectView, "id"> }) {
   const threads = useSidebarProjects()
@@ -288,6 +287,7 @@ function RemoteOpen({ remote }: { remote: string }) {
   );
 }
 
+/** One project's own page. */
 export function ProjectPage({ project, ctx }: { project: ProjectView; ctx: SettingsContext }) {
   const place = ctx.places.find(p => p.id === project.computer);
   const computer = project.computer === HERE_PLACE_ID ? hereName(ctx.places) : place === undefined ? project.computer : placeName(place);
