@@ -221,6 +221,7 @@ const { api } = settingsApi({
   recipesOptions: async () => OPTIONS,
   recipesList: async () => (screen === "recipes-empty" ? [] : RECIPES),
   placesChoose: async () => pending[0]!,
+  placesEstimate: async () => ({ neededBytes: 3.9 * 1024 * MB, freeBytes: screen === "summary-disk" ? 2.1 * 1024 * MB : 61 * 1024 * MB, unmeasured: 0 }),
   placesList: async () => ({ places, adds: [], pending }),
   initGet: async () => null,
   addComputerOverSsh: async () => STUDIO,
@@ -245,8 +246,8 @@ const job = ADD_STEPS[screen];
 if (job !== undefined) useAdds.setState({ jobs: { [job.addId]: job } });
 if (screen === "where") useAddFlow.setState({ open: true, step: "where", address: "studio" });
 else if (job !== undefined) useAddFlow.setState({ open: true, step: "checks", address: job.address, addId: job.addId });
-else if (PICK_STEPS.includes(screen as AddStep) || screen === "projects-taken" || screen === "projects-nogithub") {
-  const step = (screen.startsWith("projects") ? "projects" : screen) as AddStep;
+else if (PICK_STEPS.includes(screen as AddStep) || screen === "projects-taken" || screen === "projects-nogithub" || screen === "summary-disk") {
+  const step = (screen.startsWith("projects") ? "projects" : screen === "summary-disk" ? "summary" : screen) as AddStep;
   const picks = screen === "projects-nogithub" ? { ...PICKS, configs: { ...PICKS.configs, github: { signin: "skip" as const } } } : PICKS;
   useAddFlow.setState({ open: true, step, address: "studio", placeId: STUDIO.id, pendingId: "a_add", picks, from: "here", options: OPTIONS, saveAs: { on: true, name: "Builders", icon: "rocket" } });
 } else if (RUNNING_SCREENS.includes(screen)) useAddFlow.setState({ open: true, step: screen === "ready" ? "ready" : "running", placeId: STUDIO.id, address: "studio" });

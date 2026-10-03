@@ -33,7 +33,7 @@ import { placeName } from "../places.js";
 import { readRecipes, useRecipes } from "../recipesStore.js";
 import { Card, Line } from "../rows.js";
 import { CopyRow, RefusalSlot } from "../sheetParts.js";
-import { STEP_TITLES, askedHostKey, closeAdd, connect, firstPick, go, openSetup, readOptions, retrySetup, setPicks, setSaveAs, setUp, stepsFor, useAddFlow, type AddStep } from "./addFlow.js";
+import { STEP_TITLES, askedHostKey, closeAdd, connect, firstPick, go, openSetup, readOptions, retrySetup, setPicks, setSaveAs, setUp, stepsFor, tooBig, useAddFlow, weigh, type AddStep } from "./addFlow.js";
 import { everything, folderKey, githubPick, noPicks } from "./choices.js";
 import { AgentsPicks, Choice, ClisPicks, GitHubPicks, OtherPicks, PluginsPicks, ProjectsPicks, ServersPicks, SkillsPicks, type FolderOption } from "./PickLists.js";
 import { PickLine, PickRow } from "./PickRow.js";
@@ -168,6 +168,9 @@ const names = (table: Record<string, unknown>): string => Object.keys(table).joi
 
 function SummaryStep({ picks, box, place, here, recipeIcon }: { picks: RecipeFile; box: string; place: PlaceView | undefined; here: string; recipeIcon: ProjectIcon }) {
   const saveAs = useAddFlow(s => s.saveAs);
+  const estimate = useAddFlow(s => s.estimate);
+  const free = estimate?.freeBytes ?? place?.diskFreeBytes;
+  const short = tooBig(estimate);
   const counts = recipeCounts(picks);
   const github = { vault: `Token from ${here}`, machine: `Sign in on ${box}`, skip: ADD_COMPUTER_WORDS.skipForNow }[githubPick(picks)];
   const lines: [string, string][] = [
@@ -187,18 +190,24 @@ function SummaryStep({ picks, box, place, here, recipeIcon }: { picks: RecipeFil
         {lines.map(([label, value]) => (
           <Line key={label} id={label} label={label} value={value === "" || value === "0" ? "None" : value} valueClass="fact" />
         ))}
-        {place?.diskFreeBytes === undefined ? null : (
+        {estimate === null && free === undefined ? null : (
           <Line
             id="disk"
             label={`Disk on ${box}`}
             control={
-              <span data-k="disk" className="text-[13px] text-muted-foreground tabular-nums sm:text-right">
-                {fmtBytes(place.diskFreeBytes)} free
+              <span
+                data-k="disk"
+                data-short={short}
+                {...(estimate === null || estimate.unmeasured === 0 ? {} : { title: ADD_COMPUTER_WORDS.unmeasured(estimate.unmeasured) })}
+                className={cn("text-[13px] tabular-nums sm:text-right", short ? "text-destructive-foreground" : "text-muted-foreground")}
+              >
+                {estimate === null ? `${fmtBytes(free!)} free` : free === undefined ? `${fmtBytes(estimate.neededBytes)} needed` : ADD_COMPUTER_WORDS.diskLine(fmtBytes(estimate.neededBytes), fmtBytes(free))}
               </span>
             }
           />
         )}
       </Card>
+      {short ? <RefusalSlot k="disk-short" {...ADD_COMPUTER_WORDS.diskShort(box, fmtBytes(free!), fmtBytes(estimate!.neededBytes))} /> : null}
       <Card id="save-recipe">
         <PickRow id="save" checked={saveAs.on} onCheckedChange={on => setSaveAs({ on })} glyph={<Glyph aria-hidden className={GLYPH} />} name="Save as a recipe" note="The next box starts from these picks.">
           {saveAs.on ? (
@@ -386,6 +395,12 @@ export function AddComputerDialog() {
     if (job?.state === "done" && job.placeId !== undefined && flow.placeId === null) useAddFlow.setState({ placeId: job.placeId, pendingId: job.addId });
   }, [job?.state, job?.placeId, flow.placeId, job?.addId]);
 
+  // The summary weighs the picks as they stand each time it opens, and again on any change to them.
+  useEffect(() => {
+    if (flow.step !== "summary" || api === null || flow.placeId === null || flow.picks === null) return;
+    weigh(api, flow.placeId, flow.picks);
+  }, [flow.step, api, flow.placeId, flow.picks]);
+
   // A first pick step with nothing picked starts from everything the computer running the host has, once.
   useEffect(() => {
     if (!PICK_STEPS.has(flow.step) || flow.options === null || flow.from !== "here" || flow.saves > 0 || !empty(flow.picks)) return;
@@ -546,7 +561,7 @@ export function AddComputerDialog() {
         return (
           <>
             {backButton}
-            {primary(`Set up ${box}`, () => void (api === null ? undefined : setUp(api, (slug, icon) => void setPreferences({ recipeLook: { [slug]: { icon } } }))), place === undefined || empty(flow.picks) || flow.starting)}
+            {primary(`Set up ${box}`, () => void (api === null ? undefined : setUp(api, (slug, icon) => void setPreferences({ recipeLook: { [slug]: { icon } } }))), place === undefined || empty(flow.picks) || flow.starting || tooBig(flow.estimate))}
           </>
         );
       case "running":

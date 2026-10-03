@@ -275,6 +275,37 @@ describe("Add a computer, from the address to Set up", () => {
     expect(useStore.getState().places.find(p => p.id === studio.id)?.setup).toEqual(RUNNING);
   });
 
+  it("weighs the picks against the computer's room on the summary, and holds Set up where they do not fit", async () => {
+    const GB = 1024 ** 3;
+    const weighed: { ref: string; choices: RecipeFile }[] = [];
+    let free = 61 * GB;
+    const fake = host({
+      placesEstimate: async (ref: string, choices: RecipeFile) => {
+        weighed.push({ ref, choices });
+        return { neededBytes: 3.9 * GB, freeBytes: free, unmeasured: 2 };
+      },
+    } as Partial<Api>);
+    useStore.setState({ places: [here, studio] });
+    mountSettings({ api: fake.api, at: { kind: "group", group: "computers" } });
+    act(() => useAddFlow.setState({ open: true, step: "summary", placeId: studio.id, pendingId: "a_1", address: "studio" }));
+    await settle();
+    await waitFor(() => expect(dialog()!.querySelector("[data-k=disk]")?.textContent).toBe("3.9 GB needed, 61 GB free"));
+    expect(weighed.at(-1)!.ref).toBe(studio.id);
+    expect(Object.keys(weighed.at(-1)!.choices.agents)).toEqual(["claude", "codex"]);
+    expect(dialog()!.querySelector("[data-k=disk]")?.getAttribute("title")).toBe("2 picked rows were not measured");
+    expect(dialog()!.querySelector("[data-k=disk-short]")).toBeNull();
+    expect(primary().hasAttribute("data-held")).toBe(false);
+    free = 2.1 * GB;
+    act(() => useAddFlow.setState({ step: "other" }));
+    await settle();
+    act(() => useAddFlow.setState({ step: "summary" }));
+    await settle();
+    await waitFor(() => expect(dialog()!.querySelector("[data-k=disk]")?.textContent).toBe("3.9 GB needed, 2.1 GB free"));
+    expect(dialog()!.querySelector("[data-k=disk]")?.getAttribute("data-short")).toBe("true");
+    expect(dialog()!.querySelector("[data-k=disk-short]")?.textContent).toBe("studio has 2.1 GB free; these picks need 3.9 GB. Untick some rows, or free room on studio.");
+    expect(primary().hasAttribute("data-held")).toBe(true);
+  });
+
   it("offers Start from where a recipe is saved, and a pick there takes the recipe's rows", async () => {
     const builders: RecipeView = { name: "Builders", slug: "builders", summary: "1 agent", machines: ["spoo"], file: RecipeFile.parse({ name: "Builders", agents: { codex: { signin: "machine" } } }) };
     const fake = host({}, [builders]);
