@@ -19,6 +19,7 @@ import { effortsFor, everyModel, markedDefault, modelOf } from "./harness-picks.
 import { AccessChoice, AgentDefaults, AgentDefaultsPatch, ProjectOverrides, ProjectOverridesPatch, AgentSetupSet, patchedFields } from "./thread-defaults.js";
 import { GENERAL_DEFAULTS, GENERAL_FIELDS, patchedGeneral } from "./general-prefs.js";
 import { UsageAlertEvent } from "./plan-alerts.js";
+import { SessionSlateEvent, SLATE_OPS, SlateStateEvent, UsageAccountEvent } from "./slate/wire.js";
 import { RecipeFile } from "./recipe-file.js";
 import { ProjectHue, ProjectIcon } from "./project-look.js";
 import type { OutsideLine, OutsideOpen } from "./outside-line.js";
@@ -1871,6 +1872,7 @@ export const SessionEvent = z.discriminatedUnion("type", [
   SessionMovedEvent,
   SessionBehindEvent,
   SessionSubagentEvent,
+  SessionSlateEvent,
 ]);
 export type SessionEvent = z.infer<typeof SessionEvent>;
 
@@ -3721,6 +3723,9 @@ export const EventUnion = z.discriminatedUnion("type", [
   SessionMovedEvent.extend(sequenced),
   SessionBehindEvent.extend(sequenced),
   SessionSubagentEvent.extend(sequenced),
+  SessionSlateEvent.extend(sequenced),
+  SlateStateEvent.extend(sequenced),
+  UsageAccountEvent.extend(sequenced),
   SessionQueuedEvent.extend(sequenced),
   SessionHeldEvent.extend(sequenced),
   ThreadMarkedEvent.extend(sequenced),
@@ -6414,6 +6419,25 @@ export const placeFileText = (file: PlaceFile): string => `${JSON.stringify(file
 /** The refusal a second join on one computer gets: a place file is the one wsp this computer belongs to. */
 export const ALREADY_JOINED_LINE = `this computer is already a place in a wsp; ${PLACE_LEAVE_LINE} first`;
 
+/** Each slate op as a request of this table: the envelope's id and op beside the params wire.ts declares. */
+function slateOps() {
+  const op = <N extends keyof typeof SLATE_OPS>(name: N) => z.object({ id: reqId, op: z.literal(name) }).extend(SLATE_OPS[name].shape as (typeof SLATE_OPS)[N]["shape"]);
+  return [
+    op("slates.get"),
+    op("slates.state"),
+    op("slates.set"),
+    op("slates.patch"),
+    op("slates.read"),
+    op("slates.undo"),
+    op("slates.clear"),
+    op("slates.shown"),
+    op("slates.act"),
+    op("slates.subscribe"),
+    op("slates.unsubscribe"),
+    op("slates.resolve"),
+  ] as const;
+}
+
 const RuntimeOp = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("auth"), token: z.string() }),
   z.object({ id: reqId, op: z.literal("ticket.issue"), purpose: TicketPurpose }),
@@ -7199,6 +7223,8 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** Writes the record and the vault, sealed to the passphrase, to `dest` on this computer. Replies with
    * { exported: SealedImageExport }. The passphrase is never logged and never kept. */
   z.object({ id: reqId, op: z.literal("image.export"), dest: z.string().min(1), passphrase: z.string().min(IMAGE_PASSPHRASE_MIN).max(256), name: z.string().optional() }),
+  // A thread's slate: the window's ops and the slate verbs' (packages/protocol/src/slate/wire.ts).
+  ...slateOps(),
 ]);
 
 /** Every request carries where it reached the host from: here, this computer's own app, CLI or MCP, or relayed from
@@ -7279,6 +7305,13 @@ export const THREAD_OPS: readonly string[] = [
   "sessions.rename",
   "sessions.read",
   "sessions.search",
+  // A thread writes and reads its own slate, and a lead reads a child's; the window's own slate ops are not here.
+  "slates.set",
+  "slates.patch",
+  "slates.state",
+  "slates.read",
+  "slates.undo",
+  "slates.clear",
 ];
 
 /** The ops a computer the person paired may send with no role of its own, and the whole of them, for the reason
@@ -7368,6 +7401,15 @@ export const DEVICE_OPS: readonly string[] = [
   "release.check",
   "host.terminalConfig",
   "init.get",
+  // A window on a paired computer draws a slate and writes its state; a press that sends is a start, so it is not here.
+  "slates.get",
+  "slates.state",
+  "slates.undo",
+  "slates.clear",
+  "slates.shown",
+  "slates.subscribe",
+  "slates.unsubscribe",
+  "slates.resolve",
 ];
 
 /** The one sentence a thread's own token is refused an op with. It names the op rather than guessing why a caller

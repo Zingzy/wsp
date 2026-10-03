@@ -450,6 +450,7 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
       case "session.moved":
       case "session.behind":
       case "session.subagent":
+      case "session.slate":
         continue;
       case "session.checkpoint": {
         // Taken once the turn is over, so a later turn may already be open: the row goes on its own turn's summary.
