@@ -60,7 +60,7 @@ const project = (id: string, name: string, computer = "here"): ProjectView => ({
 const workspace = (id: string, name: string, projectId: string): WorkspaceView => ({
   id,
   name,
-  kind: "local",
+  kind: "cloud",
   machineId: "local",
   project: { id: projectId, name: projectId, path: `/Users/dev/${projectId}`, computer: "here" },
   phase: "running",
@@ -172,7 +172,8 @@ afterEach(() => {
 
 describe("the sidebar's list of thread tiles", () => {
   it("lists every root thread as a tile across every workspace, newest first, with no project row and no workspace row over them", async () => {
-    mount({ projects: [project("pr_1", "spoo"), project("pr_2", "wsp")], workspaces: [workspace("ws_a", "pricing page", "pr_1"), workspace("ws_b", "webhook retries", "pr_2")] });
+    const here = (id: string, name: string, projectId: string): WorkspaceView => ({ ...workspace(id, name, projectId), kind: "local" });
+    mount({ projects: [project("pr_1", "spoo"), project("pr_2", "wsp")], workspaces: [here("ws_a", "pricing page", "pr_1"), here("ws_b", "webhook retries", "pr_2")] });
     await act(async () => {
       useStore.setState({ sessions: sessions([{ ws: "ws_a", id: "th_old", prompt: "the older one", startedAgo: 3 * HOUR }, { ws: "ws_b", id: "th_new", prompt: "the newer one", startedAgo: HOUR }]) } as never);
     });
@@ -193,13 +194,15 @@ describe("the sidebar's list of thread tiles", () => {
     expect(useStore.getState().selectedThreadId).toBeNull();
   });
 
-  it("titles this computer's own workspace with no thread by the computer's name, never its host name, and a copy by its own", async () => {
-    const { worktree: _worktree, ...itself } = workspace("ws_a", "zingzys-MacBook-Pro.local", "pr_1");
-    mount({ projects: [project("pr_1", "spoo")], workspaces: [itself] });
-    await waitFor(() => expect(rowIds()).toEqual(["ws:ws_a"]));
-    const tile = document.querySelector<HTMLElement>("[data-row-id='ws:ws_a']")!;
-    expect(tile.querySelector("[data-thread-title]")!.textContent).toBe("zingzy's MacBook Pro");
-    expect(tile.textContent).not.toContain("zingzys-MacBook-Pro.local");
+  it("draws no tile for this computer's own folder while it holds no thread, and its thread's tile once one starts", async () => {
+    const { worktree: _worktree, ...itself } = workspace("ws_a", "spoo", "pr_1");
+    mount({ projects: [project("pr_1", "spoo")], workspaces: [{ ...itself, kind: "local" }] });
+    await waitFor(() => screen.getByText(PROJECT_WORDS.noWorkspaces));
+    expect(rowIds()).toEqual([]);
+    await act(async () => {
+      useStore.setState({ sessions: sessions([{ ws: "ws_a", id: "th_first", prompt: "the first one", startedAgo: HOUR }]) } as never);
+    });
+    await waitFor(() => expect(rowIds()).toEqual(["thread:th_first"]));
   });
 
   describe("a workspace's checkout, on the tile and on its card", () => {

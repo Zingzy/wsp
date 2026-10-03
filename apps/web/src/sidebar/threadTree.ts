@@ -9,7 +9,7 @@
 // while the workspace its session is filed under stays what its meta names and
 // what selecting it opens: the two are the same thread's two facts and a
 // surface needs both.
-import { ThreadSection, type ProjectView, type ThreadMarks, type ThreadPlacement } from "@wsp/protocol";
+import { copiesFolder, ThreadSection, workspaceKind, type ProjectView, type ThreadMarks, type ThreadPlacement } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot } from "../adapt/index.js";
 import { workspaceRowId } from "./rowGrammar.js";
 import { isThreadSettleable, isThreadSettled, isThreadWorking, nestSpawnedThreads, sortSettledThreadsForSidebar, sortThreadsForSidebar, threadForest, threadSection, type ThreadNode } from "./Sidebar.logic.js";
@@ -178,7 +178,8 @@ export function sidebarTiles(
 ): { live: TileNode[]; settled: TileNode[]; sections: TileSection[] } {
   const items = projects.flatMap((runs): TileItem[] => {
     const forkedBy = runs.workspace.parentThreadId ?? null;
-    if (runs.threads.length === 0) return [{ id: workspaceRowId(runs.id), parentThreadId: forkedBy, startedAt: runs.workspace.createdAt, runs, thread: null }];
+    // A folder's record is made before its first thread and outlives its last; only a machine is a tile alone.
+    if (runs.threads.length === 0) return copiesFolder(workspaceKind(runs.workspace)) ? [] : [{ id: workspaceRowId(runs.id), parentThreadId: forkedBy, startedAt: runs.workspace.createdAt, runs, thread: null }];
     return runs.threads.map(thread => ({ id: thread.id, parentThreadId: thread.parentThreadId ?? forkedBy, startedAt: thread.startedAt, runs, thread }));
   });
   const roots = attemptGroups(threadForest(sortThreadsForSidebar(items)).filter(node => picked === null || node.thread.runs.workspace.project.id === picked));
