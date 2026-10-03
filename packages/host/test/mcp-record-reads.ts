@@ -248,9 +248,9 @@ export const READS: Record<string, Case[]> = {
   ],
   thread_read: [
     { case: "messages", arguments: { thread: "t-1111" }, replies: { "sessions.list": reply({ sessions: SESSIONS }), "sessions.history": reply({ events: EVENTS }), "sessions.read": reply({}) } },
-    { case: "last", arguments: { thread: "t-1111aaaa", last: true }, replies: { "sessions.list": reply({ sessions: SESSIONS }), "sessions.history": reply({ events: EVENTS.slice(0, 24) }), "sessions.read": reply({}) } },
-    { case: "last with a newer turn", arguments: { thread: "t-1111aaaa", last: true }, replies: { "sessions.list": reply({ sessions: SESSIONS }), "sessions.history": reply({ events: EVENTS.slice(0, 25) }), "sessions.read": reply({}) } },
-    { case: "last cut by the runtime", arguments: { thread: "t-1111aaaa", last: true }, replies: { "sessions.list": reply({ sessions: SESSIONS }), "sessions.history": reply({ events: EVENTS.slice(0, 26) }), "sessions.read": reply({}) } },
+    { case: "last", arguments: { thread: "t-1111aaaa", last: true }, replies: { "sessions.list": reply({ sessions: SESSIONS }), "sessions.history": reply({ events: EVENTS.slice(0, 25) }), "sessions.read": reply({}) } },
+    { case: "last with a newer turn", arguments: { thread: "t-1111aaaa", last: true }, replies: { "sessions.list": reply({ sessions: SESSIONS }), "sessions.history": reply({ events: EVENTS.slice(0, 26) }), "sessions.read": reply({}) } },
+    { case: "last cut by the runtime", arguments: { thread: "t-1111aaaa", last: true }, replies: { "sessions.list": reply({ sessions: SESSIONS }), "sessions.history": reply({ events: EVENTS.slice(0, 27) }), "sessions.read": reply({}) } },
     { case: "last with no words", arguments: { thread: "t-1111aaaa", last: true }, replies: { "sessions.list": reply({ sessions: SESSIONS }), "sessions.history": reply({ events: EVENTS }), "sessions.read": reply({}) } },
     { case: "a thread of no id", arguments: { thread: "s-2" }, replies: { "sessions.list": reply({ sessions: SESSIONS }), "sessions.history": reply({ events: [] }), "sessions.read": reply({}) } },
     { case: "no reply yet", arguments: { thread: "s-2", last: true }, replies: { "sessions.list": reply({ sessions: SESSIONS }), "sessions.history": reply({ events: [{ type: "session.start", threadId: "s-2", turnId: "x" }] }), "sessions.read": reply({}) } },
