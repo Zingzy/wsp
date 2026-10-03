@@ -1175,7 +1175,12 @@ export const useStore = create<State>((set, get) => {
           applyAddStage(get().api, e);
           return;
         case "place.setup": {
-          set(s => ({ places: s.places.map(p => (p.id === e.placeId ? { ...p, setup: foldSetup(p.setup, e) } : p)) }));
+          set(s => {
+            const at = s.places.find(p => p.id === e.placeId);
+            const setup = at === undefined ? undefined : foldSetup(at.setup, e);
+            // A frame of a run the record does not hold yet changes nothing: the list's next read brings that run.
+            return at === undefined || setup === at.setup ? {} : { places: s.places.map(p => (p === at ? { ...p, setup } : p)) };
+          });
           // A step's rows and the end's outcome ride the record, not the frame: read once per step, never per frame.
           const api = get().api;
           if (api !== null && frameEndsStep(e)) readPlaceRows(api);

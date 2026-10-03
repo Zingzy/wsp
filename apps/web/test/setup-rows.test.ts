@@ -32,6 +32,10 @@ describe("a setup's frames in the store", () => {
     push({ type: "place.setup", addId: "a_1", placeId: "p_studio", line: { step: "floor", state: "done", ms: 72_000 } } as EventUnion);
     push({ type: "place.setup", addId: "a_1", placeId: "p_studio", line: { step: "agents", state: "running" } } as EventUnion);
     push({ type: "place.setup", addId: "a_1", placeId: "p_studio", wait: { row: "signins/codex", label: "Codex", code: "4F2K-9QJM", url: "https://auth.openai.com/device", expiresAt: "2026-10-03T10:10:00.000Z", state: "waiting" } } as EventUnion);
+    // A frame of a run the record does not hold changes nothing, not even the list's identity.
+    const before = useStore.getState().places;
+    push({ type: "place.setup", addId: "a_other", placeId: "p_studio", line: { step: "floor", state: "running" } } as EventUnion);
+    expect(useStore.getState().places).toBe(before);
     const row = useStore.getState().places.find(p => p.id === "p_studio")!;
     expect(row.setup?.steps).toEqual([{ step: "floor", state: "done", ms: 72_000 }, { step: "agents", state: "running" }]);
     expect(row.setup?.waiting.map(w => w.code)).toEqual(["4F2K-9QJM"]);

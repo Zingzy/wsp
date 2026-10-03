@@ -129,13 +129,36 @@ describe("a computer's install and its link", () => {
     expect(notices()).toEqual([]);
     const wait = { row: "signins/codex", label: "Codex", url: "https://auth.example/device", code: "ABCD-1234", expiresAt: "2026-10-03T10:00:00Z", state: "waiting" as const };
     emit({ type: "place.setup", addId: "a_1", placeId: "pl_box", wait });
-    expect(notices().map(n => [n.kind, n.text, n.where])).toEqual([["note", setupNeedsYouLine("spoo", waitLine(wait)), "spoo"]]);
+    expect(notices().map(n => [n.kind, n.text, n.where])).toEqual([["waiting", setupNeedsYouLine("spoo", waitLine(wait)), "spoo"]]);
     act(() => notices()[0]!.action!.run());
     expect(useAddFlow.getState()).toMatchObject({ open: true, placeId: "pl_box", step: "running" });
-    // With the dialog on that computer, the next frame is already in front of the person.
+    // The wait ran out: its toast goes. With the dialog on that computer, the end is already in front of the person.
     emit({ type: "place.setup", addId: "a_1", placeId: "pl_box", wait: { ...wait, state: "expired" } });
     emit({ type: "place.setup", addId: "a_1", placeId: "pl_box", end: "failed", said: "node did not install" });
-    expect(notices()).toHaveLength(1);
+    expect(notices()).toEqual([]);
+  });
+
+  it("a sign-in's wait is said once, in the app and outside it, through the frames the runtime sends for it, and its toast goes with the wait", () => {
+    const said: unknown[] = [];
+    window.wsp = { sayOutside: (line: unknown) => void said.push(line), onNeedsYouOpen: () => () => {} };
+    try {
+      remount();
+      // The runtime's own sequence: the wait as the sign-in starts, then again once the relay read the page, then the code.
+      const bare = { row: "signins/codex", label: "Codex", expiresAt: "2026-10-03T10:00:00Z", state: "waiting" as const };
+      emit({ type: "place.setup", addId: "a_1", placeId: "pl_box", wait: bare });
+      emit({ type: "place.setup", addId: "a_1", placeId: "pl_box", wait: { ...bare, url: "https://auth.example/device" } });
+      emit({ type: "place.setup", addId: "a_1", placeId: "pl_box", wait: { ...bare, url: "https://auth.example/device", code: "ABCD-1234" } });
+      expect(said).toHaveLength(1);
+      // One toast, which says the newest of what the wait knows.
+      expect(notices().map(n => n.text)).toEqual([setupNeedsYouLine("spoo", waitLine({ ...bare, url: "https://auth.example/device", code: "ABCD-1234" }))]);
+      // The wait left the record (the person signed in): its toast goes, and a later wait for the same sign-in is said again.
+      act(() => useStore.setState({ places: [{ ...BOX, setup: { state: "running", addId: "a_1", startedAt: "x", steps: [], waiting: [] } }] }));
+      expect(notices()).toEqual([]);
+      emit({ type: "place.setup", addId: "a_2", placeId: "pl_box", wait: bare });
+      expect(said).toHaveLength(2);
+    } finally {
+      delete (window as { wsp?: unknown }).wsp;
+    }
   });
 
   it("a computer's own page showing keeps its setup off the toasts", () => {
