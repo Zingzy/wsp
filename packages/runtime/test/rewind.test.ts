@@ -64,8 +64,10 @@ function harness(o: {
   revertFails?: boolean;
   /** What the harness answers a revert with where it keeps the conversation whole. */
   revertKeeps?: string;
-  /** Turns that name no anchor, as a Codex turn from before wsp kept one did. */
+  /** Turns that name no anchor, as a Codex turn from before wsp kept one did; with anchorsFrom, only the turns before
+   * that number. */
   anchorless?: boolean;
+  anchorsFrom?: number;
   /** Why the harness cannot cut this thread's conversation, said with every anchor, as Codex says it of a legacy thread. */
   keeps?: string;
   /** Turns ended this way instead of completed, by their number. */
@@ -111,7 +113,7 @@ function harness(o: {
       const finished = Promise.resolve().then(() => {
         emit({ type: "session.start", sessionId: SESSION });
         emit({ type: "turn.delta", sessionId: SESSION, kind: "text", text: `reply ${n}` });
-        if (o.anchorless !== true) emit({ type: "turn.anchor", sessionId: SESSION, anchor: `a${n}`, ...(o.keeps !== undefined ? { kept: o.keeps } : {}) });
+        if (o.anchorless !== true || (o.anchorsFrom !== undefined && n >= o.anchorsFrom)) emit({ type: "turn.anchor", sessionId: SESSION, anchor: `a${n}`, ...(o.keeps !== undefined ? { kept: o.keeps } : {}) });
         emit({ type: "turn.done", sessionId: SESSION, result });
         emit({ type: "session.end", sessionId: SESSION, exitCode: 0, sawResult: true });
         return result;
@@ -246,8 +248,16 @@ describe("rewinding a thread to one of its replies", () => {
     const { ws, daemon } = await workspace(harness({ cuts: "revert", reverted, anchorless: true, ends: { 2: refused } }));
     const { threadId, turns } = await threeTurns(ws.id);
     expect(await rt!.sessions.rewind(threadId, { turnId: turns[0]!, files: true })).toEqual({ turns: 2, files: 2 });
-    expect(reverted).toEqual([{ session: FIRST_SESSION, cwd: daemon.checkout(), turns: [refused, { status: "completed", text: "reply 3" }] }]);
+    expect(reverted).toEqual([{ session: FIRST_SESSION, cwd: daemon.checkout(), turns: [{ result: refused }, { result: { status: "completed", text: "reply 3" } }] }]);
     expect(await texts(ws.id)).toEqual(["reply 1"]);
+  });
+
+  it("hands the harness each cut turn's anchor beside its end where the turn kept one", async () => {
+    const reverted: Parameters<SessionReverter>[0][] = [];
+    const { ws, daemon } = await workspace(harness({ cuts: "revert", reverted, anchorless: true, anchorsFrom: 3 }));
+    const { threadId, turns } = await threeTurns(ws.id);
+    await rt!.sessions.rewind(threadId, { turnId: turns[0]!, files: false });
+    expect(reverted).toEqual([{ session: FIRST_SESSION, cwd: daemon.checkout(), turns: [{ result: { status: "completed", text: "reply 2" } }, { anchor: "a3", result: { status: "completed", text: "reply 3" } }] }]);
   });
 
   it("a harness that keeps a thread's conversation whole leaves the files back with Undo, keeps every turn, and says why", async () => {

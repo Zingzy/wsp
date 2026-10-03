@@ -9798,7 +9798,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       let keptWhy: string | undefined;
       if (adapter.revert !== undefined && cutsConversation && latest?.claudeSessionId !== undefined) {
         const firstCut = keptOf(cut[0]!)?.anchor;
-        // A turn that named no anchor is found by count among the harness's own, off how each cut turn ended.
+        // A turn that named no anchor is found by count among the harness's own, off each cut turn's anchor and end.
         const endOf = (turnId: string): TurnResult | undefined => {
           for (let i = events.length - 1; i >= 0; i--) {
             const e = events[i]!;
@@ -9806,8 +9806,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           }
           return undefined;
         };
+        const turnOf = (turnId: string): { anchor?: string; result?: TurnResult } => {
+          const anchor = keptOf(turnId)?.anchor;
+          const result = endOf(turnId);
+          return { ...(anchor !== undefined ? { anchor } : {}), ...(result !== undefined ? { result } : {}) };
+        };
         try {
-          const answer = await adapter.revert({ session: latest.claudeSessionId, cwd, ...(firstCut !== undefined ? { beforeTurn: firstCut } : { turns: cut.map(endOf) }) });
+          const answer = await adapter.revert({ session: latest.claudeSessionId, cwd, ...(firstCut !== undefined ? { beforeTurn: firstCut } : { turns: cut.map(turnOf) }) });
           keptWhy = answer?.kept;
         } catch (e) {
           if (before !== undefined) await restore(before).catch((back: unknown) => console.warn(`the files of thread ${threadWord(threadId)} were not put back after a refused rewind: ${back instanceof Error ? back.message : String(back)}`));

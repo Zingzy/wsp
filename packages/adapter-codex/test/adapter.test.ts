@@ -5,7 +5,7 @@
 // CODEX_HOME.
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { asideWallLine, CODEX_LEGACY_HISTORY, codexKeyRefusedLine, codexMissingEnvLine, codexNotSignedInLine, codexReconnectLine, PERMISSION_ALLOW, PERMISSION_DENY } from "@wsp/protocol";
+import { asideWallLine, CODEX_FEWER_TURNS, CODEX_LEGACY_HISTORY, codexKeyRefusedLine, codexMissingEnvLine, codexNotSignedInLine, codexReconnectLine, PERMISSION_ALLOW, PERMISSION_DENY } from "@wsp/protocol";
 import type { AdapterEvent, ExecStream, ExecStreamFactory, TurnResult } from "@wsp/protocol";
 import { createCodexAdapter, creditsOf, type CodexSession } from "../src/adapter.js";
 
@@ -994,6 +994,31 @@ describe("a subagent's frames on its lead's stream", () => {
   });
 });
 
+describe("a recorded Codex turn whose lead spawned an agent and ended first", () => {
+  // codex-cli 0.155.1 on gpt-5.6-luna at effort low, recorded through a throwaway host: the lead's turn/completed comes
+  // before its child's. MCP startup, hook and stderr lines are left out; the account, paths and warnings are scrubbed.
+  const LEAD = "01a100dc-e1f0-7183-94f1-048611cff500";
+  const CHILD = "01a100dd-0379-7f91-bd7d-76a0d1bcb962";
+
+  it("holds the lead's reply until the child's own turn completes, and says the child's start and end once each", async () => {
+    const launch = launcher(server(fixtureLines("app-server-subagent")));
+    const { events, onEvent } = collect();
+    const result = await adapterOver(launch).start({ prompt: "spawn one agent and end your turn", onEvent }).finished;
+    const said = events.filter((e): e is Extract<AdapterEvent, { type: "subagent" }> => e.type === "subagent");
+    expect(said).toEqual([
+      { type: "subagent", sessionId: LEAD, task: CHILD, state: "running", parentToolUseId: "exec-c2242f64-3c99-4c9b-be0d-2132497b24ef", title: "Reply with the single word done and nothing else.", prompt: "Reply with the single word done and nothing else." },
+      { type: "subagent", sessionId: LEAD, task: CHILD, state: "done", parentToolUseId: "exec-c2242f64-3c99-4c9b-be0d-2132497b24ef", summary: "done" },
+    ]);
+    const at = (type: string) => events.findIndex(e => e.type === type);
+    expect(at("turn.done")).toBeGreaterThan(events.lastIndexOf(said[1]!));
+    expect(events.flatMap(e => (e.type === "turn.tasks" ? [e.running] : []))).toEqual([1, 0]);
+    expect(result).toMatchObject({ status: "completed", text: "spawned", tokens: { input: 77_535 + 19_515, window: 258_400 } });
+    expect(deltasOf(events).map(d => d.text)).not.toContain("done");
+    expect(launch.wires[0]!.closed).toBe(true);
+    expect(events.at(-1)).toMatchObject({ type: "session.end", sessionId: LEAD, sawResult: true });
+  });
+});
+
 describe("a turn a later host attaches to", () => {
   it("re-opens the run with its channel, replays the log, and writes nothing in answer to what the replay shows", async () => {
     const launch = launcher(server(fixtureLines("app-server-turn")));
@@ -1132,6 +1157,13 @@ describe("what a rewind needs of a Codex turn", () => {
     expect(events.filter(e => e.type === "turn.anchor")).toEqual([{ type: "turn.anchor", sessionId: THREAD_ID, anchor: TURN_ID, kept: CODEX_LEGACY_HISTORY }]);
   });
 
+  it("reads the history mode off this thread's own announcement alone, never a later thread's", async () => {
+    const other = `{"method":"thread/started","params":{"thread":{"id":"01a0e2c1-0000-7000-8000-00000000c41d","historyMode":"legacy"}}}`;
+    const { events, onEvent } = collect();
+    await adapterOver(launcher(server([...opened(), other, turnStarted, agentMessage("msg_1", "done"), completed("completed")]))).start({ prompt: "x", onEvent }).finished;
+    expect(events.filter(e => e.type === "turn.anchor")).toEqual([{ type: "turn.anchor", sessionId: THREAD_ID, anchor: TURN_ID }]);
+  });
+
   it("cuts the thread's history before a turn on its own short server run, resuming the thread and asking thread/revert", async () => {
     const launch = launcher(seed => {
       const w = wire({
@@ -1174,7 +1206,7 @@ describe("what a rewind needs of a Codex turn", () => {
       return w;
     });
   const listed = (launch: Launch) => launch.wires[0]!.written.filter(m => m.method === "thread/turns/list").map(m => m.params);
-  const done = (text: string): TurnResult => ({ status: "completed", text });
+  const done = (text: string): { result: TurnResult } => ({ result: { status: "completed", text } });
   const NEWEST_FIRST = ["t9", "t8", "t7", "t6", "t5"];
 
   it("rejects in the server's words when it will not cut, so the rewind is refused whole", async () => {
@@ -1196,9 +1228,24 @@ describe("what a rewind needs of a Codex turn", () => {
     const launch = history({ mode: "paginated", turns: NEWEST_FIRST });
     const refused: TurnResult = { status: "failed", error: NOT_SIGNED_IN, refusal: "sign-in" };
     const unopened: TurnResult = { status: "failed", error: "codex could not open the thread: no rollout found for thread id 01a0" };
-    await adapterOver(launch).revert({ session: THREAD_ID, turns: [refused, done("a"), unopened, undefined, { status: "interrupted" }] });
+    await adapterOver(launch).revert({ session: THREAD_ID, turns: [{ result: refused }, done("a"), { result: unopened }, {}, { result: { status: "interrupted" } }] });
     expect(listed(launch).map(p => (p as Json).limit)).toEqual([3]);
     expect(launch.wires[0]!.written.find(m => m.method === "thread/revert")!.params).toEqual({ threadId: THREAD_ID, beforeTurnId: "t7" });
+  });
+
+  it("counts a cut turn that kept the server's own id as opened, whatever its result says", async () => {
+    const launch = history({ mode: "paginated", turns: NEWEST_FIRST });
+    const refused: TurnResult = { status: "failed", error: NOT_SIGNED_IN, refusal: "sign-in" };
+    await adapterOver(launch).revert({ session: THREAD_ID, turns: [{ result: refused }, { anchor: "t8", result: refused }, done("a")] });
+    expect(listed(launch).map(p => (p as Json).limit)).toEqual([2]);
+    expect(launch.wires[0]!.written.find(m => m.method === "thread/revert")!.params).toEqual({ threadId: THREAD_ID, beforeTurnId: "t8" });
+  });
+
+  it("refuses when the server lists fewer turns than the rewind would cut, and cuts nothing", async () => {
+    const launch = history({ mode: "paginated", turns: ["t2", "t1"], pageSize: 1 });
+    await expect(adapterOver(launch).revert({ session: THREAD_ID, turns: [done("a"), done("b"), done("c")] })).rejects.toThrow(CODEX_FEWER_TURNS);
+    expect(listed(launch).map(p => (p as Json).limit)).toEqual([3, 2]);
+    expect(launch.wires[0]!.written.some(m => m.method === "thread/revert")).toBe(false);
   });
 
   it("refuses a server that hands back a page it already gave, before asking any cut", async () => {

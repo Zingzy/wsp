@@ -14,6 +14,7 @@ import {
   PERMISSION_ALLOW,
   PERMISSION_DENY,
   ASIDE_WALL_MS,
+  CODEX_FEWER_TURNS,
   CODEX_LEGACY_HISTORY,
   RUN_EXIT_MS,
   asideWallLine,
@@ -214,9 +215,11 @@ const PAGINATED_ONLY = "only supports paginated threads";
 /** The start of every failure this adapter words itself before the server opened the turn. */
 const NEVER_OPENED = "codex could not ";
 
-/** Whether the server opened a turn that ended this way, so the thread's own history holds it: a turn refused for want
- * of a sign-in, or one the adapter failed before the server took it, left none there. */
-const serverOpened = (result: TurnResult | undefined): boolean => result?.refusal === undefined && result?.error?.startsWith(NEVER_OPENED) !== true;
+/** Whether the server opened a cut turn, so the thread's own history holds it: one that kept the server's turn id did;
+ * of the rest, a turn refused for want of a sign-in, or one the adapter failed before the server took it, left none
+ * there, and one that never said how it ended counts as opened. */
+const serverOpened = (turn: { anchor?: string; result?: TurnResult }): boolean =>
+  turn.anchor !== undefined || (turn.result?.refusal === undefined && turn.result?.error?.startsWith(NEVER_OPENED) !== true);
 
 function rec(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
@@ -723,7 +726,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
       if (id === REQUEST.thread) {
         const answer = rec(result);
         const thread = rec(answer?.thread);
-        legacy ||= thread?.historyMode === "legacy";
+        legacy ||= !announced && thread?.historyMode === "legacy";
         announce(str(thread?.id), str(answer?.model) ?? str(thread?.model), str(answer?.cwd) ?? str(thread?.cwd));
         if (o.sideRun !== undefined) side(id, answer);
         else if (o.turnLine !== undefined) void stream.write(o.turnLine(threadId));
@@ -781,7 +784,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
       switch (method) {
         case "thread/started": {
           const thread = rec(params.thread);
-          legacy ||= thread?.historyMode === "legacy";
+          legacy ||= !announced && thread?.historyMode === "legacy";
           announce(str(thread?.id), str(thread?.model), str(thread?.cwd));
           break;
         }
@@ -1079,7 +1082,9 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
             if (--remaining === 0) break;
           }
           cursor = str(answer?.nextCursor) ?? null;
-          if (remaining === 0 || cursor === null) return cutAt();
+          if (remaining === 0) return cutAt();
+          // wsp's count is rebuilt from its own transcript, so a server that runs out first disagrees with it.
+          if (cursor === null) return { status: "failed", error: CODEX_FEWER_TURNS };
           return seen.has(cursor) ? { status: "failed", error: "codex could not list the thread's turns: it handed back a page it already gave" } : page();
         }
         return done();

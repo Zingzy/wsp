@@ -1625,6 +1625,10 @@ export function rewindKeptLine(why: string, filesBack: boolean): string {
  * on writes. */
 export const CODEX_LEGACY_HISTORY = "a Codex older than 0.151.0 made this thread and keeps its history in a form thread/revert cannot cut";
 
+/** A Codex rewind by count whose server lists fewer turns than the cut would take: cutting there would take the
+ * reply the person keeps too. */
+export const CODEX_FEWER_TURNS = "codex lists fewer turns in this thread than the rewind would cut, so it cut nothing";
+
 /** A rewind to the thread's latest reply, after which nothing stands to cut. */
 export const REWIND_LATEST_LINE = "that is the thread's latest reply, so nothing comes after it to rewind";
 

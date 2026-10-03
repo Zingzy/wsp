@@ -395,13 +395,14 @@ export type SessionAsker = (question: AsideQuestion) => Promise<AsideAnswer>;
 
 /**
  * Cuts a session's conversation back to just before one of its turns, in the harness's own history, and runs no
- * turn: `beforeTurn` is the anchor that turn announced, the first one cut; where it announced none, `turns` is what
- * each cut turn ended as, oldest first and undefined where it never said, and the harness finds the boundary by
- * counting the ones it opened. Files are not its business. Answers `kept`, a clause saying why, where the harness
+ * turn: `beforeTurn` is the anchor that turn announced, the first one cut; where it announced none, `turns` holds each
+ * cut turn oldest first, with the anchor it kept and what it ended as where it said, and the harness finds the
+ * boundary by counting the ones it opened: a turn with an anchor was opened, and one that said nothing counts as
+ * opened too. Files are not its business. Answers `kept`, a clause saying why, where the harness
  * keeps that session's history in a form it cannot cut, and rejects with the harness's own words when it would not
  * cut otherwise. Absent on an adapter whose harness cuts at its next turn instead (resumesAt) or cannot cut at all.
  */
-export type SessionReverter = (o: { session: string; cwd?: string } & ({ beforeTurn: string } | { turns: readonly (TurnResult | undefined)[] })) => Promise<void | { kept: string }>;
+export type SessionReverter = (o: { session: string; cwd?: string } & ({ beforeTurn: string } | { turns: readonly { anchor?: string; result?: TurnResult }[] })) => Promise<void | { kept: string }>;
 
 /** Where a reset script runs: the agent's own home on that computer, the variables its launch exports (the PATH it
  * finds the binary on among them), and the person's program in place of the agent's word. */
