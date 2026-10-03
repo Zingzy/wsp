@@ -9,7 +9,7 @@
 // sidebar, the pane header and the command line never say two things about
 // one thread.
 import { askingLine } from "./format.js";
-import type { SessionPermissionEvent, SessionStatus, ThreadView } from "./index.js";
+import type { SessionPermissionEvent, SessionStatus, SubagentState, ThreadView } from "./index.js";
 
 export type ThreadState = SessionStatus | "waiting" | "done";
 
@@ -63,6 +63,13 @@ export function threadStateWord(state: ThreadState): string {
 /** The word a thread's row shows, the short road every surface takes. */
 export function threadWordOf(thread: Pick<ThreadView, "status" | "asking" | "waitingOn" | "endedAt" | "readAt" | "wokeAt">): string {
   return threadStateWord(threadState(thread));
+}
+
+const SUBAGENT_WORDS: Record<SubagentState, string> = { running: "Working", done: "Done", failed: "Failed", stopped: "Stopped" };
+
+/** The word one of an agent's own subagents shows where a thread's would. */
+export function subagentStateWord(state: SubagentState): string {
+  return SUBAGENT_WORDS[state];
 }
 
 /** What a terminal watching a turn prints the moment that turn stops on a prompt: the thread's own state word, in
