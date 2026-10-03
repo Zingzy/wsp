@@ -188,7 +188,7 @@ export function tailWithin(text: string, max: number): string {
   if (bytes.length <= max) return text;
   const tail = bytes.subarray(bytes.length - max);
   const nl = tail.indexOf(10);
-  return new TextDecoder().decode(nl >= 0 && nl + 1 < tail.length ? tail.subarray(nl + 1) : tail).replace(/^�+/, "");
+  return new TextDecoder().decode(nl >= 0 && nl + 1 < tail.length ? tail.subarray(nl + 1) : tail).replace(/^\uFFFD+/, "");
 }
 
 /** What asking the agent to fix a failed check says: which check failed on which commit, outside any fence, the
