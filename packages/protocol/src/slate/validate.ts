@@ -56,6 +56,13 @@ function sourcePath(head: string, segs: readonly (string | number)[]): { type: S
   return "shape" in walked ? { type: shapeType(walked.shape) } : walked;
 }
 
+/** Every path under a shape, lists marked "[]". */
+function shapePaths(prefix: string, shape: SlateShape, out: string[] = []): string[] {
+  if (typeof shape === "object" && "fields" in shape) for (const [k, v] of Object.entries(shape.fields)) { out.push(`${prefix}.${k}`); shapePaths(`${prefix}.${k}`, v, out); }
+  if (typeof shape === "object" && "list" in shape) shapePaths(`${prefix}[]`, shape.list, out);
+  return out;
+}
+
 /** The shape of a row when items binds a bare declared list path, else undefined. */
 function rowShape(items: SlatePropValue | undefined): { shape: SlateShape; label: string } | undefined {
   if (!isSlateBinding(items)) return undefined;
@@ -97,7 +104,7 @@ function scopeFor(ctx: Ctx, row?: { shape?: SlateShape; label?: string }): Slate
         item: row.shape !== undefined ? shapeType(row.shape) : "any",
         ...(row.shape !== undefined ? {
           field: (segs: readonly (string | number)[]) => {
-            const walked = walkShape("item", row.shape!, segs, [], "item");
+            const walked = walkShape("item", row.shape!, segs, shapePaths("item", row.shape!), "item");
             return "shape" in walked ? { type: shapeType(walked.shape) } : { ...walked, message: walked.message.replace(/^item(\S*) is not a path/, `item$1 is not a field of ${row.label}`) };
           },
         } : {}),
@@ -133,6 +140,9 @@ function literal(ctx: Ctx, name: string, spec: SlatePropSpec, v: SlatePropValue,
   const t = spec.type;
   const wrong = (fix?: string): void => add(ctx, "T303", `${name} takes ${typeWord(t)}; ${literalKind(v)}${fix !== undefined ? `. To bind it, write ${fix}.` : ""}`, { ...extra, ...(fix !== undefined ? { fix } : {}) });
   if (typeof v === "string") {
+    if ((t === "string" || t === "text") && /^[a-z]+(\.[A-Za-z_][A-Za-z0-9_]*)+$/.test(v) && SOURCE_PATHS.get(v.split(".")[0]!)?.has(v) === true) {
+      add(ctx, "W001", `${name} is the text "${v}"; did you mean {${v}}?`, { ...extra, fix: `${name}={${v}}` });
+    }
     if (v.length > SLATE_LIMITS.literalChars) add(ctx, "T310", `${name} is ${v.length} characters; the most is ${SLATE_LIMITS.literalChars}`, extra);
     if (v.includes("\u2014")) add(ctx, "W004", `${name} has an em dash; the app's copy uses none`, extra);
     if (v.includes("${")) add(ctx, "W001", `${name} is a literal containing \${...}. For a format string use backticks.`, extra);
@@ -154,7 +164,7 @@ function literal(ctx: Ctx, name: string, spec: SlatePropSpec, v: SlatePropValue,
     return `${name}={${path}}`;
   };
   switch (t) {
-    case "string": if (typeof v !== "string") wrong(); else if (pathish && SOURCE_PATHS.get(v.split(".")[0]!)?.has(v)) add(ctx, "W001", `${name} is the text "${v}"; did you mean {${v}}?`, { ...extra, fix: `${name}={${v}}` }); return;
+    case "string": if (typeof v !== "string") wrong(); return;
     case "number": if (typeof v !== "number") wrong(asBinding()); return;
     case "integer":
       if (typeof v !== "number" || !Number.isInteger(v)) wrong(asBinding());
