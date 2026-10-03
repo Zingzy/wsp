@@ -497,6 +497,7 @@ pub struct Daemon {
     listener: TcpListener,
     open_socket: Option<UnixListener>,
     ctx: Arc<Ctx>,
+    terminated: tokio::signal::unix::Signal,
 }
 
 impl Daemon {
@@ -541,7 +542,9 @@ impl Daemon {
                 ctx.log(&format!("workspaces have no doors inside them: {e}"));
             }
         }
-        Ok(Daemon { listener, open_socket, ctx })
+        // Installed before the listening line goes out, since a SIGTERM landing mid-install is dropped, not acted on.
+        let terminated = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+        Ok(Daemon { listener, open_socket, ctx, terminated })
     }
 
     pub fn local_addr(&self) -> SocketAddr {
@@ -576,7 +579,7 @@ impl Daemon {
         });
         // An update or a restart ends this daemon with SIGTERM, and the ssh servers it started would outlive it,
         // known to no daemon after it.
-        let mut terminated = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+        let mut terminated = self.terminated;
         loop {
             let accepted = tokio::select! {
                 accepted = self.listener.accept() => accepted,
