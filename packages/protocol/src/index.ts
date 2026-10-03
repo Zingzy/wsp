@@ -6033,6 +6033,10 @@ const RuntimeOp = z.discriminatedUnion("op", [
     op: z.literal("events.subscribe"),
     after: z.number().int().nonnegative().optional(),
     stream: z.string().optional(),
+    /** Also sends, after the replay, the last workspace.creating frame of every create the host is making and of
+     * every refused one it still holds: a window that connected after a create began hears of it, and a create it
+     * hears nothing of is one this host is not making. */
+    creates: z.boolean().optional(),
   }),
   /** Replies with a WorkspaceStatus[] snapshot and keeps the runtime's status
    * poller + cost ticker running while this socket lives; the events ride the

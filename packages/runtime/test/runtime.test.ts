@@ -78,13 +78,17 @@ describe("runtime", () => {
       return said.filter(e => e.type === "workspace.creating" && e.stage === "failed").at(-1)!.workspaceId!;
     };
     const first = await failing();
+    expect(rt.workspaces.creating()).toEqual([expect.objectContaining({ workspaceId: first, name: "fleet check", stage: "failed", message: "Snapshot not found" })]);
     // Asked again under the name, the older failure goes, from the runtime and from every client's rows.
     const id = await failing();
     expect(said).toContainEqual(expect.objectContaining({ type: "workspace.deleted", workspaceId: first }));
-    await expect(rt.workspaces.delete(first)).rejects.toThrow(`no such workspace: ${first}`);
+    expect(rt.workspaces.creating().map(e => e.workspaceId)).toEqual([id]);
+    // A workspace the host does not hold is the caller's word gone wrong, so its refusal reads as usage.
+    await expect(rt.workspaces.delete(first)).rejects.toMatchObject({ message: `no such workspace: ${first}`, kind: "not-found" });
     expect(await rt.workspaces.resolve("fleet check")).toMatchObject({ id, name: "fleet check", machineId: "", phase: "gone", gone: "Snapshot not found" });
     await rt.workspaces.delete(id);
     expect(said.at(-1)).toMatchObject({ type: "workspace.deleted", workspaceId: id });
+    expect(rt.workspaces.creating()).toEqual([]);
     await expect(rt.workspaces.resolve("fleet check")).rejects.toThrow(/no workspace/);
     expect(await rt.workspaces.list()).toEqual([]);
   });

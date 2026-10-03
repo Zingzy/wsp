@@ -13,11 +13,12 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fakeCopier, LocalBackend, projectStateKey, type Copier } from "@wsp/engine";
 import { PATH_BOUND_DIR_NAMES } from "@wsp/catalog";
-import { boxFullLine, copyPathFor, DAEMON_VERSION, EXIT_CODES, exitClassOf, HERE_PLACE_ID, PORT_BASE_FIRST, PORT_BASE_STEP, type AdapterEvent, type TurnResult } from "@wsp/protocol";
+import { boxFullLine, copyPathFor, DAEMON_VERSION, EXIT_CODES, exitClassOf, HERE_PLACE_ID, PORT_BASE_FIRST, PORT_BASE_STEP, type AdapterEvent, type TurnResult, type WorkspaceCreatingEvent } from "@wsp/protocol";
 import { COPY_SIZE_LINE_BYTES, createRuntime, NO_COPIER_HERE, type HarnessAdapterContext, type HarnessAdapterFactory, type LocalWiring, type Runtime } from "../src/runtime.js";
 import { localExecStream } from "../src/local-exec.js";
 import { memoryStore } from "../src/store.js";
 import { stubBackend, tempRepo, testPlatform } from "./stub-backend.js";
+import { until } from "./until.js";
 
 const roots: string[] = [];
 const scratch = (): string => {
@@ -312,5 +313,37 @@ describe("the daemon beside this host, before the first copy", () => {
     const its = await bare.rt.projects.add({ source: at });
     await bare.rt.workspaces.create({ project: its.id, name: "one" });
     expect(bare.copier.asks).toHaveLength(1);
+  });
+});
+
+describe("a copy being made, as every window hears it", () => {
+  it("says its step while the folder is copied and its refusal when the copy fails, and the host holds the last word of each for a window that connects later", async () => {
+    const { rt, copier } = withCopier();
+    const folder = repo();
+    const project = await rt.projects.add({ source: folder });
+    const heard: WorkspaceCreatingEvent[] = [];
+    rt.events.on("workspace.creating", e => {
+      if (e.type === "workspace.creating") heard.push(e);
+    });
+    const make = copier.make.bind(copier);
+    let refuse: (e: Error) => void = () => {};
+    copier.make = () => new Promise((_, reject) => (refuse = reject));
+    const made = rt.workspaces.create({ project: project.id, name: "one" });
+    await until(() => heard.length === 1);
+    expect(heard[0]).toMatchObject({ name: "one", stage: "fork-requested" });
+    expect(rt.workspaces.creating()).toEqual([heard[0]]);
+    refuse(new Error("the disk is full"));
+    await expect(made).rejects.toThrow("the disk is full");
+    const failed = heard.at(-1)!;
+    expect(failed).toMatchObject({ workspaceId: heard[0]!.workspaceId, name: "one", stage: "failed", message: "the disk is full" });
+    expect(rt.workspaces.creating()).toEqual([failed]);
+    expect(await rt.workspaces.resolve("one")).toMatchObject({ id: failed.workspaceId, phase: "gone", gone: "the disk is full" });
+    await rt.workspaces.delete(failed.workspaceId);
+    expect(rt.workspaces.creating()).toEqual([]);
+
+    copier.make = make;
+    const two = await rt.workspaces.create({ project: project.id, name: "two" });
+    expect(heard.filter(e => e.name === "two").map(e => e.workspaceId)).toEqual([two.id]);
+    expect(rt.workspaces.creating()).toEqual([]);
   });
 });

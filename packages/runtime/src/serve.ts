@@ -1129,6 +1129,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               if (opts.release) detaches.push(opts.release.on(pass));
               send({ id: msg.id, ok: true, seq: head, stream, ...(gap ? { gap: true } : {}) });
               for (const e of events) pass(e);
+              if (msg.creates === true) for (const e of rt.workspaces.creating()) pass(e);
               return;
             }
             case "status.subscribe":

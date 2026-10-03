@@ -1326,3 +1326,43 @@ describe("serveRuntime the doctor's computer road", () => {
     expect(runtime.workspaces.seenBy(line, { origin: "here", by: { kind: "thread", threadId: "t_1", workspaceId: "ws_1", rootThreadId: "t_1" } })).toBe(false);
   });
 });
+
+describe("a window that subscribes after a create began", () => {
+  it("hears the last word of every create still being made and every one refused since the host started, once, and a plain subscribe hears neither", async () => {
+    const backend = stubBackend();
+    const create = backend.create.bind(backend);
+    let forks = 0;
+    let boot: () => void = () => {};
+    backend.create = async spec => {
+      forks += 1;
+      if (forks === 1) throw Object.assign(new Error("Snapshot not found"), { kind: "missing", status: 404 });
+      await new Promise<void>(resolve => (boot = resolve));
+      return create(spec);
+    };
+    srv = await serveRuntime(createRuntime({ backend, store: memoryStore(), adapters: {} }), { port: 0, authToken: "secret" });
+    const cli = await WsClient.connect(srv.port, { token: "secret" });
+    expect((await createOverWire(cli, "refused", { golden: "snap_g" })).ok).toBe(false);
+    const held = createOverWire(cli, "held", { golden: "snap_g" });
+    await until(() => forks === 2);
+    const creating = (c: WsClient) => c.events.filter(e => e.type === "workspace.creating");
+    const window = await WsClient.connect(srv.port, { token: "secret" });
+    await window.request("events.subscribe", { creates: true });
+    const listed = await window.request("workspaces.list");
+    expect(listed["workspaces"]).toEqual([]);
+    expect(creating(window)).toMatchObject([
+      { name: "refused", stage: "failed", message: "Snapshot not found" },
+      { name: "held", stage: "fork-requested" },
+    ]);
+    const plain = await WsClient.connect(srv.port, { token: "secret" });
+    await plain.request("events.subscribe");
+    await plain.request("workspaces.list");
+    expect(creating(plain)).toEqual([]);
+    boot();
+    expect((await held).ok).toBe(true);
+    await until(() => window.events.some(e => e.type === "workspace.created"));
+    expect(creating(window).filter(e => e.stage === "fork-requested" && e.name === "held")).toHaveLength(1);
+    cli.close();
+    window.close();
+    plain.close();
+  });
+});

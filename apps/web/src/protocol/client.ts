@@ -268,6 +268,7 @@ export class ProtocolClient {
     this.#raw({
       id: this.#subscribeId,
       op: "events.subscribe",
+      creates: true,
       ...(this.#cursor !== undefined ? { after: this.#cursor } : {}),
       ...(this.#stream !== undefined ? { stream: this.#stream } : {}),
     });

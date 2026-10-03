@@ -2,12 +2,14 @@
 // The first message of a thread started from New thread is the window's to keep
 // until the workspace is up: a reload, a closed window or a crash while the copy
 // is made must not lose it, and it lands on the workspace's queue once, ahead of
-// anything typed on the setup page. A reload is the store's modules evaluated
-// again over the same local storage.
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+// anything typed on the setup page. A kept row learns from the host's word on
+// connect whether its create still runs, a send to several models keeps its
+// starts the same way, and one page at a time owns a kept row. A reload is the
+// store's modules evaluated again over the same local storage.
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_PREFERENCES, type HarnessCatalog, type ProjectView, type WorkspaceView } from "@wsp/protocol";
-import { RequestError, type Api } from "../src/protocol/client.js";
+import { DEFAULT_PREFERENCES, type HarnessCatalog, type ProjectView, type WorkspaceCreatingEvent, type WorkspaceView } from "@wsp/protocol";
+import { RequestError, type Api, type ProtocolEvent, type StartSessionOptions } from "../src/protocol/client.js";
 import { KEPT_CREATIONS_KEY } from "../src/protocol/keptCreations.js";
 import { projectHomeKey, useStore } from "../src/protocol/store.js";
 import { ProjectHome } from "../src/shell/ProjectHome.js";
@@ -38,10 +40,13 @@ const CLAUDE: HarnessCatalog = {
 
 const view = (id: string, name: string, createdAt = "2026-10-02T00:00:00Z"): WorkspaceView => ({ id, name, machineId: "local", project: { id: PROJECT.id, name: PROJECT.name, path: "/root", computer: "here" }, phase: "running", golden: "", createdAt });
 
-/** A host whose create answers only when `finish` is called, and whose list holds what `listed` holds. */
-function fakeApi(listed: WorkspaceView[] = []) {
+/** A host whose create answers only when `finish` is called, whose list holds what `listed` holds, and whose
+ * subscribe hands this window the last word of every create in `creating`, ahead of the list's reply. */
+function fakeApi(listed: WorkspaceView[] = [], creating: WorkspaceCreatingEvent[] = []) {
   let finish: (w: WorkspaceView) => void = () => {};
+  let hear: (e: ProtocolEvent) => void = () => {};
   const asked: string[] = [];
+  const started: StartSessionOptions[] = [];
   const api: Api = {
     preferences: async () => DEFAULT_PREFERENCES,
     listHarnesses: async () => [CLAUDE],
@@ -51,7 +56,10 @@ function fakeApi(listed: WorkspaceView[] = []) {
     listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
     snapshotStorage: async () => null,
     rollbackSnapshot: async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" }),
-    listWorkspaces: async () => listed,
+    listWorkspaces: async () => {
+      for (const e of creating) hear(e);
+      return listed;
+    },
     getWorkspace: async id => view(id, id),
     createWorkspace: (_project, name) => {
       asked.push(name);
@@ -62,12 +70,39 @@ function fakeApi(listed: WorkspaceView[] = []) {
     capabilities: async () => caps(),
     listSessions: async () => [],
     watchStatuses: async () => [],
-    subscribe: () => () => {},
+    subscribe: fn => {
+      hear = fn;
+      return () => {};
+    },
     getGolden: async () => undefined,
     projectsList: async () => [PROJECT],
-    startSession: async o => ({ id: "s_1", workspaceId: o.workspaceId, harness: "claude", status: "running" }),
+    startSession: async o => {
+      started.push(o);
+      return { id: `s_${started.length}`, workspaceId: o.workspaceId, harness: o.harness ?? "claude", status: "running" };
+    },
   };
-  return { api, asked, finish: (w: WorkspaceView) => finish(w) };
+  return { api, asked, started, creating, finish: (w: WorkspaceView) => finish(w), hear: (e: ProtocolEvent) => hear(e) };
+}
+
+/** A create's stage as the host says it. */
+const stage = (workspaceId: string, name: string, at: WorkspaceCreatingEvent["stage"], message = "copying /root to /root-copy", elapsedMs = 10): WorkspaceCreatingEvent => ({ type: "workspace.creating", workspaceId, name, stage: at, message, elapsedMs });
+
+/** The lock manager every page of one origin shares: a lock stands until the callback's promise settles. */
+function installLocks(): { held: Set<string>; remove: () => void } {
+  const held = new Set<string>();
+  const locks = {
+    request: async (name: string, _opts: unknown, take: (lock: { name: string } | null) => unknown) => {
+      if (held.has(name)) return take(null);
+      held.add(name);
+      try {
+        return await take({ name });
+      } finally {
+        held.delete(name);
+      }
+    },
+  };
+  Object.defineProperty(window.navigator, "locks", { value: locks, configurable: true });
+  return { held, remove: () => void delete (window.navigator as { locks?: unknown }).locks };
 }
 
 let restoreLayout: () => void = () => {};
@@ -100,19 +135,6 @@ async function sendFromHome(api: Api) {
   await waitFor(() => expect(useStore.getState().creations).toHaveLength(1));
 }
 
-/** Runs `steps` on a fake clock from a fresh connect, the wait the first connect armed on the real one cleared first. */
-function onFakeClock(store: typeof useStore, steps: () => void): void {
-  store.getState().setConn("closed");
-  vi.useFakeTimers();
-  try {
-    store.getState().setConn("live");
-    steps();
-  } finally {
-    store.getState().setConn("closed");
-    vi.useRealTimers();
-  }
-}
-
 /** The page loaded again: every module read anew off the local storage the last one left. */
 async function reload(api: Api) {
   cleanup();
@@ -128,14 +150,12 @@ async function reload(api: Api) {
 
 describe("New thread's first message across a reload", () => {
   it("a reload while the copy is made keeps the message on the setup page, and the workspace takes it when it is up", async () => {
-    const first = fakeApi();
-    await sendFromHome(first.api);
-    const { store, queue } = await reload(fakeApi().api);
-    expect(store.getState().creations).toEqual([expect.objectContaining({ name: TASK, project: PROJECT.id, asked: TASK, workspaceId: null })]);
+    await sendFromHome(fakeApi().api);
+    const { store, queue } = await reload(fakeApi([], [stage("ws_new", TASK, "fork-requested")]).api);
+    expect(store.getState().creations).toEqual([expect.objectContaining({ name: TASK, project: PROJECT.id, asked: TASK, workspaceId: "ws_new", failed: null })]);
     const { WorkspaceCreation } = await import("../src/shell/WorkspaceCreation.js");
     render(<WorkspaceCreation creation={store.getState().creations[0]!} />);
     expect(document.querySelector("[data-k=creation-asked]")?.textContent).toContain(TASK);
-    // A copy on this computer says nothing until it is made; the created frame names it by the name it was asked for.
     store.getState().applyEvent({ type: "workspace.created", workspace: view("ws_new", TASK) });
     expect(queue("ws_new")).toEqual([TASK]);
     expect(store.getState().creations).toEqual([]);
@@ -150,79 +170,60 @@ describe("New thread's first message across a reload", () => {
     expect(store.getState().creations).toEqual([]);
   });
 
-  it("a fork's stages after the reload find the kept row, and a refusal keeps it with Retry", async () => {
+  it("a create refused while no page was open comes back refused with Retry, from the host's last word of it", async () => {
     await sendFromHome(fakeApi().api);
-    const { store } = await reload(fakeApi().api);
-    store.getState().applyEvent({ type: "workspace.creating", workspaceId: "ws_far", name: TASK, stage: "failed", message: "boom", elapsedMs: 10 });
-    expect(store.getState().creations).toEqual([expect.objectContaining({ asked: TASK, project: PROJECT.id, workspaceId: "ws_far", failed: { title: `Could not start ${TASK}`, detail: "boom" } })]);
+    const { store } = await reload(fakeApi([], [stage("ws_far", TASK, "fork-requested"), stage("ws_far", TASK, "failed", "the disk is full", 20)]).api);
+    expect(store.getState().creations).toEqual([expect.objectContaining({ asked: TASK, project: PROJECT.id, workspaceId: "ws_far", failed: { title: `Could not start ${TASK}`, detail: "the disk is full" } })]);
+    const { WorkspaceCreation } = await import("../src/shell/WorkspaceCreation.js");
+    render(<WorkspaceCreation creation={store.getState().creations[0]!} />);
+    expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
   });
 
-  it("a kept row the host says nothing about for 30 seconds after the window connects can be dismissed, its message still on screen", async () => {
+  it("a kept row the host neither lists nor speaks of reads as refused, its message on screen, and Retry asks for it again", async () => {
     await sendFromHome(fakeApi().api);
-    const deleted: string[] = [];
     const again = fakeApi();
-    again.api.deleteWorkspace = async id => void deleted.push(id);
     const { store, queue } = await reload(again.api);
     const { WorkspaceCreation } = await import("../src/shell/WorkspaceCreation.js");
-    const { CREATE_QUIET } = await import("../src/shell/creationLog.js");
-    const key = store.getState().creations[0]!.key;
-    onFakeClock(store, () => {
-      act(() => vi.advanceTimersByTime(29_000));
-      expect(store.getState().creations[0]!.quiet).toBeUndefined();
-      act(() => vi.advanceTimersByTime(1_000));
-    });
+    const { CREATE_UNHEARD } = await import("../src/shell/creationLog.js");
+    expect(store.getState().creations).toEqual([expect.objectContaining({ asked: TASK, failed: { title: `Could not start ${TASK}`, detail: CREATE_UNHEARD } })]);
     render(<WorkspaceCreation creation={store.getState().creations[0]!} />);
     expect(document.querySelector("[data-k=creation-asked]")?.textContent).toContain(TASK);
-    expect(screen.getByText(CREATE_QUIET)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
-    expect(store.getState().creations).toEqual([]);
-    expect(queue(key)).toEqual([]);
-    expect(deleted).toEqual([]);
-    expect(JSON.parse(window.localStorage.getItem(KEPT_CREATIONS_KEY) ?? "{}")).toEqual({});
+    expect(screen.getByText(CREATE_UNHEARD)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Dismiss" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(again.asked).toEqual([TASK]);
+    again.finish(view("ws_new", TASK));
+    await waitFor(() => expect(queue("ws_new")).toEqual([TASK]));
   });
 
-  it("dismissing a quiet row whose stages named its workspace before the reload leaves that workspace's create alone", async () => {
-    window.localStorage.setItem(KEPT_CREATIONS_KEY, JSON.stringify({ "": [{ key: "creating:k1", name: TASK, project: PROJECT.id, askedAt: Date.now(), asked: TASK, queued: true, workspaceId: "ws_far", failed: null }] }));
-    const deleted: string[] = [];
+  it("a kept row the host is still making keeps waiting, and the host's last word repeated adds no second line", async () => {
+    await sendFromHome(fakeApi().api);
+    const host = fakeApi([], [stage("ws_new", TASK, "fork-requested")]);
+    const { store } = await reload(host.api);
+    host.hear(stage("ws_new", TASK, "fork-requested"));
+    expect(store.getState().creations).toEqual([expect.objectContaining({ workspaceId: "ws_new", failed: null })]);
+    expect(store.getState().creations[0]!.lines).toHaveLength(1);
+  });
+
+  it("a row the host spoke of reads as refused once a reconnect hears nothing of it, which is a host that restarted mid-create", async () => {
+    await sendFromHome(fakeApi().api);
+    const host = fakeApi([], [stage("ws_new", TASK, "fork-requested")]);
+    const { store } = await reload(host.api);
+    expect(store.getState().creations[0]!.failed).toBeNull();
+    store.getState().setConn("reconnecting");
+    host.creating.length = 0;
+    store.getState().setConn("live");
+    await waitFor(() => expect(store.getState().creations[0]!.failed).not.toBeNull());
+  });
+
+  it("a row refused before the reload comes back refused, on the step it stopped on, and Dismiss is quiet when the host no longer holds it", async () => {
+    await sendFromHome(fakeApi().api);
+    useStore.getState().applyEvent(stage("ws_far", TASK, "fork-requested", "starting it on hetzner"));
+    useStore.getState().applyEvent(stage("ws_far", TASK, "failed", "Snapshot not found", 20));
     const api = fakeApi().api;
-    api.deleteWorkspace = async id => void deleted.push(id);
-    const { store } = await reload(api);
-    onFakeClock(store, () => act(() => vi.advanceTimersByTime(30_000)));
-    expect(store.getState().creations[0]!.quiet).toBe(true);
-    store.getState().dismissCreation("creating:k1");
-    expect(store.getState().creations).toEqual([]);
-    expect(deleted).toEqual([]);
-  });
-
-  it("a kept row the host speaks of within the 30 seconds keeps waiting with no Dismiss", async () => {
-    await sendFromHome(fakeApi().api);
-    const { store } = await reload(fakeApi().api);
-    onFakeClock(store, () => {
-      act(() => vi.advanceTimersByTime(10_000));
-      store.getState().applyEvent({ type: "workspace.creating", workspaceId: "ws_far", name: TASK, stage: "fork-requested", message: "starting", elapsedMs: 10 });
-      act(() => vi.advanceTimersByTime(30_000));
-    });
-    expect(store.getState().creations[0]!.quiet).toBeUndefined();
-  });
-
-  it("a host that goes away clears the wait: a row heard of by nobody is not offered Dismiss while the window is not connected", async () => {
-    await sendFromHome(fakeApi().api);
-    const { store } = await reload(fakeApi().api);
-    onFakeClock(store, () => {
-      act(() => vi.advanceTimersByTime(10_000));
-      store.getState().setConn("reconnecting");
-      act(() => vi.advanceTimersByTime(30_000));
-    });
-    expect(store.getState().creations[0]!.quiet).toBeUndefined();
-  });
-
-  it("a row refused before the reload comes back refused, on the step it stopped on, and Dismiss is quiet when the host has forgotten it", async () => {
-    await sendFromHome(fakeApi().api);
-    useStore.getState().applyEvent({ type: "workspace.creating", workspaceId: "ws_far", name: TASK, stage: "fork-requested", message: "starting it on hetzner", elapsedMs: 10 });
-    useStore.getState().applyEvent({ type: "workspace.creating", workspaceId: "ws_far", name: TASK, stage: "failed", message: "Snapshot not found", elapsedMs: 20 });
-    const api = fakeApi().api;
-    api.deleteWorkspace = async id => { throw new RequestError(`no workspace: ${id}`); };
+    api.deleteWorkspace = async id => {
+      throw new RequestError(`no such workspace: ${id}`, "not-found");
+    };
     const { store, queue } = await reload(api);
     const { useNotices } = await import("../src/notices/store.js");
     const { WorkspaceCreation } = await import("../src/shell/WorkspaceCreation.js");
@@ -239,6 +240,74 @@ describe("New thread's first message across a reload", () => {
     expect(queue(row.key)).toEqual([]);
     await new Promise(resolve => setTimeout(resolve, 0));
     expect(useNotices.getState().notices).toEqual([]);
+  });
+
+  it("a delete of a refused row the host refuses for any other reason says so", async () => {
+    await sendFromHome(fakeApi().api);
+    useStore.getState().applyEvent(stage("ws_far", TASK, "failed", "Snapshot not found", 20));
+    const api = fakeApi().api;
+    api.deleteWorkspace = async () => {
+      throw new RequestError("the provider would not stop it");
+    };
+    const { store } = await reload(api);
+    const { useNotices } = await import("../src/notices/store.js");
+    store.getState().dismissCreation(store.getState().creations[0]!.key);
+    await waitFor(() => expect(useNotices.getState().notices.map(n => n.text).join()).toContain("the provider would not stop it"));
+  });
+
+  it("a send to several models made before a reload still opens each thread on its own model, under one attempt", async () => {
+    useMultiPickStore.setState({ byKey: { [HOME]: [{ harness: "claude", model: "claude-opus-5", label: "Opus 5" }, { harness: "claude", model: "claude-sonnet-5", label: "Sonnet 5" }] } });
+    useStore.getState().bind(fakeApi().api);
+    render(<ProjectHome projectId={PROJECT.id} />);
+    await waitFor(() => expect(document.querySelector('[data-composer-picker="model"][data-value]')).not.toBeNull());
+    await typeInto(composerEditor(), TASK);
+    await press(composerEditor(), "Enter");
+    await waitFor(() => expect(useStore.getState().creations).toHaveLength(2));
+    const host = fakeApi([], [stage("ws_a", `${TASK} (Opus 5)`, "fork-requested"), stage("ws_b", `${TASK} (Sonnet 5)`, "fork-requested")]);
+    const { store } = await reload(host.api);
+    store.getState().applyEvent({ type: "workspace.created", workspace: view("ws_a", `${TASK} (Opus 5)`) });
+    store.getState().applyEvent({ type: "workspace.created", workspace: view("ws_b", `${TASK} (Sonnet 5)`) });
+    await waitFor(() => expect(host.started).toHaveLength(2));
+    expect(Object.fromEntries(host.started.map(s => [s.workspaceId, s.model]))).toEqual({ ws_a: "claude-opus-5", ws_b: "claude-sonnet-5" });
+    expect(host.started.every(s => s.prompt === TASK && s.harness === "claude")).toBe(true);
+    expect(new Set(host.started.map(s => s.attempt)).size).toBe(1);
+    expect(host.started[0]!.attempt).toEqual(expect.any(String));
+    store.getState().applyEvent({ type: "workspace.created", workspace: view("ws_a", `${TASK} (Opus 5)`) });
+    expect(host.started, "once").toHaveLength(2);
+  });
+
+  it("a second tab loaded while the copy is made leaves the row to the tab that made it, which queues the message once", async () => {
+    const locks = installLocks();
+    try {
+      const first = fakeApi();
+      await sendFromHome(first.api);
+      const other = await reload(fakeApi([], [stage("ws_new", TASK, "fork-requested")]).api);
+      await waitFor(() => expect(other.store.getState().creations.filter(c => c.queued === true)).toEqual([]));
+      // What the second tab writes keeps the first tab's row, which still holds the only copy of the message.
+      other.store.setState({ workspaces: [view("ws_else", "else")] });
+      const kept = JSON.parse(window.localStorage.getItem(KEPT_CREATIONS_KEY) ?? "{}") as Record<string, Array<{ asked: string }>>;
+      expect(kept[""]?.map(r => r.asked)).toEqual([TASK]);
+      for (const store of [useStore, other.store]) store.getState().applyEvent({ type: "workspace.created", workspace: view("ws_new", TASK) });
+      first.finish(view("ws_new", TASK));
+      await waitFor(() => expect(useComposerDraftStore.getState().queues["ws_new"]?.map(r => r.prompt)).toEqual([TASK]));
+      expect(other.queue("ws_new")).toEqual([]);
+      expect(JSON.parse(window.localStorage.getItem(KEPT_CREATIONS_KEY) ?? "{}")).toEqual({});
+      expect(locks.held.size).toBe(0);
+    } finally {
+      locks.remove();
+    }
+  });
+
+  it("the task typed again after a reload, while the kept row's create is gone, lands once on the workspace it makes", async () => {
+    await sendFromHome(fakeApi().api);
+    const host = fakeApi();
+    const { store, queue } = await reload(host.api);
+    void store.getState().createWorkspace(PROJECT.id, TASK, undefined, { prompt: TASK, queuedFrom: HOME });
+    store.getState().applyEvent({ type: "workspace.created", workspace: view("ws_new", TASK) });
+    host.finish(view("ws_new", TASK));
+    await waitFor(() => expect(queue("ws_new")).toEqual([TASK]));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(queue("ws_new"), "once").toEqual([TASK]);
   });
 
   it("a workspace of the same name made after the ask is the row's own, so the row stays kept between the created frame and the reply", async () => {

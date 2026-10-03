@@ -5,10 +5,10 @@
 // fresh thread, which sends it the moment the copy stands, so a person types once
 // and lands in the running thread; the store keeps the message through a reload
 // until then. A send to several models makes one copy per
-// model and starts the thread in each at once, all under one attempt id, since a
-// queue drains only in a composer on screen and one copy at most is on screen;
-// the computer's free room is read first, and a send it has no room for is
-// refused before any copy is made.
+// model, and the store starts the thread in each the moment it stands, all under
+// one attempt id, since a queue drains only in a composer on screen and one copy
+// at most is on screen; the computer's free room is read first, and a send it
+// has no room for is refused before any copy is made.
 import { HERE_PLACE_ID, START_WORDS, githubLinkOf, placeRoom, plural, projectForRepo, type ProjectView } from "@wsp/protocol";
 import { Button } from "../components/ui/button.js";
 import { RefusalSlot } from "../settings/sheetParts.js";
@@ -99,7 +99,7 @@ export function ProjectHome({ projectId }: { projectId: string }) {
   };
 
   const startSeveral = async (prompt: string, picks: ReadonlyArray<ModelPick>): Promise<string | null> => {
-    const { api, launching, launched } = useStore.getState();
+    const { api } = useStore.getState();
     if (api === null) return null;
     const refused = await roomRefusal(api, project, picks.length);
     if (refused !== null) return refused;
@@ -108,19 +108,11 @@ export function ProjectHome({ projectId }: { projectId: string }) {
     useComposerFilesStore.getState().sendAs(key, attempt);
     useMultiPickStore.getState().set(key, []);
     await Promise.all(
-      picks.map(async pick => {
-        const name = `${nameOfTask(prompt)} (${pick.label})`;
-        const workspaceId = await createWorkspace(project.id, name, undefined, { prompt });
-        if (workspaceId === null) return;
+      picks.map(pick => {
         const catalog = catalogs.find(c => c.harness === pick.harness);
         const own = { harness: pick.harness, model: pick.model };
         const options = catalog === undefined ? own : startOptionsFrom(catalog, { ...picked, ...own });
-        const requestId = newId();
-        launching(workspaceId, { requestId, title: prompt, harness: pick.harness });
-        await api.startSession({ workspaceId, prompt, requestId, attempt, ...options, ...(attachments.length > 0 ? { attachments } : {}) }).catch((e: unknown) => {
-          launched(workspaceId, requestId);
-          noticeFailure(e, said => `${name}: ${said}`);
-        });
+        return createWorkspace(project.id, `${nameOfTask(prompt)} (${pick.label})`, undefined, { prompt, opens: { ...options, harness: pick.harness, attempt }, ...(attachments.length > 0 ? { attachments } : {}) });
       }),
     );
     useComposerOptionsStore.getState().drop(key, key);

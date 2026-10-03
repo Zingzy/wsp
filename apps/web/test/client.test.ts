@@ -512,13 +512,13 @@ describe("ProtocolClient event cursor", () => {
     ScriptedSocket.reply = () => undefined;
   });
 
-  it("the first subscribe carries no cursor; a re-subscribe carries the seq of the last event seen", async () => {
+  it("the first subscribe carries no cursor; a re-subscribe carries the seq of the last event seen; both ask for the creates the host holds", async () => {
     ScriptedSocket.reply = subscribeReply(2);
     const { client, socket } = newClient();
     await client.connect();
     const seen: unknown[] = [];
     client.subscribe(e => seen.push(e));
-    expect(socket(0).frames("events.subscribe")).toEqual([{ id: expect.any(Number), op: "events.subscribe" }]);
+    expect(socket(0).frames("events.subscribe")).toEqual([{ id: expect.any(Number), op: "events.subscribe", creates: true }]);
     await replied();
 
     push(socket(0), { type: "workspace.napped", workspaceId: "ws_1", seq: 3 });
@@ -526,7 +526,7 @@ describe("ProtocolClient event cursor", () => {
     expect(seen).toHaveLength(2);
 
     await redial(client, socket(0));
-    expect(socket(1).frames("events.subscribe")).toEqual([{ id: expect.any(Number), op: "events.subscribe", after: 4, stream: "stream-a" }]);
+    expect(socket(1).frames("events.subscribe")).toEqual([{ id: expect.any(Number), op: "events.subscribe", creates: true, after: 4, stream: "stream-a" }]);
     // Replayed events move the cursor like live ones.
     push(socket(1), { type: "workspace.napped", workspaceId: "ws_1", seq: 5 });
     await redial(client, socket(1));
@@ -592,7 +592,7 @@ describe("ProtocolClient event cursor", () => {
     client.subscribe(() => {});
     push(socket(0), { type: "workspace.napped", workspaceId: "ws_1" });
     await redial(client, socket(0));
-    expect(socket(1).frames("events.subscribe")).toEqual([{ id: expect.any(Number), op: "events.subscribe" }]);
+    expect(socket(1).frames("events.subscribe")).toEqual([{ id: expect.any(Number), op: "events.subscribe", creates: true }]);
     expect(gaps).toEqual([]);
     client.close();
   });
