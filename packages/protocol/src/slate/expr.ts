@@ -624,8 +624,11 @@ export function slatePropDependencies(value: SlatePropValue | undefined): string
 export interface SlateCheckScope {
   /** The type of a path, or a problem naming the nearest declared one. item and index never reach this. */
   path(head: string, segs: readonly (string | number)[]): { type: SlateType } | { code: "X401" | "X411"; message: string; fix?: string };
-  /** Inside a repeating piece's row template: item and index are known, of these types. */
-  row?: { item: SlateType };
+  /** Inside a repeating piece's row: item and index are known; field checks item.<segs> where the row's shape is. */
+  row?: {
+    item: SlateType;
+    field?(segs: readonly (string | number)[]): { type: SlateType } | { code: "X401"; message: string; fix?: string };
+  };
 }
 
 /** Problems with an expression at write time: syntax, unknown paths, functions, arity, item outside a row, string
@@ -643,7 +646,15 @@ export function checkSlateExpression(src: string, scope: SlateCheckScope, base =
             problems.push(slateProblem("X409", `${node.head} is only known inside a repeating piece's row`, { at: node.at + base }));
             return "any";
           }
-          return node.head === "index" ? (node.segs.length === 0 ? "number" : "any") : node.segs.length === 0 ? scope.row.item : "any";
+          if (node.head === "index") return node.segs.length === 0 ? "number" : "any";
+          if (node.segs.length === 0) return scope.row.item;
+          const known = scope.row.field?.(node.segs);
+          if (known === undefined) return "any";
+          if ("code" in known) {
+            problems.push(slateProblem(known.code, known.message, { at: node.at + base, ...(known.fix !== undefined ? { fix: known.fix } : {}) }));
+            return "any";
+          }
+          return known.type;
         }
         const known = scope.path(node.head, node.segs);
         if ("code" in known) {
