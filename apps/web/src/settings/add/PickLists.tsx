@@ -117,13 +117,23 @@ export function AgentsPicks({ picks, options, onChange, box, versions, onlyTicke
   );
 }
 
-export function ServersPicks({ picks, options, onChange, onlyTicked = false }: PickProps) {
+/** The servers, each saying how it signs in on the computer, as an agent's row says it. */
+export function ServersPicks({ picks, options, onChange, box, onlyTicked = false }: PickProps) {
   return (
     <Grid id="servers">
       {options.mcp
         .filter(server => !onlyTicked || picks.mcp[server.name] !== undefined)
         .map(server => (
-          <PickRow key={server.name} id={server.name} checked={picks.mcp[server.name] !== undefined} onCheckedChange={next => onChange(tick(picks, "mcp", server.name, next, options))} glyph={<PlugIcon aria-hidden className={GLYPH} />} name={server.name} marks={<AgentMarks agents={server.agents} />} />
+          <PickRow
+            key={server.name}
+            id={server.name}
+            checked={picks.mcp[server.name] !== undefined}
+            onCheckedChange={next => onChange(tick(picks, "mcp", server.name, next, options))}
+            glyph={<PlugIcon aria-hidden className={GLYPH} />}
+            name={server.name}
+            marks={<AgentMarks agents={server.agents} />}
+            {...(server.kind === undefined ? {} : { note: ADD_COMPUTER_WORDS.serverSignIn(server.kind, box) })}
+          />
         ))}
     </Grid>
   );

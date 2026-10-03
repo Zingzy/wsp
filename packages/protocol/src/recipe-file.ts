@@ -18,6 +18,12 @@ export type RecipeSignIn = z.infer<typeof RecipeSignIn>;
 export const GitHubSignIn = z.enum(["vault", "machine", "skip"]);
 export type GitHubSignIn = z.infer<typeof GitHubSignIn>;
 
+/** How an MCP server signs in on the computer it goes to: with nothing, with a key or a token its definition
+ * carries and that travels with it, or through a browser sign-in run there (an http server the agent signs in, or
+ * mcp-remote's). */
+export const ServerSignIn = z.enum(["none", "key", "token", "oauth"]);
+export type ServerSignIn = z.infer<typeof ServerSignIn>;
+
 /** A row's name, and the facts a row says beside it, made once each: every schema made costs the host its methods
  * bound anew, held for good. */
 const NAME = z.string().min(1);
@@ -127,7 +133,8 @@ export interface RecipeOptions {
   /** `kind` is how the agent's own sign-in works (a token minted here, a key, a browser page, a device code), and
    * `bytes` what it weighs on a box where a build measured it. */
   agents: { id: string; name: string; signins: RecipeSignIn[]; kind?: string; bytes?: number }[];
-  mcp: { name: string; agents: string[] }[];
+  /** `kind` is how the server signs in, as the collector read its definition. */
+  mcp: { name: string; agents: string[]; kind?: ServerSignIn }[];
   clis: { name: string; via: string; version?: string; needs?: string[]; bytes?: number }[];
   skills: { name: string; from: string; linked: boolean }[];
   plugins: { name: string }[];

@@ -332,6 +332,13 @@ describe("Add a computer's picks read the host's facts", () => {
       { id: "claude", name: "Claude Code", signins: ["vault", "machine"], kind: "token", bytes: 230 * MB },
       { id: "codex", name: "Codex", signins: ["machine"], kind: "device", bytes: 40 * MB },
     ],
+    mcp: [
+      { name: "context7", agents: ["claude", "codex"], kind: "key" },
+      { name: "github", agents: ["codex"], kind: "token" },
+      { name: "linear", agents: ["claude"], kind: "oauth" },
+      { name: "playwright", agents: ["claude"], kind: "none" },
+      { name: "old", agents: ["claude"] },
+    ],
     clis: [
       { name: "gh", via: "apt", version: "2.86.0", bytes: 40 * MB },
       { name: "go", via: "apt", version: "1.25.1", bytes: 517 * MB },
@@ -346,7 +353,7 @@ describe("Add a computer's picks read the host's facts", () => {
       { name: "laya", path: "/Users/zingzy/laya", bytes: 340 * MB },
     ],
   };
-  const open = async (at: "agents" | "clis" | "github" | "projects", picks?: RecipeFile, over: Partial<Api> = {}): Promise<ReturnType<typeof host>> => {
+  const open = async (at: "agents" | "mcp" | "clis" | "github" | "projects", picks?: RecipeFile, over: Partial<Api> = {}): Promise<ReturnType<typeof host>> => {
     const fake = host({ recipesOptions: async () => FACTS, ...over } as Partial<Api>);
     useStore.setState({ places: [here, studio] });
     mountSettings({ api: fake.api, at: { kind: "group", group: "computers" } });
@@ -376,6 +383,15 @@ describe("Add a computer's picks read the host's facts", () => {
     expect(size("codex")).toEqual(["40 MB", "muted"]);
     expect(dialog()!.querySelector("[data-pick-row='claude'] [data-slot=select-trigger]")?.textContent).toBe("Copy the key");
     expect(dialog()!.querySelector("[data-pick-row='codex'] [data-slot=select-trigger]")?.textContent).toBe("Sign in on studio with a code");
+  });
+
+  it("says how each MCP server signs in on the computer, as the agents step says it for an agent", async () => {
+    await open("mcp");
+    await waitFor(() => expect(ticked("linear")).toBe(true));
+    const note = (row: string): string | null | undefined => dialog()!.querySelector(`[data-pick-row='${row}'] [data-pick-note]`)?.textContent;
+    expect(["context7", "github", "linear", "playwright"].map(note)).toEqual(["Key copied.", "Token copied.", "Signs in on studio.", "No sign-in."]);
+    // A server the host read no kind for says nothing rather than guess.
+    expect(note("old")).toBeUndefined();
   });
 
   it("draws each CLI's size in the weight table's ink", async () => {

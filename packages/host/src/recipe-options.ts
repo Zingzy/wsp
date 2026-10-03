@@ -8,7 +8,7 @@ import { execFile } from "node:child_process";
 import { posix } from "node:path";
 import { CATALOG_AGENTS, COMPILER_ROW, catalogEntry, catalogIdOfRow, hasLogin, keyEnvOf, mintsToken } from "@wsp/catalog";
 import { collect, detectSkills, expand, skillRoots, type Host, type Manifest } from "@wsp/collect";
-import { agentOfRow, githubAddress, MCP_ID_PREFIX, packageOf, type RecipeOptions, type RecipeSignIn, type SkillRow } from "@wsp/protocol";
+import { agentOfRow, githubAddress, MCP_ID_PREFIX, packageOf, type RecipeOptions, type RecipeSignIn, type ServerSignIn, type SkillRow } from "@wsp/protocol";
 import { agentBytes, cliBytes, folderBytes } from "./pick-sizes.js";
 import { CONFIG_PATHS } from "./recipe-configs.js";
 
@@ -57,12 +57,14 @@ export function recipeOptions(manifest: Manifest, o: { skills: readonly SkillRow
     const bytes = agentBytes(entry.id);
     return [{ id: entry.id, name: entry.name, signins: signinsOf(entry.id), kind: entry.signIn.kind, ...(bytes !== undefined ? { bytes } : {}) }];
   });
-  const servers = new Map<string, Set<string>>();
+  const servers = new Map<string, { agents: Set<string>; kind?: ServerSignIn }>();
   for (const e of manifest.entries) {
     if (!e.id.startsWith(MCP_ID_PREFIX) || e.reason !== undefined) continue;
     const agent = e.id.slice(MCP_ID_PREFIX.length).split("/")[0];
     if (agent === undefined || !CATALOG_AGENTS.some(a => a.id === agent)) continue;
-    (servers.get(e.label) ?? servers.set(e.label, new Set()).get(e.label)!).add(agent);
+    const held = servers.get(e.label) ?? servers.set(e.label, { agents: new Set() }).get(e.label)!;
+    held.agents.add(agent);
+    held.kind ??= e.signIn;
   }
   const clis = manifest.entries.flatMap(e => {
     const manager = e.id.split("/")[1];
@@ -78,7 +80,7 @@ export function recipeOptions(manifest: Manifest, o: { skills: readonly SkillRow
   });
   return {
     agents,
-    mcp: [...servers].map(([name, on]) => ({ name, agents: [...on].sort() })).sort((a, b) => a.name.localeCompare(b.name)),
+    mcp: [...servers].map(([name, on]) => ({ name, agents: [...on.agents].sort(), ...(on.kind !== undefined ? { kind: on.kind } : {}) })).sort((a, b) => a.name.localeCompare(b.name)),
     clis,
     skills,
     plugins: o.plugins.map(name => ({ name })),

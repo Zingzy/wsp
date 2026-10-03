@@ -44,25 +44,25 @@ describe("mcp servers", () => {
     ]);
     expect(rows[0]).toEqual({
       rung: "agents", id: "agents/mcp/claude/github", label: "github", group: "Claude Code MCP servers", paths: [], bytes: 0, default: "bring", consent: true,
-      detail: "stdio: npx @modelcontextprotocol/server-github; runs via npx; carries a secret: env GITHUB_TOKEN (40 B)",
+      detail: "stdio: npx @modelcontextprotocol/server-github; runs via npx; carries a secret: env GITHUB_TOKEN (40 B)", signIn: "token",
     });
     expect(rows[1]).toEqual({
       rung: "agents", id: "agents/mcp/claude/notion", label: "notion", group: "Claude Code MCP servers", paths: [], bytes: 0, default: "bring",
-      detail: "http: mcp.notion.com/mcp; nothing to install; its sign-in is kept with the Claude Code login",
+      detail: "http: mcp.notion.com/mcp; nothing to install; its sign-in is kept with the Claude Code login", signIn: "oauth",
     });
     // The file a secret-named env value points at travels on the row; the path itself is rewritten on the machine.
     expect(rows[2]).toEqual({
       rung: "agents", id: "agents/mcp/claude/gsc", label: "gsc", group: "Claude Code MCP servers", paths: ["~/.config/gsc/creds.json"], bytes: 2100, default: "bring", consent: true,
-      detail: "stdio: uvx mcp-search-console; needs uv, installed on the machine when missing; carries a secret: the file GSC_CREDENTIALS_PATH points at (2 KB)",
+      detail: "stdio: uvx mcp-search-console; needs uv, installed on the machine when missing; carries a secret: the file GSC_CREDENTIALS_PATH points at (2 KB)", signIn: "token",
     });
     expect(rows[3]).toEqual({
       rung: "agents", id: "agents/mcp/claude/notes", label: "notes", group: "Claude Code MCP servers", paths: [], bytes: 0, default: "skip",
       reason: "command ~/Library/Application Support/Notes/mcp is macOS-only, will not run",
-      detail: "stdio: ~/Library/Application Support/Notes/mcp; carries no secret",
+      detail: "stdio: ~/Library/Application Support/Notes/mcp; carries no secret", signIn: "none",
     });
     expect(rows[4]).toEqual({
       rung: "agents", id: "agents/mcp/claude/home/zomato", label: "zomato", group: "Claude Code MCP servers", paths: [], bytes: 0, default: "bring", consent: true,
-      detail: "local to ~; stdio: npx mcp-remote …; runs via npx; carries a secret: arg 2 (26 B); its saved sign-in (1 KB) travels on the mcp-remote sign-ins row",
+      detail: "local to ~; stdio: npx mcp-remote …; runs via npx; carries a secret: arg 2 (26 B); its saved sign-in (1 KB) travels on the mcp-remote sign-ins row", signIn: "oauth",
     });
     // The whole store is claimed; only what the current bridge reads travels.
     expect(rows[5]).toEqual({
@@ -244,6 +244,29 @@ describe("mcp servers", () => {
     const host = fakeHost({ files: { "~/.remote.json": JSON.stringify({ mcpServers: { notion: { type: "http", url: NOTION } } }) } });
     expect((await detectMcp(host, [remote("its sign-in is kept with the Remote login")]))[0]?.detail).toBe("http: mcp.notion.com/mcp; nothing to install; its sign-in is kept with the Remote login");
     expect((await detectMcp(host, [remote()]))[0]?.detail).toBe("http: mcp.notion.com/mcp; nothing to install; carries no secret");
+  });
+
+  it("says how each server signs in: nothing, a key or a token it carries, or a browser sign-in on the machine", async () => {
+    const host = fakeHost({
+      files: {
+        "~/.claude.json": JSON.stringify({
+          mcpServers: {
+            context7: { type: "http", url: "https://mcp.context7.com/mcp", headers: { CONTEXT7_API_KEY: "ctx7sk-x" } },
+            linear: { type: "http", url: "https://mcp.linear.app/mcp" },
+            firecrawl: { command: "npx", args: ["-y", "firecrawl-mcp"], env: { FIRECRAWL_API_KEY: "fc-x" } },
+            github: { command: "npx", args: ["-y", "@modelcontextprotocol/server-github"], env: { GITHUB_TOKEN: "ghp_x" } },
+            playwright: { command: "npx", args: ["@playwright/mcp@latest"] },
+            zomato: { command: "npx", args: ["mcp-remote", "https://mcp.zomato.com/mcp"] },
+          },
+        }),
+      },
+    });
+    const kinds = Object.fromEntries((await detectMcp(host)).filter(r => r.label !== "mcp-remote sign-ins").map(r => [r.label, r.signIn]));
+    expect(kinds).toEqual({ context7: "key", linear: "oauth", firecrawl: "key", github: "token", playwright: "none", zomato: "oauth" });
+    // An http server on an agent that keeps no sign-in for it carries none.
+    const remote: McpAgent = { ...CATALOG_AGENTS.find(a => a.id === "gemini")!, id: "remote", name: "Remote", mcp: { format: MCP_SERVERS_JSON, files: ["~/.remote.json"], scope: "user scope" } };
+    const bare = fakeHost({ files: { "~/.remote.json": JSON.stringify({ mcpServers: { notion: { type: "http", url: NOTION } } }) } });
+    expect((await detectMcp(bare, [remote]))[0]?.signIn).toBe("none");
   });
 
   it("linuxFit: home paths and Homebrew's prefix have a Linux equivalent, Library and Applications do not", () => {

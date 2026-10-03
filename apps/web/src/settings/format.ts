@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The words the settings page and its palette row say, one place, keyed by the
 // preference value where a value has words of its own.
-import { fmtPx, listWords, offlineFor, placeUpdateLine, type MidTurn, type NewThreadIn, type NotifyChoice, type OnQuit, type PlaceDialRoad, type PlaceProvisionRow, type SendKey, type SettleAfter, type TerminalSizeSource, type ThemePreference } from "@wsp/protocol";
+import { fmtPx, listWords, offlineFor, placeUpdateLine, type MidTurn, type NewThreadIn, type NotifyChoice, type OnQuit, type PlaceDialRoad, type PlaceProvisionRow, type SendKey, type ServerSignIn, type SettleAfter, type TerminalSizeSource, type ThemePreference } from "@wsp/protocol";
 
 /** The muted mono a state word or a description of machine words wears, and the foreground mono a value a person
  * reads wears: an address, a size, a path, a time, a version. Two class strings the page, the sheet and the first
@@ -140,6 +140,9 @@ export const ADD_COMPUTER_WORDS = {
   noRemote: "No remote; copied whole.",
   /** What the GitHub row says once its step ended, by the way it signed in. */
   tokenCopied: "Token copied.",
+  /** How an MCP server signs in on the computer, by the kind the host read off its definition. */
+  serverSignIn: (kind: ServerSignIn, box: string): string =>
+    ({ none: "No sign-in.", key: "Key copied.", token: "Token copied.", oauth: box === "" ? "Signs in there." : `Signs in on ${box}.` })[kind],
   skipped: "Skipped.",
   signedInOn: (box: string): string => (box === "" ? "Signed in there." : `Signed in on ${box}.`),
   /** A project's remote and what of it no remote holds: nothing, or the commits that travel with it. */

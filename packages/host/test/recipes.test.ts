@@ -344,6 +344,17 @@ describe("what a recipe picks from", () => {
     expect(await folderOptions([{ name: "app", path: repo }], async () => true)).toEqual([{ name: "app", path: repo, unpushed: 1, bytes: expect.any(Number) }]);
   });
 
+  it("says how each MCP server signs in, off the first agent's definition that says anything", () => {
+    const server = (agent: string, name: string, signIn?: "none" | "key" | "token" | "oauth") => ({ rung: "agents" as const, id: `agents/mcp/${agent}/${name}`, label: name, paths: [], bytes: 0, default: "bring" as const, ...(signIn !== undefined ? { signIn } : {}) });
+    const read = recipeOptions({ entries: [server("claude", "linear", "oauth"), server("codex", "linear", "oauth"), server("claude", "context7", "key"), server("codex", "playwright", "none"), server("claude", "old")] }, { skills: [], plugins: [], configs: [], github: false });
+    expect(read.mcp).toEqual([
+      { name: "context7", agents: ["claude"], kind: "key" },
+      { name: "linear", agents: ["claude", "codex"], kind: "oauth" },
+      { name: "old", agents: ["claude"] },
+      { name: "playwright", agents: ["codex"], kind: "none" },
+    ]);
+  });
+
   it("offers GitHub on its own with how it can sign in: the vault only where this computer holds gh's login, else on the box or skipped", () => {
     const read = (github: boolean) => recipeOptions({ entries: [] }, { skills: [], plugins: [], configs: [], github }).configs.find(c => c.id === "github");
     expect(read(true)?.signins).toEqual(["vault", "machine", "skip"]);
