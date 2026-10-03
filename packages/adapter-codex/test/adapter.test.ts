@@ -609,7 +609,7 @@ describe("interrupt", () => {
         onWrite: (message, self) => {
           if (message.method === "thread/start") self.push(...opened());
           if (message.method === "turn/start") self.push(turnStarted);
-          if (message.method === "turn/interrupt") self.push('{"id":"wsp-interrupt","result":{}}', completed("interrupted"));
+          if (message.method === "turn/interrupt") self.push(`{"id":${JSON.stringify(message.id)},"result":{}}`, completed("interrupted"));
         },
       });
       for (const line of seed) void w.stream.write(line);
@@ -662,14 +662,14 @@ describe("interrupt", () => {
 
 describe("what ends a Codex turn", () => {
   const statusOf = (type: string) => `{"method":"thread/status/changed","params":{"threadId":"${THREAD_ID}","status":{"type":"${type}"}}}`;
-  const running = (onInterrupt?: (self: Wire) => void) =>
+  const running = (onInterrupt?: (self: Wire, id: unknown) => void) =>
     launcher(seed => {
       const w = wire({
         onWrite: (message, self) => {
           if (message.method === "thread/start") self.push(...opened());
           if (message.method === "turn/start") self.push(turnStarted);
           if (message.method === "turn/steer") self.push(`{"id":${JSON.stringify(message.id)},"result":{"turnId":"${TURN_ID}"}}`);
-          if (message.method === "turn/interrupt") onInterrupt?.(self);
+          if (message.method === "turn/interrupt") onInterrupt?.(self, message.id);
         },
       });
       for (const line of seed) void w.stream.write(line);
@@ -691,7 +691,7 @@ describe("what ends a Codex turn", () => {
   });
 
   it("an interrupt's answer is not the turn's end: it stays open until turn/completed says interrupted", async () => {
-    const live = running(self => self.push('{"id":"wsp-interrupt","result":{}}'));
+    const live = running((self, id) => self.push(`{"id":${JSON.stringify(id)},"result":{}}`));
     const { events, onEvent } = collect();
     const session = adapterOver(live, { graceMs: 5_000 }).start({ prompt: "x", onEvent });
     await until(() => events.some(e => e.type === "turn.anchor"));
@@ -754,7 +754,8 @@ describe("a subagent's frames on its lead's stream", () => {
     live.wires[0]!.push(agentMessage("lead_m1", "the lead's reply"), usageOf(THREAD_ID, TURN_ID, 36_576, 18_315), completed("completed"));
     const result = await session.finished;
     expect(result).toMatchObject({ status: "completed", text: "the lead's reply" });
-    expect(result.tokens).toMatchObject({ input: 36_576, context: 18_315, window: 258_400 });
+    // The child's one call counts in the turn's tokens; what the lead's model held and its window stay the lead's.
+    expect(result.tokens).toMatchObject({ input: 36_576 + 20_756, context: 18_315, window: 258_400 });
     expect(events.filter(e => e.type === "turn.anchor")).toEqual([{ type: "turn.anchor", sessionId: THREAD_ID, anchor: TURN_ID }]);
     expect(events.some(e => e.type === "turn.plan")).toBe(false);
     expect(deltasOf(events).map(d => d.text)).not.toContain("child says done");
@@ -766,8 +767,230 @@ describe("a subagent's frames on its lead's stream", () => {
     const session = adapterOver(live, { graceMs: 15 }).start({ prompt: "spawn one agent", onEvent });
     await until(() => events.some(e => e.type === "permission.ask"));
     await session.interrupt();
-    expect(live.wires[0]!.written.filter(m => m.method === "turn/interrupt").map(m => m.params)).toContainEqual({ threadId: THREAD_ID, turnId: TURN_ID });
-    expect(live.wires[0]!.written.filter(m => m.method === "turn/interrupt").map(m => (m.params as Json).turnId)).not.toContain(CHILD_TURN);
+    const interrupts = live.wires[0]!.written.filter(m => m.method === "turn/interrupt").map(m => m.params);
+    expect(interrupts).toContainEqual({ threadId: THREAD_ID, turnId: TURN_ID });
+    expect(interrupts).not.toContainEqual({ threadId: THREAD_ID, turnId: CHILD_TURN });
+  });
+  const SPAWN = "call_spawn_1";
+  const spawnItem = (phase: "started" | "completed") =>
+    `{"method":"item/${phase}","params":{"item":{"type":"collabAgentToolCall","id":"${SPAWN}","tool":"spawnAgent","status":"${phase === "started" ? "inProgress" : "completed"}","senderThreadId":"${THREAD_ID}","receiverThreadIds":${phase === "started" ? "[]" : `["${CHILD}"]`},"prompt":"Sleep 20 s and say done.\\nEnd without waiting.","model":null,"reasoningEffort":null,"agentsStates":{}},"threadId":"${THREAD_ID}","turnId":"${TURN_ID}"}}`;
+  const childStarted = `{"method":"turn/started","params":{"threadId":"${CHILD}","turn":{"id":"${CHILD_TURN}","items":[],"status":"inProgress","error":null}}}`;
+  const childEnded = (status: string, extra = "") => `{"method":"turn/completed","params":{"threadId":"${CHILD}","turn":{"id":"${CHILD_TURN}","items":[],"status":"${status}","error":null${extra}}}}`;
+  const childSays = (text: string) => `{"method":"item/completed","params":{"item":{"type":"agentMessage","id":"child_m2","text":${JSON.stringify(text)}},"threadId":"${CHILD}","turnId":"${CHILD_TURN}"}}`;
+  const activity = (kind: string, path = "/root/alpha") =>
+    `{"method":"item/completed","params":{"item":{"type":"subAgentActivity","id":"${SPAWN}","kind":"${kind}","agentThreadId":"${CHILD}","agentPath":"${path}"},"threadId":"${THREAD_ID}","turnId":"${TURN_ID}"}}`;
+
+  /** A lead that spawns one child and ends its own turn without waiting, as the person asked it to. */
+  const spawning = (o: { interrupts?: boolean; hang?: boolean } = {}) =>
+    launcher(seed => {
+      const w = wire({
+        ...(o.hang === true ? { hang: true } : {}),
+        onWrite: (message, self) => {
+          const params = message.params as Json | undefined;
+          if (message.method === "thread/start") self.push(...opened());
+          if (message.method === "turn/start") self.push(turnStarted, spawnItem("started"), spawnItem("completed"), activity("started"), childStarted, usageOf(CHILD, CHILD_TURN, 900, 900));
+          if (message.method === "turn/interrupt" && o.interrupts === true) {
+            self.push(`{"id":${JSON.stringify(message.id)},"result":{}}`);
+            self.push(params?.threadId === CHILD ? childEnded("interrupted") : completed("interrupted"));
+          }
+        },
+      });
+      for (const line of seed) void w.stream.write(line);
+      return w;
+    });
+  const subagents = (events: AdapterEvent[]) => events.filter((e): e is Extract<AdapterEvent, { type: "subagent" }> => e.type === "subagent");
+  const tasks = (events: AdapterEvent[]) => events.flatMap(e => (e.type === "turn.tasks" ? [e.running] : []));
+
+  it("holds the lead's reply while its child runs: no turn.done, stdin open, one task, and the child's start named off its spawn", async () => {
+    const live = spawning();
+    const { events, onEvent } = collect();
+    const session = adapterOver(live, { resultExitMs: 15, graceMs: 15 }).start({ prompt: "spawn one agent", onEvent });
+    await until(() => events.some(e => e.type === "subagent"));
+    live.wires[0]!.push(agentMessage("lead_m1", "spawned it"), usageOf(THREAD_ID, TURN_ID, 18_000, 18_000), completed("completed"));
+    await new Promise(r => setTimeout(r, 40));
+    expect(events.some(e => e.type === "turn.done")).toBe(false);
+    expect(live.wires[0]!.closed).toBe(false);
+    expect(live.wires[0]!.order).toEqual([]);
+    expect(tasks(events).at(-1)).toBe(1);
+    expect(subagents(events)[0]).toEqual({
+      type: "subagent",
+      sessionId: THREAD_ID,
+      task: CHILD,
+      state: "running",
+      parentToolUseId: SPAWN,
+      title: "Sleep 20 s and say done.",
+      prompt: "Sleep 20 s and say done.\nEnd without waiting.",
+    });
+    expect(subagents(events).at(-1)).toMatchObject({ task: CHILD, state: "running", depth: 1 });
+
+    live.wires[0]!.push(childSays("done"), childEnded("completed"));
+    const result = await session.finished;
+    expect(subagents(events).at(-1)).toEqual({ type: "subagent", sessionId: THREAD_ID, task: CHILD, state: "done", parentToolUseId: SPAWN, summary: "done" });
+    expect(result).toMatchObject({ status: "completed", text: "spawned it" });
+    expect(result.tokens).toMatchObject({ input: 18_900, context: 18_000, window: 258_400 });
+    expect(tasks(events).at(-1)).toBe(0);
+    expect(live.wires[0]!.closed).toBe(true);
+    expect(events.filter(e => e.type === "turn.usage").map(e => (e as { tokens: number }).tokens)).toEqual([900, 18_000]);
+  });
+
+  it("a child whose turn failed reads failed, and one a server's activity says completed reads done", async () => {
+    const live = spawning();
+    const { events, onEvent } = collect();
+    const session = adapterOver(live).start({ prompt: "spawn one agent", onEvent });
+    await until(() => events.some(e => e.type === "subagent"));
+    live.wires[0]!.push(completed("completed"), childEnded("failed", ',"error":{"message":"stream disconnected"}'));
+    await session.finished;
+    expect(subagents(events).at(-1)).toMatchObject({ task: CHILD, state: "failed" });
+
+    const other = spawning();
+    const { events: later, onEvent: onLater } = collect();
+    const next = adapterOver(other).start({ prompt: "spawn one agent", onEvent: onLater });
+    await until(() => later.some(e => e.type === "subagent"));
+    other.wires[0]!.push(completed("completed"), activity("completed"));
+    await next.finished;
+    expect(subagents(later).at(-1)).toMatchObject({ task: CHILD, state: "done" });
+  });
+
+  it("a child known only from its spawn holds the reply but not the idle clock, until its own turn starts", async () => {
+    const live = launcher(seed => {
+      const w = wire({
+        onWrite: (message, self) => {
+          if (message.method === "thread/start") self.push(...opened());
+          if (message.method === "turn/start") self.push(turnStarted, spawnItem("completed"), completed("completed"));
+        },
+      });
+      for (const line of seed) void w.stream.write(line);
+      return w;
+    });
+    const { events, onEvent } = collect();
+    const session = adapterOver(live).start({ prompt: "x", onEvent });
+    await until(() => events.some(e => e.type === "subagent"));
+    await new Promise(r => setTimeout(r, 10));
+    expect(events.some(e => e.type === "turn.done")).toBe(false);
+    expect(tasks(events)).toEqual([]);
+    live.wires[0]!.push(childStarted);
+    await until(() => tasks(events).at(-1) === 1);
+    live.wires[0]!.push(childEnded("completed"));
+    expect((await session.finished).status).toBe("completed");
+    expect(tasks(events)).toEqual([1, 0]);
+  });
+
+  it("a spawn the server failed names no child, so nothing holds the lead", async () => {
+    const failedSpawn = spawnItem("completed").replace('"status":"completed"', '"status":"failed"');
+    const live = launcher(seed => {
+      const w = wire({
+        onWrite: (message, self) => {
+          if (message.method === "thread/start") self.push(...opened());
+          if (message.method === "turn/start") self.push(turnStarted, failedSpawn, agentMessage("lead_m1", "could not spawn"), completed("completed"));
+        },
+      });
+      for (const line of seed) void w.stream.write(line);
+      return w;
+    });
+    const { events, onEvent } = collect();
+    expect(await adapterOver(live).start({ prompt: "x", onEvent }).finished).toMatchObject({ status: "completed", text: "could not spawn" });
+    expect(subagents(events)).toEqual([]);
+  });
+
+  it("knows a child whose only sign is its own turn starting, and holds the lead for it", async () => {
+    const live = launcher(seed => {
+      const w = wire({
+        onWrite: (message, self) => {
+          if (message.method === "thread/start") self.push(...opened());
+          if (message.method === "turn/start") self.push(turnStarted, childStarted, completed("completed"));
+        },
+      });
+      for (const line of seed) void w.stream.write(line);
+      return w;
+    });
+    const { events, onEvent } = collect();
+    const session = adapterOver(live).start({ prompt: "x", onEvent });
+    await until(() => events.some(e => e.type === "subagent"));
+    expect(subagents(events)[0]).toEqual({ type: "subagent", sessionId: THREAD_ID, task: CHILD, state: "running", parentToolUseId: CHILD });
+    await new Promise(r => setTimeout(r, 10));
+    expect(events.some(e => e.type === "turn.done")).toBe(false);
+    live.wires[0]!.push(childEnded("completed"));
+    expect((await session.finished).status).toBe("completed");
+  });
+
+  it("a stop with a child running interrupts the child first, then the lead, and the child reads stopped", async () => {
+    const live = spawning({ interrupts: true });
+    const { events, onEvent } = collect();
+    const session = adapterOver(live, { graceMs: 5_000 }).start({ prompt: "spawn one agent", onEvent });
+    await until(() => events.some(e => e.type === "subagent"));
+    await session.interrupt();
+    const interrupts = live.wires[0]!.written.filter(m => m.method === "turn/interrupt").map(m => m.params);
+    expect(interrupts).toEqual([
+      { threadId: CHILD, turnId: CHILD_TURN },
+      { threadId: THREAD_ID, turnId: TURN_ID },
+    ]);
+    expect(await session.finished).toEqual({ status: "interrupted" });
+    expect(subagents(events).at(-1)).toMatchObject({ task: CHILD, state: "stopped" });
+    expect(live.wires[0]!.order).toEqual([]);
+  });
+
+  it("a stop after the lead's reply interrupts the child alone, and the held reply stands", async () => {
+    const live = spawning({ interrupts: true });
+    const { events, onEvent } = collect();
+    const session = adapterOver(live, { graceMs: 5_000 }).start({ prompt: "spawn one agent", onEvent });
+    await until(() => events.some(e => e.type === "subagent"));
+    live.wires[0]!.push(agentMessage("lead_m1", "spawned it"), completed("completed"));
+    await new Promise(r => setTimeout(r, 10));
+    await session.interrupt();
+    expect(live.wires[0]!.written.filter(m => m.method === "turn/interrupt").map(m => m.params)).toEqual([{ threadId: CHILD, turnId: CHILD_TURN }]);
+    expect(await session.finished).toMatchObject({ status: "completed", text: "spawned it" });
+    expect(subagents(events).at(-1)).toMatchObject({ state: "stopped" });
+  });
+
+  it("a child's approval reaches the person as an ask named by the child's spawn", async () => {
+    const live = leading();
+    const { events, onEvent } = collect();
+    const session = adapterOver(live).start({ prompt: "spawn one agent", onEvent });
+    await until(() => events.some(e => e.type === "permission.ask"));
+    const ask = events.find((e): e is Extract<AdapterEvent, { type: "permission.ask" }> => e.type === "permission.ask")!;
+    expect(ask).toMatchObject({ sessionId: THREAD_ID, ask: { askId: "11", toolName: "command_execution", parentToolUseId: "call_S2JP" } });
+    expect(await session.answer(ask.ask.askId, { optionId: PERMISSION_ALLOW, outcome: "allowed", denyMessage: "" })).toBe("answered");
+    expect(live.wires[0]!.written).toContainEqual({ id: 11, result: { decision: "accept" } });
+    live.wires[0]!.push(childCompleted, completed("completed"));
+    await session.finished;
+  });
+
+  it("stops one child alone by its thread id, the lead running on, and its interrupted end reads stopped", async () => {
+    const live = spawning({ interrupts: true });
+    const { events, onEvent } = collect();
+    const session = adapterOver(live).start({ prompt: "spawn one agent", onEvent });
+    await until(() => events.some(e => e.type === "subagent"));
+    expect(await session.stopTask("no-such-thread")).toEqual({ outcome: "not-running" });
+    expect(await session.stopTask(CHILD)).toEqual({ outcome: "accepted" });
+    expect(live.wires[0]!.written.filter(m => m.method === "turn/interrupt").map(m => m.params)).toEqual([{ threadId: CHILD, turnId: CHILD_TURN }]);
+    await until(() => subagents(events).at(-1)?.state === "stopped");
+    expect(events.some(e => e.type === "turn.done")).toBe(false);
+    expect(await session.stopTask(CHILD)).toEqual({ outcome: "not-running" });
+    live.wires[0]!.push(completed("completed"));
+    expect((await session.finished).status).toBe("completed");
+  });
+
+  it("a process that goes with a child still running ends the child too: stopped under a stop, failed otherwise", async () => {
+    const live = spawning();
+    const { events, onEvent } = collect();
+    const session = adapterOver(live).start({ prompt: "spawn one agent", onEvent });
+    await until(() => events.some(e => e.type === "subagent"));
+    live.wires[0]!.push(agentMessage("lead_m1", "spawned it"), completed("completed"));
+    await new Promise(r => setTimeout(r, 10));
+    live.wires[0]!.exit(1);
+    expect(await session.finished).toMatchObject({ status: "completed", text: "spawned it" });
+    expect(live.wires[0]!.order).toEqual([]);
+    expect(subagents(events).at(-1)).toMatchObject({ task: CHILD, state: "failed" });
+    expect(events.map(e => e.type).slice(-4)).toEqual(["subagent", "turn.tasks", "turn.done", "session.end"]);
+
+    const stuck = spawning({ hang: true });
+    const { events: stopped, onEvent: onStopped } = collect();
+    const cut = adapterOver(stuck, { graceMs: 15 }).start({ prompt: "spawn one agent", onEvent: onStopped });
+    await until(() => stopped.some(e => e.type === "subagent"));
+    await cut.interrupt();
+    expect(await cut.finished).toEqual({ status: "interrupted" });
+    expect(stuck.wires[0]!.order).toEqual(["teardown", "kill"]);
+    expect(subagents(stopped).at(-1)).toMatchObject({ task: CHILD, state: "stopped" });
   });
 });
 

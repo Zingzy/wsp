@@ -3,10 +3,11 @@
 // server prints into the event set the runtime consumes. One server process
 // per turn, launched the way any turn is: initialize, then thread/start (or
 // thread/resume), then turn/start once the thread answers. The turn ends at
-// the server's turn/completed; stdin closes there and the server exits on the
-// EOF. A message offered mid-turn is turn/steer, an approval the server asks
-// for is answered on the same stdin. Shapes are codex-cli 0.155.1's own schema
-// (`codex app-server generate-json-schema`).
+// the server's turn/completed, or once the last subagent it spawned ends after
+// it; stdin closes there and the server exits on the EOF. Subagents are more
+// threads on the same server. A message offered mid-turn is turn/steer, an
+// approval the server asks for is answered on the same stdin. Shapes are
+// codex-cli 0.155.1's own schema (`codex app-server generate-json-schema`).
 import { randomUUID } from "node:crypto";
 import {
   INTERRUPT_GRACE_MS,
@@ -41,6 +42,8 @@ import type {
   SessionReverter,
   SessionTitleMaker,
   CommitDrafter,
+  SubagentState,
+  TaskStop,
   SessionTitleReader,
   TurnImage,
   TurnRefusal,
@@ -114,6 +117,8 @@ export interface CodexSession {
   steer(prompt: string): Promise<"accepted" | "not-running">;
   /** Answers an approval the server asked for with accept or decline; gone when no such request is open. */
   answer(askId: string, answer: { optionId: string; outcome: PermissionOutcome; denyMessage: string }): Promise<"answered" | "gone">;
+  /** turn/interrupt on one subagent's own thread, by that thread's id, the lead and its other subagents running on. */
+  stopTask(task: string): Promise<TaskStop>;
 }
 
 export interface CodexAdapterDeps {
@@ -371,6 +376,33 @@ function itemDeltas(done: boolean, item: Item, sessionId: string): AdapterEvent[
   }
 }
 
+/** A subagent of the turn: one more thread on the same server, which its lead spawned. */
+interface Child {
+  state: SubagentState;
+  /** The turn it has in progress, which a stop of it names. */
+  turnId?: string;
+  /** The call that spawned it, which its prompts are named by; its own thread id until one is seen. */
+  parent: string;
+  title?: string;
+  prompt?: string;
+  depth?: number;
+  summary?: string;
+}
+
+/** How a subagent's own turn ended, in the shared words. */
+const childEnd = (status: string | undefined): SubagentState => (status === "completed" ? "done" : status === "interrupted" ? "stopped" : "failed");
+
+/** A subagent's depth under the lead off codex's path for it: /root is the lead, /root/alpha one it spawned. */
+const depthOf = (path: string | undefined): number | undefined => (path === undefined ? undefined : Math.max(1, path.split("/").filter(Boolean).length - 1));
+
+/** The turn's tokens with its subagents' calls added: what the lead's model held and its window stay the lead's. */
+function withChildTokens(lead: TurnTokens | undefined, children: Readonly<Record<string, number>>): TurnTokens | undefined {
+  if (Object.keys(children).length === 0) return lead;
+  const sum: TurnTokens = { ...(lead ?? { input: 0, output: 0, context: 0 }) };
+  for (const [name] of BREAKDOWN) if (children[name] !== undefined) sum[name] = (sum[name] ?? 0) + children[name]!;
+  return sum;
+}
+
 /** What a side question's fork is told, since no Codex turn can run with its tools off. */
 const ASIDE_INSTRUCTIONS =
   "The person is asking a side question about this conversation while its work goes on elsewhere. Answer it from the conversation so far, briefly. Run nothing, edit nothing and call no tool.";
@@ -431,8 +463,16 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     const changesById = new Map<string, unknown>();
     /** Approvals the server is waiting on, by the askId the runtime holds, with the id the server asked under. */
     const pending = new Map<string, { id: RequestId; ask: PermissionAsk }>();
-    const steers = new Map<string, (accepted: boolean) => void>();
-    let steerSeq = 0;
+    /** Requests this adapter sent whose answer a caller waits on (steers, a stop of one subagent), by their id. */
+    const awaiting = new Map<string, (answer: { error?: string } | "gone") => void>();
+    let requestSeq = 0;
+    /** The turn's subagents by their thread ids, in the order they were first seen. */
+    const children = new Map<string, Child>();
+    /** Each token field the subagents' calls drew, summed. */
+    const childTokens: Record<string, number> = {};
+    let tasksSaid = 0;
+    /** How the lead's own turn ended, held while any subagent still runs. */
+    let leadEnd: { status: string; error?: string } | undefined;
 
     const emit = (event: AdapterEvent): void => o.onEvent(event);
     const escalate = (): Promise<void> => endRun(stream, graceMs);
@@ -479,9 +519,78 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
       emit({ type: "permission.close", sessionId: threadId, askId, outcome, ...(optionId !== undefined ? { optionId } : {}) });
     };
 
-    const settleSteers = (): void => {
-      for (const settle of steers.values()) settle(false);
-      steers.clear();
+    const settleAwaiting = (): void => {
+      for (const settle of awaiting.values()) settle("gone");
+      awaiting.clear();
+    };
+
+    const runningChildren = (): number => [...children.values()].filter(c => c.state === "running").length;
+    /** What holds the turn's idle clock: a subagent with a turn in progress. One known only from its spawn holds the
+     * reply but not the clock, so a spawn that never starts is ended by the watchdog. */
+    const sayTasks = (): void => {
+      const running = [...children.values()].filter(c => c.state === "running" && c.turnId !== undefined).length;
+      if (running === tasksSaid) return;
+      tasksSaid = running;
+      emit({ type: "turn.tasks", sessionId: threadId, running });
+    };
+    const sayChild = (task: string, c: Child): void =>
+      emit({
+        type: "subagent",
+        sessionId: threadId,
+        task,
+        state: c.state,
+        parentToolUseId: c.parent,
+        ...(c.state === "running"
+          ? { ...(c.title !== undefined ? { title: c.title } : {}), ...(c.prompt !== undefined ? { prompt: c.prompt } : {}), ...(c.depth !== undefined ? { depth: c.depth } : {}) }
+          : c.summary !== undefined ? { summary: c.summary } : {}),
+      });
+    /** A sign of a subagent: a new one starts running, and one already running is said again where the sign adds to
+     * what was said of it. */
+    const learn = (task: string, said: { parent?: string; prompt?: string; name?: string; depth?: number } = {}): void => {
+      if (task === threadId) return;
+      const c = children.get(task);
+      const title = said.prompt?.split("\n")[0]?.trim() || said.name;
+      if (c === undefined) {
+        const fresh: Child = { state: "running", parent: said.parent ?? task, ...(title !== undefined ? { title } : {}), ...(said.prompt !== undefined ? { prompt: said.prompt } : {}), ...(said.depth !== undefined ? { depth: said.depth } : {}) };
+        children.set(task, fresh);
+        sayChild(task, fresh);
+        sayTasks();
+        return;
+      }
+      const adds = (said.parent !== undefined && c.parent === task) || (said.prompt !== undefined && c.prompt === undefined) || (said.depth !== undefined && c.depth === undefined) || (title !== undefined && c.title === undefined);
+      if (said.parent !== undefined && c.parent === task) c.parent = said.parent;
+      if (said.prompt !== undefined && c.prompt === undefined) {
+        c.prompt = said.prompt;
+        c.title = title;
+      }
+      c.depth ??= said.depth;
+      c.title ??= title;
+      if (adds && c.state === "running") sayChild(task, c);
+    };
+    const endChild = (task: string, state: SubagentState): void => {
+      const c = children.get(task);
+      if (c === undefined || c.state !== "running") return;
+      c.state = state;
+      delete c.turnId;
+      sayChild(task, c);
+      sayTasks();
+      settleLead();
+    };
+    /** The subagents a collab call or an activity item names, wherever on the server it was printed. */
+    const childSigns = (item: Item, done: boolean): void => {
+      if (item.type === "collabAgentToolCall") {
+        const receivers = Array.isArray(item.receiverThreadIds) ? item.receiverThreadIds.filter((t): t is string => typeof t === "string") : [];
+        if (item.tool === "spawnAgent" && item.status !== "failed") for (const task of receivers) learn(task, { parent: item.id, ...(str(item.prompt) !== undefined ? { prompt: str(item.prompt) } : {}) });
+        if (item.tool === "closeAgent" && done && item.status === "completed") for (const task of receivers) endChild(task, "done");
+      }
+      if (item.type === "subAgentActivity") {
+        const task = str(item.agentThreadId);
+        if (task === undefined || task === threadId) return;
+        const path = str(item.agentPath);
+        if (item.kind === "started") learn(task, { parent: item.id, ...(path !== undefined ? { name: path.split("/").at(-1)!, depth: depthOf(path)! } : {}) });
+        else if (item.kind === "completed") endChild(task, "done");
+        else if (item.kind === "interrupted") endChild(task, "stopped");
+      }
     };
 
     /** The turn's reply is final: the server waits for more input after it, and EOF is what lets it exit; one that
@@ -491,7 +600,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
       turnResult = result;
       emit({ type: "turn.done", sessionId: threadId, result });
       for (const askId of [...pending.keys()]) closeAsk(askId, "cancelled");
-      settleSteers();
+      settleAwaiting();
       stream.closeInput();
       void endAfterResult(stream, deps.resultExitMs ?? RUN_EXIT_MS, graceMs).catch(() => {});
     };
@@ -499,6 +608,68 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     const failed = (message: string): TurnResult => {
       words = failureWords(message, deps.login, deps.keyEnv) ?? words;
       return { status: "failed", durationMs: Date.now() - startedAt, error: words?.line ?? message, ...(words?.cause !== undefined ? { refusal: words.cause } : {}) };
+    };
+
+    /** The lead's turn as it ended, with every subagent call it waited on counted in its tokens. */
+    const leadResult = (end: { status: string; error?: string }): TurnResult => {
+      if (end.status === "interrupted") return { status: "interrupted" };
+      if (end.status !== "completed") return failed(end.error ?? "codex reported a failed turn");
+      const tokens = withChildTokens(usage === undefined ? undefined : turnTokensOf(usage), childTokens);
+      return { status: "completed", durationMs: Date.now() - startedAt, ...(lastText !== undefined ? { text: lastText } : {}), ...(tokens !== undefined ? { tokens } : {}), ...(modelUsed !== undefined ? { model: modelUsed } : {}) };
+    };
+
+    /** The lead's reply goes once its own turn has ended and no subagent of it still runs, as Claude's held reply does:
+     * ending it sooner closes stdin and arms the exit wait, which would end a running subagent with the server. */
+    const settleLead = (): void => {
+      if (leadEnd !== undefined && runningChildren() === 0 && !exited) finish(leadResult(leadEnd));
+    };
+
+    /** Everything a subagent's thread prints on this stdout: its turn, its tokens, its items and the subagents it
+     * spawns in turn. */
+    const onChild = (task: string, method: string, params: Record<string, unknown>, emittedAtMs?: number): void => {
+      switch (method) {
+        case "turn/started": {
+          const id = str(rec(params.turn)?.id);
+          learn(task);
+          const c = children.get(task)!;
+          if (id !== undefined) c.turnId = id;
+          if (c.state !== "running") {
+            c.state = "running";
+            delete c.summary;
+            sayChild(task, c);
+          }
+          sayTasks();
+          break;
+        }
+        case "turn/completed": {
+          const turn = rec(params.turn);
+          const c = children.get(task);
+          const id = str(turn?.id);
+          if (c?.turnId !== undefined && id !== undefined && id !== c.turnId) break;
+          endChild(task, childEnd(str(turn?.status)));
+          break;
+        }
+        case "item/started":
+        case "item/completed": {
+          const item = itemOf(params);
+          if (item === undefined) break;
+          const done = method === "item/completed";
+          if (item.type === "fileChange") changesById.set(item.id, item.changes);
+          const c = children.get(task);
+          if (done && item.type === "agentMessage" && c !== undefined) c.summary = str(item.text);
+          childSigns(item, done);
+          break;
+        }
+        case "thread/tokenUsage/updated": {
+          const last = rec(rec(params.tokenUsage)?.last);
+          if (last === undefined) break;
+          emit({ type: "turn.usage", sessionId: threadId, tokens: (count(last.inputTokens) ?? 0) + (count(last.outputTokens) ?? 0), ...(emittedAtMs !== undefined ? { at: emittedAtMs } : {}) });
+          for (const [name, key] of BREAKDOWN) if (count(last[key]) !== undefined) childTokens[name] = (childTokens[name] ?? 0) + count(last[key])!;
+          break;
+        }
+        default:
+          break;
+      }
     };
 
     const emitLimit = (credits?: HarnessLimit["credits"]): void => {
@@ -523,10 +694,12 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
           ? { changes: changesOf(itemId === undefined ? undefined : changesById.get(itemId)) }
           : { command: str(params.command) ?? "", ...(str(params.cwd) !== undefined ? { cwd: str(params.cwd) } : {}) };
       const reason = str(params.reason);
+      const asker = foreign(params) ? str(params.threadId)! : undefined;
       const ask: PermissionAsk = {
         askId: String(id),
         toolName,
         ...(itemId !== undefined ? { toolUseId: itemId } : {}),
+        ...(asker !== undefined ? { parentToolUseId: children.get(asker)?.parent ?? asker } : {}),
         input: JSON.stringify(input),
         ...(reason !== undefined && reason !== "" ? { detail: reason } : {}),
         options: [
@@ -574,18 +747,18 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
         emitLimit(creditsOf(answer));
         return;
       }
-      const settle = typeof id === "string" ? steers.get(id) : undefined;
+      const settle = typeof id === "string" ? awaiting.get(id) : undefined;
       if (settle !== undefined) {
-        steers.delete(id as string);
-        settle(true);
+        awaiting.delete(id as string);
+        settle({});
       }
     };
 
     const onError = (id: RequestId, message: string): void => {
-      const settle = typeof id === "string" ? steers.get(id) : undefined;
+      const settle = typeof id === "string" ? awaiting.get(id) : undefined;
       if (settle !== undefined) {
-        steers.delete(id as string);
-        settle(false);
+        awaiting.delete(id as string);
+        settle({ error: message });
         return;
       }
       if (id === REQUEST.revert) finish({ status: "failed", error: `codex would not cut the thread: ${message}` });
@@ -598,7 +771,10 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
       if (method !== "error") progress();
       // A subagent's thread prints its own turn, tokens, plan and items on this stdout under its own id; none of them
       // is this thread's. Request ids are the connection's, so a resolved request is read whoever asked it.
-      if (method !== "serverRequest/resolved" && foreign(params)) return;
+      if (method !== "serverRequest/resolved" && foreign(params)) {
+        onChild(str(params.threadId)!, method, params, emittedAtMs);
+        return;
+      }
       switch (method) {
         case "thread/started": {
           const thread = rec(params.thread);
@@ -618,6 +794,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
           const done = method === "item/completed";
           if (item.type === "fileChange") changesById.set(item.id, item.changes);
           if (done && item.type === "agentMessage") lastText = str(item.text);
+          childSigns(item, done);
           for (const delta of itemDeltas(done, item, threadId)) emit(delta);
           break;
         }
@@ -668,11 +845,9 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
           const turn = rec(params.turn);
           const id = str(turn?.id);
           if (turnId !== undefined && id !== undefined && id !== turnId) break;
-          const status = str(turn?.status);
-          if (status === "completed")
-            finish({ status: "completed", durationMs: Date.now() - startedAt, ...(lastText !== undefined ? { text: lastText } : {}), ...(usage !== undefined ? { tokens: turnTokensOf(usage) } : {}), ...(modelUsed !== undefined ? { model: modelUsed } : {}) });
-          else if (status === "interrupted") finish({ status: "interrupted" });
-          else finish(failed(str(rec(turn?.error)?.message) ?? "codex reported a failed turn"));
+          const error = str(rec(turn?.error)?.message);
+          leadEnd = { status: str(turn?.status) ?? "failed", ...(error !== undefined ? { error } : {}) };
+          settleLead();
           break;
         }
         default:
@@ -725,7 +900,13 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
       exited = true;
       progress();
       for (const askId of [...pending.keys()]) closeAsk(askId, "cancelled");
-      settleSteers();
+      settleAwaiting();
+      // A subagent lives in this process, so it is over too, whatever its thread last said.
+      for (const [task, c] of children) if (c.state === "running") endChild(task, interruptRequested ? "stopped" : "failed");
+      if (turnResult === undefined && leadEnd !== undefined) {
+        turnResult = leadResult(leadEnd);
+        emit({ type: "turn.done", sessionId: threadId, result: turnResult });
+      }
       const sawResult = turnResult !== undefined;
       if (turnResult === undefined) {
         const reason = lastError ?? (stderrTail.length === 0 ? undefined : stderrTail.join("\n"));
@@ -742,7 +923,17 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     })();
 
     /** The turn is open to a message: the server started it and it has neither completed nor gone. */
-    const running = (): boolean => turnId !== undefined && turnResult === undefined && !exited && !interruptRequested;
+    const running = (): boolean => turnId !== undefined && leadEnd === undefined && turnResult === undefined && !exited && !interruptRequested;
+
+    /** Asks the server to stop one turn and settles on its answer: accepted, refused in its words, or gone. */
+    const interruptTurn = async (target: { threadId: string; turnId: string }): Promise<{ error?: string } | "gone"> => {
+      const id = `wsp-interrupt-${++requestSeq}`;
+      const answered = new Promise<{ error?: string } | "gone">(resolve => awaiting.set(id, resolve));
+      const wrote = await stream.write(turnInterruptLine({ id, ...target })).catch(() => "gone" as const);
+      if (wrote === "written") return answered;
+      awaiting.delete(id);
+      return "gone";
+    };
 
     const session: CodexSession = {
       localId,
@@ -755,14 +946,15 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
       finished,
       steer: async prompt => {
         if (!running() || turnId === undefined) return "not-running";
-        const id = `wsp-steer-${++steerSeq}`;
-        const answered = new Promise<boolean>(resolve => steers.set(id, resolve));
+        const id = `wsp-steer-${++requestSeq}`;
+        const answered = new Promise<{ error?: string } | "gone">(resolve => awaiting.set(id, resolve));
         const wrote = await stream.write(turnSteerLine(id, { threadId, turnId, text: prompt })).catch(() => "gone" as const);
         if (wrote !== "written") {
-          steers.delete(id);
+          awaiting.delete(id);
           return "not-running";
         }
-        return (await answered) ? "accepted" : "not-running";
+        const answer = await answered;
+        return answer !== "gone" && answer.error === undefined ? "accepted" : "not-running";
       },
       answer: async (askId, answer) => {
         const open = pending.get(askId);
@@ -774,12 +966,22 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
         emit({ type: "permission.close", sessionId: threadId, askId, outcome: answer.outcome, optionId: answer.optionId });
         return "answered";
       },
+      stopTask: async task => {
+        const c = children.get(task);
+        if (exited || turnResult !== undefined || c?.state !== "running" || c.turnId === undefined) return { outcome: "not-running" };
+        const answer = await interruptTurn({ threadId: task, turnId: c.turnId });
+        if (answer === "gone") return { outcome: "not-running" };
+        return answer.error === undefined ? { outcome: "accepted" } : { outcome: "refused", error: answer.error };
+      },
       interrupt: async () => {
         if (exited) return;
         const live = running() ? turnId : undefined;
         interruptRequested = true;
-        if (live === undefined) return escalate();
-        await stream.write(turnInterruptLine({ threadId, turnId: live })).catch(() => "gone" as const);
+        const kids = [...children].flatMap(([task, c]) => (c.state === "running" && c.turnId !== undefined ? [{ threadId: task, turnId: c.turnId }] : []));
+        if (live === undefined && kids.length === 0) return escalate();
+        // Each subagent first, as T3 Code stops a lineage, so none is left mid-turn when its lead's process ends.
+        for (const kid of kids) void interruptTurn(kid);
+        if (live !== undefined) void interruptTurn({ threadId, turnId: live });
         // The server completes an interrupted turn and exits on the EOF that follows; one that does not is ended.
         await endAfterResult(stream, graceMs, graceMs);
       },
