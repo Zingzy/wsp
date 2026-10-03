@@ -66,8 +66,7 @@ const workspace = (id: string, name: string, projectId: string): WorkspaceView =
   phase: "running",
   golden: "",
   createdAt: "2026-09-17T01:00:00.000Z",
-  copy: { road: "clonefile", path: "/Users/dev/spoo-pricing-page", source: "/Users/dev/spoo", base: "abc", branch: "agent/pricing-page", carried: "deps-and-config" },
-  portBase: 3100,
+  worktree: { path: "/Users/dev/spoo-pricing-page", branch: "agent/pricing-page", made: true },
 });
 
 const SHARES = { copies: true, ownNetwork: false } as unknown as Capabilities;
@@ -195,7 +194,7 @@ describe("the sidebar's list of thread tiles", () => {
   });
 
   it("titles this computer's own workspace with no thread by the computer's name, never its host name, and a copy by its own", async () => {
-    const { copy: _copy, ...itself } = workspace("ws_a", "zingzys-MacBook-Pro.local", "pr_1");
+    const { worktree: _worktree, ...itself } = workspace("ws_a", "zingzys-MacBook-Pro.local", "pr_1");
     mount({ projects: [project("pr_1", "spoo")], workspaces: [itself] });
     await waitFor(() => expect(rowIds()).toEqual(["ws:ws_a"]));
     const tile = document.querySelector<HTMLElement>("[data-row-id='ws:ws_a']")!;
@@ -204,7 +203,7 @@ describe("the sidebar's list of thread tiles", () => {
   });
 
   describe("a workspace's checkout, on the tile and on its card", () => {
-    const { copy: _copy, ...bare } = workspace("ws_f", "cart rounding", "pr_1");
+    const { worktree: _worktree, ...bare } = workspace("ws_f", "cart rounding", "pr_1");
     const fork: WorkspaceView = { ...bare, kind: "cloud", machineId: "fk_1", golden: "snap_g", project: { ...bare.project, path: "/root/spoo" } };
     const statusOf = (w: WorkspaceView, checkout?: Checkout): WorkspaceStatus =>
       ({ ...w, machineState: "running", reach: { state: "reachable" }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0, ...(checkout !== undefined ? { checkout } : {}) }) as WorkspaceStatus;

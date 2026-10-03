@@ -123,7 +123,7 @@ const view = (id: string, name: string, phase: WorkspaceView["phase"] = "running
 // The second workspace's copy is on a branch, so its row carries the meta line the two branchless rows have not.
 const cloud: WorkspaceView[] = [
   view("ws_a", "api"),
-  { ...view("ws_b", "web", "napping"), copy: { road: "clonefile", path: "/root/web", source: "/root/web", base: "abc", branch: "lockfile-bump", carried: "deps-and-config" } },
+  { ...view("ws_b", "web", "napping"), worktree: { path: "/root/web", branch: "lockfile-bump", made: true } },
   { ...view("ws_c", "old", "gone"), gone: "machine m_ws_c is gone at the provider: Not found" },
 ];
 // ?vault=1: the napping workspace's last nap could not store a vault, so its row says the machine has no backup

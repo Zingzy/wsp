@@ -8,11 +8,10 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { copyPathFor } from "@wsp/protocol";
 import { copyKey, createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { cli, localWiring, serve, type CliIO } from "../src/cli.js";
 import { placeWiring } from "../src/places.js";
-import { createFor, workspaceLine } from "../src/verbs.js";
+import { createFor } from "../src/verbs.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend } from "./stub-backend.js";
 import { copyingFake, fakeDaemonStart } from "./verbs-fixture.js";
@@ -78,17 +77,15 @@ describe("wsp add and the computer a project lives on", () => {
     expect(io.errors.join("\n")).toContain("no place named nowhere");
   });
 
-  it("records a folder here as a project, and wsp new makes its workspace as a copy beside it", async () => {
+  it("records a folder here as a project, and a thread on it runs in that folder", async () => {
     const folder = realpathSync(mkdtempSync(join(tmpdir(), "wsp-place-here-")));
     execFileSync("git", ["init", "-q", folder]);
     const added = await run("add", folder);
     expect(added.code, added.io.errors.join("\n")).toBe(0);
-    const made = await run("new", "work here");
-    expect(made.code, made.io.errors.join("\n")).toBe(0);
-    const held = (await rt!.workspaces.list()).find(w => w.name === "work here")!;
+    const project = (await rt!.projects.list()).find(p => p.path === folder)!;
+    const held = (await rt!.workspaces.folderFor({ project: project.id })).workspace;
     expect(held.kind).toBe("local");
-    expect(held.project.path).toBe(folder);
-    expect(held.folder).toBe(copyPathFor(folder, "work-here"));
+    expect(held.folder).toBe(folder);
     rmSync(folder, { recursive: true, force: true });
   });
 
@@ -99,31 +96,3 @@ describe("wsp add and the computer a project lives on", () => {
   });
 });
 
-describe("the computer a workspace's row names", () => {
-  const row = {
-    id: "ws_1",
-    name: "x",
-    machineId: "m1",
-    phase: "running" as const,
-    kind: "cloud" as const,
-    golden: "snap_g",
-    createdAt: "2026-09-12T00:00:00.000Z",
-    machineState: "running" as const,
-    size: { cpu: 2, memMb: 4096 },
-    rateUsdPerHour: 0,
-    reach: { state: "reachable" as const },
-    project: { id: "pr_1", name: "api", path: "/root/api", computer: "p_ab12cd34" },
-  };
-
-  it("names the computer a fork lives on under WHERE, by the name the person gave it, and leaves the name column the name alone", () => {
-    const listed = workspaceLine({ ...row, place: "p_ab12cd34" }, new Map([["p_ab12cd34", "srv"]]));
-    expect(listed[0]).toBe("x");
-    expect(listed[3]).toBe("srv");
-  });
-
-  it("falls back to the id when the places are not to hand, and a fork at the provider names what it runs at", () => {
-    expect(workspaceLine({ ...row, place: "p_ab12cd34" })[3]).toBe("p_ab12cd34");
-    expect(workspaceLine({ ...row, provider: "solari" })[3]).toBe("solari");
-    expect(workspaceLine(row)[3]).toBe("a provider");
-  });
-});

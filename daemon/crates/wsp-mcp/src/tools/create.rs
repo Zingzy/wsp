@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-//! The two tools that make a workspace: new, a copy of a project's computer, and fork, a sibling of a workspace from
-//! its image version. Both go through the one create: the landing is read first, so a computer that forks nothing
-//! refuses before anything is minted, then the size and the project image are checked against what it offers.
+//! The tool that makes a workspace: fork, a sibling of a workspace from its image version. The landing is read
+//! first, so a computer that forks nothing refuses before anything is minted, then the size is checked against what
+//! it offers.
 
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
@@ -44,49 +44,6 @@ async fn project_of(client: &Client, reference: &str) -> Result<Project, Failure
     Ok(resolved.project)
 }
 
-/// The project a caller named, or the only one this host holds. A caller the host answers as a thread reads its own
-/// tree rather than the person's records, so where the list is refused the projects its workspaces hold stand in.
-async fn the_project(client: &Client, reference: Option<&str>) -> Result<Project, Failure> {
-    #[derive(Deserialize)]
-    struct Projects {
-        projects: Vec<Project>,
-    }
-    #[derive(Deserialize)]
-    struct Held {
-        project: Project,
-    }
-    #[derive(Deserialize)]
-    struct Workspaces {
-        workspaces: Vec<Held>,
-    }
-    if let Some(reference) = reference {
-        return project_of(client, reference).await;
-    }
-    let all = match client.request::<Projects>("projects.list", Map::new()).await {
-        Ok(listed) => listed.projects,
-        Err(_) => {
-            let listed: Workspaces = client.request("workspaces.list", Map::new()).await?;
-            let mut held: Vec<Project> = Vec::new();
-            for Held { project } in listed.workspaces {
-                match held.iter_mut().find(|p| p.id == project.id) {
-                    Some(seen) => *seen = project,
-                    None => held.push(project),
-                }
-            }
-            held
-        }
-    };
-    let words = workspace::words();
-    match all.as_slice() {
-        [only] => Ok(only.clone()),
-        [] => Err(Failure::usage(words.no_project_yet)),
-        several => {
-            let names = several.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(", ");
-            Err(Failure::usage(fill(&words.name_the_project, &[("names", &names)])))
-        }
-    }
-}
-
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Offer {
@@ -127,55 +84,9 @@ fn size_refused(word: &str, offered: &[Offer]) -> Failure {
     Failure::usage(fill(&template, &[("word", word), ("sizes", &sizes)]))
 }
 
-/// The project image a --from names, checked against the project it is being forked for: by snapshot id, else the
-/// newest whose projects carry that name. An image of another project would put the wrong work in place.
-async fn project_image_for(client: &Client, reference: &str, project: &Project) -> Result<String, Failure> {
-    #[derive(Deserialize)]
-    struct Carried {
-        name: String,
-    }
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct Golden {
-        snapshot_id: String,
-        created_at: String,
-        projects: Vec<Carried>,
-    }
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct Goldens {
-        project_goldens: Vec<Golden>,
-    }
-    let words = workspace::words();
-    let listed: Goldens = client.request("projectGoldens.list", Map::new()).await?;
-    let mut goldens = listed.project_goldens;
-    let golden = match goldens.iter().position(|g| g.snapshot_id == reference) {
-        Some(at) => goldens.swap_remove(at),
-        None => {
-            let mut named: Vec<Golden> = goldens.into_iter().filter(|g| g.projects.iter().any(|p| p.name == reference)).collect();
-            named.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-            let Some(newest) = named.into_iter().next() else {
-                return Err(Failure::new(fill(&words.no_project_image_named, &[("ref", reference)])));
-            };
-            newest
-        }
-    };
-    let carried = golden.projects.last().map_or(golden.snapshot_id.as_str(), |p| p.name.as_str());
-    if carried != project.name {
-        return Err(Failure::usage(fill(
-            &words.project_image_of_other,
-            &[("ref", reference), ("carried", carried), ("project", &project.name)],
-        )));
-    }
-    Ok(golden.snapshot_id)
-}
-
-#[derive(Default)]
 struct Asked {
-    from: Option<String>,
     size: Option<String>,
     agents: Option<Map<String, Value>>,
-    engine: bool,
     parent: Option<String>,
 }
 
@@ -187,8 +98,8 @@ fn number(x: f64) -> Value {
     }
 }
 
-/// A workspace of one project. A workspace on this computer is a copy of the project's folder and forks nothing, so
-/// the words a fork takes are refused before the landing is read.
+/// A workspace of one project. A project on this computer runs its threads in its own folder and forks nothing, so a
+/// size is refused before the landing is read.
 async fn create_for(client: &Client, project: &Project, name: &str, asked: Asked) -> Result<Created, Failure> {
     #[derive(Deserialize)]
     struct Capabilities {
@@ -200,13 +111,8 @@ async fn create_for(client: &Client, project: &Project, name: &str, asked: Asked
         capabilities: Capabilities,
     }
     let words = workspace::words();
-    let fork_words: Vec<&str> = [(asked.from.is_some(), "--from"), (asked.size.is_some(), "--size"), (asked.engine, "--engine")]
-        .into_iter()
-        .filter(|(on, _)| *on)
-        .map(|(_, w)| w)
-        .collect();
-    if project.computer == words.here_place_id && !fork_words.is_empty() {
-        return Err(Failure::usage(fill(&words.copy_takes_none, &[("project", &project.name), ("words", &fork_words.join(", "))])));
+    if project.computer == words.here_place_id && asked.size.is_some() {
+        return Err(Failure::usage(fill(&words.copy_takes_none, &[("project", &project.name), ("words", "--size")])));
     }
     let landing: Landing = client.request("workspaces.landing", params([("project", Value::from(project.id.as_str()))])).await?;
     let chosen = match &asked.size {
@@ -219,14 +125,7 @@ async fn create_for(client: &Client, project: &Project, name: &str, asked: Asked
             }
         }
     };
-    let golden = match &asked.from {
-        Some(reference) => Some(project_image_for(client, reference, project).await?),
-        None => None,
-    };
     let mut frame = params([("project", Value::from(project.id.as_str())), ("name", Value::from(name))]);
-    if let Some(golden) = golden {
-        frame.insert("golden".to_owned(), Value::from(golden));
-    }
     if let Some((cpu, mem_mb)) = chosen {
         frame.insert("cpu".to_owned(), number(cpu));
         frame.insert("memMb".to_owned(), number(mem_mb));
@@ -234,51 +133,10 @@ async fn create_for(client: &Client, project: &Project, name: &str, asked: Asked
     if let Some(agents) = asked.agents {
         frame.insert("agents".to_owned(), Value::Object(agents));
     }
-    if asked.engine {
-        frame.insert("engine".to_owned(), Value::Bool(true));
-    }
     if let Some(parent) = asked.parent {
         frame.insert("parent".to_owned(), Value::from(parent));
     }
     client.request("workspaces.create", frame).await
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[cfg_attr(test, derive(schemars::JsonSchema))]
-pub struct NewIn {
-    #[serde(default)]
-    pub project: Option<String>,
-    pub name: String,
-    #[serde(default)]
-    pub from: Option<String>,
-    #[serde(default)]
-    pub size: Option<String>,
-    #[serde(default)]
-    pub engine: Option<bool>,
-    #[serde(default)]
-    pub spawn: Option<String>,
-    #[serde(default)]
-    #[cfg_attr(test, schemars(with = "Option<u64>"))]
-    pub max_machines: Option<Number>,
-    #[serde(default)]
-    #[cfg_attr(test, schemars(with = "Option<u64>"))]
-    pub max_depth: Option<Number>,
-}
-
-const NEW_NAME: &str = "new";
-
-const NEW_LISTED: &str = include_str!("../../record/tools/new.json");
-
-pub const NEW: Tool = Tool { name: NEW_NAME, listed: NEW_LISTED, call: |host, args| Box::pin(new(host, args)) };
-
-async fn new(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
-    let NewIn { project, name, from, size, engine, spawn, max_machines, max_depth } = input(NEW_NAME, arguments)?;
-    let client = host.client().await?;
-    let project = the_project(&client, project.as_deref()).await?;
-    let agents = agents_asked(spawn.as_deref(), max_machines.as_ref(), max_depth.as_ref())
-        .map_err(|word| refused_field(NEW_NAME, NEW_LISTED, host.cloud(), "spawn", Value::from(word)))?;
-    let created = create_for(&client, &project, &name, Asked { from, size, agents, engine: engine == Some(true), parent: None }).await?;
-    Ok(Answer::json(&created))
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -348,7 +206,7 @@ async fn fork(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     let read = async {
         let source = workspace_of(&client, &workspace).await?;
         if let Some(task) = &task {
-            turn::checked_start(&client, task, agent.as_deref(), &picks, &source.id).await?;
+            turn::checked_start(&client, task, agent.as_deref(), &picks, Some(&source.id)).await?;
         }
         Ok(source)
     }
@@ -359,8 +217,7 @@ async fn fork(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
         .map_err(|word| refused_field(FORK_NAME, FORK_LISTED, host.cloud(), "spawn", Value::from(word)))?;
     let project = project_of(&client, &source.project.id).await?;
     let name = name.unwrap_or_else(|| format!("{}-fork", source.name));
-    let Created { workspace, notice } =
-        create_for(&client, &project, &name, Asked { size, agents, parent: Some(source.id), ..Asked::default() }).await?;
+    let Created { workspace, notice } = create_for(&client, &project, &name, Asked { size, agents, parent: Some(source.id) }).await?;
     let Some(task) = task else { return Ok(Answer::json(&ForkOut { workspace, notice, turn: None, failure: None })) };
     #[derive(Deserialize)]
     struct Made {
@@ -393,7 +250,6 @@ mod tests {
 
     #[test]
     fn its_structs_are_the_recorded_schemas() {
-        to_the_record::<NewIn, Created>(NEW.listed);
         to_the_record::<ForkIn, ForkOut>(FORK.listed);
     }
 

@@ -1,0 +1,96 @@
+{
+  "cloudOff": {
+    "name": "worktree",
+    "description": "A worktree of the project's repo on the branch, answered with its path: the one git already has the branch checked out in, the project folder or a worktree the person or an agent made included, else one wsp makes under its own folder, a new branch starting from the project folder's current commit, with .env files and installed dependencies carried in from the project folder and build folders tied to their path left to rebuild. made says whether wsp made it, which is the only kind it ever removes. A running session cannot move into it: work there by path, or start a thread in it with run and cwd. git worktree add works too, without the carried files and the cleanup.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "type": "string",
+          "description": "the project, by the name or the id projects lists"
+        },
+        "branch": {
+          "type": "string",
+          "description": "the branch, existing or new"
+        }
+      },
+      "required": [
+        "project",
+        "branch"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "made": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "path",
+        "branch",
+        "made"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  "cloudOn": {
+    "name": "worktree",
+    "description": "A worktree of the project's repo on the branch, answered with its path: the one git already has the branch checked out in, the project folder or a worktree the person or an agent made included, else one wsp makes under its own folder, a new branch starting from the project folder's current commit, with .env files and installed dependencies carried in from the project folder and build folders tied to their path left to rebuild. made says whether wsp made it, which is the only kind it ever removes. A running session cannot move into it: work there by path, or start a thread in it with run and cwd. git worktree add works too, without the carried files and the cleanup.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "type": "string",
+          "description": "the project, by the name or the id projects lists"
+        },
+        "branch": {
+          "type": "string",
+          "description": "the branch, existing or new"
+        }
+      },
+      "required": [
+        "project",
+        "branch"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "made": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "path",
+        "branch",
+        "made"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  }
+}

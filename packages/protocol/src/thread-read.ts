@@ -8,6 +8,7 @@
 // not rows, since a read is for the words of a thread and either of those runs
 // to megabytes.
 import { z } from "zod";
+import { threadMovedLine } from "./projects.js";
 import { NEWER_TURN_LINE, fmtClock, notifyBody, notifyReply, planStepsLine, toolActivityLine, toolDoneLine, turnChangesLine, turnEndLine } from "./format.js";
 import type { SessionEvent, SessionPermissionEvent, TurnResult } from "./index.js";
 
@@ -89,6 +90,12 @@ export function threadMessages(events: ReadonlyArray<SessionEvent>, threadId: st
         continue;
       case "session.steer":
         say("person", event.at, event.prompt);
+        continue;
+      case "session.moved":
+        say("turn", event.at, threadMovedLine(event.from, event.to, event.fresh === true));
+        continue;
+      case "session.behind":
+        say("turn", event.at, event.text);
         continue;
       case "session.delta": {
         if (event.kind === "text") {

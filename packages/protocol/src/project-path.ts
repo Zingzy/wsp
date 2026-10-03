@@ -45,16 +45,6 @@ export function folderSlug(name: string): string {
 export const SSH_ALIAS_PREFIX = "wsp-";
 export const sshAlias = (name: string): string => `${SSH_ALIAS_PREFIX}${folderSlug(name)}`;
 
-/** Where a copy of a project folder made for one piece of work lands: beside the folder it was copied from, under
- * its own name with the work's on the end. A sibling and not a folder of wsp's own, because a directory clone
- * needs the same volume as what it clones and because a sibling is where a person's editor and their own
- * worktrees already are. */
-export function copyPathFor(folder: string, slug: string): string {
-  const at = folder.replace(/\/+$/, "");
-  const parent = at.slice(0, at.lastIndexOf("/"));
-  return `${parent}/${folderName(at)}-${slug}`;
-}
-
 /** The machine a folder browser is walking, as far as the hidden rule cares: the home that machine reports, and
  * whether it is a Mac. Absent either way, the dot rule stands alone, which is every machine wsp forks. */
 export interface FolderMachine {

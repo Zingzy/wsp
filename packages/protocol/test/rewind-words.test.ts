@@ -2,7 +2,7 @@
 // What a rewind says before the click and when the host says no: one home for
 // the words, so the dialog, the refusal and the tests read the same sentence.
 import { describe, expect, it } from "vitest";
-import { REWIND_LATEST_LINE, REWIND_NO_CHECKPOINT_LINE, REWIND_NO_UNDO_LINE, REWIND_OWN_FOLDER_LINE, REWIND_WORKING_LINE, rewindBesideLine, rewindChildrenLine, rewindNoAnchorLine, rewindNote, UNDO_REWIND_LINE } from "../src/index.js";
+import { REWIND_LATEST_LINE, REWIND_NO_CHECKPOINT_LINE, REWIND_NO_UNDO_LINE, REWIND_SHARED_LINE, REWIND_WORKING_LINE, rewindBesideLine, rewindChildrenLine, rewindNoAnchorLine, rewindNote, UNDO_REWIND_LINE } from "../src/index.js";
 
 describe("the words a rewind says", () => {
   it("names what goes before the click, and that undo brings the files back and never the conversation", () => {
@@ -22,13 +22,13 @@ describe("the words a rewind says", () => {
       "stop the threads under this one first (fix the port list, write the migration); a rewind never stops them for you",
     );
     expect(rewindBesideLine("move the pricing table")).toBe(
-      "another thread in this copy is working (move the pricing table), and its files would go back too; let its turn end or stop it first",
+      "another thread in this folder is working (move the pricing table), and its files would go back too; let its turn end or stop it first",
     );
     expect(REWIND_NO_CHECKPOINT_LINE).toBe("that reply kept no checkpoint of the files, so only its conversation can be rewound");
     expect(rewindNoAnchorLine("Claude Code")).toBe("Claude Code left no point in that reply to cut its conversation at, so only the files can go back");
     expect(REWIND_LATEST_LINE).toBe("that is the thread's latest reply, so nothing comes after it to rewind");
-    expect(REWIND_OWN_FOLDER_LINE).toBe("this workspace is your own folder, and wsp keeps no checkpoints there; start the work in a copy to rewind it");
-    expect(REWIND_NO_UNDO_LINE).toBe("this thread has no rewind to undo; undo lasts until the next turn in this copy ends");
+    expect(REWIND_SHARED_LINE).toBe("another thread worked in this folder after that reply, so only the conversation goes back");
+    expect(REWIND_NO_UNDO_LINE).toBe("this thread has no rewind to undo; undo lasts until the next turn in this folder ends");
     expect(UNDO_REWIND_LINE).toBe("Files come back; the cut conversation does not.");
   });
 });

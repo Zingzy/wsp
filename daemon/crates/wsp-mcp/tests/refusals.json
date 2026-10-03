@@ -2,31 +2,39 @@
   {
     "tool": "threads",
     "arguments": {
-      "workspace": 5
+      "project": 5
     },
-    "text": "MCP error -32602: Input validation error: Invalid arguments for tool threads: Expected string, received number at workspace"
+    "text": "MCP error -32602: Input validation error: Invalid arguments for tool threads: Expected string, received number at project"
   },
   {
     "tool": "run",
     "arguments": {},
-    "text": "MCP error -32602: Input validation error: Invalid arguments for tool run: Required at task"
+    "text": "MCP error -32602: Input validation error: Invalid arguments for tool run: Required at message"
   },
   {
     "tool": "run",
     "arguments": {
-      "workspace": "w",
-      "task": 3,
+      "project": "w",
+      "message": 3,
       "agent": true
     },
-    "text": "MCP error -32602: Input validation error: Invalid arguments for tool run: Expected string, received number at task\nExpected string, received boolean at agent"
+    "text": "MCP error -32602: Input validation error: Invalid arguments for tool run: Expected string, received number at message\nExpected string, received boolean at agent"
   },
   {
     "tool": "run",
     "arguments": {
-      "workspace": {},
-      "task": []
+      "project": {},
+      "message": []
     },
-    "text": "MCP error -32602: Input validation error: Invalid arguments for tool run: Expected string, received object at workspace\nExpected string, received array at task"
+    "text": "MCP error -32602: Input validation error: Invalid arguments for tool run: Expected string, received object at project\nExpected string, received array at message"
+  },
+  {
+    "tool": "run",
+    "arguments": {
+      "message": "m",
+      "branch": 7
+    },
+    "text": "MCP error -32602: Input validation error: Invalid arguments for tool run: Expected string, received number at branch"
   },
   {
     "tool": "exec",
@@ -72,6 +80,29 @@
     "text": "MCP error -32602: Input validation error: Invalid arguments for tool delete: Expected boolean, received string at confirm"
   },
   {
+    "tool": "delete",
+    "arguments": {
+      "thread": 3
+    },
+    "text": "MCP error -32602: Input validation error: Invalid arguments for tool delete: Expected string, received number at thread"
+  },
+  {
+    "tool": "worktree",
+    "arguments": {
+      "project": "p"
+    },
+    "text": "MCP error -32602: Input validation error: Invalid arguments for tool worktree: Required at branch"
+  },
+  {
+    "tool": "worktree_remove",
+    "arguments": {
+      "project": "p",
+      "branch": "b",
+      "force": "yes"
+    },
+    "text": "MCP error -32602: Input validation error: Invalid arguments for tool worktree_remove: Expected boolean, received string at force"
+  },
+  {
     "tool": "computers_set",
     "arguments": {
       "computer": "attic",
@@ -104,52 +135,52 @@
     "text": "MCP error -32602: Input validation error: Invalid arguments for tool computers_set: Invalid enum value. Expected 'on' | 'off', received 'yes' at spawn"
   },
   {
-    "tool": "new",
+    "tool": "workspaces_agents",
     "arguments": {
-      "name": "n",
+      "workspace": "w",
       "max_machines": -1
     },
-    "text": "MCP error -32602: Input validation error: Invalid arguments for tool new: Number must be greater than or equal to 0 at max_machines"
+    "text": "MCP error -32602: Input validation error: Invalid arguments for tool workspaces_agents: Number must be greater than or equal to 0 at max_machines"
   },
   {
-    "tool": "new",
+    "tool": "workspaces_agents",
     "arguments": {
-      "name": "n",
+      "workspace": "w",
       "max_machines": 1.5
     },
-    "text": "MCP error -32602: Input validation error: Invalid arguments for tool new: Expected integer, received float at max_machines"
+    "text": "MCP error -32602: Input validation error: Invalid arguments for tool workspaces_agents: Expected integer, received float at max_machines"
   },
   {
-    "tool": "new",
+    "tool": "workspaces_agents",
     "arguments": {
-      "name": "n",
+      "workspace": "w",
       "max_machines": -0.5
     },
-    "text": "MCP error -32602: Input validation error: Invalid arguments for tool new: Expected integer, received float at max_machines\nNumber must be greater than or equal to 0 at max_machines"
+    "text": "MCP error -32602: Input validation error: Invalid arguments for tool workspaces_agents: Expected integer, received float at max_machines\nNumber must be greater than or equal to 0 at max_machines"
   },
   {
-    "tool": "new",
+    "tool": "workspaces_agents",
     "arguments": {
-      "name": "n",
+      "workspace": "w",
       "max_machines": "2"
     },
-    "text": "MCP error -32602: Input validation error: Invalid arguments for tool new: Expected number, received string at max_machines"
+    "text": "MCP error -32602: Input validation error: Invalid arguments for tool workspaces_agents: Expected number, received string at max_machines"
   },
   {
-    "tool": "new",
+    "tool": "workspaces_agents",
     "arguments": {
-      "name": "n",
+      "workspace": "w",
       "spawn": "maybe"
     },
-    "text": "MCP error -32602: Input validation error: Invalid arguments for tool new: Invalid enum value. Expected 'on' | 'off', received 'maybe' at spawn"
+    "text": "MCP error -32602: Input validation error: Invalid arguments for tool workspaces_agents: Invalid enum value. Expected 'on' | 'off', received 'maybe' at spawn"
   },
   {
-    "tool": "new",
+    "tool": "workspaces_agents",
     "arguments": {
-      "name": "n",
+      "workspace": "w",
       "spawn": 3
     },
-    "text": "MCP error -32602: Input validation error: Invalid arguments for tool new: Expected 'on' | 'off', received number at spawn"
+    "text": "MCP error -32602: Input validation error: Invalid arguments for tool workspaces_agents: Expected 'on' | 'off', received number at spawn"
   },
   {
     "tool": "skills_search",

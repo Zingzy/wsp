@@ -13,7 +13,7 @@ import type { RunningWsp } from "../src/mcp-install.js";
 import { mcpServer } from "../src/mcp.js";
 import { CLOUD_ON } from "../src/cloud.js";
 import { PROVIDER_MODULES } from "../src/providers.js";
-import { CLOUD_MARK, CLOUD_SPAN_END, INSTRUCTIONS, NO_CLOUD_MARK, NO_CLOUD_SPAN_END, skillFor, WSP_SKILL } from "../src/skill.js";
+import { CLOUD_MARK, CLOUD_SPAN_END, instructions, NO_CLOUD_MARK, NO_CLOUD_SPAN_END, skillFor, wspSkill } from "../src/skill.js";
 import { CLI_VERBS, VERBS } from "../src/verbs.js";
 
 const noPrompt = (q: string): Promise<string> => Promise.reject(new Error(`unexpected prompt: ${q}`));
@@ -73,7 +73,6 @@ const CLOUD_LINES = [
   ["image", "move", "w"],
   ["image", "remove", "snap-1"],
   ["image", "export", "/tmp/image.wsp"],
-  ["new", "p", "work", "--from", "snap-1"],
   ["add", "solari"],
   ["add", "box"],
   ["init", "--provider", "solari"],
@@ -96,24 +95,23 @@ describe.runIf(!CLOUD_ON)("with the cloud off", () => {
 
   it("no page, tool, skill line or instruction names a cloud", async () => {
     const tools = await toolList();
-    const read = { "wsp --help": HELP, "wsp --help agent": agentPage(), "the tool list": tools.text, "the skill": WSP_SKILL, "the instructions": INSTRUCTIONS };
+    const read = { "wsp --help": HELP, "wsp --help agent": agentPage(), "the tool list": tools.text, "the skill": wspSkill(), "the instructions": instructions() };
     const named = Object.entries(read).flatMap(([where, text]) => CLOUD_WORDS.filter(word => text.includes(word)).map(word => `${where}: ${word}`));
     expect(named).toEqual([]);
   });
 
   it("no page, tool, skill line or instruction says cloud, but for the uses allowed here", async () => {
     const tools = await toolList();
-    const read = { "wsp --help": HELP, "wsp --help agent": agentPage(), "the tool list": tools.text, "the skill": WSP_SKILL, "the instructions": INSTRUCTIONS };
+    const read = { "wsp --help": HELP, "wsp --help agent": agentPage(), "the tool list": tools.text, "the skill": wspSkill(), "the instructions": instructions() };
     const said = Object.entries(read).flatMap(([where, text]) =>
       [...text.matchAll(/[^.\n]*\bclouds?\b[^.\n]*/gi)].map(m => m[0].trim()).filter(line => !CLOUD_ALLOWED.some(allowed => line.includes(allowed))).map(line => `${where}: ${line}`),
     );
     expect(said).toEqual([]);
   });
 
-  it("serves none of the provider's tools, and new takes no project image", async () => {
+  it("serves none of the provider's tools", async () => {
     const tools = await toolList();
     expect(tools.names.filter(name => CLOUD_TOOLS.includes(name))).toEqual([]);
-    expect(tools.inputs["new"]).not.toContain("from");
   });
 
   it("prints none of the provider's lines on a page", () => {
@@ -136,10 +134,9 @@ describe.runIf(CLOUD_ON)("with the cloud on", () => {
     expect(PROVIDER_MODULES.map(m => m.id)).toEqual(["fake", "box", "solari", "none"]);
   });
 
-  it("serves every one of the provider's tools, and new takes a project image", async () => {
+  it("serves every one of the provider's tools", async () => {
     const tools = await toolList();
     expect(CLOUD_TOOLS.filter(name => !tools.names.includes(name))).toEqual([]);
-    expect(tools.inputs["new"]).toContain("from");
   });
 
   it("answers every one of the provider's lines", () => {
@@ -149,11 +146,11 @@ describe.runIf(CLOUD_ON)("with the cloud on", () => {
   });
 
   it("reads the skill as it always was, the marks gone", () => {
-    expect(WSP_SKILL).toContain("SOLARI_API_KEY");
-    expect(WSP_SKILL).not.toContain(CLOUD_MARK);
-    expect(WSP_SKILL).not.toContain(CLOUD_SPAN_END);
-    expect(WSP_SKILL).not.toContain(NO_CLOUD_MARK);
-    expect(WSP_SKILL).not.toContain("with none joined this run builds nothing");
+    expect(wspSkill()).toContain("SOLARI_API_KEY");
+    expect(wspSkill()).not.toContain(CLOUD_MARK);
+    expect(wspSkill()).not.toContain(CLOUD_SPAN_END);
+    expect(wspSkill()).not.toContain(NO_CLOUD_MARK);
+    expect(wspSkill()).not.toContain("with none joined this run builds nothing");
   });
 });
 
@@ -169,7 +166,7 @@ describe("the skill's cloud marks", () => {
   });
 
   it("marks every cloud verb's row, so the rows and the table go together", () => {
-    const rows = WSP_SKILL.split("\n").filter(line => line.startsWith("| `wsp "));
+    const rows = wspSkill().split("\n").filter(line => line.startsWith("| `wsp "));
     const verbs = VERBS.map(v => v.name);
     const unknown = rows.map(row => /^\| `wsp ([a-z]+(?: [a-z]+)?)/.exec(row)![1]!).filter(words => !verbs.some(v => v === words || words.startsWith(`${v} `) || v.startsWith(`${words} `)));
     expect(unknown).toEqual([]);

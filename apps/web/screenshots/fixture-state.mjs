@@ -1049,7 +1049,7 @@ const tileThread = (id, title, over = {}) => ({
 });
 
 /** A copy on a branch, as the record keeps the copy it was made of. */
-const copyOn = (name, branch) => ({ road: "clonefile", path: join(HOME, "wsp-work", name), source: projectDest("spoo-landing"), base: "abc1234", branch, carried: "deps-and-config" });
+const copyOn = (name, branch) => ({ path: join(HOME, ".wsp", "worktrees", name), branch, made: true });
 
 /** A lead on this computer and the threads its agent opened, each on a child copy of the same project on a branch of
  * its own: what the lead's THREADS rows read as the tree of branches. The copies' folders are not made, so each row's
@@ -1074,11 +1074,11 @@ const helper = (id, title, over = {}) => ({
   ...over,
 });
 const treeChild = (id, name, branch, extra = {}) =>
-  workspace(id, name, { machineId: `local-${name}`, project: "pr_tree-lab", copy: copyOn(`tree-lab-${name}`, branch), parentWorkspaceId: "ws_lead", parentThreadId: threadId("tree-lead"), rootThreadId: threadId("tree-lead"), base: "tree/lead", ...extra });
+  workspace(id, name, { machineId: `local-${name}`, project: "pr_tree-lab", worktree: copyOn(`tree-lab-${name}`, branch), parentWorkspaceId: "ws_lead", parentThreadId: threadId("tree-lead"), rootThreadId: threadId("tree-lead"), base: "tree/lead", ...extra });
 const treeFixture = children =>
   store({
     projects: [project("tree-lab", HERE, 60 * 3)],
-    workspaces: [workspace("ws_lead", "cart fixes", { project: "pr_tree-lab", copy: copyOn("tree-lab-lead", "tree/lead"), base: "tree/lead", agents: { spawn: true, maxMachines: 5, maxDepth: 1 } }), ...children.map(c => c.workspace)],
+    workspaces: [workspace("ws_lead", "cart fixes", { project: "pr_tree-lab", worktree: copyOn("tree-lab-lead", "tree/lead"), base: "tree/lead", agents: { spawn: true, maxMachines: 5, maxDepth: 1 } }), ...children.map(c => c.workspace)],
     ...merge(threadsOn("ws_lead", [[TREE_LEAD, 50]]), ...children.map(c => threadsOn(c.workspace.id, [[c.thread, c.minutes]]))),
   });
 /** A child in each state the row draws before anything went wrong: working, quiet and ahead, merged, and not pushed. */
@@ -1125,7 +1125,7 @@ const tiles = ({ marked = false, snoozedTree = false } = {}) => {
   const tree = { parent: "flaky", root: "flaky", startedBy: "agent" };
   const forkTree = { parentThreadId: threadId("flaky"), rootThreadId: threadId("flaky") };
   const spooPlace = place("p_spoo", "spoo", 1, { platform: "linux", os: "Ubuntu 24.04", runsWorkspaces: true, engine: "docker", login: { HOME: "/root", USER: "root", PATH: "/usr/bin" } }, true);
-  const onSpoo = (id, name, projectId, branch) => ({ ...onPlace(id, name, "p_spoo", { cpu: 4, memMb: 8192 }, projectId), copy: copyOn(`${name}-${id}`, branch) });
+  const onSpoo = (id, name, projectId, branch) => ({ ...onPlace(id, name, "p_spoo", { cpu: 4, memMb: 8192 }, projectId), worktree: copyOn(`${name}-${id}`, branch) });
   const landing = { icon: "folder", hue: "orange" };
   return store({
     projects: [
@@ -1136,7 +1136,7 @@ const tiles = ({ marked = false, snoozedTree = false } = {}) => {
       project("dark-contrast", CLOUD, 60 * 30),
     ],
     workspaces: [
-      workspace("ws_flaky", THIS_COMPUTER, { project: "pr_spoo-landing", copy: copyOn("spoo-landing-flaky", "fix/checkout-flakes") }),
+      workspace("ws_flaky", THIS_COMPUTER, { project: "pr_spoo-landing", worktree: copyOn("spoo-landing-flaky", "fix/checkout-flakes") }),
       fork("ws_solari", "spoo-landing", "fk_tile_1", { ...forkTree, project: "pr_spoo-landing-cloud" }),
       onSpoo("ws_relay", "relay", "pr_wsp", "relay-one-helper"),
       onSpoo("ws_release", "release", "pr_wsp", "release-0.9"),
@@ -1186,13 +1186,13 @@ const tiles = ({ marked = false, snoozedTree = false } = {}) => {
 const tilesAttempt = () => {
   const task = "Find why the cart total test is flaky and fix it";
   const tried = (id, agent, model, label, minutes) => ({
-    workspace: workspace(`ws_${id}`, `${nameOfTask(task)} (${label})`, { machineId: `local-${id}`, project: "pr_spoo-landing", copy: copyOn(`spoo-landing-${id}`, `try/${id}`), createdAt: new Date(ago(minutes + 1)).toISOString() }),
+    workspace: workspace(`ws_${id}`, `${nameOfTask(task)} (${label})`, { machineId: `local-${id}`, project: "pr_spoo-landing", worktree: copyOn(`spoo-landing-${id}`, `try/${id}`), createdAt: new Date(ago(minutes + 1)).toISOString() }),
     threads: threadsOn(`ws_${id}`, [[tileThread(id, task, { status: "running", agent, model, attempt: "att_cart" }), minutes]]),
   });
   const picks = [tried("opus", "claude", "claude-opus-5-5", "Opus 5.5", 12), tried("sonnet", "claude", "claude-sonnet-4-5", "Sonnet 4.5", 11.9), tried("sol", "codex", "gpt-5.6-sol", "GPT-5.6-Sol", 11.8)];
   return store({
     projects: [project("spoo-landing", HERE, 60 * 30)],
-    workspaces: [workspace("ws_flaky", THIS_COMPUTER, { project: "pr_spoo-landing", copy: copyOn("spoo-landing-flaky", "fix/checkout-flakes") }), ...picks.map(p => p.workspace)],
+    workspaces: [workspace("ws_flaky", THIS_COMPUTER, { project: "pr_spoo-landing", worktree: copyOn("spoo-landing-flaky", "fix/checkout-flakes") }), ...picks.map(p => p.workspace)],
     ...merge(threadsOn("ws_flaky", [[tileThread("coupon", "Coupon expiry test", { seen: true }), 35]]), ...picks.map(p => p.threads)),
     readsSince: 60 * 24 * 7,
     preferences: { projectLook: { "pr_spoo-landing": { icon: "folder", hue: "orange" } } },
@@ -1225,7 +1225,7 @@ const LONG_REPLY = Array.from({ length: 8 }, (_, i) => `Step ${i + 1}: read the 
 const longPrompt = () =>
   store({
     projects: [project("spoo-landing", HERE, 60 * 30)],
-    workspaces: [workspace("ws_long", THIS_COMPUTER, { project: "pr_spoo-landing", copy: copyOn("spoo-landing-long", "main") })],
+    workspaces: [workspace("ws_long", THIS_COMPUTER, { project: "pr_spoo-landing", worktree: copyOn("spoo-landing-long", "main") })],
     ...merge(threadsOn("ws_long", [[tileThread("brief", "Two small tickets as one branch", { status: "running", prompt: LONG_PROMPT, reply: LONG_REPLY }), 3]])),
     goldens: sealed(),
   });
@@ -1266,7 +1266,7 @@ const rewind = () => {
   ]);
   return store({
     projects: [project("spoo-landing", HERE, 60 * 30)],
-    workspaces: [workspace("ws_rewind", THIS_COMPUTER, { project: "pr_spoo-landing", copy: copyOn("spoo-landing-rewind", "fix/cart-rounding") })],
+    workspaces: [workspace("ws_rewind", THIS_COMPUTER, { project: "pr_spoo-landing", worktree: copyOn("spoo-landing-rewind", "fix/cart-rounding") })],
     sessions: { ws_rewind: { workspaceId: "ws_rewind", sessions: [...cursorTurns.sessions.ws_rewind.sessions, ...children.sessions.ws_rewind.sessions, ...claudeTurns.sessions.ws_rewind.sessions], threads: {} } },
     transcripts: { ws_rewind: { workspaceId: "ws_rewind", events: [...claudeTurns.transcripts.ws_rewind.events, ...cursorTurns.transcripts.ws_rewind.events, ...children.transcripts.ws_rewind.events] } },
     readsSince: 60 * 24 * 7,
@@ -1280,7 +1280,7 @@ const rewind = () => {
 const replies = () =>
   store({
     projects: [project("spoo-landing", HERE, 60 * 30)],
-    workspaces: [workspace("ws_replies", THIS_COMPUTER, { project: "pr_spoo-landing", copy: copyOn("spoo-landing-replies", "agent/slash") })],
+    workspaces: [workspace("ws_replies", THIS_COMPUTER, { project: "pr_spoo-landing", worktree: copyOn("spoo-landing-replies", "agent/slash") })],
     ...merge(
       threadsOn("ws_replies", [
         [

@@ -20,7 +20,7 @@ mod projects_change;
 mod pull_request;
 mod recipe;
 mod recipes;
-mod said;
+pub(crate) mod said;
 mod servers;
 mod setup;
 mod skills;
@@ -34,7 +34,7 @@ mod turn;
 mod usage;
 mod wait;
 pub(crate) mod workspace;
-mod workspaces;
+mod worktree;
 
 use std::future::Future;
 use std::pin::Pin;
@@ -93,12 +93,10 @@ pub const TOOLS: &[Tool] = &[
     recipe::SCAN,
     projects_change::ADD,
     projects_change::REMOVE,
-    create::NEW,
     machine::AGENTS,
     machine::RENAME,
     machine::SNAPSHOT,
     create::FORK,
-    home::BRING_BACK,
     changes::COMMIT,
     changes::DISCARD,
     pull_request::FIX,
@@ -117,11 +115,12 @@ pub const TOOLS: &[Tool] = &[
     image::REMOVE,
     dropping::FORGET,
     dropping::DELETE,
+    worktree::MAKE,
+    worktree::REMOVE,
     home::EXPORT,
     agents::AGENTS,
     agents::SKILLS,
     agents::SERVERS,
-    workspaces::TOOL,
     projects::TOOL,
     threads::THREADS,
     threads::THREAD_READ,

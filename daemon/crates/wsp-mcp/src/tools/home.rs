@@ -1,139 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-//! The two tools that bring work off a workspace's machine: bring back pushes its branch and opens the pull request,
-//! and export brings a project folder and its agents' sessions home to this computer.
+//! The tool that brings work off a workspace's machine: export brings a project folder and its agents' sessions home
+//! to this computer.
 
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
-use serde_json::{Number, Value};
+use serde_json::Value;
 
-use super::workspace::{self, awake, counted_number, params, read, workspace_of};
+use super::workspace::{params, workspace_of};
 use super::{input, Answer, Refused, Tool};
 use crate::host::Host;
-use crate::record::fill;
 
 type Arc<T> = std::sync::Arc<T>;
-
-#[derive(Debug, Serialize, Deserialize)]
-#[cfg_attr(test, derive(schemars::JsonSchema))]
-pub struct BringBackIn {
-    pub workspace: String,
-    #[serde(default)]
-    pub title: Option<String>,
-    #[serde(default)]
-    pub body: Option<String>,
-}
-
-/// packages/protocol's BringBackResult, in its order: the push, then the pull request or why there is none.
-#[derive(Debug, Serialize, Deserialize)]
-#[cfg_attr(test, derive(schemars::JsonSchema))]
-pub struct BringBackOut {
-    branch: String,
-    base: String,
-    #[cfg_attr(test, schemars(with = "i64"))]
-    ahead: Number,
-    #[cfg_attr(test, schemars(with = "i64"))]
-    uncommitted: Number,
-    stat: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(test, schemars(with = "Option<serde_json::Value>"))]
-    pr: Option<PullRequest>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    note: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    refused: Option<String>,
-}
-
-/// packages/protocol's PullRequest, in its order, since the TypeScript tool parses the answer with it.
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PullRequest {
-    number: Number,
-    url: String,
-    state: String,
-    host: String,
-    draft: bool,
-    base: String,
-    branch: String,
-    head_oid: String,
-    head_subject: String,
-    mergeable: String,
-    merge_state: String,
-    review: String,
-    checks: Vec<PullRequestCheck>,
-    additions: Number,
-    deletions: Number,
-    changed_files: Number,
-    commits: Number,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    behind_base: Option<Number>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct PullRequestCheck {
-    name: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    workflow: Option<String>,
-    state: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    run: Option<CheckRun>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    link: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    description: Option<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct CheckRun {
-    run_id: Number,
-    job_id: Number,
-}
-
-const BRING_BACK_NAME: &str = "bring_back";
-
-pub const BRING_BACK: Tool = Tool {
-    name: BRING_BACK_NAME,
-    listed: include_str!("../../record/tools/bring_back.json"),
-    call: |host, args| Box::pin(bring_back(host, args)),
-};
-
-/// The push's lines come first whatever the pull request half said, since that half runs after the branch landed.
-fn brought_back_line(name: &str, back: &BringBackOut) -> String {
-    let words = workspace::words();
-    let pushed = counted_number(&back.ahead, &words.pushed_one, &words.pushed_many);
-    let mut lines = vec![fill(&pushed, &[("name", name), ("branch", &back.branch), ("base", &back.base)])];
-    lines.extend(back.stat.iter().cloned());
-    match &back.pr {
-        Some(pr) => lines.push(fill(&words.pr_line, &[("url", &pr.url), ("state", &pr.state)])),
-        None => lines.extend(back.note.clone().or_else(|| back.refused.clone())),
-    }
-    if back.uncommitted.as_f64() != Some(0.0) {
-        lines.push(counted_number(&back.uncommitted, &words.left_one, &words.left_many));
-    }
-    lines.join("\n")
-}
-
-/// The push is reported either way; a pull request half that refused marks the call an error under it.
-async fn bring_back(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
-    #[derive(Deserialize)]
-    struct Woken {
-        id: String,
-        name: String,
-    }
-    let BringBackIn { workspace, title, body } = input(BRING_BACK_NAME, arguments)?;
-    let client = host.client().await?;
-    let source = workspace_of(&client, &workspace).await?;
-    let woken: Woken = read(&awake(&client, &source, "bring back").await?, "workspaces.wake")?;
-    let mut asked = params([("workspaceId", Value::from(woken.id))]);
-    for (key, value) in [("title", title), ("body", body)] {
-        if let Some(value) = value {
-            asked.insert(key.to_owned(), Value::from(value));
-        }
-    }
-    let back: BringBackOut = client.request("workspaces.bringBack", asked).await?;
-    let said = brought_back_line(&woken.name, &back);
-    Ok(if back.refused.is_none() { Answer::text(said, &back) } else { Answer::text_error(said, &back) })
-}
 
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
@@ -224,7 +101,6 @@ mod tests {
 
     #[test]
     fn its_structs_are_the_recorded_schemas() {
-        to_the_record::<BringBackIn, BringBackOut>(BRING_BACK.listed);
         to_the_record::<ExportIn, ExportShape>(EXPORT.listed);
     }
 }

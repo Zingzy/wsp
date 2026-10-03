@@ -185,13 +185,12 @@ const inPlace = (id: string, name: string, p: ProjectView): WorkspaceView => ({
   phase: "running",
   golden: "",
   createdAt: AT,
-  copy: { road: "clonefile", path: `${p.path}-first`, source: p.path, base: "", branch: "main", carried: "deps-and-config" },
+  worktree: { path: `${p.path}-first`, branch: "main", made: true },
 });
 /** A copy of that folder beside it, with the port an app reading PORT binds inside it. */
 const copyHere = (id: string, name: string, p: ProjectView, portBase: number, branch: string, extra: Partial<WorkspaceView> = {}): WorkspaceView => ({
   ...inPlace(id, name, p),
-  copy: { road: "clonefile", path: `${p.path}-${id}`, source: p.path, base: "abc", branch, carried: "deps-and-config" },
-  portBase,
+  worktree: { path: `${p.path}-${id}`, branch, made: true },
   ...extra,
 });
 /** A copy on a computer of the person's own, which gives every copy a network of its own. */
@@ -205,7 +204,6 @@ const onBox = (id: string, name: string, p: ProjectView, branch: string): Worksp
   phase: "running",
   golden: "img_1",
   createdAt: AT,
-  copy: { road: "clonefile", path: `/root/${p.name}`, source: `/root/${p.name}`, base: "abc", branch, carried: "deps-and-config" },
 });
 
 const thread = (id: string, workspaceId: string, prompt: string, over: Partial<SessionView> = {}): SessionView =>
@@ -762,7 +760,7 @@ useStore.setState({
 /** The workspace the create lands as: a copy on the box at the project's own path, where a box mounts it. */
 function landed(): WorkspaceView {
   const made = onBox(CREATED_ID, creation.name, LANDING, "agent/pricing-page");
-  return { ...made, copy: { ...made.copy!, path: LANDING.path, source: LANDING.path } };
+  return made;
 }
 
 // The creating screens carry the lists a composer reads, so its footer is the one the thread draws, and a hand to

@@ -32,7 +32,7 @@ import {
 } from "@wsp/runtime";
 import { writeOwn } from "@wsp/own-file";
 import { CATALOG_AGENTS, GOLDEN_SETUP, GOLDEN_SMOKE, GUEST_HOME, MCP_AGENT_IDS, THREAD_AGENTS, serverValuesOf } from "@wsp/catalog";
-import { authRefusal, cloudOffRefusal, PRICES_URL, holdsNothing, type McpServerSpec, hostFromEnv, jsonLine, SCOPED_MCP_ARG, scopedNoPairLine, imageHomeKeptLine, isJoinedComputer, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, loopbackThreadsLine, LOOPBACK, PERSON_HOME_ENV, portInsteadLine, PORT_TAKEN_REFUSAL, portsAsked, portsPickedLine, portTakenLine, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, namesPlace, noSuchPlaceRefusal, type PlaceView, unknownWordLine, usageRefusal, verbFailure, foreignFlagLine } from "@wsp/protocol";
+import { authRefusal, cloudOffRefusal, PRICES_URL, holdsNothing, type McpServerSpec, hostFromEnv, jsonLine, SCOPED_MCP_ARG, scopedNoPairLine, imageHomeKeptLine, isJoinedComputer, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, loopbackThreadsLine, LOOPBACK, PERSON_HOME_ENV, portInsteadLine, PORT_TAKEN_REFUSAL, portsAsked, portsPickedLine, portTakenLine, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, namesPlace, noSuchPlaceRefusal, type PlaceView, unknownWordLine, usageRefusal, verbFailure, foreignFlagLine } from "@wsp/protocol";
 import { agentHome, checkProviderKey, type Copier, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, providerSlot, type ProviderSlot, verbCopier } from "@wsp/engine";
 import { CLOUD_ON } from "./cloud.js";
 import { noMachinesLine, PROVIDER_MODULES, providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerKeyRows, providerKeySet, providerModule, providerPlaces, wiredPlaceRow, wiredProviderId, type ProviderEnv, type ProviderModule } from "./providers.js";
@@ -129,7 +129,7 @@ export const HELP = `wsp - ${TAGLINE}
 usage: wsp <verb> ...
 
   wsp init                        set this computer up: your tools and sign-ins,
-                                  copied so a workspace starts ready
+                                  copied so a machine starts ready
   wsp add <user@host|folder|url>  a computer over ssh (user@host or ssh alias);
                                   or a project: a folder here, or a repo cloned
                                   --into <folder> here or --on <computer>
@@ -138,23 +138,22 @@ ${CLOUD_ON ? `  wsp computers                   your computers: this one, each b
   wsp remove <computer>           take a computer out; the box is left as
                                   wsp found it
   wsp projects                    your projects, each on its computer
-  wsp new [<project>] "<work>"    a workspace: a copy of the project's computer
-                                  with the project inside, named by the work
-  wsp workspaces                  what you have, its project and its computer
-  wsp threads [<workspace>]       who is working, in which workspace, on which
-                                  computer
-  wsp run <workspace> "<task>"    an agent works in it and you read its reply
+  wsp threads [<project>]         who is working, in which folder and on which
+                                  branch and computer
+  wsp run <project> "<message>"   an agent works in the project's folder and
+                                  you read its reply
   wsp send <thread> "<message>"   the thread's next message
   wsp stop <thread>               end the thread's running turn
-  wsp pause <workspace>           sleep it now; an idle one sleeps by itself
-  wsp wake <workspace>            wake it now; run and send wake it anyway
-  wsp delete <workspace>          gone; the project and the computer stay
+  wsp pause <machine>             sleep a box's machine now; an idle one sleeps
+                                  by itself
+  wsp wake <machine>              wake it now; run and send wake it anyway
+  wsp delete <thread>             gone with its turns; the folder stays
   wsp status                      whether a host serves, and where
   wsp mcp                         the verbs as tools for agents on this computer
 
-A workspace or a thread comes right after the verb. new takes the project when
-you have more than one; run and send take the agent's own flags, run --help
-lists them. wsp thread read <thread> prints what a thread said.
+A project or a thread comes right after the verb. run and send take the
+agent's own flags, run --help lists them.
+wsp thread read <thread> prints what a thread said.
 Sleeping is automatic. ${HOST_STARTS_ITSELF}
 
 wsp up                 serve a host in this terminal, to watch it
@@ -1100,9 +1099,6 @@ async function besideHost(lock: HostLock, opts: SharedOpts, upCommand: string, o
   }
 }
 
-/** The --state a later command needs to find what this init wrote, only when the init was given one. */
-const stateFlag = (opts: { statePath: string }, values: Pick<SharedFlags, "state">): string[] => (values.state !== undefined ? ["--state", shellQuote(opts.statePath)] : []);
-
 /** The wsp up that serves what this init records: the serving flags off the one table the parse and the service's
  * unit are written out of, resolved as this run resolved them and quoted for a shell to take. Only the flags the
  * init was given, so the line names what the person said and defaults stay defaults. */
@@ -1113,11 +1109,6 @@ export function upCommandFor(asked: ServeAsked, values: SharedFlags): string {
     return word === undefined ? [] : [word, ...given.map(shellQuote)];
   });
   return ["wsp up", ...words].join(" ");
-}
-
-/** The wsp new that forks the first workspace from what this init records, against the host wsp up starts. */
-export function forkCommandFor(opts: { statePath: string }, values: Pick<SharedFlags, "state">): string {
-  return ["wsp new", FIRST_WORKSPACE, ...stateFlag(opts, values)].join(" ");
 }
 
 /** The envs a new workspace forks with: Claude Code's config dir and the browser shim of the golden it forks from.
@@ -1137,7 +1128,7 @@ const GOLDEN_FLAGS: readonly [string, (flags: { recipe?: string; project?: strin
 
 /** The build handed to the host serving this state: the workspace question is asked here, where the person is, and
  * everything from the first billed machine on happens in that host's job. Its own init job forks no workspace for
- * this computer, so the tick beside the question is not offered; wsp new <name> --on this computer is that road. */
+ * this computer, so the tick beside the question is not offered; a thread in the folder is that road. */
 async function handOffTo(beside: BesideHost, statePath: string, screen: InitIO, interactive: boolean, flags: { yes: boolean; rebuild?: boolean; firstWorkspace?: string; importFolder?: string; on?: string }): Promise<number> {
   const step = await askFirst({
     interactive,
@@ -1163,7 +1154,7 @@ function orSetTheKey(env: ProviderEnv): string {
 async function init(
   io: CliIO,
   opts: SharedOpts,
-  flags: { yes: boolean; nonInteractive: boolean; json: boolean; noLocal: boolean; rebuild?: boolean; recipe?: string; project?: string; firstWorkspace?: string; importFolder?: string; on?: string; upCommand: string; forkCommand: string },
+  flags: { yes: boolean; nonInteractive: boolean; json: boolean; noLocal: boolean; rebuild?: boolean; recipe?: string; project?: string; firstWorkspace?: string; importFolder?: string; on?: string; upCommand: string },
 ): Promise<number> {
   if (flags.json && flags.yes) throw usageRefusal("wsp init: --json prints the sign-ins as they are handed to you, and --yes skips the sign-ins, so there would be nothing to print.", "Drop one of them.");
   // With --on the build is always the host's, whose objects land on its job and not on this stdout, so the pair is
@@ -1264,7 +1255,6 @@ async function init(
         ports: { port: opts.port, named: opts.named, states: statesHere(opts.statePath) },
         address: opts.address,
         upCommand: flags.upCommand,
-        forkCommand: flags.forkCommand,
         relay: async (rt, builder, hooks) =>
           startCallbackRelay({
             runtime: rt,
@@ -1776,7 +1766,7 @@ export async function statusCommand(io: CliIO, opts: { statePath: string; state?
   const joined = await deps.here(home);
   if (joined !== undefined) return hereStatus(io, joined, watching?.redraw, () => deps.here(home), deps.signals);
   if (opts.watch === true) {
-    throw usageRefusal("wsp status --watch reads the agent on a computer joined to somebody's wsp, and this computer is joined to none.", "Run wsp status without --watch for the host serving here, or wsp workspaces --watch to follow what it runs.");
+    throw usageRefusal("wsp status --watch reads the agent on a computer joined to somebody's wsp, and this computer is joined to none.", "Run wsp status without --watch for the host serving here, or wsp threads --watch to follow what it runs.");
   }
   const reading = await serviceReading(deps.manager, serviceAddressHere(opts.statePath), deps.run, deps.platform);
   const lock = servingHost(opts.statePath);
@@ -2104,7 +2094,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   init: {
     page: "front",
     usage: "wsp init [--on <place>] [--recipe <path>] [--project <path>] [--first-workspace <name>] [--import <folder>] [--rebuild] [--no-local] [--yes] [--non-interactive] [--json]",
-    about: "seal this computer into your image, one screen at a time: Agents, Tools, Also on this computer, Sign-ins, wsp for your agents on this computer, each shown when it has a row to pick, then Build. Beside a host already serving this state file the screens are the same and the build runs in that host, on the place --on names or its default place, a computer you joined included. With no host serving and no provider key it seals nothing and makes your first workspace a copy of a folder here instead",
+    about: "seal this computer into your image, one screen at a time: Agents, Tools, Also on this computer, Sign-ins, wsp for your agents on this computer, each shown when it has a row to pick, then Build. Beside a host already serving this state file the screens are the same and the build runs in that host, on the place --on names or its default place, a computer you joined included. With no host serving and no provider key it seals nothing and records a folder here as your first project instead",
     json: true,
     host: "refused",
     cliOnly: "builds your image and serves for hours; an agent runs it from a shell and relays the sign-ins it prints",
@@ -2122,7 +2112,6 @@ const COMMANDS: Readonly<Record<string, Command>> = {
         ...(values.import !== undefined ? { importFolder: values.import } : {}),
         ...(values.on !== undefined ? { on: values.on } : {}),
         upCommand: upCommandFor(opts, values),
-        forkCommand: forkCommandFor(opts, values),
       }),
   },
   add: {
@@ -2130,7 +2119,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
     usage:
       `wsp add [<user@host>|<ssh alias>|<folder>|<url>|<owner/repo>|${CLOUD_ON ? "<provider>|" : ""}<computer> --update|<computer> --sign-in <agent>|<computer> --resume] [--recipe <name>] [--later] [--on <computer>] [--into <folder>] [--name <name>] [--base <branch>] [--yes] [--keep <path>] [--cut <path>] [--no-memory] [--no-commits] [--remember] [--ssh-port <port>] [--ssh-key <path>] [--host-key <key>]`,
     about:
-      "a computer of yours over ssh by user@host or by an alias from your ssh config, or a project: a folder on this computer, which every workspace of it is a copy of, or a repo cloned into an empty folder here with --into <folder> or by a computer with --on <computer>; " + (CLOUD_ON ? "<provider> takes a provider's key, " : "") + "nothing prints the join line another computer types, a computer with --update puts this wsp's daemon on one already in, and a computer with --sign-in signs that agent in there once, outside every workspace on it",
+      "a computer of yours over ssh by user@host or by an alias from your ssh config, or a project: a folder on this computer, a git repo or not, whose threads run in it, or a repo cloned into an empty folder here with --into <folder> or by a computer with --on <computer>; " + (CLOUD_ON ? "<provider> takes a provider's key, " : "") + "nothing prints the join line another computer types, a computer with --update puts this wsp's daemon on one already in, and a computer with --sign-in signs that agent in there once, outside every machine on it",
     json: true,
     host: "hostSide",
     // The computer road alone: the join code and a provider's key stay at the host's own terminal, and the tool refuses them.
@@ -2153,7 +2142,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   remove: {
     page: "front",
     usage: "wsp remove <computer>",
-    about: "take a computer out; the agent and its files go, and the computer is left as wsp found it. Refused while a workspace or a project stands on it, naming them",
+    about: "take a computer out; the agent and its files go, and the computer is left as wsp found it. Refused while a machine or a project stands on it, naming them",
     json: false,
     host: "hostSide",
     cliOnly: "takes a computer out of this wsp and sweeps wsp off it, which belongs with the terminal that joined it",
@@ -2186,7 +2175,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
     page: "dev",
     usage: DOCTOR_USAGE,
     about:
-      "prove a computer end to end. With no word, this computer and then every computer you added, forking nothing and billing nothing. With a computer's name, that one: a joined computer is proved by the host that computer dials, which makes a short-lived workspace there and reads the recipe's tools inside it, and this line prints what the host says; a cloud account gets your image forked, wsp put on the fork, a file coming back and the teardown, which forks a live machine and bills while it runs. --local proves this computer alone: a thread here and its reply, no machine, no key. --project names the project the workspace is made of, by name, on the computer named",
+      "prove a computer end to end. With no word, this computer and then every computer you added, forking nothing and billing nothing. With a computer's name, that one: a joined computer is proved by the host that computer dials, which makes a short-lived machine there and reads the recipe's tools inside it, and this line prints what the host says; a cloud account gets your image forked, wsp put on the fork, a file coming back and the teardown, which forks a live machine and bills while it runs. --local proves this computer alone: a thread here and its reply, no machine, no key. --project names the project the machine is made of, by name, on the computer named",
     json: false,
     host: "refused",
     cliOnly: "runs for minutes, makes and deletes a workspace on the computer you named, and on a cloud account forks a live machine that bills while it runs; a person decides that at a terminal",

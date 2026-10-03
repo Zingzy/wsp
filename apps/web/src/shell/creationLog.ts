@@ -6,7 +6,7 @@
 // to the first time that one needs a copy, worded off the protocol's
 // GOLDEN_STAGE_WORDS, the table the init screens and the terminal read too, so
 // a stage is never named twice in two spellings.
-import { copiesFolder, copyPathFor, creationAwaits, folderSlug, GOLDEN_STAGE_WORDS, kindForComputer, type ProjectView, type GoldenStageEvent, type WorkspaceCreateStage } from "@wsp/protocol";
+import { creationAwaits, GOLDEN_STAGE_WORDS, type ProjectView, type GoldenStageEvent, type WorkspaceCreateStage } from "@wsp/protocol";
 import type { Creation, CreationLine } from "../protocol/store.js";
 
 export const CREATE_STEP_WORDS: Record<WorkspaceCreateStage, string> = {
@@ -36,10 +36,9 @@ export function stepTime(ms: number): string {
   return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
-/** The folder the copy being made will be: beside the project's folder on the computer the app runs on, under the
- * name the runtime gives it, and the project's own path inside a copy anywhere else. */
-export function creationFolder(project: Pick<ProjectView, "computer" | "path">, name: string): string {
-  return copiesFolder(kindForComputer(project.computer)) ? copyPathFor(project.path, folderSlug(name)) : project.path;
+/** The folder a thread being started runs in: the project's own. */
+export function creationFolder(project: Pick<ProjectView, "computer" | "path">, _name: string): string {
+  return project.path;
 }
 
 /** The step a creation is on: the last one it waits on, so a note on a step already taken never stands for it. */

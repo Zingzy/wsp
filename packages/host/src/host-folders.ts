@@ -162,7 +162,7 @@ export function hostFolders(workspaces: () => Promise<readonly WorkspaceView[]>)
   return {
     list: async req => {
       const all = await workspaces();
-      const copies = all.flatMap(w => (w.copy === undefined ? [] : [w.copy.path]));
+      const copies = all.flatMap(w => (w.worktree === undefined ? [] : [w.worktree.path]));
       const paths = { projects: importedProjectFolders(all), wide: req.wide === true, copies };
       return req.repos === true ? listHostRepos(paths) : listHostFolders(req, paths);
     },

@@ -114,11 +114,6 @@ pub async fn threads_of(client: &Client, named: &[String]) -> Result<Vec<Thread>
     named.iter().map(|n| pick(&all, n)).collect()
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct Project {
-    pub path: String,
-}
-
 /// A workspace as far as these tools read one.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Workspace {
@@ -127,9 +122,6 @@ pub struct Workspace {
     pub phase: String,
     #[serde(default)]
     pub gone: Option<String>,
-    #[serde(default)]
-    pub home: Option<String>,
-    pub project: Project,
 }
 
 const PHASES: [&str; 5] = ["running", "pausing", "napping", "waking", "gone"];

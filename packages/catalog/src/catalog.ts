@@ -309,6 +309,10 @@ export const PATH_BOUND_DIRS: readonly { ecosystem: string; dirs: readonly strin
 /** Every path-bound directory, in the order the rows list them: what one copy is asked to take out. */
 export const PATH_BOUND_DIR_NAMES: readonly string[] = PATH_BOUND_DIRS.flatMap(row => row.dirs);
 
+/** Ignored directories a wsp worktree gets from the project folder beside its config files, one directory clone each,
+ * so a branch's thread starts with the dependencies installed. Nothing path-bound is here: those rebuild on use. */
+export const CARRIED_DIR_NAMES: readonly string[] = ["node_modules", ".pnpm-store", "vendor"];
+
 export const CATALOG_AGENTS: readonly AgentEntry[] = CATALOG.filter((e): e is AgentEntry => e.kind === "agent");
 
 const firstAgent = CATALOG_AGENTS[0];

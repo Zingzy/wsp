@@ -428,3 +428,10 @@ describe("the noise", () => {
     expect(notices()).toEqual([]);
   });
 });
+
+describe("what the host did on its own", () => {
+  it("is one note in the host's own words, once", () => {
+    emit({ type: "host.notice", message: "2 old copies kept with work in them; see ~/.wsp/copies-kept.txt", seq: 1 } as ProtocolEvent);
+    expect(notices()).toEqual([expect.objectContaining({ kind: "note", text: "2 old copies kept with work in them; see ~/.wsp/copies-kept.txt" })]);
+  });
+});

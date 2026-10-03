@@ -7,7 +7,7 @@ import { stripVTControlCharacters } from "node:util";
 import { S_RADIO_ACTIVE, S_RADIO_INACTIVE } from "@clack/prompts";
 import { exitClassOf, keyRefusedLine, LOOPBACK, savedKeyRefusedLine } from "@wsp/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { SERVE_FLAGS, SHARED_FLAGS, cli, forkCommandFor, jsonCliIO, keySources, loadKeys, optsFor, providerBesideRefusal, saveQuestion, terminalIO, upCommandFor, type CliIO, type KeySources, type LoadedKeys, type NoProviderKey } from "../src/cli.js";
+import { SERVE_FLAGS, SHARED_FLAGS, cli, jsonCliIO, keySources, loadKeys, optsFor, providerBesideRefusal, saveQuestion, terminalIO, upCommandFor, type CliIO, type KeySources, type LoadedKeys, type NoProviderKey } from "../src/cli.js";
 import { BOX_API_URL, BoxBackend, type KeyCheck } from "@wsp/engine";
 import { keysOf, savedEnv, serverVault, vaultOf, writeEnvFile } from "../src/env-keys.js";
 import { vaultNow } from "../src/cli.js";
@@ -52,9 +52,6 @@ describe("the wsp up an init names", () => {
     // Every row of the table, so one added tomorrow is spelled here too rather than dropped from the handover.
     const all = upCommandFor(named, { state: "s", port: "4500", listen: "0.0.0.0", advertise: "http://10.0.0.9:4500", provider: "box", "no-relay": true });
     for (const flag of SERVE_FLAGS) expect(all, `--${flag.name} in the line an init hands over`).toContain(`--${flag.name}`);
-    // The fork runs against the host wsp up started, so it needs the state and not the port.
-    expect(forkCommandFor(opts, {})).toBe("wsp new first");
-    expect(forkCommandFor(opts, { state: "state.json" })).toBe("wsp new first --state '/tmp/wsp test/state.json'");
   });
 });
 

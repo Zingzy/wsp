@@ -257,10 +257,10 @@ describe("what a workspace's kind changes about its words", () => {
     expect(onDeleteOf("cloud", undefined, "", on).asked).toBe("create failed before any computer was made, so there is none to delete");
   });
 
-  it("the delete sentence for a copy of a project folder says the copy is removed and the folder it came from stays", () => {
+  it("the delete sentence for a wsp worktree says the worktree is removed and the project folder stays", () => {
     const copy = { path: "/Users/dev/app-fix" };
-    expect(deleteNotice(1, "local", copy)).toBe("Its copy at /Users/dev/app-fix is removed and the project folder is left as it is; its record and 1 thread leave this computer.");
-    expect(onDeleteOf("local", copy).done("local")).toBe("its copy at /Users/dev/app-fix is removed and the project folder is left as it is");
+    expect(deleteNotice(1, "local", copy)).toBe("Its worktree at /Users/dev/app-fix is removed and the project folder is left as it is; its record and 1 thread leave this computer.");
+    expect(onDeleteOf("local", copy).done("local")).toBe("its worktree at /Users/dev/app-fix is removed and the project folder is left as it is");
     expect(onDeleteOf("local")).toBe(WORKSPACE_KIND_WORDS.local.onDelete);
   });
 
@@ -277,7 +277,7 @@ describe("what a workspace's kind changes about its words", () => {
       { name: "fix (Sonnet 5)", kind: "local" as const, copy: { path: "/Users/dev/fix-sonnet" }, machineId: "local" },
     ];
     expect(deleteCopiesNotice(copies, 2)).toBe(
-      "fix (Opus 5.5): its copy at /Users/dev/fix-opus is removed and the project folder is left as it is. fix (Sonnet 5): its copy at /Users/dev/fix-sonnet is removed and the project folder is left as it is. Their records and 2 threads leave this computer.",
+      "fix (Opus 5.5): its worktree at /Users/dev/fix-opus is removed and the project folder is left as it is. fix (Sonnet 5): its worktree at /Users/dev/fix-sonnet is removed and the project folder is left as it is. Their records and 2 threads leave this computer.",
     );
     for (const c of [...forks, ...copies] as CopyToDelete[]) expect(deleteCopiesNotice([c, c], 1)).toContain(onDeleteOf(c.kind, c.copy, c.machineId).asked);
   });

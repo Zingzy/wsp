@@ -203,7 +203,7 @@ describe("a guest session on the host", () => {
       const hello = await call(token, { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "t", version: "0" } } });
       expect(hello["result"]).toBeDefined();
       door.event(link, { type: "guest.message", session: "g0", message: { jsonrpc: "2.0", method: "notifications/initialized" } });
-      const called = await call(token, { jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "run", arguments: { workspace: "alpha", task: "look", files: ["/etc/hosts"] } } });
+      const called = await call(token, { jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "run", arguments: { project: "alpha", message: "look", files: ["/etc/hosts"] } } });
       expect(JSON.stringify(called)).toContain(guestNoFileLine);
     });
 
@@ -238,20 +238,20 @@ describe("a guest session on the host", () => {
       door.event(link, opened({ token, kind: "mcp", argv: ["mcp"] }));
       await call(token, { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "t", version: "0" } } });
       door.event(link, { type: "guest.message", session: "g0", message: { jsonrpc: "2.0", method: "notifications/initialized" } });
-      const called = await call(token, { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "workspaces", arguments: {} } });
-      const structured = (called["result"] as { structuredContent?: { workspaces?: { name: string }[] } }).structuredContent;
-      expect(structured?.workspaces?.map(w => w.name)).toContain("alpha");
+      const called = await call(token, { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "threads", arguments: {} } });
+      const structured = (called["result"] as { structuredContent?: { threads?: unknown[] } }).structuredContent;
+      expect(structured?.threads).toEqual([]);
     });
   });
 
   describe("the command line kind", () => {
     it("streams the host's own rows on the out stream and ends with its code", async () => {
       const token = await tokenOn(workspaceId);
-      door.event(link, opened({ token, argv: ["workspaces", "--json"] }));
+      door.event(link, opened({ token, argv: ["threads", "--json"] }));
       await settled(() => exitCode() !== undefined);
       expect(exitCode()).toBe(0);
-      const rows = JSON.parse(outText().trim()) as { workspaces: { name: string }[] };
-      expect(rows.workspaces.map(w => w.name)).toContain("alpha");
+      const rows = JSON.parse(outText().trim()) as { threads: unknown[] };
+      expect(rows.threads).toEqual([]);
       expect(closes()).toHaveLength(1);
     });
 
@@ -336,7 +336,7 @@ describe("a guest session on the host", () => {
 
     it("refuses a list that redraws where it stands, since nothing inside a machine has a terminal to redraw on", async () => {
       const token = await tokenOn(workspaceId);
-      door.event(link, opened({ token, argv: ["workspaces", "--watch"] }));
+      door.event(link, opened({ token, argv: ["threads", "--watch"] }));
       await settled(() => exitCode() !== undefined);
       expect(errText()).toContain("no terminal to redraw on");
       expect(exitCode()).toBe(EXIT_CODES.usage);

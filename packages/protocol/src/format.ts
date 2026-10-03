@@ -1484,7 +1484,7 @@ export const NOTIFY_WORDS = "The notify line goes once, at the reply, and a repl
  * launch environment says; nothing else decides it, and a blocking wait is neither road. */
 export const NOTIFY_CALLER = "A wsp thread starts every child with --notify me and ends its turn, and each child's finished line wakes it with that child's whole report";
 export const COORDINATOR_HANDOFF =
-  "A caller that is not a wsp thread cannot be woken at all, so it takes the reply of one turn as the call returns, and hands work of more than one turn to a single coordinator thread on the local workspace";
+  "A caller that is not a wsp thread cannot be woken at all, so it takes the reply of one turn as the call returns, and hands work of more than one turn to a single coordinator thread in the project's folder on this computer";
 
 /** The refusal of a start whose turn token no turn on this host carries: the host minted every token it knows into a
  * turn's own launch, so one it does not know is a caller naming a turn it is not, and reading it as the person would
@@ -1602,11 +1602,15 @@ export function rewindChildrenLine(titles: readonly string[]): string {
   return `stop the threads under this one first (${titles.join(", ")}); a rewind never stops them for you`;
 }
 
-/** A rewind of the files, or its undo, refused while another thread in the same copy runs: the files would go back
- * under its agent mid-turn, and nobody chose to lose what it is writing. */
+/** An undo refused while another thread in the same folder runs: the files would go back under its agent mid-turn,
+ * and nobody chose to lose what it is writing. */
 export function rewindBesideLine(title: string): string {
-  return `another thread in this copy is working (${title}), and its files would go back too; let its turn end or stop it first`;
+  return `another thread in this folder is working (${title}), and its files would go back too; let its turn end or stop it first`;
 }
+
+/** Why a rewind put the conversation back and left the files: another thread worked in the folder after that reply,
+ * and its work is in those files too. */
+export const REWIND_SHARED_LINE = "another thread worked in this folder after that reply, so only the conversation goes back";
 
 /** Files asked back to a turn whose end left no checkpoint of them. */
 export const REWIND_NO_CHECKPOINT_LINE = "that reply kept no checkpoint of the files, so only its conversation can be rewound";
@@ -1632,11 +1636,8 @@ export const CODEX_FEWER_TURNS = "codex lists fewer turns in this thread than th
 /** A rewind to the thread's latest reply, after which nothing stands to cut. */
 export const REWIND_LATEST_LINE = "that is the thread's latest reply, so nothing comes after it to rewind";
 
-/** A rewind on a workspace that is the person's own folder, where wsp writes nothing. */
-export const REWIND_OWN_FOLDER_LINE = "this workspace is your own folder, and wsp keeps no checkpoints there; start the work in a copy to rewind it";
-
-/** An undo with no rewind to undo, or one a turn in the same copy has ended since. */
-export const REWIND_NO_UNDO_LINE = "this thread has no rewind to undo; undo lasts until the next turn in this copy ends";
+/** An undo with no rewind to undo, or one a turn in the same folder has ended since. */
+export const REWIND_NO_UNDO_LINE = "this thread has no rewind to undo; undo lasts until the next turn in this folder ends";
 
 /** What Undo rewind puts back, said beside it: the files, and never the turns the rewind cut. */
 export const UNDO_REWIND_LINE = "Files come back; the cut conversation does not.";
@@ -1664,7 +1665,7 @@ export function threadRunsOnLine(agent: string, asked: string): string {
 }
 
 /** The refusal of a thread opened on no words: an empty or whitespace task would still start a process and a turn. */
-export const EMPTY_TASK_LINE = "the task is empty; say what the thread is to do";
+export const EMPTY_MESSAGE_LINE = "the message is empty; say what the thread is to do";
 
 /** The refusal of a rename to nothing: a blank name would take a thread's title away and leave nothing in its place. */
 export const EMPTY_TITLE_LINE = "the name is empty; say what the thread is called";
@@ -2543,9 +2544,9 @@ export function initAgentNoRecipeLine(recipePath: string, reason?: string): stri
  * sidebar row's second line and the Machine tab's lineage all read this one phrase. */
 export const THIS_COMPUTER = "this computer";
 
-/** The one sentence for the local workspace a run just recorded: wsp init's last tick says it, so what a workspace
- * here is, a copy of the person's folder on this computer, is named the same way whichever road wrote the record. */
-export const thisComputerLine = (name: string, id: string, folder: string): string => `Workspace ${name} (${id}) is a copy of ${folder} on ${THIS_COMPUTER}; its threads run here, under your own sign-ins.`;
+/** The one sentence for a project a run just recorded on this computer: wsp init's last tick says it, so where its
+ * threads run is named the same way whichever road wrote the record. */
+export const thisComputerLine = (name: string, folder: string): string => `Threads on ${name} run in ${folder} on ${THIS_COMPUTER}, under your own sign-ins.`;
 
 /** What a place's machine is, in every sentence and every row that names it: a computer of the person's own that
  * dialled this host and holds the link, so wsp drives it with the daemon protocol and never made it. */
@@ -2583,16 +2584,13 @@ export const COPY_WORD = "a copy";
  * say two things about one workspace. */
 export const madeOfWord = (_road: CopyRoad): string => COPY_WORD;
 
-/** What a workspace's copy has for a network, in the same words: its own where the computer gives a copy one, else
- * the computer's own ports, with the port an app that reads PORT binds where the record carries a base, since two
- * copies on one computer's network cannot both have 3000. Nothing at all on a computer that copies nothing, which
- * has no copy to say it of. Reads the two capability flags and nothing about the workspace's kind, so a computer
- * that gains its own network changes one flag and every line follows. */
-export function portsWord(c: Pick<Capabilities, "copies" | "ownNetwork">, portBase: number | undefined, computer: string): string {
+/** What a computer's threads have for a network: their own where the computer gives them one, else the computer's own
+ * ports, shared as panes in one terminal share them. Nothing at all on a computer that copies nothing. Reads the two
+ * capability flags and nothing about the kind, so a computer that gains its own network changes one flag. */
+export function portsWord(c: Pick<Capabilities, "copies" | "ownNetwork">, computer: string): string {
   if (c.ownNetwork) return "own network";
   if (!c.copies) return "";
-  const shares = `shares ${computer}'s ports`;
-  return portBase === undefined ? shares : `${shares}, PORT ${portBase}`;
+  return `shares ${computer}'s ports`;
 }
 
 /** What the browser pane says for a port it cannot open: the computer it runs on gives this pane no address, and

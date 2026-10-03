@@ -106,10 +106,10 @@ export function selectRoot(byWorkspaceId: Record<string, WorkspaceRoot>, workspa
   return entry.pinned ?? listable(entry.shell) ?? entry.followed ?? listable(project) ?? roots[0] ?? null;
 }
 
-/** The folder a workspace's project sits in on its machine: a copy's own folder where the copy stands beside the
- * project, else the project's. What the finder searches and what Open in editor opens for the thread. */
-export function projectFolderOf(workspace: Pick<WorkspaceView, "copy" | "project">): string {
-  return workspace.copy?.path ?? workspace.project.path;
+/** The folder a record's threads work in: the project folder or the worktree's, as the runtime reads it. What the
+ * finder searches and what Open in editor opens for the thread. */
+export function projectFolderOf(workspace: Pick<WorkspaceView, "folder" | "project">): string {
+  return workspace.folder ?? workspace.project.path;
 }
 
 /** The workspace's one project off the store: a workspace is one project's copy, so this is the whole of what it

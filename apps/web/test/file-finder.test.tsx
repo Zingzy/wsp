@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Quick open and search in files over a fake daemon wire: the finder asks
-// fs.search under the open thread's project folder (a copy's own folder where
-// it has one), ranks a file by its name first, lists a line with its place,
+// fs.search under the open thread's project folder (a worktree's own folder where
+// it runs in one), ranks a file by its name first, lists a line with its place,
 // opens the pick as a Files tab at its line, and says why it lists nothing.
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -30,10 +30,10 @@ describe("ranking the paths the daemon found", () => {
 });
 
 describe("the file finder", () => {
-  it("finds a file by a few letters of its name under the copy's own folder and opens it as a Files tab", async () => {
+  it("finds a file by a few letters of its name under the worktree's own folder and opens it as a Files tab", async () => {
     const wire = fakeWire({ "fs.search": params => ({ hits: PATHS.filter(p => String(params["query"]) === "" || p.toLowerCase().includes("a")).map(path => ({ path })), truncated: false }) });
     provideDaemonWire(WS, wire);
-    act(() => useStore.setState({ workspaces: [{ ...view, kind: "local", copy: { path: "/Users/dev/web-copy", base: "main", branch: "main", carried: "deps-and-config", road: "clonefile", source: "/root" } } as never] }));
+    act(() => useStore.setState({ workspaces: [{ ...view, kind: "local", worktree: { path: "/Users/dev/web-copy", branch: "feat/x", made: true }, folder: "/Users/dev/web-copy" } as never] }));
     render(<FileFinder />);
     act(() => openFileFinder("files"));
     type("pan");
