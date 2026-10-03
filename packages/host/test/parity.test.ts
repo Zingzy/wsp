@@ -243,6 +243,8 @@ const LISTS_ON_THE_COMMAND_LINE: Record<string, string> = {
   "agents setup unset_env": "--unset-env",
   "agents setup reset": "--reset",
   "projects set reset": "--reset",
+  "slate read values": "--values",
+  "slate patch ops": "the ops are a .json file's list, the patch lines a .slate file's",
 };
 
 describe("the command line, the MCP tools and the skill are one contract", () => {
@@ -356,6 +358,19 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
     };
     expect(RUNTIME_OPS.filter(op => op.startsWith("sessions.") && !verbs.includes(`"${op}"`)).sort()).toEqual(Object.keys(WINDOW_ONLY).sort());
     for (const [op, why] of Object.entries(WINDOW_ONLY)) expect(why, `${op} says why it has no verb`).toMatch(/\S/);
+  });
+
+  it("every slate op no verb sends is the window's own and says why: an agent reaches the slate through the slate verbs", () => {
+    const verbs = readFileSync(new URL("../src/verbs.ts", import.meta.url), "utf8");
+    const WINDOW_ONLY: Record<string, string> = {
+      "slates.get": "the window's fetch of the record it draws; an agent reads its slate with slate read, which answers the sketch too",
+      "slates.shown": "the window saying it opened the Slate tab on the first write, a fact about one person's window",
+      "slates.act": "a press is the person's act in the window; an agent hears it as the message the press sends",
+      "slates.subscribe": "a window's hold on the sources its drawn pieces read; an agent's read resolves what it names at once",
+      "slates.unsubscribe": "a window letting go of a hold it took",
+      "slates.resolve": "the window's read of a path it cannot resolve itself; an agent names paths in slate read",
+    };
+    expect(RUNTIME_OPS.filter(op => op.startsWith("slates.") && !verbs.includes(`"${op}"`)).sort()).toEqual(Object.keys(WINDOW_ONLY).sort());
   });
 
   it("the Changes and Pull request panes' own ops that no verb sends say why they stay with the pane", () => {

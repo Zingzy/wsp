@@ -80,6 +80,8 @@ export const SlatesActParams = z.object({
   requestId: z.string().min(1).max(200),
   /** The row, for an action on a repeating piece. */
   scope: z.object({ item: SlateWireJson, index: z.number().int().nonnegative() }).optional(),
+  /** A row action of a repeating piece, by its index in the piece's rowActions, whose own `on` holds the action. */
+  rowAction: z.number().int().nonnegative().optional(),
 });
 export const SlatesSubscribeParams = z.object({ threadId: z.string(), sources: z.array(z.string()), feeds: z.array(z.string()) });
 export const SlatesResolveParams = z.object({ threadId: z.string(), paths: z.array(z.string()).max(200) });

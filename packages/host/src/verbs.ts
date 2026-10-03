@@ -213,6 +213,17 @@ import {
   validatorRefusal,
   verbFailure,
   problemListsOf,
+  compileSlate,
+  sketchSlate,
+  slateCatalog,
+  validateSlate,
+  type Slate,
+  type SlateClearAnswer,
+  type SlateProblem,
+  type SlateReadAnswer,
+  type SlateStateAnswer,
+  type SlateUndoAnswer,
+  type SlateWriteAnswer,
   waitTimedOutLine,
   workspaceAsleepAgainLine,
   workspaceKind,
@@ -3740,6 +3751,362 @@ const AgentsOnIn = z.string().optional().describe("the computer to read, by the 
 const AGENTS_ON_WORDS = "the computer to read, by the name wsp computers shows; this computer without it, and a workspace names its own";
 const AGENTS_READ_WORDS = "Read as the login the computer was added with, off each agent's config and whether its files are there: no MCP server is started and no login file is opened. A napping workspace answers what stood there when it last ran, marked stale, and is not woken.";
 
+// --- the slate: a live panel per thread the agent builds and the person reads and presses (spec 11) ---
+
+const SlateProblemOut = z.array(z.object({ code: z.string(), name: z.string(), message: z.string() }).passthrough());
+const SlateThreadIn = z.string().optional().describe("the thread whose slate it is, by id or a prefix; absent is your own thread, read off your token");
+const SlateLinesIn = z.string().optional().describe("the slate in shorthand, one piece per line; slate_catalog teaches it");
+const SlateDocumentIn = z.record(z.string(), z.unknown()).optional().describe("the slate as its stored JSON document, instead of lines");
+const SlateIfVersionIn = z.number().int().optional().describe("the version a read answered; the write is refused with V700 when the slate has moved past it");
+const SlateWriteOut = { version: z.number().int(), sketch: z.string(), warnings: SlateProblemOut, problems: SlateProblemOut };
+
+/** The thread a slate line names, as the host takes it: one named by id or prefix, else the turn this line runs
+ * inside, else nothing, which the host reads off the caller's own token. */
+async function slateTarget(client: HostClient, ref: string | undefined, env: VerbDeps["env"]): Promise<{ threadId?: string; turnToken?: string }> {
+  if (ref !== undefined) {
+    const thread = await threadOf(client, ref);
+    return { threadId: thread.threadId ?? thread.id };
+  }
+  const token = turnTokenOf(env);
+  return token !== undefined ? { turnToken: token } : {};
+}
+
+/** A slate file as a write sends it: shorthand for .slate, the stored document for .json. */
+function slateFile(ctx: VerbContext, path: string, ops?: boolean): { lines: string } | { document: Record<string, unknown> } | { ops: unknown[] } {
+  if (ctx.elsewhere === true) throw usageRefusal(`${path} is a file on your machine, which this host cannot read:`, "pass the slate to the slate tools as lines instead.");
+  const at = resolve(ctx.cwd ?? process.cwd(), path);
+  if (!path.endsWith(".slate") && !path.endsWith(".json")) throw usageRefusal(`${path} is neither a .slate nor a .json file:`, "write the shorthand to a .slate file or the stored form to a .json file.");
+  let text: string;
+  try {
+    text = readFileSync(at, "utf8");
+  } catch {
+    throw usageRefusal(`there is no file at ${at}:`, "name a .slate or .json file that is there.");
+  }
+  if (path.endsWith(".slate")) return { lines: text };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (e) {
+    throw usageRefusal(`${path} does not parse as JSON (${e instanceof Error ? e.message : String(e)}):`, "fix the JSON or write shorthand to a .slate file.");
+  }
+  if (ops === true && Array.isArray(parsed)) return { ops: parsed };
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw usageRefusal(`${path} holds no JSON object:`, ops === true ? "write a list of patch ops or shorthand lines." : "write the stored document, an object with schema, root and pieces.");
+  return { document: parsed as Record<string, unknown> };
+}
+
+/** The thread and the file of a write line, the thread first and optional. */
+function threadAndFile(ctx: VerbContext): { ref?: string; file: string } {
+  const [a, b] = ctx.args;
+  if (a === undefined || ctx.args.length > 2) throw usageRefusal(`wsp ${ctx.usage.split(" ").slice(1, 3).join(" ")} takes a file, after a thread where it is not yours.`, usageIs(ctx));
+  return b === undefined ? { file: a } : { ref: a, file: b };
+}
+
+const ifVersionOf = (ctx: VerbContext): number | undefined => {
+  const raw = ctx.flags["if-version"];
+  if (typeof raw !== "string") return undefined;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 0) throw usageRefusal(`--if-version takes a version number, and ${raw} is not one.`, usageIs(ctx));
+  return n;
+};
+
+/** What a write prints for a person: the sketch, which carries the version in its header. */
+const slateWriteLine = (w: { sketch: string; warnings: readonly { code: string; message: string }[] }): string =>
+  [w.sketch, ...w.warnings.map(p => `warning ${p.code}: ${p.message}`)].join("\n");
+
+const SLATE_CATALOG_PARTS = ["pieces", "piece", "sources", "source", "actions", "action", "steps", "step", "functions", "rules", "examples"] as const;
+
+/** The parts of the catalog that were asked for and the text form of them, the same on both doors. */
+function slateCatalogOf(ask: { piece?: string; source?: string; action?: string; step?: string; functions?: boolean; examples?: boolean }): Structured & { text: string } {
+  const answer = slateCatalog(ask);
+  const parts = Object.fromEntries(SLATE_CATALOG_PARTS.flatMap(part => (answer[part] !== undefined ? [[part, answer[part]]] : [])));
+  return { text: answer.text, ...parts };
+}
+
+/** A slate checked here, nothing stored and no host asked: the compile, the validator and a sketch with the bound
+ * paths unread. */
+function slateChecked(sent: { lines?: string; document?: Record<string, unknown> }): { ok: boolean; errors: SlateProblem[]; warnings: SlateProblem[]; document?: Slate; sketch: string } {
+  const given = [sent.lines, sent.document].filter(v => v !== undefined).length;
+  if (given !== 1) throw usageRefusal(`A601 action-arg: a slate check takes exactly one of lines or document, and this one has ${given === 0 ? "none" : "both"}:`, "send lines alone.");
+  let warnings: SlateProblem[] = [];
+  let input: unknown = sent.document;
+  if (sent.lines !== undefined) {
+    const compiled = compileSlate(sent.lines);
+    if (compiled.errors.length > 0 || compiled.document === undefined) return { ok: false, errors: compiled.errors, warnings: compiled.warnings, sketch: "" };
+    warnings = compiled.warnings;
+    input = compiled.document;
+  }
+  const checked = validateSlate(input);
+  const seen = new Set(warnings.map(w => JSON.stringify(w)));
+  warnings = [...warnings, ...checked.warnings.filter(w => !seen.has(JSON.stringify(w)))];
+  if (checked.errors.length > 0 || checked.document === undefined) return { ok: false, errors: checked.errors, warnings, sketch: "" };
+  return { ok: true, errors: [], warnings, document: checked.document, sketch: sketchSlate(checked.document, checked.document.state ?? {}, { resolve: () => undefined }) };
+}
+
+const slateCheckLine = (c: ReturnType<typeof slateChecked>): string =>
+  c.ok ? slateWriteLine(c) : [`slate refused: ${c.errors.length} error${c.errors.length === 1 ? "" : "s"}`, ...c.errors.map(e => `${e.line !== undefined ? `line ${e.line}: ` : ""}${e.piece !== undefined ? `${e.piece}${e.prop !== undefined ? `.${e.prop}` : ""}: ` : ""}${e.code} ${e.name} ${e.message}${e.fix !== undefined ? ` (fix: ${e.fix})` : ""}`)].join("\n");
+
+/** What a read prints for a person: the sketch, then each value asked for, then the shorthand where asked. */
+const slateReadLine = (r: SlateReadAnswer): string =>
+  [r.sketch ?? `slate v${r.version}`, ...Object.entries(r.values).map(([path, v]) => `${path} = ${JSON.stringify(v)}`), ...(r.lines !== undefined ? ["", r.lines] : [])].join("\n");
+
+/** A path=json word of a state line: the value parsed as JSON, else taken as the text it is. */
+function stateValue(word: string): [string, unknown] | undefined {
+  const at = word.indexOf("=");
+  if (at <= 0 || !word.startsWith("state.")) return undefined;
+  const raw = word.slice(at + 1);
+  try {
+    return [word.slice(0, at), JSON.parse(raw)];
+  } catch {
+    return [word.slice(0, at), raw];
+  }
+}
+
+const SLATE_VERBS: readonly Verb[] = [
+  {
+    name: "slate catalog",
+    usage: "wsp slate catalog [--piece <type>] [--source <name>] [--action <kind>] [--step <name>] [--functions] [--examples]",
+    about: "what a slate can hold: every piece, source and action in one line each with the rules and two examples, or one of them in full",
+    page: "agent",
+    options: { piece: { type: "string" }, source: { type: "string" }, action: { type: "string" }, step: { type: "string" }, functions: { type: "boolean" }, examples: { type: "boolean" } },
+    run: async ctx => {
+      if (ctx.args.length > 0) throw usageRefusal("wsp slate catalog takes flags alone.", usageIs(ctx));
+      const str = (name: string): string | undefined => (typeof ctx.flags[name] === "string" ? (ctx.flags[name] as string) : undefined);
+      const read = slateCatalogOf({ ...pick({ piece: str("piece"), source: str("source"), action: str("action"), step: str("step") }), ...(ctx.flags["functions"] === true ? { functions: true } : {}), ...(ctx.flags["examples"] === true ? { examples: true } : {}) });
+      ctx.out.emit(read, read.text);
+      return 0;
+    },
+    tool: tool({
+      description: "What a slate can hold, read before writing one: with nothing named, every piece, source and action in a line each with the rules and two examples; with a piece, source, action or step named, that one in full.",
+      input: {
+        piece: z.string().optional().describe("one piece type in full, like meter"),
+        source: z.string().optional().describe("one source in full, like usage or pr"),
+        action: z.string().optional().describe("one action kind in full, like send"),
+        step: z.string().optional().describe("one pipeline step in full"),
+        functions: z.boolean().optional().describe("every formula function with its signature"),
+        examples: z.boolean().optional().describe("the example slates in shorthand"),
+      },
+      output: { text: z.string(), ...Object.fromEntries(SLATE_CATALOG_PARTS.map(part => [part, z.unknown().optional()])) },
+      call: async ask => {
+        const read = slateCatalogOf(pick(ask));
+        return asText(read.text, read);
+      },
+    }),
+  },
+  {
+    name: "slate check",
+    usage: "wsp slate check <file>",
+    about: "compiles and validates a .slate or .json file and prints its sketch or every error with its fix; nothing is stored",
+    page: "agent",
+    options: {},
+    run: async ctx => {
+      const [file] = ctx.args;
+      if (file === undefined || ctx.args.length !== 1) throw usageRefusal("wsp slate check takes one file.", usageIs(ctx));
+      const sent = slateFile(ctx, file);
+      if ("ops" in sent) throw usageRefusal(`${file} holds a list, which is a patch:`, "check a whole slate.");
+      const checked = slateChecked(sent);
+      ctx.out.emit(checked, slateCheckLine(checked));
+      return 0;
+    },
+    tool: tool({
+      description: "Compiles and validates a slate without storing it, answering every error with its line, piece, prop and fix, or the sketch of how it would look; check a big first write before setting it.",
+      input: { lines: SlateLinesIn, document: SlateDocumentIn },
+      output: { ok: z.boolean(), errors: SlateProblemOut, warnings: SlateProblemOut, document: z.record(z.string(), z.unknown()).optional(), sketch: z.string() },
+      call: async sent => {
+        const checked = slateChecked(sent);
+        return asText(slateCheckLine(checked), checked);
+      },
+    }),
+  },
+  {
+    name: "slate set",
+    usage: "wsp slate set [<thread>] <file> [--if-version <n>]",
+    about: "writes the thread's slate whole from a .slate or .json file and prints how it reads now; the Slate tab beside the thread draws it",
+    page: "agent",
+    options: { "if-version": { type: "string" } },
+    run: async ctx => {
+      const { ref, file } = threadAndFile(ctx);
+      const sent = slateFile(ctx, file);
+      if ("ops" in sent) throw usageRefusal(`${file} holds a list, which is a patch:`, "write it with wsp slate patch.");
+      const client = await ctx.client();
+      const ifVersion = ifVersionOf(ctx);
+      const wrote = await client.request<SlateWriteAnswer>("slates.set", { ...(await slateTarget(client, ref, ctx.env)), ...sent, ...(ifVersion !== undefined ? { ifVersion } : {}) });
+      ctx.out.emit(wrote, slateWriteLine(wrote));
+      return 0;
+    },
+    tool: tool({
+      description: "Writes this thread's slate whole, from shorthand lines or the stored document, and answers its version and a sketch of how it reads now; a refusal lists every error with its fix and stores nothing.",
+      input: { thread: SlateThreadIn, lines: SlateLinesIn, document: SlateDocumentIn, if_version: SlateIfVersionIn },
+      output: SlateWriteOut,
+      call: async ({ thread, lines, document, if_version }, deps) => {
+        const client = await deps.client();
+        const wrote = await client.request<SlateWriteAnswer>("slates.set", { ...(await slateTarget(client, thread, deps.env)), ...pick({ lines, document, ifVersion: if_version }) });
+        return asText(slateWriteLine(wrote), wrote);
+      },
+    }),
+  },
+  {
+    name: "slate patch",
+    usage: "wsp slate patch [<thread>] <file> [--if-version <n>]",
+    about: "changes the thread's slate by piece id from a .slate file of patch lines or a .json list of ops, all or nothing, and prints how it reads now",
+    page: "agent",
+    options: { "if-version": { type: "string" } },
+    run: async ctx => {
+      const { ref, file } = threadAndFile(ctx);
+      const sent = slateFile(ctx, file, true);
+      if ("document" in sent) throw usageRefusal(`${file} holds a whole slate, not a patch:`, "write it with wsp slate set.");
+      const client = await ctx.client();
+      const ifVersion = ifVersionOf(ctx);
+      const wrote = await client.request<SlateWriteAnswer>("slates.patch", { ...(await slateTarget(client, ref, ctx.env)), ...sent, ...(ifVersion !== undefined ? { ifVersion } : {}) });
+      ctx.out.emit(wrote, slateWriteLine(wrote));
+      return 0;
+    },
+    tool: tool({
+      description: "Changes this thread's slate by piece id, from patch lines or a list of ops, applied all or nothing and validated whole, and answers its version and the sketch.",
+      input: { thread: SlateThreadIn, lines: z.string().optional().describe("patch lines: ~ id prop=value, + id: type ... under=parent, - id, > id under=parent, state.path = json"), ops: z.array(z.record(z.string(), z.unknown())).optional().describe("the patch as stored ops, instead of lines"), if_version: SlateIfVersionIn },
+      output: SlateWriteOut,
+      call: async ({ thread, lines, ops, if_version }, deps) => {
+        const client = await deps.client();
+        const wrote = await client.request<SlateWriteAnswer>("slates.patch", { ...(await slateTarget(client, thread, deps.env)), ...pick({ lines, ops, ifVersion: if_version }) });
+        return asText(slateWriteLine(wrote), wrote);
+      },
+    }),
+  },
+  {
+    name: "slate state",
+    usage: "wsp slate state [<thread>] <path>=<json>... [--if-version <n>]",
+    about: "sets values in the thread's slate state by path, like state.steps[2].done=true, and prints how the slate reads now",
+    page: "agent",
+    options: { "if-version": { type: "string" } },
+    run: async ctx => {
+      const values: Record<string, unknown> = {};
+      const rest: string[] = [];
+      for (const word of ctx.args) {
+        const pair = stateValue(word);
+        if (pair === undefined) rest.push(word);
+        else values[pair[0]] = pair[1];
+      }
+      if (rest.length > 1 || Object.keys(values).length === 0) throw usageRefusal("wsp slate state takes state.<path>=<json> words, after a thread where it is not yours.", usageIs(ctx));
+      const client = await ctx.client();
+      const ifVersion = ifVersionOf(ctx);
+      const wrote = await client.request<SlateStateAnswer>("slates.state", { ...(await slateTarget(client, rest[0], ctx.env)), values, sketch: true, ...(ifVersion !== undefined ? { ifVersion } : {}) });
+      const out = { version: wrote.version, sketch: wrote.sketch ?? "", problems: wrote.problems ?? [] };
+      ctx.out.emit(out, out.sketch);
+      return 0;
+    },
+    tool: tool({
+      description: "Sets values in this thread's slate state by path, the narrowest path that says what changed (state.steps[2].done rather than state.steps), and answers the version and the sketch.",
+      input: { thread: SlateThreadIn, values: z.record(z.string(), z.unknown()).describe("each state path with its new JSON value"), if_version: SlateIfVersionIn },
+      output: { version: z.number().int(), sketch: z.string(), problems: SlateProblemOut },
+      call: async ({ thread, values, if_version }, deps) => {
+        const client = await deps.client();
+        const wrote = await client.request<SlateStateAnswer>("slates.state", { ...(await slateTarget(client, thread, deps.env)), values, sketch: true, ...pick({ ifVersion: if_version }) });
+        const out = { version: wrote.version, sketch: wrote.sketch ?? "", problems: wrote.problems ?? [] };
+        return asText(out.sketch, out);
+      },
+    }),
+  },
+  {
+    name: "slate read",
+    usage: "wsp slate read [<thread>] [--values <path>]... [--lines] [--no-sketch]",
+    about: "the thread's slate as it stands: the document, the live state, the values of the paths named, its problems and its sketch; --lines adds the shorthand",
+    page: "agent",
+    options: { values: { type: "string", multiple: true }, lines: { type: "boolean" }, "no-sketch": { type: "boolean" } },
+    run: async ctx => {
+      if (ctx.args.length > 1) throw usageRefusal("wsp slate read takes one thread at most.", usageIs(ctx));
+      const client = await ctx.client();
+      const values = flagList(ctx.flags, "values");
+      const read = await client.request<SlateReadAnswer>("slates.read", { ...(await slateTarget(client, ctx.args[0], ctx.env)), ...(values.length > 0 ? { values } : {}), ...(ctx.flags["lines"] === true ? { lines: true } : {}), ...(ctx.flags["no-sketch"] === true ? { sketch: false } : {}) });
+      ctx.out.emit(read, slateReadLine(read));
+      return 0;
+    },
+    tool: tool({
+      description: "Reads this thread's slate, or a child's of yours by thread: the document, the live state the person may have changed, the values of the paths named (* for every bound one), problems such as R900 for data not there yet, and the sketch; read rather than trusting a screenshot.",
+      input: { thread: SlateThreadIn, values: z.array(z.string()).optional().describe("paths to resolve now, like usage.week.percent, or * for every bound path"), lines: z.boolean().optional().describe("also answer the slate as shorthand, the form a patch is written against"), sketch: z.boolean().optional().describe("false leaves the sketch out") },
+      output: { schema: z.number().int(), version: z.number().int(), title: z.string().optional(), document: z.record(z.string(), z.unknown()).nullable(), lines: z.string().optional(), state: z.record(z.string(), z.unknown()), pipes: z.record(z.string(), z.unknown()), feeds: z.record(z.string(), z.unknown()), values: z.record(z.string(), z.unknown()), problems: SlateProblemOut, annotations: z.array(z.unknown()), consents: z.record(z.string(), z.unknown()), sketch: z.string().optional() },
+      call: async ({ thread, values, lines, sketch }, deps) => {
+        const client = await deps.client();
+        const read = await client.request<SlateReadAnswer>("slates.read", { ...(await slateTarget(client, thread, deps.env)), ...pick({ values, lines, sketch }) });
+        return asText(slateReadLine(read), read);
+      },
+    }),
+  },
+  {
+    name: "slate undo",
+    usage: "wsp slate undo [<thread>]",
+    about: "takes back the last whole write to the thread's slate, a set, a patch or a clear; a second undo puts it back",
+    page: "agent",
+    options: {},
+    run: async ctx => {
+      if (ctx.args.length > 1) throw usageRefusal("wsp slate undo takes one thread at most.", usageIs(ctx));
+      const client = await ctx.client();
+      const undone = await client.request<SlateUndoAnswer>("slates.undo", await slateTarget(client, ctx.args[0], ctx.env));
+      ctx.out.emit(undone, undone.sketch);
+      return 0;
+    },
+    tool: tool({
+      description: "Takes back the last whole write to this thread's slate (a set, a patch or a clear) and answers the version and the sketch; a second undo puts it back, and with nothing to go back to it is refused with V702.",
+      input: { thread: SlateThreadIn },
+      output: { version: z.number().int(), sketch: z.string() },
+      call: async ({ thread }, deps) => {
+        const client = await deps.client();
+        const undone = await client.request<SlateUndoAnswer>("slates.undo", await slateTarget(client, thread, deps.env));
+        return asText(undone.sketch, undone);
+      },
+    }),
+  },
+  {
+    name: "slate clear",
+    usage: "wsp slate clear [<thread>]",
+    about: "empties the thread's slate and keeps its state; undo brings it back",
+    page: "agent",
+    options: {},
+    run: async ctx => {
+      if (ctx.args.length > 1) throw usageRefusal("wsp slate clear takes one thread at most.", usageIs(ctx));
+      const client = await ctx.client();
+      const cleared = await client.request<SlateClearAnswer>("slates.clear", await slateTarget(client, ctx.args[0], ctx.env));
+      ctx.out.emit(cleared, `slate v${cleared.version}, cleared`);
+      return 0;
+    },
+    tool: tool({
+      description: "Empties this thread's slate, keeping its state, and answers the version; slate_undo brings it back.",
+      input: { thread: SlateThreadIn },
+      output: { version: z.number().int() },
+      call: async ({ thread }, deps) => {
+        const client = await deps.client();
+        const cleared = await client.request<SlateClearAnswer>("slates.clear", await slateTarget(client, thread, deps.env));
+        return asText(`slate v${cleared.version}, cleared`, cleared);
+      },
+    }),
+  },
+  {
+    name: "slate reply",
+    usage: "wsp slate reply <thread> <annotation> <text>",
+    about: "answers a comment the person left on a piece of the slate; comments are not in this build, so it says so",
+    page: "agent",
+    options: {},
+    run: async ctx => {
+      const [, annotation, text] = ctx.args;
+      if (annotation === undefined || text === undefined || ctx.args.length !== 3) throw usageRefusal("wsp slate reply takes a thread, a comment's id and the reply.", usageIs(ctx));
+      const out = { ok: false, annotation };
+      ctx.out.emit(out, slateReplyLine(annotation));
+      return 0;
+    },
+    tool: tool({
+      description: "Answers a comment the person left on a piece of the slate; this build carries no comments, so ok is false and nothing is stored.",
+      input: { thread: z.string(), annotation: z.string(), text: z.string() },
+      output: { ok: z.boolean(), annotation: z.string() },
+      call: async ({ annotation }) => asText(slateReplyLine(annotation), { ok: false, annotation }),
+    }),
+  },
+];
+
+const slateReplyLine = (annotation: string): string => `no comment ${annotation} on this slate: comments are not in this build, so nothing was stored`;
+
+/** The fields given, without the ones left out, so an absent input never rides the wire as undefined. */
+function pick<T extends Record<string, unknown>>(o: T): Partial<T> {
+  return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as Partial<T>;
+}
+
 /** Every verb, the cloud's among them; VERBS below is the table this process answers. */
 export const ALL_VERBS: readonly Verb[] = [
   {
@@ -5733,6 +6100,7 @@ export const ALL_VERBS: readonly Verb[] = [
     }),
   },
   ...ANSWER_VERBS,
+  ...SLATE_VERBS,
   {
     name: "send",
     usage: 'wsp send <thread> [--model, --effort <value>] [--fast] [--file <path>] [--detach] "<message>"',
@@ -6131,6 +6499,16 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   fast: "run the turn in the agent's fast mode, on a model that offers one; refused naming the model otherwise",
   file: "a file on this computer to send with the message: an image goes as an image, any other file lands in the thread's folder and the message names its path; repeats",
   last: "the final reply alone, the whole message the thread's finished line carries",
+  "slate catalog piece": "one piece type in full, like meter",
+  "slate catalog source": "one source in full, like usage or pr",
+  "slate catalog action": "one action kind in full, like send",
+  "slate catalog step": "one pipeline step in full",
+  "slate catalog functions": "every formula function with its signature",
+  "slate catalog examples": "the example slates in shorthand",
+  "if-version": "the version a read printed; refused with V700 when the slate moved past it",
+  "slate read values": "a path to resolve now, like usage.week.percent, or * for every bound one; repeats",
+  "slate read lines": "also print the slate as shorthand, the form a patch is written against",
+  "slate read no-sketch": "leave the sketch out",
   threads: "how many threads may run on that computer at once; a new one waits past it",
   machines: "how many machines may run on that cloud at once",
   spend: "the dollars a day that cloud may spend before it starts no new machine",
