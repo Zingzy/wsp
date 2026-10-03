@@ -4,7 +4,7 @@
 // per frame, the pending adds kept off their own events, and the record drawn
 // as the rows every list of steps shows.
 import { afterEach, describe, expect, it } from "vitest";
-import { RecipeFile, type EventUnion, type PendingComputer, type PlaceAddJob, type PlaceSetup, type PlaceView } from "@wsp/protocol";
+import { RecipeFile, type EventUnion, type PendingComputer, type PlaceAddJob, type PlaceProvisionRow, type PlaceSetup, type PlaceView } from "@wsp/protocol";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { checkRows, foldSetup, setupCount, setupRows, setupStanding } from "../src/settings/add/setup.js";
@@ -166,3 +166,47 @@ describe("an install as the checks", () => {
     expect(rows[2]).toMatchObject({ id: "root", said: "jumpbox logs in as a user that is not root", fix: "Add it as root." });
   });
 });
+
+describe("what a step says in the list", () => {
+  const AT = "2026-10-03T10:00:00.000Z";
+  const place = (steps: PlaceSetup["steps"], rows: PlaceProvisionRow[], picks: RecipeFile): Pick<PlaceView, "name" | "setup" | "applied" | "picks"> => ({
+    name: "studio",
+    setup: { state: "running", addId: "a_1", startedAt: AT, steps, waiting: [] },
+    applied: { hash: "h", at: AT, rows },
+    picks,
+  });
+
+  it("names the GitHub row by what was done, not by its label", () => {
+    const done = [{ step: "github" as const, state: "done" as const, ms: 400 }];
+    const github = (signin: "vault" | "machine" | "skip", outcome: "present" | "skipped") => setupRows(place(done, [{ id: "github", label: "GitHub", outcome, step: "github", note: "from this computer's vault" }], RecipeFile.parse({ name: "studio", configs: { github: { signin } } })), "studio").find(r => r.id === "github")?.note;
+    expect(github("vault", "present")).toBe("Token copied.");
+    expect(github("machine", "present")).toBe("Signed in on studio.");
+    expect(github("skip", "skipped")).toBe("Skipped.");
+  });
+
+  it("says what a running step puts on, off its picks less the rows already there", () => {
+    const skills = Object.fromEntries(Array.from({ length: 78 }, (_, i) => [`skill-${i}`, { from: "~/.claude/skills" }]));
+    const picks = RecipeFile.parse({ name: "studio", mcp: { wsp: { agents: ["claude"] }, context7: { agents: ["claude"] }, gsc: { agents: ["claude"] } }, clis: { gh: { via: "apt" }, go: { via: "apt" }, bun: { via: "npm" } }, skills, agents: { claude: {}, codex: {} } });
+    const rows = setupRows(
+      place(
+        [
+          { step: "floor", state: "done" },
+          { step: "agents", state: "running" },
+          { step: "mcp", state: "running" },
+          { step: "clis", state: "running" },
+          { step: "skills", state: "running" },
+        ],
+        [{ id: "clis/gh", label: "gh", outcome: "present", step: "clis" }],
+        picks,
+      ),
+    );
+    const note = (id: string): string | undefined => rows.find(r => r.id === id)?.note;
+    expect(note("agents")).toBe("Installing Claude Code, Codex.");
+    expect(note("mcp")).toBe("Copying wsp, context7, gsc.");
+    expect(note("clis")).toBe("Installing go, bun.");
+    expect(note("skills")).toBe("Copying 78 skills.");
+    const many = setupRows(place([{ step: "mcp", state: "running" }], [], RecipeFile.parse({ name: "studio", mcp: Object.fromEntries(["wsp", "context7", "gsc", "linear", "github"].map(n => [n, { agents: ["claude"] }])) })));
+    expect(many.find(r => r.id === "mcp")?.note).toBe("Copying wsp, context7 and 3 more.");
+  });
+});
+

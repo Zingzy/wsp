@@ -12,10 +12,11 @@ import { FACT } from "../format.js";
 import { CARD_INSET, LINE_FLOOR, NOTE, SETTING_TITLE } from "../layout.js";
 import type { StepLine } from "./setup.js";
 
-/** A step's time in the mono: tenths under a second, seconds under a minute, then minutes and seconds. */
-export function fmtStepMs(ms: number): string {
-  if (ms < 950) return `${(ms / 1000).toFixed(1)} s`;
-  const s = Math.round(ms / 1000);
+/** A step's time in the mono: tenths under a second, seconds under a minute, then minutes and seconds. A time that
+ * climbs while the step runs is whole seconds, so it ticks once a second. */
+export function fmtStepMs(ms: number, ticking = false): string {
+  if (!ticking && ms < 950) return `${(ms / 1000).toFixed(1)} s`;
+  const s = ticking ? Math.floor(ms / 1000) : Math.round(ms / 1000);
   return s < 60 ? `${s} s` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
@@ -30,11 +31,13 @@ export function StepRow({ row, why, acts, children }: { row: StepLine; why?: str
         <span className="flex size-4 items-center justify-center">
           <StateMark state={row.state} {...(why === undefined ? {} : { why })} />
         </span>
-        <span className="flex min-w-0 flex-col">
+        <span data-step-words className="flex min-w-0 flex-col" {...(row.output === undefined ? {} : { title: row.output })}>
           <span className={cn(SETTING_TITLE, "min-w-0 break-words", quiet && "font-normal text-muted-foreground")}>{row.name}</span>
           {row.note === undefined ? null : <span className={NOTE}>{row.note}</span>}
         </span>
-        <span className={cn(FACT, "min-w-0 text-right")}>{row.ms === undefined ? "" : fmtStepMs(row.ms)}</span>
+        <span data-step-time className={cn(FACT, "min-w-0 text-right")}>
+          {row.ms === undefined ? "" : fmtStepMs(row.ms, row.ticking === true)}
+        </span>
       </div>
       {row.said === undefined && children === undefined && acts === undefined ? null : (
         <div className={cn("flex flex-col gap-3 pb-4 pr-(--settings-inset,20px)", TEXT_EDGE, row.sub === true && "pl-[calc(var(--settings-inset,20px)+56px)]")}>

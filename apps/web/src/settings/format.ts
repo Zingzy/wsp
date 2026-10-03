@@ -138,6 +138,10 @@ export const ADD_COMPUTER_WORDS = {
   needsGitHub: "Private; needs GitHub to clone. Go back to sign in, or skip it.",
   /** A project with no remote travels as its folder. */
   noRemote: "No remote; copied whole.",
+  /** What the GitHub row says once its step ended, by the way it signed in. */
+  tokenCopied: "Token copied.",
+  skipped: "Skipped.",
+  signedInOn: (box: string): string => (box === "" ? "Signed in there." : `Signed in on ${box}.`),
   /** A project's remote and what of it no remote holds: nothing, or the commits that travel with it. */
   remoteLine: (remote: string, unpushed: number | undefined): string =>
     `${remote}${unpushed === undefined ? "" : unpushed === 0 ? ", clean" : `, ${unpushed} unpushed ${unpushed === 1 ? "commit comes" : "commits come"} along`}.`,

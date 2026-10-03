@@ -534,7 +534,9 @@ describe("Add a computer while the setup runs", () => {
     mountSettings({ api: fake.api, at: { kind: "group", group: "computers" } });
     act(() => openSetup(studio.id));
     await settle();
-    await waitFor(() => expect(dialog()!.querySelector("[data-step-row='agents']")?.textContent).toContain("npm install -g @anthropic-ai/claude-code"));
+    // The box's own line is behind the row on hover; the note is the sentence the picks make.
+    await waitFor(() => expect(dialog()!.querySelector("[data-step-row='agents'] [data-step-words]")?.getAttribute("title")).toBe("npm install -g @anthropic-ai/claude-code"));
+    expect(dialog()!.querySelector("[data-step-row='agents']")?.textContent).not.toContain("npm install");
     // A step that ended keeps its own note, never a line of output.
     expect(dialog()!.querySelector("[data-step-row='floor']")?.textContent).not.toContain("apt-get");
     expect(reads).toEqual([{ placeId: studio.id, step: undefined }]);
@@ -552,6 +554,30 @@ describe("Add a computer while the setup runs", () => {
     expect(out.clis).toHaveLength(120);
     expect(out.clis!.endsWith("…")).toBe(true);
     expect(Object.keys(out)).toEqual(["clis", "mcp"]);
+  });
+
+  it("ticks each running step's time off one interval for the whole list", async () => {
+    const ticks: number[] = [];
+    const was = window.setInterval;
+    window.setInterval = ((fn: () => void, ms?: number) => {
+      if (ms === 1000) ticks.push(ms);
+      return was(fn, ms);
+    }) as typeof window.setInterval;
+    try {
+      const three: PlaceSetup = { ...RUNNING, addId: "a_tick", steps: [{ step: "floor", state: "done", ms: 72_000 }, { step: "agents", state: "running" }, { step: "mcp", state: "running" }, { step: "clis", state: "running" }] };
+      useStore.setState({ places: [here, placed(three)] });
+      mountSettings({ api: host().api, at: { kind: "group", group: "computers" } });
+      act(() => openSetup(studio.id));
+      await settle();
+      const time = (id: string): string | null | undefined => dialog()!.querySelector(`[data-step-row='${id}'] [data-step-time]`)?.textContent;
+      expect(["agents", "mcp", "clis"].map(time)).toEqual(["0 s", "0 s", "0 s"]);
+      await rest(1100);
+      expect(["agents", "mcp", "clis"].map(time)).toEqual(["1 s", "1 s", "1 s"]);
+      expect(time("floor")).toBe("1:12");
+      expect(ticks).toHaveLength(1);
+    } finally {
+      window.setInterval = was;
+    }
   });
 
   it("draws every step a frame says is running with its own crab", async () => {

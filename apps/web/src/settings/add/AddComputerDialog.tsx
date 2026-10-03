@@ -37,7 +37,7 @@ import { STEP_TITLES, askedHostKey, closeAdd, connect, firstPick, go, openSetup,
 import { everything, folderKey, githubPick, noPicks } from "./choices.js";
 import { AgentsPicks, Choice, ClisPicks, GitHubPicks, OtherPicks, PluginsPicks, ProjectsPicks, ServersPicks, SkillsPicks, type FolderOption } from "./PickLists.js";
 import { PickLine, PickRow } from "./PickRow.js";
-import { checkRows, setupCount, setupRows, setupStanding, stepOutput, type StepLine } from "./setup.js";
+import { checkRows, runningMs, setupCount, setupRows, setupStanding, stepOutput, type StepLine } from "./setup.js";
 import { RetryActs, SkipAct, StepRow } from "./StepRow.js";
 
 const GLYPH = "size-4 text-foreground/80";
@@ -268,7 +268,7 @@ function WaitBlock({ row, onRetry, onSkip, busy }: { row: StepLine; onRetry: () 
 
 /** The steps of a setup with what each row asks: Retry where a row did not land, Skip where it is an item the host can
  * set aside, the wait where a sign-in does. */
-export function SetupList({ place, id = "setup", rows = setupRows(place) }: { place: PlaceView; id?: string; rows?: readonly StepLine[] }) {
+export function SetupList({ place, id = "setup", rows = setupRows(place, placeName(place)) }: { place: PlaceView; id?: string; rows?: readonly StepLine[] }) {
   const api = useStore(s => s.api);
   const [refused, setRefused] = useState<Failure | null>(null);
   const [busy, setBusy] = useState(false);
@@ -305,8 +305,21 @@ export function SetupList({ place, id = "setup", rows = setupRows(place) }: { pl
 /** How often the steps running are read off the box's setup log: one tail of the log a read, for every step at once. */
 const OUTPUT_EVERY_MS = 3000;
 
+/** The time now, moved once a second while `on`: one interval for every row that ticks, never one per row. */
+function useNow(on: boolean): number {
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    if (!on) return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [on]);
+  return now;
+}
+
 /** The last line of output of each step running, read when the steps running change and on a timer while any runs,
- * never on a render; a read still out when the next is due is not doubled. */
+ * never on a render; a read still out when the next is due is not doubled. It stands behind the row on hover: the
+ * row's own note is the sentence its picks make. */
 function useStepOutput(placeId: string, running: string): Partial<Record<PlaceSetupStep, string>> {
   const api = useStore(s => s.api);
   const [out, setOut] = useState<Partial<Record<PlaceSetupStep, string>>>({});
@@ -341,17 +354,15 @@ function useStepOutput(placeId: string, running: string): Partial<Record<PlaceSe
 }
 
 function RunningView({ place }: { place: PlaceView }) {
-  const drawn = setupRows(place);
-  const output = useStepOutput(
-    place.id,
-    drawn
-      .filter(row => row.state === "working")
-      .map(row => row.id)
-      .join(" "),
-  );
+  const drawn = setupRows(place, placeName(place));
+  const working = drawn.filter(row => row.state === "working").map(row => row.id);
+  const output = useStepOutput(place.id, working.join(" "));
+  const now = useNow(working.length > 0);
+  const addId = place.setup?.addId;
   const rows = drawn.map(row => {
-    const said = row.state === "working" ? output[row.id as PlaceSetupStep] : undefined;
-    return said === undefined ? row : { ...row, note: said };
+    if (row.state !== "working" || addId === undefined) return row;
+    const said = output[row.id as PlaceSetupStep];
+    return { ...row, ms: runningMs(addId, row.id, now), ticking: true as const, ...(said === undefined ? {} : { output: said }) };
   });
   const asks = rows.find(row => row.state === "needs-you" || row.state === "failed")?.id;
   const shown = useRef(false);
@@ -550,7 +561,7 @@ export function AddComputerDialog() {
   };
 
   const standing = place === undefined ? "running" : setupStanding(place);
-  const rows = place === undefined ? [] : setupRows(place);
+  const rows = place === undefined ? [] : setupRows(place, box);
   const head = ((): { title: string; line?: string } => {
     if (view === "where" || view === "hostkey") return { title: ADD_COMPUTER_WORDS.title, line: ADD_COMPUTER_WORDS.where };
     if (view !== "running" && view !== "ready") return { title: STEP_TITLES[view] };
