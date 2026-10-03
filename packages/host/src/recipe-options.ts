@@ -97,10 +97,11 @@ const FOLDER_READ_MS = 5_000;
 const gitIn = (path: string, args: readonly string[]): Promise<string | undefined> =>
   new Promise(resolve => execFile("git", ["-C", path, ...args], { timeout: FOLDER_READ_MS }, (e, out) => resolve(e === null ? out.trim() : undefined)));
 
-/** Whether a repository answers a read with no sign-in at all: no credential helper, no prompt. */
+/** Whether a repository answers a read with no sign-in at all: no credential helper, no prompt, and none of the
+ * person's own git config, whose url rewrites would send the read over their ssh key. */
 export const readsAnonymously = (url: string): Promise<boolean> =>
   new Promise(resolve =>
-    execFile("git", ["-c", "credential.helper=", "ls-remote", "--quiet", url, "HEAD"], { timeout: FOLDER_READ_MS, env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "", SSH_ASKPASS: "" } }, e => resolve(e === null)),
+    execFile("git", ["-c", "credential.helper=", "ls-remote", "--quiet", url, "HEAD"], { timeout: FOLDER_READ_MS, env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "", SSH_ASKPASS: "", GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" } }, e => resolve(e === null)),
   );
 
 /** This computer's own projects as folders a box can take, each with what it weighs, the commits no remote holds and,
