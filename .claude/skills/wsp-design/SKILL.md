@@ -85,7 +85,10 @@ blue is the primary (the owner's ruling, 2026-09-26). Nothing else is coloured
 at rest except a real brand or agent mark, a project's own glyph, and the
 line counts, whose additions are `--success` and deletions `--error-foreground`
 as in T3, one tone on the card under a reply, the Changes pane and the PR pane
-(2026-10-01).
+(2026-10-01). A slate's tone on a word, a figure or a meter's fill takes
+`--success` (good), `--warning`, `--error-foreground` (bad), `--status-input`
+(info) or `--primary` (accent, one per slate), never on a background, a border
+or a whole row, under the one-loud-thing rule (the Slate proof of concept).
 
 ### Spacing and pitch
 
