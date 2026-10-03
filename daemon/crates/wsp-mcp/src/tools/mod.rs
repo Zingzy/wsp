@@ -18,7 +18,7 @@ mod projects;
 mod projects_change;
 mod pull_request;
 mod recipe;
-mod said;
+pub(crate) mod said;
 mod servers;
 mod setup;
 mod skills;

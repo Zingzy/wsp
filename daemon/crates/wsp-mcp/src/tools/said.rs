@@ -47,6 +47,8 @@ pub struct Turns {
     pub branch_here_only: String,
     pub thread_opened: String,
     pub thread_opened_in: String,
+    pub moved: String,
+    pub moved_fresh: String,
     pub opened_thread: String,
     pub no_result: String,
     pub no_thread_stamped: String,

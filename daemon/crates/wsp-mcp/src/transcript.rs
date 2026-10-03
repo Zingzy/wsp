@@ -8,6 +8,8 @@ use serde_json::value::RawValue;
 use serde_json::Value;
 
 use crate::js;
+use crate::record::fill;
+use crate::tools::said::turns;
 use crate::words::{cost, duration, plural, title_line};
 
 /// A row of a read: who spoke, when the runtime recorded it, and the text.
@@ -68,6 +70,12 @@ struct Event {
     reason: Option<String>,
     #[serde(default)]
     turn_id: Option<String>,
+    #[serde(default)]
+    from: Option<String>,
+    #[serde(default)]
+    to: Option<String>,
+    #[serde(default)]
+    fresh: Option<bool>,
 }
 
 const NO_RESULT_LINE: &str = "turn ended without a result";
@@ -75,7 +83,8 @@ const NO_RESULT_LINE: &str = "turn ended without a result";
 /// The events of this thread that a read folds, in order; an event of another kind, or one that does not read as its
 /// kind's shape, is no row of it.
 fn of_thread(events: &[Box<RawValue>], thread_id: &str) -> Vec<Event> {
-    const READ: [&str; 5] = ["session.start", "session.steer", "session.delta", "session.done", "session.end"];
+    const READ: [&str; 7] =
+        ["session.start", "session.steer", "session.delta", "session.done", "session.end", "session.moved", "session.behind"];
     events
         .iter()
         .filter_map(|raw| serde_json::from_str::<Event>(raw.get()).ok())
@@ -136,6 +145,16 @@ pub fn messages(events: &[Box<RawValue>], thread_id: &str) -> Vec<Message> {
             }
             "session.steer" => {
                 say(&mut rows, &mut open, "person", at, event.prompt.unwrap_or_else(|| "undefined".to_owned()));
+            }
+            "session.moved" => {
+                let words = turns();
+                let template = if event.fresh == Some(true) { &words.moved_fresh } else { &words.moved };
+                let text =
+                    fill(template, &[("from", event.from.as_deref().unwrap_or_default()), ("to", event.to.as_deref().unwrap_or_default())]);
+                say(&mut rows, &mut open, "turn", at, text);
+            }
+            "session.behind" => {
+                say(&mut rows, &mut open, "turn", at, event.text.unwrap_or_default());
             }
             "session.delta" => {
                 let text = event.text.clone().unwrap_or_default();

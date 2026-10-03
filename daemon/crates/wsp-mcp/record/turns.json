@@ -114,6 +114,8 @@
   "branchHereOnly": "--branch takes a project on this computer, where wsp makes worktrees. Name a project on this computer.",
   "threadOpened": "thread {thread} on {project} in {folder}",
   "threadOpenedIn": "thread {thread} in {folder}",
+  "moved": "its worktree at {from} is gone, so it goes on in {to}",
+  "movedFresh": "its worktree at {from} is gone, so it goes on in {to} in a fresh session of its agent",
   "openedThread": "thread {thread}",
   "noResult": "turn ended without a result",
   "noThreadStamped": "the runtime stamped no thread on the session",

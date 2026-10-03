@@ -124,6 +124,9 @@ const WORKSPACES = reply({
 const at = (ms: number) => 1727431200000 + ms;
 
 const EVENTS = [
+  { type: "session.moved", threadId: "t-1111aaaa", turnId: "u1", sessionId: "s", workspaceId: "w", from: "/w/tree é", to: "/w/proj", fresh: true, at: at(0) },
+  { type: "session.behind", threadId: "t-1111aaaa", turnId: "u1", sessionId: "s", workspaceId: "w", text: "this worktree is behind pull request #7 \u0085", at: at(0) },
+  { type: "session.moved", threadId: "t-1111aaaa", turnId: "u1", sessionId: "s", workspaceId: "w", from: "/w/tree", to: "/w/proj", at: at(0) },
   { type: "session.start", threadId: "t-1111aaaa", turnId: "u1", prompt: "Fix the \u0085test", at: at(0) },
   { type: "session.delta", threadId: "t-1111aaaa", kind: "text", text: "Looking ", messageId: "m1", at: at(1000) },
   { type: "session.delta", threadId: "t-1111aaaa", kind: "text", text: "now.", messageId: "m1", at: at(1500) },
