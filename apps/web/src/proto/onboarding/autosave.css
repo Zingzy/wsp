@@ -1,0 +1,44 @@
+/* The auto-save check: its stroke draws in over 600 ms when a save lands, then the ink settles to muted. Once per
+   save, nothing runs at rest; under reduced motion it is simply there, muted. */
+@keyframes proto-autosave-draw {
+  from {
+    stroke-dashoffset: 24;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes proto-autosave-settle {
+  0%,
+  60% {
+    color: var(--foreground);
+  }
+  100% {
+    color: var(--muted-foreground);
+  }
+}
+.proto-autosave {
+  color: var(--muted-foreground);
+  animation: proto-autosave-settle 1400ms ease-out both;
+}
+.proto-autosave path {
+  stroke-dasharray: 24;
+  stroke-dashoffset: 0;
+  animation: proto-autosave-draw 600ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .proto-autosave,
+  .proto-autosave path {
+    animation: none;
+  }
+}
+/* The dev page's ?freeze=1: the check held early in its draw (the stroke eases out fast, so 60 ms is about half of
+   it), with the ink still the foreground, so the mid-stroke frame can be photographed. */
+.proto-freeze .proto-autosave {
+  animation-play-state: paused;
+  animation-delay: -300ms;
+}
+.proto-freeze .proto-autosave path {
+  animation-play-state: paused;
+  animation-delay: -60ms;
+}

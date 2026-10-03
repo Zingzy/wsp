@@ -16,6 +16,7 @@ import { ComputerPageProto, ComputersProto } from "../../src/proto/onboarding/Co
 import { PLACES, SETUP_CARDS, STUDIO } from "../../src/proto/onboarding/fixtures";
 import { RecipePageProto, RecipesEmptyProto, RecipesListProto } from "../../src/proto/onboarding/RecipesProto";
 import { useSettingUp } from "../../src/proto/onboarding/SettingUpSection";
+import { markSaved } from "../../src/proto/onboarding/saves";
 import { useStore } from "../../src/protocol/store";
 import { useSettingsStore } from "../../src/settings/settingsStore";
 import { applyTheme } from "../../src/settings/theme";
@@ -66,6 +67,12 @@ function ProtoSettingsPage() {
     </ScrollArea>
   );
 }
+
+// ?draw=<ms> lands a save that many ms after load; ?freeze=1 holds the foot's check 300 ms into its draw, so the
+// mid-stroke frame can be photographed.
+const draw = params.get("draw");
+if (draw !== null) setTimeout(markSaved, Number(draw));
+document.documentElement.classList.toggle("proto-freeze", params.get("freeze") === "1");
 
 // ?scroll=bottom scrolls the dialog's panel to its end once drawn, so the rows under the fold can be photographed.
 if (params.get("scroll") === "bottom") {

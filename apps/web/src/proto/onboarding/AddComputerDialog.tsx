@@ -16,7 +16,7 @@ import { HarnessMark } from "../../components/chat/HarnessMark.js";
 import { HeroField } from "../../components/chat/EmptyHero.js";
 import { AddButton } from "../../components/ui/add-button.js";
 import { Button } from "../../components/ui/button.js";
-import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../../components/ui/dialog.js";
+import { Dialog, DialogDescription, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../../components/ui/dialog.js";
 import { Input } from "../../components/ui/input.js";
 import { Radio, RadioGroup } from "../../components/ui/radio-group.js";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../../components/ui/select.js";
@@ -33,6 +33,8 @@ import { CopyRow, RefusalSlot } from "../../settings/sheetParts.js";
 import { ADDED_FOLDER, AGENTS, BOX_NAME, CHECKS_REFUSED, CHECKS_RUNNING, CLIS, CONFIGS, GITHUB_CHOICES, HERE, HOST_KEY, MAC_NAME, NAME_TAKEN, NEEDS_GITHUB, PLUGINS, PROJECTS, RECIPES, RUNNING, RUNNING_BLOCKED, RUNNING_DONE, RUNNING_FAILED, SERVERS, SKILLS, SSH_HOSTS, STUDIO, SUMMARY, type ProjectPick, type StepLine } from "./fixtures.js";
 import { PickLine, PickRow } from "./PickRow.js";
 import { RetryActs, StepRow } from "./StepRow.js";
+import { markSaved, useSaves } from "./saves.js";
+import "./autosave.css";
 
 export type Screen =
   | "where"
@@ -168,7 +170,14 @@ function Choice({ id, picked, glyph, name, note, fact }: { id: string; picked: b
 function StartFromStep() {
   const [picked, setPicked] = useState("mac");
   return (
-    <RadioGroup value={picked} onValueChange={next => setPicked(String(next))} className="gap-0">
+    <RadioGroup
+      value={picked}
+      onValueChange={next => {
+        setPicked(String(next));
+        markSaved();
+      }}
+      className="gap-0"
+    >
       <Grid id="start-from">
         <Choice id="mac" picked={picked === "mac"} glyph={<ComputerGlyph place={HERE} className="size-4 text-foreground/80" />} name={`Everything on ${MAC_NAME}`} note="3 agents, 14 MCP servers, 9 CLIs, 78 skills, 17 plugins, every project." />
         {RECIPES.map(recipe => {
@@ -184,7 +193,14 @@ function StartFromStep() {
 function GitHubStep() {
   const [picked, setPicked] = useState("token");
   return (
-    <RadioGroup value={picked} onValueChange={next => setPicked(String(next))} className="gap-0">
+    <RadioGroup
+      value={picked}
+      onValueChange={next => {
+        setPicked(String(next));
+        markSaved();
+      }}
+      className="gap-0"
+    >
       <Grid id="github">
         {GITHUB_CHOICES.map(choice => (
           <Choice key={choice.id} id={choice.id} picked={picked === choice.id} glyph={<GithubIcon aria-hidden className="size-4 text-foreground/80" />} name={choice.name} note={choice.note} />
@@ -197,7 +213,13 @@ function GitHubStep() {
 function WordSelect({ value, words, label }: { value: string; words: readonly string[]; label: string }) {
   const [picked, setPicked] = useState(value);
   return (
-    <Select value={picked} onValueChange={next => setPicked(String(next))}>
+    <Select
+      value={picked}
+      onValueChange={next => {
+        setPicked(String(next));
+        markSaved();
+      }}
+    >
       <SelectTrigger size="sm" aria-label={label} className={SELECT_WIDTH}>
         <SelectValue />
       </SelectTrigger>
@@ -215,7 +237,13 @@ function WordSelect({ value, words, label }: { value: string; words: readonly st
 /** The ticks of a list, by id. */
 function useTicks<T extends { id: string; ticked: boolean }>(rows: readonly T[]): [Record<string, boolean>, (id: string, next: boolean) => void] {
   const [ticks, setTicks] = useState<Record<string, boolean>>(Object.fromEntries(rows.map(row => [row.id, row.ticked])));
-  return [ticks, (id, next) => setTicks(t => ({ ...t, [id]: next }))];
+  return [
+    ticks,
+    (id, next) => {
+      setTicks(t => ({ ...t, [id]: next }));
+      markSaved();
+    },
+  ];
 }
 
 function AgentsStep() {
@@ -503,8 +531,31 @@ function progress(screen: Screen, rows: readonly StepLine[] | undefined): { word
   return { words: `${at} of ${STEPS.length}`, why: `Step ${at} of ${STEPS.length}` };
 }
 
-/** From the first choice on, the choices are kept as a pending machine; the header says so once, quietly. */
+/** From the first choice on, the choices are kept as a pending machine; the foot says so, quietly. */
 const saved = (screen: Screen): boolean => STEPS.indexOf(stepOf(screen)) >= STEPS.indexOf("startfrom") && RUNS[screen] === undefined && screen !== "ready";
+
+/** The foot's left: the auto-save check, drawn in again on every save, and the one line. The check is keyed on the
+ * save count so a landed save remounts it and its stroke draws in once more. */
+function SavedLine() {
+  const n = useSaves(s => s.n);
+  return (
+    <span data-k="saved" className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+      <CheckIcon key={n} aria-hidden className="proto-autosave size-3.5 shrink-0" />
+      Saved, you can finish later
+    </span>
+  );
+}
+
+/** The dialog's foot without the Esc keycap: the saved line at the left once a choice is kept, the acts at the right.
+ * Under 640 px the acts stack with the primary on top and the line stands under them. */
+function Foot({ left, children }: { left: ReactNode; children: ReactNode }) {
+  return (
+    <div data-slot="dialog-footer" className="flex flex-col-reverse gap-2 px-5 pt-3 pb-4 sm:flex-row sm:items-center sm:justify-end">
+      <span className="flex min-h-5 items-center max-sm:justify-center sm:me-auto">{left}</span>
+      {children}
+    </div>
+  );
+}
 
 function foot(screen: Screen): ReactNode {
   const back = (
@@ -590,7 +641,7 @@ function foot(screen: Screen): ReactNode {
 export function AddComputerDialog({ screen }: { screen: Screen }) {
   const head = HEAD[screen];
   const at = progress(screen, RUNS[screen]);
-  const popup = "max-w-[680px] [--settings-inset:16px] sm:h-[640px]";
+  const popup = "max-w-[560px] [--settings-inset:16px] sm:h-[640px]";
   if (screen === "ready") {
     return (
       <Dialog open onOpenChange={() => {}}>
@@ -610,19 +661,12 @@ export function AddComputerDialog({ screen }: { screen: Screen }) {
               <DialogTitle>{head.title}</DialogTitle>
               {head.line === undefined ? null : <DialogDescription>{head.line}</DialogDescription>}
             </div>
-            <div className="flex shrink-0 flex-col items-end gap-0.5 pt-0.5">
-              <span data-k="progress" className={FACT} title={at.why}>
-                {at.words}
-              </span>
-              {saved(screen) ? (
-                <span data-k="saved" className="text-xs text-muted-foreground">
-                  Saved, you can finish later
-                </span>
-              ) : null}
-            </div>
+            <span data-k="progress" className={cn(FACT, "shrink-0 pt-0.5")} title={at.why}>
+              {at.words}
+            </span>
           </DialogHeader>
           <DialogPanel className="flex flex-col gap-5 pt-2 pb-5">{body(screen)}</DialogPanel>
-          <DialogFooter className="pt-2">{foot(screen)}</DialogFooter>
+          <Foot left={saved(screen) ? <SavedLine /> : null}>{foot(screen)}</Foot>
         </div>
       </DialogPopup>
     </Dialog>
