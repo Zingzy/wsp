@@ -20,6 +20,7 @@ import { AccessChoice, AgentDefaults, AgentDefaultsPatch, ProjectOverrides, Proj
 import { GENERAL_DEFAULTS, GENERAL_FIELDS, patchedGeneral } from "./general-prefs.js";
 import { UsageAlertEvent } from "./plan-alerts.js";
 import { RecipeFile } from "./recipe-file.js";
+import { ProjectHue, ProjectIcon } from "./project-look.js";
 import type { OutsideLine, OutsideOpen } from "./outside-line.js";
 import type { FsListReply as WireFsListReply } from "./generated/FsListReply.js";
 import type { FsFilesReply as WireFsFilesReply } from "./generated/FsFilesReply.js";
@@ -2115,12 +2116,6 @@ export type PreferencesTarget = z.infer<typeof PreferencesTarget>;
 
 /** One record on the host's state; the desktop app and a browser tab on the same host read and write this one. sidebarWidth
  * absent is the sidebar's own default; terminalZoom is the pixels a workspace's panes add to the base size, by workspace id. */
-/** The glyphs a project can wear in the sidebar and the switcher; the app maps each word to its drawing. */
-export const ProjectIcon = z.enum(["folder", "code", "terminal", "globe", "rocket", "box", "database", "server", "cpu", "zap", "flame", "leaf", "star", "heart", "book", "music", "camera", "gamepad", "shield", "wrench"]);
-export type ProjectIcon = z.infer<typeof ProjectIcon>;
-/** The hues a project's glyph can take; the app maps each word to a colour of its own theme. */
-export const ProjectHue = z.enum(["neutral", "red", "orange", "amber", "green", "teal", "blue", "violet", "pink"]);
-export type ProjectHue = z.infer<typeof ProjectHue>;
 /** How one project is drawn: its glyph and its hue, each the default where absent. */
 export const ProjectLook = z.object({ icon: ProjectIcon.optional(), hue: ProjectHue.optional() }).strict();
 export type ProjectLook = z.infer<typeof ProjectLook>;
@@ -7352,6 +7347,7 @@ export { AGENTS_ON, CLOUD_CAP_DEFAULT, NAP_AFTER_MAX_MS, NAP_AFTER_MS, phaseHold
 export { MCP_SERVER_NAME, threadsFollowed, WSP_TOOL_TIMEOUT_SEC } from "./wsp-tools.js";
 export { type AbsentComputer, type AwayWord, absentComputer, actionRefusal, daemonSilent, ownDaemonDown, START_DAEMON_WORD, agentsKindRefusal, agentsMayDrive, awayMsOf, composerHeldLine, type CopyToDelete, deleteCopiesNotice, deleteNotice, unpushedLine, onDeleteOf, type StandsOn, UNNAMED_COMPUTER, goneRefusal, COMPUTER_LEFT, pausedOrPausing, notAnsweringYet, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, turnSpendWord, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, FORGET_NEEDS_GONE, goneRoadRefusal, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, whereWord, workspaceStateLine, workspaceStateOf, workspaceWord, type AbsentRoad, type AbsentRoadInput, absentRoad, BACK_OVER_SSH, backUrl, dialsBackWord, linkedOver, lastKnown, REPORTED_WORD, placeDialLine, placeNoDialLine, placeDialRoad, sshRoadOf, type PlaceDialRoad } from "./workspace-state.js";
 export * from "./agents-report.js";
+export * from "./project-look.js";
 export { contextWindowsFor, effortsFor, everyModel, listedPick, markedDefault, modelOf } from "./harness-picks.js";
 export * from "./thread-defaults.js";
 export * from "./exit.js";

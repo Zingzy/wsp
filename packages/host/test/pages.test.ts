@@ -197,7 +197,7 @@ describe("the pages wsp prints", () => {
     expect(init.lines[0]).not.toContain("--service");
     const foreign = captured();
     expect(await cli(["down", "--recipe", "x"], foreign, undefined, {}, false)).toBe(EXIT_CODES.usage);
-    expect(foreign.errors[0]).toBe("--recipe belongs to wsp init; wsp down does not read it. usage: wsp down");
+    expect(foreign.errors[0]).toBe("--recipe belongs to wsp add and wsp init; wsp down does not read it. usage: wsp down");
   });
 
   it("the tool server's own two pages say what each does and give each flag it reads a line", async () => {

@@ -53,7 +53,6 @@ import { addedProjectLine, defaultSeedChoice, kindForComputer, ProjectAddEvent, 
   PLACE_LINK_NONCE_BYTES,
   PlaceJoinDevice,
   PlaceJoinReply,
-  PlaceStageEvent,
   PlaceView,
   type DeviceView,
   type PlaceBack,
@@ -1605,17 +1604,6 @@ async function confirmedHostKey(io: CliIO, address: string, flags: AddFlags, dep
 /** The port and key a person typed beside an address, in the shape every ssh reading takes them. */
 function sshFlags(flags: AddFlags): { port?: number; keyPath?: string } {
   return { ...(flags.sshPort !== undefined ? { port: flags.sshPort } : {}), ...(flags.keyPath !== undefined ? { keyPath: flags.keyPath } : {}) };
-}
-
-/** One step of an install as a terminal prints it: the step's own words, a tick where it is done and what the
- * computer answered beside it. */
-export function stageLines(event: PlaceStageEvent): string[] {
-  const mark = event.state === "done" ? "·" : event.state === "failed" ? "x" : " ";
-  // A running step says its note as a finished one does: what the box was read as and where it will dial back are
-  // read while the step they belong to is still running, and holding them until it ends is holding them too long.
-  // A failed step's note is the failure's first line, which the terminal prints whole as the command's error.
-  const note = event.note === undefined || event.state === "failed" ? "" : `: ${event.note}`;
-  return [`  ${mark} ${PLACE_ADD_WORDS[event.step]}${note}`];
 }
 
 /** What an install prints once the computer is in: what it is, the key its ssh answered with so a person can check

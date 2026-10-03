@@ -6,7 +6,7 @@
 // file; it is read when the recipe is resolved, so a recipe never pins one.
 import { z } from "zod";
 import { plural } from "./format.js";
-import { ProjectHue, ProjectIcon } from "./index.js";
+import { ProjectHue, ProjectIcon } from "./project-look.js";
 
 /** How an agent or the GitHub row signs in on the computer: the token this computer's vault holds, set in the
  * environment of every run there, or the tool's own login run on that computer through the sign-in relay. */
@@ -37,9 +37,8 @@ export const RecipeFile = z
         row({
           from: NAME,
           name: NAME.optional(),
-          // Lazy: the two enums live in the index, which re-exports this file.
-          icon: z.lazy(() => ProjectIcon).optional(),
-          hue: z.lazy(() => ProjectHue).optional(),
+          icon: ProjectIcon.optional(),
+          hue: ProjectHue.optional(),
           keep: NAMES.default([]),
         }),
       )

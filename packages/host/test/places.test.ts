@@ -58,6 +58,7 @@ import {
   joinCommand,
   placeDaemonFlags,
   placeInstaller,
+  addLineWords,
   backRefusedLine,
   dialsBackOverSshNote,
   placeHeldRefusal,
@@ -79,7 +80,6 @@ import {
   removeCommand,
   removeLines,
   twoPlacesLine,
-  stageLines,
   UNSAID_CHIP_REFUSAL,
   ADD_LOOPBACK_REFUSAL,
   advertisedLoopbackRefusal,
@@ -1740,7 +1740,7 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
       box.stage,
     );
     expect(box.stages).toContain("wsp running (x86_64)");
-    expect(stageLines({ type: "place.stage", addId: "a_1", step: "wsp", state: "running", note: "x86_64" })).toEqual(["    installing wsp: x86_64"]);
+    expect(addLineWords({ step: "wsp", state: "running", note: "x86_64" })).toBe("    installing wsp: x86_64");
   });
 
   it("says where the box will dial back as its join starts, not after the twenty seconds it would wait", async () => {
