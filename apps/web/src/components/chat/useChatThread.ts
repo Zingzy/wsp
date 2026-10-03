@@ -177,6 +177,8 @@ function ownPlace(e: SessionEvent): string | undefined {
       return `session.checkpoint:${e.turnId}`;
     case "session.run":
       return `session.run:${e.runId}:${e.state}`;
+    case "session.subagent":
+      return e.line === undefined ? undefined : `session.subagent:${e.turnId}:${e.line}`;
     default: {
       const _exhaustive: never = e;
       return undefined;

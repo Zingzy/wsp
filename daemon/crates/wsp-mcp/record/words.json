@@ -246,7 +246,7 @@
     "thread_deny": "wsp thread deny <thread>",
     "send": "wsp send <thread> [--model, --effort <value>] [--fast] [--file <path>] [--detach] \"<message>\"",
     "restart": "wsp restart",
-    "stop": "wsp stop <thread>",
+    "stop": "wsp stop <thread> [--task <id>]",
     "exec": "wsp exec <workspace> [--cwd <dir>] -- <command...>",
     "folders": "wsp folders [<folder>] [--hidden] [--repos] [--on <computer>]",
     "setup": "wsp setup",

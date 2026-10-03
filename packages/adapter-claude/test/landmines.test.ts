@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { buildCommand, buildEnv, newSessionId, PROJECT_DIR_ENV, SAVED_SPEND_TAIL_BYTES, savedSpendCommand, userMessageLine } from "../src/landmines.js";
+import { buildCommand, buildEnv, forwardsSubagentText, newSessionId, PROJECT_DIR_ENV, SAVED_SPEND_TAIL_BYTES, savedSpendCommand, userMessageLine } from "../src/landmines.js";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -66,9 +66,15 @@ describe("buildEnv", () => {
         (k.startsWith("CLAUDE_CODE_") || k === "CLAUDECODE") &&
         k !== "CLAUDE_CODE_AUTO_CONNECT_IDE" &&
         k !== "CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL" &&
-        k !== "CLAUDE_CODE_ENABLE_TODO_TOOLS",
+        k !== "CLAUDE_CODE_ENABLE_TODO_TOOLS" &&
+        k !== "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS",
     );
     expect(leaked).toEqual([]);
+  });
+
+  it("lets a background subagent run as long as the turn holds its reply: the CLI ends none on a clock of its own", () => {
+    expect(buildEnv({ base }).CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS).toBe("0");
+    expect(buildEnv({ base: { ...base, CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "600000" } }).CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS).toBe("0");
   });
 
   it("passes the API key through when given", () => {
@@ -114,6 +120,17 @@ describe("buildCommand", () => {
     expect(cmd).not.toContain("</dev/null");
     expect(cmd).toMatch(/claude -p --/);
     expect(cmd).not.toContain("--resume");
+  });
+
+  it("forwards a subagent's own text and thinking only where asked, since an older CLI exits on the flag", () => {
+    expect(buildCommand({ sessionId, subagentText: true })).toContain("--forward-subagent-text");
+    expect(buildCommand({ sessionId })).not.toContain("--forward-subagent-text");
+  });
+
+  it("takes the subagent text flag from 2.1.270 on, the first CLI whose SDK passes it", () => {
+    for (const version of ["2.1.270", "2.1.288", "2.2.0", "3.0.0"]) expect(forwardsSubagentText(version), version).toBe(true);
+    for (const version of ["2.1.269", "2.0.99", "1.9.300", "", "not a version"]) expect(forwardsSubagentText(version), version).toBe(false);
+    expect(forwardsSubagentText(undefined)).toBe(false);
   });
 
   it("uses --resume instead of --session-id when resuming", () => {

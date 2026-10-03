@@ -205,6 +205,8 @@ export function heldAgent(steers: boolean) {
   const starts: HarnessStartOptions[] = [];
   const steered: string[] = [];
   const interrupted: string[] = [];
+  /** Every subagent this agent was asked to stop by itself, by its id. */
+  const tasksStopped: string[] = [];
   const turns: { sessionId: string; onEvent: HarnessStartOptions["onEvent"]; finish: (r: TurnResult) => void; open: Map<string, PermissionAsk> }[] = [];
   /** Every prompt this agent was asked to answer, in order, as the adapter's control channel takes it. */
   const answers: { askId: string; optionId: string; outcome: PermissionOutcome }[] = [];
@@ -238,6 +240,11 @@ export function heldAgent(steers: boolean) {
           o.onEvent({ type: "permission.close", sessionId, askId, outcome: picked.outcome, optionId: picked.optionId });
           return "answered" as const;
         },
+        stopTask: async (task: string) => {
+          tasksStopped.push(task);
+          setImmediate(() => o.onEvent({ type: "subagent", sessionId, task, state: "stopped", parentToolUseId: `toolu_${task}` }));
+          return { outcome: "accepted" as const };
+        },
         ...(steers
           ? {
               steer: async (prompt: string) => {
@@ -260,7 +267,12 @@ export function heldAgent(steers: boolean) {
     t.open.set(raised.askId, raised);
     t.onEvent({ type: "permission.ask", sessionId: t.sessionId, ask: raised });
   };
-  return { adapter, starts, envs, steered, interrupted, release, ask, answers };
+  /** Starts one of the agent's own subagents on a running turn, as the CLI's task_started does. */
+  const spawn = (turn: number, task: string, title: string): void => {
+    const t = turns[turn]!;
+    t.onEvent({ type: "subagent", sessionId: t.sessionId, task, state: "running", parentToolUseId: `toolu_${task}`, title, depth: 1 });
+  };
+  return { adapter, starts, envs, steered, interrupted, release, ask, answers, spawn, tasksStopped };
 }
 
 /** One scripted tool call: the name and input the harness reports for it, and what it answered when it answered
