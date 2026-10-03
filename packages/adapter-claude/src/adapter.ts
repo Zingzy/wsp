@@ -689,8 +689,8 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     let askedSeq = 0;
     /** The call each running subagent was launched by, by the CLI's handle for the subagent. */
     const launchedBy = new Map<string, string>();
-    /** Set once this turn is moved to the mode that asks nobody: the CLI takes that one only at launch, so from here
-     * every prompt it raises is allowed by this host and none of them reaches a person. */
+    /** Set once the turn is in the mode that asks nobody, launched there or moved there: every prompt the CLI raises
+     * from then is allowed by this host, and only a question reaches the person. */
     let skipsPrompts = false;
 
     /** Every request still waiting, answered as the caller's outcome; nothing can reach the CLI after this. */
@@ -871,6 +871,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
               sawInit = true;
               harnessCwd = normalized.cwd;
               shellCwd = normalized.cwd;
+              if (normalized.harness?.permissionMode === SKIP_PROMPTS_MODE) skipsPrompts = true;
               if (heldReply !== undefined) {
                 woken = true;
                 if (settleTimer !== undefined) clearTimeout(settleTimer);

@@ -130,7 +130,7 @@ function PullRequestPane({ workspaceId }: { workspaceId: string }) {
   const footField = useRef<HTMLTextAreaElement>(null);
   const [quoted, setQuoted] = useState(0);
   const quote = useCallback((author: string, body: string) => {
-    setFoot(quoteOf(author, body));
+    setFoot(typed => (typed.trim() === "" ? quoteOf(author, body) : `${typed.trimEnd()}\n\n${quoteOf(author, body)}`));
     setQuoted(n => n + 1);
   }, []);
   // A quote reply brings the box into view with the caret after the quote, ready for the person's words.

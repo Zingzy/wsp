@@ -373,6 +373,23 @@ describe("a running turn moved to another access mode", () => {
     await session.finished;
   });
 
+  it("a turn launched at bypass allows a tool's prompt itself and leaves a question with the person", async () => {
+    const { events, session, io } = start();
+    io.push(JSON.stringify({ ...JSON.parse(initLine), permissionMode: "bypassPermissions" }));
+    io.push(askLine);
+    await settle();
+    expect(asks(events)).toEqual([]);
+    expect(io.stdin).toHaveLength(2);
+    expect(JSON.parse(io.stdin[1]!)).toMatchObject({ type: "control_response", response: { subtype: "success", request_id: ASK, response: { behavior: "allow" } } });
+    io.push(JSON.stringify({ ...JSON.parse(questionAskLine), request_id: NEXT_ASK }));
+    await settle();
+    expect(asks(events)).toHaveLength(1);
+    expect(io.stdin).toHaveLength(2);
+    io.push(resultLine);
+    io.end();
+    await session.finished;
+  });
+
   it("a mode the CLI offered on the open prompt answers it as that option, and one it did not leaves it for the person", async () => {
     const { events, session, io } = start();
     io.push(initLine);
