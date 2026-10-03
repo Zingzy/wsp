@@ -789,6 +789,7 @@ const TOOL_ROWS: ReadonlyMap<string, ToolRow> = new Map<string, ToolRow>([
   ["WebFetch", aboutRow({ doing: "fetching", did: "fetched" }, "url", { itemType: "web_search" })],
   ["Task", agentRow],
   ["Agent", agentRow],
+  ["spawn_agent", aboutRow({ doing: "agent:" }, "prompt", { itemType: "collab_agent_tool_call" })],
   [QUESTION_TOOL, questionRow],
 ]);
 

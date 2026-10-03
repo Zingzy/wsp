@@ -143,6 +143,7 @@ const EVENTS = [
   { type: "session.delta", threadId: "t-1111aaaa", kind: "tool_use", toolUseId: "k5", toolName: "AskUserQuestion", text: '{"questions":[{"question":"No choices?","options":[]},{"question":"Which one?","options":[{"label":"A"}]}]}', at: at(4400) },
   { type: "session.delta", threadId: "t-1111aaaa", kind: "tool_use", toolUseId: "k6", toolName: "Task", text: '{"description":"explore\\nthe code"}', at: at(4450) },
   { type: "session.delta", threadId: "t-1111aaaa", kind: "tool_result", toolUseId: "k6", at: at(4460) },
+  { type: "session.delta", threadId: "t-1111aaaa", kind: "tool_use", toolUseId: "k7", toolName: "spawn_agent", text: '{"prompt":"review\\nthe diff"}', at: at(4470) },
   { type: "session.delta", threadId: "t-1111aaaa", kind: "text", text: "", at: at(4500) },
   { type: "session.delta", threadId: "t-1111aaaa", kind: "text", text: "Done: ", messageId: "m2", at: at(5000) },
   { type: "session.delta", threadId: "t-1111aaaa", kind: "text", text: "fixed \"it\".", messageId: "m3", at: at(5100) },
