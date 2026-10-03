@@ -1630,7 +1630,7 @@ const AssistantChangedFilesSection = memo(function AssistantChangedFilesSection(
   );
 });
 
-/** Inner component that only mounts when there are actual changed files,
+/** Inner component that only mounts when the turn changed files or moved HEAD,
  *  so its hooks run unconditionally (no hooks after early return). */
 function AssistantChangedFilesSectionInner({
   turnSummary,
