@@ -3,7 +3,7 @@
 // contract components code against.
 import { useEffect, useMemo } from "react";
 import { create } from "zustand";
-import { applyPreferencesPatch, threadsFollowed, type AbsentComputer, type Attachment, type BringBackResult, foldThreads, goldenHead, threadKeyOf, workspaceStateOf, type AppAddress, type Capabilities, copyBuildOf, type GoldenStageEvent, type HarnessCatalog, type InitJob, type InitSetup, type PlaceView, type PlaceSettingsAsk, type PlaceSettingWord, type PortForward, type ProjectView, type Preferences, type PreferencesPatch, type ReleaseView, type SessionView, type ThreadMarks, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceProject, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView, type PlaceDial, type WorkspaceLanding, type ReviewDraft } from "@wsp/protocol";
+import { applyPreferencesPatch, threadsFollowed, type AbsentComputer, type Attachment, type BringBackResult, foldThreads, goldenHead, threadKeyOf, workspaceStateOf, type AppAddress, type Capabilities, copyBuildOf, type GoldenStageEvent, type HarnessCatalog, type InitJob, type InitSetup, type PlaceView, type PendingComputer, type PlaceSettingsAsk, type PlaceSettingWord, type PortForward, type ProjectView, type Preferences, type PreferencesPatch, type ReleaseView, type SessionView, type ThreadMarks, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceProject, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView, type PlaceDial, type WorkspaceLanding, type ReviewDraft } from "@wsp/protocol";
 import { noSuchThreadLine, renameNotTakenLine } from "../actions/format.js";
 import { readAddress, readProjectHome, writeAddress, writeProjectHome } from "./address.js";
 import { deriveSidebarProjects, sidebarWorkspaceOrder } from "../adapt/workspaces.js";
@@ -16,6 +16,7 @@ import { claimKept, claiming, claimsAnswered, keepCreations, keptCreations, letG
 import { clearLegacyPreferences, legacyPreferences } from "./legacyPreferences.js";
 import { bootPreferences, rememberFirstPaint } from "./firstPaint.js";
 import { applyAddStage, takeAdds } from "../settings/adds.js";
+import { foldSetup, frameEndsStep } from "../settings/add/setup.js";
 import { WHERE_WORDS } from "../settings/format.js";
 import { absenceOf, placeName, placeNamed } from "../settings/places.js";
 import { sameAt, useSettingsStore, type SettingsAt } from "../settings/settingsStore.js";
@@ -141,6 +142,8 @@ interface State {
   forwards: PortForward[];
   /** Every computer this wsp runs on, as the Settings table shows them; the four place events keep it current. */
   places: PlaceView[];
+  /** Every add that has not reached Set up, as the places list and its pending events carry them. */
+  pending: PendingComputer[];
   /** Every project this wsp holds, which is what a workspace is made of; the two project events keep it current. */
   projects: ProjectView[];
   /** What the last bring back on a workspace answered, by its id: the branch it pushed and the pull request it
@@ -592,7 +595,7 @@ export const useStore = create<State>((set, get) => {
       });
   };
 
-  const readPlaces = (api: Api): void => {
+  const readPlaceRows = (api: Api): void => {
     // An answer either way settles it, and a host whose wire carries no place list settles it at once: nothing
     // waits on a reply that is never coming.
     const placesAsked = api.placesList?.();
@@ -600,13 +603,16 @@ export const useStore = create<State>((set, get) => {
     else {
       takeAdds(api, placesAsked.then(read => read.adds));
       void placesAsked.then(
-        ({ places }) => set({ places, placesRead: true, placesRefused: null }),
+        ({ places, pending }) => set({ places, pending: pending ?? [], placesRead: true, placesRefused: null }),
         (e: unknown) => {
           const refused = listRefusal(e, "Computers", COMPUTERS_PAGE);
           if (refused !== undefined) set({ places: [], placesRead: true, placesRefused: refused });
         },
       );
     }
+  };
+  const readPlaces = (api: Api): void => {
+    readPlaceRows(api);
     // The landings go with it: a host that has gained a computer or an image since answers differently now.
     set({ landings: {} });
   };
@@ -683,6 +689,7 @@ export const useStore = create<State>((set, get) => {
     spending: {},
     forwards: [],
     places: [],
+    pending: [],
     projects: [],
     broughtBack: {},
     viewed: {},
@@ -1166,6 +1173,16 @@ export const useStore = create<State>((set, get) => {
           return;
         case "place.stage":
           applyAddStage(get().api, e);
+          return;
+        case "place.setup": {
+          set(s => ({ places: s.places.map(p => (p.id === e.placeId ? { ...p, setup: foldSetup(p.setup, e) } : p)) }));
+          // A step's rows and the end's outcome ride the record, not the frame: read once per step, never per frame.
+          const api = get().api;
+          if (api !== null && frameEndsStep(e)) readPlaceRows(api);
+          return;
+        }
+        case "place.pending":
+          set(s => ({ pending: e.pending === undefined ? s.pending.filter(p => p.id !== e.id) : [...s.pending.filter(p => p.id !== e.id), e.pending] }));
           return;
         case "place.present":
         case "place.absent":

@@ -2912,6 +2912,12 @@ export function hostKeyUnconfirmedRefusal(address: string, hostKey: string): str
   return `${address} has never been reached from this computer and answers with the key ${hostKey}; check it against the computer itself, then run wsp add ${address} --host-key '${hostKey}'`;
 }
 
+/** The key a refusal above names, read back by the app so the person confirms it with a press rather than a line;
+ * undefined for any other sentence. */
+export function unconfirmedHostKey(said: string): string | undefined {
+  return / has never been reached from this computer and answers with the key (.+?); check it against the computer itself/.exec(said)?.[1];
+}
+
 /** The same refusal where the key could not be asked for at all: a jump host or a proxy command in the person's own
  * ssh config, which a scan cannot follow, or a computer that answered no scan. The key is theirs to read on the
  * computer and pass here. */

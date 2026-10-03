@@ -2,6 +2,9 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_PLACE_PORT,
+  hostKeyUnconfirmedRefusal,
+  hostKeyUnscannableRefusal,
+  unconfirmedHostKey,
   DEFAULT_PORT,
   EventUnion,
   GUEST_DAEMON_DIR,
@@ -584,5 +587,14 @@ describe("the one rule that decides whether a computer can be a place", () => {
     expect(workspacesBlockedBy({ platform: "darwin", read: box({}), euid: 1000 })).toContain("Linux computer");
     expect(workspacesBlockedBy({ platform: "linux", read: box({}), euid: 1000 })).toContain("cgroup v1");
     expect(workspacesBlockedBy({ platform: "linux", read: box({ [CGROUP_CONTROLLERS_PATH]: "cpu memory\n" }), euid: 1000 })).toContain("overlay");
+  });
+});
+
+describe("the host key an add was refused for", () => {
+  it("is read back off the refusal that names it, and off nothing else", () => {
+    const key = "ssh-ed25519 SHA256:tK3mX9Qf2bWq8vRz0YhN4cL7pJd1sE6gA5uF8oH2kIw";
+    expect(unconfirmedHostKey(hostKeyUnconfirmedRefusal("root@65.21.4.12", key))).toBe(key);
+    expect(unconfirmedHostKey(hostKeyUnscannableRefusal("studio"))).toBeUndefined();
+    expect(unconfirmedHostKey("ssh: connect to host studio port 22: Connection refused")).toBeUndefined();
   });
 });
