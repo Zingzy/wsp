@@ -5629,6 +5629,7 @@ export const nothingToSkipLine = (row: string, name: string): string => `nothing
 /** What the GitHub row says where the person skipped it, and a folder whose repository needs it to clone. */
 export const GITHUB_SKIPPED_LINE = "skipped; gh is not signed in there";
 export const NEEDS_GITHUB_LINE = "private; needs GitHub to clone";
+export const WAITS_ON_GITHUB_LINE = "private; waits on the GitHub sign-in to clone";
 
 /** How many of the setup's steps after the base tools run at once on a computer of this much memory: one per 2 GB,
  * at least one and at most four, so a small box never runs two installs into each other's memory. */

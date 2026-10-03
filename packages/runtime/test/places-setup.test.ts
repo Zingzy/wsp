@@ -16,6 +16,7 @@ import {
   floorFailedLine,
   GITHUB_SKIPPED_LINE,
   NEEDS_GITHUB_LINE,
+  WAITS_ON_GITHUB_LINE,
   SETUP_LOG_TAIL_BYTES,
   SKIPPED_FOR_NOW,
   editedThereLine,
@@ -478,7 +479,7 @@ describe("a computer added with its picks", () => {
     const s = signIns();
     const repo = privateRepo();
     const cmds: string[] = [];
-    await hosting({ local: true, provision: provisioner().wired, acts: s.acts, cmds, answer: cmd => (cmd.includes("ls-remote") ? { exitCode: 128 } : undefined) });
+    const { frames } = await hosting({ local: true, provision: provisioner().wired, acts: s.acts, cmds, answer: cmd => (cmd.includes("ls-remote") ? { exitCode: 128 } : undefined) });
     const picks = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "vault" } }, folders: { app: { from: repo, keep: [] } }, configs: { github: { signin: "machine" } } });
     const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
     await until(async () => (await rowOf(place.id)).setup?.state === "done");
@@ -486,10 +487,17 @@ describe("a computer added with its picks", () => {
     expect(s.started).toEqual(["gh"]);
     await until(async () => (await rowOf(place.id)).setup?.waiting.some(w => w.code !== undefined) === true);
     expect((await rowOf(place.id)).setup?.waiting).toEqual([expect.objectContaining({ row: "github", label: "GitHub", url: "https://auth.example/gh/1", code: "CODE-1" })]);
-    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "folders/app")).toBeUndefined();
+    // The folder stands on its own row while it waits, which its clone replaces.
+    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "folders/app")).toMatchObject({ outcome: "skipped", note: WAITS_ON_GITHUB_LINE, step: "folders" });
     expect(placeWord(await rowOf(place.id), null).word).toBe("Needs you");
+    const heard = frames.length;
     s.end("gh", { state: "signed-in" });
-    await until(async () => (await rowOf(place.id)).applied?.rows.some(r => r.id === "folders/app") === true);
+    await until(async () => (await rowOf(place.id)).applied?.rows.find(r => r.id === "folders/app")?.note !== WAITS_ON_GITHUB_LINE);
+    await new Promise(resolve => setTimeout(resolve, 30));
+    // One end once the folder is in, not a ready before its clone and a second word after it.
+    const ends = ended(frames.slice(heard));
+    expect(ends).toHaveLength(1);
+    expect(ends[0]?.end).toBe(placeWord(await rowOf(place.id), null).word === "Ready" ? "ready" : "needs-you");
     const row = await rowOf(place.id);
     expect(row.applied?.rows.find(r => r.id === "github")).toMatchObject({ outcome: "installed", step: "github" });
     expect(row.applied?.rows.find(r => r.id === "folders/app")?.note).not.toBe(NEEDS_GITHUB_LINE);
@@ -504,7 +512,7 @@ describe("a computer added with its picks", () => {
     const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
     await until(async () => (await rowOf(place.id)).setup?.waiting.some(w => w.code !== undefined) === true);
     s.end("gh", { state: "failed", said: "gh refused" });
-    await until(async () => (await rowOf(place.id)).applied?.rows.some(r => r.id === "folders/app") === true);
+    await until(async () => (await rowOf(place.id)).applied?.rows.find(r => r.id === "folders/app")?.outcome === "failed");
     expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "folders/app")).toMatchObject({ outcome: "failed", note: NEEDS_GITHUB_LINE, step: "folders" });
   });
 
@@ -802,7 +810,7 @@ describe("a step the person skips for now", () => {
     const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
     await until(async () => (await rowOf(place.id)).setup?.waiting.some(w => w.code !== undefined) === true);
     await runtime!.places!.skip(place.id, "github");
-    await until(async () => (await rowOf(place.id)).applied?.rows.some(r => r.id === "folders/app") === true);
+    await until(async () => (await rowOf(place.id)).applied?.rows.find(r => r.id === "folders/app")?.outcome === "failed");
     const row = await rowOf(place.id);
     expect(row.applied?.rows.find(r => r.id === "github")).toMatchObject({ outcome: "skipped", note: SKIPPED_FOR_NOW });
     expect(row.applied?.rows.find(r => r.id === "folders/app")).toMatchObject({ outcome: "failed", note: NEEDS_GITHUB_LINE });

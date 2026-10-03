@@ -72,6 +72,7 @@ import {
   noVaultTokenLine,
   GITHUB_SKIPPED_LINE,
   NEEDS_GITHUB_LINE,
+  WAITS_ON_GITHUB_LINE,
   SETUP_LOG_TAIL_BYTES,
   SKIPPED_FOR_NOW,
   nothingToSkipLine,
@@ -1433,8 +1434,10 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     const landRow = (r: PlaceProvisionRow): void => {
       rows.splice(0, rows.length, ...rows.filter(x => x.id !== r.id), r);
       push({ ...held });
-      if (ended && held.waiting.length === 0) setupFrame({ addId, placeId, ...outcome() });
+      if (ended && held.waiting.length === 0 && foldersWaiting === 0) setupFrame({ addId, placeId, ...outcome() });
     };
+    /** The folders waiting on the GitHub sign-in: the setup comes out again only once the last of them is in. */
+    let foldersWaiting = 0;
 
     /** A sign-in on that computer that waits on the person: its row waits with the page and the code as the relay
      * reads them, and when the wait runs out it reads expired and a retry asks for a fresh one. It never holds the
@@ -1450,8 +1453,8 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       const landed = (r: PlaceProvisionRow): void => {
         skippers.delete(`${placeId}/${row}`);
         held = { ...held, waiting: held.waiting.filter(x => x.row !== row) };
-        landRow({ ...r, step: rowStep });
         settled?.(r.outcome === "installed");
+        landRow({ ...r, step: rowStep });
       };
       if (signIn === undefined) {
         landed({ id: row, label, outcome: "failed", note: NO_SIGN_IN_ROAD });
@@ -1605,7 +1608,13 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
           out.push({ id: `folders/${key}`, label, outcome: "failed", note: NEEDS_GITHUB_LINE });
           continue;
         }
-        void githubReady.then(async ok => landRow({ ...(ok ? await addFolder(key, folder) : { id: `folders/${key}`, label, outcome: "failed" as const, note: NEEDS_GITHUB_LINE }), step: "folders" }));
+        out.push({ id: `folders/${key}`, label, outcome: "skipped", note: WAITS_ON_GITHUB_LINE });
+        foldersWaiting++;
+        void githubReady.then(async ok => {
+          const landed = ok ? await addFolder(key, folder) : { id: `folders/${key}`, label, outcome: "failed" as const, note: NEEDS_GITHUB_LINE };
+          foldersWaiting--;
+          landRow({ ...landed, step: "folders" });
+        });
       }
       return out;
     };
