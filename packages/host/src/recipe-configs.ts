@@ -7,8 +7,9 @@
 import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { stripExports } from "@wsp/collect";
+import { isSecretName, stripExports } from "@wsp/collect";
 import { folderFiles } from "./folder-files.js";
+import { tokenShaped } from "./token-shapes.js";
 
 /** The configs a recipe can tick that land as files. The GitHub row is a vault token and lands none. */
 export type ConfigFiles = "git" | "shell";
@@ -89,6 +90,9 @@ export function gitCut(text: string, main: boolean): string {
     const key = pair?.[1]?.toLowerCase();
     if (key !== undefined) {
       if (!named && GIT_DROPPED_KEYS.has(`${section}.${key}`)) continue;
+      // A secret never lands: a key named like one, a value shaped like a token, a URL carrying a login.
+      const value = pair?.[2] ?? "";
+      if (isSecretName(key) || (section === "sendemail" && key === "smtppass") || tokenShaped(value) || /[a-z][a-z0-9+.-]*:\/\/[^/\s@]+@/i.test(value)) continue;
       if (named && (section === "diff" || section === "merge") && GIT_DRIVER_KEYS.has(key)) continue;
       // An alias that starts with ! is a shell command.
       if (section === "alias" && pair?.[2]?.trim().startsWith("!") === true) continue;

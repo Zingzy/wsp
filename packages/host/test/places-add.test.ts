@@ -268,6 +268,10 @@ describe("the checks a box passes before anything of wsp's goes on it", () => {
     const asUser = placeCheckRefusal("dev@10.0.0.9", "/home/dev", read(["uid 1000"]), need)!;
     expect(asUser).toContain("root on the box is required");
     expect(asUser).toContain("wsp add root@10.0.0.9");
+    // An alias is named by the host it reaches, beside the ssh config line that makes the alias log in as root.
+    const asAlias = placeCheckRefusal("spoo", "/home/dev", read(["uid 1000"]), need, "65.21.4.12")!;
+    expect(asAlias).toContain("wsp add root@65.21.4.12");
+    expect(asAlias).toContain("User root under Host spoo");
     expect(placeCheckRefusal("spoo", "/root", read(["uid 0", "systemd no"]), need)).toContain("runs no systemd");
     expect(placeCheckRefusal("spoo", "/root", read(["uid 0", "systemd yes", "cgroup2 no"]), need)).toContain("no cgroup v2");
     expect(placeCheckRefusal("spoo", "/root", read(["uid 0", "systemd yes", "cgroup2 yes", `free ${1024 ** 3}`]), need)).toContain("1 GB free under /root");

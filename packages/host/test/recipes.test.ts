@@ -86,7 +86,7 @@ describe("the recipe file", () => {
       await expect(writeRecipe(statePath, { ...LAPTOP, clis: { [shape]: { via: "brew" } } }), shape).rejects.toThrow(/shaped like a token/);
     }
     expect(existsSync(recipesDir(statePath))).toBe(false);
-    const plain = await writeRecipe(statePath, { ...LAPTOP, name: "desk session", skills: { "task-sk-notes": { from: "~/.claude/skills" }, "sk-learn": { from: "~/.claude/skills" } } });
+    const plain = await writeRecipe(statePath, { ...LAPTOP, name: "desk session", skills: { "task-sk-notes": { from: "~/.claude/skills" }, "sk-learn": { from: "~/.claude/skills" }, "sk-build-and-release-pipeline-notes": { from: "~/.claude/skills" } } });
     expect(plain.file.name).toBe("desk session");
   });
 
@@ -185,6 +185,11 @@ describe("the configs a recipe carries", () => {
       true,
     );
     expect(cut).toBe(["[user]", "\tname = Dev", "\temail = dev@example.com", "[core]", "[commit]", "[credential]", "\thelper = !gh auth git-credential", ""].join("\n"));
+  });
+
+  it("lands no line that carries a secret: a token-shaped value, a key named like a secret, a password, a URL with a login in it", () => {
+    const cut = gitCut(["[user]", "\tname = Dev", "[github]", "\ttoken = ghp_16C7e42F292c6912E7710c838347Ae178B4a", "[sendemail]", "\tsmtpPass = hunter2", "\tsmtpServer = smtp.example.com", "[http]", "\tproxy = http://user:pw@proxy.example.com:3128", "\tsslVerify = true"].join("\n"), false);
+    expect(cut).toBe(["[user]", "\tname = Dev", "[github]", "[sendemail]", "\tsmtpServer = smtp.example.com", "[http]", "\tsslVerify = true", ""].join("\n"));
   });
 
   it("lands no key that names a command, since root's own git on the box reads the file", () => {

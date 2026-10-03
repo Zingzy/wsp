@@ -650,10 +650,15 @@ export function parsePlaceCheck(stdout: string): PlaceCheck {
 /** Room a box needs past the floor before anything goes on it: what its first agents and folders work in. */
 export const PLACE_CHECK_SPARE_BYTES = 1024 ** 3;
 
-/** Why a box is refused at the check, naming what would fix it; nothing where it passes or would not say. */
-export function placeCheckRefusal(address: string, home: string, check: PlaceCheck, needBytes: number): string | undefined {
+/** Why a box is refused at the check, naming what would fix it; nothing where it passes or would not say. `host` is
+ * the hostname the address reached, which an ssh alias stands for. */
+export function placeCheckRefusal(address: string, home: string, check: PlaceCheck, needBytes: number, host?: string): string | undefined {
   const at = address.slice(0, 64);
-  if (check.uid !== undefined && check.uid !== 0) return `${at} logs in as a user that is not root, and root on the box is required: wsp runs its daemon there as a system service. Allow root's ssh login there and add it with wsp add root@${at.slice(at.indexOf("@") + 1)}`;
+  if (check.uid !== undefined && check.uid !== 0) {
+    const reached = host ?? at.slice(at.indexOf("@") + 1);
+    const alias = at.includes("@") ? "" : `, or put User root under Host ${at} in your ssh config and add it again`;
+    return `${at} logs in as a user that is not root, and root on the box is required: wsp runs its daemon there as a system service. Allow root's ssh login there and add it with wsp add root@${reached}${alias}`;
+  }
   if (check.systemd === false) return `${at} runs no systemd, which is what keeps wsp's daemon up there; wsp takes a Linux box that boots with systemd`;
   if (check.cgroup2 === false) return `${at} has no cgroup v2 (/sys/fs/cgroup/cgroup.controllers), which every workspace there is held in; boot it with the unified hierarchy`;
   if (check.freeBytes !== undefined && check.freeBytes < needBytes) return `${at} has ${fmtBytes(check.freeBytes)} free under ${home}, and the base tools with a gigabyte to work in take ${fmtBytes(needBytes)}; free some room there and add it again`;
@@ -773,7 +778,7 @@ export function placeInstaller(deps: { backend?: SshBackend; sshWord?: SshWordRe
     // preflight stands behind it.
     stage("check", "running");
     const checked = parsePlaceCheck((await machine.run(PLACE_CHECK_SCRIPT, { deadlineMs: SSH_DIAL_MS }).catch(() => undefined))?.stdout ?? "");
-    const refused = placeCheckRefusal(req.address, login.HOME, checked, floorBytes(false) + PLACE_CHECK_SPARE_BYTES);
+    const refused = placeCheckRefusal(req.address, login.HOME, checked, floorBytes(false) + PLACE_CHECK_SPARE_BYTES, reach.host);
     if (refused !== undefined) throw new Error(refused);
     const checkedNote = placeCheckNote(checked);
     stage("check", "done", checkedNote === "" ? undefined : checkedNote);
