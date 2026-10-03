@@ -14,5 +14,12 @@
     "op": "git.restore",
     "cwd": "/root/repo",
     "checkpoint": null
+  },
+  {
+    "id": 1,
+    "op": "git.restore",
+    "cwd": "/root/repo",
+    "checkpoint": "refs/wsp/checkpoints/ws_1/thr_1/turn_1",
+    "scope": false
   }
 ]

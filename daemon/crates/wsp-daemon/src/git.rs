@@ -18,6 +18,7 @@ use wsp_frames::{DaemonErrorCode, GitBranch, GitDiffFile, GitDiffReply, GitDiffS
 use crate::fs::utf8_text;
 use crate::paths::OpError;
 
+pub(crate) mod branches;
 pub(crate) mod checkpoint;
 pub(crate) mod here;
 pub(crate) mod untracked;
