@@ -213,6 +213,12 @@ export const WORKTREE_BUSY_LINE = "a thread is working in that worktree; let its
 /** A worktree removal refused over files no commit holds: they would go with it. */
 export const worktreeChangedLine = (files: number): string => `that worktree has ${files} ${files === 1 ? "file" : "files"} not committed; commit them, or remove it with --force to lose them`;
 
+/** Why a settled worktree wsp made still stands: files no commit holds, a turn running in it, or a week of either,
+ * after which it is the person's to remove. */
+export const keptChangedLine = (files: number): string => `${files} ${files === 1 ? "file" : "files"} not committed`;
+export const KEPT_RUNNING_LINE = "a thread is running";
+export const KEPT_ABANDONED_LINE = "kept 7 days; remove it by hand";
+
 /** A removal asked of a branch with no worktree wsp made: a worktree the person or an agent made is theirs to remove. */
 export const notMadeWorktreeLine = (branch: string): string => `wsp made no worktree for ${branch}; git worktree remove takes one wsp did not make`;
 

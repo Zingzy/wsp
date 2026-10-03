@@ -27,8 +27,9 @@ const HOST_MEMORY_CAP_MB = 36.5;
 /** The one page that quotes the budget. */
 const PAGE = join("apps", "www", "src", "sections", "story.tsx");
 
-/** The scripted day: four threads a person keeps open, thirty turns each, forty deltas a turn. That is past the
- * transcript ring's 5000 events, so the host is measured with every cap it has already full. */
+/** The scripted day: four threads a person keeps open, one of them in a worktree of a branch of its own, thirty turns
+ * each, forty deltas a turn. That is past the transcript ring's 5000 events, so the host is measured with every cap it
+ * has already full. */
 const THREADS = 4;
 const TURNS_PER_THREAD = 30;
 const DELTAS_PER_TURN = 40;
@@ -45,7 +46,7 @@ interface Reading {
  * turn's worth of events instead of starting an agent, so no machine and no agent is involved in the measurement. */
 const hostScript = (home: string): string => `
 import { execFileSync } from "node:child_process";
-import { cpSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { createRuntime, jsonFileStore } from ${JSON.stringify(distOf("runtime"))};
@@ -78,12 +79,9 @@ const scripted = () => ({
   },
 });
 
-// The copy road and the daemon beside the host are the fakes: every workspace here is a copy, this checkout stages
-// no daemon binary, and what is measured is the host's own bookkeeping.
-const copier = fakeCopier(ask => {
-  cpSync(ask.from, ask.to, { recursive: true });
-  return { road: "clonefile", path: ask.to, base: "0".repeat(40), branch: "main", fetched: true, carried: "deps-and-config", excluded: [...ask.exclude], bytes: 1024, ms: 1 };
-});
+// The worktree road and the daemon beside the host are the fakes: this checkout stages no daemon binary, and what is
+// measured is the host's own bookkeeping.
+const copier = fakeCopier();
 const daemon = async () => ({ version: DAEMON_VERSION, road: { url: "http://127.0.0.1:1", expiresAt: Number.MAX_SAFE_INTEGER, daemonToken: "t" }, sysSamples: async () => () => {}, close: async () => {} });
 const runtime = createRuntime({
   backend: new NoProviderBackend(),
@@ -92,21 +90,22 @@ const runtime = createRuntime({
   adapters: { claude: scripted },
 });
 const host = await startHost({ runtime, webDir, port: 0, statePath });
-// A workspace is one project's copy, so the measurement records a repo of its own here and copies it.
+// Threads run in the project's folder, and the last of them in a worktree of a branch of its own.
 const folder = join(home, "repo");
 mkdirSync(folder, { recursive: true });
-execFileSync("git", ["init", "-q", folder]);
+execFileSync("git", ["init", "-q", "-b", "main", folder]);
 const project = await host.addProject(folder);
 const workspace = await host.createWorkspace("here", undefined, project.id);
+const worktree = (await runtime.workspaces.folderFor({ project: project.id, branch: "feat/side" })).workspace;
 
-const turn = async (thread) => {
-  const handle = await runtime.sessions.start(workspace.id, { prompt: "go", harness: "claude", ...(thread === undefined ? {} : { thread }) });
+const turn = async (at, thread) => {
+  const handle = await runtime.sessions.start(at.id, { prompt: "go", harness: "claude", ...(thread === undefined ? {} : { thread }) });
   await handle.finished?.catch(() => {});
-  return handle.view().threadId ?? handle.view().id;
+  return { at, thread: handle.view().threadId ?? handle.view().id };
 };
 const threads = [];
-for (let t = 0; t < ${THREADS}; t++) threads.push(await turn(undefined));
-for (let n = 1; n < ${TURNS_PER_THREAD}; n++) for (const thread of threads) await turn(thread);
+for (let t = 0; t < ${THREADS}; t++) threads.push(await turn(t === ${THREADS} - 1 ? worktree : workspace, undefined));
+for (let n = 1; n < ${TURNS_PER_THREAD}; n++) for (const { at, thread } of threads) await turn(at, thread);
 
 // The host writes its index and its transcripts behind a queue. What it holds is only known once it has been left
 // alone the way an idle minute leaves it, so this reads until a collection frees nothing more: the drain falls from
@@ -206,7 +205,7 @@ describeWithDists("what the host holds after a day of agents", ["host", "runtime
     rmSync(home, { recursive: true, force: true });
   });
 
-  it(`stays under ${HOST_MEMORY_CAP_MB} MB with ${THREADS * TURNS_PER_THREAD} turns through it`, async () => {
+  it(`stays under ${HOST_MEMORY_CAP_MB} MB with ${THREADS * TURNS_PER_THREAD} turns through it, one thread of them in a worktree`, async () => {
     const empty = await ran('global.gc(); console.log(`measured ${JSON.stringify({ heldMb: 0, rssMb: +(process.memoryUsage().rss / 1048576).toFixed(1), turns: 0 })}`)', home);
     expect(empty.code, `an empty node on this runner said: ${empty.out}`).toBe(0);
     const floor = reading(empty.out, "an empty node");
