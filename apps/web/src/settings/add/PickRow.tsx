@@ -54,7 +54,11 @@ export function PickRow({
               {tag === undefined ? null : <span className={cn(FACT, "shrink-0")}>{tag}</span>}
               {marks}
             </span>
-            {note === undefined ? null : <span className={NOTE}>{note}</span>}
+            {note === undefined ? null : (
+              <span data-pick-note className={NOTE}>
+                {note}
+              </span>
+            )}
           </span>
         </span>
         {slot === undefined ? null : (

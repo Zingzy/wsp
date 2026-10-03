@@ -6,7 +6,9 @@
 // step the host adds or a field a frame grows is met in this file alone.
 import { addFix } from "../adds.js";
 import { ADD_COMPUTER_WORDS } from "../format.js";
-import type { PlaceAddJob, PlaceProvisionRow, PlaceSetup, PlaceSetupEvent, PlaceSetupStep, PlaceView, PlaceWait } from "@wsp/protocol";
+import { githubPick } from "./choices.js";
+import { agentName } from "@wsp/catalog";
+import { SETUP_STEP_WORDS, type RecipeFile, type PlaceAddJob, type PlaceProvisionRow, type PlaceSetup, type PlaceSetupEvent, type PlaceSetupStep, type PlaceView, type PlaceWait } from "@wsp/protocol";
 
 /** A row's state as the marks draw it. */
 export type StepState = "waiting" | "working" | "done" | "needs-you" | "failed";
@@ -23,10 +25,14 @@ export interface StepLine {
   readonly fix?: string;
   readonly wait?: PlaceWait;
   readonly sub?: true;
+  /** A running step's time so far, which climbs, rather than the time an ended step took. */
+  readonly ticking?: true;
+  /** The last line a running step wrote on the box, behind its row on hover. */
+  readonly output?: string;
 }
 
-/** A setup frame onto the setup the record held: a step's line where it stands, a sign-in's wait in or out, the
- * end's state. Frames for another run leave the record as it was. */
+/** A setup frame onto the setup the record held: a step's line where it stands, every step the frame names running
+ * marked running, a sign-in's wait in or out, the end's state. Frames for another run leave the record as it was. */
 export function foldSetup(setup: PlaceSetup | undefined, e: PlaceSetupEvent): PlaceSetup | undefined {
   if (setup === undefined || setup.addId !== e.addId) return setup;
   let next = setup;
@@ -34,27 +40,90 @@ export function foldSetup(setup: PlaceSetup | undefined, e: PlaceSetupEvent): Pl
     const line = e.line;
     next = { ...next, steps: next.steps.some(s => s.step === line.step) ? next.steps.map(s => (s.step === line.step ? line : s)) : [...next.steps, line] };
   }
+  for (const step of e.running ?? []) {
+    const held = next.steps.find(s => s.step === step);
+    if (held?.state === "running") continue;
+    next = { ...next, steps: held === undefined ? [...next.steps, { step, state: "running" }] : next.steps.map(s => (s === held ? { step, state: "running" } : s)) };
+  }
   if (e.wait !== undefined) next = { ...next, waiting: [...next.waiting.filter(w => w.row !== e.wait!.row), e.wait] };
   if (e.end !== undefined) next = { ...next, state: e.end === "failed" ? "failed" : "done", ...(e.end === "failed" && e.said !== undefined ? { said: e.said } : {}) };
   return next;
 }
 
+/** When this window first saw each step of a run running, by run and step: the host stamps a step's time only once
+ * it ends. A step's entry goes when it ends and a run's when the run does. */
+const SINCE = new Map<string, number>();
+
+/** A setup frame onto the times its steps started. */
+export function noteRunning(e: PlaceSetupEvent, at = Date.now()): void {
+  if (e.end !== undefined) {
+    for (const key of SINCE.keys()) if (key.startsWith(`${e.addId}/`)) SINCE.delete(key);
+    return;
+  }
+  if (e.line !== undefined && e.line.state !== "running") SINCE.delete(`${e.addId}/${e.line.step}`);
+  for (const step of [...(e.running ?? []), ...(e.line?.state === "running" ? [e.line.step] : [])]) if (!SINCE.has(`${e.addId}/${step}`)) SINCE.set(`${e.addId}/${step}`, at);
+}
+
+/** How long a step has run as of `now`, from when this window first saw it running. */
+export function runningMs(addId: string, step: string, now: number): number {
+  const key = `${addId}/${step}`;
+  const at = SINCE.get(key) ?? now;
+  if (!SINCE.has(key)) SINCE.set(key, at);
+  return Math.max(0, now - at);
+}
+
 /** Whether a frame ends something the places list carries more of than the frame does: a step's rows, the end. */
 export const frameEndsStep = (e: PlaceSetupEvent): boolean => e.end !== undefined || (e.line !== undefined && e.line.state !== "running");
 
+/** What a running step is doing, off the picks: the verb, each picked row by its key and the name a person reads, and
+ * for a step of many like rows the noun they are counted by rather than named. */
+interface Doing {
+  verb: string;
+  counted?: string;
+  picked: (picks: RecipeFile) => readonly (readonly [key: string, name: string])[];
+}
+
+/** One step as every list draws it: its name, what it says while it runs, and what it says once it ended where the
+ * names of what landed would not say it. */
+interface SetupRowSpec {
+  step: PlaceSetupStep;
+  name: string;
+  doing?: Doing;
+  ended?: (rows: readonly PlaceProvisionRow[], picks: RecipeFile | undefined, box: string) => string | undefined;
+}
+
+const keyed = (table: Record<string, unknown>): (readonly [string, string])[] => Object.keys(table).map(key => [key, key] as const);
+
+/** The GitHub row by the way it signed in: its one row carries the facts in its note, not a name. */
+function githubEnded(rows: readonly PlaceProvisionRow[], picks: RecipeFile | undefined, box: string): string | undefined {
+  const row = rows.find(r => r.id === "github");
+  if (row?.outcome === "skipped") return ADD_COMPUTER_WORDS.skipped;
+  if (row?.outcome !== "installed" && row?.outcome !== "present") return undefined;
+  return picks !== undefined && githubPick(picks) === "machine" ? ADD_COMPUTER_WORDS.signedInOn(box) : ADD_COMPUTER_WORDS.tokenCopied;
+}
+
 /** The steps as the person chose them and as they read in every list: the job's steps by the name each goes by. The
  * sign-ins sit under Agents and the job's own context step is not drawn. */
-export const SETUP_ROWS: readonly { step: PlaceSetupStep; name: string }[] = [
+export const SETUP_ROWS: readonly SetupRowSpec[] = [
   { step: "floor", name: "Base packages" },
-  { step: "agents", name: "Agents" },
-  { step: "mcp", name: "MCP servers" },
-  { step: "clis", name: "CLIs" },
-  { step: "skills", name: "Skills" },
-  { step: "plugins", name: "Plugins" },
-  { step: "github", name: "GitHub" },
-  { step: "folders", name: "Projects" },
-  { step: "configs", name: "Other config" },
+  { step: "agents", name: "Agents", doing: { verb: "Installing", picked: picks => Object.keys(picks.agents).map(id => [id, agentName(id)] as const) } },
+  { step: "mcp", name: "MCP servers", doing: { verb: "Copying", picked: picks => keyed(picks.mcp) } },
+  { step: "clis", name: "CLIs", doing: { verb: "Installing", picked: picks => keyed(picks.clis) } },
+  { step: "skills", name: "Skills", doing: { verb: "Copying", counted: "skills", picked: picks => keyed(picks.skills) } },
+  { step: "plugins", name: "Plugins", doing: { verb: "Installing", counted: "plugins", picked: picks => Object.keys(picks.plugins).map(key => [key, key.split("@")[0]!] as const) } },
+  { step: "github", name: "GitHub", ended: githubEnded },
+  { step: "folders", name: "Projects", doing: { verb: "Importing", picked: picks => Object.entries(picks.folders).map(([key, folder]) => [key, folder.name ?? key] as const) } },
+  { step: "configs", name: "Other config", doing: { verb: "Copying", picked: picks => (["git", "shell"] as const).filter(id => picks.configs[id] !== undefined).map(id => [id, id] as const) } },
 ];
+
+/** What a running step is putting on: its picks less the rows already there, named as a step's landed rows are, or
+ * counted where the step counts them. */
+function doingLine(doing: Doing, picks: RecipeFile, rows: readonly PlaceProvisionRow[]): string | undefined {
+  const there = (key: string, name: string): boolean => rows.some(r => (r.outcome === "installed" || r.outcome === "present") && (r.id.endsWith(`/${key}`) || r.label === name || r.label.startsWith(`${name} `)));
+  const names = doing.picked(picks).filter(([key, name]) => !there(key, name)).map(([, name]) => name);
+  if (names.length === 0) return undefined;
+  return `${doing.verb} ${doing.counted !== undefined && names.length > 3 ? `${names.length} ${doing.counted}` : names.length <= 3 ? names.join(", ") : `${names.slice(0, 2).join(", ")} and ${names.length - 2} more`}.`;
+}
 
 const INSTALL = "Install wsp";
 
@@ -63,19 +132,28 @@ const nameList = (rows: readonly PlaceProvisionRow[]): string | undefined =>
   rows.length === 0 ? undefined : rows.length <= 3 ? `${rows.map(r => r.label).join(", ")}.` : `${rows.slice(0, 2).map(r => r.label).join(", ")} and ${rows.length - 2} more.`;
 
 /** The setup on a computer as rows: Install wsp, then each step with the items of it that did not land under it,
- * the sign-ins under Agents. A step not started reads waiting; a sign-in that waits on the person carries its wait. */
-export function setupRows(place: Pick<PlaceView, "setup" | "applied">): StepLine[] {
+ * the sign-ins under Agents. A step not started reads waiting; a running one says what it is putting on; a sign-in
+ * that waits on the person carries its wait. `box` is the computer's name, for the words that name it. */
+export function setupRows(place: Pick<PlaceView, "setup" | "applied" | "picks">, box = ""): StepLine[] {
   const setup = place.setup;
   const rows = place.applied?.rows ?? [];
   const out: StepLine[] = [{ id: "wsp", name: INSTALL, state: "done", note: ADD_COMPUTER_WORDS.dialledBack }];
-  for (const { step, name } of SETUP_ROWS) {
+  for (const { step, name, doing, ended } of SETUP_ROWS) {
     const line = setup?.steps.find(s => s.step === step);
     const mine = rows.filter(r => r.step === step);
     const landed = mine.filter(r => r.outcome === "installed" || r.outcome === "present");
     // The step a setup stopped at says why on its own row; any other step that missed says it per item, under it.
     const stopped = setup?.state === "failed" && line?.state === "failed";
-    const state: StepState = line === undefined ? "waiting" : line.state === "running" ? "working" : stopped || (line.state === "failed" && landed.length === 0) ? "failed" : "done";
-    const note = line?.state === "running" || stopped ? undefined : (nameList(landed) ?? line?.note);
+    // A step whose every item was set aside with Skip for now is settled, not failed.
+    const missed = mine.length === 0 || mine.some(r => r.outcome === "failed");
+    const state: StepState = line === undefined ? "waiting" : line.state === "running" ? "working" : stopped || (line.state === "failed" && landed.length === 0 && missed) ? "failed" : "done";
+    const note = stopped
+      ? undefined
+      : line?.state === "running"
+        ? doing === undefined || place.picks === undefined
+          ? undefined
+          : doingLine(doing, place.picks, mine)
+        : (ended?.(mine, place.picks, box) ?? nameList(landed) ?? line?.note);
     out.push({ id: step, name, state, ...(note === undefined ? {} : { note }), ...(line?.ms === undefined ? {} : { ms: line.ms }), ...(stopped && setup?.said !== undefined ? { said: setup.said } : {}) });
     if (step === "agents") out.push(...signInRows(setup, rows));
     if (!stopped) for (const r of mine) if (r.outcome === "failed") out.push({ id: r.id, name: r.label, state: "failed", sub: true, ...(r.note === undefined ? {} : { said: r.note }) });
@@ -111,11 +189,15 @@ export function setupStanding(place: Pick<PlaceView, "setup" | "applied">): Setu
   return missed ? "needs-you" : "ready";
 }
 
-/** The steps of an install, as the checks list draws them: the connection, the box's own checks, whether it can reach
- * this computer, and wsp itself, which spans the install, the service and the join. */
+/** The steps of an install, as the checks list draws them, in the order the host reads them: the connection, each
+ * of the box's own checks, whether it can reach this computer, and wsp itself, which spans the install, the service
+ * and the join. */
 const CHECK_ROWS: readonly { id: string; name: string; steps: readonly PlaceAddJob["steps"][number]["step"][] }[] = [
   { id: "connect", name: "Connected", steps: ["connect"] },
-  { id: "check", name: "System", steps: ["check"] },
+  { id: "chip", name: "Chip", steps: ["chip"] },
+  { id: "root", name: "Root", steps: ["root"] },
+  { id: "system", name: "System", steps: ["system"] },
+  { id: "disk", name: "Disk", steps: ["disk"] },
   { id: "reach", name: "Dials back", steps: ["reach"] },
   { id: "wsp", name: INSTALL, steps: ["wsp", "service", "join"] },
 ];
@@ -131,8 +213,29 @@ export function checkRows(job: PlaceAddJob | undefined): StepLine[] {
   return CHECK_ROWS.map(row => {
     const mine = mineOf(row);
     const state: StepState = row.id === failedAt ? "failed" : rowDone(row) ? "done" : mine.length > 0 && job?.state === "running" ? "working" : "waiting";
-    const note = mine.filter(s => s.state === "done" && s.note !== undefined).at(-1)?.note;
+    const note = mine.filter(s => s.state !== "failed" && s.note !== undefined).at(-1)?.note;
     const fix = job === undefined ? undefined : addFix(job);
     return { id: row.id, name: row.name, state, ...(state === "failed" ? { said: job?.said ?? "", ...(fix === undefined ? {} : { fix }) } : note === undefined ? {} : { note }) };
   });
+}
+
+/** How much of one line of a step's output a row's note takes: a long command is cut at its end. */
+const OUTPUT_CHARS = 120;
+
+/** A line of the box's setup log: its stamp, the step it was written under, and what was said. */
+const LOG_LINE = /^\S+ \[([a-z]+)\] (.*)$/;
+
+/** The last line of output each step wrote, off the end of the box's setup log. The line that marks a step running
+ * or done is the step's own state, which its row already says, and is passed over. */
+export function stepOutput(lines: readonly string[]): Partial<Record<PlaceSetupStep, string>> {
+  const out: Partial<Record<PlaceSetupStep, string>> = {};
+  for (const line of lines) {
+    const read = LOG_LINE.exec(line);
+    if (read === null || !(read[1]! in SETUP_STEP_WORDS)) continue;
+    const step = read[1] as PlaceSetupStep;
+    const said = read[2]!.trim();
+    if (said === "" || said.startsWith(`${SETUP_STEP_WORDS[step]}: `)) continue;
+    out[step] = said.length > OUTPUT_CHARS ? `${said.slice(0, OUTPUT_CHARS - 1)}…` : said;
+  }
+  return out;
 }

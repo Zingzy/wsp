@@ -2,7 +2,7 @@
 // What the setup job puts on Settings, Computers: the Pending list, each row
 // carrying on where it was left, and a computer's page with the recipe it
 // follows and its setup's steps.
-import { act, cleanup, fireEvent, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { RecipeFile, type PendingComputer, type PlaceSetup, type PlaceView, type RecipeView } from "@wsp/protocol";
 import type { Api } from "../src/protocol/client.js";
@@ -56,5 +56,42 @@ describe("a computer's page after a setup", () => {
     expect(document.querySelector("[data-settings-card='setup'] [data-settings-head]")?.textContent).toBe("Setup");
     expect([...document.querySelectorAll("[data-settings-card='setup'] [data-step-row]")].map(r => r.getAttribute("data-step-row")).slice(0, 4)).toEqual(["wsp", "floor", "agents", "mcp"]);
   });
-});
 
+  it("moves the computer onto another recipe through the host, the answer standing on its row", async () => {
+    const builders: RecipeView = { name: "Builders", slug: "builders", summary: "1 agent", machines: ["studio"], file: RecipeFile.parse({ name: "Builders" }) };
+    const minimal: RecipeView = { name: "Minimal", slug: "minimal", summary: "1 CLI", machines: [], file: RecipeFile.parse({ name: "Minimal" }) };
+    const studio = box("p_studio", "studio", { setup: running, picks: RecipeFile.parse({ name: "Builders" }), recipe: "builders" });
+    const followed: { placeId: string; recipe: string }[] = [];
+    let lists = 0;
+    useStore.setState({ places: [here, studio] });
+    const api = settingsApi({
+      initGet: async () => null,
+      recipesList: async () => {
+        lists++;
+        return [builders, minimal];
+      },
+      placesFollow: async (placeId: string, recipe: string) => {
+        followed.push({ placeId, recipe });
+        return { ...studio, recipe };
+      },
+    } as unknown as Partial<Api>).api;
+    mountSettings({ api, at: { kind: "computer", id: "p_studio" } });
+    await settle();
+    const trigger = (): HTMLElement => document.querySelector<HTMLElement>("[data-settings-row='follows'] [data-slot=select-trigger]")!;
+    await waitFor(() => expect(trigger().textContent).toBe("Builders"));
+    expect(trigger().hasAttribute("disabled") || trigger().hasAttribute("data-disabled")).toBe(false);
+    const read = lists;
+    fireEvent.click(trigger());
+    const options = await screen.findAllByRole("option");
+    expect(options.map(o => o.textContent)).toEqual(["Builders", "Minimal", "None"]);
+    await act(async () => void (await new Promise(r => setTimeout(r, 0))));
+    fireEvent.keyDown(options[1]!, { key: "Enter" });
+    fireEvent.click(options[1]!);
+    await waitFor(() => expect(followed).toEqual([{ placeId: "p_studio", recipe: "minimal" }]));
+    await waitFor(() => expect(useStore.getState().places.find(p => p.id === "p_studio")?.recipe).toBe("minimal"));
+    await waitFor(() => expect(trigger().textContent).toBe("Minimal"));
+    // Which computers follow each recipe moved, so the list is read again.
+    await waitFor(() => expect(lists).toBeGreaterThan(read));
+    cleanup();
+  });
+});

@@ -10,7 +10,7 @@
 // and the one act.
 import { CheckIcon, ExternalLinkIcon, ListChecksIcon, ServerIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { fmtBytes, fmtDuration, HERE_PLACE_ID, hereName, recipeCounts, recipeSummary, type PlaceView, type ProjectIcon, type RecipeFile, type RecipeOptions, type SshHostSuggestion } from "@wsp/protocol";
+import { fmtBytes, fmtDuration, HERE_PLACE_ID, hereName, recipeCounts, recipeSummary, type PlaceSetupStep, type PlaceView, type ProjectIcon, type RecipeFile, type RecipeOptions, type SshHostSuggestion } from "@wsp/protocol";
 import { agentName } from "@wsp/catalog";
 import { AddButton } from "../../components/ui/add-button.js";
 import { Button } from "../../components/ui/button.js";
@@ -33,12 +33,12 @@ import { placeName } from "../places.js";
 import { readRecipes, useRecipes } from "../recipesStore.js";
 import { Card, Line } from "../rows.js";
 import { CopyRow, RefusalSlot } from "../sheetParts.js";
-import { STEP_TITLES, askedHostKey, closeAdd, connect, firstPick, go, openSetup, readOptions, retrySetup, setPicks, setSaveAs, setUp, stepsFor, useAddFlow, type AddStep } from "./addFlow.js";
-import { everything, folderKey, noPicks } from "./choices.js";
+import { STEP_TITLES, askedHostKey, closeAdd, connect, firstPick, go, openSetup, readOptions, retrySetup, setPicks, skipRow, setSaveAs, setUp, stepsFor, tooBig, useAddFlow, weigh, type AddStep } from "./addFlow.js";
+import { everything, folderKey, githubPick, noPicks } from "./choices.js";
 import { AgentsPicks, Choice, ClisPicks, GitHubPicks, OtherPicks, PluginsPicks, ProjectsPicks, ServersPicks, SkillsPicks, type FolderOption } from "./PickLists.js";
 import { PickLine, PickRow } from "./PickRow.js";
-import { checkRows, setupCount, setupRows, setupStanding, type StepLine } from "./setup.js";
-import { RetryActs, StepRow } from "./StepRow.js";
+import { checkRows, runningMs, setupCount, setupRows, setupStanding, stepOutput, type StepLine } from "./setup.js";
+import { RetryActs, SkipAct, StepRow } from "./StepRow.js";
 
 const GLYPH = "size-4 text-foreground/80";
 
@@ -122,7 +122,14 @@ function useHereProjects() {
   return useMemo(() => projects.filter(p => p.computer === HERE_PLACE_ID), [projects]);
 }
 
-function ProjectsStep({ picks, box, boxId, onChange }: { picks: RecipeFile; box: string; boxId: string; onChange: (next: RecipeFile) => void }) {
+/** What the host read of a folder of the computer running it, by its path: its size, whether it is private, and the
+ * commits no remote holds. */
+const folderFacts = (facts: RecipeOptions["folders"], path: string): Pick<FolderOption, "bytes" | "private" | "unpushed"> => {
+  const fact = facts?.find(f => f.path === path);
+  return { ...(fact?.bytes === undefined ? {} : { bytes: fact.bytes }), ...(fact?.private === undefined ? {} : { private: fact.private }), ...(fact?.unpushed === undefined ? {} : { unpushed: fact.unpushed }) };
+};
+
+function ProjectsStep({ picks, box, boxId, facts, onChange }: { picks: RecipeFile; box: string; boxId: string; facts: RecipeOptions["folders"]; onChange: (next: RecipeFile) => void }) {
   const here = useHereProjects();
   const looks = useStore(s => s.preferences.projectLook);
   const onBox = useStore(s => s.projects).filter(p => p.computer === boxId);
@@ -130,8 +137,8 @@ function ProjectsStep({ picks, box, boxId, onChange }: { picks: RecipeFile; box:
   // A folder already in the picks that is no project here is one the person picked: it stands at the top.
   const picked: FolderOption[] = Object.entries(picks.folders)
     .filter(([key]) => !here.some(p => folderKey(p.name) === key) && !added.some(f => f.key === key))
-    .map(([key, row]) => ({ key, name: row.name ?? key, path: row.from, icon: row.icon ?? "folder", hue: row.hue ?? "neutral" }));
-  const folders: FolderOption[] = [...added, ...picked, ...here.map(p => ({ key: folderKey(p.name), name: p.name, path: p.path, remote: p.remote, icon: looks[p.id]?.icon ?? "folder", hue: looks[p.id]?.hue ?? "neutral" }))];
+    .map(([key, row]) => ({ key, name: row.name ?? key, path: row.from, icon: row.icon ?? "folder", hue: row.hue ?? "neutral", ...folderFacts(facts, row.from) }));
+  const folders: FolderOption[] = [...added, ...picked, ...here.map(p => ({ key: folderKey(p.name), name: p.name, path: p.path, remote: p.remote, icon: looks[p.id]?.icon ?? "folder", hue: looks[p.id]?.hue ?? "neutral", ...folderFacts(facts, p.path) }))];
   const pick = desktopBridge()?.pickFolder;
   const addFolder = async (): Promise<void> => {
     const path = await pick?.();
@@ -162,8 +169,11 @@ const names = (table: Record<string, unknown>): string => Object.keys(table).joi
 
 function SummaryStep({ picks, box, place, here, recipeIcon }: { picks: RecipeFile; box: string; place: PlaceView | undefined; here: string; recipeIcon: ProjectIcon }) {
   const saveAs = useAddFlow(s => s.saveAs);
+  const estimate = useAddFlow(s => s.estimate);
+  const free = estimate?.freeBytes ?? place?.diskFreeBytes;
+  const short = tooBig(estimate);
   const counts = recipeCounts(picks);
-  const github = picks.configs.github === undefined ? "Skip for now" : picks.configs.github.signin === "machine" ? `Sign in on ${box}` : `Token from ${here}`;
+  const github = { vault: `Token from ${here}`, machine: `Sign in on ${box}`, skip: ADD_COMPUTER_WORDS.skipForNow }[githubPick(picks)];
   const lines: [string, string][] = [
     ["Agents", Object.keys(picks.agents).map(agentName).join(", ")],
     ["MCP servers", names(picks.mcp)],
@@ -181,18 +191,24 @@ function SummaryStep({ picks, box, place, here, recipeIcon }: { picks: RecipeFil
         {lines.map(([label, value]) => (
           <Line key={label} id={label} label={label} value={value === "" || value === "0" ? "None" : value} valueClass="fact" />
         ))}
-        {place?.diskFreeBytes === undefined ? null : (
+        {estimate === null && free === undefined ? null : (
           <Line
             id="disk"
             label={`Disk on ${box}`}
             control={
-              <span data-k="disk" className="text-[13px] text-muted-foreground tabular-nums sm:text-right">
-                {fmtBytes(place.diskFreeBytes)} free
+              <span
+                data-k="disk"
+                data-short={short}
+                {...(estimate === null || estimate.unmeasured === 0 ? {} : { title: ADD_COMPUTER_WORDS.unmeasured(estimate.unmeasured) })}
+                className={cn("text-[13px] tabular-nums sm:text-right", short ? "text-destructive-foreground" : "text-muted-foreground")}
+              >
+                {estimate === null ? `${fmtBytes(free!)} free` : free === undefined ? `${fmtBytes(estimate.neededBytes)} needed` : ADD_COMPUTER_WORDS.diskLine(fmtBytes(estimate.neededBytes), fmtBytes(free))}
               </span>
             }
           />
         )}
       </Card>
+      {short ? <RefusalSlot k="disk-short" {...ADD_COMPUTER_WORDS.diskShort(box, fmtBytes(free!), fmtBytes(estimate!.neededBytes))} /> : null}
       <Card id="save-recipe">
         <PickRow id="save" checked={saveAs.on} onCheckedChange={on => setSaveAs({ on })} glyph={<Glyph aria-hidden className={GLYPH} />} name="Save as a recipe" note="The next box starts from these picks.">
           {saveAs.on ? (
@@ -211,9 +227,10 @@ function SummaryStep({ picks, box, place, here, recipeIcon }: { picks: RecipeFil
   );
 }
 
-/** A sign-in that waits on the person: the code, the tab opened again, and where it can be finished later. A wait
- * that ran out says so and is run again by Retry. */
-function WaitBlock({ row, onRetry }: { row: StepLine; onRetry: () => void }) {
+/** A sign-in that waits on the person: the code, the tab opened again, Skip for now, and where it can be finished
+ * later. A wait that ran out says so and is run again by Retry. */
+function WaitBlock({ row, onRetry, onSkip, busy }: { row: StepLine; onRetry: () => void; onSkip: () => void; busy: boolean }) {
+  const skip = <SkipAct word={ADD_COMPUTER_WORDS.skipForNow} onSkip={onSkip} busy={busy} />;
   const wait = row.wait!;
   if (wait.state === "expired") {
     return (
@@ -222,7 +239,8 @@ function WaitBlock({ row, onRetry }: { row: StepLine; onRetry: () => void }) {
           The sign-in page ran out.<span className="text-foreground"> Retry opens a fresh one.</span>
         </p>
         <div className="flex flex-wrap items-center gap-2">
-          <RetryActs onRetry={onRetry} />
+          <RetryActs onRetry={onRetry} busy={busy} />
+          {skip}
         </div>
       </>
     );
@@ -241,30 +259,41 @@ function WaitBlock({ row, onRetry }: { row: StepLine; onRetry: () => void }) {
             Open the tab again
           </Button>
         )}
+        {skip}
       </div>
       <p className={NOTE}>{ADD_COMPUTER_WORDS.signInLater}</p>
     </>
   );
 }
 
-/** The steps of a setup with what each row asks: Retry where a row did not land, the wait where a sign-in does. */
-export function SetupList({ place, id = "setup", rows = setupRows(place) }: { place: PlaceView; id?: string; rows?: readonly StepLine[] }) {
+/** The steps of a setup with what each row asks: Retry where a row did not land, Skip where it is an item the host can
+ * set aside, the wait where a sign-in does. */
+export function SetupList({ place, id = "setup", rows = setupRows(place, placeName(place)) }: { place: PlaceView; id?: string; rows?: readonly StepLine[] }) {
   const api = useStore(s => s.api);
   const [refused, setRefused] = useState<Failure | null>(null);
   const [busy, setBusy] = useState(false);
-  const retry = (): void => {
+  const ask = (run: () => Promise<Failure | null>): void => {
     setBusy(true);
-    void retrySetup(api, place.id).then(failure => {
+    void run().then(failure => {
       setBusy(false);
       setRefused(failure);
     });
   };
+  const retry = (): void => ask(() => retrySetup(api, place.id));
+  const skip = (row: string) => (): void => ask(() => skipRow(api, place.id, row));
+  const acts = (row: StepLine): ReactNode =>
+    row.state !== "failed" || row.wait !== undefined ? undefined : (
+      <>
+        <RetryActs onRetry={retry} busy={busy} />
+        {row.sub === true ? <SkipAct word={ADD_COMPUTER_WORDS.skip} onSkip={skip(row.id)} busy={busy} /> : null}
+      </>
+    );
   return (
     <>
       <Grid id={id}>
         {rows.map(row => (
-          <StepRow key={row.id} row={row} {...(row.state === "failed" ? { acts: <RetryActs onRetry={retry} busy={busy} /> } : {})}>
-            {row.wait === undefined ? undefined : <WaitBlock row={row} onRetry={retry} />}
+          <StepRow key={row.id} row={row} acts={acts(row)}>
+            {row.wait === undefined ? undefined : <WaitBlock row={row} onRetry={retry} onSkip={skip(row.id)} busy={busy} />}
           </StepRow>
         ))}
       </Grid>
@@ -273,8 +302,68 @@ export function SetupList({ place, id = "setup", rows = setupRows(place) }: { pl
   );
 }
 
+/** How often the steps running are read off the box's setup log: one tail of the log a read, for every step at once. */
+const OUTPUT_EVERY_MS = 3000;
+
+/** The time now, moved once a second while `on`: one interval for every row that ticks, never one per row. */
+function useNow(on: boolean): number {
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    if (!on) return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [on]);
+  return now;
+}
+
+/** The last line of output of each step running, read when the steps running change and on a timer while any runs,
+ * never on a render; a read still out when the next is due is not doubled. It stands behind the row on hover: the
+ * row's own note is the sentence its picks make. */
+function useStepOutput(placeId: string, running: string): Partial<Record<PlaceSetupStep, string>> {
+  const api = useStore(s => s.api);
+  const [out, setOut] = useState<Partial<Record<PlaceSetupStep, string>>>({});
+  useEffect(() => {
+    const read = api?.placesSetupLog;
+    if (running === "" || read === undefined) return;
+    let live = true;
+    let asking = false;
+    const tail = (): void => {
+      if (asking) return;
+      asking = true;
+      void read(placeId).then(
+        lines => {
+          asking = false;
+          if (!live) return;
+          const next = stepOutput(lines);
+          setOut(was => (JSON.stringify(was) === JSON.stringify(next) ? was : next));
+        },
+        () => {
+          asking = false;
+        },
+      );
+    };
+    tail();
+    const timer = setInterval(tail, OUTPUT_EVERY_MS);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, [api, placeId, running]);
+  return out;
+}
+
 function RunningView({ place }: { place: PlaceView }) {
-  const rows = setupRows(place);
+  const drawn = setupRows(place, placeName(place));
+  const working = drawn.filter(row => row.state === "working").map(row => row.id);
+  const output = useStepOutput(place.id, working.join(" "));
+  const now = useNow(working.length > 0);
+  const addId = place.setup?.addId;
+  const rows = drawn.map(row => {
+    if (row.state !== "working" || addId === undefined) return row;
+    const said = output[row.id as PlaceSetupStep];
+    return { ...row, ms: runningMs(addId, row.id, now), ticking: true as const, ...(said === undefined ? {} : { output: said }) };
+  });
   const asks = rows.find(row => row.state === "needs-you" || row.state === "failed")?.id;
   const shown = useRef(false);
   // The list opens on the first row that waits on the person, once, when it first appears, so a long run never hides
@@ -380,6 +469,12 @@ export function AddComputerDialog() {
     if (job?.state === "done" && job.placeId !== undefined && flow.placeId === null) useAddFlow.setState({ placeId: job.placeId, pendingId: job.addId });
   }, [job?.state, job?.placeId, flow.placeId, job?.addId]);
 
+  // The summary weighs the picks as they stand each time it opens, and again on any change to them.
+  useEffect(() => {
+    if (flow.step !== "summary" || api === null || flow.placeId === null || flow.picks === null) return;
+    weigh(api, flow.placeId, flow.picks);
+  }, [flow.step, api, flow.placeId, flow.picks]);
+
   // A first pick step with nothing picked starts from everything the computer running the host has, once.
   useEffect(() => {
     if (!PICK_STEPS.has(flow.step) || flow.options === null || flow.from !== "here" || flow.saves > 0 || !empty(flow.picks)) return;
@@ -450,7 +545,7 @@ export function AddComputerDialog() {
       case "github":
         return optionsBody(o => <GitHubPicks picks={picks} options={o} onChange={change} box={box} here={here} />);
       case "projects":
-        return <ProjectsStep picks={picks} box={box} boxId={flow.placeId ?? ""} onChange={change} />;
+        return <ProjectsStep picks={picks} box={box} boxId={flow.placeId ?? ""} facts={options?.folders} onChange={change} />;
       case "other":
         return optionsBody(o => <OtherPicks picks={picks} options={o} onChange={change} box={box} />);
       case "summary":
@@ -466,7 +561,7 @@ export function AddComputerDialog() {
   };
 
   const standing = place === undefined ? "running" : setupStanding(place);
-  const rows = place === undefined ? [] : setupRows(place);
+  const rows = place === undefined ? [] : setupRows(place, box);
   const head = ((): { title: string; line?: string } => {
     if (view === "where" || view === "hostkey") return { title: ADD_COMPUTER_WORDS.title, line: ADD_COMPUTER_WORDS.where };
     if (view !== "running" && view !== "ready") return { title: STEP_TITLES[view] };
@@ -540,7 +635,7 @@ export function AddComputerDialog() {
         return (
           <>
             {backButton}
-            {primary(`Set up ${box}`, () => void (api === null ? undefined : setUp(api, (slug, icon) => void setPreferences({ recipeLook: { [slug]: { icon } } }))), place === undefined || empty(flow.picks) || flow.starting)}
+            {primary(`Set up ${box}`, () => void (api === null ? undefined : setUp(api, (slug, icon) => void setPreferences({ recipeLook: { [slug]: { icon } } }))), place === undefined || empty(flow.picks) || flow.starting || tooBig(flow.estimate))}
           </>
         );
       case "running":

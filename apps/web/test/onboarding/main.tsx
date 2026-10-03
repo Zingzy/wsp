@@ -7,7 +7,7 @@
 // the host's shapes, so a screenshot of one is what the app draws for that
 // record. ?scroll=bottom scrolls the dialog's panel to its end.
 import { createRoot } from "react-dom/client";
-import { DAEMON_VERSION, DEFAULT_PREFERENCES, PLACE_HOST_KEY_KIND, RecipeFile, hostKeyUnconfirmedRefusal, type PendingComputer, type PlaceAddJob, type PlaceApplied, type PlaceSetup, type PlaceView, type ProjectView, type RecipeOptions, type RecipeView, type SessionView, type WorkspaceView } from "@wsp/protocol";
+import { DAEMON_VERSION, type AgentRow, type AgentsReport, DEFAULT_PREFERENCES, PLACE_HOST_KEY_KIND, RecipeFile, hostKeyUnconfirmedRefusal, type PendingComputer, type PlaceAddJob, type PlaceApplied, type PlaceSetup, type PlaceView, type ProjectView, type RecipeOptions, type RecipeView, type SessionView, type WorkspaceView } from "@wsp/protocol";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import { addNotice } from "../../src/notices/store";
 import { useStore } from "../../src/protocol/store";
@@ -38,9 +38,9 @@ const DISHA: PlaceView = { id: "p_disha", kind: "computer", name: "dishapc", def
 
 const OPTIONS: RecipeOptions = {
   agents: [
-    { id: "claude", name: "Claude Code", signins: ["vault", "machine"] },
-    { id: "codex", name: "Codex", signins: ["machine"] },
-    { id: "opencode", name: "OpenCode", signins: ["machine"] },
+    { id: "claude", name: "Claude Code", signins: ["vault", "machine"], kind: "token", bytes: 230 * MB },
+    { id: "codex", name: "Codex", signins: ["machine"], kind: "oauth", bytes: 95 * MB },
+    { id: "opencode", name: "OpenCode", signins: ["machine"], kind: "key", bytes: 120 * MB },
   ],
   mcp: [
     { name: "wsp", agents: ["claude", "codex"] },
@@ -54,24 +54,42 @@ const OPTIONS: RecipeOptions = {
     { name: "excalidraw", agents: ["claude"] },
   ],
   clis: [
-    { name: "gh", via: "apt", version: "2.86.0" },
-    { name: "ripgrep", via: "apt", version: "15.1.0" },
-    { name: "jq", via: "apt", version: "1.8.1" },
-    { name: "fd", via: "apt", version: "10.3.0" },
-    { name: "uv", via: "installer", version: "0.9.2" },
-    { name: "pnpm", via: "npm", version: "11.9.0" },
-    { name: "bun", via: "npm", version: "1.3.1" },
-    { name: "go", via: "apt", version: "1.25.1" },
-    { name: "cargo-nextest", via: "cargo", version: "0.9.98", needs: ["build-essential"] },
-    { name: "yq", via: "apt", version: "4.47.1" },
+    { name: "gh", via: "apt", version: "2.86.0", bytes: 40 * MB },
+    { name: "ripgrep", via: "apt", version: "15.1.0", bytes: 6 * MB },
+    { name: "jq", via: "apt", version: "1.8.1", bytes: 1 * MB },
+    { name: "fd", via: "apt", version: "10.3.0", bytes: 4 * MB },
+    { name: "uv", via: "installer", version: "0.9.2", bytes: 38 * MB },
+    { name: "pnpm", via: "npm", version: "11.9.0", bytes: 20 * MB },
+    { name: "bun", via: "npm", version: "1.3.1", bytes: 90 * MB },
+    { name: "go", via: "apt", version: "1.25.1", bytes: 517 * MB },
+    { name: "cargo-nextest", via: "cargo", version: "0.9.98", needs: ["build-essential"], bytes: 30 * MB },
+    { name: "yq", via: "apt", version: "4.47.1", bytes: 10 * MB },
   ],
   skills: ["unslop", "diagnosing-bugs", "blast-radius", "typescript-best-practices", "grilling", "wizard", "wsp", "wsp-review", "agent-pipeline", "zingzy-design-taste", "writing-plans", "prototype", "research", "why"].map(name => ({ name, from: name === "wsp" ? "~/.agents/skills" : "~/.claude/skills", linked: false })),
   plugins: ["frontend-design@claude-plugins-official", "code-review@claude-plugins-official", "skill-creator@claude-plugins-official", "ralph-loop@claude-plugins-official", "brag@hyperframes", "dataviz@anthropic-labs", "turnstile-spin@spoo-me", "excalidraw-skill@excalidraw", "raycast-ui-skills@raycast"].map(name => ({ name })),
   configs: [
     { id: "git", label: "git settings and identity" },
     { id: "shell", label: "zsh or fish, the prompt, tmux and the rest of the shell's look" },
-    { id: "github", label: "the GitHub sign-in" },
+    { id: "github", label: "the GitHub sign-in", signins: ["vault", "machine", "skip"] },
   ],
+  folders: [
+    { name: "wsp", path: "~/wsp", remote: "github.com/Zingzy/wsp", private: true, unpushed: 2, bytes: 1.1 * 1024 * MB },
+    { name: "spoo", path: "~/spoo", remote: "github.com/spoo-me/url-shortener", private: false, unpushed: 0, bytes: 180 * MB },
+    { name: "laya", path: "~/laya", bytes: 340 * MB },
+    { name: "kartsmash", path: "~/kartsmash", bytes: 2.3 * 1024 * MB },
+  ],
+};
+
+const hereAgent = (id: string, name: string, over: Partial<AgentRow>): AgentRow => ({ id, name, installed: true, road: "own", signIn: "signed-in", signInRoad: "key", wspTools: true, ...over });
+const HERE_AGENTS: AgentsReport = {
+  target: { placeId: "here" },
+  home: "/Users/zingzy",
+  user: "zingzy",
+  readAt: AT,
+  agents: [hereAgent("claude", "Claude Code", { signInKind: "api-key" }), hereAgent("codex", "Codex", { signInKind: "subscription", signInPlan: "plus" }), hereAgent("opencode", "OpenCode", { signIn: "none" })],
+  skills: [],
+  servers: [],
+  refused: [],
 };
 
 const project = (id: string, name: string, path: string, remote: string, computer = "here"): ProjectView => ({ id, name, computer, source: { kind: "folder", path }, path, remote, defaultBranch: "main", memoryKey: id, memoryDir: "/m" }) as ProjectView;
@@ -148,8 +166,34 @@ const SETUPS: Record<string, { setup: PlaceSetup; applied: PlaceApplied }> = {
 };
 
 const ADD_STEPS: Record<string, PlaceAddJob> = {
-  checks: { addId: "a_add", address: "studio", startedAt: AT, state: "running", steps: [{ step: "connect", state: "done", note: "Ubuntu 24.04" }, { step: "check", state: "done", note: "root, systemd, cgroup v2, 61 GB free" }, { step: "reach", state: "done", note: "studio dials back over ssh" }, { step: "wsp", state: "running", note: "x86_64" }] },
-  "checks-refused": { addId: "a_add", address: "jumpbox", startedAt: AT, state: "failed", steps: [{ step: "connect", state: "done", note: "Ubuntu 22.04" }, { step: "check", state: "running" }], said: "jumpbox logs in as a user that is not root, and root on the box is required: wsp runs its daemon there as a system service.", fix: "Add it as root@jump.zingzy.dev, or put User root under Host jumpbox in your ssh config." },
+  checks: {
+    addId: "a_add",
+    address: "studio",
+    startedAt: AT,
+    state: "running",
+    steps: [
+      { step: "connect", state: "done", note: "Ubuntu 24.04" },
+      { step: "chip", state: "done", note: "Linux x86_64" },
+      { step: "root", state: "done" },
+      { step: "system", state: "done", note: "systemd, cgroup v2" },
+      { step: "disk", state: "done", note: "61 GB free" },
+      { step: "reach", state: "done", note: "studio dials back over ssh" },
+      { step: "wsp", state: "running", note: "x86_64" },
+    ],
+  },
+  "checks-refused": {
+    addId: "a_add",
+    address: "jumpbox",
+    startedAt: AT,
+    state: "failed",
+    steps: [
+      { step: "connect", state: "done", note: "Ubuntu 22.04" },
+      { step: "chip", state: "done", note: "Linux arm64" },
+      { step: "root", state: "failed", note: "jumpbox logs in as a user that is not root, and root on the box is required: wsp runs its daemon there as a system service." },
+    ],
+    said: "jumpbox logs in as a user that is not root, and root on the box is required: wsp runs its daemon there as a system service.",
+    fix: "Add it as root@jump.zingzy.dev, or put User root under Host jumpbox in your ssh config.",
+  },
   hostkey: { addId: "a_add", address: "studio", startedAt: AT, state: "failed", steps: [{ step: "connect", state: "running" }], said: hostKeyUnconfirmedRefusal("studio", "ED25519 SHA256:tK3mX9Qf2bWq8vRz0YhN4cL7pJd1sE6gA5uF8oH2kIw"), kind: PLACE_HOST_KEY_KIND, hostKey: "ED25519 SHA256:tK3mX9Qf2bWq8vRz0YhN4cL7pJd1sE6gA5uF8oH2kIw" },
 };
 
@@ -187,6 +231,17 @@ const { api } = settingsApi({
   recipesOptions: async () => OPTIONS,
   recipesList: async () => (screen === "recipes-empty" ? [] : RECIPES),
   placesChoose: async () => pending[0]!,
+  agentsRead: async () => HERE_AGENTS,
+  placesFollow: async (_: string, recipe: string) => ({ ...studio, recipe }),
+  placesSkip: async () => studio,
+  placesSetupLog: async () => [
+    "2026-10-03T10:02:05Z [mcp] copying wsp, context7, gsc",
+    "2026-10-03T10:02:06Z [clis] apt-get install -y golang-go",
+    "2026-10-03T10:02:07Z [skills] copying 78 skills",
+    "2026-10-03T10:02:08Z [plugins] claude plugin install frontend-design@claude-plugins-official",
+    "2026-10-03T10:02:09Z [folders] git clone github.com/Zingzy/wsp",
+  ],
+  placesEstimate: async () => ({ neededBytes: 3.9 * 1024 * MB, freeBytes: screen === "summary-disk" ? 2.1 * 1024 * MB : 61 * 1024 * MB, unmeasured: 0 }),
   placesList: async () => ({ places, adds: [], pending }),
   initGet: async () => null,
   addComputerOverSsh: async () => STUDIO,
@@ -211,9 +266,10 @@ const job = ADD_STEPS[screen];
 if (job !== undefined) useAdds.setState({ jobs: { [job.addId]: job } });
 if (screen === "where") useAddFlow.setState({ open: true, step: "where", address: "studio" });
 else if (job !== undefined) useAddFlow.setState({ open: true, step: "checks", address: job.address, addId: job.addId });
-else if (PICK_STEPS.includes(screen as AddStep) || screen === "projects-taken") {
-  const step = (screen === "projects-taken" ? "projects" : screen) as AddStep;
-  useAddFlow.setState({ open: true, step, address: "studio", placeId: STUDIO.id, pendingId: "a_add", picks: PICKS, from: "here", options: OPTIONS, saveAs: { on: true, name: "Builders", icon: "rocket" } });
+else if (PICK_STEPS.includes(screen as AddStep) || screen === "projects-taken" || screen === "projects-nogithub" || screen === "summary-disk") {
+  const step = (screen.startsWith("projects") ? "projects" : screen === "summary-disk" ? "summary" : screen) as AddStep;
+  const picks = screen === "projects-nogithub" ? { ...PICKS, configs: { ...PICKS.configs, github: { signin: "skip" as const } } } : PICKS;
+  useAddFlow.setState({ open: true, step, address: "studio", placeId: STUDIO.id, pendingId: "a_add", picks, from: "here", options: OPTIONS, saveAs: { on: true, name: "Builders", icon: "rocket" } });
 } else if (RUNNING_SCREENS.includes(screen)) useAddFlow.setState({ open: true, step: screen === "ready" ? "ready" : "running", placeId: STUDIO.id, address: "studio" });
 
 // The desktop shell's folder picker, which is what draws Add a folder on Import projects.

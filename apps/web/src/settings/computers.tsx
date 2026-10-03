@@ -437,8 +437,8 @@ function RemoveLine({ place, ctx, onRemoved }: { place: PlaceView; ctx: Settings
 /** A computer's facts of one kind on one line: its system, cores and memory, as it last reported them. */
 const shapeLine = (place: PlaceView): string => [place.os, place.shape === undefined ? undefined : `${place.shape.cpu} cores`, place.shape === undefined ? undefined : fmtMemGb(place.shape.memMb)].filter((part): part is string => part !== undefined && part !== "").join(", ");
 
-/** The recipe a computer follows, its changes reaching it on their own; None where it follows none. Moving it to
- * another is the host's to offer, and the picker is held until it does. */
+/** The recipe a computer follows, its changes reaching it on their own; None where it follows none. A move is the
+ * host's: its answer stands on the computer's row, and the recipes are read again for who follows each. */
 function RecipeCard({ place, ctx }: { place: PlaceView; ctx: SettingsContext }) {
   const recipes = useRecipes(s => s.recipes);
   const looks = ctx.preferences.recipeLook;
@@ -449,6 +449,11 @@ function RecipeCard({ place, ctx }: { place: PlaceView; ctx: SettingsContext }) 
   const value = place.recipe === undefined || place.recipe === NO_RECIPE ? NO_RECIPE : place.recipe;
   const glyphOf = (slug: string) => PROJECT_GLYPHS[looks?.[slug]?.icon ?? "folder"];
   const choices = [...(recipes ?? []).map(r => ({ value: r.slug, label: r.name })), { value: NO_RECIPE, label: "None" }];
+  const follow = (slug: string): void =>
+    void ctx.api?.placesFollow?.(place.id, slug).then(answer => {
+      useStore.setState(s => ({ places: s.places.map(p => (p.id === answer.id ? answer : p)) }));
+      readRecipes(ctx.api);
+    }, ctx.failed);
   return (
     <Card id="recipe">
       <Row
@@ -456,7 +461,7 @@ function RecipeCard({ place, ctx }: { place: PlaceView; ctx: SettingsContext }) 
         title="Follows a recipe"
         description={`Changes to it reach ${name} on their own.`}
         control={
-          <Select value={value} disabled={ctx.api?.placesFollow === undefined} onValueChange={next => void ctx.api?.placesFollow?.(place.id, String(next)).catch(ctx.failed)}>
+          <Select value={value} disabled={ctx.api?.placesFollow === undefined} onValueChange={next => follow(String(next))}>
             <SelectTrigger size="sm" aria-label="Recipe" className={SELECT_WIDTH}>
               <SelectValue>
                 {(slug: string) => {
