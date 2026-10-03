@@ -36,6 +36,7 @@ import { brewTableFor, copyRows, planImport } from "./image-recipe.js";
 import { CONFIG_PATHS, configTexts, type ConfigText } from "./recipe-configs.js";
 import { folderFiles, LINKED_FOLDER_NOTE } from "./folder-files.js";
 import { loadRecipe, smallRecipePath } from "./recipe-file.js";
+import { agentOwnPaths } from "./recipes.js";
 
 /** What the planner reads beside the picks: this computer's rungs and its Homebrew table, the same two readers wsp
  * init and a copy's build take. */
@@ -256,9 +257,12 @@ export async function undoPlan(before: RecipeFile, removed: readonly { kind: Rec
         out.push({ key, label: name, ids: [id], ...("cmd" in r ? { cmd: r.cmd } : { note: r.note }) });
         break;
       }
-      case "agents":
-        out.push({ key, label: CATALOG_AGENTS.find(a => a.id === name)?.name ?? name, ids: [`agents/${name}`, `signins/${name}`], ...catalogUninstall(name, path, prefix) });
+      case "agents": {
+        // Its own files wsp landed come off with it; a file it rewrites as it runs was never wsp's to keep.
+        const dests = agentOwnPaths(name).map(p => p.replace(/^~\//, ""));
+        out.push({ key, label: CATALOG_AGENTS.find(a => a.id === name)?.name ?? name, ids: [`agents/${name}`, `signins/${name}`, ...dests.map(d => `files/${d}`)], dests, ...catalogUninstall(name, path, prefix) });
         break;
+      }
       case "plugins": {
         const road = CATALOG_AGENTS.find(a => a.plugins !== undefined && before.agents[a.id] !== undefined)?.plugins;
         out.push({ key, label: name, ids: [key], ...(road === undefined ? { note: "no picked agent takes plugins" } : { cmd: `${pathLine(path, prefix)}\n${road.uninstall(name)}` }) });

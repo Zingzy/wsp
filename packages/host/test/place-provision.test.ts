@@ -14,7 +14,7 @@ import { nodeHost } from "@wsp/collect";
 import { boxGuest, cleanGuests } from "../../engine/test/box-guest.js";
 import { parseEnvFile, serverEnvFileFor } from "../src/env-keys.js";
 import { serversActs } from "../src/servers-acts.js";
-import { placeProvisioner } from "../src/place-provision.js";
+import { placeProvisioner, undoPlan } from "../src/place-provision.js";
 import { smallRecipePath } from "../src/recipe-file.js";
 import { FIXTURE, RECIPE } from "./init-fixture.js";
 
@@ -210,5 +210,45 @@ describe("a computer's picks planned for a sync", () => {
     expect(light.skills?.lands.map(l => l.dest)).toEqual([".claude/skills/unslop"]);
     await planner.setup(picks, { home }, new Set(["skills", "clis"]));
     expect(reads).toBe(1);
+  });
+});
+
+describe("what taking rows out of a computer's picks runs there", () => {
+  it("takes a CLI and an agent off by their own roads where they have one, a skill and an agent's own files by the ledger, a plugin by claude's command and a folder by its record", async () => {
+    const before = {
+      name: "laptop",
+      agents: { claude: { signin: "vault" as const } },
+      mcp: { linear: { agents: ["claude"] } },
+      clis: { cowsay: { via: "npm" }, jq: { via: "apt" } },
+      skills: { why: { from: "~/.claude/skills" } },
+      plugins: { "lint@acme": {} },
+      folders: { app: { from: "~/app", name: "app", keep: [] } },
+      configs: { git: {} },
+    };
+    const removed = [
+      { kind: "agents" as const, name: "claude" },
+      { kind: "clis" as const, name: "cowsay" },
+      { kind: "clis" as const, name: "jq" },
+      { kind: "skills" as const, name: "why" },
+      { kind: "plugins" as const, name: "lint@acme" },
+      { kind: "folders" as const, name: "app" },
+      { kind: "mcp" as const, name: "linear" },
+      { kind: "configs" as const, name: "git" },
+    ];
+    const undo = await undoPlan(before, removed, { home: "/root" }, async () => new Map());
+    const by = new Map(undo.map(u => [u.key, u]));
+    expect(by.get("agents/claude")).toMatchObject({ ids: expect.arrayContaining(["agents/claude", "signins/claude", "files/.claude/settings.json"]), dests: expect.arrayContaining([".claude/settings.json", ".claude/CLAUDE.md"]) });
+    expect(by.get("agents/claude")?.dests).not.toContain(".claude.json");
+    // Claude Code's script road names no uninstall, which its row says.
+    expect(by.get("agents/claude")?.note).toContain("no uninstaller");
+    expect(by.get("clis/cowsay")).toMatchObject({ ids: ["tools/npm/cowsay"], cmd: expect.stringContaining("npm uninstall -g cowsay") });
+    // A floor row is the base's and stays, which its row says.
+    expect(by.get("clis/jq")).toMatchObject({ ids: ["tools/apt/jq"], note: "jq is part of the base and stays" });
+    expect(by.get("skills/why")).toMatchObject({ dests: [".claude/skills/why"] });
+    expect(by.get("plugins/lint@acme")?.cmd).toContain("claude plugin uninstall 'lint@acme'");
+    expect(by.get("folders/app")).toMatchObject({ folder: "app", ids: ["folders/app"] });
+    expect(by.get("mcp/linear")).toMatchObject({ ids: [`${MCP_ID_PREFIX}claude/linear`] });
+    expect(by.get("mcp/linear")?.cmd).toBeUndefined();
+    expect(by.get("configs/git")).toMatchObject({ dests: [".gitconfig", ".config/git/config", ".config/git/ignore", ".config/git/attributes"] });
   });
 });

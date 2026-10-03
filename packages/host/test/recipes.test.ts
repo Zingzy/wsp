@@ -151,6 +151,18 @@ describe("a resolved recipe", () => {
     expect((await resolveRecipe(LAPTOP, reading())).items["skills/unslop"]).toBe(before.items["skills/unslop"]);
   });
 
+  it("moves an agent's item for an edit to its own files, and not for one to a file it rewrites as it runs", async () => {
+    mkdirSync(join(home, ".claude"), { recursive: true });
+    writeFileSync(join(home, ".claude", "settings.json"), "{}\n");
+    writeFileSync(join(home, ".claude.json"), "{}\n");
+    const before = await resolveRecipe(LAPTOP, reading());
+    expect(before.items["agents/claude"]).toMatch(/^[0-9a-f]{64}$/);
+    writeFileSync(join(home, ".claude.json"), '{"numStartups":2}\n');
+    expect((await resolveRecipe(LAPTOP, reading())).items["agents/claude"]).toBe(before.items["agents/claude"]);
+    writeFileSync(join(home, ".claude", "settings.json"), '{"model":"opus"}\n');
+    expect((await resolveRecipe(LAPTOP, reading())).items["agents/claude"]).not.toBe(before.items["agents/claude"]);
+  });
+
   it("moves no hash when this computer gains a tool the recipe does not hold", async () => {
     const tools = [{ id: "tools/brew/gh", version: "2.80.0" }];
     const before = recipeHash(await resolveRecipe(LAPTOP, reading(tools)));

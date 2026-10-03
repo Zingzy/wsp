@@ -102,6 +102,7 @@ import { skillsActs } from "./skills-acts.js";
 import { serverIcons } from "./server-icons.js";
 import { agentLatest } from "./agent-latest.js";
 import { keptTools, recipeShelf } from "./recipes.js";
+import { recipeWatch } from "./recipe-watch.js";
 import { serversActs } from "./servers-acts.js";
 import { hostActs } from "./agents-signin.js";
 import { startHost, workspaceRoads, type HostDoctorReaders, type HostHandle } from "./server.js";
@@ -706,7 +707,39 @@ export function statesHere(statePath: string): string[] {
 
 /** The provider slot each runtime made here was wired with, so a host can swap the module in when a key is saved. */
 const PROVIDER_SLOTS = new WeakMap<Runtime, ProviderSlot>();
+/** The managers' listing each runtime's recipes resolve against, which the watcher reads again once a day. */
+const RECIPE_TOOLS = new WeakMap<Runtime, ReturnType<typeof keptTools>>();
 
+/** How long after an edit here the computers that follow its recipe sync: a save in an editor is often several. */
+const WATCH_SYNC_MS = 5_000;
+
+/** The watcher over what followed recipes hold on this computer, on a host that keeps recipes and places: an edit
+ * reaches every computer that follows a recipe holding it, and a recipe saved or followed moves what is watched. */
+function hostRecipeWatch(rt: Runtime): { close(): void } | undefined {
+  const places = rt.places;
+  const recipes = rt.recipes;
+  if (places === undefined || recipes === undefined) return undefined;
+  const watcher = recipeWatch({
+    home: homedir(),
+    followed: async () => {
+      const by = await places.followers();
+      return (await recipes.list()).filter(r => by.has(r.slug));
+    },
+    changed: slugs => {
+      for (const slug of slugs) void places.recipeChanged(slug, WATCH_SYNC_MS).catch(() => undefined);
+    },
+    versions: async () => RECIPE_TOOLS.get(rt)?.refresh(),
+  });
+  const moved = (): void => void watcher.refresh().catch(() => undefined);
+  moved();
+  const off = rt.events.on("place.sync", moved);
+  return {
+    close: () => {
+      off();
+      watcher.close();
+    },
+  };
+}
 /** The provider pick each runtime made here stands on: the module it forks on now, which names the place its copies
  * are filed under, and the environment that module was picked out of, which is also where the other places this
  * host can build at are read from. A swap moves both, so the backend, the place and the table never say different
@@ -840,6 +873,7 @@ export function makeRuntime(
   });
   PROVIDER_SLOTS.set(rt, slot);
   PROVIDER_PICKS.set(rt, pick);
+  RECIPE_TOOLS.set(rt, tools);
   return rt;
 }
 
@@ -1511,9 +1545,11 @@ async function hostFor(
           })
         : undefined;
     if (linked && opts.relay === false) await stopRecordedConnector(dirname(opts.statePath));
+    const watcher = hostRecipeWatch(rt);
     const host: HostHandle = {
       ...handle,
       close: async () => {
+        watcher?.close();
         await relay?.close();
         await handle.close();
         rmSync(lockPath, { force: true });

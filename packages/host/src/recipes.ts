@@ -7,12 +7,12 @@
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { MCP_AGENTS } from "@wsp/catalog";
+import { CATALOG_AGENTS, MCP_AGENTS } from "@wsp/catalog";
 import { DETECTORS, expand, isSecretName, nodeHost, type Manifest } from "@wsp/collect";
 import { writeOwn } from "@wsp/own-file";
 import { issuesLine, noSuchRecipeRefusal, RECIPE_NAME_REFUSAL, RecipeFile, recipeCanon, recipeSlug, toolRowId, type RecipeOptions, type ResolvedRecipe } from "@wsp/protocol";
 import type { RecipeShelf } from "@wsp/runtime";
-import { configDigest, configTexts, type ConfigFiles } from "./recipe-configs.js";
+import { CONFIG_PATHS, configDigest, configTexts, type ConfigFiles } from "./recipe-configs.js";
 import { readRecipeOptions } from "./recipe-options.js";
 import { folderFiles } from "./folder-files.js";
 import { tokenShaped } from "./token-shapes.js";
@@ -141,6 +141,62 @@ function serverDigest(home: string, agentId: string, name: string): string {
   return "";
 }
 
+/** An agent's own files a recipe carries, home-relative: its config paths less what is read as its own row (the
+ * skills folders, the MCP config file) and less what it rewrites as it runs, which lands once and is never synced. */
+export function agentOwnPaths(id: string): string[] {
+  const a = CATALOG_AGENTS.find(entry => entry.id === id);
+  if (a === undefined) return [];
+  const apart = new Set([...(a.volatile ?? []), ...(a.mcp?.files ?? []), ...a.skillRoots.user.map(r => r.dir)]);
+  return a.configPaths.filter(p => !apart.has(p));
+}
+
+/** Where on this computer each row a change can reach a computer from is read, by item key, and what it reads as
+ * now: a skill at its real path, a config's files after their cuts, an agent's own files, the entry a server has in
+ * the file its agent keeps them in. The resolve reads these and the watcher watches them; a CLI's version comes off
+ * its manager and has no path. */
+export function itemSources(file: RecipeFile, home: string): { key: string; paths: string[]; digest(): string }[] {
+  const at = (p: string): string => expand({ home }, p.startsWith("~/") ? p : `~/${p}`);
+  const out: { key: string; paths: string[]; digest(): string }[] = [];
+  for (const [name, row] of Object.entries(file.skills)) {
+    let real: string | undefined;
+    try {
+      real = realpathSync(join(expand({ home }, row.from), name));
+    } catch {
+      real = undefined;
+    }
+    out.push({ key: `skills/${name}`, paths: real === undefined ? [] : [real], digest: () => (real === undefined ? "" : folderDigest(real)) });
+  }
+  for (const [name, row] of Object.entries(file.mcp)) {
+    for (const agent of row.agents) out.push({ key: `mcp/${name}/${agent}`, paths: (MCP_AGENTS.find(a => a.id === agent)?.mcp.files ?? []).map(at), digest: () => serverDigest(home, agent, name) });
+  }
+  for (const id of ["git", "shell"] as const satisfies readonly ConfigFiles[]) {
+    if (file.configs[id] !== undefined) out.push({ key: `configs/${id}`, paths: CONFIG_PATHS[id].map(at), digest: () => configDigest(configTexts(id, home)) });
+  }
+  for (const id of Object.keys(file.agents)) {
+    const paths = agentOwnPaths(id).map(at);
+    out.push({ key: `agents/${id}`, paths, digest: () => pathsDigest(paths) });
+  }
+  return out;
+}
+
+/** The digest of what stands at some paths: a folder by the rule everything a recipe ships is read by, a file by its
+ * bytes, a path not there by nothing. Empty where none of them is there. */
+function pathsDigest(paths: readonly string[]): string {
+  const hash = createHash("sha256");
+  let any = false;
+  for (const path of paths) {
+    let st;
+    try {
+      st = statSync(path);
+    } catch {
+      continue;
+    }
+    any = true;
+    hash.update(`${path}\0`).update(st.isDirectory() ? folderDigest(path) : readFileSync(path)).update("\0");
+  }
+  return any ? hash.digest("hex") : "";
+}
+
 /** A recipe with what this computer has for each row now: a CLI's version off its manager, a skill's digest at its
  * real path (a symlinked skill is read where it lives), a config's digest after its cuts, a server's entry digest
  * per agent. A row this computer no longer has reads empty. The managers are asked only when a CLI is picked. */
@@ -149,17 +205,7 @@ export async function resolveRecipe(file: RecipeFile, reading: RecipeReading): P
   const tools = Object.keys(file.clis).length === 0 ? [] : await reading.tools();
   const versions = new Map(tools.map(e => [e.id, e.version ?? ""]));
   for (const [name, row] of Object.entries(file.clis)) items[`clis/${name}`] = versions.get(toolRowId(row.via, name)) ?? "";
-  for (const [name, row] of Object.entries(file.skills)) {
-    let real: string | undefined;
-    try {
-      real = realpathSync(join(expand({ home: reading.home }, row.from), name));
-    } catch {
-      real = undefined;
-    }
-    items[`skills/${name}`] = real === undefined ? "" : folderDigest(real);
-  }
-  for (const [name, row] of Object.entries(file.mcp)) for (const agent of row.agents) items[`mcp/${name}/${agent}`] = serverDigest(reading.home, agent, name);
-  for (const id of ["git", "shell"] as const satisfies readonly ConfigFiles[]) if (file.configs[id] !== undefined) items[`configs/${id}`] = configDigest(configTexts(id, reading.home));
+  for (const source of itemSources(file, reading.home)) items[source.key] = source.digest();
   return { file, items };
 }
 
