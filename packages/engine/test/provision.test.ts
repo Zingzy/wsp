@@ -742,7 +742,7 @@ describe("the PATH every script of the job exports", () => {
 });
 
 describe("a CLI the catalog says takes hold with a command of its own", () => {
-  it("runs git-lfs's install system-wide once the row stands, and a hook that fails fails its row with what it said", async () => {
+  it("runs git-lfs's install system-wide once wsp put the row on, never on one the box had, and a hook that fails fails its row", async () => {
     const lfs = step({ id: "tools/brew/git-lfs", label: "Git LFS", bin: "git-lfs" });
     const jq = step({ id: "tools/brew/jq", label: "jq", bin: "jq" });
     const { machine, calls } = boxMachine();
@@ -756,6 +756,12 @@ describe("a CLI the catalog says takes hold with a command of its own", () => {
     expect(hooks[0]).toContain("git lfs install --system");
     // The person's own ~/.gitconfig is the git row's file, so the filters go in the system's and never there.
     expect(hooks[0]).not.toContain("--global");
+
+    // A git-lfs the box had before wsp is the person's own: its system gitconfig is not wsp's to write.
+    const theirs = boxMachine(cmd => (cmd.includes("wsp-present") || cmd.includes("command -v 'git-lfs'") ? { exitCode: 0, stdout: "wsp-present 0 /usr/bin/git-lfs\n", stderr: "" } : undefined));
+    const kept = await provisionStep(theirs.machine, planOf([lfs]), "clis", newSetupRun(), () => {}, ON);
+    expect(outcomes(kept)).toEqual([["tools/brew/git-lfs", "present"]]);
+    expect(theirs.calls.some(c => c.includes("git lfs install"))).toBe(false);
 
     const refused = boxMachine(cmd => (cmd.includes("git lfs install") ? { exitCode: 2, stdout: "", stderr: "git: 'lfs' is not a git command" } : undefined));
     const failed = await provisionStep(refused.machine, planOf([lfs]), "clis", newSetupRun(), () => {}, ON);

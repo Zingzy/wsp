@@ -407,15 +407,15 @@ async function stepRows(machine: Machine, plan: ProvisionPlan, step: EngineStep,
 /** How long a tool's own hook gets once the tool stands. */
 const HOOK_MS = 60_000;
 
-/** The CLIs whose catalog row names a hook, run once each row stands: a hook that fails fails its row, since the tool
- * is there and does not yet do what it was picked for. */
+/** The CLIs whose catalog row names a hook, run once wsp put the row on: a hook that fails fails its row, since the
+ * tool is there and does not yet do what it was picked for. A row the box had before wsp is the person's own. */
 async function hooked(machine: Machine, plan: ProvisionPlan, rows: PlaceProvisionRow[], stage: ProvisionStage): Promise<PlaceProvisionRow[]> {
   const out: PlaceProvisionRow[] = [];
   for (const row of rows) {
     const id = catalogIdOfRow(row);
     const entry = id === undefined ? undefined : catalogEntry(id);
     const hook = entry?.kind === "tool" ? entry.hook : undefined;
-    if (hook === undefined || (row.outcome !== "installed" && row.outcome !== "present")) {
+    if (hook === undefined || row.outcome !== "installed") {
       out.push(row);
       continue;
     }
