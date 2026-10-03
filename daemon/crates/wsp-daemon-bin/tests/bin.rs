@@ -421,6 +421,23 @@ async fn settles(mut holds: impl FnMut() -> bool) -> bool {
     true
 }
 
+/// The daemon's threads and fds once two reads 100 ms apart agree. The blocking pool's first thread is born about
+/// when the first socket's auth is answered and wears the daemon's name until it names itself, and the first read
+/// it runs holds a file for a moment.
+async fn at_rest(pid: u32) -> (usize, usize) {
+    let read = || (own_threads(pid), count(pid, "fd"));
+    let mut last = read();
+    for _ in 0..50 {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let now = read();
+        if now == last {
+            return now;
+        }
+        last = now;
+    }
+    panic!("the daemon never came to rest: {last:?} {:?}", thread_names(pid));
+}
+
 /// The daemon's threads less tokio's blocking pool, whose threads come for any file read and idle out after ten seconds.
 fn own_threads(pid: u32) -> usize {
     thread_names(pid).iter().filter(|n| *n != "tokio-rt-worker").count()
@@ -441,7 +458,7 @@ async fn an_exited_pty_holds_its_scrollback_and_no_thread_or_fd_until_it_is_kill
     let mut c = Peer::connect(port).await;
     // The startup sweep of copies a stop cut short runs on an unnamed thread beside main, holding fds while it lasts.
     assert!(settles(|| own_threads(pid) == 1).await, "a resting daemon runs its main thread alone: {:?}", thread_names(pid));
-    let (threads, fds) = (own_threads(pid), count(pid, "fd"));
+    let (threads, fds) = at_rest(pid).await;
     let mut ids = Vec::new();
     for _ in 0..10 {
         let created = c.request("pty.create", json!({ "shell": "bash" })).await;
