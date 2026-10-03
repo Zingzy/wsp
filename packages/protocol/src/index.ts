@@ -3421,6 +3421,11 @@ export type PlaceSetupEvent = z.infer<typeof PlaceSetupEvent>;
 export const PlaceSyncEvent = z.object({ type: z.literal("place.sync"), placeId: SETUP_TEXT, sync: PlaceSync.optional(), line: PlaceSetupLine.optional(), applied: PlaceApplied.optional() });
 export type PlaceSyncEvent = z.infer<typeof PlaceSyncEvent>;
 
+/** Which computers follow a recipe moved, or the recipe itself did: a follow, a recipe saved or taken away. What
+ * watches a recipe's items here, and a page listing recipes, read it again. */
+export const RecipesChangedEvent = z.object({ type: z.literal("recipes.changed"), slug: z.string() });
+export type RecipesChangedEvent = z.infer<typeof RecipesChangedEvent>;
+
 /** One line of an add as the command line and the tool stream it: a step of the install, then a step of the setup. */
 export const AddLine = PlaceSetupLine.extend({ step: z.union([PlaceAddStep, PlaceSetupStep]) });
 export type AddLine = z.infer<typeof AddLine>;
@@ -3738,6 +3743,7 @@ export const EventUnion = z.discriminatedUnion("type", [
   PlaceStageEvent.extend(sequenced),
   PlaceSetupEvent.extend(sequenced),
   PlaceSyncEvent.extend(sequenced),
+  RecipesChangedEvent.extend(sequenced),
   PlacePendingEvent.extend(sequenced),
   PlaceJoinedEvent.extend(sequenced),
   PlacePresentEvent.extend(sequenced),

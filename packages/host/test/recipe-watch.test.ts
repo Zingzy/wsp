@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { RecipeFile } from "@wsp/protocol";
 import { recipeWatch, type WatchFn, type WatchTimers } from "../src/recipe-watch.js";
+import { hostRecipeWatch } from "../src/cli.js";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -202,6 +203,26 @@ describe("watching what a followed recipe holds", () => {
     await new Promise(resolve => setImmediate(resolve));
     expect(reads).toBe(2);
     watcher.close();
+  });
+
+  it("reads which recipes are followed again on a follow, a save or a remove, not only on a sync's frames", async () => {
+    const h = home();
+    const handlers = new Map<string, () => void>();
+    let reads = 0;
+    const rt = {
+      events: { on: (type: string, fn: () => void) => (handlers.set(type, fn), () => handlers.delete(type)), since: () => ({ stream: "", head: 0, events: [], gap: false }) },
+      places: { followers: async () => (reads++, new Map([["laptop", ["spoo"]]])), recipeChanged: async () => [] },
+      recipes: { list: async () => [{ slug: "laptop", file: RECIPE }] },
+    };
+    const watching = hostRecipeWatch(rt as never, fakeWatch().watch)!;
+    await new Promise(resolve => setImmediate(resolve));
+    const before = reads;
+    handlers.get("recipes.changed")!();
+    await new Promise(resolve => setImmediate(resolve));
+    expect(reads).toBeGreaterThan(before);
+    watching.close();
+    expect(handlers.size).toBe(0);
+    void h;
   });
 
   it("hears a config file unlinked and written again, and the edit after it, over the system's own watch", async () => {

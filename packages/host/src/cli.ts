@@ -102,7 +102,7 @@ import { skillsActs } from "./skills-acts.js";
 import { serverIcons } from "./server-icons.js";
 import { agentLatest } from "./agent-latest.js";
 import { keptTools, recipeShelf } from "./recipes.js";
-import { recipeWatch } from "./recipe-watch.js";
+import { recipeWatch, type WatchFn } from "./recipe-watch.js";
 import { serversActs } from "./servers-acts.js";
 import { hostActs } from "./agents-signin.js";
 import { startHost, workspaceRoads, type HostDoctorReaders, type HostHandle } from "./server.js";
@@ -715,7 +715,7 @@ const WATCH_SYNC_MS = 5_000;
 
 /** The watcher over what followed recipes hold on this computer, on a host that keeps recipes and places: an edit
  * reaches every computer that follows a recipe holding it, and a recipe saved or followed moves what is watched. */
-function hostRecipeWatch(rt: Runtime): { close(): void } | undefined {
+export function hostRecipeWatch(rt: Pick<Runtime, "places" | "recipes" | "events">, watch?: WatchFn): { close(): void } | undefined {
   const places = rt.places;
   const recipes = rt.recipes;
   if (places === undefined || recipes === undefined) return undefined;
@@ -728,14 +728,16 @@ function hostRecipeWatch(rt: Runtime): { close(): void } | undefined {
     changed: slugs => {
       for (const slug of slugs) void places.recipeChanged(slug, WATCH_SYNC_MS).catch(() => undefined);
     },
-    versions: async () => RECIPE_TOOLS.get(rt)?.refresh(),
+    versions: async () => RECIPE_TOOLS.get(rt as Runtime)?.refresh(),
+    ...(watch !== undefined ? { watch } : {}),
   });
   const moved = (): void => void watcher.refresh().catch(() => undefined);
   moved();
-  const off = rt.events.on("place.sync", moved);
+  // A follow, a recipe saved or taken away moves what is watched; a sync's own frames may too.
+  const offs = [rt.events.on("recipes.changed", moved), rt.events.on("place.sync", moved)];
   return {
     close: () => {
-      off();
+      for (const off of offs) off();
       watcher.close();
     },
   };

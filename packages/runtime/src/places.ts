@@ -96,6 +96,7 @@ import {
   type PlaceSetupLine,
   type PlaceSync,
   type PlaceSyncEvent,
+  type RecipesChangedEvent,
   type PlaceSetupStep,
   type PlaceWait,
   type PlaceEstimate,
@@ -462,7 +463,7 @@ export interface PlaceDoorOptions {
   /** How far an install on a computer this host has never met has got; the runtime puts these on its own stream. */
   onStage?: (event: PlaceStageEvent) => void;
   /** Every frame of a setup and every move of a pending add; the runtime puts these on its own stream. */
-  onSetup?: (event: PlaceSetupEvent | PlacePendingEvent | PlaceSyncEvent) => void;
+  onSetup?: (event: PlaceSetupEvent | PlacePendingEvent | PlaceSyncEvent | RecipesChangedEvent) => void;
   /** What a place's row says about its copy of the image while it is not standing: the stage of the build running
    * there, or the reason the last one stopped. The runtime holds the builds, so it answers; nothing for a copy that
    * stands. `stopped` says which of the two the line is. */
@@ -1314,6 +1315,9 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     await keep(next);
   };
 
+  /** Which computers follow a recipe moved, or the recipe did, on the stream every client watches. */
+  const recipesMoved = (slug: string): void => opts.onSetup?.({ type: "recipes.changed", slug });
+
   /** One move of a computer's sync on the stream every client watches. */
   const syncFrame = (event: Omit<PlaceSyncEvent, "type">): void => opts.onSetup?.({ type: "place.sync", ...event });
 
@@ -1771,11 +1775,11 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
 
   /** What moved between what a computer last applied and the recipe it follows as this computer has it now, or
    * nothing where it follows none, is mid-setup, or that recipe will not resolve. */
-  const syncOf = async (record: PlaceRecord): Promise<{ resolved: Awaited<ReturnType<RecipeResolver["resolve"]>>; changes: RecipeChange[] } | undefined> => {
+  const syncOf = async (record: PlaceRecord, given?: Awaited<ReturnType<RecipeResolver["resolve"]>>): Promise<{ resolved: Awaited<ReturnType<RecipeResolver["resolve"]>>; changes: RecipeChange[] } | undefined> => {
     const slug = record.recipe;
     const resolver = opts.recipes?.();
     if (slug === undefined || slug === NO_RECIPE || resolver === undefined || record.picks === undefined || record.setup?.state !== "done") return undefined;
-    const resolved = await resolver.resolve(slug).catch(() => undefined);
+    const resolved = given ?? (await resolver.resolve(slug).catch(() => undefined));
     if (resolved === undefined) return undefined;
     if (resolved.hash === record.applied?.hash) return { resolved, changes: [] };
     return { resolved, changes: recipeChanges(record.picks, record.applied?.items, resolved.file, resolved.items) };
@@ -2968,14 +2972,19 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       const moved = await keep(recipe === NO_RECIPE ? { ...rest, recipe } : { ...held, recipe });
       if (recipe === NO_RECIPE && held.sync !== undefined) syncFrame({ placeId });
       if (recipe !== NO_RECIPE) syncSoon(placeId, 0);
+      for (const slug of new Set([held.recipe, recipe])) if (slug !== undefined && slug !== NO_RECIPE) recipesMoved(slug);
       return viewOf(moved, await defaultId());
     },
 
     async recipeChanged(slug, afterMs = 0) {
+      recipesMoved(slug);
       const names: string[] = [];
+      // One read of the recipe for every computer that follows it.
+      let resolved: Awaited<ReturnType<RecipeResolver["resolve"]>> | undefined;
       for (const r of await records()) {
         if (r.recipe !== slug) continue;
-        const read = await syncOf(r);
+        resolved ??= await opts.recipes?.()?.resolve(slug).catch(() => undefined);
+        const read = await syncOf(r, resolved);
         if (read === undefined || read.changes.length === 0) {
           if (read !== undefined) syncSoon(r.id, afterMs);
           continue;
@@ -3045,6 +3054,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         await keep({ ...r, recipe: NO_RECIPE });
         names.push(r.name);
       }
+      recipesMoved(slug);
       return names;
     },
 

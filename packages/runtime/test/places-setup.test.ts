@@ -925,6 +925,16 @@ describe("a computer that follows a recipe", () => {
     expect(cmds.filter(c => c.startsWith("take-off-"))).toEqual([]);
   });
 
+  it("says a follow, an unfollow and a changed recipe on the stream, whether or not any computer moves", async () => {
+    const { placeId } = await following();
+    const heard: string[] = [];
+    runtime!.events.on("recipes.changed", e => void heard.push((e as { slug: string }).slug));
+    await runtime!.places!.follow(placeId, "laptop");
+    await runtime!.places!.recipeChanged("laptop");
+    await runtime!.places!.unfollow("laptop");
+    expect(heard).toEqual(["laptop", "laptop", "laptop"]);
+  });
+
   it("does nothing on a computer that follows no recipe, and nothing when the recipe did not move", async () => {
     const { p, r, placeId } = await following();
     const before = r.resolves();
