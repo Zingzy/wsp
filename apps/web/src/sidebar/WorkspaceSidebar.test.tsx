@@ -432,6 +432,23 @@ describe("the sidebar's list of thread tiles", () => {
     expect(JSON.parse(window.localStorage.getItem("wsp:sidebar-folded") ?? "null")).toEqual(["settled"]);
   });
 
+  it("folds Setting up by its head and remembers it in the window, as every other head is", async () => {
+    const box = { id: "p_studio", kind: "computer", name: "studio", default: false, present: true, setup: { state: "running", addId: "a_1", startedAt: "2026-10-03T10:00:00.000Z", steps: [{ step: "floor", state: "running" }], waiting: [] } } as PlaceView;
+    const settingUp = { placesList: async () => ({ places: [MAC_ROW, box], adds: [] }) };
+    mount({ projects: [project("pr_1", "spoo")], workspaces: [] }, settingUp);
+    await act(async () => useStore.setState({ places: [MAC_ROW, box] }));
+    const head = (): HTMLElement => document.querySelector<HTMLElement>("[data-row-id='section:setting-up']")!;
+    await waitFor(() => expect(document.querySelector("[data-setup-card='p_studio']")).not.toBeNull());
+    fireEvent.click(head());
+    await waitFor(() => expect(document.querySelector("[data-setup-card='p_studio']")).toBeNull());
+    expect(JSON.parse(window.localStorage.getItem("wsp:sidebar-folded") ?? "null")).toEqual(["settled", "setting-up"]);
+    cleanup();
+    mount({ projects: [project("pr_1", "spoo")], workspaces: [] }, settingUp);
+    await act(async () => useStore.setState({ places: [MAC_ROW, box] }));
+    await waitFor(() => expect(head().getAttribute("aria-expanded")).toBe("false"));
+    expect(document.querySelector("[data-setup-card='p_studio']")).toBeNull();
+  });
+
   it("a fold list saved before the sidebar lost a section is read without its old ids, and Settled folds and opens on a click", async () => {
     window.localStorage.setItem("wsp:sidebar-folded", JSON.stringify(["needs-you", "idle", "done"]));
     mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });

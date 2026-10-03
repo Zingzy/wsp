@@ -1,15 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Add a computer goes on to the image: once a box has joined over ssh or by
-// its code, and once a cloud's key is saved, the same Image card the
-// computer's page draws stands under the add panel, headed with that
-// computer's name. Nothing is built by getting there; a copy is built on its
+// Add a cloud goes on to the image: once a cloud's key is saved, the same
+// Image card the cloud's page draws stands under the panel, headed with that
+// cloud's name. Nothing is built by getting there; a copy is built on its
 // press alone, with the time and the rate beside it.
 import { act, cleanup, fireEvent } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_PREFERENCES, fmtRate, placeBuildsNoImageLine, type InitJob, type InitSetup, type PlaceView, type SealedImage, type SealedImageBuilt, type SealedImageCopy, type SealedImageView } from "@wsp/protocol";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
-import { useAdds } from "../src/settings/adds.js";
 import { ADD_COMPUTER_WORDS } from "../src/settings/format.js";
 import { copyCost, IMAGE_WORDS } from "../src/settings/image.js";
 import { placeName } from "../src/settings/places.js";
@@ -58,17 +56,11 @@ const title = (within: HTMLElement | null): string => stateRow(within).querySele
 const press = (within: HTMLElement | null): HTMLButtonElement => stateRow(within).querySelector<HTMLButtonElement>("[data-k='image-press']")!;
 const cost = (within: HTMLElement | null): string[] => [...stateRow(within).querySelectorAll("[data-k='image-cost'] > span")].map(line => line.textContent ?? "");
 
-const openRoad = async (api: Api, name: "ssh" | "cloud" | "code"): Promise<void> => {
+const openRoad = async (api: Api, _name: "cloud"): Promise<void> => {
   mountSettings({ api, at: { kind: "group", group: "computers" } });
   await settle();
-  fireEvent.click(document.querySelector("[data-k='add-computer-button']")!);
-  fireEvent.click(document.querySelector(`[data-add-road='${name}']`)!);
+  fireEvent.click(document.querySelector("[data-k='add-cloud-button']")!);
   await settle();
-};
-
-/** An add over ssh the host has finished, as the window that asked it keeps it. */
-const joinedOverSsh = (place: PlaceView): void => {
-  useAdds.setState({ jobs: { a_1: { addId: "a_1", address: `root@${place.name}`, startedAt: AT, state: "done", steps: [], placeId: place.id } }, putAway: null });
 };
 
 beforeEach(() => {
@@ -78,69 +70,7 @@ beforeEach(() => {
 
 afterEach(() => cleanup());
 
-describe("Add a computer goes on to the image", () => {
-  it("draws the Image card under a box that joined over ssh, headed with its name, and builds nothing until Copy is pressed", async () => {
-    useStore.setState({ places: [here, box] });
-    joinedOverSsh(box);
-    const fake = host(WITH_IMAGE);
-    await openRoad(fake.api, "ssh");
-    const ssh = road("ssh");
-    expect(ssh?.querySelector("[data-k='joined']")).not.toBeNull();
-    expect(head(ssh)).toBe(IMAGE_WORDS.head("hetzner"));
-    expect(title(ssh)).toBe(IMAGE_WORDS.state.notHere);
-    expect(press(ssh).textContent).toBe(IMAGE_WORDS.copyHere);
-    expect(cost(ssh)).toEqual(copyCost(undefined));
-    expect(fake.builds).toEqual([]);
-    fireEvent.click(press(ssh));
-    await settle();
-    expect(fake.builds).toEqual([{ place: "p_2", force: undefined }]);
-  });
-
-  it("puts the card away with Add another", async () => {
-    useStore.setState({ places: [here, box] });
-    joinedOverSsh(box);
-    await openRoad(host(WITH_IMAGE).api, "ssh");
-    expect(card(road("ssh"))).not.toBeNull();
-    fireEvent.click([...road("ssh")!.querySelectorAll("[data-k='joined'] button")].find(b => b.textContent === ADD_COMPUTER_WORDS.another)!);
-    await settle();
-    expect(card(road("ssh"))).toBeNull();
-  });
-
-  it("draws the card under a computer that joined by its code", async () => {
-    const fake = host(WITH_IMAGE, { mintJoin: async () => ({ joins: [{ url: "http://10.0.0.2:4640", line: "wsp join http://10.0.0.2:4640 --code abc" }], expiresAt: new Date(Date.now() + 600_000).toISOString() }) } as Partial<Api>);
-    await openRoad(fake.api, "code");
-    expect(card(road("code"))).toBeNull();
-    act(() => useStore.setState({ places: [here, box] }));
-    await settle();
-    const code = road("code");
-    expect(code?.querySelector("[data-k='joined']")).not.toBeNull();
-    expect(head(code)).toBe(IMAGE_WORDS.head("hetzner"));
-    expect(press(code).textContent).toBe(IMAGE_WORDS.copyHere);
-    expect(fake.builds).toEqual([]);
-  });
-
-  it("says where no image exists yet that the image is built here, and its press opens the recipe under the panel", async () => {
-    useStore.setState({ places: [here, box] });
-    joinedOverSsh(box);
-    await openRoad(host({ image: null, copies: [], projects: [] }, { initStart: async () => ({}) as InitJob }).api, "ssh");
-    const ssh = road("ssh");
-    expect(title(ssh)).toBe(IMAGE_WORDS.state.nothing);
-    expect(press(ssh).hasAttribute("data-held")).toBe(false);
-    fireEvent.click(press(ssh));
-    await settle();
-    expect(card(ssh)?.querySelector("[data-k='recipe']")?.getAttribute("data-step")).toBe("choice");
-  });
-
-  it("says in one line that a joined computer takes no copy, in place of a card", async () => {
-    const bare: PlaceView = { ...box, buildsImages: false };
-    useStore.setState({ places: [here, bare] });
-    joinedOverSsh(bare);
-    await openRoad(host(WITH_IMAGE).api, "ssh");
-    const ssh = road("ssh");
-    expect(card(ssh)).toBeNull();
-    expect(ssh?.querySelector("[data-k='no-image-here']")?.textContent).toBe(placeBuildsNoImageLine("hetzner"));
-  });
-
+describe("Add a cloud goes on to the image", () => {
   it("draws the card for a cloud once its key is saved, with the rate beside Copy, and bills nothing for the save", async () => {
     let places: PlaceView[] = [here];
     const fake = host(WITH_IMAGE, {

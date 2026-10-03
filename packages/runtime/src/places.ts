@@ -76,6 +76,7 @@ import {
   pendingHeldLine,
   pendingHeldFix,
   pendingNotJoinedLine,
+  noPendingRefusal,
   pendingNotJoinedFix,
   CHOOSE_FIX,
   type AgentsSignInEvent,
@@ -97,6 +98,7 @@ import {
   type MachineSizeOffer,
   type PlaceAddStep,
   PLACE_LOGIN_REFUSED_KIND,
+  PLACE_HOST_KEY_KIND,
   type PlaceStageEvent,
   type PlaceAddJob,
   withPlaceStage,
@@ -543,6 +545,9 @@ export interface PlaceDoor {
   setUp(ref: string, o: { choices?: RecipeFile; recipe?: string; addId?: string }): Promise<PlaceSetUp>;
   /** Every add that has not reached Set up, oldest first. */
   pending(): Promise<PendingComputer[]>;
+  /** Keeps the person's picks so far on a pending add, and the recipe they started from, so it resumes there. `ref`
+   * is the pending add's id or address, or the computer it joined as. Refused as usage where no pending add answers. */
+  choose(ref: string, choices: RecipeFile, recipe?: string): Promise<PendingComputer>;
   /** Dials one computer once: a frame over the link it is holding, or one login over the road it was added on when
    * it holds none. Answers what came back and writes it on the record, so a window opened later reads the same
    * answer. Nothing is installed and nothing is left running either way. */
@@ -2303,7 +2308,9 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         // first line rides the throw, which both roads print whole.
         const message = e instanceof Error ? e.message : String(e);
         const { said, fix, kind } = refusalParts(e);
-        putAdd(addId, job => ({ ...job, said: keptSaid(said), ...(fix === undefined ? {} : { fix }), ...(kind === undefined ? {} : { kind }) }));
+        // The key a computer never dialled answered with rides its refusal as a field, kept for the client's Trust.
+        const offered = kind === PLACE_HOST_KEY_KIND && typeof (e as { hostKey?: unknown }).hostKey === "string" ? { hostKey: (e as { hostKey: string }).hostKey } : {};
+        putAdd(addId, job => ({ ...job, said: keptSaid(said), ...(fix === undefined ? {} : { fix }), ...(kind === undefined ? {} : { kind }), ...offered }));
         // The pending add keeps the refusal, so the computer reads Setup failed with what to do until it is added
         // again; an add that joined and then failed is that computer's row to say.
         if (pending.placeId === undefined) await movePending({ ...pending, failed: { said: keptSaid(said), ...(fix === undefined ? {} : { fix }) } });
@@ -2557,6 +2564,15 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     find: async ref => (await records()).filter(r => r.id === ref || r.name === ref),
 
     pending: async () => (await pendingRecords()).map(pendingView),
+
+    async choose(ref, choices, recipe) {
+      const pend = (await pendingRecords()).find(p => p.id === ref || p.address === ref || (p.placeId !== undefined && p.placeId === ref));
+      if (pend === undefined) throw usageRefusal(noPendingRefusal(ref), "Run wsp computers to read the adds still pending.");
+      const { recipe: _was, ...rest } = pend;
+      const next: PendingRecord = { ...rest, choices, ...(recipe !== undefined ? { recipe } : {}) };
+      await putPending(next);
+      return pendingView(next);
+    },
 
     async setUp(ref, o) {
       const addId = o.addId ?? `a_${randomBytes(6).toString("hex")}`;

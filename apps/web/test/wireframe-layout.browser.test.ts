@@ -25,7 +25,7 @@
 // while the results stand and a dimmed row standing back by opacity on both
 // sides, one group's sub-rows open at a time right under it, the Light pick drawing the page light, Restore defaults only off the
 // defaults, the region right of the sidebar whole with the panel back on the
-// chord, and Add a computer's roads laid out on Computers. A computer's page
+// chord, and Add a computer's dialog over Computers. A computer's page
 // stands on one left edge and is photographed to its foot at both widths, in a window tall enough to hold
 // it, since Remove stands at its foot. Vite serves test/wireframe to Playwright's
 // browser, so like the shell layout test it runs only when asked for
@@ -35,7 +35,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Browser, Page } from "playwright";
-import { DEFAULT_PREFERENCES, PlaceAddStep } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES } from "@wsp/protocol";
 import { CARD_SURFACE } from "../src/settings/rows.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { textContrast, wcagContrast } from "./contrast";
@@ -446,7 +446,7 @@ const SETTINGS_SCREENS = [
   ["settings-computers", "[data-settings-at=computers] [data-place-row=solari]"],
   ["settings-computer", "[data-settings-at='computer:p_spoo'] [data-k=remove-line]"],
   ["settings-computer-failed", "[data-settings-at='computer:p_lab'] [data-k=place-sentence]"],
-  ["settings-this-mac", "[data-settings-at='computer:here'] [data-grid='threads-here'] [data-thread-row]"],
+  ["settings-this-mac", "[data-settings-at='computer:here'] [data-k=computer-head]"],
   ["settings-cloud", "[data-settings-at='computer:solari'] [data-k=remove-line]"],
   ["settings-projects", "[data-settings-at=projects] [data-project-row=pr_landing]"],
   ["settings-project", "[data-settings-at='project:pr_spoo'] [data-k=project-threads]"],
@@ -457,7 +457,7 @@ const SETTINGS_SCREENS = [
   ["settings-usage", "[data-settings-at=usage] [data-used-row=codex]"],
   ["settings-search", "[data-settings-at=search] [data-settings-row=server-icons]"],
   ["settings-over-panel", "[data-settings-at=appearance]"],
-  ["settings-add-computer", "[data-k=add-computer] [data-k=road-ssh] [data-k=login]"],
+  ["settings-add-computer", "[data-add-computer] [data-k=where-field]"],
   ["settings-remove-computer", "[data-k=remove-sentence]"],
 ] as const;
 /** A row or a line grows with what it says; the least it stands at is one 20 px line between its 12 px pads. */
@@ -762,7 +762,7 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
     expect(computers.length).toBeGreaterThan(1);
     // The computers follow their group with nothing between, and the next group follows them.
     expect(ids.slice(at + 1, at + 1 + computers.length)).toEqual(computers);
-    expect(ids[at + 1 + computers.length]).toBe("group:projects");
+    expect(ids[at + 1 + computers.length]).toBe("group:recipes");
     // The computers stand one under the other from the group's own row down, 36 px apart, no gap opening among them.
     const steps = ids.slice(at, at + 1 + computers.length).map(id => after.find(([i]) => i === id)![1]);
     expect(new Set(steps.slice(1).map((top, i) => top - steps[i]!))).toEqual(new Set([ONE_LINE]));
@@ -824,65 +824,59 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
     await shot("from-foot-390-dark");
   }, 60_000);
 
-  it("Add a computer stands inline on Computers: three road pictures of one size on one row that stack on a phone, and the ssh road open under them with its fields at one height and every step listed", async () => {
-    const READY = "[data-k=add-computer] [data-k=road-ssh] [data-k=login]";
+  it("Add a computer stands over Computers as one 560 px dialog of one height, its foot inside it, and as the phone's sheet at 390", async () => {
+    const READY = "[data-add-computer] [data-k=where-field]";
     const layout = () =>
       page!.evaluate(() => {
         const box = (el: Element) => {
           const b = el.getBoundingClientRect();
           return { x: Math.round(b.x), y: Math.round(b.y), w: Math.round(b.width), h: Math.round(b.height), bottom: Math.round(b.bottom) };
         };
-        const pictures = [...document.querySelectorAll("[data-k=add-roads] [data-add-road] > span:first-child")].map(box);
-        const fields = [...document.querySelectorAll("[data-k=road-ssh] input")].map(box);
-        return { pictures, fields, roads: box(document.querySelector("[data-k=add-roads]")!), panel: box(document.querySelector("[data-k=road-ssh]")!), steps: document.querySelectorAll("[data-k=road-ssh] [data-k=plan] li").length };
+        return { dialog: box(document.querySelector("[data-add-computer]")!), foot: box(document.querySelector("[data-add-computer] [data-slot=dialog-footer]")!), field: box(document.querySelector("[data-add-computer] [data-k=where-field]")!) };
       });
     for (const theme of THEMES) {
       await open("settings-add-computer", theme, READY);
       const wide = await layout();
       console.info(`add a computer at 1280 ${theme}: ${JSON.stringify(wide)}`);
-      expect(wide.pictures).toHaveLength(3);
-      expect(new Set(wide.pictures.map(p => p.y)).size).toBe(1);
-      expect(new Set(wide.pictures.map(p => `${p.w}x${p.h}`)).size).toBe(1);
-      expect(wide.panel.y).toBeGreaterThanOrEqual(wide.roads.bottom);
-      expect(wide.fields).toHaveLength(3);
-      expect(new Set(wide.fields.map(f => f.h)).size).toBe(1);
-      expect(new Set(wide.fields.map(f => f.y)).size).toBe(1);
-      expect(wide.steps).toBe(PlaceAddStep.options.length);
-      await shot(`add-computer-1280-${theme}`, "[data-k=add-computer]");
+      expect(wide.dialog.w).toBe(560);
+      expect(wide.dialog.h).toBe(640);
+      expect(wide.foot.bottom).toBeLessThanOrEqual(wide.dialog.bottom);
+      await shot(`add-computer-1280-${theme}`, "[data-add-computer]");
     }
     await open("settings-add-computer", "dark", READY, { width: 390, height: 844 });
     const phone = await layout();
     console.info(`add a computer at 390: ${JSON.stringify(phone)}`);
-    expect(new Set(phone.pictures.map(p => p.x)).size).toBe(1);
-    expect(phone.pictures[1]!.y).toBeGreaterThan(phone.pictures[0]!.y);
-    expect(new Set(phone.fields.map(f => f.x)).size).toBe(1);
-    await shot("add-computer-390-dark", "[data-k=add-computer]");
+    expect(phone.dialog.w).toBe(390);
+    expect(phone.foot.bottom).toBeLessThanOrEqual(phone.dialog.bottom);
+    await shot("add-computer-390-dark", "[data-add-computer]");
   }, 90_000);
 
-  it("Computers draws each refusal where its control is, in the host's two halves: the add this window watched fail under its fields, the places read above Add a computer, the ssh config where its hosts would be", async () => {
-    const slotRead = (k: string) =>
-      page!.evaluate(key => {
-        const slot = document.querySelector<HTMLElement>(`[data-k=${key}]`)!;
-        const panel = document.querySelector<HTMLElement>("[data-settings-page]")!.getBoundingClientRect();
-        const b = slot.getBoundingClientRect();
-        return { text: slot.textContent, fix: slot.querySelector("span.text-foreground")?.textContent?.trim() ?? null, inside: b.left >= panel.left && b.right <= panel.right + 0.5, h: Math.round(b.height) };
-      }, k);
+  it("Computers draws each refusal where its control is, in the host's two halves: the add this window watched fail on the check it stopped at, the places read above Add a computer, the ssh config where its hosts would be", async () => {
+    /** A slot's words and whether it stands inside what holds it: the settings page, or Add a computer's dialog. */
+    const slotRead = (k: string, within = "[data-settings-page]") =>
+      page!.evaluate(
+        ([key, holder]) => {
+          const slot = document.querySelector<HTMLElement>(`[data-k=${key}]`)!;
+          const panel = document.querySelector<HTMLElement>(holder!)!.getBoundingClientRect();
+          const b = slot.getBoundingClientRect();
+          return { text: slot.textContent, fix: slot.querySelector("span.text-foreground")?.textContent?.trim() ?? null, inside: b.left >= panel.left && b.right <= panel.right + 0.5, h: Math.round(b.height) };
+        },
+        [k, within],
+      );
     for (const theme of THEMES) {
-      await open("settings-add-computer-failed", theme, "[data-k=ssh-refusal]");
-      const add = await slotRead("ssh-refusal");
+      await open("settings-add-computer-failed", theme, "[data-add-computer] [data-k=step-refusal]");
+      const add = await slotRead("step-refusal", "[data-add-computer]");
       console.info(`add refused ${theme}: ${JSON.stringify(add)}`);
       expect(add.text).toBe("spoo has no curl or wget on its PATH. Install one of them there, then add again.");
       expect(add.fix).toBe("Install one of them there, then add again.");
       expect(add.inside).toBe(true);
-      expect(add.h).toBeGreaterThanOrEqual(36);
-      expect(await page!.locator("[data-k=road-ssh] [data-k=plan] li[data-state=failed]").count()).toBe(1);
-      expect(await page!.locator("[data-k=road-ssh] [data-k=login]").inputValue()).toBe("spoo");
+      expect(await page!.locator("[data-add-computer] [data-step-row][data-state=failed]").count()).toBe(1);
       await page!.waitForTimeout(400);
-      await shot(`add-computer-refused-${theme}`, "[data-k=add-computer]");
+      await shot(`add-computer-refused-${theme}`, "[data-add-computer]");
 
       await open("settings-computers-refused", theme, "[data-k=ssh-hosts-refused]");
       const places = await slotRead("places-refused");
-      const hosts = await slotRead("ssh-hosts-refused");
+      const hosts = await slotRead("ssh-hosts-refused", "[data-add-computer]");
       console.info(`computers refused ${theme}: ${JSON.stringify({ places, hosts })}`);
       expect(places.fix).toBe("Fix or move ~/.wsp/state.json, then start wsp again.");
       expect(places.inside).toBe(true);
@@ -893,7 +887,7 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
       // The road opens with a 200 ms rise; the shots wait it out.
       await page!.waitForTimeout(400);
       await shot(`computers-refused-${theme}`);
-      await shot(`computers-refused-add-${theme}`, "[data-k=add-computer]");
+      await shot(`computers-refused-add-${theme}`, "[data-add-computer]");
     }
   }, 90_000);
 });

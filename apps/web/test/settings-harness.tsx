@@ -7,6 +7,8 @@ import { act, render, type RenderResult } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { DEFAULT_PREFERENCES, applyPreferencesPatch, type EventUnion, type Preferences, type PreferencesPatch } from "@wsp/protocol";
 import type { Api } from "../src/protocol/client.js";
+import { closeAdd } from "../src/settings/add/addFlow.js";
+import { useRecipes } from "../src/settings/recipesStore.js";
 import { useAdds } from "../src/settings/adds.js";
 import { useNotices } from "../src/notices/store.js";
 import { useStore } from "../src/protocol/store.js";
@@ -59,8 +61,10 @@ export function resetSettings(): void {
   useSettingsStore.setState({ at: FIRST_PAGE, search: "", reads: NO_READS, addProjectAt: null, devicesAsked: 0, buildShown: null, recipeAsked: null, addAsked: null, usageTab: "used", agentsTab: "agents", agentsPlace: null, agentsLevel: null });
   useRightPanelStore.setState({ byWorkspaceId: {} });
   useNotices.getState().clear();
-  useAdds.setState({ jobs: {}, putAway: null });
-  useStore.setState({ api: null, conn: "live", places: [], projects: [], placesRefused: null, projectsRefused: null, landings: {}, workspaces: [], statuses: {}, sessions: {}, addComputerOpen: false, settingsOpen: false, selectedId: null, selectedThreadId: null, ready: true, projectsRead: true, release: null, preferences: { ...DEFAULT_PREFERENCES, labs: false } });
+  useAdds.setState({ jobs: {} });
+  closeAdd();
+  useRecipes.setState({ recipes: null, refused: null });
+  useStore.setState({ api: null, conn: "live", places: [], pending: [], projects: [], placesRefused: null, projectsRefused: null, landings: {}, workspaces: [], statuses: {}, sessions: {}, addComputerOpen: false, settingsOpen: false, selectedId: null, selectedThreadId: null, ready: true, projectsRead: true, release: null, preferences: { ...DEFAULT_PREFERENCES, labs: false } });
 }
 
 /** Mounts the shell with Settings open on a page, the store already holding what the case named. */

@@ -2,8 +2,7 @@
 // A computer's grid row, measured in a real Chromium at the 390 px sheet in
 // both themes, since jsdom lays nothing out: every cell that stands at that
 // width stands wholly inside the row, the cores and memory having given way
-// and the state kept, on the Computers list and under Add a computer once a
-// box has joined. Runs only when asked for (WSP_RENDER=1) and skips without
+// and the state cell kept, on the Computers list. Runs only when asked for (WSP_RENDER=1) and skips without
 // Playwright's Chromium.
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -39,7 +38,7 @@ describe.skipIf(renderSkipped !== undefined)("a computer's row at 390", () => {
         standing: rows.map(row => [...row.children].filter(cell => getComputedStyle(cell).display !== "none").length),
         states: rows.map(row => {
           const cell = row.querySelector<HTMLElement>("[data-state-cell]");
-          return cell === null || getComputedStyle(cell).display === "none" ? "" : (cell.textContent ?? "");
+          return cell === null || getComputedStyle(cell).display === "none" ? "" : "shown";
         }),
         cut: rows.flatMap(row => {
           const box = row.getBoundingClientRect();
@@ -54,16 +53,7 @@ describe.skipIf(renderSkipped !== undefined)("a computer's row at 390", () => {
       };
     }, scope);
 
-  it.each(["dark", "light"] as const)("in the %s theme the joined box's row under Add a computer stands whole", async theme => {
-    await page!.emulateMedia({ colorScheme: theme });
-    await page!.goto(`${base}?screen=settings-add-joined&theme=${theme}`);
-    await page!.waitForSelector("[data-k='road-ssh'] [data-k='joined'] [data-place-row]");
-    const got = await cut("[data-k='joined']");
-    expect(got.rows).toBe(1);
-    expect(got.cut).toEqual([]);
-  }, 60_000);
-
-  it.each(["dark", "light"] as const)("in the %s theme every row on the Computers list stands whole with its name, one load, its state and the chevron", async theme => {
+  it.each(["dark", "light"] as const)("in the %s theme every row on the Computers list stands whole with its name, one load, its state cell and the chevron", async theme => {
     await page!.emulateMedia({ colorScheme: theme });
     await page!.goto(`${base}?screen=settings-computers&theme=${theme}`);
     await page!.waitForSelector("[data-settings-card='computers'] [data-place-row]");

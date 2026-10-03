@@ -1106,7 +1106,16 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 return;
               }
               const picked = msg.recipe === undefined ? undefined : await recipeNamed(msg.recipe);
-              send({ id: msg.id, ok: true, ...(await places().setUp(msg.ref, { ...(picked !== undefined ? { choices: picked.file, recipe: picked.slug } : {}), ...(msg.addId !== undefined ? { addId: msg.addId } : {}) })) });
+              const given = picked !== undefined ? { choices: picked.file, recipe: picked.slug } : msg.choices !== undefined ? { choices: msg.choices } : {};
+              send({ id: msg.id, ok: true, ...(await places().setUp(msg.ref, { ...given, ...(msg.addId !== undefined ? { addId: msg.addId } : {}) })) });
+              return;
+            }
+            case "places.choose": {
+              if (!ownRoad()) {
+                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
+                return;
+              }
+              send({ id: msg.id, ok: true, pending: await places().choose(msg.ref, msg.choices, msg.recipe) });
               return;
             }
             case "recipes.list":
