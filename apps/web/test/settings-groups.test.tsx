@@ -78,7 +78,7 @@ describe("Projects", () => {
   });
 
   it("lists one row per project with its glyph, the computer it is on then its source, and the workspace count, and the empty state with the button", async () => {
-    useStore.setState({ places: [here, box], projects: [project("pr_spoo", "spoo"), project("pr_landing", "landing", "p_spoo", { source: { kind: "github", repo: "dev/landing" } })], workspaces: [view("ws_a", "pricing page", "pr_spoo"), view("ws_b", "webhook retries", "pr_spoo")] });
+    useStore.setState({ places: [here, box], projects: [project("pr_spoo", "spoo"), project("pr_landing", "landing", "p_spoo", { source: { kind: "github", repo: "dev/landing" } })], workspaces: [{ ...view("ws_a", "pricing page", "pr_spoo"), kind: "cloud" }, { ...view("ws_b", "webhook retries", "pr_spoo"), kind: "cloud" }] });
     await mount({}, "projects");
     expect(rowTitles()).toEqual(["spoo", "landing"]);
     expect(descriptionOf("pr_spoo")).toBe(`${placeName(here)} /Users/dev/spoo`);
@@ -101,7 +101,7 @@ describe("Projects", () => {
   it("a project's page says its lines, its two rows, and Remove held with the refusal while a workspace stands, else asks with the line for the computer's kind and lands the runtime's answer as the toast", async () => {
     const removed: string[] = [];
     const spoo = project("pr_spoo", "spoo", "here", { base: "release", seeded: { files: 412, bytes: 3_250_000, memory: "landed", commits: 9, at: AT } });
-    useStore.setState({ places: [here, box, solari], projects: [spoo, project("pr_landing", "landing", "p_spoo"), project("pr_cloud", "cloud", "solari")], workspaces: [view("ws_a", "pricing page", "pr_spoo")] });
+    useStore.setState({ places: [here, box, solari], projects: [spoo, project("pr_landing", "landing", "p_spoo"), project("pr_cloud", "cloud", "solari")], workspaces: [{ ...view("ws_a", "pricing page", "pr_spoo"), kind: "cloud" }] });
     await mount(
       {
         projectsRemove: async (id: string) => {
@@ -156,6 +156,16 @@ describe("Projects", () => {
     act(() => useSettingsStore.getState().go({ kind: "project", id: "pr_cloud" }));
     await settle();
     expect(descriptionOf("remove")).toBe(PROJECTS_WORDS.removeAtCloud("Solari"));
+  });
+});
+
+describe("a project whose folder's record holds no thread", () => {
+  it("is not held by it: Remove stays open and asks with the line for this computer", async () => {
+    useStore.setState({ places: [here], projects: [project("pr_spoo", "spoo")], workspaces: [view("ws_a", "spoo", "pr_spoo")], sessions: {} });
+    await mount({ projectsRemove: async () => ({ said: "" }) } as Partial<Api>, "projects");
+    fireEvent.click(rowOf("pr_spoo")!);
+    expect(document.querySelector<HTMLElement>("[data-k=remove-project]")!.hasAttribute("disabled")).toBe(false);
+    expect(descriptionOf("remove")).toBe(PROJECTS_WORDS.removeHere);
   });
 });
 

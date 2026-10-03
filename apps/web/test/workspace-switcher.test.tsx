@@ -730,6 +730,14 @@ describe("buildSwitcherCards", () => {
     expect(card([MAC])).toBe("zingzy's MacBook Pro");
   });
 
+  it("lists no task in the palette for a folder's record on this computer that holds no thread", () => {
+    const bare = { ...view("ws_a", "wsp"), kind: "local" as const, machineId: "local" };
+    const held = { ...view("ws_b", "api"), kind: "local" as const, machineId: "local" };
+    const projects = deriveSidebarProjects({ workspaces: [bare, held], sessions: { ws_b: [session("s_b", "ws_b", "The one.", Date.parse("2026-09-01T01:00:00Z"))] } });
+    const items = buildPaletteItems({ projects, selectedId: null, query: "", messageHits: [], canCreate: false, recorded: [], projectOrder: [], asks: false, handlers: {} as never, verbs: {} as never, places: [] });
+    expect(items.workspaceItems.map(item => item.value)).toEqual(["workspace:ws_b"]);
+  });
+
   it("offers Copy as Markdown for the thread on screen, and nothing where no thread is open", async () => {
     const copyThreadMarkdown = vi.fn(async () => {});
     const items = (copy: (() => Promise<void>) | null) =>

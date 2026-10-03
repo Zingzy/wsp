@@ -126,6 +126,15 @@ describe("the sidebar's tiles", () => {
     ]);
   });
 
+  it("draws no tile for a folder on this computer that holds no thread, whatever made its record", () => {
+    const here = (id: string, threads: SidebarThreadSnapshot[]): SidebarProjectSnapshot => {
+      const r = row(id, "pr_1", threads);
+      return { ...r, workspace: { ...r.workspace, kind: "local" } };
+    };
+    const rows = [here("ws_folder", []), here("ws_tree", [thread("t", "ws_tree")]), row("ws_fork", "pr_1", [])];
+    expect(sidebarTiles(rows, { picked: null, nowMs: NOW }).live.map(node => node.thread.id)).toEqual(["t", "ws:ws_fork"]);
+  });
+
   it("folds a root into Settled once its whole tree has been read and quiet two hours, and keeps it out while any thread in it is not", () => {
     const rows = [
       row("ws_a", "pr_1", [done("quiet", "ws_a", 3), done("quiet-child", "ws_a", 2.5, "quiet"), done("recent", "ws_a", 1.5)]),

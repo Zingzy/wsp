@@ -10,6 +10,15 @@ const status = (phase: WorkspacePhase, machineState: MachineState, reach: ReachS
   machineState, reach: { state: reach }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11,
 });
 
+describe("deriveSidebarProjects", () => {
+  it("leaves out a folder's record on this computer that holds no thread, and keeps one with a thread and a machine with none", () => {
+    const record = (id: string, kind: "local" | "cloud"): WorkspaceView => ({ id, name: id, kind, machineId: `m_${id}`, project: { id: "pr_1", name: "spoo", path: "/root", computer: "here" }, phase: "running", golden: "", createdAt: "2026-09-01T00:00:00Z" });
+    const row = { id: "s_1", workspaceId: "ws_tree", harness: "claude", status: "completed", prompt: "hi", startedAt: 1, threadId: "t_1" } as unknown as SessionView;
+    const shown = deriveSidebarProjects({ workspaces: [record("ws_folder", "local"), record("ws_tree", "local"), record("ws_fork", "cloud")], sessions: { ws_tree: [row] } });
+    expect(shown.map(p => p.id)).toEqual(["ws_fork", "ws_tree"]);
+  });
+});
+
 describe("workspaceIndicator", () => {
   it.each<[WorkspacePhase, MachineState | null, ReachState | null, string, string, boolean]>([
     ["running", "running", "reachable", "Running", "running", false],
