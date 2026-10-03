@@ -7,7 +7,7 @@ import type { SlateEngine } from "./engine.js";
 
 /** The window's roads out for one slate, so a test draws a slate against a fake. */
 export interface SlateLink {
-  act(ask: SlateActAsk): Promise<{ outcome: string }>;
+  act(ask: SlateActAsk): Promise<{ outcome: string; said?: string }>;
   writeState(values: Record<string, SlateJson>): Promise<unknown>;
   fill(text: string): void;
   /** Opens or focuses a right panel pane; false where the pane cannot open here. */
@@ -161,8 +161,8 @@ export class ActionRunner {
           ...(options.rowAction !== undefined ? { rowAction: options.rowAction } : {}),
         };
         try {
-          const { outcome } = await this.#link().act(ask);
-          return { said: outcomeWord(outcome) };
+          const answer = await this.#link().act(ask);
+          return { said: answer.said ?? outcomeWord(answer.outcome) };
         } catch (error) {
           return { refused: error instanceof Error ? error.message : String(error) };
         }

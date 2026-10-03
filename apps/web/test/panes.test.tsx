@@ -20,6 +20,7 @@ const SURFACES: RightPanelSurface[] = [
   { id: "machine", kind: "machine" },
   { id: "processes", kind: "processes" },
   { id: "agents", kind: "agents" },
+  { id: "slate", kind: "slate" },
 ];
 
 function tabs(surfaces: RightPanelSurface[], onAdd = vi.fn()) {
@@ -51,7 +52,7 @@ describe("the pane registry", () => {
   it("names every open kind on the tab strip by its label, or by what its tab holds", () => {
     tabs(SURFACES);
     const strip = [...document.querySelectorAll("[data-right-panel-tab-list] [data-active-tab]")].map(t => t.textContent);
-    expect(strip).toEqual(["Browser", "Terminal", "Changes", "Pull request", "Files", "Computer", "Processes", "Agents"]);
+    expect(strip).toEqual(["Browser", "Terminal", "Changes", "Pull request", "Files", "Computer", "Processes", "Agents", "Slate"]);
   });
 
   it("keeps every kind it holds across a reload of the store", () => {
@@ -72,15 +73,15 @@ describe("the pane registry", () => {
     const away: AbsentComputer = absentComputer("old-macbook", 120_000);
     const startable: AbsentComputer = { ...away, start: "Start" };
     const contexts: Record<string, PaneContext> = {
-      here: { here: true, workspace: null, absent: null },
-      running: { here: false, workspace: view, absent: null },
-      napping: { here: false, workspace: { ...view, phase: "napping" }, absent: null },
-      away: { here: false, workspace: view, absent: away },
-      startable: { here: false, workspace: view, absent: startable },
-      none: { here: false, workspace: null, absent: null },
+      here: { here: true, workspace: null, absent: null, threadId: null },
+      running: { here: false, workspace: view, absent: null, threadId: "t1" },
+      napping: { here: false, workspace: { ...view, phase: "napping" }, absent: null, threadId: null },
+      away: { here: false, workspace: view, absent: away, threadId: null },
+      startable: { here: false, workspace: view, absent: startable, threadId: null },
+      none: { here: false, workspace: null, absent: null, threadId: null },
       // A pull request is read on the Mac, so its pane opens on a napping copy as on a running one.
-      pr: { here: false, workspace: { ...view, phase: "napping" }, absent: null, pr: { number: 12, url: "u", state: "merged", base: "main", readAt: 1 } },
-      unread: { here: false, workspace: view, absent: null, pr: { why: "no signed-in command line", readAt: 1 } },
+      pr: { here: false, workspace: { ...view, phase: "napping" }, absent: null, pr: { number: 12, url: "u", state: "merged", base: "main", readAt: 1 }, threadId: null },
+      unread: { here: false, workspace: view, absent: null, pr: { why: "no signed-in command line", readAt: 1 }, threadId: null },
     };
     const opens = Object.fromEntries(Object.entries(contexts).map(([name, at]) => [name, PANE_KINDS.filter(k => PANES[k].available(at))]));
     expect(opens).toEqual({
@@ -91,11 +92,11 @@ describe("the pane registry", () => {
       startable: ["preview", "diff", "files", "machine", "processes", "agents"],
       none: [],
       pr: ["pr", "machine", "agents"],
-      unread: PANE_KINDS.filter(k => k !== "pr"),
+      unread: PANE_KINDS.filter(k => k !== "pr" && k !== "slate"),
     });
     const reasons = (at: PaneContext) => Object.fromEntries(PANE_KINDS.flatMap(k => (PANES[k].reason?.(at) === undefined ? [] : [[k, PANES[k].reason!(at)]])));
-    expect(reasons(contexts["here"]!)).toEqual({ diff: "Pick a project to review its changes.", files: "Pick a thread to read its files." });
+    expect(reasons(contexts["here"]!)).toEqual({ diff: "Pick a project to review its changes.", files: "Pick a thread to read its files.", slate: "Pick a thread to see its slate." });
     expect(reasons(contexts["running"]!)).toEqual({});
-    expect(reasons(contexts["away"]!)).toEqual({ terminal: away.sentence, processes: away.sentence });
+    expect(reasons(contexts["away"]!)).toEqual({ terminal: away.sentence, processes: away.sentence, slate: "Pick a thread to see its slate." });
   });
 });

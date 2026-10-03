@@ -4,13 +4,13 @@
 // and this computer's link all read this table; what a pane draws is the one
 // line each kind has in RightPanel's view table. This module imports no
 // component, since the store reads it and every pane imports the store.
-import { Activity, Bot, Cpu, File, FileDiff, Folder, GitPullRequest, Globe2, TerminalSquare, type LucideIcon } from "lucide-react";
+import { Activity, Bot, Cpu, File, FileDiff, Folder, GitPullRequest, Globe2, PanelsTopLeft, TerminalSquare, type LucideIcon } from "lucide-react";
 import { isPullRequestNamed, type AbsentComputer, type PullRequestSeen, type WorkspaceView } from "@wsp/protocol";
 import type { PreviewTabSnapshot } from "./components/RightPanelTabs";
 import { baseName } from "./files/entries";
 import type { RightPanelSurface } from "./rightPanelStore";
 
-export type RightPanelKind = "preview" | "terminal" | "diff" | "pr" | "files" | "machine" | "processes" | "agents";
+export type RightPanelKind = "preview" | "terminal" | "diff" | "pr" | "files" | "machine" | "processes" | "agents" | "slate";
 
 /** What decides whether a pane can open: the panel's workspace, or this computer's own panel. */
 export interface PaneContext {
@@ -19,6 +19,8 @@ export interface PaneContext {
   absent: AbsentComputer | null;
   /** The workspace's pull request as the host last pushed it; the Pull request pane stands only where there is one. */
   pr?: PullRequestSeen | undefined;
+  /** The thread the centre shows, whose slate the Slate pane draws; null on a fresh thread, a project's home or Settings. */
+  threadId: string | null;
 }
 
 /** What a tab reads its name from, for the kinds whose name is not their label. */
@@ -137,6 +139,15 @@ export const PANES: { readonly [K in RightPanelKind]: Pane<K> } = {
     hint: "Pick a thread to use it.",
     // A paused workspace answers its last report and is never woken for it.
     available: at => at.workspace !== null,
+  },
+  slate: {
+    label: "Slate",
+    description: "What the agent built for this thread.",
+    icon: PanelsTopLeft,
+    shortcut: "S",
+    hint: "The agent's panel for the open thread.",
+    available: at => at.threadId !== null,
+    reason: at => (at.threadId === null ? "Pick a thread to see its slate." : undefined),
   },
 };
 

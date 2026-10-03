@@ -88,6 +88,11 @@ export class SlateEngine {
     return this.#version;
   }
 
+  /** A version an answer carried: the person's own write moved it. */
+  noteVersion(version: number): void {
+    if (version > this.#version) this.#version = version;
+  }
+
   setReader(read: SourceReader): void {
     this.#read = read;
     this.invalidateAll();
