@@ -107,6 +107,27 @@ describe("the ledger of what was used", () => {
     ]);
   });
 
+  it("files one model under each agent that ran it, and names the agent on every agent, account and model row and on no other", async () => {
+    const { usage } = ledger();
+    await usage.add(turn({ at: NOON, agent: "claude", account: "claude:vault-token", model: "claude-sonnet-4-5", tokens: { input: 3_000, output: 10 } }));
+    await usage.add(turn({ at: NOON, agent: "hermes", account: "hermes@here", model: "claude-sonnet-4-5[1m]", tokens: { input: 2_000, output: 10 } }));
+    const agentOf = async (split: UsageSplit) => (await usage.used({ range: "day", split, label: labelOf })).rows.map(r => [r.key, r.label, r.agent]);
+    expect(await agentOf("model")).toEqual([
+      ["claude:claude-sonnet-4-5", "model:claude-sonnet-4-5", "claude"],
+      ["hermes:claude-sonnet-4-5", "model:claude-sonnet-4-5", "hermes"],
+    ]);
+    expect(await agentOf("account")).toEqual([
+      ["claude:vault-token", "account:claude:vault-token", "claude"],
+      ["hermes@here", "account:hermes@here", "hermes"],
+    ]);
+    expect(await agentOf("agent")).toEqual([
+      ["claude", "agent:claude", "claude"],
+      ["hermes", "agent:hermes", "hermes"],
+    ]);
+    expect(await agentOf("computer")).toEqual([["here", "computer:here", undefined]]);
+    expect(await agentOf("project")).toEqual([["p_spoo", "project:p_spoo", undefined]]);
+  });
+
   it("keeps the harness's own cost, prices what it left bare off the table as a list price, and says what it could not price", async () => {
     const { usage } = ledger();
     await usage.add(turn({ at: NOON, agent: "claude", model: "claude-opus-5", costUsd: 0.42 }));

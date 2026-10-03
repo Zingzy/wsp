@@ -58,13 +58,13 @@ const used = (range: UsageRange, split: UsageSplit, rows = true): UsedAnswer => 
     ? []
     : split === "model"
       ? [
-          { key: "claude-opus-5-5", label: "Opus 5.5", tokens: { input: 7_000_000_000, output: 7_000_000, cached: 6_600_000_000 }, costList: 4_100, priced: true },
-          { key: "claude-haiku-4-5", label: "Haiku 4.5", tokens: { input: 323_700_000, output: 300_000, cached: 274_800_000 }, costList: 201.74, priced: true },
-          { key: "gpt-5.6", label: "GPT-5.6", tokens: { input: 22_000_000, output: 42_000, cached: 20_700_000 }, priced: false },
+          { key: "claude:claude-opus-5-5", label: "Opus 5.5", agent: "claude", tokens: { input: 7_000_000_000, output: 7_000_000, cached: 6_600_000_000 }, costList: 4_100, priced: true },
+          { key: "claude:claude-haiku-4-5", label: "Haiku 4.5", agent: "claude", tokens: { input: 323_700_000, output: 300_000, cached: 274_800_000 }, costList: 201.74, priced: true },
+          { key: "codex:gpt-5.6", label: "GPT-5.6", agent: "codex", tokens: { input: 22_000_000, output: 42_000, cached: 20_700_000 }, priced: false },
         ]
       : [
-          { key: "claude", label: "Claude Code", tokens: { input: 7_323_700_000, output: 7_300_000, cached: 6_874_800_000 }, costList: 4_301.74, priced: true },
-          { key: "codex", label: "Codex", tokens: { input: 22_000_000, output: 42_000, cached: 20_700_000 }, priced: false },
+          { key: "claude", label: "Claude Code", agent: "claude", tokens: { input: 7_323_700_000, output: 7_300_000, cached: 6_874_800_000 }, costList: 4_301.74, priced: true },
+          { key: "codex", label: "Codex", agent: "codex", tokens: { input: 22_000_000, output: 42_000, cached: 20_700_000 }, priced: false },
         ],
   series: Array.from({ length: 7 }, (_, i) => ({ t: Date.parse("2026-09-24T00:00:00Z") + i * 24 * HOUR, tokens: rows ? (i + 1) * 100_000_000 : 0 })),
   since: Date.parse("2026-09-24T00:00:00Z"),
@@ -356,8 +356,8 @@ describe("Usage: used", () => {
     expect($("[data-k=turns]")).toBeNull();
     expect($$("[data-used-row]:not([data-sub])").map(row => row.dataset["usedRow"])).toEqual(["claude", "codex"]);
     // Each agent's models stand under it, most first, read off the model split of the same range.
-    expect($$("[data-used-group=claude] [data-sub]").map(row => row.dataset["usedRow"])).toEqual(["claude-opus-5-5", "claude-haiku-4-5"]);
-    expect($$("[data-used-group=codex] [data-sub]").map(row => row.dataset["usedRow"])).toEqual(["gpt-5.6"]);
+    expect($$("[data-used-group=claude] [data-sub]").map(row => row.dataset["usedRow"])).toEqual(["claude:claude-opus-5-5", "claude:claude-haiku-4-5"]);
+    expect($$("[data-used-group=codex] [data-sub]").map(row => row.dataset["usedRow"])).toEqual(["codex:gpt-5.6"]);
     const claude = $("[data-used-row=claude]")!;
     expect(text(claude.querySelector("[data-settings-title]"))).toBe("Claude Code");
     expect([...claude.querySelectorAll("[data-k=tokens], [data-k=cache-hit], [data-k=price]")].map(text)).toEqual(["7.33B", "93.9%", "$4,301.74"]);
@@ -366,6 +366,33 @@ describe("Usage: used", () => {
     expect(text(codex.querySelector("[data-k=price]"))).toBe(USAGE_WORDS.notPriced);
     const mix = $("[data-k=usage-mix]")!;
     expect([...mix.querySelectorAll("[data-k^=mix-]")].map(text)).toEqual([`${USAGE_PAGE_WORDS.fresh}450M`, `${USAGE_PAGE_WORDS.cached}6.9B`, `${USAGE_PAGE_WORDS.out}7.34M`]);
+  });
+
+  it("stands each model under the agent the host says ran it, so another agent's run on a Claude model never nests under Claude Code", async () => {
+    const hermes: UsedRow = { key: "hermes", label: "Hermes Agent", agent: "hermes", tokens: { input: 2_000_000, output: 10_000, cached: 0 }, priced: false };
+    const sonnet: UsedRow = { key: "hermes:claude-sonnet-4-5", label: "Sonnet 4.5", agent: "hermes", tokens: { input: 2_000_000, output: 10_000, cached: 0 }, priced: false };
+    await mount({ usageUsed: async (range: UsageRange, split: UsageSplit) => (split === "model" ? { ...used(range, split), rows: [...used(range, split).rows, sonnet] } : { ...used(range, split), rows: [...used(range, split).rows, hermes] }) } as Partial<Api>);
+    expect($$("[data-used-group=hermes] [data-sub]").map(row => row.dataset["usedRow"])).toEqual(["hermes:claude-sonnet-4-5"]);
+    expect($$("[data-used-group=claude] [data-sub]").map(row => row.dataset["usedRow"])).toEqual(["claude:claude-opus-5-5", "claude:claude-haiku-4-5"]);
+  });
+
+  it("leads an account's row with the mark of the agent the host names on it, whatever its key", async () => {
+    await mountUsed({ split: "account", rows: [{ key: "work-login", label: "Codex with ChatGPT Pro", agent: "codex", tokens: { input: 1_000, output: 10, cached: 0 }, priced: false }] });
+    expect($("[data-used-row=work-login] [data-harness-mark=codex]")).not.toBeNull();
+  });
+
+  it("leads a computer's row with that computer's glyph by its id, never by a place whose name the key happens to read as", async () => {
+    const tokens = { input: 1_000, output: 10, cached: 0 };
+    await mountUsed({ split: "computer", rows: [{ key: "here", label: "zingzy's MacBook Pro", tokens, priced: false }, { key: "zingzys-macbook-pro.local", label: "zingzys-macbook-pro.local", tokens, priced: false }] });
+    expect($("[data-used-row=here] [data-computer-glyph]")).not.toBeNull();
+    expect($("[data-used-row='zingzys-macbook-pro.local'] [data-computer-glyph]")).toBeNull();
+  });
+
+  it("lays the totals out off classes alone, so under 640 px they fold to two columns as the skeleton does", async () => {
+    await mount();
+    const totals = $("[data-k=usage-totals]")!;
+    expect(totals.style.gridTemplateColumns).toBe("");
+    expect(totals.className.split(" ")).toEqual(expect.arrayContaining(["grid-cols-3", "max-sm:grid-cols-2"]));
   });
 
   it("draws the tokens as one line, its legend all agents together, each day's figure readable on hover, and says once whose logs it counted", async () => {

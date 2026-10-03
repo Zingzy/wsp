@@ -101,11 +101,11 @@ function UsagePage({ ctx }: { ctx: SettingsContext }) {
 
   // By agent, each agent's models stand under it, read as the model split of the same range.
   const [models, setModels] = useState<readonly UsedRow[]>([]);
-  const nested = split === "agent" && (USAGE_SPLITS as readonly string[]).includes("model");
+  const nested = split === "agent";
   useEffect(() => {
     if (!nested) return setModels([]);
     let live = true;
-    void api?.usageUsed?.(range, "model" as UsageSplit).then(
+    void api?.usageUsed?.(range, "model").then(
       answer => live && setModels(answer.rows),
       () => live && setModels([]),
     );
@@ -200,7 +200,6 @@ function PoolWindow({ kind, segments, now }: { kind: LimitKind; segments: readon
   );
 }
 
-/** One agent's subscription accounts as a pool: who they are, what they draw now, and one line per window. */
 /** One account's banked resets under its pool's head, and Use reset where one is banked: it asks the one question the
  * command line asks, spends on yes, says what the host answered and puts the row it sends back in place. */
 function ResetLine({ row, now, onAccount }: { row: AccountRow; now: number; onAccount: (row: AccountRow) => void }) {
@@ -257,6 +256,7 @@ function ResetLine({ row, now, onAccount }: { row: AccountRow; now: number; onAc
   );
 }
 
+/** One agent's subscription accounts as a pool: who they are, what they draw now, and one line per window. */
 function Pool({ agent, accounts, now, onAccount }: { agent: string; accounts: readonly AccountRow[]; now: number; onAccount: (row: AccountRow) => void }) {
   const kinds = POOLED_KINDS.filter(kind => accounts.some(a => a.windows?.some(w => w.kind === kind)));
   const computers = [...new Set(accounts.flatMap(a => a.computers))];
@@ -408,40 +408,25 @@ function ticksOf(used: UsedAnswer): { at: number; word: string }[] {
   return used.series.flatMap((s, i) => (i % every === 0 ? [{ at: n > 1 ? i / (n - 1) : 0, word: word.format(s.t) }] : []));
 }
 
-/** The agent a split value belongs to, where the split names one: the agent itself, an account by its key's agent,
- * a model by its maker's agent. */
-function agentOf(split: UsageSplit, key: string): string | undefined {
-  if (split === "agent") return key;
-  if (split === "account") return key.split(/[:@]/)[0];
-  if ((split as string) === "model") return /^claude|^(opus|sonnet|haiku|fable)/i.test(key) ? "claude" : /^(gpt|o\d|codex)/i.test(key) ? "codex" : undefined;
-  return undefined;
-}
-
 /** The hues a computer, an account or a project takes by rank: none of them orange, Claude's, nor the done and failed
  * greens and reds; past them the neutral ramp. */
 const SPLIT_INKS = ["text-sky-500", "text-violet-500", "text-amber-500", "text-pink-500", "text-teal-500", "text-muted-foreground"];
 const BRAND_INK = "[--line:var(--line-light)] dark:[--line:var(--line-dark)] text-(--line)";
 
-/** A line's ink: the agent's own colour where its mark carries one, a project's own hue where one was picked, else
- * the next hue by rank. */
-function inkOf(split: UsageSplit, key: string, rank: number, projectHue?: string): ChartLine["ink"] {
-  const agent = agentOf(split, key);
-  const ink = agent === undefined ? undefined : agentMark(agent)?.inks?.[0];
-  if (ink !== undefined) return { className: BRAND_INK, style: { "--line-light": ink.light, "--line-dark": ink.dark } as CSSProperties };
-  if (projectHue !== undefined && projectHue !== "") return { className: projectHue };
-  return { className: agent === undefined ? SPLIT_INKS[Math.min(rank, SPLIT_INKS.length - 1)]! : "text-muted-foreground" };
+/** An agent's line in its mark's own colour, or down the neutral ramp where its mark carries none. */
+function agentInk(agent: string): ChartLine["ink"] {
+  const ink = agentMark(agent)?.inks?.[0];
+  return ink === undefined ? { className: "text-muted-foreground" } : { className: BRAND_INK, style: { "--line-light": ink.light, "--line-dark": ink.dark } as CSSProperties };
 }
 
-/** The mark a split row leads with: the agent's, the computer's or the project's glyph, in its frame. */
-/** The glyph a split row leads with: the agent's, the computer's or the project's; null where the value has none. */
-function splitGlyph(split: UsageSplit, key: string, ctx: SettingsContext): ReactNode {
-  const agent = agentOf(split, key);
-  if (agent !== undefined && agentMark(agent) !== undefined) return agentGlyph(agent);
+/** The glyph a split row leads with: its agent's, the computer's or the project's; null where the value has none. */
+function splitGlyph(split: UsageSplit, row: UsedRow, ctx: SettingsContext): ReactNode {
+  if (row.agent !== undefined && agentMark(row.agent) !== undefined) return agentGlyph(row.agent);
   if (split === "computer") {
-    const place = ctx.places.find(p => p.id === key || p.name === key);
+    const place = ctx.places.find(p => p.id === row.key);
     if (place !== undefined) return <ComputerGlyph place={place} className="size-4 text-foreground/80" />;
   }
-  if (split === "project" && ctx.projects.some(p => p.id === key)) return <ProjectGlyph projectId={key} />;
+  if (split === "project" && ctx.projects.some(p => p.id === row.key)) return <ProjectGlyph projectId={row.key} />;
   // A value with no glyph of its own still takes a frame, so every row's name starts at one edge.
   const Fallback = FALLBACK_GLYPHS[split as keyof typeof FALLBACK_GLYPHS];
   return Fallback === undefined ? null : <Fallback aria-hidden className="size-4 text-muted-foreground" />;
@@ -468,6 +453,9 @@ function Stat({ k, label, value, note }: { k: string; label: string; value: stri
   );
 }
 
+/** The strip's columns by how many totals it holds, as classes so the narrow fold to two still wins below 640 px. */
+const TOTALS_COLUMNS: Record<number, string> = { 2: "grid-cols-2", 3: "grid-cols-3", 4: "grid-cols-4" };
+
 function Totals({ used }: { used: UsedAnswer }) {
   const input = sumOf(used.rows, r => r.tokens.input) ?? 0;
   const cached = sumOf(used.rows, r => r.tokens.cached) ?? 0;
@@ -482,7 +470,7 @@ function Totals({ used }: { used: UsedAnswer }) {
     <Stat key="cache" k="stat-cache" label={W.cacheHit} value={percent(cached, input)} {...(saved === undefined ? {} : { note: W.saved(fmtCost(saved)) })} />,
   ];
   return (
-    <div data-k="usage-totals" className={cn(CARD_SURFACE, "grid divide-x divide-border/50 max-sm:grid-cols-2 max-sm:divide-x-0")} style={{ gridTemplateColumns: `repeat(${stats.length}, minmax(0, 1fr))` }}>
+    <div data-k="usage-totals" className={cn(CARD_SURFACE, "grid divide-x divide-border/50 max-sm:grid-cols-2 max-sm:divide-x-0", TOTALS_COLUMNS[stats.length])}>
       {stats}
     </div>
   );
@@ -534,7 +522,7 @@ function SplitRow({ row, split, share, turns, ink, sub = false, ctx }: { row: Us
         </span>
       ) : (
         <Identity
-          mark={splitGlyph(split, row.key, ctx)}
+          mark={splitGlyph(split, row, ctx)}
           title={row.label}
           under={
             <span aria-hidden className="mt-1 block h-1 max-w-64 overflow-hidden rounded-full bg-foreground/[0.08]">
@@ -575,25 +563,28 @@ function UsedSkeleton({ range }: { range: UsageRange }) {
           </div>
         ))}
       </div>
-      <section className="flex flex-col gap-4">
-        <h2 data-settings-head className="flex min-h-7 items-center text-sm font-normal text-foreground/70">
-          {W.chartHead[range]}
-        </h2>
-        <div className="flex gap-6">
-          <Skeleton className="h-3.5 w-28" />
-          <Skeleton className="h-3.5 w-20" />
-        </div>
-        <div className="grid grid-cols-[2.25rem_minmax(0,1fr)] gap-x-3 gap-y-3">
-          <span className="flex flex-col justify-between py-1" style={{ height: CHART_HEIGHT }}>
-            {[0, 1, 2, 3, 4].map(i => (
-              <Skeleton key={i} className="h-2.5 w-8" />
-            ))}
-          </span>
-          <Skeleton className="rounded-md opacity-60" style={{ height: CHART_HEIGHT }} />
-          <span />
-          <span className="h-4" />
-        </div>
-      </section>
+      <Card
+        id="usage-chart-loading"
+        head={W.chartHead[range]}
+        body={
+          <div className="flex flex-col gap-4">
+            <div className="flex gap-6">
+              <Skeleton className="h-3.5 w-28" />
+              <Skeleton className="h-3.5 w-20" />
+            </div>
+            <div className="grid grid-cols-[2.25rem_minmax(0,1fr)] gap-x-3 gap-y-3">
+              <span className="flex flex-col justify-between py-1" style={{ height: CHART_HEIGHT }}>
+                {[0, 1, 2, 3, 4].map(i => (
+                  <Skeleton key={i} className="h-2.5 w-8" />
+                ))}
+              </span>
+              <Skeleton className="rounded-md opacity-60" style={{ height: CHART_HEIGHT }} />
+              <span />
+              <span className="h-4" />
+            </div>
+          </div>
+        }
+      />
       <section className="flex flex-col gap-4">
         <Skeleton className="h-3.5 w-20" />
         <div className={BARE_TABLE}>
@@ -668,6 +659,7 @@ function Used({ used, refused, models, range, split, onRange, onSplit, ctx }: { 
   const top = tokensOf(ranked[0] ?? { tokens: { input: 0, output: 0, cached: 0 } } as UsedRow);
   const word = stepWord(used);
   const lineRows = used.lines ?? [{ key: "tokens", label: W.tokens, points: used.series.map(s => s.tokens) }];
+  const agentByKey = new Map(used.rows.flatMap(row => (row.agent === undefined ? [] : [[row.key, row.agent] as const])));
   const hueOf = (key: string): string | undefined => (split === "project" ? PROJECT_HUES[ctx.preferences.projectLook[key]?.hue ?? "neutral"].text : undefined);
   // A hue a project picked is that project's alone, so the hues handed out by rank skip it; use with no project is grey.
   const picked = new Set(lineRows.map(line => hueOf(line.key)).filter((hue): hue is string => hue !== undefined && hue !== ""));
@@ -677,7 +669,8 @@ function Used({ used, refused, models, range, split, onRange, onSplit, ctx }: { 
     if (used.lines === undefined) return { key: line.key, label: line.label, points: line.points, ink: { className: "text-foreground" } };
     const unowned = split === "project" && !ctx.projects.some(p => p.id === line.key);
     const own = hueOf(line.key);
-    const ink = unowned ? { className: "text-muted-foreground" } : own !== undefined && own !== "" ? { className: own } : agentOf(split, line.key) !== undefined ? inkOf(split, line.key, 0) : { className: free[Math.min(next++, free.length - 1)]! };
+    const agent = agentByKey.get(line.key);
+    const ink = unowned ? { className: "text-muted-foreground" } : own !== undefined && own !== "" ? { className: own } : agent !== undefined ? agentInk(agent) : { className: free[Math.min(next++, free.length - 1)]! };
     return { key: line.key, label: line.label, points: line.points, ink };
   });
   const inkByKey = new Map(used.lines === undefined ? [] : lines.map(line => [line.key, line.ink] as const));
@@ -708,7 +701,7 @@ function Used({ used, refused, models, range, split, onRange, onSplit, ctx }: { 
               ) : (
                 <div data-k="usage-legend" className="flex flex-wrap gap-x-6 gap-y-2 text-[13.5px] text-muted-foreground">
                   {lines.map(line => {
-                    const agent = agentOf(split, line.key);
+                    const agent = agentByKey.get(line.key);
                     return (
                       <span key={line.key} className="flex items-center gap-2">
                         <span aria-hidden className={cn("h-0.5 w-3.5 rounded-full bg-current", line.ink.className)} style={line.ink.style} />
@@ -735,12 +728,12 @@ function Used({ used, refused, models, range, split, onRange, onSplit, ctx }: { 
               <span className="text-right">{W.estimate}</span>
             </div>
             {ranked.map((row, i) => {
-              const own = used.split === "agent" ? models.filter(m => agentOf("model" as UsageSplit, m.key) === row.key).sort((a, b) => tokensOf(b) - tokensOf(a)) : [];
+              const own = used.split === "agent" ? models.filter(m => m.agent === row.agent).sort((a, b) => tokensOf(b) - tokensOf(a)) : [];
               return (
                 <div key={`${used.split}:${row.key}`} data-used-group={row.key} className="flex animate-settle-in flex-col pb-1 motion-reduce:animate-none [&>[data-sub]]:-mt-0.5" style={{ animationDelay: `${Math.min(i, 6) * 30}ms` }}>
                   <SplitRow row={row} split={used.split} share={top === 0 ? 0 : tokensOf(row) / top} turns={turns} {...(inkByKey.has(row.key) ? { ink: inkByKey.get(row.key)! } : {})} ctx={ctx} />
                   {own.map(model => (
-                    <SplitRow key={model.key} row={model} split={"model" as UsageSplit} share={tokensOf(row) === 0 ? 0 : tokensOf(model) / tokensOf(row)} turns={turns} sub ctx={ctx} />
+                    <SplitRow key={model.key} row={model} split="model" share={tokensOf(row) === 0 ? 0 : tokensOf(model) / tokensOf(row)} turns={turns} sub ctx={ctx} />
                   ))}
                 </div>
               );
@@ -748,12 +741,7 @@ function Used({ used, refused, models, range, split, onRange, onSplit, ctx }: { 
               </div>
             }
           />
-          <section data-settings-card="usage-mix-card" aria-label={W.mix} className="flex flex-col gap-4">
-            <h2 data-settings-head className="flex min-h-7 items-center text-sm font-normal text-foreground/70">
-              {W.mix}
-            </h2>
-            <Mix used={used} />
-          </section>
+          <Card id="usage-mix-card" head={W.mix} body={<Mix used={used} />} />
           {used.logs === undefined ? null : (
             <p data-k="logs" className={QUIET}>
               {logsLine(used.logs)}

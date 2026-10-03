@@ -149,6 +149,9 @@ function dayStartOf(at: number, timeZone?: string): number {
 /** A row's value for a split; a model with its context window after it is the same model. */
 const splitValue = (row: UsageRow, split: UsageSplit): string => (split === "model" ? baseModel(row.model) : row[split]);
 
+/** The splits whose every value is one agent's: an account signs in to one agent, and a model is filed per agent. */
+const ONE_AGENT: readonly UsageSplit[] = ["agent", "account", "model"];
+
 /** The banked resets a reading leaves held: a reading in full replaces them and stamps the detail, a count alone
  * keeps the held details while the count stands and drops them once it moved, and a reading that carries none
  * leaves them as they were. */
@@ -318,10 +321,12 @@ export function createUsageLedger(o: { store: Store; clock: Clock; timeZone?: st
       for (const row of held?.rows ?? []) {
         if (row.source === "log" && !outside) continue;
         if (row.source === "log") logged.add(row.agent);
-        const key = splitValue(row, q.split);
+        const value = splitValue(row, q.split);
+        const key = q.split === "model" ? `${row.agent}:${value}` : value;
         const line = rows.get(key) ?? {
           key,
-          label: q.label(q.split, key),
+          label: q.label(q.split, value),
+          ...(ONE_AGENT.includes(q.split) ? { agent: row.agent } : {}),
           tokens: { input: 0, output: 0, cached: 0, cacheWrite: 0, reasoning: 0 },
           priced: true,
           turns: 0,
