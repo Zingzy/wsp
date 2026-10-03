@@ -1,19 +1,21 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Add a computer as one dialog, 560 px wide and one height across its steps:
-// the header carries the step's name, one line, and the step's place in the
-// run as a quiet mono figure; the body is the step's rows in the settings list
-// grammar; the foot is Back and Continue beside the key that closes it. There
-// is no step rail: the steps are read one at a time, in the order they will
-// run. The running view is the same rows in the same order, each with its
-// state mark, a step that needs the person opening under itself with its acts.
-import { CheckIcon, ExternalLinkIcon, GitCommitHorizontalIcon, KeyRoundIcon, ListChecksIcon, PlugIcon, PuzzleIcon, ScrollTextIcon, ServerIcon, SquareTerminalIcon, TerminalIcon } from "lucide-react";
+// Add a computer as one dialog, 680 px wide and one height across its steps:
+// the header carries the step's name, a line only where the rows do not say
+// it, the step's place in the run as a quiet mono figure and, once a choice is
+// kept, that it is saved; the body is the step's rows in the settings list
+// grammar; the foot is Back and Continue beside the key that closes it. The
+// running view is the same rows in the same order, several running at once,
+// a row that needs the person opening under itself with its acts. When every
+// row is done, Next opens the ready page: the app's hero field behind the
+// box's name and the one act.
+import { CheckIcon, ExternalLinkIcon, GitCommitHorizontalIcon, GithubIcon, ListChecksIcon, PlugIcon, PuzzleIcon, ScrollTextIcon, ServerIcon, SquareTerminalIcon, TerminalIcon } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
-import type { ProjectHue, ProjectIcon } from "@wsp/protocol";
+import { fmtBytes, type ProjectHue, type ProjectIcon, type SizeTone } from "@wsp/protocol";
 import { AgentMarks } from "../../components/agents/agentsParts.js";
 import { HarnessMark } from "../../components/chat/HarnessMark.js";
+import { HeroField } from "../../components/chat/EmptyHero.js";
 import { AddButton } from "../../components/ui/add-button.js";
 import { Button } from "../../components/ui/button.js";
-import { Checkbox } from "../../components/ui/checkbox.js";
 import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../../components/ui/dialog.js";
 import { Input } from "../../components/ui/input.js";
 import { Radio, RadioGroup } from "../../components/ui/radio-group.js";
@@ -25,9 +27,10 @@ import { ComputerGlyph } from "../../settings/ComputerGlyph.js";
 import { FACT } from "../../settings/format.js";
 import { GlyphFrame, Grid, GridHead, GridName, GridRow } from "../../settings/grid.js";
 import { CARD_INSET, LIST_TITLE, NOTE, ROW_FIELD, ROW_FLOOR, SELECT_WIDTH } from "../../settings/layout.js";
+import { SizeCell } from "../../settings/recipe/rows.js";
 import { Card, Line } from "../../settings/rows.js";
 import { CopyRow, RefusalSlot } from "../../settings/sheetParts.js";
-import { ADDED_FOLDER, AGENTS, BOX_NAME, CHECKS_REFUSED, CHECKS_RUNNING, CLIS, CONFIGS, HERE, HOST_KEY, MAC_NAME, PLUGINS, PLUGIN_COUNT, PROJECTS, RECIPES, RUNNING, RUNNING_BLOCKED, RUNNING_DONE, RUNNING_FAILED, SERVERS, SKILLS, SKILL_COUNT, SSH_HOSTS, SUMMARY, type ProjectPick, type StepLine } from "./fixtures.js";
+import { ADDED_FOLDER, AGENTS, BOX_NAME, CHECKS_REFUSED, CHECKS_RUNNING, CLIS, CONFIGS, GITHUB_CHOICES, HERE, HOST_KEY, MAC_NAME, NAME_TAKEN, NEEDS_GITHUB, PLUGINS, PROJECTS, RECIPES, RUNNING, RUNNING_BLOCKED, RUNNING_DONE, RUNNING_FAILED, SERVERS, SKILLS, SSH_HOSTS, STUDIO, SUMMARY, type ProjectPick, type StepLine } from "./fixtures.js";
 import { PickLine, PickRow } from "./PickRow.js";
 import { RetryActs, StepRow } from "./StepRow.js";
 
@@ -42,69 +45,72 @@ export type Screen =
   | "clis"
   | "skills"
   | "plugins"
+  | "github"
   | "projects"
   | "projects-add"
+  | "projects-taken"
+  | "projects-nogithub"
   | "other"
   | "summary"
   | "summary-disk"
   | "running"
   | "running-failed"
   | "running-blocked"
-  | "running-done";
+  | "running-done"
+  | "ready";
 
-/** The steps a person walks, in the order they run, so the figure in the header is the same count the running
- * list shows. Start from is skipped when no recipe is saved. */
-const STEPS: readonly { id: Screen; title: string }[] = [
-  { id: "where", title: "Add a computer" },
-  { id: "checks", title: "Checks" },
-  { id: "startfrom", title: "Start from" },
-  { id: "agents", title: "Agents" },
-  { id: "mcp", title: "MCP servers" },
-  { id: "clis", title: "CLIs" },
-  { id: "skills", title: "Skills" },
-  { id: "plugins", title: "Plugins" },
-  { id: "projects", title: "Import projects" },
-  { id: "other", title: "Other config" },
-  { id: "summary", title: "Summary" },
-];
+/** The steps a person walks, in the order they run. Start from is skipped when no recipe is saved. */
+const STEPS: readonly Screen[] = ["where", "checks", "startfrom", "agents", "mcp", "clis", "skills", "plugins", "github", "projects", "other", "summary"];
 
-const stepOf = (screen: Screen): Screen => (screen === "hostkey" ? "where" : screen === "checks-refused" ? "checks" : screen === "projects-add" ? "projects" : screen === "summary-disk" ? "summary" : screen);
+const STEP_OF: Partial<Record<Screen, Screen>> = { hostkey: "where", "checks-refused": "checks", "projects-add": "projects", "projects-taken": "projects", "projects-nogithub": "projects", "summary-disk": "summary" };
+const stepOf = (screen: Screen): Screen => STEP_OF[screen] ?? screen;
 
-/** The title and the one line under it, per screen; the running view's title is the machine's state. */
-const HEAD: Record<Screen, { title: string; line: string }> = {
-  where: { title: "Add a computer", line: "A Linux box you have root on. wsp installs itself over ssh and the box dials back here." },
-  hostkey: { title: "Add a computer", line: "A Linux box you have root on. wsp installs itself over ssh and the box dials back here." },
-  checks: { title: "Checks", line: `What ${BOX_NAME} is, before anything lands. Choosing starts once wsp dials back.` },
-  "checks-refused": { title: "Checks", line: "What jumpbox is, before anything lands. Two things need fixing first." },
-  startfrom: { title: "Start from", line: `Which ticks the next steps open with. Change any of them along the way.` },
-  agents: { title: "Agents", line: `Which agents go on ${BOX_NAME}, and how each signs in there.` },
-  mcp: { title: "MCP servers", line: "Each goes to the agents it is set up for here. Servers that only run on a Mac are not offered." },
-  clis: { title: "CLIs", line: `From this Mac, at the versions here. One needs a compiler, said on its row.` },
-  skills: { title: "Skills", line: `${SKILL_COUNT} skills from this Mac, each landing in the agents it is set up for.` },
-  plugins: { title: "Plugins", line: `${PLUGIN_COUNT} Claude Code plugins installed here. One asks to run a command, so it waits for you.` },
-  projects: { title: "Import projects", line: `Your wsp projects on ${MAC_NAME}. Any folder can become one.` },
-  "projects-add": { title: "Import projects", line: `Your wsp projects on ${MAC_NAME}. Any folder can become one.` },
-  other: { title: "Other config", line: `What makes ${BOX_NAME} feel like your machine. Nothing with a secret in it travels.` },
-  summary: { title: "Summary", line: `What goes on ${BOX_NAME}. Save the picks as a recipe to reuse them on the next box.` },
-  "summary-disk": { title: "Summary", line: `What goes on ${BOX_NAME}. Save the picks as a recipe to reuse them on the next box.` },
-  running: { title: `Setting up ${BOX_NAME}`, line: "Codex needs you to sign in. Everything else carries on." },
-  "running-failed": { title: `${BOX_NAME} needs you`, line: "Everything else is done. One project and one skill did not land." },
-  "running-blocked": { title: `Setup on ${BOX_NAME} failed`, line: "Base packages did not install, so nothing after them ran." },
-  "running-done": { title: `${BOX_NAME} is ready`, line: "Set up in 6 min 12 s. It follows the Builders recipe from here." },
+/** The title and, only where the rows do not say it, one line under it. */
+const HEAD: Record<Screen, { title: string; line?: string }> = {
+  where: { title: "Add a computer", line: "A Linux box you have root on." },
+  hostkey: { title: "Add a computer", line: "A Linux box you have root on." },
+  checks: { title: "Checks" },
+  "checks-refused": { title: "Checks" },
+  startfrom: { title: "Start from" },
+  agents: { title: "Agents" },
+  mcp: { title: "MCP servers" },
+  clis: { title: "CLIs" },
+  skills: { title: "Skills" },
+  plugins: { title: "Plugins" },
+  github: { title: "GitHub" },
+  projects: { title: "Import projects" },
+  "projects-add": { title: "Import projects" },
+  "projects-taken": { title: "Import projects" },
+  "projects-nogithub": { title: "Import projects" },
+  other: { title: "Other config" },
+  summary: { title: "Summary" },
+  "summary-disk": { title: "Summary" },
+  running: { title: `Setting up ${BOX_NAME}`, line: "You can close this. Setup keeps going." },
+  "running-failed": { title: `${BOX_NAME} needs you`, line: "Everything else is done." },
+  "running-blocked": { title: `Setup on ${BOX_NAME} failed` },
+  "running-done": { title: `${BOX_NAME} is ready`, line: "Set up in 6 min 12 s." },
+  ready: { title: `${BOX_NAME} is ready` },
 };
+
+/** The size colours the coordinator ruled: neutral under 50 MB, yellow to 200 MB, orange to 1 GB, red over, in the
+ * inks the app's size cells already wear. The protocol's own ladder is 100 MB, 300 MB, 1 GB. */
+const MB = 1024 * 1024;
+const sizeToneAt = (bytes: number): SizeTone => (bytes >= 1024 * MB ? "danger" : bytes >= 200 * MB ? "warning" : bytes >= 50 * MB ? "yellow" : "muted");
+const Size = ({ bytes }: { bytes: number }) => (
+  <SizeCell tone={sizeToneAt(bytes)} className="text-[13px]">
+    {fmtBytes(bytes)}
+  </SizeCell>
+);
 
 const ssh = (host: (typeof SSH_HOSTS)[number]): string => [host.user, host.hostName ?? host.alias].filter(Boolean).join("@");
 
 function WhereStep({ hostKey }: { hostKey: boolean }) {
   return (
     <>
-      <div className="flex flex-col gap-2">
-        <Input data-k="where-field" aria-label="Address" defaultValue="studio" placeholder="user@host or an ssh alias" className="font-mono" />
-        <p className={NOTE}>Root there; wsp never asks for a password.</p>
-      </div>
+      <Input data-k="where-field" aria-label="Address" defaultValue="studio" placeholder="user@host or an ssh alias" className="font-mono" />
       {hostKey ? (
         <div className="flex flex-col gap-2">
-          <p className={NOTE}>{BOX_NAME}'s host key is new to this Mac. Check it against the box before trusting it.</p>
+          <p className={NOTE}>{BOX_NAME}'s host key is new to this Mac.</p>
           <CopyRow k="host-key" label={HOST_KEY.kind} value={HOST_KEY.fingerprint} />
         </div>
       ) : (
@@ -144,33 +150,47 @@ function ChecksStep({ rows }: { rows: readonly StepLine[] }) {
   );
 }
 
-function StartFromStep() {
-  const [picked, setPicked] = useState("mac");
-  const choice = (id: string, glyph: ReactNode, name: string, note: string, fact?: string) => (
-    <label key={id} data-start-from={id} className={cn("flex cursor-pointer items-center gap-3 py-3", CARD_INSET, ROW_FLOOR)}>
+/** A radio list in the card: the radio, the mark in its frame, the name over a note, a fact at the right. */
+function Choice({ id, picked, glyph, name, note, fact }: { id: string; picked: boolean; glyph: ReactNode; name: string; note: string; fact?: string }) {
+  return (
+    <label data-choice={id} className={cn("flex cursor-pointer items-center gap-3 py-3", CARD_INSET, ROW_FLOOR)}>
       <Radio value={id} />
       <GlyphFrame>{glyph}</GlyphFrame>
       <span className="flex min-w-0 flex-1 flex-col">
-        <span className={cn(LIST_TITLE, "min-w-0 break-words", picked !== id && "text-muted-foreground")}>{name}</span>
+        <span className={cn(LIST_TITLE, "min-w-0 break-words", !picked && "text-muted-foreground")}>{name}</span>
         <span className={NOTE}>{note}</span>
       </span>
       {fact === undefined ? null : <span className={cn(FACT, "shrink-0")}>{fact}</span>}
     </label>
   );
+}
+
+function StartFromStep() {
+  const [picked, setPicked] = useState("mac");
   return (
-    <>
-      <RadioGroup value={picked} onValueChange={next => setPicked(String(next))} className="gap-0">
-        <Grid id="start-from">
-          {choice("mac", <ComputerGlyph place={HERE} className="size-4 text-foreground/80" />, `Everything on ${MAC_NAME}`, "3 agents, 14 MCP servers, 9 CLIs, 78 skills, 17 plugins, every project.")}
-          {RECIPES.map(recipe => {
-            const Glyph = PROJECT_GLYPHS[recipe.icon];
-            return choice(recipe.id, <Glyph aria-hidden className="size-4 text-foreground/80" />, recipe.name, recipe.holds, recipe.machines.length === 0 ? undefined : `on ${recipe.machines.join(", ")}`);
-          })}
-          {choice("none", <ListChecksIcon aria-hidden className="size-4 text-foreground/80" />, "Pick each step", "Start with nothing ticked.")}
-        </Grid>
-      </RadioGroup>
-      <p className={NOTE}>Ticks you change in the next steps stay with {BOX_NAME}. A recipe changes only when you save it at the end.</p>
-    </>
+    <RadioGroup value={picked} onValueChange={next => setPicked(String(next))} className="gap-0">
+      <Grid id="start-from">
+        <Choice id="mac" picked={picked === "mac"} glyph={<ComputerGlyph place={HERE} className="size-4 text-foreground/80" />} name={`Everything on ${MAC_NAME}`} note="3 agents, 14 MCP servers, 9 CLIs, 78 skills, 17 plugins, every project." />
+        {RECIPES.map(recipe => {
+          const Glyph = PROJECT_GLYPHS[recipe.icon];
+          return <Choice key={recipe.id} id={recipe.id} picked={picked === recipe.id} glyph={<Glyph aria-hidden className="size-4 text-foreground/80" />} name={recipe.name} note={recipe.holds} {...(recipe.machines.length === 0 ? {} : { fact: `on ${recipe.machines.join(", ")}` })} />;
+        })}
+        <Choice id="none" picked={picked === "none"} glyph={<ListChecksIcon aria-hidden className="size-4 text-foreground/80" />} name="Pick each step" note="Nothing ticked." />
+      </Grid>
+    </RadioGroup>
+  );
+}
+
+function GitHubStep() {
+  const [picked, setPicked] = useState("token");
+  return (
+    <RadioGroup value={picked} onValueChange={next => setPicked(String(next))} className="gap-0">
+      <Grid id="github">
+        {GITHUB_CHOICES.map(choice => (
+          <Choice key={choice.id} id={choice.id} picked={picked === choice.id} glyph={<GithubIcon aria-hidden className="size-4 text-foreground/80" />} name={choice.name} note={choice.note} />
+        ))}
+      </Grid>
+    </RadioGroup>
   );
 }
 
@@ -192,122 +212,96 @@ function WordSelect({ value, words, label }: { value: string; words: readonly st
   );
 }
 
+/** The ticks of a list, by id. */
+function useTicks<T extends { id: string; ticked: boolean }>(rows: readonly T[]): [Record<string, boolean>, (id: string, next: boolean) => void] {
+  const [ticks, setTicks] = useState<Record<string, boolean>>(Object.fromEntries(rows.map(row => [row.id, row.ticked])));
+  return [ticks, (id, next) => setTicks(t => ({ ...t, [id]: next }))];
+}
+
 function AgentsStep() {
-  const [ticks, setTicks] = useState<Record<string, boolean>>(Object.fromEntries(AGENTS.map(a => [a.id, a.ticked])));
+  const [ticks, tick] = useTicks(AGENTS);
   return (
-    <>
-      <Grid id="agents">
-        {AGENTS.map(agent => (
-          <PickRow
-            key={agent.id}
-            id={agent.id}
-            checked={ticks[agent.id] === true}
-            onCheckedChange={next => setTicks(t => ({ ...t, [agent.id]: next }))}
-            glyph={<HarnessMark harness={agent.id} label={agent.name} className="size-5" />}
-            name={agent.name}
-            tag={agent.version}
-            note={agent.note}
-            {...(ticks[agent.id] === true ? { slot: <WordSelect value={agent.signIn} words={agent.signIns} label={`${agent.name} sign-in`} /> } : {})}
-          />
-        ))}
-      </Grid>
-      <p className={NOTE}>Installed first, then signed in. Versions follow {MAC_NAME}.</p>
-    </>
+    <Grid id="agents">
+      {AGENTS.map(agent => (
+        <PickRow
+          key={agent.id}
+          id={agent.id}
+          checked={ticks[agent.id] === true}
+          onCheckedChange={next => tick(agent.id, next)}
+          glyph={<HarnessMark harness={agent.id} label={agent.name} className="size-5" />}
+          name={agent.name}
+          tag={agent.version}
+          note={agent.note}
+          {...(ticks[agent.id] === true ? { slot: <WordSelect value={agent.signIn} words={agent.signIns} label={`${agent.name} sign-in`} /> } : {})}
+        />
+      ))}
+    </Grid>
   );
 }
 
 function ServersStep() {
-  const [ticks, setTicks] = useState<Record<string, boolean>>(Object.fromEntries(SERVERS.map(s => [s.id, s.ticked])));
+  const [ticks, tick] = useTicks(SERVERS);
   return (
     <Grid id="servers">
       {SERVERS.map(server => (
-        <PickRow
-          key={server.id}
-          id={server.id}
-          checked={ticks[server.id] === true}
-          onCheckedChange={next => setTicks(t => ({ ...t, [server.id]: next }))}
-          glyph={<PlugIcon aria-hidden className="size-4 text-foreground/80" />}
-          name={server.name}
-          marks={<AgentMarks agents={server.agents} />}
-          note={server.note}
-        />
+        <PickRow key={server.id} id={server.id} checked={ticks[server.id] === true} onCheckedChange={next => tick(server.id, next)} glyph={<PlugIcon aria-hidden className="size-4 text-foreground/80" />} name={server.name} marks={<AgentMarks agents={server.agents} />} note={server.note} />
       ))}
     </Grid>
   );
 }
 
 function ClisStep() {
-  const [ticks, setTicks] = useState<Record<string, boolean>>(Object.fromEntries(CLIS.map(c => [c.id, c.ticked])));
+  const [ticks, tick] = useTicks(CLIS);
   return (
     <Grid id="clis">
       {CLIS.map(cli => (
-        <PickRow
-          key={cli.id}
-          id={cli.id}
-          checked={ticks[cli.id] === true}
-          onCheckedChange={next => setTicks(t => ({ ...t, [cli.id]: next }))}
-          glyph={<TerminalIcon aria-hidden className="size-4 text-foreground/80" />}
-          name={cli.name}
-          tag={cli.version}
-          note={cli.needs === undefined ? `By ${cli.via}.` : `By ${cli.via}. ${cli.needs}`}
-          slot={<span className={FACT}>{cli.size}</span>}
-        />
+        <PickRow key={cli.id} id={cli.id} checked={ticks[cli.id] === true} onCheckedChange={next => tick(cli.id, next)} glyph={<TerminalIcon aria-hidden className="size-4 text-foreground/80" />} name={cli.name} tag={cli.version} note={cli.needs === undefined ? cli.via : `${cli.via}. ${cli.needs}`} slot={<Size bytes={cli.bytes} />} />
       ))}
     </Grid>
   );
 }
 
 function SkillsStep() {
-  const [ticks, setTicks] = useState<Record<string, boolean>>(Object.fromEntries(SKILLS.map(s => [s.id, s.ticked])));
+  const [ticks, tick] = useTicks(SKILLS);
   return (
     <Grid id="skills">
       {SKILLS.map(item => (
-        <PickRow
-          key={item.id}
-          id={item.id}
-          checked={ticks[item.id] === true}
-          onCheckedChange={next => setTicks(t => ({ ...t, [item.id]: next }))}
-          glyph={<ScrollTextIcon aria-hidden className="size-4 text-foreground/80" />}
-          name={item.name}
-          marks={<AgentMarks agents={item.agents} />}
-          slot={<span className={FACT}>{item.from}</span>}
-        />
+        <PickRow key={item.id} id={item.id} checked={ticks[item.id] === true} onCheckedChange={next => tick(item.id, next)} glyph={<ScrollTextIcon aria-hidden className="size-4 text-foreground/80" />} name={item.name} marks={<AgentMarks agents={item.agents} />} slot={<span className={FACT}>{item.from}</span>} />
       ))}
     </Grid>
   );
 }
 
 function PluginsStep() {
-  const [ticks, setTicks] = useState<Record<string, boolean>>(Object.fromEntries(PLUGINS.map(p => [p.id, p.ticked])));
+  const [ticks, tick] = useTicks(PLUGINS);
   return (
     <Grid id="plugins">
       {PLUGINS.map(plugin => (
-        <PickRow
-          key={plugin.id}
-          id={plugin.id}
-          checked={ticks[plugin.id] === true}
-          onCheckedChange={next => setTicks(t => ({ ...t, [plugin.id]: next }))}
-          glyph={<PuzzleIcon aria-hidden className="size-4 text-foreground/80" />}
-          name={plugin.name}
-          tag={plugin.marketplace}
-          {...(plugin.asks === undefined ? {} : { note: plugin.asks })}
-        />
+        <PickRow key={plugin.id} id={plugin.id} checked={ticks[plugin.id] === true} onCheckedChange={next => tick(plugin.id, next)} glyph={<PuzzleIcon aria-hidden className="size-4 text-foreground/80" />} name={plugin.name} tag={plugin.marketplace} {...(plugin.asks === undefined ? {} : { note: plugin.asks })} />
       ))}
     </Grid>
   );
 }
 
-function ProjectRow({ project, checked, onCheckedChange }: { project: ProjectPick; checked: boolean; onCheckedChange: (next: boolean) => void }) {
+function ProjectRow({ project, checked, onCheckedChange, taken, noGitHub }: { project: ProjectPick; checked: boolean; onCheckedChange: (next: boolean) => void; taken: boolean; noGitHub: boolean }) {
   const [name, setName] = useState(project.name);
   const [icon, setIcon] = useState<ProjectIcon>(project.icon);
   const [hue, setHue] = useState<ProjectHue>(project.hue);
   const Glyph = PROJECT_GLYPHS[icon];
+  const note = noGitHub && project.privateRepo === true ? NEEDS_GITHUB : project.note;
   return (
-    <PickRow id={project.id} checked={checked} onCheckedChange={onCheckedChange} glyph={<Glyph aria-hidden className={cn("size-4", hue === "neutral" ? "text-foreground/80" : PROJECT_HUES[hue].text)} />} name={name} tag={project.path} note={project.note} slot={<span className={FACT}>{project.size}</span>}>
+    <PickRow id={project.id} checked={checked} onCheckedChange={onCheckedChange} glyph={<Glyph aria-hidden className={cn("size-4", hue === "neutral" ? "text-foreground/80" : PROJECT_HUES[hue].text)} />} name={name} tag={project.path} note={note} slot={<Size bytes={project.bytes} />}>
       {checked ? (
         <>
           <PickLine label="Name">
-            <Input data-k="project-name" aria-label="Project name" value={name} onChange={e => setName(e.target.value)} className={cn(ROW_FIELD, "w-44 max-sm:w-36")} autoFocus={project.added === true} />
+            <span className="flex flex-col items-end gap-1">
+              <Input data-k="project-name" aria-label="Project name" aria-invalid={taken || undefined} value={name} onChange={e => setName(e.target.value)} className={cn(ROW_FIELD, "w-44 max-sm:w-36")} autoFocus={project.added === true || taken} />
+              {taken ? (
+                <span data-k="name-taken" className="text-[13px] leading-[18px] text-destructive-foreground">
+                  {NAME_TAKEN(BOX_NAME, project.name)}
+                </span>
+              ) : null}
+            </span>
           </PickLine>
           <PickLine label="Icon">
             <IconSelect icon={icon} hue={hue} onChange={setIcon} />
@@ -321,14 +315,14 @@ function ProjectRow({ project, checked, onCheckedChange }: { project: ProjectPic
   );
 }
 
-function ProjectsStep({ added }: { added: boolean }) {
+function ProjectsStep({ added = false, taken = false, noGitHub = false }: { added?: boolean; taken?: boolean; noGitHub?: boolean }) {
   const rows = added ? [ADDED_FOLDER, ...PROJECTS] : PROJECTS;
-  const [ticks, setTicks] = useState<Record<string, boolean>>(Object.fromEntries(rows.map(p => [p.id, p.ticked])));
+  const [ticks, tick] = useTicks(rows);
   return (
     <>
       <Grid id="projects">
         {rows.map(project => (
-          <ProjectRow key={project.id} project={project} checked={ticks[project.id] === true} onCheckedChange={next => setTicks(t => ({ ...t, [project.id]: next }))} />
+          <ProjectRow key={project.id} project={project} checked={ticks[project.id] === true} onCheckedChange={next => tick(project.id, next)} taken={taken && project.id === "pr_wsp"} noGitHub={noGitHub} />
         ))}
       </Grid>
       <div className="flex">
@@ -338,26 +332,15 @@ function ProjectsStep({ added }: { added: boolean }) {
   );
 }
 
-const CONFIG_GLYPHS = { git: GitCommitHorizontalIcon, shell: SquareTerminalIcon, github: KeyRoundIcon } as const;
+const CONFIG_GLYPHS = { git: GitCommitHorizontalIcon, shell: SquareTerminalIcon } as const;
 
 function OtherStep() {
-  const [ticks, setTicks] = useState<Record<string, boolean>>(Object.fromEntries(CONFIGS.map(c => [c.id, c.ticked])));
+  const [ticks, tick] = useTicks(CONFIGS);
   return (
     <Grid id="configs">
       {CONFIGS.map(config => {
         const Glyph = CONFIG_GLYPHS[config.id as keyof typeof CONFIG_GLYPHS];
-        return (
-          <PickRow
-            key={config.id}
-            id={config.id}
-            checked={ticks[config.id] === true}
-            onCheckedChange={next => setTicks(t => ({ ...t, [config.id]: next }))}
-            glyph={<Glyph aria-hidden className="size-4 text-foreground/80" />}
-            name={config.name}
-            note={config.note}
-            {...(config.signIns !== undefined && config.signIn !== undefined && ticks[config.id] === true ? { slot: <WordSelect value={config.signIn} words={config.signIns} label={`${config.name} sign-in`} /> } : {})}
-          />
-        );
+        return <PickRow key={config.id} id={config.id} checked={ticks[config.id] === true} onCheckedChange={next => tick(config.id, next)} glyph={<Glyph aria-hidden className="size-4 text-foreground/80" />} name={config.name} note={config.note} />;
       })}
     </Grid>
   );
@@ -387,7 +370,7 @@ function SummaryStep({ refused }: { refused: boolean }) {
       </Card>
       {refused ? <RefusalSlot k="disk-refused" said={`${BOX_NAME} has ${disk.free} free; these picks need ${disk.need}.`} fix="Untick cargo-nextest to leave build-essential out, or free room on studio." /> : null}
       <Card id="save-recipe">
-        <PickRow id="save" checked={save} onCheckedChange={setSave} glyph={<Glyph aria-hidden className="size-4 text-foreground/80" />} name="Save as a recipe" note="The next box starts from these picks, and follows them as they change here.">
+        <PickRow id="save" checked={save} onCheckedChange={setSave} glyph={<Glyph aria-hidden className="size-4 text-foreground/80" />} name="Save as a recipe" note="The next box starts from these picks.">
           {save ? (
             <>
               <PickLine label="Name">
@@ -416,12 +399,10 @@ function WaitBlock({ wait }: { wait: NonNullable<StepLine["wait"]> }) {
           Open the tab again
         </Button>
         <Button size="xs" variant="ghost">
-          Later
+          Skip for now
         </Button>
       </div>
-      <p className={NOTE}>
-        {wait.left}. Later leaves this on {BOX_NAME}'s page; everything else finishes.
-      </p>
+      <p className={NOTE}>You can sign in later in Settings.</p>
     </>
   );
 }
@@ -432,16 +413,37 @@ function RunningView({ rows, blocked }: { rows: readonly StepLine[]; blocked: bo
     document.querySelector("[data-add-computer] [data-step-row][data-state='needs-you'], [data-add-computer] [data-step-row][data-state='failed']")?.scrollIntoView({ block: "center" });
   }, [rows]);
   return (
-    <>
-      <Grid id="setup">
-        {rows.map(row => (
-          <StepRow key={row.id} row={row} {...(row.state === "failed" ? { acts: <RetryActs skip={!blocked} /> } : {})}>
-            {row.wait === undefined ? undefined : <WaitBlock wait={row.wait} />}
-          </StepRow>
-        ))}
-      </Grid>
-      {rows.some(row => row.state === "working") ? <p className={NOTE}>You can close this. Setup carries on in the background, and wsp pings you when it needs you.</p> : null}
-    </>
+    <Grid id="setup">
+      {rows.map(row => (
+        <StepRow key={row.id} row={row} {...(row.state === "failed" ? { acts: <RetryActs skip={!blocked} /> } : {})}>
+          {row.wait === undefined ? undefined : <WaitBlock wait={row.wait} />}
+        </StepRow>
+      ))}
+    </Grid>
+  );
+}
+
+/** The page after every row is done: the hero field the app draws behind a fresh thread, a soft glow in the same ink,
+ * the box's glyph and name, and the one act. */
+function ReadyPage() {
+  return (
+    <div data-k="ready-page" className="relative flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden rounded-xl px-6 py-12 text-center">
+      <HeroField />
+      <span aria-hidden className="pointer-events-none absolute left-1/2 top-1/2 -z-10 size-[420px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(closest-side,color-mix(in_srgb,var(--hero-field)_22%,transparent),transparent)]" />
+      <span className="flex size-12 items-center justify-center rounded-lg border border-border bg-foreground/[0.04]">
+        <ComputerGlyph place={STUDIO} className="size-6 text-foreground/80" />
+      </span>
+      <h2 data-k="ready-title" className="mt-5 text-2xl/8 font-medium tracking-[-0.01em] text-foreground">
+        {BOX_NAME} is ready
+      </h2>
+      <p className={cn(NOTE, "mt-1.5")}>Claude Code and Codex, 7 MCP servers, 78 skills, 2 projects.</p>
+      <div className="mt-7 flex items-center gap-2">
+        <Button data-k="start-task">Start a task here</Button>
+        <Button variant="ghost" data-k="ready-close">
+          Close
+        </Button>
+      </div>
+    </div>
   );
 }
 
@@ -469,10 +471,16 @@ function body(screen: Screen): ReactNode {
       return <SkillsStep />;
     case "plugins":
       return <PluginsStep />;
+    case "github":
+      return <GitHubStep />;
     case "projects":
-      return <ProjectsStep added={false} />;
+      return <ProjectsStep />;
     case "projects-add":
       return <ProjectsStep added />;
+    case "projects-taken":
+      return <ProjectsStep taken />;
+    case "projects-nogithub":
+      return <ProjectsStep noGitHub />;
     case "other":
       return <OtherStep />;
     case "summary":
@@ -484,16 +492,19 @@ function body(screen: Screen): ReactNode {
   }
 }
 
-/** The figure in the header: the step's place while choosing, the steps done while running. */
+/** The figure in the header: the step's place while choosing, the steps done of all while running. */
 function progress(screen: Screen, rows: readonly StepLine[] | undefined): { words: string; why: string } {
   if (rows !== undefined) {
     const steps = rows.filter(row => row.sub !== true);
     const done = steps.filter(row => row.state === "done").length;
-    return { words: `${done} of ${steps.length}`, why: `${done} of ${steps.length} steps done` };
+    return { words: `${done} of ${steps.length} done`, why: `${done} of ${steps.length} steps done` };
   }
-  const at = STEPS.findIndex(step => step.id === stepOf(screen)) + 1;
+  const at = STEPS.indexOf(stepOf(screen)) + 1;
   return { words: `${at} of ${STEPS.length}`, why: `Step ${at} of ${STEPS.length}` };
 }
+
+/** From the first choice on, the choices are kept as a pending machine; the header says so once, quietly. */
+const saved = (screen: Screen): boolean => STEPS.indexOf(stepOf(screen)) >= STEPS.indexOf("startfrom") && RUNS[screen] === undefined && screen !== "ready";
 
 function foot(screen: Screen): ReactNode {
   const back = (
@@ -534,6 +545,13 @@ function foot(screen: Screen): ReactNode {
           {next("Continue", true)}
         </>
       );
+    case "projects-taken":
+      return (
+        <>
+          {back}
+          {next("Continue", true)}
+        </>
+      );
     case "summary":
       return (
         <>
@@ -556,7 +574,7 @@ function foot(screen: Screen): ReactNode {
       return (
         <>
           {close}
-          {next("Start a thread here")}
+          {next("Next")}
         </>
       );
     default:
@@ -572,18 +590,36 @@ function foot(screen: Screen): ReactNode {
 export function AddComputerDialog({ screen }: { screen: Screen }) {
   const head = HEAD[screen];
   const at = progress(screen, RUNS[screen]);
+  const popup = "max-w-[680px] [--settings-inset:16px] sm:h-[640px]";
+  if (screen === "ready") {
+    return (
+      <Dialog open onOpenChange={() => {}}>
+        <DialogPopup data-add-computer={screen} initialFocus={false} className={popup}>
+          <DialogTitle className="sr-only">{head.title}</DialogTitle>
+          <ReadyPage />
+        </DialogPopup>
+      </Dialog>
+    );
+  }
   return (
     <Dialog open onOpenChange={() => {}}>
-      <DialogPopup data-add-computer={screen} initialFocus={screen === "where" || screen === "hostkey" ? undefined : false} className="max-w-[560px] [--settings-inset:16px] sm:h-[640px]">
+      <DialogPopup data-add-computer={screen} initialFocus={screen === "where" || screen === "hostkey" ? undefined : false} className={popup}>
         <div className="flex min-h-0 flex-1 flex-col">
           <DialogHeader className="flex-row items-start justify-between gap-6 pb-3">
             <div className="flex min-w-0 flex-col gap-1">
               <DialogTitle>{head.title}</DialogTitle>
-              <DialogDescription>{head.line}</DialogDescription>
+              {head.line === undefined ? null : <DialogDescription>{head.line}</DialogDescription>}
             </div>
-            <span data-k="progress" className={cn(FACT, "shrink-0 pt-0.5")} title={at.why}>
-              {at.words}
-            </span>
+            <div className="flex shrink-0 flex-col items-end gap-0.5 pt-0.5">
+              <span data-k="progress" className={FACT} title={at.why}>
+                {at.words}
+              </span>
+              {saved(screen) ? (
+                <span data-k="saved" className="text-xs text-muted-foreground">
+                  Saved, you can finish later
+                </span>
+              ) : null}
+            </div>
           </DialogHeader>
           <DialogPanel className="flex flex-col gap-5 pt-2 pb-5">{body(screen)}</DialogPanel>
           <DialogFooter className="pt-2">{foot(screen)}</DialogFooter>

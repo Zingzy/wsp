@@ -29,7 +29,7 @@ const theme: "light" | "dark" = params.get("theme") === "light" ? "light" : "dar
 const picks = { lightTheme: params.get("lightTheme") ?? DEFAULT_PREFERENCES.lightTheme, darkTheme: params.get("darkTheme") ?? DEFAULT_PREFERENCES.darkTheme };
 applyTheme({ theme, ...picks }, theme === "dark");
 
-const DIALOGS: readonly Screen[] = ["where", "hostkey", "checks", "checks-refused", "startfrom", "agents", "mcp", "clis", "skills", "plugins", "projects", "projects-add", "other", "summary", "summary-disk", "running", "running-failed", "running-blocked", "running-done"];
+const DIALOGS: readonly Screen[] = ["where", "hostkey", "checks", "checks-refused", "startfrom", "agents", "mcp", "clis", "skills", "plugins", "github", "projects", "projects-add", "projects-taken", "projects-nogithub", "other", "summary", "summary-disk", "running", "running-failed", "running-blocked", "running-done", "ready"];
 type Page = "computers" | "computer" | "recipes" | "recipe" | "recipes-empty" | "closing" | "sidebar";
 const screen = params.get("screen") ?? "where";
 const dialog = (DIALOGS as readonly string[]).includes(screen) ? (screen as Screen) : null;
@@ -80,7 +80,7 @@ if (params.get("scroll") === "bottom") {
 }
 
 if (page === "closing") {
-  setTimeout(() => addNotice({ kind: "note", text: "Setting up in the background. wsp pings you when it needs you.", where: "studio", action: { word: "Open", run: () => {} } }), 50);
+  setTimeout(() => addNotice({ kind: "note", text: "Setup keeps going. wsp pings you when it needs you.", where: "studio", action: { word: "Open", run: () => {} } }), 50);
 }
 
 createRoot(document.getElementById("root")!).render(

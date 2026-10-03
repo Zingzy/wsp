@@ -7,7 +7,7 @@
 // card speaks in, with the act under it.
 import { PlugIcon, ScrollTextIcon, TerminalIcon } from "lucide-react";
 import { useState } from "react";
-import type { ProjectIcon } from "@wsp/protocol";
+import { fmtBytes, type ProjectIcon } from "@wsp/protocol";
 import { AgentMarks } from "../../components/agents/agentsParts.js";
 import { HarnessMark } from "../../components/chat/HarnessMark.js";
 import { AddButton } from "../../components/ui/add-button.js";
@@ -48,7 +48,6 @@ export function RecipesListProto({ open, openAdd }: { open: (id: string) => void
           );
         })}
       </Grid>
-      <p className={NOTE}>A recipe is saved at the end of Add a computer. A machine that follows one takes every change to it.</p>
       <div className="flex">
         <AddButton data-k="add-computer-button" onClick={openAdd}>
           Add a computer
@@ -68,7 +67,7 @@ export function RecipesEmptyProto({ openAdd }: { openAdd: () => void }) {
         </AddButton>
       }
     >
-      <Line id="none" label="No recipes yet. The picks you make in Add a computer can be saved as one at its end." empty attrs={{ "data-k": "recipes-none" }} />
+      <Line id="none" label="No recipes yet. Save one at the end of Add a computer." empty attrs={{ "data-k": "recipes-none" }} />
     </Card>
   );
 }
@@ -83,11 +82,11 @@ export function RecipePageProto({ recipe = RECIPES[0]! }: { recipe?: Recipe }) {
         <div className={CARD_SURFACE}>
           <HeadRow glyph={<Glyph aria-hidden className="size-4 text-foreground/80" />} title={recipe.name} line={on} slot={<IconSelect icon={icon} hue="neutral" onChange={setIcon} />} attrs={{ "data-k": "recipe-head" }} />
         </div>
-        <p className={NOTE}>A tick changed here reaches every machine following the recipe. Sign-ins stay each machine's own.</p>
+        <p className={NOTE}>Ticks here reach {recipe.machines.length === 0 ? "every machine that follows it" : recipe.machines.join(" and ")}.</p>
       </section>
       <Grid id="agents" head={<GridHead cells={[{ word: "Agents" }]} />}>
         {AGENTS.map(agent => (
-          <PickRow key={agent.id} id={agent.id} checked={agent.ticked} glyph={<HarnessMark harness={agent.id} label={agent.name} className="size-5" />} name={agent.name} note={agent.ticked ? agent.signIn : "Not on this recipe."} />
+          <PickRow key={agent.id} id={agent.id} checked={agent.ticked} glyph={<HarnessMark harness={agent.id} label={agent.name} className="size-5" />} name={agent.name} {...(agent.ticked ? { note: agent.signIn } : {})} />
         ))}
       </Grid>
       <Grid id="servers" head={<GridHead cells={[{ word: "MCP servers" }]} />}>
@@ -97,7 +96,7 @@ export function RecipePageProto({ recipe = RECIPES[0]! }: { recipe?: Recipe }) {
       </Grid>
       <Grid id="clis" head={<GridHead cells={[{ word: "CLIs" }]} />}>
         {CLIS.filter(c => c.ticked).map(cli => (
-          <PickRow key={cli.id} id={cli.id} checked glyph={<TerminalIcon aria-hidden className="size-4 text-foreground/80" />} name={cli.name} note={`By ${cli.via}. Versions follow this Mac.`} slot={<span className={FACT}>{cli.size}</span>} />
+          <PickRow key={cli.id} id={cli.id} checked glyph={<TerminalIcon aria-hidden className="size-4 text-foreground/80" />} name={cli.name} note={cli.via} slot={<span className={FACT}>{fmtBytes(cli.bytes)}</span>} />
         ))}
       </Grid>
       <Grid id="skills" head={<GridHead cells={[{ word: "Skills" }]} />}>
@@ -110,7 +109,6 @@ export function RecipePageProto({ recipe = RECIPES[0]! }: { recipe?: Recipe }) {
         <div className={cn("flex flex-col justify-center gap-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-5", CARD_INSET, ROW_FLOOR)}>
           <span className="flex min-w-0 flex-col gap-0.5">
             <span className="text-sm leading-5 font-medium text-foreground">Name</span>
-            <span className={NOTE}>Shown in Start from and on each machine's page.</span>
           </span>
           <Input aria-label="Recipe name" defaultValue={recipe.name} className={cn(ROW_FIELD, "w-44 max-sm:w-36")} />
         </div>

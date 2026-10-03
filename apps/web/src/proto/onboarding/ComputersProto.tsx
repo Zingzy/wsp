@@ -159,7 +159,7 @@ export function ComputerPageProto() {
         </div>
       </section>
       <Card id="recipe">
-        <Row id="follows" title="Follows a recipe" description="A change to the recipe, or to anything it holds on this Mac, reaches studio on its own." control={<RecipeSelect />} />
+        <Row id="follows" title="Follows a recipe" description="Changes to it reach studio on their own." control={<RecipeSelect />} />
       </Card>
       <Grid id="setup" head={<GridHead cells={[{ word: "Setup" }]} />}>
         {rows.map(row => (
@@ -167,16 +167,16 @@ export function ComputerPageProto() {
         ))}
       </Grid>
       <Grid id="sign-ins" head={<GridHead cells={[{ word: `Sign-ins on ${name}` }]} />}>
-        <StepRow row={{ id: "si-claude", name: "Claude Code", state: "done", note: "Key copied from this Mac." }} />
-        <StepRow row={{ id: "si-codex", name: "Codex", state: "failed", note: "Sign in on studio.", said: "The sign-in page ran out before anyone finished it.", fix: "Retry opens a fresh page and code here." }} acts={<RetryActs skip={false} />} />
+        <StepRow row={{ id: "si-claude", name: "Claude Code", state: "done", note: "Key copied." }} />
+        <StepRow row={{ id: "si-codex", name: "Codex", state: "failed", said: "The sign-in page ran out.", fix: "Retry opens a fresh one." }} acts={<RetryActs skip={false} />} />
       </Grid>
       <Card id="computer-agents">
-        <Row id="agents-on" title={`Agents on ${name}`} description="The agents, tool servers and skills there, and what each is set up with." open={() => {}} attrs={{ "data-k": "agents-on" }} />
+        <Row id="agents-on" title={`Agents on ${name}`} description="Agents, tool servers and skills there." open={() => {}} attrs={{ "data-k": "agents-on" }} />
       </Card>
       <div data-k="remove-line" className={cn(CARD_SURFACE, CARD_INSET, ROW_FLOOR, "flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-8")}>
         <span className="flex min-w-0 flex-col gap-1">
           <span className="text-sm leading-5 font-medium text-foreground">Remove {name}</span>
-          <span className={cn(NOTE, "max-w-xl leading-[1.45]")}>wsp, the agents it installed, the copied skills and config and the projects' records come off {name}. Your folders there stay.</span>
+          <span className={cn(NOTE, "max-w-xl leading-[1.45]")}>wsp and what it installed come off {name}. Your folders stay.</span>
         </span>
         <Button data-k="remove" size="xs" variant="outline" className={DANGER_BUTTON}>
           Remove
