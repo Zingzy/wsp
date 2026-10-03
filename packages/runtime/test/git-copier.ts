@@ -2,7 +2,7 @@
 // The copier with git doing the worktree half for real, for the tests of
 // threads in a project's folder and of the sweep of worktrees wsp made.
 import { execFileSync } from "node:child_process";
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { fakeCopier } from "@wsp/engine";
 
@@ -21,10 +21,10 @@ export function gitCopier(): ReturnType<typeof fakeCopier> {
       const ours = join(ask.home, "worktrees");
       const listed = git(ask.from, "worktree", "list", "--porcelain").split("\n\n");
       const held = listed.find(block => block.includes(`branch refs/heads/${ask.branch}`));
-      if (held !== undefined) {
-        const path = held.split("\n")[0]!.slice("worktree ".length);
-        return { path, branch: ask.branch, made: path.startsWith(`${ours}/`), carried: [], ms: 1 };
-      }
+      const heldAt = held?.split("\n")[0]!.slice("worktree ".length);
+      // One deleted by hand is dropped and made again, as the verb does.
+      if (heldAt !== undefined && !existsSync(heldAt)) git(ask.from, "worktree", "prune");
+      else if (heldAt !== undefined) return { path: heldAt, branch: ask.branch, made: heldAt.startsWith(`${ours}/`), carried: [], ms: 1 };
       const path = join(ours, ask.project, ask.branch.replace(/[^A-Za-z0-9._-]/g, "-"));
       mkdirSync(join(ours, ask.project), { recursive: true });
       const exists = execFileSync("git", ["-C", ask.from, "branch", "--list", ask.branch], { encoding: "utf8" }).trim() !== "";

@@ -6554,7 +6554,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const held = top === undefined ? undefined : (await worktreesOf(top)).find(w => under(cwd, w.path));
       if (held === undefined || top === undefined) throw Object.assign(new Error(cwdOutsideLine(homeShortened(cwd, homedir()), project.name)), { kind: "usage" });
       if (held.path === top) return { entry: await projectFolder(project), cwd };
-      return { entry: await worktreeRecordAt(project, { path: held.path, ...(held.branch !== undefined ? { branch: held.branch } : {}), made: false }), cwd };
+      // A worktree wsp holds no record of, one made with plain git worktree add, is the asking thread's tree's from here.
+      return { entry: await worktreeRecordAt(project, { path: held.path, ...(held.branch !== undefined ? { branch: held.branch } : {}), made: false, ...(scope !== undefined ? { madeFor: scope.rootThreadId } : {}) }), cwd };
     }
     if (o.branch === undefined) return { entry: beside ?? (await projectFolder(project)) };
     if (top === undefined) throw Object.assign(new Error(noBranchesLine(project.name)), { kind: "usage" });
@@ -6862,22 +6863,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const top = project.git?.top;
     if (top === undefined) throw Object.assign(new Error(noBranchesLine(project.name)), { kind: "usage" });
     const branch = fact.fork === undefined ? fact.branch : `${fact.fork.owner}/${fact.branch}`;
-    // A branch a worktree already holds runs there: brought up to the pull request where it can only move forward,
-    // else left as it stands with the line its thread is told.
-    const holding = (await worktreesOf(top)).find(w => w.branch === branch);
-    if (holding !== undefined) {
-      const behind = await catchUp(holding.path, top, project.remote, fact);
-      if (behind !== undefined) behindOn.set(holding.path, behind);
-    }
-    // Fetched at every start, made where it is not here and only moved forward where it is, never forced.
-    else if (fact.fork === undefined) {
-      GitStartOnReply.parse(await onThisComputer(ask => ask({ op: "git.fetchBranch", cwd: top, remote: project.remote, branch: fact.branch, into: branch })));
-    } else {
-      // GitHub serves a fork's head on the base repository as pull/<n>/head, so no fork's URL is dialled.
-      const fetched = await gitHere(top, ["fetch", "--quiet", "--no-tags", project.remote, `pull/${fact.number}/head:refs/heads/${branch}`], CLONE_MS);
-      if (fetched.exitCode !== 0) throw new Error(gitSaid(fetched));
-    }
+    // A branch some worktree already holds runs there and is caught up below; any other is fetched first, made where
+    // it is not here and only moved forward where it is, never forced.
+    const holds = (await worktreesOf(top)).some(w => w.branch === branch);
+    if (!holds) await fetchHead(project, top, fact, branch);
     const entry = await worktreeFolder(project, top, branch);
+    if (holds) {
+      const behind = await catchUp(entry, project, top, fact);
+      if (behind !== undefined) behindOn.set(entry.record.id, behind);
+    }
     if (entry.record.worktree === undefined) return entry;
     entry.record.from = from;
     entry.record.base = fact.base;
@@ -6887,22 +6881,69 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return entry;
   };
 
-  /** The line a start on a pull request leaves for its thread, by the folder of the worktree that was left behind. */
+  /** A start's picks read against the agent's lists before a folder is made or moved for it, by the rule the start
+   * itself refuses them with, so a pick the agent does not take costs no git work. */
+  const picksHold = async (project: ProjectView, o: { harness?: string; model?: string; effort?: string; access?: AccessChoice; permissionMode?: string }): Promise<void> => {
+    if (!copiesFolder(kindForComputer(project.computer))) return;
+    const home = await projectFolder(project);
+    const prefs = preferencesHeld ?? (await preferences.get());
+    const harness = o.harness ?? defaultAgentOf(prefs, home);
+    const table = harnessCatalog(harness);
+    if (table === undefined) return;
+    const { adapter } = await launchAdapterFor(home, harness);
+    const resolved = defaultsOn(await catalogOn(table, home, adapter), prefs, prefs.projectDefaults[home.record.project]);
+    const named = o.permissionMode ?? (o.access === undefined ? undefined : namedMode(resolved.catalog, harness, o.access));
+    const model = o.model ?? resolved.open.model;
+    const effort = o.effort ?? resolved.open.effort;
+    startPicks(resolved.catalog, { ...(model !== undefined ? { model } : {}), ...(effort !== undefined ? { effort } : {}), ...(named !== undefined ? { permissionMode: named } : {}) }, true);
+  };
+
+  /** The line a start on a pull request leaves for its thread, by the record of the folder that was left behind. */
   const behindOn = new Map<string, string>();
-  /** A branch a worktree holds, brought up to the pull request's head through the daemon where that worktree is
-   * clean and the head only moves it forward; nothing to say then, else the line its thread is told. */
-  const catchUp = async (path: string, top: string, remote: string, fact: PullRequest): Promise<string | undefined> => {
-    const spec = fact.fork === undefined ? `refs/heads/${fact.branch}` : `pull/${fact.number}/head`;
-    const fetched = await gitHere(top, ["fetch", "--quiet", "--no-tags", remote, spec], CLONE_MS);
+  /** The project folder's record with this computer's daemon told the folder is its to work in, so an ask naming a
+   * project anywhere a project may live resolves. */
+  const askingIn = async (entry: LiveWorkspace): Promise<LiveWorkspace> => {
+    await writeDaemonRoots(entry);
+    return entry;
+  };
+  /** A pull request's head into its local branch through the daemon: the branch by name where the remote still holds
+   * it, else the pull request's own head, which outlives a branch deleted at the merge. GitHub serves a fork's head
+   * on the base repository as pull/<n>/head, so no fork's URL is dialled. */
+  const fetchHead = async (project: ProjectView, top: string, fact: PullRequest, branch: string): Promise<void> => {
+    if (fact.fork === undefined) {
+      const home = await askingIn(await projectFolder(project));
+      try {
+        GitStartOnReply.parse(await withDaemon(home, ask => ask({ op: "git.fetchBranch", cwd: project.path, remote: project.remote, branch: fact.branch, into: branch })));
+        return;
+      } catch (e) {
+        if (await remoteHolds(top, project.remote, `refs/heads/${fact.branch}`)) throw e;
+      }
+    }
+    const fetched = await gitHere(top, ["fetch", "--quiet", "--no-tags", project.remote, `pull/${fact.number}/head:refs/heads/${branch}`], CLONE_MS);
+    if (fetched.exitCode !== 0) throw new Error(gitSaid(fetched));
+  };
+  /** Whether the remote holds a ref; exit 2 alone is its answer that it does not. */
+  const remoteHolds = async (top: string, remote: string, ref: string): Promise<boolean> =>
+    (await gitHere(top, ["ls-remote", "--exit-code", remote, ref], CLONE_MS)).exitCode !== 2;
+  /** The folder holding a pull request's branch, caught up where it may be: a worktree wsp made that is clean and
+   * only behind moves forward through the daemon; the project folder never moves, and any folder left as it stands
+   * gets the line its thread is told. */
+  const catchUp = async (entry: LiveWorkspace, project: ProjectView, top: string, fact: PullRequest): Promise<string | undefined> => {
+    const path = entry.record.worktree?.path ?? top;
+    const byName = fact.fork === undefined && (await remoteHolds(top, project.remote, `refs/heads/${fact.branch}`));
+    const spec = byName ? `refs/heads/${fact.branch}` : `pull/${fact.number}/head`;
+    const fetched = await gitHere(top, ["fetch", "--quiet", "--no-tags", project.remote, spec], CLONE_MS);
     if (fetched.exitCode !== 0) return PR_BEHIND_WORDS.unread(fact.number, gitSaid(fetched));
     const head = (await gitHere(top, ["rev-parse", "FETCH_HEAD"])).stdout.trim();
     const at = (await gitHere(path, ["rev-parse", "HEAD"])).stdout.trim();
     if (head === at || (await gitHere(path, ["merge-base", "--is-ancestor", head, at])).exitCode === 0) return undefined;
     if ((await gitHere(path, ["merge-base", "--is-ancestor", at, head])).exitCode !== 0) return PR_BEHIND_WORDS.diverged(fact.number, path);
     if ((await gitHere(path, ["status", "--porcelain"])).stdout.trim() !== "") return PR_BEHIND_WORDS.changed(fact.number, path);
-    if (fact.fork !== undefined) return PR_BEHIND_WORDS.fork(fact.number, path, remote);
+    if (entry.record.worktree === undefined) return PR_BEHIND_WORDS.folder(fact.number, path);
+    if (entry.record.worktree.made !== true) return PR_BEHIND_WORDS.notMade(fact.number, path);
+    if (!byName) return PR_BEHIND_WORDS.byHead(fact.number, path, project.remote);
     try {
-      GitUpdateReply.parse(await onThisComputer(ask => ask({ op: "git.update", cwd: path, base: fact.branch })));
+      GitUpdateReply.parse(await withDaemon(await askingIn(entry), ask => ask({ op: "git.update", cwd: checkoutOf(entry.record), base: fact.branch })));
       return undefined;
     } catch (e) {
       return PR_BEHIND_WORDS.unread(fact.number, e instanceof Error ? e.message : String(e));
@@ -6911,9 +6952,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   /** The thread a start or a review opens, detached: the turn goes on without the caller. */
   const openWith = async (entry: LiveWorkspace, o: { prompt: string; harness?: string; model?: string; effort?: string; permissionMode?: string; access?: AccessChoice }, origin: Caller | undefined): Promise<StartResult> => {
-    const folder = checkoutOf(entry.record);
-    const behind = behindOn.get(folder);
-    behindOn.delete(folder);
+    const behind = behindOn.get(entry.record.id);
+    behindOn.delete(entry.record.id);
     const handle = await sessionsApi.start(
       entry.record.id,
       {
@@ -7873,6 +7913,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const read = await issueOf(project.remote, link.number);
       const fact = link.kind === "pull_request" ? await pullRequestOf(project.remote, link.number) : undefined;
       const from = fromOf(link.kind, link.repo, read, fact);
+      await picksHold(project, { ...(agent !== undefined ? { harness: agent } : {}), ...(model !== undefined ? { model } : {}), ...(effort !== undefined ? { effort } : {}), ...(access !== undefined ? { access } : {}) });
       const entry = await workspaceFrom(project, from, fact, "start", origin);
       return openWith(entry, { prompt: fromTaskPrompt(from, read), ...(agent !== undefined ? { harness: agent } : {}), ...(model !== undefined ? { model } : {}), ...(effort !== undefined ? { effort } : {}), ...(access !== undefined ? { access } : {}) }, origin);
     },
@@ -7904,6 +7945,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const read = await issueOf(project.remote, number);
       const diff = GitPrDiffReply.parse(await onThisComputer((ask, home) => ask({ op: "git.prDiff", cwd: home, remote: project.remote, number })));
       const from = fromOf("review", repo, read, fact);
+      await picksHold(project, { harness: reviewer, ...(model !== undefined ? { model } : {}), ...(effort !== undefined ? { effort } : {}), permissionMode: readOnly });
       const entry = await workspaceFrom(project, from, fact, "review", origin);
       return openWith(entry, { prompt: reviewTaskPrompt(from, read, diff), harness: reviewer, ...(model !== undefined ? { model } : {}), ...(effort !== undefined ? { effort } : {}), permissionMode: readOnly }, origin);
     },
