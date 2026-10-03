@@ -211,7 +211,8 @@ export const threadOnMachineLine = (machine: string): string => `a thread on ${m
 export const WORKTREE_BUSY_LINE = "a thread is working in that worktree; let its turn end or stop it first";
 
 /** A worktree removal refused over files no commit holds: they would go with it. */
-export const worktreeChangedLine = (files: number): string => `that worktree has ${files} ${files === 1 ? "file" : "files"} not committed; commit them, or remove it with --force to lose them`;
+export const worktreeChangedLine = (files: number): string =>
+  `that worktree has ${files} ${files === 1 ? "file" : "files"} not committed; commit ${files === 1 ? "it" : "them"}, or remove it with --force to lose ${files === 1 ? "it" : "them"}`;
 
 /** Why a settled worktree wsp made still stands: files no commit holds, a turn running in it, or a week of either,
  * after which it is the person's to remove. */
@@ -226,6 +227,7 @@ export const notMadeWorktreeLine = (branch: string): string => `wsp made no work
  * file the move writes. Nothing is removed that holds a change no commit has or a branch the project could not take. */
 export const OLD_COPY_WORDS = {
   changed: "it has changes no commit holds",
+  stashed: "it holds stashed changes",
   noProject: "its project is no longer recorded",
   isProject: "it is the project folder itself",
   noCopier: "this host has no daemon binary to remove it with",

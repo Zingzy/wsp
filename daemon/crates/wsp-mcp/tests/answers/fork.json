@@ -917,7 +917,7 @@
         "sessions.start": "{\"id\":1,\"ok\":true,\"session\":{\"id\":\"s-9\",\"workspaceId\":\"ws-3\",\"harness\":\"claude\",\"status\":\"running\",\"startedBy\":\"agent\",\"threadId\":\"t-9\"},\"outcome\":\"started\",\"turnId\":\"turn-1\"}"
       },
       "cloud": true,
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"Haiku, small takes no effort; wsp's built-in table says so, since no agent on that workspace described itself. Drop the flag, or give it a value the agent offers.\"}],\"structuredContent\":{\"error\":\"Haiku, small takes no effort; wsp's built-in table says so, since no agent on that workspace described itself. Drop the flag, or give it a value the agent offers.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"Haiku, small takes no effort; wsp's built-in table says so, since no agent there described itself. Drop the flag, or give it a value the agent offers.\"}],\"structuredContent\":{\"error\":\"Haiku, small takes no effort; wsp's built-in table says so, since no agent there described itself. Drop the flag, or give it a value the agent offers.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
           "op": "workspaces.resolve",

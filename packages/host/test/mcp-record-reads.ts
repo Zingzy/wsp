@@ -100,6 +100,8 @@ const SESSIONS = [
   { id: "s-5", workspaceId: "ws-3", harness: "claude", status: "completed", threadId: "t-5" },
   { id: "s-6", workspaceId: "ws-3", harness: "codex", status: "completed", threadId: "t-6" },
   { id: "s-7", workspaceId: "ws-4", harness: "claude", status: "completed", threadId: "t-7" },
+  { id: "s-8", workspaceId: "ws-5", harness: "claude", status: "completed", threadId: "t-8", cwd: "/nowhere/worktrees/proj-1/old/src" },
+  { id: "s-9", workspaceId: "ws-6", harness: "claude", status: "completed", threadId: "t-9" },
 ];
 
 /** A thread whose marks and picks moved between its turns: the latest turn's stand, and the opening turn's attempt. */
@@ -114,6 +116,8 @@ const WORKSPACES = reply({
     { id: "ws-2", name: "look", project: { id: "proj-2", name: "site", computer: "place-unnamed" } },
     { id: "ws-3", name: "wsp@feat", kind: "local", project: { id: "proj-1", name: "wsp", path: "/nowhere/wsp", computer: "here" }, worktree: { path: "/nowhere/worktrees/proj-1/feat", branch: "feat/é", made: true }, folder: "/nowhere/worktrees/proj-1/feat" },
     { id: "ws-4", name: "wsp", kind: "local", project: { id: "proj-1", name: "wsp", path: "/nowhere/wsp", computer: "here" } },
+    { id: "ws-5", name: "wsp@old", kind: "local", project: { id: "proj-1", name: "wsp", path: "/nowhere/wsp", computer: "here" }, worktree: { path: "/nowhere/worktrees/proj-1/old", branch: "old", made: true, gone: true }, folder: "/nowhere/wsp" },
+    { id: "ws-6", name: "wsp@gone", kind: "local", project: { id: "proj-1", name: "wsp", path: "/nowhere/wsp-two", computer: "here" }, worktree: { path: "/nowhere/worktrees/proj-1/gone", branch: "gone", made: true, gone: true }, folder: "/nowhere/wsp-two" },
   ],
 });
 

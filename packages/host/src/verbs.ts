@@ -154,6 +154,7 @@ import {
   fmtThreads,
   foldThreads,
   threadWordOf,
+  subagentStateWord,
   foreignFlagLine,
   forgetNotice,
   goldenHead,
@@ -1195,8 +1196,10 @@ export async function threadRows(client: HostClient, within?: string): Promise<T
   const branches = new Map<string, string>();
   return rows.map(t => {
     const workspace = all.find(w => w.id === t.workspaceId);
-    const folder = t.cwd ?? workspace?.folder ?? workspace?.project.path ?? "";
-    if (!branches.has(folder)) branches.set(folder, (isLocalWorkspace(workspace ?? {}) ? branchHere(folder) : undefined) ?? workspace?.worktree?.branch ?? "");
+    // A thread whose worktree is gone runs its next turn in the folder its record answers now, and is listed there.
+    const moved = workspace?.worktree?.gone === true && t.cwd !== undefined && under(t.cwd, workspace.worktree.path);
+    const folder = (moved ? undefined : t.cwd) ?? workspace?.folder ?? workspace?.project.path ?? "";
+    if (!branches.has(folder)) branches.set(folder, (isLocalWorkspace(workspace ?? {}) ? branchHere(folder) : undefined) ?? (workspace?.worktree?.gone === true ? undefined : workspace?.worktree?.branch) ?? "");
     return {
       ...t,
       projectName: workspace?.project.name ?? "",
@@ -1537,28 +1540,35 @@ function withLine(e: unknown, line: string | undefined): unknown {
   return Object.assign(new Error(`${e.message}\n${line}`), typeof kind === "string" ? { kind } : {});
 }
 
-/** What a stop came to, as every director prints it: the runtime's three answers, none an error. */
+/** What a stop came to, as every director prints it: the runtime's answers, none an error. */
 export interface Stopped {
   threadId: string;
+  /** The one subagent of the thread's turn the stop named, where it named one. */
+  task?: string;
   outcome: SessionInterruptOutcome;
   /** The threads this thread's agents spawned that were running and stopped with it. */
   under?: readonly string[];
+  /** Why a subagent's stop was refused or is not offered, in words. */
+  error?: string;
 }
 
-/** Stops the running turn of the thread a person names, through the runtime as the app's stop button does; the
- * machine is not touched. Parsed, not trusted: an outcome outside the enum must not read as stopped. */
-export async function stop(client: HostClient, ref: string): Promise<Stopped> {
+/** Stops the running turn of the thread a person names, or with task one of its agent's own subagents alone, through
+ * the runtime as the app's stop button does; the machine is not touched. Parsed, not trusted: an outcome outside the
+ * enum must not read as stopped. */
+export async function stop(client: HostClient, ref: string, task?: string): Promise<Stopped> {
   const thread = await threadOf(client, ref);
-  const { outcome, under } = SessionInterruptResult.parse(await client.request("sessions.interrupt", { sessionId: thread.sessionId }));
-  return { threadId: thread.id, outcome, ...(under !== undefined && under.length > 0 ? { under } : {}) };
+  const { outcome, under, error } = SessionInterruptResult.parse(await client.request("sessions.interrupt", { sessionId: thread.sessionId, ...(task !== undefined ? { task } : {}) }));
+  return { threadId: thread.id, ...(task !== undefined ? { task } : {}), outcome, ...(under !== undefined && under.length > 0 ? { under } : {}), ...(error !== undefined ? { error } : {}) };
 }
 
-const STOP_WORDS: Record<SessionInterruptOutcome, string> = { accepted: "stopped", "not-running": "not running", "not-found": "not found by the host" };
+const STOP_WORDS: Record<SessionInterruptOutcome, string> = { accepted: "stopped", "not-running": "not running", "not-found": "not found by the host", refused: "not stopped", unsupported: "not stopped" };
 
 export function stopLine(stopped: Stopped): string {
+  const named = `thread ${stopped.threadId}${stopped.task !== undefined ? ` task ${stopped.task}` : ""}`;
+  if (stopped.error !== undefined) return `${named}: ${stopped.error}`;
   const under = stopped.under ?? [];
   const tree = under.length === 0 ? "" : `, and with it ${under.length} ${under.length === 1 ? "thread" : "threads"} its agents spawned: ${under.map(threadWord).join(", ")}`;
-  return `thread ${stopped.threadId} ${STOP_WORDS[stopped.outcome]}${tree}`;
+  return `${named} ${STOP_WORDS[stopped.outcome]}${tree}`;
 }
 
 /** Drops the thread from this computer through the runtime, the road the app's row action takes; the runtime
@@ -1691,8 +1701,15 @@ export function shortenedEnd(text: string, width: number): string {
   return text.length <= width ? text : `${text.slice(0, width - 1)}…`;
 }
 
-function threadLine(t: ThreadRow, indent = ""): string[] {
-  return [t.projectName, shortenedFront(homeShortened(t.folder, homedir()), FOLDER_WIDTH), t.branch, `${indent}${t.id}`, t.harness, threadWordOf(t), t.startedBy, t.computerName, shortenedEnd(t.title, TITLE_WIDTH)];
+const THREAD_HEAD = ["PROJECT", "FOLDER", "BRANCH", "THREAD", "TASK", "AGENT", "STATE", "BY", "COMPUTER", "TITLE"];
+
+/** A thread's line and one line per subagent of its agent's under it, a step in: a subagent's THREAD and TASK are the
+ * two words `wsp stop <thread> --task <task>` takes, and BY is the agent that started it. */
+function threadLines(t: ThreadRow, indent = ""): string[][] {
+  const folder = shortenedFront(homeShortened(t.folder, homedir()), FOLDER_WIDTH);
+  const own = [t.projectName, folder, t.branch, `${indent}${t.id}`, "", t.harness, threadWordOf(t), t.startedBy, t.computerName, shortenedEnd(t.title, TITLE_WIDTH)];
+  const under = (t.subagents ?? []).map(c => [t.projectName, folder, t.branch, `${indent}  ${t.id}`, c.id, t.harness, subagentStateWord(c.state), "agent", t.computerName, shortenedEnd(c.title, TITLE_WIDTH)]);
+  return [own, ...under];
 }
 
 /** The rows a --tree listing prints: every thread a person or the command line opened, each followed by the ones
@@ -2001,9 +2018,9 @@ export function pickFlags(flags: Flags): Picks {
 
 /** What a refusal adds when the list it quotes is wsp's own table rather than the machine's own answer: a person
  * reading a model they know their agent takes has to be told the list is not that agent's. */
-export const BUILT_IN_LIST_CLAUSE = "; that list is wsp's built-in one, since no agent on that workspace described itself, and the agent on its machine may take more";
+export const BUILT_IN_LIST_CLAUSE = "; that list is wsp's built-in one, since no agent there described itself, and the agent on that computer may take more";
 /** The same for a refusal that quotes no list, a model the table says takes no effort: "that list" would point at nothing. */
-export const BUILT_IN_TABLE_CLAUSE = "; wsp's built-in table says so, since no agent on that workspace described itself";
+export const BUILT_IN_TABLE_CLAUSE = "; wsp's built-in table says so, since no agent there described itself";
 
 /** Refuses, in the runtime's own words and before a machine is minted or woken for it, what the runtime would refuse
  * once the machine was there: an empty task or message, an agent the host has no adapter for, a pick the agent's
@@ -4442,20 +4459,20 @@ export const ALL_VERBS: readonly Verb[] = [
   {
     name: "threads",
     usage: "wsp threads [<project>] [--tree] [--watch]",
-    about: "who is working, where and on which computer: every thread as the sidebar lists it, with its project, the folder it works in, that folder's branch, the agent, the state and who opened it; --tree indents the threads an agent spawned under the one that spawned them, and --watch draws the same table again every second where it stands",
+    about: "who is working, where and on which computer: every thread as the sidebar lists it, with its project, the folder it works in, that folder's branch, the agent, the state and who opened it, and under each thread the agent's own subagents with their TASK id; --tree indents the threads an agent spawned under the one that spawned them, and --watch draws the same table again every second where it stands",
     page: "front",
     options: { tree: { type: "boolean" }, watch: { type: "boolean" } },
     run: async ctx => {
       if (ctx.args.length > 1) throw usageRefusal("wsp threads takes at most one project; wsp threads wait is its one subcommand, and wsp thread read <thread> prints what one said.", usageIs(ctx));
       return drawRows(ctx, "wsp threads", async client => {
         const rows = await threadRows(client, ctx.args[0]);
-        const lines = ctx.flags["tree"] === true ? threadTree(rows).map(t => threadLine(t.row, "  ".repeat(t.depth))) : rows.map(t => threadLine(t));
-        return { value: { threads: rows }, rows: table([["PROJECT", "FOLDER", "BRANCH", "THREAD", "AGENT", "STATE", "BY", "COMPUTER", "TITLE"], ...lines]) };
+        const lines = ctx.flags["tree"] === true ? threadTree(rows).flatMap(t => threadLines(t.row, "  ".repeat(t.depth))) : rows.flatMap(t => threadLines(t));
+        return { value: { threads: rows }, rows: table([THREAD_HEAD, ...lines]) };
       });
     },
     tool: tool({
       description:
-        "Every thread as the sidebar lists it: its project, the folder it works in (the project folder, or a worktree of the project's repo), that folder's branch as git reads it now, the computer it runs on, the agent inside, its state, who opened it (person, cli or agent) and its title. Optionally within one project. A thread an agent inside another thread opened carries parentThreadId and rootThreadId, which is the tree stop ends as one.",
+        "Every thread as the sidebar lists it: its project, the folder it works in (the project folder, or a worktree of the project's repo), that folder's branch as git reads it now, the computer it runs on, the agent inside, its state, who opened it (person, cli or agent) and its title. Optionally within one project. A thread an agent inside another thread opened carries parentThreadId and rootThreadId, which is the tree stop ends as one. subagents lists the agent's own subagents of every turn (id, title, state running, done, failed or stopped); stop takes one of them alone by its id.",
       input: { project: z.string().optional().describe("one project's threads, by the name or the id projects lists") },
       output: { threads: z.array(ThreadRowOut) },
       call: async ({ project: within }, deps) => asJson({ threads: await threadRows(await deps.client(), within) }),
@@ -4756,7 +4773,7 @@ export const ALL_VERBS: readonly Verb[] = [
     },
     tool: tool({
       description:
-        "Commits the files the workspace's copy changed against its last commit, untracked ones added, with the message given, running the copy's hooks as git does; files names some of them by path from the checkout's top and leaves the rest uncommitted. Without a message the workspace's own agent drafts one from the diff and the task its newest thread was opened with, on its own command line with no thread and no tool, and the commit is made with that. Refused in one line when a file named has no change, when git knows no author in the copy (with the command that sets one), when a hook said no (with its last line), and when another git in the copy holds the index after one wait. Nothing reaches a remote: bring back is what pushes.",
+        "Commits the files the workspace's copy changed against its last commit, untracked ones added, with the message given, running the copy's hooks as git does; files names some of them by path from the checkout's top and leaves the rest uncommitted. Without a message the workspace's own agent drafts one from the diff and the task its newest thread was opened with, on its own command line with no thread and no tool, and the commit is made with that. Refused in one line when a file named has no change, when git knows no author in the copy (with the command that sets one), when a hook said no (with its last line), and when another git in the copy holds the index after one wait. Nothing reaches a remote: the app's Push is what pushes.",
       input: {
         workspace: WorkspaceIn,
         message: z.string().optional().describe("the commit message, a subject line then a blank line and the body; without one the workspace's agent drafts it"),
@@ -5574,23 +5591,23 @@ export const ALL_VERBS: readonly Verb[] = [
   },
   {
     name: "stop",
-    usage: "wsp stop <thread>",
-    about: "stops the thread's running turn, as the app's stop does; the machine stays up",
+    usage: "wsp stop <thread> [--task <id>]",
+    about: "stops the thread's running turn, as the app's stop does, or with --task one of its agent's own subagents alone; the machine stays up",
     page: "front",
-    options: {},
+    options: { task: { type: "string" } },
     run: async ctx => {
       const [ref] = ctx.args;
       if (ref === undefined || ctx.args.length !== 1) throw usageRefusal("wsp stop takes one thread.", usageIs(ctx));
-      const stopped = await stop(await ctx.client(), ref);
+      const stopped = await stop(await ctx.client(), ref, flag(ctx.flags, "task"));
       ctx.out.emit(stopped, stopLine(stopped));
       return 0;
     },
     tool: tool({
-      description: "Stops the thread's running turn (by id, or a prefix of it), as the app's stop button does; the machine stays up and the thread takes the next send. outcome accepted means the turn ended interrupted; not-running means it had already ended, which is an answer, not an error. A thread whose agents spawned threads of their own stops as one: under names each of those that was running and was stopped with it.",
-      input: { thread: z.string() },
-      output: { threadId: z.string(), outcome: SessionInterruptOutcome, under: z.array(z.string()).optional() },
-      call: async ({ thread: ref }, deps) => {
-        const stopped = await stop(await deps.client(), ref);
+      description: "Stops the thread's running turn (by id, or a prefix of it), as the app's stop button does; the machine stays up and the thread takes the next send. outcome accepted means the turn ended interrupted; not-running means it had already ended, which is an answer, not an error. A thread whose agents spawned threads of their own stops as one: under names each of those that was running and was stopped with it. Given the id of one of the agent's own subagents (off threads' subagents), that one is stopped alone and the turn runs on: accepted means the agent took the stop, refused and unsupported carry the reason in error.",
+      input: { thread: z.string(), task: z.string().optional() },
+      output: { threadId: z.string(), task: z.string().optional(), outcome: SessionInterruptOutcome, under: z.array(z.string()).optional(), error: z.string().optional() },
+      call: async ({ thread: ref, task }, deps) => {
+        const stopped = await stop(await deps.client(), ref, task);
         return asText(stopLine(stopped), { ...stopped });
       },
     }),
@@ -5849,6 +5866,7 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   access: "how far the agent may go without asking: ask, auto-edit, full or plan, refused where the agent has no such mode; without it, the project's, else the agent's default, else full",
   cwd: "the folder on the machine to work in; the project's folder without it",
   detach: "print the thread's id and return, leaving the reply to the thread's finished line",
+  "stop task": "stop one of the agent's own subagents alone, by its TASK id off wsp threads; the turn and its other subagents run on",
   effort: "how hard the agent thinks, by its own word (low, medium, high, xhigh, max); its default without it",
   engine: "give it the place's Docker or podman through a socket that sees its own containers alone",
   "recipe engine": "mark the recipe so every machine from its image gets the place's Docker or podman; it stays in the file until you edit it out",

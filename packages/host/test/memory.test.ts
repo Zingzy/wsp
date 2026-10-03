@@ -28,11 +28,14 @@ const HOST_MEMORY_CAP_MB = 36.5;
 const PAGE = join("apps", "www", "src", "sections", "story.tsx");
 
 /** The scripted day: four threads a person keeps open, one of them in a worktree of a branch of its own, thirty turns
- * each, forty deltas a turn. That is past the transcript ring's 5000 events, so the host is measured with every cap it
- * has already full. */
+ * each, forty deltas a turn, and four subagents a turn that each start, say ten lines and end. That is past the
+ * transcript ring's 5000 events, so the host is measured with every cap it has already full and every child the ring
+ * still holds kept under its thread. */
 const THREADS = 4;
 const TURNS_PER_THREAD = 30;
 const DELTAS_PER_TURN = 40;
+const SUBAGENTS_PER_TURN = 4;
+const SUBAGENT_DELTAS = 10;
 
 interface Reading {
   heldMb: number;
@@ -70,6 +73,13 @@ const scripted = () => ({
     const finished = (async () => {
       onEvent({ type: "session.start", sessionId });
       for (let i = 0; i < ${DELTAS_PER_TURN}; i++) onEvent({ type: "turn.delta", sessionId, kind: "text", text: "token ".repeat(16) });
+      for (let c = 0; c < ${SUBAGENTS_PER_TURN}; c++) {
+        const task = \`a\${nth.toString(16).padStart(12, "0")}\${c}\`;
+        const parentToolUseId = \`toolu_\${task}\`;
+        onEvent({ type: "subagent", sessionId, task, state: "running", parentToolUseId, title: "Count to thirty with one Bash call per number", depth: 1 });
+        for (let i = 0; i < ${SUBAGENT_DELTAS}; i++) onEvent({ type: "turn.delta", sessionId, kind: "text", text: "token ".repeat(16), parentToolUseId });
+        onEvent({ type: "subagent", sessionId, task, state: "done", parentToolUseId, summary: "COUNT-FINISHED" });
+      }
       const result = { status: "completed", text: "done" };
       onEvent({ type: "turn.done", sessionId, result });
       onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });

@@ -87,6 +87,8 @@ struct Session {
     permission_mode: Option<String>,
     #[serde(default)]
     fast: Option<bool>,
+    #[serde(default)]
+    subagents: Option<Box<RawValue>>,
 }
 
 /// A thread as `foldThreads` builds it, its fields in that object's order.
@@ -148,6 +150,9 @@ pub struct Thread {
     pub permission_mode: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fast: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, schemars(with = "Option<Vec<serde_json::Map<String, serde_json::Value>>>"))]
+    pub subagents: Option<Box<RawValue>>,
     pub turns: u64,
     pub ran: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -267,6 +272,7 @@ fn fold(sessions: Vec<Session>) -> Vec<Thread> {
                 rewound_at: latest.rewound_at,
                 permission_mode: latest.permission_mode,
                 fast: latest.fast.filter(|fast| *fast),
+                subagents: latest.subagents,
                 turns: count,
                 ran,
                 parent_thread_id,
@@ -315,8 +321,11 @@ struct Workspace {
 
 #[derive(Deserialize)]
 struct Worktree {
+    path: String,
     #[serde(default)]
     branch: Option<String>,
+    #[serde(default)]
+    gone: Option<bool>,
 }
 
 /// The branch a folder on this computer has checked out, read off its HEAD file: nothing where the folder is not
@@ -380,9 +389,12 @@ async fn rows(client: &Client, within: Option<&str>) -> Result<Vec<Row>, Failure
         .into_iter()
         .map(|thread| {
             let workspace = all.iter().find(|w| w.id == thread.workspace_id);
-            let folder = thread
-                .cwd
-                .clone()
+            // A thread whose worktree is gone runs its next turn in the folder its record answers now, and is listed there.
+            let moved = workspace.and_then(|w| w.worktree.as_ref()).is_some_and(|t| {
+                t.gone == Some(true)
+                    && thread.cwd.as_deref().is_some_and(|c| c == t.path || c.starts_with(&format!("{}/", t.path.trim_end_matches('/'))))
+            });
+            let folder = (if moved { None } else { thread.cwd.clone() })
                 .or_else(|| workspace.and_then(|w| w.folder.clone()))
                 .or_else(|| workspace.and_then(|w| w.project.path.clone()))
                 .unwrap_or_default();
@@ -393,7 +405,7 @@ async fn rows(client: &Client, within: Option<&str>) -> Result<Vec<Row>, Failure
                     local
                         .then(|| branch_here(&folder))
                         .flatten()
-                        .or_else(|| workspace.and_then(|w| w.worktree.as_ref()?.branch.clone()))
+                        .or_else(|| workspace.and_then(|w| w.worktree.as_ref().filter(|t| t.gone != Some(true))?.branch.clone()))
                         .unwrap_or_default()
                 })
                 .clone();

@@ -1128,7 +1128,7 @@ const GOLDEN_FLAGS: readonly [string, (flags: { recipe?: string; project?: strin
 
 /** The build handed to the host serving this state: the workspace question is asked here, where the person is, and
  * everything from the first billed machine on happens in that host's job. Its own init job forks no workspace for
- * this computer, so the tick beside the question is not offered; wsp new <name> --on this computer is that road. */
+ * this computer, so the tick beside the question is not offered; a thread in the folder is that road. */
 async function handOffTo(beside: BesideHost, statePath: string, screen: InitIO, interactive: boolean, flags: { yes: boolean; rebuild?: boolean; firstWorkspace?: string; importFolder?: string; on?: string }): Promise<number> {
   const step = await askFirst({
     interactive,
@@ -1766,7 +1766,7 @@ export async function statusCommand(io: CliIO, opts: { statePath: string; state?
   const joined = await deps.here(home);
   if (joined !== undefined) return hereStatus(io, joined, watching?.redraw, () => deps.here(home), deps.signals);
   if (opts.watch === true) {
-    throw usageRefusal("wsp status --watch reads the agent on a computer joined to somebody's wsp, and this computer is joined to none.", "Run wsp status without --watch for the host serving here, or wsp workspaces --watch to follow what it runs.");
+    throw usageRefusal("wsp status --watch reads the agent on a computer joined to somebody's wsp, and this computer is joined to none.", "Run wsp status without --watch for the host serving here, or wsp threads --watch to follow what it runs.");
   }
   const reading = await serviceReading(deps.manager, serviceAddressHere(opts.statePath), deps.run, deps.platform);
   const lock = servingHost(opts.statePath);

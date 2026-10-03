@@ -62,9 +62,15 @@ const BOX_VERBS: ReadonlySet<string> = new Set([
 
 const BANNED = /\b(workspaces?|tasks?)\b/i;
 
-/** The banned words a piece of prose holds, outside code spans and the agents' own background tasks. */
+/** The banned words a piece of prose holds, outside code spans, a tool's inputs listed in parentheses, the TASK column
+ * a subagent's id is read off and the agents' own background tasks. */
 function banned(text: string): string[] {
-  const prose = text.replace(/`[^`]*`/g, "").replace(/--[\w-]+/g, "").replace(/\bbackground tasks?\b/gi, "");
+  const prose = text
+    .replace(/`[^`]*`/g, "")
+    .replace(/--[\w-]+/g, "")
+    .replace(/\((?:[a-z_]+, )*[a-z_]+\)/g, "")
+    .replace(/\bTASK\b/g, "")
+    .replace(/\bbackground tasks?\b/gi, "");
   return [...prose.matchAll(new RegExp(BANNED.source, "gi"))].map(m => m[0]);
 }
 
@@ -173,5 +179,7 @@ describe("the words a person and an agent read about threads on this computer", 
   it("catch the word where it stands, so a usage line left behind fails", () => {
     expect(banned('wsp run [<workspace>] "<task>"')).toEqual(["workspace", "task"]);
     expect(banned("a thread in `wsp workspaces` with background tasks running")).toEqual([]);
+    expect(banned("`stop` (thread, task) by the id in the TASK column")).toEqual([]);
+    expect(banned("the (workspace) of a task")).toEqual(["task"]);
   });
 });

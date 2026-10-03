@@ -1,7 +1,7 @@
 {
   "cloudOff": {
     "name": "threads",
-    "description": "Every thread as the sidebar lists it: its project, the folder it works in (the project folder, or a worktree of the project's repo), that folder's branch as git reads it now, the computer it runs on, the agent inside, its state, who opened it (person, cli or agent) and its title. Optionally within one project. A thread an agent inside another thread opened carries parentThreadId and rootThreadId, which is the tree stop ends as one.",
+    "description": "Every thread as the sidebar lists it: its project, the folder it works in (the project folder, or a worktree of the project's repo), that folder's branch as git reads it now, the computer it runs on, the agent inside, its state, who opened it (person, cli or agent) and its title. Optionally within one project. A thread an agent inside another thread opened carries parentThreadId and rootThreadId, which is the tree stop ends as one. subagents lists the agent's own subagents of every turn (id, title, state running, done, failed or stopped); stop takes one of them alone by its id.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -228,6 +228,49 @@
               },
               "fast": {
                 "type": "boolean"
+              },
+              "subagents": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "running",
+                        "done",
+                        "failed",
+                        "stopped"
+                      ]
+                    },
+                    "parentToolUseId": {
+                      "type": "string"
+                    },
+                    "depth": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0
+                    },
+                    "startedAt": {
+                      "type": "number"
+                    },
+                    "endedAt": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "title",
+                    "state",
+                    "startedAt"
+                  ],
+                  "additionalProperties": false
+                }
               },
               "projectName": {
                 "type": "string"
@@ -273,7 +316,7 @@
   },
   "cloudOn": {
     "name": "threads",
-    "description": "Every thread as the sidebar lists it: its project, the folder it works in (the project folder, or a worktree of the project's repo), that folder's branch as git reads it now, the computer it runs on, the agent inside, its state, who opened it (person, cli or agent) and its title. Optionally within one project. A thread an agent inside another thread opened carries parentThreadId and rootThreadId, which is the tree stop ends as one.",
+    "description": "Every thread as the sidebar lists it: its project, the folder it works in (the project folder, or a worktree of the project's repo), that folder's branch as git reads it now, the computer it runs on, the agent inside, its state, who opened it (person, cli or agent) and its title. Optionally within one project. A thread an agent inside another thread opened carries parentThreadId and rootThreadId, which is the tree stop ends as one. subagents lists the agent's own subagents of every turn (id, title, state running, done, failed or stopped); stop takes one of them alone by its id.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -500,6 +543,49 @@
               },
               "fast": {
                 "type": "boolean"
+              },
+              "subagents": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "running",
+                        "done",
+                        "failed",
+                        "stopped"
+                      ]
+                    },
+                    "parentToolUseId": {
+                      "type": "string"
+                    },
+                    "depth": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0
+                    },
+                    "startedAt": {
+                      "type": "number"
+                    },
+                    "endedAt": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "title",
+                    "state",
+                    "startedAt"
+                  ],
+                  "additionalProperties": false
+                }
               },
               "projectName": {
                 "type": "string"

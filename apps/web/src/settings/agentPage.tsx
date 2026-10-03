@@ -218,8 +218,9 @@ function ModelsCard({ catalog, ctx }: { catalog: HarnessCatalog; ctx: SettingsCo
   const id = catalog.harness;
   const picker = ctx.preferences.agentDefaults[id]?.models;
   const custom = picker?.custom ?? [];
-  // Shaped off the picker as the store already holds it, so a press before the host's lists answer builds on the last.
-  const shaped = shapeModels(withCustomModels({ ...catalog, models: [...catalog.models, ...(catalog.hiddenModels ?? [])], hiddenModels: [] }, picker), picker);
+  // Shaped off the agent's own lists and the store's picker, so a press draws each row where the host's answer will.
+  const { hiddenModels: _shaped, unshaped, ...lists } = catalog;
+  const shaped = shapeModels(withCustomModels({ ...lists, ...unshaped }, picker), picker);
   const items = [...pickerModels(shaped).map(m => ({ value: m.value, label: m.label, added: m.added === true, shown: true })), ...(shaped.hiddenModels ?? []).map(m => ({ value: m.value, label: m.label, added: m.added === true, shown: false }))];
   const fallback = newThreadPicks(catalog).model;
   const [typed, setTyped] = useState("");

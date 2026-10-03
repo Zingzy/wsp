@@ -531,7 +531,7 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
       "wsp send reads --file, which its row does not show",
       "wsp send reads --model, which its row does not show",
     ]);
-    expect(flagDrift(stale.replace("| `wsp stop <thread>`", "| `wsp stop <thread> [--now]`"), COMMAND_LINES)).toContain("the row for wsp stop shows --now, which it does not read");
+    expect(flagDrift(stale.replace("| `wsp stop <thread> [--task <id>]`", "| `wsp stop <thread> [--task <id>] [--now]`"), COMMAND_LINES)).toContain("the row for wsp stop shows --now, which it does not read");
   });
 
   it("every list a tool takes is a flag the command line reads again, or a command that reads its values another way", async () => {

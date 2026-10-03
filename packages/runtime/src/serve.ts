@@ -1509,7 +1509,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, events: await rt.sessions.history(msg.workspaceId, origin) });
               return;
             case "sessions.interrupt":
-              send({ id: msg.id, ok: true, ...(await rt.sessions.interrupt(msg.sessionId, origin)) });
+              send({ id: msg.id, ok: true, ...(await rt.sessions.interrupt(msg.sessionId, origin, msg.task)) });
               return;
             case "sessions.answer":
               send({ id: msg.id, ok: true, ...(await rt.sessions.answer(msg.sessionId, { askId: msg.askId, optionId: msg.optionId }, origin)) });

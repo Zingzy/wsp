@@ -146,6 +146,30 @@ describe("the move off copies at boot", () => {
     expect(existsSync(w.kept)).toBe(false);
   });
 
+  it("keeps a clean copy that holds a stash, which no fetch of its branches carries", async () => {
+    const w = world();
+    const first = w.boot();
+    const project = await first.projects.add({ source: w.project });
+    const template = (await w.store.get("workspaces", (await first.workspaces.create({ project: project.id, name: "x" })).id)) as Record<string, unknown>;
+    await first.close();
+    const stashed = join(w.root, "spoo-stashed");
+    execFileSync("git", ["clone", "-q", w.project, stashed]);
+    writeFileSync(join(stashed, "half.md"), "half done\n");
+    git(stashed, "add", "half.md");
+    git(stashed, "stash", "push", "-q", "-m", "half");
+    expect(git(stashed, "status", "--porcelain")).toBe("");
+    await oldRecord(w.store, template, "ws_stashed", copyOf(w.project, stashed, "clonefile"));
+
+    const rt = w.boot();
+    await rt.workspaces.list();
+    await rt.close();
+
+    expect(existsSync(stashed)).toBe(true);
+    expect(git(stashed, "stash", "list")).toContain("half");
+    expect(w.removed).toEqual([]);
+    expect(readFileSync(w.kept, "utf8")).toBe(`${stashed}\t${OLD_COPY_WORDS.stashed}\n`);
+  });
+
   it("never removes a copy that is the project folder itself or holds it", async () => {
     const w = world();
     const first = w.boot();
