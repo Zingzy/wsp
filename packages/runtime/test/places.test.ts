@@ -3388,6 +3388,13 @@ describe("a fork on a computer you joined", () => {
     "git.commit",
     "git.checkpoint",
     "git.restore",
+    "git.checkpointDrop",
+    // A thread's start and its branch work on the computer the host runs on: the host sends these itself, so a
+    // client's channel into a fork carries none of them.
+    "git.worktrees",
+    "git.branches",
+    "git.switchNew",
+    "git.fetchBranch",
     // The host sends these itself, with the remote off the project's record; a client's channel carries none of them.
     "git.prRead",
     "git.prView",

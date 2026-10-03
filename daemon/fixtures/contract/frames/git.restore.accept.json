@@ -11,5 +11,12 @@
     "cwd": "/root/wsp-boat",
     "checkpoint": "refs/wsp/checkpoints/wsp-boat/thr_01a0e365/turn_1-before-1790521483000",
     "machineId": "wsp-a"
+  },
+  {
+    "id": 3,
+    "op": "git.restore",
+    "cwd": "/Users/dev/wsp",
+    "checkpoint": "refs/wsp/checkpoints/ws_7f3a/thr_01a0e365/turn_1",
+    "scope": "ws_7f3a"
   }
 ]

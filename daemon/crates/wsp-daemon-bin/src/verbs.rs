@@ -3,14 +3,16 @@
 //! from the runtime under a root, so a create or a wake can be driven and timed on a box with nothing else
 //! running. `runtime create` and `runtime exec` are the fresh processes the daemon runs youki's clone in;
 //! `runtime init` is a workspace's first process. `copy` makes and removes the copy a workspace on the computer
-//! somebody sits at is: the host runs it as a child and reads one JSON line back, so the road picking and the two
-//! rules live in the daemon's own code without the door answering a new op.
+//! somebody sits at is, and the worktree a thread on another branch works in: the host runs it as a child and reads
+//! one JSON line back, so the road picking and the rules live in the daemon's own code without the door answering a
+//! new op.
 
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 
 use clap::Subcommand;
 use wsp_frames::{numbers, CopyAsk, CopyRoadName};
+use wsp_runtime::copy_road::branch;
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum Verb {
@@ -163,6 +165,38 @@ pub(crate) enum CopyVerb {
         #[arg(long, value_name = "clonefile|worktree", value_parser = road_of)]
         road: CopyRoadName,
     },
+    /// The worktree a thread on a branch works in: the one already holding the branch, else one made under the
+    /// host's folder with the config files and the named dependency directories carried in.
+    Worktree {
+        /// The top of the project's repository.
+        #[arg(long, value_name = "dir")]
+        from: PathBuf,
+        /// The host's own folder; worktrees go under its `worktrees` folder.
+        #[arg(long, value_name = "dir")]
+        home: PathBuf,
+        /// The project's id, the folder its worktrees sit in.
+        #[arg(long, value_name = "id")]
+        project: String,
+        /// The branch: checked out as it stands when it exists, made at the folder's HEAD when it does not.
+        #[arg(long, value_name = "name")]
+        branch: String,
+        /// An ignored directory name carried in by one clone wherever it sits, once per name.
+        #[arg(long, value_name = "name")]
+        carry: Vec<String>,
+    },
+    /// Takes away a worktree wsp made; refused while it holds uncommitted files, unless forced.
+    WorktreeRemove {
+        #[arg(long, value_name = "dir")]
+        from: PathBuf,
+        #[arg(long, value_name = "dir")]
+        home: PathBuf,
+        /// The worktree's path, as `copy worktree` answered it.
+        #[arg(long, value_name = "dir")]
+        path: PathBuf,
+        /// Removes it with its uncommitted files.
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 /// The road a person or a host names on the line, read through the words the wire carries and nothing of its own.
@@ -186,6 +220,13 @@ fn copy(verb: CopyVerb) -> i32 {
             wsp_runtime::copy_road::make(&ask).and_then(|report| serde_json::to_string(&report).map_err(|e| e.to_string()))
         }
         CopyVerb::Remove { from, to, road } => wsp_runtime::copy_road::remove(&from, &to, road).map(|()| String::new()),
+        CopyVerb::Worktree { from, home, project, branch, carry } => {
+            let ask = branch::Ask { from: &from, home: &home, project: &project, branch: &branch, carry: &carry };
+            branch::make(&ask).and_then(|report| serde_json::to_string(&report).map_err(|e| e.to_string()))
+        }
+        CopyVerb::WorktreeRemove { from, home, path, force } => {
+            branch::remove(&from, &home, &path, force).and_then(|gone| serde_json::to_string(&gone).map_err(|e| e.to_string()))
+        }
     };
     match done {
         Ok(line) => {

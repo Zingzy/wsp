@@ -599,6 +599,73 @@ pub struct GitCheckpointReply {
     pub changed: bool,
 }
 
+/// What a git.checkpointDrop took away: how many of the thread's checkpoint refs went.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct GitCheckpointDropReply {
+    pub dropped: u64,
+}
+
+/// One worktree of a repository as git lists it: where it is, the branch it holds and the commit it stands at.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct GitWorktree {
+    pub path: String,
+    /// Absent on a detached worktree.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub branch: Option<String>,
+    /// Absent on a bare repository.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub head: Option<String>,
+    /// Its folder is gone and git still holds its record.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub prunable: bool,
+}
+
+/// Every worktree of the repository a checkout belongs to, the repository's own folder first.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct GitWorktreesReply {
+    pub worktrees: Vec<GitWorktree>,
+}
+
+/// One local branch: its name, the commit it stands at, when that commit was made, its upstream and the worktree
+/// holding it, where one does.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct GitLocalBranch {
+    pub name: String,
+    pub oid: String,
+    /// Seconds since the epoch.
+    pub committed: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub upstream: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub worktree: Option<String>,
+}
+
+/// The checkout's local branches, newest commit first, and the one it is on; absent when it is detached.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct GitBranchesReply {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub current: Option<String>,
+    pub branches: Vec<GitLocalBranch>,
+    /// More branches than the reply carries; the oldest were left out.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub truncated: bool,
+}
+
 /// What a git.restore did: the checkpoint of the tree as it stood just before, which restores it again, and how
 /// many files the restore wrote or removed.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -1007,7 +1074,8 @@ pub struct GitRepoReadReply {
     pub auto_merge: bool,
 }
 
-/// The branch a checkout was put on and the commit it now stands at.
+/// The branch a checkout was put on, or a branch fetched into, and the commit it now stands at: what git.startOn,
+/// git.switchNew and git.fetchBranch answer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
 #[serde(rename_all = "camelCase")]

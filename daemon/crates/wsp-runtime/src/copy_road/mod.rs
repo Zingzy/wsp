@@ -6,6 +6,7 @@
 //! the report, since a person who asked for a directory clone and got a worktree is owed the sentence.
 
 pub mod aside;
+pub mod branch;
 pub mod rules;
 pub mod worktree;
 

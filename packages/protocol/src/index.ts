@@ -50,6 +50,11 @@ import type { GitBranchCompareReply as WireGitBranchCompareReply } from "./gener
 import type { GitMergeInReply as WireGitMergeInReply } from "./generated/GitMergeInReply.js";
 import type { SysHistoryReply as WireSysHistoryReply } from "./generated/SysHistoryReply.js";
 import type { SysPoint as WireSysPoint } from "./generated/SysPoint.js";
+import type { GitCheckpointDropReply as WireGitCheckpointDropReply } from "./generated/GitCheckpointDropReply.js";
+import type { GitWorktreesReply as WireGitWorktreesReply } from "./generated/GitWorktreesReply.js";
+import type { GitBranchesReply as WireGitBranchesReply } from "./generated/GitBranchesReply.js";
+import type { WorktreeReport as WireWorktreeReport } from "./generated/WorktreeReport.js";
+import type { WorktreeRemoval as WireWorktreeRemoval } from "./generated/WorktreeRemoval.js";
 import { HERE_PLACE_ID, namesPlace } from "./place-word.js";
 import { threadNeedsYou } from "./thread-state.js";
 import { Checkout } from "./changes.js";
@@ -652,6 +657,25 @@ export const ProjectCopy = CopyReport.pick({ path: true, base: true, branch: tru
   source: z.string(),
 });
 export type ProjectCopy = z.infer<typeof ProjectCopy>;
+
+/** What the daemon binary's `copy worktree` printed: the worktree a thread on the branch works in, whether wsp made
+ * it (under the host's folder or a volume's own `.wsp`), what was carried in when this call made it, and which carried
+ * directories a clone could not take. */
+export const WorktreeReport = z.object({
+  path: z.string(),
+  branch: z.string(),
+  made: z.boolean(),
+  carried: z.array(z.string()),
+  plain: z.array(z.string()).optional(),
+  ms: z.number().int().nonnegative(),
+});
+export type WorktreeReport = WireWorktreeReport;
+type WorktreeReportHeld = Held<Same<z.infer<typeof WorktreeReport>, WorktreeReport>>;
+
+/** What `copy worktree-remove` printed once the worktree went: its path, and the ref a detached one's commit was saved to. */
+export const WorktreeRemoval = z.object({ path: z.string(), rescued: z.string().optional() });
+export type WorktreeRemoval = WireWorktreeRemoval;
+type WorktreeRemovalHeld = Held<Same<z.infer<typeof WorktreeRemoval>, WorktreeRemoval>>;
 
 /** The switch a patch leaves on the record, the one rule both roads that set one read: every key the patch does not
  * name keeps what the record holds, so turning it off and on again does not throw the caps away, and a workspace
@@ -3581,6 +3605,29 @@ type GitCheckpointReplyHeld = Held<Same<z.infer<typeof GitCheckpointReply>, GitC
 export const GitRestoreReply = z.object({ before: z.string(), files: z.number().int() });
 export type GitRestoreReply = WireGitRestoreReply;
 type GitRestoreReplyHeld = Held<Same<z.infer<typeof GitRestoreReply>, GitRestoreReply>>;
+/** How many of one thread's checkpoint refs a git.checkpointDrop took away. */
+export const GitCheckpointDropReply = z.object({ dropped: z.number().int().nonnegative() });
+export type GitCheckpointDropReply = WireGitCheckpointDropReply;
+type GitCheckpointDropReplyHeld = Held<Same<z.infer<typeof GitCheckpointDropReply>, GitCheckpointDropReply>>;
+/** One worktree as git lists it: where, the branch it holds (absent when detached), its commit (absent on a bare
+ * repository), and whether its folder is gone while git still holds its record. */
+export const GitWorktree = z.object({ path: z.string(), branch: z.string().optional(), head: z.string().optional(), prunable: z.boolean().optional() });
+/** Every worktree of the repository a checkout belongs to, the repository's own folder first. */
+export const GitWorktreesReply = z.object({ worktrees: z.array(GitWorktree) });
+export type GitWorktreesReply = WireGitWorktreesReply;
+type GitWorktreesReplyHeld = Held<Same<z.infer<typeof GitWorktreesReply>, GitWorktreesReply>>;
+/** One local branch: its commit, when that commit was made in epoch seconds, its upstream and the worktree holding it. */
+export const GitLocalBranch = z.object({
+  name: z.string(),
+  oid: z.string(),
+  committed: z.number().int().nonnegative(),
+  upstream: z.string().optional(),
+  worktree: z.string().optional(),
+});
+/** A checkout's local branches, newest commit first and at most 500, and the one it is on, absent when detached. */
+export const GitBranchesReply = z.object({ current: z.string().optional(), branches: z.array(GitLocalBranch), truncated: z.boolean().optional() });
+export type GitBranchesReply = WireGitBranchesReply;
+type GitBranchesReplyHeld = Held<Same<z.infer<typeof GitBranchesReply>, GitBranchesReply>>;
 
 export const FsReadEncoding = z.enum(["utf8", "base64"]);
 export type FsReadEncoding = z.infer<typeof FsReadEncoding>;
@@ -4056,12 +4103,24 @@ export const DaemonRequest = z.discriminatedUnion("op", [
    * No command line for the host, or one nobody signed in, is an empty list with the note saying so. */
   z.object({ id: reqId, op: z.literal("git.prList"), cwd: z.string(), machineId: z.string().optional() }),
   /** Records the checkout's whole tree at a turn's end as a commit outside every branch, under the ref the daemon
-   * names from the copy's folder, the thread and the turn, and answers a GitCheckpointReply. HEAD, the index and
-   * the branch never move. */
-  z.object({ id: reqId, op: z.literal("git.checkpoint"), cwd: z.string(), thread: z.string(), turn: z.string(), machineId: z.string().optional() }),
-  /** Puts the tree back to one of this copy's checkpoints, recording the tree as it stood first, and answers a
-   * GitRestoreReply whose before restores it again. */
-  z.object({ id: reqId, op: z.literal("git.restore"), cwd: z.string(), checkpoint: z.string(), machineId: z.string().optional() }),
+   * names from the scope (else the copy's folder), the thread and the turn, and answers a GitCheckpointReply. A
+   * thread keeps its newest hundred refs, the `-before-` refs counted. HEAD, the index and the branch never move. */
+  z.object({ id: reqId, op: z.literal("git.checkpoint"), cwd: z.string(), thread: z.string(), turn: z.string(), scope: z.string().optional(), machineId: z.string().optional() }),
+  /** Puts the tree back to one of the scope's checkpoints (else this copy's), recording the tree as it stood first,
+   * and answers a GitRestoreReply whose before restores it again. */
+  z.object({ id: reqId, op: z.literal("git.restore"), cwd: z.string(), checkpoint: z.string(), scope: z.string().optional(), machineId: z.string().optional() }),
+  /** Takes away one thread's checkpoint refs under the scope and no other thread's; answers a GitCheckpointDropReply. */
+  z.object({ id: reqId, op: z.literal("git.checkpointDrop"), cwd: z.string(), scope: z.string().optional(), thread: z.string(), machineId: z.string().optional() }),
+  /** Every worktree of the checkout's repository, its own folder first, read off git each time; a GitWorktreesReply. */
+  z.object({ id: reqId, op: z.literal("git.worktrees"), cwd: z.string(), machineId: z.string().optional() }),
+  /** The checkout's local branches, newest commit first, and the one it is on; a GitBranchesReply. */
+  z.object({ id: reqId, op: z.literal("git.branches"), cwd: z.string(), machineId: z.string().optional() }),
+  /** Puts the checkout on a new branch at its HEAD with every change carried along and nothing reset; answers a
+   * GitStartOnReply. */
+  z.object({ id: reqId, op: z.literal("git.switchNew"), cwd: z.string(), branch: z.string(), machineId: z.string().optional() }),
+  /** Fetches one branch of a remote, by name or URL, into a local branch (`into`, else the same name): made where it is
+   * not there, moved only forward where it is, never forced; answers a GitStartOnReply naming the local branch. */
+  z.object({ id: reqId, op: z.literal("git.fetchBranch"), cwd: z.string(), remote: z.string(), branch: z.string(), into: z.string().optional(), machineId: z.string().optional() }),
   /** Replies with a HostFolderListing: one level of folders on the computer this daemon runs on, for the folder
    * picker of a computer somebody owns. The roots are the home of the login the daemon runs as and each of
    * `projects` the home does not hold; `dir` absent lists the home, and so does a folder inside the roots that is
@@ -4775,6 +4834,7 @@ const DAEMON_CONTENTS = [
   "89e10a249a0e59670fc8fefec015f640d8f021d0b24bb34665412360cf6b999b",
   "ffcede69616fafe56cf56a3ec668d56516c22b7c9f53fc5176621c902ad7e639",
   "019c206265a45a72e87e3e436643cc96399b6ed44d5ae07de967b502e5742abc",
+  "b423faeb3b4ae38a7456d11b877ab8720adaaa62650c5b33209ee24e02fb37b9",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -5091,7 +5151,17 @@ const DAEMON_CONTENTS = [
  * takes off a reaction. A resolve and a reaction name their thread or item by a node id, refused before anything runs
  * where it is not one's shape, and refused before the mutation where a read finds it on any pull request but the
  * repository's one numbered. A pull request's page reads each comment's, review's and line comment's node id and
- * reactions, with whether the signed-in person left each, and each line comment's review thread by id. */
+ * reactions, with whether the signed-in person left each, and each line comment's review thread by id.
+ * Version 114: The binary makes and removes the worktree a thread on another branch works in: copy worktree answers the
+ * worktree already holding the branch, else makes one under the host's folder (or the project volume's own .wsp) on the
+ * branch as its tip stands, a new branch at the folder's HEAD and never a reset, with the folder's config files and
+ * each named dependency directory carried in by one clonefile per directory; copy worktree-remove takes away only a
+ * worktree wsp made, refuses one holding uncommitted files unless forced, and saves a detached worktree's commit to a
+ * refs/rescue ref first. git.checkpoint and git.restore take a scope that names the refs in place of the folder, and a
+ * thread keeps its newest hundred checkpoint refs, the before refs a restore writes counted; git.checkpointDrop takes
+ * one thread's refs away; git.worktrees and git.branches read a repository's worktrees and its local branches;
+ * git.switchNew puts a folder on a new branch with its changes carried along; git.fetchBranch fetches one branch of a
+ * remote into a local branch, moving it only forward. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary

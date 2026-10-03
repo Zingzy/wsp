@@ -565,13 +565,18 @@ pub enum DaemonOp {
         machine_id: Option<String>,
     },
     /// Records the checkout's whole working tree, untracked files in and ignored ones out, as a commit outside
-    /// every branch, under a ref this daemon names from the checkout's folder, the thread and the turn. HEAD, the
-    /// index and the branch never move and no hook runs.
+    /// every branch, under a ref named from the scope (else the checkout's folder), the thread and the turn. A thread
+    /// keeps its newest hundred refs, the `-before-` refs a restore writes counted among them. HEAD, the index and the
+    /// branch never move and no hook runs.
     #[serde(rename = "git.checkpoint", rename_all = "camelCase")]
     GitCheckpoint {
         cwd: String,
         thread: String,
         turn: String,
+        /// The folder record the refs are kept under; without one, the checkout's folder name.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        scope: Option<String>,
         /// The workspace this frame is for, as on fs.list above.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
@@ -584,6 +589,69 @@ pub enum DaemonOp {
         cwd: String,
         /// The checkpoint's ref, as a git.checkpoint answer named it.
         checkpoint: String,
+        /// The folder record the refs are kept under; without one, the checkout's folder name.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        scope: Option<String>,
+        /// The workspace this frame is for, as on fs.list above.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        machine_id: Option<String>,
+    },
+    /// Takes away every checkpoint ref of one thread under the scope, its `-before-` refs with them, and no other
+    /// thread's.
+    #[serde(rename = "git.checkpointDrop", rename_all = "camelCase")]
+    GitCheckpointDrop {
+        cwd: String,
+        /// The folder record the refs are kept under; without one, the checkout's folder name.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        scope: Option<String>,
+        thread: String,
+        /// The workspace this frame is for, as on fs.list above.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        machine_id: Option<String>,
+    },
+    /// Every worktree of the repository the checkout belongs to, read off git each time.
+    #[serde(rename = "git.worktrees", rename_all = "camelCase")]
+    GitWorktrees {
+        cwd: String,
+        /// The workspace this frame is for, as on fs.list above.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        machine_id: Option<String>,
+    },
+    /// The checkout's local branches, newest commit first, and the one it is on.
+    #[serde(rename = "git.branches", rename_all = "camelCase")]
+    GitBranches {
+        cwd: String,
+        /// The workspace this frame is for, as on fs.list above.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        machine_id: Option<String>,
+    },
+    /// Puts the checkout on a new branch made at its HEAD, every change in it carried along and nothing reset.
+    #[serde(rename = "git.switchNew", rename_all = "camelCase")]
+    GitSwitchNew {
+        cwd: String,
+        branch: String,
+        /// The workspace this frame is for, as on fs.list above.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        machine_id: Option<String>,
+    },
+    /// Fetches one branch from a remote, by name or URL, into a local branch: made where it is not there, moved only
+    /// forward where it is, and refused where it is checked out.
+    #[serde(rename = "git.fetchBranch", rename_all = "camelCase")]
+    GitFetchBranch {
+        cwd: String,
+        remote: String,
+        branch: String,
+        /// The local branch it lands in; the same name when absent.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        into: Option<String>,
         /// The workspace this frame is for, as on fs.list above.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
@@ -713,7 +781,7 @@ pub struct ReviewComment {
     pub body: String,
 }
 
-pub const DAEMON_OPS: [&str; 67] = [
+pub const DAEMON_OPS: [&str; 72] = [
     "pty.create",
     "pty.attach",
     "pty.detach",
@@ -781,6 +849,11 @@ pub const DAEMON_OPS: [&str; 67] = [
     "git.prReply",
     "git.prResolve",
     "git.prReact",
+    "git.checkpointDrop",
+    "git.worktrees",
+    "git.branches",
+    "git.switchNew",
+    "git.fetchBranch",
 ];
 
 /// The five of those that belong to the road a client of this machine dials in on: a guest process's two and the

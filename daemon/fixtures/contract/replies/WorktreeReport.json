@@ -1,0 +1,23 @@
+[
+  {
+    "path": "/Users/dev/.wsp/worktrees/pr_9eb41ab3/feat-pricing",
+    "branch": "feat/pricing",
+    "made": true,
+    "carried": [
+      ".env",
+      "node_modules",
+      "packages/host/node_modules"
+    ],
+    "plain": [
+      "packages/host/node_modules"
+    ],
+    "ms": 812
+  },
+  {
+    "path": "/Users/dev/wsp",
+    "branch": "main",
+    "made": false,
+    "carried": [],
+    "ms": 76
+  }
+]
