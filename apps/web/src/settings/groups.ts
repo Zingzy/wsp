@@ -5,7 +5,7 @@
 // breadcrumb and Restore defaults all read this table; adding a group is one
 // id in groupIds.ts, one entry here and its page module. A group marked empty
 // is not drawn.
-import { BotIcon, FolderIcon, GaugeIcon, KeyboardIcon, MonitorIcon, PaletteIcon, ShieldIcon, SlidersHorizontalIcon, SmartphoneIcon, UserIcon, type LucideIcon } from "lucide-react";
+import { BotIcon, FolderIcon, GaugeIcon, KeyboardIcon, ListChecksIcon, MonitorIcon, PaletteIcon, ShieldIcon, SlidersHorizontalIcon, SmartphoneIcon, UserIcon, type LucideIcon } from "lucide-react";
 import { PLACES_WORDS } from "@wsp/protocol";
 import type { ComponentType } from "react";
 import type { Preferences, PreferencesPatch } from "@wsp/protocol";
@@ -21,6 +21,7 @@ import { SETTINGS_GROUP_IDS, type SettingsGroupId } from "./groupIds.js";
 import { KEYBINDING_DEFAULTS, keybindingsCards, keybindingsOffDefaults } from "./keybindings.js";
 import { PRIVACY_DEFAULTS, privacyCards, privacyOffDefaults } from "./privacy.js";
 import { projectSubPages, projectsCards } from "./projects.js";
+import { RECIPES_WORDS, recipesCards } from "./recipes.js";
 import { UsageTabs, usageCards } from "./usage.js";
 import { normalizeSearchText } from "../lib/utils.js";
 import { itemWords, type SettingsCardData, type SettingsItem } from "./rows.js";
@@ -50,6 +51,7 @@ const TABLE: Record<SettingsGroupId, Omit<SettingsGroup, "id">> = {
   general: { name: "General", glyph: SlidersHorizontalIcon, cards: ctx => [...generalCards(ctx), ...versionCards(ctx)], meta: versionMeta },
   appearance: { name: SETTINGS_WORDS.appearance, glyph: PaletteIcon, restore: { off: appearanceOffDefaults, patch: APPEARANCE_DEFAULTS }, cards: appearanceCards },
   computers: { name: PLACES_WORDS.section, glyph: MonitorIcon, cards: computersCards, sub: computerSubPages },
+  recipes: { name: RECIPES_WORDS.title, glyph: ListChecksIcon, cards: recipesCards },
   agents: { name: AGENTS_PAGE_WORDS.title, glyph: BotIcon, cards: agentsCards, sub: agentSubPages },
   usage: { name: USAGE_PAGE_WORDS.title, glyph: GaugeIcon, cards: usageCards, head: UsageTabs },
   projects: { name: PROJECTS_WORDS.title, glyph: FolderIcon, cards: projectsCards, sub: projectSubPages },
