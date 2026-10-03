@@ -17,8 +17,8 @@ export function diskTone(total: number, room: number): Tone | undefined {
   return TERMINAL_TONE[diskToneOf(total, room)];
 }
 
-/** The colour a row's own size takes on a list: the protocol's size table, plain under 100 MB, yellow from 100,
- * bright yellow from 300, red from a gigabyte. */
+/** The colour a row's own size takes on a list: the protocol's size table, plain under 50 MB, yellow from 50,
+ * bright yellow from 200, red from a gigabyte. */
 export function sizeTone(bytes: number | undefined): Tone | undefined {
   return bytes === undefined ? undefined : TERMINAL_TONE[sizeToneOf(bytes)];
 }

@@ -459,7 +459,7 @@ describe("the words the clients print for the job", () => {
     // A machine an earlier build left behind is not a stage, so it moves neither end of the count either.
     expect(initStageCount([row({ state: "done" }), { id: "machine/b_1", kind: "machine", label: "Builder b_1", state: "machine still running, retrying" }])).toEqual({ done: 1, total: 1 });
     expect(initStageCountLine({ done: 3, total: 12 })).toBe("3 of 12");
-    expect([sizeTone(1024 * MIB), sizeTone(300 * MIB), sizeTone(100 * MIB), sizeTone(99 * MIB), sizeTone(0)]).toEqual(["danger", "warning", "yellow", "muted", "muted"]);
+    expect([sizeTone(1024 * MIB), sizeTone(1024 * MIB - 1), sizeTone(200 * MIB), sizeTone(200 * MIB - 1), sizeTone(50 * MIB), sizeTone(50 * MIB - 1), sizeTone(0)]).toEqual(["danger", "warning", "warning", "yellow", "yellow", "muted", "muted"]);
     expect([diskTone(13, 20), diskTone(14, 20), diskTone(18, 20), diskTone(21, 20), diskTone(1, 0)]).toEqual(["muted", "warning", "danger", "danger", "danger"]);
     expect(initDiskOverLine(300 * MIB)).toBe("over by 300 MB");
     expect(fmtCalls(29_623)).toBe("29,623 calls");
