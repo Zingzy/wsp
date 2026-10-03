@@ -124,7 +124,8 @@ export function toolServerHere(): string | false {
   return askedToolServer;
 }
 
-export const toolServerOf = (run: RunningWsp): string | false => run.toolServer ?? toolServerHere();
+// The slate proof of concept: the Rust tool server carries no slate tools yet, so the TypeScript one serves.
+export const toolServerOf = (run: RunningWsp): string | false => (process.env["WSP_RUST_MCP"] === "1" ? run.toolServer ?? toolServerHere() : false);
 
 /** The words the tool server is handed this same wsp by, which it brings a host up with and runs the recipe tools. */
 const handedWsp = (run: RunningWsp): string[] => {

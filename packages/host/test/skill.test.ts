@@ -7,7 +7,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { CATALOG_AGENTS, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
 import { ANOTHER_AGENT_WORDS, BACKGROUND_WORK_WORDS, COORDINATOR_HANDOFF, LOGIN_CHOICES, NOTIFY_CALLER, SessionStartOutcome, backgroundTasksLine, notifyLine, stillWorkingLine } from "@wsp/protocol";
-import { instructions, INSTRUCTIONS_KEPT, RULES_HEADING, SETUP_HEADING, SHELL_HEADING, SKILL_NAME, VERBS_HEADING, wspSkill, agentsLine, instructionsOf, skillFor } from "../src/skill.js";
+import { instructions, INSTRUCTIONS_KEPT, SLATE_WORDS, RULES_HEADING, SETUP_HEADING, SHELL_HEADING, SKILL_NAME, VERBS_HEADING, wspSkill, agentsLine, instructionsOf, skillFor } from "../src/skill.js";
 import { CLOUD_ON } from "../src/cloud.js";
 import { hasTool, CLI_VERBS, VERBS, toolName } from "../src/verbs.js";
 import { SERVICE_MANAGERS } from "../src/service.js";
@@ -251,7 +251,7 @@ describe("the wsp skill", () => {
 
   it("the MCP instructions are what another agent is, the skill's opening paragraph, the walkthrough's, the line pointing back at the skill and the command line, and the rules", () => {
     const skill = `---\nname: x\ndescription: y\n---\n\n# x\n\nOne.\nTwo.\n\n${SETUP_HEADING}\n\nThree.\n\n1. Not this.\n\n${RULES_HEADING}\n\nFour.\n\n- A rule.\n\n## Later\n\nNor this.\n`;
-    expect(instructionsOf(skill, ["claude"]).startsWith(`${ANOTHER_AGENT_WORDS}. One. Two. Three. ${agentsLine(["claude"])} The steps, with the exact line to run`)).toBe(true);
+    expect(instructionsOf(skill, ["claude"]).startsWith(`${ANOTHER_AGENT_WORDS}. ${SLATE_WORDS}. One. Two. Three. ${agentsLine(["claude"])} The steps, with the exact line to run`)).toBe(true);
     expect(instructionsOf(skill, ["claude"]).endsWith("Four.\n- A rule.")).toBe(true);
     expect(instructionsOf(skill, ["claude"])).not.toContain("Not this.");
     expect(() => instructionsOf("---\nname: x\n", ["claude"])).toThrow("never closes");
@@ -260,7 +260,7 @@ describe("the wsp skill", () => {
     expect(() => instructionsOf(`# x\n\nOne.\n\n${SETUP_HEADING}\n\nThree.\n`, ["claude"])).toThrow(`the skill has no ${RULES_HEADING} section`);
     expect(() => instructionsOf(`# x\n\nOne.\n\n${SETUP_HEADING}\n\nThree.\n\n${RULES_HEADING}\n\nFour.\n`, ["claude"])).toThrow(`${RULES_HEADING} has no rules`);
     expect(instructions()).toBe(instructionsOf(wspSkill(), THREAD_AGENTS));
-    expect(instructions().startsWith(`${ANOTHER_AGENT_WORDS}. A project is a folder on one computer, a git repo or not`)).toBe(true);
+    expect(instructions().startsWith(`${ANOTHER_AGENT_WORDS}. ${SLATE_WORDS}. A project is a folder on one computer, a git repo or not`)).toBe(true);
     // A caller holding only the tools reads the whole sequence here or nowhere: health check, the recipe from what
     // their agents used, the question about the heavy rows, the person's init line, then the host started here.
     expect(instructions()).toContain("The road is a health check");
