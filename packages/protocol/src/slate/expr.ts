@@ -358,10 +358,10 @@ const F: Record<string, FnSpec> = {
   pct: { min: 1, max: 2, returns: "string", sig: "pct(points, places?)", example: "pct(usage.week.percent)",
     fn: ([x, p]) => (isNum(x) ? `${x.toFixed(places(p, 0))}%` : null) },
   tokens: { min: 1, max: 1, returns: "string", sig: "tokens(n)", example: "tokens(thread.context.free)", fn: ([x]) => (isNum(x) ? fmtTokens(x) : null) },
-  bytes: { min: 1, max: 1, returns: "string", sig: "bytes(n)", example: "bytes(machine.mem.used)", fn: ([x]) => (isNum(x) ? fmtBytes(x) : null) },
+  bytes: { min: 1, max: 1, returns: "string", sig: "bytes(n)", example: "bytes(1073741824)", fn: ([x]) => (isNum(x) ? fmtBytes(x) : null) },
   usd: { min: 1, max: 2, returns: "string", sig: "usd(n, places?)", example: "usd(thread.cost.usd)",
     fn: ([x, p]) => (!isNum(x) ? null : p === undefined ? fmtCost(x) : `$${plainNumber(x, places(p, 2))}`) },
-  number: { min: 1, max: 2, returns: "string", sig: "number(x, places?)", example: "number(machine.load1, 2)",
+  number: { min: 1, max: 2, returns: "string", sig: "number(x, places?)", example: "number(cost.rateUsdPerHour, 2)",
     fn: ([x, p]) => (isNum(x) ? plainNumber(x, p === undefined ? undefined : places(p, 0)) : null) },
   duration: { min: 1, max: 2, returns: "string", sig: "duration(ms, style?)", example: "duration(thread.lastTurn.durationMs)",
     fn: ([x, style]) => (isNum(x) ? fmtDuration(x, style === "clock" || style === "long" ? "clock" : "short") : null) },
@@ -400,7 +400,7 @@ const F: Record<string, FnSpec> = {
   clamp: { min: 3, max: 3, returns: "number", sig: "clamp(x, lo, hi)", example: "clamp(usage.week.percent, 0, 100)",
     fn: ([x, lo, hi]) => (isNum(x) && isNum(lo) && isNum(hi) ? Math.min(hi, Math.max(lo, x)) : null) },
   str: { min: 1, max: 1, returns: "string", sig: "str(x)", example: "str(pr.number)", fn: ([x]) => (missing(x) ? null : slateText(x)) },
-  num: { min: 1, max: 1, returns: "number", sig: "num(x)", example: "num(item.completedAt) - num(item.startedAt)",
+  num: { min: 1, max: 1, returns: "number", sig: "num(x)", example: "num(pr.checks[0].completedAt) - num(pr.checks[0].startedAt)",
     fn: ([x]) => {
       if (isNum(x)) return x;
       if (typeof x === "boolean") return x ? 1 : 0;
@@ -417,8 +417,8 @@ const F: Record<string, FnSpec> = {
     fn: ([l, f], env) => (isList(l) ? numbersOf(env, l, f).reduce((a, b) => a + b, 0) : null) },
   avg: { min: 1, max: 2, returns: "number", sig: "avg(list, field?)", example: "avg(thread.changes.files, 'additions')",
     fn: ([l, f], env) => { const ns = numbersOf(env, l, f); return ns.length === 0 ? null : ns.reduce((a, b) => a + b, 0) / ns.length; } },
-  first: { min: 1, max: 1, returns: "any", sig: "first(list)", example: "first(pr.checks).name", fn: ([l]) => (isList(l) ? (l[0] ?? null) : null) },
-  last: { min: 1, max: 1, returns: "any", sig: "last(list)", example: "last(thread.plan.steps).text", fn: ([l]) => (isList(l) ? (l[l.length - 1] ?? null) : null) },
+  first: { min: 1, max: 1, returns: "any", sig: "first(list)", example: "first(pluck(pr.checks, 'name'))", fn: ([l]) => (isList(l) ? (l[0] ?? null) : null) },
+  last: { min: 1, max: 1, returns: "any", sig: "last(list)", example: "last(pluck(thread.plan.steps, 'text'))", fn: ([l]) => (isList(l) ? (l[l.length - 1] ?? null) : null) },
   pluck: { min: 2, max: 2, returns: "list", sig: "pluck(list, field)", example: "pluck(pr.checks, 'name')",
     fn: ([l, f], env) => (isList(l) && typeof f === "string" ? l.map(item => { env.charge(1); return field(item, f) ?? null; }) : null) },
   join: { min: 2, max: 2, returns: "string", sig: "join(list, sep)", example: "join(pluck(pr.checks, 'name'), ', ')",
@@ -442,6 +442,9 @@ const F: Record<string, FnSpec> = {
 
 /** Functions whose answer is null for a null argument where a value is needed; the rest take a missing value. */
 const NULL_SAFE = new Set(["min", "max", "orElse", "exists", "isNull", "len", "count", "coalesce", "concat", "if", "bool", "contains", "startsWith"]);
+
+/** Functions whose first argument must be a number, which the checker holds where it knows the type. */
+const NUMBER_FIRST = new Set(["percent", "pct", "tokens", "bytes", "usd", "number", "duration", "round", "floor", "ceil", "abs", "clamp", "plural"]);
 
 export const SLATE_FUNCTIONS: Readonly<Record<string, Readonly<Omit<FnSpec, "fn">>>> = F;
 
@@ -624,8 +627,11 @@ export function slatePropDependencies(value: SlatePropValue | undefined): string
 export interface SlateCheckScope {
   /** The type of a path, or a problem naming the nearest declared one. item and index never reach this. */
   path(head: string, segs: readonly (string | number)[]): { type: SlateType } | { code: "X401" | "X411"; message: string; fix?: string };
-  /** Inside a repeating piece's row template: item and index are known, of these types. */
-  row?: { item: SlateType };
+  /** Inside a repeating piece's row: item and index are known; field checks item.<segs> where the row's shape is. */
+  row?: {
+    item: SlateType;
+    field?(segs: readonly (string | number)[]): { type: SlateType } | { code: "X401"; message: string; fix?: string };
+  };
 }
 
 /** Problems with an expression at write time: syntax, unknown paths, functions, arity, item outside a row, string
@@ -643,7 +649,15 @@ export function checkSlateExpression(src: string, scope: SlateCheckScope, base =
             problems.push(slateProblem("X409", `${node.head} is only known inside a repeating piece's row`, { at: node.at + base }));
             return "any";
           }
-          return node.head === "index" ? (node.segs.length === 0 ? "number" : "any") : node.segs.length === 0 ? scope.row.item : "any";
+          if (node.head === "index") return node.segs.length === 0 ? "number" : "any";
+          if (node.segs.length === 0) return scope.row.item;
+          const known = scope.row.field?.(node.segs);
+          if (known === undefined) return "any";
+          if ("code" in known) {
+            problems.push(slateProblem(known.code, known.message, { at: node.at + base, ...(known.fix !== undefined ? { fix: known.fix } : {}) }));
+            return "any";
+          }
+          return known.type;
         }
         const known = scope.path(node.head, node.segs);
         if ("code" in known) {
@@ -672,11 +686,18 @@ export function checkSlateExpression(src: string, scope: SlateCheckScope, base =
       }
       case "call": {
         const spec = F[node.name];
-        for (const a of node.args) type(a);
+        const argTypes = node.args.map(type);
         if (spec === undefined) {
           const fix = nearest(node.name, Object.keys(F));
           problems.push(slateProblem("X404", `${node.name} is not a function${fix !== undefined ? `; did you mean ${fix}?` : ""}`, { at: node.at + base, ...(fix !== undefined ? { fix } : {}) }));
           return "any";
+        }
+        const first = node.args[0];
+        if (NUMBER_FIRST.has(node.name) && first !== undefined) {
+          const t = argTypes[0];
+          if (t === "string" || t === "list" || t === "record" || t === "boolean") {
+            problems.push(slateProblem("X406", `${node.name} takes a number; this gives ${t === "string" ? "text" : `a ${t}`}`, { at: first.at + base }));
+          }
         }
         if (node.args.length < spec.min || node.args.length > spec.max) {
           const want = spec.min === spec.max ? `${spec.min}` : spec.max >= 99 ? `at least ${spec.min}` : `${spec.min} or ${spec.max}`;

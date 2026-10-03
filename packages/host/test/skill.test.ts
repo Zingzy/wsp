@@ -280,12 +280,12 @@ describe("the wsp skill", () => {
     expect(instructions()).not.toContain("## ");
   });
 
-  it("the rules for running work on a machine are thirteen lines stated as facts about machines, twelve with no cloud, and the instructions carry the same lines", () => {
+  it("the rules for running work on a machine are fourteen lines stated as facts about machines, thirteen with no cloud, and the instructions carry the same lines", () => {
     const from = wspSkill().indexOf(`\n${RULES_HEADING}\n`);
     expect(from, RULES_HEADING).toBeGreaterThan(-1);
     const section = wspSkill().slice(from, wspSkill().indexOf("\n## ", from + 1));
     const rules = section.split("\n").filter(line => line.startsWith("- "));
-    expect(rules).toHaveLength(CLOUD_ON ? 13 : 12);
+    expect(rules).toHaveLength(CLOUD_ON ? 14 : 13);
     // A command meant for the person closes the section, in the one sentence the launch context quotes too.
     expect(rules.at(-1)).toBe(`- ${RUN_BLOCK_WORDS}.`);
     // The two roads to a child's end open the section: which one holds is the first thing a caller has to decide.

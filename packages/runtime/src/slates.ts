@@ -10,6 +10,7 @@ import {
   getSlateState,
   notFoundRefusal,
   parseSlateStatePath,
+  resolveSlateProp,
   printSlate,
   scopeOf,
   setSlateState,
@@ -215,7 +216,7 @@ export interface Slates {
   undo(p: SlateTarget, caller?: Caller): Promise<SlateUndoAnswer>;
   clear(p: SlateTarget, caller?: Caller): Promise<SlateClearAnswer>;
   shown(threadId: string): Promise<void>;
-  act(p: { threadId: string; version: number; piece: string; event: string; action: number; requestId: string; scope?: { item: unknown; index: number } }): Promise<SlateActAnswer>;
+  act(p: { threadId: string; version: number; piece: string; event: string; action: number; requestId: string; scope?: { item: unknown; index: number }; rowAction?: number }): Promise<SlateActAnswer>;
   /** A window's hold on sources for a thread's slate; the release goes when the window lets go or its socket closes. */
   subscribe(p: { threadId: string; sources: string[] }): () => void;
   resolve(p: { threadId: string; paths: string[] }): Promise<{ values: Record<string, SlateJson> }>;
@@ -580,7 +581,11 @@ export function createSlates(deps: SlatesDeps): Slates {
         // The host reads the action off its own document, never the window's copy.
         const piece = r.document?.pieces[p.piece];
         if (piece === undefined) throw usageRefusal(`That part of the slate is gone (piece ${p.piece}, version ${p.version}; the slate is at ${r.version}).`, "Press it again once the slate has redrawn.");
-        const action = actionsOf(piece.on, p.event)[p.action];
+        // A row action keeps its own `on` and label under the piece's rowActions.
+        const rowActions = piece.props?.["rowActions"];
+        const owner = p.rowAction === undefined ? undefined : Array.isArray(rowActions) ? (rowActions[p.rowAction] as { on?: Slate["pieces"][string]["on"]; label?: unknown } | undefined) : undefined;
+        if (p.rowAction !== undefined && owner === undefined) throw usageRefusal(`${p.piece} has no row action ${p.rowAction}.`, "Press it again once the slate has redrawn.");
+        const action = actionsOf(owner !== undefined ? owner.on : piece.on, p.event)[p.action];
         if (action === undefined) throw usageRefusal(`${p.piece} has no action ${p.action} on ${p.event}.`, "Press it again once the slate has redrawn.");
         if (action.do !== "send" && action.do !== "steer" && action.do !== "queue") throw usageRefusal(`a ${action.do} action runs in the window, not on the host:`, "only send, steer and queue are pressed through the host.");
         const pressed = presses.get(p.threadId) ?? { at: [] };
@@ -599,9 +604,10 @@ export function createSlates(deps: SlatesDeps): Slates {
           return resolveIn(views, path) ?? null;
         };
         let carried: SlateJson = Object.fromEntries(named.map(path => [path, defanged(valueOf(path))]));
-        const label = typeof piece.props?.["label"] === "string" ? piece.props["label"].slice(0, 80) : undefined;
-        const keyField = typeof piece.props?.["key"] === "string" ? piece.props["key"] : undefined;
-        const key = row !== undefined && keyField !== undefined ? resolveIn(new Map([["item", row.item]]), `item.${keyField}`) : undefined;
+        const labelled = owner !== undefined ? owner.label : piece.props?.["label"];
+        const label = typeof labelled === "string" ? labelled.slice(0, 80) : undefined;
+        const keyProp = piece.props?.["key"];
+        const key = row === undefined || keyProp === undefined ? undefined : resolveSlateProp(keyProp, { resolve: path => (path === "index" ? row.index : resolveIn(new Map([["item", row.item]]), path)), row, now });
         const line = (w: SlateJson): string =>
           `slate: ${JSON.stringify({ v: 1, kind: "action", thread: threadWord(p.threadId), version: r.version, piece: p.piece, ...(label !== undefined ? { label } : {}), event: p.event, action: action.do, ...(row !== undefined ? { index: row.index } : {}), ...(key !== undefined ? { key } : {}), ...(named.length > 0 ? { with: w } : {}), by: "person", at: new Date(now).toISOString() })}`;
         let prompt = `${action.text}\n\n${line(carried)}`;

@@ -53,6 +53,7 @@ export function nearest(word: string, options: Iterable<string>, max = 2): strin
     const d = editDistance(word.toLowerCase(), option.toLowerCase(), max);
     if (d < best) [found, best] = [option, d];
   }
+  if (found === undefined && word.length >= 3) for (const option of options) if (option.toLowerCase().startsWith(word.toLowerCase())) return option;
   return found;
 }
 

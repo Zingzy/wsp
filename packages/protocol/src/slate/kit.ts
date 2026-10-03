@@ -431,7 +431,7 @@ export const SLATE_ACTIONS: Readonly<Record<string, SlateActionModule>> = {
     kind: "send", level: "core", purpose: "Sends the text to the thread: starts a turn, or joins a running one where the agent steers.",
     args: { text: textArg, with: withArg },
     consent: "the press", refusal: "The thread is gone. Open another thread.", reaches: "the text, a blank line, then slate: {...} with the with values",
-    example: "@press send text=\"A check failed. Read its log and fix it.\" with=[item.name, item.link]",
+    example: "@press send text=\"Go on to the next step.\" with=[git.branch, pr.checks]",
   },
   steer: {
     kind: "steer", level: "core", purpose: "Sends into the running turn; with nothing running it goes as the next message.",
@@ -449,7 +449,7 @@ export const SLATE_ACTIONS: Readonly<Record<string, SlateActionModule>> = {
     kind: "fill", level: "core", purpose: "Puts the text in the thread's composer without sending; with values follow as a quoted block.",
     args: { text: textArg, with: withArg },
     consent: "none", refusal: "Open the thread to fill its composer.", reaches: "nothing until the person sends",
-    example: "@press fill text=\"About this check:\" with=[item.name]",
+    example: "@press fill text=\"About this branch:\" with=[git.branch]",
   },
 };
 
