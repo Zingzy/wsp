@@ -3,7 +3,7 @@
 // t3code ClaudeAdapter.ts (MIT, see NOTICE); event shapes are the ones
 // recorded in solari-poc/RESULTS.md.
 
-import { ASIDE_WALL_MS, INTERRUPT_GRACE_MS, LOST_SESSION_NOTE, PERMISSION_ALLOW, PERMISSION_DENY, RUN_EXIT_MS, asideWallLine, backgroundTasksLine, endAfterResult, endRun, fmtDuration, harnessExitLine, lostSessionPrompt, refusedTurn, taskFinishedLine, titlePrompt } from "@wsp/protocol";
+import { ASIDE_WALL_MS, INTERRUPT_GRACE_MS, LOST_SESSION_NOTE, PERMISSION_ALLOW, PERMISSION_DENY, QUESTION_TOOL, RUN_EXIT_MS, asideWallLine, backgroundTasksLine, endAfterResult, endRun, fmtDuration, harnessExitLine, lostSessionPrompt, refusedTurn, taskFinishedLine, titlePrompt } from "@wsp/protocol";
 import type { AdapterAttachOptions, AdapterEvent, AgentLaunch, AsideAnswer, AsideQuestion, ExecStream, ExecStreamFactory, HarnessCatalogProbe, McpServerSpec, PermissionAsk, PermissionOutcome, ScreenCommand, SessionAsker, SessionHarness, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnRefusal, TurnResult, TurnStatus, CommitDrafter, PlanStep, TurnTokens, HarnessLimit, LimitKind, LimitStatus, LimitWindow } from "@wsp/protocol";
 import { SKIP_PROMPTS_MODE, controlAllowLine, controlAnswerLine, controlErrorLine, controlLine, modeOptionOn, setModeLine } from "./permissions.js";
 import { CLAUDE_SCREEN_COMMANDS, catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
@@ -793,7 +793,8 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
           if (control !== undefined) {
             switch (control.kind) {
               case "ask": {
-                if (skipsPrompts) {
+                // Bypass skips consent, never a question: a question allowed unanswered is the agent deciding alone.
+                if (skipsPrompts && control.ask.toolName !== QUESTION_TOOL) {
                   void stream.write(controlAllowLine(control.ask));
                   break;
                 }
@@ -992,7 +993,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
           // raises from now is allowed by this host, and the ones it is stopped on are allowed now. Its answer to the
           // request is not waited for, since it cannot raise another prompt until the one in front of it is answered.
           skipsPrompts = true;
-          for (const askId of [...pending.keys()]) await answerAsk(askId, { optionId: PERMISSION_ALLOW, outcome: "allowed" });
+          for (const [askId, ask] of [...pending.entries()]) if (ask.toolName !== QUESTION_TOOL) await answerAsk(askId, { optionId: PERMISSION_ALLOW, outcome: "allowed" });
           return "set";
         }
         const outcome = await answered;
