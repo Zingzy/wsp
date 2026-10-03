@@ -7,20 +7,23 @@
 // where the picks hold it.
 import { GitCommitHorizontalIcon, GithubIcon, PlugIcon, PuzzleIcon, ScrollTextIcon, SquareTerminalIcon, TerminalIcon } from "lucide-react";
 import type { ReactNode } from "react";
-import { fmtBytes, sizeTone, type ProjectHue, type ProjectIcon, type RecipeFile, type RecipeOptions, type RecipeSignIn } from "@wsp/protocol";
+import { HERE_PLACE_ID, fmtBytes, hereName, sizeTone, type GitHubSignIn, type ProjectHue, type ProjectIcon, type RecipeFile, type RecipeOptions, type RecipeSignIn } from "@wsp/protocol";
 import { AgentMarks } from "../../components/agents/agentsParts.js";
+import { useAgentsReport } from "../../components/agents/useAgentsReport.js";
 import { HarnessMark } from "../../components/chat/HarnessMark.js";
 import { Input } from "../../components/ui/input.js";
 import { Radio, RadioGroup } from "../../components/ui/radio-group.js";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../../components/ui/select.js";
 import { cn } from "../../lib/utils.js";
+import { useStore } from "../../protocol/store.js";
 import { PROJECT_GLYPHS, PROJECT_HUES } from "../../projects/look.js";
 import { HueSelect, IconSelect } from "../../projects/LookPicker.js";
-import { FACT } from "../format.js";
+import { signInSentence } from "../agents.js";
+import { ADD_COMPUTER_WORDS, FACT } from "../format.js";
 import { GlyphFrame, Grid } from "../grid.js";
 import { CARD_INSET, LIST_TITLE, NOTE, ROW_FIELD, ROW_FLOOR, SELECT_WIDTH } from "../layout.js";
 import { SizeCell } from "../recipe/rows.js";
-import { githubPick, setGitHub, signIn, tick, tickConfig, tickFolder, type GitHubPick } from "./choices.js";
+import { githubPick, setGitHub, signIn, tick, tickConfig, tickFolder } from "./choices.js";
 import { PickLine, PickRow } from "./PickRow.js";
 
 const GLYPH = "size-4 text-foreground/80";
@@ -46,23 +49,47 @@ export function Size({ bytes }: { bytes: number | undefined }) {
   );
 }
 
-/** How a row's size is read off an option, where the host measured one. */
-const bytesOf = (row: object): number | undefined => ("bytes" in row && typeof row.bytes === "number" ? row.bytes : undefined);
+/** What signing in on the computer adds to its words, by how the agent's own sign-in works: a device code is typed
+ * on a page, where a browser sign-in only opens a tab. */
+const MACHINE_TAIL: Readonly<Record<string, string>> = { device: " with a code" };
 
-/** What each way of signing in is called in the picker. */
-const signInWords = (box: string): Record<RecipeSignIn, string> => ({ vault: "Copy the key", machine: box === "" ? "Sign in there" : `Sign in on ${box}` });
+/** What each way of signing in is called in the picker, for an agent that signs in the way `kind` names. */
+const signInWords = (box: string, kind: string | undefined): Record<RecipeSignIn, string> => ({
+  vault: "Copy the key",
+  machine: `${box === "" ? "Sign in there" : `Sign in on ${box}`}${(kind === undefined ? undefined : MACHINE_TAIL[kind]) ?? ""}`,
+});
 
 /** The agents; on a recipe's page each ticked one says how it signs in as its note rather than a picker. */
 export function AgentsPicks({ picks, options, onChange, box, versions, onlyTicked = false, wayAsNote = false }: PickProps & { versions?: Record<string, string>; wayAsNote?: boolean }) {
-  const words = signInWords(box);
+  // Where the picks are made, each agent says how it is signed in on the computer running the host.
+  const { report } = useAgentsReport(wayAsNote ? null : { placeId: HERE_PLACE_ID });
+  const here = useStore(s => hereName(s.places));
   return (
     <Grid id="agents">
       {options.agents
         .filter(agent => !onlyTicked || picks.agents[agent.id] !== undefined)
         .map(agent => {
           const on = picks.agents[agent.id] !== undefined;
+          const words = signInWords(box, agent.kind);
           const way = picks.agents[agent.id]?.signin ?? agent.signins[0] ?? "vault";
           const version = versions?.[agent.id];
+          const row = report?.agents.find(a => a.id === agent.id && a.installed);
+          const note = on && wayAsNote ? words[way] : row === undefined ? undefined : signInSentence(row, here);
+          const select =
+            on && !wayAsNote && agent.signins.length > 0 ? (
+              <Select value={way} onValueChange={next => onChange(signIn(picks, agent.id, next as RecipeSignIn))}>
+                <SelectTrigger size="sm" aria-label={`${agent.name} sign-in`} className={SELECT_WIDTH}>
+                  <SelectValue>{(value: RecipeSignIn) => words[value]}</SelectValue>
+                </SelectTrigger>
+                <SelectPopup>
+                  {agent.signins.map(w => (
+                    <SelectItem key={w} value={w}>
+                      {words[w]}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
+            ) : null;
           return (
             <PickRow
               key={agent.id}
@@ -72,25 +99,17 @@ export function AgentsPicks({ picks, options, onChange, box, versions, onlyTicke
               glyph={<HarnessMark harness={agent.id} label={agent.name} className="size-5" />}
               name={agent.name}
               {...(version === undefined ? {} : { tag: version })}
-              {...(on && wayAsNote ? { note: words[way] } : {})}
-              {...(on && !wayAsNote && agent.signins.length > 0
-                ? {
+              {...(note === undefined ? {} : { note })}
+              {...(select === null && agent.bytes === undefined
+                ? {}
+                : {
                     slot: (
-                      <Select value={way} onValueChange={next => onChange(signIn(picks, agent.id, next as RecipeSignIn))}>
-                        <SelectTrigger size="sm" aria-label={`${agent.name} sign-in`} className={SELECT_WIDTH}>
-                          <SelectValue>{(value: RecipeSignIn) => words[value]}</SelectValue>
-                        </SelectTrigger>
-                        <SelectPopup>
-                          {agent.signins.map(w => (
-                            <SelectItem key={w} value={w}>
-                              {words[w]}
-                            </SelectItem>
-                          ))}
-                        </SelectPopup>
-                      </Select>
+                      <>
+                        <Size bytes={agent.bytes} />
+                        {select}
+                      </>
                     ),
-                  }
-                : {})}
+                  })}
             />
           );
         })}
@@ -125,7 +144,7 @@ export function ClisPicks({ picks, options, onChange, onlyTicked = false }: Pick
             name={cli.name}
             {...(cli.version === undefined ? {} : { tag: cli.version })}
             note={cli.needs === undefined ? cli.via : `${cli.via}. Needs ${cli.needs.join(", ")}.`}
-            {...(bytesOf(cli) === undefined ? {} : { slot: <Size bytes={bytesOf(cli)} /> })}
+            {...(cli.bytes === undefined ? {} : { slot: <Size bytes={cli.bytes} /> })}
           />
         ))}
     </Grid>
@@ -180,16 +199,18 @@ export function Choice({ id, picked, glyph, name, note, fact }: { id: string; pi
   );
 }
 
-/** GitHub: the token gh holds on the computer running the host, where it holds one, signing in there, or later. */
+/** GitHub: the ways the host says it can sign gh in there, the token gh holds on the computer running the host only
+ * where it holds one, signing in there, or skipping it for now. */
 export function GitHubPicks({ picks, options, onChange, box, here }: PickProps & { here: string }) {
   const picked = githubPick(picks);
-  const choices: { id: GitHubPick; name: string; note?: string }[] = [
-    ...(options.configs.some(c => c.id === "github") ? [{ id: "vault" as const, name: `Use the token from ${here}` }] : []),
-    { id: "machine", name: `Sign in on ${box}`, note: "A tab opens in your browser here." },
-    { id: "skip", name: "Skip for now", note: "Private repos will not clone until you sign in. You can do it later in Settings." },
-  ];
+  const words: Record<GitHubSignIn, { name: string; note?: string }> = {
+    vault: { name: `Use the token from ${here}` },
+    machine: { name: `Sign in on ${box}`, note: "A tab opens in your browser here." },
+    skip: { name: ADD_COMPUTER_WORDS.skipForNow, note: "Private repos will not clone until you sign in. You can do it later in Settings." },
+  };
+  const choices = (options.configs.find(c => c.id === "github")?.signins ?? []).map(id => ({ id, ...words[id] }));
   return (
-    <RadioGroup value={picked} onValueChange={next => onChange(setGitHub(picks, next as GitHubPick))} className="gap-0">
+    <RadioGroup value={picked} onValueChange={next => onChange(setGitHub(picks, next as GitHubSignIn))} className="gap-0">
       <Grid id="github">
         {choices.map(choice => (
           <Choice key={choice.id} id={choice.id} picked={picked === choice.id} glyph={<GithubIcon aria-hidden className={GLYPH} />} name={choice.name} {...(choice.note === undefined ? {} : { note: choice.note })} />
@@ -226,11 +247,21 @@ export interface FolderOption {
   icon: ProjectIcon;
   hue: ProjectHue;
   bytes?: number;
+  /** GitHub refuses an anonymous read of its repository: the box clones it only with GitHub signed in there. */
+  private?: boolean;
+  /** Commits no remote holds. */
+  unpushed?: number;
 }
+
+/** What a project's row says of its repository: its remote and what of it is not pushed, or that it has none. A folder
+ * whose remote nobody read says nothing. */
+const folderNote = (folder: FolderOption): string | undefined =>
+  folder.remote === undefined ? undefined : folder.remote === "" ? ADD_COMPUTER_WORDS.noRemote : ADD_COMPUTER_WORDS.remoteLine(folder.remote, folder.unpushed);
 
 /** The projects to import: a ticked one opens its name, icon and colour. A name the computer already has a project
  * by is the one state that questions the field. */
 export function ProjectsPicks({ picks, onChange, box, folders, taken }: Omit<PickProps, "options"> & { folders: readonly FolderOption[]; taken: (name: string) => boolean }) {
+  const noGitHub = githubPick(picks) === "skip";
   return (
     <Grid id="projects">
       {folders.map(folder => {
@@ -240,6 +271,7 @@ export function ProjectsPicks({ picks, onChange, box, folders, taken }: Omit<Pic
         const hue = row?.hue ?? folder.hue;
         const Glyph = PROJECT_GLYPHS[icon];
         const clash = row !== undefined && taken(name);
+        const note = row !== undefined && noGitHub && folder.private === true ? ADD_COMPUTER_WORDS.needsGitHub : folderNote(folder);
         const put = (next: Partial<RecipeFile["folders"][string]>): void => onChange(tickFolder(picks, folder.key, { from: folder.path, name, icon, hue, keep: row?.keep ?? [], ...next }));
         return (
           <PickRow
@@ -250,7 +282,7 @@ export function ProjectsPicks({ picks, onChange, box, folders, taken }: Omit<Pic
             glyph={<Glyph aria-hidden className={cn("size-4", hue === "neutral" ? "text-foreground/80" : PROJECT_HUES[hue].text)} />}
             name={name}
             tag={folder.path}
-            {...(folder.remote === undefined || folder.remote === "" ? {} : { note: folder.remote })}
+            {...(note === undefined ? {} : { note })}
             {...(folder.bytes === undefined ? {} : { slot: <Size bytes={folder.bytes} /> })}
           >
             {row === undefined ? null : (

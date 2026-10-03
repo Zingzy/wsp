@@ -27,7 +27,7 @@ import { cn } from "../lib/utils.js";
 import { movedBefore } from "../sidebar/NounSwitcher.js";
 import { failureOf } from "../protocol/failure.js";
 import { useStore } from "../protocol/store.js";
-import { AgentsControls, UpdateButton, newThreadPicks, signInHead, usePickedPlace } from "./agents.js";
+import { AgentsControls, UpdateButton, newThreadPicks, planWord, signInHead, usePickedPlace } from "./agents.js";
 import { AGENTS_PAGE_WORDS as W } from "./format.js";
 import { CARD_INSET, ROW_FLOOR, SELECT_WIDTH } from "./layout.js";
 import { placeName } from "./places.js";
@@ -435,12 +435,6 @@ function useAccountOn(agent: string, computer: string): AccountRow | null {
   }, [api]);
   return accounts.find(a => a.agent === agent && a.computers.includes(computer)) ?? null;
 }
-
-/** The plan word a vendor names its plan by: ChatGPT Plus, Claude Max. */
-const planWord = (plan: string, brand: string | undefined): string => {
-  const word = plan[0]!.toUpperCase() + plan.slice(1);
-  return brand === undefined ? word : `${brand} ${word}`;
-};
 
 /** How it runs while the computer's agents are read: its head and its four rows in their shape, so nothing moves in. */
 function RunsSkeleton() {

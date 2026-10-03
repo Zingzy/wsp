@@ -3,7 +3,7 @@
 // computer running the host has, nothing, or one saved recipe; and one tick or
 // one choice moved on them. The dialog and a recipe's own page both write picks
 // through here, so the two cannot spell a pick two ways.
-import { RecipeFile, type ProjectHue, type ProjectIcon, type ProjectView, type RecipeOptions, type RecipeSignIn } from "@wsp/protocol";
+import { RecipeFile, type GitHubSignIn, type ProjectHue, type ProjectIcon, type ProjectView, type RecipeOptions, type RecipeSignIn } from "@wsp/protocol";
 
 /** The kinds of row a step ticks, each a table of the recipe keyed by the row's name. */
 export type TickKind = "agents" | "mcp" | "clis" | "skills" | "plugins" | "folders";
@@ -40,7 +40,7 @@ export function everything(name: string, options: RecipeOptions, projects: reado
     skills: Object.fromEntries(options.skills.map(s => [s.name, { from: s.from }])),
     plugins: Object.fromEntries(options.plugins.map(p => [p.name, {}])),
     folders: Object.fromEntries(projects.map(p => [folderKey(p.name), folderOf(p, looks[p.id])])),
-    configs: Object.fromEntries(options.configs.map(c => [c.id, c.id === "github" ? { signin: "vault" } : {}])),
+    configs: Object.fromEntries(options.configs.map(c => [c.id, c.id === "github" && c.signins?.[0] !== undefined ? { signin: c.signins[0] } : {}])),
   });
 }
 
@@ -71,13 +71,10 @@ export function tickFolder(picks: RecipeFile, key: string, row: RecipeFile["fold
 /** How one agent signs in. */
 export const signIn = (picks: RecipeFile, agent: string, signin: RecipeSignIn): RecipeFile => ({ ...picks, agents: { ...picks.agents, [agent]: { signin } } });
 
-/** The GitHub choice: the token, signing in there, or none. */
-export type GitHubPick = "vault" | "machine" | "skip";
-export const githubPick = (picks: RecipeFile): GitHubPick => (picks.configs.github === undefined ? "skip" : (picks.configs.github.signin ?? "vault"));
-export function setGitHub(picks: RecipeFile, pick: GitHubPick): RecipeFile {
-  const { github: _gone, ...rest } = picks.configs;
-  return { ...picks, configs: pick === "skip" ? rest : { ...rest, github: { signin: pick } } };
-}
+/** The GitHub choice: the token, signing in there, or skipped. A skip is kept as one: picks with no GitHub row clone
+ * with whatever the vault holds. */
+export const githubPick = (picks: RecipeFile): GitHubSignIn => (picks.configs.github === undefined ? "skip" : (picks.configs.github.signin ?? "vault"));
+export const setGitHub = (picks: RecipeFile, pick: GitHubSignIn): RecipeFile => ({ ...picks, configs: { ...picks.configs, github: { signin: pick } } });
 
 /** Git or the shell ticked or not. */
 export function tickConfig(picks: RecipeFile, id: "git" | "shell", on: boolean): RecipeFile {

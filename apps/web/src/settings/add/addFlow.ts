@@ -6,7 +6,7 @@
 // Set up hands them to the host. Which step a pending add was left at is this
 // window's own, kept beside its id.
 import { create } from "zustand";
-import { PLACE_HOST_KEY_KIND, type PendingComputer, type PlaceAddJob, type PlaceSetup, type PlaceView, type ProjectIcon, type RecipeFile, type RecipeOptions } from "@wsp/protocol";
+import { PLACE_HOST_KEY_KIND, type PendingComputer, type PlaceAddJob, type PlaceEstimate, type PlaceSetup, type PlaceView, type ProjectIcon, type RecipeFile, type RecipeOptions } from "@wsp/protocol";
 import { noticeFailure } from "../../notices/store.js";
 import type { Api } from "../../protocol/client.js";
 import { useStore } from "../../protocol/store.js";
@@ -68,9 +68,11 @@ interface AddFlowState {
   /** Set up asked and not answered, and its refusal where it was refused. */
   starting: boolean;
   refused: Failure | null;
+  /** What the picks weigh against the computer's room, read on the summary; null until the host answered. */
+  estimate: PlaceEstimate | null;
 }
 
-const CLOSED: AddFlowState = { open: false, step: "where", address: "", addId: null, placeId: null, pendingId: null, picks: null, from: "here", options: null, optionsRefused: null, saveAs: { on: false, name: "", icon: "rocket" }, saves: 0, starting: false, refused: null };
+const CLOSED: AddFlowState = { open: false, step: "where", address: "", addId: null, placeId: null, pendingId: null, picks: null, from: "here", options: null, optionsRefused: null, saveAs: { on: false, name: "", icon: "rocket" }, saves: 0, starting: false, refused: null, estimate: null };
 
 export const useAddFlow = create<AddFlowState>(() => CLOSED);
 
@@ -179,7 +181,7 @@ function keepNow(): void {
 
 /** The picks as they now stand, kept on the pending add a moment after the last change, and said saved. */
 export function setPicks(api: Api | null, picks: RecipeFile, from?: string): void {
-  useAddFlow.setState(s => ({ picks, ...(from === undefined ? {} : { from }), saves: s.saves + 1 }));
+  useAddFlow.setState(s => ({ picks, ...(from === undefined ? {} : { from }), saves: s.saves + 1, estimate: null }));
   const { placeId, from: started } = useAddFlow.getState();
   if (keeping !== undefined) clearTimeout(keeping.timer);
   const write = (): void => {
@@ -194,6 +196,21 @@ export function setPicks(api: Api | null, picks: RecipeFile, from?: string): voi
     write,
   };
 }
+
+/** Weighs the picks against the computer's room. An answer for picks that have moved on since is dropped, and a host
+ * that would not weigh them leaves the summary on the room alone. */
+export function weigh(api: Api, placeId: string, picks: RecipeFile): void {
+  if (api.placesEstimate === undefined) return;
+  void api.placesEstimate(placeId, picks).then(
+    estimate => {
+      if (useAddFlow.getState().picks === picks) useAddFlow.setState({ estimate });
+    },
+    () => undefined,
+  );
+}
+
+/** Whether the picks need more room than the computer has free, as last weighed. */
+export const tooBig = (estimate: PlaceEstimate | null): boolean => estimate?.freeBytes !== undefined && estimate.freeBytes < estimate.neededBytes;
 
 export function setSaveAs(next: Partial<SaveAs>): void {
   useAddFlow.setState(s => ({ saveAs: { ...s.saveAs, ...next } }));
@@ -221,6 +238,18 @@ export async function setUp(api: Api, setIcon: (slug: string, icon: ProjectIcon)
     saved => setIcon(saved.slug, saveAs.icon),
     (e: unknown) => noticeFailure(e),
   );
+}
+
+/** Skip for now on one row of a computer's setup, a sign-in that waits or an item that failed: the host sets it aside
+ * and answers the computer's row, which stands at once. */
+export async function skipRow(api: Api | null, placeId: string, row: string): Promise<Failure | null> {
+  if (api?.placesSkip === undefined) return null;
+  try {
+    showSetup({ place: await api.placesSkip(placeId, row) });
+    return null;
+  } catch (e) {
+    return failureOf(e);
+  }
 }
 
 /** Retry on a computer whose setup missed something: the host runs again whatever is not there. */
