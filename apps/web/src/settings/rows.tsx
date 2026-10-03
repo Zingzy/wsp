@@ -120,14 +120,14 @@ const OPENS_CLASS = "w-full cursor-pointer text-left transition-colors duration-
 export function Card({ id, head, lede, under, body, children }: { id: string; head?: ReactNode; /** One sentence under the head, for a card whose rows need the why. */ lede?: string; under?: ReactNode; body?: ReactNode; children?: ReactNode }) {
   return (
     <section data-settings-card={id} {...(typeof head === "string" ? { "aria-label": head } : {})} className="flex flex-col gap-3 group-data-[locked]/settings:gap-4">
-      {head === undefined && lede === undefined ? null : (
+      {head === undefined && (lede ?? "") === "" ? null : (
         <div className="flex flex-col gap-1">
           {head === undefined ? null : (
             <h2 data-settings-head className={SECTION_HEAD}>
               {head}
             </h2>
           )}
-          {lede === undefined ? null : (
+          {(lede ?? "") === "" ? null : (
             <p data-settings-lede className={DESCRIPTION_CLASS}>
               {lede}
             </p>

@@ -12,7 +12,7 @@ import { DAEMON_VERSION, DEFAULT_PREFERENCES, DEVICES_TICKET_REFUSAL, HOST_NO_RE
 import { DisconnectedError, RequestError, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { EDITOR_SSH_WORDS } from "../src/files/EditorConsent.js";
-import { ABOUT_WORDS, ACCOUNT_WORDS, AWAKE_WORDS, DEVICES_WORDS, FONT_WORDS, GENERAL_WORDS, KEYBINDINGS_WORDS, PRIVACY_WORDS, PROJECTS_WORDS, TRANSPARENCY_WORDS, WHERE_WORDS } from "../src/settings/format.js";
+import { ABOUT_WORDS, ACCOUNT_WORDS, AWAKE_WORDS, COMPUTER_PAGE_WORDS, DEVICES_WORDS, FONT_WORDS, GENERAL_WORDS, KEYBINDINGS_WORDS, PRIVACY_WORDS, PROJECTS_WORDS, THEME_SECTION_WORDS, TRANSPARENCY_WORDS, WHERE_WORDS } from "../src/settings/format.js";
 import { builtWhen } from "../src/settings/image.js";
 import { chordsOf, keybindingCards } from "../src/settings/keybindings.js";
 import { CHORD_WORDS, JUMP_WORD, KEYBINDING_WORDS } from "../src/settings/keybindingWords.js";
@@ -310,10 +310,10 @@ describe("General", () => {
     await settle();
     const heads = [...document.querySelectorAll("[data-settings-page] > section[data-settings-card] [data-settings-head]")].map(h => h.textContent);
     expect(heads).toEqual(["Composer", "Notifications", "Threads", "Open in", "Startup and quit", ABOUT_WORDS.title]);
-    expect(rowTitles()).toEqual(["Send with", "A message while a thread works", "When a thread needs you", "When a thread finishes", "When a plan window runs low", "New thread starts in", "Settle a thread after", "Ask before deleting", "Open files in", AWAKE_WORDS.keepAwake(""), ABOUT_WORDS.wsp]);
+    expect(rowTitles()).toEqual(["Send with", "A message while a thread works", "When a thread needs you", "When a thread finishes", "When a plan window runs low", "New thread starts in", "Settle a thread after", "Ask before deleting", "Open files in", ABOUT_WORDS.wsp]);
     // On the defaults no row carries the arrow that puts it back.
     expect(document.querySelectorAll("[data-settings-page] [data-k=row-reset]")).toHaveLength(0);
-    expect(descriptionOf("send-with")).toBe("The other key makes a new line. Keys read as this computer's: ⌘ on a Mac, Ctrl elsewhere.");
+    expect(descriptionOf("send-with")).toBe("The other key makes a new line. ⌘ on a Mac, Ctrl elsewhere.");
     expect(descriptionOf("mid-turn")).toBe("Queue waits for the turn to end; steer hands it to the agent now.");
     expect(descriptionOf("notify-needs")).toBe("A question, a permission prompt, a sign-in.");
     expect(descriptionOf("notify-done")).toBe("Off keeps ten running threads from pinging you ten times.");
@@ -446,10 +446,11 @@ describe("Transparency", () => {
 describe("Keeping the computer awake", () => {
   it("is one switch on General, on by default, that writes the record", async () => {
     const { api, sets } = settingsApi({ editorList: async () => [] } as Partial<Api>);
+    useStore.setState({ places: [here] });
     mountSettings({ api, at: { kind: "group", group: "general" } });
     await settle();
     expect(descriptionOf("keep-awake")).toBe(AWAKE_WORDS.keepAwakeDescription);
-    expect(`${AWAKE_WORDS.keepAwake("")} ${AWAKE_WORDS.keepAwakeDescription}`).not.toMatch(/host|daemon|service/i);
+    expect(`${AWAKE_WORDS.keepAwake(placeName(here))} ${AWAKE_WORDS.keepAwakeDescription}`).not.toMatch(/host|daemon|service/i);
     const toggle = (): HTMLElement => document.querySelector<HTMLElement>("[data-k=keep-awake]")!;
     expect(toggle().getAttribute("aria-checked")).toBe("true");
     fireEvent.click(toggle());
@@ -465,6 +466,21 @@ describe("Keeping the computer awake", () => {
     await settle();
     expect(rowTitles()).toContain("Keep zingzy's MacBook Pro awake");
     expect(document.querySelector("[data-k=keep-awake]")!.getAttribute("aria-label")).toBe("Keep zingzy's MacBook Pro awake");
+  });
+});
+
+describe("The computer wsp runs on, by its name", () => {
+  it("names it in every line about it once its name is known, says nothing of it before, and never calls it this computer", async () => {
+    const lines = (name: string): string[] => [THEME_SECTION_WORDS.modeLede(name), GENERAL_WORDS.onQuitDescription(name), GENERAL_WORDS.loginStartDescription(name), PRIVACY_WORDS.usageLogsDescription(name)];
+    expect(lines("")).toEqual(["", "", "", ""]);
+    expect([...lines("spoo"), AWAKE_WORDS.keepAwake("spoo")].filter(line => !line.includes("spoo"))).toEqual([]);
+    const said = [...lines("spoo"), GENERAL_WORDS.sendWithDescription, AWAKE_WORDS.keepAwakeDescription, COMPUTER_PAGE_WORDS.threadsLine(2, "spoo", "4 GB")];
+    expect(said.filter(line => /this computer/i.test(line))).toEqual([]);
+    // Until the computers are read no keep-awake switch stands, since its title is the name.
+    await mount({ editorList: async () => [] } as Partial<Api>, "general");
+    expect(rowOf("keep-awake")).toBeNull();
+    await act(async () => useStore.setState({ places: [here] }));
+    expect(rowOf("keep-awake")?.querySelector("[data-settings-title]")?.textContent).toBe("Keep zingzy's MacBook Pro awake");
   });
 });
 

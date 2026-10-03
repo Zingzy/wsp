@@ -6,7 +6,7 @@
 // variable's value is typed once and never drawn again.
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_PREFERENCES, ENV_VALUE_REFUSAL, accessRefusal, agentEnvRefusal, configDirSignInLine, modelIdRefusal, type AgentSetupSet, type AgentsTarget, type Preferences, type PlaceView, type ProjectView, type ThreadDefaults } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, ENV_VALUE_REFUSAL, accessRefusal, applyPreferencesPatch, agentEnvRefusal, configDirSignInLine, modelIdRefusal, type AgentSetupSet, type AgentsTarget, type Preferences, type PlaceView, type ProjectView, type ThreadDefaults } from "@wsp/protocol";
 import { RequestError, type Api } from "../src/protocol/client.js";
 import { catalogEntry } from "@wsp/catalog";
 import { useNotices } from "../src/notices/store.js";
@@ -14,7 +14,7 @@ import { useStore } from "../src/protocol/store.js";
 import { AGENTS_PAGE_WORDS as W, PROJECTS_WORDS as P } from "../src/settings/format.js";
 import { useSettingsStore, type SettingsAt } from "../src/settings/settingsStore.js";
 import { AGENTS_SETUP_REPORT } from "./fixtures/agents-report.js";
-import { CLAUDE_CATALOG, CODEX_CATALOG, HARNESSES } from "./fixtures/harnesses.js";
+import { CLAUDE_CATALOG, CODEX_CATALOG, HARNESS_DEFAULTS, HARNESSES } from "./fixtures/harnesses.js";
 import { descriptionOf, mountSettings, pageAt, resetSettings, rowOf, settingsApi, settle, sidebarRowIds, wordOf } from "./settings-harness.js";
 import { pickOption } from "./select.js";
 
@@ -27,7 +27,9 @@ const CLAUDE = REPORT.agents[0]!;
 const WSP: ProjectView = { id: "pr_wsp", name: "wsp", computer: "here", source: { kind: "folder", path: "~/wsp" }, path: "/Users/dev/wsp", remote: "https://github.com/Zingzy/wsp.git", defaultBranch: "main", memoryKey: "-Users-dev-wsp", memoryDir: "/Users/dev/.claude/projects/-Users-dev-wsp/memory", createdAt: "2026-09-12T11:00:00.000Z" };
 
 /** An api that answers the agents report, the lists and the setup writes, recording each setup it was asked. */
-function agentsApi(over: Partial<Api> = {}, record: Preferences = { ...DEFAULT_PREFERENCES, labs: false }) {
+const RECORD: Preferences = { ...DEFAULT_PREFERENCES, labs: false, agentDefaults: HARNESS_DEFAULTS };
+
+function agentsApi(over: Partial<Api> = {}, record: Preferences = RECORD) {
   const setups: Array<[string, string, AgentSetupSet]> = [];
   const reads: AgentsTarget[] = [];
   let lists = 0;
@@ -57,7 +59,7 @@ const notices = (): string[] => useNotices.getState().notices.map(n => n.text);
 
 beforeEach(() => {
   resetSettings();
-  useStore.setState({ places: [here], harnesses: HARNESSES, projects: [WSP] });
+  useStore.setState({ places: [here], harnesses: HARNESSES, projects: [WSP], preferences: RECORD });
   Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: vi.fn(async () => {}) } });
 });
 
@@ -282,7 +284,7 @@ describe("an agent's page", () => {
 
     cleanup();
     resetSettings();
-    useStore.setState({ places: [here], harnesses: HARNESSES, projects: [WSP] });
+    useStore.setState({ places: [here], harnesses: HARNESSES, projects: [WSP], preferences: RECORD });
     made = agentsApi();
     await mount(made.api, atClaude);
     await act(async () => void fireEvent.keyDown(rowOfModel("claude-fable-5-1").querySelector("[data-k=model-grip]")!, { key: "ArrowUp" }));
@@ -290,12 +292,28 @@ describe("an agent's page", () => {
 
     cleanup();
     resetSettings();
-    useStore.setState({ places: [here], harnesses: HARNESSES, projects: [WSP] });
+    useStore.setState({ places: [here], harnesses: HARNESSES, projects: [WSP], preferences: RECORD });
     made = agentsApi();
     await mount(made.api, atClaude);
     fireEvent.change(page().querySelector("[data-k=agent-models-id]")!, { target: { value: "claude-opus-6-preview" } });
     await act(async () => void fireEvent.click(page().querySelector("[data-k=agent-models-add]")!));
     expect(written(made.sets)).toEqual({ hide: HIDDEN, custom: ["claude-opus-6-preview"] });
+  });
+
+  it("hides two models pressed within one round trip, the second write keeping the first hidden", async () => {
+    // The host answers nothing until both presses are in, as a slow round trip would.
+    const answers: Array<() => void> = [];
+    const made = agentsApi({ setPreferences: async patch => (made.sets.push(patch), new Promise(done => answers.push(() => done(applyPreferencesPatch(RECORD, patch))))) } as Partial<Api>);
+    await mount(made.api, atClaude);
+    const shown = (id: string): HTMLElement => page().querySelector<HTMLElement>(`[data-settings-card='agent-models'] [data-model='${id}'] [data-k=model-shown]`)!;
+    await act(async () => void fireEvent.click(shown("claude-haiku-4-5-20251001")));
+    await act(async () => void fireEvent.click(shown("claude-sonnet-5")));
+    expect(made.sets.map(set => (set as { agentDefaults: { claude: { models: { hide: string[] } } } }).agentDefaults.claude.models.hide)).toEqual([
+      ["claude-haiku-4-5-20251001", "claude-opus-4-8", "claude-sonnet-4-5"],
+      ["claude-sonnet-5", "claude-haiku-4-5-20251001", "claude-opus-4-8", "claude-sonnet-4-5"],
+    ]);
+    expect(shown("claude-haiku-4-5-20251001").getAttribute("aria-checked")).toBe("false");
+    await act(async () => answers.forEach(answer => answer()));
   });
 
   it("refuses an id no model has under the field and writes nothing, and takes the field again once it is changed", async () => {

@@ -52,7 +52,7 @@ export const FONT_WORDS = {
 /** Settings > Appearance's theme section. */
 export const THEME_SECTION_WORDS = {
   lede: "Point at a theme to see this window in it.",
-  modeLede: (here: string): string => `Light, dark, or whichever side ${here === "" ? "this computer" : here} is on.`,
+  modeLede: (here: string): string => onceNamed(here, h => `Light, dark, or whichever side ${h} is on.`),
 } as const;
 
 /** Settings > Appearance's glass section, which holds the Transparency switch. */
@@ -211,7 +211,7 @@ export const ACCOUNT_WORDS = {
 export const GENERAL_WORDS = {
   composer: "Composer",
   sendWith: "Send with",
-  sendWithDescription: "The other key makes a new line. Keys read as this computer's: ⌘ on a Mac, Ctrl elsewhere.",
+  sendWithDescription: "The other key makes a new line. ⌘ on a Mac, Ctrl elsewhere.",
   sendKeys: (mac: boolean): Record<SendKey, string> => ({ enter: "Enter", "mod-enter": mac ? "⌘ Enter" : "Ctrl Enter" }),
   midTurn: "A message while a thread works",
   midTurnDescription: "Queue waits for the turn to end; steer hands it to the agent now.",
@@ -239,10 +239,10 @@ export const GENERAL_WORDS = {
   noEditor: "No editor wsp opens files in is installed: VS Code, Cursor, Zed or a JetBrains IDE.",
   startup: "Startup and quit",
   onQuit: "When you quit",
-  onQuitDescription: (here: string): string => `Quitting the window leaves threads running on ${here === "" ? "this computer" : here}; quit and stop ends them too.`,
+  onQuitDescription: (here: string): string => onceNamed(here, h => `Quitting the window leaves threads running on ${h}; quit and stop ends them too.`),
   onQuitChoices: { ask: "Ask each time", keep: "Keep threads running", stop: "Stop wsp too" } satisfies Record<OnQuit, string>,
   loginStart: "Start wsp at login",
-  loginStartDescription: (here: string): string => `wsp keeps running on ${here === "" ? "this computer" : here} with no window open, so threads carry on.`,
+  loginStartDescription: (here: string): string => onceNamed(here, h => `wsp keeps running on ${h} with no window open, so threads carry on.`),
 } as const;
 
 export const PRIVACY_WORDS = {
@@ -253,7 +253,7 @@ export const PRIVACY_WORDS = {
   agentVersionsDescription: "wsp asks npm, GitHub and each agent's maker for every agent's newest version, once a day.",
   agentVersionsHeld: "Off on the host: WSP_UPDATE_CHECK is 0.",
   usageLogs: "Agent logs",
-  usageLogsDescription: (here: string): string => `Usage counts what Claude Code, Codex and OpenCode logged on ${here === "" ? "this computer" : here}, wsp's own threads there included. wsp reads the logs there and shows what they count on the Usage page alone, never to an agent.`,
+  usageLogsDescription: (here: string): string => onceNamed(here, h => `Usage counts what Claude Code, Codex and OpenCode logged on ${h}, wsp's own threads there included. wsp reads the logs there and shows what they count on the Usage page alone, never to an agent.`),
 } as const;
 
 /** Settings > Appearance's switch over the app's glass. */
@@ -262,10 +262,11 @@ export const TRANSPARENCY_WORDS = {
   description: "Glass shows what is behind the window. Off, every surface is solid.",
 } as const;
 
-/** Settings > General's switch over the desktop app keeping this computer awake. */
+/** Settings > General's switch over the desktop app keeping the computer it runs on awake, drawn once that computer's
+ * name is known. */
 export const AWAKE_WORDS = {
-  keepAwake: (here: string): string => `Keep ${here === "" ? "this computer" : here} awake`,
-  keepAwakeDescription: "The wsp app stops this computer sleeping on its own while a thread works on it.",
+  keepAwake: (here: string): string => `Keep ${here} awake`,
+  keepAwakeDescription: "The wsp app stops it sleeping on its own while a thread works there.",
 } as const;
 
 /** Settings > Devices: every computer and browser paired with this wsp, and the one act on each. */
@@ -524,7 +525,7 @@ export const COMPUTER_PAGE_WORDS = {
   updating: "Updating",
   limits: "Limits",
   threadsAtOnce: "Threads at once",
-  threadsLine: (n: number, name: string, mem: string): string => `New threads wait past this. The default is one thread for every 2.5 GB of this computer's memory, so ${n} on ${name}'s ${mem}.`,
+  threadsLine: (n: number, name: string, mem: string): string => `New threads wait past this. The default is one thread for every 2.5 GB of memory, so ${n} on ${name}'s ${mem}.`,
   threadsLineBare: "New threads wait past this.",
   fewer: "One fewer",
   more: "One more",

@@ -114,7 +114,7 @@ import { AppShell } from "../../src/shell/AppShell";
 import { FirstRun } from "../../src/shell/FirstRun";
 import { AgentsSurface } from "../../src/components/agents/AgentsSurface";
 import { SettingsPage } from "../../src/settings/SettingsPage";
-import { HARNESSES } from "../fixtures/harnesses";
+import { HARNESS_DEFAULTS, HARNESSES } from "../fixtures/harnesses";
 import { AGENTS_PAGE_REPORT, AGENTS_REPORT, AGENTS_SETUP_REPORT, AGENTS_TOOLS_REPORT, HOSTILE_SKILL_MD, SERVER_TOOLS, SKILL_HITS, SKILL_PREVIEWS } from "../fixtures/agents-report";
 import { useSettingsStore, type SettingsAt } from "../../src/settings/settingsStore";
 import { applyTheme, useThemeEffect } from "../../src/settings/theme";
@@ -532,8 +532,9 @@ const creatingScreen = screen === "creating" || screen === "creating-refused";
 const agentScreen = ["settings-agents", "settings-agent", "settings-project-overrides"].includes(screen);
 /** The Agents page's Tool servers and Skills tabs, which read every server and skill on this Mac. */
 const toolsScreen = screen === "settings-agents-servers" || screen === "settings-agents-skills";
-/** wsp's own overrides on the screen about them: its agent set to Codex, its model and access left to Codex's own. */
-const OVERRIDES = screen === "settings-project-overrides" ? { projectDefaults: { pr_wsp: { agent: "codex" } } } : {};
+/** The record the host shaped the lists off, Claude Code's picker hiding the models held apart; and wsp's own overrides
+ * on the screen about them: its agent set to Codex, its model and access left to Codex's own. */
+const OVERRIDES = { ...(agentScreen ? { agentDefaults: HARNESS_DEFAULTS } : {}), ...(screen === "settings-project-overrides" ? { projectDefaults: { pr_wsp: { agent: "codex" } } } : {}) };
 const PROJECT_DEFAULTS: Record<string, ThreadDefaults> = {
   pr_wsp: { agent: { value: "codex", from: "project" }, model: { value: "gpt-5.6-sol", from: "catalog" }, effort: { value: "low", from: "catalog" }, access: { value: "full", mode: "danger-full-access", from: "catalog" } },
 };
@@ -574,10 +575,17 @@ const USAGE_ANSWERS = {
   usageUsed: async (range: string, split: string) => ({
     range,
     split,
-    rows: [
-      { key: "claude", label: "Claude Code", tokens: { input: 7_323_700_000, output: 7_300_000, cached: 6_874_800_000 }, costList: 4_301.74, priced: true },
-      { key: "codex", label: "Codex", tokens: { input: 22_000_000, output: 42_000, cached: 20_700_000 }, costList: 15.45, priced: true },
-    ],
+    rows:
+      split === "model"
+        ? [
+            { key: "claude:claude-opus-5-5", label: "Opus 5.5", agent: "claude", tokens: { input: 7_000_000_000, output: 7_000_000, cached: 6_600_000_000 }, costList: 4_100, priced: true },
+            { key: "claude:claude-haiku-4-5", label: "Haiku 4.5", agent: "claude", tokens: { input: 323_700_000, output: 300_000, cached: 274_800_000 }, costList: 201.74, priced: true },
+            { key: "codex:gpt-5.6-sol", label: "GPT-5.6-Sol", agent: "codex", tokens: { input: 22_000_000, output: 42_000, cached: 20_700_000 }, costList: 15.45, priced: true },
+          ]
+        : [
+            { key: "claude", label: "Claude Code", agent: "claude", tokens: { input: 7_323_700_000, output: 7_300_000, cached: 6_874_800_000 }, costList: 4_301.74, priced: true },
+            { key: "codex", label: "Codex", agent: "codex", tokens: { input: 22_000_000, output: 42_000, cached: 20_700_000 }, costList: 15.45, priced: true },
+          ],
     series: Array.from({ length: 7 }, (_, i) => ({ t: Date.parse(AT) - (6 - i) * DAY_MS, tokens: [1.4, 0.6, 1.1, 0.3, 1.8, 0.9, 1.2][i]! * 1_000_000_000 })),
     since: Date.parse(AT) - 6 * DAY_MS,
     until: Date.parse(AT) + DAY_MS,
