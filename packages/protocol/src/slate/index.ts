@@ -5,7 +5,7 @@ export * from "./types.js";
 export { SLATE_LIMITS } from "./limits.js";
 export { SLATE_CODES, SLATE_WARNINGS, slateProblem, type SlateCode } from "./problems.js";
 export { getSlateState, setSlateState, parseSlateStatePath } from "./state.js";
-export { parseSlateExpression, evaluateSlateExpression, slateDependencies, resolveSlateProp } from "./expr.js";
+export { parseSlateExpression, evaluateSlateExpression, evaluateSlateFormat, slateDependencies, slatePropDependencies, resolveSlateProp, parseSlateFormat, checkSlateExpression, slateTruthy, slateText, slatePathText, SLATE_FUNCTIONS, type SlateFormatPart, type SlateCheckScope, type SlateType } from "./expr.js";
 export { compileSlate, compileSlatePatch, printSlate } from "./shorthand.js";
 export { validateSlate } from "./validate.js";
 export { applySlatePatch } from "./patch.js";
