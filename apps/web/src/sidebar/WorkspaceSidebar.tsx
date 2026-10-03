@@ -8,9 +8,9 @@
 // holding every root whose whole tree is settled, by hand or by quiet after a
 // read, with "Settle all read" on its own row's menu. A root tile is dragged
 // onto another section to hold it there, onto Pinned to pin it and onto the
-// fold to settle it; while one is dragged every section stands to take it. A workspace
-// with no thread yet is a tile of its own and a workspace being made is a
-// tile-shaped placeholder. The first tile of a copy in a tree carries every
+// fold to settle it; while one is dragged every section stands to take it. A machine
+// with no thread yet is a tile of its own, a folder's record with none is no tile,
+// and a workspace being made is a tile-shaped placeholder. The first tile of a copy in a tree carries every
 // one of that copy's verbs in its menu after the thread's own. On a wsp with no project
 // the body holds one row that points at the first run in the centre. The
 // computer switcher under the project switcher narrows the list to the work on

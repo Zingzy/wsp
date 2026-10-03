@@ -9,7 +9,7 @@ import { HERE_PLACE_ID, namesPlace } from "./place-word.js";
 import type { ProjectSource, ProjectView, WorkspaceKind, WorkspaceProject } from "./index.js";
 import { folderName, underProject } from "./project-path.js";
 import { shellLine, shellQuote } from "./shell-quote.js";
-import { kindWords } from "./workspace-state.js";
+import { kindWords, workspaceKind } from "./workspace-state.js";
 
 /** What a caller is told once a project is recorded: what it is called, where its code comes from, the computer it
  * lives on and where a workspace of it holds the checkout, then the line that makes one. The command line prints it
@@ -369,6 +369,12 @@ export function threadOpenedLine(threadId: string, project: string | undefined, 
  * the one reading of the kind table both the create and the folder rule take. */
 export function copiesFolder(kind: WorkspaceKind): boolean {
   return kindWords(kind).copiesFolder;
+}
+
+/** Whether a record is a folder's on this computer that no thread names: the host makes one before a folder's first
+ * thread and keeps it past its last, so nothing shows it and nothing counts it as standing on its project. */
+export function bareFolder(record: { readonly kind?: WorkspaceKind | undefined }, holdsThread: boolean): boolean {
+  return !holdsThread && copiesFolder(workspaceKind(record));
 }
 
 /** The kind of workspace a computer makes: the computer the app runs on copies a folder of the person's own, and

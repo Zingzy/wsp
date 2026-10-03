@@ -19,6 +19,7 @@ import {
   REWIND_SHARED_LINE,
   worktreeChangedLine,
   PR_BEHIND_WORDS,
+  projectInUseRefusal,
   WORKTREE_BUSY_LINE,
   WORKTREE_FORCE_LINE,
   type AdapterEvent,
@@ -213,6 +214,13 @@ describe("a thread on another branch", () => {
     expect(twice.workspace.id).toBe(at.workspace.id);
   });
 
+  it("makes no record of the project folder to read which branch it holds", async () => {
+    const { rt } = here();
+    const project = await rt.projects.add({ source: repo() });
+    const at = await rt.workspaces.folderFor({ project: project.id, branch: "feat/only" });
+    expect((await rt.workspaces.list()).map(w => w.id)).toEqual([at.workspace.id]);
+  });
+
   it("is refused in one sentence when the daemon binary beside this host is behind, and the binary is never run", async () => {
     const { rt, copier } = here({ hereDaemon: { version: async () => DAEMON_VERSION - 1, fix: "npm i -g @zingzy/wsp" } });
     const project = await rt.projects.add({ source: repo() });
@@ -337,6 +345,25 @@ describe("a thread whose worktree is gone", () => {
     ]);
     expect(moved[0]).not.toHaveProperty("fresh");
     expect((await rt.workspaces.get(at.workspace.id)).worktree).toMatchObject({ gone: true });
+  });
+});
+
+describe("removing a project whose folders hold no thread", () => {
+  it("takes the records no thread names with it, a worktree wsp made too, and is refused while a thread stands", async () => {
+    const { rt, copier } = here();
+    const folder = repo();
+    const project = await rt.projects.add({ source: folder });
+    const home = await rt.workspaces.folderFor({ project: project.id });
+    const run = await rt.sessions.start(home.workspace.id, { prompt: "one" });
+    await run.finished;
+    const tree = await rt.workspaces.worktree({ project: project.id, branch: "feat/w" });
+    await expect(rt.projects.remove(project.id)).rejects.toMatchObject({ message: projectInUseRefusal(project.name, [home.workspace.name]), kind: "conflict" });
+    await rt.sessions.delete(run.view().threadId!);
+    await rt.projects.remove(project.id);
+    expect(await rt.projects.list()).toEqual([]);
+    expect(await rt.workspaces.list()).toEqual([]);
+    expect(copier.worktreesRemoved.map(r => r.path)).toEqual([tree.path]);
+    expect(existsSync(join(folder, ".git"))).toBe(true);
   });
 });
 
