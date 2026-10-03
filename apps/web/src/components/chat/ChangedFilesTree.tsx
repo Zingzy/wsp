@@ -38,6 +38,18 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
   const { turnId, files, moved = EMPTY_MOVED, allDirectoriesExpanded, resolvedTheme, onToggleAllDirectories, onOpenTurnDiff } = props;
   const summaryStat = useMemo(() => summarizeTurnDiffStats(files), [files]);
   const hasDirectories = files.some((file) => /[/\\]/.test(file.path));
+  const movedLines =
+    moved.length === 0 ? null : (
+      <div data-changed-files-moved="" className={cn("flex flex-col gap-0.5", files.length === 0 ? "mt-4" : "px-3 pb-1 pt-0.5")}>
+        {moved.map((line, index) => (
+          <span key={`${index}:${line}`} className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            <GitBranchIcon aria-hidden className="size-3 shrink-0" />
+            {line}
+          </span>
+        ))}
+      </div>
+    );
+  if (files.length === 0) return movedLines;
 
   return (
     <div className="@container/changed-files mt-4 rounded-lg bg-secondary dark:bg-input/20" data-changed-files-state="tree">
@@ -84,28 +96,17 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
           </Tooltip>
         </div>
       </div>
-      {moved.length === 0 ? null : (
-        <div data-changed-files-moved="" className="flex flex-col gap-0.5 px-3 pb-1 pt-0.5">
-          {moved.map((line, index) => (
-            <span key={`${index}:${line}`} className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-              <GitBranchIcon aria-hidden className="size-3 shrink-0" />
-              {line}
-            </span>
-          ))}
-        </div>
-      )}
-      {files.length === 0 ? null : (
-        <div className="p-2">
-          <ChangedFilesTree
-            key={`${turnId}:${allDirectoriesExpanded}`}
-            turnId={turnId}
-            files={files}
-            allDirectoriesExpanded={allDirectoriesExpanded}
-            resolvedTheme={resolvedTheme}
-            onOpenTurnDiff={onOpenTurnDiff}
-          />
-        </div>
-      )}
+      {movedLines}
+      <div className="p-2">
+        <ChangedFilesTree
+          key={`${turnId}:${allDirectoriesExpanded}`}
+          turnId={turnId}
+          files={files}
+          allDirectoriesExpanded={allDirectoriesExpanded}
+          resolvedTheme={resolvedTheme}
+          onOpenTurnDiff={onOpenTurnDiff}
+        />
+      </div>
     </div>
   );
 });

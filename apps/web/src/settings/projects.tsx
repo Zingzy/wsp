@@ -10,7 +10,7 @@ import { ProjectGlyph } from "../projects/look.js";
 import { GlyphFrame } from "./grid.js";
 import { useEffect, useState } from "react";
 import { agentName } from "@wsp/catalog";
-import { ACCESS_CHOICES, HERE_PLACE_ID, accessRefusal, type AccessChoice, type ProjectLook, type ProjectOverridesPatch, type ProjectSource, type ProjectView, type ThreadDefaults } from "@wsp/protocol";
+import { ACCESS_CHOICES, HERE_PLACE_ID, accessRefusal, bareFolder, type AccessChoice, type ProjectLook, type ProjectOverridesPatch, type ProjectSource, type ProjectView, type ThreadDefaults } from "@wsp/protocol";
 import { AlertDialog, AlertDialogClose, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogPopup, AlertDialogTitle } from "../components/ui/alert-dialog.js";
 import { Button, DANGER_BUTTON, NEUTRAL_RING } from "../components/ui/button.js";
 import { AddButton } from "../components/ui/add-button.js";
@@ -43,8 +43,9 @@ export function sourceWord(source: ProjectSource): string {
   }
 }
 
-/** The workspaces standing on a project, by name, which is what its removal is refused for. */
-export const workspacesOn = (ctx: Pick<SettingsContext, "workspaces">, project: Pick<ProjectView, "id">): string[] => ctx.workspaces.filter(w => w.project.id === project.id).map(w => w.name);
+/** The workspaces standing on a project, by name, which is what its removal is refused for, as the runtime counts them. */
+export const workspacesOn = (ctx: Pick<SettingsContext, "workspaces" | "sessions">, project: Pick<ProjectView, "id">): string[] =>
+  ctx.workspaces.filter(w => w.project.id === project.id && !bareFolder(w, (ctx.sessions[w.id]?.length ?? 0) > 0)).map(w => w.name);
 
 /** The one line a remove says by the computer's kind, matching the runtime's three landings. */
 export function removeLine(ctx: Pick<SettingsContext, "places">, project: Pick<ProjectView, "computer">): string {

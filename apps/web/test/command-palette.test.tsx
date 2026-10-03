@@ -232,7 +232,7 @@ describe("command palette", () => {
 
   it("reads this computer's own daemon in the row and in the rebuild's reason, and never says Unreachable about it", async () => {
     const here: WorkspaceView = { ...view("ws_a", "mac"), kind: "local", machineId: "local" };
-    const api = fakeApi([here], []);
+    const api = fakeApi([here], [{ ...session("s_h", "ws_a", "hello"), threadId: "t_h" }]);
     api.watchStatuses = async () => [{ ...here, machineState: "running", reach: { state: "unreachable" }, size: { cpu: 8, memMb: 16384 }, kind: "local" } as unknown as WorkspaceStatus];
     useStore.getState().bind(api);
     render(
@@ -261,7 +261,7 @@ describe("command palette", () => {
   it("offers the start the row's own line names, under start and under daemon, and refuses it while the daemon answers", async () => {
     const here: WorkspaceView = { ...view("ws_a", "mac"), kind: "local", machineId: "local" };
     const asked: string[] = [];
-    const api = fakeApi([here], []);
+    const api = fakeApi([here], [{ ...session("s_h", "ws_a", "hello"), threadId: "t_h" }]);
     api.restartDaemon = async (id: string) => void asked.push(id);
     api.watchStatuses = async () => [{ ...here, machineState: "running", reach: { state: "unreachable" }, size: { cpu: 8, memMb: 16384 }, kind: "local" } as unknown as WorkspaceStatus];
     useStore.getState().bind(api);
