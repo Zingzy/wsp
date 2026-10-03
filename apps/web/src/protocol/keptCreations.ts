@@ -102,7 +102,10 @@ function hold(key: string, taken: () => void, refused: () => void): void {
     taken();
     return;
   }
-  void locks.request(lockName(key), { ifAvailable: true }, lock => {
+  let called = false;
+  // A request the browser refuses (an opaque origin, a document not fully active) is answered as no locks at all.
+  locks.request(lockName(key), { ifAvailable: true }, lock => {
+    called = true;
     if (lock === null) {
       refused();
       return undefined;
@@ -113,6 +116,8 @@ function hold(key: string, taken: () => void, refused: () => void): void {
       return undefined;
     }
     return new Promise<void>(release => releases.set(key, release));
+  }).catch(() => {
+    if (!called) taken();
   });
 }
 

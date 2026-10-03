@@ -327,6 +327,17 @@ describe("New thread's first message across a reload", () => {
     }
   });
 
+  it("a lock request the browser refuses leaves the kept row this page's, so the window never waits on it", async () => {
+    await sendFromHome(fakeApi().api);
+    Object.defineProperty(window.navigator, "locks", { value: { request: () => Promise.reject(new DOMException("not fully active", "InvalidStateError")) }, configurable: true });
+    try {
+      const next = await reload(fakeApi([view("ws_new", TASK)]).api);
+      await waitFor(() => expect(next.queue("ws_new")).toEqual([TASK]));
+    } finally {
+      delete (window.navigator as { locks?: unknown }).locks;
+    }
+  });
+
   it("a refused create the host holds that no kept row here names draws nothing, while one still being made draws its row", async () => {
     const { store } = await reload(fakeApi([], [stage("ws_cli", "from the command line", "failed", "the disk is full"), stage("ws_else", "made elsewhere", "fork-requested")]).api);
     expect(store.getState().creations.map(c => c.name)).toEqual(["made elsewhere"]);
