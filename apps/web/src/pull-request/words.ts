@@ -70,6 +70,8 @@ export const PR_WORDS = {
   noDescription: "No description.",
   replyTo: (who: string): string => `Reply to ${who}`,
   reply: "Reply",
+  quoteReply: "Quote reply",
+  leaveComment: "Leave a comment",
   resolve: "Resolve",
   unresolve: "Unresolve",
   resolved: "Resolved",
