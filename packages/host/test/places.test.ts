@@ -10,7 +10,7 @@ import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sig
 import { appendFileSync, chmodSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { PassThrough } from "node:stream";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, posix, resolve } from "node:path";
+import { basename, dirname, join, posix, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 
@@ -120,11 +120,14 @@ runsFromItsOwnFolder();
 /** The leave as a case runs it: the workspace profile it takes off is one under the case's own home unless the case
  * names another, since a suite run as root otherwise takes the machine's own profile off it. */
 const sweepPlace = (opts: PlaceSweepOptions = {}): ReturnType<typeof sweepPlaceHere> =>
-  sweepPlaceHere({ ...(opts.home === undefined ? {} : { apparmorProfile: join(opts.home, "etc-apparmor.d", "wsp-workspace") }), ...opts });
+  sweepPlaceHere({ ...(opts.home === undefined ? {} : { apparmorProfile: join(opts.home, "etc-apparmor.d", "wsp-workspace"), tools: toolsUnder(opts.home) }), ...opts });
+
+/** wsp's install folder and the folder its commands are linked into, under a case's own home, for the same reason. */
+const toolsUnder = (home: string): { prefix: string; links: string } => ({ prefix: join(home, "opt-wsp"), links: join(home, "usr-local-bin") });
 
 /** `wsp leave` as a case runs it, with the same profile under the case's own home. */
 const leaveCommand = (io: Parameters<typeof leaveCommandHere>[0], args: readonly string[], deps: NonNullable<Parameters<typeof leaveCommandHere>[2]>): ReturnType<typeof leaveCommandHere> =>
-  leaveCommandHere(io, args, { apparmorProfile: join(deps.home, "etc-apparmor.d", "wsp-workspace"), ...deps });
+  leaveCommandHere(io, args, { apparmorProfile: join(deps.home, "etc-apparmor.d", "wsp-workspace"), tools: toolsUnder(deps.home), ...deps });
 
 /** The machine's own profile as the file found it, which every case leaves exactly as it was. */
 const MACHINES_PROFILE = existsSync(WSP_WORKSPACE_APPARMOR_PATH) ? readFileSync(WSP_WORKSPACE_APPARMOR_PATH) : undefined;
@@ -1246,6 +1249,42 @@ describe("taking wsp off the computer it is typed on", () => {
     expect(ran.some(script => script.includes(`apparmor_parser -R ${shellQuote(profile)}`))).toBe(true);
     expect(existsSync(profile)).toBe(false);
     expect(swept.removed).toContain(profile);
+  });
+
+  it("takes wsp's install folder and every command linked out of it where the leave runs as root, and nothing else there", async () => {
+    const home = tmp("leave-tools");
+    const tools = toolsUnder(home);
+    mkdirSync(join(tools.prefix, "uv", "tools", "ruff", "bin"), { recursive: true });
+    writeFileSync(join(tools.prefix, "uv", "tools", "ruff", "bin", "ruff"), "#!/bin/sh\n");
+    mkdirSync(join(tools.prefix, "pnpm", "bin"), { recursive: true });
+    mkdirSync(tools.links);
+    symlinkSync(join(tools.prefix, "uv", "tools", "ruff", "bin", "ruff"), join(tools.links, "ruff"));
+    // A relative link reads by where it sits, and one wsp's folder named already gone still points under it.
+    symlinkSync(relative(tools.links, join(tools.prefix, "pnpm", "bin", "tsc")), join(tools.links, "tsc"));
+    // The computer's own: a file, a link elsewhere, and a name that only starts like the folder.
+    writeFileSync(join(tools.links, "jq"), "#!/bin/sh\n");
+    symlinkSync("/usr/bin/env", join(tools.links, "env2"));
+    mkdirSync(`${tools.prefix}-old`);
+    symlinkSync(`${tools.prefix}-old`, join(tools.links, "old"));
+    const other = await sweepPlace({ home, manager: undefined, run: fakeRunner().run, uid: 1000 });
+    expect(existsSync(tools.prefix)).toBe(true);
+    expect(other.removed).not.toContain(tools.prefix);
+    const swept = await sweepPlace({ home, manager: undefined, run: fakeRunner().run, uid: 0 });
+    expect(swept.removed).toEqual(expect.arrayContaining([join(tools.links, "ruff"), join(tools.links, "tsc"), tools.prefix]));
+    expect(existsSync(tools.prefix)).toBe(false);
+    expect(readdirSync(tools.links).sort()).toEqual(["env2", "jq", "old"]);
+    expect(existsSync(`${tools.prefix}-old`)).toBe(true);
+  });
+
+  it("leaves wsp's install folder where it is a link, and says so", async () => {
+    const home = tmp("leave-tools-link");
+    const tools = toolsUnder(home);
+    const elsewhere = tmp("leave-tools-elsewhere");
+    writeFileSync(join(elsewhere, "keep"), "theirs");
+    symlinkSync(elsewhere, tools.prefix);
+    const swept = await sweepPlace({ home, manager: undefined, run: fakeRunner().run, uid: 0 });
+    expect(swept.removed).toContain(placeKeptForLinkLine(tools.prefix));
+    expect(existsSync(join(elsewhere, "keep"))).toBe(true);
   });
 
   it("says what the manager answered when the stop refused, and still takes the file", async () => {

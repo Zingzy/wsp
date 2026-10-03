@@ -33,6 +33,11 @@ pub const OPEN_SHIM_PATH: &str = "/usr/local/bin/wsp-open";
 pub const XDG_OPEN_PATH: &str = "/usr/local/bin/xdg-open";
 /// The AppArmor profile a root install's workspaces run under, which a leave unloads and takes off.
 pub const WORKSPACE_APPARMOR_PATH: &str = "/etc/apparmor.d/wsp-workspace";
+/// The folder of wsp's own every manager installs under on a computer somebody owns, and the folder each command
+/// installed there is linked into: a leave run as root takes every link there pointing under the prefix, then the
+/// prefix whole, and nothing else of either.
+pub const TOOL_PREFIX: &str = "/opt/wsp";
+pub const TOOL_LINKS_DIR: &str = "/usr/local/bin";
 pub const OPEN_SOCKET_PATH: &str = "/root/.wsp/open.sock";
 
 /// The computer's own system directories a workspace on a computer somebody owns reads through a tree of its own,

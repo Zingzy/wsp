@@ -6249,6 +6249,13 @@ export const hostKeyRefusal = (url: string): string => `the host at ${url} did n
  * that computer is not, since nothing could reach it to sweep. */
 export const placeStillInstalledLine = (name: string): string => `${name} is off this host, but the agent on it is still installed; run ${PLACE_LEAVE_LINE} on that computer when it is back`;
 
+/** What a remove took off that computer by its agent's own command: a plugin the setup put on there. */
+export const pluginOffLine = (name: string): string => `plugin ${name}`;
+
+/** What a remove took off this host's list with that computer: a project the recipe's folders step made there. The
+ * checkout on that computer is the person's and stays. */
+export const projectLeftLine = (name: string): string => `project ${name}, its folder there left as it is`;
+
 /** What a place that is connected but has never said which port its daemon bound is refused with: a pane needs
  * that port to carry to, and only that computer knows it. */
 export const placeNoDaemonPortLine = (name: string): string => `${name} is connected but has not said which port its daemon is on, so nothing can carry a pane to it yet; it says so on its next link`;

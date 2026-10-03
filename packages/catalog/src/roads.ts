@@ -7,7 +7,7 @@
 // under its pinned signing key, Hermes by a git checkout at a commit, Claude Code
 // by the vendor's own binary at a pinned version. Every pin here is checked on
 // the machine before anything runs.
-import { SUM_SHOWN, pinMismatchLine, shellQuote, shortSum, type ToolPin } from "@wsp/protocol";
+import { SUM_SHOWN, TOOL_LINKS_DIR, pinMismatchLine, shellQuote, shortSum, type ToolPin } from "@wsp/protocol";
 import type { LinuxCask } from "./linux-casks.js";
 
 export type { ToolPin };
@@ -104,7 +104,7 @@ export const GUEST_HOME = "/root";
 export const HOME_BIN = `${GUEST_HOME}/.local/bin`;
 /** Where every pinned command lands, and every manager links its commands on a computer somebody owns: on every job's
  * PATH, a box's included, and read-only inside every workspace on a box. */
-export const LOCAL_BIN = "/usr/local/bin";
+export const LOCAL_BIN = TOOL_LINKS_DIR;
 /** The one line every apt run exports, so no prompt can wait on a machine nobody types at. */
 export const APT_ENV = "export DEBIAN_FRONTEND=noninteractive";
 /** Claude Code's config dir on the guest under the guest home, which the pack rewrites `.claude/` to. */

@@ -53,6 +53,8 @@ import {
   placeNoPicksLine,
   placeProvisionPaths,
   placeProvisioningLine,
+  pluginOffLine,
+  projectLeftLine,
   provisionLogLine,
   PendingComputer,
   RecipeFile,
@@ -209,6 +211,11 @@ export interface PlaceRecord {
 export interface PlaceRecordRoad extends PlaceRoad {
   keyPath?: string;
 }
+
+/** The rows of one kind the setup put on that computer itself, by their key in the picks: a row it found already
+ * there reads present and is never counted, so a remove takes off only what wsp put there. */
+const madeBySetup = (held: PlaceRecord, kind: "folders" | "plugins"): string[] =>
+  Object.keys(held.picks?.[kind] ?? {}).filter(key => held.applied?.rows.some(r => r.id === `${kind}/${key}` && r.outcome === "installed") === true);
 
 const isPlaceRecord = (v: unknown): v is PlaceRecord => {
   const r = v as PlaceRecord | undefined;
@@ -1923,6 +1930,24 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     return took.flatMap(serversOutLines);
   };
 
+  /** The plugins the setup put on that computer, each taken off by its agent's own command over the link, the way a
+   * sync takes one out. A plugin the computer had before wsp stays, and nothing here fails the remove. */
+  const pluginsOffOver = async (placeId: string, held: PlaceRecord): Promise<string[]> => {
+    const home = held.report.login["HOME"];
+    const names = madeBySetup(held, "plugins");
+    const undo = wiring.provision?.undo;
+    if (home === undefined || held.picks === undefined || names.length === 0 || undo === undefined) return [];
+    const machine = new PlaceMachine(linkTo(placeId), { id: held.name, home });
+    const planned = await undo(held.picks, names.map(name => ({ kind: "plugins" as const, name })), { home }).catch(() => []);
+    const off: string[] = [];
+    for (const u of planned) {
+      if (u.cmd === undefined) continue;
+      const res = await machine.exec(u.cmd, { timeoutMs: UNDO_MS }).catch(() => undefined);
+      if (res?.exitCode === 0) off.push(pluginOffLine(u.label));
+    }
+    return off;
+  };
+
   /** The record with what that computer forks with on it, waited for no longer than one round trip on a link
    * that is up: the read behind this writes the record whenever the answer lands, so a computer slower than
    * that is joined, or updated, all the same and its row fills in at the read after. Where the facts are already
@@ -2876,9 +2901,15 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       if (forks.length > 0) throw new Error(placeHoldsForksRefusal(held.name, forks));
       // A project is one computer's: taken out from under its projects, the place id on each record would name
       // nothing. The forks are refused first, since a workspace of a project is a machine standing on this place.
+      // The projects the recipe's folders step made there are wsp's own and go with it; any other refuses.
+      const made = madeBySetup(held, "folders");
       const projects = await recording.projectsOn(placeId);
-      if (projects.length > 0) throw new Error(placeHoldsProjectsRefusal(held.name, projects));
+      const theirs = projects.filter(name => !made.some(key => (held.picks?.folders[key]?.name ?? key) === name));
+      if (theirs.length > 0) throw new Error(placeHoldsProjectsRefusal(held.name, theirs));
       const reach = live.get(placeId)?.reach;
+      // Before either road sweeps: a plugin comes off by its agent's own command, which may sit in the install folder
+      // the sweep takes, and nothing on that computer knows which plugins were wsp's.
+      const pluginsOff = reach === undefined ? [] : await pluginsOffOver(placeId, held);
       const leaver = wiring.leave;
       const login = loginOf(held);
       let swept: string[] = [];
@@ -2922,6 +2953,15 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
             note = loginRoad === undefined ? failed : `${placeLoginRoadLine(held.name, loginRoad.at, loginRoad.said)}, and ${failed}`;
           }
         }
+      }
+      swept = [...pluginsOff, ...swept];
+      for (const key of made) {
+        const folder = held.picks!.folders[key]!;
+        const gone = await recording.removeFolder?.(placeId, key, folder).then(
+          () => projectLeftLine(folder.name ?? key),
+          () => undefined,
+        );
+        if (gone !== undefined) swept.push(gone);
       }
       if (reach !== undefined) cut(placeId, "removed from this host");
       // After the sweep, since the link that sweep may ride comes in through the forward.

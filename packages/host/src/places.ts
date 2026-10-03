@@ -110,7 +110,7 @@ import WebSocket from "ws";
 import type { CliIO } from "./cli.js";
 import { servingHost } from "./host-lock.js";
 import { aimName, aimedHost, type HostAim, type HostPick } from "./hosts.js";
-import { joinStanding, placeFilePath, placeKeyPath, placeLogPath, placeFacts, placeLogin, placeReport, placeService, readPlaceFile, sweepPlace, sweptLine, sweptSaid, writeExclusive, writePlaceFile, wspArgvOf } from "./place-report.js";
+import { joinStanding, placeFilePath, placeKeyPath, placeLogPath, placeFacts, placeLogin, placeReport, placeService, readPlaceFile, sweepPlace, sweptLine, sweptSaid, writeExclusive, type ToolFolders, writePlaceFile, wspArgvOf } from "./place-report.js";
 import { PROVIDER_ENV, addedProviders, providerBackendFor, unregisteredCloud, type ProviderEnv } from "./providers.js";
 import { placeLink, relaySignIn, type BoxSignIn, type BoxSignedIn, type PlaceLink } from "./place-signin.js";
 import { publicHostname } from "./relay-link.js";
@@ -2148,7 +2148,7 @@ export async function leaveCommand(
   io: CliIO,
   args: readonly string[],
   /** The workspace profile the sweep takes off as root is the one every install writes unless a caller names another. */
-  deps: { home: string; run: ServiceRunner; platform: string; apparmorProfile?: string } = { home: process.env["HOME"] ?? "", run: systemRunner, platform: platform() },
+  deps: { home: string; run: ServiceRunner; platform: string; apparmorProfile?: string; tools?: ToolFolders } = { home: process.env["HOME"] ?? "", run: systemRunner, platform: platform() },
 ): Promise<number> {
   if (args.length !== 0) throw usageRefusal("wsp leave takes no positional arguments.", "Run wsp leave on its own; it takes wsp off the computer you are sitting at.");
   const home = deps.home;
@@ -2162,7 +2162,7 @@ export async function leaveCommand(
   const manager = serviceManagerFor(deps.platform);
   // The agent is another process from this one, so the sweep stops it before taking its unit file, and the lines
   // below say so.
-  const swept = await sweepPlace({ home, ...(manager !== undefined ? { manager } : {}), run: deps.run, ...(deps.apparmorProfile === undefined ? {} : { apparmorProfile: deps.apparmorProfile }) });
+  const swept = await sweepPlace({ home, ...(manager !== undefined ? { manager } : {}), run: deps.run, ...(deps.apparmorProfile === undefined ? {} : { apparmorProfile: deps.apparmorProfile }), ...(deps.tools === undefined ? {} : { tools: deps.tools }) });
   io.log("broken" in standing ? brokenPlaceLeftLine(standing.broken) : `${standing.joined.name} left the wsp at ${standing.joined.hostUrls.join(", ")}; removed:`);
   for (const line of swept.removed) io.log(sweptLine(line));
   for (const line of swept.kept) io.log(line);
