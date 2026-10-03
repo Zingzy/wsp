@@ -27,6 +27,8 @@ export function bindSources(engine: SlateEngine, threadId: string, deps: BinderD
   let clock = now();
   const fromHost: Record<string, SlateJson | undefined> = {};
   const asked = new Set<string>();
+  /** Host values whose source moved: drawn as they were until the host answers again, never blanked. */
+  const stale = new Set<string>();
   let pending = new Set<string>();
   let disposed = false;
 
@@ -41,13 +43,6 @@ export function bindSources(engine: SlateEngine, threadId: string, deps: BinderD
     }
     threadCache = { sessions: app.sessions, out };
     return out;
-  };
-
-  const context = (): SourceContext => {
-    const app = deps.app();
-    const slates = deps.slates();
-    const { workspaceId, thread } = threadOf(app);
-    return { threadId, app, workspaceId, thread, lastTurn: slates.lastTurn[threadId], record: slates.record, fromHost, now: clock };
   };
 
   const ask = (path: string) => {
@@ -69,7 +64,8 @@ export function bindSources(engine: SlateEngine, threadId: string, deps: BinderD
       values => {
         if (disposed) return;
         for (const path of paths) fromHost[path] = (values[path] ?? null) as SlateJson;
-        engine.invalidate(paths);
+        // A source may read other paths through one it asked for (usage through its account's key).
+        engine.invalidate([...new Set(paths.map(path => splitPath(path)?.head ?? path))]);
       },
       () => {
         for (const path of paths) asked.delete(path);
@@ -77,12 +73,19 @@ export function bindSources(engine: SlateEngine, threadId: string, deps: BinderD
     );
   };
 
-  /** Forgets what the host said under a source, so the next draw asks again: its input moved. */
+  const context = (): SourceContext => {
+    const app = deps.app();
+    const slates = deps.slates();
+    const { workspaceId, thread } = threadOf(app);
+    return { threadId, app, workspaceId, thread, lastTurn: slates.lastTurn[threadId], record: slates.record, fromHost, now: clock, ask };
+  };
+
+  /** Marks what the host said under a source as old, so the next draw asks again: its input moved. */
   const forgetHost = (name: string) => {
     for (const path of Object.keys(fromHost)) {
       if (path === name || path.startsWith(`${name}.`)) {
-        delete fromHost[path];
         asked.delete(path);
+        stale.add(path);
       }
     }
   };
@@ -95,7 +98,10 @@ export function bindSources(engine: SlateEngine, threadId: string, deps: BinderD
       const answer = source.select(split.steps, context());
       if (answer !== ASK_HOST) return answer;
     }
-    if (path in fromHost) return fromHost[path];
+    if (path in fromHost) {
+      if (stale.delete(path)) ask(path);
+      return fromHost[path];
+    }
     ask(path);
     return undefined;
   });

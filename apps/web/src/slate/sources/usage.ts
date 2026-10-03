@@ -3,14 +3,19 @@
 // usage.account push. Which account is the host's to say; it answers usage.account.key once.
 import type { AccountRow } from "@wsp/protocol";
 import { walk } from "../paths.js";
-import { ASK_HOST, type SourceContext, type SourceModule } from "./source.js";
+import type { SourceContext, SourceModule } from "./source.js";
 
-function accountOf(ctx: SourceContext): AccountRow | undefined | typeof ASK_HOST {
+const KEY = "usage.account.key";
+
+function accountOf(ctx: SourceContext): AccountRow | undefined {
   const rows = ctx.app.usageAccounts;
+  if (!(KEY in ctx.fromHost)) {
+    ctx.ask(KEY);
+    return undefined;
+  }
   if (rows === null) return undefined;
-  const key = ctx.fromHost["usage.account.key"];
+  const key = ctx.fromHost[KEY];
   if (typeof key === "string") return rows[key];
-  if (!("usage.account.key" in ctx.fromHost)) return ASK_HOST;
   // The host could not say: the one account of the thread's agent, where there is one.
   const agent = ctx.thread?.harness;
   const mine = Object.values(rows).filter(row => row.agent === agent);
@@ -23,7 +28,6 @@ export const usage: SourceModule = {
   wants: ctx => ctx.app.loadUsageAccounts(),
   select(steps, ctx) {
     const row = accountOf(ctx);
-    if (row === ASK_HOST) return ASK_HOST;
     if (row === undefined) return undefined;
     const window = (kind: string) => {
       const found = row.windows?.find(w => w.kind === kind);

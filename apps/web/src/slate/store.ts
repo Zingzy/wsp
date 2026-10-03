@@ -3,7 +3,7 @@
 // again on every session.slate and after a gap, and folded in place on slate.state. Each thread's engine lives for
 // the window's life, so switching threads and back keeps a section's fold and a field's unsent text.
 import { create } from "zustand";
-import { SlateSchema, type Slate, type SlateJson, type SlateView as SlateRecord, type TurnResult } from "@wsp/protocol";
+import { type Slate, type SlateJson, type SlateView as SlateRecord, type TurnResult } from "@wsp/protocol";
 import { ActionRunner, StateSender, type SlateLink } from "./actions.js";
 import { SlateEngine } from "./engine.js";
 import type { SlateApi } from "./wire.js";
@@ -79,18 +79,8 @@ export function slateBundle(threadId: string): SlateBundle {
   return bundle;
 }
 
-function entryOf(record: SlateRecord | null): SlateEntry {
-  const doc = record?.document;
-  if (record === null || doc === null || doc === undefined) return { record };
-  const schema = doc["schema"];
-  if (typeof schema === "number" && schema > 1) return { record, newer: schema };
-  return { record };
-}
-
 function documentOf(entry: SlateEntry): Slate | null {
-  if (entry.newer !== undefined || entry.record?.document == null) return null;
-  const parsed = SlateSchema.safeParse(entry.record.document);
-  return parsed.success ? parsed.data : null;
+  return entry.newer !== undefined ? null : (entry.record?.document ?? null);
 }
 
 function applyRecord(engine: SlateEngine, entry: SlateEntry): void {
@@ -107,8 +97,8 @@ export function loadSlate(threadId: string): Promise<SlateEntry | undefined> {
   if (running !== undefined) return running;
   const ask = api
     .get(threadId)
-    .then(record => {
-      const entry = entryOf(record);
+    .then(answer => {
+      const entry: SlateEntry = answer.newer === undefined ? { record: answer.record } : { record: answer.record, newer: answer.newer };
       useSlateStore.setState(s => ({ byThread: { ...s.byThread, [threadId]: entry } }));
       const bundle = bundles.get(threadId);
       if (bundle !== undefined) applyRecord(bundle.engine, entry);
@@ -126,7 +116,7 @@ const shownHere = new Set<string>();
 
 export function showOnce(threadId: string, entry: SlateEntry | undefined): void {
   // An answer read before the host stored this window's shown must not open the tab a second time.
-  if (host === null || entry?.record == null || entry.record.shownOnce || entry.record.document === null || shownHere.has(threadId)) return;
+  if (host === null || entry?.record == null || entry.record.shownOnce || entry.record.document === null || entry.newer !== undefined || shownHere.has(threadId)) return;
   const selected = host.selected();
   if (selected.threadId !== threadId) return;
   if (!host.openPane(selected.panelKey, "slate")) return;

@@ -1,37 +1,21 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The slate's own thread, from its rows in the store and the latest session.done this window saw. The figures a
-// turn carries (context, tokens, the last turn) are the host's until a turn ends with this window open.
+// The slate's own thread, from its rows in the store. The figures folded over its turns (context, tokens, the last
+// turn) are the host's, asked again whenever a row or a turn's end moves.
 import { threadKeyOf } from "@wsp/protocol";
 import { threadStatusOf } from "../../components/status/threadStatusOf.js";
 import { walk } from "../paths.js";
 import { ASK_HOST, type SourceModule } from "./source.js";
 
-const TURN_FIELDS = new Set(["context", "lastTurn", "tokens", "turns"]);
+/** Figures folded over every turn, which the host reads off the transcript; a turn ending here asks again. */
+const HOST_FIELDS = new Set(["context", "lastTurn", "tokens", "turns", "computer", "project"]);
 
 export const thread: SourceModule = {
   name: "thread",
   input: ctx => [ctx.thread, ctx.lastTurn],
   select(steps, ctx) {
-    const [first, ...rest] = steps;
+    const [first] = steps;
+    if (typeof first === "string" && HOST_FIELDS.has(first)) return ASK_HOST;
     const t = ctx.thread;
-    const turn = ctx.lastTurn;
-    if (typeof first === "string" && TURN_FIELDS.has(first)) {
-      if (first === "turns") return t?.turns ?? ASK_HOST;
-      if (turn === undefined) return ASK_HOST;
-      const tokens = turn.tokens;
-      if (first === "tokens") return walk(tokens ?? null, rest);
-      if (first === "lastTurn") return walk({ status: turn.status, durationMs: turn.durationMs ?? null, waitedMs: turn.waitedMs ?? null, model: turn.model ?? null }, rest);
-      const used = tokens?.context;
-      const window = tokens?.window;
-      if (used === undefined) return walk({ used: null, window: window ?? null, free: null, percent: null }, rest);
-      const context = {
-        used,
-        window: window ?? null,
-        free: window === undefined ? null : Math.max(0, window - used),
-        percent: window === undefined || window <= 0 ? null : (used / window) * 100,
-      };
-      return walk(context, rest);
-    }
     if (t === null) return undefined;
     const rows = ctx.workspaceId === null ? [] : (ctx.app.sessions[ctx.workspaceId] ?? []).filter(row => threadKeyOf(row) === ctx.threadId);
     const latest = rows.at(-1);

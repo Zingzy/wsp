@@ -3,7 +3,7 @@
 // the tab opened once on the agent's first write, and state pushes folded in place.
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { SessionView, SlateView as SlateRecord } from "@wsp/protocol";
+import type { SessionView, Slate, SlateView as SlateRecord } from "@wsp/protocol";
 import type { Api, ProtocolEvent } from "../protocol/client";
 import { useStore } from "../protocol/store";
 import { useRightPanelStore } from "../rightPanelStore";
@@ -11,7 +11,7 @@ import { SlateSurface } from "./SlateSurface";
 import { useSlateStore } from "./store";
 import type { SlateApi } from "./wire";
 
-const DOC = {
+const DOC: Slate = {
   schema: 1,
   root: "root",
   title: "Progress",
@@ -29,14 +29,15 @@ function record(over: Partial<SlateRecord> = {}): SlateRecord {
 
 const ROW: SessionView = { id: "s1", workspaceId: "ws", harness: "claude", status: "completed", threadId: "t1" };
 
-function host(answers: (SlateRecord | null)[]): SlateApi & { calls: string[] } {
+function host(answers: (SlateRecord | null | { newer: number })[]): SlateApi & { calls: string[] } {
   const calls: string[] = [];
   let at = 0;
   return {
     calls,
     get: vi.fn(async () => {
       calls.push("get");
-      return answers[Math.min(at++, answers.length - 1)] ?? null;
+      const answer = answers[Math.min(at++, answers.length - 1)] ?? null;
+      return answer !== null && "newer" in answer ? { record: record({ document: null }), newer: answer.newer } : { record: answer };
     }),
     state: vi.fn(async () => ({ version: 2 })),
     act: vi.fn(async () => ({ outcome: "started" as const, said: "Sent" })),
@@ -91,7 +92,7 @@ describe("the Slate tab", () => {
   });
 
   it("says a slate newer than this build needs a newer wsp, and draws none of it", async () => {
-    select(host([record({ document: { ...DOC, schema: 2 } })]), "t1");
+    select(host([{ newer: 2 }]), "t1");
     render(<SlateSurface />);
     expect(await screen.findByText(/needs a newer wsp \(schema 2\)/)).toBeTruthy();
     expect(screen.queryByText("First version")).toBeNull();

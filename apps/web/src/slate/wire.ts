@@ -8,7 +8,8 @@ interface Requester {
 }
 
 export interface SlateApi {
-  get(threadId: string): Promise<SlateRecord | null>;
+  /** The record, or, for a document of a schema this build does not know, the record without it and that schema. */
+  get(threadId: string): Promise<{ record: SlateRecord | null; newer?: number }>;
   state(threadId: string, values: Record<string, unknown>): Promise<{ version: number }>;
   act(threadId: string, ask: SlateActAsk): Promise<SlateActAnswer>;
   shown(threadId: string): Promise<void>;
@@ -21,7 +22,14 @@ export interface SlateApi {
 
 export function slateApi(c: Requester): SlateApi {
   return {
-    get: async threadId => SlatesGetAnswer.parse(await c.request<unknown>("slates.get", { threadId })).slate,
+    get: async threadId => {
+      const raw = await c.request<{ slate?: { document?: { schema?: unknown } | null } | null }>("slates.get", { threadId });
+      const schema = raw.slate?.document?.schema;
+      if (typeof schema === "number" && schema > 1) {
+        return { record: SlatesGetAnswer.parse({ slate: { ...raw.slate, document: null } }).slate, newer: schema };
+      }
+      return { record: SlatesGetAnswer.parse(raw).slate };
+    },
     state: async (threadId, values) => SlateStateAnswer.parse(await c.request<unknown>("slates.state", { threadId, values })),
     act: async (threadId, ask) => SlateActAnswer.parse(await c.request<unknown>("slates.act", { threadId, ...ask })),
     shown: async threadId => void (await c.request("slates.shown", { threadId })),

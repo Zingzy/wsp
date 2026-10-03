@@ -17,6 +17,8 @@ export interface SourceContext {
   /** Values the host resolved for this slate, by path. */
   readonly fromHost: Readonly<Record<string, SlateJson | undefined>>;
   readonly now: number;
+  /** Asks the host for a path the source needs to read others: the account a thread runs on. */
+  ask(path: string): void;
 }
 
 export const ASK_HOST = Symbol("ask the host");
