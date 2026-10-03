@@ -36,7 +36,7 @@ describe("ChangedFilesCard", () => {
     expect(card([{ path: "src/a.ts", kind: "modified", additions: 2, deletions: 1 }], true)).toContain('aria-label="Collapse all folders"');
   });
 
-  it("shows a move-only turn as its quiet lines with no file tree", () => {
+  it("shows a move-only turn as its quiet lines alone: no file tree, no count and no Open diff", () => {
     const markup = renderToStaticMarkup(
       <ChangedFilesCard
         turnId={"turn-1"}
@@ -53,6 +53,9 @@ describe("ChangedFilesCard", () => {
     expect(markup).toContain("Pulled");
     // No file tree: the move named itself, and no file is its own.
     expect(markup).not.toContain("data-changed-file=");
+    expect(markup).not.toContain("data-changed-files-header");
+    expect(markup).not.toContain("changed file");
+    expect(markup).not.toContain("Open diff");
   });
 
   it("lists a large turn as its top-level rows, with no chips and no Show all", () => {
