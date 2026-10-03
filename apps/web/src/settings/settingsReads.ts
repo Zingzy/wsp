@@ -14,6 +14,7 @@ import { useProtocolEvents, useStore } from "../protocol/store.js";
 import { appScheme } from "../terminal/ghosttyConfig.js";
 import { useSettingsAt } from "./settingsContext.js";
 import { groupOf, useSettingsStore } from "./settingsStore.js";
+import { openAdd } from "./add/addFlow.js";
 
 export function useSettingsReads(): void {
   const api = useStore(s => s.api);
@@ -26,13 +27,12 @@ export function useSettingsReads(): void {
    * it: a read dropped while the socket reconnects is asked again at the next tick. */
   const refused = useRef(false);
 
-  // The Add a computer door moves the page rather than standing over it: the sheet is asked for from the first run
-  // and from the palette as well as from the list, and closing it on whatever page was remembered hid the new row.
+  // Add a computer stands over the Computers page wherever it was asked from, so closing it shows the new row.
   useEffect(() => {
     if (!addComputerOpen) return;
-    const settings = useSettingsStore.getState();
-    settings.go({ kind: "group", group: "computers" });
-    settings.askAdd(null);
+    useSettingsStore.getState().go({ kind: "group", group: "computers" });
+    useStore.getState().closeAddComputer();
+    openAdd();
   }, [addComputerOpen]);
 
   useEffect(() => {

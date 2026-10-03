@@ -55,16 +55,11 @@
 //   settings-version-restart 0.3.0 installed under the running 0.2.0 host, which a restart brings back
 //   settings-search       "icons" typed in the field
 //   settings-over-panel   a workspace's panel open, then Settings over it
-//   settings-add-computer Computers scrolled to Add a computer, the ssh road open
-//   settings-add-computer-failed  the same after an add this window watched fail, one the host kept
+//   settings-add-computer Add a computer open over Computers at its address
+//   settings-add-computer-failed  its checks after an add this window watched fail, one the host kept
 //                         refused while the wsp step ran, with the host's fix
 //   settings-computers-refused  Computers with the host refusing the places read
 //                         and the ssh config read
-//   settings-add-joined   the ssh road after a box joined, its Image card under it
-//                         (&image=none: no image anywhere yet; &bare=1: a box
-//                         that takes no copy, which says so in one line)
-//   settings-add-code     the code road, a computer joining a moment after the
-//                         code is made
 //   settings-add-cloud    the cloud road, where a key saved for Boat lists it and
 //                         draws its Image card (&image=none as above)
 //   settings-remove-computer  the Remove dialog over the box's page
@@ -122,6 +117,7 @@ import { useHostNotices } from "../../src/notices/hostNotices";
 import { WorkspaceCreation } from "../../src/shell/WorkspaceCreation";
 import { RequestError, type Api } from "../../src/protocol/client";
 import { useCreation, useStore } from "../../src/protocol/store";
+import { useAddFlow } from "../../src/settings/add/addFlow";
 import { useAdds } from "../../src/settings/adds";
 import { useRightPanelStore } from "../../src/rightPanelStore";
 import { KEY_REFUSED_LINE, KEY_REFUSED_ROWS } from "../fixtures/keyRefusedJob";
@@ -325,10 +321,9 @@ const COMPUTERS: PlaceView[] = [
   box("p_attic", "attic", { setup: { state: "failed", addId: "a_1", startedAt: AT, finishedAt: AT, steps: [], waiting: [], said: "the base tools did not install: curl" } }),
   { id: "solari", kind: "provider", name: "solari", default: false, takesForks: true, buildsImages: true, rateUsdPerHour: 0.11 } as PlaceView,
 ];
-/** The computer an add screen has just added, holding no copy of the image yet, and the cloud a saved key lists. */
-const ADDED = box("p_new", "hetzner", { shape: { cpu: 2, memMb: 4096 }, diskFreeBytes: 38 * GB, ...(params.get("bare") === "1" ? { buildsImages: false } : {}) });
+/** The cloud a saved key lists. */
 const BOX_CLOUD = { id: "box", kind: "provider", name: "box", default: false, takesForks: true, buildsImages: true, rateUsdPerHour: 0.018 } as PlaceView;
-const ADD_SCREENS = ["settings-add-joined", "settings-add-code", "settings-add-cloud"];
+const ADD_SCREENS = ["settings-add-cloud"];
 /** A key the cloud road's Save hands the host: once it lands, the host lists the cloud the key opened. */
 let keySaved = false;
 
@@ -448,10 +443,8 @@ const FAILED_ADD: PlaceAddJob = {
   fix: "Install one of them there, then add again.",
 };
 const settings = settingsAt !== undefined;
-/** The add over ssh that joined the box a moment ago, as the window that asked it keeps it. */
-const JOINED_ADD: PlaceAddJob = { addId: "a_new", address: "root@hetzner", startedAt: AT, state: "done", steps: [], placeId: "p_new" };
 /** Every computer this host holds on a settings screen: this Mac, three boxes and the cloud whose key it holds. */
-const computers = settings || params.get("fork") === "solari" ? [...COMPUTERS, ...(screen === "settings-add-joined" ? [ADDED] : [])] : places;
+const computers = settings || params.get("fork") === "solari" ? COMPUTERS : places;
 /** The image this host sealed and where it stands, on the cloud's page. */
 const IMAGE: SealedImage = {
   name: "default",
@@ -596,21 +589,12 @@ const api = {
   placesList: async () =>
     screen === "settings-computers-refused"
       ? Promise.reject(new RequestError("wsp could not read its places: state.json is not valid JSON. Fix or move ~/.wsp/state.json, then start wsp again.", undefined, "Fix or move ~/.wsp/state.json, then start wsp again."))
-      : { places: [...computers, ...(keySaved ? [BOX_CLOUD] : [])], adds: screen === "settings-add-computer-failed" ? [FAILED_ADD] : screen === "settings-add-joined" ? [JOINED_ADD] : [] },
+      : { places: [...computers, ...(keySaved ? [BOX_CLOUD] : [])], adds: screen === "settings-add-computer-failed" ? [FAILED_ADD] : [] },
   ...(screen === "settings-add-cloud"
     ? {
         initKeys: async () => {
           keySaved = true;
           return { keys: { solari: true, box: true }, home: "/Users/dev", agents: [], pricing: null, job: null };
-        },
-      }
-    : {}),
-  ...(screen === "settings-add-code"
-    ? {
-        // The computer typing the line joins a moment after the code is made, as a place.joined would land it.
-        mintJoin: async () => {
-          setTimeout(() => useStore.setState(s => ({ places: [...s.places, ADDED] })), 400);
-          return { joins: [{ url: "http://192.168.1.20:4640", line: "wsp join http://192.168.1.20:4640 --code 7Q4F-M2XK" }], expiresAt: new Date(Date.now() + 10 * 60_000).toISOString() };
         },
       }
     : {}),
@@ -741,7 +725,7 @@ useStore.setState({
   ...(agentScreen || toolsScreen ? { harnesses: HARNESSES } : {}),
   places: computers,
   settingsOpen: settings,
-  addComputerOpen: screen === "settings-add-computer" || screen === "settings-add-computer-failed" || screen === "settings-computers-refused" || ADD_SCREENS.includes(screen),
+  addComputerOpen: screen === "settings-add-computer" || screen === "settings-computers-refused",
   release:
     screen === "settings-version-behind"
       ? { state: "read", latest: { version: "0.3.0", tag: "v0.3.0", url: "https://github.com/Zingzy/wsp/releases/tag/v0.3.0", publishedAt: AT }, checkedAt: AT, triedAt: AT }
@@ -770,8 +754,11 @@ if (creatingScreen) {
     useStore.getState().applyEvent({ type: "workspace.created", workspace: landed() } as never);
 }
 // This window watched the add fail: one read off the host at a reload alone leaves the form clean.
-if (screen === "settings-add-computer-failed") useAdds.setState({ jobs: { [FAILED_ADD.addId]: FAILED_ADD } });
-if (screen === "settings-add-joined") useAdds.setState({ jobs: { [JOINED_ADD.addId]: JOINED_ADD }, heard: [JOINED_ADD.addId] });
+if (screen === "settings-add-computer-failed") {
+  useAdds.setState({ jobs: { [FAILED_ADD.addId]: FAILED_ADD } });
+  useAddFlow.setState({ open: true, step: "checks", address: FAILED_ADD.address, addId: FAILED_ADD.addId });
+}
+if (screen === "settings-add-cloud") useSettingsStore.getState().askAdd("cloud");
 useStore.getState().bind(api);
 // The frames a copy build at the box sent, set after the bind, whose pull starts every place over.
 // A focus change during the build: the running stage ends and the next one starts, as the host's next view says.

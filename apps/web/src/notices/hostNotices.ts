@@ -15,12 +15,13 @@
 // plan running low, blocked or back is a notice and a notification with no
 // sound while the person keeps that switch on. The
 // dock's badge counts the threads waiting on the person.
-import { GET_THE_APP_WORD, NOTIFY_ME, setupNeedsYouLine, setupReadyLine, askingLine, exitLine, foldThreads, initJobBuilding, initNeedsYouLine, needsYouCount, outsideLine, planAlertLine, threadFinishedLine, threadKeyOf, threadStoppedLine, titleWithNeed, type OutsideLine, type OutsideMoment, type ReleaseView, type TurnResult } from "@wsp/protocol";
+import { GET_THE_APP_WORD, NOTIFY_ME, waitLine, setupNeedsYouLine, setupReadyLine, askingLine, exitLine, foldThreads, initJobBuilding, initNeedsYouLine, needsYouCount, outsideLine, planAlertLine, threadFinishedLine, threadKeyOf, threadStoppedLine, titleWithNeed, type OutsideLine, type OutsideMoment, type ReleaseView, type TurnResult } from "@wsp/protocol";
 import { useCallback, useEffect, useRef } from "react";
 import type { ProtocolEvent } from "../protocol/client.js";
 import { threadRows, useProtocolEvents, useStore } from "../protocol/store.js";
 import { desktopBridge } from "../lib/desktopShell.js";
 import { placeName } from "../settings/places.js";
+import { openSetup, useAddFlow } from "../settings/add/addFlow.js";
 import { useSettingsStore } from "../settings/settingsStore.js";
 import { needsYouRoad, type NeedsYouRoad } from "../shell/needsYou.js";
 import { releaseAhead, shellVersions } from "../shell/shellVersion.js";
@@ -84,6 +85,8 @@ function buildOnScreen(placeId: string | undefined): boolean {
 
 function computerOnScreen(placeId: string | undefined): boolean {
   const s = useStore.getState();
+  const flow = useAddFlow.getState();
+  if (flow.open && placeId !== undefined && flow.placeId === placeId) return true;
   if (!s.settingsOpen) return false;
   const at = useSettingsStore.getState().at;
   return s.addComputerOpen || (at.kind === "group" && at.group === "computers") || (at.kind === "computer" && at.id === placeId);
@@ -103,6 +106,9 @@ const versionOnScreen = (): boolean => {
 };
 
 const openThread = (workspaceId: string, threadId: string | undefined): NoticeAction => ({ word: HOST_NOTICE_WORDS.open, run: () => useStore.getState().select(workspaceId, threadId ?? null) });
+/** A setup's notice opens Add a computer on that computer's running steps, where whatever it asks is answered. */
+const openSetupOf = (placeId: string): NoticeAction => ({ word: HOST_NOTICE_WORDS.open, run: () => openSetup(placeId) });
+
 const openComputer = (placeId: string | undefined): NoticeAction => ({
   word: HOST_NOTICE_WORDS.open,
   run: () => {
@@ -202,11 +208,17 @@ const RULES: { [T in ProtocolEvent["type"]]?: Rule<T> } = {
   },
   // A setup's end, said once it is over: failed, waiting on the person, or ready, inside the app and outside it.
   "place.setup": (e, held) => {
-    if (e.end === undefined || computerOnScreen(e.placeId)) return;
+    if ((e.end === undefined && e.wait?.state !== "waiting") || computerOnScreen(e.placeId)) return;
     const place = useStore.getState().places.find(p => p.id === e.placeId);
     if (place === undefined) return;
     const name = placeName(place);
-    const open = openComputer(e.placeId);
+    const open = openSetupOf(e.placeId);
+    if (e.end === undefined && e.wait !== undefined) {
+      const what = waitLine(e.wait);
+      addNotice({ kind: "note", text: setupNeedsYouLine(name, what), where: name, action: open });
+      sayOutside(held, open.run, lineFor({ kind: "signIn", what: `${name}: ${what}` }));
+      return;
+    }
     if (e.end === "failed") {
       addNotice({ kind: "error", text: HOST_NOTICE_WORDS.notSetUp(name, e.said ?? ""), where: name, action: open });
       sayOutside(held, open.run, lineFor({ kind: "setupFailed", computer: name, said: e.said ?? "" }));

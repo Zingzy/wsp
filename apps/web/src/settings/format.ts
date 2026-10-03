@@ -127,22 +127,11 @@ export const PLACE_STATE_WORDS = {
 export const ADD_COMPUTER_WORDS = {
   title: "Add a computer",
   addCloud: "Add a cloud",
-  user: "User",
-  host: "Host",
-  hostPlaceholder: "box.example.com or an ssh alias",
-  port: "Port",
-  addComputer: "Add computer",
-  whatHappens: "What happens",
   replace: "Replace",
-  adding: "Adding",
-  another: "Add another",
   signInsOn: (computer: string): string => `Sign-ins on ${computer}`,
   signInsWhy: (agents: readonly string[], computer: string): string =>
     `${new Intl.ListFormat("en", { type: "conjunction" }).format(agents)} ${agents.length === 1 ? "keeps" : "keep"} one login for every workspace on ${computer}, so sign in once here.`,
   suggested: "From your ssh config",
-  copy: "Copy",
-  copied: "Copied",
-  notCopied: "not copied",
   replaceKey: "Paste a new key to replace it",
   /** Said only once the host lists that cloud as a computer: a key kept is not yet a place to fork on. */
   keySaved: "key saved",
@@ -156,24 +145,10 @@ export const ADD_COMPUTER_WORDS = {
     fix: provider.keyConsole === undefined ? "Check it and paste it again." : `Check it at ${provider.keyConsole} and paste it again.`,
   }),
   hostsNotRead: (said: string): string => `Hosts from your ssh config not read: ${said}`,
-  installThere: "On that computer, install wsp",
-  joinThere: "Then run",
-  minting: "making a code",
-  codeLeft: (ms: number): string => {
-    const seconds = Math.ceil(ms / 1000);
-    return `code works for ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
-  },
-  expired: "code expired",
-  newCode: "New code",
-  noMint: "this wsp cannot make a join line from the app yet",
-  adds: "adds",
-  /** Why Add is held on a wsp whose host cannot log in over ssh yet. */
-  noRoad: "this wsp cannot log in over ssh yet",
   /** What to do about a login ssh would not take, short enough that what ssh said and this together stand on the
    * slot's two lines: a third line moves what is under them. There is no file picker on this road: the host reads
    * the ssh agent and config as they stand, so the key a box wants is named where every other ssh client reads it. */
   refusedFix: "Check the user and the address, or name a key in your ssh config.",
-  running: "closing keeps it going",
   /** An add the host no longer lists while nothing here waits on it: the host restarted, or never got the ask. */
   hostLost: "The host lost track of this add, so how it ended is not known; add it again if the computer is not listed.",
 } as const;

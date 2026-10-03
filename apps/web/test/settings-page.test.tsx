@@ -13,6 +13,7 @@ import { useStore } from "../src/protocol/store.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
 import { ABOUT_WORDS, AGENTS_PAGE_WORDS, FONT_WORDS, GLASS_WORDS, THEME_SECTION_WORDS, THEME_WORDS, TRANSPARENCY_WORDS, SETTINGS_WORDS } from "../src/settings/format.js";
 import { SETTINGS_GROUPS } from "../src/settings/groups.js";
+import { closeAdd, useAddFlow } from "../src/settings/add/addFlow.js";
 import { useSettingsStore } from "../src/settings/settingsStore.js";
 import { SYSTEM_DARK_QUERY, useFontEffect, useThemeEffect } from "../src/settings/theme.js";
 import { forgetFontFamilies } from "../src/settings/FontPicker.js";
@@ -637,10 +638,10 @@ describe("the doors and the memory", () => {
     mountSettings();
     await settle();
     expect(pageAt()).toBe("computers");
-    expect(document.querySelector("[data-k=add-computer]")).not.toBeNull();
-    // The door moved the page rather than standing over it: the computer it added is on the list the person is left
-    // on, not behind whatever page they were last reading.
-    act(() => useStore.getState().closeAddComputer());
+    expect(useAddFlow.getState().open).toBe(true);
+    // The door moved the page under the dialog: the computer it added is on the list the person is left on, not
+    // behind whatever page they were last reading.
+    act(() => closeAdd());
     await settle();
     expect(pageAt()).toBe("computers");
     expect(window.localStorage.getItem("wsp:settings-at")).toBe("computers");

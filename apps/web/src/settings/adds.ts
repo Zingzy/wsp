@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The adds over ssh as the host keeps them: read off places.list whenever the
 // store binds, kept current by the steps that ride place.stage, and settled
-// by an add's own answer in the window that asked. The sheet draws the job
-// from here, so another page or a second window reads the same install; how a
+// by an add's own answer in the window that asked. Add a computer draws the
+// install from here, so a second window reads the same install; how a
 // finished add ended stays on the form only in a window that watched it run,
 // and the computer's row keeps the fact everywhere else.
 import { create } from "zustand";
@@ -11,19 +11,8 @@ import type { Api, SshLogin } from "../protocol/client.js";
 import { failureOf } from "../protocol/failure.js";
 import { ADD_COMPUTER_WORDS } from "./format.js";
 
-/** The ssh fields as the person typed them. */
-export interface SshDraft {
-  user: string;
-  host: string;
-  port: string;
-}
-
 interface AddsState {
   jobs: Record<string, PlaceAddJob>;
-  /** The finished add the person put away with Add another: the form stands empty over it. */
-  putAway: string | null;
-  /** What this window typed and has not sent: never the host's, and no add from elsewhere writes it. */
-  draft: SshDraft | null;
   /** The adds whose request from this window is still out: the host may not list one yet, and has not lost it. */
   asking: readonly string[];
   /** The adds this window heard a step of, so each was running while it watched. */
@@ -32,7 +21,7 @@ interface AddsState {
   readOff: Api | null;
 }
 
-export const useAdds = create<AddsState>(() => ({ jobs: {}, putAway: null, draft: null, asking: [], heard: [], readOff: null }));
+export const useAdds = create<AddsState>(() => ({ jobs: {}, asking: [], heard: [], readOff: null }));
 
 const put = (job: PlaceAddJob): void => useAdds.setState(s => ({ jobs: { ...s.jobs, [job.addId]: job } }));
 
@@ -85,15 +74,13 @@ export function applyAddStage(api: Api | null, e: PlaceStageEvent): void {
 const mintAddId = (): string => `a_${[...crypto.getRandomValues(new Uint8Array(6))].map(b => b.toString(16).padStart(2, "0")).join("")}`;
 
 /** Asks the host to add a computer over ssh under a stream minted here, since its steps arrive before the answer. A
- * lost socket leaves the job running: the host goes on installing, and the read on reconnect says how it ended.
- * Asking clears the draft: what was typed is on the job now. */
-export function addOverSsh(api: Api, login: SshLogin): void {
-  if (api.addComputerOverSsh === undefined) return;
+ * lost socket leaves the job running: the host goes on installing, and the read on reconnect says how it ended. */
+export function addOverSsh(api: Api, login: SshLogin): string | null {
+  if (api.addComputerOverSsh === undefined) return null;
   const addId = mintAddId();
   useAdds.setState(s => ({
     jobs: { ...s.jobs, [addId]: { addId, address: login.address, ...(login.port === undefined ? {} : { sshPort: login.port }), startedAt: new Date().toISOString(), state: "running", steps: [] } },
     asking: [...s.asking, addId],
-    draft: null,
   }));
   const settle = (next: (job: PlaceAddJob) => PlaceAddJob): void =>
     useAdds.setState(s => {
@@ -107,16 +94,8 @@ export function addOverSsh(api: Api, login: SshLogin): void {
       settle(job => (failure.disconnected ? job : { ...job, state: "failed", said: failure.said, ...(failure.fix === undefined ? {} : { fix: failure.fix }), ...(failure.kind === undefined ? {} : { kind: failure.kind }) }));
     },
   );
+  return addId;
 }
 
 /** The fix under a failed add: the host's own, else the login fix for a login ssh refused, else none. */
 export const addFix = (job: PlaceAddJob): string | undefined => job.fix ?? (job.kind === PLACE_LOGIN_REFUSED_KIND ? ADD_COMPUTER_WORDS.refusedFix : undefined);
-
-/** The add the sheet draws: the one this app heard of last, unless the person put it away. Read by the order jobs
- * arrived in, not their stamps: an add asked here is stamped by this clock and one read off the host by its own. */
-export function useShownAdd(): PlaceAddJob | undefined {
-  return useAdds(s => {
-    const newest = Object.values(s.jobs).at(-1);
-    return newest?.addId === s.putAway ? undefined : newest;
-  });
-}

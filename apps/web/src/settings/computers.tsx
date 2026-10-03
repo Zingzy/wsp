@@ -30,6 +30,7 @@ import { Button, DANGER_BUTTON } from "../components/ui/button.js";
 import { useSidebarProjects, useStore } from "../protocol/store.js";
 import { DialButton, useDialPlace } from "./AbsentRoad.js";
 import { AddComputer } from "./AddComputer.js";
+import { openAdd } from "./add/addFlow.js";
 import { ComputerGlyph, useComputerIcon } from "./ComputerGlyph.js";
 import { BehindRow, LimitsCard, SpawnCard } from "./computerSettings.js";
 import { ADD_COMPUTER_WORDS, AGENTS_PAGE_WORDS, PLACE_STATE_WORDS, VALUE, WHERE_WORDS, capitalised } from "./format.js";
@@ -133,7 +134,7 @@ export function computersCards(ctx: SettingsContext): SettingsCardData[] {
       )}
       {refused}
       <div className="flex">
-        <AddButton data-k="add-computer-button" onClick={() => ctx.askAdd(null)}>
+        <AddButton data-k="add-computer-button" onClick={openAdd}>
           {ADD_COMPUTER_WORDS.title}
         </AddButton>
       </div>
