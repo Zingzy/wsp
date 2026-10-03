@@ -2682,9 +2682,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   };
 
   /** One git command on this computer, argv quoted, through the local backend as every read here goes. */
-  const gitHere = async (cwd: string, args: readonly string[], timeoutMs = INLINE_EXEC_MS): Promise<{ exitCode: number; stdout: string; stderr: string }> => {
+  const gitHere = async (cwd: string, args: readonly string[], timeoutMs = INLINE_EXEC_MS, stdin?: string): Promise<{ exitCode: number; stdout: string; stderr: string }> => {
     const machine = await moduleOf("local").backend({ kind: "local" } as WorkspaceRecord).get(LOCAL_MACHINE_ID);
-    return machine.exec(shellLine(["git", "-C", cwd, ...args]), { timeoutMs });
+    return machine.exec(shellLine(["git", "-C", cwd, ...args]), { timeoutMs, ...(stdin !== undefined ? { stdin: Buffer.from(stdin) } : {}) });
   };
   /** The top of the repo a folder on this computer sits in, the folder itself or one above it; nothing for a folder
    * git holds no repo in. */
@@ -6791,9 +6791,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // A stash lives in the copy's own repo and rides no fetch of its branches; a worktree's is the project's own.
       const stash = await gitHere(copy.path, ["rev-parse", "--verify", "--quiet", "refs/stash"]);
       if (stash.exitCode === 0 && stash.stdout.trim() !== "") return OLD_COPY_WORDS.stashed;
-      // HEAD rides the same fetch, so a commit on no branch is carried too.
-      const fetched = await gitHere(top, ["fetch", "--quiet", "--no-tags", copy.path, `+refs/heads/*:refs/rescue/${name}/*`, `+HEAD:refs/rescue/${name}/HEAD`], CLONE_MS);
-      if (fetched.exitCode !== 0) return OLD_COPY_WORDS.fetchFailed(gitSaid(fetched));
+      const failed = await rescueTips(top, copy.path, name);
+      if (failed !== undefined) return OLD_COPY_WORDS.fetchFailed(failed);
     } else {
       const head = await gitHere(copy.path, ["rev-parse", "--verify", "--quiet", "HEAD"]);
       if (head.stdout.trim() !== "") {
@@ -6805,6 +6804,39 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (copier === undefined) return OLD_COPY_WORDS.noCopier;
     await copier.remove(copy.source, copy.path, copy.road);
     return undefined;
+  };
+  /** A clean copy's commits kept in the project's repo: its branches and its HEAD fetched beside the project's refs,
+   * then only the tips no branch, remote, tag or earlier rescue of the project reaches kept under refs/rescue, one
+   * ref per tip, a branch before HEAD; every fetched ref goes after. A copy shares nearly every branch with its
+   * project, and a ref kept for each one slows every git command in that repo. What git said where it failed. */
+  const rescueTips = async (top: string, from: string, name: string): Promise<string | undefined> => {
+    const incoming = `refs/rescue-incoming/${name}`;
+    try {
+      // HEAD rides the same fetch, so a commit on no branch is carried too.
+      const fetched = await gitHere(top, ["fetch", "--quiet", "--no-tags", from, `+refs/heads/*:${incoming}/heads/*`, `+HEAD:${incoming}/HEAD`], CLONE_MS);
+      if (fetched.exitCode !== 0) return gitSaid(fetched);
+      const unreached = await gitHere(top, ["rev-list", `--glob=${incoming}`, "--not", "--branches", "--remotes", "--tags", "--glob=refs/rescue"], CLONE_MS);
+      if (unreached.exitCode !== 0) return gitSaid(unreached);
+      const lacking = new Set(unreached.stdout.split("\n").filter(Boolean));
+      if (lacking.size === 0) return undefined;
+      const listed = await gitHere(top, ["for-each-ref", "--format=%(objectname) %(refname)", incoming]);
+      if (listed.exitCode !== 0) return gitSaid(listed);
+      const refs = listed.stdout.split("\n").filter(Boolean).map(line => ({ tip: line.slice(0, line.indexOf(" ")), ref: line.slice(line.indexOf(" ") + 1) }));
+      const ordered = [...refs.filter(r => r.ref !== `${incoming}/HEAD`), ...refs.filter(r => r.ref === `${incoming}/HEAD`)];
+      const kept = new Set<string>();
+      const lines: string[] = [];
+      for (const { tip, ref } of ordered) {
+        if (!lacking.has(tip) || kept.has(tip)) continue;
+        kept.add(tip);
+        const rest = ref === `${incoming}/HEAD` ? "HEAD" : ref.slice(`${incoming}/heads/`.length);
+        lines.push(`update refs/rescue/${name}/${rest} ${tip}`);
+      }
+      const put = await gitHere(top, ["update-ref", "--stdin"], INLINE_EXEC_MS, `${lines.join("\n")}\n`);
+      return put.exitCode === 0 ? undefined : gitSaid(put);
+    } finally {
+      const left = await gitHere(top, ["for-each-ref", "--format=delete %(refname)", incoming]);
+      if (left.stdout.trim() !== "") await gitHere(top, ["update-ref", "--stdin"], INLINE_EXEC_MS, left.stdout);
+    }
   };
   /** A folder's name as one part of a ref: what git refuses in a ref name turned to a dash. */
   const refPart = (name: string): string => name.replace(/[^A-Za-z0-9._-]/g, "-").replace(/\.\.+/g, "-").replace(/^[.-]+|\.lock$|\.$/g, "") || "copy";
