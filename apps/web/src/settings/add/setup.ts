@@ -213,7 +213,7 @@ export function checkRows(job: PlaceAddJob | undefined): StepLine[] {
   return CHECK_ROWS.map(row => {
     const mine = mineOf(row);
     const state: StepState = row.id === failedAt ? "failed" : rowDone(row) ? "done" : mine.length > 0 && job?.state === "running" ? "working" : "waiting";
-    const note = mine.filter(s => s.state === "done" && s.note !== undefined).at(-1)?.note;
+    const note = mine.filter(s => s.state !== "failed" && s.note !== undefined).at(-1)?.note;
     const fix = job === undefined ? undefined : addFix(job);
     return { id: row.id, name: row.name, state, ...(state === "failed" ? { said: job?.said ?? "", ...(fix === undefined ? {} : { fix }) } : note === undefined ? {} : { note }) };
   });

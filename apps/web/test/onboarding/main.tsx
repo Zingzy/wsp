@@ -173,7 +173,6 @@ const ADD_STEPS: Record<string, PlaceAddJob> = {
     state: "running",
     steps: [
       { step: "connect", state: "done", note: "Ubuntu 24.04" },
-      { step: "check", state: "done", note: "root, systemd, cgroup v2, 61 GB free" },
       { step: "chip", state: "done", note: "Linux x86_64" },
       { step: "root", state: "done" },
       { step: "system", state: "done", note: "systemd, cgroup v2" },
@@ -189,7 +188,6 @@ const ADD_STEPS: Record<string, PlaceAddJob> = {
     state: "failed",
     steps: [
       { step: "connect", state: "done", note: "Ubuntu 22.04" },
-      { step: "check", state: "running" },
       { step: "chip", state: "done", note: "Linux arm64" },
       { step: "root", state: "failed", note: "jumpbox logs in as a user that is not root, and root on the box is required: wsp runs its daemon there as a system service." },
     ],

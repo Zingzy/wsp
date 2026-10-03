@@ -160,6 +160,11 @@ describe("an install as the checks", () => {
     expect(checkRows(job({ state: "done", steps: [{ step: "connect", state: "done" }, { step: "chip", state: "done" }, { step: "root", state: "done" }, { step: "system", state: "done" }, { step: "disk", state: "done" }, { step: "reach", state: "done" }, { step: "wsp", state: "done" }, { step: "join", state: "done" }] })).at(-1)?.state).toBe("done");
   });
 
+  it("says what the running install is doing on its row", () => {
+    const rows = checkRows(job({ steps: [{ step: "connect", state: "done" }, { step: "reach", state: "done" }, { step: "wsp", state: "running", note: "x86_64" }] }));
+    expect(rows.at(-1)).toMatchObject({ id: "wsp", state: "working", note: "x86_64" });
+  });
+
   it("puts a refusal on the check that was running, the rest after it left waiting", () => {
     const rows = checkRows(job({ state: "failed", said: "jumpbox logs in as a user that is not root", fix: "Add it as root.", steps: [{ step: "connect", state: "done" }, { step: "check", state: "running" }, { step: "chip", state: "done" }, { step: "root", state: "failed", note: "jumpbox logs in as a user that is not root" }] }));
     expect(rows.map(r => r.state)).toEqual(["done", "done", "failed", "waiting", "waiting", "waiting", "waiting"]);
