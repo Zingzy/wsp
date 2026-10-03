@@ -6343,8 +6343,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const failedCreates = new Map<string, WorkspaceView>();
   const createStages = new Map<string, WorkspaceCreatingEvent>();
   bus.on("*", e => {
-    if (e.type === "workspace.creating") createStages.set(e.workspaceId, e);
-    else if (e.type === "workspace.created") createStages.delete(e.workspace.id);
+    if (e.type === "workspace.creating") {
+      // Held without the seq the bus stamped: sent again on a subscribe, it is no position in the stream.
+      const { seq: _seq, ...stage } = e;
+      createStages.set(e.workspaceId, stage);
+    } else if (e.type === "workspace.created") createStages.delete(e.workspace.id);
     else if (e.type === "workspace.deleted") createStages.delete(e.workspaceId);
   });
   const failedView = (id: string, name: string, kind: WorkspaceKind, golden: string, began: number, project: ProjectView, said: string): WorkspaceView => ({

@@ -12,7 +12,7 @@ import { DisconnectedError, RequestError, type Api, type ConnStatus, type Protoc
 import { failureOf, type Failure } from "./failure.js";
 import { addNotice, noticeFailure } from "../notices/store.js";
 import { lastWorkspaceId, rememberWorkspace } from "./lastWorkspace.js";
-import { claimKept, keepCreations, keptCreations, letGo, own } from "./keptCreations.js";
+import { claimKept, claiming, claimsAnswered, keepCreations, keptCreations, letGo, own } from "./keptCreations.js";
 import { clearLegacyPreferences, legacyPreferences } from "./legacyPreferences.js";
 import { bootPreferences, rememberFirstPaint } from "./firstPaint.js";
 import { applyAddStage, takeAdds } from "../settings/adds.js";
@@ -432,7 +432,7 @@ const restored = new Set(keptAtLoad.map(c => c.key));
  * alone, by the name and the project it was asked with, the name being one no other workspace holds. A row this page
  * asked for needs no name, since its create's reply names the workspace. */
 const madeAs = (c: Creation, w: WorkspaceView): boolean =>
-  c.workspaceId === w.id || (c.workspaceId === null && c.failed === null && restored.has(c.key) && c.name === w.name && c.project === w.project.id);
+  !claiming(c.key) && (c.workspaceId === w.id || (c.workspaceId === null && c.failed === null && restored.has(c.key) && c.name === w.name && c.project === w.project.id));
 
 /** The rows a reload must not lose: a queued message lives nowhere else. A row whose name a workspace made before it
  * was asked for already holds is refused by the host, and kept it could be taken for that workspace after a reload. */
@@ -599,7 +599,10 @@ export const useStore = create<State>((set, get) => {
   // What bind fetches and a reconnect fetches again: the list plus the status snapshot that also arms status.subscribe.
   const pull = (api: Api): void => {
     heard.clear();
-    void get().refresh().catch((e: unknown) => noticeFailure(e, said => `Workspaces not read: ${said}`));
+    // A restored row is neither handed over nor judged before this page knows it owns it.
+    void claimsAnswered()
+      .then(() => get().refresh())
+      .catch((e: unknown) => noticeFailure(e, said => `Workspaces not read: ${said}`));
     void api
       .watchStatuses()
       .then(statuses => set({ statuses: Object.fromEntries(statuses.map(s => [s.id, s])) }))
@@ -831,7 +834,7 @@ export const useStore = create<State>((set, get) => {
     async retryCreation(key) {
       const creation = get().creations.find(c => c.key === key);
       // A row another client started carries no project, so there is nothing here to ask again.
-      if (!creation || creation.project === undefined) return;
+      if (!creation || creation.project === undefined || claiming(key)) return;
       // From here the create's own reply answers for the row, as for a row this page asked for.
       restored.delete(key);
       patchCreation(key, c => ({ ...c, workspaceId: null, lines: NO_LINES, failed: null }));
@@ -1216,6 +1219,9 @@ export const useStore = create<State>((set, get) => {
             const own = s.creations.find(c => c.workspaceId === e.workspaceId) ?? s.creations.find(c => c.workspaceId === null && c.name === e.name && c.failed === null);
             const failed = e.stage === "failed" ? { title: couldNotStart(e.name), detail: e.message } : null;
             if (own === undefined) {
+              // A refusal of a create this window holds no row of, as the subscribe's last word of a command line's
+              // failure is, has nobody here to tell.
+              if (failed !== null) return {};
               return { creations: [...s.creations, { key: `${CREATION_PREFIX}${e.workspaceId}`, name: e.name, askedAt: Date.now() - e.elapsedMs, workspaceId: e.workspaceId, lines: [line], failed }] };
             }
             heard.add(own.key);

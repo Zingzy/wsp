@@ -331,12 +331,12 @@ describe("a copy being made, as every window hears it", () => {
     const made = rt.workspaces.create({ project: project.id, name: "one" });
     await until(() => heard.length === 1);
     expect(heard[0]).toMatchObject({ name: "one", stage: "fork-requested" });
-    expect(rt.workspaces.creating()).toEqual([heard[0]]);
+    expect(rt.workspaces.creating()).toEqual([{ ...heard[0], seq: undefined }]);
     refuse(new Error("the disk is full"));
     await expect(made).rejects.toThrow("the disk is full");
     const failed = heard.at(-1)!;
     expect(failed).toMatchObject({ workspaceId: heard[0]!.workspaceId, name: "one", stage: "failed", message: "the disk is full" });
-    expect(rt.workspaces.creating()).toEqual([failed]);
+    expect(rt.workspaces.creating()).toEqual([{ ...failed, seq: undefined }]);
     expect(await rt.workspaces.resolve("one")).toMatchObject({ id: failed.workspaceId, phase: "gone", gone: "the disk is full" });
     await rt.workspaces.delete(failed.workspaceId);
     expect(rt.workspaces.creating()).toEqual([]);

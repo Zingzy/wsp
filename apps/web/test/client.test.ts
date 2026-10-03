@@ -585,6 +585,20 @@ describe("ProtocolClient event cursor", () => {
     client.close();
   });
 
+  it("an event stamped behind the cursor leaves it where it was, so a re-subscribe never asks for what it already heard", async () => {
+    ScriptedSocket.reply = subscribeReply(10);
+    const { client, gaps, socket } = newClient();
+    await client.connect();
+    client.subscribe(() => {});
+    await replied();
+    push(socket(0), { type: "workspace.napped", workspaceId: "ws_1", seq: 11 });
+    push(socket(0), { type: "workspace.creating", workspaceId: "ws_2", name: "x", stage: "fork-requested", message: "m", elapsedMs: 1, seq: 3 });
+    await redial(client, socket(0));
+    expect(socket(1).frames("events.subscribe")[0]).toMatchObject({ after: 11 });
+    expect(gaps).toEqual([]);
+    client.close();
+  });
+
   it("a reply without a head and events without seq leave the cursor where it was", async () => {
     ScriptedSocket.reply = f => (f["op"] === "events.subscribe" ? { id: f["id"], ok: true } : undefined);
     const { client, gaps, socket } = newClient();

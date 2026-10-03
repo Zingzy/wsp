@@ -372,7 +372,7 @@ export class ProtocolClient {
         if (reading.success) for (const fn of this.#sys) fn(reading.data);
         return;
       }
-      if (typeof msg.seq === "number") this.#cursor = msg.seq;
+      if (typeof msg.seq === "number" && (this.#cursor === undefined || msg.seq > this.#cursor)) this.#cursor = msg.seq;
       for (const fn of this.#listeners) fn(msg as unknown as ProtocolEvent);
       return;
     }

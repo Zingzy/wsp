@@ -1353,6 +1353,8 @@ describe("a window that subscribes after a create began", () => {
       { name: "refused", stage: "failed", message: "Snapshot not found" },
       { name: "held", stage: "fork-requested" },
     ]);
+    // A snapshot frame is no position in the stream: a cursor taken off it would ask for events heard long ago.
+    for (const e of creating(window)) expect(e).not.toHaveProperty("seq");
     const plain = await WsClient.connect(srv.port, { token: "secret" });
     await plain.request("events.subscribe");
     await plain.request("workspaces.list");

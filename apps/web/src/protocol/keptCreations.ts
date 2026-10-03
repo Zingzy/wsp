@@ -87,6 +87,9 @@ const owned = new Set<string>();
 const everOwned = new Set<string>();
 const releases = new Map<string, () => void>();
 const gone = new Set<string>();
+/** Restored rows whose lock has not answered yet: nothing hands one over or judges it until it does. */
+const pending = new Set<string>();
+let answered: Promise<void> = Promise.resolve();
 
 const lockName = (key: string): string => `wsp:creation:${key}`;
 
@@ -104,8 +107,11 @@ function hold(key: string, taken: () => void, refused: () => void): void {
       refused();
       return undefined;
     }
-    if (gone.has(key)) return undefined;
     taken();
+    if (gone.has(key)) {
+      owned.delete(key);
+      return undefined;
+    }
     return new Promise<void>(release => releases.set(key, release));
   });
 }
@@ -118,8 +124,27 @@ const take = (key: string): void => {
 /** Asks for the rows a page before this one left: each is this page's once its lock is, and another page's while
  * that page holds it, which `lost` drops from this page's store. */
 export function claimKept(rows: readonly Creation[], lost: (key: string) => void): void {
-  for (const row of rows) hold(row.key, () => take(row.key), () => lost(row.key));
+  answered = Promise.all(
+    rows.map(
+      row =>
+        new Promise<void>(done => {
+          pending.add(row.key);
+          const answer = (then: () => void) => () => {
+            pending.delete(row.key);
+            then();
+            done();
+          };
+          hold(row.key, answer(() => take(row.key)), answer(() => lost(row.key)));
+        }),
+    ),
+  ).then(() => undefined);
 }
+
+/** Settles once every restored row's lock has answered. */
+export const claimsAnswered = (): Promise<void> => answered;
+
+/** Whether a restored row still waits on its lock. */
+export const claiming = (key: string): boolean => pending.has(key);
 
 /** A row this page made under a key it minted is its own from the press. */
 export function own(key: string): void {

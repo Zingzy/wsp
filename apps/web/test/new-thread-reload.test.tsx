@@ -87,11 +87,14 @@ function fakeApi(listed: WorkspaceView[] = [], creating: WorkspaceCreatingEvent[
 /** A create's stage as the host says it. */
 const stage = (workspaceId: string, name: string, at: WorkspaceCreatingEvent["stage"], message = "copying /root to /root-copy", elapsedMs = 10): WorkspaceCreatingEvent => ({ type: "workspace.creating", workspaceId, name, stage: at, message, elapsedMs });
 
-/** The lock manager every page of one origin shares: a lock stands until the callback's promise settles. */
-function installLocks(): { held: Set<string>; remove: () => void } {
+/** The lock manager every page of one origin shares: a lock stands until the callback's promise settles. A late
+ * one answers nothing until `answer` is called. */
+function installLocks(late = false): { held: Set<string>; answer: () => void; remove: () => void } {
   const held = new Set<string>();
+  const waiting: Array<() => void> = [];
   const locks = {
     request: async (name: string, _opts: unknown, take: (lock: { name: string } | null) => unknown) => {
+      if (late) await new Promise<void>(resolve => waiting.push(resolve));
       if (held.has(name)) return take(null);
       held.add(name);
       try {
@@ -102,7 +105,7 @@ function installLocks(): { held: Set<string>; remove: () => void } {
     },
   };
   Object.defineProperty(window.navigator, "locks", { value: locks, configurable: true });
-  return { held, remove: () => void delete (window.navigator as { locks?: unknown }).locks };
+  return { held, answer: () => waiting.splice(0).forEach(go => go()), remove: () => void delete (window.navigator as { locks?: unknown }).locks };
 }
 
 let restoreLayout: () => void = () => {};
@@ -296,6 +299,37 @@ describe("New thread's first message across a reload", () => {
     } finally {
       locks.remove();
     }
+  });
+
+  it("a kept row whose workspace is there before its lock answers waits for the lock, is handed over once, and is not kept for the next load", async () => {
+    await sendFromHome(fakeApi().api);
+    const locks = installLocks(true);
+    try {
+      cleanup();
+      vi.resetModules();
+      const { useStore: store } = await import("../src/protocol/store.js");
+      const { useComposerDraftStore: drafts } = await import("../src/components/chat/composerDraftStore.js");
+      const queue = () => drafts.getState().queues["ws_new"]?.map(r => r.prompt) ?? [];
+      store.setState({ projects: [PROJECT] });
+      store.getState().bind(fakeApi([view("ws_new", TASK)]).api);
+      reloaded = store;
+      store.getState().applyEvent({ type: "workspace.created", workspace: view("ws_new", TASK) });
+      await new Promise(resolve => setTimeout(resolve, 0));
+      expect(queue()).toEqual([]);
+      locks.answer();
+      await waitFor(() => expect(queue()).toEqual([TASK]));
+      expect(JSON.parse(window.localStorage.getItem(KEPT_CREATIONS_KEY) ?? "{}")).toEqual({});
+      store.getState().setConn("closed");
+      const next = await reload(fakeApi([view("ws_new", TASK)]).api);
+      expect(next.queue("ws_new"), "once").toEqual([TASK]);
+    } finally {
+      locks.remove();
+    }
+  });
+
+  it("a refused create the host holds that no kept row here names draws nothing, while one still being made draws its row", async () => {
+    const { store } = await reload(fakeApi([], [stage("ws_cli", "from the command line", "failed", "the disk is full"), stage("ws_else", "made elsewhere", "fork-requested")]).api);
+    expect(store.getState().creations.map(c => c.name)).toEqual(["made elsewhere"]);
   });
 
   it("the task typed again after a reload, while the kept row's create is gone, lands once on the workspace it makes", async () => {
