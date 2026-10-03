@@ -5,7 +5,9 @@
 // projects. The heading's project name is the project picker, one line under
 // the box says where the thread will run, the header reads New thread, and the
 // composer's footer carries no project chip and no folder walker. A New thread
-// from a workspace's own menu still opens in that workspace.
+// from a workspace's own menu still opens in that workspace. One send starts one
+// thread, even where React runs the page's effects twice, as the dev window does.
+import { StrictMode } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_PREFERENCES, type HarnessCatalog, type PlaceView, type Preferences, type ProjectView, type WorkspaceView } from "@wsp/protocol";
@@ -19,6 +21,7 @@ import { openCommandPalette } from "../src/commandPaletteBus.js";
 import { runShellCommand } from "../src/shell/shellCommands.js";
 import { onAddProjectRequest } from "../src/shell/shellRequests.js";
 import { PROJECT_PICK_KEY } from "../src/sidebar/picks.js";
+import { composerEditor, press, typeInto } from "./composer-harness.js";
 import { installFakeLayout } from "./fake-layout.js";
 import { caps } from "./caps.js";
 import { noDaemonApi } from "./fake-daemon-api.js";
@@ -364,5 +367,37 @@ describe("New thread from the palette", () => {
     fireEvent.click(rowNamed("New thread"));
     await waitFor(() => expect(projectRows().map(rowTitle)).toEqual(["wsp", "py_spoo_url"]));
     expect(useStore.getState().projectHome).toBeNull();
+  });
+});
+
+describe("New thread's send", () => {
+  const MADE: WorkspaceView = { id: "ws_new", name: "what do you think about yams", machineId: "local", project: { id: SPOO.id, name: SPOO.name, path: SPOO.path, computer: "here" }, phase: "running", golden: "", createdAt: "2026-10-03T00:00:00Z" };
+
+  it("starts one thread, even where React runs the page's effects twice", async () => {
+    const started: string[] = [];
+    const api: Api = {
+      ...fakeApi([WSP, SPOO], CURRENT),
+      createWorkspace: async () => MADE,
+      startSession: async o => {
+        started.push(`${o.workspaceId}: ${o.prompt}`);
+        return { id: `s${started.length}`, workspaceId: o.workspaceId, harness: "claude", status: "running", prompt: o.prompt, startedAt: 0 };
+      },
+    };
+    useStore.setState({ api: null, conn: "live", workspaces: [], statuses: {}, creations: [], sessions: {}, ready: false, selectedId: null, selectedThreadId: null, projectHome: null, freshThread: false, preferences: CURRENT, projects: [], places: [], landings: {} });
+    useStore.getState().bind(api);
+    render(
+      <StrictMode>
+        <Shell />
+      </StrictMode>,
+    );
+    await waitFor(() => expect(useStore.getState().ready).toBe(true));
+    act(() => useStore.setState({ projects: [WSP, SPOO], places: PLACES }));
+    act(() => useStore.getState().openProjectHome(SPOO.id));
+    await waitFor(() => expect(document.querySelector("[data-k=project-home]")).not.toBeNull());
+    await typeInto(composerEditor(), "what do you think about yams?");
+    await press(composerEditor(), "Enter");
+    await waitFor(() => expect(started).not.toEqual([]));
+    await act(() => new Promise(r => setTimeout(r, 300)));
+    expect(started).toEqual(["ws_new: what do you think about yams?"]);
   });
 });
