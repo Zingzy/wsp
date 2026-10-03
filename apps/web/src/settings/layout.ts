@@ -21,3 +21,6 @@ export const SECTION_HEAD = "flex min-h-7 items-center text-[13.5px] font-medium
 export const SELECT_WIDTH = "h-[30px] min-h-[30px] w-44 rounded-[7px] text-[13px] sm:text-[13px] max-sm:w-36";
 /** A field a person types into in a setting row, at the select's height and size. */
 export const ROW_FIELD = "h-[30px] rounded-[7px] [&_input]:h-[28px] [&_input]:text-[13px] [&_input]:leading-[28px] sm:[&_input]:h-[28px] sm:[&_input]:text-[13px] sm:[&_input]:leading-[28px]";
+
+/** The space between a page's cards. */
+export const PAGE_GAP = "gap-[30px]";

@@ -26,6 +26,7 @@ import {
   SIGN_IN_LINE_REFUSAL,
   AGENTS_KEY_REFUSAL,
   PLACE_LOGIN_REFUSED_KIND,
+  PLACE_HOST_KEY_KIND,
   PLACE_KEY_REFUSAL,
   PLACE_UNKNOWN_REFUSAL,
   placeRefusalTranscript,
@@ -2152,6 +2153,21 @@ describe("the adds this host keeps", () => {
     });
     expect(job).not.toHaveProperty("kind");
     expect(Date.parse(String(job!["startedAt"]))).not.toBeNaN();
+  });
+
+  it("keeps the key a computer never met answered with, under its kind, so the app's Trust reads it off the record", async () => {
+    const key = "ssh-ed25519 SHA256:tK3mX9Qf2bWq8vRz0YhN4cL7pJd1sE6gA5uF8oH2kIw";
+    runtime = createRuntime({
+      backend: stubBackend(),
+      store: memoryStore(),
+      adapters: {},
+      placeLinks: { ...wiring(newPlaceKeyPair()), install: async () => Promise.reject(Object.assign(new Error("maya@box has never been reached"), { kind: PLACE_HOST_KEY_KIND, hostKey: key })) },
+    });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices, door });
+    const c = await WsClient.connect(srv.port, { token: "host-token" });
+    sockets.push(c.ws);
+    expect(await c.request("places.add", { addId: "a_maya", address: "maya@box" })).toMatchObject({ ok: false, kind: PLACE_HOST_KEY_KIND });
+    expect(await addsOf(c)).toEqual([expect.objectContaining({ addId: "a_maya", state: "failed", kind: PLACE_HOST_KEY_KIND, hostKey: key })]);
   });
 
   it("keeps the kind a refused login carries, so the app's login fix reads off the record", async () => {

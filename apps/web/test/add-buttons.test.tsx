@@ -10,7 +10,6 @@ import { AgentsSurface } from "../src/components/agents/AgentsSurface.js";
 import { TooltipProvider } from "../src/components/ui/tooltip.js";
 import { useStore } from "../src/protocol/store.js";
 import { FirstRun } from "../src/shell/FirstRun.js";
-import { useAdds } from "../src/settings/adds.js";
 import { ADD_COMPUTER_WORDS } from "../src/settings/format.js";
 import { drawnGroups } from "../src/settings/groups.js";
 import { useSettingsStore, type SettingsAt } from "../src/settings/settingsStore.js";
@@ -78,20 +77,13 @@ describe("the shared Add button on the settings pages", () => {
     expect([...seen]).toEqual(expect.arrayContaining([ADD_COMPUTER_WORDS.title, ADD_COMPUTER_WORDS.addCloud, "Add a project", "Add"]));
   });
 
-  it("is every Add in the Add a computer panel, on each road and on the screen a finished add goes on to", async () => {
-    useAdds.setState({ jobs: { a_1: { addId: "a_1", address: "root@spoo", startedAt: "2026-09-12T11:00:00.000Z", state: "done", steps: [], placeId: box.id } }, putAway: null });
+  it("is every Add in the Add a cloud panel", async () => {
     mountSettings({ api: api(), at: { kind: "group", group: "computers" } });
     await settle();
-    fireEvent.click(screen.getByRole("button", { name: ADD_COMPUTER_WORDS.title }));
+    fireEvent.click(screen.getByRole("button", { name: ADD_COMPUTER_WORDS.addCloud }));
     await settle();
-    for (const road of ["ssh", "cloud", "code"]) {
-      fireEvent.click(document.querySelector(`[data-add-road='${road}']`)!);
-      await settle();
-      expect({ road, strays: strays() }).toEqual({ road, strays: [] });
-    }
-    fireEvent.click(document.querySelector("[data-add-road='ssh']")!);
-    await settle();
-    expect(document.querySelector("[data-k=joined] [data-add-button]")?.textContent).toBe(ADD_COMPUTER_WORDS.another);
+    expect(document.querySelector("[data-k='road-cloud']")).not.toBeNull();
+    expect({ road: "cloud", strays: strays() }).toEqual({ road: "cloud", strays: [] });
   });
 });
 
@@ -114,7 +106,7 @@ const mountPanel = async (): Promise<void> => {
 };
 
 describe("the one size of the shared Add button", () => {
-  it("is the 32 px keycap on the key road, the ssh road and the first run", async () => {
+  it("is the 32 px keycap on the key road and the first run", async () => {
     mountSettings({ api: api(), at: { kind: "group", group: "computers" } });
     await settle();
     fireEvent.click(screen.getByRole("button", { name: ADD_COMPUTER_WORDS.addCloud }));
@@ -122,9 +114,6 @@ describe("the one size of the shared Add button", () => {
     const keyAdds = document.querySelectorAll("[data-k='cloud-save'][data-add-button]");
     expect(keyAdds.length).toBeGreaterThan(0);
     keyAdds.forEach(keycap);
-    fireEvent.click(document.querySelector("[data-add-road='ssh']")!);
-    await settle();
-    keycap(document.querySelector("[data-k='ssh-add']"));
     cleanup();
     render(<FirstRun />);
     keycap(document.querySelector("[data-k=add-project]"));

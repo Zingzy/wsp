@@ -106,6 +106,18 @@ describe("the preferences record", () => {
     expect(PreferencesPatch.safeParse({ computerLook: { pl_1: { icon: "cloud", hue: "blue" } } }).success).toBe(false);
   });
 
+  it("a recipe's icon lands per recipe, a null entry dropping it, and a record that never picked one carries no field", () => {
+    expect(DEFAULT_PREFERENCES).not.toHaveProperty("recipeLook");
+    const one = applyPreferencesPatch(DEFAULT_PREFERENCES, { recipeLook: { builders: { icon: "rocket" } } });
+    expect(one.recipeLook).toEqual({ builders: { icon: "rocket" } });
+    const two = applyPreferencesPatch(one, { recipeLook: { minimal: { icon: "zap" } }, theme: "dark" });
+    expect(two.recipeLook).toEqual({ builders: { icon: "rocket" }, minimal: { icon: "zap" } });
+    expect(applyPreferencesPatch(two, { theme: "light" }).recipeLook).toEqual(two.recipeLook);
+    expect(applyPreferencesPatch(two, { recipeLook: { builders: null } }).recipeLook).toEqual({ minimal: { icon: "zap" } });
+    expect(applyPreferencesPatch(DEFAULT_PREFERENCES, { theme: "dark" })).not.toHaveProperty("recipeLook");
+    expect(PreferencesPatch.safeParse({ recipeLook: { builders: { icon: "toaster" } } }).success).toBe(false);
+  });
+
   it("server icons are on until the person turns them off, a stored record without the switch reading as on", () => {
     expect(preferencesFrom({ theme: "light" }).serverIcons).toBe(true);
     const off = applyPreferencesPatch(DEFAULT_PREFERENCES, { serverIcons: false });

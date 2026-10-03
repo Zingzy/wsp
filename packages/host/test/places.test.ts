@@ -31,7 +31,7 @@ afterEach(() => {
 });
 import { WebSocketServer } from "ws";
 import WebSocket from "ws";
-import { macKindOf, ALREADY_JOINED_LINE, DAEMON_VERSION, configHardLinkRefusal, backUrl, PLACE_LOGIN_REFUSED_KIND, hostKeyAsk, hostKeyMismatchRefusal, hostKeyUnconfirmedRefusal, hostKeyUnscannableRefusal, PLACE_ROOT_SHELLS, placeRootShellRefusal, addedProjectLine, addedProjectOn, agentsCell, placeCurrentLine, placeNoPicksLine, placeProvisioningLine, setupWord, RecipeFile, type PlaceProvisionRow, type PendingComputer, type PlaceSetup, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, placeFileText, MCP_ID_PREFIX, placeDaemonBehind, placeDaemonPaths, placeKeptForLinkLine, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeProvisionPaths, placeUpdateLine, shellQuote, workFolderIn, wsUrlOf, type PlaceBack, type PlaceDoorView, type PlaceView, type SignInLine } from "@wsp/protocol";
+import { macKindOf, ALREADY_JOINED_LINE, DAEMON_VERSION, configHardLinkRefusal, backUrl, PLACE_LOGIN_REFUSED_KIND, PLACE_HOST_KEY_KIND, hostKeyAsk, hostKeyMismatchRefusal, hostKeyUnconfirmedRefusal, hostKeyUnscannableRefusal, PLACE_ROOT_SHELLS, placeRootShellRefusal, addedProjectLine, addedProjectOn, agentsCell, placeCurrentLine, placeNoPicksLine, placeProvisioningLine, setupWord, RecipeFile, type PlaceProvisionRow, type PendingComputer, type PlaceSetup, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, placeFileText, MCP_ID_PREFIX, placeDaemonBehind, placeDaemonPaths, placeKeptForLinkLine, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeProvisionPaths, placeUpdateLine, shellQuote, workFolderIn, wsUrlOf, type PlaceBack, type PlaceDoorView, type PlaceView, type SignInLine } from "@wsp/protocol";
 import { CATALOG_AGENTS, CODEX_TOML } from "@wsp/catalog";
 import { PlaceAddTakenBackError, PlaceLoginRefusedError, freshEphemeral, makeSeal, sealKeys, sharedSecret, type PlaceBackHolder, type PlaceLogin, type PlaceStaging, type PlaceUpdateRequest, type Seal } from "@wsp/runtime";
 import { MissingKnownHostsError, missingKnownHostsLine, OWN_MARK, SshBackend, SSH_LINE_CAP, SSH_READ_SCRIPT, SSH_WORD_REFUSAL, keyFingerprint, sshWordReach, type SshLocalRun, type SshReach, type SshTransport } from "@wsp/engine";
@@ -2392,7 +2392,11 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
       offeredKeyFor: async () => ({ key: BOX_KEY }),
     };
     const install = placeInstaller({ backend: never as never, ...assets(tmp("first-dial"), [X86]) });
-    await expect(install({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"] }, box.stage)).rejects.toThrow(hostKeyUnconfirmedRefusal("maya@box", BOX_KEY));
+    const refused = await install({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"] }, box.stage).catch((e: unknown) => e as Error & { kind?: string; hostKey?: string });
+    expect(refused).toBeInstanceOf(Error);
+    expect((refused as Error).message).toBe(hostKeyUnconfirmedRefusal("maya@box", BOX_KEY));
+    // The key rides the refusal as a field under its own kind, so a client that offers Trust reads it, never the words.
+    expect(refused).toMatchObject({ kind: PLACE_HOST_KEY_KIND, hostKey: BOX_KEY });
     // Nothing was dialled, so nothing was read off the box and nothing of wsp's landed on it.
     expect(box.ran).toEqual([]);
     expect(box.landed).toEqual([]);
@@ -2529,7 +2533,8 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
     expect(await kindOf(placeInstaller({ backend: loop.backend as never, ...assets(tmp("kind-loop"), [X86]) })({ address: "root@spoo", code: "7QK3M2VD", hostUrls: ["http://127.0.0.1:4400"] }, loop.stage))).toBeUndefined();
     const stranger = fakeBox("x86_64");
     const unmet = { ...(stranger.backend as Record<string, unknown>), keyFor: async () => undefined };
-    expect(await kindOf(placeInstaller({ backend: unmet as never, ...assets(tmp("kind-unmet"), [X86]) })({ address: "root@spoo", code: "7QK3M2VD", hostUrls: urls }, stranger.stage))).toBeUndefined();
+    // A computer never met carries its own kind, the host key's, never the login's.
+    expect(await kindOf(placeInstaller({ backend: unmet as never, ...assets(tmp("kind-unmet"), [X86]) })({ address: "root@spoo", code: "7QK3M2VD", hostUrls: urls }, stranger.stage))).toBe(PLACE_HOST_KEY_KIND);
   });
 });
 

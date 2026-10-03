@@ -4,7 +4,7 @@
 // page, and the acts a row can raise. A page is a plain function of this, so
 // the search can walk every group's rows with one call each and the sidebar
 // can dim a group with no match.
-import type { AccountView, HarnessCatalog, PlaceView, Preferences, PreferencesPatch, ProjectView, ReleaseView, SessionView, WorkspaceLanding, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
+import type { AccountView, HarnessCatalog, PendingComputer, PlaceView, Preferences, PreferencesPatch, ProjectView, ReleaseView, SessionView, WorkspaceLanding, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
 import { useNowMinute } from "../hooks/useNowMinute.js";
 import { isDesktopShell } from "../lib/desktopShell.js";
 import type { Api } from "../protocol/client.js";
@@ -14,11 +14,16 @@ import { useStore } from "../protocol/store.js";
 import { shellVersions } from "../shell/shellVersion.js";
 import { inProjectOrder } from "../sidebar/threadTree.js";
 import type { AddRoad } from "./AddComputer.js";
+import { useRecipes } from "./recipesStore.js";
 import { resolveAt, useSettingsStore, type SettingsAt, type SettingsReads, type SettingsState } from "./settingsStore.js";
 
 export interface SettingsContext {
   readonly preferences: Preferences;
   readonly places: ReadonlyArray<PlaceView>;
+  /** The adds that have not reached Set up. */
+  readonly pending: ReadonlyArray<PendingComputer>;
+  /** How many recipes are saved, which decides whether Add a computer offers Start from. */
+  readonly recipes: number;
   /** Why the host refused the place list, while it does: the Computers page says so rather than drawing it empty. */
   readonly placesRefused: Failure | null;
   /** The same for the project list and the Projects page. */
@@ -61,6 +66,8 @@ export const accountOf = (reads: SettingsReads): AccountView | null => reads.acc
 export function useSettingsContext(): SettingsContext {
   const preferences = useStore(s => s.preferences);
   const places = useStore(s => s.places);
+  const pending = useStore(s => s.pending);
+  const recipes = useRecipes(s => s.recipes?.length ?? 0);
   const placesRefused = useStore(s => s.placesRefused);
   const projectsRefused = useStore(s => s.projectsRefused);
   const projects = useStore(s => s.projects);
@@ -79,6 +86,8 @@ export function useSettingsContext(): SettingsContext {
   return {
     preferences,
     places,
+    pending,
+    recipes,
     placesRefused,
     projectsRefused,
     projects: inProjectOrder(projects, project => project.id, preferences.projectOrder),

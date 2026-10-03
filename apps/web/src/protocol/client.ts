@@ -6,6 +6,11 @@
 // token; the store re-runs its standing fetches when the status comes back
 // to live.
 import {
+  PendingComputer,
+  PlaceSetup,
+  RecipeView,
+  type RecipeFile,
+  type RecipeOptions,
   AccountView,
   AgentRow,
   type AgentSetupSet,
@@ -403,6 +408,8 @@ export interface PlaceRemoved {
 export interface SshLogin {
   address: string;
   port?: number;
+  /** The host key the person confirmed for a computer this one has never dialled. */
+  hostKey?: string;
 }
 
 export interface Api {
@@ -641,7 +648,21 @@ export interface Api {
   /** Every computer this wsp runs on: this one, the ones joined to it, and the provider it forks on; and beside
    * them every add over ssh the host is running and the last it finished. Optional so a fixture with no Settings
    * page need not fake it. */
-  placesList?(): Promise<{ places: PlaceView[]; adds: PlaceAddJob[] }>;
+  placesList?(): Promise<{ places: PlaceView[]; adds: PlaceAddJob[]; pending?: PendingComputer[] }>;
+  /** Sets a computer up from the picks given, a saved recipe, or the choices its pending add holds; the steps ride
+   * place.setup events under `addId`. */
+  placesSetup?(ref: string, o: { choices?: RecipeFile; recipe?: string; addId?: string }): Promise<{ addId: string; place: PlaceView; setup?: PlaceSetup; said?: string }>;
+  /** Moves a computer onto a saved recipe, or onto none. Absent until the host serves it; the picker is held. */
+  placesFollow?(placeId: string, recipe: string): Promise<PlaceView>;
+  /** Keeps the picks so far on a pending add, and the recipe they started from. */
+  placesChoose?(ref: string, choices: RecipeFile, recipe?: string): Promise<PendingComputer>;
+  /** Every saved recipe, with what it holds and the computers that follow it. */
+  recipesList?(): Promise<RecipeView[]>;
+  /** Writes a recipe whole, from a file or from a computer's own picks, which then follows it. */
+  recipesSave?(name: string, from: { file: RecipeFile } | { computer: string }): Promise<RecipeView>;
+  recipesRemove?(name: string): Promise<RecipeView>;
+  /** What a recipe can pick from on the computer running the host, read now. */
+  recipesOptions?(): Promise<RecipeOptions>;
   /** Every project this wsp holds, which is what New thread opens on and the palette's page of projects lists.
    * Optional so a fixture that makes no workspace need not fake it. */
   projectsList?(): Promise<ProjectView[]>;
@@ -926,12 +947,22 @@ export function makeApi(c: ProtocolClient): Api {
       EditorId.parse((await c.request<{ editor?: unknown }>("editor.open", { workspaceId, path, ...(line !== undefined ? { line } : {}), ...(editor !== undefined ? { editor } : {}) })).editor),
     sshInclude: async on => (await c.request<{ sshInclude?: unknown }>("ssh.include", on !== undefined ? { on } : {})).sshInclude === true,
     addComputerOverSsh: async (login, addId) =>
-      PlaceView.parse((await c.request<{ place?: unknown }>("places.add", { addId, address: login.address, ...(login.port === undefined ? {} : { sshPort: login.port }) })).place),
+      PlaceView.parse((await c.request<{ place?: unknown }>("places.add", { addId, address: login.address, ...(login.port === undefined ? {} : { sshPort: login.port }), ...(login.hostKey === undefined ? {} : { hostKey: login.hostKey }) })).place),
     // Parsed, not trusted: the sheet draws only steps and states the wire type vouches for.
     placesList: async () => {
-      const read = await c.request<{ places?: unknown; adds?: unknown }>("places.list");
-      return { places: PlaceView.array().parse(read.places), adds: PlaceAddJob.array().parse(read.adds ?? []) };
+      const read = await c.request<{ places?: unknown; adds?: unknown; pending?: unknown }>("places.list");
+      return { places: PlaceView.array().parse(read.places), adds: PlaceAddJob.array().parse(read.adds ?? []), pending: PendingComputer.array().parse(read.pending ?? []) };
     },
+    placesSetup: async (ref, o) => {
+      const read = await c.request<{ addId?: unknown; place?: unknown; setup?: unknown; said?: unknown }>("places.setup", { ref, ...o });
+      return { addId: String(read.addId), place: PlaceView.parse(read.place), ...(read.setup === undefined ? {} : { setup: PlaceSetup.parse(read.setup) }), ...(typeof read.said === "string" ? { said: read.said } : {}) };
+    },
+    placesChoose: async (ref, choices, recipe) => PendingComputer.parse((await c.request<{ pending?: unknown }>("places.choose", { ref, choices, ...(recipe === undefined ? {} : { recipe }) })).pending),
+    recipesList: async () => RecipeView.array().parse((await c.request<{ recipes?: unknown }>("recipes.list")).recipes),
+    recipesSave: async (name, from) => RecipeView.parse((await c.request<{ recipe?: unknown }>("recipes.save", { name, ...("file" in from ? { file: from.file } : { from: from.computer }) })).recipe),
+    recipesRemove: async name => RecipeView.parse((await c.request<{ recipe?: unknown }>("recipes.remove", { name })).recipe),
+    // The options carry names the host read off this computer, drawn as text and sent back only inside a recipe.
+    recipesOptions: async () => (await c.request<{ options: RecipeOptions }>("recipes.options")).options,
     projectsList: async () => ProjectView.array().parse((await c.request<{ projects?: unknown }>("projects.list")).projects),
     projectsAdd: async (source, on, into) => ProjectView.parse((await c.request<{ project?: unknown }>("projects.add", { source, ...(on === undefined ? {} : { on }), ...(into === undefined ? {} : { into }) })).project),
     projectsDefaults: async () => Object.fromEntries(Object.entries((await c.request<{ defaults?: Record<string, unknown> }>("projects.defaults")).defaults ?? {}).map(([id, defaults]) => [id, ThreadDefaults.parse(defaults)])),
