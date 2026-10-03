@@ -44,6 +44,8 @@ export interface SettingsContext {
   readonly openAddComputer: () => void;
   /** The Add a computer panel's ask off the Computers page's own buttons, and the press that makes one. */
   readonly addAsked: SettingsState["addAsked"];
+  /** The computer the Agents page reads, by its id; null for the one the host runs on. */
+  readonly agentsPlace: SettingsState["agentsPlace"];
   readonly askAdd: (road: AddRoad | null) => void;
   readonly openAddProject: () => void;
   readonly rereadDevices: () => void;
@@ -71,6 +73,7 @@ export function useSettingsContext(): SettingsContext {
   const release = useStore(s => s.release);
   const reads = useSettingsStore(s => s.reads);
   const addAsked = useSettingsStore(s => s.addAsked);
+  const agentsPlace = useSettingsStore(s => s.agentsPlace);
   // The minute clock every countdown in the app reads, as a stamp.
   const now = Date.parse(`${useNowMinute()}:00Z`);
   return {
@@ -95,6 +98,7 @@ export function useSettingsContext(): SettingsContext {
     setPreferences: patch => void useStore.getState().setPreferences(patch),
     openAddComputer: () => useStore.getState().openAddComputer(),
     addAsked,
+    agentsPlace,
     askAdd: road => useSettingsStore.getState().askAdd(road),
     openAddProject: () => useSettingsStore.getState().openAddProject(),
     rereadDevices: () => useSettingsStore.getState().rereadDevices(),

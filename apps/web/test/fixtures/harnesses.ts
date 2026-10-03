@@ -4,7 +4,7 @@
 // marked where a new thread starts (the model, its effort, the access that
 // asks nobody) and the default agent marked. Shared by the settings tests and
 // the wireframe.
-import type { HarnessCatalog, HarnessOption } from "@wsp/protocol";
+import type { HarnessCatalog, HarnessOption, Preferences } from "@wsp/protocol";
 
 const option = (value: string, label: string): HarnessOption => ({ value, label });
 const levels = (values: readonly string[], marked: string): HarnessOption[] => values.map(v => ({ ...option(v, v === "xhigh" ? "Extra high" : v.charAt(0).toUpperCase() + v.slice(1)), ...(v === marked ? { isDefault: true } : {}) }));
@@ -76,3 +76,6 @@ export const OPENCODE_CATALOG: HarnessCatalog = {
 };
 
 export const HARNESSES: HarnessCatalog[] = [CLAUDE_CATALOG, CODEX_CATALOG, OPENCODE_CATALOG];
+
+/** The preferences the host shaped these lists off: Claude Code's picker hides the models its list holds apart. */
+export const HARNESS_DEFAULTS: Preferences["agentDefaults"] = { claude: { models: { hide: CLAUDE_CATALOG.hiddenModels!.map(m => m.value) } } };

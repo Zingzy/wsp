@@ -33,7 +33,7 @@ import { AddComputer } from "./AddComputer.js";
 import { ComputerGlyph, useComputerIcon } from "./ComputerGlyph.js";
 import { BehindRow, LimitsCard, SpawnCard } from "./computerSettings.js";
 import { ADD_COMPUTER_WORDS, AGENTS_PAGE_WORDS, PLACE_STATE_WORDS, VALUE, WHERE_WORDS, capitalised } from "./format.js";
-import { Chevron, GlyphFrame, Grid, GridHead, GridName, GridRow, LIST_COLUMNS, Num, PAGE_COLUMNS, StateCell, type HeadCell } from "./grid.js";
+import { Chevron, GlyphFrame, Grid, GridHead, GridName, GridRow, LIST_COLUMNS, Num, PAGE_COLUMNS, StateCell, wordOnly, type HeadCell } from "./grid.js";
 import { copyOn } from "./image.js";
 import { ImageCard, useImageStanding } from "./ImageCard.js";
 import { openImageRecipe } from "./openAt.js";
@@ -328,9 +328,6 @@ interface KindLine {
   readonly flow?: FlowView;
 }
 
-/** An act as its word alone, as every act on the settings grid is: the plus is Add's and no other button wears a glyph. */
-export const wordOnly = ({ icon: _icon, ...act }: RowAct): RowAct => act;
-
 /** A kind's rows as lines: the row's lead, name and state word as the note, and its step only where it has a road,
  * since a held button beside every row is furniture. A state nothing has read yet is no state, and says nothing. */
 function kindLines<T>(kind: KindModule<T>, items: readonly T[], ctx: RowsContext, version: (item: T) => string | undefined): KindLine[] {
@@ -428,9 +425,6 @@ function RemoveLine({ place, ctx, onRemoved }: { place: PlaceView; ctx: Settings
   );
 }
 
-/** One computer's or cloud's own page. A cloud keeps no computer to read: its agents are the image's, and every word
- * about the image stands under the rule the cloud's key does, since a cloud row drawn for a workspace alone is a
- * machine somebody else's key made. */
 /** A computer's facts of one kind on one line: its system, cores and memory, as it last reported them. */
 const shapeLine = (place: PlaceView): string => [place.os, place.shape === undefined ? undefined : `${place.shape.cpu} cores`, place.shape === undefined ? undefined : fmtMemGb(place.shape.memMb)].filter((part): part is string => part !== undefined && part !== "").join(", ");
 
@@ -463,6 +457,9 @@ function AgentsLink({ place, ctx }: { place: PlaceView; ctx: SettingsContext }) 
   );
 }
 
+/** One computer's or cloud's own page. A cloud keeps no computer to read: its agents are the image's, and every word
+ * about the image stands under the rule the cloud's key does, since a cloud row drawn for a workspace alone is a
+ * machine somebody else's key made. */
 export function ComputerPage({ place, ctx }: { place: PlaceView; ctx: SettingsContext }) {
   const here = place.id === HERE_PLACE_ID;
   const cloud = isProviderPlace(place);

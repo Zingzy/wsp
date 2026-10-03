@@ -19,3 +19,22 @@ describe("wsp usage's accounts table", () => {
     expect(rows[0]!.slice(at, at + "RESETS".length).trim()).toBe("");
   });
 });
+
+describe("wsp usage's used table", () => {
+  it("names the agent beside each model, since two agents running one model are two rows", () => {
+    const tokens = { input: 1_000, output: 10, cached: 0 };
+    const byModel: UsedAnswer = {
+      ...used,
+      split: "model",
+      rows: [
+        { key: "claude:claude-sonnet-4-5", label: "Sonnet 4.5", agent: "claude", tokens, priced: false },
+        { key: "hermes:claude-sonnet-4-5", label: "Sonnet 4.5", agent: "hermes", tokens, priced: false },
+      ],
+    };
+    const lines = usageTableLines({ accounts: [], used: byModel }, NOW);
+    const [head, claude, hermes] = lines.slice(lines.indexOf("") + 1);
+    expect(head).toMatch(/^AGENT +MODEL +FRESH IN/);
+    expect(claude).toMatch(/^Claude Code +Sonnet 4\.5 /);
+    expect(hermes).toMatch(/^Hermes Agent +Sonnet 4\.5 /);
+  });
+});
