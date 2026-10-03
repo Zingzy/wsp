@@ -17,6 +17,8 @@ export interface ReviewThread {
   readonly line?: number;
   readonly hunk?: string;
   readonly resolved: boolean;
+  /** The thread's node id, which resolving names; absent on a thread past the newest the host read. */
+  readonly threadId?: string;
   readonly reviewId?: number;
   readonly comments: readonly LineComment[];
 }
@@ -67,12 +69,14 @@ export function threadsOf(comments: readonly LineComment[]): ReviewThread[] {
   }
   return [...roots.entries()].map(([id, held]) => {
     const first = held[0]!;
+    const threadId = held.find(c => c.threadId !== undefined)?.threadId;
     return {
       key: `thread:${id}`,
       path: first.path,
       ...(first.line !== undefined ? { line: first.line } : {}),
       ...(first.hunk !== undefined ? { hunk: first.hunk } : {}),
       resolved: held.some(c => c.resolved === true),
+      ...(threadId !== undefined ? { threadId } : {}),
       ...(first.reviewId !== undefined ? { reviewId: first.reviewId } : {}),
       comments: held,
     };

@@ -14,6 +14,8 @@ import {
   PR_POLL_MS,
   noSuchItemRefusal,
   pullRequestSendPrompt,
+  REPLY_EMPTY_LINE,
+  pullRequestPostLine,
   checkNotFailedRefusal,
   childPushedLine,
   mergeMethodRefusal,
@@ -398,7 +400,7 @@ describe("the acts on a pull request", () => {
     await rt!.workspaces.checkout(id);
     await until(async () => (await prOf(id))?.pr?.["number"] === 12);
     // The pane offers the methods the repository allows, read once an hour on this computer, and nothing is sent yet.
-    expect(await rt!.workspaces.pullRequestView({ workspaceId: id })).toEqual({ ...PAGE, merge, sent: [] });
+    expect(await rt!.workspaces.pullRequestView({ workspaceId: id })).toEqual({ ...PAGE, merge, sent: [], postsAsYou: true });
     await rt!.workspaces.pullRequestView({ workspaceId: id });
     expect(daemons.ops("here").filter(op => op === "git.repoRead")).toHaveLength(1);
     expect(daemons.frames.filter(f => f.frame["op"] === "git.prView")).toEqual([
@@ -470,6 +472,74 @@ describe("the acts on a pull request", () => {
     expect((await rt!.workspaces.pullRequestView({ workspaceId: id })).sent).toEqual([]);
     expect(await store.get("workspaces", id)).not.toHaveProperty("prSent");
     agent.end(0);
+  });
+
+  it("posts a reply, a resolve and a reaction as the person over this computer's daemon, and answers each changed item", async () => {
+    const comment = { id: 9, nodeId: "IC_kwDOx", author: "Zingzy", association: "owner", bot: false, body: "Fixed.", url: "u", at: "t" };
+    const daemons = fakeDaemons({
+      here: {
+        "git.prReply": () => ({ id: 1, ok: true, comment }),
+        "git.prResolve": f => ({ id: 1, ok: true, threadId: String(f["threadId"]), resolved: f["resolved"] === true }),
+        "git.prReact": f => ({ id: 1, ok: true, subject: String(f["subject"]), reactions: [{ content: "eyes", count: 1, mine: true }] }),
+      },
+    });
+    const { id, remote } = await withWorkspace(daemons);
+    await rt!.workspaces.checkout(id);
+    await until(async () => (await prOf(id))?.pr?.["number"] === 12);
+    expect(await rt!.workspaces.pullRequestReply({ workspaceId: id, replyTo: 7, body: "Fixed." })).toEqual({ comment });
+    expect(await rt!.workspaces.pullRequestResolve({ workspaceId: id, threadId: "PRRT_kwDOx", resolved: true })).toEqual({ threadId: "PRRT_kwDOx", resolved: true });
+    expect(await rt!.workspaces.pullRequestReact({ workspaceId: id, subject: "IC_kwDOx", content: "eyes", on: true })).toEqual({ subject: "IC_kwDOx", reactions: [{ content: "eyes", count: 1, mine: true }] });
+    const writes = daemons.frames.filter(f => ["git.prReply", "git.prResolve", "git.prReact"].includes(String(f.frame["op"])));
+    expect(writes).toEqual([
+      { road: "here", frame: { op: "git.prReply", cwd: root, remote, number: 12, replyTo: 7, body: "Fixed." } },
+      { road: "here", frame: { op: "git.prResolve", cwd: root, remote, number: 12, threadId: "PRRT_kwDOx", resolved: true } },
+      { road: "here", frame: { op: "git.prReact", cwd: root, remote, number: 12, subject: "IC_kwDOx", content: "eyes", on: true } },
+    ]);
+    // A reply with no words is refused here and reaches no daemon.
+    await expect(rt!.workspaces.pullRequestReply({ workspaceId: id, body: " \n " })).rejects.toThrow(REPLY_EMPTY_LINE);
+    expect(daemons.frames.filter(f => f.frame["op"] === "git.prReply")).toHaveLength(1);
+  });
+
+  it("never posts as the person through the copy's gh: a signed-out Mac with a running copy is refused and the copy is not asked", async () => {
+    const written = { "git.prReply": () => ({ id: 1, ok: true }), "git.prResolve": () => ({ id: 1, ok: true }), "git.prReact": () => ({ id: 1, ok: true }) } as Record<string, Answer>;
+    const page: Answer = () => ({ id: 1, ok: true, ...PAGE }) as DaemonResponse;
+    const daemons = fakeDaemons({ here: { "git.prReply": NO_GH, "git.prResolve": NO_GH, "git.prReact": NO_GH, "git.prView": NO_GH }, copy: { ...written, "git.prView": page } });
+    const { id } = await withWorkspace(daemons);
+    await rt!.workspaces.checkout(id);
+    await until(async () => (await prOf(id))?.pr?.["number"] === 12);
+    // The copy still reads the page, and the page says nothing is posted from here.
+    expect((await rt!.workspaces.pullRequestView({ workspaceId: id })).postsAsYou).toBe(false);
+    const refused = pullRequestPostLine("github.com");
+    await expect(rt!.workspaces.pullRequestReply({ workspaceId: id, body: "x" })).rejects.toThrow(refused);
+    await expect(rt!.workspaces.pullRequestResolve({ workspaceId: id, threadId: "PRRT_x", resolved: false })).rejects.toThrow(refused);
+    await expect(rt!.workspaces.pullRequestReact({ workspaceId: id, subject: "IC_x", content: "+1", on: false })).rejects.toThrow(refused);
+    expect(daemons.ops("copy").filter(op => ["git.prReply", "git.prResolve", "git.prReact"].includes(String(op)))).toEqual([]);
+    expect(daemons.ops("here").filter(op => ["git.prReply", "git.prResolve", "git.prReact"].includes(String(op)))).toHaveLength(3);
+  });
+
+  it("carries the thread a line reply goes into", async () => {
+    const daemons = fakeDaemons({ here: { "git.prReply": f => ({ id: 1, ok: true, reviewComment: { id: 10, path: "a.ts", author: "Zingzy", bot: false, body: "b", url: "u", at: "t", replyTo: Number(f["replyTo"]), threadId: String(f["threadId"]), resolved: false } }) } });
+    const { id } = await withWorkspace(daemons);
+    await rt!.workspaces.checkout(id);
+    await until(async () => (await prOf(id))?.pr?.["number"] === 12);
+    const read = await rt!.workspaces.pullRequestReply({ workspaceId: id, replyTo: 7, threadId: "PRRT_kwDOx", body: "b" });
+    expect(read.reviewComment).toMatchObject({ replyTo: 7, threadId: "PRRT_kwDOx", resolved: false });
+    expect(daemons.frames.find(f => f.frame["op"] === "git.prReply")?.frame).toMatchObject({ replyTo: 7, threadId: "PRRT_kwDOx", number: 12 });
+  });
+
+  it("keeps the checks the read that saw it merge found, so a settled one still shows its last checks", async () => {
+    const checks = [{ name: "ci", workflow: "ci", state: "pass" as const, startedAt: "2026-10-02T10:00:00Z", completedAt: "2026-10-02T10:16:00Z" }];
+    let pr = open();
+    const daemons = fakeDaemons({ here: { "git.prRead": () => ({ id: 1, ok: true, pr }) } });
+    const { clock, advance } = fakeClock();
+    const { id } = await withWorkspace(daemons, { clock });
+    await rt!.workspaces.checkout(id);
+    await until(async () => (await prOf(id))?.pr?.["number"] === 12);
+    expect(await store.get("workspaces", id)).not.toHaveProperty("pr.checks");
+    pr = open({ state: "merged", checks });
+    advance(PR_POLL_MS);
+    await until(async () => (await prOf(id))?.pr?.["state"] === "merged");
+    expect(await store.get("workspaces", id)).toMatchObject({ pr: { number: 12, state: "merged", checks } });
   });
 
   it("sends a failed check's log into the workspace's thread as a message framed as a log, and answers at once", async () => {

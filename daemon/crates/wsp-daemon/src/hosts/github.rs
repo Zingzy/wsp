@@ -6,13 +6,14 @@
 
 use serde::de::IgnoredAny;
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use wsp_frames::{
-    numbers, CheckState, GitPrViewReply, GitRepoReadReply, HostItem, HostItemKind, IssueComment, IssueRead, MergeMethod, Mergeable,
-    PullRequest, PullRequestAutoMerge, PullRequestCheck, PullRequestCheckRun, PullRequestComment, PullRequestCommit, PullRequestFile,
-    PullRequestFork, PullRequestLabel, PullRequestPageCut, PullRequestReview, PullRequestReviewComment, PullRequestReviewRequest,
-    PullRequestState, PullRequestVerdict, ReviewComment, ReviewEvent, ReviewSide, ReviewState,
+    numbers, CheckState, GitPrReplyReply, GitPrResolveReply, GitPrViewReply, GitRepoReadReply, HostItem, HostItemKind, IssueComment,
+    IssueRead, MergeMethod, Mergeable, PullRequest, PullRequestAutoMerge, PullRequestCheck, PullRequestCheckRun, PullRequestComment,
+    PullRequestCommit, PullRequestFile, PullRequestFork, PullRequestLabel, PullRequestPageCut, PullRequestReaction, PullRequestReview,
+    PullRequestReviewComment, PullRequestReviewRequest, PullRequestState, PullRequestVerdict, ReactionContent, ReviewComment, ReviewEvent,
+    ReviewSide, ReviewState,
 };
 
 use super::{Pick, PullRequests};
@@ -103,11 +104,12 @@ struct GhCheck {
 /// The fields a pull request's page asks for; its conversation is read off the REST API, which says who is a bot.
 const PAGE_FIELDS: &str = "title,body,author,createdAt,updatedAt,closedAt,mergedAt,mergedBy,mergeCommit,labels,reviewRequests,latestReviews,assignees,commits,reviews,files";
 
-/// The one GraphQL read beside the page: each commit's parents, line counts and checks rolled into one word, over the
+/// The one GraphQL read beside the page, which asks the first 100 comments of each thread because a reply is found in
+/// its thread by its own id, not its root's, and each comment's own reactions say whether the person left one: each commit's parents, line counts and checks rolled into one word, over the
 /// same first 100 commits gh's own list holds; the newest 100 reviews' database ids, which the comments on lines name;
 /// and whether each of the newest 100 review threads is resolved, keyed on the thread's first comment. Each says
 /// whether there was more than it read.
-const GRAPH_QUERY: &str = "query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { commits(first: 100) { totalCount nodes { commit { oid additions deletions parents { totalCount } statusCheckRollup { state } } } } reviews(last: 100) { pageInfo { hasPreviousPage } nodes { id databaseId } } reviewThreads(last: 100) { pageInfo { hasPreviousPage } nodes { isResolved comments(first: 1) { nodes { databaseId } } } } } } }";
+const GRAPH_QUERY: &str = "query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { commits(first: 100) { totalCount nodes { commit { oid additions deletions parents { totalCount } statusCheckRollup { state } } } } reviews(last: 100) { pageInfo { hasPreviousPage } nodes { id databaseId reactionGroups { content viewerHasReacted } } } reviewThreads(last: 100) { pageInfo { hasPreviousPage } nodes { id isResolved comments(first: 100) { nodes { id databaseId reactionGroups { content viewerHasReacted } } } } } comments(last: 100) { pageInfo { hasPreviousPage } nodes { id reactionGroups { content viewerHasReacted } } } } } }";
 
 #[derive(Deserialize)]
 struct GhLogin {
@@ -142,6 +144,8 @@ struct GhCommit {
 struct GhReview {
     #[serde(default)]
     id: String,
+    #[serde(default)]
+    reaction_groups: Vec<GhReactionCount>,
     author: Option<GhLogin>,
     #[serde(default)]
     author_association: String,
@@ -248,10 +252,165 @@ fn user_of(user: Option<GhUser>) -> (String, bool, Option<String>) {
     user.map_or_else(|| (String::new(), false, None), |u| (u.login, u.kind == "Bot", some(u.avatar_url)))
 }
 
+/// One reaction's count as gh's review JSON gives it.
+#[derive(Deserialize)]
+struct GhReactionCount {
+    #[serde(default)]
+    content: String,
+    users: Option<GhCount>,
+}
+
+/// The counts of the eight reactions as the REST API gives them on a comment.
+#[derive(Deserialize)]
+struct GhRestReactions {
+    #[serde(default, rename = "+1")]
+    thumbs_up: u64,
+    #[serde(default, rename = "-1")]
+    thumbs_down: u64,
+    #[serde(default)]
+    laugh: u64,
+    #[serde(default)]
+    hooray: u64,
+    #[serde(default)]
+    confused: u64,
+    #[serde(default)]
+    heart: u64,
+    #[serde(default)]
+    rocket: u64,
+    #[serde(default)]
+    eyes: u64,
+}
+
+impl GhRestReactions {
+    fn counts(&self) -> [(ReactionContent, u64); 8] {
+        [
+            (ReactionContent::ThumbsUp, self.thumbs_up),
+            (ReactionContent::ThumbsDown, self.thumbs_down),
+            (ReactionContent::Laugh, self.laugh),
+            (ReactionContent::Hooray, self.hooray),
+            (ReactionContent::Confused, self.confused),
+            (ReactionContent::Heart, self.heart),
+            (ReactionContent::Rocket, self.rocket),
+            (ReactionContent::Eyes, self.eyes),
+        ]
+    }
+}
+
+/// One reaction group as the GraphQL API gives it: which, whether the signed-in person left it, and, where asked, how
+/// many did.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GhViewerReaction {
+    #[serde(default)]
+    content: String,
+    #[serde(default)]
+    viewer_has_reacted: bool,
+    reactors: Option<GhCount>,
+}
+
+/// The GraphQL API's word for a reaction, in the REST API's names the protocol carries.
+fn reaction_of(word: &str) -> Option<ReactionContent> {
+    Some(match word {
+        "THUMBS_UP" => ReactionContent::ThumbsUp,
+        "THUMBS_DOWN" => ReactionContent::ThumbsDown,
+        "LAUGH" => ReactionContent::Laugh,
+        "HOORAY" => ReactionContent::Hooray,
+        "CONFUSED" => ReactionContent::Confused,
+        "HEART" => ReactionContent::Heart,
+        "ROCKET" => ReactionContent::Rocket,
+        "EYES" => ReactionContent::Eyes,
+        _ => return None,
+    })
+}
+
+/// The GraphQL API's word for a reaction the protocol names.
+fn reaction_word(content: ReactionContent) -> &'static str {
+    match content {
+        ReactionContent::ThumbsUp => "THUMBS_UP",
+        ReactionContent::ThumbsDown => "THUMBS_DOWN",
+        ReactionContent::Laugh => "LAUGH",
+        ReactionContent::Hooray => "HOORAY",
+        ReactionContent::Confused => "CONFUSED",
+        ReactionContent::Heart => "HEART",
+        ReactionContent::Rocket => "ROCKET",
+        ReactionContent::Eyes => "EYES",
+    }
+}
+
+/// The reactions an item carries, GitHub's order kept: each one somebody left, with whether the signed-in person is
+/// one of them; nothing where nobody reacted.
+fn reactions_of(
+    counts: impl IntoIterator<Item = (ReactionContent, u64)>,
+    mine: Option<&HashSet<ReactionContent>>,
+) -> Option<Vec<PullRequestReaction>> {
+    let listed: Vec<PullRequestReaction> = counts
+        .into_iter()
+        .filter(|(_, count)| *count > 0)
+        .map(|(content, count)| PullRequestReaction { content, count, mine: mine.is_some_and(|m| m.contains(&content)) })
+        .collect();
+    (!listed.is_empty()).then_some(listed)
+}
+
+/// Which reactions the signed-in person left, by the node id of what they reacted to.
+type Mine = HashMap<String, HashSet<ReactionContent>>;
+
+fn mine_of(groups: &[GhViewerReaction]) -> HashSet<ReactionContent> {
+    groups.iter().filter(|g| g.viewer_has_reacted).filter_map(|g| reaction_of(&g.content)).collect()
+}
+
+/// The review thread each comment on a line is in, by the comment's id: the thread's node id and whether it is resolved.
+type Threads = HashMap<u64, (String, bool)>;
+
+/// A comment in the conversation as the REST API answered with it.
+fn comment_of(c: GhIssueComment, mine: &Mine) -> PullRequestComment {
+    let (author, bot, avatar) = user_of(c.user);
+    PullRequestComment {
+        reactions: c.reactions.and_then(|r| reactions_of(r.counts(), mine.get(&c.node_id))),
+        id: c.id,
+        node_id: some(c.node_id),
+        author,
+        association: association_of(c.author_association),
+        bot,
+        avatar,
+        body: c.body.trim().to_owned(),
+        url: c.html_url,
+        at: c.created_at,
+    }
+}
+
+/// A comment on a line as the REST API answered with it, its thread found by its own id or by the comment it answers.
+fn line_comment_of(c: GhLineComment, threads: &Threads, mine: &Mine) -> PullRequestReviewComment {
+    let (author, bot, avatar) = user_of(c.user);
+    let thread = threads.get(&c.id).or_else(|| c.in_reply_to_id.and_then(|root| threads.get(&root)));
+    PullRequestReviewComment {
+        reactions: c.reactions.and_then(|r| reactions_of(r.counts(), mine.get(&c.node_id))),
+        resolved: thread.map(|(_, resolved)| *resolved),
+        thread_id: thread.map(|(id, _)| id.clone()),
+        association: association_of(c.author_association),
+        id: c.id,
+        node_id: some(c.node_id),
+        path: c.path,
+        line: c.line.or(c.original_line),
+        side: c.side,
+        author,
+        bot,
+        avatar,
+        body: c.body.trim().to_owned(),
+        url: c.html_url,
+        at: c.created_at,
+        hunk: c.diff_hunk.and_then(some),
+        reply_to: c.in_reply_to_id,
+        review_id: c.pull_request_review_id,
+    }
+}
+
 /// The REST API's JSON for one comment in a pull request's conversation, which says who is a bot where gh's does not.
 #[derive(Deserialize)]
 struct GhIssueComment {
     id: u64,
+    #[serde(default)]
+    node_id: String,
+    reactions: Option<GhRestReactions>,
     user: Option<GhUser>,
     #[serde(default)]
     author_association: String,
@@ -267,6 +426,9 @@ struct GhIssueComment {
 #[derive(Deserialize)]
 struct GhLineComment {
     id: u64,
+    #[serde(default)]
+    node_id: String,
+    reactions: Option<GhRestReactions>,
     path: String,
     line: Option<u64>,
     original_line: Option<u64>,
@@ -307,6 +469,8 @@ struct GhGraphRepo {
 struct GhGraphPr {
     #[serde(default)]
     commits: GhNodes<GhGraphCommitNode>,
+    #[serde(default)]
+    comments: GhNodes<GhGraphReactable>,
     #[serde(default)]
     reviews: GhNodes<GhGraphReview>,
     #[serde(default)]
@@ -375,20 +539,29 @@ struct GhGraphReview {
     #[serde(default)]
     id: String,
     database_id: Option<u64>,
+    #[serde(default)]
+    reaction_groups: Vec<GhViewerReaction>,
+}
+
+/// Anything the GraphQL read asks reactions of: its node id, its database id where it has one, and its groups.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GhGraphReactable {
+    #[serde(default)]
+    id: String,
+    database_id: Option<u64>,
+    #[serde(default)]
+    reaction_groups: Vec<GhViewerReaction>,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct GhGraphThread {
+    #[serde(default)]
+    id: String,
     is_resolved: bool,
     #[serde(default)]
-    comments: GhNodes<GhDatabaseId>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct GhDatabaseId {
-    database_id: Option<u64>,
+    comments: GhNodes<GhGraphReactable>,
 }
 
 /// gh's JSON for a repository's merge settings.
@@ -444,6 +617,97 @@ struct GhPrFile {
 struct GhPostedReview {
     #[serde(default)]
     html_url: String,
+}
+
+/// The two mutations a review thread is resolved and unresolved by, and the two a reaction is added and taken off by,
+/// each naming what it acts on as a variable so nothing a person or the page sent is spliced into the query.
+/// The read a resolve or a reaction makes first: which pull request, in which repository, the node it names sits on.
+const SCOPE_QUERY: &str = "query($id: ID!) { node(id: $id) { __typename ... on PullRequestReviewThread { pullRequest { number repository { nameWithOwner } } } ... on PullRequestReviewComment { pullRequest { number repository { nameWithOwner } } } ... on PullRequestReview { pullRequest { number repository { nameWithOwner } } } ... on IssueComment { pullRequest { number repository { nameWithOwner } } } } }";
+
+/// What that read answered: the node's kind and its pull request, where it sits on one.
+#[derive(Deserialize)]
+struct GhScope {
+    data: Option<GhScopeData>,
+}
+
+#[derive(Deserialize)]
+struct GhScopeData {
+    node: Option<GhScopeNode>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GhScopeNode {
+    #[serde(default, rename = "__typename")]
+    kind: String,
+    pull_request: Option<GhScopePr>,
+}
+
+#[derive(Deserialize)]
+struct GhScopePr {
+    number: u64,
+    repository: GhScopeRepo,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GhScopeRepo {
+    name_with_owner: String,
+}
+
+const RESOLVE_MUTATION: &str = "mutation($id: ID!) { resolveReviewThread(input: {threadId: $id}) { thread { id isResolved } } }";
+const UNRESOLVE_MUTATION: &str = "mutation($id: ID!) { unresolveReviewThread(input: {threadId: $id}) { thread { id isResolved } } }";
+const REACT_MUTATION: &str = "mutation($id: ID!, $content: ReactionContent!) { addReaction(input: {subjectId: $id, content: $content}) { subject { reactionGroups { content viewerHasReacted reactors { totalCount } } } } }";
+const UNREACT_MUTATION: &str = "mutation($id: ID!, $content: ReactionContent!) { removeReaction(input: {subjectId: $id, content: $content}) { subject { reactionGroups { content viewerHasReacted reactors { totalCount } } } } }";
+
+/// What a resolve or an unresolve answered with, under whichever of the two mutations ran.
+#[derive(Deserialize)]
+struct GhResolved {
+    data: Option<GhResolvedData>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GhResolvedData {
+    resolve_review_thread: Option<GhThreadPayload>,
+    unresolve_review_thread: Option<GhThreadPayload>,
+}
+
+#[derive(Deserialize)]
+struct GhThreadPayload {
+    thread: GhThreadState,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GhThreadState {
+    id: String,
+    is_resolved: bool,
+}
+
+/// What a reaction added or taken off answered with: every reaction group on the item now.
+#[derive(Deserialize)]
+struct GhReacted {
+    data: Option<GhReactedData>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GhReactedData {
+    add_reaction: Option<GhReactionPayload>,
+    remove_reaction: Option<GhReactionPayload>,
+}
+
+#[derive(Deserialize)]
+struct GhReactionPayload {
+    subject: GhReactedSubject,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GhReactedSubject {
+    #[serde(default)]
+    reaction_groups: Vec<GhViewerReaction>,
 }
 
 /// The fields a list asks for, in gh's own spelling.
@@ -700,11 +964,29 @@ impl PullRequests for GitHub {
             commits: graph.commits.total_count.is_some_and(|total| total > read.commits.len() as u64).then_some(true),
             reviews: graph.reviews.more_before().then_some(true),
             threads: graph.review_threads.more_before().then_some(true),
+            comments: graph.comments.more_before().then_some(true),
         };
         let commits: HashMap<String, GhGraphCommit> = graph.commits.nodes.into_iter().map(|n| (n.commit.oid.clone(), n.commit)).collect();
-        let review_ids: HashMap<String, u64> = graph.reviews.nodes.into_iter().filter_map(|r| Some((r.id, r.database_id?))).collect();
-        let resolved: HashMap<u64, bool> =
-            graph.review_threads.nodes.into_iter().filter_map(|t| Some((t.comments.nodes.first()?.database_id?, t.is_resolved))).collect();
+        let mut mine: Mine = HashMap::new();
+        let mut review_ids: HashMap<String, u64> = HashMap::new();
+        for r in graph.reviews.nodes {
+            mine.insert(r.id.clone(), mine_of(&r.reaction_groups));
+            if let Some(db) = r.database_id {
+                review_ids.insert(r.id, db);
+            }
+        }
+        let mut threads: Threads = HashMap::new();
+        for t in graph.review_threads.nodes {
+            for c in t.comments.nodes {
+                mine.insert(c.id, mine_of(&c.reaction_groups));
+                if let Some(db) = c.database_id {
+                    threads.insert(db, (t.id.clone(), t.is_resolved));
+                }
+            }
+        }
+        for c in graph.comments.nodes {
+            mine.insert(c.id, mine_of(&c.reaction_groups));
+        }
         Some(GitPrViewReply {
             title: read.title,
             body: read.body.trim().to_owned(),
@@ -768,6 +1050,13 @@ impl PullRequests for GitHub {
                 .into_iter()
                 .map(|r| PullRequestReview {
                     id: review_ids.get(&r.id).copied(),
+                    reactions: reactions_of(
+                        r.reaction_groups
+                            .iter()
+                            .filter_map(|g| Some((reaction_of(&g.content)?, g.users.as_ref().map_or(0, |u| u.total_count)))),
+                        mine.get(&r.id),
+                    ),
+                    node_id: some(r.id),
                     association: association_of(r.author_association),
                     author: login(r.author),
                     state: r.state.to_ascii_lowercase(),
@@ -775,47 +1064,8 @@ impl PullRequests for GitHub {
                     at: r.submitted_at.unwrap_or_default(),
                 })
                 .collect(),
-            comments: comments
-                .into_iter()
-                .flatten()
-                .map(|c| {
-                    let (author, bot, avatar) = user_of(c.user);
-                    PullRequestComment {
-                        id: c.id,
-                        author,
-                        association: association_of(c.author_association),
-                        bot,
-                        avatar,
-                        body: c.body.trim().to_owned(),
-                        url: c.html_url,
-                        at: c.created_at,
-                    }
-                })
-                .collect(),
-            review_comments: lines
-                .into_iter()
-                .flatten()
-                .map(|c| {
-                    let (author, bot, avatar) = user_of(c.user);
-                    PullRequestReviewComment {
-                        resolved: resolved.get(&c.in_reply_to_id.unwrap_or(c.id)).copied(),
-                        association: association_of(c.author_association),
-                        id: c.id,
-                        path: c.path,
-                        line: c.line.or(c.original_line),
-                        side: c.side,
-                        author,
-                        bot,
-                        avatar,
-                        body: c.body.trim().to_owned(),
-                        url: c.html_url,
-                        at: c.created_at,
-                        hunk: c.diff_hunk.and_then(some),
-                        reply_to: c.in_reply_to_id,
-                        review_id: c.pull_request_review_id,
-                    }
-                })
-                .collect(),
+            comments: comments.into_iter().flatten().map(|c| comment_of(c, &mine)).collect(),
+            review_comments: lines.into_iter().flatten().map(|c| line_comment_of(c, &threads, &mine)).collect(),
             files: read
                 .files
                 .into_iter()
@@ -953,6 +1203,76 @@ impl PullRequests for GitHub {
     fn read_review_url(&self, stdout: &str) -> Option<String> {
         let read: GhPostedReview = serde_json::from_str(stdout.trim()).ok()?;
         some(read.html_url)
+    }
+
+    fn reply_argv(&self, repo: &str, number: u64, reply_to: Option<u64>) -> Vec<String> {
+        let path = match reply_to {
+            Some(id) => format!("repos/{repo}/pulls/{number}/comments/{id}/replies"),
+            None => format!("repos/{repo}/issues/{number}/comments"),
+        };
+        words(&["api", "--method", "POST", &path, "--input", "-"])
+    }
+
+    fn reply_input(&self, body: &str) -> String {
+        serde_json::json!({ "body": body }).to_string()
+    }
+
+    fn read_reply(&self, stdout: &str, on_a_line: bool, thread_id: Option<&str>) -> Option<GitPrReplyReply> {
+        let mine = Mine::new();
+        Some(if on_a_line {
+            let read: GhLineComment = serde_json::from_str(stdout.trim()).ok()?;
+            let threads: Threads = thread_id.map(|t| (read.id, (t.to_owned(), false))).into_iter().collect();
+            GitPrReplyReply { comment: None, review_comment: Some(line_comment_of(read, &threads, &mine)) }
+        } else {
+            let read: GhIssueComment = serde_json::from_str(stdout.trim()).ok()?;
+            GitPrReplyReply { comment: Some(comment_of(read, &mine)), review_comment: None }
+        })
+    }
+
+    fn scope_argv(&self, id: &str) -> Vec<String> {
+        words(&["api", "graphql", "-f", &format!("query={SCOPE_QUERY}"), "-f", &format!("id={id}")])
+    }
+
+    fn read_scope(&self, stdout: &str, thread: bool) -> Option<(String, u64)> {
+        let read: GhScope = serde_json::from_str(stdout.trim()).ok()?;
+        let node = read.data?.node?;
+        let kinds: &[&str] =
+            if thread { &["PullRequestReviewThread"] } else { &["PullRequestReviewComment", "PullRequestReview", "IssueComment"] };
+        if !kinds.contains(&node.kind.as_str()) {
+            return None;
+        }
+        let pr = node.pull_request?;
+        Some((pr.repository.name_with_owner, pr.number))
+    }
+
+    fn resolve_argv(&self, thread_id: &str, resolved: bool) -> Vec<String> {
+        let query = format!("query={}", if resolved { RESOLVE_MUTATION } else { UNRESOLVE_MUTATION });
+        words(&["api", "graphql", "-f", &query, "-f", &format!("id={thread_id}")])
+    }
+
+    fn read_resolve(&self, stdout: &str) -> Option<GitPrResolveReply> {
+        let read: GhResolved = serde_json::from_str(stdout.trim()).ok()?;
+        let data = read.data?;
+        let thread = data.resolve_review_thread.or(data.unresolve_review_thread)?.thread;
+        Some(GitPrResolveReply { thread_id: thread.id, resolved: thread.is_resolved })
+    }
+
+    fn react_argv(&self, subject: &str, content: ReactionContent, on: bool) -> Vec<String> {
+        let query = format!("query={}", if on { REACT_MUTATION } else { UNREACT_MUTATION });
+        words(&["api", "graphql", "-f", &query, "-f", &format!("id={subject}"), "-f", &format!("content={}", reaction_word(content))])
+    }
+
+    fn read_react(&self, stdout: &str) -> Option<Vec<PullRequestReaction>> {
+        let read: GhReacted = serde_json::from_str(stdout.trim()).ok()?;
+        let data = read.data?;
+        let groups = data.add_reaction.or(data.remove_reaction)?.subject.reaction_groups;
+        let mine = mine_of(&groups);
+        let counts = groups.iter().filter_map(|g| Some((reaction_of(&g.content)?, g.reactors.as_ref().map_or(0, |r| r.total_count))));
+        Some(reactions_of(counts, Some(&mine)).unwrap_or_default())
+    }
+
+    fn is_node_id(&self, id: &str) -> bool {
+        (1..=128).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'='))
     }
 
     fn sign_in_exit(&self) -> Option<i32> {
@@ -1339,11 +1659,160 @@ pub(crate) mod tests {
             .replace(r#""reviewThreads":{"pageInfo":{"hasPreviousPage":false}"#, r#""reviewThreads":{"pageInfo":{"hasPreviousPage":true}"#);
         assert_ne!(past, GRAPH_772);
         let read = GitHub.read_page(PAGE_772, LINES_772, COMMENTS_772, &past).unwrap();
-        assert_eq!(read.cut, Some(PullRequestPageCut { commits: Some(true), reviews: Some(true), threads: Some(true) }));
+        assert_eq!(read.cut, Some(PullRequestPageCut { commits: Some(true), reviews: Some(true), threads: Some(true), comments: None }));
         let threads_only = GRAPH_772
             .replace(r#""reviewThreads":{"pageInfo":{"hasPreviousPage":false}"#, r#""reviewThreads":{"pageInfo":{"hasPreviousPage":true}"#);
         let read = GitHub.read_page(PAGE_772, LINES_772, COMMENTS_772, &threads_only).unwrap();
-        assert_eq!(read.cut, Some(PullRequestPageCut { commits: None, reviews: None, threads: Some(true) }));
+        assert_eq!(read.cut, Some(PullRequestPageCut { commits: None, reviews: None, threads: Some(true), comments: None }));
+    }
+
+    /// cli/cli PR 14519 as GitHub answered it on 2026-10-02: its comments on lines off the REST API, cut to the fields
+    /// read here and their words left out, and the GraphQL read's answer whole.
+    const LINES_14519: &str = include_str!("../../tests/gh/pr14519-line-comments.json");
+    const GRAPH_14519: &str = include_str!("../../tests/gh/pr14519-graph.json");
+    const PAGE_14519: &str = r#"{"title":"t","body":"","author":{"login":"waldyrious"},"createdAt":"c","updatedAt":"u","commits":[{"oid":"97577e407ff3aee505aec675da081da75a24224a","messageHeadline":"s"}],"reviews":[{"id":"PRR_kwDODKw3uc8AAAABPRLGDg","author":{"login":"Copilot"},"authorAssociation":"NONE","body":"","submittedAt":"t","state":"COMMENTED","reactionGroups":[{"content":"THUMBS_UP","users":{"totalCount":1}}]}],"files":[]}"#;
+
+    #[test]
+    fn each_item_carries_its_node_id_its_reactions_and_a_line_comment_its_thread() {
+        let read = GitHub.read_page(PAGE_14519, LINES_14519, "[[]]", GRAPH_14519).unwrap();
+        let first = &read.review_comments[0];
+        assert_eq!((first.id, first.node_id.as_deref()), (4106126529, Some("PRRC_kwDODKw3uc70voTB")));
+        assert_eq!(first.reactions, Some(vec![PullRequestReaction { content: ReactionContent::ThumbsUp, count: 1, mine: false }]));
+        // The reply sits in its root's thread, by its own id in the GraphQL read.
+        let reply = &read.review_comments[2];
+        assert_eq!((reply.id, reply.reply_to, reply.reactions.as_ref()), (4106458120, Some(4106126529), None));
+        assert_eq!(
+            (first.thread_id.as_deref(), reply.thread_id.as_deref()),
+            (Some("PRRT_kwDODKw3uc6mD3eD"), Some("PRRT_kwDODKw3uc6mD3eD"))
+        );
+        assert_eq!((first.resolved, reply.resolved), (Some(true), Some(true)));
+        // A review's counts come off gh's own JSON, and its node id is what a reaction names.
+        let review = &read.reviews[0];
+        assert_eq!((review.id, review.node_id.as_deref()), (Some(5319607822), Some("PRR_kwDODKw3uc8AAAABPRLGDg")));
+        assert_eq!(review.reactions, Some(vec![PullRequestReaction { content: ReactionContent::ThumbsUp, count: 1, mine: false }]));
+        assert_eq!(read.cut, None);
+        // Where the signed-in person left one, it reads as theirs.
+        let mine = GRAPH_14519.replacen(
+            r#""id":"PRRC_kwDODKw3uc70voTB","databaseId":4106126529,"reactionGroups":[{"content":"THUMBS_UP","viewerHasReacted":false}"#,
+            r#""id":"PRRC_kwDODKw3uc70voTB","databaseId":4106126529,"reactionGroups":[{"content":"THUMBS_UP","viewerHasReacted":true}"#,
+            1,
+        );
+        assert_ne!(mine, GRAPH_14519);
+        let read = GitHub.read_page(PAGE_14519, LINES_14519, "[[]]", &mine).unwrap();
+        assert_eq!(
+            read.review_comments[0].reactions,
+            Some(vec![PullRequestReaction { content: ReactionContent::ThumbsUp, count: 1, mine: true }])
+        );
+        assert_eq!(read.review_comments[1].reactions.as_ref().map(|r| r[0].mine), Some(false));
+    }
+
+    #[test]
+    fn a_conversation_comment_carries_its_node_id_and_counts_and_older_ones_are_marked_cut() {
+        let read = page_772();
+        assert_eq!(read.comments[0].node_id.as_deref(), Some("IC_kwDOULIAx88AAAABXDU4OQ"));
+        assert_eq!(read.comments[0].reactions, None);
+        assert_eq!(read.review_comments[2].thread_id.as_deref(), Some("PRRT_kwDOULIAx86mM5yP"));
+        let hearts = COMMENTS_772.replacen(r#""heart":0"#, r#""heart":2"#, 1).replacen(r#""eyes":0"#, r#""eyes":1"#, 1);
+        let mut graph: serde_json::Value = serde_json::from_str(GRAPH_772).unwrap();
+        let groups = &mut graph["data"]["repository"]["pullRequest"]["comments"]["nodes"][0]["reactionGroups"];
+        let heart = groups.as_array_mut().unwrap().iter_mut().find(|g| g["content"] == "HEART").unwrap();
+        heart["viewerHasReacted"] = serde_json::Value::Bool(true);
+        let mine = graph.to_string();
+        let read = GitHub.read_page(PAGE_772, LINES_772, &hearts, &mine).unwrap();
+        assert_eq!(
+            read.comments[0].reactions,
+            Some(vec![
+                PullRequestReaction { content: ReactionContent::Heart, count: 2, mine: true },
+                PullRequestReaction { content: ReactionContent::Eyes, count: 1, mine: false }
+            ])
+        );
+        let older =
+            GRAPH_772.replace(r#""comments":{"pageInfo":{"hasPreviousPage":false}"#, r#""comments":{"pageInfo":{"hasPreviousPage":true}"#);
+        assert_ne!(older, GRAPH_772);
+        let read = GitHub.read_page(PAGE_772, LINES_772, COMMENTS_772, &older).unwrap();
+        assert_eq!(read.cut, Some(PullRequestPageCut { commits: None, reviews: None, threads: None, comments: Some(true) }));
+    }
+
+    #[test]
+    fn a_reply_posts_its_body_as_typed_on_stdin_and_reads_back_the_new_comment() {
+        assert_eq!(GitHub.reply_argv("o/r", 12, None), ["api", "--method", "POST", "repos/o/r/issues/12/comments", "--input", "-"]);
+        assert_eq!(
+            GitHub.reply_argv("o/r", 12, Some(7)),
+            ["api", "--method", "POST", "repos/o/r/pulls/12/comments/7/replies", "--input", "-"]
+        );
+        let body = "Fixed in 9703d1f.\n\n\"quoted\" `code` $HOME ${{x}} } mutation { deleteRepository }";
+        let input: serde_json::Value = serde_json::from_str(&GitHub.reply_input(body)).unwrap();
+        assert_eq!(input, serde_json::json!({ "body": body }));
+        // What the REST API answers a post with is the comment as its list gives it.
+        let posted: Vec<Vec<serde_json::Value>> = serde_json::from_str(COMMENTS_772).unwrap();
+        let read = GitHub.read_reply(&posted[0][1].to_string(), false, None).unwrap();
+        assert_eq!(read.review_comment, None);
+        let comment = read.comment.unwrap();
+        assert_eq!((comment.id, comment.author.as_str(), comment.association.as_deref()), (5842606909, "Zingzy", Some("owner")));
+        let lines: Vec<Vec<serde_json::Value>> = serde_json::from_str(LINES_772).unwrap();
+        let read = GitHub.read_reply(&lines[0][2].to_string(), true, Some("PRRT_kwDOULIAx86mM5yP")).unwrap();
+        let line = read.review_comment.unwrap();
+        assert_eq!((line.id, line.reply_to, line.node_id.is_some()), (4110044839, Some(4109844888), true));
+        // The thread the reply was posted into rides back on it, unresolved as a reply leaves it.
+        assert_eq!((line.thread_id.as_deref(), line.resolved), (Some("PRRT_kwDOULIAx86mM5yP"), Some(false)));
+        assert!(GitHub.read_reply("{\"message\":\"Validation Failed\"}", true, None).is_none());
+    }
+
+    /// What GitHub answered on 2026-10-02 to the scope read for a thread, a comment on a line, a review and a comment in
+    /// the conversation of Zingzy/wsp PR 772, and for an id it holds no node for.
+    #[test]
+    fn the_scope_read_names_the_pull_request_a_thread_or_a_reactable_sits_on_and_nothing_for_any_other_node() {
+        let at = |kind: &str| {
+            format!(
+                r#"{{"data":{{"node":{{"__typename":"{kind}","pullRequest":{{"number":772,"repository":{{"nameWithOwner":"Zingzy/wsp"}}}}}}}}}}"#
+            )
+        };
+        let here = Some(("Zingzy/wsp".to_owned(), 772));
+        assert_eq!(GitHub.read_scope(&at("PullRequestReviewThread"), true), here);
+        for kind in ["PullRequestReviewComment", "PullRequestReview", "IssueComment"] {
+            assert_eq!(GitHub.read_scope(&at(kind), false), here, "{kind}");
+            assert_eq!(GitHub.read_scope(&at(kind), true), None, "{kind} is no thread");
+        }
+        assert_eq!(GitHub.read_scope(&at("PullRequestReviewThread"), false), None);
+        // A comment on an issue sits on no pull request, and an id GitHub holds nothing for names no node.
+        assert_eq!(GitHub.read_scope(r#"{"data":{"node":{"__typename":"IssueComment","pullRequest":null}}}"#, false), None);
+        let missing = r#"{"data":{"node":null},"errors":[{"type":"NOT_FOUND","path":["node"],"message":"Could not resolve to a node with the global id of 'I_kwDOULIAx87xxxxxx'"}]}"#;
+        assert_eq!(GitHub.read_scope(missing, true), None);
+        assert_eq!(GitHub.scope_argv("PRRT_x"), ["api", "graphql", "-f", &format!("query={SCOPE_QUERY}"), "-f", "id=PRRT_x"]);
+    }
+
+    /// The mutations' answers in the shape GitHub's GraphQL schema gives them.
+    #[test]
+    fn a_resolve_and_a_reaction_name_what_they_act_on_as_variables_and_read_back_where_it_stands() {
+        let resolve = GitHub.resolve_argv("PRRT_kwDOULIAx86mM5yP", true);
+        assert_eq!(resolve, ["api", "graphql", "-f", &format!("query={RESOLVE_MUTATION}"), "-f", "id=PRRT_kwDOULIAx86mM5yP"]);
+        assert_eq!(GitHub.resolve_argv("PRRT_x", false)[3], format!("query={UNRESOLVE_MUTATION}"));
+        let done = r#"{"data":{"resolveReviewThread":{"thread":{"id":"PRRT_kwDOULIAx86mM5yP","isResolved":true}}}}"#;
+        assert_eq!(GitHub.read_resolve(done), Some(GitPrResolveReply { thread_id: "PRRT_kwDOULIAx86mM5yP".into(), resolved: true }));
+        let undone = r#"{"data":{"unresolveReviewThread":{"thread":{"id":"PRRT_x","isResolved":false}}}}"#;
+        assert_eq!(GitHub.read_resolve(undone), Some(GitPrResolveReply { thread_id: "PRRT_x".into(), resolved: false }));
+        assert_eq!(GitHub.read_resolve(r#"{"data":null,"errors":[{"message":"Could not resolve to a node"}]}"#), None);
+        assert_eq!(
+            GitHub.react_argv("IC_kwDOULIAx88AAAABXDU4OQ", ReactionContent::ThumbsUp, true),
+            ["api", "graphql", "-f", &format!("query={REACT_MUTATION}"), "-f", "id=IC_kwDOULIAx88AAAABXDU4OQ", "-f", "content=THUMBS_UP"]
+        );
+        assert_eq!(GitHub.react_argv("IC_x", ReactionContent::Eyes, false)[3], format!("query={UNREACT_MUTATION}"));
+        let reacted = r#"{"data":{"addReaction":{"subject":{"reactionGroups":[{"content":"THUMBS_UP","viewerHasReacted":true,"reactors":{"totalCount":2}},{"content":"THUMBS_DOWN","viewerHasReacted":false,"reactors":{"totalCount":0}},{"content":"HEART","viewerHasReacted":false,"reactors":{"totalCount":1}}]}}}}"#;
+        assert_eq!(
+            GitHub.read_react(reacted),
+            Some(vec![
+                PullRequestReaction { content: ReactionContent::ThumbsUp, count: 2, mine: true },
+                PullRequestReaction { content: ReactionContent::Heart, count: 1, mine: false }
+            ])
+        );
+        let none_left = r#"{"data":{"removeReaction":{"subject":{"reactionGroups":[{"content":"EYES","viewerHasReacted":false,"reactors":{"totalCount":0}}]}}}}"#;
+        assert_eq!(GitHub.read_react(none_left), Some(vec![]));
+        for id in ["PRRT_kwDOULIAx86mM5yP", "IC_kwDOULIAx88AAAABXDU4OQ", "MDQ6VXNlcjkwMzA5Mjkw=="] {
+            assert!(GitHub.is_node_id(id), "{id}");
+        }
+        for id in ["", "PRRT_x\") { deleteRepository", "a b", "x\n", &"a".repeat(129)] {
+            assert!(!GitHub.is_node_id(id), "{id}");
+        }
     }
 
     #[test]

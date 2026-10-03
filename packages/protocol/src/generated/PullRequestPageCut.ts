@@ -5,4 +5,4 @@
  * reviews before the newest 100, which carry no id, and review threads before the newest 100, whose comments do not
  * say whether they are resolved. Each is present only where true.
  */
-export type PullRequestPageCut = { commits?: boolean, reviews?: boolean, threads?: boolean, };
+export type PullRequestPageCut = { commits?: boolean, reviews?: boolean, threads?: boolean, comments?: boolean, };

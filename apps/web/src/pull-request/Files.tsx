@@ -3,6 +3,7 @@
 // drawn by the code view the Changes pane draws with, the comments on its lines standing on them. One file is open at
 // a time; its head hands the whole branch to the Changes pane.
 import { ChevronsDownUpIcon, ChevronsUpDownIcon, FileIcon } from "lucide-react";
+import { Skeleton } from "../components/ui/skeleton.js";
 import { useMemo, useState, type ReactNode } from "react";
 import type { PullRequestPage } from "@wsp/protocol";
 import { ChangedFilesTree } from "../components/chat/ChangedFilesTree.js";
@@ -17,7 +18,7 @@ import { buildFileDiffContentVersion, buildFileDiffIdentityKey, getRenderablePat
 import { summarizeTurnDiffStats } from "../lib/turnDiffTree.js";
 import { useRightPanelStore } from "../rightPanelStore.js";
 import { threadsOf, type LineComment } from "./conversation.logic.js";
-import { LineCommentRow, type Agent, type SendOf } from "./Conversation.js";
+import { LineCommentRow, type Agent, type PageActs, type SendOf } from "./Conversation.js";
 import { Hover } from "./parts.js";
 import { PR_WORDS } from "./words.js";
 
@@ -33,7 +34,7 @@ const sentMark = (of: SendOf | undefined, id: number): string => {
   return road !== undefined && "sent" in road ? String(road.sent) : "";
 };
 
-function FileDiff({ path, read, comments, theme, onOpenChanges, agent, of }: { path: string; read: DiffRead; comments: readonly LineComment[]; theme: "light" | "dark"; onOpenChanges: () => void; agent: Agent; of: SendOf | undefined }) {
+function FileDiff({ path, read, comments, theme, onOpenChanges, agent, of, acts }: { path: string; read: DiffRead; comments: readonly LineComment[]; theme: "light" | "dark"; onOpenChanges: () => void; agent: Agent; of: SendOf | undefined; acts: PageActs | undefined }) {
   const file = useMemo(() => {
     if (read.state !== "read") return undefined;
     const parsed = getRenderablePatch(read.patch, "pr-diff");
@@ -47,22 +48,29 @@ function FileDiff({ path, read, comments, theme, onOpenChanges, agent, of }: { p
         filePath: path,
         side: thread.comments[0]!.side === "LEFT" ? "deletions" : "additions",
         line: thread.line!,
-        version: thread.comments.map(c => `${c.id}:${c.body}:${sentMark(of, c.id)}`).join("|"),
+        version: thread.comments.map(c => `${c.id}:${c.body}:${sentMark(of, c.id)}:${(c.reactions ?? []).map(r => `${r.content}${r.count}${r.mine ? "m" : ""}`).join(",")}`).join("|"),
         render: () => (
           <div className="font-sans [&>*:first-child]:border-t-0">
             {thread.comments.map(c => (
-              <LineCommentRow key={c.id} comment={c} agent={agent} of={of} />
+              <LineCommentRow key={c.id} comment={c} agent={agent} of={of} acts={acts} />
             ))}
           </div>
         ),
       })),
-    [agent, comments, of, path],
+    [acts, agent, comments, of, path],
   );
   const quiet = (words: string): ReactNode => <p className="px-3 py-2.5 text-[13px] text-muted-foreground">{words}</p>;
   return (
     <div data-pr-file-diff={path} className="mt-1.5 mb-1 overflow-clip rounded-lg border border-border bg-card">
       {read.state === "reading" ? (
-        quiet(PR_WORDS.reading)
+        <div data-pr-skeleton="diff" aria-busy="true" className="flex flex-col gap-2 px-3 py-3">
+          {[0.62, 0.8, 0.44, 0.7, 0.36].map((w, i) => (
+            <div key={i} className="grid grid-cols-[28px_minmax(0,1fr)] items-center gap-3">
+              <Skeleton className="h-2.5 w-5 justify-self-end" />
+              <Skeleton className="h-2.5" style={{ width: `${w * 100}%` }} />
+            </div>
+          ))}
+        </div>
       ) : read.state === "refused" ? (
         quiet(read.said)
       ) : file === undefined ? (
@@ -92,7 +100,7 @@ function FileDiff({ path, read, comments, theme, onOpenChanges, agent, of }: { p
   );
 }
 
-export function Files({ workspaceId, page, theme, readDiff, read, agent, of }: { workspaceId: string; page: PullRequestPage; theme: "light" | "dark"; readDiff: () => void; read: DiffRead | null; agent: Agent; of: SendOf | undefined }) {
+export function Files({ workspaceId, page, theme, readDiff, read, agent, of, acts }: { workspaceId: string; page: PullRequestPage; theme: "light" | "dark"; readDiff: () => void; read: DiffRead | null; agent: Agent; of: SendOf | undefined; acts?: PageActs | undefined }) {
   const [allExpanded, setAllExpanded] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
   const files: TurnDiffFileChange[] = useMemo(() => page.files.map(f => ({ path: f.path, kind: "modified", additions: f.additions, deletions: f.deletions })), [page.files]);
@@ -133,7 +141,7 @@ export function Files({ workspaceId, page, theme, readDiff, read, agent, of }: {
         statTone="diff"
         openPath={open ?? undefined}
         onOpenFile={press}
-        renderUnderFile={path => (path !== open ? null : <FileDiff path={path} read={read ?? { state: "reading" }} comments={page.reviewComments} theme={theme} onOpenChanges={openChanges} agent={agent} of={of} />)}
+        renderUnderFile={path => (path !== open ? null : <FileDiff path={path} read={read ?? { state: "reading" }} comments={page.reviewComments} theme={theme} onOpenChanges={openChanges} agent={agent} of={of} acts={acts} />)}
       />
     </div>
   );

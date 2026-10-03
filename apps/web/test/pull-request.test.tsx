@@ -82,28 +82,39 @@ const PAGE: PullRequestPage = {
     { oid: "def5678abc", subject: "merge: origin/main into fix", body: "", at: "2026-09-28T10:30:00Z", author: "cass", parents: 2, additions: 40, deletions: 9 },
   ],
   reviews: [
-    { id: 50, author: "ana", state: "changes_requested", body: "## Cold review\n\nsee `check.sh`", at: "2026-09-28T11:00:00Z" },
+    { id: 50, nodeId: "PRR_50", author: "ana", state: "changes_requested", body: "## Cold review\n\nsee `check.sh`", at: "2026-09-28T11:00:00Z", reactions: [{ content: "+1", count: 2, mine: true }, { content: "rocket", count: 1, mine: false }] },
     { id: 51, author: "cass", state: "commented", body: "", at: "2026-09-28T11:40:00Z" },
   ],
   comments: [
     { id: 1, author: "vercel", bot: true, avatar: "https://avatars.githubusercontent.com/in/8329", body: "Deployed", url: "u1", at: "2026-09-28T09:30:00Z" },
-    { id: 2, author: "bo", bot: false, body: "thanks, **fixed**", url: "u2", at: "2026-09-28T12:00:00Z" },
+    { id: 2, nodeId: "IC_2", author: "bo", bot: false, body: "thanks, **fixed**", url: "u2", at: "2026-09-28T12:00:00Z" },
   ],
   reviewComments: [
-    { id: 7, path: "check.sh", line: 3, side: "RIGHT", author: "ana", bot: false, body: "exit 1 here", url: "u7", at: "2026-09-28T11:00:00Z", hunk: HUNK, reviewId: 50, resolved: false },
-    { id: 8, path: "check.sh", line: 3, side: "RIGHT", author: "cass", bot: false, body: "Done", url: "u8", at: "2026-09-28T11:40:00Z", replyTo: 7, reviewId: 51, resolved: false },
+    { id: 7, path: "check.sh", line: 3, side: "RIGHT", author: "ana", bot: false, body: "exit 1 here", url: "u7", at: "2026-09-28T11:00:00Z", hunk: HUNK, reviewId: 50, resolved: false, nodeId: "PRRC_7", threadId: "PRRT_1" },
+    { id: 8, path: "check.sh", line: 3, side: "RIGHT", author: "cass", bot: false, body: "Done", url: "u8", at: "2026-09-28T11:40:00Z", replyTo: 7, reviewId: 51, resolved: false, nodeId: "PRRC_8", threadId: "PRRT_1" },
   ],
   files: [{ path: "check.sh", additions: 2, deletions: 1 }],
   merge: { methods: ["merge", "squash"], defaultMethod: "squash", autoMerge: true },
   sent: [],
 };
+const NOT_YOU = "no signed-in command line for github.com is on this computer, so nothing is posted as you";
 const DIFF = "diff --git a/check.sh b/check.sh\nindex 1..2 100644\n--- a/check.sh\n+++ b/check.sh\n@@ -1,2 +1,3 @@\n #!/bin/sh\n-exit 0\n+echo checking\n+exit 1\n";
 
 const statusWith = (pr: WorkspaceStatus["pr"]): WorkspaceStatus =>
   ({ ...view, machineState: "running", reach: { state: "reachable" }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0, ...(pr !== undefined ? { pr } : {}) }) as WorkspaceStatus;
 
-function withApi(pr: WorkspaceStatus["pr"], page: PullRequestPage = PAGE) {
+function withApi(pr: WorkspaceStatus["pr"], page: PullRequestPage = PAGE, o: { acts?: boolean } = {}) {
+  const writes = {
+    pullRequestReply: vi.fn(async (_id: string, w: { replyTo?: number; body: string }) =>
+      w.replyTo === undefined
+        ? { comment: { id: 90, nodeId: "IC_90", author: "cass", bot: false, body: w.body, url: "u90", at: new Date().toISOString() } }
+        : { reviewComment: { id: 91, nodeId: "PRRC_91", path: "check.sh", line: 3, side: "RIGHT", author: "cass", bot: false, body: w.body, url: "u91", at: new Date().toISOString(), replyTo: w.replyTo, threadId: "PRRT_1", resolved: false } },
+    ),
+    pullRequestResolve: vi.fn(async (_id: string, threadId: string, resolved: boolean) => ({ threadId, resolved })),
+    pullRequestReact: vi.fn(async (_id: string, w: { subject: string; content: string; on: boolean }) => ({ subject: w.subject, reactions: [{ content: w.content, count: 1, mine: w.on }] })),
+  };
   const api = {
+    ...(o.acts === true ? writes : {}),
     pullRequestView: vi.fn(async () => page),
     pullRequestDiff: vi.fn(async () => ({ diff: DIFF, truncated: false, left: [] as string[] })),
     pullRequestSend: vi.fn(async (_id: string, items: readonly { kind: "comment" | "review" | "reviewComment"; id: number }[]) => ({ outcome: "steered" as const, threadId: "t1", agent: "claude", sent: items.map(i => ({ ...i, at: Date.now() - 120_000 })) })),
@@ -112,11 +123,12 @@ function withApi(pr: WorkspaceStatus["pr"], page: PullRequestPage = PAGE) {
     update: vi.fn(async () => ({ base: "main", merged: false, commits: 0, conflicts: ["README.md"] })),
   };
   act(() => useStore.setState({ api: api as never, statuses: { [WS]: statusWith(pr) }, sessions: { [WS]: [{ id: "s1", workspaceId: WS, harness: "claude", status: "done", threadId: "t1", startedAt: 1 }] } as never }));
-  return api;
+  return { ...api, ...writes };
 }
 
-async function pane(pr: WorkspaceStatus["pr"] = fact(), page: PullRequestPage = PAGE) {
-  const api = withApi(pr, page);
+async function pane(pr: WorkspaceStatus["pr"] = fact(), page: PullRequestPage = PAGE, o: { acts?: boolean; posts?: boolean } = {}) {
+  // The writes post through this computer's own gh, which a page read through it says.
+  const api = withApi(pr, (o.posts ?? o.acts) === true ? { ...page, postsAsYou: true } : page, o);
   const utils = render(<PullRequestSurface workspaceId={WS} />);
   await waitFor(() => expect(utils.container.querySelector("[data-pr-title]")?.textContent).toBe(page.title));
   return { api, ...utils };
@@ -160,7 +172,7 @@ describe("the Pull request pane's head", () => {
     expect(said(q(head, "[data-pr-asks]"))).toBe("Review asked of octocat");
   });
 
-  it("wears red only for a failure or a conflict, green only approved, violet merged, muted open and closed, and pulses while checks run", async () => {
+  it("wears GitHub's meanings: green open and approved, red closed, failed or conflicting, violet merged, muted draft, and pulses while checks run", async () => {
     const tone = (): [string, string, boolean] => {
       const w = q(document.body, "[data-k='pr-word']");
       return [w.textContent!, w.dataset["tone"]!, w.querySelector(".pr-word-pulse") !== null];
@@ -168,30 +180,18 @@ describe("the Pull request pane's head", () => {
     await pane();
     expect(tone()).toEqual(["Checks failed", "bad", false]);
     const states: [WorkspaceStatus["pr"], [string, string, boolean]][] = [
-      [fact({ checks: [] }), ["Open", "quiet", false]],
+      [fact({ checks: [] }), ["Open", "ok", false]],
       [fact({ checks: [], mergeable: "conflicting" }), ["Conflicts with main", "bad", false]],
       [fact({ checks: [{ name: "ci", state: "pending" }] }), ["Checks running", "run", true]],
       [fact({ checks: [], review: "approved" }), ["Approved", "ok", false]],
       [fact({ checks: [], review: "changes_asked" }), ["Changes asked for", "warn", false]],
       [{ number: 12, url: "u", state: "merged", base: "main", readAt: 1 } satisfies PullRequestKept, ["Merged", "merged", false]],
-      [{ number: 12, url: "u", state: "closed", base: "main", readAt: 1 } satisfies PullRequestKept, ["Closed", "quiet", false]],
+      [{ number: 12, url: "u", state: "closed", base: "main", readAt: 1 } satisfies PullRequestKept, ["Closed", "bad", false]],
     ];
     for (const [pr, want] of states) {
       act(() => useStore.setState({ statuses: { [WS]: statusWith(pr) } }));
       expect(tone()).toEqual(want);
     }
-  });
-
-  it("scrolls to the merge box from the state word, from any tab", async () => {
-    const scrolled = vi.fn();
-    const was = Element.prototype.scrollIntoView;
-    Element.prototype.scrollIntoView = scrolled;
-    onTestFinished(() => void (Element.prototype.scrollIntoView = was));
-    const { container } = await pane();
-    fireEvent.click(q(container, "[data-segment='files']"));
-    fireEvent.click(q(container, "[data-pr-word-to-box]"));
-    await waitFor(() => expect(scrolled).toHaveBeenCalledTimes(1));
-    expect(scrolled.mock.contexts[0]).toBe(q(container, "[data-pr-merge-box]"));
   });
 
   it("stands its refresh in the panel's tab strip, and a press reads the page again", async () => {
@@ -233,8 +233,8 @@ describe("the Conversation tab", () => {
     const { container } = await pane();
     expect([...container.querySelectorAll<HTMLElement>("[data-pr-entry]")].map(e => e.dataset["prEntry"])).toEqual(["comment", "push", "review", "comment"]);
     const push = q(container, "[data-pr-entry='push']");
-    expect(push.textContent).toContain("pushed 2 commits");
-    expect([...push.querySelectorAll<HTMLElement>("[data-pr-pushed]")].map(r => r.textContent)).toEqual(["abc1234Set ci status", "def5678merge: origin/main into fix"]);
+    expect([...q(push, "[data-pr-entry-head]").children].map(c => c.textContent).filter(t => t !== "")).toEqual(["cass", "pushed 2 commits", expect.stringMatching(/ago$/)]);
+    expect(push.querySelector("[data-pr-pushed]")).toBeNull();
     const thread = q(q(container, "[data-pr-entry='review']"), "[data-pr-thread]");
     expect([...thread.querySelectorAll("[data-pr-line-comment]")].map(r => r.getAttribute("data-pr-line-comment"))).toEqual(["7", "8"]);
     expect([...thread.querySelectorAll<HTMLElement>("[data-pr-thread-code] [data-line]")].map(l => [l.dataset["line"], l.textContent])).toEqual([
@@ -304,15 +304,44 @@ describe("the Conversation tab", () => {
   });
 });
 
-describe("the merge box", () => {
-  const box = (c: HTMLElement) => q(c, "[data-pr-merge-box]");
+describe("Status", () => {
+  const box = (c: HTMLElement) => q(c, "[data-pr-status]");
   const row = (c: HTMLElement, k: string) => q(box(c), `[data-pr-box-row='${k}']`);
+  const follows = (a: Element, b: Element): boolean => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
 
-  it("stands after the timeline under its own head, the checks counted on one line with a failure open under it", async () => {
+  it("stands first under the tabs, then the description, then Activity, on open, merged and closed pull requests alike", async () => {
     const { container } = await pane();
-    const timeline = q(container, "[data-pr-timeline]");
-    expect(timeline.compareDocumentPosition(box(container)) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(box(container).querySelector("h3")!.textContent).toBe("Merge");
+    expect(follows(q(container, "[data-pr-tabs]"), box(container))).toBe(true);
+    expect(follows(box(container), q(container, "[data-pr-body]"))).toBe(true);
+    expect(follows(q(container, "[data-pr-body]"), q(container, "[data-pr-activity]"))).toBe(true);
+    expect([box(container).querySelector("h3")!.textContent, q(container, "[data-pr-activity] h3").textContent]).toEqual(["Status", "Activity"]);
+    for (const settled of [
+      { number: 12, url: "u", state: "merged", base: "main", readAt: 1 },
+      { number: 12, url: "u", state: "closed", base: "main", readAt: 1 },
+    ] satisfies PullRequestKept[]) {
+      act(() => useStore.setState({ statuses: { [WS]: statusWith(settled) } }));
+      const at = await waitFor(() => q(container, "[data-pr-status]"));
+      expect(follows(at, q(container, "[data-pr-body]"))).toBe(true);
+    }
+  });
+
+  it("says a closed pull request closed without a merge, with when and nobody named, and a missing description in so many words", async () => {
+    const closed: PullRequestKept = { number: 12, url: "u", state: "closed", base: "main", closedAt: Date.now() - 5 * 86_400_000, readAt: 1 };
+    const { container } = await pane(closed, { ...PAGE, body: "" });
+    expect(said(row(container, "settled"))).toBe("Closed, not merged5 d ago");
+    expect(q(container, "[data-pr-no-body]").textContent).toBe("No description.");
+  });
+
+  it("opens the Commits tab from a push line", async () => {
+    const { container } = await pane();
+    fireEvent.click(q(container, "[data-pr-entry='push'] [data-pr-push-open]"));
+    expect(q(container, "[data-segment='commits']").getAttribute("aria-checked")).toBe("true");
+    expect(container.querySelector("[data-pr-commits]")).not.toBeNull();
+  });
+
+  it("counts the checks on its first row, with a failure open under it", async () => {
+    const { container } = await pane();
+    expect(box(container).querySelector("[data-pr-box-row]")!.getAttribute("data-pr-box-row")).toBe("checks");
     expect(row(container, "checks").textContent).toBe("Checks1 passed, 1 failed");
     expect(row(container, "check:ci").textContent).toContain("ci, failed after 16 min");
     expect(row(container, "checks:pass").textContent).toBe("1 passedlint");
@@ -334,7 +363,15 @@ describe("the merge box", () => {
     const review = row(container, "review");
     expect(review.textContent).toContain("ana asked for changes, dee approved");
     expect([...review.querySelectorAll("[data-pr-faces] [data-pr-face]")].map(f => f.getAttribute("data-pr-face"))).toEqual(["ana", "dee"]);
-    expect(within(review).getByRole("button", { name: "Review with an agent" })).not.toBeNull();
+    const agentButton = within(review).getByRole("button", { name: "Review with an agent" });
+    expect([agentButton.textContent, [...review.querySelectorAll("[role=tooltip]")].at(-1)!.textContent]).toEqual(["", "Review with an agent"]);
+  });
+
+  it("folds the checks shut as the pull request settles", async () => {
+    const { container } = await pane();
+    expect(q(container, "[data-pr-checks]").getAttribute("aria-expanded")).toBe("true");
+    act(() => useStore.setState({ statuses: { [WS]: statusWith({ ...fact(), state: "merged" }) } }));
+    await waitFor(() => expect(q(container, "[data-pr-checks]").getAttribute("aria-expanded")).toBe("false"));
   });
 
   it("counts the unresolved comments not yet sent, and sends them all as one message", async () => {
@@ -398,6 +435,178 @@ describe("the merge box", () => {
     expect(row(container, "landed").textContent).toBe("Landed on main as cfa39fa");
     expect(q<HTMLAnchorElement>(box(container), "[data-pr-open-github]").getAttribute("href")).toBe("https://github.com/o/r/pull/12");
     expect(box(container).querySelector("[data-pr-merge]")).toBeNull();
+  });
+});
+
+describe("acting on the page as the person", () => {
+  const typeAndSend = (field: HTMLElement, words: string): void => {
+    const area = q<HTMLTextAreaElement>(field, "textarea");
+    fireEvent.change(area, { target: { value: words } });
+    fireEvent.keyDown(area, { key: "Enter", metaKey: true });
+  };
+
+  it("replies in a thread under its first comment, and the reply stands in the thread once GitHub has it", async () => {
+    const { container, api } = await pane(fact(), PAGE, { acts: true });
+    const thread = q(container, "[data-pr-thread='thread:7']");
+    fireEvent.click(q(thread, "[data-pr-thread-reply]"));
+    const field = q(thread, "[data-pr-reply]");
+    expect(q<HTMLTextAreaElement>(field, "textarea").placeholder).toBe("Reply to ana");
+    typeAndSend(field, "Pushed the fix");
+    await waitFor(() => expect(api.pullRequestReply).toHaveBeenCalledWith(WS, { body: "Pushed the fix", replyTo: 7, threadId: "PRRT_1" }));
+    await waitFor(() => expect(thread.querySelector("[data-pr-line-comment='91']")).not.toBeNull());
+    expect(thread.querySelector("[data-pr-reply]")).toBeNull();
+  });
+
+  it("keeps the words and says why under the field when a reply is refused", async () => {
+    const { container, api } = await pane(fact(), PAGE, { acts: true });
+    api.pullRequestReply.mockRejectedValueOnce(new Error(NOT_YOU));
+    const comment = q(container, "[data-pr-entry='comment']:not([data-quiet])");
+    fireEvent.click(q(comment, "[data-pr-reply-open]"));
+    const field = q(comment, "[data-pr-reply]");
+    typeAndSend(field, "Thanks");
+    await waitFor(() => expect(q(field, "[data-pr-reply-refusal]").textContent).toBe(NOT_YOU));
+    expect(api.pullRequestReply).toHaveBeenCalledWith(WS, { body: "Thanks" });
+    expect(q<HTMLTextAreaElement>(field, "textarea").value).toBe("Thanks");
+    fireEvent.click(q(field, "[data-pr-reply-send]"));
+    await waitFor(() => expect(container.querySelector("[data-pr-entry][data-pr-entry='comment'] [data-pr-reply]")).toBeNull());
+    await waitFor(() => expect(container.querySelectorAll("[data-pr-entry='comment']:not([data-quiet])")).toHaveLength(2));
+  });
+
+  it("resolves a thread, which then folds to its path, Resolved and its count, and opens again to Unresolve", async () => {
+    const { container, api } = await pane(fact(), PAGE, { acts: true });
+    const thread = (): HTMLElement => q(container, "[data-pr-thread='thread:7']");
+    fireEvent.click(q(thread(), "[data-pr-thread-resolve]"));
+    await waitFor(() => expect(api.pullRequestResolve).toHaveBeenCalledWith(WS, "PRRT_1", true));
+    await waitFor(() => expect(thread().dataset["folded"]).toBe("true"));
+    expect(q(thread(), "[data-pr-thread-toggle]").textContent).toBe("check.sh:3Resolved2 comments");
+    expect(thread().querySelector("[data-pr-line-comment]")).toBeNull();
+    fireEvent.click(q(thread(), "[data-pr-thread-toggle]"));
+    expect(q(thread(), "[data-pr-thread-resolve]").textContent).toBe("Unresolve");
+    fireEvent.click(q(thread(), "[data-pr-thread-resolve]"));
+    await waitFor(() => expect(api.pullRequestResolve).toHaveBeenLastCalledWith(WS, "PRRT_1", false));
+    await waitFor(() => expect(thread().dataset["resolved"]).toBeUndefined());
+  });
+
+  it("marks the person's own reaction, puts one on at once from the eight, and takes it back where the host refuses", async () => {
+    const { container, api } = await pane(fact(), PAGE, { acts: true });
+    const review = q(container, "[data-pr-reactions='review:50']");
+    expect([...review.querySelectorAll<HTMLElement>("[data-pr-reaction]")].map(r => [r.dataset["prReaction"], r.textContent, r.dataset["mine"] ?? null])).toEqual([
+      ["+1", "👍2", "true"],
+      ["rocket", "🚀1", null],
+    ]);
+    expect(q(container, "[data-pr-line-comment='7'] [data-diff-comment-said] [data-pr-react-add]")).not.toBeNull();
+    expect(q(review.closest("[data-pr-entry]")!, "[data-pr-entry-head] [data-pr-react-add]").className).toContain("opacity-0");
+    expect(container.querySelector("[data-pr-reactions='reviewComment:7']")).toBeNull();
+    expect(container.querySelector("[data-pr-reactions='comment:2']")).toBeNull();
+    const head = q(container, "[data-pr-entry='comment']:not([data-quiet]) [data-pr-entry-head]");
+    fireEvent.click(q(head, "[data-pr-react-add]"));
+    const picks = await waitFor(() => {
+      const found = [...document.querySelectorAll<HTMLElement>("[data-pr-react-pick]")];
+      expect(found).toHaveLength(8);
+      return found;
+    });
+    let answer: (v: unknown) => void = () => {};
+    api.pullRequestReact.mockImplementationOnce(() => new Promise(r => (answer = r as never)));
+    fireEvent.click(picks.find(p => p.dataset["prReactPick"] === "heart")!);
+    const comment = q(container, "[data-pr-reactions='comment:2']");
+    expect(q(comment, "[data-pr-reaction='heart']").dataset["mine"]).toBe("true");
+    expect(api.pullRequestReact).toHaveBeenCalledWith(WS, { subject: "IC_2", content: "heart", on: true });
+    await act(async () => answer({ subject: "IC_2", reactions: [{ content: "heart", count: 3, mine: true }] }));
+    expect(q(comment, "[data-pr-reaction='heart']").textContent).toBe("❤️3");
+    api.pullRequestReact.mockRejectedValueOnce(new Error(NOT_YOU));
+    fireEvent.click(q(review, "[data-pr-reaction='+1']"));
+    expect(api.pullRequestReact).toHaveBeenLastCalledWith(WS, { subject: "PRR_50", content: "+1", on: false });
+    await waitFor(() => expect(q(review, "[data-pr-reaction='+1']").textContent).toBe("👍2"));
+    expect(q(review, "[data-pr-reaction='+1']").dataset["mine"]).toBe("true");
+    await waitFor(() => expect(useNotices.getState().notices.at(-1)?.text).toBe(NOT_YOU));
+  });
+
+  it("draws no reactions row under a comment nobody reacted to, the add button and Reply only in its head on a hover", async () => {
+    const { container } = await pane(fact(), PAGE, { acts: true });
+    const entry = q(container, "[data-pr-entry='comment']:not([data-quiet])");
+    expect(entry.querySelector("[data-pr-reactions]")).toBeNull();
+    const acts = q(entry, "[data-pr-entry-head] [data-pr-head-acts]");
+    expect([acts.querySelector("[data-pr-react-add]") !== null, acts.querySelector("[data-pr-reply-open]") !== null]).toEqual([true, true]);
+    expect(acts.className).toMatch(/\babsolute\b.*\bopacity-0\b.*group-hover\/ev:opacity-100/);
+  });
+
+  it("ends every head's time on one edge: the hover's acts sit inside the time and take no width, as on a push line and a thread", async () => {
+    const { container } = await pane(fact(), PAGE, { acts: true });
+    const heads = [...container.querySelectorAll<HTMLElement>("[data-pr-timeline] > li > div > [data-pr-entry-head], [data-pr-timeline] > li [data-pr-push-open] > [data-pr-entry-head]")];
+    expect(new Set(heads.map(h => h.closest("[data-pr-entry]")!.getAttribute("data-pr-entry")))).toEqual(new Set(["comment", "push", "review", "thread"].filter(k => container.querySelector(`[data-pr-entry='${k}']`) !== null)));
+    for (const head of heads) {
+      const time = head.lastElementChild as HTMLElement;
+      expect([time.hasAttribute("data-pr-time"), time.className.includes("ml-auto") || head.querySelector("[data-pr-sent]") !== null]).toEqual([true, true]);
+      for (const act of head.querySelectorAll("[data-pr-head-acts]")) expect([act.parentElement, act.className.includes("absolute")]).toEqual([time, true]);
+    }
+  });
+
+  it("takes only the latest press's answer on an item: an older answer that lands last, or an older refusal, changes nothing", async () => {
+    const { container, api } = await pane(fact(), PAGE, { acts: true });
+    const answers: ((v: unknown) => void)[] = [];
+    const refusals: ((e: unknown) => void)[] = [];
+    api.pullRequestReact.mockImplementation(() => new Promise((ok, no) => (answers.push(ok as never), refusals.push(no))));
+    const chip = (): HTMLElement => q(container, "[data-pr-reactions='review:50'] [data-pr-reaction='+1']");
+    fireEvent.click(chip());
+    fireEvent.click(chip());
+    await act(async () => answers[1]!({ subject: "PRR_50", reactions: [{ content: "+1", count: 2, mine: true }] }));
+    await act(async () => answers[0]!({ subject: "PRR_50", reactions: [{ content: "+1", count: 1, mine: false }] }));
+    expect([chip().textContent, chip().dataset["mine"]]).toEqual(["👍2", "true"]);
+    fireEvent.click(chip());
+    fireEvent.click(chip());
+    await act(async () => refusals[2]!(new Error(NOT_YOU)));
+    expect([chip().textContent, chip().dataset["mine"]]).toEqual(["👍2", "true"]);
+    await act(async () => answers[3]!({ subject: "PRR_50", reactions: [{ content: "+1", count: 3, mine: true }] }));
+    expect(chip().textContent).toBe("👍3");
+  });
+
+  it("toggles a line comment's reactions in the Files tab's diff as in Activity, and draws plain chips where no act exists", async () => {
+    const reacted = { ...PAGE, reviewComments: PAGE.reviewComments.map(c => (c.id === 7 ? { ...c, reactions: [{ content: "eyes" as const, count: 1, mine: false }] } : c)) };
+    const { container, api } = await pane(fact(), reacted, { acts: true });
+    fireEvent.click(q(container, "[data-segment='files']"));
+    fireEvent.click(q(container, "[data-changed-file='check.sh']"));
+    const diff = await waitFor(() => q(container, "[data-pr-file-diff='check.sh'] [data-code-view]"));
+    fireEvent.click(q(diff, "[data-pr-reaction='eyes']"));
+    expect(api.pullRequestReact).toHaveBeenCalledWith(WS, { subject: "PRRC_7", content: "eyes", on: true });
+    cleanup();
+    const plain = await pane(fact(), reacted);
+    fireEvent.click(q(plain.container, "[data-segment='files']"));
+    fireEvent.click(q(plain.container, "[data-changed-file='check.sh']"));
+    const still = await waitFor(() => q(plain.container, "[data-pr-file-diff='check.sh'] [data-pr-reaction='eyes']"));
+    expect(still.tagName).toBe("SPAN");
+  });
+
+  it("lets the reply field grow with its words and gives it no resize grip", async () => {
+    const { container } = await pane(fact(), PAGE, { acts: true });
+    fireEvent.click(q(container, "[data-pr-thread-reply]"));
+    const field = q(container, "[data-pr-reply] [data-slot='textarea-control']");
+    expect(field.className).toContain("[&_[data-slot=textarea]]:resize-none");
+    expect(q(field, "textarea").className).toContain("field-sizing-content");
+  });
+
+  it("draws no Reply, no Resolve and no add button where the page did not come through this computer's own gh, and the chips still stand", async () => {
+    for (const postsAsYou of [false, undefined]) {
+      cleanup();
+      const page = { ...PAGE, ...(postsAsYou === undefined ? {} : { postsAsYou }) };
+      const { container } = await pane(fact(), page, { acts: true, posts: false });
+      expect(container.querySelector("[data-pr-thread-reply], [data-pr-thread-resolve], [data-pr-reply-open], [data-pr-react-add]")).toBeNull();
+      expect(container.querySelectorAll("[data-pr-reactions='review:50'] [data-pr-reaction]")).toHaveLength(2);
+      expect(q(container, "[data-pr-reactions='review:50'] [data-pr-reaction='+1']").tagName).toBe("SPAN");
+    }
+  });
+
+  it("draws no reply field, no Resolve and no add button where no host serves the writes, and the chips still stand", async () => {
+    const { container } = await pane(fact(), { ...PAGE, postsAsYou: true });
+    expect(container.querySelector("[data-pr-thread-reply], [data-pr-thread-resolve], [data-pr-reply-open], [data-pr-react-add]")).toBeNull();
+    expect(container.querySelectorAll("[data-pr-reactions='review:50'] [data-pr-reaction]")).toHaveLength(2);
+  });
+
+  it("shows a settled pull request's kept checks as Status's first row", async () => {
+    const closed: PullRequestKept = { number: 12, url: "u", state: "closed", base: "main", closedAt: Date.now() - 86_400_000, readAt: 1, checks: [{ name: "ci", workflow: "ci", state: "pass" }] };
+    const { container } = await pane(closed);
+    const rows = [...container.querySelectorAll<HTMLElement>("[data-pr-status] [data-pr-box-row]")].map(r => r.dataset["prBoxRow"]);
+    expect(rows).toEqual(["checks", "settled", "end"]);
+    expect(q(container, "[data-pr-checks]").getAttribute("aria-expanded")).toBe("false");
   });
 });
 

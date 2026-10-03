@@ -14,10 +14,11 @@ use wsp_frames::{
     guest_wsp_shim, landed_files_script, numbers, place_owned_paths, probe_path, words, BackendFacts, CopyReport, DaemonAuthRequest,
     DaemonErrorResponse, DaemonEvent, DaemonRequest, FsFilesReply, GitBranchCompareReply, GitCheckpointReply, GitCommitReply,
     GitDiscardReply, GitIssueReadReply, GitMergeInReply, GitPrCheckoutReply, GitPrDiffReply, GitPrListReply, GitPrMergeReply,
-    GitPrReadReply, GitPrReply, GitPrReviewReply, GitPrViewReply, GitPushReply, GitRepoReadReply, GitRestoreReply, GitRunLogReply,
-    GitSnapshotReply, GitStartOnReply, GitUpdateReply, GuestCliMessage, GuestOpenReply, HostFolderListing, MachineAnswersReply,
-    MachineExecReply, MachineHandleReply, MachineLinkRequest, MachineListReply, MachineReachReply, MachineReadingReply, MachineShapeReply,
-    MachineStateReply, PlaceAuthRequest, PlaceCapacity, PlaceProveRequest, SshStartReply, SysHistoryReply, DAEMON_OPS, MACHINE_OPS,
+    GitPrReactReply, GitPrReadReply, GitPrReply, GitPrReplyReply, GitPrResolveReply, GitPrReviewReply, GitPrViewReply, GitPushReply,
+    GitRepoReadReply, GitRestoreReply, GitRunLogReply, GitSnapshotReply, GitStartOnReply, GitUpdateReply, GuestCliMessage, GuestOpenReply,
+    HostFolderListing, MachineAnswersReply, MachineExecReply, MachineHandleReply, MachineLinkRequest, MachineListReply, MachineReachReply,
+    MachineReadingReply, MachineShapeReply, MachineStateReply, PlaceAuthRequest, PlaceCapacity, PlaceProveRequest, SshStartReply,
+    SysHistoryReply, DAEMON_OPS, MACHINE_OPS,
 };
 
 fn fixtures() -> PathBuf {
@@ -265,6 +266,15 @@ fn every_reply_fixture_round_trips_through_the_reply_types() {
                 "GitPrReviewReply" => {
                     round_trip::<GitPrReviewReply>(&sample, &at);
                 }
+                "GitPrReplyReply" => {
+                    round_trip::<GitPrReplyReply>(&sample, &at);
+                }
+                "GitPrResolveReply" => {
+                    round_trip::<GitPrResolveReply>(&sample, &at);
+                }
+                "GitPrReactReply" => {
+                    round_trip::<GitPrReactReply>(&sample, &at);
+                }
                 "FsFilesReply" => {
                     round_trip::<FsFilesReply>(&sample, &at);
                 }
@@ -316,6 +326,9 @@ fn every_reply_fixture_round_trips_through_the_reply_types() {
         "GitPrCheckoutReply",
         "GitPrDiffReply",
         "GitPrReviewReply",
+        "GitPrReplyReply",
+        "GitPrResolveReply",
+        "GitPrReactReply",
         "GitUpdateReply",
         "GuestCliMessage",
         "GuestOpenReply",
@@ -400,6 +413,7 @@ fn rendered_numbers() -> BTreeMap<&'static str, Value> {
     let mut m = BTreeMap::new();
     m.insert("daemonVersion", Value::from(numbers::DAEMON_VERSION));
     m.insert("execBodyMax", Value::from(numbers::EXEC_BODY_MAX));
+    m.insert("prReplyBodyMax", Value::from(numbers::PR_REPLY_BODY_MAX));
     m.insert("guestMessageCapBytes", Value::from(numbers::GUEST_MESSAGE_CAP_BYTES));
     m.insert("guestQueueCapFrames", Value::from(numbers::GUEST_QUEUE_CAP_FRAMES));
     m.insert("guestInFlightCapBytes", Value::from(numbers::GUEST_IN_FLIGHT_CAP_BYTES));

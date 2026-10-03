@@ -78,7 +78,8 @@ export const PullRequestUnread = z.object({ why: z.string(), readAt: z.number() 
 export type PullRequestUnread = z.infer<typeof PullRequestUnread>;
 
 /** What a workspace's record keeps of its pull request, so a merged one still reads merged after the host restarts
- * and is never read again: the number, the link, where it stands and its base, and when the host saw it settle. */
+ * and is never read again: the number, the link, where it stands and its base, when the host saw it settle, and the
+ * checks the read that saw it settle found on its head. */
 export const PullRequestRecord = z.object({
   number: count,
   url: z.string(),
@@ -86,6 +87,7 @@ export const PullRequestRecord = z.object({
   base: z.string(),
   mergedAt: z.number().optional(),
   closedAt: z.number().optional(),
+  checks: z.array(PullRequestCheck).optional(),
 });
 export type PullRequestRecord = z.infer<typeof PullRequestRecord>;
 
@@ -383,6 +385,15 @@ export type PullRequestLabel = z.infer<typeof PullRequestLabel>;
 export const PullRequestReviewRequest = z.object({ name: text, team: z.boolean() });
 export type PullRequestReviewRequest = z.infer<typeof PullRequestReviewRequest>;
 
+/** The eight reactions GitHub offers, by the REST API's names. */
+export const ReactionContent = z.enum(["+1", "-1", "laugh", "hooray", "confused", "heart", "rocket", "eyes"]);
+export type ReactionContent = z.infer<typeof ReactionContent>;
+
+/** One reaction left on an item: which, how many left it, and whether the person signed in to the host's command line
+ * is one of them. Only reactions somebody left are listed, and an item nobody reacted to carries no list. */
+export const PullRequestReaction = z.object({ content: ReactionContent, count, mine: z.boolean() });
+export type PullRequestReaction = z.infer<typeof PullRequestReaction>;
+
 /** One commit of a pull request: its id, its subject and the rest of its message, when it was made, its author; and
  * where the host's API answered for it, how many parents it has (two on a merge), its line counts, and every check on
  * it rolled into one word. */
@@ -399,16 +410,26 @@ export const PullRequestCommit = z.object({
 });
 export type PullRequestCommit = z.infer<typeof PullRequestCommit>;
 
-/** One review: its id, which the comments it left on lines name, who, their association with the repository, the
- * state it left in lower case, its body whole, and when. */
-export const PullRequestReview = z.object({ id: count.optional(), author: text, association: text.optional(), state: text, body: text, at: text });
+/** One review: its id, which the comments it left on lines name, and its node id, which a reaction names; who, their
+ * association with the repository, the state it left in lower case, its body whole, when, and its reactions. */
+export const PullRequestReview = z.object({
+  id: count.optional(),
+  nodeId: text.optional(),
+  author: text,
+  association: text.optional(),
+  state: text,
+  body: text,
+  at: text,
+  reactions: z.array(PullRequestReaction).optional(),
+});
 export type PullRequestReview = z.infer<typeof PullRequestReview>;
 
-/** One comment in the conversation: its id, who, their association with the repository, whether a bot wrote it, the
+/** One comment in the conversation: its id and its node id, which a reaction names, who, their association with the repository, whether a bot wrote it, the
  * face the host shows for its author, its body whole, its link and when. An association is GitHub's word in lower
  * case: owner, member, collaborator, contributor, first_time_contributor, first_timer, mannequin or none. */
 export const PullRequestComment = z.object({
   id: count,
+  nodeId: text.optional(),
   author: text,
   association: text.optional(),
   bot: z.boolean(),
@@ -416,14 +437,17 @@ export const PullRequestComment = z.object({
   body: text,
   url: text,
   at: text,
+  reactions: z.array(PullRequestReaction).optional(),
 });
 export type PullRequestComment = z.infer<typeof PullRequestComment>;
 
-/** One comment on a line: the file, the line (or the line it was on once the diff moved away) and the side, who,
- * their association, whether a bot wrote it and its face, the body whole, its link and when; the diff's lines down to the commented one,
- * the comment it answers, the review it was left in, and whether its thread is resolved. */
+/** One comment on a line: its id and node id, the file, the line (or the line it was on once the diff moved away)
+ * and the side, who, their association, whether a bot wrote it and its face, the body whole, its link and when; the
+ * diff's lines down to the commented one, the comment it answers, the review it was left in, whether its thread is
+ * resolved and the thread's node id, and its reactions. */
 export const PullRequestReviewComment = z.object({
   id: count,
+  nodeId: text.optional(),
   path: text,
   line: count.optional(),
   side: text.optional(),
@@ -438,6 +462,9 @@ export const PullRequestReviewComment = z.object({
   replyTo: count.optional(),
   reviewId: count.optional(),
   resolved: z.boolean().optional(),
+  /** The node id of its review thread, which resolving names, on its first comment and on every reply. */
+  threadId: text.optional(),
+  reactions: z.array(PullRequestReaction).optional(),
 });
 export type PullRequestReviewComment = z.infer<typeof PullRequestReviewComment>;
 
@@ -465,9 +492,13 @@ export const GitPrViewReply = z.object({
   reviewComments: z.array(PullRequestReviewComment),
   files: z.array(z.object({ path: text, additions: count, deletions: count })),
   /** The parts read only in part, each present only where true: commits past gh's first 100, which carry no lines or
-   * checks of their own; reviews before the newest 100, which carry no id; review threads before the newest 100, whose
-   * comments do not say whether they are resolved. Absent where everything was read. */
-  cut: z.object({ commits: z.boolean().optional(), reviews: z.boolean().optional(), threads: z.boolean().optional() }).optional(),
+   * checks of their own; reviews before the newest 100, which carry no id and do not say which reactions are yours;
+   * review threads before the newest 100, whose comments say neither whether they are resolved nor which reactions are
+   * yours, and have no thread id; conversation comments before the newest 100, which do not say which reactions are
+   * yours. Absent where everything was read. */
+  cut: z
+    .object({ commits: z.boolean().optional(), reviews: z.boolean().optional(), threads: z.boolean().optional(), comments: z.boolean().optional() })
+    .optional(),
 });
 export type GitPrViewReply = z.infer<typeof GitPrViewReply>;
 
@@ -497,8 +528,15 @@ export const PullRequestSent = PullRequestItem.extend({ at: z.number() });
 export type PullRequestSent = z.infer<typeof PullRequestSent>;
 
 /** What the Pull request pane reads: the page, how the repository lets it land where this computer could read that,
- * so the pane offers the methods it allows with its default first, and the items already sent to the agent. */
-export const PullRequestPage = GitPrViewReply.extend({ merge: GitRepoReadReply.optional(), sent: z.array(PullRequestSent) });
+ * so the pane offers the methods it allows with its default first, the items already sent to the agent, and whether
+ * it may post as the person. */
+export const PullRequestPage = GitPrViewReply.extend({
+  merge: GitRepoReadReply.optional(),
+  sent: z.array(PullRequestSent),
+  /** True where this computer's own signed-in command line read the page, which is the one a reply, a resolve and a
+   * reaction post through; false or absent where it came through the copy's, and the pane draws none of them. */
+  postsAsYou: z.boolean().optional(),
+});
 export type PullRequestPage = z.infer<typeof PullRequestPage>;
 
 /** What a send answers: the message joined the turn running, waits as the thread's next turn, or started one; the
@@ -510,3 +548,28 @@ export const PullRequestSendResult = z.object({
   sent: z.array(PullRequestSent),
 });
 export type PullRequestSendResult = z.infer<typeof PullRequestSendResult>;
+
+/** What a reply posted as the person answers: the new comment in the conversation, or the new comment under a thread
+ * on a line, read off what the host answered with. */
+export const GitPrReplyReply = z.object({ comment: PullRequestComment.optional(), reviewComment: PullRequestReviewComment.optional() });
+export type GitPrReplyReply = z.infer<typeof GitPrReplyReply>;
+
+/** A review thread resolved or unresolved as the person: its node id and where it stands now. */
+export const GitPrResolveReply = z.object({ threadId: text, resolved: z.boolean() });
+export type GitPrResolveReply = z.infer<typeof GitPrResolveReply>;
+
+/** A reaction added or taken off as the person: the item's node id and every reaction on it now. */
+export const GitPrReactReply = z.object({ subject: text, reactions: z.array(PullRequestReaction) });
+export type GitPrReactReply = z.infer<typeof GitPrReactReply>;
+
+/** What a reply refuses with when it has no words. */
+export const REPLY_EMPTY_LINE = "a reply needs words";
+
+/** The most characters a reply carries, which is what GitHub takes in one comment. */
+export const PR_REPLY_BODY_MAX = 65_536;
+
+/** What a reply, a resolve or a reaction is refused with where this computer has no signed-in command line for the
+ * host: they post as the person, so they never run through a copy's. */
+export function pullRequestPostLine(host: string): string {
+  return `no signed-in command line for ${host} is on this computer, so nothing is posted as you`;
+}

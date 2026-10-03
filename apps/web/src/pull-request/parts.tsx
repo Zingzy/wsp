@@ -10,6 +10,7 @@ import ChatMarkdown from "../components/ChatMarkdown.js";
 import { HarnessMark } from "../components/chat/HarnessMark.js";
 import { CLAMP_FADE_MASK } from "../components/chat/clamp.js";
 import { Button } from "../components/ui/button.js";
+import { Skeleton } from "../components/ui/skeleton.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
 import { useStore } from "../protocol/store.js";
 import { useAppDark } from "../settings/theme.js";
@@ -46,8 +47,10 @@ export function Face({ login, size, stacked = false, src }: { login: string; siz
 /** A login in a sentence, its face before it. */
 export function Who({ login, size = 16 }: { login: string; size?: FaceSize }) {
   return (
-    <span data-pr-who className={cn("inline-flex items-center gap-1.5", size === 16 ? "align-[-4px]" : "align-[-5px]")}>
-      <Face login={login} size={size} />
+    <span data-pr-who className="inline-flex items-baseline gap-1.5">
+      <span className="self-center">
+        <Face login={login} size={size} />
+      </span>
       {authorName(login)}
     </span>
   );
@@ -160,4 +163,58 @@ export function usePrAgent(workspaceId: string): { id: string; name: string } {
 
 export function AgentMark({ agent }: { agent: { id: string; name: string } }) {
   return <HarnessMark harness={agent.id} label={agent.name} className="size-3.5" />;
+}
+
+/** The timeline's shape while the page is read: the rail, a face and the lines each entry will hold. */
+export function TimelineSkeleton() {
+  return (
+    <ol data-pr-skeleton="timeline" aria-busy="true" className="relative flex flex-col gap-[22px] pt-0.5 before:absolute before:top-3.5 before:bottom-3.5 before:left-[11.5px] before:w-px before:bg-border before:content-['']">
+      {[0.72, 0.9, 0.56].map((w, i) => (
+        <li key={i} className="relative grid grid-cols-[24px_minmax(0,1fr)] gap-3">
+          <Skeleton className="size-6 rounded-full" />
+          <div className="flex min-w-0 flex-col gap-2 pt-1.5">
+            <Skeleton className="h-3 w-40" />
+            <Skeleton className="h-3" style={{ width: `${w * 100}%` }} />
+            <Skeleton className="h-3 w-1/2" />
+          </div>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/** The commits' shape while the page is read: the rail, its dots, a face, the subject and the SHA. */
+export function CommitsSkeleton() {
+  return (
+    <ol data-pr-skeleton="commits" aria-busy="true" className="relative flex flex-col gap-0.5 before:absolute before:top-2 before:bottom-2 before:left-[19.5px] before:w-px before:bg-border before:content-['']">
+      {[0.8, 0.62, 0.74, 0.5, 0.68].map((w, i) => (
+        <li key={i} className="grid min-h-9 grid-cols-[28px_18px_minmax(0,1fr)_84px_56px] items-center gap-2.5 px-1.5">
+          <span className="relative z-[1] grid h-9 w-7 place-items-center">
+            <i className="block size-1.5 rounded-full bg-border" />
+          </span>
+          <Skeleton className="size-[18px] rounded-full" />
+          <Skeleton className="h-3" style={{ width: `${w * 100}%` }} />
+          <span />
+          <Skeleton className="h-3 w-12 justify-self-end" />
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/** The files' shape while the page is read: the count line, then a row per file. */
+export function FilesSkeleton() {
+  return (
+    <div data-pr-skeleton="files" aria-busy="true" className="flex flex-col gap-3">
+      <Skeleton className="h-3 w-36" />
+      <div className="flex flex-col">
+        {[0.5, 0.64, 0.44, 0.58, 0.38, 0.52].map((w, i) => (
+          <div key={i} className="flex h-8 items-center justify-between gap-3 px-1.5">
+            <Skeleton className="h-3" style={{ width: `${w * 100}%` }} />
+            <Skeleton className="h-3 w-14" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }

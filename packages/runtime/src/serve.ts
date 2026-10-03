@@ -1236,6 +1236,22 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "workspaces.pullRequestDiff":
               send({ id: msg.id, ok: true, ...(await rt.workspaces.pullRequestDiff({ workspaceId: msg.workspaceId }, origin)) });
               return;
+            case "workspaces.pullRequestReply":
+              send({
+                id: msg.id,
+                ok: true,
+                ...(await rt.workspaces.pullRequestReply(
+                  { workspaceId: msg.workspaceId, body: msg.body, ...(msg.replyTo !== undefined ? { replyTo: msg.replyTo } : {}), ...(msg.threadId !== undefined ? { threadId: msg.threadId } : {}) },
+                  origin,
+                )),
+              });
+              return;
+            case "workspaces.pullRequestResolve":
+              send({ id: msg.id, ok: true, ...(await rt.workspaces.pullRequestResolve({ workspaceId: msg.workspaceId, threadId: msg.threadId, resolved: msg.resolved }, origin)) });
+              return;
+            case "workspaces.pullRequestReact":
+              send({ id: msg.id, ok: true, ...(await rt.workspaces.pullRequestReact({ workspaceId: msg.workspaceId, subject: msg.subject, content: msg.content, on: msg.on }, origin)) });
+              return;
             case "workspaces.pullRequestSend":
               send({ id: msg.id, ok: true, ...(await rt.workspaces.pullRequestSend({ workspaceId: msg.workspaceId, items: msg.items }, origin)) });
               return;

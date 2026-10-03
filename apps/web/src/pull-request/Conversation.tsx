@@ -1,19 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The Conversation tab's timeline, on a hairline rail with a 24 px face on each entry: comments, a bot's notice folded
+// The Conversation tab's Activity, on a hairline rail with a 24 px face on each entry: comments, a bot's notice folded
 // to one line, reviews with their verdict and the threads they left with the last lines of code each sits on, a
-// thread no review holds, and the commits pushed between two of them as one quiet row. Every body is the restricted
-// markdown the description reads, and every comment, review and thread line takes a quiet send to the agent.
-import { FileIcon } from "lucide-react";
+// thread no review holds, and one quiet line where commits were pushed between two of them, which opens the Commits
+// tab. Every body is the restricted markdown the description reads, and every comment, review and thread line takes a
+// quiet send to the agent.
+import { ChevronRightIcon, CircleCheckIcon, FileIcon, ReplyIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
-import type { PullRequestItem, PullRequestPage } from "@wsp/protocol";
+import type { PullRequestItem, PullRequestPage, PullRequestReaction, ReactionContent } from "@wsp/protocol";
 import { DiffCommentAnnotation } from "../components/diffs/DiffCommentAnnotation.js";
 import { Button } from "../components/ui/button.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
 import { formatRelativeTimeLabel } from "../lib/timestampFormat.js";
 import { cn } from "../lib/utils.js";
-import { isMergeCommit } from "./commits.logic.js";
 import { conversationOf, hunkTail, reviewVerdict, sentAt, type LineComment, type ReviewThread, type TimelineEntry } from "./conversation.logic.js";
-import { AgentMark, Clamped, Face, PrMarkdown, StateWord } from "./parts.js";
+import { ReactAdd, ReplyField, Reactions } from "./ThreadActs.js";
+import { AgentMark, Hover, Clamped, Face, PrMarkdown, StateWord } from "./parts.js";
 import { PR_WORDS, authorName, spacedAgo } from "./words.js";
 
 export type Agent = { id: string; name: string };
@@ -21,7 +22,69 @@ export type Agent = { id: string; name: string };
  * serves one. */
 export type SendOf = (item: PullRequestItem) => { sent: number } | { send: () => void } | undefined;
 
+/** What the person can do on the page as themselves through the signed-in gh; each absent where no host serves it. */
+export interface PageActs {
+  /** A reply: into a thread under its first comment, or with none a new comment in the conversation. */
+  readonly reply?: (body: string, into?: { replyTo: number; threadId?: string | undefined }) => Promise<void>;
+  readonly resolve?: (threadId: string, resolved: boolean) => Promise<void>;
+  /** A reaction put on or taken off an item by its node id, at once and taken back where the host refuses. */
+  readonly react?: (subject: string, content: ReactionContent, on: boolean) => void;
+}
+
 const ago = (at: string): string => formatRelativeTimeLabel(at);
+
+/** The reactions under an item, the add button where its node id lets the person react. */
+type Reactable = { nodeId?: string | undefined; reactions?: readonly PullRequestReaction[] | undefined };
+
+/** How a press reacts on an item, where its node id lets the person. */
+function toggleOn(item: Reactable, acts: PageActs | undefined): ((content: ReactionContent) => void) | undefined {
+  const react = acts?.react;
+  const subject = item.nodeId;
+  if (react === undefined || subject === undefined) return undefined;
+  return content => react(subject, content, !(item.reactions ?? []).some(r => r.content === content && r.mine));
+}
+
+/** The chips under an item, and the head's tools for it: Reply where it takes one, and the add button. */
+function itemActs(item: Reactable, acts: PageActs | undefined, k: string, onReply?: () => void): { chips: ReactNode; tools: ReactNode } {
+  const onToggle = toggleOn(item, acts);
+  return {
+    chips: <Reactions k={k} reactions={item.reactions ?? []} {...(onToggle === undefined ? {} : { onToggle })} />,
+    tools:
+      onReply === undefined && onToggle === undefined ? null : (
+        <>
+          {onReply === undefined ? null : (
+            <Hover words={PR_WORDS.reply}>
+              <Button type="button" size="icon-xs" variant="ghost" data-pr-reply-open={k} aria-label={PR_WORDS.reply} className="ml-1 self-center opacity-0 transition-opacity duration-150 group-hover/ev:opacity-100 focus-visible:opacity-100" onClick={onReply}>
+                <ReplyIcon aria-hidden className="size-[13px]" />
+              </Button>
+            </Hover>
+          )}
+          {onToggle === undefined ? null : <ReactAdd reactions={item.reactions ?? []} onToggle={onToggle} />}
+        </>
+      ),
+  };
+}
+
+/** A comment or a review in the conversation: its head with Reply and the add button on a hover, its body, its chips,
+ * and the reply field once Reply is pressed. A reply here is a new comment, GitHub having no nesting there. */
+function Said({ kind, face, avatar, head, body, after, item, to, acts, k }: { kind: "comment" | "review"; face: string; avatar?: string | undefined; head: (tools: ReactNode) => ReactNode; body: ReactNode; /** What follows the reply field: a review's threads. */ after?: ReactNode; item: Reactable; to: string; acts: PageActs | undefined; k: string }) {
+  const [replying, setReplying] = useState(false);
+  const reply = acts?.reply;
+  const { chips, tools } = itemActs(item, acts, k, reply === undefined || replying ? undefined : () => setReplying(true));
+  return (
+    <Entry kind={kind} face={face} avatar={avatar}>
+      {head(tools)}
+      {body}
+      {chips}
+      {replying && reply !== undefined ? (
+        <div className="mt-2">
+          <ReplyField to={to} onSend={words => reply(words).then(() => setReplying(false))} onCancel={() => setReplying(false)} />
+        </div>
+      ) : null}
+      {after}
+    </Entry>
+  );
+}
 const sentWord = (at: number): string => PR_WORDS.sent(spacedAgo(formatRelativeTimeLabel(new Date(at).toISOString())));
 
 /** The quiet send on an item's head, shown on the entry's hover: the agent's mark, the agent named on its tooltip. */
@@ -58,19 +121,32 @@ function sendParts(agent: Agent, of: SendOf | undefined, item: PullRequestItem):
   return "sent" in road ? { sent: sentWord(road.sent) } : { send: <SendToAgent agent={agent} send={road.send} item={item} /> };
 }
 
-function Head({ author, verb, word, at, sent, send }: { author: string; verb?: string; word?: ReactNode; at: string; sent?: string; send?: ReactNode }) {
+function Head({ author, verb, word, at, sent, send, tools, go = false }: { author: string; verb?: string; word?: ReactNode; at: string; sent?: string; send?: ReactNode; /** Reply and the add button, before the send. */ tools?: ReactNode; /** The line opens somewhere: a chevron after the verb. */ go?: boolean }) {
   return (
     <div data-pr-entry-head className="flex min-h-6 min-w-0 items-baseline gap-2 text-[13px] leading-6">
       <b className="shrink-0 font-medium text-foreground">{authorName(author)}</b>
-      {verb === undefined ? null : <span className="min-w-0 truncate text-muted-foreground">{verb}</span>}
+      {verb === undefined ? null : (
+        <span data-verb className="min-w-0 truncate text-muted-foreground">
+          {verb}
+        </span>
+      )}
+      {go ? <ChevronRightIcon aria-hidden className="-ml-0.5 size-[13px] shrink-0 self-center text-muted-foreground/70" /> : null}
       {word === undefined ? null : <span className="ml-0.5 self-center">{word}</span>}
       {sent === undefined ? null : (
         <span data-pr-sent className="ml-auto text-xs whitespace-nowrap text-muted-foreground">
           {sent}
         </span>
       )}
-      <span className={cn("font-mono text-xs whitespace-nowrap text-muted-foreground", sent === undefined ? "ml-auto" : "ml-2.5")}>{ago(at)}</span>
-      {send}
+      <span data-pr-time className={cn("relative font-mono text-xs whitespace-nowrap text-muted-foreground", sent === undefined ? "ml-auto" : "ml-2.5")}>
+        {ago(at)}
+        {/* The hover's acts stand left of the time and take no width at rest, so every head's time ends on one edge. */}
+        {(tools ?? null) === null && (send ?? null) === null ? null : (
+          <span data-pr-head-acts className="absolute top-1/2 right-full mr-1.5 flex -translate-y-1/2 items-center bg-background pl-1.5 font-sans opacity-0 transition-opacity duration-150 group-hover/ev:opacity-100 focus-within:opacity-100 has-[[data-popup-open]]:opacity-100">
+            {tools}
+            {send}
+          </span>
+        )}
+      </span>
     </div>
   );
 }
@@ -85,8 +161,9 @@ function Entry({ kind, face, avatar, quiet = false, children }: { kind: Timeline
 }
 
 /** One comment on a line, as the diff draws the same comment. */
-export function LineCommentRow({ comment, agent, of }: { comment: LineComment; agent: Agent; of: SendOf | undefined }) {
+export function LineCommentRow({ comment, agent, of, acts }: { comment: LineComment; agent: Agent; of: SendOf | undefined; acts?: PageActs | undefined }) {
   const parts = sendParts(agent, of, { kind: "reviewComment", id: comment.id });
+  const { chips, tools } = itemActs(comment, acts, `reviewComment:${comment.id}`);
   return (
     <div data-pr-line-comment={comment.id} className="border-t border-border/50">
       <DiffCommentAnnotation
@@ -100,8 +177,22 @@ export function LineCommentRow({ comment, agent, of }: { comment: LineComment; a
           face: <Face login={comment.author} size={20} src={comment.avatar} />,
           at: ago(comment.at),
           ...(parts.sent !== undefined ? { note: parts.sent } : {}),
-          ...(parts.send !== undefined ? { action: parts.send } : {}),
-          body: <PrMarkdown text={comment.body} said line />,
+          ...(parts.send !== undefined || tools !== null
+            ? {
+                action: (
+                  <>
+                    {tools}
+                    {parts.send}
+                  </>
+                ),
+              }
+            : {}),
+          body: (
+            <>
+              <PrMarkdown text={comment.body} said line />
+              {chips}
+            </>
+          ),
         }}
       />
     </div>
@@ -131,31 +222,91 @@ function ThreadCode({ hunk }: { hunk: string }) {
   );
 }
 
-export function ThreadBox({ thread, agent, of }: { thread: ReviewThread; agent: Agent; of: SendOf | undefined }) {
-  return (
-    <div data-pr-thread={thread.key} data-resolved={thread.resolved || undefined} className="mt-2.5 overflow-hidden rounded-lg border border-border bg-card">
-      <div className="flex h-[30px] min-w-0 items-center gap-2 bg-[var(--code-background)] px-2.5 font-mono text-xs">
-        <FileIcon aria-hidden className="size-[13px] shrink-0 text-muted-foreground" />
-        <span className="min-w-0 truncate">{thread.path}</span>
-        {thread.line === undefined ? null : <span className="shrink-0 text-muted-foreground">:{thread.line}</span>}
-      </div>
-      {thread.hunk === undefined ? null : <ThreadCode hunk={thread.hunk} />}
-      {thread.comments.map(c => (
-        <LineCommentRow key={c.id} comment={c} agent={agent} of={of} />
-      ))}
-    </div>
+/** What a thread offers the person where the signed-in gh can act: resolve or unresolve it, and reply in it. */
+export interface ThreadActs {
+  readonly resolve?: (resolved: boolean) => Promise<void>;
+  readonly reply?: (body: string) => Promise<void>;
+}
+
+function PathRow({ thread, folded, onOpen }: { thread: ReviewThread; folded: boolean; onOpen?: () => void }) {
+  const inner = (
+    <>
+      <FileIcon aria-hidden className="size-[13px] shrink-0 text-muted-foreground/70" />
+      <span className="min-w-0 truncate">{thread.path}</span>
+      {thread.line === undefined ? null : <span className="shrink-0 text-muted-foreground">:{thread.line}</span>}
+      {thread.resolved ? (
+        <span data-pr-thread-resolved className="ml-auto inline-flex shrink-0 items-center gap-1.5 font-sans text-muted-foreground">
+          <CircleCheckIcon aria-hidden className="size-[13px] text-status-done" />
+          {PR_WORDS.resolved}
+        </span>
+      ) : null}
+      {folded ? <span className="ml-2.5 shrink-0 font-sans text-muted-foreground">{PR_WORDS.commentCount(thread.comments.length)}</span> : null}
+      {thread.resolved ? <ChevronRightIcon aria-hidden className={cn("ml-2 size-[13px] shrink-0 text-muted-foreground/70 transition-transform duration-150", !folded && "rotate-90")} /> : null}
+    </>
+  );
+  const row = cn("flex w-full min-w-0 items-center gap-2 bg-[var(--code-background)] px-2.5 text-left font-mono text-xs", folded ? "h-[34px]" : "h-[30px]");
+  return onOpen === undefined ? (
+    <div className={row}>{inner}</div>
+  ) : (
+    <button type="button" data-pr-thread-toggle aria-expanded={!folded} onClick={onOpen} className={cn(row, "cursor-pointer")}>
+      {inner}
+    </button>
   );
 }
 
-function PushList({ commits }: { commits: readonly PullRequestPage["commits"][number][] }) {
+export function ThreadBox({ thread, agent, of, acts: page }: { thread: ReviewThread; agent: Agent; of: SendOf | undefined; acts?: PageActs | undefined }) {
+  const threadId = thread.threadId;
+  const root = thread.comments[0]!.id;
+  const acts: ThreadActs = {
+    ...(page?.resolve === undefined || threadId === undefined ? {} : { resolve: (resolved: boolean) => page.resolve!(threadId, resolved) }),
+    ...(page?.reply === undefined ? {} : { reply: (body: string) => page.reply!(body, { replyTo: root, threadId }) }),
+  };
+  const [open, setOpen] = useState(!thread.resolved);
+  const [replying, setReplying] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const shown = open || !thread.resolved;
+  const resolve = acts.resolve;
+  const toggle = (): void => {
+    if (resolve === undefined || busy) return;
+    setBusy(true);
+    resolve(!thread.resolved).then(
+      () => {
+        setBusy(false);
+        setOpen(thread.resolved);
+      },
+      () => setBusy(false),
+    );
+  };
   return (
-    <div className="mt-1.5 flex flex-col gap-[5px]">
-      {commits.map(c => (
-        <div key={c.oid} data-pr-pushed={c.oid} className="grid grid-cols-[56px_minmax(0,1fr)] items-baseline gap-2.5 text-[13px]">
-          <code className="font-mono text-xs text-muted-foreground">{c.oid.slice(0, 7)}</code>
-          <span className={cn("truncate", isMergeCommit(c) && "text-muted-foreground")}>{c.subject}</span>
-        </div>
-      ))}
+    <div data-pr-thread={thread.key} data-resolved={thread.resolved || undefined} data-folded={!shown || undefined} className="mt-2.5 overflow-hidden rounded-lg border border-border bg-card">
+      <PathRow thread={thread} folded={!shown} {...(thread.resolved ? { onOpen: () => setOpen(v => !v) } : {})} />
+      {!shown ? null : (
+        <>
+          {thread.hunk === undefined ? null : <ThreadCode hunk={thread.hunk} />}
+          {thread.comments.map(c => (
+            <LineCommentRow key={c.id} comment={c} agent={agent} of={of} acts={page} />
+          ))}
+          {resolve === undefined && acts?.reply === undefined ? null : (
+            <div data-pr-thread-foot className="flex justify-end gap-0.5 border-t border-border/50 px-2 py-1.5">
+              {resolve === undefined ? null : (
+                <Button type="button" size="xs" variant="ghost" data-pr-thread-resolve disabled={busy} onClick={toggle}>
+                  {thread.resolved ? PR_WORDS.unresolve : PR_WORDS.resolve}
+                </Button>
+              )}
+              {acts?.reply === undefined ? null : (
+                <Button type="button" size="xs" variant="ghost" data-pr-thread-reply className="text-foreground" onClick={() => setReplying(true)}>
+                  {PR_WORDS.reply}
+                </Button>
+              )}
+            </div>
+          )}
+          {replying && acts?.reply !== undefined ? (
+            <div className="mx-3 mb-3">
+              <ReplyField to={authorName(thread.comments[0]!.author)} onSend={body => acts.reply!(body).then(() => setReplying(false))} onCancel={() => setReplying(false)} />
+            </div>
+          ) : null}
+        </>
+      )}
     </div>
   );
 }
@@ -186,7 +337,7 @@ function BotNotice({ entry, agent, of }: { entry: Extract<TimelineEntry, { kind:
   );
 }
 
-export function Timeline({ page, agent, of }: { page: PullRequestPage; agent: Agent; of?: SendOf | undefined }) {
+export function Timeline({ page, agent, of, acts, onOpenCommits }: { page: PullRequestPage; agent: Agent; of?: SendOf | undefined; acts?: PageActs | undefined; /** Where a push line goes: the Commits tab. */ onOpenCommits: () => void }) {
   const entries = conversationOf(page);
   if (entries.length === 0) return null;
   return (
@@ -196,52 +347,76 @@ export function Timeline({ page, agent, of }: { page: PullRequestPage; agent: Ag
           case "comment":
             if (entry.comment.bot) return <BotNotice key={entry.key} entry={entry} agent={agent} of={of} />;
             return (
-              <Entry key={entry.key} kind="comment" face={entry.comment.author} avatar={entry.comment.avatar}>
-                <Head author={entry.comment.author} verb={PR_WORDS.commented} at={entry.at} {...sendParts(agent, of, { kind: "comment", id: entry.comment.id })} />
-                <div className="mt-1">
-                  <Clamped>
-                    <PrMarkdown text={entry.comment.body} said />
-                  </Clamped>
-                </div>
-              </Entry>
+              <Said
+                key={entry.key}
+                kind="comment"
+                face={entry.comment.author}
+                avatar={entry.comment.avatar}
+                head={tools => <Head author={entry.comment.author} verb={PR_WORDS.commented} at={entry.at} tools={tools} {...sendParts(agent, of, { kind: "comment", id: entry.comment.id })} />}
+                body={
+                  <div className="mt-1">
+                    <Clamped>
+                      <PrMarkdown text={entry.comment.body} said />
+                    </Clamped>
+                  </div>
+                }
+                item={entry.comment}
+                to={authorName(entry.comment.author)}
+                acts={acts}
+                k={`comment:${entry.comment.id}`}
+              />
             );
           case "review": {
             const verdict = reviewVerdict(entry.review.state);
             const id = entry.review.id;
+            const said = entry.review.body !== "";
             return (
-              <Entry key={entry.key} kind="review" face={entry.review.author}>
-                <Head
-                  author={entry.review.author}
-                  verb={PR_WORDS.reviewed}
-                  word={<StateWord word={verdict.word} tone={verdict.tone} k="pr-verdict" />}
-                  at={entry.at}
-                  {...(entry.review.body === "" || id === undefined ? {} : sendParts(agent, of, { kind: "review", id }))}
-                />
-                {entry.review.body === "" ? null : (
-                  <div className="mt-1">
-                    <Clamped>
-                      <PrMarkdown text={entry.review.body} said />
-                    </Clamped>
-                  </div>
+              <Said
+                key={entry.key}
+                kind="review"
+                face={entry.review.author}
+                head={tools => (
+                  <Head
+                    author={entry.review.author}
+                    verb={PR_WORDS.reviewed}
+                    word={<StateWord word={verdict.word} tone={verdict.tone} k="pr-verdict" />}
+                    at={entry.at}
+                    tools={tools}
+                    {...(!said || id === undefined ? {} : sendParts(agent, of, { kind: "review", id }))}
+                  />
                 )}
-                {entry.threads.map(t => (
-                  <ThreadBox key={t.key} thread={t} agent={agent} of={of} />
+                body={
+                  !said ? null : (
+                    <div className="mt-1">
+                      <Clamped>
+                        <PrMarkdown text={entry.review.body} said />
+                      </Clamped>
+                    </div>
+                  )
+                }
+                after={entry.threads.map(t => (
+                  <ThreadBox key={t.key} thread={t} agent={agent} of={of} acts={acts} />
                 ))}
-              </Entry>
+                item={said ? entry.review : {}}
+                to={authorName(entry.review.author)}
+                acts={said ? acts : undefined}
+                k={`review:${entry.review.id ?? entry.key}`}
+              />
             );
           }
           case "thread":
             return (
               <Entry key={entry.key} kind="thread" face={entry.thread.comments[0]!.author} avatar={entry.thread.comments[0]!.avatar}>
                 <Head author={entry.thread.comments[0]!.author} verb={PR_WORDS.commentedOnLine} at={entry.at} />
-                <ThreadBox thread={entry.thread} agent={agent} of={of} />
+                <ThreadBox thread={entry.thread} agent={agent} of={of} acts={acts} />
               </Entry>
             );
           case "push":
             return (
               <Entry key={entry.key} kind="push" face={entry.authors[0]!}>
-                <Head author={entry.authors.map(authorName).join(", ")} verb={PR_WORDS.pushed(entry.commits.length)} at={entry.at} />
-                <PushList commits={entry.commits} />
+                <button type="button" data-pr-push-open onClick={onOpenCommits} className="block w-full cursor-pointer rounded-sm text-left focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none [&_[data-verb]]:transition-colors [&_[data-verb]]:duration-150 hover:[&_[data-verb]]:text-foreground [&_svg]:transition-colors [&_svg]:duration-150 hover:[&_svg]:text-foreground">
+                  <Head author={entry.authors.map(authorName).join(", ")} verb={PR_WORDS.pushed(entry.commits.length)} at={entry.at} go />
+                </button>
               </Entry>
             );
         }

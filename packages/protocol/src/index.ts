@@ -37,6 +37,9 @@ import type { GitPrCheckoutReply as WireGitPrCheckoutReply } from "./generated/G
 import type { GitPrDiffReply as WireGitPrDiffReply } from "./generated/GitPrDiffReply.js";
 import type { GitPrReviewReply as WireGitPrReviewReply } from "./generated/GitPrReviewReply.js";
 import type { GitPrViewReply as WireGitPrViewReply } from "./generated/GitPrViewReply.js";
+import type { GitPrReplyReply as WireGitPrReplyReply } from "./generated/GitPrReplyReply.js";
+import type { GitPrResolveReply as WireGitPrResolveReply } from "./generated/GitPrResolveReply.js";
+import type { GitPrReactReply as WireGitPrReactReply } from "./generated/GitPrReactReply.js";
 import type { GitRunLogReply as WireGitRunLogReply } from "./generated/GitRunLogReply.js";
 import type { GitPrMergeReply as WireGitPrMergeReply } from "./generated/GitPrMergeReply.js";
 import type { GitRepoReadReply as WireGitRepoReadReply } from "./generated/GitRepoReadReply.js";
@@ -51,7 +54,7 @@ import { HERE_PLACE_ID, namesPlace } from "./place-word.js";
 import { threadNeedsYou } from "./thread-state.js";
 import { Checkout } from "./changes.js";
 import { GitBranchCompareReply, GitMergeInReply, GitStartOnReply, TreeFact } from "./tree.js";
-import { GitPrReadReply, GitPrViewReply, GitPrMergeReply, GitRepoReadReply, GitRunLogReply, GitUpdateReply, MergeMethod, PullRequest, PullRequestItem, PullRequestSeen } from "./pull-request.js";
+import { GitPrReadReply, GitPrViewReply, GitPrMergeReply, GitPrReactReply, GitPrReplyReply, GitPrResolveReply, GitRepoReadReply, GitRunLogReply, GitUpdateReply, MergeMethod, PullRequest, PullRequestItem, PullRequestSeen, PR_REPLY_BODY_MAX, ReactionContent } from "./pull-request.js";
 import { GitIssueReadReply, GitPrCheckoutReply, GitPrDiffReply, GitPrReviewReply, ReviewDraft, WorkspaceFrom } from "./start.js";
 import { AGENTS_ON, NAP_AFTER_MAX_MS, placeAtLimitLine, placeFullLine } from "./place-state.js";
 import type { AbsentComputer } from "./workspace-state.js";
@@ -3607,6 +3610,9 @@ type GitPrCheckoutReplyHeld = Held<Same<GitPrCheckoutReply, WireGitPrCheckoutRep
 type GitPrDiffReplyHeld = Held<Same<GitPrDiffReply, WireGitPrDiffReply>>;
 type GitPrReviewReplyHeld = Held<Same<GitPrReviewReply, WireGitPrReviewReply>>;
 type GitPrViewReplyHeld = Held<Same<GitPrViewReply, WireGitPrViewReply>>;
+type GitPrReplyReplyHeld = Held<Same<GitPrReplyReply, WireGitPrReplyReply>>;
+type GitPrResolveReplyHeld = Held<Same<GitPrResolveReply, WireGitPrResolveReply>>;
+type GitPrReactReplyHeld = Held<Same<GitPrReactReply, WireGitPrReactReply>>;
 type GitRunLogReplyHeld = Held<Same<GitRunLogReply, WireGitRunLogReply>>;
 type GitPrMergeReplyHeld = Held<Same<GitPrMergeReply, WireGitPrMergeReply>>;
 type GitRepoReadReplyHeld = Held<Same<GitRepoReadReply, WireGitRepoReadReply>>;
@@ -3931,6 +3937,47 @@ export const DaemonRequest = z.discriminatedUnion("op", [
     event: z.enum(["comment", "approve", "request_changes"]),
     body: z.string(),
     comments: z.array(z.object({ id: z.string(), path: z.string(), line: z.number().int().nonnegative(), side: z.enum(["LEFT", "RIGHT"]), body: z.string() })),
+    machineId: z.string().optional(),
+  }),
+  /** Posts a reply as the signed-in person: under the comment on a line replyTo names, or, with none, as a new comment
+   * in the conversation, the body sent as typed on stdin; answered as a GitPrReplyReply, a line reply carrying the
+   * threadId the frame names. */
+  z.object({
+    id: reqId,
+    op: z.literal("git.prReply"),
+    cwd: z.string(),
+    remote: z.string(),
+    number: z.number().int().nonnegative(),
+    replyTo: z.number().int().nonnegative().optional(),
+    threadId: z.string().optional(),
+    body: z.string().max(PR_REPLY_BODY_MAX),
+    machineId: z.string().optional(),
+  }),
+  /** Resolves or unresolves a review thread, named by its node id, as the signed-in person; answered as a
+   * GitPrResolveReply. A thread id that is not a node id's shape, or names a thread of any pull request but the
+   * repository's number given, is refused before the mutation runs. */
+  z.object({
+    id: reqId,
+    op: z.literal("git.prResolve"),
+    cwd: z.string(),
+    remote: z.string(),
+    number: z.number().int().nonnegative(),
+    threadId: z.string(),
+    resolved: z.boolean(),
+    machineId: z.string().optional(),
+  }),
+  /** Adds or takes off one reaction on the item a node id names, as the signed-in person; answered as a GitPrReactReply
+   * with every reaction on it now. A subject that is not a node id's shape, or is not a comment or a review on the
+   * repository's pull request numbered, is refused before the mutation runs. */
+  z.object({
+    id: reqId,
+    op: z.literal("git.prReact"),
+    cwd: z.string(),
+    remote: z.string(),
+    number: z.number().int().nonnegative(),
+    subject: z.string(),
+    content: ReactionContent,
+    on: z.boolean(),
     machineId: z.string().optional(),
   }),
   /** How the repository lets a pull request land, answered as a GitRepoReadReply. */
@@ -4672,6 +4719,7 @@ const DAEMON_CONTENTS = [
   "409fce58696aaa20c7803f7a963841e4aacc0702a153ca6f916fba64f941bd16",
   "89e10a249a0e59670fc8fefec015f640d8f021d0b24bb34665412360cf6b999b",
   "ffcede69616fafe56cf56a3ec668d56516c22b7c9f53fc5176621c902ad7e639",
+  "019c206265a45a72e87e3e436643cc96399b6ed44d5ae07de967b502e5742abc",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -4981,7 +5029,14 @@ const DAEMON_CONTENTS = [
  * bot wrote each comment and the face it shows, and each line comment's hunk, the comment it answers and its review. No
  * body on the page is cut, and every host line's answer is read to 16 MB and refused past it. A check reads when it
  * started and finished, a pull request the merge armed on it, and git.prDiff cuts at the bytes asked for, up to the cap
- * a git.diff has, reading at most four times that before it stops gh and names the files it saw. */
+ * a git.diff has, reading at most four times that before it stops gh and names the files it saw.
+ * Version 113: Writes on a pull request as the person signed in to gh: git.prReply posts a reply under a comment on a
+ * line or a new comment in the conversation, its body as typed on stdin and at most 65,536 characters, a line reply
+ * carrying back the thread it names; git.prResolve resolves or unresolves a review thread; and git.prReact adds or
+ * takes off a reaction. A resolve and a reaction name their thread or item by a node id, refused before anything runs
+ * where it is not one's shape, and refused before the mutation where a read finds it on any pull request but the
+ * repository's one numbered. A pull request's page reads each comment's, review's and line comment's node id and
+ * reactions, with whether the signed-in person left each, and each line comment's review thread by id. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -6086,6 +6141,23 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * the message joins the workspace's first thread as a fix's does. The host keeps what was sent, with when, and the
    * page answers it. Answered as a PullRequestSendResult. */
   z.object({ id: reqId, op: z.literal("workspaces.pullRequestSend"), workspaceId: z.string(), items: z.array(PullRequestItem).min(1) }),
+  /** Posts a reply as the person through this computer's signed-in command line, never a copy's: under the comment on
+   * a line replyTo names, in the thread threadId names, or a new comment in the conversation where it names none.
+   * Answered as a GitPrReplyReply with the new comment. */
+  z.object({
+    id: reqId,
+    op: z.literal("workspaces.pullRequestReply"),
+    workspaceId: z.string(),
+    replyTo: z.number().int().nonnegative().optional(),
+    threadId: z.string().optional(),
+    body: z.string().max(PR_REPLY_BODY_MAX),
+  }),
+  /** Resolves or unresolves a review thread by its node id as the person, through this computer's command line alone,
+   * answered as a GitPrResolveReply. */
+  z.object({ id: reqId, op: z.literal("workspaces.pullRequestResolve"), workspaceId: z.string(), threadId: z.string(), resolved: z.boolean() }),
+  /** Adds a reaction to the item a node id names, or takes it off where on is false, as the person through this
+   * computer's command line alone; answered as a GitPrReactReply with every reaction on the item now. */
+  z.object({ id: reqId, op: z.literal("workspaces.pullRequestReact"), workspaceId: z.string(), subject: z.string(), content: ReactionContent, on: z.boolean() }),
   /** Asks the workspace's agent to fix a failed check, named, with its log's failed steps; with no check, updates the
    * copy from its base first and asks it to fix the conflicts where the merge had any. Answered as a FixResult at
    * once, the turn going on without the caller. */

@@ -1,0 +1,35 @@
+[
+  {
+    "id": 1,
+    "op": "git.prResolve",
+    "cwd": "/Users/p",
+    "remote": "git@github.com:Zingzy/wsp-pr-lab.git",
+    "threadId": "PRRT_kwDOULIAx85cqYb8",
+    "number": 772
+  },
+  {
+    "id": 1,
+    "op": "git.prResolve",
+    "cwd": "/Users/p",
+    "remote": "git@github.com:Zingzy/wsp-pr-lab.git",
+    "resolved": true,
+    "number": 772
+  },
+  {
+    "id": 1,
+    "op": "git.prResolve",
+    "cwd": "/Users/p",
+    "remote": "git@github.com:Zingzy/wsp-pr-lab.git",
+    "threadId": 7,
+    "resolved": true,
+    "number": 772
+  },
+  {
+    "id": 1,
+    "op": "git.prResolve",
+    "cwd": "/Users/p",
+    "remote": "git@github.com:Zingzy/wsp-pr-lab.git",
+    "threadId": "PRRT_kwDOULIAx85cqYb8",
+    "resolved": true
+  }
+]

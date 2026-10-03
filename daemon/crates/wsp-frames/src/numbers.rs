@@ -2,7 +2,7 @@
 //! The numbers and paths the protocol and the node daemon own, as the contract fixture pins them.
 
 /// The daemon's protocol version, carried in its hello: the length of the protocol's DAEMON_CONTENTS record.
-pub const DAEMON_VERSION: u32 = 112;
+pub const DAEMON_VERSION: u32 = 113;
 
 pub const DEFAULT_HOST: &str = "0.0.0.0";
 pub const DEFAULT_PORT: u16 = 7070;
@@ -96,6 +96,8 @@ pub const AUTH_DEADLINE_MS: u64 = 5000;
 pub const TUNNEL_CAP: usize = 64;
 
 pub const EXEC_BODY_MAX: usize = 16 * 1024;
+/// The most characters a pull request reply carries, which is what GitHub takes in one comment.
+pub const PR_REPLY_BODY_MAX: usize = 65_536;
 pub const EXEC_OUTPUT_MAX: usize = 2 * 1024 * 1024;
 pub const EXEC_TIMEOUT_DEFAULT_MS: u32 = 20_000;
 pub const EXEC_TIMEOUT_MAX_MS: u32 = 600_000;

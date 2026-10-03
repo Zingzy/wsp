@@ -23,7 +23,7 @@ interface GhView {
   deletions: number;
   changedFiles: number;
   commits: { oid: string; messageHeadline: string; messageBody: string; committedDate: string; authors: { login: string }[] }[];
-  comments: { author: { login: string }; body: string; createdAt: string; url: string }[];
+  comments: { id: string; author: { login: string }; body: string; createdAt: string; url: string }[];
   files: { path: string; additions: number; deletions: number }[];
   statusCheckRollup: { name: string; workflowName: string; detailsUrl: string; startedAt: string; completedAt: string }[];
 }
@@ -32,6 +32,7 @@ interface GhLineComment {
   path: string;
   line: number | null;
   side: string;
+  node_id: string;
   user: { login: string; type: string; avatar_url: string };
   body: string;
   html_url: string;
@@ -64,7 +65,7 @@ export const PR838_PAGE: PullRequestPage = {
     return { oid: c.oid, subject: c.messageHeadline, body: c.messageBody, at: c.committedDate, author: c.authors[0]?.login ?? "", ...(n === undefined ? {} : { parents: n.parents.totalCount, additions: n.additions, deletions: n.deletions }) };
   }),
   reviews: [],
-  comments: view.comments.map((c, i) => ({ id: i + 1, author: c.author.login, bot: false, body: c.body, url: c.url, at: c.createdAt })),
+  comments: view.comments.map((c, i) => ({ id: i + 1, nodeId: c.id, author: c.author.login, bot: false, body: c.body, url: c.url, at: c.createdAt })),
   reviewComments: lines.map(c => ({
     id: c.id,
     path: c.path,
@@ -80,6 +81,8 @@ export const PR838_PAGE: PullRequestPage = {
     ...(c.in_reply_to_id !== undefined ? { replyTo: c.in_reply_to_id } : {}),
     reviewId: c.pull_request_review_id,
     resolved: false,
+    nodeId: c.node_id,
+    threadId: `thread-of-${c.in_reply_to_id ?? c.id}`,
   })),
   files: view.files.map(f => ({ path: f.path, additions: f.additions, deletions: f.deletions })),
   merge: { methods: ["squash", "merge"], defaultMethod: "squash", autoMerge: true },
@@ -119,8 +122,19 @@ export function pr838FactLately(nowMs: number): PullRequestFact {
   return { ...PR838_FACT, checks: PR838_FACT.checks.map(c => (c.state === "pending" ? { ...c, startedAt: new Date(nowMs - 4 * 60_000).toISOString() } : c)) };
 }
 
+/** PR 838 as it stands: closed without a merge, its checks kept from the read that saw it close. */
+export const PR838_CLOSED: PullRequestKept = {
+  number: view.number,
+  url: "https://github.com/Zingzy/wsp/pull/838",
+  state: "closed",
+  base: view.baseRefName,
+  closedAt: Date.parse(view.closedAt),
+  readAt: Date.parse(view.closedAt),
+  checks: view.statusCheckRollup.map(c => ({ name: c.name, workflow: c.workflowName, state: "pass" as const, link: c.detailsUrl, startedAt: c.startedAt, completedAt: c.completedAt })),
+};
+
 /** The same pull request once merged, as the record keeps a settled one. */
-export const PR838_MERGED: PullRequestKept = { number: view.number, url: PR838_FACT.url, state: "merged", base: view.baseRefName, mergedAt: Date.parse(view.closedAt), readAt: PR838_FACT.readAt };
+export const PR838_MERGED: PullRequestKept = { number: view.number, url: PR838_FACT.url, state: "merged", base: view.baseRefName, mergedAt: Date.parse(view.closedAt), readAt: PR838_FACT.readAt, ...(PR838_CLOSED.checks !== undefined ? { checks: PR838_CLOSED.checks } : {}) };
 
 /** The page moved in time so its last comment lands forty minutes before the moment given, as the mockup reads it. */
 export function pr838Lately(nowMs: number): PullRequestPage {
