@@ -104,7 +104,7 @@ const NAME_MAX = 40;
 function headWithin(text: string, max: number): { text: string; cut: boolean } {
   const bytes = new TextEncoder().encode(text);
   if (bytes.length <= max) return { text, cut: false };
-  return { text: new TextDecoder().decode(bytes.subarray(0, max)).replace(/�+$/, ""), cut: true };
+  return { text: new TextDecoder().decode(bytes.subarray(0, max)).replace(/\uFFFD+$/, ""), cut: true };
 }
 
 /** What a thread started from an issue or a pull request opens with: the title, the body, each comment as its author
