@@ -40,6 +40,7 @@ async fn forget(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     let ForgetIn { workspace } = input(FORGET_NAME, arguments)?;
     let client = host.client().await?;
     let dropped = workspace_of(&client, &workspace).await?;
+    refuse_folder(&dropped)?;
     let threads = thread_count(&client, &dropped.id).await?;
     let _: Value = client.request("workspaces.forget", params([("workspaceId", Value::from(dropped.id.as_str()))])).await?;
     let words = workspace::words();
@@ -134,6 +135,7 @@ async fn delete(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     }
     let Some(workspace) = workspace else { return Err(Failure::usage(words.delete_names_nothing).into()) };
     let dropped = workspace_of(&client, &workspace).await?;
+    refuse_folder(&dropped)?;
     let threads = thread_count(&client, &dropped.id).await?;
     let on = stands_on(&client, &dropped).await;
     let (asked, done) = on_delete(&dropped, on.as_deref());
@@ -153,6 +155,14 @@ async fn delete(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     let said =
         fill(&counted(threads, &words.deleted_one, &words.deleted_many), &[("name", &dropped.name), ("id", &dropped.id), ("done", &done)]);
     Ok(Answer::text(said, &going))
+}
+
+/// A folder of a project on this computer is never named to delete or forget: its threads are what goes.
+fn refuse_folder(workspace: &Workspace) -> Result<(), Failure> {
+    if workspace.kind == Some(Kind::Local) {
+        return Err(Failure::usage(fill(&workspace::words().local_folder, &[("name", &workspace.name)])));
+    }
+    Ok(())
 }
 
 /// A thread on this computer, with the worktree wsp made that it runs in; nothing where the word names no thread, or

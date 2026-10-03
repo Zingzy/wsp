@@ -497,6 +497,7 @@
     "threadKeptWorktree": "thread {thread} kept. The worktree at {path} is removed with every thread in it; the branch and the project folder are left as they are. Ask the person, then call delete again with confirm true.",
     "noThreadHere": "no thread {ref} on this computer. Name a thread wsp threads lists.",
     "deleteNamesNothing": "delete takes a thread, or a workspace on a box. Name one.",
+    "localFolder": "{name} is a project's folder on this computer, which delete and forget leave alone. Run wsp threads to find its threads, then wsp delete <thread>.",
     "threadDeleted": "deleted thread {thread}",
     "threadDeletedOne": "deleted thread {thread}, the worktree at {path} and its one thread",
     "threadDeletedMany": "deleted thread {thread}, the worktree at {path} and its {count} threads",

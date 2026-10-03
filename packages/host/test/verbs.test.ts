@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { type fakeCopier, NapRefusedError, NoProviderBackend, passphraseCipher, type MachineBackend } from "@wsp/engine";
-import { homeShortened, threadDeletedLine, AGENTS_ON, type AgentRow, childStartedLine, type ProjectView, type DaemonErrorCode, noProjectImageLine, projectImageInUseRefusal, projectImageRemoveNotice, projectImageRemovedLine, napRefusedLine, HERE_PLACE_ID, LIST_PRICE_WORD, goneRoadRefusal, notAnsweringYet, runForTheList, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, EMPTY_MESSAGE_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, UP_RESTART_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, markedDefault, NO_SUCH_TURN, noReplyLine, noThreadTargetLine, notifyLine, RuntimeRequest, threadStateWord, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceAsleepAgainLine, thisComputer, type WorkspaceOut, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, type PlaceView, localRunsOneFix, localRunsOneLine, MEMORY_KEPT_CLAUSE, projectRemovedOnComputerLine, type HarnessCatalogAnswer, noFastLine, shellLine, NOT_DELIVERED_LINE } from "@wsp/protocol";
+import { homeShortened, localFolderRefusal, threadDeletedLine, AGENTS_ON, type AgentRow, childStartedLine, type ProjectView, type DaemonErrorCode, noProjectImageLine, projectImageInUseRefusal, projectImageRemoveNotice, projectImageRemovedLine, napRefusedLine, HERE_PLACE_ID, LIST_PRICE_WORD, goneRoadRefusal, notAnsweringYet, runForTheList, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, EMPTY_MESSAGE_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, UP_RESTART_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, markedDefault, NO_SUCH_TURN, noReplyLine, noThreadTargetLine, notifyLine, RuntimeRequest, threadStateWord, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceAsleepAgainLine, thisComputer, type WorkspaceOut, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, type PlaceView, localRunsOneFix, localRunsOneLine, MEMORY_KEPT_CLAUSE, projectRemovedOnComputerLine, type HarnessCatalogAnswer, noFastLine, shellLine, NOT_DELIVERED_LINE } from "@wsp/protocol";
 import { copyKey, createRuntime, harnessCatalog, memoryStore, type AgentsReader, type DaemonChannel, type HarnessAdapterFactory, type HostSsh, type PlaceBackends, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
@@ -1111,17 +1111,15 @@ describe("wsp verbs over the host", () => {
     expect((await run("delete", "fleet-check", "--yes")).io.errors).toEqual(["wsp delete: no workspace fleet-check"]);
   });
 
-  it("forget on a workspace that runs on a computer sends the person to delete, the one road that takes it away", async () => {
+  it("forget and delete named a project's folder on this computer refuse it and send the person to its threads", async () => {
     await macProject("mac");
     const here = (await rt.workspaces.list())[0]!;
-    const sent = await run("forget", "mac", "--yes");
-    expect(sent.code).toBe(1);
-    expect(sent.io.errors).toEqual([`wsp forget: ${forgetUndrivenRefusal("mac", THIS_COMPUTER)}`]);
+    for (const verb of ["forget", "delete"]) {
+      const said = await run(verb, "mac", "--yes");
+      expect(said.code).toBe(3);
+      expect(said.io.errors[0]).toContain(localFolderRefusal("mac"));
+    }
     expect((await rt.workspaces.list()).map(w => w.id)).toEqual([here.id]);
-
-    const deleted = await run("delete", "mac", "--yes");
-    expect(deleted.code).toBe(0);
-    expect(await rt.workspaces.list()).toEqual([]);
   });
 
   /** The prompt the persona's turn stopped on, as the claude adapter's control channel hands one over: a command to

@@ -325,6 +325,9 @@
                 "made": {
                   "type": "boolean"
                 },
+                "madeFor": {
+                  "type": "string"
+                },
                 "settled": {
                   "type": "object",
                   "properties": {

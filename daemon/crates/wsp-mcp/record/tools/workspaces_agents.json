@@ -285,6 +285,9 @@
                 "made": {
                   "type": "boolean"
                 },
+                "madeFor": {
+                  "type": "string"
+                },
                 "settled": {
                   "type": "object",
                   "properties": {
@@ -823,6 +826,9 @@
                 },
                 "made": {
                   "type": "boolean"
+                },
+                "madeFor": {
+                  "type": "string"
                 },
                 "settled": {
                   "type": "object",
