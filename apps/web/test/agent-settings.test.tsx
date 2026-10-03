@@ -316,6 +316,30 @@ describe("an agent's page", () => {
     await act(async () => answers.forEach(answer => answer()));
   });
 
+  it("draws a model shown or hidden where the agent's own order puts it, before the host answers", async () => {
+    const [opus, sonnet, haiku] = CLAUDE_CATALOG.models.filter(m => ["claude-opus-5-5", "claude-sonnet-5", "claude-haiku-4-5-20251001"].includes(m.value));
+    const { legacyModels: _legacy, ...claude } = CLAUDE_CATALOG;
+    const shaped = { ...claude, models: [opus!, haiku!], hiddenModels: [sonnet!], unshaped: { models: [opus!, sonnet!, haiku!] } };
+    const record: Preferences = { ...RECORD, agentDefaults: { claude: { models: { hide: [sonnet!.value] } } } };
+    const drawn = (): Array<[string, boolean]> => [...page().querySelectorAll<HTMLElement>("[data-settings-card='agent-models'] [data-model]")].map(r => [r.dataset["model"] ?? "", r.querySelector("[data-k=model-shown]")?.getAttribute("aria-checked") === "true"]);
+    const press = async (id: string): Promise<void> => act(async () => void fireEvent.click(page().querySelector(`[data-settings-card='agent-models'] [data-model='${id}'] [data-k=model-shown]`)!));
+    const mountShaped = async (): Promise<void> => {
+      cleanup();
+      resetSettings();
+      useStore.setState({ places: [here], harnesses: [shaped, CODEX_CATALOG], projects: [WSP], preferences: record });
+      await mount(agentsApi({ listHarnesses: async () => [shaped, CODEX_CATALOG], setPreferences: async () => new Promise(() => {}) } as Partial<Api>, record).api, atClaude);
+    };
+
+    await mountShaped();
+    expect(drawn()).toEqual([[opus!.value, true], [haiku!.value, true], [sonnet!.value, false]]);
+    await press(sonnet!.value);
+    expect(drawn()).toEqual([[opus!.value, true], [sonnet!.value, true], [haiku!.value, true]]);
+
+    await mountShaped();
+    await press(haiku!.value);
+    expect(drawn()).toEqual([[opus!.value, true], [sonnet!.value, false], [haiku!.value, false]]);
+  });
+
   it("refuses an id no model has under the field and writes nothing, and takes the field again once it is changed", async () => {
     const made = agentsApi();
     await mount(made.api, atClaude);
