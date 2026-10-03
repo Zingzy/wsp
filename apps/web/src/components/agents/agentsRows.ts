@@ -109,7 +109,7 @@ export const AGENTS_LIST_WORDS = {
   roadSentences: {
     device: "Signs in on a page with a device code.",
     code: "Signs in with a code you paste back.",
-    token: "Signs in with a token made on this computer.",
+    token: "Signs in with a token you make.",
     key: "Signs in with a key.",
     terminal: "Signs in from its own terminal, where it asks you to pick.",
     none: "Needs no sign-in.",
