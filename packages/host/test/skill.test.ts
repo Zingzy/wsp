@@ -116,19 +116,19 @@ describe("the wsp skill", () => {
     // Which threads that road reaches: every thread of this caller's own tree, its lead, its siblings and its
     // children, wherever each runs, and the person for anything else, so the sentence an agent reads is the one
     // the host keeps.
-    expect(section).toContain("one of your own tree, the lead that started you, a thread beside you under it or one you started, on whatever workspace it runs");
+    expect(section).toContain("one of your own tree, the lead that started you, a thread beside you under it or one you started, wherever it runs");
     expect(section).not.toContain("whoever opened it");
     expect(section).not.toContain("one you started or one under it");
     expect(section).toContain("goes to the person");
     // The instructions carry it too, since an agent holding only the tools reads nothing else.
     expect(INSTRUCTIONS).toContain("how one thread talks to another");
-    expect(INSTRUCTIONS).toContain("A thread reaches every thread of its own tree, the lead that started it, the threads beside it under that lead and the threads it started, on whatever workspace each runs, and nothing else");
+    expect(INSTRUCTIONS).toContain("A thread reaches every thread of its own tree, the lead that started it, the threads beside it under that lead and the threads it started, wherever each runs, and nothing else");
   });
 
-  it("says a thread reaches its whole tree on whatever workspace, the lead that started it included, and that stopping the lead stops the tree", () => {
+  it("says a thread reaches its whole tree wherever each runs, the lead that started it included, and that stopping the lead stops the tree", () => {
     const opening = WSP_SKILL.slice(0, WSP_SKILL.indexOf(SETUP_HEADING));
-    expect(opening).toContain("the lead that started it, the threads beside it under that lead and the threads it started, on whatever workspace each runs");
-    expect(opening).toContain("the person's own thread and another lead's tree on the same workspace are left out of `threads`");
+    expect(opening).toContain("the lead that started it, the threads beside it under that lead and the threads it started, wherever each runs");
+    expect(opening).toContain("the person's own thread and another lead's tree in the same folder are left out of `threads`");
     expect(opening).toContain("Stopping a thread stops every thread under it, so a child that stops its lead stops its siblings and itself with it.");
     // The old rule, downward only, is taught nowhere: a paragraph that kept it would send a child's report to the person.
     expect(WSP_SKILL).not.toContain("the threads it started and the threads under those, and nothing else");
@@ -158,11 +158,12 @@ describe("the wsp skill", () => {
 
   it("says where a thread on this computer starts, and its example asks nothing of a folder it may not be in", () => {
     const section = WSP_SKILL.slice(WSP_SKILL.indexOf("### run"), WSP_SKILL.indexOf("### send"));
-    expect(section).toContain("wsp run mac --agent codex \"Say in one line which folder you are in");
-    expect(section).toContain("Its folder is the workspace's own rather than the person's home");
-    // One statement of where a thread starts, so the paragraph cannot say two things about the same start. A
-    // workspace holds one project, so there is no order to pick a folder in any more.
-    expect(section).toContain("A workspace holds one project, so nothing names which: the thread starts in that project's folder");
+    expect(section).toContain("wsp run --agent codex \"Say in one line which folder you are in");
+    // One statement of where a thread starts: the project's folder, a worktree for another branch, or beside the
+    // thread asking, so the paragraph cannot say two things about the same start.
+    expect(section).toContain("`wsp run <project>` opens a thread in the project's folder on this computer");
+    expect(section).toContain("`--branch <branch>` runs it in a worktree of the project's repo on that branch instead");
+    expect(section).toContain("from a thread it runs beside you in your own folder");
     // No constant path stands in for that folder: the host decides it, and a line naming one would go stale.
     expect(section).not.toContain("~/wsp-work");
   });
@@ -187,7 +188,7 @@ describe("the wsp skill", () => {
     expect(setup).toContain("wsp threads --json");
     expect(setup).toContain("starting the host for <path>; its log is <path>, and wsp down stops it");
     expect(setup).toContain("no host answered for <path> within 20.0s");
-    expect(setup).toContain(thisComputerLine("<name>", "ws_...", "<folder>"));
+    expect(setup).toContain(thisComputerLine("<name>", "<folder>"));
     expect(setup).toContain("wsp init --recipe ~/.wsp/recipe.json");
     expect(setup).toContain("--non-interactive --json > /tmp/wsp-init.jsonl");
     expect(setup).toContain('{"event":"sign-in","tool":"gh","label":"GitHub CLI login","browserUrl":"https://github.com/login/device","code":"8F4A-C21B","nextCommand":"open \'https://github.com/login/device\'","waitSeconds":960}');
@@ -199,7 +200,7 @@ describe("the wsp skill", () => {
       expect(setup).toContain("wsp snapshot first");
     }
     expect(setup).toContain("Do not ask them to paste a key into this conversation");
-    for (const step of ["wsp recipe scan", "wsp recipe --tick used", "--set <id>=on|off", "--add <id>=", `--signin <id>=${LOGIN_CHOICES.join("|")}`, "--project <folder>", "wsp new dev", "wsp run first"]) expect(setup, step).toContain(step);
+    for (const step of ["wsp recipe scan", "wsp recipe --tick used", "--set <id>=on|off", "--add <id>=", `--signin <id>=${LOGIN_CHOICES.join("|")}`, "--project <folder>", "wsp wake first", "wsp run <project>"]) expect(setup, step).toContain(step);
     // Eight steps, since nothing in the walkthrough starts or restarts a host by hand any more.
     expect(setup.split("\n").filter(l => /^\d+\. /.test(l))).toHaveLength(8);
   });
@@ -259,7 +260,7 @@ describe("the wsp skill", () => {
     expect(() => instructionsOf(`# x\n\nOne.\n\n${SETUP_HEADING}\n\nThree.\n`, ["claude"])).toThrow(`the skill has no ${RULES_HEADING} section`);
     expect(() => instructionsOf(`# x\n\nOne.\n\n${SETUP_HEADING}\n\nThree.\n\n${RULES_HEADING}\n\nFour.\n`, ["claude"])).toThrow(`${RULES_HEADING} has no rules`);
     expect(INSTRUCTIONS).toBe(instructionsOf(WSP_SKILL, THREAD_AGENTS));
-    expect(INSTRUCTIONS.startsWith(`${ANOTHER_AGENT_WORDS}. ${CLOUD_ON ? "wsp runs cloud machines called workspaces" : "wsp runs machines called workspaces"}`)).toBe(true);
+    expect(INSTRUCTIONS.startsWith(`${ANOTHER_AGENT_WORDS}. A project is a folder on one computer, a git repo or not`)).toBe(true);
     // A caller holding only the tools reads the whole sequence here or nowhere: health check, the recipe from what
     // their agents used, the question about the heavy rows, the person's init line, then the host started here.
     expect(INSTRUCTIONS).toContain("The road is a health check");
@@ -271,9 +272,9 @@ describe("the wsp skill", () => {
     expect(INSTRUCTIONS).toContain("Starting the host is neither: any command that needs one starts it");
     expect(INSTRUCTIONS).not.toContain("their own terminal");
     expect(INSTRUCTIONS).toContain("prefer the `wsp` command line");
-    // An agent holding only the tools reads here that a workspace need not be a machine, and which listing shows both.
-    expect(INSTRUCTIONS).toContain("A project is a repo on one computer, recorded with `wsp add`");
-    expect(INSTRUCTIONS).toContain("Start with `wsp workspaces` to see every workspace");
+    // An agent holding only the tools reads here that a project is a folder, and which listings show projects and threads.
+    expect(INSTRUCTIONS).toContain("A project is a folder on one computer, a git repo or not, recorded with `wsp add`");
+    expect(INSTRUCTIONS).toContain("Start with `wsp projects` to see the projects and `wsp threads` to see the threads in them");
     // Everything but the rules is one line, so a client that shows the instructions as a paragraph shows them whole.
     expect(INSTRUCTIONS.split("\n").filter(line => !line.startsWith("- "))).toHaveLength(1);
     expect(INSTRUCTIONS).not.toContain("## ");
@@ -302,13 +303,14 @@ describe("the wsp skill", () => {
     // The rest, each by the fact it turns on: which kind of workspace the work goes on, the golden, the count, the
     // worktree, long work in the background, the send, the restart, the pause, the person reading along, and the
     // block a person runs.
-    expect(section).toContain("the one `wsp add <folder>` and `wsp new \"<what you are working on>\"` make");
+    expect(section).toContain("A thread on this computer runs in the project's folder, beside any other thread there");
+    expect(section).toContain("`wsp run <project> --branch <branch>`");
     expect(section).toContain("a quick subtask or a second harness");
     if (CLOUD_ON) {
-      expect(section).toContain("Fork a cloud workspace for builds that run beside each other");
+      expect(section).toContain("Fork a cloud machine for builds that run beside each other");
       expect(section).toContain("anything that should not touch this computer");
       expect(section).toContain("`wsp snapshot <workspace>`");
-      expect(section).toContain("`wsp new <name> --from <that image>`");
+      expect(section).toContain("every later machine of that project starts with the install already there");
     } else {
       expect(section).not.toContain("wsp snapshot");
       expect(section).not.toContain("--from");
@@ -318,7 +320,7 @@ describe("the wsp skill", () => {
     expect(section).toContain("`pnpm install --offline`");
     expect(section).toContain(BACKGROUND_WORK_WORDS);
     expect(section).toContain("a send into a thread whose turn is still running opens no second turn");
-    expect(section).toContain("Restarting the host cuts every turn running on every workspace");
+    expect(section).toContain("Restarting the host cuts every turn running anywhere");
     expect(section).toContain("`wsp pause <workspace>`");
     expect(section).toContain("shows in their sidebar");
     expect(section).toContain("`--title`");

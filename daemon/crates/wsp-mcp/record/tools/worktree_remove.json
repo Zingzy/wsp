@@ -1,0 +1,106 @@
+{
+  "cloudOff": {
+    "name": "worktree_remove",
+    "description": "Takes away the worktree wsp made for the branch, with git: refused while a thread is working in it, and over files no commit holds unless force, which loses them. The branch itself stays, and a detached worktree's commit is kept under refs/rescue. A worktree the person or an agent made is never removed; threads that ran in a removed worktree go on in the project folder.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "type": "string",
+          "description": "the project, by the name or the id projects lists"
+        },
+        "branch": {
+          "type": "string",
+          "description": "the branch the worktree holds"
+        },
+        "force": {
+          "type": "boolean",
+          "description": "remove it over files no commit holds, which go with it"
+        }
+      },
+      "required": [
+        "project",
+        "branch"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "removed": {
+          "type": "boolean",
+          "const": true
+        }
+      },
+      "required": [
+        "project",
+        "branch",
+        "removed"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  "cloudOn": {
+    "name": "worktree_remove",
+    "description": "Takes away the worktree wsp made for the branch, with git: refused while a thread is working in it, and over files no commit holds unless force, which loses them. The branch itself stays, and a detached worktree's commit is kept under refs/rescue. A worktree the person or an agent made is never removed; threads that ran in a removed worktree go on in the project folder.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "type": "string",
+          "description": "the project, by the name or the id projects lists"
+        },
+        "branch": {
+          "type": "string",
+          "description": "the branch the worktree holds"
+        },
+        "force": {
+          "type": "boolean",
+          "description": "remove it over files no commit holds, which go with it"
+        }
+      },
+      "required": [
+        "project",
+        "branch"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "removed": {
+          "type": "boolean",
+          "const": true
+        }
+      },
+      "required": [
+        "project",
+        "branch",
+        "removed"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  }
+}

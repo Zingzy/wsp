@@ -8,7 +8,7 @@
 // stand-in tests drive, so nothing above here knows there is a child process.
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { copyVerbFailedLine, CopyReport, WorktreeMade, type CopyAsk, type CopyRoad, type WorktreeAsk } from "@wsp/protocol";
+import { copyVerbFailedLine, CopyReport, WorktreeRemoval, WorktreeReport, type CopyAsk, type CopyRoad, type WorktreeAsk } from "@wsp/protocol";
 import { runChild } from "./child-exec.js";
 import { memoryHere, type MemoryHere } from "./local-backend.js";
 
@@ -19,9 +19,10 @@ export interface Copier {
   remove(from: string, to: string, road: CopyRoad): Promise<void>;
   /** The worktree holding the branch: one of the repo's own where git already has the branch checked out, else one
    * made under the ask's root with the carried files clonefiled in. Throws the verb's own sentence when refused. */
-  worktree(ask: WorktreeAsk): Promise<WorktreeMade>;
-  /** Takes a worktree away with git; refused over files no commit holds unless forced. */
-  worktreeRemove(from: string, to: string, force: boolean): Promise<void>;
+  worktree(ask: WorktreeAsk): Promise<WorktreeReport>;
+  /** Takes a worktree wsp made away with git, a detached one's commit kept under refs/rescue first; refused over files
+   * no commit holds unless forced, and for any worktree wsp did not make. */
+  worktreeRemove(o: { from: string; home: string; path: string; force: boolean }): Promise<WorktreeRemoval>;
   /** The memory of the computer the copy lands on, free and in all, read at the ask for the room check before a
    * copy; absent, a copy is held to nothing, which is a stand-in no test handed a reading. */
   room?(): Promise<MemoryHere | undefined>;
@@ -61,6 +62,22 @@ export function verbCopier(binary: string, run: typeof runChild = runChild): Cop
     }
     return said.split("\n").at(-1) ?? "the copy failed and said nothing";
   };
+  /** The verb's one JSON line read through its schema, or its refusal as the sentence it printed. */
+  const printed = <T>(schema: { safeParse(v: unknown): { success: true; data: T } | { success: false } }, what: string, res: { exitCode: number; stderr: string; stdout: string }): T => {
+    if (res.exitCode !== 0) throw new Error(line(res));
+    const said = res.stdout.trim();
+    const parsed = schema.safeParse(
+      ((): unknown => {
+        try {
+          return JSON.parse(said);
+        } catch {
+          return undefined;
+        }
+      })(),
+    );
+    if (!parsed.success) throw new Error(`the ${what} verb answered something this host does not read: ${said.slice(0, 200) || "nothing at all"}`);
+    return parsed.data;
+  };
   return {
     async make(ask) {
       const res = await run(binary, argvFor(ask), { timeoutMs: COPY_TIMEOUT_MS });
@@ -85,23 +102,12 @@ export function verbCopier(binary: string, run: typeof runChild = runChild): Cop
       if (res.exitCode !== 0) throw new Error(line(res));
     },
     async worktree(ask) {
-      const argv = ["copy", "worktree", "--from", ask.from, "--root", ask.root, "--project", ask.project, "--branch", ask.branch, ...ask.carry.flatMap(dir => ["--carry", dir])];
-      const res = await run(binary, argv, { timeoutMs: COPY_TIMEOUT_MS });
-      if (res.exitCode !== 0) throw new Error(line(res));
-      const said = res.stdout.trim();
-      const parsed = WorktreeMade.safeParse(((): unknown => {
-        try {
-          return JSON.parse(said);
-        } catch {
-          return undefined;
-        }
-      })());
-      if (!parsed.success) throw new Error(`the worktree verb answered something this host does not read: ${said.slice(0, 200) || "nothing at all"}`);
-      return parsed.data;
+      const argv = ["copy", "worktree", "--from", ask.from, "--home", ask.home, "--project", ask.project, "--branch", ask.branch, ...ask.carry.flatMap(dir => ["--carry", dir])];
+      return printed(WorktreeReport, "worktree", await run(binary, argv, { timeoutMs: COPY_TIMEOUT_MS }));
     },
-    async worktreeRemove(from, to, force) {
-      const res = await run(binary, ["copy", "worktree-remove", "--from", from, "--to", to, ...(force ? ["--force"] : [])], { timeoutMs: COPY_TIMEOUT_MS });
-      if (res.exitCode !== 0) throw new Error(line(res));
+    async worktreeRemove(o) {
+      const argv = ["copy", "worktree-remove", "--from", o.from, "--home", o.home, "--path", o.path, ...(o.force ? ["--force"] : [])];
+      return printed(WorktreeRemoval, "worktree removal", await run(binary, argv, { timeoutMs: COPY_TIMEOUT_MS }));
     },
     room: () => memoryHere(),
   };
@@ -113,26 +119,27 @@ export function verbCopier(binary: string, run: typeof runChild = runChild): Cop
 export function fakeCopier(
   script?: (ask: CopyAsk) => CopyReport,
   room?: () => Promise<MemoryHere | undefined>,
-): Copier & { asks: CopyAsk[]; removed: { from: string; to: string; road: CopyRoad }[]; worktrees: WorktreeAsk[]; worktreesRemoved: { from: string; to: string; force: boolean }[] } {
+): Copier & { asks: CopyAsk[]; removed: { from: string; to: string; road: CopyRoad }[]; worktrees: WorktreeAsk[]; worktreesRemoved: { from: string; home: string; path: string; force: boolean }[] } {
   const asks: CopyAsk[] = [];
   const removed: { from: string; to: string; road: CopyRoad }[] = [];
   const worktrees: WorktreeAsk[] = [];
-  const worktreesRemoved: { from: string; to: string; force: boolean }[] = [];
+  const worktreesRemoved: { from: string; home: string; path: string; force: boolean }[] = [];
   return {
     asks,
     removed,
     worktrees,
     worktreesRemoved,
+    ...(room !== undefined ? { room } : {}),
     async worktree(ask) {
       worktrees.push(ask);
-      const path = join(ask.root, ask.project, ask.branch.replace(/[^A-Za-z0-9._-]/g, "-"));
+      const path = join(ask.home, "worktrees", ask.project, ask.branch.replace(/[^A-Za-z0-9._-]/g, "-"));
       mkdirSync(path, { recursive: true });
-      return { path, branch: ask.branch, made: true };
+      return { path, branch: ask.branch, made: true, carried: [], ms: 1 };
     },
-    async worktreeRemove(from, to, force) {
-      worktreesRemoved.push({ from, to, force });
+    async worktreeRemove(o) {
+      worktreesRemoved.push(o);
+      return { path: o.path };
     },
-    ...(room !== undefined ? { room } : {}),
     async make(ask) {
       asks.push(ask);
       return (

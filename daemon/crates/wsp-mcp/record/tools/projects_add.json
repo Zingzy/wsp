@@ -1,7 +1,7 @@
 {
   "cloudOff": {
     "name": "projects_add",
-    "description": "Records a project: one source on one computer, which every workspace of it is a copy for. A folder on the computer the app runs on is copied beside itself for each workspace. A repo is cloned into the empty folder named with into on the computer the app runs on, which is then a folder project there, or by the computer named with on, which every workspace of it then holds a checkout of. A folder that is not a git repo, a repo with neither into nor on, a folder to clone into that holds something, and a source already recorded on that computer are each refused in one line, and a clone that fails says git's own last line. The answer is the project, whose name is what new takes.",
+    "description": "Records a project: one source on one computer. A folder on the computer the app runs on is the project as it stands, a git repo or not, a folder inside a repo being a project of that repo; its threads run in it. A repo is cloned into the empty folder named with into on the computer the app runs on, which is then a folder project there, or by the computer named with on, whose machines then hold a checkout of it. A repo with neither into nor on, a folder to clone into that holds something, and a source already recorded on that computer are each refused in one line, and a clone that fails says git's own last line. The answer is the project, whose name is what run takes.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -23,7 +23,7 @@
         },
         "base": {
           "type": "string",
-          "description": "the branch a workspace of the project starts on; the remote's own default branch at the clone without it"
+          "description": "the branch a machine of the project starts on; the remote's own default branch at the clone without it"
         }
       },
       "required": [
@@ -218,6 +218,18 @@
             },
             "base": {
               "type": "string"
+            },
+            "git": {
+              "type": "object",
+              "properties": {
+                "top": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "top"
+              ],
+              "additionalProperties": false
             },
             "createdAt": {
               "type": "string"
@@ -253,7 +265,7 @@
   },
   "cloudOn": {
     "name": "projects_add",
-    "description": "Records a project: one source on one computer, which every workspace of it is a copy for. A folder on the computer the app runs on is copied beside itself for each workspace. A repo is cloned into the empty folder named with into on the computer the app runs on, which is then a folder project there, or by the computer named with on, which every workspace of it then holds a checkout of. A folder that is not a git repo, a repo with neither into nor on, a folder to clone into that holds something, and a source already recorded on that computer are each refused in one line, and a clone that fails says git's own last line. The answer is the project, whose name is what new takes.",
+    "description": "Records a project: one source on one computer. A folder on the computer the app runs on is the project as it stands, a git repo or not, a folder inside a repo being a project of that repo; its threads run in it. A repo is cloned into the empty folder named with into on the computer the app runs on, which is then a folder project there, or by the computer named with on, whose machines then hold a checkout of it. A repo with neither into nor on, a folder to clone into that holds something, and a source already recorded on that computer are each refused in one line, and a clone that fails says git's own last line. The answer is the project, whose name is what run takes.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -275,7 +287,7 @@
         },
         "base": {
           "type": "string",
-          "description": "the branch a workspace of the project starts on; the remote's own default branch at the clone without it"
+          "description": "the branch a machine of the project starts on; the remote's own default branch at the clone without it"
         }
       },
       "required": [
@@ -470,6 +482,18 @@
             },
             "base": {
               "type": "string"
+            },
+            "git": {
+              "type": "object",
+              "properties": {
+                "top": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "top"
+              ],
+              "additionalProperties": false
             },
             "createdAt": {
               "type": "string"

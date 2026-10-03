@@ -1,15 +1,23 @@
 {
   "cloudOff": {
     "name": "run",
-    "description": "Opens a thread in the workspace under the named agent, on the model, effort and access mode named or the catalog's defaults (a cheaper model for a review, say), in the folder cwd names, else the workspace's own project, and follows its first turn; returns the reply text as soon as it is complete, with the thread id for send. With detach true it returns the thread id the moment the turn is started, without the reply: the road for a turn that runs for minutes or an hour. A turn ends when the agent process exits, not at its reply, and the thread reads running until then. With notify, each turn of the thread sends one line (outcome, duration, cost, and the reply whole into a thread or its last line to the person) to every target named, so a caller need not wait here or poll. The notify line goes once, at the reply, and a reply given with background tasks still running goes once they are done. A wsp thread starts every child with --notify me and ends its turn, and each child's finished line wakes it with that child's whole report. When the person asks for another agent, on another model or another harness, start it as a wsp thread with run, so it shows in their sidebar; your own subagent tool is for your own sub-steps.",
+    "description": "Opens a thread under the named agent, on the model, effort and access mode named or the catalog's defaults (a cheaper model for a review, say), and follows its first turn; returns the reply text as soon as it is complete, with the thread id for send. It runs in the project's folder; with branch, in a worktree of the project's repo on that branch (one that already holds the branch, wherever it is, else one wsp makes under its own folder with the dependencies carried in); with cwd, in that folder, which must be inside the project or one of its worktrees. With no project, from a thread, it runs beside that thread in its folder. With detach true it returns the thread id the moment the turn is started, without the reply: the road for a turn that runs for minutes or an hour. A turn ends when the agent process exits, not at its reply, and the thread reads running until then. With notify, each turn of the thread sends one line (outcome, duration, cost, and the reply whole into a thread or its last line to the person) to every target named, so a caller need not wait here or poll. The notify line goes once, at the reply, and a reply given with background tasks still running goes once they are done. A wsp thread starts every child with --notify me and ends its turn, and each child's finished line wakes it with that child's whole report. When the person asks for another agent, on another model or another harness, start it as a wsp thread with run, so it shows in their sidebar; your own subagent tool is for your own sub-steps.",
     "inputSchema": {
       "type": "object",
       "properties": {
-        "workspace": {
+        "project": {
           "type": "string",
-          "description": "the workspace's name, or its id when two share a name; absent, the thread goes to the workspace holding the project the client's own folder is a repo of, in that project, and the reply's first line says where it went"
+          "description": "the project the thread works on, by the name or the id projects lists; a box's machine by its name goes on as before. Absent from a thread, the thread runs beside the one asking, in its folder"
         },
-        "task": {
+        "branch": {
+          "type": "string",
+          "description": "a branch other than the one the project's folder has checked out: the thread runs in the worktree holding it, made under wsp's folder from the project folder's current commit for a new branch"
+        },
+        "cwd": {
+          "type": "string",
+          "description": "a folder inside the project or one of its worktrees, absolute, which the thread starts in"
+        },
+        "message": {
           "type": "string"
         },
         "agent": {
@@ -31,10 +39,6 @@
         "fast": {
           "type": "boolean",
           "description": "true runs the turn in the agent's fast mode, on a model that offers one, and is refused naming the model otherwise; absent runs at the agent's usual speed"
-        },
-        "cwd": {
-          "type": "string",
-          "description": "the folder on the machine the thread works in or the command runs in, absolute. Absent means the workspace's own project, which is where a thread there starts unless it says otherwise"
         },
         "notify": {
           "type": "array",
@@ -61,7 +65,7 @@
         }
       },
       "required": [
-        "task"
+        "message"
       ],
       "additionalProperties": false,
       "$schema": "http://json-schema.org/draft-07/schema#"
@@ -110,15 +114,23 @@
   },
   "cloudOn": {
     "name": "run",
-    "description": "Opens a thread in the workspace under the named agent, on the model, effort and access mode named or the catalog's defaults (a cheaper model for a review, say), in the folder cwd names, else the workspace's own project, and follows its first turn; returns the reply text as soon as it is complete, with the thread id for send. With detach true it returns the thread id the moment the turn is started, without the reply: the road for a turn that runs for minutes or an hour. A turn ends when the agent process exits, not at its reply, and the thread reads running until then. With notify, each turn of the thread sends one line (outcome, duration, cost, and the reply whole into a thread or its last line to the person) to every target named, so a caller need not wait here or poll. The notify line goes once, at the reply, and a reply given with background tasks still running goes once they are done. A wsp thread starts every child with --notify me and ends its turn, and each child's finished line wakes it with that child's whole report. When the person asks for another agent, on another model or another harness, start it as a wsp thread with run, so it shows in their sidebar; your own subagent tool is for your own sub-steps.",
+    "description": "Opens a thread under the named agent, on the model, effort and access mode named or the catalog's defaults (a cheaper model for a review, say), and follows its first turn; returns the reply text as soon as it is complete, with the thread id for send. It runs in the project's folder; with branch, in a worktree of the project's repo on that branch (one that already holds the branch, wherever it is, else one wsp makes under its own folder with the dependencies carried in); with cwd, in that folder, which must be inside the project or one of its worktrees. With no project, from a thread, it runs beside that thread in its folder. With detach true it returns the thread id the moment the turn is started, without the reply: the road for a turn that runs for minutes or an hour. A turn ends when the agent process exits, not at its reply, and the thread reads running until then. With notify, each turn of the thread sends one line (outcome, duration, cost, and the reply whole into a thread or its last line to the person) to every target named, so a caller need not wait here or poll. The notify line goes once, at the reply, and a reply given with background tasks still running goes once they are done. A wsp thread starts every child with --notify me and ends its turn, and each child's finished line wakes it with that child's whole report. When the person asks for another agent, on another model or another harness, start it as a wsp thread with run, so it shows in their sidebar; your own subagent tool is for your own sub-steps.",
     "inputSchema": {
       "type": "object",
       "properties": {
-        "workspace": {
+        "project": {
           "type": "string",
-          "description": "the workspace's name, or its id when two share a name; absent, the thread goes to the workspace holding the project the client's own folder is a repo of, in that project, and the reply's first line says where it went"
+          "description": "the project the thread works on, by the name or the id projects lists; a box's machine by its name goes on as before. Absent from a thread, the thread runs beside the one asking, in its folder"
         },
-        "task": {
+        "branch": {
+          "type": "string",
+          "description": "a branch other than the one the project's folder has checked out: the thread runs in the worktree holding it, made under wsp's folder from the project folder's current commit for a new branch"
+        },
+        "cwd": {
+          "type": "string",
+          "description": "a folder inside the project or one of its worktrees, absolute, which the thread starts in"
+        },
+        "message": {
           "type": "string"
         },
         "agent": {
@@ -140,10 +152,6 @@
         "fast": {
           "type": "boolean",
           "description": "true runs the turn in the agent's fast mode, on a model that offers one, and is refused naming the model otherwise; absent runs at the agent's usual speed"
-        },
-        "cwd": {
-          "type": "string",
-          "description": "the folder on the machine the thread works in or the command runs in, absolute. Absent means the workspace's own project, which is where a thread there starts unless it says otherwise"
         },
         "notify": {
           "type": "array",
@@ -170,7 +178,7 @@
         }
       },
       "required": [
-        "task"
+        "message"
       ],
       "additionalProperties": false,
       "$schema": "http://json-schema.org/draft-07/schema#"

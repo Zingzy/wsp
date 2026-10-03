@@ -130,7 +130,7 @@ async fn a_send_whose_host_stops_before_it_sent_anything_says_the_message_was_no
 
 #[tokio::test]
 async fn a_run_whose_host_stops_under_the_reads_before_its_start_says_the_task_was_not_delivered() {
-    let (result, seen) = called("harnesses.list", "run", json!({ "workspace": "attic-work", "task": "build it" })).await;
+    let (result, seen) = called("harnesses.list", "run", json!({ "project": "attic-work", "message": "build it" })).await;
     assert_eq!(result["isError"], true, "{result}");
     assert_eq!(result["structuredContent"]["error"], words()["notDelivered"], "{result}");
     assert!(seen.request_ids.lock().unwrap().is_empty());

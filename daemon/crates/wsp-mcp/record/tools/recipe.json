@@ -48,7 +48,7 @@
         },
         "engine": {
           "type": "boolean",
-          "description": "mark the recipe so every workspace from its image gets the place's container engine (Docker or podman) through a socket of its own, for a project whose compose file needs one; it stays in the file until edited out"
+          "description": "mark the recipe so every machine from its image gets the place's container engine (Docker or podman) through a socket of its own, for a project whose compose file needs one; it stays in the file until edited out"
         },
         "project": {
           "type": "array",
@@ -327,7 +327,7 @@
         },
         "engine": {
           "type": "boolean",
-          "description": "mark the recipe so every workspace from its image gets the place's container engine (Docker or podman) through a socket of its own, for a project whose compose file needs one; it stays in the file until edited out"
+          "description": "mark the recipe so every machine from its image gets the place's container engine (Docker or podman) through a socket of its own, for a project whose compose file needs one; it stays in the file until edited out"
         },
         "project": {
           "type": "array",

@@ -1,0 +1,59 @@
+{
+  "tool": "worktree",
+  "cases": [
+    {
+      "case": "made",
+      "arguments": {
+        "project": "alpha",
+        "branch": "feat/x \u0085"
+      },
+      "replies": {
+        "worktree.make": "{\"id\":1,\"ok\":true,\"made\":true,\"path\":\"/Users/me/.wsp/worktrees/proj-1/feat-x-\",\"extra\":1,\"branch\":\"feat/x \u0085\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"/Users/me/.wsp/worktrees/proj-1/feat-x-\"}],\"structuredContent\":{\"path\":\"/Users/me/.wsp/worktrees/proj-1/feat-x-\",\"branch\":\"feat/x \\u0085\",\"made\":true}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "worktree.make",
+          "project": "alpha",
+          "branch": "feat/x \u0085"
+        }
+      ]
+    },
+    {
+      "case": "held elsewhere",
+      "arguments": {
+        "project": "alpha",
+        "branch": "main"
+      },
+      "replies": {
+        "worktree.make": "{\"id\":1,\"ok\":true,\"path\":\"/Users/me/alpha\",\"branch\":\"main\",\"made\":false}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"/Users/me/alpha\"}],\"structuredContent\":{\"path\":\"/Users/me/alpha\",\"branch\":\"main\",\"made\":false}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "worktree.make",
+          "project": "alpha",
+          "branch": "main"
+        }
+      ]
+    },
+    {
+      "case": "refused",
+      "arguments": {
+        "project": "alpha",
+        "branch": "-x"
+      },
+      "replies": {
+        "worktree.make": "{\"id\":1,\"ok\":false,\"error\":\"-x is not a name git takes for a branch\",\"kind\":\"usage\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"-x is not a name git takes for a branch\"}],\"structuredContent\":{\"error\":\"-x is not a name git takes for a branch\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "worktree.make",
+          "project": "alpha",
+          "branch": "-x"
+        }
+      ]
+    }
+  ]
+}

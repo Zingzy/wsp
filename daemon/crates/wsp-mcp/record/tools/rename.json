@@ -262,53 +262,56 @@
             "provider": {
               "type": "string"
             },
-            "copy": {
+            "worktree": {
               "type": "object",
               "properties": {
                 "path": {
                   "type": "string"
                 },
-                "base": {
-                  "type": "string"
-                },
                 "branch": {
                   "type": "string"
                 },
-                "carried": {
-                  "type": "string",
-                  "enum": [
-                    "deps-and-config",
-                    "config-only",
-                    "nothing"
-                  ]
+                "made": {
+                  "type": "boolean"
                 },
-                "fellBack": {
+                "settled": {
+                  "type": "object",
+                  "properties": {
+                    "at": {
+                      "type": "number"
+                    },
+                    "why": {
+                      "type": "string",
+                      "enum": [
+                        "merged",
+                        "closed",
+                        "deleted",
+                        "removed"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "at",
+                    "why"
+                  ],
+                  "additionalProperties": false
+                },
+                "kept": {
                   "type": "string"
                 },
-                "road": {
-                  "type": "string",
-                  "enum": [
-                    "clonefile",
-                    "worktree"
-                  ]
-                },
-                "source": {
+                "removeFailed": {
                   "type": "string"
+                },
+                "gone": {
+                  "type": "boolean",
+                  "const": true
                 }
               },
               "required": [
                 "path",
-                "base",
-                "branch",
-                "carried",
-                "road",
-                "source"
+                "made"
               ],
               "additionalProperties": false
-            },
-            "portBase": {
-              "type": "integer",
-              "exclusiveMinimum": 0
             },
             "from": {
               "type": "object",
@@ -788,53 +791,56 @@
             "provider": {
               "type": "string"
             },
-            "copy": {
+            "worktree": {
               "type": "object",
               "properties": {
                 "path": {
                   "type": "string"
                 },
-                "base": {
-                  "type": "string"
-                },
                 "branch": {
                   "type": "string"
                 },
-                "carried": {
-                  "type": "string",
-                  "enum": [
-                    "deps-and-config",
-                    "config-only",
-                    "nothing"
-                  ]
+                "made": {
+                  "type": "boolean"
                 },
-                "fellBack": {
+                "settled": {
+                  "type": "object",
+                  "properties": {
+                    "at": {
+                      "type": "number"
+                    },
+                    "why": {
+                      "type": "string",
+                      "enum": [
+                        "merged",
+                        "closed",
+                        "deleted",
+                        "removed"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "at",
+                    "why"
+                  ],
+                  "additionalProperties": false
+                },
+                "kept": {
                   "type": "string"
                 },
-                "road": {
-                  "type": "string",
-                  "enum": [
-                    "clonefile",
-                    "worktree"
-                  ]
-                },
-                "source": {
+                "removeFailed": {
                   "type": "string"
+                },
+                "gone": {
+                  "type": "boolean",
+                  "const": true
                 }
               },
               "required": [
                 "path",
-                "base",
-                "branch",
-                "carried",
-                "road",
-                "source"
+                "made"
               ],
               "additionalProperties": false
-            },
-            "portBase": {
-              "type": "integer",
-              "exclusiveMinimum": 0
             },
             "from": {
               "type": "object",

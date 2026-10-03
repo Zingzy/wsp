@@ -180,8 +180,6 @@ export interface InitOptions {
   address?: string;
   /** The command that starts the app once the golden is recorded, with the flags this run was given. */
   upCommand: string;
-  /** The command that forks the first workspace from it, for a run with nobody at a terminal that asked for none. */
-  forkCommand: string;
   /** Links this computer to the builder for the sign-ins: the pages the machine asks to open and the callback ports
    * its flows listen on. It runs from Ready to the end of the sign-ins and binds no fixed port. The hooks wire the
    * sign-in stage in. */
@@ -1674,10 +1672,10 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
       snapshotId: sealed.version.snapshotId,
       recipe: small.path,
       nextCommand: opts.upCommand,
-      ...(opened !== undefined ? { workspace: { id: opened.id, name: opened.name } } : { forkCommand: opts.forkCommand }),
+      ...(opened !== undefined ? { workspace: { id: opened.id, name: opened.name } } : {}),
     });
     log.step(logLine(), out);
-    outro(`Done. Image v${version} is sealed${opened === undefined ? `; ${opts.forkCommand} forks a workspace from it, and ${opts.upCommand} opens the app` : `; ${opts.upCommand} opens the app`}.`, out);
+    outro(`Done. Image v${version} is sealed; ${opts.upCommand} opens the app.`, out);
     await closeRuntime();
     return result;
   }

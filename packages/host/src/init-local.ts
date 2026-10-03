@@ -105,7 +105,7 @@ export async function runLocalInit(opts: LocalInitOptions, io: InitIO): Promise<
   }
   if (handle === undefined) {
     io.json?.({ event: "done", nextCommand: opts.upCommand, ...(workspace !== undefined ? { workspace: { id: workspace.id, name: workspace.name } } : {}) });
-    outro(`Done. ${workspace === undefined ? `Nothing was made; wsp add <folder> records a project here and wsp new "<what you are working on>" makes its workspace.` : `${opts.upCommand} starts the app on ${workspace.name}.`}`, out);
+    outro(`Done. ${workspace === undefined ? `Nothing was recorded; wsp add <folder> records a project here and wsp run <project> "<message>" opens a thread in it.` : `${opts.upCommand} starts the app on ${workspace.name}.`}`, out);
     await closeRuntime();
     return { code: 0 };
   }

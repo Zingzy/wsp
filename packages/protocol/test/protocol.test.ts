@@ -910,8 +910,8 @@ describe("runtime wire types", () => {
       "workspaces.pullRequestReply", "workspaces.pullRequestResolve", "workspaces.pullRequestReact",
       // A start and a review make a copy and start an agent, and a post writes on the git host as the person.
       "workspaces.start", "workspaces.review", "workspaces.reviewPost",
-      // A worktree is made and removed in the person's own repo.
-      "worktree.make", "worktree.remove",
+      // A worktree is made and removed in the person's own repo, and a thread's delete takes its turns, and its worktree.
+      "worktree.make", "worktree.remove", "sessions.delete",
       // A reset spends what the person's plan has banked, with no undo.
       "usage.reset",
     ];

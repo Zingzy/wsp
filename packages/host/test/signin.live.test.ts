@@ -150,7 +150,6 @@ describe.runIf(LIVE)("sign-in stage (live)", () => {
         }),
       ports: { port: 0, named: true },
       upCommand: "wsp up",
-      forkCommand: "wsp new first",
       roads: () => ({
         createWorkspace: async () => { throw new Error("no workspace in this live run"); },
         addProject: async () => { throw new Error("no project in this live run"); },

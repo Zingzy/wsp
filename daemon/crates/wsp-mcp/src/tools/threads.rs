@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! `threads` and `thread read`: the session index folded into threads as packages/protocol's `foldThreads` folds it,
-//! the sidebar's rows with the names of their project, workspace and computer beside them, and one thread's messages
+//! the sidebar's rows with their project, folder, branch and computer beside them, and one thread's messages
 //! off the transcript the host holds.
 
 use std::collections::HashMap;
@@ -10,7 +10,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use serde_json::{Map, Value};
 
-use super::agents::workspace_id;
 use super::{input, Answer, Refused, Tool};
 use crate::client::Client;
 use crate::failure::Failure;
@@ -170,7 +169,8 @@ pub struct Row {
     #[serde(flatten)]
     pub thread: Thread,
     pub project_name: String,
-    pub workspace_name: String,
+    pub folder: String,
+    pub branch: String,
     pub computer_name: String,
 }
 
@@ -178,7 +178,7 @@ pub struct Row {
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct ThreadsIn {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub workspace: Option<String>,
+    pub project: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -293,15 +293,45 @@ async fn threads_of(client: &Client, workspace: Option<String>) -> Result<Vec<Th
 
 #[derive(Deserialize)]
 struct Project {
+    id: String,
     name: String,
     computer: String,
+    #[serde(default)]
+    path: Option<String>,
 }
 
 #[derive(Deserialize)]
 struct Workspace {
     id: String,
     name: String,
+    #[serde(default)]
+    kind: Option<String>,
+    #[serde(default)]
+    folder: Option<String>,
+    #[serde(default)]
+    worktree: Option<Worktree>,
     project: Project,
+}
+
+#[derive(Deserialize)]
+struct Worktree {
+    #[serde(default)]
+    branch: Option<String>,
+}
+
+/// The branch a folder on this computer has checked out, read off its HEAD file: nothing where the folder is not
+/// here, holds no repo, or stands on no branch.
+fn branch_here(folder: &str) -> Option<String> {
+    let root = std::path::Path::new(folder).ancestors().find(|at| at.join(".git").exists())?;
+    let dot_git = root.join(".git");
+    let git_dir = if dot_git.is_dir() {
+        dot_git
+    } else {
+        let text = std::fs::read_to_string(&dot_git).ok()?;
+        root.join(text.lines().find_map(|l| l.strip_prefix("gitdir:")).map(str::trim)?)
+    };
+    let head = std::fs::read_to_string(git_dir.join("HEAD")).ok()?;
+    head.lines().find_map(|l| l.strip_prefix("ref: refs/heads/")).map(|b| b.trim().to_owned())
 }
 
 #[derive(Deserialize)]
@@ -320,15 +350,22 @@ struct Places {
     places: Vec<Place>,
 }
 
-/// `threadRows`: the rows within one workspace when one is named, each with the names of what it stands on. A caller
-/// the host refuses the list of computers reads each computer by its id.
+/// `threadRows`: the rows within one project when one is named, each with its project, the folder it works in, that
+/// folder's branch as git reads it now, and the computer it is on. A caller the host refuses the list of computers
+/// reads each computer by its id.
 async fn rows(client: &Client, within: Option<&str>) -> Result<Vec<Row>, Failure> {
     let all = client.request::<Workspaces>("workspaces.list", Map::new()).await?.workspaces;
-    let scope = match within {
-        Some(within) => Some(workspace_id(client, within).await?),
-        None => None,
-    };
-    let threads = threads_of(client, scope).await?;
+    let threads: Vec<Thread> = threads_of(client, None)
+        .await?
+        .into_iter()
+        .filter(|t| {
+            within.is_none_or(|within| {
+                all.iter()
+                    .find(|w| w.id == t.workspace_id)
+                    .is_some_and(|w| w.project.id == within || w.project.name == within || w.id == within || w.name == within)
+            })
+        })
+        .collect();
     let named: HashMap<String, String> = if threads.is_empty() {
         HashMap::new()
     } else {
@@ -338,13 +375,32 @@ async fn rows(client: &Client, within: Option<&str>) -> Result<Vec<Row>, Failure
             .map(|p| p.places.into_iter().map(|p| (p.id, p.name)).collect())
             .unwrap_or_default()
     };
+    let mut branches: HashMap<String, String> = HashMap::new();
     Ok(threads
         .into_iter()
         .map(|thread| {
             let workspace = all.iter().find(|w| w.id == thread.workspace_id);
+            let folder = thread
+                .cwd
+                .clone()
+                .or_else(|| workspace.and_then(|w| w.folder.clone()))
+                .or_else(|| workspace.and_then(|w| w.project.path.clone()))
+                .unwrap_or_default();
+            let branch = branches
+                .entry(folder.clone())
+                .or_insert_with(|| {
+                    let local = workspace.is_some_and(|w| w.kind.as_deref() == Some("local"));
+                    local
+                        .then(|| branch_here(&folder))
+                        .flatten()
+                        .or_else(|| workspace.and_then(|w| w.worktree.as_ref()?.branch.clone()))
+                        .unwrap_or_default()
+                })
+                .clone();
             Row {
                 project_name: workspace.map_or_else(String::new, |w| w.project.name.clone()),
-                workspace_name: workspace.map_or_else(|| thread.workspace_id.clone(), |w| w.name.clone()),
+                folder,
+                branch,
                 computer_name: workspace
                     .map_or_else(String::new, |w| named.get(&w.project.computer).cloned().unwrap_or_else(|| w.project.computer.clone())),
                 thread,
@@ -356,7 +412,7 @@ async fn rows(client: &Client, within: Option<&str>) -> Result<Vec<Row>, Failure
 async fn threads(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     let asked: ThreadsIn = input("threads", arguments)?;
     let client = host.client().await?;
-    Ok(Answer::json(&ThreadsOut { threads: rows(&client, asked.workspace.as_deref()).await? }))
+    Ok(Answer::json(&ThreadsOut { threads: rows(&client, asked.project.as_deref()).await? }))
 }
 
 /// `pickThread`: by id, or by a prefix of it that names exactly one.

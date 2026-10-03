@@ -17,9 +17,9 @@
   {
     "id": 3,
     "op": "git.checkpoint",
-    "cwd": "/Users/dev/spoo",
+    "cwd": "/Users/dev/wsp",
     "thread": "thr_01a0e365",
     "turn": "turn_3",
-    "scope": "ws_1a2b3c4d"
+    "scope": "ws_7f3a"
   }
 ]

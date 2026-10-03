@@ -215,16 +215,16 @@ export async function runFirst(o: FirstRun): Promise<FirstResult | undefined> {
  * still opens. */
 export async function runLocal(roads: Pick<WorkspaceRoads, "addProject" | "createWorkspace">, output: Writable, folder?: string, name: string = FIRST_WORKSPACE): Promise<WorkspaceView | undefined> {
   if (folder === undefined) {
-    log.warn(`${THIS_COMPUTER} was not made a workspace: a workspace is one project's, and this run named no folder here. wsp add <folder> records one and wsp new "<what you are working on>" makes its workspace.`, { output });
+    log.warn(`no project was recorded on ${THIS_COMPUTER}: this run named no folder here. wsp add <folder> records one, and wsp run <project> "<message>" opens a thread in it.`, { output });
     return undefined;
   }
   try {
     const project = await roads.addProject(folder);
     const workspace = await roads.createWorkspace(name, undefined, project.id);
-    log.step(thisComputerLine(workspace.name, workspace.id, folder), { output });
+    log.step(thisComputerLine(workspace.project.name, folder), { output });
     return workspace;
   } catch (e) {
-    log.warn(`${THIS_COMPUTER} was not made a workspace: ${errorText(e)}. wsp add <folder> records a project here and wsp new "<what you are working on>" makes its workspace.`, { output });
+    log.warn(`no project was recorded on ${THIS_COMPUTER}: ${errorText(e)}. wsp add <folder> records a project here and wsp run <project> "<message>" opens a thread in it.`, { output });
     return undefined;
   }
 }

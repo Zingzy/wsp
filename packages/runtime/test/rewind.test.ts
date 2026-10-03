@@ -182,7 +182,7 @@ describe("rewinding a thread to one of its replies", () => {
 
     const done = await rt!.sessions.rewind(threadId, { turnId: turns[0]!, files: true });
     expect(done).toEqual({ turns: 2, files: 2 });
-    expect(daemon.frames).toEqual([{ op: "git.restore", cwd: daemon.checkout(), checkpoint: `refs/wsp/checkpoints/stub-1/${threadId}/${turns[0]}` }]);
+    expect(daemon.frames).toEqual([{ op: "git.restore", cwd: daemon.checkout(), checkpoint: `refs/wsp/checkpoints/stub-1/${threadId}/${turns[0]}`, scope: ws.id }]);
     expect(await texts(ws.id)).toEqual(["reply 1"]);
     expect((await rt!.sessions.history(ws.id)).every(e => e.turnId === turns[0])).toBe(true);
     expect(events.filter(e => e.type === "thread.rewound")).toMatchObject([{ type: "thread.rewound", workspaceId: ws.id, threadId }]);
@@ -223,8 +223,8 @@ describe("rewinding a thread to one of its replies", () => {
     daemon.frames.length = 0;
     await expect(rt!.sessions.rewind(threadId, { turnId: turns[0]!, files: true })).rejects.toThrow("codex would not cut the thread: thread history is not paginated");
     expect(daemon.frames).toEqual([
-      { op: "git.restore", cwd: daemon.checkout(), checkpoint: `refs/wsp/checkpoints/stub-1/${threadId}/${turns[0]}` },
-      { op: "git.restore", cwd: daemon.checkout(), checkpoint: `refs/wsp/checkpoints/stub-1/${threadId}/${turns[0]}-before-1` },
+      { op: "git.restore", cwd: daemon.checkout(), checkpoint: `refs/wsp/checkpoints/stub-1/${threadId}/${turns[0]}`, scope: ws.id },
+      { op: "git.restore", cwd: daemon.checkout(), checkpoint: `refs/wsp/checkpoints/stub-1/${threadId}/${turns[0]}-before-1`, scope: ws.id },
     ]);
     expect(await texts(ws.id)).toEqual(["reply 1", "reply 2", "reply 3"]);
   });
@@ -249,7 +249,7 @@ describe("rewinding a thread to one of its replies", () => {
     await rt!.sessions.rewind(threadId, { turnId: turns[0]!, files: true });
     daemon.frames.length = 0;
     expect(await rt!.sessions.rewind(threadId, { undo: true })).toEqual({ turns: 0, files: 2 });
-    expect(daemon.frames).toEqual([{ op: "git.restore", cwd: daemon.checkout(), checkpoint: `refs/wsp/checkpoints/stub-1/${threadId}/${turns[0]}-before-1` }]);
+    expect(daemon.frames).toEqual([{ op: "git.restore", cwd: daemon.checkout(), checkpoint: `refs/wsp/checkpoints/stub-1/${threadId}/${turns[0]}-before-1`, scope: ws.id }]);
     // The transcript is as the rewind left it: undo brings the files back, not the conversation.
     expect(await texts(ws.id)).toEqual(["reply 1"]);
     await expect(rt!.sessions.rewind(threadId, { undo: true })).rejects.toThrow(REWIND_NO_UNDO_LINE);

@@ -1,13 +1,13 @@
 {
   "cloudOff": {
     "name": "threads",
-    "description": "Every thread as the sidebar lists it: its project, its workspace, the computer that workspace runs on, the agent inside, its state, who opened it (person, cli or agent) and its title. Optionally within one workspace. A thread an agent inside another thread opened carries parentThreadId and rootThreadId, which is the tree stop ends as one.",
+    "description": "Every thread as the sidebar lists it: its project, the folder it works in (the project folder, or a worktree of the project's repo), that folder's branch as git reads it now, the computer it runs on, the agent inside, its state, who opened it (person, cli or agent) and its title. Optionally within one project. A thread an agent inside another thread opened carries parentThreadId and rootThreadId, which is the tree stop ends as one.",
     "inputSchema": {
       "type": "object",
       "properties": {
-        "workspace": {
+        "project": {
           "type": "string",
-          "description": "the workspace's name, or its id when two share a name"
+          "description": "one project's threads, by the name or the id projects lists"
         }
       },
       "additionalProperties": false,
@@ -232,7 +232,10 @@
               "projectName": {
                 "type": "string"
               },
-              "workspaceName": {
+              "folder": {
+                "type": "string"
+              },
+              "branch": {
                 "type": "string"
               },
               "computerName": {
@@ -250,7 +253,8 @@
               "turns",
               "ran",
               "projectName",
-              "workspaceName",
+              "folder",
+              "branch",
               "computerName"
             ],
             "additionalProperties": false
@@ -269,13 +273,13 @@
   },
   "cloudOn": {
     "name": "threads",
-    "description": "Every thread as the sidebar lists it: its project, its workspace, the computer that workspace runs on, the agent inside, its state, who opened it (person, cli or agent) and its title. Optionally within one workspace. A thread an agent inside another thread opened carries parentThreadId and rootThreadId, which is the tree stop ends as one.",
+    "description": "Every thread as the sidebar lists it: its project, the folder it works in (the project folder, or a worktree of the project's repo), that folder's branch as git reads it now, the computer it runs on, the agent inside, its state, who opened it (person, cli or agent) and its title. Optionally within one project. A thread an agent inside another thread opened carries parentThreadId and rootThreadId, which is the tree stop ends as one.",
     "inputSchema": {
       "type": "object",
       "properties": {
-        "workspace": {
+        "project": {
           "type": "string",
-          "description": "the workspace's name, or its id when two share a name"
+          "description": "one project's threads, by the name or the id projects lists"
         }
       },
       "additionalProperties": false,
@@ -500,7 +504,10 @@
               "projectName": {
                 "type": "string"
               },
-              "workspaceName": {
+              "folder": {
+                "type": "string"
+              },
+              "branch": {
                 "type": "string"
               },
               "computerName": {
@@ -518,7 +525,8 @@
               "turns",
               "ran",
               "projectName",
-              "workspaceName",
+              "folder",
+              "branch",
               "computerName"
             ],
             "additionalProperties": false

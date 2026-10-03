@@ -57,7 +57,7 @@ export const SETUP_HEADING = "## Setting a person up from nothing";
 
 /** The section the instructions carry whole, its opening paragraph and every rule line: what a machine can do at
  * once and what wastes it, which a caller holding only the tools has nowhere else to read. */
-export const RULES_HEADING = "## Running work on a workspace well";
+export const RULES_HEADING = "## Running work well";
 
 /** The verbs table an agent reads, and the section holding the one verb that blocks, which is a shell script's. A
  * verb whose row sits in the wrong one of these teaches the wrong road, so the parity test pins where each is. */

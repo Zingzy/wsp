@@ -1,7 +1,7 @@
 {
   "cloudOff": {
     "name": "projects",
-    "description": "Every project this host holds: its name, the computer it lives on, where its code comes from (a folder on the computer the app runs on, or a repo a computer clones), where the checkout sits inside a workspace of it, the branch a workspace of it starts on, and how many workspaces stand on it. The name is what new takes. A project is recorded with add and is one source on one computer; a workspace is a copy of that computer with the project inside. defaults holds, by project id, the agent, model, effort and access a new thread there starts on when its start names none, each with where it came from: the project's own (projects_set), the person's default (agents_set, agents_default) or the agent's own.",
+    "description": "Every project this host holds: its name, the computer it lives on, where its code comes from (a folder on the computer the app runs on, or a repo a computer clones), where its folder sits, the branch a machine of it starts on, and its repo's top folder where it is a folder here inside a git repo. The name is what run takes. A project is recorded with add and is one source on one computer; on the computer the app runs on its threads run in its folder, or in a worktree of its repo for another branch. defaults holds, by project id, the agent, model, effort and access a new thread there starts on when its start names none, each with where it came from: the project's own (projects_set), the person's default (agents_set, agents_default) or the agent's own.",
     "inputSchema": {
       "type": "object",
       "properties": {},
@@ -195,6 +195,18 @@
               },
               "base": {
                 "type": "string"
+              },
+              "git": {
+                "type": "object",
+                "properties": {
+                  "top": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "top"
+                ],
+                "additionalProperties": false
               },
               "createdAt": {
                 "type": "string"
@@ -295,7 +307,7 @@
   },
   "cloudOn": {
     "name": "projects",
-    "description": "Every project this host holds: its name, the computer it lives on, where its code comes from (a folder on the computer the app runs on, or a repo a computer clones), where the checkout sits inside a workspace of it, the branch a workspace of it starts on, and how many workspaces stand on it. The name is what new takes. A project is recorded with add and is one source on one computer; a workspace is a copy of that computer with the project inside. defaults holds, by project id, the agent, model, effort and access a new thread there starts on when its start names none, each with where it came from: the project's own (projects_set), the person's default (agents_set, agents_default) or the agent's own.",
+    "description": "Every project this host holds: its name, the computer it lives on, where its code comes from (a folder on the computer the app runs on, or a repo a computer clones), where its folder sits, the branch a machine of it starts on, and its repo's top folder where it is a folder here inside a git repo. The name is what run takes. A project is recorded with add and is one source on one computer; on the computer the app runs on its threads run in its folder, or in a worktree of its repo for another branch. defaults holds, by project id, the agent, model, effort and access a new thread there starts on when its start names none, each with where it came from: the project's own (projects_set), the person's default (agents_set, agents_default) or the agent's own.",
     "inputSchema": {
       "type": "object",
       "properties": {},
@@ -489,6 +501,18 @@
               },
               "base": {
                 "type": "string"
+              },
+              "git": {
+                "type": "object",
+                "properties": {
+                  "top": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "top"
+                ],
+                "additionalProperties": false
               },
               "createdAt": {
                 "type": "string"

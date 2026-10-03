@@ -73,7 +73,6 @@ const CLOUD_LINES = [
   ["image", "move", "w"],
   ["image", "remove", "snap-1"],
   ["image", "export", "/tmp/image.wsp"],
-  ["new", "p", "work", "--from", "snap-1"],
   ["add", "solari"],
   ["add", "box"],
   ["init", "--provider", "solari"],
@@ -110,10 +109,9 @@ describe.runIf(!CLOUD_ON)("with the cloud off", () => {
     expect(said).toEqual([]);
   });
 
-  it("serves none of the provider's tools, and new takes no project image", async () => {
+  it("serves none of the provider's tools", async () => {
     const tools = await toolList();
     expect(tools.names.filter(name => CLOUD_TOOLS.includes(name))).toEqual([]);
-    expect(tools.inputs["new"]).not.toContain("from");
   });
 
   it("prints none of the provider's lines on a page", () => {
@@ -136,10 +134,9 @@ describe.runIf(CLOUD_ON)("with the cloud on", () => {
     expect(PROVIDER_MODULES.map(m => m.id)).toEqual(["fake", "box", "solari", "none"]);
   });
 
-  it("serves every one of the provider's tools, and new takes a project image", async () => {
+  it("serves every one of the provider's tools", async () => {
     const tools = await toolList();
     expect(CLOUD_TOOLS.filter(name => !tools.names.includes(name))).toEqual([]);
-    expect(tools.inputs["new"]).toContain("from");
   });
 
   it("answers every one of the provider's lines", () => {

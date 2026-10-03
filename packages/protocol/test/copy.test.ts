@@ -9,7 +9,6 @@ import {
   CopyAsk,
   CopyReport,
   ProjectCopy,
-  WorkspaceView,
   CopyRoad,
   COPY_WORD,
   folderSlug,

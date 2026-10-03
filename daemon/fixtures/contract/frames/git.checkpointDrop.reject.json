@@ -2,19 +2,17 @@
   {
     "id": 1,
     "op": "git.checkpointDrop",
-    "cwd": "/Users/dev/spoo",
+    "cwd": "/root/repo"
+  },
+  {
+    "id": 1,
+    "op": "git.checkpointDrop",
     "thread": "thr_1"
   },
   {
     "id": 1,
     "op": "git.checkpointDrop",
-    "scope": "ws_1",
-    "thread": "thr_1"
-  },
-  {
-    "id": 1,
-    "op": "git.checkpointDrop",
-    "cwd": "/Users/dev/spoo",
-    "scope": "ws_1"
+    "cwd": "/root/repo",
+    "thread": 1
   }
 ]

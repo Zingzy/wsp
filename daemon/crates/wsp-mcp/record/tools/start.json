@@ -1,7 +1,7 @@
 {
   "cloudOff": {
     "name": "start",
-    "description": "Starts a workspace off a GitHub issue or pull request link and opens a thread on it, returning as soon as the thread is started. The link names the repository, and the project here whose remote is that repository is the one used (project names one where two computers hold it); a link no project matches is refused naming the repository and the add line. The issue's or pull request's title, description, comments and link are the thread's task, and an issue's thread is asked to have its pull request close the issue. A pull request's copy is put on its head branch through the git host's own command line, so bringing the work back updates the same pull request, and a pull request from a fork whose author allowed no edits is refused at bring back. A thread's own token is refused: starting work from a link is the person's act.",
+    "description": "Opens a thread off a GitHub issue or pull request link, returning as soon as the thread is started. The link names the repository, and the project here whose remote is that repository is the one used (project names one where two computers hold it); a link no project matches is refused naming the repository and the add line. The issue's or pull request's title, description, comments and link are the thread's first message, and an issue's thread is asked to have its pull request close the issue. On the computer the app runs on an issue's thread runs in the project folder, and a pull request's head is fetched into the project's repo as a branch and its thread runs in a worktree on it, so the project folder's checkout never moves. A thread's own token is refused: starting work from a link is the person's act.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -275,53 +275,56 @@
             "provider": {
               "type": "string"
             },
-            "copy": {
+            "worktree": {
               "type": "object",
               "properties": {
                 "path": {
                   "type": "string"
                 },
-                "base": {
-                  "type": "string"
-                },
                 "branch": {
                   "type": "string"
                 },
-                "carried": {
-                  "type": "string",
-                  "enum": [
-                    "deps-and-config",
-                    "config-only",
-                    "nothing"
-                  ]
+                "made": {
+                  "type": "boolean"
                 },
-                "fellBack": {
+                "settled": {
+                  "type": "object",
+                  "properties": {
+                    "at": {
+                      "type": "number"
+                    },
+                    "why": {
+                      "type": "string",
+                      "enum": [
+                        "merged",
+                        "closed",
+                        "deleted",
+                        "removed"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "at",
+                    "why"
+                  ],
+                  "additionalProperties": false
+                },
+                "kept": {
                   "type": "string"
                 },
-                "road": {
-                  "type": "string",
-                  "enum": [
-                    "clonefile",
-                    "worktree"
-                  ]
-                },
-                "source": {
+                "removeFailed": {
                   "type": "string"
+                },
+                "gone": {
+                  "type": "boolean",
+                  "const": true
                 }
               },
               "required": [
                 "path",
-                "base",
-                "branch",
-                "carried",
-                "road",
-                "source"
+                "made"
               ],
               "additionalProperties": false
-            },
-            "portBase": {
-              "type": "integer",
-              "exclusiveMinimum": 0
             },
             "from": {
               "type": "object",
@@ -547,7 +550,7 @@
   },
   "cloudOn": {
     "name": "start",
-    "description": "Starts a workspace off a GitHub issue or pull request link and opens a thread on it, returning as soon as the thread is started. The link names the repository, and the project here whose remote is that repository is the one used (project names one where two computers hold it); a link no project matches is refused naming the repository and the add line. The issue's or pull request's title, description, comments and link are the thread's task, and an issue's thread is asked to have its pull request close the issue. A pull request's copy is put on its head branch through the git host's own command line, so bringing the work back updates the same pull request, and a pull request from a fork whose author allowed no edits is refused at bring back. A thread's own token is refused: starting work from a link is the person's act.",
+    "description": "Opens a thread off a GitHub issue or pull request link, returning as soon as the thread is started. The link names the repository, and the project here whose remote is that repository is the one used (project names one where two computers hold it); a link no project matches is refused naming the repository and the add line. The issue's or pull request's title, description, comments and link are the thread's first message, and an issue's thread is asked to have its pull request close the issue. On the computer the app runs on an issue's thread runs in the project folder, and a pull request's head is fetched into the project's repo as a branch and its thread runs in a worktree on it, so the project folder's checkout never moves. A thread's own token is refused: starting work from a link is the person's act.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -821,53 +824,56 @@
             "provider": {
               "type": "string"
             },
-            "copy": {
+            "worktree": {
               "type": "object",
               "properties": {
                 "path": {
                   "type": "string"
                 },
-                "base": {
-                  "type": "string"
-                },
                 "branch": {
                   "type": "string"
                 },
-                "carried": {
-                  "type": "string",
-                  "enum": [
-                    "deps-and-config",
-                    "config-only",
-                    "nothing"
-                  ]
+                "made": {
+                  "type": "boolean"
                 },
-                "fellBack": {
+                "settled": {
+                  "type": "object",
+                  "properties": {
+                    "at": {
+                      "type": "number"
+                    },
+                    "why": {
+                      "type": "string",
+                      "enum": [
+                        "merged",
+                        "closed",
+                        "deleted",
+                        "removed"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "at",
+                    "why"
+                  ],
+                  "additionalProperties": false
+                },
+                "kept": {
                   "type": "string"
                 },
-                "road": {
-                  "type": "string",
-                  "enum": [
-                    "clonefile",
-                    "worktree"
-                  ]
-                },
-                "source": {
+                "removeFailed": {
                   "type": "string"
+                },
+                "gone": {
+                  "type": "boolean",
+                  "const": true
                 }
               },
               "required": [
                 "path",
-                "base",
-                "branch",
-                "carried",
-                "road",
-                "source"
+                "made"
               ],
               "additionalProperties": false
-            },
-            "portBase": {
-              "type": "integer",
-              "exclusiveMinimum": 0
             },
             "from": {
               "type": "object",

@@ -108,8 +108,10 @@ async fn add(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
         Err(_) => HashMap::new(),
     };
     let project: Project = read(&added.project, "projects.add")?;
+    let words = workspace::words();
+    let template = if project.computer == words.here_place_id { &words.added_project_here } else { &words.added_project };
     let said = fill(
-        &workspace::words().added_project,
+        template,
         &[
             ("name", &project.name),
             ("id", &project.id),

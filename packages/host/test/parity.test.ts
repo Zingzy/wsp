@@ -372,6 +372,7 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
       "workspaces.viewed": "a viewed mark is one person's place in a review; an agent reads the diff whole with git and marks nothing",
       "fs.write": "the pane's save of an edit made inside the diff; the command line reaches a file through wsp exec",
       "places.readings": "a computer's chart over a day, a week or a month; wsp computers prints its cores and memory now",
+      "workspaces.bringBack": "the Changes pane's Open pull request, a plain git action beside Commit and Push; an agent pushes and opens its pull request with git push and gh pr create",
     };
     // The workspace ops a window sends that are no pane's: a row's buttons and a window's own bookkeeping.
     const ROW_ONLY: Record<string, string> = {
@@ -511,7 +512,7 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
     // The rows the skill carried while run and send already read the three picks: each missing pick is named.
     const stale = WSP_SKILL.split("\n")
       .map(line => {
-        if (line.startsWith("| `wsp run ")) return '| `wsp run <workspace> [--agent <id>] [--cwd <path>] [--notify <thread\\|me>] "<task>"` | `run` (workspace, task, agent, cwd, notify) | opens |';
+        if (line.startsWith("| `wsp run ")) return '| `wsp run <project> [--agent <id>] [--branch <branch>] [--cwd <path>] [--notify <thread\\|me>] "<message>"` | `run` (project, branch, cwd, message, agent, notify) | opens |';
         if (line.startsWith("| `wsp send ")) return '| `wsp send <thread> "<message>"` | `send` (thread, message) | a message |';
         return line;
       })

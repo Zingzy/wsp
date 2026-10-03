@@ -19,7 +19,7 @@ const captured = (): CliIO & { lines: string[]; errors: string[] } => {
 };
 
 /** The sixteen words, in the order the front page prints them. */
-const FRONT = ["init", "add", "computers", "remove", "projects", "new", "workspaces", "threads", "run", "send", "stop", "pause", "wake", "delete", "status", "mcp"];
+const FRONT = ["init", "add", "computers", "remove", "projects", "threads", "run", "send", "stop", "pause", "wake", "delete", "status", "mcp"];
 
 /** The three lines about the person's own account, which print in the block under the sixteen rather than among
  * them: they are not work on a workspace, and a person meets them once. */
@@ -40,13 +40,12 @@ const REPO = fileURLToPath(new URL("../../..", import.meta.url));
 
 describe("the pages wsp prints", () => {
   it("the front page is the sixteen words on five nouns and nothing else a person has to read past", () => {
-    expect(frontLines()).toHaveLength(16);
+    expect(frontLines()).toHaveLength(14);
     expect(frontLines().map(line => line.trim().split(" ")[1])).toEqual(FRONT);
     // Each of the sixteen is a line that declares the front page, and no other line does.
     expect(COMMAND_LINES.filter(l => l.page === "front").map(l => l.words).sort()).toEqual([...FRONT, ...ACCOUNT].sort());
     // The three rules and the two pages behind it, which is what makes "nothing else" findable.
-    expect(HELP).toContain("A workspace or a thread comes right after the verb.");
-    expect(HELP).toContain("new takes the project when");
+    expect(HELP).toContain("A project or a thread comes right after the verb.");
     expect(HELP).toContain("Sleeping is automatic.");
     expect(HELP).toContain("wsp --help agent");
     expect(HELP).toContain("wsp host --help");

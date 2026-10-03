@@ -77,7 +77,7 @@
   },
   "hostDidNotStop": "the host took the restart and was still serving after 20s",
   "cwdNotAbsolute": "--cwd is a path on the machine, absolute, and got \"{path}\". Give a path that opens with /, since whoever reads it works in a folder this line cannot see.",
-  "emptyTask": "the task is empty; say what the thread is to do. Put it in quotes after the flags.",
+  "emptyTask": "the message is empty; say what the thread is to do. Put it in quotes after the flags.",
   "noAdapter": "no adapter registered for harness \"{agent}\"; agents on this host: {agents}. Name one of those with --agent.",
   "noAdapterNone": "no adapter registered for harness \"{agent}\"; agents on this host: none. Name one of those with --agent.",
   "picks": {
@@ -103,10 +103,11 @@
       "plan"
     ]
   },
-  "noThreadTarget": "workspace is needed outside a repo: run from inside a repo one of the workspaces holds, or name the workspace. Run wsp workspaces to read the names.",
+  "noThreadTarget": "<project> is needed outside your projects: run from inside a project's folder, or name the project. Run wsp projects to read the names.",
   "guestNamesWorkspace": "a line from a workspace names the workspace it means, since the folder it was typed in is not one this host can read. Name the workspace on the line.",
-  "noWorkspaceForFolder": "no workspace holds a project for {folder}; name one with workspace, or wsp add '{folder}' records it as a project here",
-  "threadOpened": "thread {thread} on {workspace} in {folder}",
+  "branchHereOnly": "--branch takes a project on this computer, where wsp makes worktrees. Name a project on this computer.",
+  "threadOpened": "thread {thread} on {project} in {folder}",
+  "threadOpenedIn": "thread {thread} in {folder}",
   "openedThread": "thread {thread}",
   "noResult": "turn ended without a result",
   "noThreadStamped": "the runtime stamped no thread on the session",

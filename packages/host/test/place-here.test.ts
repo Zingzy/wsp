@@ -12,7 +12,6 @@ import { NAME_LABEL, WORKSPACE_LABEL, WSP_LABEL } from "@wsp/engine";
 import type { DaemonReach } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { statusCommand, type CliIO, type ServiceDeps } from "../src/cli.js";
-import { workspaceLine } from "../src/verbs.js";
 import { hereAnswering, hereLines, openHere, readHere, type HereDeps, type HereReading } from "../src/place-here.js";
 import type { WatchSignals } from "../src/watch.js";
 import { writePlaceFile } from "../src/place-report.js";
@@ -334,7 +333,7 @@ describe("wsp status on a computer joined as a place", () => {
       rateUsdPerHour: 0,
       reach: { state: "reachable" as const },
       machineState: "running" as const,
-    })).map(w => workspaceLine(w).slice(0, 2));
+    })).map(w => [w.name, w.id]);
     expect(onTheBox).toEqual(onTheHost);
   });
 

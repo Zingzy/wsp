@@ -98,27 +98,36 @@ function fakeDaemon() {
   return { frames, open };
 }
 
-/** The copier with git doing the worktree half for real, as the daemon binary's verb does: the branch checked out
- * anywhere answers that worktree, an existing branch is checked out as it stands, a new one starts at HEAD. */
+/** The copier with git doing the worktree half for real, as the daemon binary's verbs do: the branch checked out
+ * anywhere answers that worktree, an existing branch is checked out as it stands, a new one starts at HEAD; a
+ * removal is refused over files no commit holds and for a worktree outside the host's folder. */
 export function gitCopier(): ReturnType<typeof fakeCopier> {
   const inner = fakeCopier();
   return {
     ...inner,
     async worktree(ask) {
       inner.worktrees.push(ask);
+      const ours = join(ask.home, "worktrees");
       const listed = git(ask.from, "worktree", "list", "--porcelain").split("\n\n");
       const held = listed.find(block => block.includes(`branch refs/heads/${ask.branch}`));
-      if (held !== undefined) return { path: held.split("\n")[0]!.slice("worktree ".length), branch: ask.branch, made: false };
-      const path = join(ask.root, ask.project, ask.branch.replace(/[^A-Za-z0-9._-]/g, "-"));
-      mkdirSync(join(ask.root, ask.project), { recursive: true });
+      if (held !== undefined) {
+        const path = held.split("\n")[0]!.slice("worktree ".length);
+        return { path, branch: ask.branch, made: path.startsWith(`${ours}/`), carried: [], ms: 1 };
+      }
+      const path = join(ours, ask.project, ask.branch.replace(/[^A-Za-z0-9._-]/g, "-"));
+      mkdirSync(join(ours, ask.project), { recursive: true });
       const exists = execFileSync("git", ["-C", ask.from, "branch", "--list", ask.branch], { encoding: "utf8" }).trim() !== "";
       if (exists) git(ask.from, "worktree", "add", "-q", path, ask.branch);
       else git(ask.from, "worktree", "add", "-q", "-b", ask.branch, path, "HEAD");
-      return { path, branch: ask.branch, made: true };
+      return { path, branch: ask.branch, made: true, carried: [], ms: 1 };
     },
-    async worktreeRemove(from, to, force) {
-      inner.worktreesRemoved.push({ from, to, force });
-      git(from, "worktree", "remove", ...(force ? ["--force"] : []), to);
+    async worktreeRemove(o) {
+      inner.worktreesRemoved.push(o);
+      if (!o.path.startsWith(`${join(o.home, "worktrees")}/`)) throw new Error(`${o.path} is not a worktree wsp made for this project, so nothing was removed`);
+      const changed = git(o.path, "status", "--porcelain").split("\n").filter(l => l !== "").length;
+      if (changed > 0 && !o.force) throw new Error(`${o.path} has ${changed} files not committed, so it was not removed; commit them, or remove it with --force`);
+      git(o.from, "worktree", "remove", "--force", o.path);
+      return { path: o.path };
     },
   };
 }
@@ -150,7 +159,7 @@ function here(wire: Partial<LocalWiring> = {}) {
     statePath: join(state, "state.json"),
     daemonChannel: daemon.open,
   });
-  return { rt, copier, starts, daemon, worktrees: join(state, "worktrees") };
+  return { rt, copier, starts, daemon, home: state, worktrees: join(state, "worktrees") };
 }
 
 describe("a thread on a project on this computer", () => {
@@ -206,11 +215,11 @@ describe("a thread on a project on this computer", () => {
 
 describe("a thread on another branch", () => {
   it("runs in a worktree the copier makes under the host's folder, keyed by the project, carrying the catalogue's directories", async () => {
-    const { rt, copier, starts, worktrees } = here();
+    const { rt, copier, starts, home, worktrees } = here();
     const folder = repo();
     const project = await rt.projects.add({ source: folder });
     const at = await rt.workspaces.folderFor({ project: project.id, branch: "feat/login" });
-    expect(copier.worktrees).toEqual([{ from: folder, root: worktrees, project: project.id, branch: "feat/login", carry: [...CARRIED_DIR_NAMES] }]);
+    expect(copier.worktrees).toEqual([{ from: folder, home, project: project.id, branch: "feat/login", carry: [...CARRIED_DIR_NAMES] }]);
     const path = join(worktrees, project.id, "feat-login");
     expect(at.workspace.worktree).toEqual({ path, branch: "feat/login", made: true });
     expect(at.workspace.folder).toBe(path);
@@ -364,7 +373,7 @@ describe("taking a folder's record away", () => {
   });
 
   it("refuses a worktree wsp made while it holds a file no commit has, and removes it once clean", async () => {
-    const { rt, copier } = here();
+    const { rt, copier, home } = here();
     const folder = repo();
     const project = await rt.projects.add({ source: folder });
     const at = await rt.workspaces.folderFor({ project: project.id, branch: "feat/keep" });
@@ -377,11 +386,11 @@ describe("taking a folder's record away", () => {
     await rt.workspaces.delete(at.workspace.id);
     expect(existsSync(path)).toBe(false);
     expect(git(folder, "branch", "--list", "feat/keep")).toContain("feat/keep");
-    expect(copier.worktreesRemoved).toEqual([{ from: folder, to: path, force: false }]);
+    expect(copier.worktreesRemoved).toEqual([{ from: folder, home, path, force: false }]);
   });
 
-  it("never removes a worktree somebody else made, and keeps a detached worktree's commit under refs/rescue", async () => {
-    const { rt } = here();
+  it("never removes a worktree somebody else made, whatever is asked of it", async () => {
+    const { rt, copier } = here();
     const folder = repo();
     const project = await rt.projects.add({ source: folder });
     const theirs = join(scratch(), "theirs");
@@ -391,14 +400,7 @@ describe("taking a folder's record away", () => {
     await expect(rt.workspaces.worktreeRemove({ project: project.id, branch: "theirs" })).rejects.toThrow(notMadeWorktreeLine("theirs"));
     await rt.workspaces.delete(held.workspace.id);
     expect(existsSync(theirs)).toBe(true);
-    const made = await rt.workspaces.folderFor({ project: project.id, branch: "feat/detach" });
-    const path = made.workspace.worktree!.path;
-    git(path, "commit", "-q", "--allow-empty", "-m", "on its own");
-    const head = git(path, "rev-parse", "HEAD");
-    git(path, "checkout", "-q", "--detach");
-    await rt.workspaces.delete(made.workspace.id);
-    expect(existsSync(path)).toBe(false);
-    expect(git(folder, "for-each-ref", "--format=%(objectname)", "refs/rescue/")).toBe(head);
+    expect(copier.worktreesRemoved).toEqual([]);
   });
 });
 

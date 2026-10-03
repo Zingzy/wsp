@@ -6,7 +6,7 @@
 // record a project one way and read it back another.
 import { THIS_COMPUTER, thisComputer } from "./format.js";
 import { HERE_PLACE_ID, namesPlace } from "./place-word.js";
-import type { ProjectSource, ProjectView, WorkspaceKind, WorkspaceProject, WorkspaceView } from "./index.js";
+import type { ProjectSource, ProjectView, WorkspaceKind, WorkspaceProject } from "./index.js";
 import { folderName, underProject } from "./project-path.js";
 import { shellLine, shellQuote } from "./shell-quote.js";
 import { kindWords } from "./workspace-state.js";
@@ -23,7 +23,8 @@ export function addedProjectLine(project: ProjectView, named: ReadonlyMap<string
  * far it has got as it goes and its last stage is this line, so the terminal reads where the project is from the
  * add itself and no door says that fact a second time. */
 export function addedProjectOn(project: ProjectView, computer: string): string {
-  return `${project.name} ${project.id}: ${sourceWord(project.source)} on ${computer}, at ${project.path} inside a workspace of it\nmake one with: wsp new ${shellQuote(project.name)} "<what you are working on>"`;
+  const here = copiesFolder(kindForComputer(project.computer));
+  return `${project.name} ${project.id}: ${sourceWord(project.source)} on ${computer}, at ${project.path}${here ? `\nopen a thread on it with: wsp run ${shellQuote(project.name)} "<message>"` : ""}`;
 }
 
 /** What the add says before any work runs on that computer: what is being recorded and where its code comes from,
@@ -172,6 +173,9 @@ export const NAME_A_PROJECT_LINE = "name the project the thread runs in";
 /** A branch named on a send into a thread: a thread keeps the folder it runs in. */
 export const BRANCH_ON_A_THREAD_LINE = "a thread keeps its folder; start a new thread for another branch";
 
+/** A branch named for a thread on a box: worktrees are made on this computer, for a project here. */
+export const BRANCH_HERE_ONLY_LINE = "--branch takes a project on this computer, where wsp makes worktrees";
+
 /** A start naming both a branch and a folder: the branch picks a folder of its own. */
 export const BRANCH_OR_CWD_LINE = "name a branch or a folder, not both";
 
@@ -180,6 +184,28 @@ export const notOnThisComputerLine = (project: string): string => `${project} is
 
 /** A folder a thread may not run in: only the project folder and the worktrees of its repo are a project's. */
 export const cwdOutsideLine = (path: string, project: string): string => `${path} is not in ${project} or a worktree of it; wsp add it first`;
+
+/** What taking a thread away on this computer takes, the question a delete puts first: the thread's turns and
+ * checkpoints, and the worktree wsp made with every thread in it where the thread ran in one. */
+export function threadDeleteQuestion(threadId: string, worktree: string | undefined): string {
+  return worktree === undefined
+    ? `Delete thread ${threadId}?\nIts turns and checkpoints leave this computer; the folder it worked in is left as it is.`
+    : `Delete thread ${threadId}?\nThe worktree at ${worktree} is removed with every thread in it; the branch and the project folder are left as they are.`;
+}
+
+/** What a thread delete did. */
+export function threadDeletedLine(threadId: string, gone: { worktree?: string; threads: number }): string {
+  return gone.worktree === undefined ? `deleted thread ${threadId}` : `deleted thread ${threadId}, the worktree at ${gone.worktree} and ${gone.threads === 1 ? "its one thread" : `its ${gone.threads} threads`}`;
+}
+
+/** What a worktree removal says once git took it away. */
+export const worktreeRemovedLine = (branch: string): string => `removed the worktree for ${branch}; the branch stays`;
+
+/** A thread taken away while its turn runs. */
+export const THREAD_WORKING_LINE = "this thread is working; stop its turn first";
+
+/** A thread on a box taken away alone: it goes with its machine. */
+export const threadOnMachineLine = (machine: string): string => `a thread on ${machine} goes with its machine; wsp delete ${machine} takes both`;
 
 /** A worktree removal refused while a thread's turn runs in it. */
 export const WORKTREE_BUSY_LINE = "a thread is working in that worktree; let its turn end or stop it first";
@@ -302,45 +328,10 @@ export function registerTakesNoConsentLine(flags: readonly string[]): string {
   return `${flags.join(", ")} ${flags.length === 1 ? "has" : "have"} no meaning on this computer: the folder is registered at its path and nothing is carried, cut or replaced`;
 }
 
-/** The first line of a thread opened from inside a repo with no workspace named: where it went. */
-export function threadOpenedLine(threadId: string, workspaceName: string, folder: string): string {
-  return `thread ${threadId} on ${workspaceName} in ${folder}`;
-}
-
-/** Why a run from inside a folder no workspace holds a project for opens nothing, with both roads out; `named` is the
- * caller's word for naming a workspace (`<workspace>` on the command line, `workspace` on the tool). */
-export function noWorkspaceForFolderLine(folder: string, named: string): string {
-  return `no workspace holds a project for ${folder}; name one with ${named}, or wsp add ${shellQuote(folder)} records it as a project here`;
-}
-
-/** The workspace a folder on this computer belongs to, and the project it is there as, for a thread opened with no
- * workspace named. A project on this computer is the person's own folder, and its path is the project's: the
- * match is the project whose path the folder is or sits under, the nearest when projects nest, and the workspace
- * is the one standing on that project. None when no project holds the folder, and none when one does and no
- * workspace of it stands. */
-export function workspaceForFolder<W extends Pick<WorkspaceView, "id" | "project">>(
-  workspaces: readonly W[],
-  projects: readonly ProjectView[],
-  folder: string,
-): { workspace: W; project: ProjectView } | null {
-  let found: ProjectView | null = null;
-  for (const project of projects) {
-    if (project.source.kind !== "folder") continue;
-    if (underProject(folder, project.path) && (found === null || project.path.length > found.path.length)) found = project;
-  }
-  if (found === null) return null;
-  const workspace = workspaces.find(w => w.project.id === found!.id);
-  return workspace === undefined ? null : { workspace, project: found };
-}
-
-/** The workspace whose copy holds this folder, the nearest where copies nest: a thread on this computer starts in its
- * copy, and the copy is on the workspace's own row, so the folder names it with nothing a thread may not read. */
-export function workspaceOfCopy<W extends { id: string; copy?: { path: string } }>(workspaces: readonly W[], folder: string): W | undefined {
-  let found: W | undefined;
-  for (const w of workspaces) {
-    if (w.copy !== undefined && underProject(folder, w.copy.path) && (found === undefined || w.copy.path.length > found.copy!.path.length)) found = w;
-  }
-  return found;
+/** The first line of a thread opened with no folder named outright: the project, where the caller named one, and the
+ * folder it went to. */
+export function threadOpenedLine(threadId: string, project: string | undefined, folder: string): string {
+  return project === undefined ? `thread ${threadId} in ${folder}` : `thread ${threadId} on ${project} in ${folder}`;
 }
 
 /** Whether a workspace of this kind is a copy of a folder on this computer, made by directory, and forks no image:
@@ -372,11 +363,11 @@ export function landsOn(computer: string, place: { id: string; name: string }): 
   return workspaceLands(computer, undefined).at === "here" ? place.id === HERE_PLACE_ID : namesPlace(place, computer);
 }
 
-/** Why a workspace on this computer takes none of the words a fork takes: it is a copy of the project's folder
- * here, so there is no image to start from, no machine to size and no engine to hand it. The words are named in
- * the order the command line lists them, so the sentence says exactly which to drop. */
+/** Why a project on this computer takes none of the words a fork takes: its threads run in its own folder, so there
+ * is no image to start from, no machine to size and no engine to hand it. The words are named in the order the
+ * command line lists them, so the sentence says exactly which to drop. */
 export const copyTakesNone = (project: string, words: readonly string[]): string =>
-  `a workspace of ${project} on ${THIS_COMPUTER} is a copy of its folder and forks nothing, so it takes no ${words.join(", ")}`;
+  `${project} is on ${THIS_COMPUTER}, where threads run in its folder and nothing forks, so it takes no ${words.join(", ")}`;
 
 /** What a computer is called in a row or a line: the name this wsp holds for it, and this computer's own word
  * where the record names this one. `named` is the places table by id, which every caller already reads for its
@@ -387,8 +378,8 @@ export function computerNamed(computer: string, named: ReadonlyMap<string, strin
   return computer === HERE_PLACE_ID ? thisComputer(platform) : (named?.get(computer) ?? computer);
 }
 
-/** Why a thread opened with no workspace named, from a folder that is not inside a repo, opens nothing; `named` is
- * the caller's word for naming one (`<workspace>` on the command line, `workspace` on the tool). */
+/** Why a thread opened with no project named, from a folder that is in no project, opens nothing; `named` is the
+ * caller's word for naming one (`<project>` on the command line, `project` on the tool). */
 export function noThreadTargetLine(named: string): string {
-  return `${named} is needed outside a repo: run from inside a repo one of the workspaces holds, or name the workspace`;
+  return `${named} is needed outside your projects: run from inside a project's folder, or name the project`;
 }

@@ -1484,7 +1484,7 @@ export const NOTIFY_WORDS = "The notify line goes once, at the reply, and a repl
  * launch environment says; nothing else decides it, and a blocking wait is neither road. */
 export const NOTIFY_CALLER = "A wsp thread starts every child with --notify me and ends its turn, and each child's finished line wakes it with that child's whole report";
 export const COORDINATOR_HANDOFF =
-  "A caller that is not a wsp thread cannot be woken at all, so it takes the reply of one turn as the call returns, and hands work of more than one turn to a single coordinator thread on the local workspace";
+  "A caller that is not a wsp thread cannot be woken at all, so it takes the reply of one turn as the call returns, and hands work of more than one turn to a single coordinator thread in the project's folder on this computer";
 
 /** The refusal of a start whose turn token no turn on this host carries: the host minted every token it knows into a
  * turn's own launch, so one it does not know is a caller naming a turn it is not, and reading it as the person would
@@ -1651,7 +1651,7 @@ export function threadRunsOnLine(agent: string, asked: string): string {
 }
 
 /** The refusal of a thread opened on no words: an empty or whitespace task would still start a process and a turn. */
-export const EMPTY_TASK_LINE = "the task is empty; say what the thread is to do";
+export const EMPTY_MESSAGE_LINE = "the message is empty; say what the thread is to do";
 
 /** The refusal of a rename to nothing: a blank name would take a thread's title away and leave nothing in its place. */
 export const EMPTY_TITLE_LINE = "the name is empty; say what the thread is called";
@@ -2530,9 +2530,9 @@ export function initAgentNoRecipeLine(recipePath: string, reason?: string): stri
  * sidebar row's second line and the Machine tab's lineage all read this one phrase. */
 export const THIS_COMPUTER = "this computer";
 
-/** The one sentence for the local workspace a run just recorded: wsp init's last tick says it, so what a workspace
- * here is, a copy of the person's folder on this computer, is named the same way whichever road wrote the record. */
-export const thisComputerLine = (name: string, id: string, folder: string): string => `Workspace ${name} (${id}) is a copy of ${folder} on ${THIS_COMPUTER}; its threads run here, under your own sign-ins.`;
+/** The one sentence for a project a run just recorded on this computer: wsp init's last tick says it, so where its
+ * threads run is named the same way whichever road wrote the record. */
+export const thisComputerLine = (name: string, folder: string): string => `Threads on ${name} run in ${folder} on ${THIS_COMPUTER}, under your own sign-ins.`;
 
 /** What a place's machine is, in every sentence and every row that names it: a computer of the person's own that
  * dialled this host and holds the link, so wsp drives it with the daemon protocol and never made it. */

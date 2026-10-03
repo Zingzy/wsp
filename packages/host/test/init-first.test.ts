@@ -167,7 +167,7 @@ describe("the tick taken", () => {
     const output = new PassThrough();
     const said: string[] = [];
     output.on("data", (c: Buffer) => said.push(stripVTControlCharacters(c.toString())));
-    const workspace = { id: "ws_local", name: "first", kind: "local" } as WorkspaceView;
+    const workspace = { id: "ws_local", name: "first", kind: "local", project: { id: "pr_1", name: "mac", path: "/Users/dev/mac", computer: "here" } } as WorkspaceView;
     const named: string[] = [];
     const roads = {
       addProject: async () => project,
@@ -177,9 +177,8 @@ describe("the tick taken", () => {
       },
     };
     expect(await runLocal(roads, output, "/Users/dev/mac")).toBe(workspace);
-    // The first piece of work, named as the golden road names its first, since it is a copy and not this computer.
     expect(named).toEqual([FIRST_WORKSPACE]);
-    expect(said.join("")).toContain("Workspace first (ws_local) is a copy of /Users/dev/mac on this computer; its threads run here, under your own sign-ins.");
+    expect(said.join("")).toContain("Threads on mac run in /Users/dev/mac on this computer, under your own sign-ins.");
   });
 
   it("a run that named no folder makes nothing and says the road: a workspace is one project's", async () => {
@@ -188,7 +187,7 @@ describe("the tick taken", () => {
     output.on("data", (c: Buffer) => said.push(stripVTControlCharacters(c.toString())));
     const roads = { addProject: async () => project, createWorkspace: async (): Promise<WorkspaceView> => { throw new Error("nothing forks here"); } };
     expect(await runLocal(roads, output)).toBeUndefined();
-    expect(said.join("")).toContain("a workspace is one project's, and this run named no folder here");
+    expect(said.join("")).toContain("no project was recorded on this computer: this run named no folder here");
   });
 
   it("a host that refuses it is one line and no throw: the fork beside it still stands", async () => {
@@ -197,7 +196,7 @@ describe("the tick taken", () => {
     output.on("data", (c: Buffer) => said.push(stripVTControlCharacters(c.toString())));
     const refused = async (): Promise<never> => { throw new Error("that folder is not a git repo"); };
     expect(await runLocal({ addProject: refused, createWorkspace: refused }, output, "/Users/dev/mac")).toBeUndefined();
-    expect(said.join("")).toContain("this computer was not made a workspace: that folder is not a git repo");
+    expect(said.join("")).toContain("no project was recorded on this computer: that folder is not a git repo");
     expect(said.join("")).toContain("wsp add <folder> records a project here");
   });
 });

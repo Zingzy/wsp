@@ -169,8 +169,8 @@ describe("wsp init with no provider key", () => {
     expect(out).toContain(`Opened http://127.0.0.1:4400/#w/${workspaces[0]!.id}/c/${CODE}`);
     expect(out).toContain(NO_PROVIDER_LINE);
     expect(out).toContain("So this run seals nothing and boots nothing.");
-    expect(out).toContain(`Workspace this-mac (${workspaces[0]!.id}) is a copy of `);
-    expect(out).toContain("on this computer; its threads run here, under your own sign-ins.");
+    expect(out).toContain(`Threads on ${workspaces[0]!.project.name} run in `);
+    expect(out).toContain("on this computer, under your own sign-ins.");
     // Nothing was built or sealed: the only mention of a golden is the offer to add one later.
     expect(out).not.toMatch(/Sealing|is sealed|Forking/);
     expect(f.hosts).toBe(1);

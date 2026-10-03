@@ -195,7 +195,7 @@ describe("a verb starts the host when none serves", () => {
     const fake = fakeSpawn(() => appendFileSync(logPath, `${refusal}\n`), { code: 1, signal: null });
     const start = hostStarter({ spawn: fake.spawn, wsp: { command: "wsp", args: [] }, env: {}, waitMs: SERVICE_WAIT_MS, answers: () => Promise.resolve(false), registered: () => undefined });
     const errors: string[] = [];
-    expect(await cli(["workspaces", "--state", statePath], quietIO([], errors), undefined, {}, start)).toBe(EXIT_CODES.provider);
+    expect(await cli(["threads", "--state", statePath], quietIO([], errors), undefined, {}, start)).toBe(EXIT_CODES.provider);
     expect(errors).toHaveLength(2);
     expect(errors[0]).toBe(startingHostLine(statePath, logPath));
     expect(errors[1]).toContain(refusal);

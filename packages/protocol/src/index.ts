@@ -646,21 +646,29 @@ export const CopyReport = z.object({
 });
 export type CopyReport = z.infer<typeof CopyReport>;
 
-/** A wsp worktree as the daemon binary's worktree verb is asked for it: the project's repo, the folder wsp keeps its
- * worktrees under, the project's id the path is keyed by, the branch, and the ignored directories carried in beside
- * the config files. */
+/** A wsp worktree as the daemon binary's worktree verb is asked for it: the project's repo, the host's own folder its
+ * worktrees live under, the project's id the path is keyed by, the branch, and the ignored directories carried in
+ * beside the config files. */
 export const WorktreeAsk = z.object({
   from: z.string(),
-  root: z.string(),
+  home: z.string(),
   project: z.string(),
   branch: z.string(),
   carry: z.array(z.string()),
 });
 export type WorktreeAsk = z.infer<typeof WorktreeAsk>;
 
-/** What the worktree verb printed: where the branch is checked out and whether wsp made that worktree just now or
- * found the branch already open in one, the project folder included. */
-export const WorktreeMade = z.object({ path: z.string(), branch: z.string(), made: z.boolean() });
+/** What the worktree verb printed: where the branch is checked out, whether that worktree is wsp's own, what was
+ * carried into it when this call made it, and the carried directories a clone could not take. */
+export const WorktreeReport = z.object({ path: z.string(), branch: z.string(), made: z.boolean(), carried: z.array(z.string()), plain: z.array(z.string()).optional(), ms: z.number() });
+export type WorktreeReport = z.infer<typeof WorktreeReport>;
+
+/** What the worktree removal printed: the worktree gone, and the ref a detached one's commit was kept under. */
+export const WorktreeRemoval = z.object({ path: z.string(), rescued: z.string().optional() });
+export type WorktreeRemoval = z.infer<typeof WorktreeRemoval>;
+
+/** A worktree as wsp worktree answers it: where the branch is checked out and whether wsp made that worktree. */
+export const WorktreeMade = WorktreeReport.pick({ path: true, branch: true, made: true });
 export type WorktreeMade = z.infer<typeof WorktreeMade>;
 
 /** What a workspace on a computer that copies by directory is made of: the road that made the copy, where it
@@ -4061,10 +4069,10 @@ export const DaemonRequest = z.discriminatedUnion("op", [
    * the branch never move. */
   z.object({ id: reqId, op: z.literal("git.checkpoint"), cwd: z.string(), thread: z.string(), turn: z.string(), scope: z.string().optional(), machineId: z.string().optional() }),
   /** Deletes every checkpoint ref one thread holds under the scope, and nothing of another thread's. */
-  z.object({ id: reqId, op: z.literal("git.checkpointDrop"), cwd: z.string(), scope: z.string(), thread: z.string(), machineId: z.string().optional() }),
+  z.object({ id: reqId, op: z.literal("git.checkpointDrop"), cwd: z.string(), scope: z.string().optional(), thread: z.string(), machineId: z.string().optional() }),
   /** Puts the tree back to one of this copy's checkpoints, recording the tree as it stood first, and answers a
    * GitRestoreReply whose before restores it again. */
-  z.object({ id: reqId, op: z.literal("git.restore"), cwd: z.string(), checkpoint: z.string(), machineId: z.string().optional() }),
+  z.object({ id: reqId, op: z.literal("git.restore"), cwd: z.string(), checkpoint: z.string(), scope: z.string().optional(), machineId: z.string().optional() }),
   /** Replies with a HostFolderListing: one level of folders on the computer this daemon runs on, for the folder
    * picker of a computer somebody owns. The roots are the home of the login the daemon runs as and each of
    * `projects` the home does not hold; `dir` absent lists the home, and so does a folder inside the roots that is
@@ -4475,7 +4483,7 @@ export const placeForksNowhereLine = (place: string): string => `${place} is no 
  * place holds its facts and its forks; the forks are the workspaces, so the refusal names the computer and the one
  * road to a workspace there. */
 export const placeNotAWorkspaceLine = (place: string): string => `${place} is a computer you joined, not a workspace; its forks are the workspaces`;
-export const placeNotAWorkspaceFix = (place: string): string => `Fork one there: wsp new <name> --on ${place}.`;
+export const placeNotAWorkspaceFix = (place: string): string => `Name a machine on it: wsp threads lists what runs on ${place}.`;
 
 /** What a caller asking for the road to a workspace's own daemon is told, where that workspace runs none: a
  * workspace on a computer somebody owns is that computer's directories under the computer's own daemon, and that
@@ -6405,6 +6413,10 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * Takes the runtime's thread id, the one the rows carry, not a session id; refused with threadForgetRefusal's
    * sentence once a turn reached the agent. */
   z.object({ id: reqId, op: z.literal("sessions.forget"), threadId: z.string() }),
+  /** Takes a thread away on this computer, its turns and its checkpoints with it: a thread in the project folder goes
+   * alone and the folder is never touched; a thread in a worktree wsp made takes that worktree and every thread in it,
+   * refused over files no commit holds. A thread on a box goes with its machine. */
+  z.object({ id: reqId, op: z.literal("sessions.delete"), threadId: z.string() }),
   /** A window showed the thread, or `wsp thread read` read it: its read stamp moves to now, and every window hears
    * thread.marked. Takes the thread's fold key, as ThreadView.id carries it. */
   z.object({ id: reqId, op: z.literal("sessions.read"), threadId: z.string() }),
