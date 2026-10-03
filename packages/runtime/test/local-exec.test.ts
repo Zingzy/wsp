@@ -352,11 +352,14 @@ describe("a real turn's process group", () => {
   }, 20_000);
 
   it("an attach to a run whose input channel was never written ends it and answers gone, and one with a message attaches", async () => {
-    const factory = localExecStream({ root, runDir });
+    const reading = new Set<() => void>();
+    const factory = localExecStream({ root, runDir, reading });
     const unprompted = factory(`sleep 300 & echo $! > ${join(root, "child")}; cat > /dev/null`, { env: {}, input: [] });
     const pid = await grandchild(join(root, "child"));
     const prompted = factory("cat > /dev/null", { env: {}, input: ["hello"] });
-    const next = localExecStream({ root, runDir });
+    // The host that launched them goes: a reader of its own still polling would reap the run under the attach.
+    for (const stop of [...reading]) stop();
+    const next = localExecStream({ root, runDir, pollMs: 500 });
     expect(await next.attach!(unprompted.run!, { input: true, startedAt: Date.now() })).toBe("gone");
     await gone(pid);
     expect(existsSync(`${unprompted.run!}.d`)).toBe(false);
