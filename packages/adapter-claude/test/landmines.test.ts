@@ -66,9 +66,15 @@ describe("buildEnv", () => {
         (k.startsWith("CLAUDE_CODE_") || k === "CLAUDECODE") &&
         k !== "CLAUDE_CODE_AUTO_CONNECT_IDE" &&
         k !== "CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL" &&
-        k !== "CLAUDE_CODE_ENABLE_TODO_TOOLS",
+        k !== "CLAUDE_CODE_ENABLE_TODO_TOOLS" &&
+        k !== "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS",
     );
     expect(leaked).toEqual([]);
+  });
+
+  it("lets a background subagent run as long as the turn holds its reply: the CLI ends none on a clock of its own", () => {
+    expect(buildEnv({ base }).CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS).toBe("0");
+    expect(buildEnv({ base: { ...base, CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "600000" } }).CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS).toBe("0");
   });
 
   it("passes the API key through when given", () => {
@@ -108,6 +114,8 @@ describe("buildCommand", () => {
     expect(cmd).toContain("--output-format stream-json");
     expect(cmd).toContain("--input-format stream-json");
     expect(cmd).toContain("--verbose");
+    // A subagent's own text and thinking reach the stream only with this; its tool calls come without it.
+    expect(cmd).toContain("--forward-subagent-text");
     expect(cmd).toContain("--dangerously-skip-permissions");
     expect(cmd).toContain(`--session-id ${sessionId}`);
     // stdin is the message channel now: never closed on the command, never a positional prompt

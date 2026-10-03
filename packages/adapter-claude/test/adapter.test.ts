@@ -8,7 +8,7 @@ import { createClaudeAdapter, type ClaudeSession } from "../src/adapter.js";
 import { CLAUDE_SCREEN_COMMANDS } from "../src/catalog.js";
 import { userMessageLine } from "../src/landmines.js";
 import { asideCommand } from "../src/aside.js";
-import { AGENT_A_CALL, AGENT_B_CALL, subagentFixtureLines } from "./subagent-fixture.js";
+import { AGENT_A_CALL, AGENT_A_ID, AGENT_B_CALL, AGENT_B_ID, subagentFixtureLines } from "./subagent-fixture.js";
 
 const FIXTURE_SESSION_ID = "e16ed170-8257-4668-879e-fe836341633c";
 
@@ -374,6 +374,37 @@ describe("ClaudeAdapter over the recorded fixture", () => {
     // The frame that binds the CLI's handle for a subagent to its launching call is bookkeeping, not a line of
     // the turn's: nothing is drawn for it.
     expect(deltas.some(d => d.text.includes("task_started"))).toBe(false);
+  });
+
+  it("says each subagent's start and its end, once each, and nothing for its progress", async () => {
+    const exec = scriptedExec(subagentFixtureLines());
+    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
+    const { events, onEvent } = collect();
+    await adapter.start({ prompt: "fan out", onEvent }).finished;
+
+    const changes = events.filter(e => e.type === "subagent");
+    expect(changes).toEqual([
+      { type: "subagent", sessionId: FIXTURE_SESSION_ID, task: AGENT_A_ID, parentToolUseId: AGENT_A_CALL, state: "running", title: "count alpha files", prompt: "Run `ls /etc | head -3` and report what you saw.", depth: 1 },
+      { type: "subagent", sessionId: FIXTURE_SESSION_ID, task: AGENT_B_ID, parentToolUseId: AGENT_B_CALL, state: "running", title: "read beta hostname", prompt: "Run `hostname` and report what you saw.", depth: 1 },
+      { type: "subagent", sessionId: FIXTURE_SESSION_ID, task: AGENT_A_ID, parentToolUseId: AGENT_A_CALL, state: "done", summary: "acpi, adduser.conf, alsa" },
+      // The kill's task_updated is the end; the notification after it says the same thing again and adds nothing.
+      { type: "subagent", sessionId: FIXTURE_SESSION_ID, task: AGENT_B_ID, parentToolUseId: AGENT_B_CALL, state: "stopped" },
+    ]);
+    expect(events.filter(e => e.type === "turn.delta").some(d => d.text.includes("task_progress") || d.text.includes("Running "))).toBe(false);
+  });
+
+  it("a background command the CLI tracks as a task is no subagent", async () => {
+    const lines = [
+      `{"type":"system","subtype":"init","session_id":"${FIXTURE_SESSION_ID}"}`,
+      `{"type":"system","subtype":"task_started","task_id":"b1","tool_use_id":"toolu_bash","description":"npm run dev","task_type":"local_bash","session_id":"${FIXTURE_SESSION_ID}"}`,
+      `{"type":"system","subtype":"task_notification","task_id":"b1","tool_use_id":"toolu_bash","status":"completed","summary":"exited 0","session_id":"${FIXTURE_SESSION_ID}"}`,
+      `{"type":"result","subtype":"success","session_id":"${FIXTURE_SESSION_ID}","result":"ok","usage":{"output_tokens":1}}`,
+    ];
+    const exec = scriptedExec(lines);
+    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
+    const { events, onEvent } = collect();
+    await adapter.start({ prompt: "serve", onEvent }).finished;
+    expect(events.filter(e => e.type === "subagent")).toEqual([]);
   });
 
   it("forwards system/init's slash_commands, permissionMode and agents as harness", async () => {
