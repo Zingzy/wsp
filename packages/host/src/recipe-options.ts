@@ -8,7 +8,7 @@ import { execFile } from "node:child_process";
 import { posix } from "node:path";
 import { CATALOG_AGENTS, COMPILER_ROW, catalogEntry, catalogIdOfRow, hasLogin, keyEnvOf, mintsToken } from "@wsp/catalog";
 import { collect, detectSkills, expand, skillRoots, type Host, type Manifest } from "@wsp/collect";
-import { agentOfRow, githubAddress, MCP_ID_PREFIX, packageOf, type RecipeOptions, type RecipeSignIn, type ServerSignIn, type SkillRow } from "@wsp/protocol";
+import { agentOfRow, ghStatusOf, githubAddress, MCP_ID_PREFIX, packageOf, type RecipeOptions, type RecipeSignIn, type ServerSignIn, type SkillRow } from "@wsp/protocol";
 import { agentBytes, cliBytes, folderBytes } from "./pick-sizes.js";
 import { CONFIG_PATHS } from "./recipe-configs.js";
 
@@ -49,7 +49,7 @@ export function userPlugins(text: string | undefined): string[] {
 
 /** The options off what was read: the manifest, the person's own skills, the plugins and which config rows this
  * computer has files for. */
-export function recipeOptions(manifest: Manifest, o: { skills: readonly SkillRow[]; plugins: readonly string[]; configs: readonly ("git" | "shell")[]; github: boolean }): RecipeOptions {
+export function recipeOptions(manifest: Manifest, o: { skills: readonly SkillRow[]; plugins: readonly string[]; configs: readonly ("git" | "shell")[]; github: boolean; gh?: { account?: string; scopes?: string[] } }): RecipeOptions {
   const agents = manifest.entries.flatMap(e => {
     const id = agentOfRow(e);
     const entry = id === undefined ? undefined : CATALOG_AGENTS.find(a => a.id === id);
@@ -87,7 +87,7 @@ export function recipeOptions(manifest: Manifest, o: { skills: readonly SkillRow
     configs: [
       ...(o.configs.includes("git") ? [{ id: "git" as const, label: "git settings and identity" }] : []),
       ...(o.configs.includes("shell") ? [{ id: "shell" as const, label: "zsh or fish, the prompt, tmux and the rest of the shell's look" }] : []),
-      { id: "github" as const, label: "the GitHub sign-in", signins: [...(o.github ? (["vault"] as const) : []), "machine" as const, "skip" as const] },
+      { id: "github" as const, label: "the GitHub sign-in", signins: [...(o.github ? (["vault"] as const) : []), "machine" as const, "skip" as const], ...(o.github ? o.gh : {}) },
     ],
   };
 }
@@ -126,6 +126,15 @@ export async function folderOptions(folders: readonly { name: string; path: stri
   );
 }
 
+/** How long gh's own status gets: it asks GitHub for the token's scopes. */
+const GH_STATUS_MS = 10_000;
+
+/** The account gh signs in with here and its token's scopes, off gh's own status; nothing where gh would not say. */
+export async function githubHere(exec: Pick<Host["exec"], "run">): Promise<{ account?: string; scopes?: string[] }> {
+  const said = await exec.run("gh", ["auth", "status", "--hostname", "github.com"], { timeoutMs: GH_STATUS_MS }).catch(() => undefined);
+  return said === undefined ? {} : ghStatusOf(said);
+}
+
 /** Reads this computer for the options: the collector's manifest, the person's own skills folders, Claude Code's
  * plugin index, and whether any file of each config row is here. */
 export async function readRecipeOptions(host: Host): Promise<RecipeOptions> {
@@ -135,5 +144,6 @@ export async function readRecipeOptions(host: Host): Promise<RecipeOptions> {
   const plugins = [...new Set(indexes.flatMap(userPlugins))].sort();
   const has = async (paths: readonly string[]): Promise<boolean> => (await Promise.all(paths.map(p => host.fs.stat(expand(host, `~/${p}`))))).some(s => s !== undefined);
   const configs = [...((await has(CONFIG_PATHS.git)) ? (["git"] as const) : []), ...((await has(CONFIG_PATHS.shell)) ? (["shell"] as const) : [])];
-  return recipeOptions(manifest, { skills: read.skills, plugins, configs, github: manifest.entries.some(e => e.id === "logins/gh") });
+  const github = manifest.entries.some(e => e.id === "logins/gh");
+  return recipeOptions(manifest, { skills: read.skills, plugins, configs, github, ...(github ? { gh: await githubHere(host.exec) } : {}) });
 }

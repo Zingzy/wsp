@@ -18,6 +18,18 @@ export type RecipeSignIn = z.infer<typeof RecipeSignIn>;
 export const GitHubSignIn = z.enum(["vault", "machine", "skip"]);
 export type GitHubSignIn = z.infer<typeof GitHubSignIn>;
 
+/** What `gh auth status` says of the first account it lists: the login it signs in as and its token's scopes. The
+ * token itself is never read. */
+export function ghStatusOf(said: string): { account?: string; scopes?: string[] } {
+  const account = /Logged in to \S+ (?:account|as) (\S+)/.exec(said)?.[1];
+  const scopes = /Token scopes:\s*(.+)/
+    .exec(said)?.[1]
+    ?.split(",")
+    .map(s => s.replace(/'/g, "").trim())
+    .filter(s => s !== "");
+  return { ...(account !== undefined ? { account } : {}), ...(scopes !== undefined && scopes.length > 0 ? { scopes } : {}) };
+}
+
 /** How an MCP server signs in on the computer it goes to: with nothing, with a key or a token its definition
  * carries and that travels with it, or through a browser sign-in run there (an http server the agent signs in, or
  * mcp-remote's). */
@@ -138,8 +150,9 @@ export interface RecipeOptions {
   clis: { name: string; via: string; version?: string; needs?: string[]; bytes?: number }[];
   skills: { name: string; from: string; linked: boolean }[];
   plugins: { name: string }[];
-  /** The GitHub row carries the sign-in words it can take here: the vault only where this computer holds a gh login. */
-  configs: { id: "git" | "shell" | "github"; label: string; signins?: GitHubSignIn[] }[];
+  /** The GitHub row carries the sign-in words it can take here: the vault only where this computer holds a gh login,
+   * with the account that login signs in as and its token's scopes where gh said them. */
+  configs: { id: "git" | "shell" | "github"; label: string; signins?: GitHubSignIn[]; account?: string; scopes?: string[] }[];
   /** This computer's own projects, each a folder a box can take: what its history and kept files weigh, the commits
    * no remote holds, and whether GitHub refuses an anonymous read of it, which is a repository that needs GitHub
    * signed in there to clone. */

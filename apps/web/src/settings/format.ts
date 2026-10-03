@@ -140,6 +140,8 @@ export const ADD_COMPUTER_WORDS = {
   noRemote: "No remote; copied whole.",
   /** What the GitHub row says once its step ended, by the way it signed in. */
   tokenCopied: "Token copied.",
+  /** Who the token the GitHub row would copy signs in as, and what it may do. */
+  githubAccount: (account: string, scopes: readonly string[]): string => `Signed in as ${account}${scopes.length === 0 ? "" : ` with ${listWords(scopes)}`}.`,
   /** How an MCP server signs in on the computer, by the kind the host read off its definition. */
   serverSignIn: (kind: ServerSignIn, box: string): string =>
     ({ none: "No sign-in.", key: "Key copied.", token: "Token copied.", oauth: box === "" ? "Signs in there." : `Signs in on ${box}.` })[kind],

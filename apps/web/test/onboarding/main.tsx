@@ -7,7 +7,7 @@
 // the host's shapes, so a screenshot of one is what the app draws for that
 // record. ?scroll=bottom scrolls the dialog's panel to its end.
 import { createRoot } from "react-dom/client";
-import { DAEMON_VERSION, type AgentRow, type AgentsReport, DEFAULT_PREFERENCES, PLACE_HOST_KEY_KIND, RecipeFile, hostKeyUnconfirmedRefusal, type PendingComputer, type PlaceAddJob, type PlaceApplied, type PlaceSetup, type PlaceView, type ProjectView, type RecipeOptions, type RecipeView, type SessionView, type WorkspaceView } from "@wsp/protocol";
+import { DAEMON_VERSION, type AgentRow, type AgentsReport, DEFAULT_PREFERENCES, PLACE_HOST_KEY_KIND, RecipeFile, hostKeyUnconfirmedRefusal, setupRowFix, type PendingComputer, type PlaceAddJob, type PlaceApplied, type PlaceSetup, type PlaceView, type ProjectView, type RecipeOptions, type RecipeView, type SessionView, type WorkspaceView } from "@wsp/protocol";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import { addNotice } from "../../src/notices/store";
 import { useStore } from "../../src/protocol/store";
@@ -70,7 +70,7 @@ const OPTIONS: RecipeOptions = {
   configs: [
     { id: "git", label: "git settings and identity" },
     { id: "shell", label: "zsh or fish, the prompt, tmux and the rest of the shell's look" },
-    { id: "github", label: "the GitHub sign-in", signins: ["vault", "machine", "skip"] },
+    { id: "github", label: "the GitHub sign-in", signins: ["vault", "machine", "skip"], account: "Zingzy", scopes: ["repo", "read:org", "workflow"] },
   ],
   folders: [
     { name: "wsp", path: "~/wsp", remote: "github.com/Zingzy/wsp", private: true, unpushed: 2, bytes: 1.1 * 1024 * MB },
@@ -156,7 +156,7 @@ const SETUPS: Record<string, { setup: PlaceSetup; applied: PlaceApplied }> = {
   },
   "running-failed": {
     setup: setupOf("done", DONE_STEPS.map(l => (l.step === "skills" || l.step === "folders" ? { ...l, state: "failed" as const, note: "1 of 2 failed" } : l))),
-    applied: { hash: "h", at: AT, rows: [...ALL_LANDED, row("skills", "skills/zingzy-design-taste", "zingzy-design-taste", "failed", "A link inside the folder points at a folder, which never travels."), row("folders", "folders/wsp", "wsp", "failed", "studio could not clone github.com/Zingzy/wsp: permission denied.")] },
+    applied: { hash: "h", at: AT, rows: [...ALL_LANDED, { ...row("skills", "skills/zingzy-design-taste", "zingzy-design-taste", "failed", "A link inside the folder points at a folder, which never travels."), fix: setupRowFix({ step: "skills" }, "studio") }, { ...row("folders", "folders/wsp", "wsp", "failed", "studio could not clone github.com/Zingzy/wsp: permission denied."), fix: setupRowFix({ step: "folders" }, "studio") }] },
   },
   "running-blocked": {
     setup: setupOf("failed", [{ step: "floor", state: "failed" }], [], "apt-get install exited 100 on studio: E: Unable to locate package nodejs."),
@@ -172,12 +172,12 @@ const ADD_STEPS: Record<string, PlaceAddJob> = {
     startedAt: AT,
     state: "running",
     steps: [
-      { step: "connect", state: "done", note: "Ubuntu 24.04" },
+      { step: "connect", state: "done", note: "Ubuntu 24.04", ms: 412 },
       { step: "chip", state: "done", note: "Linux x86_64" },
-      { step: "root", state: "done" },
-      { step: "system", state: "done", note: "systemd, cgroup v2" },
-      { step: "disk", state: "done", note: "61 GB free" },
-      { step: "reach", state: "done", note: "studio dials back over ssh" },
+      { step: "root", state: "done", ms: 2 },
+      { step: "system", state: "done", note: "systemd, cgroup v2", ms: 3 },
+      { step: "disk", state: "done", note: "61 GB free", ms: 14 },
+      { step: "reach", state: "done", note: "studio dials back over ssh", ms: 1_020 },
       { step: "wsp", state: "running", note: "x86_64" },
     ],
   },
@@ -189,9 +189,9 @@ const ADD_STEPS: Record<string, PlaceAddJob> = {
     steps: [
       { step: "connect", state: "done", note: "Ubuntu 22.04" },
       { step: "chip", state: "done", note: "Linux arm64" },
-      { step: "root", state: "failed", note: "jumpbox logs in as a user that is not root, and root on the box is required: wsp runs its daemon there as a system service." },
+      { step: "root", state: "failed", note: "jumpbox logs in as a user that is not root, and wsp needs root there to keep itself running as a system service." },
     ],
-    said: "jumpbox logs in as a user that is not root, and root on the box is required: wsp runs its daemon there as a system service.",
+    said: "jumpbox logs in as a user that is not root, and wsp needs root there to keep itself running as a system service.",
     fix: "Add it as root@jump.zingzy.dev, or put User root under Host jumpbox in your ssh config.",
   },
   hostkey: { addId: "a_add", address: "studio", startedAt: AT, state: "failed", steps: [{ step: "connect", state: "running" }], said: hostKeyUnconfirmedRefusal("studio", "ED25519 SHA256:tK3mX9Qf2bWq8vRz0YhN4cL7pJd1sE6gA5uF8oH2kIw"), kind: PLACE_HOST_KEY_KIND, hostKey: "ED25519 SHA256:tK3mX9Qf2bWq8vRz0YhN4cL7pJd1sE6gA5uF8oH2kIw" },

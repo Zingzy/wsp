@@ -1708,7 +1708,7 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
 
   /** A box that takes the deploy and answers the word it is told to say about its own chip, recording every script
    * run on it and every file landed there. `arch` is what its `uname -m` answered on the read that adopted it. */
-  function fakeBox(arch: string | undefined, shell = "bash", box: { reaches?: (url: string) => boolean; holds?: string; dials?: string; proxied?: boolean; home?: string; checks?: string[] } = {}): { backend: unknown; ran: string[]; landed: string[]; stages: string[]; stage: PlaceStaging } {
+  function fakeBox(arch: string | undefined, shell = "bash", box: { reaches?: (url: string) => boolean; holds?: string; dials?: string; proxied?: boolean; home?: string; checks?: string[] } = {}): { backend: unknown; ran: string[]; landed: string[]; stages: string[]; times: Record<string, number | undefined>; stage: PlaceStaging } {
     const ran: string[] = [];
     const landed: string[] = [];
     const stages: string[] = [];
@@ -1740,7 +1740,18 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
       offeredKeyFor: async () => ({ key: BOX_KEY }),
       knownHostsEntry: async () => ({ file: "/home/maya/.ssh/known_hosts", target: "box" }),
     };
-    return { backend, ran, landed, stages, stage: (step, state, note) => stages.push(`${step} ${state}${note === undefined ? "" : ` (${note})`}`) };
+    const times: Record<string, number | undefined> = {};
+    return {
+      backend,
+      ran,
+      landed,
+      stages,
+      times,
+      stage: (step, state, note, _placeId, ms) => {
+        stages.push(`${step} ${state}${note === undefined ? "" : ` (${note})`}`);
+        if (state !== "running") times[step] = ms;
+      },
+    };
   }
 
   /** The key the box's ssh answers with, and the key this computer's client already holds for it. */
@@ -1788,6 +1799,13 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
       "disk done (20 GB free)",
       "check done (root, systemd, cgroup v2, 20 GB free)",
     ]);
+  });
+
+  it("says how long each step took as it ends: the checks as the box timed them, every other step as this host did", async () => {
+    const box = fakeBox("x86_64", "bash", { checks: ["uid 0", "ms root 2", "systemd yes", "cgroup2 yes", "ms system 3", `free ${20 * 1024 ** 3}`, "ms disk 14"] });
+    await placeInstaller({ backend: box.backend as never, ...assets(tmp("check-times"), [X86]) })({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"] }, box.stage);
+    expect([box.times["root"], box.times["system"], box.times["disk"]]).toEqual([2, 3, 14]);
+    for (const step of ["connect", "check", "reach", "wsp"]) expect(box.times[step], step).toEqual(expect.any(Number));
   });
 
   it("fails the one check a box does not pass on its own row, with the sentence that names the fix", async () => {

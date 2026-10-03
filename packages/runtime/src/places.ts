@@ -54,6 +54,8 @@ import {
   placeProvisionPaths,
   placeProvisioningLine,
   pluginOffLine,
+  setupRowFix,
+  ghStatusOf,
   projectLeftLine,
   provisionLogLine,
   PendingComputer,
@@ -430,7 +432,8 @@ export interface PlaceInstalled {
 }
 
 /** How far one install has got; the words for each step are the protocol's. */
-export type PlaceStaging = (step: PlaceAddStep, state: "running" | "done" | "failed", note?: string, placeId?: string) => void;
+/** `ms` is how long the step took, said as it ends. */
+export type PlaceStaging = (step: PlaceAddStep, state: "running" | "done" | "failed", note?: string, placeId?: string, ms?: number) => void;
 export type PlaceInstaller = (req: PlaceInstallRequest, stage: PlaceStaging) => Promise<PlaceInstalled>;
 
 /** The one road into the runtime a place needs, handed in because it is the runtime's own: a place holds its forks
@@ -1394,7 +1397,10 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     const applied = (): PlaceApplied => ({
       hash,
       at: new Date(clockNow()).toISOString(),
-      rows: [...new Map(rows.map(r => [r.id, r])).values()],
+      rows: [...new Map(rows.map(r => [r.id, r])).values()].map(r => {
+        const fix = r.outcome === "failed" && r.fix === undefined ? setupRowFix(r, record.name) : undefined;
+        return fix === undefined ? r : { ...r, fix };
+      }),
       ...(resolved !== undefined ? { items: resolved.items } : {}),
     });
     const push = (next: PlaceSetup): void => {
@@ -1581,7 +1587,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       }
       const res = await machine.exec(withEnvFromInput(`${pathLine(plan.path, plan.prefix)}\ngh auth status --hostname github.com 2>&1`), { timeoutMs: GITHUB_MS, stdin: envInput({ [GITHUB_TOKEN_ENV]: token }) });
       // gh names the token's scopes on its status, which the row carries so a person reads what a clone may reach.
-      const scopes = /Token scopes:\s*(.+)/.exec(res.stdout)?.[1]?.replace(/'/g, "").trim();
+      const scopes = ghStatusOf(res.stdout).scopes?.join(", ");
       githubSettled(res.exitCode === 0);
       return [...gh, res.exitCode === 0 ? { id: GITHUB_ROW, label: "GitHub", outcome: "present", note: `${FROM_THE_VAULT}${scopes === undefined || scopes === "" ? "" : `; token scopes: ${scopes}`}` } : { id: GITHUB_ROW, label: "GitHub", outcome: "failed", note: lastLine(res.stdout) ?? `gh auth status exited ${res.exitCode}` }];
     };
@@ -2616,10 +2622,10 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         return pendingWrites;
       };
       let step: PlaceAddStep = "connect";
-      const stage: PlaceStaging = (which, state, note, placeId) => {
+      const stage: PlaceStaging = (which, state, note, placeId, ms) => {
         if (state === "running") step = which;
         if (state === "running" && which === "check") void movePending({ ...pending, step: "check" });
-        const said: PlaceStageEvent = { type: "place.stage", addId, step: which, state, ...(note !== undefined ? { note } : {}), ...(placeId !== undefined ? { placeId } : {}) };
+        const said: PlaceStageEvent = { type: "place.stage", addId, step: which, state, ...(note !== undefined ? { note } : {}), ...(placeId !== undefined ? { placeId } : {}), ...(ms !== undefined ? { ms } : {}) };
         putAdd(addId, job => withPlaceStage(job, said));
         opts.onStage?.(said);
       };
@@ -2650,6 +2656,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         if (installed.back !== undefined) waiting.back = installed.back;
         const early = waiting.login === undefined || waiting.placeId === undefined ? undefined : await recordOf(waiting.placeId);
         if (early !== undefined) await keep(early);
+        const joining = Date.now();
         stage("join", "running");
         const placeId = await new Promise<string>((woken, fail) => {
           // The link may already be up: the computer dials the moment its own join has written its place file, and
@@ -2674,7 +2681,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         holdBack(held);
         // The size the box reported is not here: every road that draws this line draws the box's row beside it, and
         // a fact already in the row costs the line the room it needs to read whole.
-        stage("join", "done", [linkedOver(held.report.dialed, held.road?.back, req.hostUrls), `engine ${held.report.engine}`].filter(Boolean).join(", "), placeId);
+        stage("join", "done", [linkedOver(held.report.dialed, held.road?.back, req.hostUrls), `engine ${held.report.engine}`].filter(Boolean).join(", "), placeId, Date.now() - joining);
         // What that computer forks with, read over the link it has just opened and before this answers: the row a
         // join prints carries where that computer keeps the logins its workspaces share, which is what the
         // sign-in offered right after it reads. Waited for no longer than one frame on a fresh link takes: a

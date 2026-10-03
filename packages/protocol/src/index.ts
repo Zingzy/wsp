@@ -3132,6 +3132,8 @@ export const PlaceStageEvent = z.object({
   /** The computer the step ran on, carried by the steps of a job on a computer this host already holds: a reader
    * that acts on a step rather than printing it needs the row and not the stream it rode. */
   placeId: z.string().optional(),
+  /** How long the step took, once it ended. */
+  ms: z.number().int().nonnegative().optional(),
 });
 export type PlaceStageEvent = z.infer<typeof PlaceStageEvent>;
 
@@ -3144,7 +3146,7 @@ export const PlaceAddJob = z.object({
   sshPort: z.number().int().optional(),
   startedAt: z.string(),
   state: z.enum(["running", "done", "failed"]),
-  steps: z.array(z.object({ step: PlaceAddStep, state: z.enum(["running", "done", "failed"]), note: z.string().optional() })),
+  steps: z.array(z.object({ step: PlaceAddStep, state: z.enum(["running", "done", "failed"]), note: z.string().optional(), ms: z.number().int().nonnegative().optional() })),
   said: z.string().optional(),
   fix: z.string().optional(),
   kind: z.string().optional(),
@@ -3158,8 +3160,8 @@ export type PlaceAddJob = z.infer<typeof PlaceAddJob>;
 /** The job with one more step said, the one rule the host and the app both keep it by: the step's line replaced
  * where it stands, the job done once the computer joined, failed once a step failed. The setup that runs on behind
  * a join rides place.setup frames and is the computer's row's to say, not the add's. */
-export function withPlaceStage(job: PlaceAddJob, e: Pick<PlaceStageEvent, "step" | "state" | "note" | "placeId">): PlaceAddJob {
-  const line = { step: e.step, state: e.state, ...(e.note !== undefined ? { note: e.note } : {}) };
+export function withPlaceStage(job: PlaceAddJob, e: Pick<PlaceStageEvent, "step" | "state" | "note" | "placeId" | "ms">): PlaceAddJob {
+  const line = { step: e.step, state: e.state, ...(e.note !== undefined ? { note: e.note } : {}), ...(e.ms !== undefined ? { ms: e.ms } : {}) };
   const at = job.steps.findIndex(s => s.step === e.step);
   const steps = at === -1 ? [...job.steps, line] : job.steps.map((s, i) => (i === at ? line : s));
   if (e.step === "join" && e.state === "done") return { ...job, steps, state: "done", ...(e.placeId !== undefined ? { placeId: e.placeId } : {}) };
@@ -3283,6 +3285,8 @@ export const PlaceProvisionRow = z.object({
   /** The setup step the row belongs to, which decides how its failure weighs. */
   step: z.lazy(() => PlaceSetupStep).optional(),
   note: z.string().optional(),
+  /** On a row that did not land: what to do about it, beside the note that says what happened. */
+  fix: z.string().optional(),
   ms: z.number().int().nonnegative().optional(),
 });
 export type PlaceProvisionRow = z.infer<typeof PlaceProvisionRow>;
@@ -5636,6 +5640,27 @@ export const nothingToSkipLine = (row: string, name: string): string => `nothing
 export const GITHUB_SKIPPED_LINE = "skipped; gh is not signed in there";
 export const NEEDS_GITHUB_LINE = "private; needs GitHub to clone";
 export const WAITS_ON_GITHUB_LINE = "private; waits on the GitHub sign-in to clone";
+
+/** What to do about a row of the setup that did not land, beside what happened: the reason's own fix where the
+ * reason is one wsp knows, else its step's. `box` is the computer's name. */
+export function setupRowFix(row: Pick<PlaceProvisionRow, "step" | "note">, box: string): string | undefined {
+  if (row.note === NEEDS_GITHUB_LINE) return `Sign GitHub in on ${box}, then retry.`;
+  if (row.step === undefined) return undefined;
+  const fixes: Record<PlaceSetupStep, string> = {
+    floor: `Check that ${box} can reach its package mirrors, then retry.`,
+    agents: `Retry, or install it on ${box} yourself and skip it here.`,
+    signins: "Retry for a fresh code, or sign in later in Settings.",
+    clis: `Retry, or install it on ${box} yourself and skip it here.`,
+    skills: "Check the skill's folder here, then retry.",
+    mcp: "Check the server's entry in the agent's settings here, then retry.",
+    plugins: `Retry, or add it on ${box} yourself and skip it here.`,
+    configs: "Check the file here, then retry.",
+    folders: "Check that the folder is still where it was, then retry.",
+    github: "Retry for a fresh sign-in, or sign in later in Settings.",
+    context: "Retry; nothing else waits on it.",
+  };
+  return fixes[row.step];
+}
 
 /** How many of the setup's steps after the base tools run at once on a computer of this much memory: one per 2 GB,
  * at least one and at most four, so a small box never runs two installs into each other's memory. */

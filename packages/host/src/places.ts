@@ -97,7 +97,7 @@ import { addedProjectLine, defaultSeedChoice, kindForComputer, ProjectAddEvent, 
   macKindOf,
 } from "@wsp/protocol";
 import { GITHUB_TOKEN_ENV, MissingKnownHostsError, PlaceMachine, runChild, SshBackend, SSH_DIAL_MS, SSH_LINE_CAP, boxWord, checkProviderKey, clientWords, keyCheckLine, keyFingerprint, knownHostKey, landBytes, offeredHostKey, parseSshAddress, sshClient, sshDial, sshDialsThisComputer, sshLoginWord, sshMachineName, sshRefusalLine, sshWordReach, type KeyCheck, type MachineBackend, type SshReach, type SshTransport } from "@wsp/engine";
-import { PlaceAddTakenBackError, PlaceLoginRefusedError, freshEphemeral, makeSeal, newPlaceKeyPair, openFrame, sealKeys, sharedSecret, signPlaceBytes, verifyPlaceBytes, type Seal, type HerePlace, type PlaceDialler, type PlaceInstaller, type PlaceKeyPair, type PlaceLeaver, type PlaceLogReader, type PlaceUpdateLanded, type PlaceUpdater, type PlaceWiring, type PlaceBackHolder } from "@wsp/runtime";
+import { PlaceAddTakenBackError, PlaceLoginRefusedError, freshEphemeral, makeSeal, newPlaceKeyPair, openFrame, sealKeys, sharedSecret, signPlaceBytes, verifyPlaceBytes, type Seal, type HerePlace, type PlaceDialler, type PlaceInstaller, type PlaceKeyPair, type PlaceLeaver, type PlaceLogReader, type PlaceStaging, type PlaceUpdateLanded, type PlaceUpdater, type PlaceWiring, type PlaceBackHolder } from "@wsp/runtime";
 import { BackCutError, heldPlaceScript, placeBackHolder } from "./place-back.js";
 import { writeOwn } from "@wsp/own-file";
 import { CATALOG_AGENTS, NO_SIGN_IN, agentName, floorBytes, hasLogin, keyEnvOf, loginSignIn, sharedAgentsOn, sharedOn } from "@wsp/catalog";
@@ -620,12 +620,22 @@ export const reachUnsaidLine = (address: string, said: string): string => `${add
 /** What the check prints, one fact a line, so no path of the box's reads as the check's own words. */
 const CHECK_MARK = "wsp-check";
 
+/** One check of the run, timed on the box: the three are read in one run, so only the box can say how long each
+ * took. A date that cannot count nanoseconds (busybox prints the N back) leaves the time out. */
+const timedCheck = (row: "root" | "system" | "disk", lines: readonly string[]): string[] => [
+  "s=$(date +%s%N)",
+  ...lines,
+  `e=$(date +%s%N); case "$s$e" in *[!0-9]*) ;; *) printf '${CHECK_MARK} ms ${row} %s\\n' "$(( (e - s) / 1000000 ))" ;; esac`,
+];
+
 /** The one run the check step makes on a box before anything of wsp's goes there. */
 export const PLACE_CHECK_SCRIPT = [
-  `printf '${CHECK_MARK} uid %s\\n' "$(id -u)"`,
-  `if [ -d /run/systemd/system ]; then printf '${CHECK_MARK} systemd yes\\n'; else printf '${CHECK_MARK} systemd no\\n'; fi`,
-  `if [ -f /sys/fs/cgroup/cgroup.controllers ]; then printf '${CHECK_MARK} cgroup2 yes\\n'; else printf '${CHECK_MARK} cgroup2 no\\n'; fi`,
-  `df -Pk "$HOME" 2>/dev/null | awk 'NR==2 { printf "${CHECK_MARK} free %d\\n", $4 * 1024 }'`,
+  ...timedCheck("root", [`printf '${CHECK_MARK} uid %s\\n' "$(id -u)"`]),
+  ...timedCheck("system", [
+    `if [ -d /run/systemd/system ]; then printf '${CHECK_MARK} systemd yes\\n'; else printf '${CHECK_MARK} systemd no\\n'; fi`,
+    `if [ -f /sys/fs/cgroup/cgroup.controllers ]; then printf '${CHECK_MARK} cgroup2 yes\\n'; else printf '${CHECK_MARK} cgroup2 no\\n'; fi`,
+  ]),
+  ...timedCheck("disk", [`df -Pk "$HOME" 2>/dev/null | awk 'NR==2 { printf "${CHECK_MARK} free %d\\n", $4 * 1024 }'`]),
 ].join("\n");
 
 /** What the check read off a box; a fact it did not answer is absent. */
@@ -634,13 +644,19 @@ export interface PlaceCheck {
   systemd?: boolean;
   cgroup2?: boolean;
   freeBytes?: number;
+  /** How long each check took on the box, where its date could say. */
+  ms?: Partial<Record<PlaceCheckStep, number>>;
 }
+
+/** The checks the run reads, each a row of its own. */
+type PlaceCheckStep = "root" | "system" | "disk";
 
 export function parsePlaceCheck(stdout: string): PlaceCheck {
   const out: PlaceCheck = {};
   for (const line of stdout.split("\n")) {
-    const [mark, key, value] = line.trim().split(" ");
+    const [mark, key, value, ms] = line.trim().split(" ");
     if (mark !== CHECK_MARK || value === undefined) continue;
+    if (key === "ms" && (value === "root" || value === "system" || value === "disk") && ms !== undefined && /^\d+$/.test(ms)) out.ms = { ...out.ms, [value]: Number(ms) };
     if (key === "uid" && /^\d+$/.test(value)) out.uid = Number(value);
     if (key === "systemd") out.systemd = value === "yes";
     if (key === "cgroup2") out.cgroup2 = value === "yes";
@@ -661,21 +677,21 @@ export function placeCheckRefusal(address: string, home: string, check: PlaceChe
 /** Each check the box passes or fails, on its own row in the order they are read, up to the first that fails:
  * root, then systemd with cgroup v2, then the room. A reading the box did not give passes, since the deploy's own
  * preflight stands behind it. */
-export function placeCheckRows(address: string, home: string, check: PlaceCheck, needBytes: number, host?: string): { step: "root" | "system" | "disk"; state: "done" | "failed"; note?: string }[] {
+export function placeCheckRows(address: string, home: string, check: PlaceCheck, needBytes: number, host?: string): { step: PlaceCheckStep; state: "done" | "failed"; note?: string; ms?: number }[] {
   const at = address.slice(0, 64);
-  const rows: { step: "root" | "system" | "disk"; state: "done" | "failed"; note?: string }[] = [];
+  const row = (step: PlaceCheckStep, state: "done" | "failed", note?: string) => ({ step, state, ...(note === undefined || note === "" ? {} : { note }), ...(check.ms?.[step] === undefined ? {} : { ms: check.ms[step] }) });
+  const rows: ReturnType<typeof row>[] = [];
   if (check.uid !== undefined && check.uid !== 0) {
     const reached = host ?? at.slice(at.indexOf("@") + 1);
     const alias = at.includes("@") ? "" : `, or put User root under Host ${at} in your ssh config and add it again`;
-    return [{ step: "root", state: "failed", note: `${at} logs in as a user that is not root, and root on the box is required: wsp runs its daemon there as a system service. Allow root's ssh login there and add it with wsp add root@${reached}${alias}` }];
+    return [row("root", "failed", `${at} logs in as a user that is not root, and wsp needs root there to keep itself running as a system service. Let root log in over ssh there and add root@${reached} instead${alias}`)];
   }
-  rows.push({ step: "root", state: "done" });
-  if (check.systemd === false) return [...rows, { step: "system", state: "failed", note: `${at} runs no systemd, which is what keeps wsp's daemon up there; wsp takes a Linux box that boots with systemd` }];
-  if (check.cgroup2 === false) return [...rows, { step: "system", state: "failed", note: `${at} has no cgroup v2 (/sys/fs/cgroup/cgroup.controllers), which every workspace there is held in; boot it with the unified hierarchy` }];
-  const system = [check.systemd === true ? "systemd" : undefined, check.cgroup2 === true ? "cgroup v2" : undefined].filter(w => w !== undefined).join(", ");
-  rows.push({ step: "system", state: "done", ...(system === "" ? {} : { note: system }) });
-  if (check.freeBytes !== undefined && check.freeBytes < needBytes) return [...rows, { step: "disk", state: "failed", note: `${at} has ${fmtBytes(check.freeBytes)} free under ${home}, and the base tools with a gigabyte to work in take ${fmtBytes(needBytes)}; free some room there and add it again` }];
-  rows.push({ step: "disk", state: "done", ...(check.freeBytes === undefined ? {} : { note: `${fmtBytes(check.freeBytes)} free` }) });
+  rows.push(row("root", "done"));
+  if (check.systemd === false) return [...rows, row("system", "failed", `${at} runs no systemd, which is what keeps wsp running there; wsp takes a Linux box that boots with systemd`)];
+  if (check.cgroup2 === false) return [...rows, row("system", "failed", `${at} has no cgroup v2 (/sys/fs/cgroup/cgroup.controllers), which every workspace there is held in; boot it with the unified hierarchy`)];
+  rows.push(row("system", "done", [check.systemd === true ? "systemd" : undefined, check.cgroup2 === true ? "cgroup v2" : undefined].filter(w => w !== undefined).join(", ")));
+  if (check.freeBytes !== undefined && check.freeBytes < needBytes) return [...rows, row("disk", "failed", `${at} has ${fmtBytes(check.freeBytes)} free under ${home}, and the base tools with a gigabyte to work in take ${fmtBytes(needBytes)}; free some room there and add it again`)];
+  rows.push(row("disk", "done", check.freeBytes === undefined ? undefined : `${fmtBytes(check.freeBytes)} free`));
   return rows;
 }
 
@@ -695,7 +711,14 @@ type SshWordReader = (word: string, opts: { port?: number; keyPath?: string }) =
  * Nothing waits here for the link: the computer dials this host on its own, and the place door is what knows when
  * it has. */
 export function placeInstaller(deps: { backend?: SshBackend; sshWord?: SshWordReader; daemonDir?: string; cliDir?: string; advertise?: string; back?: PlaceBackHolder } = {}): PlaceInstaller {
-  return async (req, stage) => {
+  return async (req, said) => {
+    // Each step's time from its running line to its end, as this host saw it; the checks the box timed say their own.
+    const began = new Map<PlaceAddStep, number>();
+    const stage: PlaceStaging = (step, state, note, placeId, ms) => {
+      if (state === "running") began.set(step, Date.now());
+      const from = began.get(step);
+      said(step, state, note, placeId, ms ?? (state === "running" || from === undefined ? undefined : Date.now() - from));
+    };
     // A word naming no login is the one refusal before the dial where the user and the address are the fix.
     const reach = await (deps.sshWord ?? sshWordReach)(req.address, {
       ...(req.sshPort !== undefined ? { port: req.sshPort } : {}),
@@ -798,8 +821,8 @@ export function placeInstaller(deps: { backend?: SshBackend; sshWord?: SshWordRe
     const checked = parsePlaceCheck((await machine.run(PLACE_CHECK_SCRIPT, { deadlineMs: SSH_DIAL_MS }).catch(() => undefined))?.stdout ?? "");
     const rows = placeCheckRows(req.address, login.HOME, checked, floorBytes(false) + PLACE_CHECK_SPARE_BYTES, reach.host);
     for (const row of rows) {
-      stage(row.step, "running");
-      stage(row.step, row.state, row.note);
+      said(row.step, "running");
+      said(row.step, row.state, row.note, undefined, row.ms);
     }
     const refused = rows.find(r => r.state === "failed")?.note;
     if (refused !== undefined) throw new Error(refused);

@@ -69,7 +69,7 @@ describe("a setup as rows", () => {
           { id: "claude", label: "Claude Code", outcome: "installed", step: "agents" },
           { id: "signins/claude", label: "Claude Code", outcome: "present", step: "signins", note: "from the vault" },
           { id: "skills/unslop", label: "unslop", outcome: "installed", step: "skills" },
-          { id: "skills/taste", label: "zingzy-design-taste", outcome: "failed", step: "skills", note: "a link inside points at a folder" },
+          { id: "skills/taste", label: "zingzy-design-taste", outcome: "failed", step: "skills", note: "a link inside points at a folder", fix: "Replace the link with a copy here and retry." },
         ],
       },
     });
@@ -89,7 +89,7 @@ describe("a setup as rows", () => {
       ["Other config", "waiting", false],
     ]);
     expect(rows.find(r => r.id === "skills")?.note).toBe("unslop.");
-    expect(rows.find(r => r.id === "skills/taste")?.said).toBe("a link inside points at a folder");
+    expect(rows.find(r => r.id === "skills/taste")).toMatchObject({ said: "a link inside points at a folder", fix: "Replace the link with a copy here and retry." });
     expect(rows.find(r => r.id === "signins/codex")?.wait?.code).toBe("4F2K");
     expect(setupCount(rows)).toEqual({ done: 4, of: 10 });
   });
@@ -158,6 +158,36 @@ describe("an install as the checks", () => {
       ["Install wsp", "working", undefined],
     ]);
     expect(checkRows(job({ state: "done", steps: [{ step: "connect", state: "done" }, { step: "chip", state: "done" }, { step: "root", state: "done" }, { step: "system", state: "done" }, { step: "disk", state: "done" }, { step: "reach", state: "done" }, { step: "wsp", state: "done" }, { step: "join", state: "done" }] })).at(-1)?.state).toBe("done");
+  });
+
+  it("draws each check's time once its row is done, the install's as its three steps together", () => {
+    const rows = checkRows(
+      job({
+        state: "done",
+        steps: [
+          { step: "connect", state: "done", ms: 412 },
+          { step: "chip", state: "done" },
+          { step: "root", state: "done", ms: 2 },
+          { step: "system", state: "done", ms: 3 },
+          { step: "disk", state: "done", ms: 14 },
+          { step: "reach", state: "done", ms: 1_020 },
+          { step: "wsp", state: "done", ms: 3_000 },
+          { step: "service", state: "done", ms: 900 },
+          { step: "join", state: "done" },
+        ],
+      }),
+    );
+    expect(rows.map(r => [r.id, r.ms])).toEqual([
+      ["connect", 412],
+      ["chip", undefined],
+      ["root", 2],
+      ["system", 3],
+      ["disk", 14],
+      ["reach", 1_020],
+      ["wsp", 3_900],
+    ]);
+    // A row still running has no time yet.
+    expect(checkRows(job({ steps: [{ step: "connect", state: "done", ms: 412 }, { step: "wsp", state: "done", ms: 3_000 }, { step: "service", state: "running" }] })).at(-1)?.ms).toBeUndefined();
   });
 
   it("says what the running install is doing on its row", () => {

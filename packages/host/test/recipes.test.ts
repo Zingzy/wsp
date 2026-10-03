@@ -12,7 +12,7 @@ import { NO_RECIPE, RecipeFile, type PlaceReport } from "@wsp/protocol";
 import { createRuntime, memoryStore, newPlaceKeyPair, serveRuntime, type Runtime, type RuntimeServer } from "@wsp/runtime";
 import { WsClient } from "../../runtime/test/ws-client.js";
 import { gitCut, configTexts } from "../src/recipe-configs.js";
-import { folderOptions, recipeOptions } from "../src/recipe-options.js";
+import { folderOptions, githubHere, recipeOptions } from "../src/recipe-options.js";
 import { catalogEntry, sizeBytes } from "@wsp/catalog";
 import { execFileSync } from "node:child_process";
 import { keptTools, readRecipe, readRecipes, recipeHash, recipeShelf, recipesDir, resolveRecipe, TOOLS_KEPT_MS, writeRecipe, type RecipeReading } from "../src/recipes.js";
@@ -342,6 +342,17 @@ describe("what a recipe picks from", () => {
     // A folder with no remote is asked of no one and has every commit to carry.
     git("remote", "remove", "origin");
     expect(await folderOptions([{ name: "app", path: repo }], async () => true)).toEqual([{ name: "app", path: repo, unpushed: 1, bytes: expect.any(Number) }]);
+  });
+
+  it("names the account gh signs in with here and its token's scopes on the GitHub row, read off gh's own status", async () => {
+    const ran: string[][] = [];
+    const status = "github.com\n  ✓ Logged in to github.com account Zingzy (keyring)\n  - Token scopes: 'read:org', 'repo', 'workflow'\n";
+    const read = await githubHere({ run: async (cmd, args) => (ran.push([cmd, ...args]), status) });
+    expect(ran).toEqual([["gh", "auth", "status", "--hostname", "github.com"]]);
+    const github = recipeOptions({ entries: [] }, { skills: [], plugins: [], configs: [], github: true, gh: read }).configs.find(c => c.id === "github");
+    expect(github).toMatchObject({ signins: ["vault", "machine", "skip"], account: "Zingzy", scopes: ["read:org", "repo", "workflow"] });
+    // gh that would not answer names nothing, and the row is offered as before.
+    expect(await githubHere({ run: async () => undefined })).toEqual({});
   });
 
   it("says how each MCP server signs in, off the first agent's definition that says anything", () => {

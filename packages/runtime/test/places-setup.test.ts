@@ -25,6 +25,7 @@ import {
   pendingHeldLine,
   noPendingRefusal,
   placeHoldsProjectsRefusal,
+  setupRowFix,
   placeProvisionPaths,
   placeProvisioningLine,
   placeWord,
@@ -299,6 +300,15 @@ function shelf(file: RecipeFile, items: Record<string, string>) {
 const rowOf = async (placeId: string): Promise<PlaceView> => (await runtime!.places!.list(Date.now())).find(p => p.id === placeId)!;
 const ended = (frames: readonly PlaceSetupEvent[]): PlaceSetupEvent[] => frames.filter(f => f.end !== undefined);
 
+describe("the add's own steps", () => {
+  it("says how long the join took once that computer dialled in", async () => {
+    await hosting({ provision: provisioner().wired });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: LAPTOP }, Date.now());
+    const job = runtime!.places!.adds().find(a => a.placeId === place.id);
+    expect(job?.steps.find(s => s.step === "join")).toMatchObject({ state: "done", ms: expect.any(Number) });
+  });
+});
+
 describe("a remove of a computer set up with picks", () => {
   it("takes the plugins wsp put on off before the sweep and the projects its folders made with it, the folders left", async () => {
     const cmds: string[] = [];
@@ -471,6 +481,8 @@ describe("a computer added with its picks", () => {
       ["github", "github"],
       ["folders/gone", "folders"],
     ]);
+    // Each says what to do beside what happened, in the words of the computer it is on.
+    expect(row.applied?.rows.filter(r => r.outcome === "failed").map(r => r.fix)).toEqual([setupRowFix({ step: "github" }, "spoo"), setupRowFix({ step: "folders" }, "spoo")]);
     expect(placeWord(row, null).word).toBe("Needs you");
     expect(ended(frames)[0]?.end).toBe("needs-you");
   });

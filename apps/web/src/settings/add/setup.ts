@@ -156,7 +156,7 @@ export function setupRows(place: Pick<PlaceView, "setup" | "applied" | "picks">,
         : (ended?.(mine, place.picks, box) ?? nameList(landed) ?? line?.note);
     out.push({ id: step, name, state, ...(note === undefined ? {} : { note }), ...(line?.ms === undefined ? {} : { ms: line.ms }), ...(stopped && setup?.said !== undefined ? { said: setup.said } : {}) });
     if (step === "agents") out.push(...signInRows(setup, rows));
-    if (!stopped) for (const r of mine) if (r.outcome === "failed") out.push({ id: r.id, name: r.label, state: "failed", sub: true, ...(r.note === undefined ? {} : { said: r.note }) });
+    if (!stopped) for (const r of mine) if (r.outcome === "failed") out.push({ id: r.id, name: r.label, state: "failed", sub: true, ...(r.note === undefined ? {} : { said: r.note }), ...(r.fix === undefined ? {} : { fix: r.fix }) });
   }
   return out;
 }
@@ -166,7 +166,7 @@ function signInRows(setup: PlaceSetup | undefined, rows: readonly PlaceProvision
   const waits = setup?.waiting ?? [];
   const out: StepLine[] = rows
     .filter(r => r.step === "signins" && !waits.some(w => w.row === r.id))
-    .map(r => ({ id: r.id, name: `${r.label} sign-in`, state: r.outcome === "failed" ? ("failed" as const) : ("done" as const), sub: true as const, ...(r.note === undefined ? {} : r.outcome === "failed" ? { said: r.note } : { note: r.note }), ...(r.ms === undefined ? {} : { ms: r.ms }) }));
+    .map(r => ({ id: r.id, name: `${r.label} sign-in`, state: r.outcome === "failed" ? ("failed" as const) : ("done" as const), sub: true as const, ...(r.note === undefined ? {} : r.outcome === "failed" ? { said: r.note } : { note: r.note }), ...(r.outcome === "failed" && r.fix !== undefined ? { fix: r.fix } : {}), ...(r.ms === undefined ? {} : { ms: r.ms }) }));
   // The relay opens a waiting sign-in's page in the browser on this computer as the wait starts.
   for (const w of waits) out.push({ id: w.row, name: `${w.label} sign-in`, state: "needs-you", sub: true, wait: w, ...(w.url !== undefined && w.state === "waiting" ? { note: ADD_COMPUTER_WORDS.tabOpened } : {}) });
   return out;
@@ -215,7 +215,10 @@ export function checkRows(job: PlaceAddJob | undefined): StepLine[] {
     const state: StepState = row.id === failedAt ? "failed" : rowDone(row) ? "done" : mine.length > 0 && job?.state === "running" ? "working" : "waiting";
     const note = mine.filter(s => s.state !== "failed" && s.note !== undefined).at(-1)?.note;
     const fix = job === undefined ? undefined : addFix(job);
-    return { id: row.id, name: row.name, state, ...(state === "failed" ? { said: job?.said ?? "", ...(fix === undefined ? {} : { fix }) } : note === undefined ? {} : { note }) };
+    // A row's time once it is done: the times of its steps that were timed, together.
+    const timed = mine.flatMap(s => (s.ms === undefined ? [] : [s.ms]));
+    const ms = state !== "done" || timed.length === 0 ? undefined : timed.reduce((sum, t) => sum + t, 0);
+    return { id: row.id, name: row.name, state, ...(ms === undefined ? {} : { ms }), ...(state === "failed" ? { said: job?.said ?? "", ...(fix === undefined ? {} : { fix }) } : note === undefined ? {} : { note }) };
   });
 }
 

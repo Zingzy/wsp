@@ -401,6 +401,12 @@ describe("Add a computer's picks read the host's facts", () => {
     expect(size("go")).toEqual(["517 MB", "warning"]);
   });
 
+  it("names the account and scopes of the token it would copy, as gh reads them here", async () => {
+    await open("github", undefined, { recipesOptions: async () => ({ ...FACTS, configs: [{ id: "github", label: "the GitHub sign-in", signins: ["vault", "machine", "skip"], account: "Zingzy", scopes: ["repo", "read:org", "workflow"] }] }) } as Partial<Api>);
+    await waitFor(() => expect(dialog()!.querySelectorAll("[data-choice]")).toHaveLength(3));
+    expect(dialog()!.querySelector("[data-choice='vault']")?.textContent).toContain("Signed in as Zingzy with repo, read:org and workflow.");
+  });
+
   it("offers GitHub the ways the host says it can sign in, and keeps a skip as the choice it is", async () => {
     await open("github");
     await waitFor(() => expect(dialog()!.querySelectorAll("[data-choice]")).toHaveLength(2));
