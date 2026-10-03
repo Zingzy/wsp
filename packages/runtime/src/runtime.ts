@@ -233,7 +233,7 @@ import type {
 import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding } from "./project-landing.js";
 import { projectRemote, projectSource } from "./project-sources.js";
 import { vaultUnlistedRefusal, ThreadPlacement, ThreadScope, WorkspaceOrigin, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, GitCommitReply, GitDiscardReply, GitDiffReply, GitStatusReply, GitPrReadReply, GitPrViewReply, GitRunLogReply, GitPrMergeReply, GitRepoReadReply, GitUpdateReply, GitStartOnReply, GitBranchCompareReply, GitMergeInReply, DETACHED_HEAD, leadBusyRefusal, childStartedLine, forkNeedsPushLine, FIX_CHECK_OR_CHILD, childOnNoBranchRefusal, mergeChildPrompt, mergeIntoOwnRefusal, noRemoteForTreeLine, notTheLeadsChildRefusal, pushedForChildLine, uncommittedStayed, type MergeInResult, type TreeChild, type TreeFact, type TreeRecord, PR_POLL_MS, type PullRequestPage, GitPrReplyReply, GitPrResolveReply, GitPrReactReply, REPLY_EMPTY_LINE, pullRequestPostLine, type ReactionContent, type PullRequestItem, type PullRequestSendResult, type PullRequestSent, GIT_DIFF_CAP_BYTES, pullRequestSendPrompt, checkFailedPrompt, conflictsPrompt, checkNotFailedRefusal, childPushedLine, isPullRequestFact, mergeMethodRefusal, noPullRequestRefusal, noSuchCheckRefusal, notOpenRefusal, pullRequestStoppedLine, pullRequestUnreadLine, AUTO_MERGE_OFF_LINE, type FixResult, type MergeMethod, type MergeResult, type PullRequestFact, type PullRequestRecord, type PullRequestSeen, DRAFT_NOTES, cleanCheckoutLine, commitMessage, cutDiff, draftPrompt, type Checkout, type CheckoutReply, type CommitDraft, type CommitDrafter, type ViewedMarks, AGENTS_ON, agentsFrom, foldThreads, NAP_AFTER_MS, settingFor, runningOn as runningOnPlace, phaseHoldsSlot, placeAtLimitLine, placeSpendLimit, spendCapRefusal, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadKeyOf, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, SCOPED_MCP_ARG, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn, RUN_PERSONS_LINE, runOutputTail, type RunStep, type SessionRunEvent } from "@wsp/protocol";
-import { ASIDE_NO_SESSION_LINE, BLANK_ASIDE_LINE, asideUnsupportedLine, PLACE_WORKSPACE_PATH, THIS_COMPUTER, COPY_BUILD_FIX, copyAsksSignIns, refusal, copyFirstLine, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildOf, copyIsCurrent, type CopyBuild, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, serverIconsLeftLine, homeShortened, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, threadRunsOnLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, GONE_UNCHECKED, goneUnconfirmedLine, type GoneSeenBy, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, cloneFailedLine, cloneIntoNeeded, cloneIntoTakenLine, cloneUrlRefusal, intoIsHereLine, INTO_TAKES_A_REPO_LINE, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NAME_A_PROJECT_LINE, BRANCH_OR_CWD_LINE, notOnThisComputerLine, cwdOutsideLine, noBranchesLine, notMadeWorktreeLine, THREAD_WORKING_LINE, threadOnMachineLine, OLD_COPY_WORDS, ProjectCopy, WORKTREE_BUSY_LINE, worktreeChangedLine, keptChangedLine, KEPT_RUNNING_LINE, KEPT_ABANDONED_LINE, type WorktreeFolder, type WorktreeSettled, type WorktreeMade, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeBlocked, placeDaemonBehind, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeDaemonPaths, placeDialBackLine, placeWentAwayLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspacePlace, workFolderIn, workspaceLands, REWIND_LATEST_LINE, REWIND_NO_CHECKPOINT_LINE, REWIND_NO_UNDO_LINE, REWIND_SHARED_LINE, REWIND_WORKING_LINE, rewindBesideLine, rewindChildrenLine, rewindKeptLine, rewindNoAnchorLine, attachmentRecord, filesBlocked, isImage, sendFilesDir, filePathIn, landFilesLine, filesNotLandedLine, attachedFilesPrompt, dropFilesLine } from "@wsp/protocol";
+import { ASIDE_NO_SESSION_LINE, BLANK_ASIDE_LINE, asideUnsupportedLine, PLACE_WORKSPACE_PATH, THIS_COMPUTER, COPY_BUILD_FIX, copyAsksSignIns, refusal, copyFirstLine, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildOf, copyIsCurrent, type CopyBuild, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, serverIconsLeftLine, homeShortened, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, threadRunsOnLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, GONE_UNCHECKED, goneUnconfirmedLine, type GoneSeenBy, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, cloneFailedLine, cloneIntoNeeded, cloneIntoTakenLine, cloneUrlRefusal, intoIsHereLine, INTO_TAKES_A_REPO_LINE, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NAME_A_PROJECT_LINE, BRANCH_OR_CWD_LINE, notOnThisComputerLine, cwdOutsideLine, noBranchesLine, notMadeWorktreeLine, THREAD_WORKING_LINE, threadOnMachineLine, OLD_COPY_WORDS, ProjectCopy, WORKTREE_BUSY_LINE, WORKTREE_FORCE_LINE, worktreeChangedLine, keptChangedLine, KEPT_RUNNING_LINE, KEPT_ABANDONED_LINE, type WorktreeFolder, type WorktreeSettled, type WorktreeMade, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeBlocked, placeDaemonBehind, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeDaemonPaths, placeDialBackLine, placeWentAwayLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspacePlace, workFolderIn, workspaceLands, REWIND_LATEST_LINE, REWIND_NO_CHECKPOINT_LINE, REWIND_NO_UNDO_LINE, REWIND_SHARED_LINE, REWIND_WORKING_LINE, rewindBesideLine, rewindChildrenLine, rewindKeptLine, rewindNoAnchorLine, attachmentRecord, filesBlocked, isImage, sendFilesDir, filePathIn, landFilesLine, filesNotLandedLine, attachedFilesPrompt, dropFilesLine } from "@wsp/protocol";
 import { agentsReads, type AgentsActs, type AgentsReader, type CallbackForwards, type ServerIcons, type ServersActs, type SignInAsk, type SkillAsk, type SkillsActs } from "./agents-read.js";
 import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from "./daemon-channel.js";
 import { templateHost } from "./host-id.js";
@@ -2978,19 +2978,23 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const drives = (record: { kind: WorkspaceKind; machineId?: string }, caller: Caller | undefined): boolean => roadOf(caller) !== "relayed" || moduleOf(record.kind).relayed(record.machineId);
   /** What the two rules a request is read against need of a workspace: what a record holds, and what a create is
    * checked with before there is a record. */
-  type WorkspaceLike = { id?: string; kind: WorkspaceKind; name: string; machineId?: string; rootThreadId?: string; project?: string };
+  type WorkspaceLike = { id?: string; kind: WorkspaceKind; name: string; machineId?: string; rootThreadId?: string; project?: string; worktree?: WorktreeFolder };
   /** Which workspaces a thread's own token reaches: the one its turn runs on, and the ones its root thread forked.
    * A thread never sees or drives a workspace outside its own tree, whatever the verb, so this sits beside the
    * kind rule rather than in any one of them. A caller that is no thread reaches everything the kind rule allows. */
-  const inTree = (record: { id?: string; rootThreadId?: string; kind?: WorkspaceKind; project?: string }, scope: ThreadScope | undefined): boolean =>
+  const inTree = (record: { id?: string; rootThreadId?: string; worktree?: WorktreeFolder }, scope: ThreadScope | undefined): boolean =>
     // A record with no id is a workspace that does not exist yet, the shape a create is checked against: what a
-    // thread may make is the guard's question, not this one's. On this computer every folder of the thread's own
-    // project is its to run in: the project folder and the worktrees of its repo, whoever's thread made the record.
+    // thread may make is the guard's question, not this one's. A worktree on this computer made for the tree is in
+    // it as a fork the tree made is.
     scope === undefined ||
     record.id === undefined ||
     record.id === scope.workspaceId ||
     record.rootThreadId === scope.rootThreadId ||
-    (record.kind !== undefined && copiesFolder(record.kind) && record.project !== undefined && record.project === projectOfScope(scope));
+    (record.worktree?.madeFor !== undefined && record.worktree.madeFor === scope.rootThreadId);
+  /** Where a thread may open a thread beyond its tree: the project folder of its own project, which every thread
+   * of the project shares. Every other act there stays its tree's. */
+  const opensIn = (record: WorkspaceRecord, scope: ThreadScope | undefined): boolean =>
+    scope !== undefined && copiesFolder(record.kind) && record.worktree === undefined && record.project === projectOfScope(scope);
   /** Which project a thread works on: the one its own workspace holds. A thread whose workspace this host no longer
    * holds works on none, and the project rule then has nothing to compare and leaves the tree rule to refuse. */
   const projectOfScope = (scope: ThreadScope): string | undefined => live.get(scope.workspaceId)?.record.project;
@@ -6553,7 +6557,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (top === undefined) throw Object.assign(new Error(noBranchesLine(project.name)), { kind: "usage" });
     const from = beside ?? (await projectFolder(project));
     if ((await branchAt(checkoutOf(from.record))) === o.branch) return { entry: from };
-    return { entry: await worktreeFolder(project, top, o.branch, beside?.record.id) };
+    const before = new Set(live.keys());
+    const made = await worktreeFolder(project, top, o.branch, beside?.record.id);
+    if (scope !== undefined && !before.has(made.record.id) && made.record.worktree !== undefined) {
+      made.record.worktree = { ...made.record.worktree, madeFor: scope.rootThreadId };
+      await persist(made.record);
+    }
+    return { entry: made };
   };
   /** The host's own git writes on one folder, one at a time: two threads' commits, a discard and a removal never
    * interleave. The agents' own git is theirs, and git's index lock is the answer when theirs meets this. */
@@ -6602,14 +6612,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   };
   /** A worktree no longer on disk: its threads go on in the project folder, and its record goes once no thread is
    * left on it. */
-  const worktreeGone = async (entry: LiveWorkspace, why: WorktreeSettled["why"]): Promise<void> => {
+  const worktreeGone = async (entry: LiveWorkspace, why: WorktreeSettled["why"], o: { starting?: boolean } = {}): Promise<void> => {
     const tree = entry.record.worktree;
     if (tree === undefined) return;
-    if (![...sessions.values()].some(s => s.view.workspaceId === entry.record.id) && ![...threadRecords.values()].some(t => t.workspaceId === entry.record.id)) {
+    // A start found it gone, and its thread is about to name the record.
+    if (o.starting !== true && ![...sessions.values()].some(s => s.view.workspaceId === entry.record.id) && ![...threadRecords.values()].some(t => t.workspaceId === entry.record.id)) {
       await drop(entry.record.id);
       return;
     }
-    entry.record.worktree = { path: tree.path, made: tree.made, ...(tree.branch !== undefined ? { branch: tree.branch } : {}), settled: tree.settled ?? { at: clock.now(), why }, gone: true };
+    entry.record.worktree = { path: tree.path, made: tree.made, ...(tree.branch !== undefined ? { branch: tree.branch } : {}), ...(tree.madeFor !== undefined ? { madeFor: tree.madeFor } : {}), settled: tree.settled ?? { at: clock.now(), why }, gone: true };
     await persist(entry.record);
   };
   /** The folder a thread's next turn runs in: where its session last ran, unless that was a worktree that is gone,
@@ -6741,20 +6752,22 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const overlaps = (a: string, b: string): boolean => under(a, b) || under(b, a);
     if (overlaps(copy.path, project.path) || overlaps(copy.path, top) || overlaps(copy.path, copy.source)) return OLD_COPY_WORDS.isProject;
     const status = await gitHere(copy.path, ["status", "--porcelain"]);
-    if (status.exitCode !== 0) return OLD_COPY_WORDS.unread(lastLine(status));
+    if (status.exitCode !== 0) return OLD_COPY_WORDS.unread(gitSaid(status));
     if (status.stdout.trim() !== "") return OLD_COPY_WORDS.changed;
     const name = refPart(folderName(copy.path));
     if (copy.road === "clonefile") {
       // A stash lives in the copy's own repo and rides no fetch of its branches; a worktree's is the project's own.
       const stash = await gitHere(copy.path, ["rev-parse", "--verify", "--quiet", "refs/stash"]);
       if (stash.exitCode === 0 && stash.stdout.trim() !== "") return OLD_COPY_WORDS.stashed;
-      const fetched = await gitHere(top, ["fetch", "--quiet", "--no-tags", copy.path, `+refs/heads/*:refs/rescue/${name}/*`], CLONE_MS);
-      if (fetched.exitCode !== 0) return OLD_COPY_WORDS.fetchFailed(lastLine(fetched));
-    }
-    const head = await gitHere(copy.path, ["rev-parse", "--verify", "--quiet", "HEAD"]);
-    if (head.stdout.trim() !== "") {
-      const put = await gitHere(top, ["update-ref", `refs/rescue/${name}/HEAD`, head.stdout.trim()]);
-      if (put.exitCode !== 0) return OLD_COPY_WORDS.fetchFailed(lastLine(put));
+      // HEAD rides the same fetch, so a commit on no branch is carried too.
+      const fetched = await gitHere(top, ["fetch", "--quiet", "--no-tags", copy.path, `+refs/heads/*:refs/rescue/${name}/*`, `+HEAD:refs/rescue/${name}/HEAD`], CLONE_MS);
+      if (fetched.exitCode !== 0) return OLD_COPY_WORDS.fetchFailed(gitSaid(fetched));
+    } else {
+      const head = await gitHere(copy.path, ["rev-parse", "--verify", "--quiet", "HEAD"]);
+      if (head.stdout.trim() !== "") {
+        const put = await gitHere(top, ["update-ref", `refs/rescue/${name}/HEAD`, head.stdout.trim()]);
+        if (put.exitCode !== 0) return OLD_COPY_WORDS.fetchFailed(gitSaid(put));
+      }
     }
     const copier = local?.copier;
     if (copier === undefined) return OLD_COPY_WORDS.noCopier;
@@ -6765,6 +6778,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const refPart = (name: string): string => name.replace(/[^A-Za-z0-9._-]/g, "-").replace(/\.\.+/g, "-").replace(/^[.-]+|\.lock$|\.$/g, "") || "copy";
   /** The last line git said, stderr first, for a sentence that quotes it. */
   const lastLine = (res: { stdout: string; stderr: string }): string => (res.stderr.trim() || res.stdout.trim()).split("\n").at(-1) ?? "";
+  /** What git said went wrong: its first error or fatal line, not a hint printed under it, else its last line. */
+  const gitSaid = (res: { stdout: string; stderr: string }): string => res.stderr.split("\n").find(l => /^(error|fatal): /.test(l))?.trim() ?? lastLine(res);
   /** Whether a path is the folder or inside it. */
   const under = (path: string, folder: string): boolean => path === folder || path.startsWith(folder.endsWith("/") ? folder : `${folder}/`);
   /** Every worktree of a repo as git lists it now, read each time: the person and their agents add and remove their
@@ -6849,10 +6864,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const top = project.git?.top;
     if (top === undefined) throw Object.assign(new Error(noBranchesLine(project.name)), { kind: "usage" });
     const branch = fact.fork === undefined ? fact.branch : `${fact.fork.owner}/${fact.branch}`;
-    const held = await gitHere(top, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`]);
-    if (held.exitCode !== 0) {
+    // Fetched at every start, made where it is not here and only moved forward where it is, never forced.
+    if (fact.fork === undefined) {
+      GitStartOnReply.parse(await onThisComputer(ask => ask({ op: "git.fetchBranch", cwd: top, remote: project.remote, branch: fact.branch, into: branch })));
+    } else {
+      // GitHub serves a fork's head on the base repository as pull/<n>/head, so no fork's URL is dialled.
       const fetched = await gitHere(top, ["fetch", "--quiet", "--no-tags", project.remote, `pull/${fact.number}/head:refs/heads/${branch}`], CLONE_MS);
-      if (fetched.exitCode !== 0) throw new Error(lastLine(fetched));
+      if (fetched.exitCode !== 0) throw new Error(gitSaid(fetched));
     }
     const entry = await worktreeFolder(project, top, branch);
     if (entry.record.worktree === undefined) return entry;
@@ -7571,7 +7589,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const tree = e.record.worktree;
         return tree !== undefined && tree.gone !== true && (holding !== undefined ? tree.path === holding : tree.branch === branch);
       });
+      if (entry !== undefined) refuseRelayed(entry.record, origin);
       if (entry?.record.worktree?.made !== true) throw Object.assign(new Error(notMadeWorktreeLine(branch)), { kind: "invalid" });
+      if (force === true && scopeOf(origin) !== undefined) throw Object.assign(new Error(WORKTREE_FORCE_LINE), { kind: "usage" });
       await removeWorktree(entry, force === true);
     },
 
@@ -9393,13 +9413,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // record answers before its rows, since the rows are capped and the record is not.
       const opens = !threadRecords.has(threadId) && rowsOn(threadId).length === 0;
       // A send goes into a thread the caller drives, read on the thread it lands in.
-      const reached = opens ? await entryOf(workspaceId, origin) : await entryOfRow({ threadId, workspaceId }, origin);
+      const opening = live.get(workspaceId)?.record;
+      const reached = opens ? await entryOf(workspaceId, opening !== undefined && opensIn(opening, scopeOf(origin)) ? undefined : origin) : await entryOfRow({ threadId, workspaceId }, origin);
       if (reached === undefined) throw new Error(`no thread ${opened.thread} on this workspace`);
       const entry = reached;
       // A worktree somebody removed by hand reads as gone the moment a thread asks for it, so the turn runs in the
       // project folder rather than in a folder that is not there.
       const worktree = entry.record.worktree;
-      if (worktree !== undefined && worktree.gone !== true && !existsSync(worktree.path)) await worktreeGone(entry, "removed");
+      const goneNow = worktree !== undefined && worktree.gone !== true && !existsSync(worktree.path) ? worktree.path : undefined;
+      if (goneNow !== undefined) await worktreeGone(entry, "removed", { starting: true });
       // What a thread already carries decides two of this send's picks, and it is read after the reading above, so
       // a caller that cannot drive the thread learns nothing about it. A thread keeps its agent: the turn runs on
       // the harness its record names, and a request naming another is refused rather than resuming that thread's
@@ -9663,9 +9685,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         // keys its sessions to the project carries its session across; any other opens a fresh one there.
         const ranIn = resume === undefined ? undefined : folderOf(workspaceId, resume);
         const cwd = runsIn(entry, ranIn, folder);
-        if (ranIn !== undefined && cwd !== ranIn && entry.record.worktree?.gone === true) {
-          const fresh = CATALOG_AGENTS.find(a => a.id === harness)?.projectKeyEnv === undefined;
-          record({ type: "session.moved", workspaceId, sessionId: resume ?? turnId, turnId, threadId, from: ranIn, to: cwd, ...(entry.record.worktree.branch !== undefined ? { branch: entry.record.worktree.branch } : {}), ...(fresh ? { fresh: true as const } : {}) });
+        const movedFrom = ranIn ?? goneNow;
+        if (movedFrom !== undefined && cwd !== movedFrom && entry.record.worktree?.gone === true) {
+          const fresh = ranIn !== undefined && CATALOG_AGENTS.find(a => a.id === harness)?.projectKeyEnv === undefined;
+          record({ type: "session.moved", workspaceId, sessionId: resume ?? turnId, turnId, threadId, from: movedFrom, to: cwd, ...(entry.record.worktree.branch !== undefined ? { branch: entry.record.worktree.branch } : {}), ...(fresh ? { fresh: true as const } : {}) });
           if (fresh) {
             resume = undefined;
             delete view.claudeSessionId;
@@ -10157,6 +10180,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (!copiesFolder(entry.record.kind)) throw Object.assign(new Error(threadOnMachineLine(entry.record.name)), { kind: "usage" });
       const tree = entry.record.worktree;
       if (tree?.made === true && tree.gone !== true) {
+        // Every thread in it goes with the worktree, so none may be working, and none can land a checkpoint after
+        // its refs were dropped.
+        if (turnRuns(workspaceId)) throw Object.assign(new Error(WORKTREE_BUSY_LINE), { kind: "conflict" });
         const threads = new Set([...sessions.values()].flatMap(s => (s.view.workspaceId === workspaceId && s.view.threadId !== undefined ? [s.view.threadId] : [])));
         await workspaces.delete(workspaceId, origin);
         return { workspaceId, worktree: tree.path, threads: threads.size };

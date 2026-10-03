@@ -106,7 +106,8 @@ describe("the move off copies at boot", () => {
     expect(w.removed).toEqual([{ from: w.project, to: clean, road: "clonefile" }]);
     const lines = readFileSync(w.kept, "utf8").trim().split("\n");
     expect(lines[0]).toBe(`${changed}\t${OLD_COPY_WORDS.changed}`);
-    expect(lines[1]).toMatch(new RegExp(`^${blocked}\\t${OLD_COPY_WORDS.fetchFailed("")}`));
+    // git's own error, not the hint it prints under it.
+    expect(lines[1]).toMatch(new RegExp(`^${blocked}\\t${OLD_COPY_WORDS.fetchFailed("")}(error|fatal): `));
     expect(lines).toHaveLength(2);
     expect(heard).toEqual([expect.objectContaining({ type: "host.notice", message: OLD_COPY_WORDS.kept(2, w.kept) })]);
     // Every old record is gone, and the project folder is where it was.
@@ -143,6 +144,28 @@ describe("the move off copies at boot", () => {
     expect(git(w.project, "rev-parse", "refs/rescue/spoo-review/HEAD")).toBe(head);
     expect(existsSync(tree)).toBe(false);
     expect(w.removed).toEqual([{ from: w.project, to: tree, road: "worktree" }]);
+    expect(existsSync(w.kept)).toBe(false);
+  });
+
+  it("saves a clean copy's detached commit, which no branch holds, under refs/rescue before it removes the copy", async () => {
+    const w = world();
+    const first = w.boot();
+    const project = await first.projects.add({ source: w.project });
+    const template = (await w.store.get("workspaces", (await first.workspaces.create({ project: project.id, name: "x" })).id)) as Record<string, unknown>;
+    await first.close();
+    const loose = join(w.root, "spoo-loose");
+    execFileSync("git", ["clone", "-q", w.project, loose]);
+    git(loose, "checkout", "-q", "--detach");
+    git(loose, "commit", "-q", "--allow-empty", "-m", "on no branch");
+    const head = git(loose, "rev-parse", "HEAD");
+    await oldRecord(w.store, template, "ws_loose", copyOf(w.project, loose, "clonefile"));
+
+    const rt = w.boot();
+    await rt.workspaces.list();
+    await rt.close();
+
+    expect(git(w.project, "rev-parse", "refs/rescue/spoo-loose/HEAD")).toBe(head);
+    expect(existsSync(loose)).toBe(false);
     expect(existsSync(w.kept)).toBe(false);
   });
 

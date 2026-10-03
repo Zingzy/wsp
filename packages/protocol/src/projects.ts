@@ -210,6 +210,12 @@ export const threadOnMachineLine = (machine: string): string => `a thread on ${m
 /** A worktree removal refused while a thread's turn runs in it. */
 export const WORKTREE_BUSY_LINE = "a thread is working in that worktree; let its turn end or stop it first";
 
+/** A forced removal asked by a thread's own token: losing files no commit holds is the person's call alone. */
+export const WORKTREE_FORCE_LINE = "only the person removes a worktree over files no commit holds; commit them, or ask them to remove it";
+
+/** A folder of a project on this computer named to delete or forget: the verbs take threads there, never the folder. */
+export const localFolderRefusal = (name: string): string => `${name} is a project's folder on this computer, which delete and forget leave alone`;
+
 /** A worktree removal refused over files no commit holds: they would go with it. */
 export const worktreeChangedLine = (files: number): string =>
   `that worktree has ${files} ${files === 1 ? "file" : "files"} not committed; commit ${files === 1 ? "it" : "them"}, or remove it with --force to lose ${files === 1 ? "it" : "them"}`;

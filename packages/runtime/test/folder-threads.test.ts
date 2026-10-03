@@ -18,7 +18,12 @@ import {
   notMadeWorktreeLine,
   REWIND_SHARED_LINE,
   worktreeChangedLine,
+  WORKTREE_BUSY_LINE,
+  WORKTREE_FORCE_LINE,
   type AdapterEvent,
+  type Caller,
+  type PullRequest,
+  type ThreadScope,
   type DaemonFrame,
   type DaemonResponse,
   type TurnResult,
@@ -49,6 +54,8 @@ const repo = (): string => {
 
 let rt: Runtime | undefined;
 afterEach(async () => {
+  holding.on = false;
+  holding.waiting.splice(0).forEach(go => go());
   await rt?.close();
   rt = undefined;
   for (const at of roots.splice(0)) rmSync(at, { recursive: true, force: true });
@@ -57,6 +64,8 @@ afterEach(async () => {
 /** A harness that answers each turn at once and records what it was started with. A resume keeps its session, and
  * every new one is numbered on the one count the harnesses share, so no two threads hold one session. */
 let n = 0;
+/** Turns held until the test lets them go, where a test holds them. */
+const holding: { on: boolean; waiting: (() => void)[] } = { on: false, waiting: [] };
 function harness(starts: HarnessStartOptions[]): HarnessAdapterFactory {
   return () => ({
     steers: false,
@@ -66,7 +75,9 @@ function harness(starts: HarnessStartOptions[]): HarnessAdapterFactory {
       starts.push(o);
       const sessionId = o.resume ?? `55555555-5555-4555-8555-${String(n).padStart(12, "0")}`;
       const result: TurnResult = { status: "completed", text: "ok" };
-      const finished = Promise.resolve().then(() => {
+      const held = holding.on ? new Promise<void>(go => holding.waiting.push(go)) : Promise.resolve();
+      if (holding.on) o.onEvent({ type: "session.start", sessionId });
+      const finished = held.then(() => {
         const feed: AdapterEvent[] = [
           { type: "session.start", sessionId },
           { type: "turn.anchor", sessionId, anchor: `a${n}` },
@@ -81,13 +92,16 @@ function harness(starts: HarnessStartOptions[]): HarnessAdapterFactory {
   });
 }
 
-/** A daemon that takes checkpoints and restores, recording every frame. */
+/** A daemon that takes checkpoints and restores, recording every frame; a test adds an answer to any op. */
 function fakeDaemon() {
   const frames: Record<string, unknown>[] = [];
+  const answers: Record<string, (f: Record<string, unknown>) => DaemonResponse> = {};
   const open = async (): Promise<DaemonChannel> => ({
     send: async (frame: DaemonFrame) => {
       const f = frame as unknown as Record<string, unknown>;
       frames.push(f);
+      const answer = answers[String(f["op"])];
+      if (answer !== undefined) return answer(f);
       if (f["op"] === "git.checkpoint") return { id: 1, ok: true, ref: `refs/wsp/checkpoints/${String(f["scope"])}/${String(f["thread"])}/${String(f["turn"])}`, commit: "c", changed: true } as DaemonResponse;
       if (f["op"] === "git.restore") return { id: 1, ok: true, before: `${String(f["checkpoint"])}-before-1`, files: 1 } as DaemonResponse;
       if (f["op"] === "git.checkpointDrop") return { id: 1, ok: true } as DaemonResponse;
@@ -96,7 +110,7 @@ function fakeDaemon() {
     close: () => {},
     closed: new Promise(() => {}),
   });
-  return { frames, open };
+  return { frames, answers, open };
 }
 
 function here(wire: Partial<LocalWiring> = {}) {
@@ -368,6 +382,147 @@ describe("taking a folder's record away", () => {
     await rt.workspaces.delete(held.workspace.id);
     expect(existsSync(theirs)).toBe(true);
     expect(copier.worktreesRemoved).toEqual([]);
+  });
+});
+
+/** A thread on this computer, as its turn's own token reaches the host over this computer's road. */
+const asThread = (scope: ThreadScope): Caller => ({ origin: "here", by: scope });
+
+describe("what a thread's own token reaches on this computer", () => {
+  /** A person's thread in the project folder, a worktree the person made beside it, and the scope the thread's token carries. */
+  async function lead() {
+    const h = here();
+    const folder = repo();
+    const project = await h.rt.projects.add({ source: folder });
+    const theirs = await h.rt.workspaces.folderFor({ project: project.id, branch: "feat/theirs" });
+    const home = await h.rt.workspaces.folderFor({ project: project.id });
+    const run = await h.rt.sessions.start(home.workspace.id, { prompt: "lead" });
+    await run.finished;
+    const threadId = run.view().threadId!;
+    const scope: ThreadScope = { kind: "thread", threadId, workspaceId: home.workspace.id, rootThreadId: threadId };
+    return { ...h, folder, project, theirs: theirs.workspace, home: home.workspace, scope };
+  }
+
+  it("reaches the folder it runs in and the worktrees made for its tree, and never another tree's worktree", async () => {
+    const { rt, project, theirs, home, scope } = await lead();
+    await expect(rt.workspaces.checkout(home.id, asThread(scope))).resolves.toBeDefined();
+    const child = await rt.workspaces.folderFor({ project: project.id, branch: "feat/mine" }, asThread(scope));
+    const ran = await rt.sessions.start(child.workspace.id, { prompt: "child" }, asThread(scope));
+    await ran.finished;
+    await expect(rt.workspaces.checkout(child.workspace.id, asThread(scope))).resolves.toBeDefined();
+    expect((await rt.workspaces.get(child.workspace.id)).worktree?.madeFor).toBe(scope.rootThreadId);
+    // A thread working in a worktree opens threads in the project folder every thread shares, and drives nothing there.
+    const side = await rt.sessions.start(theirs.id, { prompt: "the person's, on a branch" });
+    await side.finished;
+    const there: ThreadScope = { kind: "thread", threadId: side.view().threadId!, workspaceId: theirs.id, rootThreadId: side.view().threadId! };
+    await expect(rt.workspaces.checkout(home.id, asThread(there))).rejects.toThrow();
+    await (await rt.sessions.start(home.id, { prompt: "in the folder" }, asThread(there))).finished;
+    await expect(rt.workspaces.checkout(theirs.id, asThread(scope))).rejects.toThrow();
+    await expect(rt.sessions.start(theirs.id, { prompt: "theirs" }, asThread(scope))).rejects.toThrow();
+    await expect(rt.workspaces.worktreeRemove({ project: project.id, branch: "feat/theirs" }, asThread(scope))).rejects.toThrow();
+    expect(existsSync(theirs.worktree!.path)).toBe(true);
+  });
+
+  it("never removes a worktree over files no commit holds, which only the person may force", async () => {
+    const { rt, project, scope } = await lead();
+    const child = await rt.workspaces.folderFor({ project: project.id, branch: "feat/mine" }, asThread(scope));
+    await (await rt.sessions.start(child.workspace.id, { prompt: "child" }, asThread(scope))).finished;
+    writeFileSync(join(child.workspace.worktree!.path, "draft.md"), "mine\n");
+    await expect(rt.workspaces.worktreeRemove({ project: project.id, branch: "feat/mine", force: true }, asThread(scope))).rejects.toThrow(WORKTREE_FORCE_LINE);
+    await expect(rt.workspaces.worktreeRemove({ project: project.id, branch: "feat/mine" }, asThread(scope))).rejects.toThrow(worktreeChangedLine(1));
+    expect(existsSync(join(child.workspace.worktree!.path, "draft.md"))).toBe(true);
+    await rt.workspaces.worktreeRemove({ project: project.id, branch: "feat/mine", force: true });
+    expect(existsSync(child.workspace.worktree!.path)).toBe(false);
+  });
+});
+
+describe("a worktree removed by hand before any thread ran in it", () => {
+  it("takes its first thread in the project folder with the moved line, and keeps the record and the thread", async () => {
+    const { rt, starts } = here();
+    const folder = repo();
+    const project = await rt.projects.add({ source: folder });
+    const made = await rt.workspaces.worktree({ project: project.id, branch: "feat/bare" });
+    const record = (await rt.workspaces.list()).find(w => w.worktree?.path === made.path)!;
+    rmSync(made.path, { recursive: true, force: true });
+    const run = await rt.sessions.start(record.id, { prompt: "hello" });
+    await run.finished;
+    expect(starts.map(s => s.cwd)).toEqual([folder]);
+    expect((await rt.workspaces.list()).find(w => w.id === record.id)?.worktree).toMatchObject({ gone: true });
+    expect((await rt.sessions.list()).map(t => t.threadId)).toContain(run.view().threadId);
+    const moved = (await rt.sessions.history(record.id)).filter(e => e.type === "session.moved");
+    expect(moved).toEqual([expect.objectContaining({ threadId: run.view().threadId, from: made.path, to: folder, branch: "feat/bare" })]);
+  });
+});
+
+describe("deleting a thread that runs in a worktree wsp made", () => {
+  it("is refused while a turn runs there, and once it ended takes the worktree and the thread's checkpoint refs", async () => {
+    const { rt, copier, daemon } = here();
+    const folder = repo();
+    const project = await rt.projects.add({ source: folder });
+    const at = await rt.workspaces.folderFor({ project: project.id, branch: "feat/busy" });
+    holding.on = true;
+    const run = await rt.sessions.start(at.workspace.id, { prompt: "working" });
+    const threadId = run.view().threadId!;
+    await expect(rt.sessions.delete(threadId)).rejects.toThrow(WORKTREE_BUSY_LINE);
+    expect(existsSync(at.workspace.worktree!.path)).toBe(true);
+    holding.on = false;
+    holding.waiting.splice(0).forEach(go => go());
+    await run.finished;
+    await until(() => daemon.frames.some(f => f["op"] === "git.checkpoint"));
+    await rt.sessions.delete(threadId);
+    expect(copier.worktreesRemoved.map(r => r.path)).toEqual([at.workspace.worktree!.path]);
+    expect(daemon.frames.filter(f => f["op"] === "git.checkpointDrop")).toEqual([expect.objectContaining({ scope: at.workspace.id, thread: threadId })]);
+  });
+});
+
+describe("a pull request's head", () => {
+  /** A project whose origin is a GitHub repository, served from a bare repo here by this computer's daemon fake. */
+  async function onGitHub() {
+    const h = here();
+    const root = scratch();
+    const bare = join(root, "spoo.git");
+    const folder = join(root, "spoo");
+    execFileSync("git", ["init", "-q", "--bare", "-b", "main", bare]);
+    execFileSync("git", ["clone", "-q", bare, folder]);
+    git(folder, "commit", "-q", "--allow-empty", "-m", "first");
+    git(folder, "push", "-q", "origin", "main");
+    const author = join(root, "author");
+    execFileSync("git", ["clone", "-q", bare, author]);
+    git(author, "checkout", "-q", "-b", "feat/pr");
+    git(author, "commit", "-q", "--allow-empty", "-m", "one");
+    git(author, "push", "-q", "origin", "feat/pr");
+    git(folder, "remote", "set-url", "origin", "https://github.com/dev/spoo.git");
+    const url = "https://github.com/dev/spoo/pull/7";
+    const fact: PullRequest = { number: 7, url, state: "open", host: "github.com", draft: false, base: "main", branch: "feat/pr", headOid: "a".repeat(40), headSubject: "one", mergeable: "mergeable", mergeState: "clean", review: "none", checks: [], additions: 0, deletions: 0, changedFiles: 0, commits: 1 };
+    h.daemon.answers["git.prRead"] = () => ({ id: 1, ok: true, pr: fact }) as DaemonResponse;
+    h.daemon.answers["git.issueRead"] = () => ({ id: 1, ok: true, issue: { number: 7, url, title: "one", body: "", state: "OPEN", comments: [] } }) as DaemonResponse;
+    h.daemon.answers["git.fetchBranch"] = f => {
+      const into = String(f["into"] ?? f["branch"]);
+      try {
+        git(String(f["cwd"]), "fetch", "-q", "--no-tags", bare, `refs/heads/${String(f["branch"])}:refs/heads/${into}`);
+      } catch (e) {
+        return { id: 1, ok: false, error: e instanceof Error ? e.message : String(e) } as DaemonResponse;
+      }
+      return { id: 1, ok: true, branch: into, oid: git(String(f["cwd"]), "rev-parse", `refs/heads/${into}`) } as DaemonResponse;
+    };
+    const project = await h.rt.projects.add({ source: folder });
+    return { ...h, folder, author, project, url };
+  }
+
+  it("is fetched through the daemon at every start, so a second start runs on what the author pushed since", async () => {
+    const { rt, daemon, folder, author, project, url } = await onGitHub();
+    const first = await rt.workspaces.start({ url, agent: "claude" });
+    const path = first.workspace.worktree!.path;
+    expect(git(path, "rev-parse", "HEAD")).toBe(git(author, "rev-parse", "HEAD"));
+    await rt.workspaces.worktreeRemove({ project: project.id, branch: "feat/pr" });
+    git(author, "commit", "-q", "--allow-empty", "-m", "two");
+    git(author, "push", "-q", "origin", "feat/pr");
+    const second = await rt.workspaces.start({ url, agent: "claude" });
+    expect(git(second.workspace.worktree!.path, "rev-parse", "HEAD")).toBe(git(author, "rev-parse", "HEAD"));
+    expect(daemon.frames.filter(f => f["op"] === "git.fetchBranch")).toEqual([
+      expect.objectContaining({ cwd: folder, remote: "https://github.com/dev/spoo.git", branch: "feat/pr" }),
+      expect.objectContaining({ cwd: folder, remote: "https://github.com/dev/spoo.git", branch: "feat/pr" }),
+    ]);
   });
 });
 

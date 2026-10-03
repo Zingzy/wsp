@@ -681,11 +681,13 @@ export type WorktreeSettled = z.infer<typeof WorktreeSettled>;
 /** A worktree of the project's repo threads run in on this computer. made: wsp added it under its own folder, and
  * only such a worktree is ever removed by wsp; one the person or an agent made is used and left alone. kept says why
  * a settled worktree still stands, removeFailed is git's own line when a removal was refused, and gone marks one
- * that is no longer on disk, whose threads continue in the project folder. */
+ * that is no longer on disk, whose threads continue in the project folder. madeFor is the root thread a thread's
+ * start made it for, whose tree reaches it as a fork the tree made. */
 export const WorktreeFolder = z.object({
   path: z.string(),
   branch: z.string().optional(),
   made: z.boolean(),
+  madeFor: z.string().optional(),
   settled: WorktreeSettled.optional(),
   kept: z.string().optional(),
   removeFailed: z.string().optional(),
