@@ -216,6 +216,10 @@ machineId?: string, } | { "op": "git.prList", cwd: string,
  */
 machineId?: string, } | { "op": "git.checkpoint", cwd: string, thread: string, turn: string, 
 /**
+ * The folder record the refs are kept under; without one, the checkout's folder name.
+ */
+scope?: string, 
+/**
  * The workspace this frame is for, as on fs.list above.
  */
 machineId?: string, } | { "op": "git.restore", cwd: string, 
@@ -223,6 +227,38 @@ machineId?: string, } | { "op": "git.restore", cwd: string,
  * The checkpoint's ref, as a git.checkpoint answer named it.
  */
 checkpoint: string, 
+/**
+ * The folder record the refs are kept under; without one, the checkout's folder name.
+ */
+scope?: string, 
+/**
+ * The workspace this frame is for, as on fs.list above.
+ */
+machineId?: string, } | { "op": "git.checkpointDrop", cwd: string, 
+/**
+ * The folder record the refs are kept under; without one, the checkout's folder name.
+ */
+scope?: string, thread: string, 
+/**
+ * The workspace this frame is for, as on fs.list above.
+ */
+machineId?: string, } | { "op": "git.worktrees", cwd: string, 
+/**
+ * The workspace this frame is for, as on fs.list above.
+ */
+machineId?: string, } | { "op": "git.branches", cwd: string, 
+/**
+ * The workspace this frame is for, as on fs.list above.
+ */
+machineId?: string, } | { "op": "git.switchNew", cwd: string, branch: string, 
+/**
+ * The workspace this frame is for, as on fs.list above.
+ */
+machineId?: string, } | { "op": "git.fetchBranch", cwd: string, remote: string, branch: string, 
+/**
+ * The local branch it lands in; the same name when absent.
+ */
+into?: string, 
 /**
  * The workspace this frame is for, as on fs.list above.
  */

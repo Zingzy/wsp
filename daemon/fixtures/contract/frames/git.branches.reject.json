@@ -1,0 +1,13 @@
+[
+  {
+    "id": 1,
+    "op": "git.branches"
+  },
+  {
+    "id": 1,
+    "op": "git.branches",
+    "cwd": [
+      "/Users/dev/wsp"
+    ]
+  }
+]

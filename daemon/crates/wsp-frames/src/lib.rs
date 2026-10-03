@@ -27,7 +27,7 @@ pub mod words;
 
 pub use auth::DaemonAuthRequest;
 pub use checkpoint::{checkpoint_copy_part, checkpoint_id_ok, checkpoint_prefix, CHECKPOINT_REFS};
-pub use copy::{Carried, CopyAsk, CopyReport, CopyRoadName};
+pub use copy::{Carried, CopyAsk, CopyReport, CopyRoadName, WorktreeRemoval, WorktreeReport};
 pub use enums::{
     CheckState, DaemonErrorCode, FsEntryType, FsReadEncoding, FsSearchMode, GitDiffScope, HostItemKind, MergeMethod, Mergeable, ProcSignal,
     PtyMode, PullRequestState, ReactionContent, ReviewEvent, ReviewSide, ReviewState, WorkspaceKind,
@@ -52,16 +52,16 @@ pub use place::{
 pub use place_paths::{place_daemon_paths, place_owned_paths, place_provision_paths, probe_path, PlaceDaemonPaths, PlaceProvisionPaths};
 pub use reply::{
     DaemonErrorResponse, DaemonExecReply, Empty, False, FsEntry, FsFilesReply, FsListReply, FsReadReply, FsSearchHit, FsSearchReply,
-    FsWriteReply, GitBranch, GitBranchCompareReply, GitCheckpointReply, GitCommitReply, GitDiffFile, GitDiffReply, GitDiscardReply,
-    GitIssueReadReply, GitMergeInReply, GitPrCheckoutReply, GitPrDiffReply, GitPrListReply, GitPrMergeReply, GitPrReactReply,
-    GitPrReadReply, GitPrReply, GitPrReplyReply, GitPrResolveReply, GitPrReviewReply, GitPrViewReply, GitPushReply, GitRepoReadReply,
-    GitRestoreReply, GitRunLogReply, GitSnapshotReply, GitStartOnReply, GitStatusEntry, GitStatusReply, GitUpdateReply, HostFolder,
-    HostFolderListing, HostItem, InboxRescanReply, IssueComment, IssueRead, ListeningPort, ManifestEntry, ManifestGetReply,
-    ManifestRecordReply, ManifestRestartScriptReply, PlaceLeaveReply, PlaceUpdateReply, PortsWatchReply, ProcInspectReply, PtyAttachReply,
-    PtyCreateReply, PtyListEntry, PtyListReply, PullRequest, PullRequestAutoMerge, PullRequestCheck, PullRequestCheckRun,
-    PullRequestComment, PullRequestCommit, PullRequestFile, PullRequestFork, PullRequestLabel, PullRequestPageCut, PullRequestReaction,
-    PullRequestReview, PullRequestReviewComment, PullRequestReviewRequest, PullRequestVerdict, Reply, SshStartReply, SysHistoryReply,
-    SysPoint, True,
+    FsWriteReply, GitBranch, GitBranchCompareReply, GitBranchesReply, GitCheckpointDropReply, GitCheckpointReply, GitCommitReply,
+    GitDiffFile, GitDiffReply, GitDiscardReply, GitIssueReadReply, GitLocalBranch, GitMergeInReply, GitPrCheckoutReply, GitPrDiffReply,
+    GitPrListReply, GitPrMergeReply, GitPrReactReply, GitPrReadReply, GitPrReply, GitPrReplyReply, GitPrResolveReply, GitPrReviewReply,
+    GitPrViewReply, GitPushReply, GitRepoReadReply, GitRestoreReply, GitRunLogReply, GitSnapshotReply, GitStartOnReply, GitStatusEntry,
+    GitStatusReply, GitUpdateReply, GitWorktree, GitWorktreesReply, HostFolder, HostFolderListing, HostItem, InboxRescanReply,
+    IssueComment, IssueRead, ListeningPort, ManifestEntry, ManifestGetReply, ManifestRecordReply, ManifestRestartScriptReply,
+    PlaceLeaveReply, PlaceUpdateReply, PortsWatchReply, ProcInspectReply, PtyAttachReply, PtyCreateReply, PtyListEntry, PtyListReply,
+    PullRequest, PullRequestAutoMerge, PullRequestCheck, PullRequestCheckRun, PullRequestComment, PullRequestCommit, PullRequestFile,
+    PullRequestFork, PullRequestLabel, PullRequestPageCut, PullRequestReaction, PullRequestReview, PullRequestReviewComment,
+    PullRequestReviewRequest, PullRequestVerdict, Reply, SshStartReply, SysHistoryReply, SysPoint, True,
 };
 pub use request::{DaemonOp, DaemonRequest, ReviewComment, DAEMON_OPS, GUEST_OPS};
 pub use shell::shell_quote;
