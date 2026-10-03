@@ -221,6 +221,8 @@ const { api } = settingsApi({
   recipesOptions: async () => OPTIONS,
   recipesList: async () => (screen === "recipes-empty" ? [] : RECIPES),
   placesChoose: async () => pending[0]!,
+  placesFollow: async (_: string, recipe: string) => ({ ...studio, recipe }),
+  placesSkip: async () => studio,
   placesSetupLog: async () => [
     "2026-10-03T10:02:05Z [mcp] copying wsp, context7, gsc",
     "2026-10-03T10:02:06Z [clis] apt-get install -y golang-go",
