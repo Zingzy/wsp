@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { turnCutLine, type ExecStream } from "@wsp/protocol";
+import { shellQuote, turnCutLine, type ExecStream } from "@wsp/protocol";
 import { localExecStream, type GroupWorkReader } from "../src/local-exec.js";
 import { alive, gone, grandchild, sweepStrays } from "./strays.js";
 
@@ -67,6 +67,16 @@ describe("local exec stream", () => {
     expect(await stream.exited).toBe(0);
     expect(readFileSync(join(root, "in.txt"), "utf8")).toBe("first\nsecond\n");
   });
+
+  it("closeInput reaches a node child as the end of its stdin, so a harness exits on its own after its reply", async () => {
+    const factory = localExecStream({ root, runDir, pollMs: 10 });
+    const reader = `process.stdin.resume(); process.stdin.on("end", () => process.exit(7))`;
+    const stream = factory(`${shellQuote(process.execPath)} -e ${shellQuote(reader)}`, { env: {}, input: ["first"] });
+    stream.closeInput();
+    const code = await Promise.race([stream.exited, new Promise(resolve => setTimeout(() => resolve("still reading"), 5_000))]);
+    if (code === "still reading") stream.kill();
+    expect(code).toBe(7);
+  }, 15_000);
 
   it("a stream started without an input channel refuses a write", async () => {
     const factory = localExecStream({ root, runDir });
@@ -241,13 +251,13 @@ describe("what a run leaves on this computer", () => {
     expect(modeOf(`${base}.d`)).toBe("700");
     // The script carries the whole launch environment as export lines; the input channel carries what a person
     // sends into the turn; the log carries everything the agent prints.
-    for (const suffix of ["sh", "in", "log", "fifo"]) expect([suffix, modeOf(`${base}.${suffix}`)]).toEqual([suffix, "600"]);
+    for (const suffix of ["sh", "in", "log"]) expect([suffix, modeOf(`${base}.${suffix}`)]).toEqual([suffix, "600"]);
 
     // The key really is in there, and no file holding anything of the person's is open to another login: the run's
     // own bookkeeping (a pid, a tail's pid, an exit code) is written by the shell at its own umask, and the folder
     // at 700 is what keeps that out of anyone else's reach.
     expect(readFileSync(`${base}.sh`, "utf8")).toContain("sk-ant-x-not-a-key");
-    const carries = new Set(["sh", "in", "log", "fifo"]);
+    const carries = new Set(["sh", "in", "log"]);
     const readable = readdirSync(runDir).filter(name => carries.has(name.split(".").at(-1)!) && (statSync(join(runDir, name)).mode & 0o077) !== 0);
     expect(readable).toEqual([]);
 

@@ -11,7 +11,7 @@
 // by the handle its stream reported and reads what the turn printed while
 // nobody was listening, and a run no row of the connecting host holds is ended
 // by the sweep. A stream started with an input channel gets a file the launch
-// seeds and every write() appends to; a tail feeds it through a fifo, so a
+// seeds and every write() appends to; a tail pumps it into a pipe, so a
 // message reaches a running process this host holds no pipe to. One started
 // without gets no stdin at all, so the binary reads EOF rather than hanging on
 // a silent open pipe.
@@ -35,7 +35,7 @@
 // both: bytes, the person's messages, and the work the turn's own tree is doing
 // while it prints nothing.
 
-import { execFile, spawn, spawnSync } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -225,14 +225,6 @@ async function reapRun(base: string, graceMs = RUN_STOP_MS): Promise<void> {
   }
   for (const suffix of ["sh", "log", "pid", "exit", "in", "fifo", "tail"]) rmSync(`${base}.${suffix}`, { force: true });
   rmSync(`${base}.d`, { recursive: true, force: true });
-}
-
-/** The fifo a turn's messages reach its command through, owner-only like the files beside it: what a person sends
- * into a running turn travels through it. mkfifo is on both computers wsp runs a local turn on, and node has no
- * call of its own for one. */
-function spawnFifo(path: string): void {
-  const made = spawnSync("mkfifo", ["-m", "600", path]);
-  if (made.status !== 0) throw new Error(`no input channel for this turn: mkfifo ${path} answered ${String(made.status)}`);
 }
 
 /** One complete line at a time out of a growing byte stream: what precedes each newline is yielded, the tail waits
@@ -489,26 +481,20 @@ export function localExecStream(opts: LocalExecOptions, isWaiting?: TurnWaiting)
       .filter(([k]) => ENV_KEY.test(k))
       .map(([k, v]) => `export ${k}=${shellQuote(v)}`)
       .join("\n");
-    // The tail starts in a subshell so bash's job notice for its kill never lands in the log; the command's exit
-    // code is written before the tail is killed, so a poll that sees it reads a finished log.
     // The command runs in a subshell, so a turn whose own line ends in `exit` leaves the script standing and its
     // code still reaches the exit file: a run whose code nobody wrote reads as a run that answered nothing.
+    // Stdin is a pipe only the backgrounded pump holds: node on macOS never reads the end of a named fifo (2026-10-03).
     const body =
       input === undefined
         ? `( ${command}\n)\necho $? > ${shellQuote(`${base}.exit`)}\n`
-        : `( tail -n +1 -f ${shellQuote(`${base}.in`)} | { while IFS= read -r l; do [ "$l" = ${shellQuote(endMarker(base))} ] && break; printf '%s\\n' "$l"; done; } > ${shellQuote(`${base}.fifo`)} & echo $! > ${shellQuote(`${base}.tail`)} )\n` +
-          `( ${command}\n) < ${shellQuote(`${base}.fifo`)}\n` +
-          `echo $? > ${shellQuote(`${base}.exit`)}\n` +
-          `kill $(cat ${shellQuote(`${base}.tail`)}) 2>/dev/null\n`;
+        : `( ${command}\n) < <(tail -n +1 -f ${shellQuote(`${base}.in`)} | { while IFS= read -r l; do [ "$l" = ${shellQuote(endMarker(base))} ] && break; printf '%s\\n' "$l"; done; } &)\n` +
+          `echo $? > ${shellQuote(`${base}.exit`)}\n`;
     // The three files that carry what a turn is: the script holds the whole launch environment as export lines,
     // the provider key and the turn's own token among them, the input channel holds every message a person sends
     // and the log holds everything the agent prints. The mode goes on at the open, never by a chmod after it: a
     // file that is readable for one moment has been read.
     writeOwned(`${base}.sh`, `${exports}\n${body}`);
-    if (input !== undefined) {
-      writeOwned(`${base}.in`, input.map(line => `${line}\n`).join(""));
-      spawnFifo(`${base}.fifo`);
-    }
+    if (input !== undefined) writeOwned(`${base}.in`, input.map(line => `${line}\n`).join(""));
     writeOwned(`${base}.log`, "");
     const log = openSync(`${base}.log`, "a");
     /** A launch node itself could not make: no bash on the PATH the turn runs under. Nothing wrote a log or an exit
@@ -518,8 +504,8 @@ export function localExecStream(opts: LocalExecOptions, isWaiting?: TurnWaiting)
       const child = spawn("bash", [`${base}.sh`], {
         cwd: opts.root,
         env: { ...env },
-        // No pipe of this process's is handed to the run: its output is the log, and its stdin the fifo the script
-        // opens, so nothing it holds dies with the host that launched it.
+        // No pipe of this process's is handed to the run: its output is the log, and its stdin the pump the script
+        // starts, so nothing it holds dies with the host that launched it.
         stdio: ["ignore", log, log],
         // Its own process group, so a signal can reach what the turn started without reaching this host, and the
         // terminal's Ctrl-C reaches the host alone.

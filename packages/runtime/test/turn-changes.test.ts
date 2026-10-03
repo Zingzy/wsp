@@ -17,16 +17,21 @@ import { createOn, fakeLocal, projectOn, stubBackend, tokenGuest } from "./stub-
 const DAEMON_TOKEN = "cafef00d".repeat(3);
 const sha = (n: number): string => String(n).repeat(40).slice(0, 40);
 
-/** A daemon whose snapshots count up and whose range answers what the case gives it. */
-function fakeDaemon(o: { files?: { path: string; kind: string; additions: number; deletions: number }[]; moved?: string[]; stall?: boolean } = {}) {
+/** A daemon whose snapshots count up and whose range answers what the case gives it; with hold, the first snapshot
+ * answers when the case lets it. */
+function fakeDaemon(o: { files?: { path: string; kind: string; additions: number; deletions: number }[]; moved?: string[]; stall?: boolean; hold?: boolean } = {}) {
   const frames: Record<string, unknown>[] = [];
   let snapshots = 0;
-  const answer = (frame: Record<string, unknown>): Promise<DaemonResponse> => {
+  let letGo: () => void = () => {};
+  const held = new Promise<void>(resolve => (letGo = resolve));
+  const answer = async (frame: Record<string, unknown>): Promise<DaemonResponse> => {
     frames.push(frame);
     if (frame["op"] === "git.snapshot") {
       if (o.stall === true) return new Promise(() => {});
       snapshots += 1;
-      return Promise.resolve({ id: 1, ok: true, commit: sha(snapshots) } as DaemonResponse);
+      const commit = sha(snapshots);
+      if (o.hold === true && snapshots === 1) await held;
+      return { id: 1, ok: true, commit } as DaemonResponse;
     }
     if (frame["op"] === "git.turn") return Promise.resolve({ id: 1, ok: true, base: null, truncated: false, moved: o.moved ?? [], files: (o.files ?? []).map(f => ({ ...f, patch: "" })) } as DaemonResponse);
     return Promise.resolve({ id: 1, ok: false, code: "unsupported", error: `${String(frame["op"])} is not in this case` } as DaemonResponse);
@@ -36,15 +41,16 @@ function fakeDaemon(o: { files?: { path: string; kind: string; additions: number
     close: () => {},
     closed: new Promise(() => {}),
   });
-  return { open, frames };
+  return { open, frames, letGo: () => letGo() };
 }
 
 /** An adapter whose turn waits on the case's word before it replies, so two turns can overlap. */
-function gated(): { factory: HarnessAdapterFactory; release: (n: number) => void; starts: HarnessStartOptions[] } {
+function gated(o: { waitsForPrompt?: true } = {}): { factory: HarnessAdapterFactory; release: (n: number) => void; starts: HarnessStartOptions[] } {
   const starts: HarnessStartOptions[] = [];
   const gates: (() => void)[] = [];
   const factory: HarnessAdapterFactory = () => ({
     steers: false,
+    ...o,
     start: (options: HarnessStartOptions) => {
       const index = starts.push(options) - 1;
       const sessionId = `sess-${index}`;
@@ -112,6 +118,25 @@ describe("what a turn changed", () => {
     expect(daemon.frames.filter(f => f["op"] === "git.snapshot" || f["op"] === "git.turn")).toEqual([{ op: "git.snapshot", cwd }, { op: "git.snapshot", cwd }, { op: "git.turn", cwd, from: sha(1), to: sha(2) }]);
     expect(events).toEqual([expect.objectContaining({ type: "session.changes", turnId: turnOf.get("add a line and a file"), threadId: handle.view().threadId, from: sha(1), to: sha(2), files })]);
     expect(events[0]).not.toHaveProperty("shared");
+  });
+
+  it("starts an agent that takes its prompt late while the launch's snapshot is taken, and hands it the prompt once the snapshot is in", async () => {
+    const files = [{ path: "README.md", kind: "modified", additions: 1, deletions: 0 }];
+    const daemon = fakeDaemon({ files, hold: true });
+    const agent = gated({ waitsForPrompt: true });
+    const { ws, events } = await workspaceWith(daemon, agent.factory);
+    const handle = await rt!.sessions.start(ws.id, { prompt: "edit the readme" });
+    expect(agent.starts).toHaveLength(1);
+    let prompted = false;
+    void agent.starts[0]!.promptAfter!.then(() => (prompted = true));
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(prompted).toBe(false);
+    daemon.letGo();
+    await until(() => prompted);
+    agent.release(0);
+    await handle.finished;
+    await until(() => events.length > 0);
+    expect(events).toEqual([expect.objectContaining({ type: "session.changes", from: sha(1), to: sha(2), files })]);
   });
 
   it("records nothing for a turn that changed nothing", async () => {

@@ -436,6 +436,23 @@ describe("ClaudeAdapter over the recorded fixture", () => {
     expect(call.env.HOME).toBe("/Users/z");
   });
 
+  it("with promptAfter starts the CLI on an empty channel and writes the prompt once it settles, so the CLI starts up meanwhile", async () => {
+    const exec = manualExec();
+    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
+    let open: () => void = () => {};
+    const promptAfter = new Promise<void>((resolve) => (open = resolve));
+    const session = adapter.start({ prompt: "say ok", promptAfter, onEvent: () => {} });
+    expect(exec.calls[0]?.input).toEqual([]);
+    await new Promise((r) => setTimeout(r, 5));
+    expect(exec.writes).toEqual([]);
+    open();
+    await until(() => exec.writes.length === 1);
+    expect(exec.writes).toEqual([userMessageLine("say ok", session.localId)]);
+    expect(adapter.waitsForPrompt).toBe(true);
+    exec.end(0);
+    await session.finished;
+  });
+
   it("on a person's own computer exports no config dir and no sandbox flag, and reads the store under their home", async () => {
     // Their shell sets neither, so a launch sets neither: Claude keys its Keychain login by whether the variable is
     // set, and the flag is a machine's fact. The transcript and the session store are still read under ~/.claude.
