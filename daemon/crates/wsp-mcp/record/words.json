@@ -498,6 +498,7 @@
     "noThreadHere": "no thread {ref} on this computer. Name a thread wsp threads lists.",
     "deleteNamesNothing": "delete takes a thread, or a workspace on a box. Name one.",
     "localFolder": "{name} is a project's folder on this computer, which delete and forget leave alone. Run wsp threads to find its threads, then wsp delete <thread>.",
+    "localWorktree": "{name} is a worktree of a project on this computer, which delete and forget leave alone. Remove it with wsp worktree remove <project> <branch>, or delete a thread there with wsp delete <thread>.",
     "threadDeleted": "deleted thread {thread}",
     "threadDeletedOne": "deleted thread {thread}, the worktree at {path} and its one thread",
     "threadDeletedMany": "deleted thread {thread}, the worktree at {path} and its {count} threads",

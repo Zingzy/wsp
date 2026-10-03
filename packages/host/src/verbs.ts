@@ -246,6 +246,7 @@ import {
   HOST_TOKEN_ENV,
   threadDeleteQuestion,
   localFolderRefusal,
+  localWorktreeRefusal,
   threadDeletedLine,
   WorktreeMade,
   worktreeRemovedLine,
@@ -1634,6 +1635,9 @@ export interface Dropping {
 
 export async function dropping(client: HostClient, ref: string): Promise<Dropping> {
   const workspace = await workspaceOf(client, ref);
+  if (isLocalWorkspace(workspace) && workspace.worktree !== undefined) {
+    throw usageRefusal(localWorktreeRefusal(workspace.name), "Remove it with wsp worktree remove <project> <branch>, or delete a thread there with wsp delete <thread>.");
+  }
   if (isLocalWorkspace(workspace)) throw usageRefusal(localFolderRefusal(workspace.name), "Run wsp threads to find its threads, then wsp delete <thread>.");
   return { workspace, threads: (await threads(client, workspace.id)).length };
 }

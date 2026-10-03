@@ -103,6 +103,7 @@ export async function workspaceWords(line: LineOf, host: HostOf): Promise<Record
   const noThreadHere = textOf(await line("delete", { thread: "{ref}" }, { "sessions.list": reply({ sessions: [] }) }));
   const deleteNamesNothing = textOf(await line("delete", {}, {}));
   const localFolder = textOf(await line("forget", { workspace: "w" }, { "workspaces.resolve": reply({ workspace: ws({ kind: "local", machineId: "here" }) }) }));
+  const localWorktree = textOf(await line("forget", { workspace: "w" }, { "workspaces.resolve": reply({ workspace: ws({ kind: "local", machineId: "here", worktree: { path: "/p", branch: "b", made: true } }) }) }));
   const agentsText = textOf(await line("workspaces_agents", { workspace: "w", spawn: "off" }, { "workspaces.resolve": reply({ workspace: ws({}) }), "workspaces.agents": reply({ workspace: ws({}) }) }));
   const cloud = onDeleteOf("cloud", undefined, "{machine}");
   const forked = { ...WORKSPACE, id: "{id}", name: "{name}" };
@@ -199,6 +200,7 @@ export async function workspaceWords(line: LineOf, host: HostOf): Promise<Record
     noThreadHere,
     deleteNamesNothing,
     localFolder,
+    localWorktree,
     threadDeleted: threadDeletedLine("{thread}", { threads: 1 }),
     threadDeletedOne: threadDeletedLine("{thread}", { worktree: "{path}", threads: 1 }),
     threadDeletedMany: slot(threadDeletedLine("{thread}", { worktree: "{path}", threads: 2 }), "2", "count"),
@@ -354,7 +356,8 @@ export const WORKSPACE_ANSWERED: Record<string, TurnCase[]> = {
     { case: "paused", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "status.list": reply({ statuses: [{ id: "ws-1", machineState: "paused", reach: { state: "ok" } }] }) } },
   ]),
   forget: [
-    { case: "a folder here", arguments: { workspace: "here" }, replies: { "workspaces.resolve": reply({ workspace: LOCAL }), "sessions.list": reply({ sessions: SESSIONS }) } },
+    { case: "a folder here", arguments: { workspace: "here" }, replies: { "workspaces.resolve": reply({ workspace: { ...LOCAL, worktree: undefined } }), "sessions.list": reply({ sessions: SESSIONS }) } },
+    { case: "a worktree here", arguments: { workspace: "here" }, replies: { "workspaces.resolve": reply({ workspace: LOCAL }), "sessions.list": reply({ sessions: SESSIONS }) } },
     { case: "forgot", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: GONE }), "sessions.list": reply({ sessions: SESSIONS }), "workspaces.forget": reply({}) } },
     { case: "one thread", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: GONE }), "sessions.list": reply({ sessions: SESSIONS.slice(0, 1) }), "workspaces.forget": reply({}) } },
     { case: "refused", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "sessions.list": reply({ sessions: [] }), "workspaces.forget": refused("Only a workspace whose computer is gone can be forgotten; this one is running", "usage") } },
@@ -370,7 +373,8 @@ export const WORKSPACE_ANSWERED: Record<string, TurnCase[]> = {
     { case: "no such thread", arguments: { thread: "zz" }, replies: { "sessions.list": reply({ sessions: HERE_SESSIONS }) } },
     { case: "thread refused", arguments: { thread: "t-2", confirm: true }, replies: { "sessions.list": reply({ sessions: HERE_SESSIONS }), "workspaces.list": reply({ workspaces: [LOCAL, WORKSPACE] }), "sessions.delete": refused("that worktree has 2 files not committed; commit them, or remove it with --force to lose them", "usage") } },
     { case: "nothing named", arguments: {}, replies: {} },
-    { case: "a folder here", arguments: { workspace: "here" }, replies: { "workspaces.resolve": reply({ workspace: LOCAL }), "sessions.list": reply({ sessions: SESSIONS }) } },
+    { case: "a folder here", arguments: { workspace: "here" }, replies: { "workspaces.resolve": reply({ workspace: { ...LOCAL, worktree: undefined } }), "sessions.list": reply({ sessions: SESSIONS }) } },
+    { case: "a worktree here", arguments: { workspace: "here" }, replies: { "workspaces.resolve": reply({ workspace: LOCAL }), "sessions.list": reply({ sessions: SESSIONS }) } },
     { case: "unconfirmed never made", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: { ...WORKSPACE, machineId: "" } }), "sessions.list": reply({ sessions: [] }) } },
     { case: "deleted", arguments: { workspace: "alpha", confirm: true }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "sessions.list": reply({ sessions: SESSIONS }), "workspaces.delete": reply({}) } },
     { case: "deleted never made", arguments: { workspace: "alpha", confirm: true }, replies: { "workspaces.resolve": reply({ workspace: { ...WORKSPACE, machineId: "" } }), "sessions.list": reply({ sessions: [] }), "workspaces.delete": reply({}) } },

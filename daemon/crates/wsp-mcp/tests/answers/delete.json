@@ -211,10 +211,27 @@
         "workspace": "here"
       },
       "replies": {
-        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"here\",\"id\":\"ws-2\",\"machineId\":\"here\",\"phase\":\"running\",\"kind\":\"local\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\",\"worktree\":{\"path\":\"/Users/me/.wsp/worktrees/proj-1/work \u0085\",\"branch\":\"work\",\"made\":true}}}",
+        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"here\",\"id\":\"ws-2\",\"machineId\":\"here\",\"phase\":\"running\",\"kind\":\"local\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
         "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"id\":\"s-1\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"threadId\":\"t-1\"},{\"id\":\"s-2\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"threadId\":\"t-1\"},{\"id\":\"s-3\",\"workspaceId\":\"ws-1\",\"harness\":\"codex\",\"status\":\"running\"}]}"
       },
       "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"here is a project's folder on this computer, which delete and forget leave alone. Run wsp threads to find its threads, then wsp delete <thread>.\"}],\"structuredContent\":{\"error\":\"here is a project's folder on this computer, which delete and forget leave alone. Run wsp threads to find its threads, then wsp delete <thread>.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "workspaces.resolve",
+          "ref": "here"
+        }
+      ]
+    },
+    {
+      "case": "a worktree here",
+      "arguments": {
+        "workspace": "here"
+      },
+      "replies": {
+        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"here\",\"id\":\"ws-2\",\"machineId\":\"here\",\"phase\":\"running\",\"kind\":\"local\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\",\"worktree\":{\"path\":\"/Users/me/.wsp/worktrees/proj-1/work \u0085\",\"branch\":\"work\",\"made\":true}}}",
+        "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"id\":\"s-1\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"threadId\":\"t-1\"},{\"id\":\"s-2\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"threadId\":\"t-1\"},{\"id\":\"s-3\",\"workspaceId\":\"ws-1\",\"harness\":\"codex\",\"status\":\"running\"}]}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"here is a worktree of a project on this computer, which delete and forget leave alone. Remove it with wsp worktree remove <project> <branch>, or delete a thread there with wsp delete <thread>.\"}],\"structuredContent\":{\"error\":\"here is a worktree of a project on this computer, which delete and forget leave alone. Remove it with wsp worktree remove <project> <branch>, or delete a thread there with wsp delete <thread>.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
           "op": "workspaces.resolve",

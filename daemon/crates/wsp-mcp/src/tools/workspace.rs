@@ -101,6 +101,7 @@ pub struct Words {
     pub no_thread_here: String,
     pub delete_names_nothing: String,
     pub local_folder: String,
+    pub local_worktree: String,
     pub thread_deleted: String,
     pub thread_deleted_one: String,
     pub thread_deleted_many: String,

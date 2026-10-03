@@ -157,12 +157,15 @@ async fn delete(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     Ok(Answer::text(said, &going))
 }
 
-/// A folder of a project on this computer is never named to delete or forget: its threads are what goes.
+/// A folder of a project on this computer is never named to delete or forget: its threads are what goes, and a
+/// worktree goes by its own verb.
 fn refuse_folder(workspace: &Workspace) -> Result<(), Failure> {
-    if workspace.kind == Some(Kind::Local) {
-        return Err(Failure::usage(fill(&workspace::words().local_folder, &[("name", &workspace.name)])));
+    if workspace.kind != Some(Kind::Local) {
+        return Ok(());
     }
-    Ok(())
+    let words = workspace::words();
+    let template = if workspace.worktree.is_some() { &words.local_worktree } else { &words.local_folder };
+    Err(Failure::usage(fill(template, &[("name", &workspace.name)])))
 }
 
 /// A thread on this computer, with the worktree wsp made that it runs in; nothing where the word names no thread, or
