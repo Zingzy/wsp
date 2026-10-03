@@ -438,6 +438,13 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
       }, deps.reconnectStallMs ?? RECONNECT_STALL_MS);
     };
 
+    /** A message another thread on this server sent: one naming no thread, or sent before this one is known, is this
+     * thread's. */
+    const foreign = (params: Record<string, unknown>): boolean => {
+      const id = str(params.threadId);
+      return announced && id !== undefined && id !== threadId;
+    };
+
     const note = (text: string): void => {
       if (announced) emit({ type: "turn.delta", sessionId: threadId, kind: "note", text });
       else early.push(text);
@@ -568,6 +575,9 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
 
     const onNotification = (method: string, params: Record<string, unknown>, emittedAtMs?: number): void => {
       if (method !== "error") progress();
+      // A subagent's thread prints its own turn, tokens, plan and items on this stdout under its own id; none of them
+      // is this thread's. Request ids are the connection's, so a resolved request is read whoever asked it.
+      if (method !== "serverRequest/resolved" && foreign(params)) return;
       switch (method) {
         case "thread/started": {
           const thread = rec(params.thread);

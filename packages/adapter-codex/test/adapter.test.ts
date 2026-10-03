@@ -660,6 +660,71 @@ describe("interrupt", () => {
   });
 });
 
+describe("a subagent's frames on its lead's stream", () => {
+  // The shape of T3 Code's recorded multi-agent wire (codexMultiAgentWire.json, codex-cli 0.145.0, MIT): a child
+  // thread's own turn/started, token usage, items and turn/completed arrive on the lead's stdout under the child's id.
+  const CHILD = "019fcfd6-2883-77e0-9013-4410ede70371";
+  const CHILD_TURN = "019fcfd6-28bf-7e00-a873-4554526dc845";
+  const usageOf = (threadId: string, turnId: string, total: number, last: number) =>
+    `{"method":"thread/tokenUsage/updated","params":{"threadId":"${threadId}","turnId":"${turnId}","tokenUsage":{"total":{"inputTokens":${total},"cachedInputTokens":0,"cacheWriteInputTokens":0,"outputTokens":0,"reasoningOutputTokens":0,"totalTokens":${total}},"last":{"inputTokens":${last},"cachedInputTokens":0,"cacheWriteInputTokens":0,"outputTokens":0,"reasoningOutputTokens":0,"totalTokens":${last}},"modelContextWindow":${threadId === THREAD_ID ? 258_400 : 128_000}}}}`;
+  const childFrames = [
+    `{"method":"thread/status/changed","params":{"threadId":"${CHILD}","status":{"type":"idle"}}}`,
+    `{"method":"item/completed","params":{"item":{"type":"subAgentActivity","id":"call_S2JP","kind":"started","agentThreadId":"${CHILD}","agentPath":"/root/alpha"},"threadId":"${THREAD_ID}","turnId":"${TURN_ID}","completedAtMs":1785898346687}}`,
+    `{"method":"thread/status/changed","params":{"threadId":"${CHILD}","status":{"type":"active","activeFlags":[]}}}`,
+    `{"method":"turn/started","params":{"threadId":"${CHILD}","turn":{"id":"${CHILD_TURN}","items":[],"itemsView":"notLoaded","status":"inProgress","error":null}}}`,
+    usageOf(CHILD, CHILD_TURN, 20_756, 20_756),
+    `{"method":"turn/plan/updated","params":{"threadId":"${CHILD}","turnId":"${CHILD_TURN}","explanation":null,"plan":[{"step":"child step","status":"inProgress"}]}}`,
+    `{"method":"item/completed","params":{"item":{"type":"agentMessage","id":"child_m1","text":"child says done"},"threadId":"${CHILD}","turnId":"${CHILD_TURN}"}}`,
+  ];
+  const childAsk = `{"id":11,"method":"item/commandExecution/requestApproval","params":{"threadId":"${CHILD}","turnId":"${CHILD_TURN}","itemId":"call_c1","command":"ls","cwd":"/root/app","startedAtMs":1}}`;
+  const childCompleted = `{"method":"turn/completed","params":{"threadId":"${CHILD}","turn":{"id":"${CHILD_TURN}","items":[],"status":"completed","error":null}}}`;
+
+  const leading = () =>
+    launcher(seed => {
+      const w = wire({
+        onWrite: (message, self) => {
+          if (message.method === "thread/start") self.push(...opened());
+          if (message.method === "turn/start") self.push(turnStarted, usageOf(THREAD_ID, TURN_ID, 18_261, 18_261), ...childFrames, childAsk);
+          if (message.method === "turn/steer") self.push(`{"id":${JSON.stringify(message.id)},"result":{"turnId":"${TURN_ID}"}}`);
+        },
+      });
+      for (const line of seed) void w.stream.write(line);
+      return w;
+    });
+
+  it("never lets a child's turn set, end or rename the lead's: the steer names the lead's turn and the lead's completion ends it", async () => {
+    const live = leading();
+    const { events, onEvent } = collect();
+    const session = adapterOver(live).start({ prompt: "spawn one agent", onEvent });
+    await until(() => events.some(e => e.type === "permission.ask"));
+    expect(await session.steer("and say when")).toBe("accepted");
+    expect(live.wires[0]!.written.find(m => m.method === "turn/steer")!.params).toMatchObject({ threadId: THREAD_ID, expectedTurnId: TURN_ID });
+
+    live.wires[0]!.push(childCompleted);
+    await new Promise(r => setTimeout(r, 10));
+    expect(events.some(e => e.type === "turn.done")).toBe(false);
+    expect(live.wires[0]!.closed).toBe(false);
+
+    live.wires[0]!.push(agentMessage("lead_m1", "the lead's reply"), usageOf(THREAD_ID, TURN_ID, 36_576, 18_315), completed("completed"));
+    const result = await session.finished;
+    expect(result).toMatchObject({ status: "completed", text: "the lead's reply" });
+    expect(result.tokens).toMatchObject({ input: 36_576, context: 18_315, window: 258_400 });
+    expect(events.filter(e => e.type === "turn.anchor")).toEqual([{ type: "turn.anchor", sessionId: THREAD_ID, anchor: TURN_ID }]);
+    expect(events.some(e => e.type === "turn.plan")).toBe(false);
+    expect(deltasOf(events).map(d => d.text)).not.toContain("child says done");
+  });
+
+  it("an interrupt names the lead's turn after a child's turn started", async () => {
+    const live = leading();
+    const { events, onEvent } = collect();
+    const session = adapterOver(live, { graceMs: 15 }).start({ prompt: "spawn one agent", onEvent });
+    await until(() => events.some(e => e.type === "permission.ask"));
+    await session.interrupt();
+    expect(live.wires[0]!.written.filter(m => m.method === "turn/interrupt").map(m => m.params)).toContainEqual({ threadId: THREAD_ID, turnId: TURN_ID });
+    expect(live.wires[0]!.written.filter(m => m.method === "turn/interrupt").map(m => (m.params as Json).turnId)).not.toContain(CHILD_TURN);
+  });
+});
+
 describe("a turn a later host attaches to", () => {
   it("re-opens the run with its channel, replays the log, and writes nothing in answer to what the replay shows", async () => {
     const launch = launcher(server(fixtureLines("app-server-turn")));
