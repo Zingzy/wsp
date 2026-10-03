@@ -110,6 +110,18 @@ describe("a resolved recipe", () => {
     expect((await resolveRecipe(LAPTOP, reading())).items["skills/unslop"]).not.toBe(before.items["skills/unslop"]);
   });
 
+  it("reads nothing through a folder linked inside a skill, so a change there moves no hash", async () => {
+    const real = join(home, ".claude", "skills", "unslop");
+    mkdirSync(real, { recursive: true });
+    writeFileSync(join(real, "SKILL.md"), "---\nname: unslop\n---\n");
+    mkdirSync(join(home, ".ssh"), { recursive: true });
+    writeFileSync(join(home, ".ssh", "id_ed25519"), "one");
+    symlinkSync(join(home, ".ssh"), join(real, "keys"));
+    const before = await resolveRecipe(LAPTOP, reading());
+    writeFileSync(join(home, ".ssh", "id_ed25519"), "two");
+    expect((await resolveRecipe(LAPTOP, reading())).items["skills/unslop"]).toBe(before.items["skills/unslop"]);
+  });
+
   it("asks no manager anything when the recipe picks no CLI", async () => {
     let asked = 0;
     await resolveRecipe({ ...LAPTOP, clis: {} }, { home, tools: async () => (asked++, []) });

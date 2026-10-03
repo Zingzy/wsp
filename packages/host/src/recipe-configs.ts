@@ -5,9 +5,10 @@
 // root reads is here: bash's own files never travel, since root's home on a
 // box is the one every workspace there writes.
 import { createHash } from "node:crypto";
-import { lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { stripExports } from "@wsp/collect";
+import { folderFiles } from "./folder-files.js";
 
 /** The configs a recipe can tick that land as files. The GitHub row is a vault token and lands none. */
 export type ConfigFiles = "git" | "shell";
@@ -80,26 +81,15 @@ export interface ConfigText {
   text: string;
 }
 
-/** Every file under one path, home-relative, in order; a link is read where it points, a folder named above is left. */
+/** Every file under one path, home-relative, in order: the path itself read where it points, what is under it by the
+ * rule everything a recipe ships is read by, a folder named above left out. */
 function filesUnder(home: string, rel: string): string[] {
-  const at = join(home, rel);
-  let st;
-  try {
-    st = statSync(at);
-  } catch {
-    return [];
-  }
-  if (st.isFile()) return st.size <= CONFIG_MAX_BYTES ? [rel] : [];
-  if (!st.isDirectory()) return [];
-  return readdirSync(at)
-    .filter(name => !NEVER_NAMES.has(name))
-    .sort()
-    .flatMap(name => {
-      // A link inside a config folder is followed only to a file: a linked folder is somebody's checkout.
-      const child = `${rel}/${name}`;
-      const linked = lstatSync(join(home, child)).isSymbolicLink();
-      return linked && !statSync(join(home, child), { throwIfNoEntry: false })?.isFile() ? [] : filesUnder(home, child);
-    });
+  const st = statSync(join(home, rel), { throwIfNoEntry: false });
+  if (st?.isFile() === true) return st.size <= CONFIG_MAX_BYTES ? [rel] : [];
+  if (st?.isDirectory() !== true) return [];
+  return folderFiles(join(home, rel), name => NEVER_NAMES.has(name))
+    .files.filter(f => statSync(f.path).size <= CONFIG_MAX_BYTES)
+    .map(f => `${rel}/${f.rel}`);
 }
 
 /** What one config row lands, read off this computer with its cuts made: the git files with what never travels

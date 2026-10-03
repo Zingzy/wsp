@@ -14,6 +14,7 @@ import { issuesLine, noSuchRecipeRefusal, RECIPE_NAME_REFUSAL, RecipeFile, recip
 import type { RecipeShelf } from "@wsp/runtime";
 import { configDigest, configTexts, type ConfigFiles } from "./recipe-configs.js";
 import { readRecipeOptions } from "./recipe-options.js";
+import { folderFiles } from "./folder-files.js";
 
 /** Where a host keeps its recipes: beside its state file, one file per recipe. */
 export const recipesDir = (statePath: string): string => join(dirname(statePath), "recipes");
@@ -120,20 +121,10 @@ export interface RecipeReading {
   tools(): Promise<Manifest["entries"]>;
 }
 
-/** The digest of a folder's files at its real path, in order, a link inside it read where it points. */
+/** The digest of a folder's files at its real path, in order, by the rule everything a recipe ships is read by. */
 function folderDigest(dir: string): string {
   const hash = createHash("sha256");
-  const walk = (at: string, rel: string): void => {
-    for (const name of readdirSync(at).sort()) {
-      if (name === ".git") continue;
-      const path = join(at, name);
-      const st = statSync(path, { throwIfNoEntry: false });
-      if (st === undefined) continue;
-      if (st.isDirectory()) walk(path, `${rel}${name}/`);
-      else if (st.isFile()) hash.update(`${rel}${name}\0`).update(readFileSync(path)).update("\0");
-    }
-  };
-  walk(dir, "");
+  for (const f of folderFiles(dir).files) hash.update(`${f.rel}\0`).update(readFileSync(f.path)).update("\0");
   return hash.digest("hex");
 }
 

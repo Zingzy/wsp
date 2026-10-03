@@ -12,6 +12,7 @@ import type { Manifest } from "@wsp/collect";
 import { RecipeFile, type AddLine, type PlaceSetup, type PlaceView, type PlaceWait } from "@wsp/protocol";
 import { sshWordReach, type SshLocalRun } from "@wsp/engine";
 import { PassThrough } from "node:stream";
+import { gunzipSync } from "node:zlib";
 import { addCommand, addFlags, choosingLine, followSetup, parsePlaceCheck, placeCheckRefusal, PLACE_CHECK_SPARE_BYTES, RESUME_FLAGS_REFUSAL, SETUP_FLAGS_REFUSAL } from "../src/places.js";
 import { picksRows, placeProvisioner } from "../src/place-provision.js";
 import { addComputer, ADD_TOOL_FIX, watchSetup } from "../src/setup-follow.js";
@@ -304,7 +305,9 @@ describe("the plan off a computer's picks", () => {
     expect(full.skipped).toEqual([expect.objectContaining({ id: "skills/gone" })]);
     expect(full.configs?.lands.map(l => l.dest)).toEqual([".zshrc"]);
     const configs = await full.configs!.pack();
-    expect(configs.tar.toString("utf8")).not.toContain("ghp_x");
+    const landed = gunzipSync(configs.tar).toString("utf8");
+    expect(landed).toContain("alias g=git");
+    expect(landed).not.toContain("ghp_x");
     expect(full.configTools?.map(t => t.label)).toEqual(["zsh"]);
   });
 
@@ -318,5 +321,26 @@ describe("the plan off a computer's picks", () => {
     const plan = await provision.setup({ ...picks, skills: { ".ssh": { from: "~" }, "../../.ssh": { from: "~/.claude/skills" }, notes: { from: "~/.claude/skills" } } }, { home: "/root" });
     expect(plan.skills).toBeUndefined();
     expect(plan.skipped.map(s => s.id).sort()).toEqual(["skills/../../.ssh", "skills/.ssh", "skills/notes"]);
+  });
+
+  it("follows a link inside a skill only to a file, and names a linked folder rather than sending what it holds", async () => {
+    const home = tmp("plan-links");
+    mkdirSync(join(home, ".ssh"), { recursive: true });
+    writeFileSync(join(home, ".ssh", "id_ed25519"), "PRIVATE KEY BYTES");
+    writeFileSync(join(home, "notes.md"), "shared notes");
+    const good = join(home, ".claude", "skills", "good");
+    mkdirSync(good, { recursive: true });
+    writeFileSync(join(good, "SKILL.md"), "---\nname: good\n---\n");
+    symlinkSync(join(home, ".ssh"), join(good, "keys"));
+    symlinkSync(join(home, "notes.md"), join(good, "notes.md"));
+    const provision = placeProvisioner({ statePath: join(home, "state.json"), home, platform: "darwin", collect: async () => manifest, brew: async () => new Map() });
+    const plan = await provision.setup({ ...picks, skills: { good: { from: "~/.claude/skills" } } }, { home: "/root" });
+    const packed = await plan.skills!.pack();
+    const tar = gunzipSync(packed.tar).toString("utf8");
+    expect(tar).not.toContain("PRIVATE KEY BYTES");
+    expect(tar).not.toContain("keys/id_ed25519");
+    expect(tar).toContain("shared notes");
+    expect(packed.files).toBe(2);
+    expect(packed.skipped).toEqual([expect.objectContaining({ path: ".claude/skills/good/keys", note: expect.stringContaining("links to a folder") })]);
   });
 });

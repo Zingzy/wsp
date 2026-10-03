@@ -7,7 +7,7 @@
 // are this computer's files, packed here with their cuts made and landed there
 // through the list beside the job. What runs the plan is the engine's.
 import { createHash } from "node:crypto";
-import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { join, posix } from "node:path";
 import type { Manifest, ManifestEntry, Platform } from "@wsp/collect";
 import { expand } from "@wsp/collect";
@@ -24,6 +24,7 @@ import {
   type PackFiles,
   type ProvisionLanding,
   type ProvisionPlan,
+  type SkippedPath,
   type TarEntry,
 } from "@wsp/engine";
 import { agentOfRow, probePath, toolRowId, type Recipe, type RecipeFile } from "@wsp/protocol";
@@ -31,6 +32,7 @@ import type { PlaceProvisioner } from "@wsp/runtime";
 import { serverVault } from "./env-keys.js";
 import { brewTableFor, copyRows, planImport } from "./image-recipe.js";
 import { configTexts, type ConfigText } from "./recipe-configs.js";
+import { folderFiles, LINKED_FOLDER_NOTE } from "./folder-files.js";
 import { loadRecipe, smallRecipePath } from "./recipe-file.js";
 
 /** What the planner reads beside the picks: this computer's rungs and its Homebrew table, the same two readers wsp
@@ -94,25 +96,12 @@ export function picksRows(manifest: Manifest, picks: RecipeFile, o: { home: stri
   });
 }
 
-/** Every file under a folder at its real path, folder-relative, in order; a link inside it is read where it points
- * when that is a file, and a checkout's own .git never travels. */
-function filesIn(dir: string, rel = ""): { rel: string; path: string }[] {
-  return readdirSync(join(dir, rel))
-    .filter(name => name !== ".git")
-    .sort()
-    .flatMap(name => {
-      const at = rel === "" ? name : `${rel}/${name}`;
-      const st = statSync(join(dir, at), { throwIfNoEntry: false });
-      if (st === undefined) return [];
-      return st.isDirectory() ? filesIn(dir, at) : st.isFile() ? [{ rel: at, path: join(dir, at) }] : [];
-    });
-}
-
 /** An archive of files read here: each staged with its digest, those the computer already has at the same bytes
- * left out when the road asks, the rest packed. */
-export function packOf(files: () => readonly { dest: string; bytes: Buffer; mode: number }[]): PackFiles {
+ * left out when the road asks, the rest packed, and what was read and not sent named as skipped. */
+export function packOf(read: () => { files: readonly { dest: string; bytes: Buffer; mode: number }[]; skipped?: SkippedPath[] }): PackFiles {
   return async leaveOut => {
-    const staged = files().map(f => ({ ...f, digest: createHash("sha256").update(f.bytes).digest("hex") }));
+    const { files, skipped = [] } = read();
+    const staged = files.map(f => ({ ...f, digest: createHash("sha256").update(f.bytes).digest("hex") }));
     const stood = new Set(leaveOut === undefined ? [] : await leaveOut(staged.map(f => ({ dest: f.dest, digest: f.digest }))));
     const entries: TarEntry[] = staged.filter(f => !stood.has(f.dest)).map(f => ({ path: f.dest, mode: f.mode, content: f.bytes }));
     const tar = tarOf(entries);
@@ -120,7 +109,7 @@ export function packOf(files: () => readonly { dest: string; bytes: Buffer; mode
       tar,
       bytes: tar.length,
       unpacked: entries.reduce((n, e) => n + ("content" in e ? e.content.length : 0), 0),
-      skipped: [],
+      skipped,
       cut: [],
       silenced: [],
       macPaths: [],
@@ -155,7 +144,13 @@ function skillsOf(picks: RecipeFile, home: string): { plan?: { lands: ProvisionL
   }
   if (found.length === 0) return { skipped };
   const lands = found.flatMap(s => roots.map(root => ({ id: `skills/${s.name}`, label: s.name, dest: `${root}/${s.name}` })));
-  const pack = packOf(() => found.flatMap(s => filesIn(s.dir).flatMap(f => roots.map(root => ({ dest: `${root}/${s.name}/${f.rel}`, bytes: readFileSync(f.path), mode: statSync(f.path).mode & 0o777 })))));
+  const pack = packOf(() => {
+    const read = found.map(s => ({ s, held: folderFiles(s.dir) }));
+    return {
+      files: read.flatMap(({ s, held }) => held.files.flatMap(f => roots.map(root => ({ dest: `${root}/${s.name}/${f.rel}`, bytes: readFileSync(f.path), mode: statSync(f.path).mode & 0o777 })))),
+      skipped: read.flatMap(({ s, held }) => held.links.flatMap(link => roots.map(root => ({ id: `skills/${s.name}`, path: `${root}/${s.name}/${link}`, note: LINKED_FOLDER_NOTE })))),
+    };
+  });
   return { plan: { lands, pack }, skipped };
 }
 
@@ -168,7 +163,7 @@ function configsOf(picks: RecipeFile, home: string): { lands: ProvisionLanding[]
   if (texts.length === 0) return undefined;
   return {
     lands: texts.map(t => ({ id: `configs/${t.id}`, label: CONFIG_LABELS[t.id], dest: t.rel })),
-    pack: packOf(() => texts.map(t => ({ dest: t.rel, bytes: Buffer.from(t.text), mode: 0o644 }))),
+    pack: packOf(() => ({ files: texts.map(t => ({ dest: t.rel, bytes: Buffer.from(t.text), mode: 0o644 })) })),
   };
 }
 
