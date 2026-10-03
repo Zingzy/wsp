@@ -133,19 +133,36 @@ describe("an install as the checks", () => {
   const job = (o: Partial<PlaceAddJob>): PlaceAddJob => ({ addId: "a_1", address: "root@studio", startedAt: "x", state: "running", steps: [], ...o });
 
   it("ticks each check off its own step and holds Install wsp until the computer joined", () => {
-    const rows = checkRows(job({ steps: [{ step: "connect", state: "done", note: "Ubuntu 24.04" }, { step: "check", state: "done", note: "root, systemd, cgroup v2" }, { step: "reach", state: "done" }, { step: "wsp", state: "done" }, { step: "service", state: "running" }] }));
+    const rows = checkRows(
+      job({
+        steps: [
+          { step: "connect", state: "done", note: "Ubuntu 24.04" },
+          { step: "check", state: "done", note: "root, systemd, cgroup v2" },
+          { step: "chip", state: "done", note: "Linux x86_64" },
+          { step: "root", state: "done" },
+          { step: "system", state: "done", note: "systemd, cgroup v2" },
+          { step: "disk", state: "done", note: "61 GB free" },
+          { step: "reach", state: "done" },
+          { step: "wsp", state: "done" },
+          { step: "service", state: "running" },
+        ],
+      }),
+    );
     expect(rows.map(r => [r.name, r.state, r.note])).toEqual([
       ["Connected", "done", "Ubuntu 24.04"],
-      ["System", "done", "root, systemd, cgroup v2"],
+      ["Chip", "done", "Linux x86_64"],
+      ["Root", "done", undefined],
+      ["System", "done", "systemd, cgroup v2"],
+      ["Disk", "done", "61 GB free"],
       ["Dials back", "done", undefined],
       ["Install wsp", "working", undefined],
     ]);
-    expect(checkRows(job({ state: "done", steps: [{ step: "connect", state: "done" }, { step: "check", state: "done" }, { step: "reach", state: "done" }, { step: "wsp", state: "done" }, { step: "join", state: "done" }] })).at(-1)?.state).toBe("done");
+    expect(checkRows(job({ state: "done", steps: [{ step: "connect", state: "done" }, { step: "chip", state: "done" }, { step: "root", state: "done" }, { step: "system", state: "done" }, { step: "disk", state: "done" }, { step: "reach", state: "done" }, { step: "wsp", state: "done" }, { step: "join", state: "done" }] })).at(-1)?.state).toBe("done");
   });
 
   it("puts a refusal on the check that was running, the rest after it left waiting", () => {
-    const rows = checkRows(job({ state: "failed", said: "jumpbox logs in as a user that is not root", fix: "Add it as root.", steps: [{ step: "connect", state: "done" }, { step: "check", state: "running" }] }));
-    expect(rows.map(r => r.state)).toEqual(["done", "failed", "waiting", "waiting"]);
-    expect(rows[1]).toMatchObject({ said: "jumpbox logs in as a user that is not root", fix: "Add it as root." });
+    const rows = checkRows(job({ state: "failed", said: "jumpbox logs in as a user that is not root", fix: "Add it as root.", steps: [{ step: "connect", state: "done" }, { step: "check", state: "running" }, { step: "chip", state: "done" }, { step: "root", state: "failed", note: "jumpbox logs in as a user that is not root" }] }));
+    expect(rows.map(r => r.state)).toEqual(["done", "done", "failed", "waiting", "waiting", "waiting", "waiting"]);
+    expect(rows[2]).toMatchObject({ id: "root", said: "jumpbox logs in as a user that is not root", fix: "Add it as root." });
   });
 });

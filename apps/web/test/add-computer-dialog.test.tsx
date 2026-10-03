@@ -7,7 +7,7 @@
 // page, and closing mid-setup said as a notice.
 import { act, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { PLACE_HOST_KEY_KIND, RecipeFile, type PlaceAddJob, type EventUnion, type PendingComputer, type PlaceSetup, type PlaceView, type ProjectView, type RecipeOptions, type RecipeView } from "@wsp/protocol";
+import { PLACE_HOST_KEY_KIND, RecipeFile, type PlaceAddJob, type PlaceAddStep, type EventUnion, type PendingComputer, type PlaceSetup, type PlaceView, type ProjectView, type RecipeOptions, type RecipeView } from "@wsp/protocol";
 import { RequestError, type Api, type SshLogin } from "../src/protocol/client.js";
 import { useNotices } from "../src/notices/store.js";
 import { useStore } from "../src/protocol/store.js";
@@ -82,7 +82,7 @@ const press = async (el: Element | null): Promise<void> => {
   fireEvent.click(el!);
   await settle();
 };
-const stage = (addId: string, s: "connect" | "check" | "reach" | "wsp" | "service" | "join", state: "running" | "done" | "failed", note?: string, placeId?: string): void =>
+const stage = (addId: string, s: PlaceAddStep, state: "running" | "done" | "failed", note?: string, placeId?: string): void =>
   act(() => useStore.getState().applyEvent({ type: "place.stage", addId, step: s, state, ...(note === undefined ? {} : { note }), ...(placeId === undefined ? {} : { placeId }) } as EventUnion));
 const ticked = (id: string): boolean => dialog()!.querySelector(`[data-pick-row='${id}']`)?.getAttribute("data-checked") === "true";
 const rest = (ms: number): Promise<void> => act(async () => void (await new Promise(r => setTimeout(r, ms))));
@@ -114,16 +114,28 @@ describe("Add a computer, from the address to Set up", () => {
     const addId = useAddFlow.getState().addId!;
     stage(addId, "connect", "done", "Ubuntu 24.04");
     stage(addId, "check", "running");
+    stage(addId, "chip", "done", "Linux x86_64");
+    stage(addId, "root", "running");
     const rows = () => [...dialog()!.querySelectorAll<HTMLElement>("[data-step-row]")].map(r => [r.dataset["stepRow"], r.dataset["state"]]);
+    // Each check is its own row, in the order the host reads them.
     expect(rows()).toEqual([
       ["connect", "done"],
-      ["check", "working"],
+      ["chip", "done"],
+      ["root", "working"],
+      ["system", "waiting"],
+      ["disk", "waiting"],
       ["reach", "waiting"],
       ["wsp", "waiting"],
     ]);
+    const note = (id: string): string | null | undefined => dialog()!.querySelector(`[data-step-row='${id}']`)?.textContent;
+    expect(note("chip")).toContain("Linux x86_64");
     // Continue stands held until the computer joined.
     expect(primary().hasAttribute("data-held")).toBe(true);
+    stage(addId, "root", "done");
+    stage(addId, "system", "done", "systemd, cgroup v2");
+    stage(addId, "disk", "done", "61 GB free");
     stage(addId, "check", "done", "root, systemd, cgroup v2");
+    expect(note("disk")).toContain("61 GB free");
     stage(addId, "reach", "done");
     stage(addId, "wsp", "done");
     stage(addId, "join", "done", undefined, studio.id);
@@ -162,6 +174,26 @@ describe("Add a computer, from the address to Set up", () => {
     await press(primary());
     expect(asked).toEqual([{ address: "studio" }, { address: "studio", hostKey: key }]);
     expect(step()).toBe("checks");
+  });
+
+  it("puts a failed check's own sentence on its row, the rows after it never run", async () => {
+    const fake = host();
+    mountSettings({ api: fake.api, at: { kind: "group", group: "computers" } });
+    act(() => {
+      openAdd();
+      useAddFlow.setState({ address: "jumpbox" });
+    });
+    await settle();
+    await press(primary());
+    const addId = useAddFlow.getState().addId!;
+    stage(addId, "connect", "done", "Ubuntu 22.04");
+    stage(addId, "check", "running");
+    stage(addId, "chip", "done", "Linux arm64");
+    stage(addId, "root", "running");
+    stage(addId, "root", "failed", "jumpbox logs in as a user that is not root");
+    const states = Object.fromEntries([...dialog()!.querySelectorAll<HTMLElement>("[data-step-row]")].map(r => [r.dataset["stepRow"], r.dataset["state"]]));
+    expect(states).toEqual({ connect: "done", chip: "done", root: "failed", system: "waiting", disk: "waiting", reach: "waiting", wsp: "waiting" });
+    expect(dialog()!.querySelector("[data-step-row='root'] [data-k=step-refusal]")?.textContent).toBe("jumpbox logs in as a user that is not root");
   });
 
   it("puts a refusal on the check that was running with Try again, which goes back to the address", async () => {

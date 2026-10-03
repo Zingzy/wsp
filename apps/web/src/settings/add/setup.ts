@@ -111,11 +111,15 @@ export function setupStanding(place: Pick<PlaceView, "setup" | "applied">): Setu
   return missed ? "needs-you" : "ready";
 }
 
-/** The steps of an install, as the checks list draws them: the connection, the box's own checks, whether it can reach
- * this computer, and wsp itself, which spans the install, the service and the join. */
+/** The steps of an install, as the checks list draws them, in the order the host reads them: the connection, each
+ * of the box's own checks, whether it can reach this computer, and wsp itself, which spans the install, the service
+ * and the join. */
 const CHECK_ROWS: readonly { id: string; name: string; steps: readonly PlaceAddJob["steps"][number]["step"][] }[] = [
   { id: "connect", name: "Connected", steps: ["connect"] },
-  { id: "check", name: "System", steps: ["check"] },
+  { id: "chip", name: "Chip", steps: ["chip"] },
+  { id: "root", name: "Root", steps: ["root"] },
+  { id: "system", name: "System", steps: ["system"] },
+  { id: "disk", name: "Disk", steps: ["disk"] },
   { id: "reach", name: "Dials back", steps: ["reach"] },
   { id: "wsp", name: INSTALL, steps: ["wsp", "service", "join"] },
 ];

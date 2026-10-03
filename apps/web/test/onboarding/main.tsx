@@ -148,8 +148,36 @@ const SETUPS: Record<string, { setup: PlaceSetup; applied: PlaceApplied }> = {
 };
 
 const ADD_STEPS: Record<string, PlaceAddJob> = {
-  checks: { addId: "a_add", address: "studio", startedAt: AT, state: "running", steps: [{ step: "connect", state: "done", note: "Ubuntu 24.04" }, { step: "check", state: "done", note: "root, systemd, cgroup v2, 61 GB free" }, { step: "reach", state: "done", note: "studio dials back over ssh" }, { step: "wsp", state: "running", note: "x86_64" }] },
-  "checks-refused": { addId: "a_add", address: "jumpbox", startedAt: AT, state: "failed", steps: [{ step: "connect", state: "done", note: "Ubuntu 22.04" }, { step: "check", state: "running" }], said: "jumpbox logs in as a user that is not root, and root on the box is required: wsp runs its daemon there as a system service.", fix: "Add it as root@jump.zingzy.dev, or put User root under Host jumpbox in your ssh config." },
+  checks: {
+    addId: "a_add",
+    address: "studio",
+    startedAt: AT,
+    state: "running",
+    steps: [
+      { step: "connect", state: "done", note: "Ubuntu 24.04" },
+      { step: "check", state: "done", note: "root, systemd, cgroup v2, 61 GB free" },
+      { step: "chip", state: "done", note: "Linux x86_64" },
+      { step: "root", state: "done" },
+      { step: "system", state: "done", note: "systemd, cgroup v2" },
+      { step: "disk", state: "done", note: "61 GB free" },
+      { step: "reach", state: "done", note: "studio dials back over ssh" },
+      { step: "wsp", state: "running", note: "x86_64" },
+    ],
+  },
+  "checks-refused": {
+    addId: "a_add",
+    address: "jumpbox",
+    startedAt: AT,
+    state: "failed",
+    steps: [
+      { step: "connect", state: "done", note: "Ubuntu 22.04" },
+      { step: "check", state: "running" },
+      { step: "chip", state: "done", note: "Linux arm64" },
+      { step: "root", state: "failed", note: "jumpbox logs in as a user that is not root, and root on the box is required: wsp runs its daemon there as a system service." },
+    ],
+    said: "jumpbox logs in as a user that is not root, and root on the box is required: wsp runs its daemon there as a system service.",
+    fix: "Add it as root@jump.zingzy.dev, or put User root under Host jumpbox in your ssh config.",
+  },
   hostkey: { addId: "a_add", address: "studio", startedAt: AT, state: "failed", steps: [{ step: "connect", state: "running" }], said: hostKeyUnconfirmedRefusal("studio", "ED25519 SHA256:tK3mX9Qf2bWq8vRz0YhN4cL7pJd1sE6gA5uF8oH2kIw"), kind: PLACE_HOST_KEY_KIND, hostKey: "ED25519 SHA256:tK3mX9Qf2bWq8vRz0YhN4cL7pJd1sE6gA5uF8oH2kIw" },
 };
 
