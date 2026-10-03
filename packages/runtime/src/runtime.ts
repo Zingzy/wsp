@@ -238,7 +238,7 @@ import { agentsReads, type AgentsActs, type AgentsReader, type CallbackForwards,
 import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from "./daemon-channel.js";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
-import { isNoProvider, isPlaceAbsent, projectStateKey, putFiles, type Copier } from "@wsp/engine";
+import { GITHUB_TOKEN_ENV, isNoProvider, isPlaceAbsent, projectStateKey, putFiles, type Copier } from "@wsp/engine";
 import { boxFullLine, DISK_FULL_PCT, diskFullLine, stopRefusedLine, threadMessages, threadSeed, workspaceMemMb } from "@wsp/protocol";
 import { holdsRepo, ownerRepoOf, projectForRepo, seedChoiceFrom } from "@wsp/protocol";
 import { accessMode, accessRefusal, agentOffLine, configDirLaunchRefusal, configDirRefusal, markedFor, modelIdRefusal, openDefaults, resolveThreadDefaults, setupView, shapeModels, withCustomModels, type AccessChoice, type AgentLaunch, type AgentRow, type AgentSetupSet, type ProjectOverrides, type ResolvedFolder, type ThreadDefaults } from "@wsp/protocol";
@@ -11037,6 +11037,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // workspace, so both leave it absent and the roads there never ask.
       ...(at?.onComputer === undefined ? {} : { onComputer: at.onComputer.bind(at) }),
       imageHead: () => imageHeadOrNone(),
+      cloneEnv: (): Record<string, string> => {
+        const token = opts.vault?.()[GITHUB_TOKEN_ENV];
+        return token === undefined ? {} : { [GITHUB_TOKEN_ENV]: token };
+      },
       // Where Claude Code keeps its projects on this computer, which is the memory folder of a project worked in
       // place here; read the way every other road on this computer reads that store.
       macStateHome: local?.home("claude") ?? "",

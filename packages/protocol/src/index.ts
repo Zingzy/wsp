@@ -4434,7 +4434,7 @@ export const MachineLinkRequest = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("machine.create"), spec: MachineSpec }),
   z.object({ id: reqId, op: z.literal("machine.get"), machineId: z.string() }),
   z.object({ id: reqId, op: z.literal("machine.list"), labels: z.record(z.string()).optional() }),
-  z.object({ id: reqId, op: z.literal("machine.exec"), machineId: z.string(), cmd: z.string().max(EXEC_BODY_MAX), timeoutMs: z.number().int().positive().optional() }),
+  z.object({ id: reqId, op: z.literal("machine.exec"), machineId: z.string(), cmd: z.string().max(EXEC_BODY_MAX), timeoutMs: z.number().int().positive().optional(), stdin: z.string().optional() }),
   z.object({ id: reqId, op: z.literal("machine.pause"), machineId: z.string() }),
   z.object({ id: reqId, op: z.literal("machine.resume"), machineId: z.string() }),
   z.object({ id: reqId, op: z.literal("machine.kill"), machineId: z.string() }),
