@@ -11,6 +11,12 @@
   },
   "stopUnderOne": ", and with it 1 thread its agents spawned: {under}",
   "stopUnderSome": ", and with it {count} threads its agents spawned: {under}",
+  "stoppedTask": {
+    "accepted": "thread {thread} task {task} stopped",
+    "not-running": "thread {thread} task {task} not running",
+    "not-found": "thread {thread} task {task} not found by the host"
+  },
+  "stopTaskSaid": "thread {thread} task {task}: {error}",
   "renamed": {
     "renamed": "thread {thread} named {title}, in {agent} too",
     "unsupported": "thread {thread} not named: {agent} keeps no name of a person's for a session",

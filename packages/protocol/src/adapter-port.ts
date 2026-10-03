@@ -13,7 +13,7 @@
 // these into the SessionEvent shapes in index.ts that clients read, which is
 // why the vocabulary they share (DeltaKind, TurnResult, SessionHarness) is
 // declared once there and imported back here.
-import type { DeltaKind, PermissionOption, PermissionOutcome, PlanStep, SessionHarness, TurnResult } from "./index.js";
+import type { DeltaKind, PermissionOption, PermissionOutcome, PlanStep, SessionHarness, SubagentState, TurnResult } from "./index.js";
 import { shellQuote } from "./shell-quote.js";
 import type { HarnessLimit } from "./usage.js";
 
@@ -119,6 +119,20 @@ export type AdapterEvent =
        * restart replays its old calls, and the host reads this only there, against the run's other stamps. */
       at?: number;
     }
+  | {
+      /** One of the agent's own subagents started or ended, once per change: `task` is the agent's own id for it, what
+       * a stop names, and parentToolUseId the call that launched it, which its lines carry and whose input holds what
+       * it was asked. A start carries what the agent called it; an end the agent's summary where it gave one. */
+      type: "subagent";
+      sessionId: string;
+      task: string;
+      state: SubagentState;
+      parentToolUseId?: string;
+      title?: string;
+      summary?: string;
+      /** How deep under the thread's own agent it was spawned, 1 for one the agent itself started. */
+      depth?: number;
+    }
   | { type: "permission.ask"; sessionId: string; ask: PermissionAsk }
   | {
       type: "permission.close";
@@ -129,6 +143,10 @@ export type AdapterEvent =
       optionId?: string;
     }
   | { type: "session.end"; sessionId: string; exitCode: number | null; sawResult: boolean };
+
+/** What asking a running turn to stop one of its own subagents came to: the agent took the request, the turn or that
+ * subagent was already over, the agent refused in its own words (`error`), or it offers no stop for one subagent. */
+export type TaskStop = { outcome: "accepted" } | { outcome: "not-running" } | { outcome: "refused"; error: string } | { outcome: "unsupported" };
 
 /** What re-opening a turn a harness is still running on the machine takes: the run its stream reported, the session
  * the row already knows it by, and what that row records about the turn. The CLI announces its session, its model

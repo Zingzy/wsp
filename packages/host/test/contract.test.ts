@@ -427,10 +427,16 @@ describe("the agent contract on the command line and the tool door", () => {
     expect(await last("thread read", "thread", "read", opened.threadId, "--last")).toEqual({ threadId: opened.threadId, messages: [{ who: "agent", at: expect.any(Number), text: "re: again" }] });
     await last("thread read", "thread", "read", opened.threadId);
     await last("stop", "stop", opened.threadId);
+    // One subagent of a turn that is over: nothing to stop, which is an answer, and it names the task.
+    expect(await last("stop", "stop", opened.threadId, "--task", "a1b2")).toEqual({ threadId: opened.threadId, task: "a1b2", outcome: "not-running" });
     // A thread stopped on a permission question, answered from here the way the app's own buttons answer it.
     for (const [verb, task] of [["thread allow", "allow"], ["thread deny", "deny"]] as const) {
       const asking = (await last("run", "run", "alpha", "--detach", ASKS)) as { threadId: string };
       await vi.waitFor(async () => expect((await rt.sessions.list()).find(v => v.threadId === asking.threadId)!.asking).toBeDefined());
+      // A running turn on an agent that stops no subagent by itself says so, and still succeeds.
+      if (verb === "thread allow") {
+        expect(await last("stop", "stop", asking.threadId, "--task", "a1b2")).toEqual({ threadId: asking.threadId, task: "a1b2", outcome: "unsupported", error: "Stop is not available for Claude Code subagents; stop the thread to stop them all" });
+      }
       expect(await last(verb, "thread", task, asking.threadId)).toEqual({ threadId: asking.threadId, askId: SCRIPTED_ASK.askId, optionId: expect.any(String) });
     }
     await last("thread rename", "thread", "rename", opened.threadId, "the name he typed");

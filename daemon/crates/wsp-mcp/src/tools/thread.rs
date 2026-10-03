@@ -45,16 +45,28 @@ pub struct ThreadIn {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
+pub struct StopIn {
+    pub thread: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct StopOut {
     pub thread_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task: Option<String>,
     pub outcome: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub under: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 async fn stop(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
-    let ThreadIn { thread } = input("stop", arguments)?;
+    let StopIn { thread, task } = input("stop", arguments)?;
     let client = host.client().await?;
     let thread = thread_of(&client, &thread).await?;
     #[derive(Deserialize)]
@@ -62,11 +74,26 @@ async fn stop(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
         outcome: String,
         #[serde(default)]
         under: Option<Vec<String>>,
+        #[serde(default)]
+        error: Option<String>,
     }
-    let reply = client.request("sessions.interrupt", params([("sessionId", Value::from(thread.session_id.as_str()))])).await?;
-    let Interrupted { outcome, under } = with_outcome("sessions.interrupt", reply, &["accepted", "not-running", "not-found"])?;
+    let mut asked = params([("sessionId", Value::from(thread.session_id.as_str()))]);
+    if let Some(task) = &task {
+        asked.insert("task".to_owned(), Value::from(task.as_str()));
+    }
+    let reply = client.request("sessions.interrupt", asked).await?;
+    let Interrupted { outcome, under, error } =
+        with_outcome("sessions.interrupt", reply, &["accepted", "not-running", "not-found", "refused", "unsupported"])?;
     let under = under.filter(|u| !u.is_empty());
     let words = turns();
+    if let Some(named) = &task {
+        let filled = [("thread", thread.id.as_str()), ("task", named.as_str()), ("error", error.as_deref().unwrap_or(""))];
+        let line = match &error {
+            Some(_) => fill(&words.stop_task_said, &filled),
+            None => fill(words.stopped_task.get(&outcome).map_or("", String::as_str), &filled),
+        };
+        return Ok(Answer::text(line, &StopOut { thread_id: thread.id, task, outcome, under, error }));
+    }
     let mut line = fill(words.stopped.get(&outcome).map_or("", String::as_str), &[("thread", &thread.id)]);
     match under.as_deref() {
         None => {}
@@ -76,7 +103,7 @@ async fn stop(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
             line.push_str(&fill(&words.stop_under_some, &[("count", &several.len().to_string()), ("under", &named.join(", "))]));
         }
     }
-    Ok(Answer::text(line, &StopOut { thread_id: thread.id, outcome, under }))
+    Ok(Answer::text(line, &StopOut { thread_id: thread.id, task: None, outcome, under, error }))
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -299,7 +326,7 @@ mod tests {
 
     #[test]
     fn its_structs_are_the_recorded_schemas() {
-        to_the_record::<ThreadIn, StopOut>(STOP.listed);
+        to_the_record::<StopIn, StopOut>(STOP.listed);
         to_the_record::<RenameIn, RenameOut>(RENAME.listed);
         to_the_record::<ThreadIn, ForgetOut>(FORGET.listed);
         to_the_record::<ThreadIn, AnswerOut>(ALLOW.listed);
