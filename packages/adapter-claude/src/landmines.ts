@@ -115,6 +115,19 @@ export interface BuildCommandOptions {
   fast?: boolean;
   /** The program run in place of claude and the words added after -p, from the person's setup on that computer. */
   launch?: AgentLaunch;
+  /** Forward a subagent's own text and thinking, not only its tool calls; see forwardsSubagentText. */
+  subagentText?: boolean;
+}
+
+/** The first CLI that takes --forward-subagent-text: the SDK of 0.3.270 passes it, and a CLI before it exits on a flag
+ * it does not know. Below it, or where no version was read, a subagent still shows off its tool calls. */
+const SUBAGENT_TEXT_SINCE = [2, 1, 270] as const;
+
+export function forwardsSubagentText(version: string | undefined): boolean {
+  const parts = /^(\d+)\.(\d+)\.(\d+)/.exec(version ?? "")?.slice(1).map(Number);
+  if (parts === undefined) return false;
+  for (let i = 0; i < SUBAGENT_TEXT_SINCE.length; i++) if (parts[i] !== SUBAGENT_TEXT_SINCE[i]) return parts[i]! > SUBAGENT_TEXT_SINCE[i]!;
+  return true;
 }
 
 // Model names carry a context suffix like "claude-opus-5[1m]"; nothing else a catalog value needs is outside this set.
@@ -167,7 +180,7 @@ function mcpConfigFlag(servers: Readonly<Record<string, McpServerSpec>> | undefi
  * on that channel, and EOF ends the process after its current turn.
  */
 export function buildCommand(options: BuildCommandOptions): string {
-  const { sessionId, resume, cwd, model, effort, permissionMode, contextWindow, name, mcpServers, fast } = options;
+  const { sessionId, resume, cwd, model, effort, permissionMode, contextWindow, name, mcpServers, fast, subagentText } = options;
   if ((sessionId === undefined) === (resume === undefined)) {
     throw new Error("buildCommand needs exactly one of sessionId or resume");
   }
@@ -184,7 +197,7 @@ export function buildCommand(options: BuildCommandOptions): string {
     "--input-format stream-json",
     "--output-format stream-json",
     "--verbose",
-    "--forward-subagent-text",
+    ...(subagentText === true ? ["--forward-subagent-text"] : []),
     ...permissionFlags(permissionMode),
     ...slugFlag("--model", "model", modelWithContext(model, contextWindow)),
     ...slugFlag("--effort", "effort", effort),

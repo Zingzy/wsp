@@ -9,7 +9,7 @@ import { SKIP_PROMPTS_MODE, controlAllowLine, controlAnswerLine, controlErrorLin
 import { CLAUDE_SCREEN_COMMANDS, catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
 import { asideAnswer, asideCommand, forkCleanupCommand } from "./aside.js";
 import { draftForCommand, parseDraftFor, parseRename, parseSessionTitle, parseTitleFor, renameCommand, sessionTitleCommand, titleForCommand } from "./session-title.js";
-import { buildCommand, buildEnv, newSessionId, savedSpendCommand, userMessageLine } from "./landmines.js";
+import { buildCommand, buildEnv, forwardsSubagentText, newSessionId, savedSpendCommand, userMessageLine } from "./landmines.js";
 import { shellCwdAfter } from "./shell-cwd.js";
 
 export interface StartOptions {
@@ -38,6 +38,8 @@ export interface StartOptions {
   seed?: () => Promise<string>;
   /** The CLI starts at once and is handed the prompt when this settles; absent, the prompt is seeded at the launch. */
   promptAfter?: Promise<void>;
+  /** The version the binary on this machine answered the catalog probe with; absent where it answered nothing. */
+  version?: string;
   onEvent: (event: AdapterEvent) => void;
 }
 
@@ -410,15 +412,14 @@ const SUBAGENT_ENDS: Readonly<Record<string, SubagentState>> = { completed: "don
 
 /** A subagent the agent started, off its task_started line: the CLI tracks background commands as tasks on the same
  * line, and task_type is what tells a subagent from one of those. */
-function subagentStarted(event: Record<string, unknown>): { task: string; parent?: string; title?: string; prompt?: string; depth?: number } | undefined {
+function subagentStarted(event: Record<string, unknown>): { task: string; parent?: string; title?: string; depth?: number } | undefined {
   if (str(event.type) !== "system" || str(event.subtype) !== "task_started" || str(event.task_type) !== "local_agent") return undefined;
   const task = str(event.task_id);
   if (task === undefined) return undefined;
   const parent = str(event.tool_use_id);
   const title = str(event.description);
-  const prompt = str(event.prompt);
   const depth = num(event.spawn_depth);
-  return { task, ...(parent !== undefined ? { parent } : {}), ...(title !== undefined ? { title } : {}), ...(prompt !== undefined ? { prompt } : {}), ...(depth !== undefined ? { depth } : {}) };
+  return { task, ...(parent !== undefined ? { parent } : {}), ...(title !== undefined ? { title } : {}), ...(depth !== undefined ? { depth } : {}) };
 }
 
 /** A task the CLI says is over, off either line that says so: the notification with its summary, or the update a kill
@@ -1119,6 +1120,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       ...(options.title !== undefined ? { name: options.title } : {}),
       ...(options.mcpServers !== undefined ? { mcpServers: options.mcpServers } : {}),
       ...(deps.launch !== undefined ? { launch: deps.launch } : {}),
+      ...(forwardsSubagentText(options.version) ? { subagentText: true } : {}),
     });
     const launch = options.resume === undefined ? command : `${savedSpendCommand({ configDir: deps.configDir, sessionId: options.resume })}${command}`;
     const line = userMessageLine(options.prompt, localId, options.images);

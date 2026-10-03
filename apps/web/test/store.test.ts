@@ -745,7 +745,7 @@ describe("store sessions", () => {
     expect(useStore.getState().sessions["ws_a"]![0]!.asking).toBeUndefined();
   });
 
-  it("a subagent starting or ending re-reads that workspace's rows, at most once a quarter second, so eight children in a second cost a handful of lists", async () => {
+  it("a subagent starting or ending re-reads that workspace's rows at once and then at most once a quarter second, so eight children in a second cost a handful of lists", async () => {
     const sessions: SessionView[] = [{ id: "s1", workspaceId: "ws_a", harness: "claude", status: "running", claudeSessionId: "c1", threadId: "thr_1" }];
     const { api, emit, listCalls } = fakeApi([view("ws_a")], sessions);
     useStore.getState().bind(api);
@@ -754,13 +754,17 @@ describe("store sessions", () => {
     vi.useFakeTimers();
     try {
       const scope = { workspaceId: "ws_a", sessionId: "c1", turnId: "turn_1", threadId: "thr_1" };
-      for (let i = 0; i < 8; i++) {
+      emit({ ...scope, type: "session.subagent", task: "t0", state: "running", title: "child 0" });
+      await vi.advanceTimersByTimeAsync(0);
+      // The first child in a quiet workspace is read at once, not a quarter second later.
+      expect(listCalls).toEqual(["ws_a"]);
+      await vi.advanceTimersByTimeAsync(125);
+      for (let i = 1; i < 8; i++) {
         emit({ ...scope, type: "session.subagent", task: `t${i}`, state: "running", title: `child ${i}` });
         await vi.advanceTimersByTimeAsync(125);
       }
       await vi.advanceTimersByTimeAsync(250);
-      expect(listCalls.length).toBeGreaterThan(0);
-      expect(listCalls.length).toBeLessThanOrEqual(4);
+      expect(listCalls.length).toBeLessThanOrEqual(5);
       expect(new Set(listCalls)).toEqual(new Set(["ws_a"]));
       // The last child's start is in the rows the store ends on: the re-read trails the burst rather than leading it.
       sessions[0]!.subagents = [{ id: "t7", title: "child 7", state: "running", startedAt: 1 }];

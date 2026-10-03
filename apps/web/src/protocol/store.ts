@@ -554,10 +554,20 @@ export const useStore = create<State>((set, get) => {
    * the thread another client started meanwhile, and nothing reads that workspace again until the turn ends. */
   let rowReads = 0;
   const rowsFrom = new Map<string, number>();
-  /** The workspaces with a read of their rows waiting on a subagent's start or end: eight children starting inside a
-   * second cost a read a quarter second, not one each. */
-  const subagentReads = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Each workspace whose rows a subagent's start or end read in the last quarter second, and whether another came
+   * since: the first is read at once and the rest once the quarter second is out, so eight children starting inside
+   * a second cost a handful of reads, not one each. */
+  const subagentReads = new Map<string, { again: boolean }>();
   const SUBAGENT_READ_MS = 250;
+  const readForSubagents = (workspaceId: string): void => {
+    const window = { again: false };
+    subagentReads.set(workspaceId, window);
+    void get().reloadSessions(workspaceId);
+    setTimeout(() => {
+      if (window.again) readForSubagents(workspaceId);
+      else subagentReads.delete(workspaceId);
+    }, SUBAGENT_READ_MS);
+  };
   /** The rows a read of every workspace answered, less the workspaces a newer read has already drawn. A read that
    * answered covers every workspace, those it found no rows for too, so each is stamped with it: an older read landing
    * later may not put back rows this one found gone. */
@@ -1305,14 +1315,10 @@ export const useStore = create<State>((set, get) => {
           return;
         case "session.subagent":
           // A thread's subagents ride its row, so a child starting or ending is a row that changed.
-          if (!subagentReads.has(e.workspaceId)) {
-            subagentReads.set(
-              e.workspaceId,
-              setTimeout(() => {
-                subagentReads.delete(e.workspaceId);
-                void get().reloadSessions(e.workspaceId);
-              }, SUBAGENT_READ_MS),
-            );
+          {
+            const window = subagentReads.get(e.workspaceId);
+            if (window === undefined) readForSubagents(e.workspaceId);
+            else window.again = true;
           }
           return;
         case "session.permission":

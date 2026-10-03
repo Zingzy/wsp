@@ -384,13 +384,31 @@ describe("ClaudeAdapter over the recorded fixture", () => {
 
     const changes = events.filter(e => e.type === "subagent");
     expect(changes).toEqual([
-      { type: "subagent", sessionId: FIXTURE_SESSION_ID, task: AGENT_A_ID, parentToolUseId: AGENT_A_CALL, state: "running", title: "count alpha files", prompt: "Run `ls /etc | head -3` and report what you saw.", depth: 1 },
-      { type: "subagent", sessionId: FIXTURE_SESSION_ID, task: AGENT_B_ID, parentToolUseId: AGENT_B_CALL, state: "running", title: "read beta hostname", prompt: "Run `hostname` and report what you saw.", depth: 1 },
+      { type: "subagent", sessionId: FIXTURE_SESSION_ID, task: AGENT_A_ID, parentToolUseId: AGENT_A_CALL, state: "running", title: "count alpha files", depth: 1 },
+      { type: "subagent", sessionId: FIXTURE_SESSION_ID, task: AGENT_B_ID, parentToolUseId: AGENT_B_CALL, state: "running", title: "read beta hostname", depth: 1 },
       { type: "subagent", sessionId: FIXTURE_SESSION_ID, task: AGENT_A_ID, parentToolUseId: AGENT_A_CALL, state: "done", summary: "acpi, adduser.conf, alsa" },
       // The kill's task_updated is the end; the notification after it says the same thing again and adds nothing.
       { type: "subagent", sessionId: FIXTURE_SESSION_ID, task: AGENT_B_ID, parentToolUseId: AGENT_B_CALL, state: "stopped" },
     ]);
     expect(events.filter(e => e.type === "turn.delta").some(d => d.text.includes("task_progress") || d.text.includes("Running "))).toBe(false);
+  });
+
+  it("forwards a subagent's own text only from a CLI that takes the flag, and shows the children either way", async () => {
+    const launched = async (version?: string) => {
+      const exec = scriptedExec(subagentFixtureLines());
+      const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
+      const { events, onEvent } = collect();
+      await adapter.start({ prompt: "fan out", ...(version !== undefined ? { version } : {}), onEvent }).finished;
+      return { command: exec.calls[0]!.command, children: events.filter(e => e.type === "subagent").length };
+    };
+    expect(await launched("2.1.288")).toEqual({ command: expect.stringContaining("--forward-subagent-text"), children: 4 });
+    expect(await launched("2.1.270")).toEqual({ command: expect.stringContaining("--forward-subagent-text"), children: 4 });
+    // An older CLI exits on a flag it does not know, and a version nobody read could be one.
+    for (const older of ["2.1.269", undefined]) {
+      const { command, children } = await launched(older);
+      expect(command).not.toContain("--forward-subagent-text");
+      expect(children).toBe(4);
+    }
   });
 
   it("a background command the CLI tracks as a task is no subagent", async () => {

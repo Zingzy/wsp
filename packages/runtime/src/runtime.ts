@@ -378,6 +378,9 @@ export interface HarnessStartOptions {
   limitDetails?: true;
   /** On an adapter that waits for its prompt: its CLI starts at once and is handed the prompt when this settles. */
   promptAfter?: Promise<void>;
+  /** The version the agent's binary on this machine answered the catalog probe with; absent where the probe got no
+   * answer and wsp's own table stood in. */
+  version?: string;
   onEvent: (event: AdapterEvent) => void;
 }
 
@@ -2040,8 +2043,9 @@ interface TranscriptIndex {
   children: Map<string, Map<string, Child>>;
 }
 
-/** A subagent as the index holds it: what a listing answers, and the turn whose end stops it if it is still running. */
-type Child = SubagentView & { turnId?: string };
+/** A subagent as the index holds it: what a listing answers, the turn whose end stops it if it is still running, and
+ * when its newest start row was written, which a resumed child is held by while that row is in the ring. */
+type Child = SubagentView & { turnId?: string; startRow?: number };
 
 interface Taken {
   sessionId: string;
@@ -2074,6 +2078,7 @@ function foldChild(index: TranscriptIndex, e: Extract<SessionEvent, { type: "ses
       ...((e.depth ?? child?.depth) !== undefined ? { depth: e.depth ?? child?.depth } : {}),
       startedAt: child?.startedAt ?? e.at ?? 0,
       ...(e.turnId !== undefined ? { turnId: e.turnId } : {}),
+      ...(e.at !== undefined ? { startRow: e.at } : {}),
     });
     index.children.set(e.threadId, held);
   } else if (child !== undefined) {
@@ -2095,7 +2100,7 @@ function endChildren(index: TranscriptIndex, threadId: string, turnId: string | 
 function forgetChild(index: TranscriptIndex, e: SessionEvent): void {
   if (e.type !== "session.subagent" || e.state !== "running" || e.threadId === undefined) return;
   const held = index.children.get(e.threadId);
-  if (held === undefined || held.get(e.task)?.startedAt !== e.at) return;
+  if (held === undefined || held.get(e.task)?.startRow !== e.at) return;
   held.delete(e.task);
   if (held.size === 0) index.children.delete(e.threadId);
 }
@@ -2140,6 +2145,9 @@ const indexOf = (events: readonly SessionEvent[]): TranscriptIndex => {
  * tail. Only these are kept, since a turn holding the transcript would hold it whole for as long as it runs. */
 interface TurnWritten {
   lines: number;
+  /** The subagent rows it wrote, counted apart from the deltas: a host from before they were written counted only
+   * deltas, and a run it left is re-read with every one of its subagent lines still to write. */
+  subagents: number;
   reply?: TurnResult["status"];
   started: boolean;
 }
@@ -2153,12 +2161,13 @@ const turnWritten = (events: readonly SessionEvent[], turnId: string): TurnWritt
   };
   // From the stamp the last surviving line carries rather than from how many survive: the transcript is capped per
   // workspace and drops its oldest rows, so counting them would read a turn whose head has been evicted as shorter
-  // than it was and write its tail a second time. A subagent's rows count in the same sequence as the deltas.
-  const lines = Math.max(lastOf("session.delta")?.line ?? 0, lastOf("session.subagent")?.line ?? 0);
+  // than it was and write its tail a second time.
+  const lines = lastOf("session.delta")?.line ?? 0;
+  const subagents = lastOf("session.subagent")?.line ?? 0;
   const reply = lastOf("session.done")?.result.status;
   // A turn with a line or a reply already written had its start written too, whether or not the cap still holds it:
   // a second start row at the tail of the transcript would sit after the work it opened.
-  return { lines, ...(reply !== undefined ? { reply } : {}), started: lines > 0 || reply !== undefined || lastOf("session.start") !== undefined };
+  return { lines, subagents, ...(reply !== undefined ? { reply } : {}), started: lines > 0 || subagents > 0 || reply !== undefined || lastOf("session.start") !== undefined };
 };
 
 /** An index as its file holds it, with the mark of the transcript file it was read off: an index whose transcript
@@ -8462,7 +8471,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   }): SessionHandle => {
     const { entry, view, threadId, turnId, opening, outcome, notify, notifyBy, notifyRoad, turnToken, scopeDeviceId } = t;
     const workspaceId = entry.record.id;
-    const { lines: deltasWritten, reply: recordedReply, started: startWritten } = t.written ?? { lines: 0, started: false };
+    const { lines: deltasWritten, subagents: subagentsWritten, reply: recordedReply, started: startWritten } = t.written ?? { lines: 0, subagents: 0, started: false };
     /** What the turn changed, read once at the first of its reply and its exit: a second snapshot, the range from the
      * launch's, and the files in it recorded under the turn. A turn that changed nothing records nothing. */
     let changesRead = false;
@@ -8497,6 +8506,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     let startRecorded = startWritten;
     let deltas = deltasWritten;
     let replaying = deltasWritten;
+    let subagentRows = subagentsWritten;
+    let replayingSubagents = subagentsWritten;
     let ended = false;
     /** The harness's own name for where this turn ended, kept with the turn's checkpoint once it is over. */
     let anchor: string | undefined;
@@ -8751,9 +8762,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           anchor = event.anchor;
           return;
         case "subagent":
-          // Counted with the deltas, so a run re-read from its first line writes none of these a second time.
-          if (replaying > 0) {
-            replaying--;
+          // Counted apart from the deltas, so a run re-read from its first line writes none of these a second time and
+          // a run a host from before them left has all of them written.
+          if (replayingSubagents > 0) {
+            replayingSubagents--;
             return;
           }
           record({
@@ -8762,12 +8774,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             sessionId,
             turnId,
             threadId,
-            line: ++deltas,
+            line: ++subagentRows,
             task: event.task,
             state: event.state,
             ...(event.parentToolUseId !== undefined ? { parentToolUseId: event.parentToolUseId } : {}),
             ...(event.title !== undefined ? { title: event.title } : {}),
-            ...(event.prompt !== undefined ? { prompt: event.prompt } : {}),
             ...(event.summary !== undefined ? { summary: event.summary } : {}),
             ...(event.depth !== undefined ? { depth: event.depth } : {}),
           });
@@ -9394,6 +9405,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
               ...(mcpServers !== undefined ? { mcpServers } : {}),
               ...(limitDetails ? { limitDetails: true as const } : {}),
               ...(promptsLate && snapshot !== undefined ? { promptAfter: snapshot.from.then(() => {}) } : {}),
+              ...(catalog?.source === "harness" && catalog.version !== null ? { version: catalog.version } : {}),
               // The thread's earlier turns as its transcript holds them, this one left out since its message follows.
               ...(resume !== undefined ? { seed: async () => threadSeed(threadMessages((await openTranscript(workspaceId)).filter(e => e.turnId !== turnId), threadId)) } : {}),
               onEvent,
@@ -9467,7 +9479,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           ...s.view,
           ...(s.view.status === "running" && s.pid !== undefined ? { pid: s.pid } : {}),
           ...(behind !== undefined ? { waitingOn: behind } : {}),
-          ...(children !== undefined && children.size > 0 ? { subagents: [...children.values()].map(({ turnId: _turn, ...child }) => child) } : {}),
+          ...(children !== undefined && children.size > 0 ? { subagents: [...children.values()].map(({ turnId: _turn, startRow: _row, ...child }) => child) } : {}),
           ...((): { setupRefusal?: string } => {
             const entry = live.get(s.view.workspaceId);
             const place = entry === undefined ? undefined : setupPlace(entry);
@@ -9507,7 +9519,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const agent = agentLabel(s.view.harness);
         if (s.handle.stopTask === undefined) return { outcome: "unsupported", error: taskStopUnsupportedLine(agent) };
         const stopped = await s.handle.stopTask(task);
-        if (stopped.outcome === "refused") return { outcome: "refused", error: taskStopRefusedLine(agent, task, stopped.error) };
+        if (stopped.outcome === "refused") return { outcome: "refused", error: taskStopRefusedLine(agent, stopped.error) };
         return stopped.outcome === "unsupported" ? { outcome: "unsupported", error: taskStopUnsupportedLine(agent) } : { outcome: stopped.outcome };
       }
       // A thread's agents spawned a tree under it, and a stop on the thread is a stop on the tree: the children go

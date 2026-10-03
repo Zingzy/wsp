@@ -75,7 +75,7 @@ const scripted = () => ({
       for (let c = 0; c < ${SUBAGENTS_PER_TURN}; c++) {
         const task = \`a\${nth.toString(16).padStart(12, "0")}\${c}\`;
         const parentToolUseId = \`toolu_\${task}\`;
-        onEvent({ type: "subagent", sessionId, task, state: "running", parentToolUseId, title: "Count to thirty with one Bash call per number", prompt: "Count from 1 to 30. For each number N make a separate Bash call running: echo N; sleep 2.", depth: 1 });
+        onEvent({ type: "subagent", sessionId, task, state: "running", parentToolUseId, title: "Count to thirty with one Bash call per number", depth: 1 });
         for (let i = 0; i < ${SUBAGENT_DELTAS}; i++) onEvent({ type: "turn.delta", sessionId, kind: "text", text: "token ".repeat(16), parentToolUseId });
         onEvent({ type: "subagent", sessionId, task, state: "done", parentToolUseId, summary: "COUNT-FINISHED" });
       }

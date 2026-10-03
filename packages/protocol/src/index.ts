@@ -1666,7 +1666,8 @@ export type PlanStep = z.infer<typeof PlanStep>;
 
 /** One of the agent's own subagents started or ended: a row per change, so a child is its start row and, once it is
  * over, its end row. task is the agent's own id for it, what a stop names; parentToolUseId is the call that launched
- * it, which its lines carry. A start carries the title and the prompt, an end the agent's summary where it gave one. */
+ * it, which its lines carry and whose tool_use delta holds what it was asked. A start carries the title, an end the
+ * agent's summary where it gave one. */
 export const SessionSubagentEvent = z.object({
   type: z.literal("session.subagent"),
   ...sessionScope,
@@ -1674,10 +1675,10 @@ export const SessionSubagentEvent = z.object({
   state: SubagentState,
   parentToolUseId: z.string().optional(),
   title: z.string().optional(),
-  prompt: z.string().optional(),
   summary: z.string().optional(),
   depth: z.number().int().positive().optional(),
-  /** Where this row sits in its turn, counted with the turn's deltas: what a host re-opening the run reads past. */
+  /** Where this row sits among its turn's subagent rows, counting from one, as a delta's line does among the deltas:
+   * what a host re-opening the run reads past. */
   line: z.number().int().positive().optional(),
 });
 export type SessionSubagentEvent = z.infer<typeof SessionSubagentEvent>;
@@ -6952,8 +6953,8 @@ export const SessionInterruptResult = z.object({
 });
 export type SessionInterruptResult = z.infer<typeof SessionInterruptResult>;
 
-/** What a stop of one subagent the agent refused says, in the agent's own words after the task. */
-export const taskStopRefusedLine = (agent: string, task: string, why: string): string => `${agent} would not stop ${task}: ${why}`;
+/** What a stop of one subagent the agent refused says, in the agent's own words; the line it stands in names the task. */
+export const taskStopRefusedLine = (agent: string, why: string): string => `${agent} would not stop it: ${why}`;
 /** What a stop of one subagent says where the agent offers none. */
 export const taskStopUnsupportedLine = (agent: string): string => `Stop is not available for ${agent} subagents; stop the thread to stop them all`;
 
