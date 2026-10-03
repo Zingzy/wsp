@@ -262,6 +262,10 @@ describe("the checks a box passes before anything of wsp's goes on it", () => {
   it("passes root on systemd with cgroup v2 and the room, and refuses each that is missing in a sentence naming the fix", () => {
     expect(placeCheckRefusal("spoo", "/root", read(["uid 0", "systemd yes", "cgroup2 yes", `free ${10 * 1024 ** 3}`]), need)).toBeUndefined();
     expect(placeCheckRefusal("spoo", "/home/dev", read(["uid 1000", "systemd yes"]), need)).toContain("not root");
+    // Root alone this time, said with what to do: a login with passwordless sudo is refused the same way.
+    const asUser = placeCheckRefusal("dev@10.0.0.9", "/home/dev", read(["uid 1000"]), need)!;
+    expect(asUser).toContain("root on the box is required");
+    expect(asUser).toContain("wsp add root@10.0.0.9");
     expect(placeCheckRefusal("spoo", "/root", read(["uid 0", "systemd no"]), need)).toContain("runs no systemd");
     expect(placeCheckRefusal("spoo", "/root", read(["uid 0", "systemd yes", "cgroup2 no"]), need)).toContain("no cgroup v2");
     expect(placeCheckRefusal("spoo", "/root", read(["uid 0", "systemd yes", "cgroup2 yes", `free ${1024 ** 3}`]), need)).toContain("1 GB free under /root");

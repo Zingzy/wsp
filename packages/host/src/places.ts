@@ -654,7 +654,7 @@ export const PLACE_CHECK_SPARE_BYTES = 1024 ** 3;
 /** Why a box is refused at the check, naming what would fix it; nothing where it passes or would not say. */
 export function placeCheckRefusal(address: string, home: string, check: PlaceCheck, needBytes: number): string | undefined {
   const at = address.slice(0, 64);
-  if (check.uid !== undefined && check.uid !== 0) return `${at} logs in as a user that is not root, and wsp installs its daemon there as a system service; add it as root@ that box, since a login with passwordless sudo is not taken yet`;
+  if (check.uid !== undefined && check.uid !== 0) return `${at} logs in as a user that is not root, and root on the box is required: wsp runs its daemon there as a system service. Allow root's ssh login there and add it with wsp add root@${at.slice(at.indexOf("@") + 1)}`;
   if (check.systemd === false) return `${at} runs no systemd, which is what keeps wsp's daemon up there; wsp takes a Linux box that boots with systemd`;
   if (check.cgroup2 === false) return `${at} has no cgroup v2 (/sys/fs/cgroup/cgroup.controllers), which every workspace there is held in; boot it with the unified hierarchy`;
   if (check.freeBytes !== undefined && check.freeBytes < needBytes) return `${at} has ${fmtBytes(check.freeBytes)} free under ${home}, and the base tools with a gigabyte to work in take ${fmtBytes(needBytes)}; free some room there and add it again`;
