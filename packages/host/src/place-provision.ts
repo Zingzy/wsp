@@ -179,16 +179,16 @@ function shellPackage(picks: RecipeFile, manifest: Manifest, path: string, prefi
 
 /** The picked plugins as the lines that put each on, by the agent's own commands there, each from the marketplace
  * this computer's index names for it. One whose marketplace this computer cannot name is set aside. */
-function pluginsOf(picks: RecipeFile, home: string): { plugins: { id: string; label: string; cmd: string }[]; skipped: { id: string; label: string; note: string }[] } {
+function pluginsOf(picks: RecipeFile, home: string): { plugins: NonNullable<ProvisionPlan["plugins"]>[number][]; skipped: { id: string; label: string; note: string }[] } {
   const road = CATALOG_AGENTS.find(a => a.plugins !== undefined && picks.agents[a.id] !== undefined)?.plugins;
-  const plugins: { id: string; label: string; cmd: string }[] = [];
+  const plugins: NonNullable<ProvisionPlan["plugins"]>[number][] = [];
   const skipped: { id: string; label: string; note: string }[] = [];
   const index = road === undefined || !existsSync(expand({ home }, road.marketplaces)) ? undefined : readFileSync(expand({ home }, road.marketplaces), "utf8");
   for (const name of Object.keys(picks.plugins)) {
     const marketplace = name.split("@")[1];
     const source = road === undefined || index === undefined || marketplace === undefined ? undefined : road.sourceOf(index, marketplace);
     if (road === undefined || source === undefined) skipped.push({ id: `plugins/${name}`, label: name, note: road === undefined ? "no picked agent takes plugins" : "this computer names no marketplace for it" });
-    else plugins.push({ id: `plugins/${name}`, label: name, cmd: road.install(name, source) });
+    else plugins.push({ id: `plugins/${name}`, label: name, cmd: road.install(name, source), asked: out => road.asked(out, name) });
   }
   return { plugins, skipped };
 }

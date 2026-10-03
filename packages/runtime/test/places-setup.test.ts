@@ -27,7 +27,7 @@ import {
 } from "@wsp/protocol";
 import type { EngineStep, ProvisionPlan } from "@wsp/engine";
 import type { AgentsActs, SignInRun } from "../src/agents-read.js";
-import { ADD_STOPPED_LINE, PlaceProvisioningError, newPlaceKeyPair, type PlaceKeyPair, type PlaceProvisioner, type PlaceRecord, type PlaceWiring } from "../src/places.js";
+import { ADD_STOPPED_LINE, PlaceProvisioningError, newPlaceKeyPair, type PlaceKeyPair, type PlaceProvisioner, type PlaceRecord, type PlaceUpdater, type PlaceUpdateRequest, type PlaceWiring } from "../src/places.js";
 import { createRuntime, type Runtime } from "../src/runtime.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
@@ -145,7 +145,7 @@ function signIns() {
 }
 
 /** A host with the setup wired, serving, and the road an add takes onto a computer that joins over the link. */
-async function hosting(o: { provision: PlaceProvisioner; store?: Store; cmds?: string[]; acts?: AgentsActs; vault?: Record<string, string>; report?: PlaceReport; install?: PlaceWiring["install"]; undo?: PlaceWiring["undo"]; hostKey?: PlaceKeyPair; clock?: Clock }): Promise<{ hostKey: PlaceKeyPair; store: Store; frames: PlaceSetupEvent[]; joined: { placeId: string; pair: PlaceKeyPair }[] }> {
+async function hosting(o: { provision: PlaceProvisioner; store?: Store; cmds?: string[]; acts?: AgentsActs; vault?: Record<string, string>; report?: PlaceReport; install?: PlaceWiring["install"]; undo?: PlaceWiring["undo"]; hostKey?: PlaceKeyPair; clock?: Clock; update?: PlaceUpdater }): Promise<{ hostKey: PlaceKeyPair; store: Store; frames: PlaceSetupEvent[]; joined: { placeId: string; pair: PlaceKeyPair }[] }> {
   const hostKey = o.hostKey ?? newPlaceKeyPair();
   const joined: { placeId: string; pair: PlaceKeyPair }[] = [];
   const store = o.store ?? memoryStore();
@@ -158,7 +158,7 @@ async function hosting(o: { provision: PlaceProvisioner; store?: Store; cmds?: s
     ...(o.acts !== undefined ? { agentsActs: o.acts } : {}),
     vault: () => o.vault ?? { CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-x" },
     placeLinks: {
-      ...wiring(hostKey),
+      ...wiring(hostKey, undefined, o.update),
       provision: o.provision,
       ...(o.undo !== undefined ? { undo: o.undo } : {}),
       install:
@@ -199,6 +199,37 @@ async function stopHost(): Promise<void> {
 
 const rowOf = async (placeId: string): Promise<PlaceView> => (await runtime!.places!.list(Date.now())).find(p => p.id === placeId)!;
 const ended = (frames: readonly PlaceSetupEvent[]): PlaceSetupEvent[] => frames.filter(f => f.end !== undefined);
+
+describe("an update of a computer already set up", () => {
+  it("asks the updater every time, with a binary only where the computer is behind, and runs its setup again", async () => {
+    const asked: PlaceUpdateRequest[] = [];
+    const p = provisioner();
+    await hosting({ provision: p.wired, update: async req => void asked.push(req) });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: LAPTOP }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    const answer = await runtime!.places!.update(place.id);
+    expect(asked).toEqual([expect.objectContaining({ name: "spoo", daemon: false })]);
+    // Nothing landed, so no dial-back was waited for and the answer carries no daemon, only the setup run again.
+    expect(answer.daemon).toBeUndefined();
+    expect(answer.setup?.state).toBe("running");
+    await until(() => p.ran.filter(s => s === "floor").length === 2);
+  });
+
+  it("puts a binary only on a computer whose daemon is behind", async () => {
+    const asked: PlaceUpdateRequest[] = [];
+    const { hostKey, joined } = await hosting({ provision: provisioner().wired, report: { ...CURRENT, daemonVersion: DAEMON_VERSION - 1 }, update: async req => (asked.push(req), { road: "ssh", at: "/root/.wsp/daemon/wsp-daemon" }) });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: LAPTOP }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    const moving = runtime!.places!.update(place.id);
+    await until(() => asked.length === 1);
+    // The new daemon dials back on its own, which is what the update waits for.
+    for (const ws of sockets.splice(0)) ws.close();
+    await dialsBack(hostKey, place.id, joined[0]!.pair);
+    const moved = await moving;
+    expect(asked).toEqual([expect.objectContaining({ name: "spoo", daemon: true })]);
+    expect(moved.daemon).toMatchObject({ from: DAEMON_VERSION - 1, road: "ssh" });
+  });
+});
 
 describe("a computer added with its picks", () => {
   it("runs the floor and the agents first, starts the sign-ins, then the rest, and writes every step and its rows on the record", async () => {

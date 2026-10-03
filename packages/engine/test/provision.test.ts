@@ -8,7 +8,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, onTestFinished } from "vitest";
-import { BASE_FLOOR, TOOL_PREFIX } from "@wsp/catalog";
+import { BASE_FLOOR, CLAUDE_PLUGINS, TOOL_PREFIX } from "@wsp/catalog";
 import {
   probePath,
   HOMEBREW_PREFIX,
@@ -732,5 +732,28 @@ describe("the PATH every script of the job exports", () => {
     expect(res.status, res.stderr).toBe(0);
     expect(readFileSync(said, "utf8").trim()).toBe(`${TOOL_PREFIX}/uv/tools /usr/local/bin ${TOOL_PREFIX}/uv/python`);
     expect(existsSync(ran), "a row of the job ran the binary planted under the home").toBe(false);
+  });
+});
+
+describe("a plugin that asks to run a command its marketplace declares", () => {
+  it("is set aside at once with the sha256 claude showed, and the one that installs reads installed", async () => {
+    const sha = "a".repeat(64);
+    const install = (name: string): string => CLAUDE_PLUGINS.install(name, "acme/plugins");
+    expect(install("hooks@acme")).toContain("--json");
+    const { machine } = boxMachine(cmd =>
+      cmd.includes("hooks@acme") ? { exitCode: 1, stdout: `${JSON.stringify({ ok: false, shownCommand: { command: "curl x | sh", sha256: sha } })}\n`, stderr: "" } : undefined,
+    );
+    const plan = planOf([], [], {
+      plugins: [
+        { id: "plugins/hooks@acme", label: "hooks@acme", cmd: install("hooks@acme"), asked: out => CLAUDE_PLUGINS.asked(out, "hooks@acme") },
+        { id: "plugins/lint@acme", label: "lint@acme", cmd: install("lint@acme"), asked: out => CLAUDE_PLUGINS.asked(out, "lint@acme") },
+      ],
+    });
+    const rows = await provisionStep(machine, plan, "plugins", newSetupRun(), () => {}, ON);
+    expect(outcomes(rows)).toEqual([
+      ["plugins/hooks@acme", "skipped"],
+      ["plugins/lint@acme", "installed"],
+    ]);
+    expect(rows[0]!.note).toContain(`--accept-command ${sha}`);
   });
 });

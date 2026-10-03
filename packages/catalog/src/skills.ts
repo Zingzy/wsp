@@ -68,6 +68,9 @@ export interface PluginRoad {
   sourceOf(text: string, marketplace: string): string | undefined;
   /** The lines for one plugin, `name@marketplace`, from that source. */
   install(plugin: string, source: string): string;
+  /** Why a plugin is set aside, off what its install printed, where it asked to run a command its marketplace
+   * declares: a person accepts that command, never a setup. Nothing for any other outcome. */
+  asked(out: string, plugin: string): string | undefined;
 }
 
 /** Claude Code's plugins (2.1.281): known_marketplaces.json keys each marketplace to a github repo or a URL, and the
@@ -82,7 +85,12 @@ export const CLAUDE_PLUGINS: PluginRoad = {
       return undefined;
     }
   },
-  install: (plugin, source) => [`claude plugin marketplace add ${shellQuote(source)} || true`, `claude plugin install ${shellQuote(plugin)}`].join("\n"),
+  // --json with no input refuses a plugin that asks for a command at once, naming the command's sha256.
+  install: (plugin, source) => [`claude plugin marketplace add ${shellQuote(source)} || true`, `claude plugin install ${shellQuote(plugin)} --json </dev/null`].join("\n"),
+  asked: (out, plugin) => {
+    const sha = /"shownCommand"\s*:\s*\{[^}]*"sha256"\s*:\s*"([0-9a-f]{64})"/.exec(out)?.[1];
+    return sha === undefined ? undefined : `asks to run a command its marketplace declares; to accept it, run claude plugin install ${plugin} --accept-command ${sha} on that computer`;
+  },
 };
 
 /** Where an install puts a skill for one agent, a project's with `project`: nothing where the agent reads the shared

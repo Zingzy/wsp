@@ -44,10 +44,27 @@ const NEVER_NAMES = new Set(["fish_variables", ".git"]);
 const CONFIG_MAX_BYTES = 1024 * 1024;
 
 /** Git sections that never travel: a credential helper is this computer's, a url rewrite points at keys that stay
- * here, an include names a path on this computer, and signing needs the key that stays here. */
-const GIT_DROPPED_SECTIONS = /^(credential|url|gpg|include|includeif)\b/i;
-/** Keys cut out of sections that otherwise travel, by `section.key`. */
-const GIT_DROPPED_KEYS = new Set(["core.sshcommand", "user.signingkey", "commit.gpgsign", "tag.gpgsign"]);
+ * here, an include names a path on this computer, signing needs the key that stays here, and a filter, a pager
+ * table or a diff or merge tool is a command root's own git on the box would run. */
+const GIT_DROPPED_SECTIONS = /^(credential|url|gpg|include|includeif|filter|pager|difftool|mergetool)$/i;
+/** Keys cut out of sections that otherwise travel, by `section.key`: signing, and every key whose value git runs. */
+const GIT_DROPPED_KEYS = new Set([
+  "core.sshcommand",
+  "core.fsmonitor",
+  "core.hookspath",
+  "core.pager",
+  "core.editor",
+  "core.askpass",
+  "core.gitproxy",
+  "sequence.editor",
+  "diff.external",
+  "interactive.difffilter",
+  "user.signingkey",
+  "commit.gpgsign",
+  "tag.gpgsign",
+]);
+/** Keys of a named diff or merge driver that git runs, cut whatever the driver's name. */
+const GIT_DRIVER_KEYS = new Set(["textconv", "command", "driver"]);
 /** What a landed .gitconfig asks git for credentials with, so a box with GH_TOKEN in a run's environment clones a
  * private repo and nothing writes the file there afterwards. */
 export const GH_CREDENTIAL_HELPER = "!gh auth git-credential";
@@ -56,18 +73,26 @@ export const GH_CREDENTIAL_HELPER = "!gh auth git-credential";
 export function gitCut(text: string, main: boolean): string {
   const out: string[] = [];
   let section = "";
+  let named = false;
   let dropping = false;
   for (const line of text.split(/\r?\n/)) {
-    const header = /^\s*\[\s*([^\]\s"]+)(?:\s+"[^"]*")?\s*\]/.exec(line);
+    const header = /^\s*\[\s*([^\]\s"]+)(\s+"[^"]*")?\s*\]/.exec(line);
     if (header !== null) {
       section = header[1]!.toLowerCase();
+      named = header[2] !== undefined;
       dropping = GIT_DROPPED_SECTIONS.test(section);
       if (!dropping) out.push(line);
       continue;
     }
     if (dropping) continue;
-    const key = /^\s*([A-Za-z][A-Za-z0-9-]*)\s*(=|$)/.exec(line)?.[1]?.toLowerCase();
-    if (key !== undefined && GIT_DROPPED_KEYS.has(`${section}.${key}`)) continue;
+    const pair = /^\s*([A-Za-z][A-Za-z0-9-]*)\s*(?:=\s*(.*))?$/.exec(line);
+    const key = pair?.[1]?.toLowerCase();
+    if (key !== undefined) {
+      if (!named && GIT_DROPPED_KEYS.has(`${section}.${key}`)) continue;
+      if (named && (section === "diff" || section === "merge") && GIT_DRIVER_KEYS.has(key)) continue;
+      // An alias that starts with ! is a shell command.
+      if (section === "alias" && pair?.[2]?.trim().startsWith("!") === true) continue;
+    }
     out.push(line);
   }
   while (out.length > 0 && out[out.length - 1]!.trim() === "") out.pop();

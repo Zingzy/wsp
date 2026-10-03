@@ -184,7 +184,43 @@ describe("the configs a recipe carries", () => {
       ].join("\n"),
       true,
     );
-    expect(cut).toBe(["[user]", "\tname = Dev", "\temail = dev@example.com", "[core]", "\teditor = vim", "[commit]", "[credential]", "\thelper = !gh auth git-credential", ""].join("\n"));
+    expect(cut).toBe(["[user]", "\tname = Dev", "\temail = dev@example.com", "[core]", "[commit]", "[credential]", "\thelper = !gh auth git-credential", ""].join("\n"));
+  });
+
+  it("lands no key that names a command, since root's own git on the box reads the file", () => {
+    const cut = gitCut(
+      [
+        "[core]",
+        "	autocrlf = input",
+        "	fsmonitor = /usr/local/bin/watch",
+        "	hooksPath = ~/hooks",
+        "	pager = delta",
+        "	editor = code --wait",
+        "	askPass = /usr/bin/ask",
+        "[alias]",
+        "	lg = log --oneline",
+        "	nuke = !rm -rf .",
+        "[diff]",
+        "	external = difftool.sh",
+        "	colorMoved = zebra",
+        '[diff "pdf"]',
+        "	textconv = pdftotext",
+        '[merge "ours"]',
+        "	driver = true",
+        '[filter "lfs"]',
+        "	clean = git-lfs clean -- %f",
+        "[sequence]",
+        "	editor = vim",
+        "[pager]",
+        "	log = less",
+        "[interactive]",
+        "	diffFilter = delta --color-only",
+        '[difftool "x"]',
+        "	cmd = x $LOCAL",
+      ].join("\n"),
+      false,
+    );
+    expect(cut).toBe(["[core]", "\tautocrlf = input", "[alias]", "\tlg = log --oneline", "[diff]", "\tcolorMoved = zebra", '[diff "pdf"]', '[merge "ours"]', "[sequence]", "[interactive]", ""].join("\n"));
   });
 
   it("carries no bash file and no exported secret of the shell's", () => {

@@ -48,8 +48,8 @@ export interface ProvisionPlan {
   configs?: { lands: readonly ProvisionLanding[]; pack: PackFiles };
   /** Installs that go with the configs: the shell's own package where the picks carry its files. */
   configTools?: readonly ToolInstall[];
-  /** Plugins, each put on by its agent's own commands. */
-  plugins?: readonly { id: string; label: string; cmd: string }[];
+  /** Plugins, each put on by its agent's own commands; `asked` reads off what one printed why it is set aside. */
+  plugins?: readonly { id: string; label: string; cmd: string; asked?(out: string): string | undefined }[];
 }
 
 /** What a plan off the picks adds to the import's: the skills, the configs, the plugins and whether the C toolchain
@@ -372,9 +372,12 @@ async function stepRows(machine: Machine, plan: ProvisionPlan, step: EngineStep,
       for (const plugin of plan.plugins ?? []) {
         const started = Date.now();
         const res = await machine.run(`${pathLine(plan.path, plan.prefix)}\n${plugin.cmd}`, { deadlineMs: PLUGIN_MS }).catch((e: unknown) => ({ exitCode: -1, stdout: "", stderr: e instanceof Error ? e.message : String(e) }));
+        const asked = res.exitCode === 0 ? undefined : plugin.asked?.(res.stdout);
         const row: PlaceProvisionRow = res.exitCode === 0
           ? { id: plugin.id, label: plugin.label, outcome: "installed", ms: Date.now() - started }
-          : { id: plugin.id, label: plugin.label, outcome: "failed", note: lastWords(res.stderr || res.stdout) ?? `exit ${res.exitCode}` };
+          : asked !== undefined
+            ? { id: plugin.id, label: plugin.label, outcome: "skipped", note: asked }
+            : { id: plugin.id, label: plugin.label, outcome: "failed", note: lastWords(res.stderr || res.stdout) ?? `exit ${res.exitCode}` };
         stage(rowLine(row), undefined, row);
         rows.push(row);
       }
