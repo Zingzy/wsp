@@ -4829,6 +4829,7 @@ const DAEMON_CONTENTS = [
   "89e10a249a0e59670fc8fefec015f640d8f021d0b24bb34665412360cf6b999b",
   "ffcede69616fafe56cf56a3ec668d56516c22b7c9f53fc5176621c902ad7e639",
   "019c206265a45a72e87e3e436643cc96399b6ed44d5ae07de967b502e5742abc",
+  "b423faeb3b4ae38a7456d11b877ab8720adaaa62650c5b33209ee24e02fb37b9",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -5145,7 +5146,17 @@ const DAEMON_CONTENTS = [
  * takes off a reaction. A resolve and a reaction name their thread or item by a node id, refused before anything runs
  * where it is not one's shape, and refused before the mutation where a read finds it on any pull request but the
  * repository's one numbered. A pull request's page reads each comment's, review's and line comment's node id and
- * reactions, with whether the signed-in person left each, and each line comment's review thread by id. */
+ * reactions, with whether the signed-in person left each, and each line comment's review thread by id.
+ * Version 114: The binary makes and removes the worktree a thread on another branch works in: copy worktree answers the
+ * worktree already holding the branch, else makes one under the host's folder (or the project volume's own .wsp) on the
+ * branch as its tip stands, a new branch at the folder's HEAD and never a reset, with the folder's config files and
+ * each named dependency directory carried in by one clonefile per directory; copy worktree-remove takes away only a
+ * worktree wsp made, refuses one holding uncommitted files unless forced, and saves a detached worktree's commit to a
+ * refs/rescue ref first. git.checkpoint and git.restore take a scope that names the refs in place of the folder, and a
+ * thread keeps its newest hundred checkpoint refs, the before refs a restore writes counted; git.checkpointDrop takes
+ * one thread's refs away; git.worktrees and git.branches read a repository's worktrees and its local branches;
+ * git.switchNew puts a folder on a new branch with its changes carried along; git.fetchBranch fetches one branch of a
+ * remote into a local branch, moving it only forward. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
