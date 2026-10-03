@@ -29,7 +29,7 @@ const OUTLINE = 237;
 /** Each row a step darker than the one above; the box-drawing outline darker than the blocks it edges. */
 export function wordmark(colour = true): string[] {
   if (!colour) return [...WORDMARK];
-  return WORDMARK.map((row, i) => row.replace(/█+|[^█ ]+/g, run => grey(run.startsWith("█") ? FILL[i]! : OUTLINE, run)));
+  return WORDMARK.map((row, i) => row.replace(/\u2588+|[^\u2588 ]+/g, run => grey(run.startsWith("█") ? FILL[i]! : OUTLINE, run)));
 }
 
 export function opening(io: Pick<InitIO, "output" | "isTTY" | "env">, o: { command: string; version: string; yes: boolean; statePath: string }): void {

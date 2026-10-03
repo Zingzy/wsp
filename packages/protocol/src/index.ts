@@ -4903,6 +4903,7 @@ const DAEMON_CONTENTS = [
   "ffcede69616fafe56cf56a3ec668d56516c22b7c9f53fc5176621c902ad7e639",
   "019c206265a45a72e87e3e436643cc96399b6ed44d5ae07de967b502e5742abc",
   "b423faeb3b4ae38a7456d11b877ab8720adaaa62650c5b33209ee24e02fb37b9",
+  "4076321ab3d83fb3893ad81b9222fc36b92dccec81e8e9bc4566cc64a412b299",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -5229,7 +5230,8 @@ const DAEMON_CONTENTS = [
  * thread keeps its newest hundred checkpoint refs, the before refs a restore writes counted; git.checkpointDrop takes
  * one thread's refs away; git.worktrees and git.branches read a repository's worktrees and its local branches;
  * git.switchNew puts a folder on a new branch with its changes carried along; git.fetchBranch fetches one branch of a
- * remote into a local branch, moving it only forward. */
+ * remote into a local branch, moving it only forward.
+ * Version 115: Daemon port-file test times out on Linux CI about half the time. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary

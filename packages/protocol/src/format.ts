@@ -2386,7 +2386,7 @@ export const NEEDS_YOU = "wsp needs you";
 export const initNeedsYouLine = (what: string): string => `${NEEDS_YOU}: ${what}`;
 
 /** What a window or tab title leads with while a need stands, so a person reading only the title sees it. */
-export const NEEDS_YOU_MARK = "• ";
+export const NEEDS_YOU_MARK = "\u2022 ";
 
 /** The title with the mark on it while a need stands and without it otherwise, from a title that may already carry
  * one: the same title goes through this on every change, so the mark can never double or stick. */

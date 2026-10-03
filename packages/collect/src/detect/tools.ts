@@ -103,7 +103,7 @@ export function parsePnpmGlobals(text: string): Pkg[] {
 export function parseBunGlobals(text: string): Pkg[] {
   const out: Pkg[] = [];
   for (const line of text.split("\n")) {
-    const m = /^[│├└─\s]+(@?[^@\s]+)@(\S+)$/.exec(line);
+    const m = /^[\u2502\u251c\u2514\u2500\s]+(@?[^@\s]+)@(\S+)$/.exec(line);
     if (m?.[1] === undefined || m[2] === undefined) continue;
     out.push({ name: m[1], version: m[2] });
   }
