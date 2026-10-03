@@ -135,11 +135,14 @@ function modelWithContext(model: string | undefined, contextWindow: string | und
  * itself, "default" included: sending no flag for it left the person's own settings deciding the turn's access, and
  * on 2.1.263 a turn launched that way came back in the auto mode their store had (measured 2026-09-08), which is
  * not what the picker said. A mode that is not bypass may raise a prompt, and --permission-prompt-tool routes it to
- * this process over the control channel; without the flag the CLI denies every such call by itself.
+ * this process over the control channel; without the flag the CLI denies every such call by itself. Bypass takes the
+ * flag too: without it the CLI has no road to a person and switches AskUserQuestion off, while with it every other
+ * tool still runs unasked and only the question comes here (measured 2026-10-03).
  */
 function permissionFlags(mode: string | undefined): string[] {
-  if (mode === undefined || mode === SKIP_PROMPTS_MODE) return ["--dangerously-skip-permissions"];
-  return [...slugFlag("--permission-mode", "permissionMode", mode), `--permission-prompt-tool ${PERMISSION_PROMPT_TOOL}`];
+  const prompts = `--permission-prompt-tool ${PERMISSION_PROMPT_TOOL}`;
+  if (mode === undefined || mode === SKIP_PROMPTS_MODE) return ["--dangerously-skip-permissions", prompts];
+  return [...slugFlag("--permission-mode", "permissionMode", mode), prompts];
 }
 
 /**

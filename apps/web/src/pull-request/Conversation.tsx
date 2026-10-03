@@ -4,7 +4,7 @@
 // thread no review holds, and one quiet line where commits were pushed between two of them, which opens the Commits
 // tab. Every body is the restricted markdown the description reads, and every comment, review and thread line takes a
 // quiet send to the agent.
-import { ChevronRightIcon, CircleCheckIcon, FileIcon, ReplyIcon } from "lucide-react";
+import { ChevronRightIcon, CircleCheckIcon, FileIcon, QuoteIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import type { PullRequestItem, PullRequestPage, PullRequestReaction, ReactionContent } from "@wsp/protocol";
 import { DiffCommentAnnotation } from "../components/diffs/DiffCommentAnnotation.js";
@@ -24,7 +24,7 @@ export type SendOf = (item: PullRequestItem) => { sent: number } | { send: () =>
 
 /** What the person can do on the page as themselves through the signed-in gh; each absent where no host serves it. */
 export interface PageActs {
-  /** A reply: into a thread under its first comment, or with none a new comment in the conversation. */
+  /** A reply into a thread under its first comment, or with none a new comment at the conversation's end. */
   readonly reply?: (body: string, into?: { replyTo: number; threadId?: string | undefined }) => Promise<void>;
   readonly resolve?: (threadId: string, resolved: boolean) => Promise<void>;
   /** A reaction put on or taken off an item by its node id, at once and taken back where the host refuses. */
@@ -45,17 +45,17 @@ function toggleOn(item: Reactable, acts: PageActs | undefined): ((content: React
 }
 
 /** The chips under an item, and the head's tools for it: Reply where it takes one, and the add button. */
-function itemActs(item: Reactable, acts: PageActs | undefined, k: string, onReply?: () => void): { chips: ReactNode; tools: ReactNode } {
+function itemActs(item: Reactable, acts: PageActs | undefined, k: string, onQuote?: () => void): { chips: ReactNode; tools: ReactNode } {
   const onToggle = toggleOn(item, acts);
   return {
     chips: <Reactions k={k} reactions={item.reactions ?? []} {...(onToggle === undefined ? {} : { onToggle })} />,
     tools:
-      onReply === undefined && onToggle === undefined ? null : (
+      onQuote === undefined && onToggle === undefined ? null : (
         <>
-          {onReply === undefined ? null : (
-            <Hover words={PR_WORDS.reply}>
-              <Button type="button" size="icon-xs" variant="ghost" data-pr-reply-open={k} aria-label={PR_WORDS.reply} className="ml-1 self-center opacity-0 transition-opacity duration-150 group-hover/ev:opacity-100 focus-visible:opacity-100" onClick={onReply}>
-                <ReplyIcon aria-hidden className="size-[13px]" />
+          {onQuote === undefined ? null : (
+            <Hover words={PR_WORDS.quoteReply}>
+              <Button type="button" size="icon-xs" variant="ghost" data-pr-quote={k} aria-label={PR_WORDS.quoteReply} className="ml-1 self-center" onClick={onQuote}>
+                <QuoteIcon aria-hidden className="size-[13px]" />
               </Button>
             </Hover>
           )}
@@ -65,22 +65,15 @@ function itemActs(item: Reactable, acts: PageActs | undefined, k: string, onRepl
   };
 }
 
-/** A comment or a review in the conversation: its head with Reply and the add button on a hover, its body, its chips,
- * and the reply field once Reply is pressed. A reply here is a new comment, GitHub having no nesting there. */
-function Said({ kind, face, avatar, head, body, after, item, to, acts, k }: { kind: "comment" | "review"; face: string; avatar?: string | undefined; head: (tools: ReactNode) => ReactNode; body: ReactNode; /** What follows the reply field: a review's threads. */ after?: ReactNode; item: Reactable; to: string; acts: PageActs | undefined; k: string }) {
-  const [replying, setReplying] = useState(false);
-  const reply = acts?.reply;
-  const { chips, tools } = itemActs(item, acts, k, reply === undefined || replying ? undefined : () => setReplying(true));
+/** A comment or a review in the conversation: its head with Quote reply and the add button on a hover, its body and its
+ * chips. GitHub has no nesting in the conversation, so an answer is a quote in the comment box at Activity's foot. */
+function Said({ kind, face, avatar, head, body, after, item, quote, acts, k }: { kind: "comment" | "review"; face: string; avatar?: string | undefined; head: (tools: ReactNode) => ReactNode; body: ReactNode; /** A review's threads, after its body. */ after?: ReactNode; item: Reactable; quote?: (() => void) | undefined; acts: PageActs | undefined; k: string }) {
+  const { chips, tools } = itemActs(item, acts, k, acts?.reply === undefined ? undefined : quote);
   return (
     <Entry kind={kind} face={face} avatar={avatar}>
       {head(tools)}
       {body}
       {chips}
-      {replying && reply !== undefined ? (
-        <div className="mt-2">
-          <ReplyField to={to} onSend={words => reply(words).then(() => setReplying(false))} onCancel={() => setReplying(false)} />
-        </div>
-      ) : null}
       {after}
     </Entry>
   );
@@ -137,15 +130,16 @@ function Head({ author, verb, word, at, sent, send, tools, go = false }: { autho
           {sent}
         </span>
       )}
-      <span data-pr-time className={cn("relative font-mono text-xs whitespace-nowrap text-muted-foreground", sent === undefined ? "ml-auto" : "ml-2.5")}>
-        {ago(at)}
-        {/* The hover's acts stand left of the time and take no width at rest, so every head's time ends on one edge. */}
+      <span data-pr-time className={cn("inline-flex items-center self-center font-mono text-xs whitespace-nowrap text-muted-foreground", sent === undefined ? "ml-auto" : "ml-2.5")}>
+        {/* The hover's acts open just left of the time and take no width at rest, so every head's time ends on one
+            edge; the pane stands on the Mac's glass, so they push the words aside rather than cover them. */}
         {(tools ?? null) === null && (send ?? null) === null ? null : (
-          <span data-pr-head-acts className="absolute top-1/2 right-full mr-1.5 flex -translate-y-1/2 items-center bg-background pl-1.5 font-sans opacity-0 transition-opacity duration-150 group-hover/ev:opacity-100 focus-within:opacity-100 has-[[data-popup-open]]:opacity-100">
+          <span data-pr-head-acts className="inline-flex w-0 items-center overflow-hidden font-sans opacity-0 transition-opacity duration-150 group-hover/ev:mr-1.5 group-hover/ev:w-auto group-hover/ev:opacity-100 focus-within:mr-1.5 focus-within:w-auto focus-within:opacity-100 has-[[data-popup-open]]:mr-1.5 has-[[data-popup-open]]:w-auto has-[[data-popup-open]]:opacity-100">
             {tools}
             {send}
           </span>
         )}
+        {ago(at)}
       </span>
     </div>
   );
@@ -337,7 +331,7 @@ function BotNotice({ entry, agent, of }: { entry: Extract<TimelineEntry, { kind:
   );
 }
 
-export function Timeline({ page, agent, of, acts, onOpenCommits }: { page: PullRequestPage; agent: Agent; of?: SendOf | undefined; acts?: PageActs | undefined; /** Where a push line goes: the Commits tab. */ onOpenCommits: () => void }) {
+export function Timeline({ page, agent, of, acts, onOpenCommits, onQuote }: { page: PullRequestPage; agent: Agent; of?: SendOf | undefined; acts?: PageActs | undefined; /** Where a push line goes: the Commits tab. */ onOpenCommits: () => void; /** Where a quote reply goes: the comment box at Activity's foot. */ onQuote?: (author: string, body: string) => void }) {
   const entries = conversationOf(page);
   if (entries.length === 0) return null;
   return (
@@ -361,7 +355,7 @@ export function Timeline({ page, agent, of, acts, onOpenCommits }: { page: PullR
                   </div>
                 }
                 item={entry.comment}
-                to={authorName(entry.comment.author)}
+                {...(onQuote === undefined ? {} : { quote: () => onQuote(entry.comment.author, entry.comment.body) })}
                 acts={acts}
                 k={`comment:${entry.comment.id}`}
               />
@@ -398,7 +392,7 @@ export function Timeline({ page, agent, of, acts, onOpenCommits }: { page: PullR
                   <ThreadBox key={t.key} thread={t} agent={agent} of={of} acts={acts} />
                 ))}
                 item={said ? entry.review : {}}
-                to={authorName(entry.review.author)}
+                {...(onQuote === undefined ? {} : { quote: () => onQuote(entry.review.author, entry.review.body) })}
                 acts={said ? acts : undefined}
                 k={`review:${entry.review.id ?? entry.key}`}
               />

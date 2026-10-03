@@ -24,6 +24,7 @@ import { conversationCount } from "./conversation.logic.js";
 import { Files, type DiffRead } from "./Files.js";
 import { StatusBox } from "./Status.js";
 import { usePageActs } from "./pageActs.js";
+import { CommentBox, quoteOf } from "./ThreadActs.js";
 import { SECTION_HEAD } from "../settings/layout.js";
 import { Clamped, CommitsSkeleton, CutNote, FilesSkeleton, Hover, PrMarkdown, StateWord, TimelineSkeleton, Who, usePrAgent } from "./parts.js";
 import { ReviewDialog } from "./ReviewDialog.js";
@@ -125,6 +126,21 @@ function PullRequestPane({ workspaceId }: { workspaceId: string }) {
   );
   const canSend = useStore(s => s.api?.pullRequestSend !== undefined);
   const acts = usePageActs(workspaceId, name, page?.postsAsYou === true, setPage);
+  const [foot, setFoot] = useState("");
+  const footField = useRef<HTMLTextAreaElement>(null);
+  const [quoted, setQuoted] = useState(0);
+  const quote = useCallback((author: string, body: string) => {
+    setFoot(typed => (typed.trim() === "" ? quoteOf(author, body) : `${typed.trimEnd()}\n\n${quoteOf(author, body)}`));
+    setQuoted(n => n + 1);
+  }, []);
+  // A quote reply brings the box into view with the caret after the quote, ready for the person's words.
+  useEffect(() => {
+    const field = footField.current;
+    if (quoted === 0 || field === null) return;
+    field.scrollIntoView?.({ block: "center", behavior: "smooth" });
+    field.focus();
+    field.setSelectionRange(field.value.length, field.value.length);
+  }, [quoted]);
 
   if (!isPullRequestNamed(seen)) {
     if (seen !== undefined && "why" in seen)
@@ -262,7 +278,8 @@ function PullRequestPane({ workspaceId }: { workspaceId: string }) {
             <h3 className={SECTION_HEAD}>{PR_WORDS.heads.activity}</h3>
             {page?.cut?.reviews === true ? <CutNote words={PR_WORDS.cut.reviews} /> : null}
             {page?.cut?.threads === true ? <CutNote words={PR_WORDS.cut.threads} /> : null}
-            <div className="mt-0.5">{page === null ? <TimelineSkeleton /> : <Timeline page={page} agent={agent} of={of} acts={acts} onOpenCommits={() => setTab("commits")} />}</div>
+            <div className="mt-0.5">{page === null ? <TimelineSkeleton /> : <Timeline page={page} agent={agent} of={of} acts={acts} onOpenCommits={() => setTab("commits")} onQuote={quote} />}</div>
+            {page === null || acts?.reply === undefined ? null : <CommentBox text={foot} setText={setFoot} onSend={body => acts.reply!(body)} fieldRef={footField} />}
           </section>
         </>
       )}

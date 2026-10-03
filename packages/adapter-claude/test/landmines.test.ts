@@ -135,11 +135,13 @@ describe("buildCommand", () => {
     expect(cmd).not.toContain("--dangerously-skip-permissions");
   });
 
-  it("no permission mode and bypassPermissions both skip permissions, and neither routes prompts here", () => {
+  it("no permission mode and bypassPermissions both skip permissions and still route the question tool here", () => {
+    // Without the prompt tool the CLI has no road to a person and switches AskUserQuestion off; with it, at
+    // --dangerously-skip-permissions, every other tool still runs unasked (measured on this Mac, 2026-10-03).
     for (const cmd of [buildCommand({ sessionId }), buildCommand({ sessionId, permissionMode: "bypassPermissions" })]) {
       expect(cmd).toContain("--dangerously-skip-permissions");
       expect(cmd).not.toContain("--permission-mode");
-      expect(cmd).not.toContain("--permission-prompt-tool");
+      expect(cmd).toContain("--permission-prompt-tool stdio");
     }
   });
 

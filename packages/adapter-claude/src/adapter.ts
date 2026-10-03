@@ -3,7 +3,7 @@
 // t3code ClaudeAdapter.ts (MIT, see NOTICE); event shapes are the ones
 // recorded in solari-poc/RESULTS.md.
 
-import { ASIDE_WALL_MS, INTERRUPT_GRACE_MS, LOST_SESSION_NOTE, PERMISSION_ALLOW, PERMISSION_DENY, RUN_EXIT_MS, asideWallLine, backgroundTasksLine, endAfterResult, endRun, fmtDuration, harnessExitLine, lostSessionPrompt, refusedTurn, taskFinishedLine, titlePrompt } from "@wsp/protocol";
+import { ASIDE_WALL_MS, INTERRUPT_GRACE_MS, LOST_SESSION_NOTE, PERMISSION_ALLOW, PERMISSION_DENY, QUESTION_TOOL, RUN_EXIT_MS, asideWallLine, backgroundTasksLine, endAfterResult, endRun, fmtDuration, harnessExitLine, lostSessionPrompt, refusedTurn, taskFinishedLine, titlePrompt } from "@wsp/protocol";
 import type { AdapterAttachOptions, AdapterEvent, AgentLaunch, AsideAnswer, AsideQuestion, ExecStream, ExecStreamFactory, HarnessCatalogProbe, McpServerSpec, PermissionAsk, PermissionOutcome, ScreenCommand, SessionAsker, SessionHarness, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnRefusal, TurnResult, TurnStatus, CommitDrafter, PlanStep, TurnTokens, HarnessLimit, LimitKind, LimitStatus, LimitWindow } from "@wsp/protocol";
 import { SKIP_PROMPTS_MODE, controlAllowLine, controlAnswerLine, controlErrorLine, controlLine, modeOptionOn, setModeLine } from "./permissions.js";
 import { CLAUDE_SCREEN_COMMANDS, catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
@@ -689,8 +689,8 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     let askedSeq = 0;
     /** The call each running subagent was launched by, by the CLI's handle for the subagent. */
     const launchedBy = new Map<string, string>();
-    /** Set once this turn is moved to the mode that asks nobody: the CLI takes that one only at launch, so from here
-     * every prompt it raises is allowed by this host and none of them reaches a person. */
+    /** Set once the turn is in the mode that asks nobody, launched there or moved there: every prompt the CLI raises
+     * from then is allowed by this host, and only a question reaches the person. */
     let skipsPrompts = false;
 
     /** Every request still waiting, answered as the caller's outcome; nothing can reach the CLI after this. */
@@ -793,7 +793,8 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
           if (control !== undefined) {
             switch (control.kind) {
               case "ask": {
-                if (skipsPrompts) {
+                // Bypass skips consent, never a question: a question allowed unanswered is the agent deciding alone.
+                if (skipsPrompts && control.ask.toolName !== QUESTION_TOOL) {
                   void stream.write(controlAllowLine(control.ask));
                   break;
                 }
@@ -870,6 +871,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
               sawInit = true;
               harnessCwd = normalized.cwd;
               shellCwd = normalized.cwd;
+              if (normalized.harness?.permissionMode === SKIP_PROMPTS_MODE) skipsPrompts = true;
               if (heldReply !== undefined) {
                 woken = true;
                 if (settleTimer !== undefined) clearTimeout(settleTimer);
@@ -992,7 +994,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
           // raises from now is allowed by this host, and the ones it is stopped on are allowed now. Its answer to the
           // request is not waited for, since it cannot raise another prompt until the one in front of it is answered.
           skipsPrompts = true;
-          for (const askId of [...pending.keys()]) await answerAsk(askId, { optionId: PERMISSION_ALLOW, outcome: "allowed" });
+          for (const [askId, ask] of [...pending.entries()]) if (ask.toolName !== QUESTION_TOOL) await answerAsk(askId, { optionId: PERMISSION_ALLOW, outcome: "allowed" });
           return "set";
         }
         const outcome = await answered;

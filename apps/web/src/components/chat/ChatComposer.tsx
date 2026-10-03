@@ -688,10 +688,12 @@ export function ChatComposer({
     [askAside, asides, busy, canSteer, dismissRefused, dismissTrigger, draft, enqueue, files, harnessCatalog, held, onStart, queueFiles, release, restoreDraft, runningTurn, sendHeld, sendNow, sending, setDraft, start, steers, threadKey, trigger, waits, workspace, workspaceId],
   );
 
-  // The head row goes as soon as nothing blocks a send; starting flips busy, so the rest wait for the next end.
+  // The head row goes as soon as nothing blocks a send; starting flips busy, so the rest wait for the next end. The
+  // row is read off the store, not this render: React may run the effect twice before it renders the removal.
   const head = queue[0];
   useEffect(() => {
     if (head === undefined || held || unavailable !== null || busy || waits) return;
+    if (useComposerDraftStore.getState().queues[threadKey]?.[0]?.id !== head.id) return;
     removeQueued(threadKey, head.id);
     const prompt = head.prompt.trim();
     if (prompt !== "") start(prompt, () => requeue(threadKey, head), head.id);
