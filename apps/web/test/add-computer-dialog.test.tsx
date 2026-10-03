@@ -7,7 +7,7 @@
 // page, and closing mid-setup said as a notice.
 import { act, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { hostKeyUnconfirmedRefusal, RecipeFile, type EventUnion, type PendingComputer, type PlaceSetup, type PlaceView, type ProjectView, type RecipeOptions, type RecipeView } from "@wsp/protocol";
+import { PLACE_HOST_KEY_KIND, RecipeFile, type PlaceAddJob, type EventUnion, type PendingComputer, type PlaceSetup, type PlaceView, type ProjectView, type RecipeOptions, type RecipeView } from "@wsp/protocol";
 import { RequestError, type Api, type SshLogin } from "../src/protocol/client.js";
 import { useNotices } from "../src/notices/store.js";
 import { useStore } from "../src/protocol/store.js";
@@ -138,7 +138,17 @@ describe("Add a computer, from the address to Set up", () => {
   it("asks the person to trust a host key this computer never met, and adds again with the key they trusted", async () => {
     const key = "ssh-ed25519 SHA256:tK3mX9Qf2bWq8vRz0YhN4cL7pJd1sE6gA5uF8oH2kIw";
     const asked: SshLogin[] = [];
-    const fake = host({ addComputerOverSsh: async (login: SshLogin) => (asked.push(login), login.hostKey === undefined ? Promise.reject(new RequestError(hostKeyUnconfirmedRefusal("studio", key))) : studio) } as Partial<Api>);
+    // The host keeps the refused add with the key as a field under its kind; the sentence is never read for it.
+    const kept: PlaceAddJob[] = [];
+    const fake = host({
+      addComputerOverSsh: async (login: SshLogin, addId: string) => {
+        asked.push(login);
+        if (login.hostKey !== undefined) return studio;
+        kept.push({ addId, address: "studio", startedAt: "x", state: "failed", steps: [{ step: "connect", state: "failed" }], said: "studio has never been reached from this computer", kind: PLACE_HOST_KEY_KIND, hostKey: key });
+        return Promise.reject(new RequestError("studio has never been reached from this computer", PLACE_HOST_KEY_KIND));
+      },
+      placesList: async () => ({ places: [here], adds: kept, pending: [] }),
+    } as Partial<Api>);
     mountSettings({ api: fake.api, at: { kind: "group", group: "computers" } });
     act(() => {
       openAdd();

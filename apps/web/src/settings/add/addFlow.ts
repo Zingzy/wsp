@@ -6,7 +6,7 @@
 // Set up hands them to the host. Which step a pending add was left at is this
 // window's own, kept beside its id.
 import { create } from "zustand";
-import { unconfirmedHostKey, type PendingComputer, type PlaceSetup, type PlaceView, type ProjectIcon, type RecipeFile, type RecipeOptions } from "@wsp/protocol";
+import { PLACE_HOST_KEY_KIND, type PendingComputer, type PlaceAddJob, type PlaceSetup, type PlaceView, type ProjectIcon, type RecipeFile, type RecipeOptions } from "@wsp/protocol";
 import { noticeFailure } from "../../notices/store.js";
 import type { Api } from "../../protocol/client.js";
 import { useStore } from "../../protocol/store.js";
@@ -134,8 +134,8 @@ export function connect(api: Api, address: string, hostKey?: string): void {
   useAddFlow.setState({ address: address.trim(), addId, step: "checks" });
 }
 
-/** The key a refused add names for a computer this one never dialled, which the dialog asks the person to trust. */
-export const askedHostKey = (said: string | undefined): string | undefined => (said === undefined ? undefined : unconfirmedHostKey(said));
+/** The key a computer this one never dialled answered with, on an add refused for it, for the person to trust. */
+export const askedHostKey = (job: PlaceAddJob | undefined): string | undefined => (job?.state === "failed" && job.kind === PLACE_HOST_KEY_KIND ? job.hostKey : undefined);
 
 /** Reads what the picks can be made from, once per dialog. */
 export function readOptions(api: Api): void {

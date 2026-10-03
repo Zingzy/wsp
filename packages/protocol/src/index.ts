@@ -3112,6 +3112,11 @@ export function placeAddSheetWord(step: PlaceAddStep, state: "running" | "done")
  * the one case where checking the user, the address or the key is the fix. */
 export const PLACE_LOGIN_REFUSED_KIND = "login";
 
+/** The kind an add is refused with for a computer this one has never dialled and nobody confirmed the key of. The
+ * refusal carries the key the computer answered with as `hostKey`, which the record keeps, so a client offers it to
+ * the person to trust and adds again with it. */
+export const PLACE_HOST_KEY_KIND = "host-key";
+
 /** How far the install on one computer has got, keyed by the id the request was answered with, so two installs at
  * once are two lists. A step that is running is the one with a spinner; one that is done carries its note. */
 export const PlaceStageEvent = z.object({
@@ -3141,6 +3146,8 @@ export const PlaceAddJob = z.object({
   kind: z.string().optional(),
   /** The computer the add made, once it joined. */
   placeId: z.string().optional(),
+  /** The key a computer never dialled answered with, on an add refused under PLACE_HOST_KEY_KIND. */
+  hostKey: z.string().optional(),
 });
 export type PlaceAddJob = z.infer<typeof PlaceAddJob>;
 

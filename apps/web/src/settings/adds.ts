@@ -6,7 +6,7 @@
 // finished add ended stays on the form only in a window that watched it run,
 // and the computer's row keeps the fact everywhere else.
 import { create } from "zustand";
-import { PLACE_LOGIN_REFUSED_KIND, withPlaceStage, type PlaceAddJob, type PlaceStageEvent } from "@wsp/protocol";
+import { PLACE_HOST_KEY_KIND, PLACE_LOGIN_REFUSED_KIND, withPlaceStage, type PlaceAddJob, type PlaceStageEvent } from "@wsp/protocol";
 import type { Api, SshLogin } from "../protocol/client.js";
 import { failureOf } from "../protocol/failure.js";
 import { ADD_COMPUTER_WORDS } from "./format.js";
@@ -92,6 +92,8 @@ export function addOverSsh(api: Api, login: SshLogin): string | null {
     (e: unknown) => {
       const failure = failureOf(e);
       settle(job => (failure.disconnected ? job : { ...job, state: "failed", said: failure.said, ...(failure.fix === undefined ? {} : { fix: failure.fix }), ...(failure.kind === undefined ? {} : { kind: failure.kind }) }));
+      // The key a computer never met answered with is a field of the host's record of the add, not of the refusal.
+      if (failure.kind === PLACE_HOST_KEY_KIND) readAdds(api);
     },
   );
   return addId;

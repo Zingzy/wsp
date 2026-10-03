@@ -388,7 +388,7 @@ export function AddComputerDialog() {
 
   if (!flow.open) return null;
 
-  const keyAsked = flow.step === "checks" && job?.state === "failed" ? askedHostKey(job.said) : undefined;
+  const keyAsked = flow.step === "checks" ? askedHostKey(job) : undefined;
   const view: AddStep | "hostkey" = keyAsked !== undefined ? "hostkey" : flow.step;
   const picks = flow.picks ?? noPicks(box);
   const change = (next: RecipeFile): void => setPicks(api, next);

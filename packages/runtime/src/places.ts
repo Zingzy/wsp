@@ -98,6 +98,7 @@ import {
   type MachineSizeOffer,
   type PlaceAddStep,
   PLACE_LOGIN_REFUSED_KIND,
+  PLACE_HOST_KEY_KIND,
   type PlaceStageEvent,
   type PlaceAddJob,
   withPlaceStage,
@@ -2307,7 +2308,9 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         // first line rides the throw, which both roads print whole.
         const message = e instanceof Error ? e.message : String(e);
         const { said, fix, kind } = refusalParts(e);
-        putAdd(addId, job => ({ ...job, said: keptSaid(said), ...(fix === undefined ? {} : { fix }), ...(kind === undefined ? {} : { kind }) }));
+        // The key a computer never dialled answered with rides its refusal as a field, kept for the client's Trust.
+        const offered = kind === PLACE_HOST_KEY_KIND && typeof (e as { hostKey?: unknown }).hostKey === "string" ? { hostKey: (e as { hostKey: string }).hostKey } : {};
+        putAdd(addId, job => ({ ...job, said: keptSaid(said), ...(fix === undefined ? {} : { fix }), ...(kind === undefined ? {} : { kind }), ...offered }));
         // The pending add keeps the refusal, so the computer reads Setup failed with what to do until it is added
         // again; an add that joined and then failed is that computer's row to say.
         if (pending.placeId === undefined) await movePending({ ...pending, failed: { said: keptSaid(said), ...(fix === undefined ? {} : { fix }) } });

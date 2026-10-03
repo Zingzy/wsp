@@ -7,7 +7,7 @@
 // the host's shapes, so a screenshot of one is what the app draws for that
 // record. ?scroll=bottom scrolls the dialog's panel to its end.
 import { createRoot } from "react-dom/client";
-import { DAEMON_VERSION, DEFAULT_PREFERENCES, RecipeFile, hostKeyUnconfirmedRefusal, type PendingComputer, type PlaceAddJob, type PlaceApplied, type PlaceSetup, type PlaceView, type ProjectView, type RecipeOptions, type RecipeView, type SessionView, type WorkspaceView } from "@wsp/protocol";
+import { DAEMON_VERSION, DEFAULT_PREFERENCES, PLACE_HOST_KEY_KIND, RecipeFile, hostKeyUnconfirmedRefusal, type PendingComputer, type PlaceAddJob, type PlaceApplied, type PlaceSetup, type PlaceView, type ProjectView, type RecipeOptions, type RecipeView, type SessionView, type WorkspaceView } from "@wsp/protocol";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import { addNotice } from "../../src/notices/store";
 import { useStore } from "../../src/protocol/store";
@@ -150,7 +150,7 @@ const SETUPS: Record<string, { setup: PlaceSetup; applied: PlaceApplied }> = {
 const ADD_STEPS: Record<string, PlaceAddJob> = {
   checks: { addId: "a_add", address: "studio", startedAt: AT, state: "running", steps: [{ step: "connect", state: "done", note: "Ubuntu 24.04" }, { step: "check", state: "done", note: "root, systemd, cgroup v2, 61 GB free" }, { step: "reach", state: "done", note: "studio dials back over ssh" }, { step: "wsp", state: "running", note: "x86_64" }] },
   "checks-refused": { addId: "a_add", address: "jumpbox", startedAt: AT, state: "failed", steps: [{ step: "connect", state: "done", note: "Ubuntu 22.04" }, { step: "check", state: "running" }], said: "jumpbox logs in as a user that is not root, and root on the box is required: wsp runs its daemon there as a system service.", fix: "Add it as root@jump.zingzy.dev, or put User root under Host jumpbox in your ssh config." },
-  hostkey: { addId: "a_add", address: "studio", startedAt: AT, state: "failed", steps: [{ step: "connect", state: "running" }], said: hostKeyUnconfirmedRefusal("studio", "ED25519 SHA256:tK3mX9Qf2bWq8vRz0YhN4cL7pJd1sE6gA5uF8oH2kIw") },
+  hostkey: { addId: "a_add", address: "studio", startedAt: AT, state: "failed", steps: [{ step: "connect", state: "running" }], said: hostKeyUnconfirmedRefusal("studio", "ED25519 SHA256:tK3mX9Qf2bWq8vRz0YhN4cL7pJd1sE6gA5uF8oH2kIw"), kind: PLACE_HOST_KEY_KIND, hostKey: "ED25519 SHA256:tK3mX9Qf2bWq8vRz0YhN4cL7pJd1sE6gA5uF8oH2kIw" },
 };
 
 const PICK_STEPS: AddStep[] = ["startfrom", "agents", "mcp", "clis", "skills", "plugins", "github", "projects", "other", "summary"];
