@@ -207,6 +207,9 @@ export type UsageDay = z.infer<typeof UsageDay>;
 export const UsedRow = z.object({
   key: z.string(),
   label: z.string(),
+  /** The agent every turn of the row ran on, on a split by agent, account or model: a model is filed once per agent
+   * that ran it. */
+  agent: z.string().optional(),
   tokens: UsageTokens.pick({ input: true, output: true, cached: true }).extend({ cacheWrite: z.number().optional(), reasoning: z.number().optional() }),
   costReported: z.number().optional(),
   costList: z.number().optional(),

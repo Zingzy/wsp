@@ -55,17 +55,24 @@ export function BehindRow({ place, ctx }: { place: PlaceView; ctx: SettingsConte
   );
 }
 
-/** The threads-at-once number with a step either side, at least one. */
-function Stepper({ value, label, onChange }: { value: number; label: string; onChange: (next: number) => void }) {
+/** The threads-at-once number with a step either side, at least one. While a set is on its way the host's row still
+ * holds the number before it, so the number shown and the next step go off the last one sent. */
+function Stepper({ value, label, onChange }: { value: number; label: string; onChange: (next: number) => Promise<void> }) {
+  const [sent, setSent] = useState<number | null>(null);
+  const shown = sent ?? value;
+  const step = (next: number): void => {
+    setSent(next);
+    void onChange(next).finally(() => setSent(last => (last === next ? null : last)));
+  };
   return (
     <span data-k="threads-at-once" role="group" aria-label={label} className="inline-flex h-[30px] items-center rounded-[7px] border border-border">
-      <Button variant="ghost" size="icon-xs" aria-label={W.fewer} disabled={value <= 1} onClick={() => onChange(value - 1)} className="h-full rounded-r-none">
+      <Button variant="ghost" size="icon-xs" aria-label={W.fewer} disabled={shown <= 1} onClick={() => step(shown - 1)} className="h-full rounded-r-none">
         <MinusIcon aria-hidden className="size-3.5" />
       </Button>
       <span data-k="threads-at-once-value" className="min-w-8 px-1 text-center text-[13px] tabular-nums text-foreground">
-        {value}
+        {shown}
       </span>
-      <Button variant="ghost" size="icon-xs" aria-label={W.more} onClick={() => onChange(value + 1)} className="h-full rounded-l-none">
+      <Button variant="ghost" size="icon-xs" aria-label={W.more} onClick={() => step(shown + 1)} className="h-full rounded-l-none">
         <PlusIcon aria-hidden className="size-3.5" />
       </Button>
     </span>
@@ -98,7 +105,7 @@ export function LimitsCard({ place }: { place: PlaceView }) {
           id="threads-at-once"
           title={W.threadsAtOnce}
           description={fallback === undefined || place.shape === undefined ? W.threadsLineBare : W.threadsLine(fallback, name, fmtMemGb(place.shape.memMb))}
-          control={<Stepper value={threads} label={W.threadsAtOnce} onChange={n => void setOn(place, { threads: n })} />}
+          control={<Stepper value={threads} label={W.threadsAtOnce} onChange={n => setOn(place, { threads: n })} />}
           {...(set.threads === undefined ? {} : { reset: resetOn(place, "threads") })}
         />
       )}

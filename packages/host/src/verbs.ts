@@ -835,14 +835,16 @@ export function usageTableLines(read: { accounts: readonly AccountRow[]; used: U
           ["AGENT", "ACCOUNT", "COMPUTERS", "SESSION", "WEEK", "RESETS", "PLAN", "STATE"],
           ...read.accounts.map(row => [agentName(row.agent), row.label, row.computers.join(", "), window(row, "session"), window(row, "week"), row.credits === undefined ? "" : creditsWord(row.credits, now), row.plan ?? "", accountState(row)]),
         ]);
+  // Two agents running one model are two rows of one name, so a model's row names its agent first.
+  const byModel = read.used.split === "model";
   const used =
     read.used.rows.length === 0
       ? [`${USAGE_WORDS.noUse}.`]
       : table([
-          [read.used.split.toUpperCase(), "FRESH IN", "WRITTEN", "CACHED", "OUT", "PRICE"],
+          [...(byModel ? ["AGENT"] : []), read.used.split.toUpperCase(), "FRESH IN", "WRITTEN", "CACHED", "OUT", "PRICE"],
           ...read.used.rows.map(row => {
             const price = usedPrice(row);
-            return [row.label, fmtTokens(freshIn(row.tokens)), fmtTokens(row.tokens.cacheWrite ?? 0), fmtTokens(row.tokens.cached), fmtTokens(row.tokens.output), [price.figure, price.word].filter(Boolean).join(" ")];
+            return [...(byModel ? [row.agent === undefined ? "" : agentName(row.agent)] : []), row.label, fmtTokens(freshIn(row.tokens)), fmtTokens(row.tokens.cacheWrite ?? 0), fmtTokens(row.tokens.cached), fmtTokens(row.tokens.output), [price.figure, price.word].filter(Boolean).join(" ")];
           }),
         ]);
   return [...accounts, "", ...used];
@@ -3792,7 +3794,7 @@ export const ALL_VERBS: readonly Verb[] = [
     },
     tool: tool({
       description:
-        "Two answers that are never added together. accounts: every agent account signed in on any computer, the same one on three computers once, each with how much of its plan's windows is used and when each starts again, as that agent printed them in the last turn wsp ran on it; an agent that prints none reports no plan limit, a sign-in by API key pays per token with no plan window, and an account no turn has run on yet has no reading. used: the tokens the turns used over the range (today, the last seven days or the last thirty), split by agent, account, computer, project or model, each row with the cost its agent reported, a list price off one table for every token and what the cache saved, input counting the cached and the written tokens, the turns wsp ran, and a series over the range with one line per row.",
+        "Two answers that are never added together. accounts: every agent account signed in on any computer, the same one on three computers once, each with how much of its plan's windows is used and when each starts again, as that agent printed them in the last turn wsp ran on it; an agent that prints none reports no plan limit, a sign-in by API key pays per token with no plan window, and an account no turn has run on yet has no reading. used: the tokens the turns used over the range (today, the last seven days or the last thirty), split by agent, account, computer, project or model (a model once for each agent that ran it, and a row by agent, account or model naming its agent), each row with the cost its agent reported, a list price off one table for every token and what the cache saved, input counting the cached and the written tokens, the turns wsp ran, and a series over the range with one line per row.",
       input: { range: UsageRange.optional().describe("day (the default), week or month"), by: UsageSplit.optional().describe("agent (the default), account, computer, project or model") },
       output: { accounts: z.array(AccountRow), used: UsedAnswer },
       call: async ({ range, by }, deps) => asJson(await readUsage(await deps.client(), range ?? "day", by ?? "agent")),

@@ -25,10 +25,9 @@ import { SegmentedControl } from "../components/ui/segmented-control.js";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../components/ui/select.js";
 import { useStore } from "../protocol/store.js";
 import { ComputerGlyph } from "./ComputerGlyph.js";
-import { wordOnly } from "./computers.js";
 import { AGENTS_PAGE_WORDS as W, capitalised } from "./format.js";
 import { KindTab, NotReadCard, OnHead, StatusWord, StepMark, UNDER_ROW, computerHead, type KindRead, type OnComputer } from "./agentKinds.js";
-import { GlyphFrame } from "./grid.js";
+import { GlyphFrame, wordOnly } from "./grid.js";
 import { SELECT_WIDTH } from "./layout.js";
 import { absentOf, isProviderPlace, placeName } from "./places.js";
 import { Card, Row, RowSkeleton } from "./rows.js";
@@ -348,7 +347,7 @@ const agentSearchRow = (ctx: SettingsContext, id: string, label: string, descrip
 /** The rows a search finds on the Agents page: the default agent, and one per agent page there is, each opening it:
  * the agents a thread runs on, then every other agent the picked computer's last read found installed. */
 const agentsSearch = (ctx: SettingsContext): SettingsRowData[] => {
-  const installed = keptAgentsReport({ placeId: useSettingsStore.getState().agentsPlace ?? HERE_PLACE_ID })?.agents ?? [];
+  const installed = keptAgentsReport({ placeId: ctx.agentsPlace ?? HERE_PLACE_ID })?.agents ?? [];
   const others = installed.filter(row => row.installed && !ctx.harnesses.some(c => c.harness === row.id));
   return [
     { kind: "row", id: "default-agent", title: W.defaultAgent, description: W.defaultAgentDescription, open: () => ctx.go({ kind: "group", group: "agents" }) },
