@@ -34,10 +34,10 @@ const RECIPE = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "v
 
 /** A watch whose events the test sends, and every call it took. */
 function fakeWatch() {
-  const calls: { path: string; recursive: boolean; closed: boolean; emit(event: string): void; fail(): void }[] = [];
+  const calls: { path: string; recursive: boolean; closed: boolean; emit(event: string, name?: string): void; fail(): void }[] = [];
   const watch: WatchFn = (path, o, listener) => {
     let onError = (): void => {};
-    const call = { path, recursive: o.recursive, closed: false, emit: (event: string) => listener(event, null), fail: () => onError() };
+    const call = { path, recursive: o.recursive, closed: false, emit: (event: string, name?: string) => listener(event, name ?? null), fail: () => onError() };
     calls.push(call);
     return {
       close: () => void (call.closed = true),
@@ -83,7 +83,7 @@ function fakeTimers() {
 }
 
 describe("watching what a followed recipe holds", () => {
-  it("watches a symlinked skill at its real path, recursively, and a config file and an agent's own file by themselves; never the home", async () => {
+  it("watches a symlinked skill at its real path, recursively, and a config file and an agent's own file through their folders; never the home recursively", async () => {
     const h = home();
     const w = fakeWatch();
     const t = fakeTimers();
@@ -92,11 +92,12 @@ describe("watching what a followed recipe holds", () => {
     expect(watcher.watching()).toEqual(
       expect.arrayContaining([
         { path: h.real, recursive: true },
-        { path: join(h.home, ".gitconfig"), recursive: false },
-        { path: join(h.home, ".claude", "settings.json"), recursive: false },
+        { path: h.home, recursive: false },
+        { path: join(h.home, ".claude"), recursive: false },
       ]),
     );
-    expect(w.calls.some(c => c.path === h.home)).toBe(false);
+    expect(w.calls.some(c => c.path === h.home && c.recursive)).toBe(false);
+    expect(w.calls.some(c => c.path === join(h.home, ".gitconfig"))).toBe(false);
     expect(w.calls.some(c => c.path === join(h.home, ".claude", "skills", "unslop"))).toBe(false);
     watcher.close();
   });
@@ -125,7 +126,7 @@ describe("watching what a followed recipe holds", () => {
     watcher.close();
   });
 
-  it("watches a file again after an editor's rename-replace, and a watch that errors again too, each counting as a change", async () => {
+  it("hears a file replaced under its folder's watch, and arms a watch that errors again, each counting as a change", async () => {
     const h = home();
     const w = fakeWatch();
     const t = fakeTimers();
@@ -134,9 +135,10 @@ describe("watching what a followed recipe holds", () => {
     await watcher.refresh();
     const git = join(h.home, ".gitconfig");
     writeFileSync(git, "[user]\n\tname = Someone Else\n");
-    w.live(git)[0]!.emit("rename");
-    expect(w.calls.filter(c => c.path === git)).toHaveLength(2);
-    expect(w.live(git)).toHaveLength(1);
+    w.live(h.home)[0]!.emit("rename", ".gitconfig");
+    // A file another program writes in the home moves nothing.
+    w.live(h.home)[0]!.emit("change", ".zsh_history");
+    expect(w.calls.filter(c => c.path === h.home)).toHaveLength(1);
     writeFileSync(join(h.real, "SKILL.md"), "two\n");
     w.live(h.real)[0]!.fail();
     expect(w.calls.filter(c => c.path === h.real)).toHaveLength(2);
@@ -158,11 +160,11 @@ describe("watching what a followed recipe holds", () => {
     await watcher.refresh();
     const file = join(h.home, ".claude.json");
     writeFileSync(file, JSON.stringify({ numStartups: 2, mcpServers: { linear: { command: "npx", args: ["linear-mcp"] } } }));
-    w.live(file)[0]!.emit("change");
+    w.live(h.home)[0]!.emit("change", ".claude.json");
     t.fireAll();
     expect(changed).toEqual([]);
     writeFileSync(file, JSON.stringify({ numStartups: 3, mcpServers: { linear: { command: "npx", args: ["linear-mcp", "--team", "core"] } } }));
-    w.live(file)[0]!.emit("change");
+    w.live(h.home)[0]!.emit("change", ".claude.json");
     t.fireAll();
     expect(changed).toEqual([["laptop"]]);
     watcher.close();
@@ -178,7 +180,7 @@ describe("watching what a followed recipe holds", () => {
     followed = [{ slug: "laptop", file: { ...RECIPE, skills: {} } }];
     await watcher.refresh();
     expect(w.live(h.real)).toHaveLength(0);
-    expect(w.live(join(h.home, ".gitconfig"))).toHaveLength(1);
+    expect(w.live(h.home)).toHaveLength(1);
     followed = [];
     await watcher.refresh();
     expect(watcher.watching()).toEqual([]);
@@ -200,6 +202,30 @@ describe("watching what a followed recipe holds", () => {
     await new Promise(resolve => setImmediate(resolve));
     expect(reads).toBe(2);
     watcher.close();
+  });
+
+  it("hears a config file unlinked and written again, and the edit after it, over the system's own watch", async () => {
+    const h = home();
+    const changed: string[][] = [];
+    const watcher = recipeWatch({ home: h.home, followed: async () => [{ slug: "laptop", file: RECIPE }], changed: slugs => void changed.push([...slugs]), debounceMs: 50 });
+    await watcher.refresh();
+    await new Promise(resolve => setTimeout(resolve, 200));
+    const git = join(h.home, ".gitconfig");
+    const heard = async (n: number): Promise<void> => {
+      const deadline = Date.now() + 5_000;
+      while (changed.length < n && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 25));
+    };
+    rmSync(git);
+    await new Promise(resolve => setTimeout(resolve, 30));
+    writeFileSync(git, "[user]\n\tname = Two\n");
+    await heard(1);
+    expect(changed.length).toBeGreaterThanOrEqual(1);
+    const after = changed.length;
+    await new Promise(resolve => setTimeout(resolve, 200));
+    writeFileSync(git, "[user]\n\tname = Three\n");
+    await heard(after + 1);
+    watcher.close();
+    expect(changed.length).toBe(after + 1);
   });
 
   it("hears an edit made through the symlinked folder's target over the system's own watch", async () => {
