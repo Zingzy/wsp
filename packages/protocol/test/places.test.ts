@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
 import {
+  setupWidth,
   DEFAULT_PLACE_PORT,
   DEFAULT_PORT,
   EventUnion,
@@ -422,6 +423,10 @@ describe("the setup on a computer you own", () => {
   const done: PlaceSetup = { ...running, state: "done", finishedAt: "2026-10-03T10:05:00.000Z", steps: [] };
   const applied = (rows: PlaceProvisionRow[]): PlaceApplied => ({ hash: "h", at: done.finishedAt!, rows });
   const wait: PlaceWait = { row: "signins/codex", label: "Codex", url: "https://auth.openai.com/codex/device", code: "ABCD-EFGH", expiresAt: "2026-10-03T10:15:00.000Z", state: "waiting" };
+
+  it("runs one step after the base tools per 2 GB of the computer's memory, at least one and at most four", () => {
+    expect([1024, 2047, 2048, 4096, 7700, 8192, 65536].map(setupWidth)).toEqual([1, 1, 1, 2, 3, 4, 4]);
+  });
 
   it("parses a setup under way, one over, and a sign-in waiting with its page, its code and when it runs out", () => {
     expect(PlaceSetup.parse(running)).toEqual(running);

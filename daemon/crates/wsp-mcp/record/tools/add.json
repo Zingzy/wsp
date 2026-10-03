@@ -671,7 +671,12 @@
                       "type": "object",
                       "properties": {
                         "signin": {
-                          "$ref": "#/properties/computer/properties/picks/properties/agents/additionalProperties/properties/signin"
+                          "type": "string",
+                          "enum": [
+                            "vault",
+                            "machine",
+                            "skip"
+                          ]
                         }
                       },
                       "additionalProperties": false
@@ -1544,7 +1549,12 @@
                       "type": "object",
                       "properties": {
                         "signin": {
-                          "$ref": "#/properties/computer/properties/picks/properties/agents/additionalProperties/properties/signin"
+                          "type": "string",
+                          "enum": [
+                            "vault",
+                            "machine",
+                            "skip"
+                          ]
                         }
                       },
                       "additionalProperties": false

@@ -11,7 +11,7 @@ import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { join, posix } from "node:path";
 import type { Manifest, ManifestEntry, Platform } from "@wsp/collect";
 import { expand } from "@wsp/collect";
-import { CATALOG_AGENTS, COMPILER_ROW, SHARED_SKILLS, TOOL_PREFIX, catalogIdOfRow, ownSkillFolder } from "@wsp/catalog";
+import { CATALOG_AGENTS, COMPILER_ROW, SHARED_SKILLS, TOOL_PREFIX, catalogEntry, catalogIdOfRow, ownSkillFolder } from "@wsp/catalog";
 import {
   agentStateFile,
   newSetupRun,
@@ -177,6 +177,17 @@ function shellPackage(picks: RecipeFile, manifest: Manifest, path: string, prefi
   return "cmd" in step ? [{ id: `configs/shell/${login}`, label: login, manager: "apt", ...step, bin: login }] : undefined;
 }
 
+/** gh, where the GitHub row signs it in and the picks carry no gh among their CLIs: the catalog's own road. */
+function githubTools(picks: RecipeFile, path: string, prefix: string): ProvisionPlan["github"] {
+  const signin = picks.configs.github?.signin;
+  if (picks.configs.github === undefined || signin === "skip" || picks.clis[GH] !== undefined) return undefined;
+  const entry = catalogEntry(GH);
+  if (entry === undefined) return undefined;
+  const step = viaRoad(entry.installRoad, entry.bin, path, prefix);
+  return "cmd" in step ? [{ id: `github/${GH}`, label: entry.name, manager: entry.installRoad.road, ...step, bin: entry.bin }] : undefined;
+}
+const GH = "gh";
+
 /** The picked plugins as the lines that put each on, by the agent's own commands there, each from the marketplace
  * this computer's index names for it. One whose marketplace this computer cannot name is set aside. */
 function pluginsOf(picks: RecipeFile, home: string): { plugins: NonNullable<ProvisionPlan["plugins"]>[number][]; skipped: { id: string; label: string; note: string }[] } {
@@ -227,12 +238,14 @@ export function placeProvisioner(o: ProvisionReaders): PlaceProvisioner {
       const configs = configsOf(picks, o.home);
       const configTools = shellPackage(picks, manifest, path, prefix);
       const plugins = pluginsOf(picks, o.home);
+      const github = githubTools(picks, path, prefix);
       const plan = provisionPlanOf(imp, picks.name, path, prefix, {
         compiler: Object.values(picks.clis).some(row => row.needs?.includes(COMPILER_ROW) === true),
         ...(skills.plan !== undefined ? { skills: skills.plan } : {}),
         ...(configs !== undefined ? { configs } : {}),
         ...(configTools !== undefined ? { configTools } : {}),
         ...(plugins.plugins.length > 0 ? { plugins: plugins.plugins } : {}),
+        ...(github !== undefined ? { github } : {}),
       });
       return { ...plan, skipped: [...plan.skipped, ...skills.skipped, ...plugins.skipped] };
     },

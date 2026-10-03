@@ -13,6 +13,11 @@ import { ProjectHue, ProjectIcon } from "./project-look.js";
 export const RecipeSignIn = z.enum(["vault", "machine"]);
 export type RecipeSignIn = z.infer<typeof RecipeSignIn>;
 
+/** How the GitHub row signs gh in on the computer: either sign-in word, or skip, which leaves gh signed out there and
+ * a private repository a folder that waits on GitHub to clone. */
+export const GitHubSignIn = z.enum(["vault", "machine", "skip"]);
+export type GitHubSignIn = z.infer<typeof GitHubSignIn>;
+
 /** A row's name, and the facts a row says beside it, made once each: every schema made costs the host its methods
  * bound anew, held for good. */
 const NAME = z.string().min(1);
@@ -43,7 +48,7 @@ export const RecipeFile = z
         }),
       )
       .default({}),
-    configs: row({ git: row({}).optional(), shell: row({}).optional(), github: row({ signin: SIGN_IN }).optional() }).default({}),
+    configs: row({ git: row({}).optional(), shell: row({}).optional(), github: row({ signin: GitHubSignIn.optional() }).optional() }).default({}),
   })
   .strict();
 export type RecipeFile = z.infer<typeof RecipeFile>;
@@ -124,7 +129,8 @@ export interface RecipeOptions {
   clis: { name: string; via: string; version?: string; needs?: string[] }[];
   skills: { name: string; from: string; linked: boolean }[];
   plugins: { name: string }[];
-  configs: { id: "git" | "shell" | "github"; label: string }[];
+  /** The GitHub row carries the sign-in words it can take here: the vault only where this computer holds a gh login. */
+  configs: { id: "git" | "shell" | "github"; label: string; signins?: GitHubSignIn[] }[];
 }
 
 /** The refusal a recipe whose name makes no file name gets. */

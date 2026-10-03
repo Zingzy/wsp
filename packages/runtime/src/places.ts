@@ -70,7 +70,9 @@ import {
   NO_FOLDER_ROAD,
   NO_GITHUB_TOKEN_LINE,
   noVaultTokenLine,
-  githubThereLine,
+  GITHUB_SKIPPED_LINE,
+  NEEDS_GITHUB_LINE,
+  setupWidth,
   floorFailedLine,
   noAgentLine,
   pendingHeldLine,
@@ -129,6 +131,8 @@ import {
   linkedOver,
   type PlaceProveRequest,
   macKindOf,
+  ownerRepoOf,
+  shellQuote,
 } from "@wsp/protocol";
 import { GITHUB_TOKEN_ENV, LinkBackend, PlaceAbsentError, PlaceMachine, SSH_STORE_VARS, envInput, keyFingerprint, machineServerPort, newSetupRun, pathLine, plainPath, putFiles, serversOutLines, unmergeServers, withEnvFromInput, type EngineStep, type ExecResult, type Machine, type MachineBackend, type MachineLink, type ProvisionPlan, type ProvisionStage, type SetupRun } from "@wsp/engine";
 import { CATALOG_AGENTS, keyEnvOf, mintsToken, sharedFileIn, sharedOn } from "@wsp/catalog";
@@ -138,6 +142,7 @@ import { openPlaceForward, type PlaceForward } from "./place-forward.js";
 import type { HereDaemon, PlaceBackends } from "./runtime.js";
 import type { DaemonChannel } from "./daemon-channel.js";
 import { connectDaemon, type DaemonReach } from "./reach.js";
+import { runGraph, type GraphStep } from "./setup-graph.js";
 import { freshEphemeral, makeSeal, newPlaceKeyPair, sealKeys, sharedSecret, signPlaceBytes, verifyPlaceBytes, type PlaceKeyPair, type Seal } from "@wsp/keys";
 import type { Store } from "./store.js";
 
@@ -398,6 +403,8 @@ export interface PlaceRecording {
   /** Records one folder of this computer's as a project on that computer, seeded with what its pick keeps, by the
    * add's own road. Answers the folder's row. Absent, a folder fails its row. */
   addFolder?(placeId: string, key: string, folder: RecipeFile["folders"][string]): Promise<PlaceProvisionRow>;
+  /** The remote a folder of this computer's clones from, read here; nothing where it has none. */
+  folderRemote?(folder: RecipeFile["folders"][string]): Promise<string | undefined>;
 }
 
 export interface PlaceDoorOptions {
@@ -860,6 +867,22 @@ export const ADD_NOT_TAKEN_BACK_LINE = "the host stopped while wsp was being ins
 const SIGN_IN_SLACK_MS = 5_000;
 /** How long gh's own status gets on that computer. */
 const GITHUB_MS = 30_000;
+/** The row the GitHub sign-in stands on, and the command its sign-in on that computer runs: gh's own. */
+const GITHUB_ROW = "github";
+const GITHUB_CLI = "gh";
+/** The lanes no two of the setup's steps share: the package managers, and the folder beside the job a files round
+ * stages in. */
+const INSTALLS = "installs";
+const FILES = "files";
+/** How long the anonymous read of a folder's repository gets on that computer. */
+const PROBE_MS = 30_000;
+
+/** The https address of a repository on GitHub, which an anonymous read can ask; nothing for any other host. */
+const githubAddress = (remote: string): string | undefined => {
+  if (!/(^|[@/])github\.com[:/]/.test(remote)) return undefined;
+  const repo = ownerRepoOf(remote);
+  return repo === undefined ? undefined : `https://github.com/${repo}.git`;
+};
 
 const firstLineOf = (e: unknown): string => (e instanceof Error ? e.message : String(e)).split("\n")[0]!;
 
@@ -1237,10 +1260,12 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
 
   /** The run itself, behind whoever asked for it. Every step is written onto the record as it starts and as it ends,
    * with its rows, so a host that stops resumes it at the next link and redoes no step that ended; a step already
-   * done in `done` is passed over. The steps go in the order their weight asks: the floor and the agents first,
-   * since a failure there stops the job; the sign-ins started and left running, since one waits on the person and
-   * blocks nothing; the folders on a second stream beside the CLIs, servers, skills, plugins and configs; the GitHub
-   * check once the folders are in; the machine context last, so it names what did not land. */
+   * done in `done` is passed over. The floor first, since a failure there stops the job; then the steps after it as
+   * their work allows, at most as many at once as that computer's memory takes (`setupWidth`): the agents and every
+   * other install one at a time, since two package managers run into each other; the files rounds one at a time,
+   * since they stage in one folder there, the servers after the CLIs a server may run; the sign-ins started and left
+   * waiting on the person; GitHub before the folders, so a private repository clones with it; the machine context
+   * last, so it names what did not land. */
   const runSetup = async (placeId: string, addId: string, picks: RecipeFile, done: ReadonlySet<PlaceSetupStep>, started: PlaceSetup, rerun: readonly PlaceWait[]): Promise<void> => {
     const provisioner = wiring.provision!;
     const record = (await recordOf(placeId))!;
@@ -1258,10 +1283,14 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       held = next;
       writing = writing.then(() => writeSetup(placeId, { setup: next, applied: applied() })).catch(() => undefined);
     };
+    /** The steps running this moment, which every line's frame names. */
+    const running = new Set<PlaceSetupStep>();
     const line = (l: PlaceSetupLine): void => {
+      if (l.state === "running") running.add(l.step);
+      else running.delete(l.step);
       push({ ...held, steps: held.steps.some(s => s.step === l.step) ? held.steps.map(s => (s.step === l.step ? l : s)) : [...held.steps, l] });
       log.write(`${SETUP_STEP_WORDS[l.step]}: ${l.state}${l.note === undefined ? "" : ` (${l.note})`}`);
-      setupFrame({ addId, placeId, line: l });
+      setupFrame({ addId, placeId, line: l, running: [...running] });
     };
     const stage: ProvisionStage = detail => log.write(detail);
     const vault = (): Readonly<Record<string, string>> => opts.vault?.() ?? {};
@@ -1295,13 +1324,19 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       return { rows: got, failed: failed.length > 0 };
     };
 
+    /** A row that lands after its step ended, since it waited on the person: it takes the place of what stood under
+     * that id, and the last wait gone after the steps ended is the setup coming out again, said once more. */
+    const landRow = (r: PlaceProvisionRow): void => {
+      rows.splice(0, rows.length, ...rows.filter(x => x.id !== r.id), r);
+      push({ ...held });
+      if (ended && held.waiting.length === 0) setupFrame({ addId, placeId, ...outcome() });
+    };
+
     /** A sign-in on that computer that waits on the person: its row waits with the page and the code as the relay
      * reads them, and when the wait runs out it reads expired and a retry asks for a fresh one. It never holds the
-     * job; its row lands whenever the person is through. */
-    const signInThere = (agent: string): void => {
+     * job; its row lands whenever the person is through, and `settled` hears whether it signed in. */
+    const signInThere = (ask: string, row: string, label: string, rowStep: PlaceSetupStep, settled?: (ok: boolean) => void): void => {
       const signIn = recording.signIn;
-      const label = CATALOG_AGENTS.find(a => a.id === agent)?.name ?? agent;
-      const row = `signins/${agent}`;
       const begun = clockNow();
       const wait: PlaceWait = { row, label, expiresAt: new Date(begun + SIGN_IN_WAIT_MS).toISOString(), state: "waiting" };
       const putWait = (w: PlaceWait | undefined): void => {
@@ -1309,10 +1344,9 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         if (w !== undefined) setupFrame({ addId, placeId, wait: w });
       };
       const landed = (r: PlaceProvisionRow): void => {
-        rows.splice(0, rows.length, ...rows.filter(x => x.id !== row), { ...r, step: "signins" });
-        putWait(undefined);
-        // The last wait gone after the steps ended is the setup coming out again, said once more.
-        if (ended && held.waiting.length === 0) setupFrame({ addId, placeId, ...outcome() });
+        held = { ...held, waiting: held.waiting.filter(x => x.row !== row) };
+        landRow({ ...r, step: rowStep });
+        settled?.(r.outcome === "installed");
       };
       if (signIn === undefined) {
         landed({ id: row, label, outcome: "failed", note: NO_SIGN_IN_ROAD });
@@ -1322,7 +1356,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       let current = wait;
       // The run that followed this sign-in before goes quiet at once, so only this one writes what it comes to, and
       // lets go once this one follows it, so a relay still waiting keeps its page and code.
-      const key = `${placeId}/${agent}`;
+      const key = `${placeId}/${ask}`;
       const before = signingIn.get(key);
       before?.mute();
       let gone = false;
@@ -1335,7 +1369,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         },
       };
       signingIn.set(key, mine);
-      void signIn(placeId, agent, e => {
+      void signIn(placeId, ask, e => {
         if (gone) return;
         if (e.state !== "waiting" && e.state !== "running" && signingIn.get(key) === mine) signingIn.delete(key);
         if (e.state === "waiting" || e.state === "running") {
@@ -1346,6 +1380,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
           landed({ id: row, label, outcome: "installed", note: SIGNED_IN_THERE, ms: Math.round(clockNow() - begun) });
         } else if (clockNow() >= begun + SIGN_IN_WAIT_MS - SIGN_IN_SLACK_MS) {
           putWait({ ...current, state: "expired" });
+          settled?.(false);
         } else {
           landed({ id: row, label, outcome: "failed", note: e.said ?? "the sign-in did not finish" });
         }
@@ -1360,6 +1395,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         },
       );
     };
+    const agentSignIn = (agent: string): void => signInThere(agent, `signins/${agent}`, CATALOG_AGENTS.find(a => a.id === agent)?.name ?? agent, "signins");
 
     /** The sign-ins step: an agent that signs in from the vault reads its token there now, and every turn there is
      * handed it; an agent that signs in on that computer is started and left waiting on the person. */
@@ -1368,7 +1404,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       for (const [agent, row] of Object.entries(picks.agents)) {
         const label = CATALOG_AGENTS.find(a => a.id === agent)?.name ?? agent;
         if ((row.signin ?? "vault") === "machine") {
-          signInThere(agent);
+          agentSignIn(agent);
           continue;
         }
         out.push(vaultSignIn(agent, vault()) === "vault-key" ? { id: `signins/${agent}`, label, outcome: "present", note: FROM_THE_VAULT } : { id: `signins/${agent}`, label, outcome: "failed", note: noVaultTokenLine(agent) });
@@ -1376,31 +1412,82 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       return out;
     };
 
-    /** The folders, on the second stream: each one a project on that computer by the add's own road. */
+    /** Whether gh can clone a private repository there, which the GitHub step settles: at once from the vault or a
+     * skip, once the person is through where it signs in on that computer. A setup with no GitHub row clones as it
+     * always did, with whatever the vault holds. */
+    let githubSettled: (ok: boolean) => void = () => {};
+    const githubReady = new Promise<boolean>(resolve => (githubSettled = resolve));
+    const githubWord = picks.configs.github?.signin ?? "vault";
+    if (picks.configs.github === undefined) githubSettled(true);
+    else if (done.has("github") && !rerun.some(w => w.row === GITHUB_ROW)) githubSettled(rows.some(r => r.id === GITHUB_ROW && (r.outcome === "present" || r.outcome === "installed")));
+    /** Whether that settling is in yet, without waiting on it. */
+    let githubKnown: boolean | undefined;
+    void githubReady.then(ok => (githubKnown = ok));
+
+    /** The GitHub step: gh put on where nothing else puts it, then signed in by the row's word: the vault's token
+     * on the run's input and nowhere else, gh's own login on that computer through the sign-in relay, or skipped. */
+    const github = async (plan: ProvisionPlan): Promise<PlaceProvisionRow[]> => {
+      if (picks.configs.github === undefined) return [];
+      if (githubWord === "skip") {
+        githubSettled(false);
+        return [{ id: GITHUB_ROW, label: "GitHub", outcome: "skipped", note: GITHUB_SKIPPED_LINE }];
+      }
+      const gh = await provisioner.step(machine, plan, "github", run, stage, { home });
+      if (gh.some(r => r.outcome === "failed")) {
+        githubSettled(false);
+        return gh;
+      }
+      if (githubWord === "machine") {
+        signInThere(GITHUB_CLI, GITHUB_ROW, "GitHub", "github", ok => githubSettled(ok));
+        return gh;
+      }
+      const token = vault()[GITHUB_TOKEN_ENV];
+      if (token === undefined) {
+        githubSettled(false);
+        return [...gh, { id: GITHUB_ROW, label: "GitHub", outcome: "failed", note: NO_GITHUB_TOKEN_LINE }];
+      }
+      const res = await machine.exec(withEnvFromInput(`${pathLine(plan.path, plan.prefix)}\ngh auth status --hostname github.com 2>&1`), { timeoutMs: GITHUB_MS, stdin: envInput({ [GITHUB_TOKEN_ENV]: token }) });
+      // gh names the token's scopes on its status, which the row carries so a person reads what a clone may reach.
+      const scopes = /Token scopes:\s*(.+)/.exec(res.stdout)?.[1]?.replace(/'/g, "").trim();
+      githubSettled(res.exitCode === 0);
+      return [...gh, res.exitCode === 0 ? { id: GITHUB_ROW, label: "GitHub", outcome: "present", note: `${FROM_THE_VAULT}${scopes === undefined || scopes === "" ? "" : `; token scopes: ${scopes}`}` } : { id: GITHUB_ROW, label: "GitHub", outcome: "failed", note: lastLine(res.stdout) ?? `gh auth status exited ${res.exitCode}` }];
+    };
+
+    /** Whether a folder's repository clones there only with GitHub signed in: one on GitHub that an anonymous read of
+     * it from that computer is refused. */
+    const needsGitHub = async (folder: RecipeFile["folders"][string]): Promise<boolean> => {
+      const remote = await recording.folderRemote?.(folder).catch(() => undefined);
+      const at = remote === undefined ? undefined : githubAddress(remote);
+      if (at === undefined) return false;
+      const read = await machine.exec(`GIT_TERMINAL_PROMPT=0 git -c credential.helper= ls-remote --quiet ${shellQuote(at)} HEAD >/dev/null 2>&1`, { timeoutMs: PROBE_MS }).catch(() => undefined);
+      return read?.exitCode !== 0;
+    };
+
+    /** One folder made a project there by the add's own road. */
+    const addFolder = async (key: string, folder: RecipeFile["folders"][string]): Promise<PlaceProvisionRow> => {
+      const label = folder.name ?? key;
+      if (recording.addFolder === undefined) return { id: `folders/${key}`, label, outcome: "failed", note: NO_FOLDER_ROAD };
+      return recording.addFolder(placeId, key, folder).catch((e: unknown): PlaceProvisionRow => ({ id: `folders/${key}`, label, outcome: "failed", note: firstLineOf(e) }));
+    };
+
+    /** The folders, each a project on that computer. One whose repository needs GitHub there waits on the GitHub
+     * sign-in while the person has it open, and lands once they are through; with GitHub skipped or not signed in it
+     * reads as needing GitHub to clone, and nothing is asked of the remote. */
     const folders = async (): Promise<PlaceProvisionRow[]> => {
       const out: PlaceProvisionRow[] = [];
       for (const [key, folder] of Object.entries(picks.folders)) {
         const label = folder.name ?? key;
-        if (recording.addFolder === undefined) {
-          out.push({ id: `folders/${key}`, label, outcome: "failed", note: NO_FOLDER_ROAD });
+        if (githubKnown === true || !(await needsGitHub(folder))) {
+          out.push(await addFolder(key, folder));
           continue;
         }
-        out.push(await recording.addFolder(placeId, key, folder).catch((e: unknown): PlaceProvisionRow => ({ id: `folders/${key}`, label, outcome: "failed", note: firstLineOf(e) })));
+        if (githubKnown === false) {
+          out.push({ id: `folders/${key}`, label, outcome: "failed", note: NEEDS_GITHUB_LINE });
+          continue;
+        }
+        void githubReady.then(async ok => landRow({ ...(ok ? await addFolder(key, folder) : { id: `folders/${key}`, label, outcome: "failed" as const, note: NEEDS_GITHUB_LINE }), step: "folders" }));
       }
       return out;
-    };
-
-    /** The GitHub check: gh's own status there, with the vault's token in the run's environment and nowhere else. */
-    const github = async (plan: ProvisionPlan): Promise<PlaceProvisionRow[]> => {
-      const gh = picks.configs.github;
-      if (gh === undefined) return [];
-      if (gh.signin === "machine") return [{ id: "github", label: "GitHub", outcome: "failed", note: githubThereLine(record.name) }];
-      const token = vault()[GITHUB_TOKEN_ENV];
-      if (token === undefined) return [{ id: "github", label: "GitHub", outcome: "failed", note: NO_GITHUB_TOKEN_LINE }];
-      const res = await machine.exec(withEnvFromInput(`${pathLine(plan.path, plan.prefix)}\ngh auth status --hostname github.com 2>&1`), { timeoutMs: GITHUB_MS, stdin: envInput({ [GITHUB_TOKEN_ENV]: token }) });
-      // gh names the token's scopes on its status, which the row carries so a person reads what a clone may reach.
-      const scopes = /Token scopes:\s*(.+)/.exec(res.stdout)?.[1]?.replace(/'/g, "").trim();
-      return [res.exitCode === 0 ? { id: "github", label: "GitHub", outcome: "present", note: `${FROM_THE_VAULT}${scopes === undefined || scopes === "" ? "" : `; token scopes: ${scopes}`}` } : { id: "github", label: "GitHub", outcome: "failed", note: lastLine(res.stdout) ?? `gh auth status exited ${res.exitCode}` }];
     };
 
     const end = async (failed?: string): Promise<void> => {
@@ -1410,24 +1497,50 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       setupFrame({ addId, placeId, ...(failed === undefined ? outcome() : { end: "failed", said: failed }) });
     };
 
+    const run = newSetupRun();
     try {
       // A sign-in the last run left waiting is run again for a fresh page and code: the pty behind the old one is gone.
-      for (const w of rerun) signInThere(w.row.slice("signins/".length));
-      if (picks.configs.github !== undefined && picks.configs.github.signin !== "machine" && vault()[GITHUB_TOKEN_ENV] === undefined) await wiring.githubToken?.().catch(() => undefined);
+      for (const w of rerun) {
+        if (w.row === GITHUB_ROW) signInThere(GITHUB_CLI, GITHUB_ROW, "GitHub", "github", ok => githubSettled(ok));
+        else agentSignIn(w.row.slice("signins/".length));
+      }
+      if (picks.configs.github !== undefined && githubWord === "vault" && vault()[GITHUB_TOKEN_ENV] === undefined) await wiring.githubToken?.().catch(() => undefined);
       const plan = await provisioner.setup(picks, { home });
-      const run = newSetupRun();
       const engine = (s: EngineStep) => () => provisioner.step(machine, plan, s, run, stage, { home });
       const floor = await step("floor", engine("floor"));
       if (floor?.failed === true) return await end(floorFailedLine(floor.rows));
-      const agents = await step("agents", engine("agents"));
+      let stopped: string | undefined;
       const installs = new Set(plan.steps.slice(0, plan.agents).map(s => s.id));
-      const agentRows = agents?.rows.filter(r => installs.has(r.id)) ?? [];
-      if (agentRows.length > 0 && agentRows.every(r => r.outcome === "failed")) return await end(noAgentLine(agentRows));
-      await step("signins", signIns);
-      const moved = step("folders", folders);
-      for (const s of ["clis", "mcp", "skills", "plugins", "configs"] as const) await step(s, engine(s));
-      await moved;
-      await step("github", () => github(plan));
+      const go = (work: Promise<unknown>): Promise<"go"> => work.then(() => "go" as const);
+      // gh comes with the CLIs where it is one of them, and on its own before them otherwise.
+      const ghIsCli = Object.keys(picks.clis).includes(GITHUB_CLI);
+      const graph: GraphStep<PlaceSetupStep>[] = [
+        {
+          name: "agents",
+          after: [],
+          lanes: [INSTALLS],
+          run: async () => {
+            const agents = await step("agents", engine("agents"));
+            const agentRows = agents?.rows.filter(r => installs.has(r.id)) ?? [];
+            if (agentRows.length === 0 || !agentRows.every(r => r.outcome === "failed")) return "go";
+            stopped = noAgentLine(agentRows);
+            return "stop";
+          },
+        },
+        { name: "signins", after: ["agents"], lanes: [], light: true, run: () => go(step("signins", signIns)) },
+        { name: "skills", after: [], lanes: [FILES], run: () => go(step("skills", engine("skills"))) },
+        { name: "github", after: ghIsCli ? ["clis"] : [], lanes: picks.configs.github === undefined || githubWord === "skip" ? [] : [INSTALLS], run: () => go(step("github", () => github(plan))) },
+        { name: "clis", after: ["agents"], lanes: [INSTALLS], run: () => go(step("clis", engine("clis"))) },
+        { name: "mcp", after: ["agents", "clis"], lanes: [FILES], run: () => go(step("mcp", engine("mcp"))) },
+        { name: "configs", after: [], lanes: [INSTALLS, FILES], run: () => go(step("configs", engine("configs"))) },
+        { name: "plugins", after: ["mcp"], lanes: [], run: () => go(step("plugins", engine("plugins"))) },
+        { name: "folders", after: ["github"], lanes: [], run: () => go(step("folders", folders)) },
+      ];
+      await runGraph(
+        graph.filter(g => !done.has(g.name)),
+        setupWidth(record.report.shape.memMb),
+      );
+      if (stopped !== undefined) return await end(stopped);
       await step("context", engine("context"));
       await end();
     } catch (e) {
@@ -1460,7 +1573,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       const resuming = given === undefined && record.setup?.state === "running" ? record.setup : undefined;
       const done = new Set((resuming?.steps ?? []).filter(l => l.state === "done").map(l => l.step));
       // A sign-in left waiting is run again here only where its step ended; otherwise that step starts it itself.
-      const rerun = done.has("signins") ? (record.setup?.waiting ?? []).filter(w => w.row.startsWith("signins/")) : [];
+      const rerun = (record.setup?.waiting ?? []).filter(w => (w.row.startsWith("signins/") && done.has("signins")) || (w.row === GITHUB_ROW && done.has("github")));
       const setup: PlaceSetup = { state: "running", addId, startedAt: resuming?.startedAt ?? new Date(clockNow()).toISOString(), steps: resuming?.steps.filter(l => l.state === "done") ?? [], waiting: [] };
       await writeSetup(placeId, { setup, picks, ...(given !== undefined ? { recipe: given.recipe ?? NO_RECIPE } : {}) });
       void runSetup(placeId, addId, picks, done, setup, rerun).finally(() => setting.delete(placeId));

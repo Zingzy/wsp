@@ -3246,6 +3246,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           }
           return { id: `folders/${key}`, label: project.name, outcome: "installed", ...(project.notice !== undefined ? { note: project.notice } : {}) };
         },
+        folderRemote: async folder => (await remoteHere(folder.from.replace(/^~(?=\/|$)/, homedir()))).remote || undefined,
       },
     });
     // The door's four events ride the one stream every other event rides, so the app follows a computer joining

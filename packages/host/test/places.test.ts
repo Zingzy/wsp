@@ -576,7 +576,7 @@ describe("the table wsp places prints", () => {
     // A computer that keeps no image says nothing in that column in any state of the job, and the refusal a fork
     // there meets while the job runs is never one of them.
     expect(of(rows[1]!)).toEqual({ image: "", tools: "" });
-    expect(of({ ...rows[1]!, setup: job })).toEqual({ image: "", tools: "setting up the skills and the agents' own files" });
+    expect(of({ ...rows[1]!, setup: job })).toEqual({ image: "", tools: "setting up the skills" });
     expect(of({ ...rows[1]!, ...done })).toEqual({ image: "", tools: "1 tool ready" });
   });
 

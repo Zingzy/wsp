@@ -283,6 +283,12 @@ describe("what a recipe picks from", () => {
     expect(options.plugins).toEqual([{ name: "frontend-design@claude-plugins-official" }]);
     expect(options.configs.map(c => c.id)).toEqual(["git", "github"]);
   });
+
+  it("offers GitHub on its own with how it can sign in: the vault only where this computer holds gh's login, else on the box or skipped", () => {
+    const read = (github: boolean) => recipeOptions({ entries: [] }, { skills: [], plugins: [], configs: [], github }).configs.find(c => c.id === "github");
+    expect(read(true)?.signins).toEqual(["vault", "machine", "skip"]);
+    expect(read(false)?.signins).toEqual(["machine", "skip"]);
+  });
 });
 
 describe("a recipe taken away", () => {

@@ -3312,8 +3312,8 @@ export const SETUP_STEP_WORDS: Record<PlaceSetupStep, string> = {
   agents: "the agents",
   signins: "the agents' sign-ins",
   clis: "the CLIs",
-  skills: "the skills and the agents' own files",
-  mcp: "the MCP servers",
+  skills: "the skills",
+  mcp: "the agents' own files and MCP servers",
   plugins: "the plugins",
   configs: "git and the shell",
   folders: "the folders, as projects",
@@ -3375,6 +3375,8 @@ export const PlaceSetupEvent = z.object({
   placeId: SETUP_TEXT,
   line: PlaceSetupLine.optional(),
   wait: PlaceWait.optional(),
+  /** On a step's line: every step running at that moment, since after the base tools several run at once. */
+  running: z.array(PlaceSetupStep).optional(),
   end: SetupEnd.optional(),
   /** On the end: why it failed, or what waits and what failed beside the rows that stood. */
   said: SETUP_NOTE,
@@ -5555,7 +5557,14 @@ export const NO_SIGN_IN_ROAD = "this host runs no sign-in on a computer; sign in
 export const NO_FOLDER_ROAD = "this host moves no folder to a computer; add it with wsp add <folder> --on <computer>";
 export const NO_GITHUB_TOKEN_LINE = "this computer's vault holds no GitHub token: gh auth login here, then retry";
 export const noVaultTokenLine = (agent: string): string => `this computer's vault holds no token or key for ${agent}: wsp agents key ${agent}, then retry`;
-export const githubThereLine = (name: string): string => `sign GitHub in on ${name} with gh auth login there`;
+/** What the GitHub row says where the person skipped it, and a folder whose repository needs it to clone. */
+export const GITHUB_SKIPPED_LINE = "skipped; gh is not signed in there";
+export const NEEDS_GITHUB_LINE = "private; needs GitHub to clone";
+
+/** How many of the setup's steps after the base tools run at once on a computer of this much memory: one per 2 GB,
+ * at least one and at most four, so a small box never runs two installs into each other's memory. */
+export const SETUP_MB_PER_STEP = 2048;
+export const setupWidth = (memMb: number): number => Math.max(1, Math.min(4, Math.floor(memMb / SETUP_MB_PER_STEP)));
 
 /** Why a setup stopped at the floor, naming the base tools that did not install. */
 export const floorFailedLine = (rows: readonly Pick<PlaceProvisionRow, "label">[]): string => `the base tools did not install: ${nameList(rows.map(r => r.label))}`;

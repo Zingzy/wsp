@@ -80,7 +80,7 @@ export function recipeOptions(manifest: Manifest, o: { skills: readonly SkillRow
     configs: [
       ...(o.configs.includes("git") ? [{ id: "git" as const, label: "git settings and identity" }] : []),
       ...(o.configs.includes("shell") ? [{ id: "shell" as const, label: "zsh or fish, the prompt, tmux and the rest of the shell's look" }] : []),
-      ...(o.github ? [{ id: "github" as const, label: "the GitHub sign-in" }] : []),
+      { id: "github" as const, label: "the GitHub sign-in", signins: [...(o.github ? (["vault"] as const) : []), "machine" as const, "skip" as const] },
     ],
   };
 }

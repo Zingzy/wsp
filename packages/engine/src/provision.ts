@@ -5,7 +5,7 @@
 // does not already satisfy, then the machine context. Nothing here knows how
 // the computer is reached: it drives a Machine, which for a box is that
 // computer over the link its daemon holds.
-import { COMPILER_ROW, ROAD_MODULES } from "@wsp/catalog";
+import { COMPILER_ROW, ROAD_MODULES, catalogEntry, catalogIdOfRow } from "@wsp/catalog";
 import { agentOfRow, plural, presentElsewhereLine, provisionServersLine, shellQuote, type PlaceProvisionRow } from "@wsp/protocol";
 import { markersOf, pagedReads } from "./exec-detached.js";
 import { installBase } from "./golden-base.js";
@@ -48,13 +48,15 @@ export interface ProvisionPlan {
   configs?: { lands: readonly ProvisionLanding[]; pack: PackFiles };
   /** Installs that go with the configs: the shell's own package where the picks carry its files. */
   configTools?: readonly ToolInstall[];
+  /** gh, where the GitHub row signs it in and no picked CLI puts it on. */
+  github?: readonly ToolInstall[];
   /** Plugins, each put on by its agent's own commands; `asked` reads off what one printed why it is set aside. */
   plugins?: readonly { id: string; label: string; cmd: string; asked?(out: string): string | undefined }[];
 }
 
 /** What a plan off the picks adds to the import's: the skills, the configs, the plugins and whether the C toolchain
  * is needed. */
-export type ProvisionExtras = Pick<ProvisionPlan, "compiler"> & Partial<Pick<ProvisionPlan, "skills" | "configs" | "configTools" | "plugins">>;
+export type ProvisionExtras = Pick<ProvisionPlan, "compiler"> & Partial<Pick<ProvisionPlan, "skills" | "configs" | "configTools" | "plugins" | "github">>;
 
 /** What the job says as it goes: a line, the row under way, and a row's outcome the moment it has one. */
 export type ProvisionStage = (detail: string, at?: { label: string; index: number; of: number }, row?: PlaceProvisionRow) => void;
@@ -235,7 +237,7 @@ export interface ProvisionOn {
 
 /** The steps of a setup the engine runs on the computer itself; the sign-ins, the folders and the GitHub check are
  * the runtime's and the host's. */
-export type EngineStep = "floor" | "agents" | "clis" | "mcp" | "skills" | "plugins" | "configs" | "context";
+export type EngineStep = "floor" | "agents" | "clis" | "mcp" | "skills" | "plugins" | "configs" | "github" | "context";
 
 /** What one run of the setup carries from step to step on that computer: what installed, what the agents' files
  * round landed for the servers to read, and what the person keeps there, for the machine context at the end. A
@@ -334,15 +336,16 @@ async function stepRows(machine: Machine, plan: ProvisionPlan, step: EngineStep,
     case "agents": {
       const aside = plan.skipped.map((s): PlaceProvisionRow => ({ id: s.id, label: s.label, outcome: "skipped", note: s.note }));
       for (const row of aside) stage(rowLine(row), undefined, row);
-      const rows = [...aside, ...(await toolsStep(machine, plan, plan.steps.slice(0, plan.agents), run, stage))];
-      // The agents' own files land with them and stay open for the servers step, which reads the configs that came.
-      return plan.files === undefined ? rows : [...rows, ...(await filesRound(machine, plan.files, FILES_LABEL, run, stage, on, false))];
+      return [...aside, ...(await toolsStep(machine, plan, plan.steps.slice(0, plan.agents), run, stage))];
     }
     // The C toolchain a picked row builds with is the floor's own row, which this plan's floor already carried.
     case "clis":
-      return toolsStep(machine, plan, plan.steps.slice(plan.agents), run, stage);
+      return hooked(machine, plan, await toolsStep(machine, plan, plan.steps.slice(plan.agents), run, stage), stage);
     case "mcp": {
-      const rows: PlaceProvisionRow[] = [];
+      // The agents' own files land here and stay open for the servers, which read the configs that came: one round
+      // in the folder beside the job at a time, so this waits for the CLIs a server may run rather than holding that
+      // folder while they install.
+      const rows: PlaceProvisionRow[] = plan.files === undefined ? [] : await filesRound(machine, plan.files, FILES_LABEL, run, stage, on, false);
       if (plan.mcp !== undefined) {
         stage(`${MCP_LABEL}: ${plural(plan.mcp.agents.length, "agent")}`);
         const servers = await provisionMcp(machine, plan.mcp, {
@@ -367,6 +370,8 @@ async function stepRows(machine: Machine, plan: ProvisionPlan, step: EngineStep,
     }
     case "skills":
       return plan.skills === undefined ? [] : filesRound(machine, plan.skills, SKILLS_LABEL, run, stage, on, true);
+    case "github":
+      return toolsStep(machine, plan, plan.github ?? [], run, stage);
     case "plugins": {
       const rows: PlaceProvisionRow[] = [];
       for (const plugin of plan.plugins ?? []) {
@@ -397,6 +402,29 @@ async function stepRows(machine: Machine, plan: ProvisionPlan, step: EngineStep,
       return [];
     }
   }
+}
+
+/** How long a tool's own hook gets once the tool stands. */
+const HOOK_MS = 60_000;
+
+/** The CLIs whose catalog row names a hook, run once each row stands: a hook that fails fails its row, since the tool
+ * is there and does not yet do what it was picked for. */
+async function hooked(machine: Machine, plan: ProvisionPlan, rows: PlaceProvisionRow[], stage: ProvisionStage): Promise<PlaceProvisionRow[]> {
+  const out: PlaceProvisionRow[] = [];
+  for (const row of rows) {
+    const id = catalogIdOfRow(row);
+    const entry = id === undefined ? undefined : catalogEntry(id);
+    const hook = entry?.kind === "tool" ? entry.hook : undefined;
+    if (hook === undefined || (row.outcome !== "installed" && row.outcome !== "present")) {
+      out.push(row);
+      continue;
+    }
+    const res = await machine.exec(`${pathLine(plan.path, plan.prefix)}\n${hook.on}`, { timeoutMs: HOOK_MS }).catch((e: unknown) => ({ exitCode: -1, stdout: "", stderr: e instanceof Error ? e.message : String(e) }));
+    const done: PlaceProvisionRow = res.exitCode === 0 ? row : { ...row, outcome: "failed", note: `${hook.on}: ${lastWords(res.stderr || res.stdout) ?? `exit ${res.exitCode}`}` };
+    if (done !== row) stage(rowLine(done), undefined, done);
+    out.push(done);
+  }
+  return out;
 }
 
 /** How long one plugin's install gets: its marketplace's clone and the plugin's own files. */

@@ -4,12 +4,18 @@
 // steps each weighed by their class, the word the row reads, and a host that
 // stops in the middle of any of it. The engine's steps are a fake here; what
 // is under test is the order, the state on the record and what resumes.
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type WebSocket from "ws";
 import {
   RecipeFile,
   absentComputer,
   floorFailedLine,
+  GITHUB_SKIPPED_LINE,
+  NEEDS_GITHUB_LINE,
   noAgentLine,
   pendingHeldLine,
   placeProvisionPaths,
@@ -22,17 +28,20 @@ import {
   type AgentsSignInEvent,
   type PlaceProvisionRow,
   type PlaceSetupEvent,
+  type PlaceSetupStep,
   type PlaceView,
   type PlaceReport,
 } from "@wsp/protocol";
 import type { EngineStep, ProvisionPlan } from "@wsp/engine";
 import type { AgentsActs, SignInRun } from "../src/agents-read.js";
 import { ADD_STOPPED_LINE, PlaceProvisioningError, newPlaceKeyPair, type PlaceKeyPair, type PlaceProvisioner, type PlaceRecord, type PlaceUpdater, type PlaceUpdateRequest, type PlaceWiring } from "../src/places.js";
-import { createRuntime, type Runtime } from "../src/runtime.js";
+import { createRuntime, type LocalWiring, type Runtime } from "../src/runtime.js";
+import { localExecStream } from "../src/local-exec.js";
+import { fakeCopier, LocalBackend } from "@wsp/engine";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { DOOR, joinAt, relinkAt, report, wiring } from "./place-join.js";
-import { stubBackend } from "./stub-backend.js";
+import { stubBackend, testPlatform } from "./stub-backend.js";
 import { fakeClock } from "./fake-clock.js";
 import { until } from "./until.js";
 import type { Clock } from "../src/clock.js";
@@ -59,7 +68,7 @@ const FACTS = {
 };
 
 /** What the computer answers on its link: what it forks with, and every command as its daemon's exec would. */
-function answersFor(cmds: string[]) {
+function answersFor(cmds: string[], answer?: (cmd: string) => { exitCode: number; stdout?: string } | undefined) {
   return (c: WsClient): void => {
     c.onFrame(raw => {
       const frame = raw as unknown as Record<string, unknown>;
@@ -70,6 +79,8 @@ function answersFor(cmds: string[]) {
       cmds.push(cmd);
       // gh's own status off the token the run read on its input, as gh prints it.
       const input = typeof frame["stdin"] === "string" ? Buffer.from(frame["stdin"], "base64").toString("utf8") : "";
+      const said = answer?.(cmd);
+      if (said !== undefined) return void c.say({ id: frame["id"], ok: true, exitCode: said.exitCode, stdout: said.stdout ?? "", stderr: "", truncated: false });
       const gh = cmd.includes("gh auth status") && input.includes("GH_TOKEN=") ? "github.com\n  - Logged in to github.com account dev (GH_TOKEN)\n  - Token scopes: 'gist', 'read:org', 'repo'\n" : "";
       c.say({ id: frame["id"], ok: true, exitCode: 0, stdout: gh, stderr: "", truncated: false });
     });
@@ -101,9 +112,14 @@ const ROWS: Partial<Record<EngineStep, PlaceProvisionRow[]>> = {
 
 /** A planner and the engine's steps as the host wires them, each step's rows under this test's hand: which steps
  * ran, in order, and a step held until the test lets it go. */
-function provisioner(o: { rows?: Partial<Record<EngineStep, PlaceProvisionRow[]>>; hold?: EngineStep; throws?: { step: EngineStep; error: Error } } = {}) {
+function provisioner(o: { rows?: Partial<Record<EngineStep, PlaceProvisionRow[]>>; hold?: EngineStep; holds?: EngineStep[]; throws?: { step: EngineStep; error: Error } } = {}) {
   let release = (): void => {};
   const held = new Promise<void>(resolve => (release = resolve));
+  const each = new Map((o.holds ?? []).map(step => {
+    let let_ = (): void => {};
+    const at = new Promise<void>(resolve => (let_ = resolve));
+    return [step, { at, let: let_ }] as const;
+  }));
   const ran: EngineStep[] = [];
   const floors: string[] = [];
   const picked: RecipeFile[] = [];
@@ -122,11 +138,12 @@ function provisioner(o: { rows?: Partial<Record<EngineStep, PlaceProvisionRow[]>
       ran.push(step);
       stage(`${step} under way`);
       if (o.hold === step) await held;
+      await each.get(step)?.at;
       if (o.throws?.step === step) throw o.throws.error;
       return rows[step] ?? [];
     },
   };
-  return { wired, ran, floors, picked, release: () => release() };
+  return { wired, ran, floors, picked, release: () => release(), let: (step: EngineStep) => each.get(step)?.let() };
 }
 
 /** Sign-ins as the app's own road runs them, each waiting on the test: the page and the code, then the end. */
@@ -149,17 +166,18 @@ function signIns() {
 }
 
 /** A host with the setup wired, serving, and the road an add takes onto a computer that joins over the link. */
-async function hosting(o: { provision: PlaceProvisioner; store?: Store; cmds?: string[]; acts?: AgentsActs; vault?: Record<string, string>; report?: PlaceReport; install?: PlaceWiring["install"]; undo?: PlaceWiring["undo"]; hostKey?: PlaceKeyPair; clock?: Clock; update?: PlaceUpdater }): Promise<{ hostKey: PlaceKeyPair; store: Store; frames: PlaceSetupEvent[]; joined: { placeId: string; pair: PlaceKeyPair }[] }> {
+async function hosting(o: { provision: PlaceProvisioner; store?: Store; cmds?: string[]; answer?: (cmd: string) => { exitCode: number; stdout?: string } | undefined; local?: boolean; acts?: AgentsActs; vault?: Record<string, string>; report?: PlaceReport; install?: PlaceWiring["install"]; undo?: PlaceWiring["undo"]; hostKey?: PlaceKeyPair; clock?: Clock; update?: PlaceUpdater }): Promise<{ hostKey: PlaceKeyPair; store: Store; frames: PlaceSetupEvent[]; joined: { placeId: string; pair: PlaceKeyPair }[] }> {
   const hostKey = o.hostKey ?? newPlaceKeyPair();
   const joined: { placeId: string; pair: PlaceKeyPair }[] = [];
   const store = o.store ?? memoryStore();
-  const answers = answersFor(o.cmds ?? []);
+  const answers = answersFor(o.cmds ?? [], o.answer);
   runtime = createRuntime({
     backend: stubBackend(),
     store,
     adapters: {},
     ...(o.clock !== undefined ? { clock: o.clock } : {}),
     ...(o.acts !== undefined ? { agentsActs: o.acts } : {}),
+    ...(o.local === true ? { local: localWiring() } : {}),
     vault: () => o.vault ?? { CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-x" },
     placeLinks: {
       ...wiring(hostKey, undefined, o.update),
@@ -200,6 +218,35 @@ async function stopHost(): Promise<void> {
   srv = undefined;
   runtime = undefined;
 }
+
+/** This computer as a host reads it, so a folder's own remote is read off git here. */
+function localWiring(): LocalWiring {
+  const root = mkdtempSync(join(tmpdir(), "wsp-setup-local-"));
+  repos.push(root);
+  return {
+    backend: new LocalBackend({ root }),
+    execStream: o => localExecStream({ root, runDir: join(root, "runs"), ...o }),
+    home: () => join(root, ".claude"),
+    homeDir: root,
+    rootsPath: join(root, "roots"),
+    env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
+    platform: testPlatform(),
+    copier: fakeCopier(),
+  };
+}
+
+/** A folder on this computer whose origin is a repository on GitHub. */
+function privateRepo(): string {
+  const dir = mkdtempSync(join(tmpdir(), "wsp-setup-repo-"));
+  repos.push(dir);
+  execFileSync("git", ["init", "-q", dir]);
+  execFileSync("git", ["-C", dir, "remote", "add", "origin", "git@github.com:acme/private.git"]);
+  return dir;
+}
+const repos: string[] = [];
+afterEach(() => {
+  for (const dir of repos.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
 
 const rowOf = async (placeId: string): Promise<PlaceView> => (await runtime!.places!.list(Date.now())).find(p => p.id === placeId)!;
 const ended = (frames: readonly PlaceSetupEvent[]): PlaceSetupEvent[] => frames.filter(f => f.end !== undefined);
@@ -252,23 +299,17 @@ describe("a computer added with its picks", () => {
     const waiting = (await rowOf(placeId)).setup!.waiting;
     expect(waiting).toEqual([expect.objectContaining({ row: "signins/codex", label: "Codex", url: "https://auth.example/codex/1", code: "CODE-1", state: "waiting" })]);
     await until(async () => (await rowOf(placeId)).setup?.state === "done");
-    expect(p.ran).toEqual(["floor", "agents", "clis", "mcp", "skills", "plugins", "configs", "context"]);
+    // The skills beside the agents, since they share no lane; the CLIs after the agents on the installs lane.
+    expect(p.ran).toEqual(["floor", "agents", "skills", "clis", "mcp", "configs", "plugins", "context"]);
     const row = await rowOf(placeId);
     expect(row.picks).toEqual(LAPTOP);
     expect(row.recipe).toBe("laptop");
-    expect(row.setup!.steps.map(l => [l.step, l.state])).toEqual([
-      ["floor", "done"],
-      ["agents", "done"],
-      ["signins", "done"],
-      ["folders", "done"],
-      ["clis", "done"],
-      ["mcp", "done"],
-      ["skills", "done"],
-      ["plugins", "done"],
-      ["configs", "done"],
-      ["github", "done"],
-      ["context", "done"],
-    ]);
+    // Every step ended once, each after what it waits on.
+    const lines = row.setup!.steps.map(l => l.step);
+    expect([...lines].sort()).toEqual(["agents", "clis", "configs", "context", "floor", "folders", "github", "mcp", "plugins", "signins", "skills"]);
+    expect(row.setup!.steps.every(l => l.state === "done")).toBe(true);
+    const before = (a: PlaceSetupStep, b: PlaceSetupStep): boolean => lines.indexOf(a) < lines.indexOf(b);
+    expect([before("floor", "agents"), before("agents", "clis"), before("clis", "mcp"), before("mcp", "plugins"), before("github", "folders"), before("folders", "context")]).toEqual([true, true, true, true, true, true]);
     expect(row.setup!.steps.every(l => typeof l.ms === "number")).toBe(true);
     expect(row.applied?.rows.map(r => [r.id, r.step, r.outcome])).toEqual([
       ["agents/claude", "agents", "installed"],
@@ -304,7 +345,8 @@ describe("a computer added with its picks", () => {
     await hosting({ provision: none.wired });
     const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: LAPTOP }, Date.now());
     await until(async () => (await rowOf(place.id)).setup?.state === "failed");
-    expect(none.ran).toEqual(["floor", "agents"]);
+    // The skills ran beside the agents; nothing that waits on the agents started.
+    expect(none.ran).toEqual(["floor", "agents", "skills"]);
     expect((await rowOf(place.id)).setup?.said).toBe(noAgentLine([{ label: "Claude Code", note: "exit 1" }]));
   });
 
@@ -338,11 +380,90 @@ describe("a computer added with its picks", () => {
     await until(async () => (await rowOf(place.id)).setup?.state === "done");
     const row = await rowOf(place.id);
     expect(row.applied?.rows.filter(r => r.outcome === "failed").map(r => [r.id, r.step])).toEqual([
-      ["folders/gone", "folders"],
       ["github", "github"],
+      ["folders/gone", "folders"],
     ]);
     expect(placeWord(row, null).word).toBe("Needs you");
     expect(ended(frames)[0]?.end).toBe("needs-you");
+  });
+
+  it("runs the steps after the base tools at once as wide as the box's memory allows, every line naming the steps running", async () => {
+    const p = provisioner({ holds: ["agents", "skills"] });
+    const { frames } = await hosting({ provision: p.wired });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: LAPTOP }, Date.now());
+    await until(() => p.ran.includes("skills"));
+    // A 4 GB box takes two at once: the agents on the installs lane, the skills on the files lane.
+    expect(p.ran).toEqual(["floor", "agents", "skills"]);
+    expect(frames.at(-1)?.running).toEqual(["agents", "skills"]);
+    p.let("agents");
+    p.let("skills");
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    // Every frame names no more than two heavy steps, the sign-ins aside, since they start and wait on the person.
+    const widest = Math.max(...frames.flatMap(f => (f.running === undefined ? [] : [f.running.filter(r => r !== "signins").length])));
+    expect(widest).toBe(2);
+  });
+
+  it("runs one step at a time on a box under 4 GB", async () => {
+    const p = provisioner({ holds: ["agents"] });
+    const { frames } = await hosting({ provision: p.wired, report: { ...CURRENT, shape: { cpu: 1, memMb: 2048 } } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: LAPTOP }, Date.now());
+    await until(() => p.ran.includes("agents"));
+    await new Promise(r => setTimeout(r, 20));
+    expect(p.ran).toEqual(["floor", "agents"]);
+    p.let("agents");
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    expect(Math.max(...frames.flatMap(f => (f.running === undefined ? [] : [f.running.filter(r => r !== "signins").length])))).toBe(1);
+  });
+
+  it("skips GitHub where the person said so, and a private folder reads as needing GitHub with nothing cloned", async () => {
+    const cmds: string[] = [];
+    const repo = privateRepo();
+    await hosting({ local: true, provision: provisioner().wired, cmds, answer: cmd => (cmd.includes("ls-remote") ? { exitCode: 128 } : undefined) });
+    const picks = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "vault" } }, folders: { app: { from: repo, keep: [] } }, configs: { github: { signin: "skip" } } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    const row = await rowOf(place.id);
+    expect(row.applied?.rows.find(r => r.id === "github")).toMatchObject({ outcome: "skipped", note: GITHUB_SKIPPED_LINE });
+    expect(row.applied?.rows.find(r => r.id === "folders/app")).toMatchObject({ outcome: "failed", note: NEEDS_GITHUB_LINE });
+    // The anonymous read asked GitHub over https with no credential helper; nothing was cloned and no gh was put on.
+    expect(cmds.find(c => c.includes("ls-remote"))).toContain("https://github.com/acme/private.git");
+    expect(cmds.find(c => c.includes("ls-remote"))).toContain("credential.helper=");
+    expect(cmds.some(c => c.includes("clone"))).toBe(false);
+    expect(placeWord(row, null).word).toBe("Needs you");
+  });
+
+  it("signs GitHub in on the box through the relay, and a private folder waits for it and clones once the person is through", async () => {
+    const s = signIns();
+    const repo = privateRepo();
+    const cmds: string[] = [];
+    await hosting({ local: true, provision: provisioner().wired, acts: s.acts, cmds, answer: cmd => (cmd.includes("ls-remote") ? { exitCode: 128 } : undefined) });
+    const picks = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "vault" } }, folders: { app: { from: repo, keep: [] } }, configs: { github: { signin: "machine" } } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    // gh's own login, one page and one code, on the row the GitHub step stands on.
+    expect(s.started).toEqual(["gh"]);
+    await until(async () => (await rowOf(place.id)).setup?.waiting.some(w => w.code !== undefined) === true);
+    expect((await rowOf(place.id)).setup?.waiting).toEqual([expect.objectContaining({ row: "github", label: "GitHub", url: "https://auth.example/gh/1", code: "CODE-1" })]);
+    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "folders/app")).toBeUndefined();
+    expect(placeWord(await rowOf(place.id), null).word).toBe("Needs you");
+    s.end("gh", { state: "signed-in" });
+    await until(async () => (await rowOf(place.id)).applied?.rows.some(r => r.id === "folders/app") === true);
+    const row = await rowOf(place.id);
+    expect(row.applied?.rows.find(r => r.id === "github")).toMatchObject({ outcome: "installed", step: "github" });
+    expect(row.applied?.rows.find(r => r.id === "folders/app")?.note).not.toBe(NEEDS_GITHUB_LINE);
+    expect(row.setup?.waiting).toEqual([]);
+  });
+
+  it("reads a private folder as needing GitHub once the GitHub sign-in on the box failed", async () => {
+    const s = signIns();
+    const repo = privateRepo();
+    await hosting({ local: true, provision: provisioner().wired, acts: s.acts, answer: cmd => (cmd.includes("ls-remote") ? { exitCode: 128 } : undefined) });
+    const picks = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "vault" } }, folders: { app: { from: repo, keep: [] } }, configs: { github: { signin: "machine" } } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.waiting.some(w => w.code !== undefined) === true);
+    s.end("gh", { state: "failed", said: "gh refused" });
+    await until(async () => (await rowOf(place.id)).applied?.rows.some(r => r.id === "folders/app") === true);
+    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "folders/app")).toMatchObject({ outcome: "failed", note: NEEDS_GITHUB_LINE, step: "folders" });
   });
 
   it("refuses a fork there while it runs, naming the step, and takes one once it is done", async () => {
@@ -492,7 +613,7 @@ describe("a host that stops in the middle of a setup", () => {
     await expect(runtime!.places!.forkingBackend(place.id)).rejects.toThrow("is still being set up");
     await dialsBack(first.hostKey, place.id, first.joined[0]!.pair);
     await until(async () => (await rowOf(place.id)).setup?.state === "done");
-    expect(again.ran).toEqual(["clis", "mcp", "skills", "plugins", "configs", "context"]);
+    expect(again.ran).toEqual(["skills", "clis", "mcp", "configs", "plugins", "context"]);
     // The sign-in that waited is run again for a fresh page, never waited on.
     await until(async () => (await rowOf(place.id)).setup?.waiting.some(w => w.url !== undefined) === true);
     expect(s2.started).toEqual(["codex"]);
