@@ -5,8 +5,8 @@
 // jsonrpc field off every message it prints and takes messages without one.
 import type { AccessParams } from "./command.js";
 
-/** The ids of the requests a turn sends once each; a steer is numbered, since a turn may take several. */
-export const REQUEST = { initialize: "wsp-initialize", thread: "wsp-thread", turn: "wsp-turn", interrupt: "wsp-interrupt", revert: "wsp-revert", account: "wsp-account", rateLimits: "wsp-rate-limits" } as const;
+/** The ids of the requests a turn sends once each; a steer and an interrupt are numbered, since a turn may send several. */
+export const REQUEST = { initialize: "wsp-initialize", thread: "wsp-thread", turn: "wsp-turn", revert: "wsp-revert", turns: "wsp-turns", account: "wsp-account", rateLimits: "wsp-rate-limits" } as const;
 
 /** A request id as the server sends one: a string or an integer, echoed back as it came. */
 export type RequestId = string | number;
@@ -67,6 +67,11 @@ export function threadRevertLine(o: { threadId: string; beforeTurnId: string }):
   return line({ id: REQUEST.revert, method: "thread/revert", params: { threadId: o.threadId, beforeTurnId: o.beforeTurnId } });
 }
 
+/** One page of the thread's turns, newest first, each without its items: what a cut by count finds its boundary in. */
+export function threadTurnsListLine(o: { threadId: string; cursor: string | null; limit: number }): string {
+  return line({ id: REQUEST.turns, method: "thread/turns/list", params: { threadId: o.threadId, cursor: o.cursor, limit: o.limit, sortDirection: "desc", itemsView: "summary" } });
+}
+
 const textInput = (text: string) => ({ type: "text", text });
 
 export function turnStartLine(o: { threadId: string; text: string; images?: readonly string[]; effort?: string }): string {
@@ -78,8 +83,9 @@ export function turnSteerLine(id: string, o: { threadId: string; turnId: string;
   return line({ id, method: "turn/steer", params: { threadId: o.threadId, expectedTurnId: o.turnId, input: [textInput(o.text)] } });
 }
 
-export function turnInterruptLine(o: { threadId: string; turnId: string }): string {
-  return line({ id: REQUEST.interrupt, method: "turn/interrupt", params: { threadId: o.threadId, turnId: o.turnId } });
+/** Each interrupt is numbered, since a stop interrupts each subagent's turn as well as the lead's. */
+export function turnInterruptLine(o: { id: string; threadId: string; turnId: string }): string {
+  return line({ id: o.id, method: "turn/interrupt", params: { threadId: o.threadId, turnId: o.turnId } });
 }
 
 /** accept and decline are the only decisions wsp sends: acceptForSession would let one click pass every later prompt
