@@ -5,7 +5,7 @@
 // read again when a rewind lands. A fixture api; no live host.
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { REWIND_WORKING_LINE, UNDO_REWIND_LINE, rewindNote, type EventUnion, type HarnessCatalog, type SessionEvent, type SessionView, type WorkspaceView } from "@wsp/protocol";
+import { CODEX_LEGACY_HISTORY, REWIND_WORKING_LINE, UNDO_REWIND_LINE, rewindNote, type EventUnion, type HarnessCatalog, type SessionEvent, type SessionView, type WorkspaceView } from "@wsp/protocol";
 import { installFakeLayout } from "./fake-layout.js";
 import { TABLE_CATALOG, whenAgentsAnswered } from "./agents.js";
 import { caps } from "./caps.js";
@@ -37,7 +37,7 @@ const workspace: WorkspaceView = {
 };
 
 /** One finished turn of the thread: the person's ask, the agent's reply, and what its end kept. */
-const turn = (n: number, kept: { ref?: string; anchor?: string } | null): SessionEvent[] => {
+const turn = (n: number, kept: { ref?: string; anchor?: string; kept?: string } | null): SessionEvent[] => {
   const s = { workspaceId: WS, sessionId: "sess_1", turnId: `turn_${n}`, threadId: THREAD };
   return [
     { type: "session.start", ...s, at: n * 60_000, prompt: `ask ${n}` },
@@ -173,6 +173,39 @@ describe("Rewind to here on a thread's replies", () => {
     const dialog = await screen.findByRole("alertdialog");
     expect(within(dialog).queryByRole("radio", { name: "Conversation only" })).toBeNull();
     expect(dialog.textContent).toContain(rewindNote({ turns: 2, files: true, cutsConversation: false, agent: "Cursor" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Rewind" }));
+    await waitFor(() => expect(rewound).toEqual([{ threadId: THREAD, turnId: "turn_1", files: true }]));
+  });
+
+  const CODEX: HarnessCatalog = { ...TABLE_CATALOG, label: "Codex", rewindsConversation: true, rewindsByCount: true };
+
+  it("on an agent the host rewinds by count stands on every earlier reply, one that named no anchor or kept nothing included", async () => {
+    const history = [...turn(1, { ref: "refs/wsp/checkpoints/api/thr_rewind/turn_1" }), ...turn(2, null), ...turn(3, null)];
+    const { api, rewound } = fixtureApi({ catalog: CODEX, history });
+    await mount(api);
+    await waitFor(() => expect(rewindButtons()).toHaveLength(2));
+    expect(rewindButtons().map(replyOf).map(text => text.match(/reply \d/)?.[0])).toEqual(["reply 1", "reply 2"]);
+    fireEvent.click(rewindButtons()[1]!);
+    const dialog = await screen.findByRole("alertdialog");
+    expect(within(dialog).getByRole("radio", { name: "Conversation and files" }).hasAttribute("data-disabled")).toBe(true);
+    expect(dialog.textContent).toContain(rewindNote({ turns: 1, files: false, cutsConversation: true, agent: "Codex" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Rewind" }));
+    await waitFor(() => expect(rewound).toEqual([{ threadId: THREAD, turnId: "turn_2", files: false }]));
+  });
+
+  it("on a thread whose agent keeps its history whole offers the files alone, in that agent's words", async () => {
+    const ref = (n: number) => `refs/wsp/checkpoints/api/thr_rewind/turn_${n}`;
+    const history = [...turn(1, { ref: ref(1), anchor: "a1" }), ...turn(2, { anchor: "a2", kept: CODEX_LEGACY_HISTORY }), ...turn(3, { ref: ref(3), anchor: "a3", kept: CODEX_LEGACY_HISTORY })];
+    const { api, rewound } = fixtureApi({ catalog: CODEX, history });
+    await mount(api);
+    await waitFor(() => expect(rewindButtons()).toHaveLength(1));
+    expect(replyOf(rewindButtons()[0]!)).toContain("reply 1");
+    fireEvent.click(rewindButtons()[0]!);
+    const dialog = await screen.findByRole("alertdialog");
+    expect(within(dialog).queryByRole("radio", { name: "Conversation only" })).toBeNull();
+    const note = rewindNote({ turns: 2, files: true, cutsConversation: false, agent: "Codex", kept: CODEX_LEGACY_HISTORY });
+    expect(note.startsWith("A Codex older than 0.151.0 made this thread")).toBe(true);
+    expect(dialog.textContent).toContain(note);
     fireEvent.click(within(dialog).getByRole("button", { name: "Rewind" }));
     await waitFor(() => expect(rewound).toEqual([{ threadId: THREAD, turnId: "turn_1", files: true }]));
   });
