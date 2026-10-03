@@ -25,7 +25,7 @@ const daemon = async (): Promise<DaemonChannel> => ({
 });
 
 /** A harness that cuts its conversation on its next resume, as Claude Code does, and replies at once. */
-function harness(prompts: string[]): HarnessAdapterFactory {
+function harness(prompts: string[], limit?: { usedPercent: number }): HarnessAdapterFactory {
   let turns = 0;
   return () => ({
     steers: false,
@@ -40,6 +40,7 @@ function harness(prompts: string[]): HarnessAdapterFactory {
         emit({ type: "session.start", sessionId: session });
         emit({ type: "turn.delta", sessionId: session, kind: "text", text: `reply ${n}` });
         emit({ type: "turn.anchor", sessionId: session, anchor: `a${n}` });
+        if (limit !== undefined) emit({ type: "limit", sessionId: session, limit: { windows: [{ kind: "week", usedPercent: limit.usedPercent }] } });
         emit({ type: "turn.done", sessionId: session, result });
         emit({ type: "session.end", sessionId: session, exitCode: 0, sawResult: true });
         return result;
@@ -57,12 +58,12 @@ afterEach(async () => {
   rt = undefined;
 });
 
-async function setup() {
+async function setup(limit?: { usedPercent: number }) {
   const backend = stubBackend();
   backend.execImpl = tokenGuest;
   const store: Store = memoryStore();
   const prompts: string[] = [];
-  rt = createRuntime({ backend, store, adapters: { claude: harness(prompts) }, daemonToken: DAEMON_TOKEN, daemonChannel: daemon });
+  rt = createRuntime({ backend, store, adapters: { claude: harness(prompts, limit) }, daemonToken: DAEMON_TOKEN, daemonChannel: daemon });
   const ws = await createOn(rt, { golden: "snap_g", name: "slate" });
   backend.machines[0]!.previewUrl = async () => ({ url: "http://127.0.0.1:7070", token: "e", expiresAt: Date.now() + 3_600_000 });
   const events: EventUnion[] = [];
@@ -92,7 +93,8 @@ describe("a thread's slate on the host", () => {
     const { ws, store, events, threadId, asThread } = await setup();
     const set = await rt!.slates.set({ lines: TRACKER }, asThread);
     expect(set).toMatchObject({ version: 1, problems: [] });
-    expect(set.sketch).toEqual(expect.any(String));
+    expect(set.sketch.split("\n")[0]).toMatch(/^slate v1 "Steps", \d+ pieces/);
+    expect(set.sketch).toContain("[progress meter]");
     expect(events.filter(e => e.type === "session.slate")).toMatchObject([{ type: "session.slate", threadId, cause: "set", version: 1, by: "agent" }]);
     expect((await rt!.sessions.history(ws.id)).some(e => e.type === "session.slate")).toBe(true);
 
@@ -130,6 +132,11 @@ describe("a thread's slate on the host", () => {
     expect((await rt!.slates.get(threadId))!.version).toBe(7);
     // Persisted through the store port, so a host over the same store finds it.
     expect(((await store.get(SLATES, threadId)) as SlateRecord).version).toBe(7);
+    // A host restarted over the same store serves the same slate at the same version.
+    const before = await rt!.slates.get(threadId);
+    await rt!.close();
+    rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: harness([]) }, daemonToken: DAEMON_TOKEN, daemonChannel: daemon });
+    expect(await rt.slates.get(threadId)).toEqual(before);
   });
 
   it("a press starts the thread's next turn with the action's text and the slate line, once per request id", async () => {
@@ -182,5 +189,21 @@ describe("a thread's slate on the host", () => {
     await rt!.sessions.rewind(threadId, { turnId: firstTurn, files: false });
     expect(await rt!.slates.get(threadId)).toMatchObject({ document: null, empty: "rewound-before", version: 5 });
     expect((await rt!.slates.read({}, asThread)).problems).toEqual([expect.objectContaining({ code: "Z804" })]);
+  });
+
+  it("pushes the account's row the moment a turn's limit reading folds in, and a bound read sees it", async () => {
+    const { events, asThread } = await setup({ usedPercent: 46 });
+    await settle();
+    const pushed = events.filter((e): e is Extract<EventUnion, { type: "usage.account" }> => e.type === "usage.account");
+    expect(pushed.at(-1)).toMatchObject({ type: "usage.account", row: { windows: [{ kind: "week", usedPercent: 46 }] } });
+    await rt!.slates.set({ lines: 'slate 1\n\nweek: meter label="Weekly" value={usage.week.percent} max=100' }, asThread);
+    expect((await rt!.slates.read({ values: ["usage.week.percent"] }, asThread)).values).toEqual({ "usage.week.percent": 46 });
+  });
+
+  it("marks a workspace whose slate binds the pull request's checks, which reads a pending check every 30 s", async () => {
+    const { ws, asThread } = await setup();
+    expect(rt!.slates.watchesPr(ws.id)).toBe(false);
+    await rt!.slates.set({ lines: 'slate 1\n\nchecks: table items={pr.checks} empty="No checks yet"\n  - col title="Check" value={item.name}' }, asThread);
+    expect(rt!.slates.watchesPr(ws.id)).toBe(true);
   });
 });
