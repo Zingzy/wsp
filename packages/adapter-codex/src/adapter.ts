@@ -440,6 +440,8 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
 
     let threadId = localId;
     let announced = false;
+    /** The server keeps this thread's history in a form thread/revert cannot cut, as its thread answer said. */
+    let legacy = false;
     let turnId: string | undefined;
     let exited = false;
     let interruptRequested = false;
@@ -721,6 +723,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
       if (id === REQUEST.thread) {
         const answer = rec(result);
         const thread = rec(answer?.thread);
+        legacy ||= thread?.historyMode === "legacy";
         announce(str(thread?.id), str(answer?.model) ?? str(thread?.model), str(answer?.cwd) ?? str(thread?.cwd));
         if (o.sideRun !== undefined) side(id, answer);
         else if (o.turnLine !== undefined) void stream.write(o.turnLine(threadId));
@@ -778,13 +781,14 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
       switch (method) {
         case "thread/started": {
           const thread = rec(params.thread);
+          legacy ||= thread?.historyMode === "legacy";
           announce(str(thread?.id), str(thread?.model), str(thread?.cwd));
           break;
         }
         case "turn/started": {
           const first = turnId === undefined;
           turnId = str(rec(params.turn)?.id) ?? turnId;
-          if (first && turnId !== undefined) emit({ type: "turn.anchor", sessionId: threadId, anchor: turnId });
+          if (first && turnId !== undefined) emit({ type: "turn.anchor", sessionId: threadId, anchor: turnId, ...(legacy ? { kept: CODEX_LEGACY_HISTORY } : {}) });
           break;
         }
         case "item/started":

@@ -1125,6 +1125,13 @@ describe("what a rewind needs of a Codex turn", () => {
     expect(events.filter(e => e.type === "turn.anchor")).toEqual([{ type: "turn.anchor", sessionId: THREAD_ID, anchor: TURN_ID }]);
   });
 
+  it("on a thread an older Codex made, names each turn's anchor with why its history cannot be cut", async () => {
+    const legacy = server([opened()[0]!, opened()[1]!.replace('"turns":[]', '"turns":[],"historyMode":"legacy"'), turnStarted, agentMessage("msg_1", "done"), completed("completed")]);
+    const { events, onEvent } = collect();
+    await adapterOver(launcher(legacy)).start({ prompt: "x", resume: THREAD_ID, onEvent }).finished;
+    expect(events.filter(e => e.type === "turn.anchor")).toEqual([{ type: "turn.anchor", sessionId: THREAD_ID, anchor: TURN_ID, kept: CODEX_LEGACY_HISTORY }]);
+  });
+
   it("cuts the thread's history before a turn on its own short server run, resuming the thread and asking thread/revert", async () => {
     const launch = launcher(seed => {
       const w = wire({

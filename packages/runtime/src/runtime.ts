@@ -7684,6 +7684,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       ...(adapter.movesAccess === true ? { movesAccess: true } : {}),
       ...(adapter.aside !== undefined ? { asides: true } : {}),
       ...(adapter.resumesAt === true || adapter.revert !== undefined ? { rewindsConversation: true } : {}),
+      ...(adapter.revert !== undefined ? { rewindsByCount: true } : {}),
       ...(adapter.screenCommands !== undefined ? { screenCommands: [...adapter.screenCommands] } : {}),
     };
     if (adapter.probeCatalog === undefined) return Promise.resolve(known);
@@ -8310,7 +8311,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** What a rewind to a turn needs, kept once the turn is over: the checkout's tree through the workspace's own
    * daemon, and the harness's anchor. A checkout the daemon takes none of (not a repo, a daemon too old, a machine
    * gone) leaves the anchor alone; the turn itself is as it ended either way. */
-  const keepCheckpoint = async (entry: LiveWorkspace, turn: { sessionId: string; threadId: string; turnId: string; anchor?: string }): Promise<void> => {
+  const keepCheckpoint = async (entry: LiveWorkspace, turn: { sessionId: string; threadId: string; turnId: string; anchor?: string; kept?: string }): Promise<void> => {
     let ref: string | undefined;
     if (!ownFolder(entry.record)) {
       try {
@@ -8320,8 +8321,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         console.warn(noCheckpointLogLine(turn.threadId, entry.record.id, e instanceof Error ? e.message : String(e)));
       }
     }
-    if (ref === undefined && turn.anchor === undefined) return;
-    record({ type: "session.checkpoint", workspaceId: entry.record.id, sessionId: turn.sessionId, turnId: turn.turnId, threadId: turn.threadId, ...(ref !== undefined ? { ref } : {}), ...(turn.anchor !== undefined ? { anchor: turn.anchor } : {}) });
+    if (ref === undefined && turn.anchor === undefined && turn.kept === undefined) return;
+    record({ type: "session.checkpoint", workspaceId: entry.record.id, sessionId: turn.sessionId, turnId: turn.turnId, threadId: turn.threadId, ...(ref !== undefined ? { ref } : {}), ...(turn.anchor !== undefined ? { anchor: turn.anchor } : {}), ...(turn.kept !== undefined ? { kept: turn.kept } : {}) });
   };
   /** Recorded once the harness took the line, so the row sits where the turn could first see it. */
   /** The handle a start already taken answers with: the turn's own while it runs, and while it does not, one whose
@@ -8500,11 +8501,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     let ended = false;
     /** The harness's own name for where this turn ended, kept with the turn's checkpoint once it is over. */
     let anchor: string | undefined;
+    /** The harness's word that it cannot cut this thread's conversation, kept with the checkpoint as the anchor is. */
+    let keptWhy: string | undefined;
     let over = false;
     /** The turn is over however it ended: no rewind in this copy can be undone any more, since an undo would take
      * this turn's files with it, and what a rewind to this turn needs is kept, off the turn's road so nothing waits
      * on the machine. */
-    const turnOver = (named: string | undefined): void => {
+    const turnOver = (): void => {
       if (over) return;
       over = true;
       const undone: string[] = [];
@@ -8517,7 +8520,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         void persistSessions(workspaceId);
         bus.emit({ type: "thread.marked", workspaceId, threadIds: undone });
       }
-      void keepCheckpoint(entry, { sessionId: view.claudeSessionId ?? view.id, threadId, turnId, ...(named !== undefined ? { anchor: named } : {}) });
+      void keepCheckpoint(entry, { sessionId: view.claudeSessionId ?? view.id, threadId, turnId, ...(anchor !== undefined ? { anchor } : {}), ...(keptWhy !== undefined ? { kept: keptWhy } : {}) });
     };
     // The reply's status, held while the process still runs. Shared with this turn's session-map entry so runningOn
     // and the persisted row read it whether the harness emits its result synchronously in start() (before the entry
@@ -8749,6 +8752,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         }
         case "turn.anchor":
           anchor = event.anchor;
+          keptWhy = event.kept;
           return;
         case "subagent":
           // Counted with the deltas, so a run re-read from its first line writes none of these a second time.
@@ -8825,7 +8829,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             exitCode: event.exitCode,
             sawResult: event.sawResult,
           });
-          turnOver(anchor);
+          turnOver();
           readChanges(sessionId);
           return;
       }
@@ -8895,7 +8899,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       settleCut({ view, turnId, ...(notify !== undefined ? { notify } : {}), ...(notifyBy !== undefined ? { notifyBy } : {}), ...(notifyRoad !== undefined ? { notifyRoad } : {}), turnLive }, reason, () => reason);
       void persistSessions(workspaceId);
       void started.interrupt().catch(() => {});
-      turnOver(anchor);
+      turnOver();
     };
     // One row per turn, never two: the key the start road held this turn under goes as the harness's own takes over.
     if (turnId !== rowId) sessions.delete(turnId);
@@ -9779,7 +9783,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const agent = harnessCatalog(harness)?.label ?? harness;
       const files = opts.files === true;
       if (files && kept?.ref === undefined) throw conflict(REWIND_NO_CHECKPOINT_LINE);
-      const cutsConversation = adapter.resumesAt === true || adapter.revert !== undefined;
+      // A harness that said it cannot cut this thread keeps every turn: the files alone go back and it is not asked.
+      const uncut = events.find((e): e is Extract<SessionEvent, { type: "session.checkpoint" }> => e.type === "session.checkpoint" && e.threadId === threadId && e.kept !== undefined)?.kept;
+      if (uncut !== undefined && !files) throw conflict(rewindKeptLine(uncut, false));
+      const cutsConversation = (adapter.resumesAt === true || adapter.revert !== undefined) && uncut === undefined;
       if (adapter.resumesAt === true && kept?.anchor === undefined) throw conflict(rewindNoAnchorLine(agent));
       if (!cutsConversation && !files) throw conflict(rewindNoAnchorLine(agent));
       if (files) besideRunning();
@@ -9789,7 +9796,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const moved = files ? await restore(kept!.ref!) : undefined;
       const before = moved === undefined ? undefined : String(moved["before"]);
       let keptWhy: string | undefined;
-      if (adapter.revert !== undefined && latest?.claudeSessionId !== undefined) {
+      if (adapter.revert !== undefined && cutsConversation && latest?.claudeSessionId !== undefined) {
         const firstCut = keptOf(cut[0]!)?.anchor;
         // A turn that named no anchor is found by count among the harness's own, off how each cut turn ended.
         const endOf = (turnId: string): TurnResult | undefined => {

@@ -66,6 +66,8 @@ function harness(o: {
   revertKeeps?: string;
   /** Turns that name no anchor, as a Codex turn from before wsp kept one did. */
   anchorless?: boolean;
+  /** Why the harness cannot cut this thread's conversation, said with every anchor, as Codex says it of a legacy thread. */
+  keeps?: string;
   /** Turns ended this way instead of completed, by their number. */
   ends?: Record<number, TurnResult>;
   starts?: HarnessStartOptions[];
@@ -109,7 +111,7 @@ function harness(o: {
       const finished = Promise.resolve().then(() => {
         emit({ type: "session.start", sessionId: SESSION });
         emit({ type: "turn.delta", sessionId: SESSION, kind: "text", text: `reply ${n}` });
-        if (o.anchorless !== true) emit({ type: "turn.anchor", sessionId: SESSION, anchor: `a${n}` });
+        if (o.anchorless !== true) emit({ type: "turn.anchor", sessionId: SESSION, anchor: `a${n}`, ...(o.keeps !== undefined ? { kept: o.keeps } : {}) });
         emit({ type: "turn.done", sessionId: SESSION, result });
         emit({ type: "session.end", sessionId: SESSION, exitCode: 0, sawResult: true });
         return result;
@@ -261,6 +263,27 @@ describe("rewinding a thread to one of its replies", () => {
 
     await expect(rt!.sessions.rewind(threadId, { turnId: turns[0]!, files: false })).rejects.toThrow(rewindKeptLine(CODEX_LEGACY_HISTORY, false));
     expect(await texts(ws.id)).toEqual(["reply 1", "reply 2", "reply 3"]);
+  });
+
+  it("a thread the harness said it cannot cut is rewound in its files alone without asking the harness, and the conversation alone is refused in its words", async () => {
+    const reverted: Parameters<SessionReverter>[0][] = [];
+    const { ws, daemon } = await workspace(harness({ cuts: "revert", reverted, keeps: CODEX_LEGACY_HISTORY }));
+    const { threadId, turns } = await threeTurns(ws.id);
+    const kept = (await rt!.sessions.history(ws.id)).filter(e => e.type === "session.checkpoint");
+    expect(kept.map(e => e.kept)).toEqual([CODEX_LEGACY_HISTORY, CODEX_LEGACY_HISTORY, CODEX_LEGACY_HISTORY]);
+    daemon.frames.length = 0;
+    await expect(rt!.sessions.rewind(threadId, { turnId: turns[0]!, files: false })).rejects.toThrow(rewindKeptLine(CODEX_LEGACY_HISTORY, false));
+    expect(daemon.frames).toEqual([]);
+    expect(await rt!.sessions.rewind(threadId, { turnId: turns[0]!, files: true })).toEqual({ turns: 0, files: 2 });
+    expect(reverted).toEqual([]);
+    expect(await texts(ws.id)).toEqual(["reply 1", "reply 2", "reply 3"]);
+  });
+
+  it("tells a window which harness the host rewinds by count, so a reply with no anchor is offered too", async () => {
+    const { ws } = await workspace(harness({ cuts: "revert" }));
+    expect((await rt!.harnesses.list(ws.id)).find(c => c.harness === "claude")).toMatchObject({ rewindsConversation: true, rewindsByCount: true });
+    const other = await workspace(harness({ cuts: "next" }));
+    expect((await rt!.harnesses.list(other.ws.id)).find(c => c.harness === "claude")?.rewindsByCount).toBeUndefined();
   });
 
   it("on a harness that keeps its own history moves the files and keeps every turn, and says it cuts no conversation", async () => {

@@ -100,6 +100,9 @@ export type AdapterEvent =
       type: "turn.anchor";
       sessionId: string;
       anchor: string;
+      /** Why the harness cannot cut this session's conversation at all, in its own clause, where its history is in a
+       * form it cannot cut; a rewind of the thread then moves its files alone. */
+      kept?: string;
     }
   | {
       /** The plan's limits for the account this turn runs on, as the harness printed them: sent whenever it prints

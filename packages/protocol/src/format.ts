@@ -1644,8 +1644,9 @@ const turnsAfter = (turns: number): string => (turns === 1 ? "The turn after thi
 
 /** What a rewind to a reply takes, said before the click: how many turns go, whether the files go back, and what
  * Undo rewind brings back after. An agent that cuts no history of its own keeps every turn, and the note says so. */
-export function rewindNote(o: { turns: number; files: boolean; cutsConversation: boolean; agent: string }): string {
+export function rewindNote(o: { turns: number; files: boolean; cutsConversation: boolean; agent: string; kept?: string }): string {
   const undo = "Undo rewind puts them back until the next turn in this copy ends";
+  if (o.kept !== undefined) return `${o.kept.charAt(0).toUpperCase()}${o.kept.slice(1)}, so the conversation stays and the files go back to how they stood at this reply. ${WHOLE_COPY} ${undo}.`;
   if (!o.cutsConversation) return `${o.agent} keeps its own history, so the conversation stays and the files go back to how they stood at this reply. ${WHOLE_COPY} ${undo}.`;
   if (!o.files) return `${turnsAfter(o.turns)} the conversation; the files stay as they are.`;
   return `${turnsAfter(o.turns)} the conversation, and the files go back to how they stood at this reply. ${WHOLE_COPY} ${undo}; the conversation does not come back.`;
