@@ -4,12 +4,12 @@
 // recorded in solari-poc/RESULTS.md.
 
 import { ASIDE_WALL_MS, INTERRUPT_GRACE_MS, LOST_SESSION_NOTE, PERMISSION_ALLOW, PERMISSION_DENY, QUESTION_TOOL, RUN_EXIT_MS, asideWallLine, backgroundTasksLine, endAfterResult, endRun, fmtDuration, harnessExitLine, lostSessionPrompt, refusedTurn, taskFinishedLine, titlePrompt } from "@wsp/protocol";
-import type { AdapterAttachOptions, AdapterEvent, AgentLaunch, AsideAnswer, AsideQuestion, ExecStream, ExecStreamFactory, HarnessCatalogProbe, McpServerSpec, PermissionAsk, PermissionOutcome, ScreenCommand, SessionAsker, SessionHarness, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnRefusal, TurnResult, TurnStatus, CommitDrafter, PlanStep, TurnTokens, HarnessLimit, LimitKind, LimitStatus, LimitWindow } from "@wsp/protocol";
-import { SKIP_PROMPTS_MODE, controlAllowLine, controlAnswerLine, controlErrorLine, controlLine, modeOptionOn, setModeLine } from "./permissions.js";
+import type { AdapterAttachOptions, AdapterEvent, AgentLaunch, SubagentState, TaskStop, AsideAnswer, AsideQuestion, ExecStream, ExecStreamFactory, HarnessCatalogProbe, McpServerSpec, PermissionAsk, PermissionOutcome, ScreenCommand, SessionAsker, SessionHarness, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnRefusal, TurnResult, TurnStatus, CommitDrafter, PlanStep, TurnTokens, HarnessLimit, LimitKind, LimitStatus, LimitWindow } from "@wsp/protocol";
+import { SKIP_PROMPTS_MODE, controlAllowLine, controlAnswerLine, controlErrorLine, controlLine, modeOptionOn, setModeLine, stopTaskLine } from "./permissions.js";
 import { CLAUDE_SCREEN_COMMANDS, catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
 import { asideAnswer, asideCommand, forkCleanupCommand } from "./aside.js";
 import { draftForCommand, parseDraftFor, parseRename, parseSessionTitle, parseTitleFor, renameCommand, sessionTitleCommand, titleForCommand } from "./session-title.js";
-import { buildCommand, buildEnv, newSessionId, savedSpendCommand, userMessageLine } from "./landmines.js";
+import { buildCommand, buildEnv, forwardsSubagentText, newSessionId, savedSpendCommand, userMessageLine } from "./landmines.js";
 import { shellCwdAfter } from "./shell-cwd.js";
 
 export interface StartOptions {
@@ -38,6 +38,8 @@ export interface StartOptions {
   seed?: () => Promise<string>;
   /** The CLI starts at once and is handed the prompt when this settles; absent, the prompt is seeded at the launch. */
   promptAfter?: Promise<void>;
+  /** The version the binary on this machine answered the catalog probe with; absent where it answered nothing. */
+  version?: string;
   onEvent: (event: AdapterEvent) => void;
 }
 
@@ -79,6 +81,9 @@ export interface ClaudeSession {
    * answers it as that option. Settles on the CLI's own answer to the request otherwise, so a mode it will not take
    * and this host cannot stand in for comes back refused rather than as a silent no-op. */
   setAccess(mode: string): Promise<AccessOutcome>;
+  /** Stops one of this turn's own subagents by the CLI's handle for it, the rest of the turn running on; settles on
+   * the CLI's answer, or refused once it has said nothing for the wait. */
+  stopTask(task: string): Promise<TaskStop>;
 }
 
 export interface AdapterDeps {
@@ -106,7 +111,13 @@ export interface AdapterDeps {
   asideWallMs?: number;
   /** The program the person runs in place of claude on this computer, and the words every turn's launch adds. */
   launch?: AgentLaunch;
+  /** How long a stop of one subagent waits on the CLI's answer; STOP_TASK_WAIT_MS unless a test says otherwise. */
+  stopTaskWaitMs?: number;
 }
+
+/** How long the CLI gets to answer a stop of one subagent before the caller hears it refused: the kill is in process
+ * and answers at once, so silence this long is a CLI wedged mid-kill, and a person pressing Stop is not left waiting. */
+export const STOP_TASK_WAIT_MS = 10_000;
 
 export interface ClaudeAdapter {
   start(options: StartOptions): ClaudeSession;
@@ -351,6 +362,10 @@ function apiErrorCause(event: Record<string, unknown>): TurnRefusal | null | und
   return REFUSAL_CAUSES[str(event.error) ?? ""] ?? null;
 }
 
+/** The CLI's words for a session whose tasks it cannot stop one at a time (read off the 2.1.288 binary): the same
+ * answer an agent with no such request gives, never a refusal of this one task. */
+const STOP_TASK_UNSUPPORTED = "stop_task is not supported in this context";
+
 /** The CLI's sentence for a resume of a session id its store does not hold, before the id (measured on 2.1.280). */
 const NO_CONVERSATION = "No conversation found with session ID:";
 
@@ -390,6 +405,34 @@ function subagentLaunch(event: Record<string, unknown>): { agentId: string; tool
   const agentId = str(event.task_id);
   const toolUseId = str(event.tool_use_id);
   return agentId === undefined || toolUseId === undefined ? undefined : { agentId, toolUseId };
+}
+
+/** The CLI's own word for how a subagent ended, as wsp's; a word it has not used before reads as failed. */
+const SUBAGENT_ENDS: Readonly<Record<string, SubagentState>> = { completed: "done", failed: "failed", stopped: "stopped", killed: "stopped" };
+
+/** A subagent the agent started, off its task_started line: the CLI tracks background commands as tasks on the same
+ * line, and task_type is what tells a subagent from one of those. */
+function subagentStarted(event: Record<string, unknown>): { task: string; parent?: string; title?: string; depth?: number } | undefined {
+  if (str(event.type) !== "system" || str(event.subtype) !== "task_started" || str(event.task_type) !== "local_agent") return undefined;
+  const task = str(event.task_id);
+  if (task === undefined) return undefined;
+  const parent = str(event.tool_use_id);
+  const title = str(event.description);
+  const depth = num(event.spawn_depth);
+  return { task, ...(parent !== undefined ? { parent } : {}), ...(title !== undefined ? { title } : {}), ...(depth !== undefined ? { depth } : {}) };
+}
+
+/** A task the CLI says is over, off either line that says so: the notification with its summary, or the update a kill
+ * writes ahead of it. Any task; the caller knows which of them are subagents. */
+function taskEnded(event: Record<string, unknown>): { task: string; state: SubagentState; summary?: string } | undefined {
+  if (str(event.type) !== "system") return undefined;
+  const subtype = str(event.subtype);
+  const task = str(event.task_id);
+  const status = subtype === "task_notification" ? str(event.status) : subtype === "task_updated" ? str(rec(event.patch)?.status) : undefined;
+  if (task === undefined || status === undefined) return undefined;
+  if (subtype === "task_updated" && status !== "killed") return undefined;
+  const summary = subtype === "task_notification" ? str(event.summary) : undefined;
+  return { task, state: SUBAGENT_ENDS[status] ?? "failed", ...(summary !== undefined && summary !== "" ? { summary } : {}) };
 }
 
 /** The CLI's own live background tasks (commands and subagents the agent did not wait for), sent whole each time the
@@ -689,17 +732,20 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     const pending = new Map<string, PermissionAsk>();
     /** The control requests this adapter sent that the CLI has not answered yet, by the id it was sent under. It
      * answers every one, and one still open when the channel shuts is settled rather than left waiting. */
-    const asked = new Map<string, (outcome: AccessOutcome) => void>();
+    const asked = new Map<string, (answer: { error?: string } | "gone") => void>();
     let askedSeq = 0;
     /** The call each running subagent was launched by, by the CLI's handle for the subagent. */
     const launchedBy = new Map<string, string>();
+    /** Where each of the agent's own subagents stands, by the CLI's handle for it: what says its end once, and what a
+     * stop of one already over is answered from. */
+    const subagents = new Map<string, SubagentState>();
     /** Set once the turn is in the mode that asks nobody, launched there or moved there: every prompt the CLI raises
      * from then is allowed by this host, and only a question reaches the person. */
     let skipsPrompts = false;
 
-    /** Every request still waiting, answered as the caller's outcome; nothing can reach the CLI after this. */
-    const settleAsked = (outcome: AccessOutcome): void => {
-      for (const settle of [...asked.values()]) settle(outcome);
+    /** Every request still waiting, answered as gone; nothing can reach the CLI after this. */
+    const settleAsked = (): void => {
+      for (const settle of [...asked.values()]) settle("gone");
       asked.clear();
     };
 
@@ -733,7 +779,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       heldReply = undefined;
       sawResult = true;
       stream.closeInput();
-      settleAsked("gone");
+      settleAsked();
       void endAfterResult(stream, exitMs, deps.interruptGraceMs ?? INTERRUPT_GRACE_MS).catch(() => {});
       // Held until the process exits, since the CLI writes its reason to stderr after the result.
       if (answeredNothing(result)) {
@@ -820,7 +866,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
               case "answer": {
                 const settle = asked.get(control.requestId);
                 asked.delete(control.requestId);
-                settle?.(control.error === undefined ? "set" : "refused");
+                settle?.(control.error === undefined ? {} : { error: control.error });
                 break;
               }
             }
@@ -829,6 +875,12 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
           const launch = subagentLaunch(event);
           if (launch !== undefined) {
             launchedBy.set(launch.agentId, launch.toolUseId);
+            const started = subagentStarted(event);
+            if (started !== undefined) {
+              subagents.set(started.task, "running");
+              const { task, parent, ...said } = started;
+              onEvent({ type: "subagent", sessionId: claudeSessionId, task, state: "running", ...(parent !== undefined ? { parentToolUseId: parent } : {}), ...said });
+            }
             continue;
           }
           const tasks = backgroundTasksOf(event);
@@ -844,11 +896,18 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
             }
             continue;
           }
+          const ended = taskEnded(event);
+          if (ended !== undefined && subagents.get(ended.task) === "running") {
+            subagents.set(ended.task, ended.state);
+            const parent = launchedBy.get(ended.task);
+            onEvent({ type: "subagent", sessionId: claudeSessionId, task: ended.task, state: ended.state, ...(parent !== undefined ? { parentToolUseId: parent } : {}), ...(ended.summary !== undefined ? { summary: ended.summary } : {}) });
+          }
           const over = taskFinishedOf(event);
           if (over !== undefined) {
             if (heldReply !== undefined) finishedAfter.push(taskFinishedLine(taskNames.get(over.id) ?? over.id, over.status, Date.now() - heldAt));
             continue;
           }
+          if (ended !== undefined) continue;
           // A report's answer with no reply held is not this turn's: the person's message is answered after it.
           if (heldReply === undefined && !sawResult && drainedNotice(event)) continue;
           const compacted = compactedTo(event);
@@ -924,7 +983,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       // The process is gone, so nothing can answer these; the rows say so rather than waiting for an answer that
       // has nowhere to land.
       for (const askId of [...pending.keys()]) closeAsk(askId, "cancelled");
-      settleAsked("gone");
+      settleAsked();
       const exitLine = (): string =>
         streamError ?? harnessExitLine("claude", exitCode, env["PATH"], { reached: sawInit, ...(stream.signalled !== undefined ? { signal: stream.signalled } : {}) });
       if (turnResult === undefined && heldReply !== undefined) {
@@ -987,7 +1046,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       setAccess: async (mode) => {
         if (!running()) return "gone";
         const requestId = `wsp-set-mode-${++askedSeq}`;
-        const answered = new Promise<AccessOutcome>((resolve) => asked.set(requestId, resolve));
+        const answered = new Promise<AccessOutcome>((resolve) => asked.set(requestId, answer => resolve(answer === "gone" ? "gone" : answer.error === undefined ? "set" : "refused")));
         const wrote = await stream.write(setModeLine(requestId, mode));
         if (wrote !== "written") {
           asked.delete(requestId);
@@ -1012,6 +1071,32 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
         }
         return outcome;
       },
+      stopTask: async (task) => {
+        const state = subagents.get(task);
+        if (!running() || (state !== undefined && state !== "running")) return { outcome: "not-running" };
+        const requestId = `wsp-stop-task-${++askedSeq}`;
+        const waitMs = deps.stopTaskWaitMs ?? STOP_TASK_WAIT_MS;
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const answered = new Promise<{ error?: string } | "gone" | "silent">((resolve) => {
+          asked.set(requestId, resolve);
+          timer = setTimeout(() => {
+            asked.delete(requestId);
+            resolve("silent");
+          }, waitMs);
+        });
+        const wrote = await stream.write(stopTaskLine(requestId, task));
+        if (wrote !== "written") {
+          clearTimeout(timer);
+          asked.delete(requestId);
+          return { outcome: "not-running" };
+        }
+        const answer = await answered;
+        clearTimeout(timer);
+        if (answer === "gone") return { outcome: "not-running" };
+        if (answer === "silent") return { outcome: "refused", error: `it did not answer within ${fmtDuration(waitMs)}` };
+        if (answer.error === undefined) return { outcome: "accepted" };
+        return answer.error.includes(STOP_TASK_UNSUPPORTED) ? { outcome: "unsupported" } : { outcome: "refused", error: answer.error };
+      },
       interrupt: async () => {
         interruptRequested = true;
         await endRun(stream, deps.interruptGraceMs ?? INTERRUPT_GRACE_MS);
@@ -1035,6 +1120,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       ...(options.title !== undefined ? { name: options.title } : {}),
       ...(options.mcpServers !== undefined ? { mcpServers: options.mcpServers } : {}),
       ...(deps.launch !== undefined ? { launch: deps.launch } : {}),
+      ...(forwardsSubagentText(options.version) ? { subagentText: true } : {}),
     });
     const launch = options.resume === undefined ? command : `${savedSpendCommand({ configDir: deps.configDir, sessionId: options.resume })}${command}`;
     const line = userMessageLine(options.prompt, localId, options.images);
@@ -1094,6 +1180,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       steer: prompt => current.steer(prompt),
       answer: (askId, answer) => current.answer(askId, answer),
       setAccess: mode => current.setAccess(mode),
+      stopTask: task => current.stopTask(task),
     };
     sessions.set(first.localId, session);
     return session;

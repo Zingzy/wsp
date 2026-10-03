@@ -554,6 +554,20 @@ export const useStore = create<State>((set, get) => {
    * the thread another client started meanwhile, and nothing reads that workspace again until the turn ends. */
   let rowReads = 0;
   const rowsFrom = new Map<string, number>();
+  /** Each workspace whose rows a subagent's start or end read in the last quarter second, and whether another came
+   * since: the first is read at once and the rest once the quarter second is out, so eight children starting inside
+   * a second cost a handful of reads, not one each. */
+  const subagentReads = new Map<string, { again: boolean }>();
+  const SUBAGENT_READ_MS = 250;
+  const readForSubagents = (workspaceId: string): void => {
+    const window = { again: false };
+    subagentReads.set(workspaceId, window);
+    void get().reloadSessions(workspaceId);
+    setTimeout(() => {
+      if (window.again) readForSubagents(workspaceId);
+      else subagentReads.delete(workspaceId);
+    }, SUBAGENT_READ_MS);
+  };
   /** The rows a read of every workspace answered, less the workspaces a newer read has already drawn. A read that
    * answered covers every workspace, those it found no rows for too, so each is stamped with it: an older read landing
    * later may not put back rows this one found gone. */
@@ -1298,6 +1312,14 @@ export const useStore = create<State>((set, get) => {
           // An end without a start of its own is a harness that died before it announced itself: the send it stood
           // for has no row coming, so the row it was drawn as goes with it.
           void get().reloadSessions(e.workspaceId).then(() => get().launched(e.workspaceId));
+          return;
+        case "session.subagent":
+          // A thread's subagents ride its row, so a child starting or ending is a row that changed.
+          {
+            const window = subagentReads.get(e.workspaceId);
+            if (window === undefined) readForSubagents(e.workspaceId);
+            else window.again = true;
+          }
           return;
         case "session.permission":
         case "session.permission.closed":

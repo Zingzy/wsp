@@ -911,6 +911,26 @@ export const ThreadMarks = z
   .strict();
 export type ThreadMarks = z.infer<typeof ThreadMarks>;
 
+/** Where one of an agent's own subagents stands: the words every agent's adapter maps its own statuses onto, so no
+ * reader ever sees one agent's word for it. A subagent is the agent's, run inside the thread's own process, never a
+ * thread of wsp's. */
+export const SubagentState = z.enum(["running", "done", "failed", "stopped"]);
+export type SubagentState = z.infer<typeof SubagentState>;
+
+/** One of a thread's subagents as a listing carries it, read off the transcript's session.subagent rows at answer
+ * time and never written on the row: id is the agent's own for it, what a stop names, and parentToolUseId the call
+ * that launched it, which its lines carry. A child stays for as long as its start row is in the transcript. */
+export const SubagentView = z.object({
+  id: z.string(),
+  title: z.string(),
+  state: SubagentState,
+  parentToolUseId: z.string().optional(),
+  depth: z.number().int().positive().optional(),
+  startedAt: z.number(),
+  endedAt: z.number().optional(),
+});
+export type SubagentView = z.infer<typeof SubagentView>;
+
 export const SessionView = z.object({
   id: z.string(),
   workspaceId: z.string(),
@@ -982,6 +1002,9 @@ export const SessionView = z.object({
    * computer's, and on a turn that is over. It is never written down: a pid outlives nothing, and the computer is
    * free to hand it to a stranger the moment the turn ends. */
   pid: z.number().int().optional(),
+  /** The agent's own subagents of every turn of this row's thread, in the order they started, on the thread's latest
+   * row alone. Stamped at answer time off the transcript like pid, never written down. */
+  subagents: z.array(SubagentView).optional(),
   /** When a window last showed this row's thread, ms epoch on the host's clock; where no window has since the host
    * began keeping the stamp, that beginning, or the turn's own end where it ended before. The host keeps it per thread and stamps it on every row of the thread
    * as it answers a listing; the row itself never writes it down. */
@@ -1055,6 +1078,8 @@ export const ThreadView = z.object({
   /** The access and the fast mode the latest turn ran at, as its row carries them. */
   permissionMode: z.string().optional(),
   fast: z.boolean().optional(),
+  /** The agent's own subagents of every turn, as the latest row carries them. */
+  subagents: z.array(SubagentView).optional(),
 });
 export type ThreadView = z.infer<typeof ThreadView>;
 
@@ -1113,6 +1138,7 @@ export function foldThreads(sessions: ReadonlyArray<SessionView>): ThreadView[] 
       ...(latest.rewoundAt !== undefined ? { rewoundAt: latest.rewoundAt } : {}),
       ...(latest.permissionMode !== undefined ? { permissionMode: latest.permissionMode } : {}),
       ...(latest.fast === true ? { fast: true } : {}),
+      ...(latest.subagents !== undefined && latest.subagents.length > 0 ? { subagents: latest.subagents } : {}),
       turns: turns.length,
       ran: threadRan(turns),
       ...(first.parentThreadId !== undefined ? { parentThreadId: first.parentThreadId } : {}),
@@ -1194,6 +1220,9 @@ export const HarnessCatalog = z.object({
   /** Models the person took off this agent's picker, which the composer does not list and a start still takes by
    * name; read with the rest through everyModel. Absent is none. */
   hiddenModels: z.array(HarnessModel).optional(),
+  /** The agent's own lists as they stood before the person's picker shaped the ones above, so a client shaping a
+   * change before the host answers puts each model where the host will. Absent where no picker shaped them. */
+  unshaped: z.object({ models: z.array(HarnessModel), legacyModels: z.array(HarnessModel).optional() }).optional(),
   efforts: z.array(HarnessOption),
   contextWindows: z.array(HarnessOption),
   permissionModes: z.array(HarnessOption),
@@ -1639,6 +1668,25 @@ export type SessionChangesEvent = z.infer<typeof SessionChangesEvent>;
 export const PlanStep = z.object({ text: z.string(), state: z.enum(["pending", "working", "done"]) });
 export type PlanStep = z.infer<typeof PlanStep>;
 
+/** One of the agent's own subagents started or ended: a row per change, so a child is its start row and, once it is
+ * over, its end row. task is the agent's own id for it, what a stop names; parentToolUseId is the call that launched
+ * it, which its lines carry and whose tool_use delta holds what it was asked. A start carries the title, an end the
+ * agent's summary where it gave one. */
+export const SessionSubagentEvent = z.object({
+  type: z.literal("session.subagent"),
+  ...sessionScope,
+  task: z.string(),
+  state: SubagentState,
+  parentToolUseId: z.string().optional(),
+  title: z.string().optional(),
+  summary: z.string().optional(),
+  depth: z.number().int().positive().optional(),
+  /** Where this row sits among its turn's subagent rows, counting from one, as a delta's line does among the deltas:
+   * what a host re-opening the run reads past. */
+  line: z.number().int().positive().optional(),
+});
+export type SessionSubagentEvent = z.infer<typeof SessionSubagentEvent>;
+
 /** The agent's plan for the turn as it stands: its step list whole, each time it changes, or the plan it proposed as
  * Markdown. A later one of either replaces the earlier in the turn it names. */
 export const SessionPlanEvent = z.object({
@@ -1731,6 +1779,7 @@ export const SessionEvent = z.discriminatedUnion("type", [
   SessionChangesEvent,
   SessionPlanEvent,
   SessionRunEvent,
+  SessionSubagentEvent,
 ]);
 export type SessionEvent = z.infer<typeof SessionEvent>;
 
@@ -3533,6 +3582,7 @@ export const EventUnion = z.discriminatedUnion("type", [
   SessionChangesEvent.extend(sequenced),
   SessionPlanEvent.extend(sequenced),
   SessionRunEvent.extend(sequenced),
+  SessionSubagentEvent.extend(sequenced),
   SessionQueuedEvent.extend(sequenced),
   SessionHeldEvent.extend(sequenced),
   ThreadMarkedEvent.extend(sequenced),
@@ -6537,8 +6587,9 @@ const RuntimeOp = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("sessions.list"), workspaceId: z.string().optional() }),
   /** Replies with the workspace's persisted SessionEvent[] (oldest first, capped by the runtime). */
   z.object({ id: reqId, op: z.literal("sessions.history"), workspaceId: z.string() }),
-  /** Asks the harness to stop the session's running turn; replies with a SessionInterruptResult. */
-  z.object({ id: reqId, op: z.literal("sessions.interrupt"), sessionId: z.string() }),
+  /** Asks the harness to stop the session's running turn, or with task the one subagent of it the agent calls by that
+   * id and nothing else; replies with a SessionInterruptResult. */
+  z.object({ id: reqId, op: z.literal("sessions.interrupt"), sessionId: z.string(), task: z.string().optional() }),
   /** Sends a message into the session's running turn; replies with a SessionSteerResult. Takes the runtime's session
    * id, as sessions.interrupt does. */
   z.object({ id: reqId, op: z.literal("sessions.steer"), sessionId: z.string(), prompt: z.string(), requestId: z.string().optional() }),
@@ -7107,11 +7158,14 @@ export type RuntimeResponse = z.infer<typeof RuntimeResponse>;
 
 // --- session interrupt (what a stop button gets back) -------------------------
 
-/** accepted: the harness was told to stop and the turn ends with status interrupted.
- * not-running: the turn had already ended, so there was nothing to stop.
+/** accepted: the harness was told to stop and the turn ends with status interrupted; for a subagent, the agent took
+ * the stop and the child reads stopped once it says so.
+ * not-running: the turn, or the subagent, had already ended, so there was nothing to stop.
  * not-found: this runtime holds no such session (sessions live in memory; a restart forgets them).
+ * refused and unsupported answer a subagent's stop alone: the agent would not stop that one, or offers no stop of one
+ * subagent at all, and `error` says which in words.
  * None of these is an error reply: a stop button has nothing to recover from. */
-export const SessionInterruptOutcome = z.enum(["accepted", "not-running", "not-found"]);
+export const SessionInterruptOutcome = z.enum(["accepted", "not-running", "not-found", "refused", "unsupported"]);
 export type SessionInterruptOutcome = z.infer<typeof SessionInterruptOutcome>;
 export const SessionInterruptResult = z.object({
   outcome: SessionInterruptOutcome,
@@ -7119,8 +7173,15 @@ export const SessionInterruptResult = z.object({
    * agents spawned stop as one, since a lead left standing while its builders are cut is neither state. Absent
    * where the thread spawned none that were running. */
   under: z.array(z.string()).optional(),
+  /** The words for a refused or unsupported stop of a subagent. */
+  error: z.string().optional(),
 });
 export type SessionInterruptResult = z.infer<typeof SessionInterruptResult>;
+
+/** What a stop of one subagent the agent refused says, in the agent's own words; the line it stands in names the task. */
+export const taskStopRefusedLine = (agent: string, why: string): string => `${agent} would not stop it: ${why}`;
+/** What a stop of one subagent says where the agent offers none. */
+export const taskStopUnsupportedLine = (agent: string): string => `Stop is not available for ${agent} subagents; stop the thread to stop them all`;
 
 // --- session steer (what send-now on a queued row gets back) -------------------
 
@@ -7286,7 +7347,7 @@ export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
 export { hereName, isHere, isProviderPlace, placeName, placeOf, workspaceComputerName } from "./place-name.js";
-export { needsYouLine, threadNeedsYou, threadState, threadStateWord, threadUnread, threadUnseenAt, threadWordOf, waitingLine, type ThreadState } from "./thread-state.js";
+export { needsYouLine, subagentStateWord, threadNeedsYou, threadState, threadStateWord, threadUnread, threadUnseenAt, threadWordOf, waitingLine, type ThreadState } from "./thread-state.js";
 export { AGENTS_ON, CLOUD_CAP_DEFAULT, NAP_AFTER_MAX_MS, NAP_AFTER_MS, phaseHoldsSlot, placeAtLimitLine, placeCapOf, placeFullLine, placeSetRefusal, placeSettingKey, placeSettingsLine, placeTakes, settingFor, napMsOf, placeRoom, placeSpendLimit, runningOn, THREAD_MEM_MB, threadsAtOnce, workspacePlace, workspacePlaceId, type PlacedThread, type PlacedWorkspace } from "./place-state.js";
 export { MCP_SERVER_NAME, threadsFollowed, WSP_TOOL_TIMEOUT_SEC } from "./wsp-tools.js";
 export { type AbsentComputer, type AwayWord, absentComputer, actionRefusal, daemonSilent, ownDaemonDown, START_DAEMON_WORD, agentsKindRefusal, agentsMayDrive, awayMsOf, composerHeldLine, type CopyToDelete, deleteCopiesNotice, deleteNotice, unpushedLine, onDeleteOf, type StandsOn, UNNAMED_COMPUTER, goneRefusal, COMPUTER_LEFT, pausedOrPausing, notAnsweringYet, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, turnSpendWord, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, FORGET_NEEDS_GONE, goneRoadRefusal, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, whereWord, workspaceStateLine, workspaceStateOf, workspaceWord, type AbsentRoad, type AbsentRoadInput, absentRoad, BACK_OVER_SSH, backUrl, dialsBackWord, linkedOver, lastKnown, REPORTED_WORD, placeDialLine, placeNoDialLine, placeDialRoad, sshRoadOf, type PlaceDialRoad } from "./workspace-state.js";
@@ -7363,4 +7424,4 @@ export * from "./release.js";
 export * from "./init-job.js";
 export { catalogRefused, endAfterResult, endRun, launchWords, PERMISSION_ALLOW, PERMISSION_DENY, programWord } from "./adapter-port.js";
 export { CLOUD_ENV, LAUNCH_ENV, SCOPED_MCP_ARG, FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, PERSON_HOME_ENV, RELEASE_API_ENV, TURN_TOKEN_ENV, UPDATE_CHECK_ENV, WEB_DIR_ENV } from "./env.js";
-export type { AdapterAttachOptions, AdapterEvent, AgentLaunch, AsideAnswer, AsideQuestion, AttachmentRoad, CommitDrafter, DraftAsk, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, PermissionAsk, PlanResets, ResetReading, ResetRoad, ResetSpend, SessionAsker, SessionRenameWrite, SessionRenamer, SessionTitleMaker, SessionTitleReader, TitleTurn, TurnImage, SessionReverter } from "./adapter-port.js";
+export type { AdapterAttachOptions, AdapterEvent, AgentLaunch, AsideAnswer, AsideQuestion, AttachmentRoad, CommitDrafter, DraftAsk, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, PermissionAsk, PlanResets, ResetReading, ResetRoad, ResetSpend, SessionAsker, SessionRenameWrite, SessionRenamer, SessionTitleMaker, SessionTitleReader, TaskStop, TitleTurn, TurnImage, SessionReverter } from "./adapter-port.js";
