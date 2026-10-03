@@ -119,6 +119,7 @@ pub struct Words {
     /// Each verb's usage line by the name of its tool, which a refusal of a reply this build cannot read ends with.
     pub usages: HashMap<String, String>,
     pub defaults: crate::tools::defaults::Words,
+    pub add: crate::tools::add::Words,
 }
 
 pub fn words() -> Words {

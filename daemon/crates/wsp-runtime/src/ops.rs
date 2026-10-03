@@ -497,9 +497,16 @@ impl Ops {
                 body(MachineHandleReply { machine: self.handle(&record, None, Some(seen)) })
             }
             MachineOp::List { labels } => body(MachineListReply { machines: self.list(labels.as_ref())? }),
-            MachineOp::Exec { machine_id, cmd, timeout_ms } => {
+            MachineOp::Exec { machine_id, cmd, timeout_ms, stdin } => {
                 let record = self.running(&machine_id)?;
-                body(MachineExecReply { result: self.exec(&record, &cmd, None, deadline(timeout_ms)).await? })
+                let input = stdin
+                    .map(|text| {
+                        base64::engine::general_purpose::STANDARD
+                            .decode(text)
+                            .map_err(|e| OpError::plain(format!("the input of an exec in {machine_id} is not base64: {e}")))
+                    })
+                    .transpose()?;
+                body(MachineExecReply { result: self.exec(&record, &cmd, input, deadline(timeout_ms)).await? })
             }
             MachineOp::Pause { machine_id } => {
                 let record = self.record(&machine_id)?;

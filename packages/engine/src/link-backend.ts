@@ -139,12 +139,12 @@ export class LinkMachine implements Machine {
 
   /** A command the caller says may be run twice carries its key down to the link, so a gap in the link is waited
    * out rather than failing it. Every other command is the caller's alone and is sent once. */
-  exec(cmd: string, opts?: LinkAsk): Promise<ExecResult> {
+  exec(cmd: string, opts?: LinkAsk & { stdin?: Uint8Array }): Promise<ExecResult> {
     const timeoutMs = opts?.timeoutMs ?? INLINE_EXEC_MS;
     return this.ask(
       MachineExecReply,
       "machine.exec",
-      { cmd, timeoutMs },
+      { cmd, timeoutMs, ...(opts?.stdin !== undefined ? { stdin: Buffer.from(opts.stdin).toString("base64") } : {}) },
       { timeoutMs: timeoutMs + LINK_MARGIN_MS, ...(opts?.idempotencyKey !== undefined ? { idempotencyKey: opts.idempotencyKey } : {}) },
     ).then(r => r.result);
   }

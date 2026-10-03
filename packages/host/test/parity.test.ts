@@ -311,7 +311,6 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
       expect(row!.tools.find(t => t.name === tool.name)!.inputs, `${tool.name}'s inputs in the skill`).toEqual(tool.inputs);
     }
     expect(COMMAND_LINES.filter(c => "cliOnly" in c).map(c => c.words).sort()).toEqual([
-      "add",
       "agents key",
       "agents signin",
       "doctor",
@@ -396,11 +395,12 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
 
   it("every command line is a verb table entry or a command carrying why it has no tool, so a new command sits in neither only by failing here", () => {
     for (const line of COMMAND_LINES) {
-      if ("tool" in line) expect(CLI_VERBS.some(v => v.name === line.words), `${line.words} names a tool but is not in the verb table`).toBe(true);
+      // A line of the shared parse that carries a tool names one the verb table serves for it.
+      if ("tool" in line) expect(CLI_VERBS.some(v => v.name === line.words) || VERBS.some(v => "command" in v && toolName(v.name) === line.tool), `${line.words} names a tool but is not in the verb table`).toBe(true);
       else expect(line.cliOnly, `${line.words} carries no reason for having no tool`).toMatch(/\S/);
     }
     for (const verb of CLI_VERBS) expect(COMMAND_LINES.find(c => c.words === verb.name && ("cliOnly" in verb ? "cliOnly" in c : "tool" in c)), `${verb.name} is in the table and not in the command lines`).toBeDefined();
-    for (const words of [...JSON_COMMANDS, ...PROSE_COMMANDS]) expect(COMMAND_LINES.find(c => c.words === words && "cliOnly" in c), `${words} is a command with no reason in the command lines`).toBeDefined();
+    for (const words of [...JSON_COMMANDS, ...PROSE_COMMANDS]) expect(COMMAND_LINES.find(c => c.words === words && ("cliOnly" in c || "tool" in c)), `${words} is a command with no reason in the command lines`).toBeDefined();
   });
 
   it("every wsp line in the skill, the instructions and the tool descriptions parses against the flags its command reads", () => {
@@ -437,7 +437,7 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
     for (const line of COMMAND_LINES) {
       const word = line.words.split(" ")[0]!;
       // A verb serves itself, flags and all; only the lines the shared parse serves are held to their command's table.
-      if (!("cliOnly" in line) || word === "mcp" || CLI_VERBS.some(v => v.name === line.words)) continue;
+      if (word === "mcp" || CLI_VERBS.some(v => v.name === line.words)) continue;
       // The command a line selects is the longest key that opens it, which is what the parse itself reads.
       const key = Object.keys(HOST_FLAG).filter(k => k.split(" ").every((w, i) => line.words.split(" ")[i] === w)).sort((a, b) => b.length - a.length)[0]!;
       expect(Object.hasOwn(line.options, "host"), `wsp ${line.words} advertises --host`).toBe(HOST_FLAG[key] !== "refused");

@@ -3,7 +3,7 @@
 // screen and left alone when the person is already looking at it, the waits
 // keyed until the event that closes them, and the noise said nowhere.
 import { act, render } from "@testing-library/react";
-import { askingLine, initNeedsYouLine, type InitJob, type PlaceView, type ReleaseView, type SessionView, type WorkspaceView } from "@wsp/protocol";
+import { askingLine, initNeedsYouLine, setupNeedsYouLine, setupReadyLine, type InitJob, type PlaceView, type ReleaseView, type SessionView, type WorkspaceView } from "@wsp/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
@@ -105,34 +105,35 @@ describe("a computer's install and its link", () => {
     expect(notices()).toEqual([]);
   });
 
-  it("a join and a recipe that finished away are said done under the computer's name, and a recipe that failed is an error", () => {
+  it("a join and a setup that ended away are said under the computer's name: ready is done, waiting on the person is a note, failed is an error", () => {
     emit({ type: "place.stage", addId: "a_1", placeId: "pl_box", step: "join", state: "done", note: "engine none" });
-    emit({ type: "place.stage", addId: "a_1", placeId: "pl_box", step: "provision", state: "failed", note: "node did not install" });
-    emit({ type: "place.stage", addId: "a_2", placeId: "pl_box", step: "provision", state: "done" });
+    emit({ type: "place.setup", addId: "a_1", placeId: "pl_box", end: "failed", said: "the base tools did not install: curl" });
+    emit({ type: "place.setup", addId: "a_2", placeId: "pl_box", end: "needs-you", said: "Codex waits on you to sign in" });
+    emit({ type: "place.setup", addId: "a_3", placeId: "pl_box", end: "ready", said: "1 row did not install" });
     expect(notices().map(n => [n.kind, n.text, n.where])).toEqual([
-      ["done", HOST_NOTICE_WORDS.setUp("spoo"), "spoo"],
-      ["error", HOST_NOTICE_WORDS.notSetUp("spoo", "node did not install"), "spoo"],
+      ["done", setupReadyLine("spoo", "1 row did not install"), "spoo"],
+      ["note", setupNeedsYouLine("spoo", "Codex waits on you to sign in"), "spoo"],
+      ["error", HOST_NOTICE_WORDS.notSetUp("spoo", "the base tools did not install: curl"), "spoo"],
       ["done", HOST_NOTICE_WORDS.joined("spoo"), "spoo"],
     ]);
+    expect(texts()[0]).toBe("spoo is ready; 1 row did not install");
     // The Open lands on that computer's own page.
     act(() => notices()[0]!.action!.run());
     expect(useSettingsStore.getState().at).toEqual({ kind: "computer", id: "pl_box" });
   });
 
-  it("a recipe that finished with rows failed is an error saying how many, with an Open onto that computer", () => {
-    emit({ type: "place.stage", addId: "a_1", placeId: "pl_box", step: "provision", state: "done", note: "spoo: 1 installed: git;   x node: exit 1;   x uv: exit 2", failed: 2 });
-    expect(notices().map(n => [n.kind, n.text, n.where])).toEqual([["error", HOST_NOTICE_WORDS.rowsFailed("spoo", 2), "spoo"]]);
-    expect(texts()[0]).toBe("spoo: 2 rows of the recipe failed");
-    act(() => notices()[0]!.action!.run());
-    expect(useSettingsStore.getState().at).toEqual({ kind: "computer", id: "pl_box" });
+  it("a setup's frames before its end say nothing: its steps are the computer's row to draw", () => {
+    emit({ type: "place.setup", addId: "a_1", placeId: "pl_box", line: { step: "floor", state: "running" } });
+    emit({ type: "place.setup", addId: "a_1", placeId: "pl_box", wait: { row: "signins/codex", label: "Codex", url: "https://auth.example/device", code: "ABCD-1234", expiresAt: "2026-10-03T10:00:00Z", state: "waiting" } });
+    expect(notices()).toEqual([]);
   });
 
-  it("a computer's own page showing keeps its steps off the toasts", () => {
+  it("a computer's own page showing keeps its setup off the toasts", () => {
     act(() => {
       useStore.setState({ settingsOpen: true });
       useSettingsStore.getState().go({ kind: "computer", id: "pl_box" });
     });
-    emit({ type: "place.stage", addId: "a_1", placeId: "pl_box", step: "provision", state: "failed", note: "node did not install" });
+    emit({ type: "place.setup", addId: "a_1", placeId: "pl_box", end: "failed", said: "node did not install" });
     expect(notices()).toEqual([]);
   });
 

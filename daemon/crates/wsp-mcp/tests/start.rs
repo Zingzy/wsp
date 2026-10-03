@@ -55,7 +55,7 @@ async fn brings_up_the_wsp_it_was_handed_and_answers_once_that_host_serves() {
         &format!("sleep 0.3\necho started-token > '{folder}/host-token'\necho '{lock}' > '{folder}/host.lock'\necho serving"),
     );
     let answered = computers(state.clone(), &wsp, &env_in(dir.path())).await;
-    assert_eq!(answered["structuredContent"], json!({ "computers": [], "spend": [] }), "{answered}");
+    assert_eq!(answered["structuredContent"], json!({ "computers": [], "spend": [], "pending": [] }), "{answered}");
     let ran = std::fs::read_to_string(dir.path().join("ran")).unwrap();
     // The words the command line's own starter runs, as the record holds them.
     let host: Value = serde_json::from_str(include_str!("../record/host.json")).unwrap();

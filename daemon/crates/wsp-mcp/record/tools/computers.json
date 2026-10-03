@@ -1,7 +1,7 @@
 {
   "cloudOff": {
     "name": "computers",
-    "description": "Every computer this host holds, which is the whole of where work can run: the computer the app runs on and each box joined to it. A row carries what that computer last reported (cores, memory, free disk, the engine it has for a project's own containers) and whether it is connected right now. Every row carries its cap, threads at once on a computer (the number the person set, else one thread per 2.5 GB of memory up to its cores), and running, the threads running there now on a computer; a row whose running meets its cap is full. A row whose copy of the image is building says which stage it is at, and one whose last build stopped says why. A computer is not a workspace: a project lives on a computer, and a workspace is a copy of that computer with the project inside, which wsp workspaces lists.",
+    "description": "Every computer this host holds, which is the whole of where work can run: the computer the app runs on and each box joined to it. A row carries what that computer last reported (cores, memory, free disk, the engine it has for a project's own containers) and whether it is connected right now. Every row carries its cap, threads at once on a computer (the number the person set, else one thread per 2.5 GB of memory up to its cores), and running, the threads running there now on a computer; a row whose running meets its cap is full. A row whose copy of the image is building says which stage it is at, and one whose last build stopped says why. A computer is not a workspace: a project lives on a computer, and a workspace is a copy of that computer with the project inside, which wsp workspaces lists. pending holds every add that has not reached Set up: how far it got, what was chosen for it, and why it stopped where one did.",
     "inputSchema": {
       "type": "object",
       "properties": {},
@@ -263,7 +263,7 @@
               "buildsImages": {
                 "type": "boolean"
               },
-              "provision": {
+              "setup": {
                 "type": "object",
                 "properties": {
                   "state": {
@@ -271,23 +271,121 @@
                     "enum": [
                       "running",
                       "done",
-                      "stopped"
+                      "failed"
                     ]
                   },
                   "addId": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "recipeAt": {
-                    "type": "string",
-                    "minLength": 1
+                    "type": "string"
                   },
                   "startedAt": {
-                    "type": "string",
-                    "minLength": 1
+                    "$ref": "#/properties/computers/items/properties/setup/properties/addId"
                   },
                   "finishedAt": {
-                    "type": "string"
+                    "$ref": "#/properties/computers/items/properties/setup/properties/addId"
+                  },
+                  "steps": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "step": {
+                          "type": "string",
+                          "enum": [
+                            "floor",
+                            "agents",
+                            "signins",
+                            "clis",
+                            "skills",
+                            "mcp",
+                            "plugins",
+                            "configs",
+                            "folders",
+                            "github",
+                            "context"
+                          ]
+                        },
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "running",
+                            "done",
+                            "failed",
+                            "skipped"
+                          ]
+                        },
+                        "note": {
+                          "$ref": "#/properties/computers/items/properties/setup/properties/finishedAt"
+                        },
+                        "ms": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "required": [
+                        "step",
+                        "state"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "waiting": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "row": {
+                          "$ref": "#/properties/computers/items/properties/setup/properties/addId"
+                        },
+                        "label": {
+                          "$ref": "#/properties/computers/items/properties/setup/properties/addId"
+                        },
+                        "url": {
+                          "$ref": "#/properties/computers/items/properties/setup/properties/finishedAt"
+                        },
+                        "code": {
+                          "$ref": "#/properties/computers/items/properties/setup/properties/finishedAt"
+                        },
+                        "expiresAt": {
+                          "$ref": "#/properties/computers/items/properties/setup/properties/addId"
+                        },
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "waiting",
+                            "expired"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "row",
+                        "label",
+                        "expiresAt",
+                        "state"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "said": {
+                    "$ref": "#/properties/computers/items/properties/setup/properties/finishedAt"
+                  }
+                },
+                "required": [
+                  "state",
+                  "addId",
+                  "startedAt",
+                  "steps",
+                  "waiting"
+                ],
+                "additionalProperties": false
+              },
+              "applied": {
+                "type": "object",
+                "properties": {
+                  "hash": {
+                    "$ref": "#/properties/computers/items/properties/setup/properties/addId"
+                  },
+                  "at": {
+                    "$ref": "#/properties/computers/items/properties/setup/properties/addId"
                   },
                   "rows": {
                     "type": "array",
@@ -319,6 +417,9 @@
                             "server"
                           ]
                         },
+                        "step": {
+                          "$ref": "#/properties/computers/items/properties/setup/properties/steps/items/properties/step"
+                        },
                         "note": {
                           "type": "string"
                         },
@@ -334,41 +435,222 @@
                       ],
                       "additionalProperties": false
                     }
-                  },
-                  "at": {
-                    "type": "object",
-                    "properties": {
-                      "label": {
-                        "type": "string"
-                      },
-                      "index": {
-                        "type": "integer",
-                        "exclusiveMinimum": 0
-                      },
-                      "of": {
-                        "type": "integer",
-                        "exclusiveMinimum": 0
-                      }
-                    },
-                    "required": [
-                      "label",
-                      "index",
-                      "of"
-                    ],
-                    "additionalProperties": false
-                  },
-                  "said": {
-                    "type": "string"
                   }
                 },
                 "required": [
-                  "state",
-                  "addId",
-                  "recipeAt",
-                  "startedAt",
+                  "hash",
+                  "at",
                   "rows"
                 ],
                 "additionalProperties": false
+              },
+              "picks": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  },
+                  "agents": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "object",
+                      "properties": {
+                        "signin": {
+                          "type": "string",
+                          "enum": [
+                            "vault",
+                            "machine"
+                          ]
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "propertyNames": {
+                      "minLength": 1
+                    },
+                    "default": {}
+                  },
+                  "mcp": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "object",
+                      "properties": {
+                        "agents": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "minItems": 1
+                        }
+                      },
+                      "required": [
+                        "agents"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "propertyNames": {
+                      "minLength": 1
+                    },
+                    "default": {}
+                  },
+                  "clis": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "object",
+                      "properties": {
+                        "via": {
+                          "$ref": "#/properties/computers/items/properties/picks/properties/mcp/additionalProperties/properties/agents/items"
+                        },
+                        "needs": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/properties/computers/items/properties/picks/properties/mcp/additionalProperties/properties/agents/items"
+                          }
+                        }
+                      },
+                      "required": [
+                        "via"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "propertyNames": {
+                      "minLength": 1
+                    },
+                    "default": {}
+                  },
+                  "skills": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "object",
+                      "properties": {
+                        "from": {
+                          "$ref": "#/properties/computers/items/properties/picks/properties/mcp/additionalProperties/properties/agents/items"
+                        }
+                      },
+                      "required": [
+                        "from"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "propertyNames": {
+                      "minLength": 1
+                    },
+                    "default": {}
+                  },
+                  "plugins": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "object",
+                      "properties": {},
+                      "additionalProperties": false
+                    },
+                    "propertyNames": {
+                      "minLength": 1
+                    },
+                    "default": {}
+                  },
+                  "folders": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "object",
+                      "properties": {
+                        "from": {
+                          "$ref": "#/properties/computers/items/properties/picks/properties/mcp/additionalProperties/properties/agents/items"
+                        },
+                        "name": {
+                          "$ref": "#/properties/computers/items/properties/picks/properties/mcp/additionalProperties/properties/agents/items"
+                        },
+                        "icon": {
+                          "type": "string",
+                          "enum": [
+                            "folder",
+                            "code",
+                            "terminal",
+                            "globe",
+                            "rocket",
+                            "box",
+                            "database",
+                            "server",
+                            "cpu",
+                            "zap",
+                            "flame",
+                            "leaf",
+                            "star",
+                            "heart",
+                            "book",
+                            "music",
+                            "camera",
+                            "gamepad",
+                            "shield",
+                            "wrench"
+                          ]
+                        },
+                        "hue": {
+                          "type": "string",
+                          "enum": [
+                            "neutral",
+                            "red",
+                            "orange",
+                            "amber",
+                            "green",
+                            "teal",
+                            "blue",
+                            "violet",
+                            "pink"
+                          ]
+                        },
+                        "keep": {
+                          "$ref": "#/properties/computers/items/properties/picks/properties/clis/additionalProperties/properties/needs",
+                          "default": []
+                        }
+                      },
+                      "required": [
+                        "from"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "propertyNames": {
+                      "minLength": 1
+                    },
+                    "default": {}
+                  },
+                  "configs": {
+                    "type": "object",
+                    "properties": {
+                      "git": {
+                        "type": "object",
+                        "properties": {},
+                        "additionalProperties": false
+                      },
+                      "shell": {
+                        "type": "object",
+                        "properties": {},
+                        "additionalProperties": false
+                      },
+                      "github": {
+                        "type": "object",
+                        "properties": {
+                          "signin": {
+                            "$ref": "#/properties/computers/items/properties/picks/properties/agents/additionalProperties/properties/signin"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "additionalProperties": false,
+                    "default": {}
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "additionalProperties": false
+              },
+              "recipe": {
+                "type": "string"
               },
               "cap": {
                 "anyOf": [
@@ -516,11 +798,77 @@
             ],
             "additionalProperties": false
           }
+        },
+        "pending": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "$ref": "#/properties/computers/items/properties/setup/properties/addId"
+              },
+              "address": {
+                "$ref": "#/properties/computers/items/properties/setup/properties/addId"
+              },
+              "sshPort": {
+                "type": "integer"
+              },
+              "name": {
+                "$ref": "#/properties/computers/items/properties/setup/properties/finishedAt"
+              },
+              "placeId": {
+                "$ref": "#/properties/computers/items/properties/setup/properties/finishedAt"
+              },
+              "step": {
+                "type": "string",
+                "enum": [
+                  "connect",
+                  "check",
+                  "wsp",
+                  "floor",
+                  "choosing"
+                ]
+              },
+              "choices": {
+                "$ref": "#/properties/computers/items/properties/picks"
+              },
+              "recipe": {
+                "$ref": "#/properties/computers/items/properties/setup/properties/finishedAt"
+              },
+              "startedAt": {
+                "$ref": "#/properties/computers/items/properties/setup/properties/addId"
+              },
+              "failed": {
+                "type": "object",
+                "properties": {
+                  "said": {
+                    "$ref": "#/properties/computers/items/properties/setup/properties/addId"
+                  },
+                  "fix": {
+                    "$ref": "#/properties/computers/items/properties/setup/properties/finishedAt"
+                  }
+                },
+                "required": [
+                  "said"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "id",
+              "address",
+              "step",
+              "choices",
+              "startedAt"
+            ],
+            "additionalProperties": false
+          }
         }
       },
       "required": [
         "computers",
-        "spend"
+        "spend",
+        "pending"
       ],
       "additionalProperties": false,
       "$schema": "http://json-schema.org/draft-07/schema#"
@@ -531,7 +879,7 @@
   },
   "cloudOn": {
     "name": "computers",
-    "description": "Every computer this host holds, which is the whole of where work can run: the computer the app runs on, each box joined to it and each cloud account. A row carries what that computer last reported (cores, memory, free disk, the engine it has for a project's own containers) and whether it is connected right now; a cloud row carries its hourly rate. Every row carries its cap, threads at once on a computer and machines at once and spend per day on a cloud (the number the person set, else one thread per 2.5 GB of memory up to its cores, and 3 machines and $10 a day), and running, the threads running there now on a computer or the machines holding a slot on a cloud; a row whose running meets its cap is full. spend holds one row per cloud, what it has spent today (since midnight where the host runs) and this month and what it burns an hour now; a cloud whose spend today reaches its spend per day is at its limit and starts no new machine until midnight, while the machines already running there go on. A row whose copy of the image is building says which stage it is at, and one whose last build stopped says why. A computer is not a workspace: a project lives on a computer, and a workspace is a copy of that computer with the project inside, which wsp workspaces lists.",
+    "description": "Every computer this host holds, which is the whole of where work can run: the computer the app runs on, each box joined to it and each cloud account. A row carries what that computer last reported (cores, memory, free disk, the engine it has for a project's own containers) and whether it is connected right now; a cloud row carries its hourly rate. Every row carries its cap, threads at once on a computer and machines at once and spend per day on a cloud (the number the person set, else one thread per 2.5 GB of memory up to its cores, and 3 machines and $10 a day), and running, the threads running there now on a computer or the machines holding a slot on a cloud; a row whose running meets its cap is full. spend holds one row per cloud, what it has spent today (since midnight where the host runs) and this month and what it burns an hour now; a cloud whose spend today reaches its spend per day is at its limit and starts no new machine until midnight, while the machines already running there go on. A row whose copy of the image is building says which stage it is at, and one whose last build stopped says why. A computer is not a workspace: a project lives on a computer, and a workspace is a copy of that computer with the project inside, which wsp workspaces lists. pending holds every add that has not reached Set up: how far it got, what was chosen for it, and why it stopped where one did.",
     "inputSchema": {
       "type": "object",
       "properties": {},
@@ -793,7 +1141,7 @@
               "buildsImages": {
                 "type": "boolean"
               },
-              "provision": {
+              "setup": {
                 "type": "object",
                 "properties": {
                   "state": {
@@ -801,23 +1149,121 @@
                     "enum": [
                       "running",
                       "done",
-                      "stopped"
+                      "failed"
                     ]
                   },
                   "addId": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "recipeAt": {
-                    "type": "string",
-                    "minLength": 1
+                    "type": "string"
                   },
                   "startedAt": {
-                    "type": "string",
-                    "minLength": 1
+                    "$ref": "#/properties/computers/items/properties/setup/properties/addId"
                   },
                   "finishedAt": {
-                    "type": "string"
+                    "$ref": "#/properties/computers/items/properties/setup/properties/addId"
+                  },
+                  "steps": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "step": {
+                          "type": "string",
+                          "enum": [
+                            "floor",
+                            "agents",
+                            "signins",
+                            "clis",
+                            "skills",
+                            "mcp",
+                            "plugins",
+                            "configs",
+                            "folders",
+                            "github",
+                            "context"
+                          ]
+                        },
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "running",
+                            "done",
+                            "failed",
+                            "skipped"
+                          ]
+                        },
+                        "note": {
+                          "$ref": "#/properties/computers/items/properties/setup/properties/finishedAt"
+                        },
+                        "ms": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "required": [
+                        "step",
+                        "state"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "waiting": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "row": {
+                          "$ref": "#/properties/computers/items/properties/setup/properties/addId"
+                        },
+                        "label": {
+                          "$ref": "#/properties/computers/items/properties/setup/properties/addId"
+                        },
+                        "url": {
+                          "$ref": "#/properties/computers/items/properties/setup/properties/finishedAt"
+                        },
+                        "code": {
+                          "$ref": "#/properties/computers/items/properties/setup/properties/finishedAt"
+                        },
+                        "expiresAt": {
+                          "$ref": "#/properties/computers/items/properties/setup/properties/addId"
+                        },
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "waiting",
+                            "expired"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "row",
+                        "label",
+                        "expiresAt",
+                        "state"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "said": {
+                    "$ref": "#/properties/computers/items/properties/setup/properties/finishedAt"
+                  }
+                },
+                "required": [
+                  "state",
+                  "addId",
+                  "startedAt",
+                  "steps",
+                  "waiting"
+                ],
+                "additionalProperties": false
+              },
+              "applied": {
+                "type": "object",
+                "properties": {
+                  "hash": {
+                    "$ref": "#/properties/computers/items/properties/setup/properties/addId"
+                  },
+                  "at": {
+                    "$ref": "#/properties/computers/items/properties/setup/properties/addId"
                   },
                   "rows": {
                     "type": "array",
@@ -849,6 +1295,9 @@
                             "server"
                           ]
                         },
+                        "step": {
+                          "$ref": "#/properties/computers/items/properties/setup/properties/steps/items/properties/step"
+                        },
                         "note": {
                           "type": "string"
                         },
@@ -864,41 +1313,222 @@
                       ],
                       "additionalProperties": false
                     }
-                  },
-                  "at": {
-                    "type": "object",
-                    "properties": {
-                      "label": {
-                        "type": "string"
-                      },
-                      "index": {
-                        "type": "integer",
-                        "exclusiveMinimum": 0
-                      },
-                      "of": {
-                        "type": "integer",
-                        "exclusiveMinimum": 0
-                      }
-                    },
-                    "required": [
-                      "label",
-                      "index",
-                      "of"
-                    ],
-                    "additionalProperties": false
-                  },
-                  "said": {
-                    "type": "string"
                   }
                 },
                 "required": [
-                  "state",
-                  "addId",
-                  "recipeAt",
-                  "startedAt",
+                  "hash",
+                  "at",
                   "rows"
                 ],
                 "additionalProperties": false
+              },
+              "picks": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  },
+                  "agents": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "object",
+                      "properties": {
+                        "signin": {
+                          "type": "string",
+                          "enum": [
+                            "vault",
+                            "machine"
+                          ]
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "propertyNames": {
+                      "minLength": 1
+                    },
+                    "default": {}
+                  },
+                  "mcp": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "object",
+                      "properties": {
+                        "agents": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "minItems": 1
+                        }
+                      },
+                      "required": [
+                        "agents"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "propertyNames": {
+                      "minLength": 1
+                    },
+                    "default": {}
+                  },
+                  "clis": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "object",
+                      "properties": {
+                        "via": {
+                          "$ref": "#/properties/computers/items/properties/picks/properties/mcp/additionalProperties/properties/agents/items"
+                        },
+                        "needs": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/properties/computers/items/properties/picks/properties/mcp/additionalProperties/properties/agents/items"
+                          }
+                        }
+                      },
+                      "required": [
+                        "via"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "propertyNames": {
+                      "minLength": 1
+                    },
+                    "default": {}
+                  },
+                  "skills": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "object",
+                      "properties": {
+                        "from": {
+                          "$ref": "#/properties/computers/items/properties/picks/properties/mcp/additionalProperties/properties/agents/items"
+                        }
+                      },
+                      "required": [
+                        "from"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "propertyNames": {
+                      "minLength": 1
+                    },
+                    "default": {}
+                  },
+                  "plugins": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "object",
+                      "properties": {},
+                      "additionalProperties": false
+                    },
+                    "propertyNames": {
+                      "minLength": 1
+                    },
+                    "default": {}
+                  },
+                  "folders": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "object",
+                      "properties": {
+                        "from": {
+                          "$ref": "#/properties/computers/items/properties/picks/properties/mcp/additionalProperties/properties/agents/items"
+                        },
+                        "name": {
+                          "$ref": "#/properties/computers/items/properties/picks/properties/mcp/additionalProperties/properties/agents/items"
+                        },
+                        "icon": {
+                          "type": "string",
+                          "enum": [
+                            "folder",
+                            "code",
+                            "terminal",
+                            "globe",
+                            "rocket",
+                            "box",
+                            "database",
+                            "server",
+                            "cpu",
+                            "zap",
+                            "flame",
+                            "leaf",
+                            "star",
+                            "heart",
+                            "book",
+                            "music",
+                            "camera",
+                            "gamepad",
+                            "shield",
+                            "wrench"
+                          ]
+                        },
+                        "hue": {
+                          "type": "string",
+                          "enum": [
+                            "neutral",
+                            "red",
+                            "orange",
+                            "amber",
+                            "green",
+                            "teal",
+                            "blue",
+                            "violet",
+                            "pink"
+                          ]
+                        },
+                        "keep": {
+                          "$ref": "#/properties/computers/items/properties/picks/properties/clis/additionalProperties/properties/needs",
+                          "default": []
+                        }
+                      },
+                      "required": [
+                        "from"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "propertyNames": {
+                      "minLength": 1
+                    },
+                    "default": {}
+                  },
+                  "configs": {
+                    "type": "object",
+                    "properties": {
+                      "git": {
+                        "type": "object",
+                        "properties": {},
+                        "additionalProperties": false
+                      },
+                      "shell": {
+                        "type": "object",
+                        "properties": {},
+                        "additionalProperties": false
+                      },
+                      "github": {
+                        "type": "object",
+                        "properties": {
+                          "signin": {
+                            "$ref": "#/properties/computers/items/properties/picks/properties/agents/additionalProperties/properties/signin"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "additionalProperties": false,
+                    "default": {}
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "additionalProperties": false
+              },
+              "recipe": {
+                "type": "string"
               },
               "cap": {
                 "anyOf": [
@@ -1046,11 +1676,77 @@
             ],
             "additionalProperties": false
           }
+        },
+        "pending": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "$ref": "#/properties/computers/items/properties/setup/properties/addId"
+              },
+              "address": {
+                "$ref": "#/properties/computers/items/properties/setup/properties/addId"
+              },
+              "sshPort": {
+                "type": "integer"
+              },
+              "name": {
+                "$ref": "#/properties/computers/items/properties/setup/properties/finishedAt"
+              },
+              "placeId": {
+                "$ref": "#/properties/computers/items/properties/setup/properties/finishedAt"
+              },
+              "step": {
+                "type": "string",
+                "enum": [
+                  "connect",
+                  "check",
+                  "wsp",
+                  "floor",
+                  "choosing"
+                ]
+              },
+              "choices": {
+                "$ref": "#/properties/computers/items/properties/picks"
+              },
+              "recipe": {
+                "$ref": "#/properties/computers/items/properties/setup/properties/finishedAt"
+              },
+              "startedAt": {
+                "$ref": "#/properties/computers/items/properties/setup/properties/addId"
+              },
+              "failed": {
+                "type": "object",
+                "properties": {
+                  "said": {
+                    "$ref": "#/properties/computers/items/properties/setup/properties/addId"
+                  },
+                  "fix": {
+                    "$ref": "#/properties/computers/items/properties/setup/properties/finishedAt"
+                  }
+                },
+                "required": [
+                  "said"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "id",
+              "address",
+              "step",
+              "choices",
+              "startedAt"
+            ],
+            "additionalProperties": false
+          }
         }
       },
       "required": [
         "computers",
-        "spend"
+        "spend",
+        "pending"
       ],
       "additionalProperties": false,
       "$schema": "http://json-schema.org/draft-07/schema#"

@@ -125,7 +125,7 @@ import {
   DISK_USE_CMD,
   diskUsePct,
 } from "@wsp/engine";
-import type { AgentsReport, AgentsSignInEvent, AgentsTarget, DaemonFrame, DaemonResponse, EditorChoice, EditorId, PlaceReport, ServerAdd, ServerAsk, ServerToolsAnswer, SignInLine, SkillAdded, SkillHit, SkillPreview } from "@wsp/protocol";
+import type { AgentsReport, AgentsSignInEvent, AgentsTarget, DaemonFrame, DaemonResponse, EditorChoice, EditorId, PlaceReport, RecipeFile, RecipeOptions, ServerAdd, ServerAsk, ServerToolsAnswer, SignInLine, SkillAdded, SkillHit, SkillPreview } from "@wsp/protocol";
 import type {
   AdapterAttachOptions,
   AdapterEvent,
@@ -238,9 +238,9 @@ import { agentsReads, type AgentsActs, type AgentsReader, type CallbackForwards,
 import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from "./daemon-channel.js";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
-import { isNoProvider, isPlaceAbsent, projectStateKey, putFiles, type Copier } from "@wsp/engine";
+import { GITHUB_TOKEN_ENV, isNoProvider, isPlaceAbsent, projectStateKey, putFiles, type Copier } from "@wsp/engine";
 import { boxFullLine, DISK_FULL_PCT, diskFullLine, stopRefusedLine, threadMessages, threadSeed, workspaceMemMb } from "@wsp/protocol";
-import { holdsRepo, ownerRepoOf, projectForRepo } from "@wsp/protocol";
+import { holdsRepo, ownerRepoOf, projectForRepo, seedChoiceFrom } from "@wsp/protocol";
 import { taskStopRefusedLine, taskStopUnsupportedLine, type SubagentView, type TaskStop } from "@wsp/protocol";
 import { accessMode, accessRefusal, agentOffLine, configDirLaunchRefusal, configDirRefusal, markedFor, modelIdRefusal, openDefaults, resolveThreadDefaults, setupView, shapeModels, withCustomModels, type AccessChoice, type AgentLaunch, type AgentRow, type AgentSetupSet, type ProjectOverrides, type ResolvedFolder, type ThreadDefaults } from "@wsp/protocol";
 import { agentSetups, keyOf, realFolderHere, realFolderScript } from "./agent-setup.js";
@@ -705,6 +705,20 @@ export interface InitDoor {
   /** Every change to the job, and beside it the arrival of a wait on the person, which a client that speaks once per
    * need rides rather than diffing views. */
   on(fn: (e: InitJobEvent | InitNeedsYouEvent) => void): () => void;
+}
+
+/** The recipes a host keeps, as the runtime serves them: the files beside the state are the host's, and which
+ * computers follow each is the place records', which the runtime folds in. */
+export interface RecipeShelf {
+  list(): Promise<{ slug: string; file: RecipeFile }[]>;
+  /** One recipe by its name or slug, as saved; refused naming the ones there are. */
+  read(word: string): Promise<{ slug: string; file: RecipeFile }>;
+  /** One recipe by its name or slug, with the hash it resolves to on this computer now. */
+  get(word: string): Promise<{ slug: string; file: RecipeFile; hash: string }>;
+  /** Writes the recipe whole; refused for a name that makes no file name and for anything shaped like a secret. */
+  save(file: unknown): Promise<{ slug: string; file: RecipeFile }>;
+  remove(word: string): Promise<{ slug: string; file: RecipeFile }>;
+  options(): Promise<RecipeOptions>;
 }
 
 /** One agent's result with its catalog name, for the sentence the runtime says about it. */
@@ -3220,6 +3234,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       providers: () => places,
       now: () => clock.now(),
       onStage: event => bus.emit(event),
+      onSetup: event => bus.emit(event),
       copyBuild: placeId => copyRows.get(placeId),
       napMs: defaultIdleWindowMs,
       ...(opts.local?.hereDaemon !== undefined ? { hereDaemon: opts.local.hereDaemon } : {}),
@@ -3251,6 +3266,19 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           const standing = [...live.values()].map(e => ({ ...e.record, provider: providerOf(e.record) }));
           return runningOnPlace(placeId, rows, standing, foldThreads([...sessions.values()].map(s => s.view)));
         },
+        // The app's own sign-in road on that computer, read as a setup's row waiting on the person.
+        signIn: async (placeId, agent, emit) => agentsRead.signIn({ placeId }, { agent }, emit),
+        // The add's own road for a folder seeding a project on that computer, with what the pick keeps.
+        addFolder: async (placeId, key, folder) => {
+          const source = folder.from.replace(/^~(?=\/|$)/, homedir());
+          const plan = await projectsDoor.seedPlan(source);
+          const seed = seedChoiceFrom(plan, folder.keep, []);
+          const project = await projectsDoor.add({ source, on: placeId, ...(folder.name !== undefined ? { name: folder.name } : {}), seed });
+          if (folder.icon !== undefined || folder.hue !== undefined) {
+            await preferences.set({ projectLook: { [project.id]: { ...(folder.icon !== undefined ? { icon: folder.icon } : {}), ...(folder.hue !== undefined ? { hue: folder.hue } : {}) } } });
+          }
+          return { id: `folders/${key}`, label: project.name, outcome: "installed", ...(project.notice !== undefined ? { note: project.notice } : {}) };
+        },
       },
     });
     // The door's four events ride the one stream every other event rides, so the app follows a computer joining
@@ -3261,9 +3289,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     });
     // A copy is built only when somebody asks for one, and a computer's setup was asked for: its end is when the
     // image there can be read at all, which is the moment the tally beside it is written. A link builds nothing.
-    bus.on("place.stage", e => {
-      if (e.type !== "place.stage" || e.step !== "provision" || e.placeId === undefined) return;
-      if (e.state === "done" || e.state === "failed") void image.keepCurrent(e.placeId);
+    bus.on("place.setup", e => {
+      if (e.type !== "place.setup" || e.end === undefined) return;
+      void image.keepCurrent(e.placeId);
     });
     // A build on that computer is making its requests over the link that just went: the ones that may be asked
     // again are waiting on it, so the stage they are in says what it is waiting for and says its own line again
@@ -11148,6 +11176,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // workspace, so both leave it absent and the roads there never ask.
       ...(at?.onComputer === undefined ? {} : { onComputer: at.onComputer.bind(at) }),
       imageHead: () => imageHeadOrNone(),
+      cloneEnv: (): Record<string, string> => {
+        const token = opts.vault?.()[GITHUB_TOKEN_ENV];
+        return token === undefined ? {} : { [GITHUB_TOKEN_ENV]: token };
+      },
       // Where Claude Code keeps its projects on this computer, which is the memory folder of a project worked in
       // place here; read the way every other road on this computer reads that store.
       macStateHome: local?.home("claude") ?? "",

@@ -12,7 +12,7 @@ import { dirname, join, posix } from "node:path";
 import { promisify } from "node:util";
 import { agentName, CATALOG_AGENTS, CLAUDE_CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE, keyEnvOf, mintsToken, VAULT_VARIABLES } from "@wsp/catalog";
 import { CREATED_AT_LABEL, DAEMON_ENV_FILE, DAEMON_LISTENING_CHECK, DAEMON_PORT, DOCTOR_LABEL, EXEC_ENV, GUEST_USER_ENV, OWNER_LABEL, RUN_DIR, TOOLS_PATH, WSP_LABEL, clientWords, isMissing, isReserved, landBytes, presenceTests, presentElsewhere, presentSteps, whoseMachine, type DaemonSupervisor, type Machine, type MachineBackend, type ProvisionPlan } from "@wsp/engine";
-import { ALREADY_JOINED_LINE, absentComputer, agentSignInWord, agentVersionWord, awayMsOf, boxRoomLines, doctorComputerRowLine, DoctorLineEvent, EXIT_CODES, exitClassOf, hereDaemonBehindLine, HERE_PLACE_ID, isJoinedComputer, noSuchProjectLine, placeBehindLine, placeDaemonBehind, plural, projectNeedsReaddLine, DAEMON_MEMORY_MAX_PERCENT, DAEMON_ROOTS_PATH, DAEMON_TOKEN_PATH, DAEMON_UNIT, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_INBOX_DIR, GUEST_MANIFEST_PATH, GUEST_WSP_PATH, guestWspShim, LOOPBACK, WSP_WORKSPACE_APPARMOR_PATH, machineLacking, machineUnanswered, NO_LINGER_LINE, NO_NODE_LINE, PLACE_NEEDS_ROOT_LINE, NO_SNAPSHOT_LISTING, NO_SYSTEMD_LINE, NO_TEMPLATES_LINE, OPEN_SOCKET_PATH, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, PLACE_WORKSPACE_PATH, placeDaemonPaths, placeOwnedPaths, rootsPathIn, shellQuote, workFolderIn, templateRecordedLine, templateSkippedLine, wspBinIn, wspPackageIn, type PlaceProvision, type PlaceView, type ProjectView, type SnapshotStorage, type DaemonKind } from "@wsp/protocol";
+import { ALREADY_JOINED_LINE, absentComputer, agentSignInWord, agentVersionWord, awayMsOf, boxRoomLines, doctorComputerRowLine, DoctorLineEvent, EXIT_CODES, exitClassOf, hereDaemonBehindLine, HERE_PLACE_ID, isJoinedComputer, noSuchProjectLine, placeBehindLine, placeDaemonBehind, plural, projectNeedsReaddLine, DAEMON_MEMORY_MAX_PERCENT, DAEMON_ROOTS_PATH, DAEMON_TOKEN_PATH, DAEMON_UNIT, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_INBOX_DIR, GUEST_MANIFEST_PATH, GUEST_WSP_PATH, guestWspShim, LOOPBACK, WSP_WORKSPACE_APPARMOR_PATH, machineLacking, machineUnanswered, NO_LINGER_LINE, NO_NODE_LINE, PLACE_NEEDS_ROOT_LINE, NO_SNAPSHOT_LISTING, NO_SYSTEMD_LINE, NO_TEMPLATES_LINE, OPEN_SOCKET_PATH, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, PLACE_WORKSPACE_PATH, placeDaemonPaths, placeOwnedPaths, rootsPathIn, shellQuote, workFolderIn, templateRecordedLine, templateSkippedLine, wspBinIn, wspPackageIn, type PlaceApplied, type PlaceView, type ProjectView, type SnapshotStorage, type DaemonKind } from "@wsp/protocol";
 import { goldenHead, writeDaemonTokenScript, type AccountOrphans, type GoldenVersion, type HereDaemon, type Runtime } from "@wsp/runtime";
 import { keyIn } from "./env-keys.js";
 import WebSocket from "ws";
@@ -1404,9 +1404,9 @@ export interface DoctorOptions {
   /** What the vault holds right now, read at the ask rather than copied, for the line that says which keys this
    * computer holds by name. Absent leaves the step saying no vault was wired. */
   vault?: () => Readonly<Record<string, string>>;
-  /** The recipe on this computer planned for a computer somebody owns, the same plan the recipe job runs, or the
-   * path a recipe would be written to where there is none: what the tools inside a workspace are read against. */
-  plan?: () => Promise<ProvisionPlan | { noRecipe: string }>;
+  /** What the tools inside a workspace are read against: a computer's own picks planned as its setup plans them, or
+   * for a computer with none and for a cloud the recipe beside the state, or the path one would be written to. */
+  plan?: (computer?: PlaceView) => Promise<ProvisionPlan | { noRecipe: string }>;
   /** The daemon this host runs for its own computer's workspace, for the line that says it is behind. */
   hereDaemon?: HereDaemon;
   /** The newest release as the command line read it off the host's file, worded; absent where none was kept. */
@@ -1581,7 +1581,7 @@ const vaultVariablesOf = (signIn: Parameters<typeof keyEnvOf>[0]): string[] => {
  * is the rows behind it. A command answering from outside its own road's directories is a note and not a failure;
  * a row that did not answer fails the step, and where the computer's own record read that row present the line
  * that reads the computer again is said with it. */
-export async function toolsInside(machine: Pick<Machine, "exec">, plan: Pick<ProvisionPlan, "steps" | "prefix">, recorded?: { name: string; provision?: PlaceProvision }): Promise<string> {
+export async function toolsInside(machine: Pick<Machine, "exec">, plan: Pick<ProvisionPlan, "steps" | "prefix">, recorded?: { name: string; applied?: PlaceApplied }): Promise<string> {
   const asked = plan.steps.filter(step => presenceTests(step).length > 0);
   if (asked.length === 0) return "the recipe plans no tool this can ask a workspace for, so there is nothing to read inside";
   // On the order a workspace on a computer somebody owns boots with, and under the same managers' knobs the job
@@ -1594,10 +1594,10 @@ export async function toolsInside(machine: Pick<Machine, "exec">, plan: Pick<Pro
   });
   const missing = asked.filter(step => !present.has(step.id));
   if (missing.length > 0) {
-    const rows = recorded?.provision;
+    const rows = recorded?.applied;
     const said = missing.map(step => {
       const row = rows?.rows.find(r => r.id === step.id);
-      const also = row?.outcome === "present" && rows?.finishedAt !== undefined ? ` (${doctorComputerRowLine(recorded!.name, rows.finishedAt)})` : "";
+      const also = row?.outcome === "present" && rows !== undefined ? ` (${doctorComputerRowLine(recorded!.name, rows.at)})` : "";
       return `${step.label}${also}`;
     });
     throw new Error(`${said.join(", ")} did not answer inside the workspace, though the recipe installed ${missing.length === 1 ? "it" : "them"} on the machine`);
@@ -1611,9 +1611,9 @@ export type DoctorRuntime = Pick<Runtime, "places" | "projects" | "workspaces">;
 
 /** The plan the tools step reads, or the sentence that stands in its place: a host that wired no recipe reader,
  * and a computer whose recipe has never been written here. */
-async function planToRead(opts: DoctorOptions): Promise<ProvisionPlan | string> {
+async function planToRead(opts: DoctorOptions, computer?: PlaceView): Promise<ProvisionPlan | string> {
   if (opts.plan === undefined) return "this host wired no recipe plan, so there is nothing to read inside";
-  const plan = await opts.plan();
+  const plan = await opts.plan(computer);
   return "noRecipe" in plan ? `this computer holds no recipe at ${plan.noRecipe}, so there is nothing to read inside` : plan;
 }
 
@@ -1676,11 +1676,11 @@ export async function computerDoctor(rt: DoctorRuntime, io: CliIO, computer: Pla
     await timings.time(
       "the recipe's tools inside",
       async () => {
-        const plan = await planToRead(opts);
+        const plan = await planToRead(opts, computer);
         if (typeof plan === "string") return plan;
         return toolsInside({ exec: (cmd, o) => rt.workspaces.exec(workspace.view.id, cmd, o) }, plan, {
           name: computer.name,
-          ...(computer.provision !== undefined ? { provision: computer.provision } : {}),
+          ...(computer.applied !== undefined ? { applied: computer.applied } : {}),
         });
       },
       note => note,

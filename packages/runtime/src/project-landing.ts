@@ -6,7 +6,7 @@
 // nothing outside this file decides by what a computer is. Adding a road is a
 // module and its row.
 import { CLAUDE_CONFIG_DIR } from "@wsp/catalog";
-import { INSTALL_MS, installScript, projectInstalls, type Machine } from "@wsp/engine";
+import { envInput, INSTALL_MS, installScript, projectInstalls, withEnvFromInput, type Machine } from "@wsp/engine";
 import { claudeMemoryDir, NO_IMAGE_FOR_SEED, projectNeedsReaddLine, projectPathOn, projectRemovedAtProviderLine, projectRemovedHereLine, projectRemovedOnComputerLine, seedBytes, seedCommitsLandedLine, seedCommitsLostLine, SEED_DIR, SEED_MEMORY_DIR, SEED_PATCH, seedingLine, seedMemoryKeptLine, shellLine, shellQuote, type ExecResult, type MachineBind, type ProjectAddStage, type ProjectSource, type ProjectView, type SeedChoice, type SeedPlan } from "@wsp/protocol";
 import type { ProjectSourceModule } from "./project-sources.js";
 
@@ -66,6 +66,9 @@ export interface LandingDeps {
   /** The head of this host's own image, or nothing where it has sealed none: read by the road that forks one to
    * work in, and by no other, so a computer that forks nothing is never refused for want of an image. */
   imageHead(): Promise<string | undefined>;
+  /** What a clone on a computer the person owns reads on its own input: the vault's GitHub token where it holds one,
+   * which is how a private repo clones there without a login of that computer's own. */
+  cloneEnv?(): Readonly<Record<string, string>>;
   /** One command on the computer holding the project, outside every workspace of it: how the folder wsp keeps
    * there is taken away again. Absent on a computer that runs nothing of wsp's outside a workspace, which is this
    * Mac and every provider. */
@@ -120,13 +123,15 @@ const STEP_MS = 120_000;
  * there at all, the line pointing git at that command's login, the folder above the checkout, and the clone. The
  * add reads them with a seed on top; a workspace whose own create clones reads them alone, so the two roads
  * cannot differ about what cloning a project means. */
-export function cloneLines(o: { source: ProjectSourceModule; remote: string; checkout: string; computer: string; branch?: string }): string[] {
+export function cloneLines(o: { source: ProjectSourceModule; remote: string; checkout: string; computer: string; branch?: string; setupGit?: boolean }): string[] {
   const cli = o.source.cli;
   return [
     "set -e",
     // The command the clone goes through, before anything is made: a computer whose image does not carry it is
     // refused in one sentence naming the command, rather than a clone that sits waiting for a password.
-    ...(cli === undefined ? [] : [`command -v ${cli.bin} >/dev/null 2>&1 || { echo ${shellQuote(cli.missing(o.computer))} >&2; exit 1; }`, cli.setupGit]),
+    ...(cli === undefined ? [] : [`command -v ${cli.bin} >/dev/null 2>&1 || { echo ${shellQuote(cli.missing(o.computer))} >&2; exit 1; }`]),
+    // A computer the person owns keeps root's .gitconfig as the recipe landed it, so nothing points its git at gh.
+    ...(cli === undefined || o.setupGit === false ? [] : [cli.setupGit]),
     `mkdir -p ${shellQuote(o.checkout.replace(/\/[^/]+$/, ""))}`,
     o.source.cloneCommand({ remote: o.remote, dest: o.checkout, ...(o.branch !== undefined ? { branch: o.branch } : {}) }),
   ];
@@ -135,7 +140,7 @@ export function cloneLines(o: { source: ProjectSourceModule; remote: string; che
 /** The clone with the person's ticked files unpacked on top of it, which is the add's own road. The commits and
  * the memory folder the seed carries are steps of their own, so a step git refuses fails what it was for and not
  * the add. */
-export function cloneScript(o: { source: ProjectSourceModule; remote: string; checkout: string; computer: string; branch?: string; seedTar?: string }): string {
+export function cloneScript(o: { source: ProjectSourceModule; remote: string; checkout: string; computer: string; branch?: string; seedTar?: string; setupGit?: boolean }): string {
   const lines = cloneLines(o);
   if (o.seedTar !== undefined) lines.push(`tar -xzf ${shellQuote(o.seedTar)} -C ${shellQuote(o.checkout)}`);
   return lines.join("\n");
@@ -239,6 +244,8 @@ async function cloneSeedInstall(
    * workspace of it; `holds` is where that folder sits on the computer once the machine is gone, which is what the
    * cloning line names, since a person watching an add is being told where their code landed on their computer. */
   places: { checkout: string; holds: string; memoryDir: string; log: string },
+  /** A computer the person owns: its clone reads `env` on its input and runs no `setup-git`. */
+  owned?: { env: Readonly<Record<string, string>> },
 ): Promise<Landed> {
   const { project, report } = o;
   const seed = o.seed;
@@ -252,9 +259,11 @@ async function cloneSeedInstall(
     computer: deps.computerName,
     ...(project.base !== undefined ? { branch: project.base } : {}),
     ...(seedTar !== undefined ? { seedTar } : {}),
+    ...(owned !== undefined ? { setupGit: false } : {}),
   });
   if (seed !== undefined) report("seeding", seedingLine(seed.plan, seed.choice));
-  const ran = await machine.exec(script, { timeoutMs: CLONE_MS });
+  const env = owned?.env ?? {};
+  const ran = await (Object.keys(env).length === 0 ? machine.exec(script, { timeoutMs: CLONE_MS }) : machine.exec(withEnvFromInput(script), { timeoutMs: CLONE_MS, stdin: envInput(env) }));
   if (ran.exitCode !== 0) throw new Error(lastLine(ran.stderr) ?? lastLine(ran.stdout) ?? `the clone exited ${ran.exitCode}`);
   const patched = seed === undefined ? undefined : await patchSeed({ seed, report, computerName: deps.computerName, checkout: places.checkout, base: project.base }, machine);
   let memoryKept = false;
@@ -397,7 +406,7 @@ const boxLanding: ProjectLanding = {
     try {
       // The checkout stays on the computer once the machine is gone: every workspace of this project takes its own
       // copy of it, so the seed and the install are paid for once.
-      return { checkout, ...(await cloneSeedInstall(o, deps, machine, { checkout: o.project.path, holds: checkout, memoryDir: o.project.memoryDir, log: `${dir}/install.log` })) };
+      return { checkout, ...(await cloneSeedInstall(o, deps, machine, { checkout: o.project.path, holds: checkout, memoryDir: o.project.memoryDir, log: `${dir}/install.log` }, { env: deps.cloneEnv?.() ?? {} })) };
     } catch (e) {
       failed = e;
       throw e;

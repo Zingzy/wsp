@@ -2,6 +2,7 @@
 //! Every tool this server serves: its entry as the TypeScript server lists it, recorded under record/tools, and the
 //! call that answers it through the host. CONTRIBUTING.md in this crate says how one is added.
 
+pub(crate) mod add;
 mod agents;
 mod changes;
 mod computers;
@@ -18,6 +19,7 @@ mod projects;
 mod projects_change;
 mod pull_request;
 mod recipe;
+mod recipes;
 mod said;
 mod servers;
 mod setup;
@@ -126,6 +128,11 @@ pub const TOOLS: &[Tool] = &[
     folders::TOOL,
     setup::TOOL,
     terminal_config::TOOL,
+    add::ADD,
+    recipes::LIST,
+    recipes::SHOW,
+    recipes::SAVE,
+    recipes::REMOVE,
 ];
 
 /// The tool of that name the state lists, with its entry there; none where that state lists no such tool, which the

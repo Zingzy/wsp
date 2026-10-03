@@ -6,6 +6,7 @@
 // a header or an env variable is ever in it.
 import { z } from "zod";
 import { AgentSetupView } from "./thread-defaults.js";
+import { HERE_PLACE_ID } from "./place-word.js";
 
 /** Whether an agent on a computer can run a turn there without anybody signing anything in: its own login stands on
  * that computer, the vault this host holds has the variable that agent reads, or neither. One word per agent, worked
@@ -23,6 +24,10 @@ export type AgentSignInKind = z.infer<typeof AgentSignInKind>;
  * workspace. */
 export const AgentsTarget = z.union([z.object({ placeId: z.string(), project: z.string().optional() }).strict(), z.object({ workspaceId: z.string() }).strict()]);
 export type AgentsTarget = z.infer<typeof AgentsTarget>;
+
+/** Whether a pty opened for this target is on a computer somebody owns, whose root home every workspace there
+ * writes, so bash there reads no startup file. */
+export const ptyBareOn = (target: AgentsTarget): boolean => "placeId" in target && target.placeId !== HERE_PLACE_ID;
 
 /** A project a report read the folders of, by the id and name projects.list gives it and its folder on that
  * computer, `~`-relative under the home: every project on a computer, or a workspace's own. */

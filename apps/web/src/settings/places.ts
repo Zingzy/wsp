@@ -5,7 +5,7 @@
 // state word after a name, how long a computer has been away and an hourly
 // rate are all the protocol's (absentComputer, fmtSize, fmtBytes, offlineFor,
 // fmtRate) and are not copied here.
-import { FREE_WORD, JOINED_COMPUTER, hereName, isHere, isProviderPlace, placeName, placeOf, absentComputer, placeDaemonBehind, awayMsOf, chargesNothing, daemonSilent, fmtBytes, fmtRate, imageCopyStaysLine, isLocalWorkspace, landsOn, namesPlace, ownDaemonDown, plural, provisionWord, type AbsentComputer, type CpuWord, type InitSetup, type PlaceKind, type PlaceProvisionRow, type PlaceView, type ProjectView, type SealedImageCopy, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { FREE_WORD, JOINED_COMPUTER, hereName, isHere, isProviderPlace, placeName, placeOf, absentComputer, placeDaemonBehind, awayMsOf, chargesNothing, daemonSilent, fmtBytes, fmtRate, imageCopyStaysLine, isLocalWorkspace, landsOn, namesPlace, ownDaemonDown, plural, placeWord, SETUP_WORDS, type AbsentComputer, type CpuWord, type InitSetup, type PlaceKind, type PlaceProvisionRow, type PlaceView, type ProjectView, type SealedImageCopy, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { agentName } from "@wsp/catalog";
 import { PLACE_STATE_WORDS, PROVISION_OUTCOME_WORDS, capitalised } from "./format.js";
 
@@ -128,11 +128,13 @@ export type PlaceStateCell =
 
 export function placeStateCell(place: PlaceView, absent: AbsentComputer | null, { canUpdate }: { canUpdate: boolean }): PlaceStateCell {
   if (place.blocked !== undefined) return { kind: "word", word: PLACE_STATE_WORDS.blocked, why: place.blocked };
+  // The setup's own words where it failed or waits on the person, before the silence, and where it runs, after it:
+  // the one order wsp computers reads.
+  const setup = placeWord(place, absent);
+  const said = (word: string): PlaceStateCell => ({ kind: "word", word, ...(setup.sentence !== undefined ? { why: setup.sentence } : {}) });
+  if (setup.word === SETUP_WORDS.failed || setup.word === SETUP_WORDS.needsYou) return said(setup.word);
   if (absent !== null) return { kind: "word", word: capitalised(absent.away), why: absent.sentence };
-  const job = place.provision;
-  if (job?.state === "running") return { kind: "word", word: PLACE_STATE_WORDS.building(job.at), why: provisionWord(job) };
-  if (job?.state === "stopped") return { kind: "word", word: PLACE_STATE_WORDS.stopped, why: provisionWord(job) };
-  if (job?.rows.some(row => row.outcome === "failed") === true) return { kind: "word", word: PLACE_STATE_WORDS.failed, why: provisionWord(job) };
+  if (setup.word === SETUP_WORDS.settingUp) return said(setup.word);
   const behind = placeDaemonBehind(place);
   if (behind !== undefined) return canUpdate ? { kind: "update", why: behind } : { kind: "word", word: PLACE_STATE_WORDS.behind, why: behind };
   const unsigned = Object.entries(place.signIns ?? {}).flatMap(([agent, state]) => (state === "none" ? [agentName(agent)] : []));

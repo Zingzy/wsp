@@ -76,7 +76,6 @@ export function readAdds(api: Api): void {
 /** One step onto its job. A stream this app has not seen is an add another window started, read off the host; a
  * failed step is read again for the fix and the kind its one-line note does not carry. */
 export function applyAddStage(api: Api | null, e: PlaceStageEvent): void {
-  if (e.step === "provision") return;
   if (!useAdds.getState().heard.includes(e.addId)) useAdds.setState(s => ({ heard: [...s.heard, e.addId] }));
   const job = useAdds.getState().jobs[e.addId];
   if (job !== undefined) put(withPlaceStage(job, e));

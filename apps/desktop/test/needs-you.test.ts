@@ -37,7 +37,7 @@ function stub(supported = true) {
 
 function fakeWindow(focused: boolean) {
   const did: string[] = [];
-  return { did, win: { focused: () => focused, raise: () => did.push("raise"), open: () => did.push("open") } };
+  return { did, win: { focused: () => focused, raise: () => did.push("raise"), open: (at?: { computer: string }) => did.push(at === undefined ? "open" : `open ${at.computer}`) } };
 }
 
 describe("the shell's system notification for something the person should hear about", () => {
@@ -76,6 +76,14 @@ describe("the shell's system notification for something the person should hear a
     expect(did).toEqual([]);
     clicks[0]!();
     expect(did).toEqual(["raise", "open"]);
+  });
+
+  it("a click on a line about a computer's setup tells the page which computer to open", () => {
+    const { notifier, clicks } = stub();
+    const { win, did } = fakeWindow(false);
+    sayOutside({ ...NEED, title: "spoo: setup failed", open: { computer: "spoo" } }, win, notifier);
+    clicks[0]!();
+    expect(did).toEqual(["raise", "open spoo"]);
   });
 
   it("a computer that shows no notifications is told nothing and builds none", () => {

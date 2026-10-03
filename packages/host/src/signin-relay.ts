@@ -13,6 +13,13 @@ import type { PtyLink } from "@wsp/runtime";
 
 export type { PtyLink };
 
+/** The shell a pty on a computer somebody owns is opened with: bash reading no startup file, since the home it
+ * runs in is root's, the one every workspace there writes, and a profile there is a file a workspace wrote. */
+export const BARE_BASH = "exec bash --noprofile --norc";
+
+/** What a pty is created with: bash by name, and on a computer somebody owns bash that reads no startup file. */
+const ptyShell = (bare: boolean | undefined): { shell: string; run?: string } => (bare === true ? { shell: "bash", run: BARE_BASH } : { shell: "bash" });
+
 export interface RelayTerminal {
   input: Readable & { isTTY?: boolean; isRaw?: boolean; setRawMode?(on: boolean): unknown };
   output: Writable & { columns?: number; rows?: number };
@@ -198,7 +205,7 @@ export async function relayPty(o: RelayOptions): Promise<RelayOutcome> {
   const cols = output.columns ?? 80;
   const rows = output.rows ?? 24;
   // bash by name: the person's login shell may read interactive rc files that would sit under the typed line.
-  const ptyId = ptyIdOf(await o.link.op("pty.create", { cols, rows, shell: "bash", ...(o.env !== undefined ? { env: o.env } : {}) }));
+  const ptyId = ptyIdOf(await o.link.op("pty.create", { cols, rows, ...ptyShell(o.link.bare), ...(o.env !== undefined ? { env: o.env } : {}) }));
   const scanner = new UrlScanner();
   const tool = o.command === undefined ? (chunk: string) => chunk : fromTool();
   let staged: Staged | undefined;
@@ -339,7 +346,7 @@ export interface WatchOptions {
  * computer instead. */
 export async function watchPty(o: WatchOptions): Promise<WatchOutcome> {
   // Wide, so a printed URL is never wrapped onto two lines before the scanner reads it.
-  const ptyId = ptyIdOf(await o.link.op("pty.create", { cols: 200, rows: 50, shell: "bash", ...(o.env !== undefined ? { env: o.env } : {}) }));
+  const ptyId = ptyIdOf(await o.link.op("pty.create", { cols: 200, rows: 50, ...ptyShell(o.link.bare), ...(o.env !== undefined ? { env: o.env } : {}) }));
   const scanner = new UrlScanner();
   const outcome: WatchOutcome = { exitCode: -1, timedOut: false, dropped: false, stopped: false };
   let ended = false;
