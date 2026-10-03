@@ -73,8 +73,8 @@ describe("a link clicked in a terminal", () => {
     expect(panel()?.surfaces.at(-1)).toMatchObject({ kind: "files", path: "/root/README.md", line: null });
   });
 
-  it("reads a path against a copy's own folder, where its shells open and its turns run, never the project it was copied from", async () => {
-    act(() => useStore.setState({ workspaces: [{ ...view, kind: "local", copy: { path: "/Users/dev/wsp-codex-reviews", base: "main", branch: "main", carried: "deps-and-config", road: "clonefile", source: "/root" } } as never] }));
+  it("reads a path against a worktree's own folder, where its shells open and its turns run, never the project folder", async () => {
+    act(() => useStore.setState({ workspaces: [{ ...view, kind: "local", worktree: { path: "/Users/dev/wsp-codex-reviews", branch: "codex/reviews", made: true }, folder: "/Users/dev/wsp-codex-reviews" } as never] }));
     render(<Drawer />);
     await waitFor(() => expect(built.options).not.toBeNull());
     act(() => built.options!.onLinkActivate("apps/web/src/panes.ts:12", CMD));

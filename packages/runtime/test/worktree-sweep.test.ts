@@ -171,13 +171,25 @@ async function sweep(h: ReturnType<typeof host>, ms: number, done: () => boolean
   await until(done, 3_000);
 }
 
-/** The clock moved on by ms, and whatever sweep that ran waited out. */
+/** The clock moved on by ms, and whatever sweep that ran waited out: the next one is armed, or no worktree wsp made
+ * is left for one to look at, and the host holds no timer for it. */
 async function later(h: ReturnType<typeof host>, ms: number): Promise<void> {
   h.time.advance(ms);
-  await until(() => h.time.dueFor(h.time.clock.now() + SWEEP), 3_000);
+  await until(async () => h.time.dueFor(h.time.clock.now() + SWEEP) || !(await h.rt.workspaces.list()).some(w => w.worktree?.made === true && w.worktree.gone !== true), 3_000);
 }
 
 describe("the sweep of worktrees wsp made", () => {
+  it("holds no timer while no worktree wsp made stands, and arms one when the first is made", async () => {
+    const h = host();
+    const { folder } = project();
+    const added = await h.rt.projects.add({ source: folder });
+    await h.rt.workspaces.list();
+    const idle = h.time.pending();
+    await h.rt.workspaces.worktree({ project: added.id, branch: "feat/one" });
+    expect(h.time.pending()).toBe(idle + 1);
+    expect(h.time.dueFor(h.time.clock.now() + SWEEP)).toBe(true);
+  });
+
   it("removes one whose pull request merged once six hours have passed, clean and with no turn running", async () => {
     const h = host();
     const { folder } = project();

@@ -6497,6 +6497,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // A worktree under the host's own folder sits outside the daemon's home root on a host serving another state
     // file, so the daemon is told about it before a pane asks; the project folder is listed already.
     if (worktree !== undefined) await writeDaemonRoots(live.get(id)!);
+    if (worktree?.made === true) armSweep();
     bus.emit({ type: "workspace.created", workspace: view(record) });
     return live.get(id)!;
   };
@@ -6533,6 +6534,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const madeFor = was.madeFor;
     held.record.worktree = { path: tree.path, made: was.made || tree.made, ...(tree.branch !== undefined ? { branch: tree.branch } : {}), ...(madeFor !== undefined ? { madeFor } : {}) };
     await persist(held.record);
+    armSweep();
     return held;
   };
   /** Where a thread asked for on this computer runs: the record of its folder and the folder itself where the start
@@ -6637,9 +6639,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   let sweepTimer: (() => void) | undefined;
   let sweeping: Promise<void> | undefined;
   let sweepStopped = false;
+  /** Whether any worktree wsp made still stands, which is all the sweep has to look at. */
+  const sweepHasWork = (): boolean => [...live.values()].some(e => e.record.worktree?.made === true && e.record.worktree.gone !== true);
+  /** Armed only while a worktree wsp made stands: a host with none holds no timer for it. */
   const armSweep = (): void => {
-    sweepTimer?.();
-    if (sweepStopped) return;
+    if (sweepTimer !== undefined || sweeping !== undefined) return;
+    if (sweepStopped || !sweepHasWork()) return;
     sweepTimer = clock.schedule(
       () => {
         sweepTimer = undefined;
