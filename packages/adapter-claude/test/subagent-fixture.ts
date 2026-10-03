@@ -17,6 +17,7 @@ const launches = frames().filter(e => e["type"] === "system" && e["subtype"] ===
 export const AGENT_A_CALL = launches[0]!["tool_use_id"] as string;
 export const AGENT_B_CALL = launches[1]!["tool_use_id"] as string;
 export const AGENT_A_ID = launches[0]!["task_id"] as string;
+export const AGENT_B_ID = launches[1]!["task_id"] as string;
 
 /** One frame of that fixture, by whatever tells it from the rest. */
 export const subagentFixtureFrame = (holds: (event: Record<string, unknown>) => boolean): string =>

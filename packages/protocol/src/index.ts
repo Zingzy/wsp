@@ -1385,6 +1385,12 @@ export function startPicks(catalog: HarnessCatalog | undefined, picks: StartPick
 export const DeltaKind = z.enum(["text", "thinking", "note", "tool_use", "tool_result"]);
 export type DeltaKind = z.infer<typeof DeltaKind>;
 
+/** Where one of an agent's own subagents stands: the words every agent's adapter maps its own statuses onto, so no
+ * reader ever sees one agent's word for it. A subagent is the agent's, run inside the thread's own process, never a
+ * thread of wsp's. */
+export const SubagentState = z.enum(["running", "done", "failed", "stopped"]);
+export type SubagentState = z.infer<typeof SubagentState>;
+
 export const TurnStatus = z.enum(["completed", "interrupted", "failed"]);
 export type TurnStatus = z.infer<typeof TurnStatus>;
 
@@ -7140,4 +7146,4 @@ export * from "./release.js";
 export * from "./init-job.js";
 export { catalogRefused, endAfterResult, endRun, launchWords, PERMISSION_ALLOW, PERMISSION_DENY, programWord } from "./adapter-port.js";
 export { CLOUD_ENV, LAUNCH_ENV, SCOPED_MCP_ARG, FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, PERSON_HOME_ENV, RELEASE_API_ENV, TURN_TOKEN_ENV, UPDATE_CHECK_ENV, WEB_DIR_ENV } from "./env.js";
-export type { AdapterAttachOptions, AdapterEvent, AgentLaunch, AsideAnswer, AsideQuestion, AttachmentRoad, CommitDrafter, DraftAsk, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, PermissionAsk, PlanResets, ResetReading, ResetRoad, ResetSpend, SessionAsker, SessionRenameWrite, SessionRenamer, SessionTitleMaker, SessionTitleReader, TitleTurn, TurnImage, SessionReverter } from "./adapter-port.js";
+export type { AdapterAttachOptions, AdapterEvent, AgentLaunch, AsideAnswer, AsideQuestion, AttachmentRoad, CommitDrafter, DraftAsk, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, PermissionAsk, PlanResets, ResetReading, ResetRoad, ResetSpend, SessionAsker, SessionRenameWrite, SessionRenamer, SessionTitleMaker, SessionTitleReader, TaskStop, TitleTurn, TurnImage, SessionReverter } from "./adapter-port.js";
