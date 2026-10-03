@@ -1,0 +1,28 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Every limit a slate is held to, in one place, so phase 1's measurements change one number.
+export const SLATE_LIMITS = {
+  documentBytes: 64 * 1024,
+  pieces: 300,
+  depth: 10,
+  children: 100,
+  literalChars: 10_000,
+  holes: 20,
+  stateBytes: 256 * 1024,
+  listItems: 5_000,
+  exprChars: 500,
+  exprDepth: 16,
+  evalSteps: 20_000,
+  columns: 8,
+  facts: 12,
+  rowActions: 3,
+  actionsPerEvent: 4,
+  announce: 3,
+  titleChars: 120,
+  fallbackChars: 200,
+  subscriptions: 20,
+  errorsPerPass: 20,
+  sketchColumns: 100,
+  sketchPieceLines: 40,
+  sketchRows: 8,
+  printColumns: 120,
+} as const;
