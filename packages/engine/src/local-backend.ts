@@ -81,7 +81,7 @@ export interface LocalBackendOptions {
 /** One shell command on this computer: bash -c, cwd the backend's root, the person's own environment. The child
  * itself is read by the shared runner, so a timeout, a signal and a streamed line mean here what they mean on a
  * machine reached over ssh. */
-async function runShell(root: string, env: Readonly<Record<string, string | undefined>>, cmd: string, opts: { timeoutMs?: number; onLine?: (line: string) => void } = {}): Promise<ExecResult> {
+async function runShell(root: string, env: Readonly<Record<string, string | undefined>>, cmd: string, opts: { timeoutMs?: number; onLine?: (line: string) => void; stdin?: Uint8Array } = {}): Promise<ExecResult> {
   return runChild("bash", ["-c", cmd], { cwd: root, env, ...opts });
 }
 
@@ -100,8 +100,8 @@ export class LocalMachine implements Machine {
     private readonly env: Readonly<Record<string, string | undefined>>,
   ) {}
 
-  exec(cmd: string, opts?: { timeoutMs?: number }): Promise<ExecResult> {
-    return runShell(this.root, this.env, cmd, { ...(opts?.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}) });
+  exec(cmd: string, opts?: { timeoutMs?: number; stdin?: Uint8Array }): Promise<ExecResult> {
+    return runShell(this.root, this.env, cmd, { ...(opts?.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}), ...(opts?.stdin !== undefined ? { stdin: opts.stdin } : {}) });
   }
 
   run(script: string, opts: RunOptions): Promise<ExecResult> {

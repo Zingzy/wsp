@@ -62,6 +62,14 @@ describe("the line a sign-in runs where it stands", () => {
     expect((await planSignIn(fork(), { agent: "codex" })).line).toEqual({ command: "codex login --device-auth", status: "codex login status" });
   });
 
+  it("signs the GitHub CLI in on a box by its own web login, a tool with a login and not an agent", async () => {
+    const plan = await planSignIn(relayedBox(), { agent: "gh" });
+    expect(plan.line.command).toContain("gh auth login --hostname github.com --git-protocol https --web --skip-ssh-key");
+    expect(plan.line.status).toContain("gh auth status");
+    // A tool with no login of its own is still no sign-in.
+    await expect(planSignIn(relayedBox(), { agent: "jq" })).rejects.toThrow(/no agent jq/);
+  });
+
   it("refuses a token row and, for the app, a row that asks the person to pick; the person's terminal takes that one", async () => {
     await expect(planSignIn({ kind: "here" }, { agent: "claude" })).rejects.toThrow(signInVaultRefusal("Claude Code"));
     await expect(planSignIn({ kind: "here" }, { agent: "opencode" })).rejects.toThrow(signInTerminalRefusal("OpenCode", "wsp agents signin opencode"));

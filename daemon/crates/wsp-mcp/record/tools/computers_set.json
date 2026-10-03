@@ -38,6 +38,10 @@
           "minimum": 1,
           "description": "how many levels deep the tree under a root thread there may go while spawn is on"
         },
+        "recipe": {
+          "type": "string",
+          "description": "the saved recipe it follows from now, as recipes lists it, or none: one it follows syncs to it, a change to the recipe reaching it with no step, and none keeps what it has"
+        },
         "reset": {
           "type": "array",
           "items": {
@@ -483,6 +487,12 @@
                     ],
                     "additionalProperties": false
                   }
+                },
+                "items": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "$ref": "#/properties/computer/properties/setup/properties/addId"
+                  }
                 }
               },
               "required": [
@@ -682,7 +692,12 @@
                       "type": "object",
                       "properties": {
                         "signin": {
-                          "$ref": "#/properties/computer/properties/picks/properties/agents/additionalProperties/properties/signin"
+                          "type": "string",
+                          "enum": [
+                            "vault",
+                            "machine",
+                            "skip"
+                          ]
                         }
                       },
                       "additionalProperties": false
@@ -699,6 +714,33 @@
             },
             "recipe": {
               "type": "string"
+            },
+            "sync": {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "behind",
+                    "running"
+                  ]
+                },
+                "changes": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/properties/computer/properties/setup/properties/addId"
+                  }
+                },
+                "since": {
+                  "$ref": "#/properties/computer/properties/setup/properties/addId"
+                }
+              },
+              "required": [
+                "state",
+                "changes",
+                "since"
+              ],
+              "additionalProperties": false
             },
             "cap": {
               "anyOf": [
@@ -878,6 +920,10 @@
           "type": "integer",
           "minimum": 1,
           "description": "how many levels deep the tree under a root thread there may go while spawn is on"
+        },
+        "recipe": {
+          "type": "string",
+          "description": "the saved recipe it follows from now, as recipes lists it, or none: one it follows syncs to it, a change to the recipe reaching it with no step, and none keeps what it has"
         },
         "reset": {
           "type": "array",
@@ -1326,6 +1372,12 @@
                     ],
                     "additionalProperties": false
                   }
+                },
+                "items": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "$ref": "#/properties/computer/properties/setup/properties/addId"
+                  }
                 }
               },
               "required": [
@@ -1525,7 +1577,12 @@
                       "type": "object",
                       "properties": {
                         "signin": {
-                          "$ref": "#/properties/computer/properties/picks/properties/agents/additionalProperties/properties/signin"
+                          "type": "string",
+                          "enum": [
+                            "vault",
+                            "machine",
+                            "skip"
+                          ]
                         }
                       },
                       "additionalProperties": false
@@ -1542,6 +1599,33 @@
             },
             "recipe": {
               "type": "string"
+            },
+            "sync": {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "behind",
+                    "running"
+                  ]
+                },
+                "changes": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/properties/computer/properties/setup/properties/addId"
+                  }
+                },
+                "since": {
+                  "$ref": "#/properties/computer/properties/setup/properties/addId"
+                }
+              },
+              "required": [
+                "state",
+                "changes",
+                "since"
+              ],
+              "additionalProperties": false
             },
             "cap": {
               "anyOf": [

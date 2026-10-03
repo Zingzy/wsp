@@ -12,8 +12,10 @@ import { NO_RECIPE, RecipeFile, type PlaceReport } from "@wsp/protocol";
 import { createRuntime, memoryStore, newPlaceKeyPair, serveRuntime, type Runtime, type RuntimeServer } from "@wsp/runtime";
 import { WsClient } from "../../runtime/test/ws-client.js";
 import { gitCut, configTexts } from "../src/recipe-configs.js";
-import { recipeOptions } from "../src/recipe-options.js";
-import { readRecipe, readRecipes, recipeHash, recipeShelf, recipesDir, resolveRecipe, writeRecipe, type RecipeReading } from "../src/recipes.js";
+import { folderOptions, recipeOptions } from "../src/recipe-options.js";
+import { catalogEntry, sizeBytes } from "@wsp/catalog";
+import { execFileSync } from "node:child_process";
+import { keptTools, readRecipe, readRecipes, recipeHash, recipeShelf, recipesDir, resolveRecipe, TOOLS_KEPT_MS, writeRecipe, type RecipeReading } from "../src/recipes.js";
 import { stubBackend } from "./stub-backend.js";
 
 let dir: string;
@@ -151,6 +153,38 @@ describe("a resolved recipe", () => {
     expect((await resolveRecipe(LAPTOP, reading())).items["skills/unslop"]).toBe(before.items["skills/unslop"]);
   });
 
+  it("moves an agent's item for an edit to its own files, and not for one to a file it rewrites as it runs", async () => {
+    mkdirSync(join(home, ".claude"), { recursive: true });
+    writeFileSync(join(home, ".claude", "settings.json"), "{}\n");
+    writeFileSync(join(home, ".claude.json"), "{}\n");
+    const before = await resolveRecipe(LAPTOP, reading());
+    expect(before.items["agents/claude"]).toMatch(/^[0-9a-f]{64}$/);
+    writeFileSync(join(home, ".claude.json"), '{"numStartups":2}\n');
+    expect((await resolveRecipe(LAPTOP, reading())).items["agents/claude"]).toBe(before.items["agents/claude"]);
+    writeFileSync(join(home, ".claude", "settings.json"), '{"model":"opus"}\n');
+    expect((await resolveRecipe(LAPTOP, reading())).items["agents/claude"]).not.toBe(before.items["agents/claude"]);
+  });
+
+  it("moves no hash when this computer gains a tool the recipe does not hold", async () => {
+    const tools = [{ id: "tools/brew/gh", version: "2.80.0" }];
+    const before = recipeHash(await resolveRecipe(LAPTOP, reading(tools)));
+    expect(recipeHash(await resolveRecipe(LAPTOP, reading([...tools, { id: "tools/npm/cowsay", version: "1.6.0" }])))).toBe(before);
+  });
+
+  it("reads the managers once a day, and again when the watcher asks", async () => {
+    let reads = 0;
+    let now = 0;
+    const kept = keptTools(async () => (reads++, []), () => now);
+    await kept.tools();
+    await kept.tools();
+    expect(reads).toBe(1);
+    now = TOOLS_KEPT_MS;
+    await kept.tools();
+    expect(reads).toBe(2);
+    await kept.refresh();
+    expect(reads).toBe(3);
+  });
+
   it("asks no manager anything when the recipe picks no CLI", async () => {
     let asked = 0;
     await resolveRecipe({ ...LAPTOP, clis: {} }, { home, tools: async () => (asked++, []) });
@@ -283,6 +317,38 @@ describe("what a recipe picks from", () => {
     expect(options.plugins).toEqual([{ name: "frontend-design@claude-plugins-official" }]);
     expect(options.configs.map(c => c.id)).toEqual(["git", "github"]);
   });
+
+  it("says what each CLI and agent weighs where the catalog measured it, and how each agent signs in", async () => {
+    const options = recipeOptions(await collect(laptop()), { skills: [], plugins: [], configs: [], github: false });
+    expect(options.clis.find(c => c.name === "a2ps")?.bytes).toBeUndefined();
+    const manifest = { entries: [{ rung: "agents" as const, id: "agents/claude", label: "Claude Code", paths: [], bytes: 0, default: "bring" as const }, { rung: "tools" as const, id: "tools/brew/gh", label: "gh", paths: [], bytes: 0, default: "bring" as const }] };
+    const read = recipeOptions(manifest, { skills: [], plugins: [], configs: [], github: false });
+    expect(read.clis.find(c => c.name === "gh")?.bytes).toBe(sizeBytes(catalogEntry("gh")!.size));
+    expect(read.agents.find(a => a.id === "claude")).toMatchObject({ bytes: sizeBytes(catalogEntry("claude")!.size), kind: catalogEntry("claude")!.signIn.kind });
+  });
+
+  it("offers this computer's own projects as folders with what each weighs, how far it is ahead of its remote, and whether GitHub keeps it private", async () => {
+    const repo = join(dir, "app");
+    mkdirSync(repo, { recursive: true });
+    const git = (...args: string[]) => execFileSync("git", ["-C", repo, ...args], { env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@example.com", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@example.com" } });
+    git("init", "-q", "-b", "main");
+    git("commit", "-q", "--allow-empty", "-m", "one");
+    git("remote", "add", "origin", "git@github.com:acme/private.git");
+    const asked: string[] = [];
+    const folders = await folderOptions([{ name: "app", path: repo }], async url => (asked.push(url), false));
+    expect(asked).toEqual(["https://github.com/acme/private.git"]);
+    expect(folders).toEqual([{ name: "app", path: repo, remote: "git@github.com:acme/private.git", private: true, unpushed: 1, bytes: expect.any(Number) }]);
+    expect(folders[0]!.bytes).toBeGreaterThan(0);
+    // A folder with no remote is asked of no one and has every commit to carry.
+    git("remote", "remove", "origin");
+    expect(await folderOptions([{ name: "app", path: repo }], async () => true)).toEqual([{ name: "app", path: repo, unpushed: 1, bytes: expect.any(Number) }]);
+  });
+
+  it("offers GitHub on its own with how it can sign in: the vault only where this computer holds gh's login, else on the box or skipped", () => {
+    const read = (github: boolean) => recipeOptions({ entries: [] }, { skills: [], plugins: [], configs: [], github }).configs.find(c => c.id === "github");
+    expect(read(true)?.signins).toEqual(["vault", "machine", "skip"]);
+    expect(read(false)?.signins).toEqual(["machine", "skip"]);
+  });
 });
 
 describe("a recipe taken away", () => {
@@ -313,6 +379,26 @@ describe("a recipe taken away", () => {
     c.close();
     expect(Object.fromEntries(places.filter(p => p.recipe !== undefined).map(p => [p.name, p.recipe]))).toEqual({ spoo: NO_RECIPE, vps: NO_RECIPE, desk: "other" });
     expect(await readRecipes(statePath)).toEqual([]);
+  });
+
+  it("is followed by a computer the person sets to it, and followed by none again, by its name", async () => {
+    const store = memoryStore();
+    const at = new Date().toISOString();
+    await store.put("places", "p_1", { id: "p_1", name: "spoo", publicKey: "k", joinedAt: at, lastSeenAt: at, report: { name: "spoo", platform: "linux", arch: "x86_64", os: "Ubuntu", shape: { cpu: 2, memMb: 7700 }, login: { HOME: "/root" }, runsWorkspaces: true, engine: "none", daemonVersion: 1, wsp: ["/w"], agents: [] }, picks: LAPTOP, recipe: NO_RECIPE });
+    rt = createRuntime({ backend: stubBackend(), store, adapters: {}, placeLinks: { hostKey: newPlaceKeyPair(), here: () => ({ name: "mac" }), hostName: () => "mac" } });
+    srv = await serveRuntime(rt, { port: 0, authToken: "host-token", devices: rt.devices, recipes: recipeShelf({ statePath, home }) });
+    await writeRecipe(statePath, { ...LAPTOP, name: "Box" });
+    const c = await WsClient.connect(srv.port, { token: "host-token" });
+    const followed = await c.request("places.follow", { placeId: "p_1", recipe: "Box" });
+    expect(followed.ok, String(followed["error"])).toBe(true);
+    expect(followed["place"]).toMatchObject({ name: "spoo", recipe: "box" });
+    expect((await c.request("recipes.list"))["recipes"]).toEqual([expect.objectContaining({ slug: "box", machines: ["spoo"] })]);
+    const none = await c.request("places.follow", { placeId: "p_1", recipe: NO_RECIPE });
+    expect(none["place"]).toMatchObject({ recipe: NO_RECIPE });
+    const nowhere = await c.request("places.follow", { placeId: "p_1", recipe: "desk" });
+    expect(nowhere.ok).toBe(false);
+    expect(String(nowhere["error"])).toContain("no recipe named desk");
+    c.close();
   });
 
   it("is saved from a computer's own picks, and that computer follows it", async () => {

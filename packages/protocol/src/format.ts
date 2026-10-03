@@ -80,12 +80,12 @@ export function initImageBytes(job: Pick<InitJob, "disk" | "screens" | "drafts">
 }
 
 /** The tone a size is read in, by weight, the one table every size cell reads: a gigabyte and over is the danger
- * tone, 300 MB and over the warning tone, 100 MB and over the yellow tone, anything under muted. */
+ * tone, 200 MB and over the warning tone, 50 MB and over the yellow tone, anything under muted. */
 export type SizeTone = "danger" | "warning" | "yellow" | "muted";
 const SIZE_TONES: readonly (readonly [number, SizeTone])[] = [
   [1024 * MIB, "danger"],
-  [300 * MIB, "warning"],
-  [100 * MIB, "yellow"],
+  [200 * MIB, "warning"],
+  [50 * MIB, "yellow"],
 ];
 export function sizeTone(bytes: number): SizeTone {
   return SIZE_TONES.find(([from]) => bytes >= from)?.[1] ?? "muted";

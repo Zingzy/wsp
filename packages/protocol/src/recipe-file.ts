@@ -13,6 +13,11 @@ import { ProjectHue, ProjectIcon } from "./project-look.js";
 export const RecipeSignIn = z.enum(["vault", "machine"]);
 export type RecipeSignIn = z.infer<typeof RecipeSignIn>;
 
+/** How the GitHub row signs gh in on the computer: either sign-in word, or skip, which leaves gh signed out there and
+ * a private repository a folder that waits on GitHub to clone. */
+export const GitHubSignIn = z.enum(["vault", "machine", "skip"]);
+export type GitHubSignIn = z.infer<typeof GitHubSignIn>;
+
 /** A row's name, and the facts a row says beside it, made once each: every schema made costs the host its methods
  * bound anew, held for good. */
 const NAME = z.string().min(1);
@@ -43,7 +48,7 @@ export const RecipeFile = z
         }),
       )
       .default({}),
-    configs: row({ git: row({}).optional(), shell: row({}).optional(), github: row({ signin: SIGN_IN }).optional() }).default({}),
+    configs: row({ git: row({}).optional(), shell: row({}).optional(), github: row({ signin: GitHubSignIn.optional() }).optional() }).default({}),
   })
   .strict();
 export type RecipeFile = z.infer<typeof RecipeFile>;
@@ -119,12 +124,19 @@ export type RecipeView = z.infer<typeof RecipeView>;
 /** What a recipe can pick from on this computer: every row a computer of the person's can take, Mac-only things
  * left out. A CLI that builds from source names the C toolchain under `needs`. */
 export interface RecipeOptions {
-  agents: { id: string; name: string; signins: RecipeSignIn[] }[];
+  /** `kind` is how the agent's own sign-in works (a token minted here, a key, a browser page, a device code), and
+   * `bytes` what it weighs on a box where a build measured it. */
+  agents: { id: string; name: string; signins: RecipeSignIn[]; kind?: string; bytes?: number }[];
   mcp: { name: string; agents: string[] }[];
-  clis: { name: string; via: string; version?: string; needs?: string[] }[];
+  clis: { name: string; via: string; version?: string; needs?: string[]; bytes?: number }[];
   skills: { name: string; from: string; linked: boolean }[];
   plugins: { name: string }[];
-  configs: { id: "git" | "shell" | "github"; label: string }[];
+  /** The GitHub row carries the sign-in words it can take here: the vault only where this computer holds a gh login. */
+  configs: { id: "git" | "shell" | "github"; label: string; signins?: GitHubSignIn[] }[];
+  /** This computer's own projects, each a folder a box can take: what its history and kept files weigh, the commits
+   * no remote holds, and whether GitHub refuses an anonymous read of it, which is a repository that needs GitHub
+   * signed in there to clone. */
+  folders?: { name: string; path: string; remote?: string; private?: boolean; unpushed?: number; bytes?: number }[];
 }
 
 /** The refusal a recipe whose name makes no file name gets. */

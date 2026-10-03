@@ -11,7 +11,7 @@
 // that page's callback port, types what a page hands back, and asks the
 // tool's own status until it says signed in. The vault and the wsp tools are
 // the two writes that sit beside it.
-import { CATALOG_AGENTS, MCP_AGENTS, asksThePerson, hasLogin, keyEnvOf, loginHomeIn, mintsToken, questionsOf, serverSignInRoad, sharedLoginOf, signInRoadOf, tokenIn, type Question, type StatusCheck } from "@wsp/catalog";
+import { CATALOG, CATALOG_AGENTS, MCP_AGENTS, type CatalogEntry, asksThePerson, hasLogin, keyEnvOf, loginHomeIn, mintsToken, questionsOf, serverSignInRoad, sharedLoginOf, signInRoadOf, tokenIn, type Question, type StatusCheck } from "@wsp/catalog";
 import { asLogin, targetLogin, type TargetLogin } from "@wsp/engine";
 import {
   addToolsHereRefusal,
@@ -54,8 +54,9 @@ const GRACE_MS = 2_000;
 /** What is kept of the tool's output: its first part for the code, its last for its last words. */
 const TEXT_CAP = 16 * 1024;
 
-function agentOf(id: string): (typeof CATALOG_AGENTS)[number] {
-  const entry = CATALOG_AGENTS.find(a => a.id === id);
+/** The catalog row a sign-in names: an agent, or a tool with a login of its own, such as gh. */
+function agentOf(id: string): CatalogEntry {
+  const entry = CATALOG_AGENTS.find(a => a.id === id) ?? CATALOG.find(e => e.kind === "tool" && e.id === id && hasLogin(e.signIn));
   if (entry === undefined) throw new Error(`no agent ${id} in the catalog`);
   return entry;
 }

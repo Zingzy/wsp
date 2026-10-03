@@ -80,6 +80,12 @@ describe("local backend", () => {
     expect(bad.exitCode).toBe(7);
   });
 
+  it("exec hands the bytes it is given to the command's stdin and closes it", async () => {
+    const machine = await new LocalBackend({ root }).get();
+    const read = await machine.exec("cat; printf end", { timeoutMs: 5_000, stdin: Buffer.from("given\n") });
+    expect(read.stdout).toBe("given\nend");
+  });
+
   it("files read and write under the workspace folder through exec", async () => {
     const backend = new LocalBackend({ root });
     const machine = await backend.get();

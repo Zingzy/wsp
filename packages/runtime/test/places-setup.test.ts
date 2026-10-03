@@ -4,12 +4,23 @@
 // steps each weighed by their class, the word the row reads, and a host that
 // stops in the middle of any of it. The engine's steps are a fake here; what
 // is under test is the order, the state on the record and what resumes.
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type WebSocket from "ws";
 import {
   RecipeFile,
   absentComputer,
   floorFailedLine,
+  GITHUB_SKIPPED_LINE,
+  NEEDS_GITHUB_LINE,
+  WAITS_ON_GITHUB_LINE,
+  SETUP_LOG_TAIL_BYTES,
+  SKIPPED_FOR_NOW,
+  editedThereLine,
+  wasThereLine,
   noAgentLine,
   pendingHeldLine,
   noPendingRefusal,
@@ -23,17 +34,22 @@ import {
   type AgentsSignInEvent,
   type PlaceProvisionRow,
   type PlaceSetupEvent,
+  type PlaceSetupStep,
+  type PlaceSyncEvent,
   type PlaceView,
   type PlaceReport,
 } from "@wsp/protocol";
 import type { EngineStep, ProvisionPlan } from "@wsp/engine";
 import type { AgentsActs, SignInRun } from "../src/agents-read.js";
-import { ADD_STOPPED_LINE, PlaceProvisioningError, newPlaceKeyPair, type PlaceKeyPair, type PlaceProvisioner, type PlaceRecord, type PlaceUpdater, type PlaceUpdateRequest, type PlaceWiring } from "../src/places.js";
-import { createRuntime, type Runtime } from "../src/runtime.js";
+import type { RecipeShelf } from "../src/runtime.js";
+import { ADD_STOPPED_LINE, PlaceProvisioningError, type PlaceUndo, newPlaceKeyPair, type PlaceKeyPair, type PlaceProvisioner, type PlaceRecord, type PlaceUpdater, type PlaceUpdateRequest, type PlaceWiring } from "../src/places.js";
+import { createRuntime, type LocalWiring, type Runtime } from "../src/runtime.js";
+import { localExecStream } from "../src/local-exec.js";
+import { fakeCopier, LocalBackend } from "@wsp/engine";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { DOOR, joinAt, relinkAt, report, wiring } from "./place-join.js";
-import { stubBackend } from "./stub-backend.js";
+import { stubBackend, testPlatform } from "./stub-backend.js";
 import { fakeClock } from "./fake-clock.js";
 import { until } from "./until.js";
 import type { Clock } from "../src/clock.js";
@@ -60,7 +76,7 @@ const FACTS = {
 };
 
 /** What the computer answers on its link: what it forks with, and every command as its daemon's exec would. */
-function answersFor(cmds: string[]) {
+function answersFor(cmds: string[], answer?: (cmd: string) => { exitCode: number; stdout?: string } | undefined) {
   return (c: WsClient): void => {
     c.onFrame(raw => {
       const frame = raw as unknown as Record<string, unknown>;
@@ -71,6 +87,8 @@ function answersFor(cmds: string[]) {
       cmds.push(cmd);
       // gh's own status off the token the run read on its input, as gh prints it.
       const input = typeof frame["stdin"] === "string" ? Buffer.from(frame["stdin"], "base64").toString("utf8") : "";
+      const said = answer?.(cmd);
+      if (said !== undefined) return void c.say({ id: frame["id"], ok: true, exitCode: said.exitCode, stdout: said.stdout ?? "", stderr: "", truncated: false });
       const gh = cmd.includes("gh auth status") && input.includes("GH_TOKEN=") ? "github.com\n  - Logged in to github.com account dev (GH_TOKEN)\n  - Token scopes: 'gist', 'read:org', 'repo'\n" : "";
       c.say({ id: frame["id"], ok: true, exitCode: 0, stdout: gh, stderr: "", truncated: false });
     });
@@ -102,9 +120,16 @@ const ROWS: Partial<Record<EngineStep, PlaceProvisionRow[]>> = {
 
 /** A planner and the engine's steps as the host wires them, each step's rows under this test's hand: which steps
  * ran, in order, and a step held until the test lets it go. */
-function provisioner(o: { rows?: Partial<Record<EngineStep, PlaceProvisionRow[]>>; hold?: EngineStep; throws?: { step: EngineStep; error: Error } } = {}) {
+function provisioner(o: { rows?: Partial<Record<EngineStep, PlaceProvisionRow[]>>; hold?: EngineStep; holds?: EngineStep[]; throws?: { step: EngineStep; error: Error }; undo?: (removed: readonly { kind: string; name: string }[]) => PlaceUndo[] } = {}) {
   let release = (): void => {};
   const held = new Promise<void>(resolve => (release = resolve));
+  const each = new Map<EngineStep, { at: Promise<void>; let: () => void }>();
+  const arm = (step: EngineStep): void => {
+    let let_ = (): void => {};
+    const at = new Promise<void>(resolve => (let_ = resolve));
+    each.set(step, { at, let: let_ });
+  };
+  for (const step of o.holds ?? []) arm(step);
   const ran: EngineStep[] = [];
   const floors: string[] = [];
   const picked: RecipeFile[] = [];
@@ -123,21 +148,30 @@ function provisioner(o: { rows?: Partial<Record<EngineStep, PlaceProvisionRow[]>
       ran.push(step);
       stage(`${step} under way`);
       if (o.hold === step) await held;
+      await each.get(step)?.at;
       if (o.throws?.step === step) throw o.throws.error;
       return rows[step] ?? [];
     },
+    estimate: async picks => ({ bytes: Object.keys(picks.agents).length * 1024 ** 3, unmeasured: Object.keys(picks.plugins).length }),
+    undo: async (before, removed) => {
+      undone.push({ before, removed: removed.map(r => `${r.kind}/${r.name}`) });
+      return o.undo?.(removed) ?? [];
+    },
   };
-  return { wired, ran, floors, picked, release: () => release() };
+  const undone: { before: RecipeFile; removed: string[] }[] = [];
+  return { wired, ran, floors, picked, undone, release: () => release(), let: (step: EngineStep) => each.get(step)?.let(), arm };
 }
 
 /** Sign-ins as the app's own road runs them, each waiting on the test: the page and the code, then the end. */
 function signIns() {
   const started: string[] = [];
+  const stopped: string[] = [];
   const ends = new Map<string, (e: Pick<AgentsSignInEvent, "state" | "said">) => void>();
   const acts: AgentsActs = {
     signInLine: async () => ({ command: "codex login" }),
     signIn: async (_on, ask) => async (run: SignInRun) => {
       started.push(ask.agent);
+      void run.stop.then(() => stopped.push(ask.agent));
       run.emit({ state: "running" });
       run.emit({ state: "waiting", url: `https://auth.example/${ask.agent}/${started.length}`, code: `CODE-${started.length}` });
       const end = await new Promise<Pick<AgentsSignInEvent, "state" | "said">>(resolve => ends.set(ask.agent, resolve));
@@ -146,21 +180,23 @@ function signIns() {
     key: async () => {},
     addTools: async () => ({ file: "" }),
   };
-  return { acts, started, end: (agent: string, e: Pick<AgentsSignInEvent, "state" | "said">) => ends.get(agent)?.(e) };
+  return { acts, started, stopped, end: (agent: string, e: Pick<AgentsSignInEvent, "state" | "said">) => ends.get(agent)?.(e) };
 }
 
 /** A host with the setup wired, serving, and the road an add takes onto a computer that joins over the link. */
-async function hosting(o: { provision: PlaceProvisioner; store?: Store; cmds?: string[]; acts?: AgentsActs; vault?: Record<string, string>; report?: PlaceReport; install?: PlaceWiring["install"]; undo?: PlaceWiring["undo"]; hostKey?: PlaceKeyPair; clock?: Clock; update?: PlaceUpdater }): Promise<{ hostKey: PlaceKeyPair; store: Store; frames: PlaceSetupEvent[]; joined: { placeId: string; pair: PlaceKeyPair }[] }> {
+async function hosting(o: { provision: PlaceProvisioner; recipes?: RecipeShelf; store?: Store; cmds?: string[]; answer?: (cmd: string) => { exitCode: number; stdout?: string } | undefined; local?: boolean; acts?: AgentsActs; vault?: Record<string, string>; report?: PlaceReport; install?: PlaceWiring["install"]; undo?: PlaceWiring["undo"]; hostKey?: PlaceKeyPair; clock?: Clock; update?: PlaceUpdater }): Promise<{ hostKey: PlaceKeyPair; store: Store; frames: PlaceSetupEvent[]; joined: { placeId: string; pair: PlaceKeyPair }[] }> {
   const hostKey = o.hostKey ?? newPlaceKeyPair();
   const joined: { placeId: string; pair: PlaceKeyPair }[] = [];
   const store = o.store ?? memoryStore();
-  const answers = answersFor(o.cmds ?? []);
+  const answers = answersFor(o.cmds ?? [], o.answer);
   runtime = createRuntime({
     backend: stubBackend(),
     store,
     adapters: {},
     ...(o.clock !== undefined ? { clock: o.clock } : {}),
     ...(o.acts !== undefined ? { agentsActs: o.acts } : {}),
+    ...(o.local === true ? { local: localWiring() } : {}),
+    ...(o.recipes !== undefined ? { recipes: o.recipes } : {}),
     vault: () => o.vault ?? { CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-x" },
     placeLinks: {
       ...wiring(hostKey, undefined, o.update),
@@ -182,6 +218,8 @@ async function hosting(o: { provision: PlaceProvisioner; store?: Store; cmds?: s
   });
   const frames: PlaceSetupEvent[] = [];
   runtime.events.on("place.setup", e => void frames.push(e as PlaceSetupEvent));
+  syncs.length = 0;
+  runtime.events.on("place.sync", e => void syncs.push(e as PlaceSyncEvent));
   srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
   return { hostKey, store, frames, joined };
 }
@@ -200,6 +238,57 @@ async function stopHost(): Promise<void> {
   await runtime!.close();
   srv = undefined;
   runtime = undefined;
+}
+
+/** This computer as a host reads it, so a folder's own remote is read off git here. */
+function localWiring(): LocalWiring {
+  const root = mkdtempSync(join(tmpdir(), "wsp-setup-local-"));
+  repos.push(root);
+  return {
+    backend: new LocalBackend({ root }),
+    execStream: o => localExecStream({ root, runDir: join(root, "runs"), ...o }),
+    home: () => join(root, ".claude"),
+    homeDir: root,
+    rootsPath: join(root, "roots"),
+    env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
+    platform: testPlatform(),
+    copier: fakeCopier(),
+  };
+}
+
+/** A folder on this computer whose origin is a repository on GitHub. */
+function privateRepo(): string {
+  const dir = mkdtempSync(join(tmpdir(), "wsp-setup-repo-"));
+  repos.push(dir);
+  execFileSync("git", ["init", "-q", dir]);
+  execFileSync("git", ["-C", dir, "remote", "add", "origin", "git@github.com:acme/private.git"]);
+  return dir;
+}
+const repos: string[] = [];
+afterEach(() => {
+  for (const dir of repos.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
+/** Every sync frame the host running now put on its stream. */
+const syncs: PlaceSyncEvent[] = [];
+
+/** One saved recipe as this computer resolves it, which the test moves between syncs. */
+function shelf(file: RecipeFile, items: Record<string, string>) {
+  let now = { file, items, hash: "h1" };
+  let resolves = 0;
+  const recipes: RecipeShelf = {
+    list: async () => [{ slug: "laptop", file: now.file }],
+    read: async () => ({ slug: "laptop", file: now.file }),
+    get: async () => ({ slug: "laptop", file: now.file, hash: now.hash }),
+    save: async () => ({ slug: "laptop", file: now.file }),
+    remove: async () => ({ slug: "laptop", file: now.file }),
+    options: async () => ({ agents: [], mcp: [], clis: [], skills: [], plugins: [], configs: [] }),
+    resolve: async () => {
+      resolves++;
+      return now;
+    },
+  };
+  return { recipes, move: (next: RecipeFile, nextItems: Record<string, string>, hash: string) => void (now = { file: next, items: nextItems, hash }), resolves: () => resolves };
 }
 
 const rowOf = async (placeId: string): Promise<PlaceView> => (await runtime!.places!.list(Date.now())).find(p => p.id === placeId)!;
@@ -253,23 +342,17 @@ describe("a computer added with its picks", () => {
     const waiting = (await rowOf(placeId)).setup!.waiting;
     expect(waiting).toEqual([expect.objectContaining({ row: "signins/codex", label: "Codex", url: "https://auth.example/codex/1", code: "CODE-1", state: "waiting" })]);
     await until(async () => (await rowOf(placeId)).setup?.state === "done");
-    expect(p.ran).toEqual(["floor", "agents", "clis", "mcp", "skills", "plugins", "configs", "context"]);
+    // The skills beside the agents, since they share no lane; the CLIs after the agents on the installs lane.
+    expect(p.ran).toEqual(["floor", "agents", "skills", "clis", "mcp", "configs", "plugins", "context"]);
     const row = await rowOf(placeId);
     expect(row.picks).toEqual(LAPTOP);
     expect(row.recipe).toBe("laptop");
-    expect(row.setup!.steps.map(l => [l.step, l.state])).toEqual([
-      ["floor", "done"],
-      ["agents", "done"],
-      ["signins", "done"],
-      ["folders", "done"],
-      ["clis", "done"],
-      ["mcp", "done"],
-      ["skills", "done"],
-      ["plugins", "done"],
-      ["configs", "done"],
-      ["github", "done"],
-      ["context", "done"],
-    ]);
+    // Every step ended once, each after what it waits on.
+    const lines = row.setup!.steps.map(l => l.step);
+    expect([...lines].sort()).toEqual(["agents", "clis", "configs", "context", "floor", "folders", "github", "mcp", "plugins", "signins", "skills"]);
+    expect(row.setup!.steps.every(l => l.state === "done")).toBe(true);
+    const before = (a: PlaceSetupStep, b: PlaceSetupStep): boolean => lines.indexOf(a) < lines.indexOf(b);
+    expect([before("floor", "agents"), before("agents", "clis"), before("clis", "mcp"), before("mcp", "plugins"), before("github", "folders"), before("folders", "context")]).toEqual([true, true, true, true, true, true]);
     expect(row.setup!.steps.every(l => typeof l.ms === "number")).toBe(true);
     expect(row.applied?.rows.map(r => [r.id, r.step, r.outcome])).toEqual([
       ["agents/claude", "agents", "installed"],
@@ -305,7 +388,8 @@ describe("a computer added with its picks", () => {
     await hosting({ provision: none.wired });
     const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: LAPTOP }, Date.now());
     await until(async () => (await rowOf(place.id)).setup?.state === "failed");
-    expect(none.ran).toEqual(["floor", "agents"]);
+    // The skills ran beside the agents; nothing that waits on the agents started.
+    expect(none.ran).toEqual(["floor", "agents", "skills"]);
     expect((await rowOf(place.id)).setup?.said).toBe(noAgentLine([{ label: "Claude Code", note: "exit 1" }]));
   });
 
@@ -339,11 +423,97 @@ describe("a computer added with its picks", () => {
     await until(async () => (await rowOf(place.id)).setup?.state === "done");
     const row = await rowOf(place.id);
     expect(row.applied?.rows.filter(r => r.outcome === "failed").map(r => [r.id, r.step])).toEqual([
-      ["folders/gone", "folders"],
       ["github", "github"],
+      ["folders/gone", "folders"],
     ]);
     expect(placeWord(row, null).word).toBe("Needs you");
     expect(ended(frames)[0]?.end).toBe("needs-you");
+  });
+
+  it("runs the steps after the base tools at once as wide as the box's memory allows, every line naming the steps running", async () => {
+    const p = provisioner({ holds: ["agents", "skills"] });
+    const { frames } = await hosting({ provision: p.wired });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: LAPTOP }, Date.now());
+    await until(() => p.ran.includes("skills"));
+    // A 4 GB box takes two at once: the agents on the installs lane, the skills on the files lane.
+    expect(p.ran).toEqual(["floor", "agents", "skills"]);
+    expect(frames.at(-1)?.running).toEqual(["agents", "skills"]);
+    p.let("agents");
+    p.let("skills");
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    // Every frame names no more than two heavy steps, the sign-ins aside, since they start and wait on the person.
+    const widest = Math.max(...frames.flatMap(f => (f.running === undefined ? [] : [f.running.filter(r => r !== "signins").length])));
+    expect(widest).toBe(2);
+  });
+
+  it("runs one step at a time on a box under 4 GB", async () => {
+    const p = provisioner({ holds: ["agents"] });
+    const { frames } = await hosting({ provision: p.wired, report: { ...CURRENT, shape: { cpu: 1, memMb: 2048 } } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: LAPTOP }, Date.now());
+    await until(() => p.ran.includes("agents"));
+    await new Promise(r => setTimeout(r, 20));
+    expect(p.ran).toEqual(["floor", "agents"]);
+    p.let("agents");
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    expect(Math.max(...frames.flatMap(f => (f.running === undefined ? [] : [f.running.filter(r => r !== "signins").length])))).toBe(1);
+  });
+
+  it("skips GitHub where the person said so, and a private folder reads as needing GitHub with nothing cloned", async () => {
+    const cmds: string[] = [];
+    const repo = privateRepo();
+    await hosting({ local: true, provision: provisioner().wired, cmds, answer: cmd => (cmd.includes("ls-remote") ? { exitCode: 128 } : undefined) });
+    const picks = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "vault" } }, folders: { app: { from: repo, keep: [] } }, configs: { github: { signin: "skip" } } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    const row = await rowOf(place.id);
+    expect(row.applied?.rows.find(r => r.id === "github")).toMatchObject({ outcome: "skipped", note: GITHUB_SKIPPED_LINE });
+    expect(row.applied?.rows.find(r => r.id === "folders/app")).toMatchObject({ outcome: "failed", note: NEEDS_GITHUB_LINE });
+    // The anonymous read asked GitHub over https with no credential helper; nothing was cloned and no gh was put on.
+    expect(cmds.find(c => c.includes("ls-remote"))).toContain("https://github.com/acme/private.git");
+    expect(cmds.find(c => c.includes("ls-remote"))).toContain("credential.helper=");
+    expect(cmds.some(c => c.includes("clone"))).toBe(false);
+    expect(placeWord(row, null).word).toBe("Needs you");
+  });
+
+  it("signs GitHub in on the box through the relay, and a private folder waits for it and clones once the person is through", async () => {
+    const s = signIns();
+    const repo = privateRepo();
+    const cmds: string[] = [];
+    const { frames } = await hosting({ local: true, provision: provisioner().wired, acts: s.acts, cmds, answer: cmd => (cmd.includes("ls-remote") ? { exitCode: 128 } : undefined) });
+    const picks = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "vault" } }, folders: { app: { from: repo, keep: [] } }, configs: { github: { signin: "machine" } } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    // gh's own login, one page and one code, on the row the GitHub step stands on.
+    expect(s.started).toEqual(["gh"]);
+    await until(async () => (await rowOf(place.id)).setup?.waiting.some(w => w.code !== undefined) === true);
+    expect((await rowOf(place.id)).setup?.waiting).toEqual([expect.objectContaining({ row: "github", label: "GitHub", url: "https://auth.example/gh/1", code: "CODE-1" })]);
+    // The folder stands on its own row while it waits, which its clone replaces.
+    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "folders/app")).toMatchObject({ outcome: "skipped", note: WAITS_ON_GITHUB_LINE, step: "folders" });
+    expect(placeWord(await rowOf(place.id), null).word).toBe("Needs you");
+    const heard = frames.length;
+    s.end("gh", { state: "signed-in" });
+    await until(async () => (await rowOf(place.id)).applied?.rows.find(r => r.id === "folders/app")?.note !== WAITS_ON_GITHUB_LINE);
+    await new Promise(resolve => setTimeout(resolve, 30));
+    // One end once the folder is in, not a ready before its clone and a second word after it.
+    const ends = ended(frames.slice(heard));
+    expect(ends).toHaveLength(1);
+    expect(ends[0]?.end).toBe(placeWord(await rowOf(place.id), null).word === "Ready" ? "ready" : "needs-you");
+    const row = await rowOf(place.id);
+    expect(row.applied?.rows.find(r => r.id === "github")).toMatchObject({ outcome: "installed", step: "github" });
+    expect(row.applied?.rows.find(r => r.id === "folders/app")?.note).not.toBe(NEEDS_GITHUB_LINE);
+    expect(row.setup?.waiting).toEqual([]);
+  });
+
+  it("reads a private folder as needing GitHub once the GitHub sign-in on the box failed", async () => {
+    const s = signIns();
+    const repo = privateRepo();
+    await hosting({ local: true, provision: provisioner().wired, acts: s.acts, answer: cmd => (cmd.includes("ls-remote") ? { exitCode: 128 } : undefined) });
+    const picks = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "vault" } }, folders: { app: { from: repo, keep: [] } }, configs: { github: { signin: "machine" } } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.waiting.some(w => w.code !== undefined) === true);
+    s.end("gh", { state: "failed", said: "gh refused" });
+    await until(async () => (await rowOf(place.id)).applied?.rows.find(r => r.id === "folders/app")?.outcome === "failed");
+    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "folders/app")).toMatchObject({ outcome: "failed", note: NEEDS_GITHUB_LINE, step: "folders" });
   });
 
   it("refuses a fork there while it runs, naming the step, and takes one once it is done", async () => {
@@ -365,6 +535,23 @@ describe("a computer added with its picks", () => {
     p.release();
     await until(async () => (await rowOf(place.id)).setup?.state === "done");
     expect(await runtime!.places!.forkingBackend(place.id)).toBeDefined();
+  });
+
+  it("tags each line of its log on that computer with its step, and reads a step's lines back off the end of that log", async () => {
+    const cmds: string[] = [];
+    const at = placeProvisionPaths("/home/maya");
+    const tail = ["2026-10-04T10:00:00Z [floor] apt-get install curl", "2026-10-04T10:00:01Z [clis] brew install gh", "2026-10-04T10:00:02Z [clis] the CLIs: done"].join("\n");
+    await hosting({ provision: provisioner().wired, cmds, answer: cmd => (cmd.startsWith("tail -c") ? { exitCode: 0, stdout: `${tail}\n` } : undefined) });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: LAPTOP }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    await until(() => cmds.some(c => c.includes(at.result)));
+    const written = (cmd: string): string => Buffer.from(/printf %s '([A-Za-z0-9+/=]*)'/.exec(cmd)![1]!, "base64").toString("utf8");
+    const lines = cmds.filter(c => c.includes(at.log) && c.includes("printf")).flatMap(c => written(c).split("\n")).filter(l => l !== "");
+    expect(lines.some(l => / \[clis\] clis under way$/.test(l))).toBe(true);
+    expect(lines.some(l => / \[clis\] the CLIs: done$/.test(l))).toBe(true);
+    expect(await runtime!.places!.setupLog(place.id, "clis")).toEqual(["2026-10-04T10:00:01Z [clis] brew install gh", "2026-10-04T10:00:02Z [clis] the CLIs: done"]);
+    expect(await runtime!.places!.setupLog(place.id)).toHaveLength(3);
+    expect(cmds.find(c => c.startsWith("tail -c"))).toBe(`tail -c ${SETUP_LOG_TAIL_BYTES} '${at.log}' 2>/dev/null`);
   });
 
   it("keeps its own log on that computer, every line stamped, and the setup's outcome beside it", async () => {
@@ -512,7 +699,7 @@ describe("a host that stops in the middle of a setup", () => {
     await expect(runtime!.places!.forkingBackend(place.id)).rejects.toThrow("is still being set up");
     await dialsBack(first.hostKey, place.id, first.joined[0]!.pair);
     await until(async () => (await rowOf(place.id)).setup?.state === "done");
-    expect(again.ran).toEqual(["clis", "mcp", "skills", "plugins", "configs", "context"]);
+    expect(again.ran).toEqual(["skills", "clis", "mcp", "configs", "plugins", "context"]);
     // The sign-in that waited is run again for a fresh page, never waited on.
     await until(async () => (await rowOf(place.id)).setup?.waiting.some(w => w.url !== undefined) === true);
     expect(s2.started).toEqual(["codex"]);
@@ -555,5 +742,256 @@ describe("a host that stops in the middle of a setup", () => {
     await until(() => s.started.length === 2);
     await until(async () => (await rowOf(place.id)).setup?.waiting[0]?.code === "CODE-2");
     expect((await rowOf(place.id)).setup?.waiting[0]?.state).toBe("waiting");
+  });
+});
+
+describe("what the picks weigh before Set up", () => {
+  it("weighs the picks on this computer against the room the computer last said it has, by a pending add or the computer", async () => {
+    await hosting({ provision: provisioner().wired });
+    const added = await runtime!.places!.add({ addId: "a_wait", address: "root@10.0.0.9", hostUrls: DOOR }, Date.now());
+    await until(async () => (await runtime!.places!.pending())[0]?.step === "choosing");
+    const picks = RecipeFile.parse({ name: "laptop", agents: { claude: {}, codex: {} }, plugins: { "lint@acme": {} } });
+    const free = CURRENT.diskFreeBytes;
+    expect(await runtime!.places!.estimate("a_wait", picks)).toEqual({ neededBytes: 2 * 1024 ** 3, freeBytes: free, unmeasured: 1 });
+    expect(await runtime!.places!.estimate(added.place.id, picks)).toEqual({ neededBytes: 2 * 1024 ** 3, freeBytes: free, unmeasured: 1 });
+    // An add that never joined has said nothing of its room.
+    expect(await runtime!.places!.estimate("root@10.0.0.77", picks)).toEqual({ neededBytes: 2 * 1024 ** 3, unmeasured: 1 });
+  });
+});
+
+describe("a step the person skips for now", () => {
+  it("takes a sign-in that waits off the person: its row reads skipped, its login stops, and the computer reads Ready", async () => {
+    const s = signIns();
+    const { frames } = await hosting({ provision: provisioner().wired, acts: s.acts });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: LAPTOP }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    await until(async () => (await rowOf(place.id)).setup?.waiting.some(w => w.code !== undefined) === true);
+    const skipped = await runtime!.places!.skip(place.id, "signins/codex");
+    expect(skipped.setup?.waiting).toEqual([]);
+    expect(skipped.applied?.rows.find(r => r.id === "signins/codex")).toMatchObject({ outcome: "skipped", note: SKIPPED_FOR_NOW, step: "signins" });
+    expect(placeWord(skipped, null).word).toBe("Ready");
+    // The login there was stopped, and a late answer from it changes nothing.
+    expect(s.stopped).toEqual(["codex"]);
+    s.end("codex", { state: "signed-in" });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect((await rowOf(place.id)).applied?.rows.find(r => r.id === "signins/codex")?.outcome).toBe("skipped");
+    expect(ended(frames).at(-1)?.end).toBe("ready");
+  });
+
+  it("skips a sign-in whose page ran out, after its login there ended", async () => {
+    const fc = fakeClock();
+    const s = signIns();
+    await hosting({ provision: provisioner().wired, acts: s.acts, clock: fc.clock });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: LAPTOP }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.waiting.some(w => w.code !== undefined) === true);
+    fc.advance(SIGN_IN_WAIT_MS);
+    s.end("codex", { state: "failed", said: "the sign-in ran out" });
+    await until(async () => (await rowOf(place.id)).setup?.waiting[0]?.state === "expired");
+    const skipped = await runtime!.places!.skip(place.id, "signins/codex");
+    expect(skipped.setup?.waiting).toEqual([]);
+    expect(skipped.applied?.rows.find(r => r.id === "signins/codex")?.outcome).toBe("skipped");
+  });
+
+  it("sets a row that failed aside for later, and refuses a row with nothing to skip", async () => {
+    const p = provisioner({ rows: { clis: [{ id: "tools/brew/gh", label: "GitHub CLI", outcome: "failed", note: "no bottle" }] } });
+    await hosting({ provision: p.wired });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: { ...LAPTOP, agents: { claude: { signin: "vault" } } } }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    const skipped = await runtime!.places!.skip(place.id, "tools/brew/gh");
+    expect(skipped.applied?.rows.find(r => r.id === "tools/brew/gh")).toMatchObject({ outcome: "skipped", note: SKIPPED_FOR_NOW });
+    await expect(runtime!.places!.skip(place.id, "agents/claude")).rejects.toThrow("nothing waits or failed under agents/claude on spoo");
+  });
+
+  it("skips the GitHub sign-in on the box, and a private folder that waited on it reads as needing GitHub", async () => {
+    const s = signIns();
+    const repo = privateRepo();
+    await hosting({ local: true, provision: provisioner().wired, acts: s.acts, answer: cmd => (cmd.includes("ls-remote") ? { exitCode: 128 } : undefined) });
+    const picks = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "vault" } }, folders: { app: { from: repo, keep: [] } }, configs: { github: { signin: "machine" } } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: picks }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.waiting.some(w => w.code !== undefined) === true);
+    await runtime!.places!.skip(place.id, "github");
+    await until(async () => (await rowOf(place.id)).applied?.rows.find(r => r.id === "folders/app")?.outcome === "failed");
+    const row = await rowOf(place.id);
+    expect(row.applied?.rows.find(r => r.id === "github")).toMatchObject({ outcome: "skipped", note: SKIPPED_FOR_NOW });
+    expect(row.applied?.rows.find(r => r.id === "folders/app")).toMatchObject({ outcome: "failed", note: NEEDS_GITHUB_LINE });
+  });
+});
+
+describe("a computer that follows a recipe", () => {
+  const V1 = RecipeFile.parse({ name: "laptop", agents: { claude: { signin: "vault" } }, clis: { jq: { via: "brew" } }, skills: { unslop: { from: "~/.claude/skills" } } });
+  const ITEMS = { "clis/jq": "1.7", "skills/unslop": "d1" };
+
+  /** A computer set up from the saved recipe and in step with it. */
+  async function following(o: { undo?: (removed: readonly { kind: string; name: string }[]) => PlaceUndo[]; answer?: (cmd: string) => { exitCode: number; stdout?: string } | undefined; cmds?: string[]; rows?: Partial<Record<EngineStep, PlaceProvisionRow[]>> } = {}) {
+    const p = provisioner({ ...(o.undo !== undefined ? { undo: o.undo } : {}), ...(o.rows !== undefined ? { rows: o.rows } : {}) });
+    const r = shelf(V1, ITEMS);
+    const host = await hosting({ provision: p.wired, recipes: r.recipes, ...(o.answer !== undefined ? { answer: o.answer } : {}), ...(o.cmds !== undefined ? { cmds: o.cmds } : {}) });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: V1, recipe: "laptop" }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    // The setup holds the computer against the recipe as resolved, so the sync its link starts finds nothing to do.
+    expect((await rowOf(place.id)).applied).toMatchObject({ hash: "h1", items: ITEMS });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    p.ran.length = 0;
+    return { p, r, host, placeId: place.id };
+  }
+
+  it("takes a skill added to the recipe with no step from the person, by the skills step alone", async () => {
+    const { p, r, placeId } = await following();
+    const V2 = { ...V1, skills: { ...V1.skills, why: { from: "~/.claude/skills" } } };
+    r.move(V2, { ...ITEMS, "skills/why": "d2" }, "h2");
+    expect(await runtime!.places!.recipeChanged("laptop")).toEqual(["spoo"]);
+    await until(async () => (await rowOf(placeId)).applied?.hash === "h2");
+    expect(p.ran).toEqual(["skills"]);
+    const row = await rowOf(placeId);
+    expect(row.picks).toEqual(V2);
+    expect(row.sync).toBeUndefined();
+    expect(row.applied?.items).toEqual({ ...ITEMS, "skills/why": "d2" });
+    // Behind with what moved, then the change under way, then in step with what it applied.
+    expect(syncs.map(f => (f.line !== undefined ? `${f.line.step} ${f.line.state}` : (f.sync?.state ?? (f.applied !== undefined ? "applied" : "in step"))))).toEqual(["behind", "running", "skills running", "skills done", "applied"]);
+    expect(syncs[0]?.sync?.changes).toEqual(["skills/why"]);
+    // The setup stands as it ended: a sync is not a setup, and its word never read Setting up.
+    expect(row.setup?.state).toBe("done");
+    expect(placeWord(row, null).word).toBe("Ready");
+  });
+
+  it("takes a skill taken out of the recipe off by the ledger, keeps a file edited there and says so on its row", async () => {
+    const cmds: string[] = [];
+    const { p, r, placeId } = await following({
+      cmds,
+      undo: () => [{ key: "skills/unslop", label: "unslop", ids: ["skills/unslop", "files/.claude/skills/unslop"], dests: [".claude/skills/unslop"] }],
+      answer: cmd => (cmd.includes("wsp-unland") ? { exitCode: 0, stdout: "wsp-unland\tgone\t.claude/skills/unslop/SKILL.md\nwsp-unland\tkept\t.claude/skills/unslop/notes.md\n" } : undefined),
+    });
+    r.move({ ...V1, skills: {} }, { "clis/jq": "1.7" }, "h3");
+    await runtime!.places!.recipeChanged("laptop");
+    await until(async () => (await rowOf(placeId)).applied?.hash === "h3");
+    expect(p.undone.map(u => u.removed)).toEqual([["skills/unslop"]]);
+    expect(p.undone[0]?.before).toEqual(V1);
+    expect(cmds.some(c => c.includes("wsp-unland") && c.includes("'.claude/skills/unslop'"))).toBe(true);
+    // No step runs for a removal alone.
+    expect(p.ran).toEqual([]);
+    expect((await rowOf(placeId)).applied?.rows.find(r => r.id === "skills/unslop")).toMatchObject({ outcome: "skipped", note: editedThereLine("spoo", [".claude/skills/unslop/notes.md"]) });
+  });
+
+  it("never takes off a row the computer had before wsp, and takes off one wsp put there by its own road", async () => {
+    const cmds: string[] = [];
+    const { r, placeId } = await following({
+      cmds,
+      rows: { clis: [{ id: "tools/brew/jq", label: "jq", outcome: "present" }] },
+      undo: removed => removed.map(c => ({ key: `${c.kind}/${c.name}`, label: c.name, ids: [c.kind === "clis" ? "tools/brew/jq" : "agents/claude"], owner: c.kind === "clis" ? "tools/brew/jq" : "agents/claude", cmd: `take-off-${c.name}` })),
+    });
+    // The setup read jq as already there and put claude on.
+    expect((await rowOf(placeId)).applied?.rows.find(r => r.id === "tools/brew/jq")?.outcome).toBe("present");
+    r.move({ ...V1, agents: {}, clis: {} }, { "skills/unslop": "d1" }, "h4");
+    await runtime!.places!.recipeChanged("laptop");
+    await until(async () => (await rowOf(placeId)).applied?.hash === "h4");
+    expect(cmds.filter(c => c.startsWith("take-off-"))).toEqual(["take-off-claude"]);
+    const rows = (await rowOf(placeId)).applied?.rows.map(r => r.id);
+    expect(rows).not.toContain("tools/brew/jq");
+    expect(rows).not.toContain("agents/claude");
+  });
+
+  it("never takes an agent the box had before wsp off, though wsp landed a file of its own for it, and says why on its row", async () => {
+    const cmds: string[] = [];
+    const { r, placeId } = await following({
+      cmds,
+      rows: { agents: [{ id: "agents/claude", label: "Claude Code", outcome: "present" }], mcp: [{ id: "files/.claude/settings.json", label: "settings", outcome: "installed", kind: "file" }] },
+      answer: cmd => (cmd.includes("wsp-unland") ? { exitCode: 0, stdout: "wsp-unland\tgone\t.claude/settings.json\n" } : undefined),
+      undo: () => [{ key: "agents/claude", label: "Claude Code", ids: ["agents/claude", "signins/claude", "files/.claude/settings.json"], owner: "agents/claude", cmd: "take-off-claude", dests: [".claude/settings.json"] }],
+    });
+    r.move({ ...V1, agents: {} }, { "clis/jq": "1.7", "skills/unslop": "d1" }, "h10");
+    await runtime!.places!.recipeChanged("laptop");
+    await until(async () => (await rowOf(placeId)).applied?.hash === "h10");
+    expect(cmds.filter(c => c.startsWith("take-off-"))).toEqual([]);
+    // Its own file wsp landed comes off by the ledger all the same, and the row says the agent stays.
+    expect(cmds.some(c => c.includes("wsp-unland"))).toBe(true);
+    expect((await rowOf(placeId)).applied?.rows.find(row => row.id === "agents/claude")).toMatchObject({ outcome: "skipped", note: wasThereLine("spoo") });
+  });
+
+  it("never takes gh off for a GitHub row dropped where gh came as a CLI, though the GitHub sign-in there was wsp's", async () => {
+    const cmds: string[] = [];
+    const withGitHub = { ...V1, clis: { ...V1.clis, gh: { via: "brew" } }, configs: { github: { signin: "machine" as const } } };
+    const p = provisioner({ undo: () => [{ key: "configs/github", label: "GitHub", ids: ["configs/github", "github", "github/gh"], owner: "github/gh", cmd: "take-off-gh" }] });
+    const r = shelf(withGitHub, ITEMS);
+    const s = signIns();
+    await hosting({ provision: p.wired, recipes: r.recipes, cmds, acts: s.acts });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: withGitHub, recipe: "laptop" }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.waiting.some(w => w.row === "github" && w.code !== undefined) === true);
+    s.end("gh", { state: "signed-in" });
+    await until(async () => (await rowOf(place.id)).applied?.rows.find(row => row.id === "github")?.outcome === "installed");
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    r.move({ ...withGitHub, configs: {} }, ITEMS, "h11");
+    await runtime!.places!.recipeChanged("laptop");
+    await until(async () => (await rowOf(place.id)).applied?.hash === "h11");
+    expect(cmds.filter(c => c.startsWith("take-off-"))).toEqual([]);
+  });
+
+  it("says a follow, an unfollow and a changed recipe on the stream, whether or not any computer moves", async () => {
+    const { placeId } = await following();
+    const heard: string[] = [];
+    runtime!.events.on("recipes.changed", e => void heard.push((e as { slug: string }).slug));
+    await runtime!.places!.follow(placeId, "laptop");
+    await runtime!.places!.recipeChanged("laptop");
+    await runtime!.places!.unfollow("laptop");
+    expect(heard).toEqual(["laptop", "laptop", "laptop"]);
+  });
+
+  it("does nothing on a computer that follows no recipe, and nothing when the recipe did not move", async () => {
+    const { p, r, placeId } = await following();
+    const before = r.resolves();
+    // Saved again with nothing changed: one read of the recipe, nothing run there.
+    await runtime!.places!.recipeChanged("laptop");
+    await new Promise(resolve => setTimeout(resolve, 30));
+    expect(p.ran).toEqual([]);
+    expect(r.resolves()).toBeGreaterThan(before);
+    await runtime!.places!.follow(placeId, "none");
+    r.move({ ...V1, skills: {} }, { "clis/jq": "1.7" }, "h5");
+    expect(await runtime!.places!.recipeChanged("laptop")).toEqual([]);
+    await new Promise(resolve => setTimeout(resolve, 30));
+    expect(p.ran).toEqual([]);
+    expect((await rowOf(placeId)).applied?.hash).toBe("h1");
+  });
+
+  it("reads Behind while its computer is away, and catches up once when it dials back", async () => {
+    const { p, r, host, placeId } = await following();
+    for (const ws of sockets.splice(0)) ws.close();
+    await until(async () => (await rowOf(placeId)).present === false);
+    r.move({ ...V1, skills: { ...V1.skills, why: { from: "~/.claude/skills" } } }, { ...ITEMS, "skills/why": "d2" }, "h6");
+    await runtime!.places!.recipeChanged("laptop");
+    await until(async () => (await rowOf(placeId)).sync?.state === "behind");
+    expect(p.ran).toEqual([]);
+    expect(placeWord({ ...(await rowOf(placeId)) }, null)).toEqual({ word: "Behind", sentence: "waiting to put on the recipe's 1 change: skills/why" });
+    await dialsBack(host.hostKey, placeId, host.joined[0]!.pair);
+    await until(async () => (await rowOf(placeId)).applied?.hash === "h6");
+    expect(p.ran).toEqual(["skills"]);
+    expect((await rowOf(placeId)).sync).toBeUndefined();
+  });
+
+  it("lands a folder a sync adds on a computer whose GitHub was signed in before, with no wait on a GitHub step it does not run", async () => {
+    const p = provisioner();
+    const withGitHub = { ...V1, configs: { github: { signin: "vault" as const } } };
+    const r = shelf(withGitHub, ITEMS);
+    const cmds: string[] = [];
+    await hosting({ provision: p.wired, recipes: r.recipes, cmds, vault: { CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-x", GH_TOKEN: "ghp_vaulted" } });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: withGitHub, recipe: "laptop" }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    expect((await rowOf(place.id)).applied?.rows.find(row => row.id === "github")?.outcome).toBe("present");
+    r.move({ ...withGitHub, folders: { app: { from: "/nowhere/app", keep: [] } } }, ITEMS, "h9");
+    await runtime!.places!.recipeChanged("laptop");
+    await until(async () => (await rowOf(place.id)).applied?.hash === "h9");
+    expect((await rowOf(place.id)).applied?.rows.find(row => row.id === "folders/app")?.note).not.toBe(NEEDS_GITHUB_LINE);
+    expect(cmds.some(c => c.includes("ls-remote"))).toBe(false);
+  });
+
+  it("runs a change that landed mid-sync once more at its end", async () => {
+    const { p, r, placeId } = await following();
+    p.arm("skills");
+    r.move({ ...V1, skills: { ...V1.skills, why: { from: "~/.claude/skills" } } }, { ...ITEMS, "skills/why": "d2" }, "h7");
+    await runtime!.places!.recipeChanged("laptop");
+    await until(() => p.ran.includes("skills"));
+    r.move({ ...V1, skills: { ...V1.skills, why: { from: "~/.claude/skills" } } }, { ...ITEMS, "skills/why": "d3" }, "h8");
+    await runtime!.places!.recipeChanged("laptop");
+    p.let("skills");
+    await until(async () => (await rowOf(placeId)).applied?.hash === "h8");
+    expect(p.ran).toEqual(["skills", "skills"]);
   });
 });

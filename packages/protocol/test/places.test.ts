@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
 import {
+  setupWidth,
   DEFAULT_PLACE_PORT,
   DEFAULT_PORT,
   EventUnion,
@@ -204,7 +205,7 @@ describe("the steps of an install on a computer over ssh", () => {
   });
 
   it("checks the box can run wsp and can reach this host, each a step of its own, after the login and before anything of wsp's lands", () => {
-    expect(PlaceAddStep.options.slice(0, 5)).toEqual(["connect", "host-key", "check", "reach", "wsp"]);
+    expect(PlaceAddStep.options.slice(0, 9)).toEqual(["connect", "host-key", "check", "chip", "root", "system", "disk", "reach", "wsp"]);
     expect(PLACE_ADD_WORDS.check).toBe("checking it can run wsp");
     expect(PLACE_ADD_WORDS.reach).toBe("checking it can reach this computer");
     expect(placeAddSheetWord("reach", "running")).toBe("checking it can reach this computer");
@@ -423,6 +424,10 @@ describe("the setup on a computer you own", () => {
   const applied = (rows: PlaceProvisionRow[]): PlaceApplied => ({ hash: "h", at: done.finishedAt!, rows });
   const wait: PlaceWait = { row: "signins/codex", label: "Codex", url: "https://auth.openai.com/codex/device", code: "ABCD-EFGH", expiresAt: "2026-10-03T10:15:00.000Z", state: "waiting" };
 
+  it("runs one step after the base tools per 2 GB of the computer's memory, at least one and at most four", () => {
+    expect([1024, 2047, 2048, 4096, 7700, 8192, 65536].map(setupWidth)).toEqual([1, 1, 1, 2, 3, 4, 4]);
+  });
+
   it("parses a setup under way, one over, and a sign-in waiting with its page, its code and when it runs out", () => {
     expect(PlaceSetup.parse(running)).toEqual(running);
     expect(PlaceSetup.parse({ ...done, waiting: [wait] }).waiting).toEqual([wait]);
@@ -442,7 +447,7 @@ describe("the setup on a computer you own", () => {
     expect(SETUP_STEP_CLASS.signins).toBe("needs-you");
     expect([SETUP_STEP_CLASS.folders, SETUP_STEP_CLASS.github]).toEqual(["important", "important"]);
     for (const step of ["clis", "skills", "mcp", "plugins", "configs", "context"] as const) expect(SETUP_STEP_CLASS[step]).toBe("fixable");
-    expect(PlaceAddStep.options).toEqual(["connect", "host-key", "check", "reach", "wsp", "service", "join"]);
+    expect(PlaceAddStep.options).toEqual(["connect", "host-key", "check", "chip", "root", "system", "disk", "reach", "wsp", "service", "join"]);
   });
 
   it("reads one word by one precedence: Setup failed, Needs you, Offline, Setting up, Behind, Ready", () => {

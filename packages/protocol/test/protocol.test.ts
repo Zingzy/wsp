@@ -892,7 +892,7 @@ describe("runtime wire types", () => {
     expect(new Set(wire.DEVICE_OPS).size).toBe(wire.DEVICE_OPS.length);
     const held = [
       "sessions.start", "sessions.steer", "sessions.interrupt", "sessions.rename", "sessions.answer", "sessions.access", "sessions.aside", "sessions.rewind", "sessions.run", "workspaces.exec", "workspaces.bringBack", "daemon.open", "daemon.send", "daemon.close",
-      "places.add", "places.setup", "places.choose", "places.update", "places.remove", "places.dial", "places.set", "places.loginLanded", "places.doctor", "places.door", "places.mint", "places.sshHosts", "projects.add",
+      "places.add", "places.setup", "places.choose", "places.update", "places.remove", "places.dial", "places.set", "places.follow", "places.skip", "places.setupLog", "places.estimate", "places.loginLanded", "places.doctor", "places.door", "places.mint", "places.sshHosts", "projects.add",
       "init.keys", "init.start", "init.answer", "init.step", "init.draft", "init.retry", "init.build", "init.signInCode", "init.cancel", "image.build", "golden.prepare", "golden.seal",
       "image.export", "host.folders", "agents.read", "servers.tools", "servers.icon", "agents.signIn", "servers.signIn", "agents.signInCode", "agents.signInStop", "agents.signInLine", "agents.key", "agents.addTools", "agents.setup", "skills.search", "skills.get", "skills.preview", "skills.add", "skills.remove", "skills.toggle", "servers.add", "servers.remove", "servers.toggle", "project.seed.plan", "project.plan", "project.import", "project.export",
       "pair.issue", "pair.redeem", "seal.open", "device.auth", "place.join", "place.auth", "place.prove", "host.restart",
@@ -927,6 +927,7 @@ describe("runtime wire types", () => {
     for (const op of ["status.list", "workspaces.create", "release.get", "release.check"]) expect(wire.DEVICE_OPS).toContain(op);
     // A cap is the person's number on their own computer; no thread and no paired device sets it.
     expect(THREAD_OPS).not.toContain("places.set");
+    expect(THREAD_OPS).not.toContain("places.follow");
     expect(RuntimeRequest.parse({ id: 1, op: "places.set", placeId: "p_1", threads: 1 })).toEqual({ id: 1, op: "places.set", placeId: "p_1", threads: 1 });
     expect(RuntimeRequest.parse({ id: 1, op: "places.set", placeId: "solari", spendPerDayUsd: 0 })).toMatchObject({ spendPerDayUsd: 0 });
     expect(() => RuntimeRequest.parse({ id: 1, op: "places.set", placeId: "p_1", threads: 0 })).toThrow();

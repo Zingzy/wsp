@@ -87,6 +87,7 @@ describe("the move off copies at boot", () => {
     // A clean copy whose fetch cannot land: a ref in the project stands where its branches would go.
     const blocked = join(w.root, "spoo-blocked");
     execFileSync("git", ["clone", "-q", w.project, blocked]);
+    git(blocked, "commit", "-q", "--allow-empty", "-m", "only here");
     git(w.project, "update-ref", "refs/rescue/spoo-blocked", "HEAD");
     await oldRecord(w.store, template, "ws_clean", copyOf(w.project, clean, "clonefile"));
     await oldRecord(w.store, template, "ws_changed", copyOf(w.project, changed, "clonefile"));
@@ -98,8 +99,8 @@ describe("the move off copies at boot", () => {
     await rt.workspaces.list();
     await rt.close();
 
-    expect(git(w.project, "rev-parse", "refs/rescue/spoo-fix-login/feat/x")).toBe(tip);
-    expect(git(w.project, "rev-parse", "refs/rescue/spoo-fix-login/HEAD")).toBe(tip);
+    // One ref per tip the project lacks: HEAD names the branch's own tip, and main is the project's.
+    expect(git(w.project, "for-each-ref", "--format=%(refname) %(objectname)", "refs/rescue/spoo-fix-login")).toBe(`refs/rescue/spoo-fix-login/feat/x ${tip}`);
     expect(existsSync(clean)).toBe(false);
     expect(existsSync(join(changed, "draft.md"))).toBe(true);
     expect(existsSync(blocked)).toBe(true);
@@ -123,6 +124,67 @@ describe("the move off copies at boot", () => {
     await again.close();
     expect(w.removed).toHaveLength(1);
     expect(later).toEqual([]);
+  });
+
+  it("keeps only the branches whose tips the project lacks, one ref per tip, and leaves no fetched ref behind", async () => {
+    const w = world();
+    const first = w.boot();
+    const project = await first.projects.add({ source: w.project });
+    const template = (await w.store.get("workspaces", (await first.workspaces.create({ project: project.id, name: "x" })).id)) as Record<string, unknown>;
+    await first.close();
+    git(w.project, "branch", "shipped");
+    git(w.project, "tag", "v1");
+
+    // A copy sharing every branch but one: main and shipped are the project's, old sits at a tagged commit, and two
+    // branches stand at the one tip nothing in the project holds.
+    const copy = join(w.root, "spoo-many");
+    execFileSync("git", ["clone", "-q", w.project, copy]);
+    git(copy, "branch", "shipped", "origin/shipped");
+    git(copy, "branch", "old", "v1");
+    git(copy, "checkout", "-q", "-b", "feat/a");
+    git(copy, "commit", "-q", "--allow-empty", "-m", "only here");
+    git(copy, "branch", "feat/b");
+    git(copy, "checkout", "-q", "main");
+    const tip = git(copy, "rev-parse", "feat/a");
+    // A second copy whose one new tip an earlier rescue already keeps.
+    const twin = join(w.root, "spoo-twin");
+    execFileSync("git", ["clone", "-q", copy, twin]);
+    git(twin, "checkout", "-q", "-b", "feat/a", "origin/feat/a");
+    git(w.project, "fetch", "-q", copy, "feat/a:refs/rescue/earlier/feat/a");
+    await oldRecord(w.store, template, "ws_many", copyOf(w.project, copy, "clonefile"));
+    await oldRecord(w.store, template, "ws_twin", copyOf(w.project, twin, "clonefile"));
+
+    const rt = w.boot();
+    await rt.workspaces.list();
+    await rt.close();
+
+    const rescued = git(w.project, "for-each-ref", "--format=%(refname) %(objectname)", "refs/rescue").split("\n");
+    expect(rescued).toEqual([`refs/rescue/earlier/feat/a ${tip}`]);
+    expect(git(w.project, "for-each-ref", "refs/")).not.toContain("incoming");
+    expect(existsSync(copy)).toBe(false);
+    expect(existsSync(twin)).toBe(false);
+  });
+
+  it("keeps a copy's own tip once, under the first branch that names it", async () => {
+    const w = world();
+    const first = w.boot();
+    const project = await first.projects.add({ source: w.project });
+    const template = (await w.store.get("workspaces", (await first.workspaces.create({ project: project.id, name: "x" })).id)) as Record<string, unknown>;
+    await first.close();
+    const copy = join(w.root, "spoo-two");
+    execFileSync("git", ["clone", "-q", w.project, copy]);
+    git(copy, "checkout", "-q", "-b", "feat/a");
+    git(copy, "commit", "-q", "--allow-empty", "-m", "a");
+    git(copy, "branch", "feat/b");
+    const tip = git(copy, "rev-parse", "HEAD");
+    await oldRecord(w.store, template, "ws_two", copyOf(w.project, copy, "clonefile"));
+
+    const rt = w.boot();
+    await rt.workspaces.list();
+    await rt.close();
+
+    expect(git(w.project, "for-each-ref", "--format=%(refname) %(objectname)", "refs/rescue")).toBe(`refs/rescue/spoo-two/feat/a ${tip}`);
+    expect(existsSync(copy)).toBe(false);
   });
 
   it("keeps a worktree copy's detached commit under refs/rescue and removes the worktree by its own road", async () => {

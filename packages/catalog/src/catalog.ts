@@ -180,6 +180,9 @@ export interface ToolEntry extends EntryBase {
   depends?: Partial<Record<RoadName, readonly string[]>>;
   /** The major the floor pins, with the tool's plain name: a Mac on another major hears both in the covered row's note. */
   major?: { name: string; version: string };
+  /** What a computer runs once the row is on it for the tool to take hold there, and what takes that back before the
+   * row comes off: git-lfs's filters, which no copied gitconfig carries. */
+  hook?: { on: string; off: string };
 }
 
 export type CatalogEntry = AgentEntry | ToolEntry;
@@ -277,7 +280,7 @@ export const CATALOG: readonly CatalogEntry[] = [
   { ...tool, id: "op", name: "1Password CLI", bin: "op", installRoad: { road: "script", script: OP_INSTALL }, covers: ["1password-cli"], signIn: SIGN_IN_ROWS.op, defaultOn: false, source: { sessions: 0, images: 0, road: "unmeasured" }, size: measured("unpacked", 42950840) },
   { ...tool, id: "ffmpeg", name: "ffmpeg", bin: "ffmpeg", ...apt(512696320, "ffmpeg"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 0, road: "unmeasured" } },
   { ...tool, id: "yq", name: "yq", bin: "yq", ...github(14180512, "mikefarah/yq", "github.com/mikefarah/yq/v4"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 3, road: "unmeasured" } },
-  { ...tool, id: "git-lfs", name: "Git LFS", bin: "git-lfs", ...apt(11213824, "git-lfs"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 2, road: "unmeasured" } },
+  { ...tool, id: "git-lfs", name: "Git LFS", bin: "git-lfs", ...apt(11213824, "git-lfs"), hook: { on: "git lfs install --system", off: "git lfs uninstall --system" }, signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 2, road: "unmeasured" } },
   { ...tool, id: "tmux", name: "tmux", bin: "tmux", ...apt(1492992, "tmux"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 3, road: "unmeasured" } },
   { ...tool, id: "ruby", name: "Ruby 3.1 with bundler", bin: "ruby", ...apt(67206144, "ruby", "ruby-dev", "ruby-bundler"), covers: ["bundler"], brings: [{ bin: "bundle", version: "bundle --version" }, { bin: "gem", version: "gem --version" }], signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 3, road: "unmeasured" } },
   { ...tool, id: "php", name: "PHP 8.2 with Composer", bin: "php", ...apt(33120256, "php-cli", "composer", "php-mbstring", "php-xml", "php-curl", "php-zip"), brings: [{ bin: "composer", version: "composer --version" }], signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 3, road: "unmeasured" } },

@@ -80,6 +80,8 @@ pub struct SetIn {
     #[cfg_attr(test, schemars(with = "Option<u64>"))]
     pub max_depth: Option<Number>,
     #[serde(default)]
+    pub recipe: Option<String>,
+    #[serde(default)]
     pub reset: Option<Vec<String>>,
 }
 
@@ -96,11 +98,22 @@ struct Placed {
 }
 
 async fn set(host: std::sync::Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
-    let SetIn { computer, threads, machines, spend, nap, spawn, max_machines, max_depth, reset } = input(SET_NAME, arguments)?;
+    let SetIn { computer, threads, machines, spend, nap, spawn, max_machines, max_depth, recipe, reset } = input(SET_NAME, arguments)?;
     let client = host.client().await?;
     let words = record::words();
     let mut frame = Map::new();
-    frame.insert("placeId".to_owned(), Value::from(place_id(&client, &words, &computer).await?));
+    let place = place_id(&client, &words, &computer).await?;
+    // The recipe first, as the command line does: a setting refused after it leaves the computer following it.
+    let followed = match recipe {
+        Some(recipe) => {
+            let mut follow = Map::new();
+            follow.insert("placeId".to_owned(), Value::from(place.clone()));
+            follow.insert("recipe".to_owned(), Value::from(recipe));
+            Some(client.request::<Placed>("places.follow", follow).await?.place)
+        }
+        None => None,
+    };
+    frame.insert("placeId".to_owned(), Value::from(place));
     for (key, value) in [("threads", threads), ("machines", machines), ("spendPerDayUsd", spend)] {
         if let Some(n) = value {
             frame.insert(key.to_owned(), Value::Number(n));
@@ -117,6 +130,9 @@ async fn set(host: std::sync::Arc<Host>, arguments: Value) -> Result<Answer, Ref
     }
     if let Some(reset) = reset.filter(|r| !r.is_empty()) {
         frame.insert("reset".to_owned(), Value::from(reset));
+    }
+    if let Some(place) = followed.filter(|_| frame.len() == 1) {
+        return Ok(Answer::json(&SetOut { computer: place }));
     }
     let Placed { place } = client.request("places.set", frame).await?;
     Ok(Answer::json(&SetOut { computer: place }))
