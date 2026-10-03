@@ -1178,6 +1178,10 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
    * this whole computer, until the job ends. */
   const setting = new Set<string>();
 
+  /** The sign-ins a setup is following on a computer, by `<place id>/<agent>`: what a later run that takes one over
+   * quiets at once and lets go of once it follows the sign-in itself. */
+  const signingIn = new Map<string, { mute(): void; leave(): void }>();
+
   /** The sentence a fork there, or a second setup, is refused with while a setup stands running on that computer:
    * one this host is driving, or one a stopped host left, which resumes when that computer dials back. The one
    * reading, so the start, the update and the gate a create passes cannot disagree about whether it is busy. */
@@ -1316,7 +1320,24 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       }
       putWait(wait);
       let current = wait;
+      // The run that followed this sign-in before goes quiet at once, so only this one writes what it comes to, and
+      // lets go once this one follows it, so a relay still waiting keeps its page and code.
+      const key = `${placeId}/${agent}`;
+      const before = signingIn.get(key);
+      before?.mute();
+      let gone = false;
+      let leave: (() => void) | undefined;
+      const mine = {
+        mute: () => void (gone = true),
+        leave: () => {
+          gone = true;
+          leave?.();
+        },
+      };
+      signingIn.set(key, mine);
       void signIn(placeId, agent, e => {
+        if (gone) return;
+        if (e.state !== "waiting" && e.state !== "running" && signingIn.get(key) === mine) signingIn.delete(key);
         if (e.state === "waiting" || e.state === "running") {
           if (e.url === undefined && e.code === undefined) return;
           current = { ...current, ...(e.url !== undefined ? { url: e.url } : {}), ...(e.code !== undefined ? { code: e.code } : {}) };
@@ -1328,7 +1349,16 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         } else {
           landed({ id: row, label, outcome: "failed", note: e.said ?? "the sign-in did not finish" });
         }
-      }).catch((e: unknown) => landed({ id: row, label, outcome: "failed", note: firstLineOf(e) }));
+      }).then(
+        handle => {
+          leave = () => handle.leave();
+          before?.leave();
+          if (gone) handle.leave();
+        },
+        (e: unknown) => {
+          if (!gone) landed({ id: row, label, outcome: "failed", note: firstLineOf(e) });
+        },
+      );
     };
 
     /** The sign-ins step: an agent that signs in from the vault reads its token there now, and every turn there is

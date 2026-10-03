@@ -290,6 +290,7 @@ import {
   type RecipeFile,
   setupWord,
   pendingWord,
+  PENDING_STEP_WORDS,
   PendingComputer,
   AddLine,
   PlaceWait,
@@ -780,6 +781,8 @@ export const hostPlatform = (): Platform => (platform() === "darwin" ? "darwin" 
 export function computerLines(places: readonly PlaceView[], platform: "darwin" | "linux", spend: readonly PlaceSpend[] = [], pending: readonly PendingComputer[] = []): string[] {
   if (places.length === 0) return ["This host holds no computer. wsp add prints the join line for a computer you are sitting at."];
   const todayOf = (p: PlaceView): number | undefined => spend.find(s => s.place === p.id)?.todayUsd;
+  // A computer that joined and still waits on its picks reads its add's word on its own row.
+  const addOf = (p: PlaceView): PendingComputer | undefined => pending.find(a => a.placeId === p.id);
   const rows = places.map(p => [
     tableName(p),
     computerKindWord(p, platform),
@@ -792,13 +795,13 @@ export function computerLines(places: readonly PlaceView[], platform: "darwin" |
     p.forks === undefined ? "" : `${p.forks.running} of ${p.forks.running + p.forks.room}`,
     ...capCells(p),
     spendCell(p, todayOf(p)),
-    placeStateOf(p, p.present === false ? absentComputer(p.name, null) : null, todayOf(p)).word,
+    placeStateOf(p, p.present === false ? absentComputer(p.name, null) : null, todayOf(p), addOf(p)).word,
     p.kind === "provider" ? "" : (p.lastSeenAt ?? ""),
     placeDaemonBehind(p) ?? "",
     p.build ?? "",
     // The setup on that computer: what is being put on it, then what stands and what failed. Empty on a cloud and
     // on this computer, which wsp installs nothing on.
-    setupWord(p.setup, p.applied),
+    addOf(p) === undefined ? setupWord(p.setup, p.applied) : PENDING_STEP_WORDS[addOf(p)!.step],
     // The agents on that computer, each at the version it answered with and the word for its sign-in. Empty on a
     // cloud account and on this computer, neither of which reports an agent.
     agentsCell(p),

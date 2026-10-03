@@ -540,6 +540,16 @@ describe("the table wsp places prints", () => {
     expect(printed[2]).toContain("joined; waiting on what goes on it");
   });
 
+  it("reads a computer that joined and is still choosing as Pending on its own row, its TOOLS cell saying how far it got", () => {
+    const choices = RecipeFile.parse({ name: "spoo" });
+    const joined = { ...rows[1]!, setup: undefined, applied: undefined };
+    const printed = computerLines([joined], "darwin", [], [{ id: "a_1", address: "root@10.0.0.9", step: "floor", choices, startedAt: "x", placeId: joined.id }]);
+    const header = printed[0]!;
+    expect(printed).toHaveLength(2);
+    expect(printed[1]!.slice(header.indexOf("STATE"), header.indexOf("LAST SEEN")).trim()).toBe("Pending");
+    expect(printed[1]!.slice(header.indexOf("TOOLS"), header.indexOf("AGENTS")).trim()).toBe("joined; the base tools are going on while you choose");
+  });
+
   it("says on the computers table which agents stand on a computer, at which version and signed in how", () => {
     const spoo = { ...rows[1]!, agents: ["claude", "codex"], agentVersions: { claude: "2.1.270 (Claude Code)", codex: "codex-cli 0.153.0" }, signIns: { claude: "vault-key" as const, codex: "none" as const } };
     const printed = computerLines([spoo, rows[0]!, rows[2]!], "darwin");

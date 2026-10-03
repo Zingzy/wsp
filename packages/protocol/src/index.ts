@@ -5266,15 +5266,18 @@ export const SETUP_WORDS = { failed: "Setup failed", needsYou: "Needs you", pend
 export const waitLine = (w: PlaceWait): string => (w.state === "expired" ? `${w.label}'s sign-in ran out; a retry asks for a fresh code` : `${w.label} waits on you to sign in${w.url === undefined ? "" : ` at ${w.url}`}${w.code === undefined ? "" : ` with code ${w.code}`}`);
 
 /** One computer's word for its setup, the one rule the STATE column and the app's rows read: Setup failed, then
- * Needs you (a sign-in waits on the person, or a folder or the GitHub sign-in failed), then Offline (no link), then
- * Setting up, then Behind (its daemon behind this host's), then Ready. A pending add has its own word, pendingWord. */
-export function placeWord(place: Pick<PlaceView, "setup" | "applied" | "daemonVersion">, absent: AbsentComputer | null): PlaceState {
+ * Needs you (a sign-in waits on the person, or a folder or the GitHub sign-in failed), then Pending (it joined and
+ * waits on its picks, `pending` its add), then Offline (no link), then Setting up, then Behind (its daemon behind this
+ * host's), then Ready. An add that never joined is a row of its own, read by pendingWord. */
+export function placeWord(place: Pick<PlaceView, "setup" | "applied" | "daemonVersion">, absent: AbsentComputer | null, pending?: PendingComputer): PlaceState {
   const setup = place.setup;
   if (setup?.state === "failed") return { word: SETUP_WORDS.failed, ...(setup.said !== undefined ? { sentence: setup.said } : {}) };
+  if (pending?.failed !== undefined) return pendingWord(pending);
   const wait = setup?.waiting[0];
   if (wait !== undefined) return { word: SETUP_WORDS.needsYou, sentence: waitLine(wait) };
   const important = importantFailures(place.applied);
   if (important.length > 0) return { word: SETUP_WORDS.needsYou, sentence: important.map(r => `${r.label}: ${r.note ?? "failed"}`).join("; ") };
+  if (pending !== undefined) return pendingWord(pending);
   if (absent !== null) return { word: absent.away, sentence: absent.sentence };
   if (setup?.state === "running") return { word: SETUP_WORDS.settingUp, sentence: setupWord(setup) };
   const behind = placeDaemonBehind(place);
@@ -5308,10 +5311,10 @@ export interface PlaceState {
   sentence?: string;
 }
 
-export function placeStateOf(place: PlaceView, absent: AbsentComputer | null, spentTodayUsd?: number): PlaceState {
+export function placeStateOf(place: PlaceView, absent: AbsentComputer | null, spentTodayUsd?: number, pending?: PendingComputer): PlaceState {
   if (place.blocked !== undefined) return { word: PLACE_BLOCKED_WORD, sentence: place.blocked };
-  const setup = placeWord(place, absent);
-  if (setup.word === SETUP_WORDS.failed || setup.word === SETUP_WORDS.needsYou || absent !== null) return setup;
+  const setup = placeWord(place, absent, pending);
+  if (setup.word === SETUP_WORDS.failed || setup.word === SETUP_WORDS.needsYou || setup.word === SETUP_WORDS.pending || absent !== null) return setup;
   const limit = placeAtLimitLine(place, spentTodayUsd);
   if (limit !== undefined) return { word: "At limit", tone: "warning", sentence: limit };
   const full = placeFullLine(place);

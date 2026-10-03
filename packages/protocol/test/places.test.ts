@@ -467,6 +467,15 @@ describe("the setup on a computer you own", () => {
     expect(pendingWord({ ...pending, step: "check", failed: { said: "spoo runs no systemd" } })).toEqual({ word: "Setup failed", sentence: "spoo runs no systemd" });
   });
 
+  it("reads a joined computer still choosing as Pending, after Needs you and before Offline", () => {
+    const base = { id: "p_1", kind: "computer" as const, name: "spoo", default: false, daemonVersion: DAEMON_VERSION };
+    const choosing: PendingComputer = { id: "a_1", address: "root@spoo", step: "choosing", choices: RecipeFile.parse({ name: "spoo" }), startedAt: "x", placeId: "p_1" };
+    expect(placeWord(base, null, choosing)).toEqual({ word: "Pending", sentence: "joined; waiting on what goes on it" });
+    expect(placeWord(base, absentComputer("spoo", null), choosing).word).toBe("Pending");
+    expect(placeWord({ ...base, setup: { ...running, waiting: [wait] } }, null, choosing).word).toBe("Needs you");
+    expect(placeWord(base, null, { ...choosing, failed: { said: "the base tools did not install: curl" } })).toEqual({ word: "Setup failed", sentence: "the base tools did not install: curl" });
+  });
+
   it("says on the TOOLS cell what is under way, where it stopped, or what stands", () => {
     expect(setupWord(undefined)).toBe("");
     expect(setupWord(running)).toBe("setting up the agents");

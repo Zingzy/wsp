@@ -454,6 +454,25 @@ describe("a host that stops in the middle of a setup", () => {
     expect((await rowOf(place.id)).setup?.waiting).toEqual([expect.objectContaining({ row: "signins/codex", url: "https://auth.example/codex/1", code: "CODE-1" })]);
   });
 
+  it("hands a sign-in still waiting to the retry that takes it over, so the old run writes nothing once it lands", async () => {
+    const s = signIns();
+    const { frames } = await hosting({ provision: provisioner().wired, acts: s.acts });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: LAPTOP }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    await until(async () => (await rowOf(place.id)).setup?.waiting.some(w => w.url !== undefined) === true);
+    const first = (await rowOf(place.id)).setup!.addId;
+    const retried = await runtime!.places!.setUp(place.id, {});
+    await until(async () => (await rowOf(place.id)).setup?.state === "done" && (await rowOf(place.id)).setup?.addId === retried.addId);
+    // The retry followed the relay still waiting: one login, its page and code as they were.
+    expect(s.started).toEqual(["codex"]);
+    expect((await rowOf(place.id)).setup?.waiting[0]?.code).toBe("CODE-1");
+    const heard = frames.length;
+    s.end("codex", { state: "signed-in" });
+    await until(async () => (await rowOf(place.id)).setup?.waiting.length === 0);
+    await until(() => frames.slice(heard).some(f => f.addId === retried.addId && f.end !== undefined));
+    expect(frames.slice(heard).filter(f => f.addId === first)).toEqual([]);
+  });
+
   it("reads a sign-in whose page ran out as expired, and a retry runs the login again for a fresh code", async () => {
     const fc = fakeClock();
     const s = signIns();
