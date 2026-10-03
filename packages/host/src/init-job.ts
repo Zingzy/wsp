@@ -172,7 +172,7 @@ class LineSink extends Writable {
     const lines = text.split(/\r?\n/);
     this.partial = lines.pop() ?? "";
     for (const line of lines) {
-      const plain = stripVTControlCharacters(line).replace(/^[│◇◆▲■○●◒◐◓◑─]+\s*/u, "").trim();
+      const plain = stripVTControlCharacters(line).replace(/^[\u2502\u25c7\u25c6\u25b2\u25a0\u25cb\u25cf\u25d2\u25d0\u25d3\u25d1\u2500]+\s*/u, "").trim();
       if (plain !== "") this.onLine(plain);
     }
     callback();

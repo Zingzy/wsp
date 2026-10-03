@@ -22,7 +22,7 @@ const DOT = /[·•∙⋅‧・]|\\u(?:00b7|2022|2219|22c5|2027|30fb)|&(?:middot
 const ALLOWED: ReadonlyArray<{ file: string; text: string; why: string }> = [
   { file: "apps/web/src/settings/AddComputer.tsx", text: "•••• ••••", why: "the masked shape of a pairing code before it is shown" },
   { file: "apps/web/src/settings/recipe/RecipeScreen.tsx", text: '"••••••••"', why: "the masked placeholder of a key already saved" },
-  { file: "packages/protocol/src/format.ts", text: 'NEEDS_YOU_MARK = "• "', why: "a mark leading the window title while a need stands, with no text before it" },
+  { file: "packages/protocol/src/format.ts", text: 'NEEDS_YOU_MARK = "\\u2022 "', why: "a mark leading the window title while a need stands, with no text before it" },
   { file: "packages/host/src/init-select.ts", text: 'dim("•")', why: "the glyph leading a row that always comes along, in the column where other rows carry their box" },
   { file: "packages/host/src/places.ts", text: 'event.state === "done" ? "·"', why: "the mark leading an install step that is done, in the column where a failed one carries x" },
 ];

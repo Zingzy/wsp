@@ -58,7 +58,7 @@ export function cutDiff(text: string, max: number = DRAFT_DIFF_MAX_BYTES): strin
   if (bytes.length <= max) return text;
   const head = bytes.subarray(0, max);
   const nl = head.lastIndexOf(10);
-  return new TextDecoder().decode(nl > 0 ? head.subarray(0, nl + 1) : head).replace(/�+$/, "");
+  return new TextDecoder().decode(nl > 0 ? head.subarray(0, nl + 1) : head).replace(/\uFFFD+$/, "");
 }
 
 /** How much of the task a draft carries: the words a change is for are at the top of a brief. */
@@ -89,7 +89,7 @@ const SUBJECT_MAX = 72;
  * one blank line. */
 export function commitMessage(answer: string): string | null {
   let text = answer.trim().replace(/^```[^\n]*\n([\s\S]*?)\n?```$/, "$1").trim();
-  const quoted = /^(["'“‘])([\s\S]*)(["'”’])$/.exec(text);
+  const quoted = /^(["'\u201C\u2018])([\s\S]*)(["'\u201D\u2019])$/.exec(text);
   if (quoted !== null) text = quoted[2]!.trim();
   text = text.replace(/\s*\u2014\s*/g, ", ");
   const lines = text.split(/\r?\n/);
