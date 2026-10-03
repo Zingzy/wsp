@@ -122,10 +122,11 @@ function useHereProjects() {
   return useMemo(() => projects.filter(p => p.computer === HERE_PLACE_ID), [projects]);
 }
 
-/** What the host measured of a folder of the computer running it, by its path: the size and whether it is private. */
-const folderFacts = (facts: RecipeOptions["folders"], path: string): Pick<FolderOption, "bytes" | "private"> => {
+/** What the host read of a folder of the computer running it, by its path: its size, whether it is private, and the
+ * commits no remote holds. */
+const folderFacts = (facts: RecipeOptions["folders"], path: string): Pick<FolderOption, "bytes" | "private" | "unpushed"> => {
   const fact = facts?.find(f => f.path === path);
-  return { ...(fact?.bytes === undefined ? {} : { bytes: fact.bytes }), ...(fact?.private === undefined ? {} : { private: fact.private }) };
+  return { ...(fact?.bytes === undefined ? {} : { bytes: fact.bytes }), ...(fact?.private === undefined ? {} : { private: fact.private }), ...(fact?.unpushed === undefined ? {} : { unpushed: fact.unpushed }) };
 };
 
 function ProjectsStep({ picks, box, boxId, facts, onChange }: { picks: RecipeFile; box: string; boxId: string; facts: RecipeOptions["folders"]; onChange: (next: RecipeFile) => void }) {

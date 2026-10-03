@@ -7,15 +7,18 @@
 // where the picks hold it.
 import { GitCommitHorizontalIcon, GithubIcon, PlugIcon, PuzzleIcon, ScrollTextIcon, SquareTerminalIcon, TerminalIcon } from "lucide-react";
 import type { ReactNode } from "react";
-import { fmtBytes, sizeTone, type GitHubSignIn, type ProjectHue, type ProjectIcon, type RecipeFile, type RecipeOptions, type RecipeSignIn } from "@wsp/protocol";
+import { HERE_PLACE_ID, fmtBytes, hereName, sizeTone, type GitHubSignIn, type ProjectHue, type ProjectIcon, type RecipeFile, type RecipeOptions, type RecipeSignIn } from "@wsp/protocol";
 import { AgentMarks } from "../../components/agents/agentsParts.js";
+import { useAgentsReport } from "../../components/agents/useAgentsReport.js";
 import { HarnessMark } from "../../components/chat/HarnessMark.js";
 import { Input } from "../../components/ui/input.js";
 import { Radio, RadioGroup } from "../../components/ui/radio-group.js";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../../components/ui/select.js";
 import { cn } from "../../lib/utils.js";
+import { useStore } from "../../protocol/store.js";
 import { PROJECT_GLYPHS, PROJECT_HUES } from "../../projects/look.js";
 import { HueSelect, IconSelect } from "../../projects/LookPicker.js";
+import { signInSentence } from "../agents.js";
 import { ADD_COMPUTER_WORDS, FACT } from "../format.js";
 import { GlyphFrame, Grid } from "../grid.js";
 import { CARD_INSET, LIST_TITLE, NOTE, ROW_FIELD, ROW_FLOOR, SELECT_WIDTH } from "../layout.js";
@@ -58,6 +61,9 @@ const signInWords = (box: string, kind: string | undefined): Record<RecipeSignIn
 
 /** The agents; on a recipe's page each ticked one says how it signs in as its note rather than a picker. */
 export function AgentsPicks({ picks, options, onChange, box, versions, onlyTicked = false, wayAsNote = false }: PickProps & { versions?: Record<string, string>; wayAsNote?: boolean }) {
+  // Where the picks are made, each agent says how it is signed in on the computer running the host.
+  const { report } = useAgentsReport(wayAsNote ? null : { placeId: HERE_PLACE_ID });
+  const here = useStore(s => hereName(s.places));
   return (
     <Grid id="agents">
       {options.agents
@@ -67,6 +73,8 @@ export function AgentsPicks({ picks, options, onChange, box, versions, onlyTicke
           const words = signInWords(box, agent.kind);
           const way = picks.agents[agent.id]?.signin ?? agent.signins[0] ?? "vault";
           const version = versions?.[agent.id];
+          const row = report?.agents.find(a => a.id === agent.id && a.installed);
+          const note = on && wayAsNote ? words[way] : row === undefined ? undefined : signInSentence(row, here);
           const select =
             on && !wayAsNote && agent.signins.length > 0 ? (
               <Select value={way} onValueChange={next => onChange(signIn(picks, agent.id, next as RecipeSignIn))}>
@@ -91,7 +99,7 @@ export function AgentsPicks({ picks, options, onChange, box, versions, onlyTicke
               glyph={<HarnessMark harness={agent.id} label={agent.name} className="size-5" />}
               name={agent.name}
               {...(version === undefined ? {} : { tag: version })}
-              {...(on && wayAsNote ? { note: words[way] } : {})}
+              {...(note === undefined ? {} : { note })}
               {...(select === null && agent.bytes === undefined
                 ? {}
                 : {
@@ -241,7 +249,14 @@ export interface FolderOption {
   bytes?: number;
   /** GitHub refuses an anonymous read of its repository: the box clones it only with GitHub signed in there. */
   private?: boolean;
+  /** Commits no remote holds. */
+  unpushed?: number;
 }
+
+/** What a project's row says of its repository: its remote and what of it is not pushed, or that it has none. A folder
+ * whose remote nobody read says nothing. */
+const folderNote = (folder: FolderOption): string | undefined =>
+  folder.remote === undefined ? undefined : folder.remote === "" ? ADD_COMPUTER_WORDS.noRemote : ADD_COMPUTER_WORDS.remoteLine(folder.remote, folder.unpushed);
 
 /** The projects to import: a ticked one opens its name, icon and colour. A name the computer already has a project
  * by is the one state that questions the field. */
@@ -256,7 +271,7 @@ export function ProjectsPicks({ picks, onChange, box, folders, taken }: Omit<Pic
         const hue = row?.hue ?? folder.hue;
         const Glyph = PROJECT_GLYPHS[icon];
         const clash = row !== undefined && taken(name);
-        const note = row !== undefined && noGitHub && folder.private === true ? ADD_COMPUTER_WORDS.needsGitHub : folder.remote;
+        const note = row !== undefined && noGitHub && folder.private === true ? ADD_COMPUTER_WORDS.needsGitHub : folderNote(folder);
         const put = (next: Partial<RecipeFile["folders"][string]>): void => onChange(tickFolder(picks, folder.key, { from: folder.path, name, icon, hue, keep: row?.keep ?? [], ...next }));
         return (
           <PickRow
@@ -267,7 +282,7 @@ export function ProjectsPicks({ picks, onChange, box, folders, taken }: Omit<Pic
             glyph={<Glyph aria-hidden className={cn("size-4", hue === "neutral" ? "text-foreground/80" : PROJECT_HUES[hue].text)} />}
             name={name}
             tag={folder.path}
-            {...(note === undefined || note === "" ? {} : { note })}
+            {...(note === undefined ? {} : { note })}
             {...(folder.bytes === undefined ? {} : { slot: <Size bytes={folder.bytes} /> })}
           >
             {row === undefined ? null : (

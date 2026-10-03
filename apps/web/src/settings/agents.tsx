@@ -9,7 +9,7 @@
 // the same agent cards and tabs.
 import { BotIcon, CircleArrowUpIcon, ScrollTextIcon, ServerIcon } from "lucide-react";
 import { HERE_PLACE_ID, accessWord, effortsFor, listWords, markedDefault, modelOf, type AccessChoice, type AgentRow, type HarnessCatalog, type PlaceView } from "@wsp/protocol";
-import { agentName } from "@wsp/catalog";
+import { agentName, catalogEntry } from "@wsp/catalog";
 import { copyText } from "../actions/clipboard.js";
 import { ActButton } from "../components/agents/agentsParts.js";
 import { AGENTS_LIST_WORDS, heldReason, recipeMissLines, refusedLines, waitingFlow, type RefusedLine, type RowsContext } from "../components/agents/agentsRows.js";
@@ -91,6 +91,19 @@ export function signInHead(row: Pick<AgentRow, "signIn" | "signInDetail" | "sign
   const detail = row.signInDetail;
   const whole = detail === undefined ? line : `${W.signedInWith}${kind === "api-key" ? "an " : ""}${detail.replace(/\bthe machine\b/g, computer)}`;
   return { line, whole, ...(planned ? { plan } : {}) };
+}
+
+/** The plan word a vendor names its plan by: ChatGPT Plus, Claude Max. */
+export const planWord = (plan: string, brand: string | undefined): string => {
+  const word = plan[0]!.toUpperCase() + plan.slice(1);
+  return brand === undefined ? word : `${brand} ${word}`;
+};
+
+/** How an agent is signed in on a computer as one sentence: the head of its page, its plan in the vendor's word. */
+export function signInSentence(row: Pick<AgentRow, "id" | "signIn" | "signInDetail" | "signInKind" | "signInPlan">, computer: string): string {
+  const entry = catalogEntry(row.id);
+  const brand = entry?.kind === "agent" ? entry.planBrand : undefined;
+  return `${signInHead(row, computer, row.signInPlan === undefined ? undefined : planWord(row.signInPlan, brand)).line}.`;
 }
 
 /** The vendor's own update for an agent, copied for the person to run on that computer: wsp never swaps a binary

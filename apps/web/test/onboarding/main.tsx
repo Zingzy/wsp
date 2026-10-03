@@ -7,7 +7,7 @@
 // the host's shapes, so a screenshot of one is what the app draws for that
 // record. ?scroll=bottom scrolls the dialog's panel to its end.
 import { createRoot } from "react-dom/client";
-import { DAEMON_VERSION, DEFAULT_PREFERENCES, PLACE_HOST_KEY_KIND, RecipeFile, hostKeyUnconfirmedRefusal, type PendingComputer, type PlaceAddJob, type PlaceApplied, type PlaceSetup, type PlaceView, type ProjectView, type RecipeOptions, type RecipeView, type SessionView, type WorkspaceView } from "@wsp/protocol";
+import { DAEMON_VERSION, type AgentRow, type AgentsReport, DEFAULT_PREFERENCES, PLACE_HOST_KEY_KIND, RecipeFile, hostKeyUnconfirmedRefusal, type PendingComputer, type PlaceAddJob, type PlaceApplied, type PlaceSetup, type PlaceView, type ProjectView, type RecipeOptions, type RecipeView, type SessionView, type WorkspaceView } from "@wsp/protocol";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import { addNotice } from "../../src/notices/store";
 import { useStore } from "../../src/protocol/store";
@@ -73,11 +73,23 @@ const OPTIONS: RecipeOptions = {
     { id: "github", label: "the GitHub sign-in", signins: ["vault", "machine", "skip"] },
   ],
   folders: [
-    { name: "wsp", path: "~/wsp", remote: "github.com/Zingzy/wsp", private: true, bytes: 1.1 * 1024 * MB },
-    { name: "spoo", path: "~/spoo", remote: "github.com/spoo-me/url-shortener", private: false, bytes: 180 * MB },
+    { name: "wsp", path: "~/wsp", remote: "github.com/Zingzy/wsp", private: true, unpushed: 2, bytes: 1.1 * 1024 * MB },
+    { name: "spoo", path: "~/spoo", remote: "github.com/spoo-me/url-shortener", private: false, unpushed: 0, bytes: 180 * MB },
     { name: "laya", path: "~/laya", bytes: 340 * MB },
     { name: "kartsmash", path: "~/kartsmash", bytes: 2.3 * 1024 * MB },
   ],
+};
+
+const hereAgent = (id: string, name: string, over: Partial<AgentRow>): AgentRow => ({ id, name, installed: true, road: "own", signIn: "signed-in", signInRoad: "key", wspTools: true, ...over });
+const HERE_AGENTS: AgentsReport = {
+  target: { placeId: "here" },
+  home: "/Users/zingzy",
+  user: "zingzy",
+  readAt: AT,
+  agents: [hereAgent("claude", "Claude Code", { signInKind: "api-key" }), hereAgent("codex", "Codex", { signInKind: "subscription", signInPlan: "plus" }), hereAgent("opencode", "OpenCode", { signIn: "none" })],
+  skills: [],
+  servers: [],
+  refused: [],
 };
 
 const project = (id: string, name: string, path: string, remote: string, computer = "here"): ProjectView => ({ id, name, computer, source: { kind: "folder", path }, path, remote, defaultBranch: "main", memoryKey: id, memoryDir: "/m" }) as ProjectView;
@@ -221,6 +233,7 @@ const { api } = settingsApi({
   recipesOptions: async () => OPTIONS,
   recipesList: async () => (screen === "recipes-empty" ? [] : RECIPES),
   placesChoose: async () => pending[0]!,
+  agentsRead: async () => HERE_AGENTS,
   placesFollow: async (_: string, recipe: string) => ({ ...studio, recipe }),
   placesSkip: async () => studio,
   placesSetupLog: async () => [

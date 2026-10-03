@@ -136,6 +136,11 @@ export const ADD_COMPUTER_WORDS = {
   skip: "Skip",
   /** A private repository ticked while GitHub is skipped: the box cannot clone it. */
   needsGitHub: "Private; needs GitHub to clone. Go back to sign in, or skip it.",
+  /** A project with no remote travels as its folder. */
+  noRemote: "No remote; copied whole.",
+  /** A project's remote and what of it no remote holds: nothing, or the commits that travel with it. */
+  remoteLine: (remote: string, unpushed: number | undefined): string =>
+    `${remote}${unpushed === undefined ? "" : unpushed === 0 ? ", clean" : `, ${unpushed} unpushed ${unpushed === 1 ? "commit comes" : "commits come"} along`}.`,
   diskLine: (needed: string, free: string): string => `${needed} needed, ${free} free`,
   diskShort: (box: string, free: string, needed: string): { said: string; fix: string } => ({ said: `${box} has ${free} free; these picks need ${needed}.`, fix: `Untick some rows, or free room on ${box}.` }),
   unmeasured: (n: number): string => `${n} picked ${n === 1 ? "row was" : "rows were"} not measured`,

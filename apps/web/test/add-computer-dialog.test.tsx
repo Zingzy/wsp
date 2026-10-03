@@ -7,12 +7,13 @@
 // page, and closing mid-setup said as a notice.
 import { act, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { PLACE_HOST_KEY_KIND, RecipeFile, type PlaceAddJob, type PlaceAddStep, type EventUnion, type PendingComputer, type PlaceSetup, type PlaceView, type ProjectView, type RecipeOptions, type RecipeView } from "@wsp/protocol";
+import { PLACE_HOST_KEY_KIND, RecipeFile, type AgentRow, type AgentsReport, type PlaceAddJob, type PlaceAddStep, type EventUnion, type PendingComputer, type PlaceSetup, type PlaceView, type ProjectView, type RecipeOptions, type RecipeView } from "@wsp/protocol";
 import { RequestError, type Api, type SshLogin } from "../src/protocol/client.js";
 import { useNotices } from "../src/notices/store.js";
 import { useStore } from "../src/protocol/store.js";
 import { closeAdd, openAdd, openPending, openSetup, useAddFlow } from "../src/settings/add/addFlow.js";
 import { stepOutput } from "../src/settings/add/setup.js";
+import { AGENTS_REPORT } from "./fixtures/agents-report.js";
 import { mountSettings, resetSettings, settingsApi, settle } from "./settings-harness.js";
 
 const here: PlaceView = { id: "here", kind: "computer", name: "zingzy-mbp", label: "zingzy's MacBook Pro", default: true, present: true, takesForks: false };
@@ -339,10 +340,14 @@ describe("Add a computer's picks read the host's facts", () => {
       { id: "git", label: "git settings and identity" },
       { id: "github", label: "the GitHub sign-in", signins: ["machine", "skip"] },
     ],
-    folders: [{ name: "wsp", path: "/Users/zingzy/wsp", remote: "github.com/Zingzy/wsp", private: true, bytes: 1.1 * 1024 ** 3 }],
+    folders: [
+      { name: "wsp", path: "/Users/zingzy/wsp", remote: "github.com/Zingzy/wsp", private: true, unpushed: 2, bytes: 1.1 * 1024 ** 3 },
+      { name: "spoo", path: "/Users/zingzy/spoo", remote: "github.com/spoo-me/url-shortener", private: false, unpushed: 0, bytes: 180 * MB },
+      { name: "laya", path: "/Users/zingzy/laya", bytes: 340 * MB },
+    ],
   };
-  const open = async (at: "agents" | "clis" | "github" | "projects", picks?: RecipeFile): Promise<ReturnType<typeof host>> => {
-    const fake = host({ recipesOptions: async () => FACTS } as Partial<Api>);
+  const open = async (at: "agents" | "clis" | "github" | "projects", picks?: RecipeFile, over: Partial<Api> = {}): Promise<ReturnType<typeof host>> => {
+    const fake = host({ recipesOptions: async () => FACTS, ...over } as Partial<Api>);
     useStore.setState({ places: [here, studio] });
     mountSettings({ api: fake.api, at: { kind: "group", group: "computers" } });
     act(() => useAddFlow.setState({ open: true, step: at, placeId: studio.id, pendingId: "a_1", address: "studio", ...(picks === undefined ? {} : { picks }) }));
@@ -353,6 +358,16 @@ describe("Add a computer's picks read the host's facts", () => {
     const cell = dialog()!.querySelector(`[data-pick-row='${row}'] [data-k=size]`);
     return [cell?.textContent, cell?.getAttribute("data-tone")];
   };
+
+  it("says how each agent is signed in here in the Agents page's own sentence", async () => {
+    const agent = (id: string, name: string, over: Partial<AgentRow>): AgentRow => ({ id, name, installed: true, road: "own", signIn: "signed-in", signInRoad: "key", wspTools: false, ...over });
+    const report: AgentsReport = { ...AGENTS_REPORT, target: { placeId: "here" }, agents: [agent("claude", "Claude Code", { signInKind: "api-key" }), agent("codex", "Codex", { signInKind: "subscription", signInPlan: "plus" })] };
+    const reads: unknown[] = [];
+    await open("agents", undefined, { agentsRead: async (target: unknown) => (reads.push(target), report) } as Partial<Api>);
+    await waitFor(() => expect(dialog()!.querySelector("[data-pick-row='claude']")?.textContent).toContain("Signed in with an API key."));
+    expect(dialog()!.querySelector("[data-pick-row='codex']")?.textContent).toContain("Signed in with ChatGPT Plus.");
+    expect(reads).toEqual([{ placeId: "here" }]);
+  });
 
   it("draws each agent's size and its sign-in words by how it signs in", async () => {
     await open("agents");
@@ -391,7 +406,18 @@ describe("Add a computer's picks read the host's facts", () => {
     expect(row().textContent).toContain("Private; needs GitHub to clone. Go back to sign in, or skip it.");
     act(() => useAddFlow.setState({ picks: picks("vault") }));
     expect(row().textContent).not.toContain("needs GitHub");
-    expect(row().textContent).toContain("github.com/Zingzy/wsp");
+    expect(row().textContent).toContain("github.com/Zingzy/wsp, 2 unpushed commits come along.");
+  });
+
+  it("says of each project whether it has a remote and what of it is not pushed", async () => {
+    const spoo: ProjectView = { ...wsp, id: "pr_spoo", name: "spoo", path: "/Users/zingzy/spoo", remote: "github.com/spoo-me/url-shortener" };
+    const laya: ProjectView = { ...wsp, id: "pr_laya", name: "laya", path: "/Users/zingzy/laya", remote: "" };
+    useStore.setState({ projects: [wsp, spoo, laya] });
+    await open("projects", RecipeFile.parse({ name: "studio", configs: { github: { signin: "vault" } } }));
+    const note = (key: string): string | null | undefined => dialog()!.querySelector(`[data-pick-row='${key}'] [data-pick-note]`)?.textContent;
+    await waitFor(() => expect(note("spoo")).toBe("github.com/spoo-me/url-shortener, clean."));
+    expect(note("laya")).toBe("No remote; copied whole.");
+    expect(note("wsp")).toBe("github.com/Zingzy/wsp, 2 unpushed commits come along.");
   });
 });
 
