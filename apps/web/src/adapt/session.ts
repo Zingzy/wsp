@@ -448,6 +448,7 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
         runs.set(event.block, event);
         continue;
       case "session.moved":
+      case "session.behind":
       case "session.subagent":
         continue;
       case "session.checkpoint": {

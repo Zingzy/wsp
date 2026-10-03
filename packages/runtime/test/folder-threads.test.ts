@@ -18,6 +18,7 @@ import {
   notMadeWorktreeLine,
   REWIND_SHARED_LINE,
   worktreeChangedLine,
+  PR_BEHIND_WORDS,
   WORKTREE_BUSY_LINE,
   WORKTREE_FORCE_LINE,
   type AdapterEvent,
@@ -95,7 +96,7 @@ function harness(starts: HarnessStartOptions[]): HarnessAdapterFactory {
 /** A daemon that takes checkpoints and restores, recording every frame; a test adds an answer to any op. */
 function fakeDaemon() {
   const frames: Record<string, unknown>[] = [];
-  const answers: Record<string, (f: Record<string, unknown>) => DaemonResponse> = {};
+  const answers: Record<string, (f: Record<string, unknown>) => DaemonResponse | Promise<DaemonResponse>> = {};
   const open = async (): Promise<DaemonChannel> => ({
     send: async (frame: DaemonFrame) => {
       const f = frame as unknown as Record<string, unknown>;
@@ -385,6 +386,48 @@ describe("taking a folder's record away", () => {
   });
 });
 
+describe("a second start on a pull request whose branch a worktree holds", () => {
+  async function held() {
+    const g = await onGitHubHere();
+    const first = await g.rt.workspaces.start({ url: g.url, agent: "claude" });
+    const path = first.workspace.worktree!.path;
+    git(g.author, "commit", "-q", "--allow-empty", "-m", "two");
+    git(g.author, "push", "-q", "origin", "feat/pr");
+    return { ...g, first, path };
+  }
+  const behindLines = async (rt: Runtime, id: string): Promise<string[]> =>
+    (await rt.sessions.history(id)).flatMap(e => (e.type === "session.behind" ? [e.text] : []));
+
+  it("runs in that worktree, brought up to the pull request first where it is clean and only behind", async () => {
+    const { rt, author, first, path } = await held();
+    const second = await rt.workspaces.start({ url: "https://github.com/dev/spoo/pull/7", agent: "claude" });
+    expect(second.workspace.id).toBe(first.workspace.id);
+    expect(git(path, "rev-parse", "HEAD")).toBe(git(author, "rev-parse", "HEAD"));
+    expect(await behindLines(rt, first.workspace.id)).toEqual([]);
+  });
+
+  it("runs there as it stands where it holds files no commit has, and the thread says how to update", async () => {
+    const { rt, author, first, path } = await held();
+    writeFileSync(join(path, "draft.md"), "mine\n");
+    const was = git(path, "rev-parse", "HEAD");
+    const second = await rt.workspaces.start({ url: "https://github.com/dev/spoo/pull/7", agent: "claude" });
+    expect(second.workspace.id).toBe(first.workspace.id);
+    expect(git(path, "rev-parse", "HEAD")).toBe(was);
+    expect(git(path, "rev-parse", "HEAD")).not.toBe(git(author, "rev-parse", "HEAD"));
+    expect(await behindLines(rt, first.workspace.id)).toEqual([PR_BEHIND_WORDS.changed(7, path)]);
+  });
+
+  it("runs there as it stands where its branch went another way, and the thread says how to bring them together", async () => {
+    const { rt, first, path } = await held();
+    git(path, "commit", "-q", "--allow-empty", "-m", "mine");
+    const was = git(path, "rev-parse", "HEAD");
+    const second = await rt.workspaces.start({ url: "https://github.com/dev/spoo/pull/7", agent: "claude" });
+    expect(second.workspace.id).toBe(first.workspace.id);
+    expect(git(path, "rev-parse", "HEAD")).toBe(was);
+    expect(await behindLines(rt, first.workspace.id)).toEqual([PR_BEHIND_WORDS.diverged(7, path)]);
+  });
+});
+
 /** A thread on this computer, as its turn's own token reaches the host over this computer's road. */
 const asThread = (scope: ThreadScope): Caller => ({ origin: "here", by: scope });
 
@@ -436,6 +479,46 @@ describe("what a thread's own token reaches on this computer", () => {
   });
 });
 
+describe("the worktrees a thread asks for itself", () => {
+  async function lead() {
+    const h = here();
+    const folder = repo();
+    const project = await h.rt.projects.add({ source: folder });
+    const home = await h.rt.workspaces.folderFor({ project: project.id });
+    const run = await h.rt.sessions.start(home.workspace.id, { prompt: "lead" });
+    await run.finished;
+    const threadId = run.view().threadId!;
+    const scope: ThreadScope = { kind: "thread", threadId, workspaceId: home.workspace.id, rootThreadId: threadId };
+    return { ...h, folder, project, scope };
+  }
+
+  it("are its tree's when it asks wsp worktree for one, so a start by its path or its branch runs there", async () => {
+    const { rt, project, scope, starts } = await lead();
+    const made = await rt.workspaces.worktree({ project: project.id, branch: "feat/mine" }, asThread(scope));
+    const record = (await rt.workspaces.list()).find(w => w.worktree?.path === made.path)!;
+    expect(record.worktree?.madeFor).toBe(scope.rootThreadId);
+    const byPath = await rt.workspaces.folderFor({ project: project.id, cwd: made.path }, asThread(scope));
+    expect(byPath.workspace.id).toBe(record.id);
+    await (await rt.sessions.start(byPath.workspace.id, { prompt: "by path", cwd: made.path }, asThread(scope))).finished;
+    const byBranch = await rt.workspaces.folderFor({ project: project.id, branch: "feat/mine" }, asThread(scope));
+    expect(byBranch.workspace.id).toBe(record.id);
+    await (await rt.sessions.start(byBranch.workspace.id, { prompt: "by branch" }, asThread(scope))).finished;
+    expect(starts.slice(1).map(s => s.cwd)).toEqual([made.path, made.path]);
+  });
+
+  it("stay its tree's when one is removed by hand and made again", async () => {
+    const { rt, project, scope } = await lead();
+    const first = await rt.workspaces.folderFor({ project: project.id, branch: "feat/again" }, asThread(scope));
+    const path = first.workspace.worktree!.path;
+    git(project.path, "worktree", "remove", "--force", path);
+    const again = await rt.workspaces.folderFor({ project: project.id, branch: "feat/again" }, asThread(scope));
+    expect(again.workspace.id).toBe(first.workspace.id);
+    expect(again.workspace.worktree?.madeFor).toBe(scope.rootThreadId);
+    await expect(rt.workspaces.checkout(again.workspace.id, asThread(scope))).resolves.toBeDefined();
+    await (await rt.sessions.start(again.workspace.id, { prompt: "again" }, asThread(scope))).finished;
+  });
+});
+
 describe("a worktree removed by hand before any thread ran in it", () => {
   it("takes its first thread in the project folder with the moved line, and keeps the record and the thread", async () => {
     const { rt, starts } = here();
@@ -475,42 +558,77 @@ describe("deleting a thread that runs in a worktree wsp made", () => {
   });
 });
 
-describe("a pull request's head", () => {
-  /** A project whose origin is a GitHub repository, served from a bare repo here by this computer's daemon fake. */
-  async function onGitHub() {
-    const h = here();
-    const root = scratch();
-    const bare = join(root, "spoo.git");
-    const folder = join(root, "spoo");
-    execFileSync("git", ["init", "-q", "--bare", "-b", "main", bare]);
-    execFileSync("git", ["clone", "-q", bare, folder]);
-    git(folder, "commit", "-q", "--allow-empty", "-m", "first");
-    git(folder, "push", "-q", "origin", "main");
-    const author = join(root, "author");
-    execFileSync("git", ["clone", "-q", bare, author]);
-    git(author, "checkout", "-q", "-b", "feat/pr");
-    git(author, "commit", "-q", "--allow-empty", "-m", "one");
-    git(author, "push", "-q", "origin", "feat/pr");
-    git(folder, "remote", "set-url", "origin", "https://github.com/dev/spoo.git");
-    const url = "https://github.com/dev/spoo/pull/7";
-    const fact: PullRequest = { number: 7, url, state: "open", host: "github.com", draft: false, base: "main", branch: "feat/pr", headOid: "a".repeat(40), headSubject: "one", mergeable: "mergeable", mergeState: "clean", review: "none", checks: [], additions: 0, deletions: 0, changedFiles: 0, commits: 1 };
-    h.daemon.answers["git.prRead"] = () => ({ id: 1, ok: true, pr: fact }) as DaemonResponse;
-    h.daemon.answers["git.issueRead"] = () => ({ id: 1, ok: true, issue: { number: 7, url, title: "one", body: "", state: "OPEN", comments: [] } }) as DaemonResponse;
-    h.daemon.answers["git.fetchBranch"] = f => {
-      const into = String(f["into"] ?? f["branch"]);
-      try {
-        git(String(f["cwd"]), "fetch", "-q", "--no-tags", bare, `refs/heads/${String(f["branch"])}:refs/heads/${into}`);
-      } catch (e) {
-        return { id: 1, ok: false, error: e instanceof Error ? e.message : String(e) } as DaemonResponse;
-      }
-      return { id: 1, ok: true, branch: into, oid: git(String(f["cwd"]), "rev-parse", `refs/heads/${into}`) } as DaemonResponse;
+describe("deleting a thread whose last checkpoint is still being written", () => {
+  it("waits for the checkpoint to land before it drops the thread's refs", async () => {
+    const { rt, daemon } = here();
+    const folder = repo();
+    const project = await rt.projects.add({ source: folder });
+    const at = await rt.workspaces.folderFor({ project: project.id });
+    let land = (): void => {};
+    const landing = new Promise<void>(go => (land = go));
+    daemon.answers["git.checkpoint"] = async f => {
+      await landing;
+      daemon.frames.push({ op: "checkpoint landed" });
+      return { id: 1, ok: true, ref: `refs/wsp/checkpoints/${String(f["scope"])}/${String(f["thread"])}/${String(f["turn"])}`, commit: "c", changed: true } as DaemonResponse;
     };
-    const project = await h.rt.projects.add({ source: folder });
-    return { ...h, folder, author, project, url };
-  }
+    const run = await rt.sessions.start(at.workspace.id, { prompt: "one" });
+    await run.finished;
+    await until(() => daemon.frames.some(f => f["op"] === "git.checkpoint"));
+    const deleting = rt.sessions.delete(run.view().threadId!);
+    await new Promise(r => setTimeout(r, 20));
+    land();
+    await deleting;
+    const ops = daemon.frames.map(f => f["op"]);
+    expect(ops.indexOf("checkpoint landed")).toBeGreaterThan(-1);
+    expect(ops.indexOf("git.checkpointDrop")).toBeGreaterThan(ops.indexOf("checkpoint landed"));
+  });
+});
 
+/** A project whose origin is a GitHub repository, served from a bare repo here by this computer's daemon fake. */
+async function onGitHubHere() {
+  const h = here();
+  const root = scratch();
+  const bare = join(root, "spoo.git");
+  const folder = join(root, "spoo");
+  execFileSync("git", ["init", "-q", "--bare", "-b", "main", bare]);
+  execFileSync("git", ["clone", "-q", bare, folder]);
+  git(folder, "commit", "-q", "--allow-empty", "-m", "first");
+  git(folder, "push", "-q", "origin", "main");
+  const author = join(root, "author");
+  execFileSync("git", ["clone", "-q", bare, author]);
+  git(author, "checkout", "-q", "-b", "feat/pr");
+  git(author, "commit", "-q", "--allow-empty", "-m", "one");
+  git(author, "push", "-q", "origin", "feat/pr");
+  git(folder, "remote", "set-url", "origin", "https://github.com/dev/spoo.git");
+  const url = "https://github.com/dev/spoo/pull/7";
+  const fact: PullRequest = { number: 7, url, state: "open", host: "github.com", draft: false, base: "main", branch: "feat/pr", headOid: "a".repeat(40), headSubject: "one", mergeable: "mergeable", mergeState: "clean", review: "none", checks: [], additions: 0, deletions: 0, changedFiles: 0, commits: 1 };
+  h.daemon.answers["git.prRead"] = () => ({ id: 1, ok: true, pr: fact }) as DaemonResponse;
+  h.daemon.answers["git.issueRead"] = () => ({ id: 1, ok: true, issue: { number: 7, url, title: "one", body: "", state: "OPEN", comments: [] } }) as DaemonResponse;
+  h.daemon.answers["git.fetchBranch"] = f => {
+    const into = String(f["into"] ?? f["branch"]);
+    try {
+      git(String(f["cwd"]), "fetch", "-q", "--no-tags", String(f["remote"]), `refs/heads/${String(f["branch"])}:refs/heads/${into}`);
+    } catch (e) {
+      return { id: 1, ok: false, error: e instanceof Error ? e.message : String(e) } as DaemonResponse;
+    }
+    return { id: 1, ok: true, branch: into, oid: git(String(f["cwd"]), "rev-parse", `refs/heads/${into}`) } as DaemonResponse;
+  };
+  h.daemon.answers["git.update"] = f => {
+    const cwd = String(f["cwd"]);
+    git(cwd, "fetch", "-q", "--no-tags", "origin", `refs/heads/${String(f["base"])}`);
+    git(cwd, "merge", "-q", "--ff-only", "FETCH_HEAD");
+    return { id: 1, ok: true, base: String(f["base"]), merged: true, commits: 1, conflicts: [] } as DaemonResponse;
+  };
+  const project = await h.rt.projects.add({ source: folder });
+  // Once the project holds its GitHub address, that address reads the bare repo here, for this computer's git and
+  // the daemon fake's alike.
+  git(folder, "config", `url.${bare}.insteadOf`, "https://github.com/dev/spoo.git");
+  return { ...h, folder, author, project, url };
+}
+
+describe("a pull request's head", () => {
   it("is fetched through the daemon at every start, so a second start runs on what the author pushed since", async () => {
-    const { rt, daemon, folder, author, project, url } = await onGitHub();
+    const { rt, daemon, folder, author, project, url } = await onGitHubHere();
     const first = await rt.workspaces.start({ url, agent: "claude" });
     const path = first.workspace.worktree!.path;
     expect(git(path, "rev-parse", "HEAD")).toBe(git(author, "rev-parse", "HEAD"));

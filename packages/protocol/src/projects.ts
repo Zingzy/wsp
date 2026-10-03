@@ -216,6 +216,17 @@ export const WORKTREE_FORCE_LINE = "only the person removes a worktree over file
 /** A folder of a project on this computer named to delete or forget: the verbs take threads there, never the folder. */
 export const localFolderRefusal = (name: string): string => `${name} is a project's folder on this computer, which delete and forget leave alone`;
 
+/** A worktree's record on this computer named to delete or forget: a worktree goes by its own verb or with its thread. */
+export const localWorktreeRefusal = (name: string): string => `${name} is a worktree of a project on this computer, which delete and forget leave alone`;
+
+/** Why a start on a pull request runs in the worktree holding its branch as that worktree stands. */
+export const PR_BEHIND_WORDS = {
+  changed: (number: number, path: string): string => `this worktree is behind pull request #${number} and holds files no commit has, so it was not updated; commit them, then run git pull --ff-only in ${path}`,
+  diverged: (number: number, path: string): string => `this worktree's branch and pull request #${number} have gone different ways, so it was not updated; run git pull --rebase in ${path} to bring them together`,
+  fork: (number: number, path: string, remote: string): string => `this worktree is behind pull request #${number}, whose head is on a fork; run git pull --ff-only ${remote} pull/${number}/head in ${path}`,
+  unread: (number: number, said: string): string => `pull request #${number} could not be read just now (${said}), so this worktree may be behind it`,
+} as const;
+
 /** A worktree removal refused over files no commit holds: they would go with it. */
 export const worktreeChangedLine = (files: number): string =>
   `that worktree has ${files} ${files === 1 ? "file" : "files"} not committed; commit ${files === 1 ? "it" : "them"}, or remove it with --force to lose ${files === 1 ? "it" : "them"}`;

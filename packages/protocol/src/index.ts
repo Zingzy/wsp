@@ -1809,6 +1809,15 @@ export const SessionMovedEvent = z.object({
 });
 export type SessionMovedEvent = z.infer<typeof SessionMovedEvent>;
 
+/** A thread opened on a pull request in the worktree that holds its branch, which was left as it stood: the one line
+ * saying it is behind the pull request, and how to bring it up. */
+export const SessionBehindEvent = z.object({
+  type: z.literal("session.behind"),
+  ...sessionScope,
+  text: z.string(),
+});
+export type SessionBehindEvent = z.infer<typeof SessionBehindEvent>;
+
 /** Where a reply's block run stands: running in its own pty, exited with its code and output, moved to a terminal
  * tab still running, or lost, its pty gone before anybody saw it end. */
 export const RunState = z.enum(["running", "exited", "moved", "lost"]);
@@ -1858,6 +1867,7 @@ export const SessionEvent = z.discriminatedUnion("type", [
   SessionPlanEvent,
   SessionRunEvent,
   SessionMovedEvent,
+  SessionBehindEvent,
   SessionSubagentEvent,
 ]);
 export type SessionEvent = z.infer<typeof SessionEvent>;
@@ -3544,6 +3554,7 @@ export const EventUnion = z.discriminatedUnion("type", [
   SessionPlanEvent.extend(sequenced),
   SessionRunEvent.extend(sequenced),
   SessionMovedEvent.extend(sequenced),
+  SessionBehindEvent.extend(sequenced),
   SessionSubagentEvent.extend(sequenced),
   SessionQueuedEvent.extend(sequenced),
   SessionHeldEvent.extend(sequenced),

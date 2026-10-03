@@ -233,7 +233,7 @@ import type {
 import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding } from "./project-landing.js";
 import { projectRemote, projectSource } from "./project-sources.js";
 import { vaultUnlistedRefusal, ThreadPlacement, ThreadScope, WorkspaceOrigin, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, GitCommitReply, GitDiscardReply, GitDiffReply, GitStatusReply, GitPrReadReply, GitPrViewReply, GitRunLogReply, GitPrMergeReply, GitRepoReadReply, GitUpdateReply, GitStartOnReply, GitBranchCompareReply, GitMergeInReply, DETACHED_HEAD, leadBusyRefusal, childStartedLine, forkNeedsPushLine, FIX_CHECK_OR_CHILD, childOnNoBranchRefusal, mergeChildPrompt, mergeIntoOwnRefusal, noRemoteForTreeLine, notTheLeadsChildRefusal, pushedForChildLine, uncommittedStayed, type MergeInResult, type TreeChild, type TreeFact, type TreeRecord, PR_POLL_MS, type PullRequestPage, GitPrReplyReply, GitPrResolveReply, GitPrReactReply, REPLY_EMPTY_LINE, pullRequestPostLine, type ReactionContent, type PullRequestItem, type PullRequestSendResult, type PullRequestSent, GIT_DIFF_CAP_BYTES, pullRequestSendPrompt, checkFailedPrompt, conflictsPrompt, checkNotFailedRefusal, childPushedLine, isPullRequestFact, mergeMethodRefusal, noPullRequestRefusal, noSuchCheckRefusal, notOpenRefusal, pullRequestStoppedLine, pullRequestUnreadLine, AUTO_MERGE_OFF_LINE, type FixResult, type MergeMethod, type MergeResult, type PullRequestFact, type PullRequestRecord, type PullRequestSeen, DRAFT_NOTES, cleanCheckoutLine, commitMessage, cutDiff, draftPrompt, type Checkout, type CheckoutReply, type CommitDraft, type CommitDrafter, type ViewedMarks, AGENTS_ON, agentsFrom, foldThreads, NAP_AFTER_MS, settingFor, runningOn as runningOnPlace, phaseHoldsSlot, placeAtLimitLine, placeSpendLimit, spendCapRefusal, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadKeyOf, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, SCOPED_MCP_ARG, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn, RUN_PERSONS_LINE, runOutputTail, type RunStep, type SessionRunEvent } from "@wsp/protocol";
-import { ASIDE_NO_SESSION_LINE, BLANK_ASIDE_LINE, asideUnsupportedLine, PLACE_WORKSPACE_PATH, THIS_COMPUTER, COPY_BUILD_FIX, copyAsksSignIns, refusal, copyFirstLine, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildOf, copyIsCurrent, type CopyBuild, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, serverIconsLeftLine, homeShortened, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, threadRunsOnLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, GONE_UNCHECKED, goneUnconfirmedLine, type GoneSeenBy, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, cloneFailedLine, cloneIntoNeeded, cloneIntoTakenLine, cloneUrlRefusal, intoIsHereLine, INTO_TAKES_A_REPO_LINE, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NAME_A_PROJECT_LINE, BRANCH_OR_CWD_LINE, notOnThisComputerLine, cwdOutsideLine, noBranchesLine, notMadeWorktreeLine, THREAD_WORKING_LINE, threadOnMachineLine, OLD_COPY_WORDS, ProjectCopy, WORKTREE_BUSY_LINE, WORKTREE_FORCE_LINE, worktreeChangedLine, keptChangedLine, KEPT_RUNNING_LINE, KEPT_ABANDONED_LINE, type WorktreeFolder, type WorktreeSettled, type WorktreeMade, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeBlocked, placeDaemonBehind, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeDaemonPaths, placeDialBackLine, placeWentAwayLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspacePlace, workFolderIn, workspaceLands, REWIND_LATEST_LINE, REWIND_NO_CHECKPOINT_LINE, REWIND_NO_UNDO_LINE, REWIND_SHARED_LINE, REWIND_WORKING_LINE, rewindBesideLine, rewindChildrenLine, rewindKeptLine, rewindNoAnchorLine, attachmentRecord, filesBlocked, isImage, sendFilesDir, filePathIn, landFilesLine, filesNotLandedLine, attachedFilesPrompt, dropFilesLine } from "@wsp/protocol";
+import { ASIDE_NO_SESSION_LINE, BLANK_ASIDE_LINE, asideUnsupportedLine, PLACE_WORKSPACE_PATH, THIS_COMPUTER, COPY_BUILD_FIX, copyAsksSignIns, refusal, copyFirstLine, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildOf, copyIsCurrent, type CopyBuild, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, serverIconsLeftLine, homeShortened, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, threadRunsOnLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, GONE_UNCHECKED, goneUnconfirmedLine, type GoneSeenBy, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, cloneFailedLine, cloneIntoNeeded, cloneIntoTakenLine, cloneUrlRefusal, intoIsHereLine, INTO_TAKES_A_REPO_LINE, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NAME_A_PROJECT_LINE, BRANCH_OR_CWD_LINE, notOnThisComputerLine, cwdOutsideLine, noBranchesLine, notMadeWorktreeLine, THREAD_WORKING_LINE, threadOnMachineLine, OLD_COPY_WORDS, ProjectCopy, WORKTREE_BUSY_LINE, WORKTREE_FORCE_LINE, PR_BEHIND_WORDS, worktreeChangedLine, keptChangedLine, KEPT_RUNNING_LINE, KEPT_ABANDONED_LINE, type WorktreeFolder, type WorktreeSettled, type WorktreeMade, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeBlocked, placeDaemonBehind, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeDaemonPaths, placeDialBackLine, placeWentAwayLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspacePlace, workFolderIn, workspaceLands, REWIND_LATEST_LINE, REWIND_NO_CHECKPOINT_LINE, REWIND_NO_UNDO_LINE, REWIND_SHARED_LINE, REWIND_WORKING_LINE, rewindBesideLine, rewindChildrenLine, rewindKeptLine, rewindNoAnchorLine, attachmentRecord, filesBlocked, isImage, sendFilesDir, filePathIn, landFilesLine, filesNotLandedLine, attachedFilesPrompt, dropFilesLine } from "@wsp/protocol";
 import { agentsReads, type AgentsActs, type AgentsReader, type CallbackForwards, type ServerIcons, type ServersActs, type SignInAsk, type SkillAsk, type SkillsActs } from "./agents-read.js";
 import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from "./daemon-channel.js";
 import { templateHost } from "./host-id.js";
@@ -1707,6 +1707,8 @@ export interface Runtime {
          * each takes in a config: what a caller that needs a tool loaded whatever the person's config says hands
          * over (the cloud setup's own thread, which calls the wsp recipe tools). */
         mcpServers?: Readonly<Record<string, McpServerSpec>>;
+        /** The line a thread opened on a pull request is told first: the worktree holding the branch was left behind it. */
+        behind?: string;
       },
       origin?: Caller,
     ): Promise<SessionHandle>;
@@ -6507,7 +6509,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** The record of the worktree holding a branch of the project's repo: the one git already has the branch checked
    * out in, wherever it is, or one the daemon binary makes under this host's folder. The project folder itself
    * answers when it is the one holding the branch. */
-  const worktreeFolder = (project: ProjectView, top: string, branch: string, parent?: string): Promise<LiveWorkspace> =>
+  const worktreeFolder = (project: ProjectView, top: string, branch: string, parent?: string, madeFor?: string): Promise<LiveWorkspace> =>
     oneFolder(`${project.id}\0${branch}`, async () => {
       const copier = local?.copier;
       if (copier === undefined) throw Object.assign(new Error(NO_COPIER_HERE), { kind: "invalid" });
@@ -6519,16 +6521,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       }
       const made = await copier.worktree({ from: top, home: stateFolder(), project: project.id, branch, carry: [...CARRIED_DIR_NAMES] });
       if (made.path === top) return projectFolder(project);
-      return worktreeRecordAt(project, { path: made.path, branch: made.branch, made: made.made }, parent);
+      return worktreeRecordAt(project, { path: made.path, branch: made.branch, made: made.made, ...(madeFor !== undefined ? { madeFor } : {}) }, parent);
     });
   /** The record naming a worktree at this path, written again where one stands from before (a worktree removed and
-   * made again comes back to its threads), else a new one, a child of the folder whose thread asked for it so its
-   * branch merges back there. */
+   * made again comes back to its threads, and to the tree it was made for), else a new one, a child of the folder
+   * whose thread asked for it so its branch merges back there. */
   const worktreeRecordAt = async (project: ProjectView, tree: WorktreeFolder, parent?: string): Promise<LiveWorkspace> => {
     const held = foldersOf(project.id).find(e => e.record.worktree?.path === tree.path);
     if (held === undefined) return recordFolder(project, tree, parent);
     const was = held.record.worktree!;
-    held.record.worktree = { path: tree.path, made: was.made || tree.made, ...(tree.branch !== undefined ? { branch: tree.branch } : {}) };
+    const madeFor = was.madeFor;
+    held.record.worktree = { path: tree.path, made: was.made || tree.made, ...(tree.branch !== undefined ? { branch: tree.branch } : {}), ...(madeFor !== undefined ? { madeFor } : {}) };
     await persist(held.record);
     return held;
   };
@@ -6557,13 +6560,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (top === undefined) throw Object.assign(new Error(noBranchesLine(project.name)), { kind: "usage" });
     const from = beside ?? (await projectFolder(project));
     if ((await branchAt(checkoutOf(from.record))) === o.branch) return { entry: from };
-    const before = new Set(live.keys());
-    const made = await worktreeFolder(project, top, o.branch, beside?.record.id);
-    if (scope !== undefined && !before.has(made.record.id) && made.record.worktree !== undefined) {
-      made.record.worktree = { ...made.record.worktree, madeFor: scope.rootThreadId };
-      await persist(made.record);
-    }
-    return { entry: made };
+    return { entry: await worktreeFolder(project, top, o.branch, beside?.record.id, scope?.rootThreadId) };
   };
   /** The host's own git writes on one folder, one at a time: two threads' commits, a discard and a removal never
    * interleave. The agents' own git is theirs, and git's index lock is the answer when theirs meets this. */
@@ -6605,6 +6602,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** Drops the checkpoint refs one thread holds in its folder's repo, best effort: a ref left behind pins files and
    * nothing else, and a delete is not refused for it. */
   const dropCheckpoints = async (entry: LiveWorkspace, threadId: string): Promise<void> => {
+    await checkpointsLanding.get(threadId)?.catch(() => {});
     if (notARepo(entry.record)) return;
     await withDaemon(entry, ask => ask({ op: "git.checkpointDrop", cwd: checkoutOf(entry.record), scope: entry.record.id, thread: threadId })).catch((e: unknown) =>
       console.warn(`the checkpoints of thread ${threadWord(threadId)} were not dropped: ${e instanceof Error ? e.message : String(e)}`),
@@ -6864,8 +6862,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const top = project.git?.top;
     if (top === undefined) throw Object.assign(new Error(noBranchesLine(project.name)), { kind: "usage" });
     const branch = fact.fork === undefined ? fact.branch : `${fact.fork.owner}/${fact.branch}`;
+    // A branch a worktree already holds runs there: brought up to the pull request where it can only move forward,
+    // else left as it stands with the line its thread is told.
+    const holding = (await worktreesOf(top)).find(w => w.branch === branch);
+    if (holding !== undefined) {
+      const behind = await catchUp(holding.path, top, project.remote, fact);
+      if (behind !== undefined) behindOn.set(holding.path, behind);
+    }
     // Fetched at every start, made where it is not here and only moved forward where it is, never forced.
-    if (fact.fork === undefined) {
+    else if (fact.fork === undefined) {
       GitStartOnReply.parse(await onThisComputer(ask => ask({ op: "git.fetchBranch", cwd: top, remote: project.remote, branch: fact.branch, into: branch })));
     } else {
       // GitHub serves a fork's head on the base repository as pull/<n>/head, so no fork's URL is dialled.
@@ -6882,11 +6887,37 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return entry;
   };
 
+  /** The line a start on a pull request leaves for its thread, by the folder of the worktree that was left behind. */
+  const behindOn = new Map<string, string>();
+  /** A branch a worktree holds, brought up to the pull request's head through the daemon where that worktree is
+   * clean and the head only moves it forward; nothing to say then, else the line its thread is told. */
+  const catchUp = async (path: string, top: string, remote: string, fact: PullRequest): Promise<string | undefined> => {
+    const spec = fact.fork === undefined ? `refs/heads/${fact.branch}` : `pull/${fact.number}/head`;
+    const fetched = await gitHere(top, ["fetch", "--quiet", "--no-tags", remote, spec], CLONE_MS);
+    if (fetched.exitCode !== 0) return PR_BEHIND_WORDS.unread(fact.number, gitSaid(fetched));
+    const head = (await gitHere(top, ["rev-parse", "FETCH_HEAD"])).stdout.trim();
+    const at = (await gitHere(path, ["rev-parse", "HEAD"])).stdout.trim();
+    if (head === at || (await gitHere(path, ["merge-base", "--is-ancestor", head, at])).exitCode === 0) return undefined;
+    if ((await gitHere(path, ["merge-base", "--is-ancestor", at, head])).exitCode !== 0) return PR_BEHIND_WORDS.diverged(fact.number, path);
+    if ((await gitHere(path, ["status", "--porcelain"])).stdout.trim() !== "") return PR_BEHIND_WORDS.changed(fact.number, path);
+    if (fact.fork !== undefined) return PR_BEHIND_WORDS.fork(fact.number, path, remote);
+    try {
+      GitUpdateReply.parse(await onThisComputer(ask => ask({ op: "git.update", cwd: path, base: fact.branch })));
+      return undefined;
+    } catch (e) {
+      return PR_BEHIND_WORDS.unread(fact.number, e instanceof Error ? e.message : String(e));
+    }
+  };
+
   /** The thread a start or a review opens, detached: the turn goes on without the caller. */
   const openWith = async (entry: LiveWorkspace, o: { prompt: string; harness?: string; model?: string; effort?: string; permissionMode?: string; access?: AccessChoice }, origin: Caller | undefined): Promise<StartResult> => {
+    const folder = checkoutOf(entry.record);
+    const behind = behindOn.get(folder);
+    behindOn.delete(folder);
     const handle = await sessionsApi.start(
       entry.record.id,
       {
+        ...(behind !== undefined ? { behind } : {}),
         prompt: o.prompt,
         ...(o.harness !== undefined ? { harness: o.harness } : {}),
         ...(o.model !== undefined ? { model: o.model } : {}),
@@ -7574,7 +7605,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const top = project.git?.top;
       if (!copiesFolder(kindForComputer(project.computer))) throw Object.assign(new Error(notOnThisComputerLine(project.name)), { kind: "usage" });
       if (top === undefined) throw Object.assign(new Error(noBranchesLine(project.name)), { kind: "usage" });
-      const entry = await worktreeFolder(project, top, branch);
+      const entry = await worktreeFolder(project, top, branch, undefined, scopeOf(origin)?.rootThreadId);
       const tree = entry.record.worktree;
       return { path: tree?.path ?? top, branch, made: tree?.made === true };
     },
@@ -8624,6 +8655,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** What a rewind to a turn needs, kept once the turn is over: the checkout's tree through the workspace's own
    * daemon, and the harness's anchor. A checkout the daemon takes none of (not a repo, a daemon too old, a machine
    * gone) leaves the anchor alone; the turn itself is as it ended either way. */
+  /** The checkpoint a thread's last turn is still writing, which a drop of its refs waits for. */
+  const checkpointsLanding = new Map<string, Promise<void>>();
   const keepCheckpoint = async (entry: LiveWorkspace, turn: { sessionId: string; threadId: string; turnId: string; anchor?: string; kept?: string }): Promise<void> => {
     let ref: string | undefined;
     if (!notARepo(entry.record)) {
@@ -8836,7 +8869,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         void persistSessions(workspaceId);
         bus.emit({ type: "thread.marked", workspaceId, threadIds: undone });
       }
-      void keepCheckpoint(entry, { sessionId: view.claudeSessionId ?? view.id, threadId, turnId, ...(anchor !== undefined ? { anchor } : {}), ...(keptWhy !== undefined ? { kept: keptWhy } : {}) });
+      const kept = keepCheckpoint(entry, { sessionId: view.claudeSessionId ?? view.id, threadId, turnId, ...(anchor !== undefined ? { anchor } : {}), ...(keptWhy !== undefined ? { kept: keptWhy } : {}) });
+      checkpointsLanding.set(threadId, kept);
+      void kept.finally(() => {
+        if (checkpointsLanding.get(threadId) === kept) checkpointsLanding.delete(threadId);
+      });
     };
     // The reply's status, held while the process still runs. Shared with this turn's session-map entry so runningOn
     // and the persisted row read it whether the harness emits its result synchronously in start() (before the entry
@@ -9685,6 +9722,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         // keys its sessions to the project carries its session across; any other opens a fresh one there.
         const ranIn = resume === undefined ? undefined : folderOf(workspaceId, resume);
         const cwd = runsIn(entry, ranIn, folder);
+        if (o.behind !== undefined) record({ type: "session.behind", workspaceId, sessionId: resume ?? turnId, turnId, threadId, text: o.behind });
         const movedFrom = ranIn ?? goneNow;
         if (movedFrom !== undefined && cwd !== movedFrom && entry.record.worktree?.gone === true) {
           const fresh = ranIn !== undefined && CATALOG_AGENTS.find(a => a.id === harness)?.projectKeyEnv === undefined;
