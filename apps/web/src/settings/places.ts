@@ -5,6 +5,7 @@
 // state word after a name, how long a computer has been away and an hourly
 // rate are all the protocol's (absentComputer, fmtSize, fmtBytes, offlineFor,
 // fmtRate) and are not copied here.
+import type { MarkState } from "../components/status/markState.js";
 import { FREE_WORD, JOINED_COMPUTER, hereName, isHere, isProviderPlace, placeName, placeOf, absentComputer, placeDaemonBehind, awayMsOf, chargesNothing, daemonSilent, fmtBytes, fmtRate, imageCopyStaysLine, isLocalWorkspace, landsOn, namesPlace, ownDaemonDown, plural, placeWord, SETUP_WORDS, type AbsentComputer, type CpuWord, type InitSetup, type PlaceKind, type PlaceProvisionRow, type PlaceView, type ProjectView, type SealedImageCopy, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { agentName } from "@wsp/catalog";
 import { PLACE_STATE_WORDS, PROVISION_OUTCOME_WORDS, capitalised } from "./format.js";
@@ -122,24 +123,25 @@ export function absentOf(place: PlaceView, now: number | null): AbsentComputer |
  * row offers. Read in the order a waiting thread reads its computer: blocked first, since only a person fixes it, then
  * not answering, the recipe on it, the daemon behind, an agent there that needs a sign-in, then Ready. */
 export type PlaceStateCell =
-  | { readonly kind: "word"; readonly word: string; readonly why?: string }
+  | { readonly kind: "word"; readonly word: string; readonly why?: string; readonly mark?: MarkState }
   | { readonly kind: "update"; readonly why: string }
   | { readonly kind: "sign-in"; readonly why: string };
 
 export function placeStateCell(place: PlaceView, absent: AbsentComputer | null, { canUpdate }: { canUpdate: boolean }): PlaceStateCell {
-  if (place.blocked !== undefined) return { kind: "word", word: PLACE_STATE_WORDS.blocked, why: place.blocked };
+  if (place.blocked !== undefined) return { kind: "word", word: PLACE_STATE_WORDS.blocked, why: place.blocked, mark: "failed" };
   // The setup's own words where it failed or waits on the person, before the silence, and where it runs, after it:
   // the one order wsp computers reads.
   const setup = placeWord(place, absent);
-  const said = (word: string): PlaceStateCell => ({ kind: "word", word, ...(setup.sentence !== undefined ? { why: setup.sentence } : {}) });
-  if (setup.word === SETUP_WORDS.failed || setup.word === SETUP_WORDS.needsYou) return said(setup.word);
-  if (absent !== null) return { kind: "word", word: capitalised(absent.away), why: absent.sentence };
-  if (setup.word === SETUP_WORDS.settingUp) return said(setup.word);
+  const said = (word: string, mark: MarkState): PlaceStateCell => ({ kind: "word", word, mark, ...(setup.sentence !== undefined ? { why: setup.sentence } : {}) });
+  if (setup.word === SETUP_WORDS.failed) return said(setup.word, "failed");
+  if (setup.word === SETUP_WORDS.needsYou) return said(setup.word, "needs-you");
+  if (absent !== null) return { kind: "word", word: capitalised(absent.away), why: absent.sentence, mark: "offline" };
+  if (setup.word === SETUP_WORDS.settingUp) return said(setup.word, "working");
   const behind = placeDaemonBehind(place);
   if (behind !== undefined) return canUpdate ? { kind: "update", why: behind } : { kind: "word", word: PLACE_STATE_WORDS.behind, why: behind };
   const unsigned = Object.entries(place.signIns ?? {}).flatMap(([agent, state]) => (state === "none" ? [agentName(agent)] : []));
   if (unsigned.length > 0) return { kind: "sign-in", why: PLACE_STATE_WORDS.needsSignIn(unsigned) };
-  return { kind: "word", word: PLACE_STATE_WORDS.ready };
+  return { kind: "word", word: PLACE_STATE_WORDS.ready, mark: "ready" };
 }
 
 /** The word for what one row of the recipe came to, or nothing for a row no job carried. A present row's note is

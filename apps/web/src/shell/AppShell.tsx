@@ -6,6 +6,7 @@ import { useEffect, type ReactNode } from "react";
 import { ContextMenuHost } from "../actions/ContextMenuHost.js";
 import { CommandPalette } from "../components/palette/CommandPalette.js";
 import { RewindDialogHost } from "../components/chat/RewindDialog.js";
+import { AddComputerDialog } from "../settings/add/AddComputerDialog.js";
 import { FileFinder } from "../files/FileFinder.js";
 import { OpenSplit } from "../files/OpenSplit.js";
 import { GitSplit } from "../pull-request/GitSplit.js";
@@ -91,6 +92,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <FileFinder />
       <ContextMenuHost />
       <RewindDialogHost />
+      <AddComputerDialog />
       <WorkspaceSwitcher />
       <Sidebar
         side="left"

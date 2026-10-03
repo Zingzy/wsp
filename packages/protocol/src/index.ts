@@ -2214,6 +2214,9 @@ export const ComputerIcon = z.enum(["laptop", "desktop", "mac-mini", "mac-studio
 export type ComputerIcon = z.infer<typeof ComputerIcon>;
 export const ComputerLook = z.object({ icon: ComputerIcon }).strict();
 export type ComputerLook = z.infer<typeof ComputerLook>;
+/** How one recipe is drawn: the glyph the person picked from the projects' set. */
+export const RecipeLook = z.object({ icon: ProjectIcon }).strict();
+export type RecipeLook = z.infer<typeof RecipeLook>;
 
 /** A theme's id, one per side. The shape is checked here; which ids exist is the app's registry, which reads an id it
  * does not know as that side's default, so a theme added later needs nothing from the host. */
@@ -2284,6 +2287,9 @@ export const Preferences = z.object({
   /** How each computer is drawn, by place id. Defaulted rather than required, so a record from a host that kept no
    * icons still parses on the wire and does not blank every other preference. */
   computerLook: z.record(z.string(), ComputerLook).default({}),
+  /** How each recipe is drawn, by its slug. Absent until one is picked, so a record from a host that kept none reads
+   * as it always did. */
+  recipeLook: z.record(z.string(), RecipeLook).optional(),
   /** Whether the host asks Google for each remote MCP server's icon by its host name. On unless the person turns it
    * off; defaulted so a record from a host older than the switch reads as on. */
   serverIcons: z.boolean().default(true),
@@ -2345,6 +2351,7 @@ export const PreferencesPatch = Preferences.omit({ labs: true })
     access: z.record(z.string(), z.string().nullable()).optional(),
     projectLook: z.record(z.string(), ProjectLook.nullable()).optional(),
     computerLook: z.record(z.string(), ComputerLook.nullable()).optional(),
+    recipeLook: z.record(z.string(), RecipeLook.nullable()).optional(),
     target: PreferencesTarget.nullable().optional(),
     keybindings: z.record(z.string(), ChordText.nullable()).optional(),
     textSize: sizeOf(TEXT_SIZES).nullable().optional(),
@@ -2381,6 +2388,7 @@ export function applyPreferencesPatch(current: Preferences, patch: PreferencesPa
   const textSize = patch.textSize === undefined ? current.textSize : patch.textSize;
   const codeSize = patch.codeSize === undefined ? current.codeSize : patch.codeSize;
   const defaultAgent = patch.defaultAgent === undefined ? current.defaultAgent : patch.defaultAgent;
+  const recipeLook = patch.recipeLook === undefined ? current.recipeLook : perWorkspace(current.recipeLook ?? {}, patch.recipeLook);
   const fieldsById = <T extends object>(kept: Record<string, T>, moved: Record<string, { [K in keyof T]?: T[K] | null } | null> | undefined): Record<string, T> => {
     const next = { ...kept };
     for (const [id, value] of Object.entries(moved ?? {})) {
@@ -2419,6 +2427,7 @@ export function applyPreferencesPatch(current: Preferences, patch: PreferencesPa
     ...(textSize === null || textSize === undefined ? {} : { textSize }),
     ...(codeSize === null || codeSize === undefined ? {} : { codeSize }),
     ...(defaultAgent === null || defaultAgent === undefined ? {} : { defaultAgent }),
+    ...(recipeLook === undefined ? {} : { recipeLook }),
   };
 }
 
@@ -3103,6 +3112,11 @@ export function placeAddSheetWord(step: PlaceAddStep, state: "running" | "done")
  * the one case where checking the user, the address or the key is the fix. */
 export const PLACE_LOGIN_REFUSED_KIND = "login";
 
+/** The kind an add is refused with for a computer this one has never dialled and nobody confirmed the key of. The
+ * refusal carries the key the computer answered with as `hostKey`, which the record keeps, so a client offers it to
+ * the person to trust and adds again with it. */
+export const PLACE_HOST_KEY_KIND = "host-key";
+
 /** How far the install on one computer has got, keyed by the id the request was answered with, so two installs at
  * once are two lists. A step that is running is the one with a spinner; one that is done carries its note. */
 export const PlaceStageEvent = z.object({
@@ -3132,6 +3146,8 @@ export const PlaceAddJob = z.object({
   kind: z.string().optional(),
   /** The computer the add made, once it joined. */
   placeId: z.string().optional(),
+  /** The key a computer never dialled answered with, on an add refused under PLACE_HOST_KEY_KIND. */
+  hostKey: z.string().optional(),
 });
 export type PlaceAddJob = z.infer<typeof PlaceAddJob>;
 
@@ -5538,6 +5554,8 @@ export function setupLines(name: string, setup: PlaceSetup, applied: PlaceApplie
 /** The refusal a second add to an address gets while the first stands, and what to do instead. */
 export const pendingHeldLine = (address: string, step: PendingStep): string => `${address} is already being added (${PENDING_STEP_WORDS[step]})`;
 export const pendingHeldFix = (name: string): string => `Finish it with wsp add ${name} --resume --recipe <name>, or in the app.`;
+/** The refusal picks kept for a word no pending add answers to get. */
+export const noPendingRefusal = (ref: string): string => `no add of ${ref} is pending`;
 /** The refusal a resume of an add that never joined gets: there is no computer to set up yet. */
 export const pendingNotJoinedLine = (name: string): string => `${name} never joined, so there is nothing to set up`;
 export const pendingNotJoinedFix = (address: string): string => `Add it again with wsp add ${address}.`;
@@ -6429,9 +6447,12 @@ const RuntimeOp = z.discriminatedUnion("op", [
   }),
   /** Sets a computer up from picks: a pending add that joined and waits on its choices, or a computer already set
    * up, run again for whatever is missing. `ref` names the computer or the pending add; `recipe` names the saved
-   * recipe to set it up from, else the choices it holds. Answers `{ addId, place: PlaceView, setup?, said? }`; the
+   * recipe to set it up from, `choices` the picks themselves, else the choices it holds. Answers `{ addId, place: PlaceView, setup?, said? }`; the
    * frames ride place.setup events carrying `addId`. */
-  z.object({ id: reqId, op: z.literal("places.setup"), ref: z.string().max(200), recipe: z.string().max(200).optional(), addId: z.string().max(64).optional() }),
+  z.object({ id: reqId, op: z.literal("places.setup"), ref: z.string().max(200), recipe: z.string().max(200).optional(), choices: z.lazy(() => RecipeFile).optional(), addId: z.string().max(64).optional() }),
+  /** Keeps the person's picks so far on a pending add, and the saved recipe they started from, so the add resumes
+   * where it was left. Answers `{ pending: PendingComputer }`. Refused for a ref no pending add answers to. */
+  z.object({ id: reqId, op: z.literal("places.choose"), ref: z.string().max(200), choices: z.lazy(() => RecipeFile), recipe: z.string().max(200).optional() }),
   /** Every recipe this host keeps, each with the line of what it holds and the computers that follow it. Answers
    * `{ recipes: RecipeView[] }`. The person's own road only, as every place op is. */
   z.object({ id: reqId, op: z.literal("recipes.list") }),

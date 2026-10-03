@@ -12,6 +12,7 @@ import {
   floorFailedLine,
   noAgentLine,
   pendingHeldLine,
+  noPendingRefusal,
   placeProvisionPaths,
   placeProvisioningLine,
   placeWord,
@@ -420,6 +421,25 @@ describe("a computer added before anything is picked", () => {
     expect(again.picked).toEqual([LAPTOP]);
     expect((await rowOf(place.id)).recipe).toBe("laptop");
     expect(await runtime!.places!.pending()).toEqual([]);
+  });
+
+  it("keeps the picks the person made so far on the pending add, says so on its stream, and sets up from them", async () => {
+    const p = provisioner();
+    await hosting({ provision: p.wired });
+    const pendings: unknown[] = [];
+    runtime!.events.on("place.pending", e => void pendings.push(e));
+    const { place } = await runtime!.places!.add({ addId: "a_wait", address: "root@10.0.0.9", hostUrls: DOOR }, Date.now());
+    await until(async () => (await runtime!.places!.pending())[0]?.step === "choosing");
+    const kept = await runtime!.places!.choose(place.id, LAPTOP, "laptop");
+    expect(kept).toMatchObject({ id: "a_wait", step: "choosing", recipe: "laptop", choices: LAPTOP });
+    expect(pendings.at(-1)).toMatchObject({ type: "place.pending", id: "a_wait", pending: { choices: LAPTOP } });
+    // Picks kept with no recipe named drop the one they started from: the person moved off it.
+    expect(await runtime!.places!.choose("root@10.0.0.9", LAPTOP)).not.toHaveProperty("recipe");
+    await expect(runtime!.places!.choose("nowhere", LAPTOP)).rejects.toThrow(noPendingRefusal("nowhere"));
+    const set = await runtime!.places!.setUp(place.id, {});
+    expect(set.setup?.state).toBe("running");
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    expect(p.picked).toEqual([LAPTOP]);
   });
 
   it("refuses a second add to an address while the first stands", async () => {

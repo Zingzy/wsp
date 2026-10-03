@@ -3,12 +3,13 @@
 // screen and left alone when the person is already looking at it, the waits
 // keyed until the event that closes them, and the noise said nowhere.
 import { act, render } from "@testing-library/react";
-import { askingLine, initNeedsYouLine, setupNeedsYouLine, setupReadyLine, type InitJob, type PlaceView, type ReleaseView, type SessionView, type WorkspaceView } from "@wsp/protocol";
+import { askingLine, initNeedsYouLine, setupNeedsYouLine, setupReadyLine, waitLine, type InitJob, type PlaceView, type ReleaseView, type SessionView, type WorkspaceView } from "@wsp/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { HOST_NOTICE_WORDS, RELEASE_SAID_KEY, useHostNotices } from "../src/notices/hostNotices.js";
 import { useNotices, type Notice } from "../src/notices/store.js";
+import { closeAdd, useAddFlow } from "../src/settings/add/addFlow.js";
 import { useSettingsStore } from "../src/settings/settingsStore.js";
 import { resetAskedToNotify } from "../src/shell/needsYou.js";
 
@@ -58,6 +59,7 @@ beforeEach(async () => {
       return () => listeners.delete(fn);
     },
   } as unknown as Api;
+  closeAdd();
   useStore.setState({ api: null, initJob: null, settingsOpen: false, addComputerOpen: false, selectedId: null, selectedThreadId: null, freshThread: false, workspaces: [], sessions: {}, places: [], release: null });
   useStore.getState().bind(api);
   // The bind's own reads land first, then the page is put where each case starts: nothing selected.
@@ -117,15 +119,46 @@ describe("a computer's install and its link", () => {
       ["done", HOST_NOTICE_WORDS.joined("spoo"), "spoo"],
     ]);
     expect(texts()[0]).toBe("spoo is ready; 1 row did not install");
-    // The Open lands on that computer's own page.
+    // The Open lands on Add a computer, open on that computer's running steps.
     act(() => notices()[0]!.action!.run());
-    expect(useSettingsStore.getState().at).toEqual({ kind: "computer", id: "pl_box" });
+    expect(useAddFlow.getState()).toMatchObject({ open: true, placeId: "pl_box", step: "running" });
   });
 
-  it("a setup's frames before its end say nothing: its steps are the computer's row to draw", () => {
+  it("a setup's steps say nothing, and a sign-in that waits on the person says so once, opening the dialog there", () => {
     emit({ type: "place.setup", addId: "a_1", placeId: "pl_box", line: { step: "floor", state: "running" } });
-    emit({ type: "place.setup", addId: "a_1", placeId: "pl_box", wait: { row: "signins/codex", label: "Codex", url: "https://auth.example/device", code: "ABCD-1234", expiresAt: "2026-10-03T10:00:00Z", state: "waiting" } });
     expect(notices()).toEqual([]);
+    const wait = { row: "signins/codex", label: "Codex", url: "https://auth.example/device", code: "ABCD-1234", expiresAt: "2026-10-03T10:00:00Z", state: "waiting" as const };
+    emit({ type: "place.setup", addId: "a_1", placeId: "pl_box", wait });
+    expect(notices().map(n => [n.kind, n.text, n.where])).toEqual([["waiting", setupNeedsYouLine("spoo", waitLine(wait)), "spoo"]]);
+    act(() => notices()[0]!.action!.run());
+    expect(useAddFlow.getState()).toMatchObject({ open: true, placeId: "pl_box", step: "running" });
+    // The wait ran out: its toast goes. With the dialog on that computer, the end is already in front of the person.
+    emit({ type: "place.setup", addId: "a_1", placeId: "pl_box", wait: { ...wait, state: "expired" } });
+    emit({ type: "place.setup", addId: "a_1", placeId: "pl_box", end: "failed", said: "node did not install" });
+    expect(notices()).toEqual([]);
+  });
+
+  it("a sign-in's wait is said once, in the app and outside it, through the frames the runtime sends for it, and its toast goes with the wait", () => {
+    const said: unknown[] = [];
+    window.wsp = { sayOutside: (line: unknown) => void said.push(line), onNeedsYouOpen: () => () => {} };
+    try {
+      remount();
+      // The runtime's own sequence: the wait as the sign-in starts, then again once the relay read the page, then the code.
+      const bare = { row: "signins/codex", label: "Codex", expiresAt: "2026-10-03T10:00:00Z", state: "waiting" as const };
+      emit({ type: "place.setup", addId: "a_1", placeId: "pl_box", wait: bare });
+      emit({ type: "place.setup", addId: "a_1", placeId: "pl_box", wait: { ...bare, url: "https://auth.example/device" } });
+      emit({ type: "place.setup", addId: "a_1", placeId: "pl_box", wait: { ...bare, url: "https://auth.example/device", code: "ABCD-1234" } });
+      expect(said).toHaveLength(1);
+      // One toast, which says the newest of what the wait knows.
+      expect(notices().map(n => n.text)).toEqual([setupNeedsYouLine("spoo", waitLine({ ...bare, url: "https://auth.example/device", code: "ABCD-1234" }))]);
+      // The wait left the record (the person signed in): its toast goes, and a later wait for the same sign-in is said again.
+      act(() => useStore.setState({ places: [{ ...BOX, setup: { state: "running", addId: "a_1", startedAt: "x", steps: [], waiting: [] } }] }));
+      expect(notices()).toEqual([]);
+      emit({ type: "place.setup", addId: "a_2", placeId: "pl_box", wait: bare });
+      expect(said).toHaveLength(2);
+    } finally {
+      delete (window as { wsp?: unknown }).wsp;
+    }
   });
 
   it("a computer's own page showing keeps its setup off the toasts", () => {

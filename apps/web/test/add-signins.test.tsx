@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Add a computer goes on to the sign-ins that live on that computer: once a
-// box has joined, each agent there whose login every workspace on it shares
+// A computer's page lists the sign-ins that live on that computer: once a box
+// has joined, each agent there whose login every workspace on it shares
 // stands as a row with its state and Sign in, which runs the agent's own
 // sign-in there and draws its page and code under the row. The row reads the
 // host's report again once the host says the agents there changed.
@@ -11,7 +11,6 @@ import { AGENTS_LIST_WORDS } from "../src/components/agents/agentsRows.js";
 import { forgetAgentsReports } from "../src/components/agents/useAgentsReport.js";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
-import { useAdds } from "../src/settings/adds.js";
 import { ADD_COMPUTER_WORDS } from "../src/settings/format.js";
 import { absentOf } from "../src/settings/places.js";
 import { AGENTS_REPORT } from "./fixtures/agents-report.js";
@@ -44,16 +43,12 @@ function host(reports: AgentsReport[]) {
   return { ...fake, started, reads };
 }
 
-const ssh = (): HTMLElement => document.querySelector<HTMLElement>("[data-settings-page] [data-k='road-ssh']")!;
+const ssh = (): HTMLElement => document.querySelector<HTMLElement>("[data-settings-page]")!;
 const card = (): HTMLElement | null => ssh().querySelector<HTMLElement>("[data-settings-card='sign-ins']");
 const row = (agent: string): HTMLElement | null => card()?.querySelector<HTMLElement>(`[data-settings-row='sign-in-${agent}']`) ?? null;
 
 const joined = async (api: Api): Promise<void> => {
-  useAdds.setState({ jobs: { a_1: { addId: "a_1", address: "root@hetzner", startedAt: AT, state: "done", steps: [], placeId: box.id } }, putAway: null });
-  mountSettings({ api, at: { kind: "group", group: "computers" } });
-  await settle();
-  fireEvent.click(document.querySelector("[data-k='add-computer-button']")!);
-  fireEvent.click(document.querySelector("[data-add-road='ssh']")!);
+  mountSettings({ api, at: { kind: "computer", id: box.id } });
   await settle();
 };
 
@@ -65,7 +60,7 @@ beforeEach(() => {
 
 afterEach(() => cleanup());
 
-describe("Add a computer goes on to the sign-ins on it", () => {
+describe("the sign-ins on a computer's page", () => {
   it("offers each agent whose login lives on the computer, runs its sign-in there, draws the code, and reads the row again once it lands", async () => {
     const fake = host([reportWith("none"), reportWith("signed-in")]);
     await joined(fake.api);
