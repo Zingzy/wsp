@@ -483,6 +483,8 @@ describe("store creations", () => {
     api.deleteWorkspace = async id => void deleted.push(id);
     useStore.getState().bind(api);
     await flush();
+    // Another client's create, watched from its first stage.
+    emit(stage({ workspaceId: "ws_far", name: "far", stage: "fork-requested", message: "starting far" }));
     emit(stage({ workspaceId: "ws_far", name: "far", stage: "failed", message: "Snapshot not found" }));
     expect(useStore.getState().creations[0]!.failed).toEqual({ title: "Could not start far", detail: "Snapshot not found" });
     useStore.getState().select("creating:ws_far");
@@ -490,6 +492,7 @@ describe("store creations", () => {
     expect(useStore.getState().creations).toEqual([]);
     expect(useStore.getState().selectedId).toBeNull();
 
+    emit(stage({ workspaceId: "ws_two", name: "far", stage: "fork-requested", message: "starting far" }));
     emit(stage({ workspaceId: "ws_two", name: "far", stage: "failed", message: "Snapshot not found" }));
     useStore.getState().dismissCreation("creating:ws_two");
     expect(deleted).toEqual(["ws_two"]);

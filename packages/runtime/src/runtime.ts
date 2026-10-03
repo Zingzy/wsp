@@ -228,11 +228,12 @@ import type {
   WorkspaceSize,
   WorkspaceStatus,
   WorkspaceView,
+  WorkspaceCreatingEvent,
 } from "@wsp/protocol";
 import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding } from "./project-landing.js";
 import { projectRemote, projectSource } from "./project-sources.js";
 import { vaultUnlistedRefusal, ThreadPlacement, ThreadScope, WorkspaceOrigin, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, GitCommitReply, GitDiscardReply, GitDiffReply, GitStatusReply, GitPrReadReply, GitPrViewReply, GitRunLogReply, GitPrMergeReply, GitRepoReadReply, GitUpdateReply, GitStartOnReply, GitBranchCompareReply, GitMergeInReply, DETACHED_HEAD, leadBusyRefusal, childStartedLine, forkNeedsPushLine, FIX_CHECK_OR_CHILD, childOnNoBranchRefusal, mergeChildPrompt, mergeIntoOwnRefusal, noRemoteForTreeLine, notTheLeadsChildRefusal, pushedForChildLine, uncommittedStayed, type MergeInResult, type TreeChild, type TreeFact, type TreeRecord, PR_POLL_MS, type PullRequestPage, GitPrReplyReply, GitPrResolveReply, GitPrReactReply, REPLY_EMPTY_LINE, pullRequestPostLine, type ReactionContent, type PullRequestItem, type PullRequestSendResult, type PullRequestSent, GIT_DIFF_CAP_BYTES, pullRequestSendPrompt, checkFailedPrompt, conflictsPrompt, checkNotFailedRefusal, childPushedLine, isPullRequestFact, mergeMethodRefusal, noPullRequestRefusal, noSuchCheckRefusal, notOpenRefusal, pullRequestStoppedLine, pullRequestUnreadLine, AUTO_MERGE_OFF_LINE, type FixResult, type MergeMethod, type MergeResult, type PullRequestFact, type PullRequestRecord, type PullRequestSeen, DRAFT_NOTES, cleanCheckoutLine, commitMessage, cutDiff, draftPrompt, type Checkout, type CheckoutReply, type CommitDraft, type CommitDrafter, type ViewedMarks, AGENTS_ON, agentsFrom, foldThreads, NAP_AFTER_MS, settingFor, runningOn as runningOnPlace, phaseHoldsSlot, placeAtLimitLine, placeSpendLimit, spendCapRefusal, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadKeyOf, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, SCOPED_MCP_ARG, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn, RUN_PERSONS_LINE, runOutputTail, type RunStep, type SessionRunEvent } from "@wsp/protocol";
-import { ASIDE_NO_SESSION_LINE, BLANK_ASIDE_LINE, asideUnsupportedLine, PLACE_WORKSPACE_PATH, THIS_COMPUTER, COPY_BUILD_FIX, copyAsksSignIns, refusal, copyFirstLine, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildOf, copyIsCurrent, type CopyBuild, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, serverIconsLeftLine, homeShortened, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, threadRunsOnLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, GONE_UNCHECKED, goneUnconfirmedLine, type GoneSeenBy, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, cloneFailedLine, cloneIntoNeeded, cloneIntoTakenLine, cloneUrlRefusal, intoIsHereLine, INTO_TAKES_A_REPO_LINE, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeBlocked, placeDaemonBehind, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeDaemonPaths, placeDialBackLine, placeWentAwayLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspacePlace, workFolderIn, workspaceLands, copyPathFor, folderSlug, type ProjectCopy, REWIND_LATEST_LINE, REWIND_NO_CHECKPOINT_LINE, REWIND_NO_UNDO_LINE, REWIND_OWN_FOLDER_LINE, REWIND_WORKING_LINE, rewindBesideLine, rewindChildrenLine, rewindNoAnchorLine, attachmentRecord, filesBlocked, isImage, sendFilesDir, filePathIn, landFilesLine, filesNotLandedLine, attachedFilesPrompt, dropFilesLine } from "@wsp/protocol";
+import { ASIDE_NO_SESSION_LINE, BLANK_ASIDE_LINE, asideUnsupportedLine, PLACE_WORKSPACE_PATH, THIS_COMPUTER, COPY_BUILD_FIX, copyAsksSignIns, refusal, copyFirstLine, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildOf, copyIsCurrent, type CopyBuild, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, serverIconsLeftLine, homeShortened, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, threadRunsOnLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, GONE_UNCHECKED, goneUnconfirmedLine, type GoneSeenBy, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, cloneFailedLine, cloneIntoNeeded, cloneIntoTakenLine, cloneUrlRefusal, intoIsHereLine, INTO_TAKES_A_REPO_LINE, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, startingLine, copyingFolderLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeBlocked, placeDaemonBehind, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeDaemonPaths, placeDialBackLine, placeWentAwayLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspacePlace, workFolderIn, workspaceLands, copyPathFor, folderSlug, type ProjectCopy, REWIND_LATEST_LINE, REWIND_NO_CHECKPOINT_LINE, REWIND_NO_UNDO_LINE, REWIND_OWN_FOLDER_LINE, REWIND_WORKING_LINE, rewindBesideLine, rewindChildrenLine, rewindNoAnchorLine, attachmentRecord, filesBlocked, isImage, sendFilesDir, filePathIn, landFilesLine, filesNotLandedLine, attachedFilesPrompt, dropFilesLine } from "@wsp/protocol";
 import { agentsReads, type AgentsActs, type AgentsReader, type CallbackForwards, type ServerIcons, type ServersActs, type SignInAsk, type SkillAsk, type SkillsActs } from "./agents-read.js";
 import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from "./daemon-channel.js";
 import { templateHost } from "./host-id.js";
@@ -1620,6 +1621,9 @@ export interface Runtime {
      * landing under somebody else is. An event naming the thread it was asked for by is that thread's and its
      * tree's whatever the records say, which is what a fork's own stages are before its record exists. */
     seenBy(event: unknown, origin?: Caller): boolean;
+    /** The last stage of every create this host is making and of every refused one it still holds, oldest first:
+     * a window that connects after a create began hears nothing else of it. */
+    creating(): WorkspaceCreatingEvent[];
   };
   readonly projects: {
     /** Records a project: the word a person typed, which is a folder on this computer, a repo cloned into an empty
@@ -6043,10 +6047,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const entry = live.get(id);
     // A workspace this host does not hold and one outside the caller's tree read alike to a thread: telling the two
     // apart is how a thread walks what else stands here.
-    if (!entry || entry.creating) {
-      if (scopeOf(origin) !== undefined) throw notFoundRefusal(noWorkspaceRefusal());
-      throw new Error(`${noWorkspaceRefusal()}: ${id}`);
-    }
+    if (!entry || entry.creating) throw notFoundRefusal(scopeOf(origin) !== undefined ? noWorkspaceRefusal() : `${noWorkspaceRefusal()}: ${id}`);
     refuseRelayed(entry.record, origin);
     return entry;
   };
@@ -6345,6 +6346,53 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** Creates that failed before any machine was recorded, by the id their stages carried: every client keeps a row
    * for one until it is deleted, so resolve and delete reach it here. */
   const failedCreates = new Map<string, WorkspaceView>();
+  const createStages = new Map<string, WorkspaceCreatingEvent>();
+  bus.on("*", e => {
+    if (e.type === "workspace.creating") {
+      // Held without the seq the bus stamped: sent again on a subscribe, it is no position in the stream.
+      const { seq: _seq, ...stage } = e;
+      createStages.set(e.workspaceId, stage);
+    } else if (e.type === "workspace.created") createStages.delete(e.workspace.id);
+    else if (e.type === "workspace.deleted") createStages.delete(e.workspaceId);
+  });
+  const failedView = (id: string, name: string, kind: WorkspaceKind, golden: string, began: number, project: ProjectView, said: string): WorkspaceView => ({
+    id,
+    name,
+    machineId: "",
+    phase: "gone",
+    kind,
+    golden,
+    createdAt: new Date(began).toISOString(),
+    project: refOf(project),
+    gone: said,
+  });
+  /** A create asked again under a name supersedes the one that failed under it, and every client's row of it. */
+  const supersedeFailed = (name: string): void => {
+    for (const [failedId, failed] of failedCreates) {
+      if (failed.name !== name) continue;
+      failedCreates.delete(failedId);
+      bus.emit({ type: "workspace.deleted", workspaceId: failedId });
+    }
+  };
+  /** One create's stages as every client hears them. Who asked rides every stage from the first, which is emitted
+   * before the create has a record: the stream's tree rule has nothing to read until then, so a thread watching its
+   * own fork boot would see it start midway. */
+  const stageReporter = (id: string, name: string, began: number, spawned: ThreadScope | undefined): StageReport => {
+    const askedBy = spawned !== undefined ? { threadId: spawned.threadId, rootThreadId: spawned.rootThreadId } : undefined;
+    return (stage, message, said) => {
+      bus.emit({
+        type: "workspace.creating",
+        workspaceId: id,
+        name,
+        stage,
+        message,
+        elapsedMs: clock.now() - began,
+        ...(said?.notice !== undefined ? { notice: said.notice } : {}),
+        ...(said?.detail !== undefined ? { detail: said.detail } : {}),
+        ...(askedBy !== undefined ? { askedBy } : {}),
+      });
+    };
+  };
   /** Why a fork of this name is refused, or nothing when the name is free: one entry holds it, whatever it is doing
    * (a delete in flight says so), or a fork of it is under way. A name never names two workspaces, and a fork and a
    * delete of one name never interleave. */
@@ -6387,44 +6435,61 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const room = await local?.copier?.room?.();
     if (room !== undefined && room.freeMb < workspaceMemMb(room.totalMb)) throw new Error(boxFullLine(workspaceMemMb(room.totalMb), room.freeMb));
     const mine = backendOfKind("local");
-    const copy = await moduleOf("local").makeCopy(project, { slug: folderSlug(n), ...(project.base !== undefined ? { base: project.base } : {}) });
-    const portBase = portBaseHere();
-    const machine = await mine.get(LOCAL_MACHINE_ID);
-    const record: WorkspaceRecord = {
-      id: `ws_${randomBytes(4).toString("hex")}`,
-      name: n,
-      kind: "local",
-      machineId: machine.id,
-      phase: "running",
-      golden: "",
-      createdAt: new Date().toISOString(),
-      project: project.id,
-      copy,
-      portBase,
-      ...treeOf(scopeOf(caller)),
-      ...(o.agents !== undefined ? { agents: agentsFrom(spawnAt(HERE_PLACE_ID), o.agents) } : {}),
-      ...(o.parent !== undefined ? { parentWorkspaceId: o.parent } : {}),
-      ...((start?.base ?? project.base) !== undefined ? { base: start?.base ?? project.base } : {}),
-      spec: {},
-      size: mine.pricing.defaultSize,
-      firstLife: false,
-      idleWindowMs: null,
-    };
-    attach(record, machine);
-    // In the live map from here, so the record holds the place under the root the guard took for it.
-    landed?.();
+    const id = `ws_${randomBytes(4).toString("hex")}`;
+    const began = clock.now();
+    const report = stageReporter(id, n, began, scopeOf(caller));
+    // Held as a fork holds its name, so a second ask under it while the folder is copied is refused.
+    forking.add(n);
+    supersedeFailed(n);
+    report("fork-requested", copyingFolderLine(project.path, copyPathFor(project.path, folderSlug(n))));
+    let record: WorkspaceRecord;
     try {
-      await moduleOf("local").landProject(live.get(record.id)!, project, () => {});
-      // The copy sits beside the person's folder, outside the daemon's home root, so the daemon is told about it
-      // here as the clone road tells it about a checkout: without this every file, diff and push op on a workspace
-      // of this kind is refused for a path outside the root.
-      await writeDaemonRoots(live.get(record.id)!);
-      await persist(record);
+      const copy = await moduleOf("local").makeCopy(project, { slug: folderSlug(n), ...(project.base !== undefined ? { base: project.base } : {}) });
+      const portBase = portBaseHere();
+      const machine = await mine.get(LOCAL_MACHINE_ID);
+      record = {
+        id,
+        name: n,
+        kind: "local",
+        machineId: machine.id,
+        phase: "running",
+        golden: "",
+        createdAt: new Date().toISOString(),
+        project: project.id,
+        copy,
+        portBase,
+        ...treeOf(scopeOf(caller)),
+        ...(o.agents !== undefined ? { agents: agentsFrom(spawnAt(HERE_PLACE_ID), o.agents) } : {}),
+        ...(o.parent !== undefined ? { parentWorkspaceId: o.parent } : {}),
+        ...((start?.base ?? project.base) !== undefined ? { base: start?.base ?? project.base } : {}),
+        spec: {},
+        size: mine.pricing.defaultSize,
+        firstLife: false,
+        idleWindowMs: null,
+      };
+      attach(record, machine);
+      // In the live map from here, so the record holds the place under the root the guard took for it.
+      landed?.();
+      try {
+        await moduleOf("local").landProject(live.get(id)!, project, () => {});
+        // The copy sits beside the person's folder, outside the daemon's home root, so the daemon is told about it
+        // here as the clone road tells it about a checkout: without this every file, diff and push op on a workspace
+        // of this kind is refused for a path outside the root.
+        await writeDaemonRoots(live.get(id)!);
+        await persist(record);
+      } catch (e) {
+        // A copy whose record never landed is a folder nobody can name: it goes with the create that made it.
+        live.delete(id);
+        await moduleOf("local").dropCopy(copy).catch(() => {});
+        throw e;
+      }
     } catch (e) {
-      // A copy whose record never landed is a folder nobody can name: it goes with the create that made it.
-      live.delete(record.id);
-      await moduleOf("local").dropCopy(copy).catch(() => {});
+      const said = e instanceof Error ? e.message : String(e);
+      report("failed", said);
+      failedCreates.set(id, failedView(id, n, "local", "", began, project, said));
       throw e;
+    } finally {
+      forking.delete(n);
     }
     const v = view(record);
     bus.emit({ type: "workspace.created", workspace: v });
@@ -6625,30 +6690,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         throw Object.assign(new Error(refusal), { kind: "conflict" });
       }
       forking.add(o.name);
-      // A create asked again under the name supersedes the one that failed under it, and every client's row of it.
-      for (const [failedId, failed] of failedCreates) {
-        if (failed.name !== o.name) continue;
-        failedCreates.delete(failedId);
-        bus.emit({ type: "workspace.deleted", workspaceId: failedId });
-      }
+      supersedeFailed(o.name);
       const id = `ws_${randomBytes(4).toString("hex")}`;
       const began = clock.now();
-      // Who asked rides every stage from the first, which is emitted before the fork has a record: the stream's
-      // tree rule has nothing to read until then, so a thread watching its own fork boot would see it start midway.
-      const askedBy = spawned !== undefined ? { threadId: spawned.threadId, rootThreadId: spawned.rootThreadId } : undefined;
-      const report: StageReport = (stage, message, said) => {
-        bus.emit({
-          type: "workspace.creating",
-          workspaceId: id,
-          name: o.name,
-          stage,
-          message,
-          elapsedMs: clock.now() - began,
-          ...(said?.notice !== undefined ? { notice: said.notice } : {}),
-          ...(said?.detail !== undefined ? { detail: said.detail } : {}),
-          ...(askedBy !== undefined ? { askedBy } : {}),
-        });
-      };
+      const report = stageReporter(id, o.name, began, spawned);
       try {
         // Read inside the try, so a parent that did not answer gives the name and the slot back the way every
         // other end of this create does, and after the guard, so what a thread may do is decided before anything
@@ -6678,7 +6723,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const said = e instanceof Error ? e.message : String(e);
         report("failed", said);
         if (kept !== undefined) bus.emit({ type: "workspace.created", workspace: view(kept.record) });
-        else failedCreates.set(id, { id, name: o.name, machineId: "", phase: "gone", kind, golden: o.golden ?? "", createdAt: new Date(began).toISOString(), project: refOf(project), gone: said });
+        else failedCreates.set(id, failedView(id, o.name, kind, o.golden ?? "", began, project, said));
         throw e;
       } finally {
         forking.delete(o.name);
@@ -7538,6 +7583,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     async originRefusal(id, origin) {
       await ready();
       return refusalFor(live.get(id)?.record, origin);
+    },
+
+    creating() {
+      return [...createStages.values()];
     },
 
     seenBy(event, origin) {

@@ -21,7 +21,7 @@ import { cn } from "../lib/utils.js";
 import { usePlaces, useStore, type Creation, type CreationLine } from "../protocol/store.js";
 import { placeNames } from "../sidebar/workspaceRows.js";
 import { RunsOn } from "./NewThreadPicks.js";
-import { CREATE_ASKED, CREATE_QUIET, CREATE_STEP_WORDS, creationFolder, currentStep, stepTime, stepWords } from "./creationLog.js";
+import { CREATE_ASKED, CREATE_STEP_WORDS, creationFolder, currentStep, stepTime, stepWords } from "./creationLog.js";
 
 /** What the composer says over a message that waits for the machine. */
 export const creationWaitLine = (name: string): string => `Sends once ${name} is up`;
@@ -268,15 +268,6 @@ function SettingUpCentre({ creation }: { creation: Creation }) {
               Dismiss
             </Button>
           </div>
-        </>
-      ) : creation.quiet === true ? (
-        <>
-          <p data-creation-quiet className="text-sm leading-6 text-muted-foreground">
-            {CREATE_QUIET}
-          </p>
-          <Button variant="ghost" size="xs" onClick={() => dismiss(creation.key)}>
-            Dismiss
-          </Button>
         </>
       ) : null}
     </div>

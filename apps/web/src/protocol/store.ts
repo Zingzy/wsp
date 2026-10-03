@@ -3,7 +3,7 @@
 // contract components code against.
 import { useEffect, useMemo } from "react";
 import { create } from "zustand";
-import { applyPreferencesPatch, threadsFollowed, type AbsentComputer, type BringBackResult, foldThreads, goldenHead, threadKeyOf, workspaceStateOf, type AppAddress, type Capabilities, copyBuildOf, type GoldenStageEvent, type HarnessCatalog, type InitJob, type InitSetup, type PlaceView, type PlaceSettingsAsk, type PlaceSettingWord, type PortForward, type ProjectView, type Preferences, type PreferencesPatch, type ReleaseView, type SessionView, type ThreadMarks, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceProject, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView, type PlaceDial, type WorkspaceLanding, type ReviewDraft } from "@wsp/protocol";
+import { applyPreferencesPatch, threadsFollowed, type AbsentComputer, type Attachment, type BringBackResult, foldThreads, goldenHead, threadKeyOf, workspaceStateOf, type AppAddress, type Capabilities, copyBuildOf, type GoldenStageEvent, type HarnessCatalog, type InitJob, type InitSetup, type PlaceView, type PlaceSettingsAsk, type PlaceSettingWord, type PortForward, type ProjectView, type Preferences, type PreferencesPatch, type ReleaseView, type SessionView, type ThreadMarks, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceProject, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView, type PlaceDial, type WorkspaceLanding, type ReviewDraft } from "@wsp/protocol";
 import { noSuchThreadLine, renameNotTakenLine } from "../actions/format.js";
 import { readAddress, readProjectHome, writeAddress, writeProjectHome } from "./address.js";
 import { deriveSidebarProjects, sidebarWorkspaceOrder } from "../adapt/workspaces.js";
@@ -12,18 +12,19 @@ import { DisconnectedError, RequestError, type Api, type ConnStatus, type Protoc
 import { failureOf, type Failure } from "./failure.js";
 import { addNotice, noticeFailure } from "../notices/store.js";
 import { lastWorkspaceId, rememberWorkspace } from "./lastWorkspace.js";
-import { keepCreations, keptCreations } from "./keptCreations.js";
+import { claimKept, claiming, claimsAnswered, keepCreations, keptCreations, letGo, own } from "./keptCreations.js";
 import { clearLegacyPreferences, legacyPreferences } from "./legacyPreferences.js";
 import { bootPreferences, rememberFirstPaint } from "./firstPaint.js";
 import { applyAddStage, takeAdds } from "../settings/adds.js";
 import { WHERE_WORDS } from "../settings/format.js";
 import { absenceOf, placeName, placeNamed } from "../settings/places.js";
 import { sameAt, useSettingsStore, type SettingsAt } from "../settings/settingsStore.js";
-import { QUIET_MS, imageBuildFrame } from "../shell/creationLog.js";
+import { CREATE_UNHEARD, imageBuildFrame } from "../shell/creationLog.js";
 import { requestNewThread } from "../shell/shellRequests.js";
 import { useSignInStore } from "../shell/signInStore.js";
 import { newId, useComposerDraftStore } from "../components/chat/composerDraftStore.js";
 import { useComposerOptionsStore } from "../components/chat/composerOptionsStore.js";
+import type { ComposerStart } from "../components/chat/composerPicks.js";
 
 export interface CostTick {
   rateUsdPerHour: number;
@@ -61,12 +62,14 @@ export interface Creation {
   readonly size?: WorkspaceSize;
   /** The message that asked for this work, drawn as the thread's first message while the machine is made. */
   readonly asked?: string;
-  /** The asked message goes to the workspace's queue once it is up, and the row is kept in local storage until then;
+  /** The asked message goes to the workspace once it is up, and the row is kept in local storage until then;
    * absent, the caller sends it itself. */
   readonly queued?: true;
-  /** A kept row the host has said nothing about since this window connected, long enough that its create may be one
-   * nobody will answer for: it can be dismissed. */
-  readonly quiet?: true;
+  /** The thread the asked message opens on the workspace, started from here once it is up; absent, the message
+   * waits on the workspace's queue for its composer. */
+  readonly opens?: Opens;
+  /** The files that go with the message; never kept, so a reload sends it without them. */
+  readonly attachments?: ReadonlyArray<Attachment>;
   /** The computer the work lands on, which is the project's own, by the id its row carries. The image build's own
    * frames name their place, so this is what says which are this create's. */
   readonly where?: string;
@@ -82,7 +85,13 @@ export interface Creation {
 export interface Asked {
   readonly prompt: string;
   readonly queuedFrom?: string;
+  /** The agent and the picks the message opens its thread at, for a send no page's composer will drain. */
+  readonly opens?: Opens;
+  readonly attachments?: ReadonlyArray<Attachment>;
 }
+
+/** A thread's start as a send to several models names it: the agent, its picks and the send's one attempt id. */
+export type Opens = ComposerStart & { readonly harness: string; readonly attempt?: string };
 
 export interface CreateRefusal {
   readonly title: string;
@@ -357,6 +366,19 @@ function movePicks(from: string, to: string): void {
   if (access !== undefined) void useStore.getState().setPreferences({ access: { [to]: access, [from]: null } });
 }
 
+/** Opens the thread a row's message starts on its workspace; a refusal is a notice naming the workspace. */
+function openOn(workspaceId: string, creation: Creation & { readonly asked: string; readonly opens: Opens }): void {
+  const { api, launching, launched } = useStore.getState();
+  if (api === null) return;
+  const requestId = newId();
+  const attachments = creation.attachments ?? [];
+  launching(workspaceId, { requestId, title: creation.asked, harness: creation.opens.harness });
+  void api.startSession({ workspaceId, prompt: creation.asked, requestId, ...creation.opens, ...(attachments.length > 0 ? { attachments: [...attachments] } : {}) }).catch((e: unknown) => {
+    launched(workspaceId, requestId);
+    noticeFailure(e, said => `${creation.name}: ${said}`);
+  });
+}
+
 /** A creation's page keys its draft, its waiting messages and its picks by the creation's key; the workspace takes
  * them all, so what waited goes with the agent and the model picked over it. A queued asked message goes first, and
  * only while the row stands, since every caller takes the row away straight after. */
@@ -364,7 +386,10 @@ function handOver(key: string, workspaceId: string): void {
   const drafts = useComposerDraftStore.getState();
   drafts.rekeyQueue(key, workspaceId);
   const creation = useStore.getState().creations.find(c => c.key === key);
-  if (creation?.queued === true && creation.asked !== undefined) drafts.enqueue(workspaceId, creation.asked, "head");
+  if (creation?.queued === true && creation.asked !== undefined) {
+    if (creation.opens === undefined) drafts.enqueue(workspaceId, creation.asked, "head");
+    else openOn(workspaceId, { ...creation, asked: creation.asked, opens: creation.opens });
+  }
   const draft = drafts.drafts[key];
   if (draft !== undefined) {
     useComposerDraftStore.setState(s => {
@@ -402,22 +427,12 @@ function dropWaiting(key: string): void {
 /** The rows a page before this one left kept, which no create in flight here will answer for. */
 const keptAtLoad = keptCreations();
 const restored = new Set(keptAtLoad.map(c => c.key));
-/** Kept rows refused before this page loaded: the host keeps a refused create in memory alone, so after a restart
- * it no longer knows the workspace a Dismiss asks it to delete. */
-const refusedBeforeLoad = new Set(keptAtLoad.filter(c => c.failed !== null).map(c => c.key));
 
 /** Whether a workspace is the one a row was making: by the id once its stages named it, before that, for a kept row
  * alone, by the name and the project it was asked with, the name being one no other workspace holds. A row this page
  * asked for needs no name, since its create's reply names the workspace. */
 const madeAs = (c: Creation, w: WorkspaceView): boolean =>
-  c.workspaceId === w.id || (c.workspaceId === null && c.failed === null && restored.has(c.key) && c.name === w.name && c.project === w.project.id);
-
-/** The row with a word from the host on it: whatever it said, the create is alive. */
-function heardFrom(c: Creation): Creation {
-  if (c.quiet === undefined) return c;
-  const { quiet: _quiet, ...rest } = c;
-  return rest;
-}
+  !claiming(c.key) && (c.workspaceId === w.id || (c.workspaceId === null && c.failed === null && restored.has(c.key) && c.name === w.name && c.project === w.project.id));
 
 /** The rows a reload must not lose: a queued message lives nowhere else. A row whose name a workspace made before it
  * was asked for already holds is refused by the host, and kept it could be taken for that workspace after a reload. */
@@ -467,17 +482,10 @@ export const useStore = create<State>((set, get) => {
     }));
     if (opened) writeAddress({ workspaceId });
   };
-  /** Kept rows heard of since the window last connected, and the wait after which the rest can be dismissed. */
+  /** Rows the host has spoken of since this window last subscribed. The subscribe asks for the last word of every
+   * create the host holds, which lands ahead of the list's reply, so a kept row unheard by then is one no create
+   * there is making. */
   const heard = new Set<string>();
-  let quietTimer: ReturnType<typeof setTimeout> | undefined;
-  const armQuiet = (): void => {
-    clearTimeout(quietTimer);
-    heard.clear();
-    if (!get().creations.some(c => restored.has(c.key))) return;
-    quietTimer = setTimeout(() => {
-      set(s => ({ creations: s.creations.map(c => (restored.has(c.key) && c.failed === null && !heard.has(c.key) ? { ...c, quiet: true as const } : c)) }));
-    }, QUIET_MS);
-  };
   const runCreation = async (key: string, project: string, name: string, picked?: { golden?: string; size?: WorkspaceSize }): Promise<string | null> => {
     const api = get().api;
     if (!api) return null;
@@ -590,8 +598,11 @@ export const useStore = create<State>((set, get) => {
   };
   // What bind fetches and a reconnect fetches again: the list plus the status snapshot that also arms status.subscribe.
   const pull = (api: Api): void => {
-    armQuiet();
-    void get().refresh().catch((e: unknown) => noticeFailure(e, said => `Workspaces not read: ${said}`));
+    heard.clear();
+    // A restored row is neither handed over nor judged before this page knows it owns it.
+    void claimsAnswered()
+      .then(() => get().refresh())
+      .catch((e: unknown) => noticeFailure(e, said => `Workspaces not read: ${said}`));
     void api
       .watchStatuses()
       .then(statuses => set({ statuses: Object.fromEntries(statuses.map(s => [s.id, s])) }))
@@ -712,7 +723,6 @@ export const useStore = create<State>((set, get) => {
     },
     setConn(conn) {
       set({ conn });
-      if (conn !== "live") clearTimeout(quietTimer);
       const api = get().api;
       if (conn === "live" && api) pull(api);
     },
@@ -764,7 +774,16 @@ export const useStore = create<State>((set, get) => {
       // Unique across reloads: a draft or a waiting message persisted under a key must never meet another creation.
       const key = `${CREATION_PREFIX}${newId()}`;
       if (asked?.queuedFrom !== undefined) movePicks(asked.queuedFrom, key);
-      const said = asked === undefined ? {} : { asked: asked.prompt, ...(asked.queuedFrom !== undefined ? { queued: true as const } : {}) };
+      const said =
+        asked === undefined
+          ? {}
+          : {
+              asked: asked.prompt,
+              ...(asked.queuedFrom !== undefined || asked.opens !== undefined ? { queued: true as const } : {}),
+              ...(asked.opens !== undefined ? { opens: asked.opens } : {}),
+              ...(asked.attachments !== undefined ? { attachments: asked.attachments } : {}),
+            };
+      own(key);
       set(s => ({
         creations: [
           ...s.creations,
@@ -815,20 +834,20 @@ export const useStore = create<State>((set, get) => {
     async retryCreation(key) {
       const creation = get().creations.find(c => c.key === key);
       // A row another client started carries no project, so there is nothing here to ask again.
-      if (!creation || creation.project === undefined) return;
-      refusedBeforeLoad.delete(key);
+      if (!creation || creation.project === undefined || claiming(key)) return;
+      // From here the create's own reply answers for the row, as for a row this page asked for.
+      restored.delete(key);
       patchCreation(key, c => ({ ...c, workspaceId: null, lines: NO_LINES, failed: null }));
       await runCreation(key, creation.project, creation.name, { ...(creation.golden !== undefined ? { golden: creation.golden } : {}), ...(creation.size !== undefined ? { size: creation.size } : {}) });
     },
     dismissCreation(key) {
       // The runtime holds a create that failed with the id its stages carried, so every client's row goes with it. A
-      // quiet row's create may still be running, and only the row goes.
+      // host that restarted since holds nothing under the id, and its not-found leaves nothing to say.
       const creation = get().creations.find(c => c.key === key);
       const workspaceId = creation !== undefined && creation.failed !== null ? creation.workspaceId : null;
       dropWaiting(key);
       const deleting = get().api?.deleteWorkspace;
-      const forgotten = refusedBeforeLoad.delete(key);
-      if (workspaceId !== null && deleting !== undefined) void deleting(workspaceId).catch((e: unknown) => (forgotten ? undefined : noticeFailure(e)));
+      if (workspaceId !== null && deleting !== undefined) void deleting(workspaceId).catch((e: unknown) => (failureOf(e).kind === "not-found" ? undefined : noticeFailure(e)));
       set(s => {
         const project = s.creations.find(c => c.key === key)?.project;
         // The next row is one of the same project's, never the sidebar's first, which may be another project's.
@@ -862,10 +881,12 @@ export const useStore = create<State>((set, get) => {
         // row of its own. A list it refused says nothing, and the sends in flight stand until a start or an end.
         ...(answered === null ? {} : { launches: {} }),
       });
-      // A kept row whose workspace was made while no page here was open to hear it becomes that workspace now.
+      // A kept row whose workspace was made while no page here was open to hear it becomes that workspace now, and
+      // one the host neither listed nor spoke of is a create it is no longer making.
       for (const c of get().creations) {
         const made = workspaces.find(w => madeAs(c, w));
         if (made !== undefined) finishCreation(c.key, made.id);
+        else if (restored.has(c.key) && c.failed === null && !heard.has(c.key)) patchCreation(c.key, r => ({ ...r, failed: { title: couldNotStart(r.name), detail: CREATE_UNHEARD } }));
       }
       if (open.toast !== undefined) addNotice({ kind: "error", text: open.toast });
       if (selectedId === null || !workspaces.some(w => w.id === selectedId)) return;
@@ -1178,7 +1199,7 @@ export const useStore = create<State>((set, get) => {
             if (own === undefined || line === undefined) return { goldenFrames };
             const logged: CreationLine = { stage: "image", at: new Date().toISOString(), elapsedMs: Date.now() - own.askedAt, ...line };
             heard.add(own.key);
-            return { goldenFrames, creations: s.creations.map(c => (c === own ? { ...heardFrom(c), lines: [...c.lines, logged] } : c)) };
+            return { goldenFrames, creations: s.creations.map(c => (c === own ? { ...c, lines: [...c.lines, logged] } : c)) };
           });
           return;
         }
@@ -1198,10 +1219,16 @@ export const useStore = create<State>((set, get) => {
             const own = s.creations.find(c => c.workspaceId === e.workspaceId) ?? s.creations.find(c => c.workspaceId === null && c.name === e.name && c.failed === null);
             const failed = e.stage === "failed" ? { title: couldNotStart(e.name), detail: e.message } : null;
             if (own === undefined) {
+              // A refusal of a create this window holds no row of, as the subscribe's last word of a command line's
+              // failure is, has nobody here to tell.
+              if (failed !== null) return {};
               return { creations: [...s.creations, { key: `${CREATION_PREFIX}${e.workspaceId}`, name: e.name, askedAt: Date.now() - e.elapsedMs, workspaceId: e.workspaceId, lines: [line], failed }] };
             }
             heard.add(own.key);
-            return { creations: s.creations.map(c => (c === own ? { ...heardFrom(c), workspaceId: e.workspaceId, lines: [...c.lines, line], failed: c.failed ?? failed } : c)) };
+            // The last word the subscribe asks for repeats the frame a replay may have carried just before it.
+            const last = own.lines.at(-1);
+            const repeated = last !== undefined && last.stage === line.stage && last.message === line.message && last.elapsedMs === line.elapsedMs;
+            return { creations: s.creations.map(c => (c === own ? { ...c, workspaceId: e.workspaceId, lines: repeated ? c.lines : [...c.lines, line], failed: c.failed ?? failed } : c)) };
           });
           return;
         }
@@ -1322,8 +1349,11 @@ useStore.subscribe((s, prev) => {
   if (s.preferences !== prev.preferences) rememberFirstPaint(s.preferences);
 });
 useStore.subscribe((s, prev) => {
-  if (s.creations !== prev.creations || s.workspaces !== prev.workspaces) keepCreations(toKeep(s));
+  if (s.creations === prev.creations && s.workspaces === prev.workspaces) return;
+  keepCreations(toKeep(s));
+  for (const c of prev.creations) if (!s.creations.some(now => now.key === c.key)) letGo(c.key);
 });
+claimKept(keptAtLoad, key => useStore.setState(s => ({ creations: s.creations.filter(c => c.key !== key) })));
 
 /** Every workspace with its threads, as the sidebar's rows read them, for the surfaces that need the whole fleet
  * rather than one workspace: the sidebar, the palette, the rows a transcript draws for the threads it opened, and
