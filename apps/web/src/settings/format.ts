@@ -80,7 +80,6 @@ export const onName = (name: string): string => onceNamed(name, n => ` on ${n}`)
  * computer's own page, its agents and the Remove dialog, which are this build's and are drawn nowhere else. No
  * word is in both. */
 export const WHERE_WORDS = {
-  runningHere: (n: number): string => (n === 0 ? "Nothing running" : `${n} ${n === 1 ? "thread" : "threads"} running`),
   /** A place list the host refused, said where the list would stand. */
   notRead: (said: string) => `Computers not read: ${said}`,
   /** Puts this wsp's daemon on that computer and runs the recipe there again. One word in both states, held and
@@ -107,7 +106,7 @@ export const WHERE_WORDS = {
   cannotDial: "This wsp cannot dial a computer from here.",
   cannotSaveKey: "This wsp cannot save a key from here.",
   /** The first cell of each list's header row, which is the only name a section has. */
-  heads: { computer: "Computer", cores: "Cores", memory: "Memory", threads: "Threads", cloud: "Cloud", agents: "Agents", version: "Version", servers: "Tool servers", image: "Image", threadsHere: "Threads running here" },
+  heads: { computer: "Computer", cores: "Cores", memory: "Memory", threads: "Threads", cloud: "Cloud", agents: "Agents", version: "Version", servers: "Tool servers", image: "Image", pending: "Pending", setup: "Setup" },
   yourImage: "Your image",
 } as const;
 
