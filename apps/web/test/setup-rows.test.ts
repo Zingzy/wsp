@@ -137,7 +137,7 @@ describe("an install as the checks", () => {
     expect(rows.map(r => [r.name, r.state, r.note])).toEqual([
       ["Connected", "done", "Ubuntu 24.04"],
       ["System", "done", "root, systemd, cgroup v2"],
-      ["Reach", "done", undefined],
+      ["Dials back", "done", undefined],
       ["Install wsp", "working", undefined],
     ]);
     expect(checkRows(job({ state: "done", steps: [{ step: "connect", state: "done" }, { step: "check", state: "done" }, { step: "reach", state: "done" }, { step: "wsp", state: "done" }, { step: "join", state: "done" }] })).at(-1)?.state).toBe("done");

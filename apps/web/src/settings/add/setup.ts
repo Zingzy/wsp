@@ -116,7 +116,7 @@ export function setupStanding(place: Pick<PlaceView, "setup" | "applied">): Setu
 const CHECK_ROWS: readonly { id: string; name: string; steps: readonly PlaceAddJob["steps"][number]["step"][] }[] = [
   { id: "connect", name: "Connected", steps: ["connect"] },
   { id: "check", name: "System", steps: ["check"] },
-  { id: "reach", name: "Reach", steps: ["reach"] },
+  { id: "reach", name: "Dials back", steps: ["reach"] },
   { id: "wsp", name: INSTALL, steps: ["wsp", "service", "join"] },
 ];
 

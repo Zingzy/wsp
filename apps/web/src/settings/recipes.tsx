@@ -38,7 +38,7 @@ function RecipesList({ recipes, open }: { recipes: readonly RecipeView[]; open: 
   const looks = useStore(s => s.preferences.recipeLook);
   return (
     <section data-settings-card="recipes" className="flex flex-col gap-2">
-      <Grid id="recipes" head={<GridHead columns={RECIPE_COLUMNS} cells={[{ word: "Recipe" }, { word: "Machines" }]} />}>
+      <Grid id="recipes" head={<GridHead columns={RECIPE_COLUMNS} cells={[{ word: "Recipe" }, { word: "Computers" }]} />}>
         {recipes.map(recipe => {
           const Glyph = PROJECT_GLYPHS[iconOf(looks, recipe.slug)];
           return (
@@ -150,9 +150,9 @@ function RecipePage({ recipe, options, onGone }: { recipe: RecipeView; options: 
     <div className={cn("flex flex-col", PAGE_GAP)}>
       <section data-settings-card="recipe" className="flex flex-col gap-3">
         <div className={CARD_SURFACE}>
-          <HeadRow glyph={<Glyph aria-hidden className={GLYPH} />} title={recipe.name} line={followed ? `Followed by ${on}.` : "No machine follows it yet."} slot={<IconSelect icon={icon} hue="neutral" onChange={next => void setPreferences({ recipeLook: { [recipe.slug]: { icon: next } } })} />} attrs={{ "data-k": "recipe-head" }} />
+          <HeadRow glyph={<Glyph aria-hidden className={GLYPH} />} title={recipe.name} line={followed ? `Followed by ${on}.` : "No computer follows it yet."} slot={<IconSelect icon={icon} hue="neutral" onChange={next => void setPreferences({ recipeLook: { [recipe.slug]: { icon: next } } })} />} attrs={{ "data-k": "recipe-head" }} />
         </div>
-        <p className={NOTE}>Ticks here reach {followed ? on : "every machine that follows it"}.</p>
+        <p className={NOTE}>Ticks here reach {followed ? on : "every computer that follows it"}.</p>
       </section>
       {refused === null ? null : <RefusalSlot k="recipe-refused" said={refused.said} {...(refused.fix === undefined ? {} : { fix: refused.fix })} />}
       {props === null ? null : (
