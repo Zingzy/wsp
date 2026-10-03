@@ -469,3 +469,90 @@ describe("a running turn moved to another access mode", () => {
     await session.finished.catch(() => {});
   });
 });
+
+describe("one of the turn's own subagents stopped by itself", () => {
+  const launched = (task: string, call: string): string =>
+    JSON.stringify({ type: "system", subtype: "task_started", task_id: task, tool_use_id: call, description: "count", task_type: "local_agent", spawn_depth: 1, session_id: SESSION });
+  const answered = (line: string, error?: string): string =>
+    JSON.stringify({
+      type: "control_response",
+      response: { subtype: error === undefined ? "success" : "error", request_id: JSON.parse(line).request_id, ...(error !== undefined ? { error } : {}) },
+    });
+  const begin = (stopTaskWaitMs?: number) => {
+    const io = driven();
+    const adapter = createClaudeAdapter({ exec: io.factory, configDir: "/root/.claude-cfg", ...(stopTaskWaitMs !== undefined ? { stopTaskWaitMs } : {}) });
+    const events: AdapterEvent[] = [];
+    const session = adapter.start({ prompt: "fan out", onEvent: e => events.push(e) });
+    io.push(initLine);
+    io.push(launched("a1", "toolu_a"));
+    io.push(launched("b2", "toolu_b"));
+    return { io, session, events };
+  };
+  const finish = async (io: ReturnType<typeof driven>, session: { finished: Promise<unknown> }): Promise<void> => {
+    io.push(resultLine);
+    io.end();
+    await session.finished;
+  };
+
+  it("writes the CLI's own stop_task for that subagent alone and settles accepted on the CLI's answer", async () => {
+    const { io, session } = begin();
+    await settle();
+    const stopped = session.stopTask("a1");
+    await settle();
+    expect(io.stdin[1]).toBe(JSON.stringify({ type: "control_request", request_id: "wsp-stop-task-1", request: { subtype: "stop_task", task_id: "a1" } }));
+    expect(io.stdin).toHaveLength(2);
+    io.push(answered(io.stdin[1]!));
+    expect(await stopped).toEqual({ outcome: "accepted" });
+    await finish(io, session);
+  });
+
+  it("a task the CLI does not hold comes back refused in the CLI's own words", async () => {
+    const { io, session } = begin();
+    await settle();
+    const stopped = session.stopTask("zz9");
+    await settle();
+    io.push(answered(io.stdin[1]!, "No task found with ID: zz9"));
+    expect(await stopped).toEqual({ outcome: "refused", error: "No task found with ID: zz9" });
+    await finish(io, session);
+  });
+
+  it("a CLI with no stop for this session's tasks reads as unsupported, the answer an agent with no such request gives", async () => {
+    const { io, session } = begin();
+    await settle();
+    const stopped = session.stopTask("a1");
+    await settle();
+    io.push(answered(io.stdin[1]!, "stop_task is not supported in this context (callback not registered)"));
+    expect(await stopped).toEqual({ outcome: "unsupported" });
+    await finish(io, session);
+  });
+
+  it("a CLI that answers nothing inside the wait comes back refused rather than holding the caller", async () => {
+    const { io, session } = begin(20);
+    await settle();
+    const stopped = await session.stopTask("a1");
+    expect(stopped).toEqual({ outcome: "refused", error: "it did not answer within 20ms" });
+    await finish(io, session);
+  });
+
+  it("a subagent already over, and a turn not running, write nothing and read not-running", async () => {
+    const { io, session } = begin();
+    io.push(JSON.stringify({ type: "system", subtype: "task_notification", task_id: "b2", tool_use_id: "toolu_b", status: "completed", summary: "30", session_id: SESSION }));
+    await settle();
+    expect(await session.stopTask("b2")).toEqual({ outcome: "not-running" });
+    expect(io.stdin).toHaveLength(1);
+    await finish(io, session);
+    expect(await session.stopTask("a1")).toEqual({ outcome: "not-running" });
+    expect(io.stdin).toHaveLength(1);
+  });
+
+  it("a stop still waiting when the turn replies settles not-running, since nothing can answer it now", async () => {
+    const { io, session } = begin();
+    await settle();
+    const stopped = session.stopTask("a1");
+    await settle();
+    io.push(resultLine);
+    expect(await stopped).toEqual({ outcome: "not-running" });
+    io.end();
+    await session.finished;
+  });
+});

@@ -11,8 +11,9 @@
 // control_cancel_request, which the CLI sends for a prompt whose turn was
 // interrupted. A control_request this file does not know is answered with an
 // error rather than left unanswered, since the CLI waits on every one it sends.
-// The channel runs both ways: set_permission_mode is this host's own request,
-// and the CLI answers it with a control_response carrying the request's id.
+// The channel runs both ways: set_permission_mode and stop_task are this
+// host's own requests, and the CLI answers each with a control_response
+// carrying the request's id.
 
 import { PERMISSION_ALLOW, PERMISSION_DENY, pickedOptions, questionAnswerInput, questionOptions } from "@wsp/protocol";
 import type { PermissionAsk, PermissionOption } from "@wsp/protocol";
@@ -154,6 +155,14 @@ export function modeOptionOn(ask: PermissionAsk, mode: string): string | undefin
  * the CLI skipping them. */
 export function setModeLine(requestId: string, mode: string): string {
   return JSON.stringify({ type: "control_request", request_id: requestId, request: { subtype: "set_permission_mode", mode } });
+}
+
+/** The request that stops one of the turn's own subagents by the CLI's handle for it, and nothing else: interrupt
+ * ends the turn and every background subagent with it (claude-agent-sdk-typescript#352). A kill writes task_updated
+ * killed and then task_notification stopped; a task the CLI does not hold is refused, and a session with no task
+ * registry says stop_task is not supported in this context (read off the 2.1.288 binary, 2026-10-03). */
+export function stopTaskLine(requestId: string, task: string): string {
+  return JSON.stringify({ type: "control_request", request_id: requestId, request: { subtype: "stop_task", task_id: task } });
 }
 
 /** The answer to a control_request this adapter cannot serve: the CLI stops waiting on it and says why in its log. */

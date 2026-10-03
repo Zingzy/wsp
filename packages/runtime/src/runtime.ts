@@ -241,6 +241,7 @@ import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./
 import { isNoProvider, isPlaceAbsent, projectStateKey, putFiles, type Copier } from "@wsp/engine";
 import { boxFullLine, DISK_FULL_PCT, diskFullLine, stopRefusedLine, threadMessages, threadSeed, workspaceMemMb } from "@wsp/protocol";
 import { holdsRepo, ownerRepoOf, projectForRepo } from "@wsp/protocol";
+import { taskStopRefusedLine, taskStopUnsupportedLine, type SubagentView, type TaskStop } from "@wsp/protocol";
 import { accessMode, accessRefusal, agentOffLine, configDirLaunchRefusal, configDirRefusal, markedFor, modelIdRefusal, openDefaults, resolveThreadDefaults, setupView, shapeModels, withCustomModels, type AccessChoice, type AgentLaunch, type AgentRow, type AgentSetupSet, type ProjectOverrides, type ResolvedFolder, type ThreadDefaults } from "@wsp/protocol";
 import { agentSetups, keyOf, realFolderHere, realFolderScript } from "./agent-setup.js";
 import { realClock, type Clock } from "./clock.js";
@@ -377,6 +378,9 @@ export interface HarnessStartOptions {
   limitDetails?: true;
   /** On an adapter that waits for its prompt: its CLI starts at once and is handed the prompt when this settles. */
   promptAfter?: Promise<void>;
+  /** The version the agent's binary on this machine answered the catalog probe with; absent where the probe got no
+   * answer and wsp's own table stood in. */
+  version?: string;
   onEvent: (event: AdapterEvent) => void;
 }
 
@@ -403,6 +407,9 @@ export interface HarnessSession {
    * person's pick then waits for their next message. `refused` is the CLI's own no to that mode with no road left to
    * stand in for it, `gone` a turn whose channel takes nothing any more. */
   setAccess?(mode: string): Promise<"set" | "refused" | "gone">;
+  /** Stops one of this turn's own subagents by the agent's id for it, the turn and its other subagents running on;
+   * absent on a harness that stops none by itself. */
+  stopTask?(task: string): Promise<TaskStop>;
 }
 
 export interface HarnessAdapter {
@@ -861,6 +868,8 @@ export interface SessionHandle {
   /** Moves this running turn to another access mode, the prompt it is stopped on included; absent on a harness that
    * takes none mid-turn. */
   setAccess?(mode: string): Promise<"set" | "refused" | "gone">;
+  /** Stops one of this turn's own subagents; absent on a harness that stops none by itself. */
+  stopTask?(task: string): Promise<TaskStop>;
 }
 
 /** Which backend a place name resolves to. One row today, the provider this host is wired with; a row per joined
@@ -1707,8 +1716,9 @@ export interface Runtime {
     list(workspaceId?: string, origin?: Caller): Promise<SessionView[]>;
     /** The workspace's persisted session events, oldest first; a chat replays these on mount. */
     history(workspaceId: string, origin?: Caller): Promise<SessionEvent[]>;
-    /** Stops the session's running turn through its harness; a turn already over or an unknown id answers, never throws. */
-    interrupt(sessionId: string, origin?: Caller): Promise<SessionInterruptResult>;
+    /** Stops the session's running turn through its harness, or with task the one subagent of it the agent calls by that
+     * id; a turn already over or an unknown id answers, never throws. */
+    interrupt(sessionId: string, origin?: Caller, task?: string): Promise<SessionInterruptResult>;
     /** Sends a message into the session's running turn through its harness and records it as session.steer once the
      * harness took it; a turn already over, a harness without steer or an unknown id answers. Refuses like start
      * while the workspace is pausing or paused. */
@@ -2029,7 +2039,13 @@ interface TranscriptIndex {
   /** The turn each start the transcript holds by its request id opened or joined: a start sent again under that id
    * after the host stopped under it is answered with this turn, never a second one. */
   taken: Map<string, Taken>;
+  /** Each thread's subagents by the agent's id for them, in the order they started, with the turn each ran under. */
+  children: Map<string, Map<string, Child>>;
 }
+
+/** A subagent as the index holds it: what a listing answers, the turn whose end stops it if it is still running, and
+ * when its newest start row was written, which a resumed child is held by while that row is in the ring. */
+type Child = SubagentView & { turnId?: string; startRow?: number };
 
 interface Taken {
   sessionId: string;
@@ -2045,7 +2061,49 @@ const transcriptUnreadLine = (workspaceId: string, why: string): string => `the 
 const SESSION_FACTS = ["cwd", "permissionMode", "model"] as const;
 type SessionFacts = Partial<Record<(typeof SESSION_FACTS)[number], string>>;
 
-const emptyIndex = (): TranscriptIndex => ({ words: new Map(), starts: new Map(), cut: new Map(), facts: new Map(), taken: new Map() });
+const emptyIndex = (): TranscriptIndex => ({ words: new Map(), starts: new Map(), cut: new Map(), facts: new Map(), taken: new Map(), children: new Map() });
+
+/** One session.subagent row into a thread's children: a start makes the child, or runs a resumed one again, and an end
+ * moves one the index holds. An end whose start has left the ring finds none, so the child stays gone with it. */
+function foldChild(index: TranscriptIndex, e: Extract<SessionEvent, { type: "session.subagent" }>): void {
+  if (e.threadId === undefined) return;
+  const held = index.children.get(e.threadId) ?? new Map<string, Child>();
+  const child = held.get(e.task);
+  if (e.state === "running") {
+    held.set(e.task, {
+      id: e.task,
+      title: e.title ?? child?.title ?? e.task,
+      state: "running",
+      ...((e.parentToolUseId ?? child?.parentToolUseId) !== undefined ? { parentToolUseId: e.parentToolUseId ?? child?.parentToolUseId } : {}),
+      ...((e.depth ?? child?.depth) !== undefined ? { depth: e.depth ?? child?.depth } : {}),
+      startedAt: child?.startedAt ?? e.at ?? 0,
+      ...(e.turnId !== undefined ? { turnId: e.turnId } : {}),
+      ...(e.at !== undefined ? { startRow: e.at } : {}),
+    });
+    index.children.set(e.threadId, held);
+  } else if (child !== undefined) {
+    child.state = e.state;
+    child.endedAt = e.at ?? child.startedAt;
+  }
+}
+
+/** A turn's end stops every child of it still running: whatever ended the turn ended them with it. */
+function endChildren(index: TranscriptIndex, threadId: string, turnId: string | undefined, at: number | undefined): void {
+  for (const child of index.children.get(threadId)?.values() ?? []) {
+    if (child.state !== "running" || child.turnId !== turnId) continue;
+    child.state = "stopped";
+    child.endedAt = at ?? child.startedAt;
+  }
+}
+
+/** A row the ring dropped: a child whose start it was leaves the index with it. */
+function forgetChild(index: TranscriptIndex, e: SessionEvent): void {
+  if (e.type !== "session.subagent" || e.state !== "running" || e.threadId === undefined) return;
+  const held = index.children.get(e.threadId);
+  if (held === undefined || held.get(e.task)?.startRow !== e.at) return;
+  held.delete(e.task);
+  if (held.size === 0) index.children.delete(e.threadId);
+}
 
 /** One event into an index: the person's messages and its own agent's replies by thread, a reply's pieces joined back
  * into the one message they are, and the newest start and end of each thread and session. A subagent's lines are the
@@ -2059,7 +2117,10 @@ function foldEvent(index: TranscriptIndex, e: SessionEvent): void {
     const facts = index.facts.get(e.sessionId) ?? {};
     for (const fact of SESSION_FACTS) if (e[fact] !== undefined) facts[fact] = e[fact];
     index.facts.set(e.sessionId, facts);
-  } else if (e.type === "session.end" && e.threadId !== undefined) index.cut.set(e.threadId, e.exitCode === null && !e.sawResult);
+  } else if (e.type === "session.end" && e.threadId !== undefined) {
+    index.cut.set(e.threadId, e.exitCode === null && !e.sawResult);
+    endChildren(index, e.threadId, e.turnId, e.at);
+  } else if (e.type === "session.subagent") foldChild(index, e);
   if (e.threadId === undefined) return;
   const held = index.words.get(e.threadId) ?? { lines: [], open: undefined, last: 0 };
   index.words.set(e.threadId, held);
@@ -2084,6 +2145,9 @@ const indexOf = (events: readonly SessionEvent[]): TranscriptIndex => {
  * tail. Only these are kept, since a turn holding the transcript would hold it whole for as long as it runs. */
 interface TurnWritten {
   lines: number;
+  /** The subagent rows it wrote, counted apart from the deltas: a host from before they were written counted only
+   * deltas, and a run it left is re-read with every one of its subagent lines still to write. */
+  subagents: number;
   reply?: TurnResult["status"];
   started: boolean;
 }
@@ -2099,10 +2163,11 @@ const turnWritten = (events: readonly SessionEvent[], turnId: string): TurnWritt
   // workspace and drops its oldest rows, so counting them would read a turn whose head has been evicted as shorter
   // than it was and write its tail a second time.
   const lines = lastOf("session.delta")?.line ?? 0;
+  const subagents = lastOf("session.subagent")?.line ?? 0;
   const reply = lastOf("session.done")?.result.status;
   // A turn with a line or a reply already written had its start written too, whether or not the cap still holds it:
   // a second start row at the tail of the transcript would sit after the work it opened.
-  return { lines, ...(reply !== undefined ? { reply } : {}), started: lines > 0 || reply !== undefined || lastOf("session.start") !== undefined };
+  return { lines, subagents, ...(reply !== undefined ? { reply } : {}), started: lines > 0 || subagents > 0 || reply !== undefined || lastOf("session.start") !== undefined };
 };
 
 /** An index as its file holds it, with the mark of the transcript file it was read off: an index whose transcript
@@ -2110,12 +2175,13 @@ const turnWritten = (events: readonly SessionEvent[], turnId: string): TurnWritt
  * one that does not parse, and one written before it held the starts by request id, since the restart that brings
  * this host up is the one a send may be waiting across. */
 const indexBytes = (index: TranscriptIndex, of: BlobMark | undefined): Buffer =>
-  Buffer.from(JSON.stringify({ of, words: [...index.words], starts: [...index.starts], cut: [...index.cut], facts: [...index.facts], taken: [...index.taken] }));
+  Buffer.from(JSON.stringify({ of, words: [...index.words], starts: [...index.starts], cut: [...index.cut], facts: [...index.facts], taken: [...index.taken], children: [...index.children].map(([thread, held]) => [thread, [...held]]) }));
 const indexRead = (bytes: Buffer): { index: TranscriptIndex; of?: BlobMark } | undefined => {
   try {
-    const held = JSON.parse(bytes.toString("utf8")) as { of?: BlobMark; words: [string, ThreadWords][]; starts: [string, string][]; cut: [string, boolean][]; facts: [string, SessionFacts][]; taken?: [string, Taken][] };
-    if (held.taken === undefined) return undefined;
-    return { index: { words: new Map(held.words), starts: new Map(held.starts), cut: new Map(held.cut), facts: new Map(held.facts), taken: new Map(held.taken) }, ...(held.of !== undefined ? { of: held.of } : {}) };
+    const held = JSON.parse(bytes.toString("utf8")) as { of?: BlobMark; words: [string, ThreadWords][]; starts: [string, string][]; cut: [string, boolean][]; facts: [string, SessionFacts][]; taken?: [string, Taken][]; children?: [string, [string, Child][]][] };
+    if (held.taken === undefined || held.children === undefined) return undefined;
+    const children = new Map(held.children.map(([thread, kids]) => [thread, new Map(kids)]));
+    return { index: { words: new Map(held.words), starts: new Map(held.starts), cut: new Map(held.cut), facts: new Map(held.facts), taken: new Map(held.taken), children }, ...(held.of !== undefined ? { of: held.of } : {}) };
   } catch {
     return undefined;
   }
@@ -3334,14 +3400,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** The bytes each held transcript's events come to as JSON, kept beside it so a new event is not a walk of all of them. */
   const transcriptBytes = new Map<string, number>();
   const eventBytes = (e: SessionEvent): number => JSON.stringify(e).length;
-  /** Drops the oldest events until the rest are inside both caps, in place, and answers the bytes left. */
-  const dropOldest = (events: SessionEvent[], bytes: number = events.reduce((n, e) => n + eventBytes(e), 0)): number => {
+  /** Drops the oldest events until the rest are inside both caps, in place, and answers the bytes left; each dropped
+   * event goes to `gone`. */
+  const dropOldest = (events: SessionEvent[], bytes: number = events.reduce((n, e) => n + eventBytes(e), 0), gone?: (e: SessionEvent) => void): number => {
     let drop = 0;
     while (drop < events.length - 1 && (events.length - drop > TRANSCRIPT_CAP || bytes > TRANSCRIPT_BYTES)) bytes -= eventBytes(events[drop++]!);
+    if (gone !== undefined) for (let i = 0; i < drop; i++) gone(events[i]!);
     if (drop > 0) events.splice(0, drop);
     return bytes;
   };
-  const trimTranscript = (workspaceId: string, events: SessionEvent[]): void => void transcriptBytes.set(workspaceId, dropOldest(events, transcriptBytes.get(workspaceId)));
+  const trimTranscript = (workspaceId: string, events: SessionEvent[]): void =>
+    void transcriptBytes.set(workspaceId, dropOldest(events, transcriptBytes.get(workspaceId), e => forgetChild(indexFor(workspaceId), e)));
   /** A transcript held as the one opened last, the oldest of the others let go past the cap. */
   const holdTranscript = (workspaceId: string, events: SessionEvent[]): void => {
     transcripts.delete(workspaceId);
@@ -3614,7 +3683,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const record = (unstamped: SessionEvent): void => {
     const event: SessionEvent = { ...unstamped, at: Date.now() };
     const id = event.workspaceId;
-    const kept = event.type === "session.delta" && event.kind === "tool_result" && event.text.length > TOOL_RESULT_KEPT ? { ...event, text: event.text.slice(0, TOOL_RESULT_KEPT) } : event;
+    // A subagent's text and thinking are clipped as a tool result is, so a subagent that thinks for pages cannot push its
+    // lead's own lines out of the ring.
+    const clipped = event.type === "session.delta" && event.text.length > TOOL_RESULT_KEPT && (event.kind === "tool_result" || (event.parentToolUseId !== undefined && (event.kind === "text" || event.kind === "thinking")));
+    const kept = clipped ? { ...event, text: event.text.slice(0, TOOL_RESULT_KEPT) } : event;
     const size = eventBytes(kept);
     const held = transcripts.get(id);
     if (held !== undefined) {
@@ -8399,7 +8471,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   }): SessionHandle => {
     const { entry, view, threadId, turnId, opening, outcome, notify, notifyBy, notifyRoad, turnToken, scopeDeviceId } = t;
     const workspaceId = entry.record.id;
-    const { lines: deltasWritten, reply: recordedReply, started: startWritten } = t.written ?? { lines: 0, started: false };
+    const { lines: deltasWritten, subagents: subagentsWritten, reply: recordedReply, started: startWritten } = t.written ?? { lines: 0, subagents: 0, started: false };
     /** What the turn changed, read once at the first of its reply and its exit: a second snapshot, the range from the
      * launch's, and the files in it recorded under the turn. A turn that changed nothing records nothing. */
     let changesRead = false;
@@ -8434,6 +8506,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     let startRecorded = startWritten;
     let deltas = deltasWritten;
     let replaying = deltasWritten;
+    let subagentRows = subagentsWritten;
+    let replayingSubagents = subagentsWritten;
     let ended = false;
     /** The harness's own name for where this turn ended, kept with the turn's checkpoint once it is over. */
     let anchor: string | undefined;
@@ -8687,6 +8761,28 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         case "turn.anchor":
           anchor = event.anchor;
           return;
+        case "subagent":
+          // Counted apart from the deltas, so a run re-read from its first line writes none of these a second time and
+          // a run a host from before them left has all of them written.
+          if (replayingSubagents > 0) {
+            replayingSubagents--;
+            return;
+          }
+          record({
+            type: "session.subagent",
+            workspaceId,
+            sessionId,
+            turnId,
+            threadId,
+            line: ++subagentRows,
+            task: event.task,
+            state: event.state,
+            ...(event.parentToolUseId !== undefined ? { parentToolUseId: event.parentToolUseId } : {}),
+            ...(event.title !== undefined ? { title: event.title } : {}),
+            ...(event.summary !== undefined ? { summary: event.summary } : {}),
+            ...(event.depth !== undefined ? { depth: event.depth } : {}),
+          });
+          return;
         case "limit": {
           turnAccount = event.limit.account ?? turnAccount;
           const account = usageAccountOf(entry, view.harness, turnAccount);
@@ -8799,6 +8895,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       ...(started.steer !== undefined ? { steer: (prompt: string) => started.steer!(prompt) } : {}),
       ...(started.answer !== undefined ? { answer } : {}),
       ...(started.setAccess !== undefined ? { setAccess } : {}),
+      ...(started.stopTask !== undefined ? { stopTask: (task: string) => started.stopTask!(task) } : {}),
     };
     const end = (reason: string): void => {
       if (ended || view.status !== "running") return;
@@ -9308,6 +9405,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
               ...(mcpServers !== undefined ? { mcpServers } : {}),
               ...(limitDetails ? { limitDetails: true as const } : {}),
               ...(promptsLate && snapshot !== undefined ? { promptAfter: snapshot.from.then(() => {}) } : {}),
+              ...(catalog?.source === "harness" && catalog.version !== null ? { version: catalog.version } : {}),
               // The thread's earlier turns as its transcript holds them, this one left out since its message follows.
               ...(resume !== undefined ? { seed: async () => threadSeed(threadMessages((await openTranscript(workspaceId)).filter(e => e.turnId !== turnId), threadId)) } : {}),
               onEvent,
@@ -9367,16 +9465,21 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // A row with none blocks, so a thread is titled on the first listing that sees it.
       const asked = titleRows(rows).map(view => ({ first: view.harnessTitle === undefined, done: refreshTitle(view, false) }));
       await Promise.all(asked.filter(a => a.first).map(a => a.done));
+      // A thread's subagents ride its latest row alone, the one foldThreads reads, so a thread of several rows lists
+      // each child once.
+      const latest = new Map(held.map(s => [threadKeyOf(s.view), s] as const));
       // The turn's process and what its calls are stopped behind ride the answer and never the row itself: both are
       // this host's to know while the turn runs, and a pid written down outlives the process it named while a wait
       // written down outlives the question it was on.
       return held.map(s => {
         const behind = s.view.status === "running" ? stoppedBehind(s) : undefined;
         const marks = threadRecords.get(threadKeyOf(s.view));
+        const children = latest.get(threadKeyOf(s.view)) === s && s.view.threadId !== undefined ? transcriptIndex.get(s.view.workspaceId)?.children.get(s.view.threadId) : undefined;
         return {
           ...s.view,
           ...(s.view.status === "running" && s.pid !== undefined ? { pid: s.pid } : {}),
           ...(behind !== undefined ? { waitingOn: behind } : {}),
+          ...(children !== undefined && children.size > 0 ? { subagents: [...children.values()].map(({ turnId: _turn, startRow: _row, ...child }) => child) } : {}),
           ...((): { setupRefusal?: string } => {
             const entry = live.get(s.view.workspaceId);
             const place = entry === undefined ? undefined : setupPlace(entry);
@@ -9403,13 +9506,22 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       return (await openTranscript(workspaceId)).filter(e => drivesThread(e.threadId, origin)).map(e => ({ ...e }));
     },
 
-    async interrupt(sessionId, origin) {
+    async interrupt(sessionId, origin, task) {
       await ready();
       const s = sessions.get(sessionId);
       if (!s) return { outcome: "not-found" };
       // One absence for every row a thread cannot reach, wherever it stands: a sentence about the workspace would
       // tell a thread which of the two rules hid the row.
       if ((await entryOfRow(s.view, origin)) === undefined) return { outcome: "not-found" };
+      // One subagent of the turn, and nothing else: the threads under this one and the turn itself run on.
+      if (task !== undefined) {
+        if (s.view.status !== "running" || s.handle === undefined) return { outcome: "not-running" };
+        const agent = agentLabel(s.view.harness);
+        if (s.handle.stopTask === undefined) return { outcome: "unsupported", error: taskStopUnsupportedLine(agent) };
+        const stopped = await s.handle.stopTask(task);
+        if (stopped.outcome === "refused") return { outcome: "refused", error: taskStopRefusedLine(agent, stopped.error) };
+        return stopped.outcome === "unsupported" ? { outcome: "unsupported", error: taskStopUnsupportedLine(agent) } : { outcome: stopped.outcome };
+      }
       // A thread's agents spawned a tree under it, and a stop on the thread is a stop on the tree: the children go
       // first, so nothing under a stopped lead is left working for a thread that is no longer reading. The lead
       // itself may already be over, which is an answer and not a reason to leave its builders running. A child
@@ -11795,7 +11907,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const lists = entry === undefined || entry.record.phase !== "running" ? table : await Promise.all(table.map(c => listsOn(c, entry)));
         const project = entry === undefined ? undefined : prefs.projectDefaults[entry.record.project];
         const agent = defaultAgentOf(prefs, entry);
-        return lists.map(c => ({ ...shapeModels(defaultsOn(c, prefs, project).catalog, prefs.agentDefaults[c.harness]?.models), ...(c.harness === agent ? { isDefault: true } : {}) }));
+        return lists.map(c => {
+          const picker = prefs.agentDefaults[c.harness]?.models;
+          const unshaped = picker === undefined ? {} : { unshaped: { models: c.models, ...(c.legacyModels !== undefined ? { legacyModels: c.legacyModels } : {}) } };
+          return { ...shapeModels(defaultsOn(c, prefs, project).catalog, picker), ...unshaped, ...(c.harness === agent ? { isDefault: true } : {}) };
+        });
       },
     },
     golden,

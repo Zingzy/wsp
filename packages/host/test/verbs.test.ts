@@ -2111,7 +2111,7 @@ describe("wsp verbs over the host", () => {
     const { code, io } = await run("threads");
     expect(code).toBe(0);
     const rows = io.lines[0]!.split("\n");
-    expect(rows[0]).toMatch(/^PROJECT\s+WORKSPACE\s+THREAD\s+AGENT\s+STATE\s+BY\s+COMPUTER\s+TITLE$/);
+    expect(rows[0]).toMatch(/^PROJECT\s+WORKSPACE\s+THREAD\s+TASK\s+AGENT\s+STATE\s+BY\s+COMPUTER\s+TITLE$/);
     const [a] = await rt.sessions.list(alpha!.id);
     const [b] = await rt.sessions.list(beta!.id);
     // Each row reads project, workspace, thread, agent, state, who opened it, the computer and the title. Both turns
@@ -2821,6 +2821,38 @@ describe("wsp verbs over the host", () => {
     const missing = await run("stop", "nope");
     expect(missing.code).toBe(EXIT_CODES.usage);
     expect(missing.io.errors).toEqual(["wsp stop: no thread nope"]);
+  });
+
+  it("an agent's own subagents list under their thread with their task ids, and stop --task stops one of them alone", async () => {
+    const held = heldAgent(false);
+    await restartHost({ claude: held.adapter });
+    await run("new", "alpha");
+    void run("run", "alpha", "fan out");
+    await vi.waitFor(() => expect(held.starts).toHaveLength(1));
+    await vi.waitFor(async () => expect((await rt.sessions.list())[0]?.claudeSessionId).toBeDefined());
+    held.spawn(0, "a1", "count alpha");
+    held.spawn(0, "b2", "count beta");
+    const [row] = await rt.sessions.list();
+    const thread = row!.threadId!;
+    const listed = await run("threads");
+    const cells = listed.io.lines[0]!.split("\n").slice(1).map(r => r.trim().split(/ {2,}/));
+    // A child's THREAD and TASK cells are the two words a stop of it takes; its state is its own, and its agent started it.
+    expect(cells.map(c => c.slice(2))).toEqual([
+      [thread, "claude", "Working", "cli", expect.any(String), "fan out"],
+      [thread, "a1", "claude", "Working", "agent", expect.any(String), "count alpha"],
+      [thread, "b2", "claude", "Working", "agent", expect.any(String), "count beta"],
+    ]);
+
+    const stopped = await run("stop", thread.slice(0, 8), "--task", "a1");
+    expect(stopped.code).toBe(0);
+    expect(stopped.io.lines).toEqual([`thread ${thread} task a1 stopped`]);
+    expect(held.tasksStopped).toEqual(["a1"]);
+    expect(held.interrupted).toEqual([]);
+    await vi.waitFor(async () => expect((await rt.sessions.list())[0]!.subagents?.map(c => c.state)).toEqual(["stopped", "running"]));
+    const json = await run("threads", "--json");
+    expect((JSON.parse(json.io.lines.at(-1)!) as { threads: ThreadView[] }).threads[0]!.subagents?.map(c => [c.id, c.state])).toEqual([["a1", "stopped"], ["b2", "running"]]);
+    expect((await rt.sessions.list())[0]!.status).toBe("running");
+    held.release(0, "done");
   });
 
   it("thread rename names the thread in the agent's own store and says so; an agent that keeps no name, one whose store has no such session, and an unknown thread each say why", async () => {

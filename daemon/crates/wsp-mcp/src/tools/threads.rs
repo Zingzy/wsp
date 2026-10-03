@@ -88,6 +88,8 @@ struct Session {
     permission_mode: Option<String>,
     #[serde(default)]
     fast: Option<bool>,
+    #[serde(default)]
+    subagents: Option<Box<RawValue>>,
 }
 
 /// A thread as `foldThreads` builds it, its fields in that object's order.
@@ -149,6 +151,9 @@ pub struct Thread {
     pub permission_mode: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fast: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, schemars(with = "Option<Vec<serde_json::Map<String, serde_json::Value>>>"))]
+    pub subagents: Option<Box<RawValue>>,
     pub turns: u64,
     pub ran: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -267,6 +272,7 @@ fn fold(sessions: Vec<Session>) -> Vec<Thread> {
                 rewound_at: latest.rewound_at,
                 permission_mode: latest.permission_mode,
                 fast: latest.fast.filter(|fast| *fast),
+                subagents: latest.subagents,
                 turns: count,
                 ran,
                 parent_thread_id,
