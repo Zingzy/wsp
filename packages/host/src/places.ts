@@ -1533,7 +1533,9 @@ async function setUpPlace(io: CliIO, opts: PlaceOpts, aim: HostAim, ref: string,
     const watch = watchSetup(client, addId, setupSay(io, flags, deps));
     await client.events();
     try {
-      const answer = await client.request<{ place: PlaceView; setup?: PlaceSetup; said?: string }>("places.setup", { ref, addId, ...(flags.recipe !== undefined ? { recipe: flags.recipe } : {}) });
+      const answer = await client.request<{ addId: string; place: PlaceView; setup?: PlaceSetup; said?: string }>("places.setup", { ref, addId, ...(flags.recipe !== undefined ? { recipe: flags.recipe } : {}) });
+      // A setup already under way answers with its own stream, which this line then follows.
+      watch.also(answer.addId);
       return await followAdded(io, client, flags, answer.place, watch, answer.said);
     } finally {
       watch.off();

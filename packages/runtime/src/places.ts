@@ -2535,6 +2535,9 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       if (found.length > 1) throw usageRefusal(twoPlacesRefusal(ref, found.map(r => r.id)), "Name it by its id.");
       const record = found[0];
       if (record === undefined) throw usageRefusal(noSuchPlaceRefusal(ref, held.map(r => r.name)), "Run wsp computers to read the ones this host holds.");
+      // A setup under way asked again with nothing new is followed rather than refused: the run it answers is the
+      // one to read on to its next wait or its end. New picks are what a running setup refuses.
+      if (setting.has(record.id) && record.setup !== undefined && o.choices === undefined && o.recipe === undefined) return { addId: record.setup.addId, place: viewOf(record, await defaultId()), setup: record.setup };
       // What it is set up with: the picks given, else the choices its pending add holds, else what it was set up
       // with before. A computer still choosing with nothing chosen waits on the person.
       const choices = o.choices ?? (pend !== undefined && Object.values(recipeCounts(pend.choices)).some(n => n > 0) ? pend.choices : undefined);

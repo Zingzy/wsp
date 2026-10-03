@@ -311,7 +311,11 @@ describe("a computer added with its picks", () => {
     );
     expect(refused).toBeInstanceOf(PlaceProvisioningError);
     expect(refused).toMatchObject({ kind: "conflict", message: placeProvisioningLine("spoo", "clis") });
-    await expect(runtime!.places!.setUp(place.id, {})).rejects.toThrow(placeProvisioningLine("spoo", "clis"));
+    // Asked again with nothing new, it answers the run under way to follow; new picks are what it refuses.
+    const followed = await runtime!.places!.setUp(place.id, {});
+    expect([followed.setup?.state, followed.addId]).toEqual(["running", (await rowOf(place.id)).setup?.addId]);
+    await expect(runtime!.places!.setUp(place.id, { choices: LAPTOP })).rejects.toThrow(placeProvisioningLine("spoo", "clis"));
+    expect(p.ran.filter(s => s === "floor")).toHaveLength(1);
     p.release();
     await until(async () => (await rowOf(place.id)).setup?.state === "done");
     expect(await runtime!.places!.forkingBackend(place.id)).toBeDefined();

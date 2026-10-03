@@ -18,6 +18,8 @@ export interface SetupWatch {
   failed?: string;
   /** Settles at the next thing heard: a line, a wait or an end. */
   next(): Promise<void>;
+  /** Takes a second stream as this one's: the run a resume answered with where a setup was already under way. */
+  also(addId: string): void;
   off(): void;
 }
 
@@ -30,15 +32,17 @@ export function watchSetup(client: HostClient, addId: string, say: { line(l: Add
     heard = new Promise<void>(r => (wake = r));
     was();
   };
+  const ids = new Set([addId]);
   const watch: SetupWatch = {
     lines: [],
     waits: new Map(),
     next: () => heard,
+    also: id => void ids.add(id),
     off: () => off(),
   };
   const off = client.onFrame(frame => {
     const stage = PlaceStageEvent.safeParse(frame);
-    if (stage.success && stage.data.addId === addId) {
+    if (stage.success && ids.has(stage.data.addId)) {
       const l: AddLine = { step: stage.data.step, state: stage.data.state, ...(stage.data.note !== undefined ? { note: stage.data.note } : {}) };
       watch.lines.push(l);
       if (stage.data.state === "failed") watch.failed = stage.data.note;
@@ -47,7 +51,7 @@ export function watchSetup(client: HostClient, addId: string, say: { line(l: Add
       return;
     }
     const setup = PlaceSetupEvent.safeParse(frame);
-    if (!setup.success || setup.data.addId !== addId) return;
+    if (!setup.success || !ids.has(setup.data.addId)) return;
     const e = setup.data;
     if (e.line !== undefined) {
       watch.lines.push(e.line);

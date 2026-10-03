@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Manifest } from "@wsp/collect";
-import { RecipeFile, type AddLine, type PlaceSetup, type PlaceView, type PlaceWait } from "@wsp/protocol";
+import { RecipeFile, SETUP_STEP_WORDS, type AddLine, type PlaceSetup, type PlaceView, type PlaceWait } from "@wsp/protocol";
 import { sshWordReach, type SshLocalRun } from "@wsp/engine";
 import { PassThrough } from "node:stream";
 import { gunzipSync } from "node:zlib";
@@ -34,7 +34,7 @@ const RUNNING: PlaceSetup = { state: "running", addId: "a_x", startedAt: "2026-1
 
 /** A host that plays one add: the install's steps, the setup's, a sign-in that waits and its landing when the test
  * says, and the end. The row it lists moves with what it said. */
-function fakeHost(o: { end?: "ready" | "failed"; signIn?: boolean; pending?: boolean } = {}) {
+function fakeHost(o: { end?: "ready" | "failed"; signIn?: boolean; pending?: boolean; running?: string } = {}) {
   const asked: { op: string; params?: Record<string, unknown> }[] = [];
   const frames: ((frame: Record<string, unknown>) => void)[] = [];
   let row: PlaceView = PLACE;
@@ -63,7 +63,8 @@ function fakeHost(o: { end?: "ready" | "failed"; signIn?: boolean; pending?: boo
       asked.push({ op, ...(params === undefined ? {} : { params }) });
       if (op === "places.list") return { places: [row] };
       if (op !== "places.add" && op !== "places.setup") throw new Error(`unexpected op ${op}`);
-      addId = String(params!["addId"] ?? "a_tool");
+      // A setup already under way answers its own stream, not the one the caller minted.
+      addId = o.running ?? String(params!["addId"] ?? "a_tool");
       if (o.pending === true) {
         say({ type: "place.stage", addId, step: "join", state: "done", placeId: PLACE.id });
         return { addId, place: PLACE, pending: { id: addId, address: "root@10.0.0.9", step: "floor", choices: RecipeFile.parse({ name: "spoo" }), startedAt: "x", placeId: PLACE.id } };
@@ -173,6 +174,14 @@ describe("wsp add <user@host> --recipe", () => {
     await expect(addCommand(captured(), opts(tmp("add-resume-name")), ["spoo"], { resume: true, name: "box" }, deps(host.client))).rejects.toThrow(RESUME_FLAGS_REFUSAL);
   });
 
+  it("with --resume on a setup already running follows that run on its own stream to the end", async () => {
+    const io = captured();
+    const host = fakeHost({ running: "a_running" });
+    const followed = addCommand(io, opts(tmp("add-follow")), ["spoo"], { resume: true }, deps(host.client));
+    expect(await Promise.race([followed, new Promise<"stuck">(r => setTimeout(() => r("stuck"), 1_000))])).toBe(0);
+    expect(io.lines.some(l => l.includes(SETUP_STEP_WORDS.clis))).toBe(true);
+  });
+
   it("refuses a recipe, --later and --json on an add that is not a computer's", async () => {
     const host = fakeHost();
     for (const flags of [{ recipe: "laptop" }, { later: true }, { json: true }]) {
@@ -232,6 +241,11 @@ describe("the add tool", () => {
     await expect(addComputer(host.client as never, { address: "https://github.com/dev/app.git" })).rejects.toMatchObject({ kind: "usage" });
     await expect(addComputer(host.client as never, { address: "box" })).rejects.toThrow("box is not one");
     expect(host.asked).toEqual([]);
+  });
+
+  it("called again with resume while the setup runs, answers that run's next wait rather than a refusal", async () => {
+    const answer = await addComputer(fakeHost({ running: "a_running", signIn: true }).client as never, { address: "spoo", resume: true });
+    expect(answer.waiting).toEqual([WAIT]);
   });
 
   it("answers at its ceiling with how far the add got", async () => {
