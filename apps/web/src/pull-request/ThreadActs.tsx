@@ -3,7 +3,7 @@
 // thread or a comment (Send, Cancel, Cmd or Ctrl Enter), and reactions, GitHub's eight behind one add button with
 // the used ones as chips under the body and the person's own marked.
 import { SmilePlusIcon } from "lucide-react";
-import { useState } from "react";
+import { useState, type Ref } from "react";
 import { isCommentSubmitShortcut } from "../components/diffs/commentSubmitShortcut.js";
 import { Button } from "../components/ui/button.js";
 import { Kbd } from "../components/ui/kbd.js";
@@ -32,9 +32,9 @@ const labelOf = (content: ReactionContent): string => REACTIONS.find(r => r.cont
 /** A 24 px pill a small act takes: the box's own button at the reply field's size. */
 const XS = "h-6 gap-1 rounded-md px-2 text-xs font-medium";
 
-/** The field a reply is written in, the text kept and the refusal said under it when a send is refused. */
-export function ReplyField({ to, onSend, onCancel }: { to: string; onSend: (body: string) => Promise<void>; onCancel: () => void }) {
-  const [text, setText] = useState("");
+/** The one field a person writes in from the pane, in the house style: Send, an optional Cancel, Cmd or Ctrl Enter;
+ * the words kept and the host's refusal said under it when a send is refused. */
+function CommentField({ label, text, setText, onSent, onSend, onCancel, autoFocus, fieldRef }: { label: string; text: string; setText: (text: string) => void; onSent: () => void; onSend: (body: string) => Promise<void>; onCancel?: () => void; autoFocus: boolean; fieldRef?: Ref<HTMLTextAreaElement> }) {
   const [sending, setSending] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
   const send = (): void => {
@@ -43,7 +43,10 @@ export function ReplyField({ to, onSend, onCancel }: { to: string; onSend: (body
     setSending(true);
     setRefusal(null);
     onSend(body).then(
-      () => setSending(false),
+      () => {
+        setSending(false);
+        onSent();
+      },
       (e: unknown) => {
         setSending(false);
         setRefusal(failureOf(e).said);
@@ -56,13 +59,14 @@ export function ReplyField({ to, onSend, onCancel }: { to: string; onSend: (body
       <div className="overflow-hidden rounded-lg border border-border bg-background">
         <Textarea
           unstyled
-          autoFocus
-          aria-label={PR_WORDS.replyTo(to)}
-          placeholder={PR_WORDS.replyTo(to)}
+          autoFocus={autoFocus}
+          ref={fieldRef}
+          aria-label={label}
+          placeholder={label}
           value={text}
           onChange={e => setText(e.target.value)}
           onKeyDown={e => {
-            if (e.key === "Escape") {
+            if (e.key === "Escape" && onCancel !== undefined) {
               e.preventDefault();
               onCancel();
             }
@@ -75,9 +79,11 @@ export function ReplyField({ to, onSend, onCancel }: { to: string; onSend: (body
         />
         <div className="flex items-center gap-2 px-2 pb-2">
           <Kbd className="mr-auto h-auto rounded border border-border bg-transparent px-[5px] py-px text-[11px]">{`${mod} Enter`}</Kbd>
-          <Button type="button" variant="ghost" className={XS} data-pr-reply-cancel onClick={onCancel}>
-            {PR_WORDS.cancel}
-          </Button>
+          {onCancel === undefined ? null : (
+            <Button type="button" variant="ghost" className={XS} data-pr-reply-cancel onClick={onCancel}>
+              {PR_WORDS.cancel}
+            </Button>
+          )}
           <Button type="button" className={XS} data-pr-reply-send disabled={text.trim() === "" || sending} onClick={send}>
             {PR_WORDS.send}
           </Button>
@@ -91,6 +97,32 @@ export function ReplyField({ to, onSend, onCancel }: { to: string; onSend: (body
     </div>
   );
 }
+
+/** The field a reply in a thread is written in, open until it is sent or cancelled. */
+export function ReplyField({ to, onSend, onCancel }: { to: string; onSend: (body: string) => Promise<void>; onCancel: () => void }) {
+  const [text, setText] = useState("");
+  return <CommentField label={PR_WORDS.replyTo(to)} text={text} setText={setText} onSend={onSend} onSent={() => {}} onCancel={onCancel} autoFocus />;
+}
+
+/** The one comment box at Activity's foot: a new comment in the conversation, the box emptied once it is posted. Its
+ * words are the caller's, so a quote reply can fill it from an item above. */
+export function CommentBox({ text, setText, onSend, fieldRef }: { text: string; setText: (text: string) => void; onSend: (body: string) => Promise<void>; fieldRef?: Ref<HTMLTextAreaElement> }) {
+  return (
+    <div data-pr-comment-box>
+      <CommentField label={PR_WORDS.leaveComment} text={text} setText={setText} onSend={onSend} onSent={() => setText("")} autoFocus={false} {...(fieldRef !== undefined ? { fieldRef } : {})} />
+    </div>
+  );
+}
+
+/** How many of an item's lines a quote reply carries. */
+const QUOTE_LINES = 3;
+
+/** A quote reply's words: who it answers, then the item's first lines as a markdown quote, ready for the person's own. */
+export function quoteOf(author: string, body: string): string {
+  const lines = body.trim().split("\n").filter(l => l.trim() !== "").slice(0, QUOTE_LINES);
+  return `@${author}\n\n${lines.map(l => `> ${l}`).join("\n")}\n\n`;
+}
+
 
 /** The add button and its eight: a 24 px icon in an item's head, shown on the item's hover beside the send. */
 export function ReactAdd({ reactions, onToggle }: { reactions: readonly PullRequestReaction[]; onToggle: (content: ReactionContent) => void }) {
