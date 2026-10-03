@@ -132,6 +132,13 @@ export const ADD_COMPUTER_WORDS = {
   restDone: "Everything else is done.",
   keepsGoing: "Setup keeps going. wsp pings you when it needs you.",
   signInLater: "You can sign in later in Settings.",
+  skipForNow: "Skip for now",
+  skip: "Skip",
+  /** A private repository ticked while GitHub is skipped: the box cannot clone it. */
+  needsGitHub: "Private; needs GitHub to clone. Go back to sign in, or skip it.",
+  diskLine: (needed: string, free: string): string => `${needed} needed, ${free} free`,
+  diskShort: (box: string, free: string, needed: string): { said: string; fix: string } => ({ said: `${box} has ${free} free; these picks need ${needed}.`, fix: `Untick some rows, or free room on ${box}.` }),
+  unmeasured: (n: number): string => `${n} picked ${n === 1 ? "row was" : "rows were"} not measured`,
   tabOpened: "A tab opened in your browser.",
   dialledBack: "Dialled back.",
   addCloud: "Add a cloud",

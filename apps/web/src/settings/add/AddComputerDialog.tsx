@@ -34,7 +34,7 @@ import { readRecipes, useRecipes } from "../recipesStore.js";
 import { Card, Line } from "../rows.js";
 import { CopyRow, RefusalSlot } from "../sheetParts.js";
 import { STEP_TITLES, askedHostKey, closeAdd, connect, firstPick, go, openSetup, readOptions, retrySetup, setPicks, setSaveAs, setUp, stepsFor, useAddFlow, type AddStep } from "./addFlow.js";
-import { everything, folderKey, noPicks } from "./choices.js";
+import { everything, folderKey, githubPick, noPicks } from "./choices.js";
 import { AgentsPicks, Choice, ClisPicks, GitHubPicks, OtherPicks, PluginsPicks, ProjectsPicks, ServersPicks, SkillsPicks, type FolderOption } from "./PickLists.js";
 import { PickLine, PickRow } from "./PickRow.js";
 import { checkRows, setupCount, setupRows, setupStanding, type StepLine } from "./setup.js";
@@ -122,7 +122,13 @@ function useHereProjects() {
   return useMemo(() => projects.filter(p => p.computer === HERE_PLACE_ID), [projects]);
 }
 
-function ProjectsStep({ picks, box, boxId, onChange }: { picks: RecipeFile; box: string; boxId: string; onChange: (next: RecipeFile) => void }) {
+/** What the host measured of a folder of the computer running it, by its path: the size and whether it is private. */
+const folderFacts = (facts: RecipeOptions["folders"], path: string): Pick<FolderOption, "bytes" | "private"> => {
+  const fact = facts?.find(f => f.path === path);
+  return { ...(fact?.bytes === undefined ? {} : { bytes: fact.bytes }), ...(fact?.private === undefined ? {} : { private: fact.private }) };
+};
+
+function ProjectsStep({ picks, box, boxId, facts, onChange }: { picks: RecipeFile; box: string; boxId: string; facts: RecipeOptions["folders"]; onChange: (next: RecipeFile) => void }) {
   const here = useHereProjects();
   const looks = useStore(s => s.preferences.projectLook);
   const onBox = useStore(s => s.projects).filter(p => p.computer === boxId);
@@ -130,8 +136,8 @@ function ProjectsStep({ picks, box, boxId, onChange }: { picks: RecipeFile; box:
   // A folder already in the picks that is no project here is one the person picked: it stands at the top.
   const picked: FolderOption[] = Object.entries(picks.folders)
     .filter(([key]) => !here.some(p => folderKey(p.name) === key) && !added.some(f => f.key === key))
-    .map(([key, row]) => ({ key, name: row.name ?? key, path: row.from, icon: row.icon ?? "folder", hue: row.hue ?? "neutral" }));
-  const folders: FolderOption[] = [...added, ...picked, ...here.map(p => ({ key: folderKey(p.name), name: p.name, path: p.path, remote: p.remote, icon: looks[p.id]?.icon ?? "folder", hue: looks[p.id]?.hue ?? "neutral" }))];
+    .map(([key, row]) => ({ key, name: row.name ?? key, path: row.from, icon: row.icon ?? "folder", hue: row.hue ?? "neutral", ...folderFacts(facts, row.from) }));
+  const folders: FolderOption[] = [...added, ...picked, ...here.map(p => ({ key: folderKey(p.name), name: p.name, path: p.path, remote: p.remote, icon: looks[p.id]?.icon ?? "folder", hue: looks[p.id]?.hue ?? "neutral", ...folderFacts(facts, p.path) }))];
   const pick = desktopBridge()?.pickFolder;
   const addFolder = async (): Promise<void> => {
     const path = await pick?.();
@@ -163,7 +169,7 @@ const names = (table: Record<string, unknown>): string => Object.keys(table).joi
 function SummaryStep({ picks, box, place, here, recipeIcon }: { picks: RecipeFile; box: string; place: PlaceView | undefined; here: string; recipeIcon: ProjectIcon }) {
   const saveAs = useAddFlow(s => s.saveAs);
   const counts = recipeCounts(picks);
-  const github = picks.configs.github === undefined ? "Skip for now" : picks.configs.github.signin === "machine" ? `Sign in on ${box}` : `Token from ${here}`;
+  const github = { vault: `Token from ${here}`, machine: `Sign in on ${box}`, skip: ADD_COMPUTER_WORDS.skipForNow }[githubPick(picks)];
   const lines: [string, string][] = [
     ["Agents", Object.keys(picks.agents).map(agentName).join(", ")],
     ["MCP servers", names(picks.mcp)],
@@ -450,7 +456,7 @@ export function AddComputerDialog() {
       case "github":
         return optionsBody(o => <GitHubPicks picks={picks} options={o} onChange={change} box={box} here={here} />);
       case "projects":
-        return <ProjectsStep picks={picks} box={box} boxId={flow.placeId ?? ""} onChange={change} />;
+        return <ProjectsStep picks={picks} box={box} boxId={flow.placeId ?? ""} facts={options?.folders} onChange={change} />;
       case "other":
         return optionsBody(o => <OtherPicks picks={picks} options={o} onChange={change} box={box} />);
       case "summary":

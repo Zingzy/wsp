@@ -38,9 +38,9 @@ const DISHA: PlaceView = { id: "p_disha", kind: "computer", name: "dishapc", def
 
 const OPTIONS: RecipeOptions = {
   agents: [
-    { id: "claude", name: "Claude Code", signins: ["vault", "machine"] },
-    { id: "codex", name: "Codex", signins: ["machine"] },
-    { id: "opencode", name: "OpenCode", signins: ["machine"] },
+    { id: "claude", name: "Claude Code", signins: ["vault", "machine"], kind: "token", bytes: 230 * MB },
+    { id: "codex", name: "Codex", signins: ["machine"], kind: "oauth", bytes: 95 * MB },
+    { id: "opencode", name: "OpenCode", signins: ["machine"], kind: "key", bytes: 120 * MB },
   ],
   mcp: [
     { name: "wsp", agents: ["claude", "codex"] },
@@ -54,23 +54,29 @@ const OPTIONS: RecipeOptions = {
     { name: "excalidraw", agents: ["claude"] },
   ],
   clis: [
-    { name: "gh", via: "apt", version: "2.86.0" },
-    { name: "ripgrep", via: "apt", version: "15.1.0" },
-    { name: "jq", via: "apt", version: "1.8.1" },
-    { name: "fd", via: "apt", version: "10.3.0" },
-    { name: "uv", via: "installer", version: "0.9.2" },
-    { name: "pnpm", via: "npm", version: "11.9.0" },
-    { name: "bun", via: "npm", version: "1.3.1" },
-    { name: "go", via: "apt", version: "1.25.1" },
-    { name: "cargo-nextest", via: "cargo", version: "0.9.98", needs: ["build-essential"] },
-    { name: "yq", via: "apt", version: "4.47.1" },
+    { name: "gh", via: "apt", version: "2.86.0", bytes: 40 * MB },
+    { name: "ripgrep", via: "apt", version: "15.1.0", bytes: 6 * MB },
+    { name: "jq", via: "apt", version: "1.8.1", bytes: 1 * MB },
+    { name: "fd", via: "apt", version: "10.3.0", bytes: 4 * MB },
+    { name: "uv", via: "installer", version: "0.9.2", bytes: 38 * MB },
+    { name: "pnpm", via: "npm", version: "11.9.0", bytes: 20 * MB },
+    { name: "bun", via: "npm", version: "1.3.1", bytes: 90 * MB },
+    { name: "go", via: "apt", version: "1.25.1", bytes: 517 * MB },
+    { name: "cargo-nextest", via: "cargo", version: "0.9.98", needs: ["build-essential"], bytes: 30 * MB },
+    { name: "yq", via: "apt", version: "4.47.1", bytes: 10 * MB },
   ],
   skills: ["unslop", "diagnosing-bugs", "blast-radius", "typescript-best-practices", "grilling", "wizard", "wsp", "wsp-review", "agent-pipeline", "zingzy-design-taste", "writing-plans", "prototype", "research", "why"].map(name => ({ name, from: name === "wsp" ? "~/.agents/skills" : "~/.claude/skills", linked: false })),
   plugins: ["frontend-design@claude-plugins-official", "code-review@claude-plugins-official", "skill-creator@claude-plugins-official", "ralph-loop@claude-plugins-official", "brag@hyperframes", "dataviz@anthropic-labs", "turnstile-spin@spoo-me", "excalidraw-skill@excalidraw", "raycast-ui-skills@raycast"].map(name => ({ name })),
   configs: [
     { id: "git", label: "git settings and identity" },
     { id: "shell", label: "zsh or fish, the prompt, tmux and the rest of the shell's look" },
-    { id: "github", label: "the GitHub sign-in" },
+    { id: "github", label: "the GitHub sign-in", signins: ["vault", "machine", "skip"] },
+  ],
+  folders: [
+    { name: "wsp", path: "~/wsp", remote: "github.com/Zingzy/wsp", private: true, bytes: 1.1 * 1024 * MB },
+    { name: "spoo", path: "~/spoo", remote: "github.com/spoo-me/url-shortener", private: false, bytes: 180 * MB },
+    { name: "laya", path: "~/laya", bytes: 340 * MB },
+    { name: "kartsmash", path: "~/kartsmash", bytes: 2.3 * 1024 * MB },
   ],
 };
 
@@ -239,9 +245,10 @@ const job = ADD_STEPS[screen];
 if (job !== undefined) useAdds.setState({ jobs: { [job.addId]: job } });
 if (screen === "where") useAddFlow.setState({ open: true, step: "where", address: "studio" });
 else if (job !== undefined) useAddFlow.setState({ open: true, step: "checks", address: job.address, addId: job.addId });
-else if (PICK_STEPS.includes(screen as AddStep) || screen === "projects-taken") {
-  const step = (screen === "projects-taken" ? "projects" : screen) as AddStep;
-  useAddFlow.setState({ open: true, step, address: "studio", placeId: STUDIO.id, pendingId: "a_add", picks: PICKS, from: "here", options: OPTIONS, saveAs: { on: true, name: "Builders", icon: "rocket" } });
+else if (PICK_STEPS.includes(screen as AddStep) || screen === "projects-taken" || screen === "projects-nogithub") {
+  const step = (screen.startsWith("projects") ? "projects" : screen) as AddStep;
+  const picks = screen === "projects-nogithub" ? { ...PICKS, configs: { ...PICKS.configs, github: { signin: "skip" as const } } } : PICKS;
+  useAddFlow.setState({ open: true, step, address: "studio", placeId: STUDIO.id, pendingId: "a_add", picks, from: "here", options: OPTIONS, saveAs: { on: true, name: "Builders", icon: "rocket" } });
 } else if (RUNNING_SCREENS.includes(screen)) useAddFlow.setState({ open: true, step: screen === "ready" ? "ready" : "running", placeId: STUDIO.id, address: "studio" });
 
 // The desktop shell's folder picker, which is what draws Add a folder on Import projects.

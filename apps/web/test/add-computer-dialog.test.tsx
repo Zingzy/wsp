@@ -291,6 +291,78 @@ describe("Add a computer, from the address to Set up", () => {
   });
 });
 
+describe("Add a computer's picks read the host's facts", () => {
+  const MB = 1024 ** 2;
+  const FACTS: RecipeOptions = {
+    ...OPTIONS,
+    agents: [
+      { id: "claude", name: "Claude Code", signins: ["vault", "machine"], kind: "token", bytes: 230 * MB },
+      { id: "codex", name: "Codex", signins: ["machine"], kind: "device", bytes: 40 * MB },
+    ],
+    clis: [
+      { name: "gh", via: "apt", version: "2.86.0", bytes: 40 * MB },
+      { name: "go", via: "apt", version: "1.25.1", bytes: 517 * MB },
+    ],
+    configs: [
+      { id: "git", label: "git settings and identity" },
+      { id: "github", label: "the GitHub sign-in", signins: ["machine", "skip"] },
+    ],
+    folders: [{ name: "wsp", path: "/Users/zingzy/wsp", remote: "github.com/Zingzy/wsp", private: true, bytes: 1.1 * 1024 ** 3 }],
+  };
+  const open = async (at: "agents" | "clis" | "github" | "projects", picks?: RecipeFile): Promise<ReturnType<typeof host>> => {
+    const fake = host({ recipesOptions: async () => FACTS } as Partial<Api>);
+    useStore.setState({ places: [here, studio] });
+    mountSettings({ api: fake.api, at: { kind: "group", group: "computers" } });
+    act(() => useAddFlow.setState({ open: true, step: at, placeId: studio.id, pendingId: "a_1", address: "studio", ...(picks === undefined ? {} : { picks }) }));
+    await settle();
+    return fake;
+  };
+  const size = (row: string): [string | null | undefined, string | null | undefined] => {
+    const cell = dialog()!.querySelector(`[data-pick-row='${row}'] [data-k=size]`);
+    return [cell?.textContent, cell?.getAttribute("data-tone")];
+  };
+
+  it("draws each agent's size and its sign-in words by how it signs in", async () => {
+    await open("agents");
+    await waitFor(() => expect(ticked("claude")).toBe(true));
+    expect(size("claude")).toEqual(["230 MB", "warning"]);
+    expect(size("codex")).toEqual(["40 MB", "muted"]);
+    expect(dialog()!.querySelector("[data-pick-row='claude'] [data-slot=select-trigger]")?.textContent).toBe("Copy the key");
+    expect(dialog()!.querySelector("[data-pick-row='codex'] [data-slot=select-trigger]")?.textContent).toBe("Sign in on studio with a code");
+  });
+
+  it("draws each CLI's size in the weight table's ink", async () => {
+    await open("clis");
+    await waitFor(() => expect(ticked("gh")).toBe(true));
+    expect(size("gh")).toEqual(["40 MB", "muted"]);
+    expect(size("go")).toEqual(["517 MB", "warning"]);
+  });
+
+  it("offers GitHub the ways the host says it can sign in, and keeps a skip as the choice it is", async () => {
+    await open("github");
+    await waitFor(() => expect(dialog()!.querySelectorAll("[data-choice]")).toHaveLength(2));
+    expect([...dialog()!.querySelectorAll("[data-choice]")].map(c => c.getAttribute("data-choice"))).toEqual(["machine", "skip"]);
+    // With no token here the first way is signing in there.
+    expect(useAddFlow.getState().picks!.configs.github).toEqual({ signin: "machine" });
+    await press(dialog()!.querySelector("[data-choice='skip'] [role=radio]"));
+    expect(useAddFlow.getState().picks!.configs.github).toEqual({ signin: "skip" });
+    act(() => useAddFlow.setState({ step: "summary" }));
+    await settle();
+    expect(dialog()!.querySelector("[data-settings-line='GitHub'] [data-settings-word]")?.textContent).toBe("Skip for now");
+  });
+
+  it("weighs each project and says a private one needs GitHub only while GitHub is skipped", async () => {
+    const picks = (github: "vault" | "skip"): RecipeFile => RecipeFile.parse({ name: "studio", folders: { wsp: { from: "/Users/zingzy/wsp", name: "wsp", keep: [] } }, configs: { github: { signin: github } } });
+    await open("projects", picks("skip"));
+    const row = (): Element => dialog()!.querySelector("[data-pick-row='wsp']")!;
+    expect(size("wsp")).toEqual(["1.1 GB", "danger"]);
+    expect(row().textContent).toContain("Private; needs GitHub to clone. Go back to sign in, or skip it.");
+    act(() => useAddFlow.setState({ picks: picks("vault") }));
+    expect(row().textContent).not.toContain("needs GitHub");
+    expect(row().textContent).toContain("github.com/Zingzy/wsp");
+  });
+});
+
 describe("Add a computer while the setup runs", () => {
   const placed = (setup: PlaceSetup, applied?: PlaceView["applied"]): PlaceView => ({ ...studio, setup, ...(applied === undefined ? {} : { applied }) });
 
