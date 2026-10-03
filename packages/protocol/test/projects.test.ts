@@ -4,7 +4,7 @@
 // this computer belongs to: the command line, the runtime and the app all
 // read these here.
 import { describe, expect, it } from "vitest";
-import { workspaceOfCopy, cloneFailedLine, cloneUrlRefusal, noComputerForSourceLine, addedProjectLine, addedProjectOn, addingProjectLine, ADD_FORMS_LINE, projectSourceOf, computerNamed, folderName, HERE_PLACE_ID, hiddenFolder, isMacMachine, goldenForkName, homeShortened, kindWords, landsOn, MEMORY_KEPT_CLAUSE, noWorkspaceForFolderLine, NOT_A_REPO_LINE, ProjectGolden, projectNameOf, projectPathOn, projectRemovedOnComputerLine, projectsInPlace, type ProjectSource, type ProjectView, REGISTERING_LINE, registeredLine, registerTakesNoConsentLine, sameSourceRefusal, sourceKind, threadOpenedLine, workspaceForFolder, workspaceLands, type WorkspaceProject, WorkspaceView } from "../src/index.js";
+import { cloneFailedLine, cloneUrlRefusal, noComputerForSourceLine, addedProjectLine, addedProjectOn, addingProjectLine, ADD_FORMS_LINE, projectSourceOf, computerNamed, folderName, HERE_PLACE_ID, hiddenFolder, isMacMachine, goldenForkName, homeShortened, kindWords, landsOn, MEMORY_KEPT_CLAUSE, cwdOutsideLine, noBranchesLine, ProjectGolden, projectNameOf, projectPathOn, projectRemovedOnComputerLine, projectsInPlace, type ProjectSource, type ProjectView, REGISTERING_LINE, registeredLine, registerTakesNoConsentLine, sameSourceRefusal, sourceKind, threadOpenedLine, workspaceLands, type WorkspaceProject, WorkspaceView } from "../src/index.js";
 
 const spoo: WorkspaceProject = { name: "spoo", dest: "/root/spoo", importedAt: "2026-09-01T00:00:00Z", size: 1024 };
 const wsp: WorkspaceProject = { name: "wsp", dest: "/root/wsp", importedAt: "2026-09-02T00:00:00Z" };
@@ -14,19 +14,6 @@ const view = { id: "ws_1", name: "b2", machineId: "m1", phase: "running", golden
 const folderSource = (path: string): ProjectSource => ({ kind: "folder", path });
 const gitSource = (url: string): ProjectSource => ({ kind: "git", url });
 
-const project = (over: Partial<ProjectView>): ProjectView => ({
-  id: "pr_1",
-  name: "wsp",
-  computer: "here",
-  source: folderSource("/Users/dev/wsp"),
-  path: "/Users/dev/wsp",
-  remote: "https://github.com/dev/wsp.git",
-  defaultBranch: "main",
-  memoryKey: "-Users-dev-wsp",
-  memoryDir: "/Users/dev/.claude/projects/-Users-dev-wsp/memory",
-  createdAt: "2026-09-17T00:00:00.000Z",
-  ...over,
-});
 
 describe("what one word to wsp add names", () => {
   it("a login is a computer, a url or a repo path is a repo, a path is a folder, and anything else is refused with the three forms", () => {
@@ -79,7 +66,10 @@ describe("what one word to wsp add names", () => {
 
   it("the refusals name the project, the folder and the computer", () => {
     expect(sameSourceRefusal("spoo-landing", "spoo")).toBe("that source is already a project on spoo, spoo-landing; one source on one computer is one project");
-    expect(NOT_A_REPO_LINE).toBe("is not a git repo; git init makes it one, or add a repo's url with --into <folder> or --on <computer>");
+    expect(cwdOutsideLine("~/elsewhere", "spoo")).toBe("~/elsewhere is not in spoo or a worktree of it; wsp add it first");
+    expect(noBranchesLine("notes")).toBe("notes is not a git repo, so it has no branches");
+    expect(threadOpenedLine("th_1", "spoo", "~/.wsp/worktrees/pr_1/feat-x")).toBe("thread th_1 on spoo in ~/.wsp/worktrees/pr_1/feat-x");
+    expect(threadOpenedLine("th_1", undefined, "~/spoo")).toBe("thread th_1 in ~/spoo");
   });
 });
 
@@ -118,7 +108,7 @@ describe("what a computer is called in a row", () => {
     expect(computerNamed("pl_box", undefined, "darwin")).toBe("pl_box");
   });
 
-  it("the line a recorded project answers with names the computer the same way, and says the command that makes its workspace", () => {
+  it("the line a recorded project answers with names the computer the same way, and on this computer the command that opens a thread", () => {
     const project = {
       id: "pr_1",
       name: "spoo-landing",
@@ -132,13 +122,15 @@ describe("what a computer is called in a row", () => {
       createdAt: "t",
     };
     expect(addedProjectLine(project, new Map([["pl_box", "hetzner"]]), "darwin")).toBe(
-      'spoo-landing pr_1: https://github.com/dev/spoo.git on hetzner, at /root/spoo-landing inside a workspace of it\nmake one with: wsp new \'spoo-landing\' "<what you are working on>"',
+      "spoo-landing pr_1: https://github.com/dev/spoo.git on hetzner, at /root/spoo-landing",
     );
     // This computer's own word is the host's platform's, never a default: a line written on a Linux host says
     // this computer where a Mac says this Mac, and neither reads the other's word.
     const here = { ...project, id: "pr_2", name: "wsp", computer: HERE_PLACE_ID, source: { kind: "folder" as const, path: "/Users/dev/wsp" }, path: "/Users/dev/wsp" };
     expect(addedProjectLine(here, new Map(), "darwin")).toContain("on this Mac, at /Users/dev/wsp");
     expect(addedProjectLine(here, new Map(), "linux")).toContain("on this computer, at /Users/dev/wsp");
+    // A project here takes a thread at once, and the line says the one that opens it.
+    expect(addedProjectLine(here, new Map(), "darwin").split("\n")[1]).toBe(`open a thread on it with: wsp run 'wsp' "<message>"`);
     // The add's own stage says that one sentence and no other: a caller holding the computer's word already,
     // which is the road the landing takes, reads the same line off it.
     expect(addedProjectOn(project, "hetzner")).toBe(addedProjectLine(project, new Map([["pl_box", "hetzner"]]), "darwin"));
@@ -205,52 +197,6 @@ describe("getting a project onto a machine", () => {
     // A machine that has answered nothing yet has said nothing to hide.
     expect(isMacMachine(undefined)).toBe(false);
     expect(isMacMachine("")).toBe(false);
-  });
-});
-
-describe("the workspace a folder on this computer belongs to", () => {
-  const here = project({ id: "pr_wsp", name: "wsp", path: "/Users/dev/wsp", source: folderSource("/Users/dev/wsp") });
-  const nested = project({ id: "pr_host", name: "host", path: "/Users/dev/wsp/packages/host", source: folderSource("/Users/dev/wsp/packages/host") });
-  const cloned = project({ id: "pr_front", name: "frontend", computer: "pl_box", path: "/root/frontend", source: gitSource("https://github.com/spoo-me/frontend") });
-  const on = (p: ProjectView, id = `ws_${p.id}`) => ({ id, name: p.name, project: { id: p.id, name: p.name, path: p.path, computer: p.computer } });
-
-  it("a folder under a project worked in place picks that project's workspace, the nearest when projects nest", () => {
-    const wspWorkspace = on(here);
-    const hostWorkspace = on(nested);
-    expect(workspaceForFolder([wspWorkspace], [here], "/Users/dev/wsp")).toEqual({ workspace: wspWorkspace, project: here });
-    expect(workspaceForFolder([wspWorkspace], [here], "/Users/dev/wsp/packages/host/src")).toEqual({ workspace: wspWorkspace, project: here });
-    expect(workspaceForFolder([wspWorkspace, hostWorkspace], [here, nested], "/Users/dev/wsp/packages/host/src")).toEqual({ workspace: hostWorkspace, project: nested });
-  });
-
-  it("a folder no project holds, and a project no workspace stands on, name nothing", () => {
-    expect(workspaceForFolder([on(here)], [here], "/Users/dev/elsewhere")).toBeNull();
-    expect(workspaceForFolder([], [here], "/Users/dev/wsp")).toBeNull();
-    expect(workspaceForFolder([on(here)], [], "/Users/dev/wsp")).toBeNull();
-  });
-
-  it("a folder inside a copy picks that copy's workspace, which is where a thread on it starts", () => {
-    const copyOf = (p: ProjectView, name: string) => ({ ...on(p, `ws_${name}`), copy: { path: `${p.path}-${name}` } });
-    const lead = copyOf(here, "lead");
-    const other = copyOf(here, "leader");
-    expect(workspaceOfCopy([other, lead], "/Users/dev/wsp-lead")).toBe(lead);
-    expect(workspaceOfCopy([other, lead], "/Users/dev/wsp-lead/packages/host")).toBe(lead);
-    expect(workspaceOfCopy([other, lead], "/Users/dev/wsp")).toBeUndefined();
-    expect(workspaceOfCopy([on(here)], "/Users/dev/wsp")).toBeUndefined();
-  });
-
-  it("a project a computer cloned is on that computer, not here, so a folder of this name here is not it", () => {
-    expect(workspaceForFolder([on(cloned)], [cloned], "/root/frontend")).toBeNull();
-    expect(workspaceForFolder([on(cloned)], [cloned], "/Users/dev/frontend")).toBeNull();
-  });
-
-  it("the refusal names the folder and the road that records it", () => {
-    expect(noWorkspaceForFolderLine("/Users/dev/my repo", "<workspace>")).toBe("no workspace holds a project for /Users/dev/my repo; name one with <workspace>, or wsp add '/Users/dev/my repo' records it as a project here");
-    // The tool has no flag to pass, so its refusal names its own word.
-    expect(noWorkspaceForFolderLine("/Users/dev/spoo", "workspace")).toContain("name one with workspace,");
-  });
-
-  it("the first line of a thread opened from inside a repo names the workspace and the folder", () => {
-    expect(threadOpenedLine("1a2b3c4d", "b2", "~/spoo")).toBe("thread 1a2b3c4d on b2 in ~/spoo");
   });
 });
 

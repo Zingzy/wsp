@@ -13,7 +13,7 @@ import { tilde } from "@wsp/collect";
 import { MCP_SERVER_NAME, mcpServerCommandLine, nextInsideAgentLine, WSP_TOOL_TIMEOUT_SEC, type McpServerSpec } from "@wsp/protocol";
 import { placeSections, removeSections } from "./agents-md.js";
 import { daemonBinaryHere } from "./assets.js";
-import { SKILL_NAME, WSP_SKILL } from "./skill.js";
+import { SKILL_NAME, wspSkill } from "./skill.js";
 import { realState } from "./serving-home.js";
 import { VERSION } from "./version.js";
 
@@ -248,7 +248,7 @@ export function skillFile(agent: AgentEntry, home: string): { tilde: string; abs
 function installSkill(agent: AgentEntry, home: string): string {
   const file = skillFile(agent, home);
   mkdirSync(dirname(file.abs), { recursive: true });
-  writeFileSync(file.abs, WSP_SKILL);
+  writeFileSync(file.abs, wspSkill());
   return file.tilde;
 }
 
@@ -259,15 +259,16 @@ function installSkill(agent: AgentEntry, home: string): string {
  * dials another host, whose copy is that host's to keep. */
 export function refreshSkills(home: string, statePath: string): string[] {
   const written: string[] = [];
+  const skill = wspSkill();
   for (const agent of CATALOG_AGENTS) {
     if (!dialsState(agent, home, statePath)) continue;
     const file = skillFile(agent, home);
     try {
-      if (readFileSync(file.abs, "utf8") === WSP_SKILL) continue;
+      if (readFileSync(file.abs, "utf8") === skill) continue;
     } catch {
       continue;
     }
-    writeFileSync(file.abs, WSP_SKILL);
+    writeFileSync(file.abs, skill);
     written.push(file.tilde);
   }
   return written;

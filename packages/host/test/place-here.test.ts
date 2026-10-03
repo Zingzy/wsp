@@ -12,7 +12,6 @@ import { NAME_LABEL, WORKSPACE_LABEL, WSP_LABEL } from "@wsp/engine";
 import type { DaemonReach } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { statusCommand, type CliIO, type ServiceDeps } from "../src/cli.js";
-import { workspaceLine } from "../src/verbs.js";
 import { hereAnswering, hereLines, openHere, readHere, type HereDeps, type HereReading } from "../src/place-here.js";
 import type { WatchSignals } from "../src/watch.js";
 import { writePlaceFile } from "../src/place-report.js";
@@ -334,7 +333,7 @@ describe("wsp status on a computer joined as a place", () => {
       rateUsdPerHour: 0,
       reach: { state: "reachable" as const },
       machineState: "running" as const,
-    })).map(w => workspaceLine(w).slice(0, 2));
+    })).map(w => [w.name, w.id]);
     expect(onTheBox).toEqual(onTheHost);
   });
 
@@ -480,7 +479,7 @@ describe("wsp status on a computer joined as a place", () => {
     const at = { statePath: join(home, "state.json"), home, watch: true };
     // This computer is in no wsp: the rows would be about the host serving here, which a watch does not follow.
     await expect(statusCommand(io, at, deps(fakeDaemon(READINGS).deps))).rejects.toThrow(
-      "wsp status --watch reads the agent on a computer joined to somebody's wsp, and this computer is joined to none. Run wsp status without --watch for the host serving here, or wsp workspaces --watch to follow what it runs.",
+      "wsp status --watch reads the agent on a computer joined to somebody's wsp, and this computer is joined to none. Run wsp status without --watch for the host serving here, or wsp threads --watch to follow what it runs.",
     );
     joined();
     writeHost(home, "box", { url: "http://box.example:4400", deviceId: "d1", deviceToken: "t1", hostKey: HOST_KEY, pairedAt: "2026-09-13T02:00:00.000Z", via: { kind: "account", hostId: "hbox" } });

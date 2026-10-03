@@ -221,11 +221,11 @@ describe("the creation page", () => {
     expect(view.querySelector('[data-composer-picker="project"]')).toBeNull();
   });
 
-  it("names the folder the copy is going to under the box, never the project's own", async () => {
+  it("names the folder the thread runs in under the box: the project's own here, the checkout on a box", async () => {
     const project = (id: string, computer: string, path: string) => ({ id, name: "spoo", computer, source: { kind: "folder", path }, path, remote: "", defaultBranch: "main", memoryKey: "-", memoryDir: "/m", createdAt: "t" });
     act(() => useStore.setState({ projects: [project("pr_here", "here", "/Users/dev/spoo"), project("pr_box", "p_box", "/root/spoo")] } as never));
     let view = await mount(making([], { name: "pricing page", project: "pr_here" }));
-    expect(view.querySelector("[data-composer-folder]")!.getAttribute("data-composer-folder")).toBe("/Users/dev/spoo-pricing-page");
+    expect(view.querySelector("[data-composer-folder]")!.getAttribute("data-composer-folder")).toBe("/Users/dev/spoo");
     cleanup();
     view = await mount(making([], { name: "pricing page", project: "pr_box" }));
     expect(view.querySelector("[data-composer-folder]")!.getAttribute("data-composer-folder")).toBe("/root/spoo");

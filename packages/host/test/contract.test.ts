@@ -3,7 +3,7 @@
 // over the fake runtime: with --json stdout is JSON only and ends with the
 // object the verb's MCP tool answers with; every refusal is one line on stderr
 // and the exit code is its class's, the same class the tool error carries.
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,7 +16,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { CLOUD_ENV, DAEMON_TOKEN_PATH, noSuchAccountLine, pushedForChildLine, EXIT_CODES, SCOPED_MCP_ARG, scopedNoPairLine, HERE_PLACE_ID, shellQuote, TURN_TOKEN_ENV, VerbFailure, WS_PATH } from "@wsp/protocol";
 import { CLOUD_ON } from "../src/cloud.js";
 import { copyKey, createRuntime, DAEMON_TOKEN_SET, localExecStream, memoryStore, type Runtime, type Store } from "@wsp/runtime";
-import { LocalBackend } from "@wsp/engine";
+import { fakeCopier, LocalBackend } from "@wsp/engine";
 import type { RestartRoad } from "../src/restart.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
@@ -192,6 +192,7 @@ describe("the agent contract on the command line and the tool door", () => {
         env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
         platform: process.platform === "darwin" ? "darwin" : "linux",
         daemonRoad: async () => ({ url: "ws://this-computer", expiresAt: Number.MAX_SAFE_INTEGER, daemonToken: DAEMON_TOKEN_SET }),
+        copier: fakeCopier(),
       },
       // The daemon inside a workspace, as far as the verbs that ask it anything are concerned. Its pull request half
       // refuses where a case sets that, since the two halves of a bring back are answered apart.
@@ -256,8 +257,21 @@ describe("the agent contract on the command line and the tool door", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  /** --state goes before any `--`, where exec's command begins. */
+  /** --state goes before any `--`, where exec's command begins. A machine on a box is made the way the app makes one,
+   * since no verb makes one. */
   async function run(...argv: string[]): Promise<{ code: number; io: Captured }> {
+    if (argv[0] === "new") {
+      const io = captured();
+      const [project] = await rt.projects.list();
+      try {
+        const made = await rt.workspaces.create({ project: project!.id, golden: SEALED_GOLDEN.versions[0]!.snapshotId, name: argv[1]! });
+        io.lines.push(`created ${made.name} ${made.id}`);
+        return { code: 0, io };
+      } catch (e) {
+        io.errors.push(e instanceof Error ? e.message : String(e));
+        return { code: 1, io };
+      }
+    }
     const io = captured();
     const cut = argv.indexOf("--");
     const at = cut === -1 ? argv.length : cut;
@@ -288,9 +302,8 @@ describe("the agent contract on the command line and the tool door", () => {
     const guest = exportGuest(backend);
     expect(guest.sources).toEqual([]);
 
-    const created = (await last("new", "new", "alpha")) as { workspace: { id: string } };
-    const alpha = created.workspace.id;
-    await last("workspaces", "workspaces");
+    expect((await run("new", "alpha")).code).toBe(0);
+    const alpha = (await rt.workspaces.list()).find(w => w.name === "alpha")!.id;
     // The one verb that asks the workspace's own daemon anything: the guest carries this host's token and the
     // machine has a route, which is what the channel behind a bring back is opened on.
     const machine = backend.machines[0]!;
@@ -298,14 +311,6 @@ describe("the agent contract on the command line and the tool door", () => {
     const guestSoFar = backend.execImpl;
     machine.previewUrl = async () => ({ url: "http://127.0.0.1:7070", token: "e", expiresAt: Date.now() + 3_600_000 });
     backend.execImpl = (m, cmd) => (cmd.includes(DAEMON_TOKEN_PATH) ? { exitCode: 0, stdout: `${DAEMON_TOKEN_SET}\n`, stderr: "" } : guestSoFar(m, cmd));
-    expect(await last("bring back", "bring", "back", "alpha")).toEqual({
-      branch: "work",
-      base: "main",
-      ahead: 1,
-      uncommitted: 0,
-      stat: [" a.ts | 2 +-"],
-      pr: { number: 3, url: "https://github.com/dev/alpha/pull/3", state: "open", host: "github.com", ...PR_REST },
-    });
     expect(await last("commit", "commit", "alpha", "--message", "Round the cart total once", "--file", "a.ts")).toEqual({
       oid: "5f1c0e2b9a7d4c3e8f6a1b2c3d4e5f60718293a4",
       subject: "Round the cart total once",
@@ -449,6 +454,18 @@ describe("the agent contract on the command line and the tool door", () => {
       expect(await last(verb, "thread", task, asking.threadId)).toEqual({ threadId: asking.threadId, askId: SCRIPTED_ASK.askId, optionId: expect.any(String) });
     }
     await last("thread rename", "thread", "rename", opened.threadId, "the name he typed");
+    // A project on this computer: its worktree for a branch, the worktree taken away, and a thread in its folder
+    // deleted by its id, the folder left as it stands.
+    const here = join(dir, "here-proj");
+    mkdirSync(here, { recursive: true });
+    execFileSync("git", ["init", "-q", here]);
+    await rt.projects.add({ source: here, name: "here" });
+    const tree = (await last("worktree", "worktree", "here", "feat/x")) as { path: string };
+    expect(tree).toEqual({ path: expect.stringContaining("feat-x"), branch: "feat/x", made: true });
+    execFileSync("git", ["init", "-q", tree.path]);
+    expect(await last("worktree remove", "worktree", "remove", "here", "feat/x")).toEqual({ project: "here", branch: "feat/x", removed: true });
+    const inFolder = (await last("run", "run", "here", "hello here")) as { threadId: string };
+    expect(await last("delete", "delete", inFolder.threadId, "--yes")).toEqual({ threadId: inFolder.threadId, workspaceId: expect.any(String), threads: 1 });
     // A launch that never started its agent leaves a row with no turn on it, which is the one a forget takes.
     const dead = await run("run", "alpha", "--agent", "codex", "never gets going", "--json");
     expect(dead.code).toBe(1);
@@ -546,9 +563,9 @@ describe("the agent contract on the command line and the tool door", () => {
     expect(flag.io.lines).toEqual([]);
     expect(failure(flag.io)).toEqual({ error: expect.stringContaining("Unknown option '--nope'"), class: "usage", exit: 3 });
 
-    const bare = await run("new");
+    const bare = await run("run");
     expect(bare.code).toBe(3);
-    expect(bare.io.errors).toEqual([expect.stringMatching(/^wsp new takes the work you are doing/)]);
+    expect(bare.io.errors).toEqual([expect.stringMatching(/^wsp run: the message is empty/)]);
 
     await run("new", "alpha");
     const unasked = await run("delete", "alpha", "--json");
@@ -638,49 +655,6 @@ describe("the agent contract on the command line and the tool door", () => {
     const gone = captured();
     expect(await cli(["threads", "--json", "--state", statePath], gone, undefined, process.env, false)).toBe(1);
     expect(failure(gone)).toEqual({ error: noHostServingLine(statePath), class: "provider", exit: 1 });
-  });
-
-  it("a bring back whose pull request half refused carries both halves on the JSON and exits 1, the push's fields with it", async () => {
-    await run("new", "alpha");
-    const machine = backend.machines[0]!;
-    const guestSoFar = backend.execImpl;
-    machine.previewUrl = async () => ({ url: "http://127.0.0.1:7070", token: "e", expiresAt: Date.now() + 3_600_000 });
-    backend.execImpl = (m, cmd) => (cmd.includes(DAEMON_TOKEN_PATH) ? { exitCode: 0, stdout: `${DAEMON_TOKEN_SET}\n`, stderr: "" } : guestSoFar(m, cmd));
-    prRefusal = "gh said: could not create pull request";
-    const { code, io } = await run("bring", "back", "alpha", "--json");
-    // The push landed, so its own fields are on the object beside the refusal and the verb still exits 1.
-    expect(objects(io).at(-1)).toEqual({
-      branch: "work",
-      base: "main",
-      ahead: 1,
-      uncommitted: 0,
-      stat: [" a.ts | 2 +-"],
-      refused: prRefusal,
-    });
-    expect(code).toBe(1);
-    expect(io.errors).toEqual([]);
-
-    // The tool door carries the same answer with isError on it: a caller reading the structured content gets the
-    // push's own fields, not a failure object, since the branch is on the remote whatever the other half said.
-    const server = mcpServer(statePath, { env: {} });
-    const [toClient, toServer] = InMemoryTransport.createLinkedPair();
-    const client = new Client({ name: "contract-bring-back", version: "0" });
-    await server.connect(toServer);
-    await client.connect(toClient);
-    try {
-      const answer = await client.callTool({ name: "bring_back", arguments: { workspace: "alpha" } });
-      expect(answer.isError).toBe(true);
-      expect(answer.structuredContent).toEqual({ branch: "work", base: "main", ahead: 1, uncommitted: 0, stat: [" a.ts | 2 +-"], refused: prRefusal });
-      expect((answer.content as { text?: string }[]).map(part => part.text ?? "").join("")).toContain(prRefusal!);
-      // The note is the other half's other answer and is no error: the pull request waits and nothing failed.
-      prRefusal = undefined;
-      const noted = await client.callTool({ name: "bring_back", arguments: { workspace: "alpha" } });
-      expect(noted.isError).not.toBe(true);
-      expect(noted.structuredContent).toMatchObject({ branch: "work", pr: { number: 3 } });
-    } finally {
-      await client.close();
-      await server.close();
-    }
   });
 
   it("the shared parse and the commands answer under the same classes: a bad flag, an unknown command, --json on a prose command and a word wsp doctor cannot read are usage", async () => {

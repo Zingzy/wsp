@@ -223,11 +223,11 @@ mod tests {
 
     #[test]
     fn a_key_the_entry_does_not_list_reaches_no_tool() {
-        let new = include_str!("../record/tools/new.json");
-        let asked = json!({ "name": "n", "from": "alpha", "nothing": 1 });
-        let off = refused_before_call("new", tools::entry_in(new, false).unwrap(), Some(asked.clone()));
-        assert_eq!(off, Ok(json!({ "name": "n" })));
-        let on = refused_before_call("new", tools::entry_in(new, true).unwrap(), Some(asked));
-        assert_eq!(on, Ok(json!({ "name": "n", "from": "alpha" })));
+        let set = include_str!("../record/tools/computers_set.json");
+        let asked = json!({ "computer": "c", "machines": 2, "nothing": 1 });
+        let off = refused_before_call("computers_set", tools::entry_in(set, false).unwrap(), Some(asked.clone()));
+        assert_eq!(off, Ok(json!({ "computer": "c" })));
+        let on = refused_before_call("computers_set", tools::entry_in(set, true).unwrap(), Some(asked));
+        assert_eq!(on, Ok(json!({ "computer": "c", "machines": 2 })));
     }
 }

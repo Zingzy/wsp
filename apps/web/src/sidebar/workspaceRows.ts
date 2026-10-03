@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Row labels for the workspace sidebar. The adapter names the state; this file
-// turns it into the words and classes a row shows. What a workspace is made of
-// and what its ports are is the protocol's word table (madeOfWord, portsWord),
+// turns it into the words and classes a row shows. What its ports are is the
+// protocol's word table (portsWord),
 // read here and never respelled. Pure but for the one hook beside the where
 // word, which reads that word off the store for the surfaces that hold a
 // workspace's id and no snapshot.
-import { HERE_PLACE_ID, isLocalWorkspace, madeOfWord, portsWord, workspaceComputerName, workspaceKind, type Capabilities, type PlaceView } from "@wsp/protocol";
+import { HERE_PLACE_ID, isLocalWorkspace, portsWord, workspaceComputerName, workspaceKind, type Capabilities, type PlaceView } from "@wsp/protocol";
 import type { SidebarProjectSnapshot } from "../adapt/index.js";
 import type { ProjectRef } from "./threadTree.js";
 import { PLACE_KIND_WORDS, isHere, placeName, placeOf } from "../settings/places.js";
@@ -22,19 +22,17 @@ export const newThreadTitle = (shortcut: string | null): string => (shortcut ===
  * network alone; a caller with no landing for the project has no flags to read the network off and says the copy
  * and the computer.  */
 export function madeOfLine({ project, landing, computer, here }: { project: Pick<SidebarProjectSnapshot, "workspace">; landing: Pick<Capabilities, "copies" | "ownNetwork"> | null; computer: string | null; here: string }): string[] {
-  const copy = project.workspace.copy;
   const on = computer ?? here;
   return [
-    copy === undefined ? undefined : madeOfWord(copy.road),
     computer ?? undefined,
-    landing === null || on === "" ? undefined : portsWord(landing, project.workspace.portBase, on) || undefined,
+    landing === null || on === "" ? undefined : portsWord(landing, on) || undefined,
   ].filter((part): part is string => part !== undefined);
 }
 
 /** The branch the agent is working on, off the record the copy was made with; empty where the record carries
  * none, which is a workspace whose copy was made with no branch of its own. */
 export function branchLine(project: Pick<SidebarProjectSnapshot, "workspace">): string {
-  return project.workspace.copy?.branch ?? "";
+  return project.workspace.worktree?.branch ?? "";
 }
 
 /** The fuller reading of computerName, for the pane that has a whole row for it: the name, then what that row is.
@@ -63,7 +61,7 @@ export function computerName(places: readonly PlaceView[], project: Pick<Sidebar
 /** A copy's name as a person reads it. The workspace that is this computer itself, rather than a copy beside a
  * folder, is named by its host name, which nobody reads, so it goes by the computer's own name. */
 export function copyName(places: readonly PlaceView[], project: Pick<SidebarProjectSnapshot, "status" | "workspace" | "displayName">): string {
-  return isLocalWorkspace(project.workspace) && project.workspace.copy === undefined ? computerName(places, project) : project.displayName;
+  return isLocalWorkspace(project.workspace) && project.workspace.worktree === undefined ? computerName(places, project) : project.displayName;
 }
 
 /** The same name off the store for a surface that holds the workspace's id and no snapshot, and the id itself

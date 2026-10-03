@@ -42,13 +42,15 @@ import {
   sealedLoginsHeld,
   shellQuote,
   thisComputer,
+  threadDeletedLine,
   workspaceStateLine,
+  worktreeRemovedLine,
   type WorkspaceState,
   mergeConflictsLine,
   mergedInLine,
   nothingToMergeLine,
 } from "@wsp/protocol";
-import { absoluteFolder, agentsToolAskedNothing, broughtBackLine, deletedLine, forgotLine, imageMovedLine, otherVersion, projectGoldenOf, NO_DRAFT_FIX, noDraftLine, rebuiltLine, renamedWorkspaceLine, theProject, type HostClient } from "../src/verbs.js";
+import { absoluteFolder, agentsToolAskedNothing, deletedLine, forgotLine, imageMovedLine, otherVersion, NO_DRAFT_FIX, noDraftLine, rebuiltLine, renamedWorkspaceLine, type HostClient } from "../src/verbs.js";
 import type { TurnCase } from "./mcp-record-turns.js";
 
 type Replies = Record<string, string>;
@@ -91,20 +93,18 @@ export async function workspaceWords(line: LineOf, host: HostOf): Promise<Record
   const golden = { snapshotId: "{id}", projects: [], golden: "g", workspaceId: "w", workspaceName: "W", createdAt: "2026-01-01T00:00:00.000Z" };
   const removeText = textOf(await line("image_remove", { image: "{id}" }, { "projectGoldens.list": reply({ projectGoldens: [golden] }) }, { cloud: true }));
   const project = { id: "p", name: "{project}", path: "/p", computer: HERE_PLACE_ID, source: { kind: "folder", path: "/p" } };
-  const copyText = textOf(await line("new", { project: "p", name: "n", size: "2x4" }, { "projects.resolve": reply({ project }) }));
-  const cloudProject = { ...project, computer: "solari" };
+  const forkOf = (asked: Record<string, unknown>) => ({ "workspaces.resolve": reply({ workspace: ws({}) }), "projects.resolve": reply({ project: asked }) });
+  const copyText = textOf(await line("fork", { workspace: "w", size: "2x4" }, forkOf(project), { cloud: true }));
   const offered = [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.09 }];
-  const sizeText = textOf(await line("new", { project: "p", name: "n", size: "{word}" }, { "projects.resolve": reply({ project: cloudProject }), "workspaces.landing": reply({ capabilities: { sizes: offered } }) }));
-  const otherText = textOf(
-    await line(
-      "new",
-      { project: "p", name: "n", from: "{ref}" },
-      { "projects.resolve": reply({ project: cloudProject }), "workspaces.landing": reply({ capabilities: { sizes: [] } }), "projectGoldens.list": reply({ projectGoldens: [{ ...golden, snapshotId: "{ref}", projects: [{ name: "{carried}", dest: "/d", importedAt: "i" }] }] }) },
-      { cloud: true },
-    ),
-  );
+  const sizeText = textOf(await line("fork", { workspace: "w", size: "{word}" }, { ...forkOf({ ...project, computer: "solari" }), "workspaces.landing": reply({ capabilities: { sizes: offered } }) }, { cloud: true }));
+  const here = (worktree?: Record<string, unknown>) => ({ "sessions.list": reply({ sessions: [{ id: "s", workspaceId: "w", harness: "claude", status: "completed", threadId: "{thread}" }] }), "workspaces.list": reply({ workspaces: [ws({ id: "w", kind: "local", machineId: "here", ...(worktree !== undefined ? { worktree } : {}) })] }) });
+  const threadKeptFolder = textOf(await line("delete", { thread: "{thread}" }, here()));
+  const threadKeptWorktree = textOf(await line("delete", { thread: "{thread}" }, here({ path: "{path}", branch: "b", made: true })));
+  const noThreadHere = textOf(await line("delete", { thread: "{ref}" }, { "sessions.list": reply({ sessions: [] }) }));
+  const deleteNamesNothing = textOf(await line("delete", {}, {}));
+  const localFolder = textOf(await line("forget", { workspace: "w" }, { "workspaces.resolve": reply({ workspace: ws({ kind: "local", machineId: "here" }) }) }));
+  const localWorktree = textOf(await line("forget", { workspace: "w" }, { "workspaces.resolve": reply({ workspace: ws({ kind: "local", machineId: "here", worktree: { path: "/p", branch: "b", made: true } }) }) }));
   const agentsText = textOf(await line("workspaces_agents", { workspace: "w", spawn: "off" }, { "workspaces.resolve": reply({ workspace: ws({}) }), "workspaces.agents": reply({ workspace: ws({}) }) }));
-  const back = (over: Record<string, unknown>) => broughtBackLine("{name}", { branch: "{branch}", base: "{base}", ahead: 1, uncommitted: 0, stat: [], ...over } as never).split("\n");
   const cloud = onDeleteOf("cloud", undefined, "{machine}");
   const forked = { ...WORKSPACE, id: "{id}", name: "{name}" };
   const forkReplies = { "workspaces.resolve": reply({ workspace: WORKSPACE }), "harnesses.list": reply({ harnesses: [] }), "projects.resolve": reply({ project: PROJECT }), "workspaces.landing": reply({ capabilities: { sizes: [] } }), "workspaces.create": reply({ workspace: forked }) };
@@ -130,7 +130,7 @@ export async function workspaceWords(line: LineOf, host: HostOf): Promise<Record
     unnamedComputer: UNNAMED_COMPUTER,
     onDelete: {
       ...Object.fromEntries(Object.keys(WORKSPACE_KIND_WORDS).map(kind => [kind, { asked: onDeleteOf(kind as never, undefined, "{machine}").asked, done: onDeleteOf(kind as never, undefined, "{machine}").done("{machine}") }])),
-      copy: { asked: onDeleteOf("local", { path: "{path}" }, "{machine}").asked, done: onDeleteOf("local", { path: "{path}" }, "{machine}").done("{machine}") },
+      worktree: { asked: onDeleteOf("local", { path: "{path}" }, "{machine}").asked, done: onDeleteOf("local", { path: "{path}" }, "{machine}").done("{machine}") },
       place: { asked: onDeleteOf("cloud", undefined, "{machine}", { name: "{name}", computer: "{computer}" }).asked, done: onDeleteOf("cloud", undefined, "{machine}", { name: "{name}", computer: "{computer}" }).done("{machine}") },
       none: { asked: onDeleteOf("cloud", undefined, "").asked, done: onDeleteOf("cloud", undefined, "").done("") },
     },
@@ -159,22 +159,14 @@ export async function workspaceWords(line: LineOf, host: HostOf): Promise<Record
     sumShown: SUM_SHOWN,
     catalogNames: Object.fromEntries(CATALOG.map(e => [e.id, e.name])),
     roadWords: Object.fromEntries(Object.entries(ROAD_MODULES).map(([road, module]) => [road, module.words])),
-    addedProject: slot(addedProjectOn({ name: "{name}", id: "{id}", source: { kind: "folder", path: "{source}" }, path: "{path}" } as never, "{computer}"), shellQuote("{name}"), "quoted"),
+    addedProject: addedProjectOn({ name: "{name}", id: "{id}", computer: "pl_x", source: { kind: "folder", path: "{source}" }, path: "{path}" } as never, "{computer}"),
+    addedProjectHere: slot(addedProjectOn({ name: "{name}", id: "{id}", computer: HERE_PLACE_ID, source: { kind: "folder", path: "{source}" }, path: "{path}" } as never, "{computer}"), shellQuote("{name}"), "quoted"),
     thisMac: thisComputer("darwin"),
     thisComputer: thisComputer("linux"),
     herePlaceId: HERE_PLACE_ID,
-    noProjectYet: await thrown(() => theProject(host({ "projects.list": reply({ projects: [] }) }), undefined)),
-    nameTheProject: slot(await thrown(() => theProject(host({ "projects.list": reply({ projects: [{ name: "{names}" }, { name: "{names}" }] }) }), undefined)), "{names}, {names}", "names"),
     copyTakesNone: slot(copyText, "--size", "words"),
     sizeRefused: slot(sizeText, "2x4 ($0.09/hr)", "sizes"),
-    noProjectImageNamed: await thrown(() => projectGoldenOf(host({ "projectGoldens.list": reply({ projectGoldens: [] }) }), "{ref}")),
-    projectImageOfOther: otherText,
     cwdNotAbsolute: await thrown(() => absoluteFolder("{path}")),
-    pushedOne: back({})[0],
-    pushedMany: slot(back({ ahead: 2 })[0]!, "2", "count"),
-    prLine: slot(back({ pr: { number: 1, url: "{url}", state: "open", host: "h" } })[1]!, "open", "state"),
-    leftOne: back({ uncommitted: 1 })[1],
-    leftMany: slot(back({ uncommitted: 2 })[1]!, "2", "count"),
     committedOne: slot(committedLine("{name}", { oid: "abcdefghij", subject: "{subject}", filesChanged: 1 }), "abcdefg", "oid"),
     committedMany: slot(slot(committedLine("{name}", { oid: "abcdefghij", subject: "{subject}", filesChanged: 2 }), "abcdefg", "oid"), "2", "count"),
     noDraft: noDraftLine("{note}"),
@@ -203,6 +195,16 @@ export async function workspaceWords(line: LineOf, host: HostOf): Promise<Record
     mergeConflicts: mergeConflictsLine("{lead}", "{branch}", ["{paths}"]),
     nothingToMerge: nothingToMergeLine("{lead}", "{child}"),
     firstTurnFailed,
+    threadKeptFolder,
+    threadKeptWorktree,
+    noThreadHere,
+    deleteNamesNothing,
+    localFolder,
+    localWorktree,
+    threadDeleted: threadDeletedLine("{thread}", { threads: 1 }),
+    threadDeletedOne: threadDeletedLine("{thread}", { worktree: "{path}", threads: 1 }),
+    threadDeletedMany: slot(threadDeletedLine("{thread}", { worktree: "{path}", threads: 2 }), "2", "count"),
+    worktreeRemoved: worktreeRemovedLine("{branch}"),
   };
 }
 
@@ -267,7 +269,13 @@ const forkedWith = (over: Replies): Replies => ({
   ...over,
 });
 const GONE = { ...WORKSPACE, phase: "gone", gone: "the provider has no machine m-1 \u009b" };
-const LOCAL = { ...WORKSPACE, id: "ws-2", name: "here", kind: "local", machineId: "here", copy: { road: "worktree", path: "/Users/me/alpha-work", base: "main", branch: "work", carried: "nothing", source: "/Users/me/alpha" } };
+const LOCAL = { ...WORKSPACE, id: "ws-2", name: "here", kind: "local", machineId: "here", worktree: { path: "/Users/me/.wsp/worktrees/proj-1/work \u0085", branch: "work", made: true } };
+/** Threads on this computer and one on a box: t-2 in a worktree wsp made, t-3 in the project folder. */
+const HERE_SESSIONS = [
+  { id: "s-1", workspaceId: "ws-1", harness: "claude", status: "completed", threadId: "t-1" },
+  { id: "s-2", workspaceId: "ws-2", harness: "codex", status: "completed", threadId: "t-2 \u0085" },
+  { id: "s-3", workspaceId: "ws-2", harness: "claude", status: "completed", threadId: "t-3" },
+];
 const SESSIONS = [
   { id: "s-1", workspaceId: "ws-1", harness: "claude", status: "completed", threadId: "t-1" },
   { id: "s-2", workspaceId: "ws-1", harness: "claude", status: "completed", threadId: "t-1" },
@@ -348,21 +356,41 @@ export const WORKSPACE_ANSWERED: Record<string, TurnCase[]> = {
     { case: "paused", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "status.list": reply({ statuses: [{ id: "ws-1", machineState: "paused", reach: { state: "ok" } }] }) } },
   ]),
   forget: [
+    { case: "a folder here", arguments: { workspace: "here" }, replies: { "workspaces.resolve": reply({ workspace: { ...LOCAL, worktree: undefined } }), "sessions.list": reply({ sessions: SESSIONS }) } },
+    { case: "a worktree here", arguments: { workspace: "here" }, replies: { "workspaces.resolve": reply({ workspace: LOCAL }), "sessions.list": reply({ sessions: SESSIONS }) } },
     { case: "forgot", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: GONE }), "sessions.list": reply({ sessions: SESSIONS }), "workspaces.forget": reply({}) } },
     { case: "one thread", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: GONE }), "sessions.list": reply({ sessions: SESSIONS.slice(0, 1) }), "workspaces.forget": reply({}) } },
     { case: "refused", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "sessions.list": reply({ sessions: [] }), "workspaces.forget": refused("Only a workspace whose computer is gone can be forgotten; this one is running", "usage") } },
   ],
   delete: [
     { case: "unconfirmed", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "sessions.list": reply({ sessions: SESSIONS }) } },
-    { case: "unconfirmed copy", arguments: { workspace: "here", confirm: false }, replies: { "workspaces.resolve": reply({ workspace: LOCAL }), "sessions.list": reply({ sessions: SESSIONS.slice(0, 1) }) } },
-    { case: "unconfirmed local", arguments: { workspace: "here" }, replies: { "workspaces.resolve": reply({ workspace: { ...LOCAL, copy: undefined } }), "sessions.list": reply({ sessions: [] }) } },
+    { case: "thread unconfirmed", arguments: { thread: "t-2" }, replies: { "sessions.list": reply({ sessions: HERE_SESSIONS }), "workspaces.list": reply({ workspaces: [LOCAL, WORKSPACE] }) } },
+    { case: "thread in the folder unconfirmed", arguments: { thread: "t-3", confirm: false }, replies: { "sessions.list": reply({ sessions: HERE_SESSIONS }), "workspaces.list": reply({ workspaces: [{ ...LOCAL, worktree: undefined }, WORKSPACE] }) } },
+    { case: "thread deleted with its worktree", arguments: { thread: "t-2", confirm: true }, replies: { "sessions.list": reply({ sessions: HERE_SESSIONS }), "workspaces.list": reply({ workspaces: [LOCAL, WORKSPACE] }), "sessions.delete": reply({ workspaceId: "ws-2", worktree: LOCAL.worktree.path, threads: 2, extra: 1 }) } },
+    { case: "thread deleted with one thread", arguments: { thread: "t-2", confirm: true }, replies: { "sessions.list": reply({ sessions: HERE_SESSIONS }), "workspaces.list": reply({ workspaces: [LOCAL, WORKSPACE] }), "sessions.delete": reply({ threads: 1, worktree: LOCAL.worktree.path, workspaceId: "ws-2" }) } },
+    { case: "thread deleted in the folder", arguments: { thread: "t-3", confirm: true }, replies: { "sessions.list": reply({ sessions: HERE_SESSIONS }), "workspaces.list": reply({ workspaces: [{ ...LOCAL, worktree: undefined }, WORKSPACE] }), "sessions.delete": reply({ workspaceId: "ws-2", threads: 1 }) } },
+    { case: "thread on a box", arguments: { thread: "t-1" }, replies: { "sessions.list": reply({ sessions: HERE_SESSIONS }), "workspaces.list": reply({ workspaces: [LOCAL, WORKSPACE] }) } },
+    { case: "no such thread", arguments: { thread: "zz" }, replies: { "sessions.list": reply({ sessions: HERE_SESSIONS }) } },
+    { case: "thread refused", arguments: { thread: "t-2", confirm: true }, replies: { "sessions.list": reply({ sessions: HERE_SESSIONS }), "workspaces.list": reply({ workspaces: [LOCAL, WORKSPACE] }), "sessions.delete": refused("that worktree has 2 files not committed; commit them, or remove it with --force to lose them", "usage") } },
+    { case: "nothing named", arguments: {}, replies: {} },
+    { case: "a folder here", arguments: { workspace: "here" }, replies: { "workspaces.resolve": reply({ workspace: { ...LOCAL, worktree: undefined } }), "sessions.list": reply({ sessions: SESSIONS }) } },
+    { case: "a worktree here", arguments: { workspace: "here" }, replies: { "workspaces.resolve": reply({ workspace: LOCAL }), "sessions.list": reply({ sessions: SESSIONS }) } },
     { case: "unconfirmed never made", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: { ...WORKSPACE, machineId: "" } }), "sessions.list": reply({ sessions: [] }) } },
     { case: "deleted", arguments: { workspace: "alpha", confirm: true }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "sessions.list": reply({ sessions: SESSIONS }), "workspaces.delete": reply({}) } },
-    { case: "deleted copy", arguments: { workspace: "here", confirm: true }, replies: { "workspaces.resolve": reply({ workspace: LOCAL }), "sessions.list": reply({ sessions: SESSIONS.slice(0, 1) }), "workspaces.delete": reply({}) } },
     { case: "deleted never made", arguments: { workspace: "alpha", confirm: true }, replies: { "workspaces.resolve": reply({ workspace: { ...WORKSPACE, machineId: "" } }), "sessions.list": reply({ sessions: [] }), "workspaces.delete": reply({}) } },
     { case: "deleted on a joined computer", arguments: { workspace: "alpha", confirm: true }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "sessions.list": reply({ sessions: SESSIONS }), "places.list": reply({ places: PLACES }), "workspaces.delete": reply({}) } },
     { case: "unconfirmed, the names not read", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "sessions.list": reply({ sessions: [] }), "places.list": refused("not yours to read", "auth") } },
     { case: "unconfirmed at another provider", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "sessions.list": reply({ sessions: [] }), "places.list": reply({ places: [{ id: "place-9", kind: "provider", name: "ascii", default: false }] }) } },
+  ],
+  worktree: [
+    { case: "made", arguments: { project: "alpha", branch: "feat/x \u0085" }, replies: { "worktree.make": reply({ made: true, path: "/Users/me/.wsp/worktrees/proj-1/feat-x-", extra: 1, branch: "feat/x \u0085" }) } },
+    { case: "held elsewhere", arguments: { project: "alpha", branch: "main" }, replies: { "worktree.make": reply({ path: "/Users/me/alpha", branch: "main", made: false }) } },
+    { case: "refused", arguments: { project: "alpha", branch: "-x" }, replies: { "worktree.make": refused("-x is not a name git takes for a branch", "usage") } },
+  ],
+  worktree_remove: [
+    { case: "removed", arguments: { project: "alpha", branch: "feat/x \u0085", force: true }, replies: { "worktree.remove": reply({}) } },
+    { case: "kept", arguments: { project: "alpha", branch: "feat/x", force: false }, replies: { "worktree.remove": reply({ removed: true }) } },
+    { case: "refused", arguments: { project: "alpha", branch: "feat/x" }, replies: { "worktree.remove": refused("a thread is working in that worktree; let its turn end or stop it first", "usage") } },
   ],
   image_move: onCloud([
     { case: "kept", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.updateImage": reply({ workspace: { ...WORKSPACE, machineId: "m-3" }, moved: true, kept: ["zeta, one", ".bashrc", "Ärger", "~/b"], extra: 1 }) } },
@@ -417,12 +445,6 @@ export const WORKSPACE_ANSWERED: Record<string, TurnCase[]> = {
     },
     { case: "refused", arguments: { lead: "alpha", child: "beta" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.wake": reply({ workspace: WORKSPACE }), "workspaces.mergeIn": refused("the lead is working") } },
     { case: "gone", arguments: { lead: "alpha", child: "beta" }, replies: { "workspaces.resolve": reply({ workspace: GONE }) } },
-  ],
-  bring_back: [
-    { case: "pr", arguments: { workspace: "alpha", title: "Fix it", body: "because" }, replies: { "workspaces.resolve": reply({ workspace: NAPPING }), "workspaces.wake": reply({ workspace: WORKSPACE }), "workspaces.bringBack": reply({ stat: [" a.ts | 2 +-", " b \u0085 | 1 +"], branch: "work", base: "main", ahead: 3, uncommitted: 2, pr: { url: "https://github.com/dev/alpha/pull/3", number: 3, checks: [{ state: "fail", name: "ci \u0085", run: { jobId: 2, runId: 1 }, workflow: "ci" }], state: "open", host: "github.com", draft: false, base: "main", branch: "work", headSubject: "Fix it, caf\u00e9 again", headOid: "abc1234", mergeable: "conflicting", mergeState: "dirty", review: "changes_asked", additions: 10, deletions: 0, changedFiles: 1, commits: 2, behindBase: 3 } }) } },
-    { case: "note", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.wake": reply({ workspace: WORKSPACE }), "workspaces.bringBack": reply({ branch: "work", base: "main", ahead: 1, uncommitted: 1, stat: [], note: "no signed-in gh on the machine" }) } },
-    { case: "refused", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "workspaces.wake": reply({ workspace: WORKSPACE }), "workspaces.bringBack": reply({ branch: "work", base: "main", ahead: 2, uncommitted: 0, stat: [], refused: "gh refused: no remote" }) } },
-    { case: "gone", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: GONE }) } },
   ],
   commit: [
     {
@@ -506,29 +528,6 @@ export const WORKSPACE_ANSWERED: Record<string, TurnCase[]> = {
       },
     },
     { case: "refused", arguments: { workspace: "alpha", folder: "/Users/me/alpha" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "project.export": refused("/Users/me/alpha is already there", "exists") } },
-  ],
-  new: [
-    { case: "created", arguments: { project: "alpha", name: "fix \u0085 it", spawn: "on", max_depth: 2 }, replies: { "projects.resolve": reply({ project: PROJECT }), "workspaces.landing": reply({ capabilities: { sizes: [] } }), "workspaces.create": reply({ workspace: WORKSPACE }) } },
-    {
-      case: "sized from an image",
-      cloud: true,
-      arguments: { name: "fix", size: " 2x0.5 ", from: "alpha 'quoted'", engine: true },
-      replies: {
-        "projects.list": reply({ projects: [PROJECT] }),
-        "workspaces.landing": reply({ capabilities: { sizes: [{ cpu: 2, memMb: 512, rateUsdPerHour: 0.018 }] } }),
-        "projectGoldens.list": reply({ projectGoldens: [{ ...GOLDEN, snapshotId: "snap-old", createdAt: "2026-09-01T00:00:00.000Z", projects: [{ name: "alpha 'quoted'", dest: "/d", importedAt: "i" }] }, { ...GOLDEN, projects: [{ name: "alpha 'quoted'", dest: "/d", importedAt: "i" }] }] }),
-        "workspaces.create": reply({ workspace: WORKSPACE, notice: "a copy of your image is being built at attic \u0085" }),
-      },
-    },
-    { case: "size refused", arguments: { name: "fix", size: "3x3" }, replies: { "projects.list": reply({ projects: [PROJECT] }), "workspaces.landing": reply({ capabilities: { sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.09000000000000001 }, { cpu: 4, memMb: 8192, rateUsdPerHour: 0.018 }, { cpu: 8, memMb: 1536, rateUsdPerHour: 1.5 }] } }) } },
-    { case: "other project's image", cloud: true, arguments: { name: "fix", from: "snap-p1" }, replies: { "projects.list": reply({ projects: [PROJECT] }), "workspaces.landing": reply({ capabilities: { sizes: [] } }), "projectGoldens.list": reply({ projectGoldens: [GOLDEN] }) } },
-    { case: "no such image", cloud: true, arguments: { name: "fix", from: "nope" }, replies: { "projects.list": reply({ projects: [PROJECT] }), "workspaces.landing": reply({ capabilities: { sizes: [] } }), "projectGoldens.list": reply({ projectGoldens: [GOLDEN] }) } },
-    { case: "an image named with no cloud", arguments: { name: "fix", from: "nope" }, replies: { "projects.list": reply({ projects: [PROJECT] }), "workspaces.landing": reply({ capabilities: { sizes: [] } }), "workspaces.create": reply({ workspace: WORKSPACE }) } },
-    { case: "a copy takes no size", arguments: { name: "fix", size: "2x4", engine: true }, replies: { "projects.list": reply({ projects: [{ ...PROJECT, computer: HERE_PLACE_ID }] }) } },
-    { case: "several projects", arguments: { name: "fix" }, replies: { "projects.list": reply({ projects: [PROJECT, { ...PROJECT, id: "proj-2", name: "beta, two" }] }) } },
-    { case: "no project", arguments: { name: "fix" }, replies: { "projects.list": reply({ projects: [] }) } },
-    { case: "a thread's projects", arguments: { name: "fix" }, replies: { "projects.list": refused("not yours to read", "auth"), "workspaces.list": reply({ workspaces: [WORKSPACE, { ...WORKSPACE, id: "ws-9" }] }), "workspaces.landing": reply({ capabilities: { sizes: [] } }), "workspaces.create": reply({ workspace: WORKSPACE }) } },
-    { case: "a cap alone", arguments: { project: "alpha", name: "fix", max_machines: 2 }, replies: { "projects.resolve": reply({ project: PROJECT }), "workspaces.landing": reply({ capabilities: { sizes: [] } }), "workspaces.create": reply({ workspace: WORKSPACE }) } },
   ],
   fork: onCloud([
     { case: "forked", arguments: { workspace: "alpha" }, replies: { "workspaces.resolve": reply({ workspace: WORKSPACE }), "projects.resolve": reply({ project: PROJECT }), "workspaces.landing": reply({ capabilities: { sizes: [] } }), "workspaces.create": reply({ workspace: { ...WORKSPACE, id: "ws-3", name: "alpha-fork", parentWorkspaceId: "ws-1" } }) } },

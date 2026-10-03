@@ -68,10 +68,10 @@ describe("what wsp says when it will not run a line", () => {
     expect(word.io.lines).toEqual([HELP]);
   });
 
-  it("names the third word when a thread is opened on more than a workspace and a task", async () => {
+  it("names the third word when a thread is opened on more than a project and a message", async () => {
     const { code, io } = await run("run", "api", "say hi", "and this");
     expect(code).toBe(EXIT_CODES.usage);
-    expect(io.errors[0]).toContain("wsp run takes a workspace and a task; and this reads as a third word.");
+    expect(io.errors[0]).toContain("wsp run takes a project and a message; and this reads as a third word.");
     // The name is the line's own prefix, so the sentence behind it never says it a second time.
     expect(io.errors[0]!.startsWith("wsp run: wsp run")).toBe(false);
   });
@@ -94,7 +94,7 @@ describe("what wsp says when it will not run a line", () => {
     // No old word is kept as a road, hidden or otherwise: the release note says what moved, once, and the command
     // line carries none of it.
     // wsp hosts is a line wsp answers to; the words below are the ones that are gone for good.
-    for (const argv of [["pair"], ["devices"], ["connect", "http://box:4400"], ["disconnect", "box"]]) {
+    for (const argv of [["pair"], ["devices"], ["connect", "http://box:4400"], ["disconnect", "box"], ["new", "x"], ["bring", "back", "x"]]) {
       const { code, io } = await run(...argv);
       const line = argv.join(" ");
       expect(code, line).toBe(EXIT_CODES.usage);
@@ -109,7 +109,7 @@ describe("what wsp says when it will not run a line", () => {
     expect(relay.code).toBe(EXIT_CODES.usage);
     expect(relay.io.errors).toEqual(["unknown command: relay. Run wsp --help for the list."]);
     // A flag wsp used to read is the parser's own unknown option, with the line's usage under it.
-    for (const argv of [["threads", "--in", "alpha"], ["new", "x", "--local"], ["new", "x", "--ssh", "maya@box"]]) {
+    for (const argv of [["threads", "--in", "alpha"], ["run", "x", "--local"], ["run", "x", "--ssh", "maya@box"]]) {
       const { code, io } = await run(...argv);
       const line = argv.join(" ");
       expect(code, line).toBe(EXIT_CODES.usage);
@@ -117,9 +117,9 @@ describe("what wsp says when it will not run a line", () => {
       expect(io.errors[0], line).toContain("usage: wsp ");
     }
     // --on is read by the lists of a computer, so on another verb it is that verb's stray flag rather than an unknown one.
-    const on = await run("new", "x", "--on", "here");
+    const on = await run("run", "x", "--on", "here");
     expect(on.code).toBe(EXIT_CODES.usage);
-    expect(on.io.errors[0]).toContain("--on belongs to wsp usage reset, wsp agents, wsp skills, wsp skills show, wsp skills add, wsp skills remove, wsp skills disable, wsp skills enable, wsp servers, wsp agents setup, wsp servers signin, wsp servers tools, wsp servers add, wsp servers remove, wsp servers disable, wsp servers enable and wsp folders; wsp new does not read it");
+    expect(on.io.errors[0]).toContain("--on belongs to wsp usage reset, wsp agents, wsp skills, wsp skills show, wsp skills add, wsp skills remove, wsp skills disable, wsp skills enable, wsp servers, wsp agents setup, wsp servers signin, wsp servers tools, wsp servers add, wsp servers remove, wsp servers disable, wsp servers enable and wsp folders; wsp run does not read it");
   });
 
   it("refuses a server's command line with a quote it never closes before anything is dialled", async () => {
@@ -131,7 +131,7 @@ describe("what wsp says when it will not run a line", () => {
   it("says a thread opened on no words at all what to put in quotes", async () => {
     const { code, io } = await run("run");
     expect(code).toBe(EXIT_CODES.usage);
-    expect(io.errors).toEqual(['wsp run takes a task and got none. Put the task in quotes: wsp run <workspace> "say hi".']);
+    expect(io.errors).toEqual(['wsp run: the message is empty; say what the thread is to do. Put the message in quotes: wsp run <project> "say hi".']);
   });
 
   it("answers every verb in one line that never says the verb's name twice over, and refuses one with both halves", async () => {

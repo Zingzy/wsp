@@ -97,6 +97,11 @@ const SESSIONS = [
   { id: "s-2", workspaceId: "ws-2", harness: "codex", status: "running", prompt: "look", startedAt: 1727431300000.25, pid: 4242 },
   { id: "s-3", workspaceId: "ws-1", harness: "claude", status: "running", threadId: "t-1111aaaa", harnessTitle: "  Parser\n fix  🧪", costUsd: 0.2, asking: "ask-1", readAt: 1727431270000, settledAt: 1727431265000, cwd: "/w/é", waitingOn: { title: "other", threadId: "t-2", workspaceId: "ws-1", sessionId: "s-9", prompt: { askId: "a", toolName: "Bash", input: "{}", options: [] } } },
   { id: "s-4", workspaceId: "ws-gone", harness: "claude", status: "failed", threadId: "t-4", refusal: "sign-in", claudeSessionId: "c-4" },
+  { id: "s-5", workspaceId: "ws-3", harness: "claude", status: "completed", threadId: "t-5" },
+  { id: "s-6", workspaceId: "ws-3", harness: "codex", status: "completed", threadId: "t-6" },
+  { id: "s-7", workspaceId: "ws-4", harness: "claude", status: "completed", threadId: "t-7" },
+  { id: "s-8", workspaceId: "ws-5", harness: "claude", status: "completed", threadId: "t-8", cwd: "/nowhere/worktrees/proj-1/old/src" },
+  { id: "s-9", workspaceId: "ws-6", harness: "claude", status: "completed", threadId: "t-9" },
 ];
 
 /** A thread whose marks and picks moved between its turns: the latest turn's stand, and the opening turn's attempt. */
@@ -109,12 +114,19 @@ const WORKSPACES = reply({
   workspaces: [
     { id: "ws-1", name: "parser", project: { id: "proj-1", name: "wsp", computer: "place-9" } },
     { id: "ws-2", name: "look", project: { id: "proj-2", name: "site", computer: "place-unnamed" } },
+    { id: "ws-3", name: "wsp@feat", kind: "local", project: { id: "proj-1", name: "wsp", path: "/nowhere/wsp", computer: "here" }, worktree: { path: "/nowhere/worktrees/proj-1/feat", branch: "feat/é", made: true }, folder: "/nowhere/worktrees/proj-1/feat" },
+    { id: "ws-4", name: "wsp", kind: "local", project: { id: "proj-1", name: "wsp", path: "/nowhere/wsp", computer: "here" } },
+    { id: "ws-5", name: "wsp@old", kind: "local", project: { id: "proj-1", name: "wsp", path: "/nowhere/wsp", computer: "here" }, worktree: { path: "/nowhere/worktrees/proj-1/old", branch: "old", made: true, gone: true }, folder: "/nowhere/wsp" },
+    { id: "ws-6", name: "wsp@gone", kind: "local", project: { id: "proj-1", name: "wsp", path: "/nowhere/wsp-two", computer: "here" }, worktree: { path: "/nowhere/worktrees/proj-1/gone", branch: "gone", made: true, gone: true }, folder: "/nowhere/wsp-two" },
   ],
 });
 
 const at = (ms: number) => 1727431200000 + ms;
 
 const EVENTS = [
+  { type: "session.moved", threadId: "t-1111aaaa", turnId: "u1", sessionId: "s", workspaceId: "w", from: "/w/tree é", to: "/w/proj", fresh: true, at: at(0) },
+  { type: "session.behind", threadId: "t-1111aaaa", turnId: "u1", sessionId: "s", workspaceId: "w", text: "this worktree is behind pull request #7 \u0085", at: at(0) },
+  { type: "session.moved", threadId: "t-1111aaaa", turnId: "u1", sessionId: "s", workspaceId: "w", from: "/w/tree", to: "/w/proj", at: at(0) },
   { type: "session.start", threadId: "t-1111aaaa", turnId: "u1", prompt: "Fix the \u0085test", at: at(0) },
   { type: "session.delta", threadId: "t-1111aaaa", kind: "text", text: "Looking ", messageId: "m1", at: at(1000) },
   { type: "session.delta", threadId: "t-1111aaaa", kind: "text", text: "now.", messageId: "m1", at: at(1500) },
@@ -206,11 +218,6 @@ export const READS: Record<string, Case[]> = {
   agents: reportCases("agents"),
   skills: [...reportCases("skills"), { case: "no skills", arguments: {}, replies: { "agents.read": reply({ report: EMPTY_REPORT }) } }],
   servers: [...reportCases("servers"), { case: "no servers", arguments: {}, replies: { "agents.read": reply({ report: EMPTY_REPORT }) } }],
-  workspaces: [
-    { case: "rows", arguments: {}, replies: { "status.list": reply({ statuses: [{ ...WORKSPACE, name: AWKWARD, "2": "an index key", machineState: "running", size: { cpu: 8, memMb: 16384 }, rateUsdPerHour: 0.1 + 0.2, reach: { state: "reachable", offline: false } }] }) } },
-    { case: "empty", arguments: {}, replies: { "status.list": reply({ statuses: [] }) } },
-    { case: "refused", arguments: {}, replies: { "status.list": refused("the token this line presented is not one this host holds", "auth") } },
-  ],
   projects: [
     {
       case: "rows",
@@ -231,11 +238,12 @@ export const READS: Record<string, Case[]> = {
   ],
   threads: [
     { case: "rows", arguments: {}, replies: { "workspaces.list": WORKSPACES, "sessions.list": reply({ sessions: SESSIONS }), "places.list": PLACES } },
-    { case: "within a workspace", arguments: { workspace: "parser" }, replies: { "workspaces.list": WORKSPACES, "workspaces.resolve": reply({ workspace: WORKSPACE }), "sessions.list": reply({ sessions: SESSIONS.slice(0, 1) }), "places.list": PLACES } },
+    { case: "within a project", arguments: { project: "wsp" }, replies: { "workspaces.list": WORKSPACES, "sessions.list": reply({ sessions: SESSIONS }), "places.list": PLACES } },
+    { case: "within a project by id", arguments: { project: "proj-2" }, replies: { "workspaces.list": WORKSPACES, "sessions.list": reply({ sessions: SESSIONS }), "places.list": PLACES } },
     { case: "computers refused", arguments: {}, replies: { "workspaces.list": WORKSPACES, "sessions.list": reply({ sessions: SESSIONS }), "places.list": refused("a thread may not list computers", "auth") } },
     { case: "empty", arguments: {}, replies: { "workspaces.list": WORKSPACES, "sessions.list": reply({ sessions: [] }) } },
     { case: "pinned, snoozed and in a section", arguments: {}, replies: { "workspaces.list": WORKSPACES, "sessions.list": reply({ sessions: PLACED }), "places.list": PLACES } },
-    { case: "no such workspace", arguments: { workspace: "nope" }, replies: { "workspaces.list": WORKSPACES, "workspaces.resolve": refused("no workspace nope", "not-found") } },
+    { case: "no such project", arguments: { project: "nope" }, replies: { "workspaces.list": WORKSPACES, "sessions.list": reply({ sessions: SESSIONS }) } },
   ],
   thread_read: [
     { case: "messages", arguments: { thread: "t-1111" }, replies: { "sessions.list": reply({ sessions: SESSIONS }), "sessions.history": reply({ events: EVENTS }), "sessions.read": reply({}) } },

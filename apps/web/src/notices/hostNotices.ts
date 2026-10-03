@@ -287,6 +287,7 @@ const RULES: { [T in ProtocolEvent["type"]]?: Rule<T> } = {
     addNotice({ kind: e.alert.kind === "back" ? "done" : "note", text, action: openUsage });
     sayOutside(held, openUsage.run, lineFor({ kind: "plan", label: e.label, alert: e.alert }));
   },
+  "host.notice": e => addNotice({ kind: "note", text: e.message }),
   "workspace.woken": (e, held) => {
     const name = workspaceNamed(e.workspaceId);
     if (name !== undefined) sayOutside(held, () => useStore.getState().select(e.workspaceId), lineFor({ kind: "awake", workspace: name }));

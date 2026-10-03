@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-//! `run`, which opens a thread in a workspace, and `send`, which continues one: each checks what it asks for against
+//! `run`, which opens a thread in a project's folder or a workspace, and `send`, which continues one: each checks what it asks for against
 //! the agent's own lists before a machine is woken, starts the turn, and follows it to its reply through the frames
 //! the host pushes, dialling the host again when it stops under the turn. packages/host/src/verbs.ts `follow`,
 //! `checkedStart`, `openingOf` and `napAfterDeadLaunch` are the rules.
@@ -31,8 +31,12 @@ pub const SEND: Tool =
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 pub struct RunIn {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub workspace: Option<String>,
-    pub task: String,
+    pub project: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    pub message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -43,8 +47,6 @@ pub struct RunIn {
     pub access: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fast: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cwd: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notify: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -263,7 +265,7 @@ pub(super) async fn checked_start(
     task: &str,
     harness: Option<&str>,
     picks: &Picks,
-    workspace_id: &str,
+    workspace_id: Option<&str>,
 ) -> Result<(), Failure> {
     let words = turns();
     if js_trim(task).is_empty() {
@@ -273,11 +275,15 @@ pub(super) async fn checked_start(
     struct Listed {
         harnesses: Vec<Catalog>,
     }
-    let Listed { harnesses } = client.request("harnesses.list", params([("workspaceId", Value::from(workspace_id))])).await?;
+    let asked = workspace_id.map_or_else(Map::new, |id| params([("workspaceId", Value::from(id))]));
+    let Listed { harnesses } = client.request("harnesses.list", asked).await?;
     let table = harnesses.iter().find(|c| harness.map_or(c.is_default == Some(true), |h| c.harness == h));
     if let (None, Some(harness)) = (table, harness) {
         // An agent the host runs that is off on this workspace's computer is the start's to refuse, naming it.
-        let Listed { harnesses: all } = client.request("harnesses.list", Map::new()).await?;
+        let all = match workspace_id {
+            None => &harnesses,
+            Some(_) => &client.request::<Listed>("harnesses.list", Map::new()).await?.harnesses,
+        };
         if all.iter().any(|c| c.harness == harness) {
             return Ok(());
         }
@@ -302,9 +308,24 @@ pub(super) async fn checked_start(
     }
 }
 
-/// The folder a thread starts in when the call names no workspace: the repo the server's own folder is in.
+/// The repo a folder on this computer is in: the nearest folder up the tree holding a .git entry.
 fn git_root_of(folder: &Path) -> Option<PathBuf> {
     folder.ancestors().find(|at| at.join(".git").exists()).map(Path::to_path_buf)
+}
+
+/// The main folder of the repo a folder is in: the root itself, or for a linked worktree the folder holding the git
+/// directory its .git file points into (`<main>/.git/worktrees/<name>`).
+fn main_worktree_of(folder: &Path) -> Option<PathBuf> {
+    let root = git_root_of(folder)?;
+    let dot_git = root.join(".git");
+    if dot_git.is_dir() {
+        return Some(root);
+    }
+    let text = std::fs::read_to_string(&dot_git).ok()?;
+    let pointed = text.lines().find_map(|l| l.strip_prefix("gitdir:")).map(str::trim)?;
+    let git_dir = root.join(pointed);
+    let worktrees = git_dir.parent()?;
+    worktrees.ends_with(".git/worktrees").then(|| worktrees.parent()?.parent().map(Path::to_path_buf)).flatten()
 }
 
 fn under(path: &str, root: &str) -> bool {
@@ -334,7 +355,19 @@ pub(super) fn opening(
     cwd: Option<&str>,
     notify: Option<Vec<String>>,
 ) -> Map<String, Value> {
-    let mut start = params([("workspaceId", Value::from(workspace_id)), ("prompt", Value::from(prompt))]);
+    opening_at(host, params([("workspaceId", Value::from(workspace_id))]), prompt, harness, cwd, notify)
+}
+
+/// The same start where the host picks the folder: the project and branch named, or beside the thread asking.
+fn opening_at(
+    host: &Host,
+    mut start: Map<String, Value>,
+    prompt: &str,
+    harness: Option<String>,
+    cwd: Option<&str>,
+    notify: Option<Vec<String>>,
+) -> Map<String, Value> {
+    start.insert("prompt".to_owned(), Value::from(prompt));
     if let Some(cwd) = cwd {
         start.insert("cwd".to_owned(), Value::from(cwd));
     }
@@ -350,51 +383,133 @@ pub(super) fn opening(
     start
 }
 
-/// Where a thread goes: the workspace named, else the one standing on the project the server's folder is a repo of,
-/// and then the first line says where it went. A guest's folder is on its machine, so walking one here would read the
-/// person's own checkouts: a guest names the workspace.
-async fn thread_target(client: &Client, named: Option<&str>, cwd: Option<&Path>, guest: bool) -> Result<(Workspace, bool), Failure> {
+/// A project as a run reads the list: what names it, the computer it is on, its folder and its repo's top.
+#[derive(Deserialize, Clone)]
+struct ProjectRow {
+    id: String,
+    name: String,
+    computer: String,
+    #[serde(default)]
+    path: String,
+    #[serde(default)]
+    git: Option<GitTop>,
+}
+
+#[derive(Deserialize, Clone)]
+struct GitTop {
+    top: String,
+}
+
+/// Where a run goes: a folder the host picks on this computer, or a workspace on a box.
+enum Target {
+    /// The project's folder, a worktree for the branch, or with no project the folder of the thread asking.
+    Here {
+        project: Option<ProjectRow>,
+        branch: Option<String>,
+        cwd: Option<String>,
+    },
+    Box(Workspace),
+}
+
+/// The projects a caller may name: the host's own list, and for a caller the host answers as a thread, which reads
+/// its own tree rather than the person's records, the projects its workspaces hold.
+async fn projects_here(client: &Client) -> Result<Vec<ProjectRow>, Failure> {
+    #[derive(Deserialize)]
+    struct Projects {
+        projects: Vec<ProjectRow>,
+    }
+    #[derive(Deserialize)]
+    struct Held {
+        project: ProjectRow,
+    }
+    #[derive(Deserialize)]
+    struct Listed {
+        workspaces: Vec<Held>,
+    }
+    if let Ok(Projects { projects }) = client.request("projects.list", Map::new()).await {
+        return Ok(projects);
+    }
+    let Listed { workspaces } = client.request("workspaces.list", Map::new()).await?;
+    let mut held: Vec<ProjectRow> = Vec::new();
+    for Held { project } in workspaces {
+        match held.iter_mut().find(|p| p.id == project.id) {
+            Some(seen) => *seen = project,
+            None => held.push(project),
+        }
+    }
+    Ok(held)
+}
+
+/// The project on this computer a folder is in: the one whose folder holds it, the deepest where two do, else the one
+/// whose repo the folder is a worktree of.
+fn project_of_folder(projects: Vec<ProjectRow>, folder: &Path, here: &str) -> Option<ProjectRow> {
+    let folder_text = folder.to_string_lossy();
+    let mine: Vec<ProjectRow> = projects.into_iter().filter(|p| p.computer == here).collect();
+    if let Some(holding) = mine.iter().filter(|p| under(&folder_text, &p.path)).max_by_key(|p| p.path.len()) {
+        return Some(holding.clone());
+    }
+    let main = main_worktree_of(folder)?;
+    let main = main.to_string_lossy();
+    mine.into_iter().find(|p| p.git.as_ref().is_some_and(|g| g.top == main))
+}
+
+/// Where a run goes, as packages/host/src/verbs.ts `runTarget` decides: the project named when it is on this
+/// computer, else the box workspace the word names; with no word, beside the thread asking, or the project whose
+/// folder, or a worktree of whose repo, the server's own folder is in. A guest's folder is on its machine, so a guest
+/// names what it means.
+async fn run_target(
+    host: &Host,
+    client: &Client,
+    named: Option<&str>,
+    branch: Option<String>,
+    cwd: Option<String>,
+) -> Result<Target, Failure> {
     let words = turns();
+    let here = super::workspace::words().here_place_id;
     if let Some(named) = named {
-        return Ok((workspace_of(client, named).await?, false));
+        let listed = projects_here(client).await.unwrap_or_default();
+        if let Some(project) = listed.into_iter().find(|p| p.id == named || p.name == named).filter(|p| p.computer == here) {
+            #[derive(Deserialize)]
+            struct Resolved {
+                #[allow(dead_code)]
+                project: Value,
+            }
+            let _ = client.request::<Resolved>("projects.resolve", params([("ref", Value::from(project.id.as_str()))])).await;
+            return Ok(Target::Here { project: Some(project), branch, cwd });
+        }
+        if branch.is_some() {
+            return Err(Failure::usage(words.branch_here_only.clone()));
+        }
+        return Ok(Target::Box(workspace_of(client, named).await?));
+    }
+    let env = host.env();
+    let set = |name: &str| env.get(name).is_some_and(|v| !v.is_empty());
+    let guest = host.args().guest;
+    if (set(&words.turn_token_env) || set(&record::host().env.token)) && !guest {
+        return Ok(Target::Here { project: None, branch, cwd });
     }
     if guest {
         return Err(Failure::usage(words.guest_names_workspace.clone()));
     }
-    let Some(root) = cwd.and_then(git_root_of) else { return Err(Failure::usage(words.no_thread_target.clone())) };
-    let root = root.to_string_lossy().into_owned();
-    #[derive(Deserialize)]
-    struct Listed {
-        workspaces: Vec<Value>,
-    }
-    #[derive(Deserialize)]
-    struct Projects {
-        projects: Vec<Value>,
-    }
-    let Listed { workspaces } = client.request("workspaces.list", Map::new()).await?;
-    let Projects { projects } = client.request("projects.list", Map::new()).await?;
-    let str_of = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).map(str::to_owned);
-    let mut found: Option<(String, String)> = None;
-    for project in &projects {
-        let folder = project.get("source").and_then(|s| s.get("kind")).and_then(Value::as_str) == Some("folder");
-        let (Some(id), Some(path)) = (str_of(project, "id"), str_of(project, "path")) else { continue };
-        if folder && under(&root, &path) && found.as_ref().is_none_or(|(_, held)| path.len() > held.len()) {
-            found = Some((id, path));
+    let project = match host.cwd() {
+        None => None,
+        Some(folder) => {
+            #[derive(Deserialize)]
+            struct Projects {
+                projects: Vec<ProjectRow>,
+            }
+            let listed = client.request::<Projects>("projects.list", Map::new()).await.map(|p| p.projects).unwrap_or_default();
+            project_of_folder(listed, folder, &here)
         }
-    }
-    let workspace = found.and_then(|(id, _)| {
-        workspaces.into_iter().find(|w| w.get("project").and_then(|p| p.get("id")).and_then(Value::as_str) == Some(id.as_str()))
-    });
-    // The recorded sentence quotes the folder where it is a word for a shell; that one is filled shell-quoted.
-    let template = words.no_workspace_for_folder.replace("'{folder}'", "{quoted}");
-    let refused = || Failure::new(fill(&template, &[("quoted", &shell_quote(&root)), ("folder", &root)]));
-    let workspace = workspace.ok_or_else(refused)?;
-    let workspace: Workspace = serde_json::from_value(workspace).map_err(|_| refused())?;
-    Ok((workspace, true))
-}
-
-fn shell_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
+    };
+    let Some(project) = project else { return Err(Failure::usage(words.no_thread_target.clone())) };
+    let caller = host.cwd().map(|f| f.to_string_lossy().into_owned());
+    let in_worktree = caller.as_deref().is_some_and(|c| !under(c, &project.path));
+    let cwd = match (cwd, &branch) {
+        (None, None) if in_worktree => caller,
+        (cwd, _) => cwd,
+    };
+    Ok(Target::Here { project: Some(project), branch, cwd })
 }
 
 /// The files a call names, read off this computer and carried as bytes, so nothing on the machine reaches back for the
@@ -493,6 +608,8 @@ pub(super) struct Turn {
     harness: String,
     outcome: String,
     turn_id: String,
+    /// The folder the host started the thread in.
+    cwd: Option<String>,
     result: Option<TurnResult>,
     reason: Option<String>,
     after_cut: bool,
@@ -524,6 +641,7 @@ async fn begin(client: &Client, start: &Map<String, Value>, request_id: &str) ->
         harness: str_at(session, "harness").unwrap_or_default(),
         outcome,
         turn_id,
+        cwd: str_at(session, "cwd"),
         result: None,
         reason: None,
         after_cut: false,
@@ -756,43 +874,72 @@ pub(super) async fn notify_of(client: &Client, named: &[String]) -> Result<Optio
     Ok(Some(out))
 }
 
-/// Where a thread whose workspace was inferred went: the workspace's name and the folder it starts in.
+/// Where a thread the host picked the folder for went: the project named, where the caller named one, and the
+/// folder the host started it in.
 struct Opened {
-    workspace: String,
-    folder: String,
+    project: Option<String>,
 }
 
 impl Opened {
-    fn line(&self, thread_id: &str) -> String {
-        fill(&turns().thread_opened, &[("thread", thread_id), ("workspace", &self.workspace), ("folder", &self.folder)])
+    fn line(&self, thread_id: &str, folder: Option<&str>) -> String {
+        let words = turns();
+        let Some(folder) = folder else { return fill(&words.opened_thread, &[("thread", thread_id)]) };
+        let home = std::env::var("HOME").ok();
+        let folder = home_shortened(folder, home.as_deref());
+        match &self.project {
+            Some(project) => fill(&words.thread_opened, &[("thread", thread_id), ("project", project), ("folder", &folder)]),
+            None => fill(&words.thread_opened_in, &[("thread", thread_id), ("folder", &folder)]),
+        }
     }
 }
 
-/// The first line of a thread: where it went when that was inferred, else its id.
-fn opened_thread(thread_id: &str, opened: Option<&Opened>) -> String {
-    opened.map_or_else(|| fill(&turns().opened_thread, &[("thread", thread_id)]), |o| o.line(thread_id))
+/// The first line of a thread: where it went when the host picked it, else its id.
+fn opened_thread(thread_id: &str, opened: Option<&Opened>, folder: Option<&str>) -> String {
+    opened.map_or_else(|| fill(&turns().opened_thread, &[("thread", thread_id)]), |o| o.line(thread_id, folder))
 }
 
 async fn run(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
-    let RunIn { workspace, task, agent, model, effort, access, fast, cwd, notify, title, files, detach } = input("run", arguments)?;
+    let RunIn { project, branch, cwd, message, agent, model, effort, access, fast, notify, title, files, detach } =
+        input("run", arguments)?;
     let client = host.client().await?;
     let picks = Picks { model, effort, access, fast };
     let read = async {
-        let (found, inferred) = thread_target(&client, workspace.as_deref(), host.cwd(), host.args().guest).await?;
-        checked_start(&client, &task, agent.as_deref(), &picks, &found.id).await?;
-        let woken = awake(&client, &found, "send").await?;
+        let target = run_target(&host, &client, project.as_deref(), branch, cwd.clone()).await?;
+        let on = match &target {
+            Target::Box(found) => Some(found.id.as_str()),
+            Target::Here { .. } => None,
+        };
+        checked_start(&client, &message, agent.as_deref(), &picks, on).await?;
+        let woken = match &target {
+            Target::Box(found) => Some(awake(&client, found, "send").await?),
+            Target::Here { .. } => None,
+        };
         let notify = notify_of(&client, notify.as_deref().unwrap_or_default()).await?;
-        Ok((found, inferred, woken, notify))
+        Ok((target, woken, notify))
     }
     .await;
-    let (found, inferred, woken, notify) = before_sending(&client, read)?;
-    let opened = inferred.then(|| Opened {
-        workspace: found.name.clone(),
-        folder: home_shortened(cwd.as_deref().unwrap_or(&found.project.path), found.home.as_deref()),
-    });
-    let folder = absolute_folder(cwd.as_deref())?;
-    let attachments = files_from(files.as_deref().unwrap_or_default(), host.args().guest)?;
-    let mut start = opening(&host, &woken.workspace.id, &task, agent, folder, notify);
+    let (target, woken, notify) = before_sending(&client, read)?;
+    let attachments_of = || files_from(files.as_deref().unwrap_or_default(), host.args().guest);
+    let (mut start, opened, attachments) = match target {
+        Target::Box(_) => {
+            let folder = absolute_folder(cwd.as_deref())?;
+            let attachments = attachments_of()?;
+            let woken = woken.as_ref().map_or("", |w| w.workspace.id.as_str());
+            (opening(&host, woken, &message, agent, folder, notify), None, attachments)
+        }
+        Target::Here { project, branch, cwd } => {
+            let folder = absolute_folder(cwd.as_deref())?;
+            let attachments = attachments_of()?;
+            let mut at = Map::new();
+            if let Some(project) = &project {
+                at.insert("project".to_owned(), Value::from(project.id.as_str()));
+            }
+            if let Some(branch) = branch {
+                at.insert("branch".to_owned(), Value::from(branch));
+            }
+            (opening_at(&host, at, &message, agent, folder, notify), Some(Opened { project: project.map(|p| p.name) }), attachments)
+        }
+    };
     if let Some(title) = title {
         start.insert("title".to_owned(), Value::from(title));
     }
@@ -804,7 +951,7 @@ async fn run(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     let answered = if detach == Some(true) {
         begin_through(&host, client.clone(), &start)
             .await
-            .map(|turn| Answer::text(opened_thread(&turn.thread_id, opened.as_ref()), &turn_out(&turn)))
+            .map(|turn| Answer::text(opened_thread(&turn.thread_id, opened.as_ref(), turn.cwd.as_deref()), &turn_out(&turn)))
     } else {
         match follow(&host, client.clone(), &start, &mut started).await {
             Ok(turn) => match turn_refusal(&turn) {
@@ -812,7 +959,7 @@ async fn run(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
                 None => {
                     let out = turn_out(&turn);
                     let text = match &opened {
-                        Some(opened) => format!("{}\n{}", opened.line(&out.thread_id), turn_text(&out)),
+                        Some(opened) => format!("{}\n{}", opened.line(&out.thread_id, turn.cwd.as_deref()), turn_text(&out)),
                         None => turn_text(&out),
                     };
                     Ok(Answer::text(text, &out))
@@ -821,9 +968,10 @@ async fn run(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
             Err(failure) => Err(failure),
         }
     };
-    match answered {
-        Ok(answer) => Ok(answer),
-        Err(failure) => Err(with_line(failure, nap_after_dead_launch(&client, &woken, started.as_ref()).await).into()),
+    match (answered, woken) {
+        (Ok(answer), _) => Ok(answer),
+        (Err(failure), Some(woken)) => Err(with_line(failure, nap_after_dead_launch(&client, &woken, started.as_ref()).await).into()),
+        (Err(failure), None) => Err(failure.into()),
     }
 }
 
@@ -833,7 +981,7 @@ async fn send(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     let picks = Picks { model, effort, access: None, fast };
     let read = async {
         let thread: Thread = thread_of(&client, &thread).await?;
-        checked_start(&client, &message, Some(&thread.harness), &picks, &thread.workspace_id).await?;
+        checked_start(&client, &message, Some(&thread.harness), &picks, Some(&thread.workspace_id)).await?;
         awake(&client, &workspace_of(&client, &thread.workspace_id).await?, "send").await?;
         Ok(thread)
     }
@@ -852,7 +1000,7 @@ async fn send(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     picks.wire(&mut start)?;
     if detach == Some(true) {
         let turn = begin_through(&host, client, &start).await?;
-        return Ok(Answer::text(opened_thread(&turn.thread_id, None), &turn_out(&turn)));
+        return Ok(Answer::text(opened_thread(&turn.thread_id, None, None), &turn_out(&turn)));
     }
     let turn = follow(&host, client, &start, &mut None).await?;
     if let Some(refused) = turn_refusal(&turn) {
@@ -926,11 +1074,10 @@ mod tests {
     }
 
     #[test]
-    fn a_folder_is_shortened_under_the_home_and_quoted_for_a_shell() {
+    fn a_folder_is_shortened_under_the_home_and_its_repo_found() {
         assert_eq!(home_shortened("/root/wsp", Some("/root")), "~/wsp");
         assert_eq!(home_shortened("/root", Some("/root")), "~");
         assert_eq!(home_shortened("/rootless", Some("/root")), "/rootless");
-        assert_eq!(shell_quote("it's"), "'it'\\''s'");
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".git")).unwrap();
         std::fs::create_dir_all(dir.path().join("a/b")).unwrap();

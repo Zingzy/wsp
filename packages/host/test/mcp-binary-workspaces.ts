@@ -5,14 +5,10 @@
 // or its unconfirmed answer here, and by its recorded answers in the record.
 import type { Called } from "./mcp-binary.test.js";
 
-const project: Called["given"] = async rt => {
-  await rt.projects.add({ source: "https://github.com/dev/alpha.git", on: "default" });
-};
-
-/** A project and one workspace of it, named alpha. */
-const alpha: Called["given"] = async (rt, line) => {
-  await project(rt, line);
-  await line(["new", "alpha"]);
+/** A project on a box and one workspace of it, named alpha. */
+const alpha: Called["given"] = async rt => {
+  const project = await rt.projects.add({ source: "https://github.com/dev/alpha.git", on: "default" });
+  await rt.workspaces.create({ project: project.id, name: "alpha" });
 };
 
 export const WORKSPACE_CALLED: Called[] = [
@@ -26,7 +22,8 @@ export const WORKSPACE_CALLED: Called[] = [
   { tool: "rebuild", argv: ["rebuild", "alpha"], arguments: { workspace: "alpha" }, given: alpha, refused: true, cloud: true },
   { tool: "forget", argv: ["forget", "alpha", "--yes"], arguments: { workspace: "alpha" }, given: alpha, refused: true },
   { tool: "projects_remove", argv: ["projects", "remove", "alpha"], arguments: { project: "alpha" }, given: alpha, refused: true },
-  { tool: "new", argv: ["new", "alpha", "fix", "--size", "3x3"], arguments: { project: "alpha", name: "fix", size: "3x3" }, given: project, refused: true },
+  { tool: "worktree", argv: ["worktree", "nope", "feat"], arguments: { project: "nope", branch: "feat" }, refused: true },
+  { tool: "worktree_remove", argv: ["worktree", "remove", "nope", "feat", "--force"], arguments: { project: "nope", branch: "feat", force: true }, refused: true },
   { tool: "fork", argv: ["fork", "alpha", "--size", "3x3"], arguments: { workspace: "alpha", size: "3x3" }, given: alpha, refused: true, cloud: true },
   { tool: "image_remove", argv: ["image", "remove", "snap-none", "--yes"], arguments: { image: "snap-none", confirm: true }, refused: true, cloud: true },
 ];

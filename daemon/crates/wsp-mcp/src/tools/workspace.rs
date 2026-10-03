@@ -61,21 +61,13 @@ pub struct Words {
     pub catalog_names: HashMap<String, String>,
     pub road_words: HashMap<String, String>,
     pub added_project: String,
+    pub added_project_here: String,
     pub this_mac: String,
     pub this_computer: String,
     pub here_place_id: String,
-    pub no_project_yet: String,
-    pub name_the_project: String,
     pub copy_takes_none: String,
     pub size_refused: String,
-    pub no_project_image_named: String,
-    pub project_image_of_other: String,
     pub cwd_not_absolute: String,
-    pub pushed_one: String,
-    pub pushed_many: String,
-    pub pr_line: String,
-    pub left_one: String,
-    pub left_many: String,
     pub committed_one: String,
     pub committed_many: String,
     pub no_draft: String,
@@ -104,9 +96,19 @@ pub struct Words {
     pub posted_one: String,
     pub posted_many: String,
     pub first_turn_failed: String,
+    pub thread_kept_folder: String,
+    pub thread_kept_worktree: String,
+    pub no_thread_here: String,
+    pub delete_names_nothing: String,
+    pub local_folder: String,
+    pub local_worktree: String,
+    pub thread_deleted: String,
+    pub thread_deleted_one: String,
+    pub thread_deleted_many: String,
+    pub worktree_removed: String,
 }
 
-/// What a delete says it will do to a machine and what it says once it did: a kind's own words, a copy's, or a
+/// What a delete says it will do to a machine and what it says once it did: a kind's own words, a worktree's, or a
 /// create that never made a machine.
 #[derive(Deserialize)]
 pub struct OnDelete {
@@ -160,7 +162,7 @@ pub struct Workspace {
     #[serde(default)]
     pub gone: Option<String>,
     #[serde(default)]
-    pub copy: Option<Copy>,
+    pub worktree: Option<Worktree>,
     #[serde(default)]
     pub wake_refused: Option<String>,
     /// The computer somebody joined that it stands on, by that computer's id; absent everywhere else.
@@ -195,9 +197,20 @@ impl Kind {
     }
 }
 
+/// The worktree of the project's repo a folder record on this computer stands on.
 #[derive(Deserialize)]
-pub struct Copy {
+pub struct Worktree {
     pub path: String,
+    pub made: bool,
+    #[serde(default)]
+    pub gone: Option<bool>,
+}
+
+impl Worktree {
+    /// The worktree a delete removes: one wsp made that is still there.
+    pub fn removable(&self) -> bool {
+        self.made && self.gone != Some(true)
+    }
 }
 
 #[derive(Deserialize)]

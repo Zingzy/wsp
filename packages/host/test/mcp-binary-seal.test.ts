@@ -61,8 +61,8 @@ suite(`the tool server in the daemon binary against a host that proves its key${
     writeFileSync(deviceKeyPath(home), JSON.stringify(DEVICE));
   }
 
-  async function workspaces(): Promise<{ structuredContent: Record<string, unknown>; isError?: boolean }> {
-    const call = { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "workspaces", arguments: {} } };
+  async function threads(): Promise<{ structuredContent: Record<string, unknown>; isError?: boolean }> {
+    const call = { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "threads", arguments: {} } };
     const { out, code } = await served([MCP_BIN!, "mcp", "--state", join(dir, "state.json"), "--host", ALIAS], { ...ownEnv(), WSP_HOME: home }, [call]);
     expect(code).toBe(0);
     return (JSON.parse(out[0]!) as { result: { structuredContent: Record<string, unknown>; isError?: boolean } }).result;
@@ -73,15 +73,15 @@ suite(`the tool server in the daemon binary against a host that proves its key${
     const { code } = await runtime.devices.issue({ now: Date.now(), ttlMs: 60_000 });
     const paired = await runtime.devices.redeem(code, "the laptop", Date.now());
     holding(url, paired!.deviceToken);
-    const result = await workspaces();
+    const result = await threads();
     expect(result.isError, JSON.stringify(result)).toBeUndefined();
-    expect(result.structuredContent).toEqual({ workspaces: [] });
+    expect(result.structuredContent).toEqual({ threads: [] });
   });
 
   it("admits a computer the account lists on its device key and writes the token that host answers into the record", async () => {
     const url = await hostServing(account(DEVICE));
     holding(url, "");
-    const result = await workspaces();
+    const result = await threads();
     expect(result.isError, JSON.stringify(result)).toBeUndefined();
     const kept = readHost(home, ALIAS)!;
     expect(kept.deviceToken).not.toBe("");
@@ -93,7 +93,7 @@ suite(`the tool server in the daemon binary against a host that proves its key${
   it("refuses a host that proves a key other than the one pinned, in the auth class, before the token crosses", async () => {
     const url = await hostServing();
     holding(url, "a-token-it-never-sees", newPlaceKeyPair());
-    const result = await workspaces();
+    const result = await threads();
     expect(result).toMatchObject({ isError: true, structuredContent: { error: pairKeyRefusal(url), class: "auth", exit: EXIT_CODES.auth } });
     expect(await runtime.devices.list()).toEqual([]);
   });

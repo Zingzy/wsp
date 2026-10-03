@@ -139,12 +139,12 @@ console.log(\`measured \${JSON.stringify({ stateMb: +stateMb.toFixed(0), maxLagM
 process.exit(0);
 `;
 
-/** The tree a local workspace copies: a checkout's worth of small files and a few large ones. */
+/** The tree a worktree's verb works on: a checkout's worth of small files and a few large ones. */
 const TREE_FILES = 30_000;
 const TREE_LARGE = 3;
 
-/** The tree, a git repo, and the copy verb's stand-in: the daemon's verb copies on a Mac alone, so this child copies
- * with cp and answers the one JSON line the verb answers, which is the road a copy takes out of the host. */
+/** The tree, a git repo, and the worktree verb's stand-in: a child that does a large tree's worth of disk work with cp
+ * and answers the one JSON line the verb answers, which is the road a worktree takes out of the host. */
 function bigTree(home: string): { folder: string; verb: string } {
   const folder = join(home, "big");
   for (let d = 0; d < TREE_FILES / 1000; d++) {
@@ -153,13 +153,13 @@ function bigTree(home: string): { folder: string; verb: string } {
   }
   for (let i = 0; i < TREE_LARGE; i++) execFileSync("sh", ["-c", `head -c 104857600 /dev/urandom > ${join(folder, `blob${i}.bin`)}`]);
   execFileSync("git", ["init", "-q", folder]);
-  const verb = join(home, "copy-verb");
-  const report = '{"road":"clonefile","path":"%s","base":"0000000000000000000000000000000000000000","branch":"main","fetched":true,"carried":"deps-and-config","excluded":[],"bytes":1,"ms":1}\\n';
-  writeStub(verb, ["#!/bin/sh", "while [ $# -gt 0 ]; do case $1 in --from) from=$2; shift 2;; --to) to=$2; shift 2;; *) shift;; esac; done", 'cp -a "$from" "$to" || exit 1', `printf '${report}' "$to"`, ""].join("\n"));
+  const verb = join(home, "worktree-verb");
+  const report = '{"path":"%s","branch":"%s","made":true,"carried":[],"ms":1}\\n';
+  writeStub(verb, ["#!/bin/sh", "while [ $# -gt 0 ]; do case $1 in --from) from=$2; shift 2;; --home) at=$2; shift 2;; --project) project=$2; shift 2;; --branch) branch=$2; shift 2;; *) shift;; esac; done", 'to="$at/worktrees/$project/$branch"', 'mkdir -p "$at/worktrees/$project"', 'cp -a "$from" "$to" || exit 1', `printf '${report}' "$to" "$branch"`, ""].join("\n"));
   return { folder, verb };
 }
 
-/** The host making two local workspaces of that tree through the verb, with the loop's longest gap read meanwhile. */
+/** The host making two worktrees of that tree through the verb, with the loop's longest gap read meanwhile. */
 const copyScript = (home: string, folder: string, verb: string): string => `
 import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -192,10 +192,11 @@ const probe = setInterval(() => {
   last = now;
 }, 20);
 const started = performance.now();
-for (let i = 0; i < 2; i++) await host.createWorkspace("copy " + i, undefined, project.id);
+for (let i = 0; i < 2; i++) await runtime.workspaces.worktree({ project: project.id, branch: "b" + i });
 const copyMs = performance.now() - started;
 clearInterval(probe);
-const copies = readdirSync(home).filter(name => name.startsWith("big-")).map(name => readdirSync(join(home, name, "src")).length);
+const made = join(home, ".wsp", "worktrees", project.id);
+const copies = readdirSync(made).map(name => readdirSync(join(made, name, "src")).length);
 await host.close();
 console.log("measured " + JSON.stringify({ maxLagMs: Math.round(maxLagMs), copyMs: Math.round(copyMs), copies }));
 process.exit(0);
@@ -247,14 +248,14 @@ describeWithDists("a host whose state file has grown", ["host", "runtime", "engi
     expect(m.heldMb, said).toBeLessThan(HELD_CAP_MB);
   }, 300_000);
 
-  it(`keeps its loop turning inside ${LOOP_STALL_CAP_MS} ms while it makes local copies of a large tree`, async () => {
+  it(`keeps its loop turning inside ${LOOP_STALL_CAP_MS} ms while it makes worktrees of a large tree`, async () => {
     const { folder, verb } = bigTree(home);
     const run = await ran(copyScript(home, folder, verb), home);
     expect(run.code, run.out).toBe(0);
     const line = run.out.split("\n").find(l => l.startsWith("measured "));
     expect(line, run.out).toBeDefined();
     const m = JSON.parse(line!.slice("measured ".length)) as { maxLagMs: number; copyMs: number; copies: number[] };
-    const said = `two copies of ${TREE_FILES} files and ${TREE_LARGE * 100} MB took ${m.copyMs} ms, and the loop was held ${m.maxLagMs} ms at most`;
+    const said = `two worktrees of ${TREE_FILES} files and ${TREE_LARGE * 100} MB took ${m.copyMs} ms, and the loop was held ${m.maxLagMs} ms at most`;
     console.log(said);
     expect(m.copies, said).toEqual([TREE_FILES / 1000, TREE_FILES / 1000]);
     expect(m.maxLagMs, said).toBeLessThan(LOOP_STALL_CAP_MS);

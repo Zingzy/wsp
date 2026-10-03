@@ -1,0 +1,62 @@
+{
+  "tool": "worktree_remove",
+  "cases": [
+    {
+      "case": "removed",
+      "arguments": {
+        "project": "alpha",
+        "branch": "feat/x \u0085",
+        "force": true
+      },
+      "replies": {
+        "worktree.remove": "{\"id\":1,\"ok\":true}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"removed the worktree for feat/x \\u0085; the branch stays\"}],\"structuredContent\":{\"project\":\"alpha\",\"branch\":\"feat/x \\u0085\",\"removed\":true}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "worktree.remove",
+          "project": "alpha",
+          "branch": "feat/x \u0085",
+          "force": true
+        }
+      ]
+    },
+    {
+      "case": "kept",
+      "arguments": {
+        "project": "alpha",
+        "branch": "feat/x",
+        "force": false
+      },
+      "replies": {
+        "worktree.remove": "{\"id\":1,\"ok\":true,\"removed\":true}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"removed the worktree for feat/x; the branch stays\"}],\"structuredContent\":{\"project\":\"alpha\",\"branch\":\"feat/x\",\"removed\":true}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "worktree.remove",
+          "project": "alpha",
+          "branch": "feat/x"
+        }
+      ]
+    },
+    {
+      "case": "refused",
+      "arguments": {
+        "project": "alpha",
+        "branch": "feat/x"
+      },
+      "replies": {
+        "worktree.remove": "{\"id\":1,\"ok\":false,\"error\":\"a thread is working in that worktree; let its turn end or stop it first\",\"kind\":\"usage\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"a thread is working in that worktree; let its turn end or stop it first\"}],\"structuredContent\":{\"error\":\"a thread is working in that worktree; let its turn end or stop it first\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "worktree.remove",
+          "project": "alpha",
+          "branch": "feat/x"
+        }
+      ]
+    }
+  ]
+}

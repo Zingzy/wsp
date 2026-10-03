@@ -232,6 +232,18 @@
             "base": {
               "type": "string"
             },
+            "git": {
+              "type": "object",
+              "properties": {
+                "top": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "top"
+              ],
+              "additionalProperties": false
+            },
             "createdAt": {
               "type": "string"
             }
@@ -557,6 +569,18 @@
             },
             "base": {
               "type": "string"
+            },
+            "git": {
+              "type": "object",
+              "properties": {
+                "top": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "top"
+              ],
+              "additionalProperties": false
             },
             "createdAt": {
               "type": "string"

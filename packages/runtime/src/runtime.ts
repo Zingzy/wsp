@@ -1,8 +1,8 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { existsSync, mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, hostname, tmpdir } from "node:os";
-import { dirname, isAbsolute, join, posix, resolve as resolvePathOn } from "node:path";
-import { CATALOG_AGENTS, DEFAULT_AGENT, GUEST_HOME, type ThreadAgent, PATH_BOUND_DIR_NAMES, TOOL_PREFIX, catalogIdOfRow, gitHostOf, remoteHost, serverValuesOf, guestEnv, installEnv, installHomes, loginHomeIn, sharedOn } from "@wsp/catalog";
+import { dirname, isAbsolute, join, posix, relative, resolve as resolvePathOn } from "node:path";
+import { CARRIED_DIR_NAMES, CATALOG_AGENTS, DEFAULT_AGENT, GUEST_HOME, type ThreadAgent, TOOL_PREFIX, catalogIdOfRow, gitHostOf, remoteHost, serverValuesOf, guestEnv, installEnv, installHomes, loginHomeIn, sharedOn } from "@wsp/catalog";
 import {
   BUILDER_IDLE_MS,
   DAEMON_PORT,
@@ -233,7 +233,7 @@ import type {
 import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding } from "./project-landing.js";
 import { projectRemote, projectSource } from "./project-sources.js";
 import { vaultUnlistedRefusal, ThreadPlacement, ThreadScope, WorkspaceOrigin, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, GitCommitReply, GitDiscardReply, GitDiffReply, GitStatusReply, GitPrReadReply, GitPrViewReply, GitRunLogReply, GitPrMergeReply, GitRepoReadReply, GitUpdateReply, GitStartOnReply, GitBranchCompareReply, GitMergeInReply, DETACHED_HEAD, leadBusyRefusal, childStartedLine, forkNeedsPushLine, FIX_CHECK_OR_CHILD, childOnNoBranchRefusal, mergeChildPrompt, mergeIntoOwnRefusal, noRemoteForTreeLine, notTheLeadsChildRefusal, pushedForChildLine, uncommittedStayed, type MergeInResult, type TreeChild, type TreeFact, type TreeRecord, PR_POLL_MS, type PullRequestPage, GitPrReplyReply, GitPrResolveReply, GitPrReactReply, REPLY_EMPTY_LINE, pullRequestPostLine, type ReactionContent, type PullRequestItem, type PullRequestSendResult, type PullRequestSent, GIT_DIFF_CAP_BYTES, pullRequestSendPrompt, checkFailedPrompt, conflictsPrompt, checkNotFailedRefusal, childPushedLine, isPullRequestFact, mergeMethodRefusal, noPullRequestRefusal, noSuchCheckRefusal, notOpenRefusal, pullRequestStoppedLine, pullRequestUnreadLine, AUTO_MERGE_OFF_LINE, type FixResult, type MergeMethod, type MergeResult, type PullRequestFact, type PullRequestRecord, type PullRequestSeen, DRAFT_NOTES, cleanCheckoutLine, commitMessage, cutDiff, draftPrompt, type Checkout, type CheckoutReply, type CommitDraft, type CommitDrafter, type ViewedMarks, AGENTS_ON, agentsFrom, foldThreads, NAP_AFTER_MS, settingFor, runningOn as runningOnPlace, phaseHoldsSlot, placeAtLimitLine, placeSpendLimit, spendCapRefusal, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadKeyOf, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, SCOPED_MCP_ARG, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn, RUN_PERSONS_LINE, runOutputTail, type RunStep, type SessionRunEvent } from "@wsp/protocol";
-import { ASIDE_NO_SESSION_LINE, BLANK_ASIDE_LINE, asideUnsupportedLine, PLACE_WORKSPACE_PATH, THIS_COMPUTER, COPY_BUILD_FIX, copyAsksSignIns, refusal, copyFirstLine, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildOf, copyIsCurrent, type CopyBuild, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, serverIconsLeftLine, homeShortened, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, threadRunsOnLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, GONE_UNCHECKED, goneUnconfirmedLine, type GoneSeenBy, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, cloneFailedLine, cloneIntoNeeded, cloneIntoTakenLine, cloneUrlRefusal, intoIsHereLine, INTO_TAKES_A_REPO_LINE, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, startingLine, copyingFolderLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeBlocked, placeDaemonBehind, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeDaemonPaths, placeDialBackLine, placeWentAwayLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspacePlace, workFolderIn, workspaceLands, copyPathFor, folderSlug, type ProjectCopy, REWIND_LATEST_LINE, REWIND_NO_CHECKPOINT_LINE, REWIND_NO_UNDO_LINE, REWIND_OWN_FOLDER_LINE, REWIND_WORKING_LINE, rewindBesideLine, rewindChildrenLine, rewindKeptLine, rewindNoAnchorLine, attachmentRecord, filesBlocked, isImage, sendFilesDir, filePathIn, landFilesLine, filesNotLandedLine, attachedFilesPrompt, dropFilesLine } from "@wsp/protocol";
+import { ASIDE_NO_SESSION_LINE, BLANK_ASIDE_LINE, asideUnsupportedLine, PLACE_WORKSPACE_PATH, THIS_COMPUTER, COPY_BUILD_FIX, copyAsksSignIns, refusal, copyFirstLine, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildOf, copyIsCurrent, type CopyBuild, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, serverIconsLeftLine, homeShortened, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, threadRunsOnLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, GONE_UNCHECKED, goneUnconfirmedLine, type GoneSeenBy, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, cloneFailedLine, cloneIntoNeeded, cloneIntoTakenLine, cloneUrlRefusal, intoIsHereLine, INTO_TAKES_A_REPO_LINE, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NAME_A_PROJECT_LINE, BRANCH_OR_CWD_LINE, notOnThisComputerLine, cwdOutsideLine, noBranchesLine, notMadeWorktreeLine, THREAD_WORKING_LINE, threadOnMachineLine, OLD_COPY_WORDS, ProjectCopy, WORKTREE_BUSY_LINE, WORKTREE_FORCE_LINE, PR_BEHIND_WORDS, worktreeChangedLine, keptChangedLine, KEPT_RUNNING_LINE, KEPT_ABANDONED_LINE, type WorktreeFolder, type WorktreeSettled, type WorktreeMade, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeBlocked, placeDaemonBehind, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeDaemonPaths, placeDialBackLine, placeWentAwayLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspacePlace, workFolderIn, workspaceLands, REWIND_LATEST_LINE, REWIND_NO_CHECKPOINT_LINE, REWIND_NO_UNDO_LINE, REWIND_SHARED_LINE, REWIND_WORKING_LINE, rewindBesideLine, rewindChildrenLine, rewindKeptLine, rewindNoAnchorLine, attachmentRecord, filesBlocked, isImage, sendFilesDir, filePathIn, landFilesLine, filesNotLandedLine, attachedFilesPrompt, dropFilesLine } from "@wsp/protocol";
 import { agentsReads, type AgentsActs, type AgentsReader, type CallbackForwards, type ServerIcons, type ServersActs, type SignInAsk, type SkillAsk, type SkillsActs } from "./agents-read.js";
 import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from "./daemon-channel.js";
 import { templateHost } from "./host-id.js";
@@ -248,7 +248,6 @@ import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
 import { assertTokenShape, daemonTokenFor, daemonTokenPathOf, rotateDaemonToken } from "./daemon-token.js";
 import { backstopMs, createIdlePolicy } from "./idle.js";
-import { nextPortBase } from "./ports.js";
 import { connectDaemon, type DaemonReach } from "./reach.js";
 import { POLL_INTERVAL_MS, createStatusTracker, machineStateOf, phaseLeavingGone, providerSaid, type StatusApi, type StatusListOptions, type StatusWatchOptions } from "./status.js";
 import { makeDevices, type DeviceDoor, type ScopedRoad } from "./devices.js";
@@ -1190,18 +1189,9 @@ const folderNamed = (path: string): string => {
  * the whole of what says so. */
 const sameSource = (a: ProjectSource, b: ProjectSource): boolean => (a.kind === "git" && b.kind === "git" ? a.url === b.url : a.kind === "folder" && b.kind === "folder" ? a.path === b.path : false);
 
-/** Why a kind that makes a workspace some other way has no copy of a folder to make. Nothing a person types
- * reaches it: the create reads the kind table first, so this is the wiring's own sentence. */
-export const kindMakesNoCopy = (kind: string): string => `a ${kind} workspace is not a copy of a folder on this computer`;
+/** What a branch on a project here is refused with when the host wired no daemon binary: the binary makes worktrees. */
+export const NO_COPIER_HERE = "this host has no daemon binary beside it to make a worktree with; stage this wsp's daemon binary and try again";
 
-/** What a workspace on a project here is refused with when the host wired no copy road: the daemon binary is what
- * copies, every workspace here is a copy, and a host that cannot find the binary makes none. */
-export const NO_COPIER_HERE = "this host has no copy road for a folder on this computer, and every workspace here is a copy of one; stage this wsp's daemon binary and try again";
-
-/** The size above which a folder is not directory-cloned and the copy takes the worktree road instead. Twenty
- * gibibytes is well past the biggest checkout measured here (6 GB with its dependencies) and short of a folder
- * somebody would be surprised to see doubled. One place, so it is one line to change. */
-export const COPY_SIZE_LINE_BYTES = 20 * 1024 * 1024 * 1024;
 
 /** The last line a command said, which is what git puts its reason on. */
 const lastLineOf = (said: string): string => said.trimEnd().split("\n").at(-1)?.trim() ?? "";
@@ -1552,6 +1542,16 @@ export interface Runtime {
      * workspace as a branch of its own. A machine with no signed-in command line for the git host still pushes,
      * and says why the pull request waits as the result's note. */
     bringBack(o: { workspaceId: string; title?: string; body?: string }, origin?: Caller): Promise<BringBackResult>;
+    /** The record of the folder a thread on this computer runs in, made at its first thread: the project folder, the
+     * caller's own folder when a thread asks naming nothing, the worktree holding a branch, or the folder a cwd
+     * names inside the project or a worktree of its repo. cwd is the folder the start runs in where it named one. */
+    folderFor(o: { project?: string; branch?: string; cwd?: string }, origin?: Caller): Promise<{ workspace: WorkspaceView; cwd?: string }>;
+    /** The worktree holding a branch of a project's repo on this computer, made under the host's folder where none
+     * holds it. */
+    worktree(o: { project: string; branch: string }, origin?: Caller): Promise<WorktreeMade>;
+    /** Takes a worktree wsp made away with git: refused while a turn runs in it, and without force while it holds
+     * files no commit has. Its threads go on in the project folder. */
+    worktreeRemove(o: { project: string; branch: string; force?: boolean }, origin?: Caller): Promise<void>;
     /** The copy's checkout as the host holds it, read again through the copy's daemon unless it was read within
      * CHECKOUT_TTL_MS; a machine that is not running and whose computer does not answer for it keeps its last fact. */
     checkout(id: string, origin?: Caller): Promise<CheckoutReply>;
@@ -1721,6 +1721,8 @@ export interface Runtime {
          * each takes in a config: what a caller that needs a tool loaded whatever the person's config says hands
          * over (the cloud setup's own thread, which calls the wsp recipe tools). */
         mcpServers?: Readonly<Record<string, McpServerSpec>>;
+        /** The line a thread opened on a pull request is told first: the worktree holding the branch was left behind it. */
+        behind?: string;
       },
       origin?: Caller,
     ): Promise<SessionHandle>;
@@ -1782,6 +1784,9 @@ export interface Runtime {
      * decides: a turn the agent refused did none, however far its launch got. A thread of another tree reads the
      * absence a name nothing holds reads, before any of that. */
     forget(threadId: string, origin?: Caller): Promise<void>;
+    /** Takes a thread on this computer away with its turns and checkpoints, and a worktree wsp made with the thread
+     * when the thread ran in one, every thread in it going too. Never the project folder. */
+    delete(threadId: string, origin?: Caller): Promise<{ workspaceId: string; worktree?: string; threads: number }>;
   };
   readonly harnesses: {
     /** What each harness with an adapter takes at launch; the composer's pickers render from this. With a running
@@ -2565,16 +2570,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     /** Names the project folders the machine's daemon may browse beside its home, where the kind has a daemon. */
     roots: (entry: LiveWorkspace, dests: readonly string[]) => Promise<void>;
     /** Puts this workspace's project inside it, the step between the machine answering and the workspace being
-     * ready: a kind that copies a folder here has the copy already and only checks the folder is still a repo,
-     * and a kind that forks clones the repo into the fork. A throw ends the create as any failed stage does. */
+     * ready: a kind that forks clones the repo into the fork. A throw ends the create as any failed stage does. */
     landProject: (entry: LiveWorkspace, project: ProjectView, report: StageReport) => Promise<void>;
-    /** Makes this workspace's copy of the project on a computer whose capabilities say it copies by directory: the
-     * folder the copy lands at, the road that made it and what it stands on. Refused with one sentence where the
-     * computer makes no copy. The record is the caller's; this makes the folder and nothing else. */
-    makeCopy: (project: ProjectView, work: { slug: string; base?: string }) => Promise<ProjectCopy>;
-    /** Takes the copy away; the record is the caller's to delete after. The person's own folder is never touched,
-     * since no record names it as its copy. */
-    dropCopy: (copy: ProjectCopy) => Promise<void>;
     /** What one agent on this workspace keys its sessions and its memory to, where the kind has an answer: on a
      * computer whose workspaces are copies of a folder, the original folder's own key, so every copy and the
      * person's own terminal in that folder share one memory. Nothing where the folder a turn runs in is the key,
@@ -2684,56 +2681,27 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return { remote, defaultBranch: head.replace(/^origin\//, "") };
   };
 
-  /** The copy of a project folder one piece of work on this computer gets: a sibling of the folder under the work's
-   * own name, made by the daemon binary's copy verb, which picks the road, applies the two rules and says which
-   * road it took. Every refusal is the verb's, naming the folder in the way or the volume that could not take the
-   * copy, since the verb is what read the disk. */
-  const makeLocalCopy = async (project: ProjectView, work: { slug: string; base?: string }): Promise<ProjectCopy> => {
-    const copier = local?.copier;
-    if (copier === undefined) throw Object.assign(new Error(NO_COPIER_HERE), { kind: "invalid" });
-    // Before the binary is run at all: one that predates this wsp answers a verb it never heard of with its own
-    // usage text, forty flags long, which a person read as the refusal for a second workspace.
-    const here = local?.hereDaemon;
-    if (here !== undefined) {
-      const version = await here.version();
-      // No kind: a daemon behind this wsp is not a mistyped line and not a name somebody took, and an error with
-      // none of those reads as what the host refused, which is the class this is.
-      if (version < DAEMON_VERSION) throw new Error(hereDaemonBehindLine(version, DAEMON_VERSION, here.fix));
-    }
-    const to = copyPathFor(project.path, work.slug);
-    const report = await copier.make({
-      from: project.path,
-      to,
-      ...(work.base !== undefined ? { base: work.base } : {}),
-      exclude: [...PATH_BOUND_DIR_NAMES],
-      sizeLineBytes: COPY_SIZE_LINE_BYTES,
-    });
-    return {
-      road: report.road,
-      path: report.path,
-      base: report.base,
-      branch: report.branch,
-      carried: report.carried,
-      ...(report.fellBack !== undefined ? { fellBack: report.fellBack } : {}),
-      source: project.path,
-    };
-  };
-
-  /** The copy taken away by the road that made it: the verb is handed the road off the record, so a worktree's
-   * registration goes with it rather than being left inside the project's own git directory. */
-  const dropLocalCopy = async (copy: ProjectCopy): Promise<void> => {
-    const copier = local?.copier;
-    if (copier === undefined) throw new Error(NO_COPIER_HERE);
-    await copier.remove(copy.source, copy.path, copy.road);
-  };
-
-  /** Whether this computer holds a git repo at exactly this folder, which is what a project here stands on: the
-   * top of the work tree is the folder itself, not a folder above it. */
-  const isRepoHere = async (path: string): Promise<boolean> => {
+  /** One git command on this computer, argv quoted, through the local backend as every read here goes. */
+  const gitHere = async (cwd: string, args: readonly string[], timeoutMs = INLINE_EXEC_MS): Promise<{ exitCode: number; stdout: string; stderr: string }> => {
     const machine = await moduleOf("local").backend({ kind: "local" } as WorkspaceRecord).get(LOCAL_MACHINE_ID);
-    const read = await machine.exec(shellLine(["git", "-C", path, "rev-parse", "--show-toplevel"]), { timeoutMs: INLINE_EXEC_MS });
-    return read.exitCode === 0 && read.stdout.trim() === path;
+    return machine.exec(shellLine(["git", "-C", cwd, ...args]), { timeoutMs });
   };
+  /** The top of the repo a folder on this computer sits in, the folder itself or one above it; nothing for a folder
+   * git holds no repo in. */
+  const gitTopOf = async (path: string): Promise<string | undefined> => {
+    const read = await gitHere(path, ["rev-parse", "--show-toplevel"]);
+    const top = read.stdout.trim();
+    return read.exitCode === 0 && top !== "" ? top : undefined;
+  };
+  /** The branch a folder has checked out; nothing on a detached HEAD or where git answers nothing. */
+  const branchAt = async (path: string): Promise<string | undefined> => {
+    const read = await gitHere(path, ["symbolic-ref", "--quiet", "--short", "HEAD"]);
+    const branch = read.stdout.trim();
+    return read.exitCode === 0 && branch !== "" ? branch : undefined;
+  };
+  /** The folder beside the state this host serves, where its worktrees and its own files about them live, so two
+   * hosts never share one. */
+  const stateFolder = (): string => (opts.statePath !== undefined ? dirname(resolvePathOn(opts.statePath)) : join(local?.homeDir ?? homedir(), ".wsp"));
   /** A repo cloned on this computer into the folder the person named, which must hold nothing yet: the source's own
    * clone line, argv quoted so neither the url nor the folder is read by the shell, `--` before the url so git
    * reads no option out of it, and no prompt, since nobody is at a terminal to answer one. Git's own last line is
@@ -2864,10 +2832,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       import: (entry, o, report) => copyImport(entry, o, report),
       roots: (entry, dests) => writeRoots(entry, dests),
       landProject: (entry, project, report) => cloneProject(entry, project, report),
-      // A fork is the copy: the machine is a copy of an image with the project cloned into it, so there is no
-      // folder on this computer to copy and nothing to take away when the record goes.
-      makeCopy: () => Promise.reject(new Error(kindMakesNoCopy("cloud"))),
-      dropCopy: async () => {},
       // The key the project was recorded with, which is the folder's own on the computer it was seeded from: a
       // fork holds the checkout at a path of the machine's, and keying off that path would give one project as
       // many memories as it has computers.
@@ -2879,16 +2843,16 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         : {
             backend: () => local.backend,
             execStream: (_entry, o, waiting) => local.execStream(o, waiting),
-            // A workspace here is the copy of the project's folder made for this piece of work: that folder is the
-            // word its view carries and where a thread on it starts; the same reading threadFolder takes.
+            // A record here is a folder: the project's own or a worktree of its repo, the word its view carries and
+            // where a thread on it starts; the same reading threadFolder takes.
             folder: record => checkoutOf(record),
             home: (_entry, id) => local.home(id),
             homeDir: () => local.homeDir,
             // The person's own login on the computer they are sitting at, read where that agent keeps it.
             loginStands: (_entry, id) => sharedLoginUnder(local.home(id), id),
-            // The person's own login, plus the port this workspace's apps bind: every copy here shares one
-            // loopback, so a copy with no port of its own would race the person's own dev server for 3000.
-            env: entry => (entry.record.portBase === undefined ? local.env() : { ...local.env(), PORT: String(entry.record.portBase) }),
+            // The person's own login and nothing more: threads here share the person's ports, as panes in one
+            // terminal do.
+            env: () => local.env(),
             relayed: () => false,
             // This computer's own command, as the command line hands it: a thread here runs the wsp tools on this
             // computer, which dial the pair its launch carries rather than riding a machine's daemon. Marked, since here a
@@ -2918,13 +2882,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             // The file this host's own daemon reads, which is the wiring's and not a path taken off the home it
             // browses: a host on another state file has its own, and neither rewrites the other's.
             roots: (entry, dests) => writeRoots(entry, dests, local.rootsPath),
-            // The copy is already made: nothing moves, and the one thing worth reading again is that the folder it
-            // was copied from is still the repo the project was recorded on.
-            landProject: async (_entry, project) => {
-              if (project.source.kind === "folder" && !(await isRepoHere(project.path))) throw new Error(`${project.path} ${NOT_A_REPO_LINE}`);
-            },
-            makeCopy: (project, work) => makeLocalCopy(project, work),
-            dropCopy: copy => dropLocalCopy(copy),
+            landProject: async () => {},
             // The original folder's key, which is the one the person's own terminal already writes under: every
             // copy of that folder and their own agent in it share one memory directory and one sessions list,
             // with nothing seeded and nothing moved.
@@ -3036,14 +2994,23 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const drives = (record: { kind: WorkspaceKind; machineId?: string }, caller: Caller | undefined): boolean => roadOf(caller) !== "relayed" || moduleOf(record.kind).relayed(record.machineId);
   /** What the two rules a request is read against need of a workspace: what a record holds, and what a create is
    * checked with before there is a record. */
-  type WorkspaceLike = { id?: string; kind: WorkspaceKind; name: string; machineId?: string; rootThreadId?: string; project?: string };
+  type WorkspaceLike = { id?: string; kind: WorkspaceKind; name: string; machineId?: string; rootThreadId?: string; project?: string; worktree?: WorktreeFolder };
   /** Which workspaces a thread's own token reaches: the one its turn runs on, and the ones its root thread forked.
    * A thread never sees or drives a workspace outside its own tree, whatever the verb, so this sits beside the
    * kind rule rather than in any one of them. A caller that is no thread reaches everything the kind rule allows. */
-  const inTree = (record: { id?: string; rootThreadId?: string }, scope: ThreadScope | undefined): boolean =>
+  const inTree = (record: { id?: string; rootThreadId?: string; worktree?: WorktreeFolder }, scope: ThreadScope | undefined): boolean =>
     // A record with no id is a workspace that does not exist yet, the shape a create is checked against: what a
-    // thread may make is the guard's question, not this one's.
-    scope === undefined || record.id === undefined || record.id === scope.workspaceId || record.rootThreadId === scope.rootThreadId;
+    // thread may make is the guard's question, not this one's. A worktree on this computer made for the tree is in
+    // it as a fork the tree made is.
+    scope === undefined ||
+    record.id === undefined ||
+    record.id === scope.workspaceId ||
+    record.rootThreadId === scope.rootThreadId ||
+    (record.worktree?.madeFor !== undefined && record.worktree.madeFor === scope.rootThreadId);
+  /** Where a thread may open a thread beyond its tree: the project folder of its own project, which every thread
+   * of the project shares. Every other act there stays its tree's. */
+  const opensIn = (record: WorkspaceRecord, scope: ThreadScope | undefined): boolean =>
+    scope !== undefined && copiesFolder(record.kind) && record.worktree === undefined && record.project === projectOfScope(scope);
   /** Which project a thread works on: the one its own workspace holds. A thread whose workspace this host no longer
    * holds works on none, and the project rule then has nothing to compare and leaves the tree rule to refuse. */
   const projectOfScope = (scope: ThreadScope): string | undefined => live.get(scope.workspaceId)?.record.project;
@@ -3808,9 +3775,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * stored a second time. */
   const refOf = (p: ProjectView): ProjectRef => ({ id: p.id, name: p.name, path: p.path, computer: p.computer });
 
-  /** Where a workspace's checkout of its project sits on its machine: the copy made for this piece of work on this
-   * computer, else the project's own path, which is the clone inside a fork. */
-  const checkoutOf = (r: WorkspaceRecord): string => r.copy?.path ?? projectHeld(r.project).path;
+  /** Where a record's threads work: the project's own path (the clone inside a fork, the folder on this computer),
+   * or the same folder inside the worktree the record names. A worktree that is gone answers the project's path, so
+   * its threads go on there. */
+  const checkoutOf = (r: WorkspaceRecord): string => {
+    const project = projectHeld(r.project);
+    const tree = r.worktree;
+    if (tree === undefined || tree.gone === true) return project.path;
+    return join(tree.path, relative(project.git?.top ?? project.path, project.path));
+  };
   /** What the computer holding a workspace is called, for the sentences about a workspace whose daemon is that
    * computer's own: the name the person gave that computer, or the word for its kind of machine. */
   const computerOf = (entry: LiveWorkspace): string =>
@@ -4085,7 +4058,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const startChildOn = async (child: LiveWorkspace, branch: string, lead: string): Promise<string> => {
     try {
       const put = GitStartOnReply.parse(await withDaemon(child, ask => ask({ op: "git.startOn", cwd: checkoutOf(child.record), branch })));
-      if (child.record.copy !== undefined) child.record.copy = { ...child.record.copy, branch: put.branch };
+      if (child.record.worktree !== undefined) child.record.worktree = { ...child.record.worktree, branch: put.branch };
       await persist(child.record);
       void readCheckout(child, true);
       return childStartedLine(child.record.name, put.branch);
@@ -4118,10 +4091,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     golden: r.golden,
     createdAt: r.createdAt,
     project: refOf(projectHeld(r.project)),
-    ...(r.copy !== undefined ? { copy: r.copy } : {}),
+    ...(r.worktree !== undefined ? { worktree: r.worktree } : {}),
     ...(r.from !== undefined ? { from: r.from } : {}),
     ...(r.review !== undefined ? { review: r.review } : {}),
-    ...(r.portBase !== undefined ? { portBase: r.portBase } : {}),
     ...(r.claudeSessionId !== undefined ? { claudeSessionId: r.claudeSessionId } : {}),
     ...(r.screen !== undefined ? { screen: r.screen } : {}),
     ...(r.gone !== undefined ? { gone: r.gone } : {}),
@@ -4622,7 +4594,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * after one the count is against the child's commit it took. A compare nothing could answer leaves the counts out,
    * which the row reads as not counted. */
   const treeChildOf = async (child: LiveWorkspace, leadBranch: string): Promise<TreeChild> => {
-    const branch = (await readCheckout(child, false))?.branch ?? child.record.copy?.branch ?? child.record.base ?? "";
+    const branch = (await readCheckout(child, false))?.branch ?? child.record.worktree?.branch ?? child.record.base ?? "";
     const thread = [...sessions.values()].map(v => v.view).find(v => v.workspaceId === child.record.id && v.threadId !== undefined)?.threadId;
     const remote = projectHeld(child.record.project).remote;
     const asked =
@@ -4701,6 +4673,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (entry.prReading !== undefined) return entry.prReading;
     const reading = (async (): Promise<PullRequestSeen | undefined> => {
       const project = projectHeld(entry.record.project);
+      if (project.remote === "") return entry.pr;
       const branch = kept === undefined ? (entry.checkout ?? (await readCheckout(entry, false)))?.branch : undefined;
       const base = entry.record.base ?? project.base;
       if (kept === undefined && (branch === undefined || branch === base || branch.startsWith("("))) return entry.pr;
@@ -4805,7 +4778,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * back reads it; then the branch line read again, and the pull request, whose word a conflict or a count may move. */
   const updateCopy = async (entry: LiveWorkspace): Promise<GitUpdateReply> => {
     const base = entry.record.base ?? projectHeld(entry.record.project).base;
-    const done = GitUpdateReply.parse(await withDaemon(entry, ask => ask({ op: "git.update", cwd: checkoutOf(entry.record), ...(base !== undefined ? { base } : {}) })));
+    const done = GitUpdateReply.parse(await queued(entry.record.id, () => withDaemon(entry, ask => ask({ op: "git.update", cwd: checkoutOf(entry.record), ...(base !== undefined ? { base } : {}) }))));
     await readCheckout(entry, true);
     void readPullRequest(entry, true);
     return done;
@@ -5499,14 +5472,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       await moduleOf(going.record.kind)
         .dropped(going)
         .catch((e: unknown) => console.warn(`${going.record.name}'s machine ${going.machine.id} kept something of this host's: ${e instanceof Error ? e.message : String(e)}`));
-      // The copy this workspace was goes with the record that named it; the person's own folder is named by no
-      // record and stays. A copy that will not go leaves its record deleted and says so, since the alternative is
-      // a record nobody can delete.
-      if (going.record.copy !== undefined) {
-        await moduleOf(going.record.kind)
-          .dropCopy(going.record.copy)
-          .catch((e: unknown) => console.warn(`${going.record.name}'s copy at ${going.record.copy?.path} is still there: ${e instanceof Error ? e.message : String(e)}`));
-      }
     }
     live.delete(id);
     revivedAt.delete(id);
@@ -6025,6 +5990,18 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const project = raw as ProjectView;
         projectsHeld.set(project.id, project);
       }
+      // A project recorded before the repo it sits in was kept on it gets it read once here; a folder git holds no
+      // repo in is read again at each boot, which is one git call.
+      if (local !== undefined) {
+        await Promise.all(
+          [...projectsHeld.values()]
+            .filter(p => p.git === undefined && p.source.kind === "folder" && copiesFolder(kindForComputer(p.computer)))
+            .map(async p => {
+              const top = await gitTopOf(p.path).catch(() => undefined);
+              if (top !== undefined) await rememberProject({ ...p, git: { top } });
+            }),
+        );
+      }
       await setups.load();
       const toSync: LiveWorkspace[] = [];
       for (const raw of await store.list(WORKSPACES)) {
@@ -6137,9 +6114,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         if (thread !== undefined && !threadRuns(thread)) await deviceDoor.revoke(device.id);
       }
       for (const raw of await store.list(BUILDERS)) await admit(raw as StoredBuilder);
+      // Not waited on: a fetch of a big copy's branches takes seconds, and the records it drops leave as they go.
+      copiesMoving = moveOldCopies().catch((e: unknown) => console.warn(`the move off old copies stopped: ${e instanceof Error ? e.message : String(e)}`));
+      armSweep();
     })();
     return hydrated;
   };
+  let copiesMoving: Promise<void> | undefined;
 
   /** Every verb that names a workspace comes through here, so the origin rule is read once for all of them. */
   const entryOf = async (id: string, origin?: Caller): Promise<LiveWorkspace> => {
@@ -6503,98 +6484,347 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return forking.has(name) ? nameTakenRefusal(name) : undefined;
   };
 
-  /** The port base the next copy on this computer takes, out of the bases every record here already holds. A
-   * computer whose copies each get a network of their own hands out none: the ports inside one are its own. */
-  const portBaseHere = (): number | undefined => {
-    const capabilities = backendOfKind("local").capabilities;
-    if (!capabilities.copies || capabilities.ownNetwork) return undefined;
-    return nextPortBase([...live.values()].flatMap(e => (e.record.portBase !== undefined ? [e.record.portBase] : [])));
+  /** The records of one project's folders on this computer: the project folder's own and one per worktree. */
+  const foldersOf = (projectId: string): LiveWorkspace[] => [...live.values()].filter(e => copiesFolder(e.record.kind) && e.record.project === projectId);
+  /** The folder records being made, by project and branch, so two starts asking for the same folder at once get the
+   * one record rather than two. */
+  const folderMaking = new Map<string, Promise<LiveWorkspace>>();
+  const oneFolder = (key: string, make: () => Promise<LiveWorkspace>): Promise<LiveWorkspace> => {
+    const held = folderMaking.get(key);
+    if (held !== undefined) return held;
+    const making = make().finally(() => folderMaking.delete(key));
+    folderMaking.set(key, making);
+    return making;
   };
-
-  /** The copy road: every piece of work on a project on the computer the host runs on, the first included, is a
-   * copy of the folder at a sibling path with a port base of its own, which is what makes two pieces of work on
-   * one project two checkouts on two branches rather than two names for one working tree, and what keeps an agent
-   * out of the person's own folder from the first wsp new. The machine is this computer, and its phase is running
-   * with auto-nap off from the start: a machine wsp does not run neither naps nor wakes. */
-  const recordExisting = async (recorded: ProjectView, o: CreateWorkspaceOptions, caller: Caller | undefined, parent?: LiveWorkspace, landed?: () => void): Promise<CreatedWorkspace> => {
-    const n = nameGiven(o.name);
-    refuseRecording(n, caller);
-    // The workspace is a copy of the folder and forks nothing, so the words a fork takes have nothing to act on
-    // here: they are refused in one sentence rather than taken and ignored.
-    const forkWords = [o.golden !== undefined ? "--from" : "", o.cpu !== undefined || o.memMb !== undefined ? "--size" : "", o.engine === true ? "--engine" : ""].filter(w => w !== "");
-    if (forkWords.length > 0) throw Object.assign(new Error(copyTakesNone(recorded.name, forkWords)), { kind: "invalid" });
-    const refusal = nameRefusal(n);
-    if (refusal !== undefined) throw Object.assign(new Error(refusal), { kind: "conflict" });
-    // Read once this create is allowed, as the fork road reads it: nothing is asked of a parent's machine for a
-    // request its own refusal was going to stop.
-    const project = recorded;
-    const start = parent === undefined ? undefined : await leadStart(parent, n);
-    // Before a byte is copied: the room check the daemon holds a create on a box to, by the same rule and in the same
-    // words, off the memory the copy road reads. A copy here has no awake workspace to stop, so the sentence names the
-    // computer's own work.
-    const room = await local?.copier?.room?.();
-    if (room !== undefined && room.freeMb < workspaceMemMb(room.totalMb)) throw new Error(boxFullLine(workspaceMemMb(room.totalMb), room.freeMb));
+  /** A folder's record, written once: the machine is this computer, running, with auto-nap off, since a machine wsp
+   * does not run neither naps nor wakes. Its name is the project's, or the project's with the branch for a worktree,
+   * and nothing shows it to a person. */
+  const recordFolder = async (project: ProjectView, worktree?: WorktreeFolder, parent?: string): Promise<LiveWorkspace> => {
     const mine = backendOfKind("local");
+    const machine = await mine.get(LOCAL_MACHINE_ID);
     const id = `ws_${randomBytes(4).toString("hex")}`;
-    const began = clock.now();
-    const report = stageReporter(id, n, began, scopeOf(caller));
-    // Held as a fork holds its name, so a second ask under it while the folder is copied is refused.
-    forking.add(n);
-    supersedeFailed(n);
-    report("fork-requested", copyingFolderLine(project.path, copyPathFor(project.path, folderSlug(n))));
-    let record: WorkspaceRecord;
-    try {
-      const copy = await moduleOf("local").makeCopy(project, { slug: folderSlug(n), ...(project.base !== undefined ? { base: project.base } : {}) });
-      const portBase = portBaseHere();
-      const machine = await mine.get(LOCAL_MACHINE_ID);
-      record = {
-        id,
-        name: n,
-        kind: "local",
-        machineId: machine.id,
-        phase: "running",
-        golden: "",
-        createdAt: new Date().toISOString(),
-        project: project.id,
-        copy,
-        portBase,
-        ...treeOf(scopeOf(caller)),
-        ...(o.agents !== undefined ? { agents: agentsFrom(spawnAt(HERE_PLACE_ID), o.agents) } : {}),
-        ...(o.parent !== undefined ? { parentWorkspaceId: o.parent } : {}),
-        ...((start?.base ?? project.base) !== undefined ? { base: start?.base ?? project.base } : {}),
-        spec: {},
-        size: mine.pricing.defaultSize,
-        firstLife: false,
-        idleWindowMs: null,
-      };
-      attach(record, machine);
-      // In the live map from here, so the record holds the place under the root the guard took for it.
-      landed?.();
-      try {
-        await moduleOf("local").landProject(live.get(id)!, project, () => {});
-        // The copy sits beside the person's folder, outside the daemon's home root, so the daemon is told about it
-        // here as the clone road tells it about a checkout: without this every file, diff and push op on a workspace
-        // of this kind is refused for a path outside the root.
-        await writeDaemonRoots(live.get(id)!);
-        await persist(record);
-      } catch (e) {
-        // A copy whose record never landed is a folder nobody can name: it goes with the create that made it.
-        live.delete(id);
-        await moduleOf("local").dropCopy(copy).catch(() => {});
-        throw e;
+    const taken = new Set([...live.values()].map(e => e.record.name));
+    const record: WorkspaceRecord = {
+      id,
+      name: takenNameAfter(worktree?.branch === undefined ? project.name : `${project.name}@${worktree.branch}`, taken),
+      kind: "local",
+      machineId: machine.id,
+      phase: "running",
+      golden: "",
+      createdAt: new Date(clock.now()).toISOString(),
+      project: project.id,
+      ...(worktree !== undefined ? { worktree } : {}),
+      ...(parent !== undefined ? { parentWorkspaceId: parent } : {}),
+      spec: {},
+      size: mine.pricing.defaultSize,
+      firstLife: false,
+      idleWindowMs: null,
+    };
+    attach(record, machine);
+    await persist(record);
+    // A worktree under the host's own folder sits outside the daemon's home root on a host serving another state
+    // file, so the daemon is told about it before a pane asks; the project folder is listed already.
+    if (worktree !== undefined) await writeDaemonRoots(live.get(id)!);
+    if (worktree?.made === true) armSweep();
+    bus.emit({ type: "workspace.created", workspace: view(record) });
+    return live.get(id)!;
+  };
+  /** The project folder's record, made at its first thread. */
+  const projectFolder = (project: ProjectView): Promise<LiveWorkspace> => {
+    const held = foldersOf(project.id).find(e => e.record.worktree === undefined);
+    if (held !== undefined) return Promise.resolve(held);
+    return oneFolder(`${project.id}\0`, () => recordFolder(project));
+  };
+  /** The record of the worktree holding a branch of the project's repo: the one git already has the branch checked
+   * out in, wherever it is, or one the daemon binary makes under this host's folder. The project folder itself
+   * answers when it is the one holding the branch. */
+  const worktreeFolder = (project: ProjectView, top: string, branch: string, parent?: string, madeFor?: string): Promise<LiveWorkspace> =>
+    oneFolder(`${project.id}\0${branch}`, async () => {
+      const copier = local?.copier;
+      if (copier === undefined) throw Object.assign(new Error(NO_COPIER_HERE), { kind: "invalid" });
+      // Before the binary is run at all: one older than this wsp answers a verb it never heard of with its usage text.
+      const here = local?.hereDaemon;
+      if (here !== undefined) {
+        const version = await here.version();
+        if (version < DAEMON_VERSION) throw new Error(hereDaemonBehindLine(version, DAEMON_VERSION, here.fix));
       }
-    } catch (e) {
-      const said = e instanceof Error ? e.message : String(e);
-      report("failed", said);
-      failedCreates.set(id, failedView(id, n, "local", "", began, project, said));
-      throw e;
-    } finally {
-      forking.delete(n);
+      const made = await copier.worktree({ from: top, home: stateFolder(), project: project.id, branch, carry: [...CARRIED_DIR_NAMES] });
+      if (made.path === top) return projectFolder(project);
+      return worktreeRecordAt(project, { path: made.path, branch: made.branch, made: made.made, ...(madeFor !== undefined ? { madeFor } : {}) }, parent);
+    });
+  /** The record naming a worktree at this path, written again where one stands from before (a worktree removed and
+   * made again comes back to its threads, and to the tree it was made for), else a new one, a child of the folder
+   * whose thread asked for it so its branch merges back there. */
+  const worktreeRecordAt = async (project: ProjectView, tree: WorktreeFolder, parent?: string): Promise<LiveWorkspace> => {
+    const held = foldersOf(project.id).find(e => e.record.worktree?.path === tree.path);
+    if (held === undefined) return recordFolder(project, tree, parent);
+    const was = held.record.worktree!;
+    const madeFor = was.madeFor;
+    held.record.worktree = { path: tree.path, made: was.made || tree.made, ...(tree.branch !== undefined ? { branch: tree.branch } : {}), ...(madeFor !== undefined ? { madeFor } : {}) };
+    await persist(held.record);
+    armSweep();
+    return held;
+  };
+  /** Where a thread asked for on this computer runs: the record of its folder and the folder itself where the start
+   * named one. Nothing named runs in the project folder, or beside the thread asking; a branch runs in the worktree
+   * holding it, the project folder when it is that folder's own branch; a cwd runs where it is, inside the project
+   * folder or a worktree of its repo and nowhere else. */
+  const folderFor = async (o: { project?: string; branch?: string; cwd?: string }, origin: Caller | undefined): Promise<{ entry: LiveWorkspace; cwd?: string }> => {
+    const scope = scopeOf(origin);
+    const asking = scope === undefined ? undefined : live.get(scope.workspaceId);
+    const project = o.project !== undefined ? await projectsDoor.resolve(o.project, origin) : asking !== undefined ? projectHeld(asking.record.project) : undefined;
+    if (project === undefined) throw Object.assign(new Error(NAME_A_PROJECT_LINE), { kind: "usage" });
+    if (!copiesFolder(kindForComputer(project.computer))) throw Object.assign(new Error(notOnThisComputerLine(project.name)), { kind: "usage" });
+    const beside = asking !== undefined && copiesFolder(asking.record.kind) && asking.record.project === project.id ? asking : undefined;
+    if (o.branch !== undefined && o.cwd !== undefined) throw Object.assign(new Error(BRANCH_OR_CWD_LINE), { kind: "usage" });
+    const top = project.git?.top;
+    if (o.cwd !== undefined) {
+      const cwd = folderNamed(o.cwd);
+      if (under(cwd, project.path)) return { entry: beside !== undefined && beside.record.worktree === undefined ? beside : await projectFolder(project), cwd };
+      const held = top === undefined ? undefined : (await worktreesOf(top)).find(w => under(cwd, w.path));
+      if (held === undefined || top === undefined) throw Object.assign(new Error(cwdOutsideLine(homeShortened(cwd, homedir()), project.name)), { kind: "usage" });
+      if (held.path === top) return { entry: await projectFolder(project), cwd };
+      // A worktree wsp holds no record of, one made with plain git worktree add, is the asking thread's tree's from here.
+      return { entry: await worktreeRecordAt(project, { path: held.path, ...(held.branch !== undefined ? { branch: held.branch } : {}), made: false, ...(scope !== undefined ? { madeFor: scope.rootThreadId } : {}) }), cwd };
     }
-    const v = view(record);
-    bus.emit({ type: "workspace.created", workspace: v });
-    const lines = start === undefined ? [] : [...start.lines, ...(start.onLeads && start.base !== undefined ? [await startChildOn(live.get(record.id)!, start.base, parent!.record.name)] : [])];
-    return lines.length === 0 ? v : { ...v, notice: lines.join("\n") };
+    if (o.branch === undefined) return { entry: beside ?? (await projectFolder(project)) };
+    if (top === undefined) throw Object.assign(new Error(noBranchesLine(project.name)), { kind: "usage" });
+    const from = beside ?? (await projectFolder(project));
+    if ((await branchAt(checkoutOf(from.record))) === o.branch) return { entry: from };
+    return { entry: await worktreeFolder(project, top, o.branch, beside?.record.id, scope?.rootThreadId) };
+  };
+  /** The host's own git writes on one folder, one at a time: two threads' commits, a discard and a removal never
+   * interleave. The agents' own git is theirs, and git's index lock is the answer when theirs meets this. */
+  const gitWrites = new Map<string, Promise<unknown>>();
+  const queued = <T>(id: string, work: () => Promise<T>): Promise<T> => {
+    const run = (gitWrites.get(id) ?? Promise.resolve()).catch(() => {}).then(work);
+    const tail = run.catch(() => {});
+    gitWrites.set(id, tail);
+    void tail.then(() => {
+      if (gitWrites.get(id) === tail) gitWrites.delete(id);
+    });
+    return run;
+  };
+  /** Takes a worktree wsp made away with git, under the folder's queue: never while a turn runs there and never over
+   * files no commit holds unless forced; the verb keeps a detached HEAD under refs/rescue first. The record stays,
+   * gone, while threads name it, and goes with the last of them. */
+  const removeWorktree = (entry: LiveWorkspace, force: boolean, o: { ending?: boolean } = {}): Promise<void> =>
+    queued(entry.record.id, async () => {
+      const tree = entry.record.worktree;
+      const project = projectHeld(entry.record.project);
+      const top = project.git?.top;
+      if (tree === undefined || tree.made !== true || top === undefined) throw new Error(notMadeWorktreeLine(tree?.branch ?? ""));
+      const copier = local?.copier;
+      if (copier === undefined) throw Object.assign(new Error(NO_COPIER_HERE), { kind: "invalid" });
+      if (o.ending !== true && turnRuns(entry.record.id)) throw Object.assign(new Error(WORKTREE_BUSY_LINE), { kind: "conflict" });
+      if (existsSync(tree.path)) {
+        if (!force) await refuseChanged(tree.path);
+        await copier.worktreeRemove({ from: top, home: stateFolder(), path: tree.path, force });
+      }
+      if (o.ending !== true) await worktreeGone(entry, "removed");
+    });
+  /** Refuses over files no commit holds in a folder, naming how many: they would go with a removal. */
+  const refuseChanged = async (path: string): Promise<void> => {
+    const read = await gitHere(path, ["status", "--porcelain"]);
+    if (read.exitCode !== 0) throw new Error(read.stderr.trim() || read.stdout.trim());
+    const changed = read.stdout.split("\n").filter(l => l.trim() !== "").length;
+    if (changed > 0) throw Object.assign(new Error(worktreeChangedLine(changed)), { kind: "conflict" });
+  };
+  /** Drops the checkpoint refs one thread holds in its folder's repo, best effort: a ref left behind pins files and
+   * nothing else, and a delete is not refused for it. */
+  const dropCheckpoints = async (entry: LiveWorkspace, threadId: string): Promise<void> => {
+    await checkpointsLanding.get(threadId)?.catch(() => {});
+    if (notARepo(entry.record)) return;
+    await withDaemon(entry, ask => ask({ op: "git.checkpointDrop", cwd: checkoutOf(entry.record), scope: entry.record.id, thread: threadId })).catch((e: unknown) =>
+      console.warn(`the checkpoints of thread ${threadWord(threadId)} were not dropped: ${e instanceof Error ? e.message : String(e)}`),
+    );
+  };
+  /** A worktree no longer on disk: its threads go on in the project folder, and its record goes once no thread is
+   * left on it. */
+  const worktreeGone = async (entry: LiveWorkspace, why: WorktreeSettled["why"], o: { starting?: boolean } = {}): Promise<void> => {
+    const tree = entry.record.worktree;
+    if (tree === undefined) return;
+    // A start found it gone, and its thread is about to name the record.
+    if (o.starting !== true && ![...sessions.values()].some(s => s.view.workspaceId === entry.record.id) && ![...threadRecords.values()].some(t => t.workspaceId === entry.record.id)) {
+      await drop(entry.record.id);
+      return;
+    }
+    entry.record.worktree = { path: tree.path, made: tree.made, ...(tree.branch !== undefined ? { branch: tree.branch } : {}), ...(tree.madeFor !== undefined ? { madeFor: tree.madeFor } : {}), settled: tree.settled ?? { at: clock.now(), why }, gone: true };
+    await persist(entry.record);
+  };
+  /** The folder a thread's next turn runs in: where its session last ran, unless that was a worktree that is gone,
+   * whose threads go on in the folder the record answers now. */
+  const runsIn = (entry: LiveWorkspace, ranIn: string | undefined, folder: string): string => {
+    const tree = entry.record.worktree;
+    if (ranIn === undefined) return folder;
+    return tree?.gone === true && under(ranIn, tree.path) ? folder : ranIn;
+  };
+  /** The one sweep of the worktrees wsp made: how often it runs, how long a settled one stands before it goes, and how
+   * long one that could not go is tried before it is the person's to remove. */
+  const SWEEP_MS = 10 * 60_000;
+  const SETTLED_STANDS_MS = 6 * 3_600_000;
+  const KEPT_FOR_MS = 7 * 24 * 3_600_000;
+  let sweepTimer: (() => void) | undefined;
+  let sweeping: Promise<void> | undefined;
+  let sweepStopped = false;
+  /** Whether any worktree wsp made still stands, which is all the sweep has to look at. */
+  const sweepHasWork = (): boolean => [...live.values()].some(e => e.record.worktree?.made === true && e.record.worktree.gone !== true);
+  /** Armed only while a worktree wsp made stands: a host with none holds no timer for it. */
+  const armSweep = (): void => {
+    if (sweepTimer !== undefined || sweeping !== undefined) return;
+    if (sweepStopped || !sweepHasWork()) return;
+    sweepTimer = clock.schedule(
+      () => {
+        sweepTimer = undefined;
+        sweeping = sweepWorktrees()
+          .catch((e: unknown) => console.warn(`the sweep of worktrees stopped: ${e instanceof Error ? e.message : String(e)}`))
+          .finally(() => {
+            sweeping = undefined;
+            armSweep();
+          });
+      },
+      SWEEP_MS,
+      { unref: true },
+    );
+  };
+  /** Every worktree wsp made and still holds, one at a time, so a sweep is never more git than one folder's at once. */
+  const sweepWorktrees = async (): Promise<void> => {
+    for (const entry of [...live.values()]) {
+      const tree = entry.record.worktree;
+      if (tree?.made !== true || tree.gone === true || live.get(entry.record.id) !== entry) continue;
+      await sweepOne(entry).catch((e: unknown) => console.warn(`the worktree at ${tree.path} was not swept: ${e instanceof Error ? e.message : String(e)}`));
+    }
+  };
+  /** One worktree wsp made: settled when its pull request merged or closed, when the branch it pushed is gone at the
+   * remote, or when the person removed it; once settled six hours with nothing uncommitted and no turn running it
+   * goes, and otherwise says why it stays, until a week has passed and it is left to the person. */
+  const sweepOne = async (entry: LiveWorkspace): Promise<void> => {
+    const tree = entry.record.worktree!;
+    if (!existsSync(tree.path)) return worktreeGone(entry, "removed");
+    const settled = tree.settled ?? (await settledNow(entry));
+    if (settled === undefined || tree.kept === KEPT_ABANDONED_LINE) return;
+    const age = clock.now() - settled.at;
+    if (age < SETTLED_STANDS_MS) return;
+    const keep = async (said: { kept?: string; removeFailed?: string }): Promise<void> => {
+      const now = entry.record.worktree!;
+      const next: WorktreeFolder = { ...now, ...said, ...(age >= KEPT_FOR_MS ? { kept: KEPT_ABANDONED_LINE } : {}) };
+      if (JSON.stringify(next) === JSON.stringify(now)) return;
+      entry.record.worktree = next;
+      await persist(entry.record);
+      await statusNow(entry);
+    };
+    if (turnRuns(entry.record.id)) return keep({ kept: KEPT_RUNNING_LINE });
+    const status = await gitHere(tree.path, ["status", "--porcelain"]);
+    const changed = status.stdout.split("\n").filter(l => l.trim() !== "").length;
+    if (status.exitCode === 0 && changed > 0) return keep({ kept: keptChangedLine(changed) });
+    try {
+      await removeWorktree(entry, false);
+    } catch (e) {
+      await keep({ removeFailed: lastLineOf(e instanceof Error ? e.message : String(e)) });
+    }
+  };
+  /** Whether a worktree wsp made settled since the last sweep, stamped on its record when it did. Only a branch with an
+   * upstream is asked of its remote, and only the remote saying it has no such branch counts; no remote, no upstream
+   * or a remote that could not be read is no answer, so a branch never pushed keeps its worktree. */
+  const settledNow = async (entry: LiveWorkspace): Promise<WorktreeSettled | undefined> => {
+    const tree = entry.record.worktree!;
+    if (projectHeld(entry.record.project).remote === "") return undefined;
+    await readPullRequest(entry, true);
+    const pr = entry.record.pr;
+    let settled: WorktreeSettled | undefined =
+      pr?.state === "merged" ? { at: pr.mergedAt ?? clock.now(), why: "merged" } : pr?.state === "closed" ? { at: pr.closedAt ?? clock.now(), why: "closed" } : undefined;
+    if (settled === undefined && tree.branch !== undefined && (await branchGoneAtRemote(tree.path, tree.branch))) settled = { at: clock.now(), why: "deleted" };
+    if (settled === undefined) return undefined;
+    entry.record.worktree = { ...entry.record.worktree!, settled };
+    await persist(entry.record);
+    await statusNow(entry);
+    return settled;
+  };
+  /** True only where the branch has an upstream and its remote answers that it holds no such branch (exit 2). */
+  const branchGoneAtRemote = async (path: string, branch: string): Promise<boolean> => {
+    const remote = (await gitHere(path, ["config", "--get", `branch.${branch}.remote`])).stdout.trim();
+    const merge = (await gitHere(path, ["config", "--get", `branch.${branch}.merge`])).stdout.trim();
+    if (remote === "" || merge === "" || remote === ".") return false;
+    const machine = await moduleOf("local").backend({ kind: "local" } as WorkspaceRecord).get(LOCAL_MACHINE_ID);
+    const asked = await machine.exec(`GIT_TERMINAL_PROMPT=0 ${shellLine(["git", "-C", path, "ls-remote", "--exit-code", "--heads", remote, merge])}`, { timeoutMs: INLINE_EXEC_MS });
+    return asked.exitCode === 2;
+  };
+  /** What the move off copies leaves beside the state: each copy kept, with why. */
+  const COPIES_KEPT_FILE = "copies-kept.txt";
+  /** The move off copies, once, for every record a build before folder records wrote with a copy of the project.
+   * Each copy is kept unless every commit it holds is safe in the project's repo: one with changes no commit holds
+   * stays, a copy whose branches could not be fetched into the project stays, and only then is it removed by the
+   * road that made it. The record goes either way; what stayed is listed in a file beside the state and said once. */
+  const moveOldCopies = async (): Promise<void> => {
+    const old = [...live.values()].filter(e => copiesFolder(e.record.kind) && (e.record as { copy?: unknown }).copy !== undefined);
+    if (old.length === 0) return;
+    const kept: string[] = [];
+    for (const entry of old) {
+      const copy = ProjectCopy.safeParse((entry.record as { copy?: unknown }).copy);
+      endSessions(entry.record.id, OLD_COPY_WORDS.ended);
+      const why = copy.success ? await moveOldCopy(entry, copy.data).catch((e: unknown) => OLD_COPY_WORDS.notRemoved(e instanceof Error ? e.message : String(e))) : undefined;
+      if (why !== undefined && copy.success) {
+        kept.push(`${copy.data.path}\t${why}`);
+        console.warn(`old copy ${copy.data.path} kept: ${why}`);
+      }
+      await drop(entry.record.id);
+    }
+    if (kept.length === 0) return;
+    const file = join(stateFolder(), COPIES_KEPT_FILE);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, `${kept.join("\n")}\n`);
+    bus.emit({ type: "host.notice", message: OLD_COPY_WORDS.kept(kept.length, homeShortened(file, homedir())) });
+  };
+  /** One old copy: why it stays, or nothing once its commits are in the project's repo and it is gone. */
+  const moveOldCopy = async (entry: LiveWorkspace, copy: ProjectCopy): Promise<string | undefined> => {
+    if (!existsSync(copy.path)) return undefined;
+    const project = projectsHeld.get(entry.record.project);
+    if (project === undefined) return OLD_COPY_WORDS.noProject;
+    const top = project.git?.top ?? project.path;
+    const overlaps = (a: string, b: string): boolean => under(a, b) || under(b, a);
+    if (overlaps(copy.path, project.path) || overlaps(copy.path, top) || overlaps(copy.path, copy.source)) return OLD_COPY_WORDS.isProject;
+    const status = await gitHere(copy.path, ["status", "--porcelain"]);
+    if (status.exitCode !== 0) return OLD_COPY_WORDS.unread(gitSaid(status));
+    if (status.stdout.trim() !== "") return OLD_COPY_WORDS.changed;
+    const name = refPart(folderName(copy.path));
+    if (copy.road === "clonefile") {
+      // A stash lives in the copy's own repo and rides no fetch of its branches; a worktree's is the project's own.
+      const stash = await gitHere(copy.path, ["rev-parse", "--verify", "--quiet", "refs/stash"]);
+      if (stash.exitCode === 0 && stash.stdout.trim() !== "") return OLD_COPY_WORDS.stashed;
+      // HEAD rides the same fetch, so a commit on no branch is carried too.
+      const fetched = await gitHere(top, ["fetch", "--quiet", "--no-tags", copy.path, `+refs/heads/*:refs/rescue/${name}/*`, `+HEAD:refs/rescue/${name}/HEAD`], CLONE_MS);
+      if (fetched.exitCode !== 0) return OLD_COPY_WORDS.fetchFailed(gitSaid(fetched));
+    } else {
+      const head = await gitHere(copy.path, ["rev-parse", "--verify", "--quiet", "HEAD"]);
+      if (head.stdout.trim() !== "") {
+        const put = await gitHere(top, ["update-ref", `refs/rescue/${name}/HEAD`, head.stdout.trim()]);
+        if (put.exitCode !== 0) return OLD_COPY_WORDS.fetchFailed(gitSaid(put));
+      }
+    }
+    const copier = local?.copier;
+    if (copier === undefined) return OLD_COPY_WORDS.noCopier;
+    await copier.remove(copy.source, copy.path, copy.road);
+    return undefined;
+  };
+  /** A folder's name as one part of a ref: what git refuses in a ref name turned to a dash. */
+  const refPart = (name: string): string => name.replace(/[^A-Za-z0-9._-]/g, "-").replace(/\.\.+/g, "-").replace(/^[.-]+|\.lock$|\.$/g, "") || "copy";
+  /** The last line git said, stderr first, for a sentence that quotes it. */
+  const lastLine = (res: { stdout: string; stderr: string }): string => (res.stderr.trim() || res.stdout.trim()).split("\n").at(-1) ?? "";
+  /** What git said went wrong: its first error or fatal line, not a hint printed under it, else its last line. */
+  const gitSaid = (res: { stdout: string; stderr: string }): string => res.stderr.split("\n").find(l => /^(error|fatal): /.test(l))?.trim() ?? lastLine(res);
+  /** Whether a path is the folder or inside it. */
+  const under = (path: string, folder: string): boolean => path === folder || path.startsWith(folder.endsWith("/") ? folder : `${folder}/`);
+  /** Every worktree of a repo as git lists it now, read each time: the person and their agents add and remove their
+   * own, so nothing here is kept. */
+  const worktreesOf = async (top: string): Promise<{ path: string; branch?: string }[]> => {
+    const read = await gitHere(top, ["worktree", "list", "--porcelain"]);
+    if (read.exitCode !== 0) return [];
+    const trees: { path: string; branch?: string }[] = [];
+    for (const line of read.stdout.split("\n")) {
+      if (line.startsWith("worktree ")) trees.push({ path: line.slice("worktree ".length) });
+      else if (line.startsWith("branch refs/heads/") && trees.length > 0) trees[trees.length - 1]!.branch = line.slice("branch refs/heads/".length);
+    }
+    return trees;
   };
 
   /** The project a GitHub repository names: the one whose remote is that repository, this computer's where two
@@ -6634,6 +6864,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * record, and for a pull request its base, its pull request and its head, the copy put on the head branch through
    * its own daemon. A checkout that is refused takes the half-made workspace with it and answers its own sentence. */
   const workspaceFrom = async (project: ProjectView, from: WorkspaceFrom, fact: PullRequest | undefined, kind: "start" | "review", origin: Caller | undefined): Promise<LiveWorkspace> => {
+    if (copiesFolder(kindForComputer(project.computer))) return folderFrom(project, from, fact);
     const taken = new Set([...live.values()].map(e => e.record.name));
     const name = takenNameAfter(startName(kind, from.number, from.title), taken);
     const made = await workspaces.create({ project: project.id, name }, origin);
@@ -6657,11 +6888,109 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return entry;
   };
 
+  /** Where a start or a review on this computer runs: an issue in the project folder; a pull request in a worktree on
+   * its head, fetched into the project's repo first as a branch of its own where none of that name stands, so
+   * nothing moves the project folder's checkout. The pull request's facts go on the worktree's record alone. */
+  const folderFrom = async (project: ProjectView, from: WorkspaceFrom, fact: PullRequest | undefined): Promise<LiveWorkspace> => {
+    if (fact === undefined) return projectFolder(project);
+    const top = project.git?.top;
+    if (top === undefined) throw Object.assign(new Error(noBranchesLine(project.name)), { kind: "usage" });
+    const branch = fact.fork === undefined ? fact.branch : `${fact.fork.owner}/${fact.branch}`;
+    // A branch some worktree already holds runs there and is caught up below; any other is fetched first, made where
+    // it is not here and only moved forward where it is, never forced.
+    const holds = (await worktreesOf(top)).some(w => w.branch === branch);
+    if (!holds) await fetchHead(project, top, fact, branch);
+    const entry = await worktreeFolder(project, top, branch);
+    if (holds) {
+      const behind = await catchUp(entry, project, top, fact);
+      if (behind !== undefined) behindOn.set(entry.record.id, behind);
+    }
+    if (entry.record.worktree === undefined) return entry;
+    entry.record.from = from;
+    entry.record.base = fact.base;
+    entry.record.pr = { number: fact.number, url: fact.url, state: fact.state, base: fact.base };
+    entry.pr = { ...fact, readAt: clock.now() };
+    await persist(entry.record);
+    return entry;
+  };
+
+  /** A start's picks read against the agent's lists before a folder is made or moved for it, by the rule the start
+   * itself refuses them with, so a pick the agent does not take costs no git work. */
+  const picksHold = async (project: ProjectView, o: { harness?: string; model?: string; effort?: string; access?: AccessChoice; permissionMode?: string }): Promise<void> => {
+    if (!copiesFolder(kindForComputer(project.computer))) return;
+    const home = await projectFolder(project);
+    const prefs = preferencesHeld ?? (await preferences.get());
+    const harness = o.harness ?? defaultAgentOf(prefs, home);
+    const table = harnessCatalog(harness);
+    if (table === undefined) return;
+    const { adapter } = await launchAdapterFor(home, harness);
+    const resolved = defaultsOn(await catalogOn(table, home, adapter), prefs, prefs.projectDefaults[home.record.project]);
+    const named = o.permissionMode ?? (o.access === undefined ? undefined : namedMode(resolved.catalog, harness, o.access));
+    const model = o.model ?? resolved.open.model;
+    const effort = o.effort ?? resolved.open.effort;
+    startPicks(resolved.catalog, { ...(model !== undefined ? { model } : {}), ...(effort !== undefined ? { effort } : {}), ...(named !== undefined ? { permissionMode: named } : {}) }, true);
+  };
+
+  /** The line a start on a pull request leaves for its thread, by the record of the folder that was left behind. */
+  const behindOn = new Map<string, string>();
+  /** The project folder's record with this computer's daemon told the folder is its to work in, so an ask naming a
+   * project anywhere a project may live resolves. */
+  const askingIn = async (entry: LiveWorkspace): Promise<LiveWorkspace> => {
+    await writeDaemonRoots(entry);
+    return entry;
+  };
+  /** A pull request's head into its local branch through the daemon: the branch by name where the remote still holds
+   * it, else the pull request's own head, which outlives a branch deleted at the merge. GitHub serves a fork's head
+   * on the base repository as pull/<n>/head, so no fork's URL is dialled. */
+  const fetchHead = async (project: ProjectView, top: string, fact: PullRequest, branch: string): Promise<void> => {
+    if (fact.fork === undefined) {
+      const home = await askingIn(await projectFolder(project));
+      try {
+        GitStartOnReply.parse(await withDaemon(home, ask => ask({ op: "git.fetchBranch", cwd: project.path, remote: project.remote, branch: fact.branch, into: branch })));
+        return;
+      } catch (e) {
+        if (await remoteHolds(top, project.remote, `refs/heads/${fact.branch}`)) throw e;
+      }
+    }
+    const fetched = await gitHere(top, ["fetch", "--quiet", "--no-tags", project.remote, `pull/${fact.number}/head:refs/heads/${branch}`], CLONE_MS);
+    if (fetched.exitCode !== 0) throw new Error(gitSaid(fetched));
+  };
+  /** Whether the remote holds a ref; exit 2 alone is its answer that it does not. */
+  const remoteHolds = async (top: string, remote: string, ref: string): Promise<boolean> =>
+    (await gitHere(top, ["ls-remote", "--exit-code", remote, ref], CLONE_MS)).exitCode !== 2;
+  /** The folder holding a pull request's branch, caught up where it may be: a worktree wsp made that is clean and
+   * only behind moves forward through the daemon; the project folder never moves, and any folder left as it stands
+   * gets the line its thread is told. */
+  const catchUp = async (entry: LiveWorkspace, project: ProjectView, top: string, fact: PullRequest): Promise<string | undefined> => {
+    const path = entry.record.worktree?.path ?? top;
+    const byName = fact.fork === undefined && (await remoteHolds(top, project.remote, `refs/heads/${fact.branch}`));
+    const spec = byName ? `refs/heads/${fact.branch}` : `pull/${fact.number}/head`;
+    const fetched = await gitHere(top, ["fetch", "--quiet", "--no-tags", project.remote, spec], CLONE_MS);
+    if (fetched.exitCode !== 0) return PR_BEHIND_WORDS.unread(fact.number, gitSaid(fetched));
+    const head = (await gitHere(top, ["rev-parse", "FETCH_HEAD"])).stdout.trim();
+    const at = (await gitHere(path, ["rev-parse", "HEAD"])).stdout.trim();
+    if (head === at || (await gitHere(path, ["merge-base", "--is-ancestor", head, at])).exitCode === 0) return undefined;
+    if ((await gitHere(path, ["merge-base", "--is-ancestor", at, head])).exitCode !== 0) return PR_BEHIND_WORDS.diverged(fact.number, path);
+    if ((await gitHere(path, ["status", "--porcelain"])).stdout.trim() !== "") return PR_BEHIND_WORDS.changed(fact.number, path);
+    if (entry.record.worktree === undefined) return PR_BEHIND_WORDS.folder(fact.number, path);
+    if (entry.record.worktree.made !== true) return PR_BEHIND_WORDS.notMade(fact.number, path);
+    if (!byName) return PR_BEHIND_WORDS.byHead(fact.number, path, project.remote);
+    try {
+      GitUpdateReply.parse(await withDaemon(await askingIn(entry), ask => ask({ op: "git.update", cwd: checkoutOf(entry.record), base: fact.branch })));
+      return undefined;
+    } catch (e) {
+      return PR_BEHIND_WORDS.unread(fact.number, e instanceof Error ? e.message : String(e));
+    }
+  };
+
   /** The thread a start or a review opens, detached: the turn goes on without the caller. */
   const openWith = async (entry: LiveWorkspace, o: { prompt: string; harness?: string; model?: string; effort?: string; permissionMode?: string; access?: AccessChoice }, origin: Caller | undefined): Promise<StartResult> => {
+    const behind = behindOn.get(entry.record.id);
+    behindOn.delete(entry.record.id);
     const handle = await sessionsApi.start(
       entry.record.id,
       {
+        ...(behind !== undefined ? { behind } : {}),
         prompt: o.prompt,
         ...(o.harness !== undefined ? { harness: o.harness } : {}),
         ...(o.model !== undefined ? { model: o.model } : {}),
@@ -6752,7 +7081,22 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // as the same reading refuses it every workspace of one. A computer that copies its folders takes no relayed
       // request at all and says so in its own words below.
       const copies = copiesFolder(kind);
-      if (!copies) refuseRelayed({ kind, name: o.name, project: project.id }, origin);
+      // A project on this computer is its folder: a create there names the folder's record, the one every thread in
+      // that folder shares, and makes nothing.
+      if (copies) {
+        refuseRecording(o.name, origin);
+        // The folder is not forked, so the words a fork takes have nothing to act on: refused rather than ignored.
+        const forkWords = [o.golden !== undefined ? "--from" : "", o.cpu !== undefined || o.memMb !== undefined ? "--size" : "", o.engine === true ? "--engine" : ""].filter(w => w !== "");
+        if (forkWords.length > 0) throw Object.assign(new Error(copyTakesNone(project.name, forkWords)), { kind: "invalid" });
+        if (asked !== undefined && o.agents !== undefined) throw new Error(spawnActRefusal(asked.threadId, "agents"));
+        const folder = await projectFolder(project);
+        if (o.agents !== undefined) {
+          folder.record.agents = agentsFrom(spawnAt(HERE_PLACE_ID), o.agents);
+          await persist(folder.record);
+        }
+        return view(folder.record);
+      }
+      refuseRelayed({ kind, name: o.name, project: project.id }, origin);
       // A child of another workspace starts where that workspace is now, not where the project starts. A parent
       // this host does not hold, and one whose own create has not finished, are refused rather than dropped, since
       // a create that dropped it would land as somebody's root; the branch itself is read off the parent's machine
@@ -6765,7 +7109,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (parent !== undefined && parent.record.project !== project.id && !sameRepository(projectHeld(parent.record.project), project)) {
         throw Object.assign(new Error(parentProjectRefusal(parent.record.name, projectHeld(parent.record.project).name, project.name)), { kind: "invalid" });
       }
-      if (!copies) await placeGuard((await landingPlace(project.computer)).placeId ?? places.wired);
+      await placeGuard((await landingPlace(project.computer)).placeId ?? places.wired);
       // The place under the root is taken here, with no await between the count and the taking, and handed back in
       // the finally below however this create ends: the record it becomes is what holds it from then on. A copy on
       // this computer is a child in the tree as a fork is, so it takes the same place.
@@ -6776,13 +7120,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (spawned !== undefined && o.agents !== undefined) {
         freePlace();
         throw new Error(spawnActRefusal(spawned.threadId, "agents"));
-      }
-      if (copies) {
-        try {
-          return await recordExisting(project, o, origin, parent, freePlace);
-        } finally {
-          freePlace();
-        }
       }
       const refusal = nameRefusal(o.name);
       if (refusal !== undefined) {
@@ -7167,10 +7504,19 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       }
       const entry = await entryOf(id, origin);
       if (entry.deleting) return entry.deleting;
+      // A worktree wsp made goes with its record, never over files no commit holds; the project folder, and a
+      // worktree somebody else made, are never touched.
+      const tree = entry.record.worktree;
+      const takes = tree?.made === true && tree.gone !== true && existsSync(tree.path);
+      if (takes) await refuseChanged(tree.path);
       entry.deleting = (async () => {
         try {
           delete entry.deleteSaid;
           endSessions(id, DELETED_REASON);
+          const threads = new Set([...threadRecords].flatMap(([threadId, held]) => (held.workspaceId === id ? [threadId] : [])));
+          for (const s of sessions.values()) if (s.view.workspaceId === id && s.view.threadId !== undefined) threads.add(s.view.threadId);
+          if (copiesFolder(entry.record.kind)) for (const threadId of threads) await dropCheckpoints(entry, threadId);
+          if (takes) await removeWorktree(entry, false, { ending: true });
           // Before the machine goes: on a computer somebody owns the folders the files landed in outlive the workspace.
           await dropThreadFiles(entry, [...threadRecords].flatMap(([threadId, held]) => (held.workspaceId === id ? [threadId] : [])));
           // A machine wsp never forked reads running whatever is asked of it, so only a forked one is read back.
@@ -7285,7 +7631,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // Work on an issue closes it once its pull request merges: the body says so, once, whoever wrote the rest of it.
       const issue = entry.record.from?.kind === "issue" ? entry.record.from.number : undefined;
       if (issue !== undefined) body = withCloses(body ?? "", issue);
-      const brought = await withDaemon(entry, async (ask): Promise<BringBackResult> => {
+      const brought = await queued(entry.record.id, () => withDaemon(entry, async (ask): Promise<BringBackResult> => {
         const push = GitPushReply.parse(
           await ask({ op: "git.push", cwd, ...against }).catch(async (e: unknown) => {
             const said = e instanceof Error ? e.message : String(e);
@@ -7314,10 +7660,43 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const half = opened as { note?: string; refused?: string };
         const apart = half.note !== undefined ? { note: half.note } : half.refused !== undefined ? { refused: half.refused } : { pr: GitPrReply.parse(opened).pr };
         return { branch: push.branch, base: push.base, ahead: push.ahead, uncommitted: push.uncommitted, stat: push.stat, ...apart };
-      });
+      }));
       if (brought.pr !== undefined) await takePullRequest(entry, { ...brought.pr, readAt: clock.now() });
       readLeadOf(entry);
       return brought;
+    },
+
+    async folderFor(o, origin) {
+      await ready();
+      const at = await folderFor(o, origin);
+      return { workspace: view(at.entry.record), ...(at.cwd !== undefined ? { cwd: at.cwd } : {}) };
+    },
+
+    async worktree({ project: named, branch }, origin) {
+      await ready();
+      const project = await projectsDoor.resolve(named, origin);
+      const top = project.git?.top;
+      if (!copiesFolder(kindForComputer(project.computer))) throw Object.assign(new Error(notOnThisComputerLine(project.name)), { kind: "usage" });
+      if (top === undefined) throw Object.assign(new Error(noBranchesLine(project.name)), { kind: "usage" });
+      const entry = await worktreeFolder(project, top, branch, undefined, scopeOf(origin)?.rootThreadId);
+      const tree = entry.record.worktree;
+      return { path: tree?.path ?? top, branch, made: tree?.made === true };
+    },
+
+    async worktreeRemove({ project: named, branch, force }, origin) {
+      await ready();
+      const project = await projectsDoor.resolve(named, origin);
+      const top = project.git?.top;
+      if (top === undefined) throw Object.assign(new Error(noBranchesLine(project.name)), { kind: "usage" });
+      const holding = (await worktreesOf(top)).find(t => t.branch === branch)?.path;
+      const entry = foldersOf(project.id).find(e => {
+        const tree = e.record.worktree;
+        return tree !== undefined && tree.gone !== true && (holding !== undefined ? tree.path === holding : tree.branch === branch);
+      });
+      if (entry !== undefined) refuseRelayed(entry.record, origin);
+      if (entry?.record.worktree?.made !== true) throw Object.assign(new Error(notMadeWorktreeLine(branch)), { kind: "invalid" });
+      if (force === true && scopeOf(origin) !== undefined) throw Object.assign(new Error(WORKTREE_FORCE_LINE), { kind: "usage" });
+      await removeWorktree(entry, force === true);
     },
 
     async checkout(id, origin) {
@@ -7333,7 +7712,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     async discard({ workspaceId, path }, origin) {
       const entry = await entryOf(workspaceId, origin);
       await copyBlocked(entry);
-      const put = GitDiscardReply.parse(await withDaemon(entry, ask => ask({ op: "git.discard", cwd: checkoutOf(entry.record), path })));
+      const put = GitDiscardReply.parse(await queued(entry.record.id, () => withDaemon(entry, ask => ask({ op: "git.discard", cwd: checkoutOf(entry.record), path }))));
       await readCheckout(entry, true);
       return put;
     },
@@ -7344,12 +7723,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       await copyBlocked(entry);
       const cwd = checkoutOf(entry.record);
       const made = GitCommitReply.parse(
-        await withDaemon(entry, async ask => {
-          // Every changed file, each untracked one on its own, as the Changes pane lists them.
-          const named = paths ?? GitDiffReply.parse(await ask({ op: "git.diff", cwd, scope: "head" })).files.map(f => f.path);
-          if (paths === undefined && named.length === 0) throw new Error(cleanCheckoutLine(entry.record.name));
-          return ask({ op: "git.commit", cwd, message, paths: named });
-        }),
+        await queued(entry.record.id, () =>
+          withDaemon(entry, async ask => {
+            // Every changed file, each untracked one on its own, as the Changes pane lists them.
+            const named = paths ?? GitDiffReply.parse(await ask({ op: "git.diff", cwd, scope: "head" })).files.map(f => f.path);
+            if (paths === undefined && named.length === 0) throw new Error(cleanCheckoutLine(entry.record.name));
+            return ask({ op: "git.commit", cwd, message, paths: named });
+          }),
+        ),
       );
       await readCheckout(entry, true);
       return made;
@@ -7456,7 +7837,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         // A merge that stopped goes to the lead's agent as a message, and nothing is merged here.
         const kid = await childOf(entry, child, origin);
         const leadBranch = (await readCheckout(entry, false))?.branch ?? entry.record.base ?? project.base ?? project.defaultBranch;
-        const childBranch = (await readCheckout(kid, false))?.branch ?? kid.record.copy?.branch ?? "";
+        const childBranch = (await readCheckout(kid, false))?.branch ?? kid.record.worktree?.branch ?? "";
         // With no remote the child's branch is in its folder, which is where the merge took it from.
         const remote = remoteHost(project.remote) === undefined ? checkoutOf(kid.record) : "origin";
         prompt = mergeChildPrompt({ leadBranch, childBranch, remote, conflicts: kid.record.tree?.conflicts ?? [] });
@@ -7533,7 +7914,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         .filter(v => v.workspaceId === lead.record.id && v.status === "running" && v.threadId !== undefined && v.threadId !== asked?.threadId);
       if (busy.length > 0) throw new Error(leadBusyRefusal(lead.record.name, busy.map(v => v.threadId!)));
       await copyBlocked(lead);
-      const branch = (await readCheckout(kid, true))?.branch ?? kid.record.copy?.branch ?? "";
+      const branch = (await readCheckout(kid, true))?.branch ?? kid.record.worktree?.branch ?? "";
       if (branch === "" || branch === DETACHED_HEAD) throw new Error(childOnNoBranchRefusal(kid.record.name));
       const project = projectHeld(lead.record.project);
       // Through the remote, the one place both copies always reach; with none, from the child's folder only where
@@ -7544,7 +7925,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         from = checkoutOf(kid.record);
       }
       const done = GitMergeInReply.parse(
-        await withDaemon(lead, ask => ask({ op: "git.mergeIn", cwd: checkoutOf(lead.record), branch, ...(from !== undefined ? { from } : {}) })),
+        await queued(lead.record.id, () => withDaemon(lead, ask => ask({ op: "git.mergeIn", cwd: checkoutOf(lead.record), branch, ...(from !== undefined ? { from } : {}) }))),
       );
       const kept: TreeRecord = { ...kid.record.tree };
       if (done.merged) {
@@ -7565,6 +7946,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const read = await issueOf(project.remote, link.number);
       const fact = link.kind === "pull_request" ? await pullRequestOf(project.remote, link.number) : undefined;
       const from = fromOf(link.kind, link.repo, read, fact);
+      await picksHold(project, { ...(agent !== undefined ? { harness: agent } : {}), ...(model !== undefined ? { model } : {}), ...(effort !== undefined ? { effort } : {}), ...(access !== undefined ? { access } : {}) });
       const entry = await workspaceFrom(project, from, fact, "start", origin);
       return openWith(entry, { prompt: fromTaskPrompt(from, read), ...(agent !== undefined ? { harness: agent } : {}), ...(model !== undefined ? { model } : {}), ...(effort !== undefined ? { effort } : {}), ...(access !== undefined ? { access } : {}) }, origin);
     },
@@ -7596,6 +7978,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const read = await issueOf(project.remote, number);
       const diff = GitPrDiffReply.parse(await onThisComputer((ask, home) => ask({ op: "git.prDiff", cwd: home, remote: project.remote, number })));
       const from = fromOf("review", repo, read, fact);
+      await picksHold(project, { harness: reviewer, ...(model !== undefined ? { model } : {}), ...(effort !== undefined ? { effort } : {}), permissionMode: readOnly });
       const entry = await workspaceFrom(project, from, fact, "review", origin);
       return openWith(entry, { prompt: reviewTaskPrompt(from, read, diff), harness: reviewer, ...(model !== undefined ? { model } : {}), ...(effort !== undefined ? { effort } : {}), permissionMode: readOnly }, origin);
     },
@@ -8342,17 +8725,19 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (reply === undefined && s.notify !== undefined) notifyEnd(s, s.notify, tellAs(s), { status: "failed", error: cutLine(endedAt) });
     record({ type: "session.end", workspaceId: s.view.workspaceId, sessionId: s.view.claudeSessionId ?? s.view.id, turnId: s.turnId, threadId: s.view.threadId, exitCode: null, sawResult: reply !== undefined, reason });
   };
-  /** A workspace that is the person's own folder rather than a copy of it: wsp writes nothing into it, so it keeps no
-   * checkpoint and no rewind moves it. */
-  const ownFolder = (r: WorkspaceRecord): boolean => copiesFolder(r.kind) && r.copy === undefined;
+  /** A folder on this computer git holds no repo in: it keeps no checkpoint and no rewind moves its files. */
+  const notARepo = (r: WorkspaceRecord): boolean => copiesFolder(r.kind) && projectHeld(r.project).git === undefined;
   /** What a rewind to a turn needs, kept once the turn is over: the checkout's tree through the workspace's own
    * daemon, and the harness's anchor. A checkout the daemon takes none of (not a repo, a daemon too old, a machine
    * gone) leaves the anchor alone; the turn itself is as it ended either way. */
+  /** The checkpoint a thread's last turn is still writing, which a drop of its refs waits for. */
+  const checkpointsLanding = new Map<string, Promise<void>>();
   const keepCheckpoint = async (entry: LiveWorkspace, turn: { sessionId: string; threadId: string; turnId: string; anchor?: string; kept?: string }): Promise<void> => {
     let ref: string | undefined;
-    if (!ownFolder(entry.record)) {
+    if (!notARepo(entry.record)) {
       try {
-        const taken = await withDaemon(entry, ask => ask({ op: "git.checkpoint", cwd: checkoutOf(entry.record), thread: turn.threadId, turn: turn.turnId }));
+        // Scoped by the record's id, so the refs of two folders of one repo never share a prefix.
+        const taken = await withDaemon(entry, ask => ask({ op: "git.checkpoint", cwd: checkoutOf(entry.record), thread: turn.threadId, turn: turn.turnId, scope: entry.record.id }));
         if (typeof taken["ref"] === "string") ref = taken["ref"];
       } catch (e) {
         console.warn(noCheckpointLogLine(turn.threadId, entry.record.id, e instanceof Error ? e.message : String(e)));
@@ -8398,7 +8783,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * the folder is no checkout, or the daemon does not answer inside the deadline: the turn runs regardless and its
    * reply lists no changes. */
   const snapshotOf = async (entry: LiveWorkspace, cwd: string): Promise<string | undefined> => {
-    if (ownFolder(entry.record) || reachOf(entry) !== "reachable") return undefined;
+    if (notARepo(entry.record) || reachOf(entry) !== "reachable") return undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const late = new Promise<"late">(resolve => (timer = setTimeout(() => resolve("late"), snapshotMs)));
     const taken = withDaemon(entry, async ask => String((await ask({ op: "git.snapshot", cwd }))["commit"])).catch((e: unknown) => {
@@ -8559,7 +8944,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         void persistSessions(workspaceId);
         bus.emit({ type: "thread.marked", workspaceId, threadIds: undone });
       }
-      void keepCheckpoint(entry, { sessionId: view.claudeSessionId ?? view.id, threadId, turnId, ...(anchor !== undefined ? { anchor } : {}), ...(keptWhy !== undefined ? { kept: keptWhy } : {}) });
+      const kept = keepCheckpoint(entry, { sessionId: view.claudeSessionId ?? view.id, threadId, turnId, ...(anchor !== undefined ? { anchor } : {}), ...(keptWhy !== undefined ? { kept: keptWhy } : {}) });
+      checkpointsLanding.set(threadId, kept);
+      void kept.finally(() => {
+        if (checkpointsLanding.get(threadId) === kept) checkpointsLanding.delete(threadId);
+      });
     };
     // The reply's status, held while the process still runs. Shared with this turn's session-map entry so runningOn
     // and the persisted row read it whether the harness emits its result synchronously in start() (before the entry
@@ -9136,9 +9525,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // record answers before its rows, since the rows are capped and the record is not.
       const opens = !threadRecords.has(threadId) && rowsOn(threadId).length === 0;
       // A send goes into a thread the caller drives, read on the thread it lands in.
-      const reached = opens ? await entryOf(workspaceId, origin) : await entryOfRow({ threadId, workspaceId }, origin);
+      const opening = live.get(workspaceId)?.record;
+      const reached = opens ? await entryOf(workspaceId, opening !== undefined && opensIn(opening, scopeOf(origin)) ? undefined : origin) : await entryOfRow({ threadId, workspaceId }, origin);
       if (reached === undefined) throw new Error(`no thread ${opened.thread} on this workspace`);
       const entry = reached;
+      // A worktree somebody removed by hand reads as gone the moment a thread asks for it, so the turn runs in the
+      // project folder rather than in a folder that is not there.
+      const worktree = entry.record.worktree;
+      const goneNow = worktree !== undefined && worktree.gone !== true && !existsSync(worktree.path) ? worktree.path : undefined;
+      if (goneNow !== undefined) await worktreeGone(entry, "removed", { starting: true });
       // What a thread already carries decides two of this send's picks, and it is read after the reading above, so
       // a caller that cannot drive the thread learns nothing about it. A thread keeps its agent: the turn runs on
       // the harness its record names, and a request naming another is refused rather than resuming that thread's
@@ -9375,7 +9770,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             if (landed) break;
             landed = true;
             ({ images, dir: imagesDir } = await landImages(entry, adapter.attachments, sendDir, (o.attachments ?? []).filter(a => isImage(a.mediaType))));
-            const landing = (resume !== undefined ? folderOf(workspaceId, resume) : undefined) ?? folder;
+            const landing = runsIn(entry, resume === undefined ? undefined : folderOf(workspaceId, resume), folder);
             filePaths = await landFiles(entry, landing, sendFilesDir(landing, threadId, o.requestId, randomUUID()), (o.attachments ?? []).filter(a => !isImage(a.mediaType)));
             if (filePaths.length > 0) filesFolder = landing;
             const from = snapshotOf(entry, landing);
@@ -9398,8 +9793,21 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           refuse();
           cleared = false;
         }
+        // A thread whose worktree went runs on in the project folder and is told so in its transcript. An agent that
+        // keys its sessions to the project carries its session across; any other opens a fresh one there.
+        const ranIn = resume === undefined ? undefined : folderOf(workspaceId, resume);
+        const cwd = runsIn(entry, ranIn, folder);
+        if (o.behind !== undefined) record({ type: "session.behind", workspaceId, sessionId: resume ?? turnId, turnId, threadId, text: o.behind });
+        const movedFrom = ranIn ?? goneNow;
+        if (movedFrom !== undefined && cwd !== movedFrom && entry.record.worktree?.gone === true) {
+          const fresh = ranIn !== undefined && CATALOG_AGENTS.find(a => a.id === harness)?.projectKeyEnv === undefined;
+          record({ type: "session.moved", workspaceId, sessionId: resume ?? turnId, turnId, threadId, from: movedFrom, to: cwd, ...(entry.record.worktree.branch !== undefined ? { branch: entry.record.worktree.branch } : {}), ...(fresh ? { fresh: true as const } : {}) });
+          if (fresh) {
+            resume = undefined;
+            delete view.claudeSessionId;
+          }
+        }
         const picks = picksFor(resume);
-        const cwd = (resume !== undefined ? folderOf(workspaceId, resume) : undefined) ?? folder;
         const afterCut = resume !== undefined && cutBefore(workspaceId, threadId);
         // What the trips above settled, onto the row the start wrote: the reads that decide them are behind us, so
         // none of them can be answered from the row they are about. Written before adapter.start, so events that
@@ -9449,8 +9857,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         // its rows said this turn runs at, so it is read the one way from now on. Persisted with the row as the turn
         // announces itself and at its end.
         if (!threadRecords.has(threadId)) threadRecords.set(threadId, { workspaceId, harness, ...(picks.permissionMode !== undefined ? { permissionMode: picks.permissionMode } : {}) });
-        const record = threadRecords.get(threadId)!;
-        if (filesFolder !== undefined && !(record.filesIn ?? []).includes(filesFolder)) threadRecords.set(threadId, { ...record, filesIn: [...(record.filesIn ?? []), filesFolder] });
+        const thread = threadRecords.get(threadId)!;
+        if (filesFolder !== undefined && !(thread.filesIn ?? []).includes(filesFolder)) threadRecords.set(threadId, { ...thread, filesIn: [...(thread.filesIn ?? []), filesFolder] });
         launched();
         // The turn is running; what the record failed to remember must not read as a start that failed.
         if (resume === undefined) await rememberTarget(entry.record).catch((e: unknown) => console.warn(`last target for ${workspaceId} not remembered: ${e instanceof Error ? e.message : String(e)}`));
@@ -9774,18 +10182,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const conflict = (line: string): Error => Object.assign(new Error(line), { kind: "conflict" });
       // Every refusal comes before anything is written: nothing below this block moves a file or a row.
       if (rows.some(r => r.view.status === "running")) throw conflict(REWIND_WORKING_LINE);
-      if (ownFolder(entry.record)) throw conflict(REWIND_OWN_FOLDER_LINE);
       const tree = treeUnder(threadId);
       const under = foldThreads([...sessions.values()].map(s => s.view).filter(v => v.threadId !== undefined && tree.includes(v.threadId)));
       const running = under.filter(t => t.status === "running");
       if (running.length > 0) throw conflict(rewindChildrenLine(running.map(t => t.title)));
-      // The copy is every thread's on the workspace: files moved under one that runs would go back mid-turn.
+      // The folder is every thread's on the record: files moved under one that runs would go back mid-turn.
       const besideRunning = (): void => {
         const beside = foldThreads([...sessions.values()].map(s => s.view).filter(v => v.workspaceId === workspaceId && v.threadId !== undefined && v.threadId !== threadId)).find(t => t.status === "running");
         if (beside !== undefined) throw conflict(rewindBesideLine(beside.title));
       };
       const cwd = checkoutOf(entry.record);
-      const restore = (checkpoint: string) => withDaemon(entry, ask => ask({ op: "git.restore", cwd, checkpoint }));
+      const restore = (checkpoint: string) => queued(entry.record.id, () => withDaemon(entry, ask => ask({ op: "git.restore", cwd, checkpoint, scope: entry.record.id })));
       const done = async (): Promise<void> => {
         await persistSessions(workspaceId);
         await flushTranscript(workspaceId);
@@ -9821,15 +10228,19 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const latest = latestOn(threadId) ?? rows[0]?.view;
       const { harness, adapter } = await launchAdapterFor(entry, latest?.harness ?? held?.harness);
       const agent = harnessCatalog(harness)?.label ?? harness;
-      const files = opts.files === true;
+      let files = opts.files === true;
       if (files && kept?.ref === undefined) throw conflict(REWIND_NO_CHECKPOINT_LINE);
+      // Files go back only where no other thread ran a turn in the folder after the checkpoint, running ones
+      // included: otherwise the files hold that thread's work too, and the conversation alone goes back.
+      const keptAt = kept?.at ?? [...sessions.values()].find(r => r.turnId === order[at])?.view.endedAt ?? 0;
+      const shared = files && [...sessions.values()].some(({ view: v }) => v.workspaceId === workspaceId && v.threadId !== undefined && v.threadId !== threadId && (v.endedAt ?? Number.POSITIVE_INFINITY) > keptAt);
+      if (shared) files = false;
       // A harness that said it cannot cut this thread keeps every turn: the files alone go back and it is not asked.
       const uncut = events.find((e): e is Extract<SessionEvent, { type: "session.checkpoint" }> => e.type === "session.checkpoint" && e.threadId === threadId && e.kept !== undefined)?.kept;
-      if (uncut !== undefined && !files) throw conflict(rewindKeptLine(uncut, false));
+      if (uncut !== undefined && !files) throw conflict(shared ? REWIND_SHARED_LINE : rewindKeptLine(uncut, false));
       const cutsConversation = (adapter.resumesAt === true || adapter.revert !== undefined) && uncut === undefined;
       if (adapter.resumesAt === true && kept?.anchor === undefined) throw conflict(rewindNoAnchorLine(agent));
-      if (!cutsConversation && !files) throw conflict(rewindNoAnchorLine(agent));
-      if (files) besideRunning();
+      if (!cutsConversation && !files) throw conflict(shared ? REWIND_SHARED_LINE : rewindNoAnchorLine(agent));
 
       // Files first, since they alone can be put back: a harness that then will not cut has them restored again and
       // the whole rewind refused, rather than a conversation cut over files that never moved.
@@ -9869,7 +10280,35 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       }
       if (cutsConversation) await dropFromTranscript(workspaceId, e => e.threadId === threadId && cut.includes(e.turnId ?? ""));
       await done();
-      return { turns: cutsConversation ? cut.length : 0, ...(moved !== undefined ? { files: Number(moved["files"] ?? 0) } : {}) };
+      return { turns: cutsConversation ? cut.length : 0, ...(moved !== undefined ? { files: Number(moved["files"] ?? 0) } : {}), ...(shared ? { kept: REWIND_SHARED_LINE } : {}) };
+    },
+
+    async delete(threadId, origin) {
+      await ready();
+      spawnGuard("delete", origin);
+      const workspaceId = [...sessions.values()].find(s => s.view.threadId === threadId)?.view.workspaceId ?? threadRecords.get(threadId)?.workspaceId;
+      if (workspaceId === undefined) throw notFoundRefusal(`no thread ${threadWord(threadId)}`);
+      const entry = await entryOfRow({ threadId, workspaceId }, origin);
+      if (entry === undefined) throw notFoundRefusal(`no thread ${threadWord(threadId)}`);
+      if (!copiesFolder(entry.record.kind)) throw Object.assign(new Error(threadOnMachineLine(entry.record.name)), { kind: "usage" });
+      const tree = entry.record.worktree;
+      if (tree?.made === true && tree.gone !== true) {
+        // Every thread in it goes with the worktree, so none may be working, and none can land a checkpoint after
+        // its refs were dropped.
+        if (turnRuns(workspaceId)) throw Object.assign(new Error(WORKTREE_BUSY_LINE), { kind: "conflict" });
+        const threads = new Set([...sessions.values()].flatMap(s => (s.view.workspaceId === workspaceId && s.view.threadId !== undefined ? [s.view.threadId] : [])));
+        await workspaces.delete(workspaceId, origin);
+        return { workspaceId, worktree: tree.path, threads: threads.size };
+      }
+      if (threadRuns(threadId)) throw Object.assign(new Error(THREAD_WORKING_LINE), { kind: "conflict" });
+      await openTranscript(workspaceId);
+      await dropCheckpoints(entry, threadId);
+      await dropThreadFiles(entry, [threadId]);
+      for (const [id, s] of [...sessions]) if (s.view.threadId === threadId) sessions.delete(id);
+      threadRecords.delete(threadId);
+      await dropFromTranscript(workspaceId, e => e.threadId === threadId);
+      await persistSessions(workspaceId);
+      return { workspaceId, threads: 1 };
     },
 
     async forget(threadId, origin) {
@@ -11246,9 +11685,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       }
       const held = [...projectsHeld.values()].find(p => p.computer === computer && sameSource(p.source, source));
       if (held !== undefined) throw Object.assign(new Error(sameSourceRefusal(held.name, nameOfComputer(computer, rows))), { kind: "conflict" });
-      // A folder here is a project only if it is the top of a git repo: a workspace of it starts on a branch, and
-      // a folder with no git in it has none.
-      if (source.kind === "folder" && !(await isRepoHere(source.path))) throw new Error(`${source.path} ${NOT_A_REPO_LINE}`);
+      // A folder here is a project whether or not git holds it; the repo it sits in, its own or one above it, is
+      // what its branches and worktrees are read off.
+      const top = source.kind === "folder" && copiesFolder(computerKind) ? await gitTopOf(source.path) : undefined;
       const { deps, at, placeId } = await landingDeps(computer);
       await readableComputer(at, placeId);
       const road = projectLanding(landingKind(computer, at));
@@ -11289,6 +11728,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         // branch the remote has never seen is nothing a clone can ask for, so those commits land on a branch of
         // their own after the clone and the record stays on the branch the remote has.
         ...(o.base !== undefined ? { base: o.base } : {}),
+        ...(top !== undefined ? { git: { top } } : {}),
         createdAt: new Date(clock.now()).toISOString(),
       };
       const began = clock.now();
@@ -12060,6 +12500,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       }
     },
     close: async () => {
+      await copiesMoving;
+      sweepStopped = true;
+      sweepTimer?.();
+      await sweeping;
       idle.close();
       alerts.close();
       // An agent's version or sign-in command that never answers would otherwise outlive this process.

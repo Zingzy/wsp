@@ -236,37 +236,32 @@ describe("what a turn changed", () => {
     expect(byTurn.get(turnOf.get("two"))).toMatchObject({ shared: true });
   });
 
-  it("takes no snapshot of a workspace that is the person's own folder, where wsp writes nothing, and a copy's turn takes one", async () => {
+  it("takes a snapshot of the project folder a turn runs in, and none of a folder git holds no repo in", async () => {
     const root = mkdtempSync(join(tmpdir(), "wsp-own-folder-"));
     const folder = join(root, "work");
+    const plain = join(root, "plain");
     mkdirSync(folder, { recursive: true });
+    mkdirSync(plain, { recursive: true });
     execFileSync("git", ["init", "-q", folder]);
     const daemon = fakeDaemon();
     const agent = gated();
     const store = memoryStore();
     const local = { ...fakeLocal(root), daemonRoad: async () => ({ url: "http://127.0.0.1:7070", expiresAt: Number.MAX_SAFE_INTEGER, daemonToken: DAEMON_TOKEN }) };
-    const made = (): Runtime => createRuntime({ backend: stubBackend(), store, adapters: { claude: agent.factory }, local, daemonToken: DAEMON_TOKEN, daemonChannel: daemon.open });
     try {
-      rt = made();
+      rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: agent.factory }, local, daemonToken: DAEMON_TOKEN, daemonChannel: daemon.open });
       const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac", project: (await projectOn(rt, HERE_PLACE_ID, realpathSync(folder))).id });
-      const copied = await rt.sessions.start(ws.id, { prompt: "in the copy" });
+      const inRepo = await rt.sessions.start(ws.id, { prompt: "in the repo" });
       agent.release(0);
-      await copied.finished;
+      await inRepo.finished;
       await until(() => daemon.frames.some(f => f["op"] === "git.turn"));
       expect(daemon.frames.some(f => f["op"] === "git.snapshot")).toBe(true);
-      await rt.close();
-
-      // The record as a build from before copies wrote it: the workspace is the folder itself.
-      const record = (await store.get("workspaces", ws.id)) as Record<string, unknown>;
-      delete record["copy"];
-      await store.put("workspaces", ws.id, record);
       daemon.frames.length = 0;
-      rt = made();
-      const own = await rt.sessions.start(ws.id, { prompt: "in my own folder" });
+      const bare = await createOn(rt, { on: HERE_PLACE_ID, name: "plain", project: (await projectOn(rt, HERE_PLACE_ID, realpathSync(plain))).id });
+      const own = await rt.sessions.start(bare.id, { prompt: "in a plain folder" });
       agent.release(1);
       await own.finished;
       await new Promise(resolve => setTimeout(resolve, 20));
-      expect(daemon.frames.filter(f => f["op"] === "git.snapshot" || f["op"] === "git.turn")).toEqual([]);
+      expect(daemon.frames.filter(f => f["op"] === "git.snapshot" || f["op"] === "git.turn" || f["op"] === "git.checkpoint")).toEqual([]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

@@ -9,7 +9,7 @@ import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, basename } from "node:path";
 import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
 import { S_RADIO_ACTIVE, S_RADIO_INACTIVE } from "@clack/prompts";
@@ -226,7 +226,6 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
     },
     ports: { port: 0, named: true },
     upCommand: "wsp up",
-    forkCommand: "wsp new first",
     relay: async (rt: Runtime, builder, h) => {
       counters.relays += 1;
       expect(builder.id).toBe(backends.at(-1)?.machines.find(m => !m.killed && m.spec.labels?.["wsp-builder"] === "1")?.id);
@@ -1724,7 +1723,7 @@ describe("wsp init, flags and no terminal", () => {
     // Nobody is here to use the app or to pay for a machine nobody asked for: no host and no fork. A workspace is
     // one project's copy and this run named no folder here, so the tick makes none and the line says the road.
     expect(out).not.toContain("forked from image v1");
-    expect(out).toContain("a workspace is one project's, and this run named no folder here");
+    expect(out).toContain("no project was recorded on this computer: this run named no folder here");
     expect(out).not.toMatch(URL_RE);
     expect(await f.runtimes.at(-1)!.workspaces.list()).toEqual([]);
     expect(f.trail).toEqual([]);
@@ -1777,7 +1776,7 @@ describe("wsp init, flags and no terminal", () => {
   it("under --non-interactive --json on a terminal with the app's ports taken: no screens, each sign-in's page and outcome as one object, no host, the golden recorded, and one last object naming it and the wsp up to run", async () => {
     // Another host holds the app's port, as the coordinator's did: a run nobody is at never binds it, so it never notices.
     const port = await heldPort();
-    const f = fake({ nonInteractive: true, json: true, ports: { port, named: true }, upCommand: "wsp up --state /tmp/wsp-test/state.json", forkCommand: "wsp new first --state /tmp/wsp-test/state.json", recipe: async () => answeredInBuild("gh", answeredInBuild("gemini", ticking("gemini"))) });
+    const f = fake({ nonInteractive: true, json: true, ports: { port, named: true }, upCommand: "wsp up --state /tmp/wsp-test/state.json", recipe: async () => answeredInBuild("gh", answeredInBuild("gemini", ticking("gemini"))) });
     const result = await runInit(f.opts, f.io);
     expect(result.code).toBe(0);
     expect(result.handle).toBeUndefined();
@@ -1787,7 +1786,7 @@ describe("wsp init, flags and no terminal", () => {
     expect(out).not.toContain("is in use on this computer");
     expect(out).toContain("Taken as yes (--non-interactive)");
     expect(out).toContain("Sealing image v1. Taken as yes (--non-interactive).");
-    expect(out).toContain("a workspace is one project's, and this run named no folder here");
+    expect(out).toContain("no project was recorded on this computer: this run named no folder here");
     const rt = f.runtimes.at(-1)!;
     expect(goldenHead(await rt.golden.get())?.snapshotId).toBe("snap_wsp-h1s1-default-v1");
     // An agent pays for no machine it did not ask for: nothing is forked. A workspace is one project's copy and
@@ -1814,7 +1813,7 @@ describe("wsp init, flags and no terminal", () => {
       { event: "sign-in", tool: "gemini", label: "Gemini CLI login", browserUrl: GEMINI_URL, finish: "code", nextCommand: `open '${GEMINI_URL}'`, waitSeconds: 120 },
       { event: "sign-in-result", tool: "gemini", label: "Gemini CLI login", state: "signed-in", note: "gemini --skip-trust exited 0" },
       // Nothing was made, so the last object names the command that opens the app and no workspace.
-      { event: "done", golden: "default", version: 1, snapshotId: "snap_wsp-h1s1-default-v1", recipe: join(dirname(f.opts.statePath), "recipe.json"), nextCommand: "wsp up --state /tmp/wsp-test/state.json", forkCommand: "wsp new first --state /tmp/wsp-test/state.json" },
+      { event: "done", golden: "default", version: 1, snapshotId: "snap_wsp-h1s1-default-v1", recipe: join(dirname(f.opts.statePath), "recipe.json"), nextCommand: "wsp up --state /tmp/wsp-test/state.json" },
     ]);
     // Claude Code's token is the vault's and nobody is at this terminal to paste it; the two machine sign-ins ran.
     expect(result.logins?.map(l => l.state)).toEqual(["not-signed-in", "signed-in", "signed-in"]);
@@ -3684,7 +3683,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect(shared.machines[0]!.killed).toBe(true);
     // The builder gave up its slot to the smoke fork; nothing else boots, and the fork is the person's to ask for.
     expect(shared.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, true], ["snap_wsp-h1s1-default-v1", true]]);
-    expect(f.text()).toContain("wsp new first forks a workspace from it, and wsp up opens the app.");
+    expect(f.text()).toContain("Image v1 is sealed; wsp up opens the app.");
   });
 
   it("a reusable builder already carrying the new recipe is attached to; the update road does not run beside it", async () => {
@@ -4270,7 +4269,7 @@ describe("wsp init, the first workspace and its project", () => {
     f.opts.importFolder = folder;
     expect((await runInit(f.opts, f.io)).code).toBe(0);
     const workspaces = await f.runtimes.at(-1)!.workspaces.list();
-    expect(workspaces.map(w => w.name)).toEqual(["proj", LOCAL_NAME]);
+    expect(workspaces.map(w => w.name)).toEqual(["proj", basename(folder)]);
     // The fork, then the import onto it, then the tick's own workspace. Off a terminal nothing is launched, so the
     // address is printed below.
     expect(f.trail).toEqual(["fork proj", `import ${folder} -> ${folder}`, "local"]);
@@ -4317,7 +4316,7 @@ describe("wsp init, the first workspace and its project", () => {
     expect(await f.runtimes.at(-1)!.workspaces.list()).toEqual([]);
     expect(f.trail).toEqual([expect.stringMatching(OPENING_PAGE)]);
     expect(openedAddress(f.trail)).toBe(`http://127.0.0.1:4400/#c/${HERE_CODE}`);
-    expect(f.text()).toContain("a workspace is one project's, and this run named no folder here");
+    expect(f.text()).toContain("no project was recorded on this computer: this run named no folder here");
   });
 
   it("Yes with a typed folder forks under the default name and imports what was typed", async () => {
@@ -4334,7 +4333,7 @@ describe("wsp init, the first workspace and its project", () => {
     await firstWorkspace(f, folder);
     expect((await run).code).toBe(0);
     const workspaces = await f.runtimes.at(-1)!.workspaces.list();
-    expect(workspaces.map(w => w.name)).toEqual(["first", LOCAL_NAME]);
+    expect(workspaces.map(w => w.name)).toEqual(["first", basename(folder)]);
     expect(f.trail).toEqual(["fork first", `import ${folder} -> ${folder}`, "local", expect.stringMatching(OPENING_PAGE)]);
     expect(openedAddress(f.trail)).toBe(`http://127.0.0.1:4400/#w/${workspaces[0]!.id}/c/${HERE_CODE}`);
   });
@@ -4360,7 +4359,7 @@ describe("wsp init, the first workspace and its project", () => {
     expect((await runInit(f.opts, f.io)).code).toBe(0);
     expect(await f.runtimes.at(-1)!.workspaces.list()).toEqual([]);
     expect(f.trail).toEqual([]);
-    expect(f.text()).toContain("Done. Image v1 is sealed; wsp new first forks a workspace from it, and wsp up opens the app.");
+    expect(f.text()).toContain("Done. Image v1 is sealed; wsp up opens the app.");
   });
 
   it("a host that refuses the tick is one line, and the fork beside it still opens the app", async () => {
@@ -4374,7 +4373,7 @@ describe("wsp init, the first workspace and its project", () => {
     f.opts.roads = rt => ({ ...roads(rt), addProject: async () => { throw new Error("that folder is not a git repo"); } });
     expect((await runInit(f.opts, f.io)).code).toBe(0);
     expect((await f.runtimes.at(-1)!.workspaces.list()).map(w => w.name)).toEqual(["proj"]);
-    expect(f.text()).toContain("this computer was not made a workspace: that folder is not a git repo");
+    expect(f.text()).toContain("no project was recorded on this computer: that folder is not a git repo");
   });
 
   it("a --import folder that is not there ends the run before anything is read or booted", async () => {
@@ -4428,7 +4427,7 @@ describe("wsp init, the first workspace and its project", () => {
     f.opts.roads = rt => ({ ...roads(rt), importProject: async () => { throw new Error("the machine refused the upload"); } });
     expect((await runInit(f.opts, f.io)).code).toBe(0);
     const workspaces = await f.runtimes.at(-1)!.workspaces.list();
-    expect(workspaces.map(w => w.name)).toEqual(["first", LOCAL_NAME]);
+    expect(workspaces.map(w => w.name)).toEqual(["first", basename(folder)]);
     expect(f.text()).toContain(`${folder} was not imported: the machine refused the upload. The workspace is up; import it from the app.`);
     // The workspace survived the failed import, so the run still ends done, with the workspace on the account.
     expect(f.text()).toContain("Done. Image v1 is sealed; wsp up opens the app.");

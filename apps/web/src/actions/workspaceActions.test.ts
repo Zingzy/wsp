@@ -80,10 +80,10 @@ describe("delete on the workspace row", () => {
     expect(action.hint).toBe(DELETE_HINT("cloud"));
   });
 
-  it("names the copy that goes on a workspace that is a copy of a project folder", () => {
-    const copied = { ...workspace("running"), kind: "local", copy: { road: "clonefile", path: "/Users/dev/repo-fix", source: "/Users/dev/repo", base: "0".repeat(40), branch: "main", carried: "deps-and-config" } } as WorkspaceView;
+  it("names the worktree that goes on a record of a worktree wsp made", () => {
+    const copied = { ...workspace("running"), kind: "local", worktree: { path: "/Users/dev/repo-fix", branch: "fix", made: true } } as WorkspaceView;
     const action = actionById(resolveActions(workspaceActions, workspaceTarget(copied, null, []), verbs()), "delete");
-    expect(action.hint).toBe("Its copy at /Users/dev/repo-fix is removed and the project folder is left as it is");
+    expect(action.hint).toBe("Its worktree at /Users/dev/repo-fix is removed and the project folder is left as it is");
   });
 
   it("opens the confirmation for its own workspace, and says so on a client that cannot delete", async () => {

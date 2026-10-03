@@ -7,7 +7,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { localWiring, makeRuntime, servingWiring } from "../src/cli.js";
 import type { RunningWsp } from "../src/mcp-install.js";
 import { threadBinDir, writeThreadWsp } from "../src/shim.js";
-import { threadTarget, type HostClient } from "../src/verbs.js";
 
 describe("the wsp a thread's shell runs on this computer", () => {
   let dir: string;
@@ -62,21 +61,5 @@ describe("the wsp a thread's shell runs on this computer", () => {
     } finally {
       await rt.close();
     }
-  });
-
-  it("names its own workspace from the copy it runs in, asking only for what a thread may read", async () => {
-    const copy = join(dir, "proj-lead");
-    execFileSync("git", ["init", "-q", copy]);
-    const lead = { id: "ws_lead", name: "lead", home: dir, project: { id: "pr_1", name: "proj", path: join(dir, "proj"), computer: "here" }, copy: { path: copy } };
-    const asked: string[] = [];
-    const client = {
-      request: async (op: string) => {
-        asked.push(op);
-        if (op === "workspaces.list") return { workspaces: [lead] };
-        throw new Error(`${op} is not a thread's to ask for`);
-      },
-    } as unknown as HostClient;
-    expect((await threadTarget(client, undefined, join(copy), "workspace")).workspace).toBe(lead);
-    expect(asked).toEqual(["workspaces.list"]);
   });
 });

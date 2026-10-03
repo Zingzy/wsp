@@ -1,7 +1,7 @@
 {
   "cloudOff": {
     "name": "projects_remove",
-    "description": "Takes a project's record out of this wsp, and with it the folder wsp itself made for the project on the computer holding it: its checkout there goes, and the memory its agent keeps on that computer stays. A folder of yours on this computer stays exactly where it is, and no repo is ever asked for anything. Refused in one line while a workspace of it stands, naming the workspaces; delete those first.",
+    "description": "Takes a project's record out of this wsp, and with it the folder wsp itself made for the project on the computer holding it: its checkout there goes, and the memory its agent keeps on that computer stays. A folder of yours on this computer stays exactly where it is, and no repo is ever asked for anything. Refused in one line while a machine of it stands, naming them; delete those first.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -202,6 +202,18 @@
             },
             "base": {
               "type": "string"
+            },
+            "git": {
+              "type": "object",
+              "properties": {
+                "top": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "top"
+              ],
+              "additionalProperties": false
             },
             "createdAt": {
               "type": "string"
@@ -238,7 +250,7 @@
   },
   "cloudOn": {
     "name": "projects_remove",
-    "description": "Takes a project's record out of this wsp, and with it the folder wsp itself made for the project on the computer holding it: its checkout there goes, and the memory its agent keeps on that computer stays. A folder of yours on this computer stays exactly where it is, and no repo is ever asked for anything. Refused in one line while a workspace of it stands, naming the workspaces; delete those first.",
+    "description": "Takes a project's record out of this wsp, and with it the folder wsp itself made for the project on the computer holding it: its checkout there goes, and the memory its agent keeps on that computer stays. A folder of yours on this computer stays exactly where it is, and no repo is ever asked for anything. Refused in one line while a machine of it stands, naming them; delete those first.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -439,6 +451,18 @@
             },
             "base": {
               "type": "string"
+            },
+            "git": {
+              "type": "object",
+              "properties": {
+                "top": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "top"
+              ],
+              "additionalProperties": false
             },
             "createdAt": {
               "type": "string"

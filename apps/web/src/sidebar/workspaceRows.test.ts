@@ -1,21 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { type Capabilities, type PlaceView, type ProjectCopy, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { type Capabilities, type PlaceView, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import type { SidebarProjectSnapshot } from "../adapt/index.js";
 import { branchLine, computerName, madeOfLine } from "./workspaceRows";
 
 const workspace = (over: Partial<WorkspaceView>): WorkspaceView =>
   ({ id: "ws_1", name: "a", machineId: "m1", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, phase: "running", golden: "snap_g", createdAt: "2026-09-12T00:00:00.000Z", ...over }) as WorkspaceView;
-
-const copy = (over: Partial<ProjectCopy> = {}): ProjectCopy => ({
-  road: "clonefile",
-  path: "/Users/dev/spoo-pricing-page",
-  source: "/Users/dev/spoo",
-  base: "abc",
-  branch: "agent/pricing-page",
-  carried: "deps-and-config",
-  ...over,
-});
 
 const MAC = "zingzy's MacBook Pro";
 
@@ -26,31 +16,30 @@ const OWN: Pick<Capabilities, "copies" | "ownNetwork"> = { copies: false, ownNet
 const row = (over: Partial<WorkspaceView>): Pick<SidebarProjectSnapshot, "workspace"> => ({ workspace: workspace(over) });
 
 describe("what a workspace row says it is made of", () => {
-  it("joins the copy word, the computer where it is not this one, and the ports word, all off the protocol's table", () => {
-    expect(madeOfLine({ project: row({ copy: copy({ road: "worktree" }) }), landing: SHARES, computer: null, here: MAC })).toEqual(["a copy", "shares zingzy's MacBook Pro's ports"]);
-    expect(madeOfLine({ project: row({ copy: copy() }), landing: SHARES, computer: "spoo", here: MAC })).toEqual(["a copy", "spoo", "shares spoo's ports"]);
-    expect(madeOfLine({ project: row({ copy: copy(), portBase: 3100 }), landing: SHARES, computer: null, here: MAC })).toEqual(["a copy", "shares zingzy's MacBook Pro's ports, PORT 3100"]);
-    expect(madeOfLine({ project: row({ copy: copy(), portBase: 3100 }), landing: OWN, computer: "spoo", here: MAC })).toEqual(["a copy", "spoo", "own network"]);
+  it("joins the computer where it is not this one and the ports word, all off the protocol's table", () => {
+    expect(madeOfLine({ project: row({}), landing: SHARES, computer: null, here: MAC })).toEqual(["shares zingzy's MacBook Pro's ports"]);
+    expect(madeOfLine({ project: row({}), landing: SHARES, computer: "spoo", here: MAC })).toEqual(["spoo", "shares spoo's ports"]);
+    expect(madeOfLine({ project: row({}), landing: OWN, computer: "spoo", here: MAC })).toEqual(["spoo", "own network"]);
   });
 
-  it("says the network alone for a fork, which has no copy of a folder on any computer", () => {
+  it("says the network alone for a fork", () => {
     expect(madeOfLine({ project: row({}), landing: OWN, computer: "solari", here: MAC })).toEqual(["solari", "own network"]);
   });
 
   it("says nothing about the network until the host has answered where this project lands", () => {
-    expect(madeOfLine({ project: row({ copy: copy(), portBase: 3100 }), landing: null, computer: null, here: MAC })).toEqual(["a copy"]);
-    expect(madeOfLine({ project: row({ copy: copy() }), landing: null, computer: "spoo", here: MAC })).toEqual(["a copy", "spoo"]);
+    expect(madeOfLine({ project: row({}), landing: null, computer: null, here: MAC })).toEqual([]);
+    expect(madeOfLine({ project: row({}), landing: null, computer: "spoo", here: MAC })).toEqual(["spoo"]);
   });
 
   it("carries no figure of any kind: a machine's shape and its cost are its computer's row in Settings", () => {
-    const line = madeOfLine({ project: row({ copy: copy(), portBase: 3100 }), landing: SHARES, computer: null, here: MAC });
+    const line = madeOfLine({ project: row({}), landing: SHARES, computer: null, here: MAC });
     expect(line.join(" ")).not.toMatch(/\$|GB|cores|vCPU/);
   });
 });
 
 describe("the branch a tile's row three names", () => {
-  it("is the branch the copy stands on where the record carries one, and empty where it carries none", () => {
-    expect(branchLine(row({ copy: copy({ branch: "agent/pricing-page" }) }))).toBe("agent/pricing-page");
+  it("is the branch the worktree was made on where the record carries one, and empty where it carries none", () => {
+    expect(branchLine(row({ worktree: { path: "/w", branch: "agent/pricing-page", made: true } }))).toBe("agent/pricing-page");
     expect(branchLine(row({}))).toBe("");
   });
 });
@@ -70,6 +59,6 @@ describe("where a row says a workspace runs", () => {
     expect(computerName([], { workspace: workspace({ kind: "cloud", provider: "box" }), status: null })).toBe("Boat");
     expect(computerName([], { workspace: workspace({ kind: "local" }), status: null })).toBe("");
     expect(computerName([], { workspace: workspace({ kind: "local" }), status: onMac })).toBe("");
-    expect(madeOfLine({ project: row({ copy: copy() }), landing: SHARES, computer: null, here: "" })).toEqual(["a copy"]);
+    expect(madeOfLine({ project: row({}), landing: SHARES, computer: null, here: "" })).toEqual([]);
   });
 });

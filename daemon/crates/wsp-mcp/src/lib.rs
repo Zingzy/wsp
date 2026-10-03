@@ -80,5 +80,6 @@ fn refused_before(args: &Args, env: &Env) -> Option<Failure> {
 }
 
 pub async fn serve<R: AsyncBufRead + Unpin, W: AsyncWrite + Unpin>(args: &Args, env: &Env, input: R, output: W) -> i32 {
-    stdio::pump(Arc::new(host::Host::new(args, env, None)), input, output).await
+    let cwd = if args.guest { None } else { std::env::current_dir().ok() };
+    stdio::pump(Arc::new(host::Host::new(args, env, cwd)), input, output).await
 }

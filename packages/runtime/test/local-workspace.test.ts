@@ -9,9 +9,9 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { LocalBackend } from "@wsp/engine";
-import { HERE_PLACE_ID, copyPathFor, inFolder, machineWord, undrivenRefusal, NO_SUCH_TURN, NOTIFY_ME, noWorkspaceRefusal, deviceHeldRefusal, registeredLine, REGISTERING_LINE, RELAY_TICKET_REFUSAL, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, THIS_COMPUTER, TICKET_ORIGIN, TURN_TOKEN_ENV, type AdapterAttachOptions, type AdapterEvent, type EventUnion, type ExecStream, type PortForward, type ProjectImportEvent, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
+import { HERE_PLACE_ID, inFolder, machineWord, undrivenRefusal, NO_SUCH_TURN, NOTIFY_ME, noWorkspaceRefusal, deviceHeldRefusal, registeredLine, REGISTERING_LINE, RELAY_TICKET_REFUSAL, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, THIS_COMPUTER, TICKET_ORIGIN, TURN_TOKEN_ENV, type AdapterAttachOptions, type AdapterEvent, type EventUnion, type ExecStream, type PortForward, type ProjectImportEvent, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
 import type { MachineExecOptions } from "../src/machine-exec.js";
-import { createRuntime, NO_COPIER_HERE, type HarnessAdapterContext, type HarnessAdapterFactory, type HarnessSession, type LocalWiring, type ProjectExportOptions, type ProjectImportOptions, type Runtime } from "../src/runtime.js";
+import { createRuntime, type HarnessAdapterContext, type HarnessAdapterFactory, type HarnessSession, type LocalWiring, type ProjectExportOptions, type ProjectImportOptions, type Runtime } from "../src/runtime.js";
 import { HARNESS_ADAPTERS } from "../src/adapters.js";
 import { localExecStream } from "../src/local-exec.js";
 import { serveRuntime, type ForwardsSource } from "../src/serve.js";
@@ -240,21 +240,14 @@ describe("local workspace", () => {
     expect(over.pid).toBeUndefined();
   });
 
-  it("a host with no copy road refuses the first workspace of a project here, since every workspace here is a copy", async () => {
+  it("a host with no daemon binary still takes threads in the project folder, one record per project", async () => {
     const { copier: _none, ...bare } = localWiring;
     const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: echoAdapter }, local: bare });
-    const project = await projectOn(rt, HERE_PLACE_ID, repoIn(root));
-    // This wiring hands in no copier, so the first piece of work has no road to a copy and the sentence says so.
-    // With one wired it is a copy of the folder; that is local-copy.test.ts.
-    await expect(rt.workspaces.create({ project: project.id, name: "mac" })).rejects.toThrow(NO_COPIER_HERE);
-    expect(await rt.workspaces.list()).toEqual([]);
-    // A second project on a host that copies is a second workspace: this computer runs as many as there are
-    // folders to copy.
-    const copying = runtime();
-    const first = await projectOn(copying, HERE_PLACE_ID, repoIn(root, "one"));
-    const second = await projectOn(copying, HERE_PLACE_ID, repoIn(root, "other"));
-    expect((await copying.workspaces.create({ project: first.id, name: "mac" })).kind).toBe("local");
-    expect((await copying.workspaces.create({ project: second.id, name: "mac2" })).kind).toBe("local");
+    const first = await projectOn(rt, HERE_PLACE_ID, repoIn(root, "one"));
+    const second = await projectOn(rt, HERE_PLACE_ID, repoIn(root, "other"));
+    expect((await rt.workspaces.create({ project: first.id, name: "mac" })).folder).toBe(first.path);
+    expect((await rt.workspaces.create({ project: second.id, name: "mac2" })).folder).toBe(second.path);
+    expect((await rt.workspaces.list()).map(w => w.kind)).toEqual(["local", "local"]);
   });
 
   it("a create on this computer that its own refusal stops asks nothing of the workspace it names as a parent", async () => {
@@ -381,25 +374,23 @@ describe("local workspace", () => {
     expect(handed.at(-1)).toEqual({ idleMs: Number.POSITIVE_INFINITY, deadlineMs: Number.POSITIVE_INFINITY });
   });
 
-  it("the view names the copy beside the project's folder, never the folder itself, so the app's line under the box says what the runtime did", async () => {
+  it("the view names the project folder its threads run in, so the app's line under the box says what the runtime did", async () => {
     const rt = runtime();
     const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
-    // The workspace here is a copy of the folder the project was recorded on, and a thread on it starts there.
-    expect(ws.folder).toBe(copyPathFor(ws.project.path, "mac"));
-    expect(ws.folder).not.toBe(ws.project.path);
+    expect(ws.folder).toBe(ws.project.path);
     expect((await rt.workspaces.get(ws.id)).folder).toBe(ws.folder);
     expect((await rt.status.list()).find(s => s.id === ws.id)?.folder).toBe(ws.folder);
     await rt.close();
   });
 
-  it("a turn over the wire starts in the workspace's own folder, never the person's home, and the thread's row names it", async () => {
+  it("a turn over the wire starts in the project folder, never the person's home, and the thread's row names it", async () => {
     const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: pwdAdapter }, local: localWiring });
     const folder = repoIn(root);
     const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac", project: (await projectOn(rt, HERE_PLACE_ID, folder)).id });
     const result = await (await rt.sessions.start(ws.id, { prompt: "where are you" })).finished;
-    expect(realpathSync(result.text!.trim())).toBe(realpathSync(copyPathFor(folder, "mac")));
+    expect(realpathSync(result.text!.trim())).toBe(realpathSync(folder));
     const [session] = await rt.sessions.list(ws.id);
-    expect(session!.cwd).toBe(copyPathFor(folder, "mac"));
+    expect(session!.cwd).toBe(folder);
     await rt.close();
   });
 
@@ -409,11 +400,11 @@ describe("local workspace", () => {
     const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac", project: (await projectOn(rt, HERE_PLACE_ID, folder)).id });
     const stream = await rt.workspaces.execStream(ws.id, ["pwd"]);
     // The stream says which folder it resolved, so the client that prints it never restates the rule.
-    expect(stream.ranIn).toBe(copyPathFor(folder, "mac"));
+    expect(stream.ranIn).toBe(folder);
     let out = "";
     for await (const line of stream.lines) out += line;
     expect(await stream.exited).toBe(0);
-    expect(realpathSync(out.trim())).toBe(realpathSync(copyPathFor(folder, "mac")));
+    expect(realpathSync(out.trim())).toBe(realpathSync(folder));
     await rt.close();
   });
 

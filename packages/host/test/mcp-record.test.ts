@@ -67,7 +67,7 @@ async function servedIn(cloud: boolean): Promise<{ instructions: string; tools: 
   vi.stubEnv(CLOUD_ENV, cloud ? "1" : "");
   try {
     const { mcpServer: fresh } = await import("../src/mcp.js");
-    const { INSTRUCTIONS: instructions } = await import("../src/skill.js");
+    const instructions = (await import("../src/skill.js")).instructions();
     const server = fresh("/nonexistent/state.json", { env: {} });
     const [toClient, toServer] = InMemoryTransport.createLinkedPair();
     const client = new Client({ name: "record", version: "0" });
@@ -86,25 +86,29 @@ async function servedIn(cloud: boolean): Promise<{ instructions: string; tools: 
  * of field, a missing required field, a list too short, an item of the wrong type, an integer that is a fraction or
  * past its bounds, a number at its exclusive bound, a word no enum holds, and a value neither side of a union takes. */
 const REFUSED: readonly [string, Record<string, unknown>][] = [
-  ["threads", { workspace: 5 }],
+  ["threads", { project: 5 }],
   ["run", {}],
-  ["run", { workspace: "w", task: 3, agent: true }],
-  ["run", { workspace: {}, task: [] }],
+  ["run", { project: "w", message: 3, agent: true }],
+  ["run", { project: {}, message: [] }],
+  ["run", { message: "m", branch: 7 }],
   ["exec", { workspace: "w", argv: [] }],
   ["exec", { workspace: "w", argv: [1, "a", null] }],
   ["exec", { workspace: "w", argv: "ls" }],
   ["stop", { thread: null }],
   ["delete", { workspace: "w", confirm: "yes" }],
+  ["delete", { thread: 3 }],
+  ["worktree", { project: "p" }],
+  ["worktree_remove", { project: "p", branch: "b", force: "yes" }],
   ["computers_set", { computer: "attic", nap: 2.5 }],
   ["computers_set", { computer: "attic", nap: -1 }],
   ["computers_set", { computer: "attic", nap: 181 }],
   ["computers_set", { computer: "attic", spawn: "yes" }],
-  ["new", { name: "n", max_machines: -1 }],
-  ["new", { name: "n", max_machines: 1.5 }],
-  ["new", { name: "n", max_machines: -0.5 }],
-  ["new", { name: "n", max_machines: "2" }],
-  ["new", { name: "n", spawn: "maybe" }],
-  ["new", { name: "n", spawn: 3 }],
+  ["workspaces_agents", { workspace: "w", max_machines: -1 }],
+  ["workspaces_agents", { workspace: "w", max_machines: 1.5 }],
+  ["workspaces_agents", { workspace: "w", max_machines: -0.5 }],
+  ["workspaces_agents", { workspace: "w", max_machines: "2" }],
+  ["workspaces_agents", { workspace: "w", spawn: "maybe" }],
+  ["workspaces_agents", { workspace: "w", spawn: 3 }],
   ["skills_search", { query: "q", limit: 0 }],
   ["skills_search", { query: "q", limit: 1000 }],
   ["threads_wait", { threads: [] }],
@@ -378,7 +382,8 @@ async function answeredLine(
   const answered = guest && verb !== undefined && GUEST_SERVED.skip(verb) ? undefined : extra.result;
   const env = guest ? Object.fromEntries(Object.entries(extra.env ?? {}).filter(([key]) => GUEST_ENV.includes(key))) : (extra.env ?? {});
   const skip = (v: (typeof VERBS)[number]): boolean => (answered !== undefined && v === verb) || (guest && GUEST_SERVED.skip(v));
-  const server = mcpServer("/nonexistent/state.json", { env, dial, skip, ...(guest ? { elsewhere: GUEST_SERVED.elsewhere } : {}) });
+  // A server on this computer runs in some folder, as the binary does; one in no project reads the list and finds none.
+  const server = mcpServer("/nonexistent/state.json", { env, dial, skip, ...(guest ? { elsewhere: GUEST_SERVED.elsewhere } : { cwd: tmpdir() }) });
   if (answered !== undefined && verb !== undefined) {
     server.registerTool(tool, { description: verb.tool.description, inputSchema: verb.tool.input, outputSchema: verb.tool.output }, async () => answered as never);
   }

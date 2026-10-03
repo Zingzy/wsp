@@ -175,6 +175,10 @@ function ownPlace(e: SessionEvent): string | undefined {
       return `session.notify:${e.turnId}:${e.notify}`;
     case "session.checkpoint":
       return `session.checkpoint:${e.turnId}`;
+    case "session.moved":
+      return `session.moved:${e.turnId}`;
+    case "session.behind":
+      return `session.behind:${e.turnId}`;
     case "session.run":
       return `session.run:${e.runId}:${e.state}`;
     case "session.subagent":

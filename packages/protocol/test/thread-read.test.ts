@@ -16,6 +16,7 @@ import {
   threadMessages,
   threadReadText,
   threadResult,
+  threadMovedLine,
   leadAsk,
   openAsk,
   threadRowLines,
@@ -96,6 +97,20 @@ describe("a thread's messages", () => {
     expect(pieces({ messageId: "msg_a" }, { messageId: "msg_a" })).toEqual(["half a sentence"]);
     expect(pieces({}, {})).toEqual(["half a sentence"]);
     expect(pieces({}, { messageId: "msg_a" })).toEqual(["half a sentence"]);
+  });
+
+  it("prints the line a thread is told where its worktree went and where it was left behind a pull request", () => {
+    const events = [
+      { type: "session.moved", ...SCOPE, turnId: "u1", from: "/w/tree", to: "/w/proj", branch: "feat/x", fresh: true },
+      { type: "session.behind", ...SCOPE, turnId: "u1", text: "this worktree is behind pull request #7" },
+      { type: "session.start", ...SCOPE, turnId: "u1", prompt: "go", at: AT },
+    ] as SessionEvent[];
+    expect(threadMessages(events, "t1").map(m => [m.who, m.text])).toEqual([
+      ["turn", threadMovedLine("/w/tree", "/w/proj", true)],
+      ["turn", "this worktree is behind pull request #7"],
+      ["person", "go"],
+    ]);
+    expect(threadMovedLine("/w/tree", "/w/proj", false)).toBe("its worktree at /w/tree is gone, so it goes on in /w/proj");
   });
 
   it("reads only the named thread's events, and none of a row the runtime stamped no thread on", () => {

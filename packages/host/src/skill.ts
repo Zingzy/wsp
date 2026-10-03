@@ -49,7 +49,9 @@ export function skillFor(skill: string, cloud: boolean): string {
   return out.join("\n");
 }
 
-export const WSP_SKILL: string = skillFor(text, CLOUD_ON);
+/** The skill as this process reads it, worked out at each ask: an install and a tool server opening are the only
+ * askers, and holding it would keep a second copy of the file for the host's whole life. */
+export const wspSkill = (): string => skillFor(text, CLOUD_ON);
 
 /** The section whose opening paragraph is the condensed walkthrough the instructions carry; the numbered steps and
  * the exact lines to watch for stay in the skill, which is too long to be a server's instructions. */
@@ -57,7 +59,7 @@ export const SETUP_HEADING = "## Setting a person up from nothing";
 
 /** The section the instructions carry whole, its opening paragraph and every rule line: what a machine can do at
  * once and what wastes it, which a caller holding only the tools has nowhere else to read. */
-export const RULES_HEADING = "## Running work on a workspace well";
+export const RULES_HEADING = "## Running work well";
 
 /** The verbs table an agent reads, and the section holding the one verb that blocks, which is a shell script's. A
  * verb whose row sits in the wrong one of these teaches the wrong road, so the parity test pins where each is. */
@@ -131,4 +133,5 @@ export function instructionsOf(skill: string, agents: readonly string[]): string
   return [[`${ANOTHER_AGENT_WORDS}.`, opening, walkthrough, agentsLine(agents), BEYOND_THE_TOOLS, lead].join(" "), ...written].join("\n");
 }
 
-export const INSTRUCTIONS: string = instructionsOf(WSP_SKILL, THREAD_AGENTS);
+/** The MCP server's instructions, worked out when a server opens, for the same reason. */
+export const instructions = (): string => instructionsOf(wspSkill(), THREAD_AGENTS);
