@@ -819,7 +819,6 @@ describe("a subagent's frames on its lead's stream", () => {
       state: "running",
       parentToolUseId: SPAWN,
       title: "Sleep 20 s and say done.",
-      prompt: "Sleep 20 s and say done.\nEnd without waiting.",
     });
     expect(subagents(events).at(-1)).toMatchObject({ task: CHILD, state: "running", depth: 1 });
 
@@ -1006,7 +1005,7 @@ describe("a recorded Codex turn whose lead spawned an agent and ended first", ()
     const result = await adapterOver(launch).start({ prompt: "spawn one agent and end your turn", onEvent }).finished;
     const said = events.filter((e): e is Extract<AdapterEvent, { type: "subagent" }> => e.type === "subagent");
     expect(said).toEqual([
-      { type: "subagent", sessionId: LEAD, task: CHILD, state: "running", parentToolUseId: "exec-c2242f64-3c99-4c9b-be0d-2132497b24ef", title: "Reply with the single word done and nothing else.", prompt: "Reply with the single word done and nothing else." },
+      { type: "subagent", sessionId: LEAD, task: CHILD, state: "running", parentToolUseId: "exec-c2242f64-3c99-4c9b-be0d-2132497b24ef", title: "Reply with the single word done and nothing else." },
       { type: "subagent", sessionId: LEAD, task: CHILD, state: "done", parentToolUseId: "exec-c2242f64-3c99-4c9b-be0d-2132497b24ef", summary: "done" },
     ]);
     const at = (type: string) => events.findIndex(e => e.type === type);

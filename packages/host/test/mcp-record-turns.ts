@@ -382,7 +382,7 @@ export const TURN_ANSWERED: Record<string, TurnCase[]> = {
     { case: "not found by the host", arguments: { thread: OTHER }, replies: { "sessions.list": listed(), "sessions.interrupt": ok({ outcome: "not-found" }) } },
     { case: "one subagent stopped", arguments: { thread: THREAD, task: "a1b2c3" }, replies: { "sessions.list": listed(), "sessions.interrupt": ok({ outcome: "accepted" }) } },
     { case: "one subagent already over", arguments: { thread: THREAD, task: "a1b2c3" }, replies: { "sessions.list": listed(), "sessions.interrupt": ok({ outcome: "not-running" }) } },
-    { case: "one subagent the agent would not stop", arguments: { thread: THREAD, task: "zz9" }, replies: { "sessions.list": listed(), "sessions.interrupt": ok({ outcome: "refused", error: "Claude Code would not stop zz9: No task found with ID: zz9" }) } },
+    { case: "one subagent the agent would not stop", arguments: { thread: THREAD, task: "zz9" }, replies: { "sessions.list": listed(), "sessions.interrupt": ok({ outcome: "refused", error: "Claude Code would not stop it: No task found with ID: zz9" }) } },
     { case: "no stop for one subagent", arguments: { thread: THREAD, task: "a1b2c3" }, replies: { "sessions.list": listed(), "sessions.interrupt": ok({ outcome: "unsupported", error: "Stop is not available for Codex subagents; stop the thread to stop them all" }) } },
     { case: "a prefix of two", arguments: { thread: "thread-" }, replies: { "sessions.list": listed() } },
     { case: "no such thread", arguments: { thread: "nope" }, replies: { "sessions.list": listed() } },

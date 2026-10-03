@@ -387,6 +387,7 @@ interface Child {
   /** The call that spawned it, which its prompts are named by; its own thread id until one is seen. */
   parent: string;
   title?: string;
+  /** The spawn's prompt, which the title is read off; the agent's call carries it, never the subagent's own rows. */
   prompt?: string;
   depth?: number;
   summary?: string;
@@ -546,7 +547,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
         state: c.state,
         parentToolUseId: c.parent,
         ...(c.state === "running"
-          ? { ...(c.title !== undefined ? { title: c.title } : {}), ...(c.prompt !== undefined ? { prompt: c.prompt } : {}), ...(c.depth !== undefined ? { depth: c.depth } : {}) }
+          ? { ...(c.title !== undefined ? { title: c.title } : {}), ...(c.depth !== undefined ? { depth: c.depth } : {}) }
           : c.summary !== undefined ? { summary: c.summary } : {}),
       });
     /** A sign of a subagent: a new one starts running, and one already running is said again where the sign adds to

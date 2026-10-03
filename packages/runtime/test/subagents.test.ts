@@ -8,7 +8,7 @@
 // replays from its first event, so the runtime's own bookkeeping is what is
 // under test.
 import { describe, expect, it } from "vitest";
-import { foldThreads, type AdapterEvent, type SessionEvent, type TaskStop, type TurnResult } from "@wsp/protocol";
+import { foldThreads, type AdapterEvent, type HarnessCatalogAnswer, type SessionEvent, type TaskStop, type TurnResult } from "@wsp/protocol";
 import { createRuntime, TOOL_RESULT_KEPT, TRANSCRIPT_BYTES, type HarnessAdapterFactory, type HarnessSession } from "../src/runtime.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { createOn, stubBackend, type StubBackend } from "./stub-backend.js";
@@ -24,9 +24,11 @@ interface Run {
 
 /** A harness whose runs live on the machine: an attach replays a run's log from its first event, as reading a guest's
  * log from byte zero does. Each run stops its subagents through `stops`, which the test sets per case. */
-function machineRuns(stops?: (task: string) => Promise<TaskStop>) {
+function machineRuns(stops?: (task: string) => Promise<TaskStop>, probed?: HarnessCatalogAnswer) {
   const runs = new Map<string, Run>();
   const asked: string[] = [];
+  /** The agent version each start was handed, in order. */
+  const versions: (string | undefined)[] = [];
   let minted = 0;
   const deliver = (run: Run, event: AdapterEvent): void => {
     if (event.type === "turn.done") run.result = event.result;
@@ -58,7 +60,9 @@ function machineRuns(stops?: (task: string) => Promise<TaskStop>) {
   };
   const adapter: HarnessAdapterFactory = () => ({
     steers: false,
+    ...(probed !== undefined ? { probeCatalog: async () => probed } : {}),
     start: o => {
+      versions.push(o.version);
       const handle = `/tmp/wsp-run/${(++minted).toString(16).padStart(12, "0")}`;
       const run: Run = { log: [], sessionId: o.resume ?? `sess-${minted}` };
       runs.set(handle, run);
@@ -82,10 +86,13 @@ function machineRuns(stops?: (task: string) => Promise<TaskStop>) {
     run.log.push(event);
     deliver(run, event);
   };
-  return { adapter, emit, handles: () => [...runs.keys()], asked };
+  /** A line of the run's log the host reading it as it ran did not record: what a host from before an event existed
+   * left behind, which the next host reads on its replay. */
+  const logOnly = (handle: string, event: AdapterEvent): void => void runs.get(handle)!.log.push(event);
+  return { adapter, emit, logOnly, handles: () => [...runs.keys()], asked, versions };
 }
 
-const started = (task: string, sessionId: string, title = `count ${task}`): AdapterEvent => ({ type: "subagent", sessionId, task, state: "running", parentToolUseId: `toolu_${task}`, title, prompt: `Count to thirty as ${task}.`, depth: 1 });
+const started = (task: string, sessionId: string, title = `count ${task}`): AdapterEvent => ({ type: "subagent", sessionId, task, state: "running", parentToolUseId: `toolu_${task}`, title, depth: 1 });
 const ended = (task: string, sessionId: string, state: "done" | "stopped" | "failed", summary?: string): AdapterEvent => ({ type: "subagent", sessionId, task, state, parentToolUseId: `toolu_${task}`, ...(summary !== undefined ? { summary } : {}) });
 const reply = (h: ReturnType<typeof machineRuns>, run: string, sessionId: string): void => {
   h.emit(run, { type: "turn.done", sessionId, result: { status: "completed", text: "both replied" } });
@@ -125,7 +132,9 @@ describe("an agent's own subagents as children of its thread", () => {
     // Two rows a child, its start and its end, whatever the turn's own end says of the one it left running.
     const rows = subagentRows(await rt.sessions.history(ws.id));
     expect(rows.map(e => [e.task, e.state])).toEqual([["a1", "running"], ["b2", "running"], ["a1", "done"]]);
-    expect(rows[0]).toMatchObject({ title: "count a1", prompt: "Count to thirty as a1.", parentToolUseId: "toolu_a1", depth: 1 });
+    // The prompt is the launching call's own input, which its tool_use delta already carries: the row holds no copy.
+    expect(rows[0]).toMatchObject({ title: "count a1", parentToolUseId: "toolu_a1", depth: 1 });
+    expect(rows[0]).not.toHaveProperty("prompt");
     expect(rows[2]).toMatchObject({ summary: "30" });
     await rt.close();
   });
@@ -169,6 +178,56 @@ describe("an agent's own subagents as children of its thread", () => {
     expect(history.filter(e => e.type === "session.delta").map(e => e.text)).toEqual(["counting"]);
     expect((await rt2.sessions.list(ws.id))[0]!.subagents?.map(c => [c.id, c.state])).toEqual([["a1", "done"], ["b2", "done"]]);
     await rt2.close();
+  });
+
+  it("a run a host from before subagents were recorded wrote is re-read with its children and no delta twice", async () => {
+    const h = machineRuns();
+    const store = memoryStore();
+    const backend = stubBackend();
+    const { rt, ws, run } = await begin(h, store, backend);
+    // That host recorded the deltas and not the subagent lines between them.
+    h.logOnly(run, started("a1", "sess-1"));
+    h.emit(run, { type: "turn.delta", sessionId: "sess-1", kind: "text", text: "one", parentToolUseId: "toolu_a1" });
+    h.logOnly(run, started("b2", "sess-1"));
+    h.emit(run, { type: "turn.delta", sessionId: "sess-1", kind: "text", text: "two", parentToolUseId: "toolu_b2" });
+    await until(async () => (await rt.sessions.history(ws.id)).filter(e => e.type === "session.delta").length === 2);
+    await rt.close();
+
+    const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
+    await until(async () => subagentRows(await rt2.sessions.history(ws.id)).length === 2);
+    h.emit(run, { type: "turn.delta", sessionId: "sess-1", kind: "text", text: "three", parentToolUseId: "toolu_a1" });
+    await until(async () => (await rt2.sessions.history(ws.id)).filter(e => e.type === "session.delta").length === 3);
+    const history = await rt2.sessions.history(ws.id);
+    expect(history.filter(e => e.type === "session.delta").map(e => e.text)).toEqual(["one", "two", "three"]);
+    expect(subagentRows(history).map(e => [e.task, e.state])).toEqual([["a1", "running"], ["b2", "running"]]);
+    await rt2.close();
+  });
+
+  it("a resumed child stays while its second start row is in the ring, though its first has left", async () => {
+    const h = machineRuns();
+    const { rt, ws, run } = await begin(h);
+    const chunk = "x".repeat(Math.ceil(TRANSCRIPT_BYTES / 4));
+    h.emit(run, started("a1", "sess-1"));
+    h.emit(run, ended("a1", "sess-1", "done"));
+    for (let i = 0; i < 3; i++) h.emit(run, { type: "turn.delta", sessionId: "sess-1", kind: "text", text: chunk });
+    // The agent sends the finished child a message and it runs again under the same id.
+    h.emit(run, started("a1", "sess-1"));
+    for (let i = 0; i < 2; i++) h.emit(run, { type: "turn.delta", sessionId: "sess-1", kind: "text", text: chunk });
+    await until(async () => subagentRows(await rt.sessions.history(ws.id)).length === 1);
+    expect((await rt.sessions.list(ws.id))[0]!.subagents?.map(c => [c.id, c.state])).toEqual([["a1", "running"]]);
+    await rt.close();
+  });
+
+  it("each start is handed the version the agent's binary answered the probe with, and none where it answered nothing", async () => {
+    const probe: HarnessCatalogAnswer = { version: "2.1.288", models: [], efforts: [], permissionModes: [] };
+    const told = machineRuns(undefined, probe);
+    const one = await begin(told);
+    expect(told.versions).toEqual(["2.1.288"]);
+    await one.rt.close();
+    const silent = machineRuns(undefined, null);
+    const two = await begin(silent);
+    expect(silent.versions).toEqual([undefined]);
+    await two.rt.close();
   });
 
   it("a child whose rows the transcript's ring dropped is gone from the next listing", async () => {
@@ -218,7 +277,7 @@ describe("one subagent stopped by itself", () => {
   it("a refusal comes back in the agent's words with the task named, and a harness with no such stop says so", async () => {
     const h = machineRuns(async task => ({ outcome: "refused", error: `No task found with ID: ${task}` }));
     const { rt, handle } = await begin(h);
-    expect(await rt.sessions.interrupt(handle.id, undefined, "zz9")).toEqual({ outcome: "refused", error: "Claude Code would not stop zz9: No task found with ID: zz9" });
+    expect(await rt.sessions.interrupt(handle.id, undefined, "zz9")).toEqual({ outcome: "refused", error: "Claude Code would not stop it: No task found with ID: zz9" });
     await rt.close();
 
     const bare = machineRuns();

@@ -133,9 +133,9 @@
       },
       "replies": {
         "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"id\":\"sess-1\",\"threadId\":\"thread-7f3a9c21e4b5\",\"claudeSessionId\":\"cs-1\",\"prompt\":\"fix the \u0085 build\",\"costUsd\":0.1},{\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"running\",\"id\":\"sess-2\",\"threadId\":\"thread-7f3a9c21e4b5\",\"claudeSessionId\":\"cs-1\",\"costUsd\":0.2},{\"workspaceId\":\"ws-1\",\"harness\":\"codex\",\"status\":\"completed\",\"id\":\"sess-3\",\"threadId\":\"thread-b0b0b0b0c1c1\"}]}",
-        "sessions.interrupt": "{\"id\":1,\"ok\":true,\"outcome\":\"refused\",\"error\":\"Claude Code would not stop zz9: No task found with ID: zz9\"}"
+        "sessions.interrupt": "{\"id\":1,\"ok\":true,\"outcome\":\"refused\",\"error\":\"Claude Code would not stop it: No task found with ID: zz9\"}"
       },
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"thread thread-7f3a9c21e4b5 task zz9: Claude Code would not stop zz9: No task found with ID: zz9\"}],\"structuredContent\":{\"threadId\":\"thread-7f3a9c21e4b5\",\"task\":\"zz9\",\"outcome\":\"refused\",\"error\":\"Claude Code would not stop zz9: No task found with ID: zz9\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"thread thread-7f3a9c21e4b5 task zz9: Claude Code would not stop it: No task found with ID: zz9\"}],\"structuredContent\":{\"threadId\":\"thread-7f3a9c21e4b5\",\"task\":\"zz9\",\"outcome\":\"refused\",\"error\":\"Claude Code would not stop it: No task found with ID: zz9\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
       "asked": [
         {
           "op": "sessions.list"

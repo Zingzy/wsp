@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { buildCommand, buildEnv, newSessionId, PROJECT_DIR_ENV, SAVED_SPEND_TAIL_BYTES, savedSpendCommand, userMessageLine } from "../src/landmines.js";
+import { buildCommand, buildEnv, forwardsSubagentText, newSessionId, PROJECT_DIR_ENV, SAVED_SPEND_TAIL_BYTES, savedSpendCommand, userMessageLine } from "../src/landmines.js";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -114,14 +114,23 @@ describe("buildCommand", () => {
     expect(cmd).toContain("--output-format stream-json");
     expect(cmd).toContain("--input-format stream-json");
     expect(cmd).toContain("--verbose");
-    // A subagent's own text and thinking reach the stream only with this; its tool calls come without it.
-    expect(cmd).toContain("--forward-subagent-text");
     expect(cmd).toContain("--dangerously-skip-permissions");
     expect(cmd).toContain(`--session-id ${sessionId}`);
     // stdin is the message channel now: never closed on the command, never a positional prompt
     expect(cmd).not.toContain("</dev/null");
     expect(cmd).toMatch(/claude -p --/);
     expect(cmd).not.toContain("--resume");
+  });
+
+  it("forwards a subagent's own text and thinking only where asked, since an older CLI exits on the flag", () => {
+    expect(buildCommand({ sessionId, subagentText: true })).toContain("--forward-subagent-text");
+    expect(buildCommand({ sessionId })).not.toContain("--forward-subagent-text");
+  });
+
+  it("takes the subagent text flag from 2.1.270 on, the first CLI whose SDK passes it", () => {
+    for (const version of ["2.1.270", "2.1.288", "2.2.0", "3.0.0"]) expect(forwardsSubagentText(version), version).toBe(true);
+    for (const version of ["2.1.269", "2.0.99", "1.9.300", "", "not a version"]) expect(forwardsSubagentText(version), version).toBe(false);
+    expect(forwardsSubagentText(undefined)).toBe(false);
   });
 
   it("uses --resume instead of --session-id when resuming", () => {

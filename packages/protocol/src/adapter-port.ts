@@ -124,15 +124,14 @@ export type AdapterEvent =
     }
   | {
       /** One of the agent's own subagents started or ended, once per change: `task` is the agent's own id for it, what
-       * a stop names, and parentToolUseId the call that launched it, which its lines carry. A start carries what the
-       * agent called it and asked it; an end carries the agent's summary where it gave one. */
+       * a stop names, and parentToolUseId the call that launched it, which its lines carry and whose input holds what
+       * it was asked. A start carries what the agent called it; an end the agent's summary where it gave one. */
       type: "subagent";
       sessionId: string;
       task: string;
       state: SubagentState;
       parentToolUseId?: string;
       title?: string;
-      prompt?: string;
       summary?: string;
       /** How deep under the thread's own agent it was spawned, 1 for one the agent itself started. */
       depth?: number;
