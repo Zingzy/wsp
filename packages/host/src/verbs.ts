@@ -3771,6 +3771,12 @@ async function slateTarget(client: HostClient, ref: string | undefined, env: Ver
   return token !== undefined ? { turnToken: token } : {};
 }
 
+/** A slate op's answer without the reply frame's own id and ok, so both doors print the answer alone. */
+async function slateAsk<T>(client: HostClient, op: string, params: Record<string, unknown>): Promise<T> {
+  const { id: _id, ok: _ok, ...answer } = await client.request<Record<string, unknown>>(op, params);
+  return answer as T;
+}
+
 /** A slate file as a write sends it: shorthand for .slate, the stored document for .json. */
 function slateFile(ctx: VerbContext, path: string, ops?: boolean): { lines: string } | { document: Record<string, unknown> } | { ops: unknown[] } {
   if (ctx.elsewhere === true) throw usageRefusal(`${path} is a file on your machine, which this host cannot read:`, "pass the slate to the slate tools as lines instead.");
@@ -3929,7 +3935,7 @@ const SLATE_VERBS: readonly Verb[] = [
       if ("ops" in sent) throw usageRefusal(`${file} holds a list, which is a patch:`, "write it with wsp slate patch.");
       const client = await ctx.client();
       const ifVersion = ifVersionOf(ctx);
-      const wrote = await client.request<SlateWriteAnswer>("slates.set", { ...(await slateTarget(client, ref, ctx.env)), ...sent, ...(ifVersion !== undefined ? { ifVersion } : {}) });
+      const wrote = await slateAsk<SlateWriteAnswer>(client, "slates.set", { ...(await slateTarget(client, ref, ctx.env)), ...sent, ...(ifVersion !== undefined ? { ifVersion } : {}) });
       ctx.out.emit(wrote, slateWriteLine(wrote));
       return 0;
     },
@@ -3939,7 +3945,7 @@ const SLATE_VERBS: readonly Verb[] = [
       output: SlateWriteOut,
       call: async ({ thread, lines, document, if_version }, deps) => {
         const client = await deps.client();
-        const wrote = await client.request<SlateWriteAnswer>("slates.set", { ...(await slateTarget(client, thread, deps.env)), ...pick({ lines, document, ifVersion: if_version }) });
+        const wrote = await slateAsk<SlateWriteAnswer>(client, "slates.set", { ...(await slateTarget(client, thread, deps.env)), ...pick({ lines, document, ifVersion: if_version }) });
         return asText(slateWriteLine(wrote), wrote);
       },
     }),
@@ -3956,7 +3962,7 @@ const SLATE_VERBS: readonly Verb[] = [
       if ("document" in sent) throw usageRefusal(`${file} holds a whole slate, not a patch:`, "write it with wsp slate set.");
       const client = await ctx.client();
       const ifVersion = ifVersionOf(ctx);
-      const wrote = await client.request<SlateWriteAnswer>("slates.patch", { ...(await slateTarget(client, ref, ctx.env)), ...sent, ...(ifVersion !== undefined ? { ifVersion } : {}) });
+      const wrote = await slateAsk<SlateWriteAnswer>(client, "slates.patch", { ...(await slateTarget(client, ref, ctx.env)), ...sent, ...(ifVersion !== undefined ? { ifVersion } : {}) });
       ctx.out.emit(wrote, slateWriteLine(wrote));
       return 0;
     },
@@ -3966,7 +3972,7 @@ const SLATE_VERBS: readonly Verb[] = [
       output: SlateWriteOut,
       call: async ({ thread, lines, ops, if_version }, deps) => {
         const client = await deps.client();
-        const wrote = await client.request<SlateWriteAnswer>("slates.patch", { ...(await slateTarget(client, thread, deps.env)), ...pick({ lines, ops, ifVersion: if_version }) });
+        const wrote = await slateAsk<SlateWriteAnswer>(client, "slates.patch", { ...(await slateTarget(client, thread, deps.env)), ...pick({ lines, ops, ifVersion: if_version }) });
         return asText(slateWriteLine(wrote), wrote);
       },
     }),
@@ -3988,7 +3994,7 @@ const SLATE_VERBS: readonly Verb[] = [
       if (rest.length > 1 || Object.keys(values).length === 0) throw usageRefusal("wsp slate state takes state.<path>=<json> words, after a thread where it is not yours.", usageIs(ctx));
       const client = await ctx.client();
       const ifVersion = ifVersionOf(ctx);
-      const wrote = await client.request<SlateStateAnswer>("slates.state", { ...(await slateTarget(client, rest[0], ctx.env)), values, sketch: true, ...(ifVersion !== undefined ? { ifVersion } : {}) });
+      const wrote = await slateAsk<SlateStateAnswer>(client, "slates.state", { ...(await slateTarget(client, rest[0], ctx.env)), values, sketch: true, ...(ifVersion !== undefined ? { ifVersion } : {}) });
       const out = { version: wrote.version, sketch: wrote.sketch ?? "", problems: wrote.problems ?? [] };
       ctx.out.emit(out, out.sketch);
       return 0;
@@ -3999,7 +4005,7 @@ const SLATE_VERBS: readonly Verb[] = [
       output: { version: z.number().int(), sketch: z.string(), problems: SlateProblemOut },
       call: async ({ thread, values, if_version }, deps) => {
         const client = await deps.client();
-        const wrote = await client.request<SlateStateAnswer>("slates.state", { ...(await slateTarget(client, thread, deps.env)), values, sketch: true, ...pick({ ifVersion: if_version }) });
+        const wrote = await slateAsk<SlateStateAnswer>(client, "slates.state", { ...(await slateTarget(client, thread, deps.env)), values, sketch: true, ...pick({ ifVersion: if_version }) });
         const out = { version: wrote.version, sketch: wrote.sketch ?? "", problems: wrote.problems ?? [] };
         return asText(out.sketch, out);
       },
@@ -4015,7 +4021,7 @@ const SLATE_VERBS: readonly Verb[] = [
       if (ctx.args.length > 1) throw usageRefusal("wsp slate read takes one thread at most.", usageIs(ctx));
       const client = await ctx.client();
       const values = flagList(ctx.flags, "values");
-      const read = await client.request<SlateReadAnswer>("slates.read", { ...(await slateTarget(client, ctx.args[0], ctx.env)), ...(values.length > 0 ? { values } : {}), ...(ctx.flags["lines"] === true ? { lines: true } : {}), ...(ctx.flags["no-sketch"] === true ? { sketch: false } : {}) });
+      const read = await slateAsk<SlateReadAnswer>(client, "slates.read", { ...(await slateTarget(client, ctx.args[0], ctx.env)), ...(values.length > 0 ? { values } : {}), ...(ctx.flags["lines"] === true ? { lines: true } : {}), ...(ctx.flags["no-sketch"] === true ? { sketch: false } : {}) });
       ctx.out.emit(read, slateReadLine(read));
       return 0;
     },
@@ -4025,7 +4031,7 @@ const SLATE_VERBS: readonly Verb[] = [
       output: { schema: z.number().int(), version: z.number().int(), title: z.string().optional(), document: z.record(z.string(), z.unknown()).nullable(), lines: z.string().optional(), state: z.record(z.string(), z.unknown()), pipes: z.record(z.string(), z.unknown()), feeds: z.record(z.string(), z.unknown()), values: z.record(z.string(), z.unknown()), problems: SlateProblemOut, annotations: z.array(z.unknown()), consents: z.record(z.string(), z.unknown()), sketch: z.string().optional() },
       call: async ({ thread, values, lines, sketch }, deps) => {
         const client = await deps.client();
-        const read = await client.request<SlateReadAnswer>("slates.read", { ...(await slateTarget(client, thread, deps.env)), ...pick({ values, lines, sketch }) });
+        const read = await slateAsk<SlateReadAnswer>(client, "slates.read", { ...(await slateTarget(client, thread, deps.env)), ...pick({ values, lines, sketch }) });
         return asText(slateReadLine(read), read);
       },
     }),
@@ -4039,7 +4045,7 @@ const SLATE_VERBS: readonly Verb[] = [
     run: async ctx => {
       if (ctx.args.length > 1) throw usageRefusal("wsp slate undo takes one thread at most.", usageIs(ctx));
       const client = await ctx.client();
-      const undone = await client.request<SlateUndoAnswer>("slates.undo", await slateTarget(client, ctx.args[0], ctx.env));
+      const undone = await slateAsk<SlateUndoAnswer>(client, "slates.undo", await slateTarget(client, ctx.args[0], ctx.env));
       ctx.out.emit(undone, undone.sketch);
       return 0;
     },
@@ -4049,7 +4055,7 @@ const SLATE_VERBS: readonly Verb[] = [
       output: { version: z.number().int(), sketch: z.string() },
       call: async ({ thread }, deps) => {
         const client = await deps.client();
-        const undone = await client.request<SlateUndoAnswer>("slates.undo", await slateTarget(client, thread, deps.env));
+        const undone = await slateAsk<SlateUndoAnswer>(client, "slates.undo", await slateTarget(client, thread, deps.env));
         return asText(undone.sketch, undone);
       },
     }),
@@ -4063,7 +4069,7 @@ const SLATE_VERBS: readonly Verb[] = [
     run: async ctx => {
       if (ctx.args.length > 1) throw usageRefusal("wsp slate clear takes one thread at most.", usageIs(ctx));
       const client = await ctx.client();
-      const cleared = await client.request<SlateClearAnswer>("slates.clear", await slateTarget(client, ctx.args[0], ctx.env));
+      const cleared = await slateAsk<SlateClearAnswer>(client, "slates.clear", await slateTarget(client, ctx.args[0], ctx.env));
       ctx.out.emit(cleared, `slate v${cleared.version}, cleared`);
       return 0;
     },
@@ -4073,7 +4079,7 @@ const SLATE_VERBS: readonly Verb[] = [
       output: { version: z.number().int() },
       call: async ({ thread }, deps) => {
         const client = await deps.client();
-        const cleared = await client.request<SlateClearAnswer>("slates.clear", await slateTarget(client, thread, deps.env));
+        const cleared = await slateAsk<SlateClearAnswer>(client, "slates.clear", await slateTarget(client, thread, deps.env));
         return asText(`slate v${cleared.version}, cleared`, cleared);
       },
     }),

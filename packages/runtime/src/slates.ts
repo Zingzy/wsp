@@ -10,6 +10,7 @@ import {
   getSlateState,
   notFoundRefusal,
   parseSlateStatePath,
+  resolveSlateProp,
   printSlate,
   scopeOf,
   setSlateState,
@@ -605,8 +606,8 @@ export function createSlates(deps: SlatesDeps): Slates {
         let carried: SlateJson = Object.fromEntries(named.map(path => [path, defanged(valueOf(path))]));
         const labelled = owner !== undefined ? owner.label : piece.props?.["label"];
         const label = typeof labelled === "string" ? labelled.slice(0, 80) : undefined;
-        const keyField = typeof piece.props?.["key"] === "string" ? piece.props["key"] : undefined;
-        const key = row !== undefined && keyField !== undefined ? resolveIn(new Map([["item", row.item]]), `item.${keyField}`) : undefined;
+        const keyProp = piece.props?.["key"];
+        const key = row === undefined || keyProp === undefined ? undefined : resolveSlateProp(keyProp, { resolve: path => (path === "index" ? row.index : resolveIn(new Map([["item", row.item]]), path)), row, now });
         const line = (w: SlateJson): string =>
           `slate: ${JSON.stringify({ v: 1, kind: "action", thread: threadWord(p.threadId), version: r.version, piece: p.piece, ...(label !== undefined ? { label } : {}), event: p.event, action: action.do, ...(row !== undefined ? { index: row.index } : {}), ...(key !== undefined ? { key } : {}), ...(named.length > 0 ? { with: w } : {}), by: "person", at: new Date(now).toISOString() })}`;
         let prompt = `${action.text}\n\n${line(carried)}`;
