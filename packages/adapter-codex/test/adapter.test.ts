@@ -5,8 +5,8 @@
 // CODEX_HOME.
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { asideWallLine, codexKeyRefusedLine, codexMissingEnvLine, codexNotSignedInLine, codexReconnectLine, PERMISSION_ALLOW, PERMISSION_DENY } from "@wsp/protocol";
-import type { AdapterEvent, ExecStream, ExecStreamFactory } from "@wsp/protocol";
+import { asideWallLine, CODEX_LEGACY_HISTORY, codexKeyRefusedLine, codexMissingEnvLine, codexNotSignedInLine, codexReconnectLine, PERMISSION_ALLOW, PERMISSION_DENY } from "@wsp/protocol";
+import type { AdapterEvent, ExecStream, ExecStreamFactory, TurnResult } from "@wsp/protocol";
 import { createCodexAdapter, creditsOf, type CodexSession } from "../src/adapter.js";
 
 const THREAD_ID = "01a0e2c1-5d10-7b42-9a6e-3f1c2d4b5a60";
@@ -867,7 +867,7 @@ describe("what a rewind needs of a Codex turn", () => {
       for (const line of seed) void w.stream.write(line);
       return w;
     });
-    await adapterOver(launch).revert({ session: THREAD_ID, beforeTurn: TURN_ID, cwd: "/root/app" });
+    expect(await adapterOver(launch).revert({ session: THREAD_ID, beforeTurn: TURN_ID, cwd: "/root/app" })).toBeUndefined();
     expect(launch.calls[0]!.command).toBe("cd '/root/app' && codex app-server -c tools.update_plan.enabled='true'");
     expect(parse(launch.calls[0]!.input!.at(-1)!)).toMatchObject({ method: "thread/resume", params: { threadId: THREAD_ID } });
     expect(launch.wires[0]!.written.find(m => m.method === "thread/revert")).toEqual({ id: "wsp-revert", method: "thread/revert", params: { threadId: THREAD_ID, beforeTurnId: TURN_ID } });
@@ -875,18 +875,70 @@ describe("what a rewind needs of a Codex turn", () => {
     expect(launch.wires[0]!.closed).toBe(true);
   });
 
-  it("rejects in the server's words when it will not cut, so the rewind is refused whole", async () => {
-    const launch = launcher(seed => {
+  /** A server whose thread answers in the history mode given, with its turns newest first in pages of the size
+   * given, and the answer to thread/revert given. */
+  const history = (o: { mode?: string; turns?: string[]; pageSize?: number; repeatCursor?: boolean; revert?: string }) =>
+    launcher(seed => {
       const w = wire({
         onWrite: (message, self) => {
-          if (message.method === "thread/resume") self.push(`{"id":"wsp-thread","result":{"thread":{"id":"${THREAD_ID}"}}}`);
-          if (message.method === "thread/revert") self.push('{"error":{"code":-32600,"message":"thread history is not paginated"},"id":"wsp-revert"}');
+          const params = message.params as Json;
+          if (message.method === "thread/resume")
+            self.push(`{"id":"wsp-thread","result":{"thread":{"id":"${THREAD_ID}"${o.mode !== undefined ? `,"historyMode":"${o.mode}"` : ""},"turns":[]},"model":"gpt-5.6-sol"}}`);
+          if (message.method === "thread/turns/list") {
+            const from = params.cursor === null ? 0 : Number(params.cursor);
+            const size = Math.min(Number(params.limit), o.pageSize ?? 100);
+            const data = (o.turns ?? []).slice(from, from + size).map(id => ({ id, items: [], itemsView: "summary", status: "completed" }));
+            const next = o.repeatCursor === true ? "0" : from + size < (o.turns ?? []).length ? String(from + size) : null;
+            self.push(JSON.stringify({ id: message.id, result: { data, nextCursor: next, backwardsCursor: null } }));
+          }
+          if (message.method === "thread/revert") self.push(o.revert ?? `{"id":"wsp-revert","result":{"thread":{"id":"${THREAD_ID}","turns":[]}}}`);
         },
       });
       for (const line of seed) void w.stream.write(line);
       return w;
     });
-    await expect(adapterOver(launch).revert({ session: THREAD_ID, beforeTurn: TURN_ID })).rejects.toThrow("codex would not cut the thread: thread history is not paginated");
+  const listed = (launch: Launch) => launch.wires[0]!.written.filter(m => m.method === "thread/turns/list").map(m => m.params);
+  const done = (text: string): TurnResult => ({ status: "completed", text });
+  const NEWEST_FIRST = ["t9", "t8", "t7", "t6", "t5"];
+
+  it("rejects in the server's words when it will not cut, so the rewind is refused whole", async () => {
+    const launch = history({ mode: "paginated", revert: `{"error":{"code":-32603,"message":"timed out shutting down thread ${THREAD_ID} before revert"},"id":"wsp-revert"}` });
+    await expect(adapterOver(launch).revert({ session: THREAD_ID, beforeTurn: TURN_ID })).rejects.toThrow(`codex would not cut the thread: timed out shutting down thread ${THREAD_ID} before revert`);
+  });
+
+  it("without the turn's id finds the boundary by count in the thread's turns, newest first across pages", async () => {
+    const launch = history({ mode: "paginated", turns: NEWEST_FIRST, pageSize: 2 });
+    expect(await adapterOver(launch).revert({ session: THREAD_ID, turns: [done("a"), done("b"), done("c")] })).toBeUndefined();
+    expect(listed(launch)).toEqual([
+      { threadId: THREAD_ID, cursor: null, limit: 3, sortDirection: "desc", itemsView: "summary" },
+      { threadId: THREAD_ID, cursor: "2", limit: 1, sortDirection: "desc", itemsView: "summary" },
+    ]);
+    expect(launch.wires[0]!.written.find(m => m.method === "thread/revert")!.params).toEqual({ threadId: THREAD_ID, beforeTurnId: "t7" });
+  });
+
+  it("counts only the cut turns the server opened: not one refused for a sign-in, nor one the adapter failed before the server took it", async () => {
+    const launch = history({ mode: "paginated", turns: NEWEST_FIRST });
+    const refused: TurnResult = { status: "failed", error: NOT_SIGNED_IN, refusal: "sign-in" };
+    const unopened: TurnResult = { status: "failed", error: "codex could not open the thread: no rollout found for thread id 01a0" };
+    await adapterOver(launch).revert({ session: THREAD_ID, turns: [refused, done("a"), unopened, undefined, { status: "interrupted" }] });
+    expect(listed(launch).map(p => (p as Json).limit)).toEqual([3]);
+    expect(launch.wires[0]!.written.find(m => m.method === "thread/revert")!.params).toEqual({ threadId: THREAD_ID, beforeTurnId: "t7" });
+  });
+
+  it("refuses a server that hands back a page it already gave, before asking any cut", async () => {
+    const launch = history({ mode: "paginated", turns: NEWEST_FIRST, pageSize: 1, repeatCursor: true });
+    await expect(adapterOver(launch).revert({ session: THREAD_ID, turns: [done("a"), done("b"), done("c")] })).rejects.toThrow("codex could not list the thread's turns: it handed back a page it already gave");
+    expect(launch.wires[0]!.written.some(m => m.method === "thread/revert")).toBe(false);
+  });
+
+  it("a thread an older Codex made answers kept, by its history mode before any request and by the server's own refusal after one", async () => {
+    const legacy = history({ mode: "legacy", turns: NEWEST_FIRST });
+    expect(await adapterOver(legacy).revert({ session: THREAD_ID, beforeTurn: TURN_ID })).toEqual({ kept: CODEX_LEGACY_HISTORY });
+    expect(legacy.wires[0]!.written.some(m => m.method === "thread/revert" || m.method === "thread/turns/list")).toBe(false);
+    expect(legacy.wires[0]!.closed).toBe(true);
+
+    const unsaid = history({ turns: NEWEST_FIRST, revert: '{"error":{"code":-32600,"message":"thread/revert only supports paginated threads"},"id":"wsp-revert"}' });
+    expect(await adapterOver(unsaid).revert({ session: THREAD_ID, turns: [done("a")] })).toEqual({ kept: CODEX_LEGACY_HISTORY });
   });
 });
 

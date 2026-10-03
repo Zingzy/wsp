@@ -1616,6 +1616,15 @@ export function rewindNoAnchorLine(agent: string): string {
   return `${agent} left no point in that reply to cut its conversation at, so only the files can go back`;
 }
 
+/** A rewind whose harness kept the conversation whole, `why` in its own clause: what moved and what stayed. */
+export function rewindKeptLine(why: string, filesBack: boolean): string {
+  return `${why}; ${filesBack ? "the files went back and every turn stays" : "every turn stays"}`;
+}
+
+/** Why a Codex thread's conversation cannot be cut: the server cuts only the paginated history a Codex from 0.151.0
+ * on writes. */
+export const CODEX_LEGACY_HISTORY = "a Codex older than 0.151.0 made this thread and keeps its history in a form thread/revert cannot cut";
+
 /** A rewind to the thread's latest reply, after which nothing stands to cut. */
 export const REWIND_LATEST_LINE = "that is the thread's latest reply, so nothing comes after it to rewind";
 

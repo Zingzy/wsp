@@ -13,6 +13,7 @@ import {
   PERMISSION_ALLOW,
   PERMISSION_DENY,
   ASIDE_WALL_MS,
+  CODEX_LEGACY_HISTORY,
   RUN_EXIT_MS,
   asideWallLine,
   codexKeyRefusedLine,
@@ -65,6 +66,7 @@ import {
   threadResumeLine,
   threadRevertLine,
   threadStartLine,
+  threadTurnsListLine,
   turnInterruptLine,
   turnStartLine,
   turnSteerLine,
@@ -200,6 +202,16 @@ function failureWords(message: string, login: string, keyEnv?: string): { line: 
   const missing = MISSING_ENV.exec(message);
   return missing === null ? undefined : { line: codexMissingEnvLine(missing[1]!) };
 }
+
+/** The words a server that refuses to cut a legacy thread says it in (thread_processor.rs, 0.155.1). */
+const PAGINATED_ONLY = "only supports paginated threads";
+
+/** The start of every failure this adapter words itself before the server opened the turn. */
+const NEVER_OPENED = "codex could not ";
+
+/** Whether the server opened a turn that ended this way, so the thread's own history holds it: a turn refused for want
+ * of a sign-in, or one the adapter failed before the server took it, left none there. */
+const serverOpened = (result: TurnResult | undefined): boolean => result?.refusal === undefined && result?.error?.startsWith(NEVER_OPENED) !== true;
 
 function rec(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
@@ -387,8 +399,9 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     turnLine?: (threadId: string) => string;
     /** A side question's own run: every approval it raises is declined here, it joins no registry, and it has a wall. */
     aside?: true;
-    /** A run that asks the thread one thing and no turn (a revert): declined and unregistered as a side question is. */
-    sideRun?: true;
+    /** A run that asks the thread things and runs no turn (a revert), declined and unregistered as a side question
+     * is: handed the thread's answer and each later answer of its own, it names the next request or how the run ends. */
+    sideRun?: (id: RequestId, answer: Record<string, unknown> | undefined) => string | TurnResult;
     onEvent: (event: AdapterEvent) => void;
   }): CodexSession => {
     const { stream, localId, startedAt } = o;
@@ -500,7 +513,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
         void stream.write(refuseRequestLine(id, method));
         return;
       }
-      if (o.aside === true || o.sideRun === true) {
+      if (o.aside === true || o.sideRun !== undefined) {
         void stream.write(decisionLine(id, "decline"));
         return;
       }
@@ -525,16 +538,23 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
       emit({ type: "permission.ask", sessionId: threadId, ask });
     };
 
+    const side = (id: RequestId, answer: Record<string, unknown> | undefined): void => {
+      const next = o.sideRun!(id, answer);
+      if (typeof next === "string") void stream.write(next);
+      else finish(next);
+    };
+
     const onResponse = (id: RequestId, result: unknown): void => {
       if (id === REQUEST.thread) {
         const answer = rec(result);
         const thread = rec(answer?.thread);
         announce(str(thread?.id), str(answer?.model) ?? str(thread?.model), str(answer?.cwd) ?? str(thread?.cwd));
-        if (o.turnLine !== undefined) void stream.write(o.turnLine(threadId));
+        if (o.sideRun !== undefined) side(id, answer);
+        else if (o.turnLine !== undefined) void stream.write(o.turnLine(threadId));
         return;
       }
-      if (id === REQUEST.revert) {
-        finish({ status: "completed", durationMs: Date.now() - startedAt });
+      if (o.sideRun !== undefined && (id === REQUEST.turns || id === REQUEST.revert)) {
+        side(id, rec(result));
         return;
       }
       if (id === REQUEST.account) {
@@ -569,6 +589,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
         return;
       }
       if (id === REQUEST.revert) finish({ status: "failed", error: `codex would not cut the thread: ${message}` });
+      else if (id === REQUEST.turns) finish({ status: "failed", error: `codex could not list the thread's turns: ${message}` });
       else if (id === REQUEST.thread) finish({ status: "failed", error: `codex could not open the thread: ${message}` });
       else if (id === REQUEST.turn || id === REQUEST.initialize) finish({ status: "failed", error: `codex could not start the turn: ${message}` });
     };
@@ -763,7 +784,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
         await endAfterResult(stream, graceMs, graceMs);
       },
     };
-    if (o.aside !== true && o.sideRun !== true) sessions.set(localId, session);
+    if (o.aside !== true && o.sideRun === undefined) sessions.set(localId, session);
     return session;
   };
 
@@ -813,19 +834,53 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
   };
 
   /** The thread's own history cut before one of its turns, on a server run of its own that runs no turn: the
-   * thread resumed, then thread/revert, then EOF. */
+   * thread resumed, then thread/revert, then EOF. Without the turn's own id the boundary is found by count, the way
+   * T3 Code's CodexThreadRevert.ts does it (MIT): the thread's turns newest first, page by page, the count-th one the
+   * first cut. */
   const revert: SessionReverter = async o => {
     const command = buildCommand({ ...(o.cwd !== undefined ? { cwd: o.cwd } : {}), ...(deps.launch?.program !== undefined ? { launch: { program: deps.launch.program } } : {}) });
     const resume = threadResumeLine({ threadId: o.session, ...(o.cwd !== undefined ? { cwd: o.cwd } : {}), access: accessParams("read-only") });
+    let legacy = false;
+    let remaining = "turns" in o ? o.turns.filter(serverOpened).length : 0;
+    let beforeTurnId = "beforeTurn" in o ? o.beforeTurn : undefined;
+    let cursor: string | null = null;
+    const seen = new Set<string | null>();
+    let threadId = o.session;
+    const done = (): TurnResult => ({ status: "completed" });
+    const page = (): string => {
+      seen.add(cursor);
+      return threadTurnsListLine({ threadId, cursor, limit: Math.min(remaining, 100) });
+    };
+    const cutAt = (): string | TurnResult => (beforeTurnId === undefined ? done() : threadRevertLine({ threadId, beforeTurnId }));
     const result = await follow({
       stream: deps.exec(command, { env: { ...env }, input: [initializeLine(), INITIALIZED_LINE, resume] }),
       localId: randomUUID(),
       startedAt: Date.now(),
       command,
-      turnLine: threadId => threadRevertLine({ threadId, beforeTurnId: o.beforeTurn }),
-      sideRun: true,
+      sideRun: (id, answer) => {
+        if (id === REQUEST.thread) {
+          const thread = rec(answer?.thread);
+          threadId = str(thread?.id) ?? threadId;
+          legacy = thread?.historyMode === "legacy";
+          if (legacy) return done();
+          return beforeTurnId === undefined && remaining > 0 ? page() : cutAt();
+        }
+        if (id === REQUEST.turns) {
+          for (const turn of Array.isArray(answer?.data) ? answer.data : []) {
+            const turnId = str(rec(turn)?.id);
+            if (turnId === undefined) continue;
+            beforeTurnId = turnId;
+            if (--remaining === 0) break;
+          }
+          cursor = str(answer?.nextCursor) ?? null;
+          if (remaining === 0 || cursor === null) return cutAt();
+          return seen.has(cursor) ? { status: "failed", error: "codex could not list the thread's turns: it handed back a page it already gave" } : page();
+        }
+        return done();
+      },
       onEvent: () => {},
     }).finished;
+    if (legacy || (result.status === "failed" && result.error?.includes(PAGINATED_ONLY) === true)) return { kept: CODEX_LEGACY_HISTORY };
     if (result.status !== "completed") throw new Error(result.error ?? "codex did not cut the thread");
   };
 

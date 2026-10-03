@@ -6,7 +6,7 @@
 import type { AccessParams } from "./command.js";
 
 /** The ids of the requests a turn sends once each; a steer is numbered, since a turn may take several. */
-export const REQUEST = { initialize: "wsp-initialize", thread: "wsp-thread", turn: "wsp-turn", interrupt: "wsp-interrupt", revert: "wsp-revert", account: "wsp-account", rateLimits: "wsp-rate-limits" } as const;
+export const REQUEST = { initialize: "wsp-initialize", thread: "wsp-thread", turn: "wsp-turn", interrupt: "wsp-interrupt", revert: "wsp-revert", turns: "wsp-turns", account: "wsp-account", rateLimits: "wsp-rate-limits" } as const;
 
 /** A request id as the server sends one: a string or an integer, echoed back as it came. */
 export type RequestId = string | number;
@@ -65,6 +65,11 @@ export function threadForkLine(o: { threadId: string; cwd?: string; model?: stri
  * not the server's to touch here. */
 export function threadRevertLine(o: { threadId: string; beforeTurnId: string }): string {
   return line({ id: REQUEST.revert, method: "thread/revert", params: { threadId: o.threadId, beforeTurnId: o.beforeTurnId } });
+}
+
+/** One page of the thread's turns, newest first, each without its items: what a cut by count finds its boundary in. */
+export function threadTurnsListLine(o: { threadId: string; cursor: string | null; limit: number }): string {
+  return line({ id: REQUEST.turns, method: "thread/turns/list", params: { threadId: o.threadId, cursor: o.cursor, limit: o.limit, sortDirection: "desc", itemsView: "summary" } });
 }
 
 const textInput = (text: string) => ({ type: "text", text });

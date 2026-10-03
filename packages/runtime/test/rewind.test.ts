@@ -6,6 +6,7 @@
 // what is under test.
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  CODEX_LEGACY_HISTORY,
   DEVICE_OPS,
   REWIND_LATEST_LINE,
   REWIND_NO_CHECKPOINT_LINE,
@@ -15,10 +16,12 @@ import {
   foldThreads,
   rewindBesideLine,
   rewindChildrenLine,
+  rewindKeptLine,
   type AdapterEvent,
   type DaemonFrame,
   type DaemonResponse,
   type EventUnion,
+  type SessionReverter,
   type TurnResult,
 } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterFactory, type HarnessStartOptions, type Runtime } from "../src/runtime.js";
@@ -57,8 +60,14 @@ function fakeDaemon(o: { refuseCheckpoint?: boolean } = {}) {
  * cuts: "next" takes the cut on its next resume (Claude Code), "revert" cuts at once (Codex), "none" keeps its own. */
 function harness(o: {
   cuts: "next" | "revert" | "none";
-  reverted?: { session: string; beforeTurn: string; cwd?: string }[];
+  reverted?: Parameters<SessionReverter>[0][];
   revertFails?: boolean;
+  /** What the harness answers a revert with where it keeps the conversation whole. */
+  revertKeeps?: string;
+  /** Turns that name no anchor, as a Codex turn from before wsp kept one did. */
+  anchorless?: boolean;
+  /** Turns ended this way instead of completed, by their number. */
+  ends?: Record<number, TurnResult>;
   starts?: HarnessStartOptions[];
   hangFrom?: number;
 }): HarnessAdapterFactory {
@@ -68,9 +77,10 @@ function harness(o: {
     ...(o.cuts === "next" ? { resumesAt: true as const } : {}),
     ...(o.cuts === "revert"
       ? {
-          revert: async (r: { session: string; beforeTurn: string; cwd?: string }) => {
+          revert: async (r: Parameters<SessionReverter>[0]) => {
             o.reverted?.push(r);
-            if (o.revertFails === true) throw new Error("codex would not cut the thread: thread history is not paginated");
+            if (o.revertFails === true) throw new Error(`codex would not cut the thread: timed out shutting down thread ${FIRST_SESSION} before revert`);
+            return o.revertKeeps !== undefined ? { kept: o.revertKeeps } : undefined;
           },
         }
       : {}),
@@ -95,11 +105,11 @@ function harness(o: {
           },
         };
       }
-      const result: TurnResult = { status: "completed", text: `reply ${n}` };
+      const result: TurnResult = o.ends?.[n] ?? { status: "completed", text: `reply ${n}` };
       const finished = Promise.resolve().then(() => {
         emit({ type: "session.start", sessionId: SESSION });
         emit({ type: "turn.delta", sessionId: SESSION, kind: "text", text: `reply ${n}` });
-        emit({ type: "turn.anchor", sessionId: SESSION, anchor: `a${n}` });
+        if (o.anchorless !== true) emit({ type: "turn.anchor", sessionId: SESSION, anchor: `a${n}` });
         emit({ type: "turn.done", sessionId: SESSION, result });
         emit({ type: "session.end", sessionId: SESSION, exitCode: 0, sawResult: true });
         return result;
@@ -207,7 +217,7 @@ describe("rewinding a thread to one of its replies", () => {
   });
 
   it("cuts a harness that reverts at once before the first turn it drops, after the files", async () => {
-    const reverted: { session: string; beforeTurn: string; cwd?: string }[] = [];
+    const reverted: Parameters<SessionReverter>[0][] = [];
     const { ws, daemon } = await workspace(harness({ cuts: "revert", reverted }));
     const { threadId, turns } = await threeTurns(ws.id);
     daemon.frames.length = 0;
@@ -220,11 +230,36 @@ describe("rewinding a thread to one of its replies", () => {
     const { ws, daemon } = await workspace(harness({ cuts: "revert", reverted: [], revertFails: true }));
     const { threadId, turns } = await threeTurns(ws.id);
     daemon.frames.length = 0;
-    await expect(rt!.sessions.rewind(threadId, { turnId: turns[0]!, files: true })).rejects.toThrow("codex would not cut the thread: thread history is not paginated");
+    await expect(rt!.sessions.rewind(threadId, { turnId: turns[0]!, files: true })).rejects.toThrow(`codex would not cut the thread: timed out shutting down thread ${FIRST_SESSION} before revert`);
     expect(daemon.frames).toEqual([
       { op: "git.restore", cwd: daemon.checkout(), checkpoint: `refs/wsp/checkpoints/stub-1/${threadId}/${turns[0]}` },
       { op: "git.restore", cwd: daemon.checkout(), checkpoint: `refs/wsp/checkpoints/stub-1/${threadId}/${turns[0]}-before-1` },
     ]);
+    expect(await texts(ws.id)).toEqual(["reply 1", "reply 2", "reply 3"]);
+  });
+
+  it("a harness whose turns named no anchor is handed how each cut turn ended, and the transcript is cut", async () => {
+    const reverted: Parameters<SessionReverter>[0][] = [];
+    const refused: TurnResult = { status: "failed", error: "Codex is not signed in where this workspace runs", refusal: "sign-in" };
+    const { ws, daemon } = await workspace(harness({ cuts: "revert", reverted, anchorless: true, ends: { 2: refused } }));
+    const { threadId, turns } = await threeTurns(ws.id);
+    expect(await rt!.sessions.rewind(threadId, { turnId: turns[0]!, files: true })).toEqual({ turns: 2, files: 2 });
+    expect(reverted).toEqual([{ session: FIRST_SESSION, cwd: daemon.checkout(), turns: [refused, { status: "completed", text: "reply 3" }] }]);
+    expect(await texts(ws.id)).toEqual(["reply 1"]);
+  });
+
+  it("a harness that keeps a thread's conversation whole leaves the files back with Undo, keeps every turn, and says why", async () => {
+    const { ws, daemon } = await workspace(harness({ cuts: "revert", reverted: [], revertKeeps: CODEX_LEGACY_HISTORY }));
+    const { threadId, turns } = await threeTurns(ws.id);
+    daemon.frames.length = 0;
+    await expect(rt!.sessions.rewind(threadId, { turnId: turns[0]!, files: true })).rejects.toThrow(rewindKeptLine(CODEX_LEGACY_HISTORY, true));
+    expect(rewindKeptLine(CODEX_LEGACY_HISTORY, true)).toBe("a Codex older than 0.151.0 made this thread and keeps its history in a form thread/revert cannot cut; the files went back and every turn stays");
+    expect(daemon.frames.map(f => f["op"])).toEqual(["git.restore"]);
+    expect(await texts(ws.id)).toEqual(["reply 1", "reply 2", "reply 3"]);
+    expect(foldThreads(await rt!.sessions.list(ws.id)).find(t => t.threadId === threadId)?.rewoundAt).toEqual(expect.any(Number));
+    expect(await rt!.sessions.rewind(threadId, { undo: true })).toEqual({ turns: 0, files: 2 });
+
+    await expect(rt!.sessions.rewind(threadId, { turnId: turns[0]!, files: false })).rejects.toThrow(rewindKeptLine(CODEX_LEGACY_HISTORY, false));
     expect(await texts(ws.id)).toEqual(["reply 1", "reply 2", "reply 3"]);
   });
 
