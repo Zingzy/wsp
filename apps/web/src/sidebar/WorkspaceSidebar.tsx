@@ -65,9 +65,9 @@ import { PROJECT_WORDS, SECTION_WORDS } from "./words.js";
 import { SectionRow } from "./SectionRow.js";
 import { SettingUpSection } from "./SettingUpSection.js";
 
-type Fold = SidebarSection | "settled";
+type Fold = SidebarSection | "settled" | "setting-up";
 /** The folds a head can make: the one list has no head, so it never folds. */
-const FOLDS: readonly Fold[] = ["pinned", "needs-you", "settled"];
+const FOLDS: readonly Fold[] = ["pinned", "needs-you", "settled", "setting-up"];
 /** The sections a person has folded by their heads. Settled starts folded, since it holds the tiles a person has
  * stopped looking at; every live section starts open. */
 const FOLDED_KEY = "wsp:sidebar-folded";
@@ -590,7 +590,7 @@ export function WorkspaceSidebar() {
               </li>
             ) : null}
             {settledOpen ? tiles.settled.map(node => tileItem(node, 0, null, true)) : null}
-            <SettingUpSection />
+            <SettingUpSection collapsed={folded.includes("setting-up")} onToggle={() => toggleFold("setting-up")} />
             {ready && groups.length > 0 && launchItems.length + tiles.live.length + tiles.settled.length + made.length === 0 ? (
               <li data-thread-selection-safe>
                 <p data-k="no-workspaces" className="px-2 py-6 text-center text-[13px] text-muted-foreground">

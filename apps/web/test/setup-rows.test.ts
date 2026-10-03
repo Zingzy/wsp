@@ -102,6 +102,13 @@ describe("a setup as rows", () => {
     expect(rows.filter(r => r.id === "signins/codex").map(r => [r.state, r.wait?.code])).toEqual([["needs-you", "NEW-CODE"]]);
   });
 
+  it("names up to three of what a step put there, else the first two and how many more", () => {
+    const row = (n: number) => ({ id: `clis/${n}`, label: `cli${n}`, outcome: "installed" as const, step: "clis" as const });
+    const note = (n: number) => setupRows({ setup: { ...RUNNING, steps: [{ step: "clis", state: "done" }] }, applied: { hash: "h", at: "x", rows: Array.from({ length: n }, (_, i) => row(i + 1)) } }).find(r => r.id === "clis")?.note;
+    expect(note(3)).toBe("cli1, cli2, cli3.");
+    expect(note(9)).toBe("cli1, cli2 and 7 more.");
+  });
+
   it("says why on the step a setup stopped at, with no items under it", () => {
     const rows = setupRows({ setup: { ...RUNNING, state: "failed", said: "apt-get install exited 100", steps: [{ step: "floor", state: "failed" }] }, applied: { hash: "h", at: "x", rows: [{ id: "floor/stopped", label: "base", outcome: "failed", step: "floor" }] } });
     expect(rows.find(r => r.id === "floor")).toMatchObject({ state: "failed", said: "apt-get install exited 100" });

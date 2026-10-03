@@ -242,17 +242,16 @@ function WaitBlock({ row, onRetry }: { row: StepLine; onRetry: () => void }) {
           </Button>
         )}
       </div>
-      <p className={NOTE}>You can sign in later in Settings.</p>
+      <p className={NOTE}>{ADD_COMPUTER_WORDS.signInLater}</p>
     </>
   );
 }
 
 /** The steps of a setup with what each row asks: Retry where a row did not land, the wait where a sign-in does. */
-export function SetupList({ place, id = "setup" }: { place: PlaceView; id?: string }) {
+export function SetupList({ place, id = "setup", rows = setupRows(place) }: { place: PlaceView; id?: string; rows?: readonly StepLine[] }) {
   const api = useStore(s => s.api);
   const [refused, setRefused] = useState<Failure | null>(null);
   const [busy, setBusy] = useState(false);
-  const rows = setupRows(place);
   const retry = (): void => {
     setBusy(true);
     void retrySetup(api, place.id).then(failure => {
@@ -275,16 +274,17 @@ export function SetupList({ place, id = "setup" }: { place: PlaceView; id?: stri
 }
 
 function RunningView({ place }: { place: PlaceView }) {
+  const rows = setupRows(place);
+  const asks = rows.find(row => row.state === "needs-you" || row.state === "failed")?.id;
   const shown = useRef(false);
-  // The list opens on the first row that waits on the person, once, so a long run never hides the one act it asks for.
+  // The list opens on the first row that waits on the person, once, when it first appears, so a long run never hides
+  // the one act it asks for.
   useEffect(() => {
-    if (shown.current) return;
-    const row = document.querySelector("[data-add-computer] [data-step-row][data-state='needs-you'], [data-add-computer] [data-step-row][data-state='failed']");
-    if (row === null) return;
+    if (asks === undefined || shown.current) return;
     shown.current = true;
-    row.scrollIntoView({ block: "center" });
-  });
-  return <SetupList place={place} />;
+    document.querySelector(`[data-add-computer] [data-step-row="${CSS.escape(asks)}"]`)?.scrollIntoView({ block: "center" });
+  }, [asks]);
+  return <SetupList place={place} rows={rows} />;
 }
 
 /** The page after every row is done: one static wash in the theme's hero ink falling from the dialog's top edge, the
@@ -320,7 +320,7 @@ function SavedLine() {
   return (
     <span data-k="saved" className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
       <CheckIcon key={n} aria-hidden className="autosave-check size-3.5 shrink-0" />
-      Saved, you can finish later
+      {ADD_COMPUTER_WORDS.saved}
     </span>
   );
 }
@@ -395,7 +395,7 @@ export function AddComputerDialog() {
   const close = (): void => {
     if (flow.step === "running" && place !== undefined && setupStanding(place) === "running") {
       const placeId = place.id;
-      addNotice({ kind: "note", text: "Setup keeps going. wsp pings you when it needs you.", where: box, action: { word: "Open", run: () => openSetup(placeId) } });
+      addNotice({ kind: "note", text: ADD_COMPUTER_WORDS.keepsGoing, where: box, action: { word: "Open", run: () => openSetup(placeId) } });
     }
     closeAdd();
   };
@@ -468,15 +468,15 @@ export function AddComputerDialog() {
   const standing = place === undefined ? "running" : setupStanding(place);
   const rows = place === undefined ? [] : setupRows(place);
   const head = ((): { title: string; line?: string } => {
-    if (view === "where" || view === "hostkey") return { title: ADD_COMPUTER_WORDS.title, line: "A Linux box you have root on." };
+    if (view === "where" || view === "hostkey") return { title: ADD_COMPUTER_WORDS.title, line: ADD_COMPUTER_WORDS.where };
     if (view !== "running" && view !== "ready") return { title: STEP_TITLES[view] };
     if (standing === "failed") return { title: `Setup on ${box} failed` };
-    if (standing === "needs-you") return { title: `${box} needs you`, line: "Everything else is done." };
+    if (standing === "needs-you") return { title: `${box} needs you`, line: ADD_COMPUTER_WORDS.restDone };
     if (standing === "ready") {
       const took = place?.setup?.finishedAt === undefined ? undefined : Date.parse(place.setup.finishedAt) - Date.parse(place.setup.startedAt);
       return { title: `${box} is ready`, ...(took === undefined || !Number.isFinite(took) ? {} : { line: `Set up in ${fmtDuration(took)}.` }) };
     }
-    return { title: `Setting up ${box}`, line: "You can close this. Setup keeps going." };
+    return { title: `Setting up ${box}`, line: ADD_COMPUTER_WORDS.canClose };
   })();
   const figure = ((): { words: string; why: string } => {
     if (view === "running") {

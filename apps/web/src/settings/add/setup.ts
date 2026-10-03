@@ -5,6 +5,7 @@
 // the person chose them. Every reading of a setup's shape lives here, so a
 // step the host adds or a field a frame grows is met in this file alone.
 import { addFix } from "../adds.js";
+import { ADD_COMPUTER_WORDS } from "../format.js";
 import type { PlaceAddJob, PlaceProvisionRow, PlaceSetup, PlaceSetupEvent, PlaceSetupStep, PlaceView, PlaceWait } from "@wsp/protocol";
 
 /** A row's state as the marks draw it. */
@@ -57,7 +58,9 @@ export const SETUP_ROWS: readonly { step: PlaceSetupStep; name: string }[] = [
 
 const INSTALL = "Install wsp";
 
-const nameList = (rows: readonly PlaceProvisionRow[]): string | undefined => (rows.length === 0 ? undefined : `${rows.map(r => r.label).join(", ")}.`);
+/** What a step put there, by name: up to three, else the first two and how many more. */
+const nameList = (rows: readonly PlaceProvisionRow[]): string | undefined =>
+  rows.length === 0 ? undefined : rows.length <= 3 ? `${rows.map(r => r.label).join(", ")}.` : `${rows.slice(0, 2).map(r => r.label).join(", ")} and ${rows.length - 2} more.`;
 
 /** The setup on a computer as rows: Install wsp, then each step with the items of it that did not land under it,
  * the sign-ins under Agents. A step not started reads waiting; a sign-in that waits on the person carries its wait. */
@@ -87,7 +90,7 @@ function signInRows(setup: PlaceSetup | undefined, rows: readonly PlaceProvision
     .filter(r => r.step === "signins" && !waits.some(w => w.row === r.id))
     .map(r => ({ id: r.id, name: `${r.label} sign-in`, state: r.outcome === "failed" ? ("failed" as const) : ("done" as const), sub: true as const, ...(r.note === undefined ? {} : r.outcome === "failed" ? { said: r.note } : { note: r.note }), ...(r.ms === undefined ? {} : { ms: r.ms }) }));
   // The relay opens a waiting sign-in's page in the browser on this computer as the wait starts.
-  for (const w of waits) out.push({ id: w.row, name: `${w.label} sign-in`, state: "needs-you", sub: true, wait: w, ...(w.url !== undefined && w.state === "waiting" ? { note: "A tab opened in your browser." } : {}) });
+  for (const w of waits) out.push({ id: w.row, name: `${w.label} sign-in`, state: "needs-you", sub: true, wait: w, ...(w.url !== undefined && w.state === "waiting" ? { note: ADD_COMPUTER_WORDS.tabOpened } : {}) });
   return out;
 }
 

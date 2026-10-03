@@ -125,6 +125,14 @@ export const PLACE_STATE_WORDS = {
 /** What Add a computer says beyond PLACES_WORDS.sheet and the roads' own names. */
 export const ADD_COMPUTER_WORDS = {
   title: "Add a computer",
+  /** The dialog's sentences, each said once where the rows do not say it. */
+  where: "A Linux box you have root on.",
+  saved: "Saved, you can finish later",
+  canClose: "You can close this. Setup keeps going.",
+  restDone: "Everything else is done.",
+  keepsGoing: "Setup keeps going. wsp pings you when it needs you.",
+  signInLater: "You can sign in later in Settings.",
+  tabOpened: "A tab opened in your browser.",
   addCloud: "Add a cloud",
   replace: "Replace",
   signInsOn: (computer: string): string => `Sign-ins on ${computer}`,

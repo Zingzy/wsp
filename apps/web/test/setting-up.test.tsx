@@ -3,6 +3,7 @@
 // waits on the person or stopped, with its count, its line and its bar, each
 // opening Add a computer on that computer's running steps.
 import { act, cleanup, fireEvent, render } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PlaceSetup, PlaceView } from "@wsp/protocol";
 import { useStore } from "../src/protocol/store.js";
@@ -23,13 +24,19 @@ afterEach(() => {
   cleanup();
 });
 
+/** The section with its fold held as the sidebar holds it. */
+function Section() {
+  const [collapsed, setCollapsed] = useState(false);
+  return <SettingUpSection collapsed={collapsed} onToggle={() => setCollapsed(c => !c)} />;
+}
+
 describe("the sidebar's Setting up section", () => {
   const mount = () =>
     render(
       <TooltipProvider>
         <SidebarProvider defaultOpen>
           <ul>
-            <SettingUpSection />
+            <Section />
           </ul>
         </SidebarProvider>
       </TooltipProvider>,

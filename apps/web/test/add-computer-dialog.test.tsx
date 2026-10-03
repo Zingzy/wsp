@@ -277,6 +277,46 @@ describe("Add a computer while the setup runs", () => {
     expect(dialog()!.querySelector("[data-step-row='mcp']")?.getAttribute("data-state")).toBe("waiting");
   });
 
+  it("scrolls to the first row that needs the person once, when it first appears, and not on the frames after", async () => {
+    const scrolled: string[] = [];
+    const was = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function (this: Element) {
+      scrolled.push(this.getAttribute("data-step-row") ?? "");
+    };
+    try {
+      useStore.setState({ places: [here, placed(RUNNING)] });
+      mountSettings({ api: host().api, at: { kind: "group", group: "computers" } });
+      // The rows say whether one needs the person: the page is not searched on a render that brings none.
+      const searched: string[] = [];
+      const query = Document.prototype.querySelector;
+      Document.prototype.querySelector = function (this: Document, selector: string) {
+        if (selector.includes("data-step-row")) searched.push(selector);
+        return query.call(this, selector);
+      } as typeof query;
+      try {
+        act(() => openSetup(studio.id));
+        await settle();
+        for (const step of ["agents", "mcp", "clis"] as const) {
+          act(() => useStore.setState({ places: [here, placed({ ...RUNNING, steps: [...RUNNING.steps, { step, state: "running" }] })] }));
+          await settle();
+        }
+      } finally {
+        Document.prototype.querySelector = query;
+      }
+      expect(searched).toEqual([]);
+      expect(scrolled).toEqual([]);
+      const wait = { row: "signins/codex", label: "Codex", code: "4F2K", expiresAt: "x", state: "waiting" as const };
+      act(() => useStore.setState({ places: [here, placed({ ...RUNNING, waiting: [wait] })] }));
+      await settle();
+      expect(scrolled).toEqual(["signins/codex"]);
+      act(() => useStore.setState({ places: [here, placed({ ...RUNNING, steps: [...RUNNING.steps, { step: "mcp", state: "running" }], waiting: [wait] })] }));
+      await settle();
+      expect(scrolled).toEqual(["signins/codex"]);
+    } finally {
+      Element.prototype.scrollIntoView = was;
+    }
+  });
+
   it("offers Retry on a row that did not land, which runs the setup again for what is missing", async () => {
     const fake = host();
     const done: PlaceSetup = { ...RUNNING, state: "done", steps: [{ step: "floor", state: "done" }, { step: "skills", state: "failed", note: "1 of 2 failed" }] };

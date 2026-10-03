@@ -76,18 +76,31 @@ export const useAddFlow = create<AddFlowState>(() => CLOSED);
 
 const REACHED_KEY = "wsp:add-reached";
 
+/** The record last parsed and the text it was parsed from, so a render reads a string and parses only a change. */
+let reached: { raw: string | null; held: Record<string, AddStep> } = { raw: null, held: {} };
+
 /** The step each pending add was left at in this window, by the pending add's id. */
 export function reachedSteps(): Record<string, AddStep> {
+  let raw: string | null = null;
   try {
-    const held = JSON.parse(localStorage.getItem(REACHED_KEY) ?? "{}") as unknown;
-    return held !== null && typeof held === "object" ? (held as Record<string, AddStep>) : {};
+    raw = localStorage.getItem(REACHED_KEY);
   } catch {
     return {};
   }
+  if (raw === reached.raw) return reached.held;
+  let held: unknown = {};
+  try {
+    held = JSON.parse(raw ?? "{}") as unknown;
+  } catch {
+    held = {};
+  }
+  reached = { raw, held: held !== null && typeof held === "object" ? (held as Record<string, AddStep>) : {} };
+  return reached.held;
 }
 
 function keepReached(pendingId: string, step: AddStep | null): void {
-  const held = reachedSteps();
+  if (step !== null && reachedSteps()[pendingId] === step) return;
+  const held = { ...reachedSteps() };
   if (step === null) delete held[pendingId];
   else held[pendingId] = step;
   try {
