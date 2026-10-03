@@ -49,6 +49,7 @@ export { STARTED_BY_ENV, dialAddress, hostLogPath, hostTokenFor, lockPathFor, ow
 export { JoinRefused, joinCommand, placeHere, type JoinRefusalAbout } from "./places.js";
 export { SERVING_HOME_SH, defaultHomeIn, homeNamed, servingHome } from "./serving-home.js";
 export { accountAim, accountHosts, accountRecords, aimedAlias, aimedHost, aliasFrom, isUrl, listHosts, noSuchHostLine, readHost, removeHost, severalAccountHostsLine, writeHost, type AccountAim, type HostEntry, type HostRecord } from "./hosts.js";
+export { recipeShelf } from "./recipes.js";
 export { addLines, computerNameHere, hostNameHere, joinPlace, leavePlace, placeNameHere, placeStanding, placeWiring, type JoinPlaceOptions, type JoinedPlace } from "./places.js";
 export { placeFilePath, placeKeyPath, placeReport, readPlaceFile, writePlaceFile, type PlaceSelfReport } from "./place-report.js";
 export { DAEMON_BIN, DAEMON_TARGETS, GUEST_DAEMON_TARGETS, daemonArtifactName, daemonBinaryIn, daemonTargetHere, type DaemonTarget } from "./daemon-binary.js";

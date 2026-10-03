@@ -7,7 +7,8 @@ import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
 import { describe, expect, it } from "vitest";
 import type { Question } from "@wsp/catalog";
-import { OFFER_MS, QuestionScanner, UrlScanner, hyperlink, relayPty, runQuiet, shellLine, stripOsc8, urlsIn, watchPty, type Asked, type RelayTerminal } from "../src/signin-relay.js";
+import { HERE_PLACE_ID, ptyBareOn } from "@wsp/protocol";
+import { BARE_BASH, OFFER_MS, QuestionScanner, UrlScanner, hyperlink, relayPty, runQuiet, shellLine, stripOsc8, urlsIn, watchPty, type Asked, type RelayTerminal } from "../src/signin-relay.js";
 import { fakePtyLink, type FakePty } from "./fake-pty-link.js";
 import { ASKED } from "./signin-questions.js";
 
@@ -100,6 +101,17 @@ describe("URL detection", () => {
 });
 
 describe("relayPty", () => {
+  it("opens bash reading no startup file on a link to a computer somebody owns, and plain bash on any other", async () => {
+    const owned = Object.assign(fakePtyLink(), { bare: true });
+    void relayPty({ link: owned, command: "gh auth login", terminal: terminal(), open: async () => true, timeoutMs: 60_000 });
+    expect((await firstPty(owned)).created).toEqual({ cols: 120, rows: 40, shell: "bash", run: BARE_BASH });
+    const watched = Object.assign(fakePtyLink(), { bare: true });
+    void watchPty({ link: watched, command: "codex login", timeoutMs: 60_000 });
+    expect((await firstPty(watched)).created).toMatchObject({ shell: "bash", run: BARE_BASH });
+    expect(ptyBareOn({ placeId: "p_spoo" })).toBe(true);
+    expect([ptyBareOn({ placeId: HERE_PLACE_ID }), ptyBareOn({ workspaceId: "ws_1" })]).toEqual([false, false]);
+  });
+
   it("opens a pty at the terminal's size, runs the command, relays keystrokes up and bytes down, follows a resize, and restores the terminal", async () => {
     const link = fakePtyLink();
     const term = terminal();

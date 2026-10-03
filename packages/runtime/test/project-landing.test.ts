@@ -82,7 +82,7 @@ const TICKED: SeedChoice = { files: [".env.local"], memory: true, commits: false
 
 /** A host with an image sealed on the computer named, the stub provider as its backend and a folder reader that
  * answers the plan handed in: what an add of a folder on this computer onto a computer that clones needs. */
-async function withImage(o: { at?: string; plan: SeedPlan; projects?: string; packed?: Buffer; keepsImages?: boolean; left?: string[] } = { plan: plan("/x") }): Promise<{ rt: Runtime; backend: StubBackend; store: Store; seed: SeedWiring; packs: { plan: SeedPlan; choice: SeedChoice }[] }> {
+async function withImage(o: { at?: string; plan: SeedPlan; projects?: string; packed?: Buffer; keepsImages?: boolean; left?: string[]; vault?: Record<string, string> } = { plan: plan("/x") }): Promise<{ rt: Runtime; backend: StubBackend; store: Store; seed: SeedWiring; packs: { plan: SeedPlan; choice: SeedChoice }[] }> {
   const backend = stubBackend();
   // What the computer says about itself: a box keeps project checkouts on a disk of its own and no image at all,
   // a provider keeps images and no checkout.
@@ -101,7 +101,7 @@ async function withImage(o: { at?: string; plan: SeedPlan; projects?: string; pa
   const root = mkdtempSync(join(tmpdir(), "wsp-add-local-"));
   roots.push(root);
   const adapters = { claude: recordingAdapter("claude"), codex: recordingAdapter("codex") };
-  return { rt: createRuntime({ backend, store, adapters, local: fakeLocal(root), seed, killConfirm: { graceMs: 20, pollMs: 1 } }), backend, store, seed, packs };
+  return { rt: createRuntime({ backend, store, adapters, local: fakeLocal(root), seed, killConfirm: { graceMs: 20, pollMs: 1 }, ...(o.vault !== undefined ? { vault: () => o.vault! } : {}) }), backend, store, seed, packs };
 }
 
 const stages = (events: readonly EventUnion[]): ProjectAddEvent[] => events.filter((e): e is ProjectAddEvent & { seq: number } => e.type === "project.add");
@@ -309,6 +309,27 @@ describe("a folder seeding a project on a computer that clones", () => {
     // Nothing is left running at the provider, and no project was recorded.
     expect(stopped(backend)).toBe(1);
     expect(await rt.projects.list()).toEqual([]);
+  });
+});
+
+describe("a private repo cloned on a computer the person owns", () => {
+  it("clones with the vault's GitHub token on the clone's own input and nowhere in its script, and points no git at gh there", async () => {
+    const folder = repo();
+    const { rt, backend } = await withImage({ plan: plan(folder), projects: "/wsp/projects", keepsImages: false, vault: { GH_TOKEN: "ghp_private", OPENAI_API_KEY: "sk-other" } });
+    const own = backend.execImpl;
+    const inputs: string[] = [];
+    // A remote that answers only a clone carrying the token, as a private repo does.
+    backend.execImpl = (m, cmd, stdin) => {
+      if (!cmd.includes(" clone ")) return own(m, cmd, stdin);
+      const input = stdin === undefined ? "" : Buffer.from(stdin).toString("utf8");
+      inputs.push(input);
+      return input.includes("GH_TOKEN=ghp_private\0") ? { exitCode: 0, stdout: "", stderr: "" } : { exitCode: 128, stdout: "", stderr: "fatal: could not read Username for 'https://github.com': terminal prompts disabled" };
+    };
+    await rt.projects.add({ source: folder, on: "default", seed: TICKED });
+    expect(inputs).toEqual(["GH_TOKEN=ghp_private\0"]);
+    const ran = commands(backend);
+    expect(ran).not.toContain("ghp_private");
+    expect(ran).not.toContain("setup-git");
   });
 });
 

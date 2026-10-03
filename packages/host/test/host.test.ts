@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { probePath, type AdapterEvent, type TurnResult } from "@wsp/protocol";
+import { probePath, RecipeFile, type AdapterEvent, type TurnResult } from "@wsp/protocol";
 import { CATALOG, GUEST_HOME } from "@wsp/catalog";
 import { allRows, type RecipeAnswer } from "../src/recipe-answer.js";
 import { HERE } from "./recipe-fixture.js";
@@ -953,7 +953,7 @@ describe("the doctor's computer road on the host that holds the link", () => {
 
   it("runs the road here and says each of its lines as an event, out for what it printed and err for what it failed with", async () => {
     const asked: string[] = [];
-    const up = await serving({ vault: () => ({}), plan: async () => (asked.push("plan"), { recipeAt: "2026-09-18T09:00:00.000Z", path: probePath(GUEST_HOME), skipped: [], steps: [] }) });
+    const up = await serving({ vault: () => ({}), plan: async () => (asked.push("plan"), { recipeAt: "2026-09-18T09:00:00.000Z", path: probePath(GUEST_HOME), skipped: [], steps: [], agents: 0, compiler: false }) });
     const c = await wsClient(up.port, up.authToken);
     await c.request("events.subscribe");
     const reply = await c.request("places.doctor", { placeId: "p_1", doctorId: "d_1" });
@@ -970,12 +970,19 @@ describe("the doctor's computer road on the host that holds the link", () => {
   });
 
   it("reads the recipe through the planner the places wiring already holds, and no second one", async () => {
-    const plan = { recipeAt: "2026-09-18T09:00:00.000Z", path: probePath(GUEST_HOME), skipped: [], steps: [] };
+    const plan = { recipeAt: "2026-09-18T09:00:00.000Z", path: probePath(GUEST_HOME), skipped: [], steps: [], agents: 0, compiler: false };
     let asked = 0;
     const links = placeWiring(join(tmpdir(), `wsp-doctor-planner-${Date.now()}`, "state.json"));
-    links.provision = { plan: async () => (asked++, plan), run: async () => [] };
+    const fromPicks = { ...plan, recipeAt: "laptop" };
+    const picked: unknown[] = [];
+    links.provision = { plan: async () => (asked++, plan), setup: async picks => (picked.push(picks), fromPicks), floor: async () => [], step: async () => [] };
     const readers = hostDoctorReaders(links, join(tmpdir(), "wsp-doctor-planner", "state.json"));
     expect(await readers.plan!()).toBe(plan);
+    expect(asked).toBe(1);
+    // A computer set up from picks is read against what it was set up with, planned by the same road its setup took.
+    const picks = RecipeFile.parse({ name: "laptop", agents: { claude: {} } });
+    expect(await readers.plan!({ id: "p_1", kind: "computer", name: "spoo", default: false, picks })).toBe(fromPicks);
+    expect(picked).toEqual([picks]);
     expect(asked).toBe(1);
     // A wiring that plans no recipe hands the road no reader at all, and the tools step says so in its own words.
     const bare = placeWiring(join(tmpdir(), `wsp-doctor-bare-${Date.now()}`, "state.json"));

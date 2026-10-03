@@ -5,13 +5,13 @@
 // as the owner of the home. The pty is that computer's own, reached through
 // the host over the link it holds: nothing here dials it.
 import { loginSignIn } from "@wsp/catalog";
-import { lastLine, type AgentsTarget, type SignInLine } from "@wsp/protocol";
+import { lastLine, ptyBareOn, SIGN_IN_WAIT_MS, type AgentsTarget, type SignInLine } from "@wsp/protocol";
 import { relayPty, runQuiet, type PtyLink, type RelayTerminal } from "./signin-relay.js";
 import type { HostClient } from "./verbs.js";
 
 /** The whole wait a sign-in on a computer you own gets: a person opens a page and types a code in it, which is
  * minutes rather than the two the build's own sign-ins are held to. */
-export const BOX_SIGN_IN_MS = 10 * 60_000;
+export const BOX_SIGN_IN_MS = SIGN_IN_WAIT_MS;
 /** The tool's own status command afterwards, which reads a file and answers at once. */
 const STATUS_MS = 20_000;
 
@@ -52,6 +52,7 @@ export async function targetLink(client: HostClient, target: AgentsTarget): Prom
         return () => readers.delete(fn);
       },
       closed,
+      bare: ptyBareOn(target),
     },
     close: async () => {
       off();

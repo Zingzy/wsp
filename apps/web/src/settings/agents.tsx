@@ -309,7 +309,7 @@ function AgentsTabBody({ place, ctx }: { place: PlaceView; ctx: SettingsContext 
   return (
     <>
       <NewThreadsCard ctx={ctx} />
-      <AgentsCards read={read} rows={rows} on={{ name }} now={ctx.now} misses={recipeMissLines(place.provision?.rows ?? [])} notify={ctx} openOf={row => (row.installed ? () => ctx.go({ kind: "agent", id: row.id }) : undefined)} />
+      <AgentsCards read={read} rows={rows} on={{ name }} now={ctx.now} misses={recipeMissLines(place.applied?.rows ?? [])} notify={ctx} openOf={row => (row.installed ? () => ctx.go({ kind: "agent", id: row.id }) : undefined)} />
     </>
   );
 }

@@ -199,6 +199,10 @@ pub enum MachineOp {
         #[serde(default, deserialize_with = "positive", skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
         timeout_ms: Option<u32>,
+        /// The command's own input, base64: how a value from the host's vault reaches one run and nothing else.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        stdin: Option<String>,
     },
     #[serde(rename = "machine.pause", rename_all = "camelCase")]
     Pause { machine_id: String },
@@ -666,6 +670,16 @@ pub struct MachineReachReply {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_exec_carries_its_input_apart_from_its_command_and_one_without_writes_none() {
+        let asked: MachineOp =
+            serde_json::from_str(r#"{"op":"machine.exec","machineId":"m1","cmd":"read -r x","stdin":"R0g9eAA="}"#).unwrap();
+        let MachineOp::Exec { cmd, stdin, .. } = &asked else { panic!("{asked:?}") };
+        assert_eq!((cmd.as_str(), stdin.as_deref()), ("read -r x", Some("R0g9eAA=")));
+        let bare = MachineOp::Exec { machine_id: "m1".to_owned(), cmd: "true".to_owned(), timeout_ms: None, stdin: None };
+        assert_eq!(serde_json::to_string(&bare).unwrap(), r#"{"op":"machine.exec","machineId":"m1","cmd":"true"}"#);
+    }
 
     #[test]
     fn a_spec_carries_the_logins_the_computer_shares_and_a_spec_without_them_carries_no_key() {

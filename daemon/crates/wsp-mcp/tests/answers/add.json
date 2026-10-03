@@ -1,0 +1,111 @@
+{
+  "tool": "add",
+  "cases": [
+    {
+      "case": "a sign-in waits on the person",
+      "arguments": {
+        "address": "root@203.0.113.7",
+        "recipe": "laptop-one",
+        "name": "attic",
+        "ssh_port": 2222,
+        "ssh_key": "/home/dev/.ssh/id",
+        "host_key": "ssh-ed25519 AAAA"
+      },
+      "replies": {
+        "places.add": "{\"id\":1,\"ok\":true,\"addId\":\"a_1\",\"place\":{\"id\":\"place-9\",\"kind\":\"computer\",\"name\":\"attic\",\"label\":\"zingzy's \u0085box\u007f \\\"one\\\" \\\\ two\\nthree 🧪\",\"default\":false,\"os\":\"linux\",\"shape\":{\"cpu\":8,\"memMb\":16384},\"diskFreeBytes\":123456789012,\"present\":true,\"agentVersions\":{\"2\":\"an index key\",\"claude\":\"2.1.0\"},\"forks\":{\"running\":1,\"room\":2},\"setup\":{\"state\":\"running\",\"addId\":\"a_1\",\"startedAt\":\"2026-10-03T10:00:00.000Z\",\"steps\":[{\"step\":\"floor\",\"state\":\"done\",\"ms\":41000},{\"step\":\"signins\",\"state\":\"running\",\"note\":\"Codex \u0085 waits\"}],\"waiting\":[{\"row\":\"signins/codex\",\"label\":\"Codex \u0085 \\\"cli\\\"\",\"url\":\"https://auth.openai.com/codex/device\",\"code\":\"ABCD-EFGH\",\"expiresAt\":\"2026-10-03T10:15:00.000Z\",\"state\":\"waiting\"}]}}}",
+        "places.list": "{\"id\":1,\"ok\":true,\"places\":[{\"id\":\"place-9\",\"kind\":\"computer\",\"name\":\"attic\",\"label\":\"zingzy's \u0085box\u007f \\\"one\\\" \\\\ two\\nthree 🧪\",\"default\":false,\"os\":\"linux\",\"shape\":{\"cpu\":8,\"memMb\":16384},\"diskFreeBytes\":123456789012,\"present\":true,\"agentVersions\":{\"2\":\"an index key\",\"claude\":\"2.1.0\"},\"forks\":{\"running\":1,\"room\":2},\"setup\":{\"state\":\"running\",\"addId\":\"a_1\",\"startedAt\":\"2026-10-03T10:00:00.000Z\",\"steps\":[{\"step\":\"floor\",\"state\":\"done\",\"ms\":41000},{\"step\":\"signins\",\"state\":\"running\",\"note\":\"Codex \u0085 waits\"}],\"waiting\":[{\"row\":\"signins/codex\",\"label\":\"Codex \u0085 \\\"cli\\\"\",\"url\":\"https://auth.openai.com/codex/device\",\"code\":\"ABCD-EFGH\",\"expiresAt\":\"2026-10-03T10:15:00.000Z\",\"state\":\"waiting\"}]}},{\"id\":\"place-solari\",\"kind\":\"provider\",\"name\":\"solari\",\"default\":true,\"rateUsdPerHour\":0.30000000000000004}]}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\n  \\\"computer\\\": {\\n    \\\"id\\\": \\\"place-9\\\",\\n    \\\"kind\\\": \\\"computer\\\",\\n    \\\"name\\\": \\\"attic\\\",\\n    \\\"label\\\": \\\"zingzy's \\\\u0085box\\\\u007f \\\\\\\"one\\\\\\\" \\\\\\\\ two\\\\nthree 🧪\\\",\\n    \\\"default\\\": false,\\n    \\\"os\\\": \\\"linux\\\",\\n    \\\"shape\\\": {\\n      \\\"cpu\\\": 8,\\n      \\\"memMb\\\": 16384\\n    },\\n    \\\"diskFreeBytes\\\": 123456789012,\\n    \\\"present\\\": true,\\n    \\\"agentVersions\\\": {\\n      \\\"2\\\": \\\"an index key\\\",\\n      \\\"claude\\\": \\\"2.1.0\\\"\\n    },\\n    \\\"forks\\\": {\\n      \\\"running\\\": 1,\\n      \\\"room\\\": 2\\n    },\\n    \\\"setup\\\": {\\n      \\\"state\\\": \\\"running\\\",\\n      \\\"addId\\\": \\\"a_1\\\",\\n      \\\"startedAt\\\": \\\"2026-10-03T10:00:00.000Z\\\",\\n      \\\"steps\\\": [\\n        {\\n          \\\"step\\\": \\\"floor\\\",\\n          \\\"state\\\": \\\"done\\\",\\n          \\\"ms\\\": 41000\\n        },\\n        {\\n          \\\"step\\\": \\\"signins\\\",\\n          \\\"state\\\": \\\"running\\\",\\n          \\\"note\\\": \\\"Codex \\\\u0085 waits\\\"\\n        }\\n      ],\\n      \\\"waiting\\\": [\\n        {\\n          \\\"row\\\": \\\"signins/codex\\\",\\n          \\\"label\\\": \\\"Codex \\\\u0085 \\\\\\\"cli\\\\\\\"\\\",\\n          \\\"url\\\": \\\"https://auth.openai.com/codex/device\\\",\\n          \\\"code\\\": \\\"ABCD-EFGH\\\",\\n          \\\"expiresAt\\\": \\\"2026-10-03T10:15:00.000Z\\\",\\n          \\\"state\\\": \\\"waiting\\\"\\n        }\\n      ]\\n    }\\n  },\\n  \\\"setup\\\": [\\n    {\\n      \\\"step\\\": \\\"floor\\\",\\n      \\\"state\\\": \\\"done\\\",\\n      \\\"ms\\\": 41000\\n    },\\n    {\\n      \\\"step\\\": \\\"signins\\\",\\n      \\\"state\\\": \\\"running\\\",\\n      \\\"note\\\": \\\"Codex \\\\u0085 waits\\\"\\n    }\\n  ],\\n  \\\"waiting\\\": [\\n    {\\n      \\\"row\\\": \\\"signins/codex\\\",\\n      \\\"label\\\": \\\"Codex \\\\u0085 \\\\\\\"cli\\\\\\\"\\\",\\n      \\\"url\\\": \\\"https://auth.openai.com/codex/device\\\",\\n      \\\"code\\\": \\\"ABCD-EFGH\\\",\\n      \\\"expiresAt\\\": \\\"2026-10-03T10:15:00.000Z\\\",\\n      \\\"state\\\": \\\"waiting\\\"\\n    }\\n  ]\\n}\"}],\"structuredContent\":{\"computer\":{\"id\":\"place-9\",\"kind\":\"computer\",\"name\":\"attic\",\"label\":\"zingzy's \\u0085box\\u007f \\\"one\\\" \\\\ two\\nthree 🧪\",\"default\":false,\"os\":\"linux\",\"shape\":{\"cpu\":8,\"memMb\":16384},\"diskFreeBytes\":123456789012,\"present\":true,\"agentVersions\":{\"2\":\"an index key\",\"claude\":\"2.1.0\"},\"forks\":{\"running\":1,\"room\":2},\"setup\":{\"state\":\"running\",\"addId\":\"a_1\",\"startedAt\":\"2026-10-03T10:00:00.000Z\",\"steps\":[{\"step\":\"floor\",\"state\":\"done\",\"ms\":41000},{\"step\":\"signins\",\"state\":\"running\",\"note\":\"Codex \\u0085 waits\"}],\"waiting\":[{\"row\":\"signins/codex\",\"label\":\"Codex \\u0085 \\\"cli\\\"\",\"url\":\"https://auth.openai.com/codex/device\",\"code\":\"ABCD-EFGH\",\"expiresAt\":\"2026-10-03T10:15:00.000Z\",\"state\":\"waiting\"}]}},\"setup\":[{\"step\":\"floor\",\"state\":\"done\",\"ms\":41000},{\"step\":\"signins\",\"state\":\"running\",\"note\":\"Codex \\u0085 waits\"}],\"waiting\":[{\"row\":\"signins/codex\",\"label\":\"Codex \\u0085 \\\"cli\\\"\",\"url\":\"https://auth.openai.com/codex/device\",\"code\":\"ABCD-EFGH\",\"expiresAt\":\"2026-10-03T10:15:00.000Z\",\"state\":\"waiting\"}]}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "places.add",
+          "address": "root@203.0.113.7",
+          "name": "attic",
+          "sshPort": 2222,
+          "keyPath": "/home/dev/.ssh/id",
+          "hostKey": "ssh-ed25519 AAAA",
+          "recipe": "laptop-one"
+        },
+        {
+          "op": "places.list"
+        }
+      ]
+    },
+    {
+      "case": "resumed past a wait to its end",
+      "arguments": {
+        "address": "attic",
+        "resume": true,
+        "later": true
+      },
+      "replies": {
+        "places.setup": "{\"id\":1,\"ok\":true,\"place\":{\"id\":\"place-9\",\"kind\":\"computer\",\"name\":\"attic\",\"label\":\"zingzy's \u0085box\u007f \\\"one\\\" \\\\ two\\nthree 🧪\",\"default\":false,\"os\":\"linux\",\"shape\":{\"cpu\":8,\"memMb\":16384},\"diskFreeBytes\":123456789012,\"present\":true,\"agentVersions\":{\"2\":\"an index key\",\"claude\":\"2.1.0\"},\"forks\":{\"running\":1,\"room\":2},\"setup\":{\"state\":\"running\",\"addId\":\"a_1\",\"startedAt\":\"2026-10-03T10:00:00.000Z\",\"steps\":[{\"step\":\"floor\",\"state\":\"done\",\"ms\":41000},{\"step\":\"signins\",\"state\":\"running\",\"note\":\"Codex \u0085 waits\"}],\"waiting\":[{\"row\":\"signins/codex\",\"label\":\"Codex \u0085 \\\"cli\\\"\",\"url\":\"https://auth.openai.com/codex/device\",\"code\":\"ABCD-EFGH\",\"expiresAt\":\"2026-10-03T10:15:00.000Z\",\"state\":\"waiting\"}]}}}",
+        "places.list": "{\"id\":1,\"ok\":true,\"places\":[{\"id\":\"place-solari\",\"kind\":\"provider\",\"name\":\"solari\",\"default\":true,\"rateUsdPerHour\":0.30000000000000004},{\"id\":\"place-9\",\"kind\":\"computer\",\"name\":\"attic\",\"label\":\"zingzy's \u0085box\u007f \\\"one\\\" \\\\ two\\nthree 🧪\",\"default\":false,\"os\":\"linux\",\"shape\":{\"cpu\":8,\"memMb\":16384},\"diskFreeBytes\":123456789012,\"present\":true,\"agentVersions\":{\"2\":\"an index key\",\"claude\":\"2.1.0\"},\"forks\":{\"running\":1,\"room\":2},\"setup\":{\"state\":\"done\",\"addId\":\"a_1\",\"startedAt\":\"2026-10-03T10:00:00.000Z\",\"steps\":[{\"step\":\"floor\",\"state\":\"done\",\"ms\":41000},{\"step\":\"folders\",\"state\":\"failed\",\"note\":\"api did not clone\"}],\"waiting\":[],\"finishedAt\":\"2026-10-03T10:05:00.000Z\"},\"applied\":{\"hash\":\"h1\",\"at\":\"2026-10-03T10:05:00.000Z\",\"rows\":[{\"id\":\"tools/brew/gh\",\"label\":\"GitHub CLI\",\"outcome\":\"installed\",\"step\":\"clis\",\"ms\":1500}]}}]}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\n  \\\"computer\\\": {\\n    \\\"id\\\": \\\"place-9\\\",\\n    \\\"kind\\\": \\\"computer\\\",\\n    \\\"name\\\": \\\"attic\\\",\\n    \\\"label\\\": \\\"zingzy's \\\\u0085box\\\\u007f \\\\\\\"one\\\\\\\" \\\\\\\\ two\\\\nthree 🧪\\\",\\n    \\\"default\\\": false,\\n    \\\"os\\\": \\\"linux\\\",\\n    \\\"shape\\\": {\\n      \\\"cpu\\\": 8,\\n      \\\"memMb\\\": 16384\\n    },\\n    \\\"diskFreeBytes\\\": 123456789012,\\n    \\\"present\\\": true,\\n    \\\"agentVersions\\\": {\\n      \\\"2\\\": \\\"an index key\\\",\\n      \\\"claude\\\": \\\"2.1.0\\\"\\n    },\\n    \\\"forks\\\": {\\n      \\\"running\\\": 1,\\n      \\\"room\\\": 2\\n    },\\n    \\\"setup\\\": {\\n      \\\"state\\\": \\\"done\\\",\\n      \\\"addId\\\": \\\"a_1\\\",\\n      \\\"startedAt\\\": \\\"2026-10-03T10:00:00.000Z\\\",\\n      \\\"steps\\\": [\\n        {\\n          \\\"step\\\": \\\"floor\\\",\\n          \\\"state\\\": \\\"done\\\",\\n          \\\"ms\\\": 41000\\n        },\\n        {\\n          \\\"step\\\": \\\"folders\\\",\\n          \\\"state\\\": \\\"failed\\\",\\n          \\\"note\\\": \\\"api did not clone\\\"\\n        }\\n      ],\\n      \\\"waiting\\\": [],\\n      \\\"finishedAt\\\": \\\"2026-10-03T10:05:00.000Z\\\"\\n    },\\n    \\\"applied\\\": {\\n      \\\"hash\\\": \\\"h1\\\",\\n      \\\"at\\\": \\\"2026-10-03T10:05:00.000Z\\\",\\n      \\\"rows\\\": [\\n        {\\n          \\\"id\\\": \\\"tools/brew/gh\\\",\\n          \\\"label\\\": \\\"GitHub CLI\\\",\\n          \\\"outcome\\\": \\\"installed\\\",\\n          \\\"step\\\": \\\"clis\\\",\\n          \\\"ms\\\": 1500\\n        }\\n      ]\\n    }\\n  },\\n  \\\"setup\\\": [\\n    {\\n      \\\"step\\\": \\\"floor\\\",\\n      \\\"state\\\": \\\"done\\\",\\n      \\\"ms\\\": 41000\\n    },\\n    {\\n      \\\"step\\\": \\\"folders\\\",\\n      \\\"state\\\": \\\"failed\\\",\\n      \\\"note\\\": \\\"api did not clone\\\"\\n    }\\n  ],\\n  \\\"waiting\\\": []\\n}\"}],\"structuredContent\":{\"computer\":{\"id\":\"place-9\",\"kind\":\"computer\",\"name\":\"attic\",\"label\":\"zingzy's \\u0085box\\u007f \\\"one\\\" \\\\ two\\nthree 🧪\",\"default\":false,\"os\":\"linux\",\"shape\":{\"cpu\":8,\"memMb\":16384},\"diskFreeBytes\":123456789012,\"present\":true,\"agentVersions\":{\"2\":\"an index key\",\"claude\":\"2.1.0\"},\"forks\":{\"running\":1,\"room\":2},\"setup\":{\"state\":\"done\",\"addId\":\"a_1\",\"startedAt\":\"2026-10-03T10:00:00.000Z\",\"steps\":[{\"step\":\"floor\",\"state\":\"done\",\"ms\":41000},{\"step\":\"folders\",\"state\":\"failed\",\"note\":\"api did not clone\"}],\"waiting\":[],\"finishedAt\":\"2026-10-03T10:05:00.000Z\"},\"applied\":{\"hash\":\"h1\",\"at\":\"2026-10-03T10:05:00.000Z\",\"rows\":[{\"id\":\"tools/brew/gh\",\"label\":\"GitHub CLI\",\"outcome\":\"installed\",\"step\":\"clis\",\"ms\":1500}]}},\"setup\":[{\"step\":\"floor\",\"state\":\"done\",\"ms\":41000},{\"step\":\"folders\",\"state\":\"failed\",\"note\":\"api did not clone\"}],\"waiting\":[]}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "places.setup",
+          "ref": "attic"
+        },
+        {
+          "op": "places.list"
+        }
+      ]
+    },
+    {
+      "case": "joined, waiting on its picks",
+      "arguments": {
+        "address": "attic"
+      },
+      "replies": {
+        "places.add": "{\"id\":1,\"ok\":true,\"addId\":\"a_1\",\"place\":{\"id\":\"place-9\",\"kind\":\"computer\",\"name\":\"attic\",\"label\":\"zingzy's \u0085box\u007f \\\"one\\\" \\\\ two\\nthree 🧪\",\"default\":false,\"os\":\"linux\",\"shape\":{\"cpu\":8,\"memMb\":16384},\"diskFreeBytes\":123456789012,\"present\":true,\"agentVersions\":{\"2\":\"an index key\",\"claude\":\"2.1.0\"},\"forks\":{\"running\":1,\"room\":2}},\"pending\":{\"id\":\"a_1\",\"address\":\"root@203.0.113.7\",\"sshPort\":2222,\"name\":\"attic\",\"placeId\":\"place-9\",\"step\":\"choosing\",\"choices\":{\"name\":\"laptop \u0085 \\\"one\\\" 🧪\",\"agents\":{},\"mcp\":{},\"clis\":{\"ripgrep\":{\"via\":\"brew\"}},\"skills\":{},\"plugins\":{},\"folders\":{},\"configs\":{}},\"startedAt\":\"2026-10-03T10:00:00.000Z\",\"failed\":{\"said\":\"attic said \\\"no\\\"\\nat the floor\",\"fix\":\"Run it again.\"}}}",
+        "places.list": "{\"id\":1,\"ok\":true,\"places\":[{\"id\":\"place-9\",\"kind\":\"computer\",\"name\":\"attic\",\"label\":\"zingzy's \u0085box\u007f \\\"one\\\" \\\\ two\\nthree 🧪\",\"default\":false,\"os\":\"linux\",\"shape\":{\"cpu\":8,\"memMb\":16384},\"diskFreeBytes\":123456789012,\"present\":true,\"agentVersions\":{\"2\":\"an index key\",\"claude\":\"2.1.0\"},\"forks\":{\"running\":1,\"room\":2}}]}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\n  \\\"computer\\\": {\\n    \\\"id\\\": \\\"place-9\\\",\\n    \\\"kind\\\": \\\"computer\\\",\\n    \\\"name\\\": \\\"attic\\\",\\n    \\\"label\\\": \\\"zingzy's \\\\u0085box\\\\u007f \\\\\\\"one\\\\\\\" \\\\\\\\ two\\\\nthree 🧪\\\",\\n    \\\"default\\\": false,\\n    \\\"os\\\": \\\"linux\\\",\\n    \\\"shape\\\": {\\n      \\\"cpu\\\": 8,\\n      \\\"memMb\\\": 16384\\n    },\\n    \\\"diskFreeBytes\\\": 123456789012,\\n    \\\"present\\\": true,\\n    \\\"agentVersions\\\": {\\n      \\\"2\\\": \\\"an index key\\\",\\n      \\\"claude\\\": \\\"2.1.0\\\"\\n    },\\n    \\\"forks\\\": {\\n      \\\"running\\\": 1,\\n      \\\"room\\\": 2\\n    }\\n  },\\n  \\\"setup\\\": [],\\n  \\\"waiting\\\": []\\n}\"}],\"structuredContent\":{\"computer\":{\"id\":\"place-9\",\"kind\":\"computer\",\"name\":\"attic\",\"label\":\"zingzy's \\u0085box\\u007f \\\"one\\\" \\\\ two\\nthree 🧪\",\"default\":false,\"os\":\"linux\",\"shape\":{\"cpu\":8,\"memMb\":16384},\"diskFreeBytes\":123456789012,\"present\":true,\"agentVersions\":{\"2\":\"an index key\",\"claude\":\"2.1.0\"},\"forks\":{\"running\":1,\"room\":2}},\"setup\":[],\"waiting\":[]}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "places.add",
+          "address": "attic"
+        },
+        {
+          "op": "places.list"
+        }
+      ]
+    },
+    {
+      "case": "a project's folder",
+      "arguments": {
+        "address": "/Users/dev/app"
+      },
+      "replies": {},
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"add takes a computer over ssh, by user@host or by an alias from the ssh config, and /Users/dev/app is not one. A project is recorded with projects_add; a provider's key and the join code another computer types are handed out at the host's own terminal, with wsp add.\"}],\"structuredContent\":{\"error\":\"add takes a computer over ssh, by user@host or by an alias from the ssh config, and /Users/dev/app is not one. A project is recorded with projects_add; a provider's key and the join code another computer types are handed out at the host's own terminal, with wsp add.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": []
+    },
+    {
+      "case": "a provider",
+      "arguments": {
+        "address": "solari"
+      },
+      "replies": {},
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"add takes a computer over ssh, by user@host or by an alias from the ssh config, and solari is not one. A project is recorded with projects_add; a provider's key and the join code another computer types are handed out at the host's own terminal, with wsp add.\"}],\"structuredContent\":{\"error\":\"add takes a computer over ssh, by user@host or by an alias from the ssh config, and solari is not one. A project is recorded with projects_add; a provider's key and the join code another computer types are handed out at the host's own terminal, with wsp add.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": []
+    },
+    {
+      "case": "the install refused",
+      "arguments": {
+        "address": "root@203.0.113.7"
+      },
+      "replies": {
+        "places.add": "{\"id\":1,\"ok\":false,\"error\":\"root@203.0.113.7 did not answer on port 22\",\"kind\":\"unreachable\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"root@203.0.113.7 did not answer on port 22\"}],\"structuredContent\":{\"error\":\"root@203.0.113.7 did not answer on port 22\",\"class\":\"provider\",\"exit\":1},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "places.add",
+          "address": "root@203.0.113.7"
+        }
+      ]
+    }
+  ]
+}

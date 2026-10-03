@@ -892,7 +892,7 @@ describe("runtime wire types", () => {
     expect(new Set(wire.DEVICE_OPS).size).toBe(wire.DEVICE_OPS.length);
     const held = [
       "sessions.start", "sessions.steer", "sessions.interrupt", "sessions.rename", "sessions.answer", "sessions.access", "sessions.aside", "sessions.rewind", "sessions.run", "workspaces.exec", "workspaces.bringBack", "daemon.open", "daemon.send", "daemon.close",
-      "places.add", "places.update", "places.remove", "places.dial", "places.set", "places.loginLanded", "places.doctor", "places.door", "places.mint", "places.sshHosts", "projects.add",
+      "places.add", "places.setup", "places.update", "places.remove", "places.dial", "places.set", "places.loginLanded", "places.doctor", "places.door", "places.mint", "places.sshHosts", "projects.add",
       "init.keys", "init.start", "init.answer", "init.step", "init.draft", "init.retry", "init.build", "init.signInCode", "init.cancel", "image.build", "golden.prepare", "golden.seal",
       "image.export", "host.folders", "agents.read", "servers.tools", "servers.icon", "agents.signIn", "servers.signIn", "agents.signInCode", "agents.signInStop", "agents.signInLine", "agents.key", "agents.addTools", "agents.setup", "skills.search", "skills.get", "skills.preview", "skills.add", "skills.remove", "skills.toggle", "servers.add", "servers.remove", "servers.toggle", "project.seed.plan", "project.plan", "project.import", "project.export",
       "pair.issue", "pair.redeem", "seal.open", "device.auth", "place.join", "place.auth", "place.prove", "host.restart",
@@ -912,6 +912,8 @@ describe("runtime wire types", () => {
       "workspaces.start", "workspaces.review", "workspaces.reviewPost",
       // A reset spends what the person's plan has banked, with no undo.
       "usage.reset",
+      // A recipe is read off this computer's disk and resolved against it, and a save or a remove writes there.
+      "recipes.list", "recipes.get", "recipes.save", "recipes.remove", "recipes.options",
     ];
     for (const op of held) {
       expect(wire.RUNTIME_OPS, op).toContain(op);

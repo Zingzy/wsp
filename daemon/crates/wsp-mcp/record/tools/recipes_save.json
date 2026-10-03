@@ -1,0 +1,534 @@
+{
+  "cloudOff": {
+    "name": "recipes_save",
+    "description": "Saves the picks one of the person's computers was set up with as a recipe under name, rewriting a recipe of that name whole, and that computer follows it from then on, so an edit to the recipe reaches it. Refused for a name with no letter or digit in it, for the computer the app runs on, and for a computer set up before picks were kept. The answer is the recipe as saved.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "what to call the recipe"
+        },
+        "from": {
+          "type": "string",
+          "description": "the computer whose picks to save, by the name computers lists"
+        }
+      },
+      "required": [
+        "name",
+        "from"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "recipe": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "slug": {
+              "$ref": "#/properties/recipe/properties/name"
+            },
+            "summary": {
+              "$ref": "#/properties/recipe/properties/name"
+            },
+            "machines": {
+              "type": "array",
+              "items": {
+                "$ref": "#/properties/recipe/properties/name"
+              }
+            },
+            "file": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                },
+                "agents": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "signin": {
+                        "type": "string",
+                        "enum": [
+                          "vault",
+                          "machine"
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "propertyNames": {
+                    "minLength": 1
+                  },
+                  "default": {}
+                },
+                "mcp": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "agents": {
+                        "type": "array",
+                        "items": {
+                          "$ref": "#/properties/recipe/properties/name"
+                        },
+                        "minItems": 1
+                      }
+                    },
+                    "required": [
+                      "agents"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "propertyNames": {
+                    "minLength": 1
+                  },
+                  "default": {}
+                },
+                "clis": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "via": {
+                        "$ref": "#/properties/recipe/properties/name"
+                      },
+                      "needs": {
+                        "$ref": "#/properties/recipe/properties/machines"
+                      }
+                    },
+                    "required": [
+                      "via"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "propertyNames": {
+                    "minLength": 1
+                  },
+                  "default": {}
+                },
+                "skills": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "from": {
+                        "$ref": "#/properties/recipe/properties/name"
+                      }
+                    },
+                    "required": [
+                      "from"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "propertyNames": {
+                    "minLength": 1
+                  },
+                  "default": {}
+                },
+                "plugins": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": false
+                  },
+                  "propertyNames": {
+                    "minLength": 1
+                  },
+                  "default": {}
+                },
+                "folders": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "from": {
+                        "$ref": "#/properties/recipe/properties/name"
+                      },
+                      "name": {
+                        "$ref": "#/properties/recipe/properties/name"
+                      },
+                      "icon": {
+                        "type": "string",
+                        "enum": [
+                          "folder",
+                          "code",
+                          "terminal",
+                          "globe",
+                          "rocket",
+                          "box",
+                          "database",
+                          "server",
+                          "cpu",
+                          "zap",
+                          "flame",
+                          "leaf",
+                          "star",
+                          "heart",
+                          "book",
+                          "music",
+                          "camera",
+                          "gamepad",
+                          "shield",
+                          "wrench"
+                        ]
+                      },
+                      "hue": {
+                        "type": "string",
+                        "enum": [
+                          "neutral",
+                          "red",
+                          "orange",
+                          "amber",
+                          "green",
+                          "teal",
+                          "blue",
+                          "violet",
+                          "pink"
+                        ]
+                      },
+                      "keep": {
+                        "$ref": "#/properties/recipe/properties/machines",
+                        "default": []
+                      }
+                    },
+                    "required": [
+                      "from"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "propertyNames": {
+                    "minLength": 1
+                  },
+                  "default": {}
+                },
+                "configs": {
+                  "type": "object",
+                  "properties": {
+                    "git": {
+                      "type": "object",
+                      "properties": {},
+                      "additionalProperties": false
+                    },
+                    "shell": {
+                      "type": "object",
+                      "properties": {},
+                      "additionalProperties": false
+                    },
+                    "github": {
+                      "type": "object",
+                      "properties": {
+                        "signin": {
+                          "$ref": "#/properties/recipe/properties/file/properties/agents/additionalProperties/properties/signin"
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "additionalProperties": false,
+                  "default": {}
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "name",
+            "slug",
+            "summary",
+            "machines",
+            "file"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "recipe"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  "cloudOn": {
+    "name": "recipes_save",
+    "description": "Saves the picks one of the person's computers was set up with as a recipe under name, rewriting a recipe of that name whole, and that computer follows it from then on, so an edit to the recipe reaches it. Refused for a name with no letter or digit in it, for the computer the app runs on, and for a computer set up before picks were kept. The answer is the recipe as saved.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "what to call the recipe"
+        },
+        "from": {
+          "type": "string",
+          "description": "the computer whose picks to save, by the name computers lists"
+        }
+      },
+      "required": [
+        "name",
+        "from"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "recipe": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "slug": {
+              "$ref": "#/properties/recipe/properties/name"
+            },
+            "summary": {
+              "$ref": "#/properties/recipe/properties/name"
+            },
+            "machines": {
+              "type": "array",
+              "items": {
+                "$ref": "#/properties/recipe/properties/name"
+              }
+            },
+            "file": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                },
+                "agents": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "signin": {
+                        "type": "string",
+                        "enum": [
+                          "vault",
+                          "machine"
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "propertyNames": {
+                    "minLength": 1
+                  },
+                  "default": {}
+                },
+                "mcp": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "agents": {
+                        "type": "array",
+                        "items": {
+                          "$ref": "#/properties/recipe/properties/name"
+                        },
+                        "minItems": 1
+                      }
+                    },
+                    "required": [
+                      "agents"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "propertyNames": {
+                    "minLength": 1
+                  },
+                  "default": {}
+                },
+                "clis": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "via": {
+                        "$ref": "#/properties/recipe/properties/name"
+                      },
+                      "needs": {
+                        "$ref": "#/properties/recipe/properties/machines"
+                      }
+                    },
+                    "required": [
+                      "via"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "propertyNames": {
+                    "minLength": 1
+                  },
+                  "default": {}
+                },
+                "skills": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "from": {
+                        "$ref": "#/properties/recipe/properties/name"
+                      }
+                    },
+                    "required": [
+                      "from"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "propertyNames": {
+                    "minLength": 1
+                  },
+                  "default": {}
+                },
+                "plugins": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": false
+                  },
+                  "propertyNames": {
+                    "minLength": 1
+                  },
+                  "default": {}
+                },
+                "folders": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "from": {
+                        "$ref": "#/properties/recipe/properties/name"
+                      },
+                      "name": {
+                        "$ref": "#/properties/recipe/properties/name"
+                      },
+                      "icon": {
+                        "type": "string",
+                        "enum": [
+                          "folder",
+                          "code",
+                          "terminal",
+                          "globe",
+                          "rocket",
+                          "box",
+                          "database",
+                          "server",
+                          "cpu",
+                          "zap",
+                          "flame",
+                          "leaf",
+                          "star",
+                          "heart",
+                          "book",
+                          "music",
+                          "camera",
+                          "gamepad",
+                          "shield",
+                          "wrench"
+                        ]
+                      },
+                      "hue": {
+                        "type": "string",
+                        "enum": [
+                          "neutral",
+                          "red",
+                          "orange",
+                          "amber",
+                          "green",
+                          "teal",
+                          "blue",
+                          "violet",
+                          "pink"
+                        ]
+                      },
+                      "keep": {
+                        "$ref": "#/properties/recipe/properties/machines",
+                        "default": []
+                      }
+                    },
+                    "required": [
+                      "from"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "propertyNames": {
+                    "minLength": 1
+                  },
+                  "default": {}
+                },
+                "configs": {
+                  "type": "object",
+                  "properties": {
+                    "git": {
+                      "type": "object",
+                      "properties": {},
+                      "additionalProperties": false
+                    },
+                    "shell": {
+                      "type": "object",
+                      "properties": {},
+                      "additionalProperties": false
+                    },
+                    "github": {
+                      "type": "object",
+                      "properties": {
+                        "signin": {
+                          "$ref": "#/properties/recipe/properties/file/properties/agents/additionalProperties/properties/signin"
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "additionalProperties": false,
+                  "default": {}
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "name",
+            "slug",
+            "summary",
+            "machines",
+            "file"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "recipe"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  }
+}

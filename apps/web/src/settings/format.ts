@@ -118,9 +118,6 @@ export const capitalised = (word: string): string => word.charAt(0).toUpperCase(
 export const PLACE_STATE_WORDS = {
   ready: "Ready",
   blocked: "Blocked",
-  building: (at: { index: number; of: number } | undefined): string => (at === undefined ? "Building" : `Building ${at.index}/${at.of}`),
-  stopped: "Stopped",
-  failed: "Failed",
   behind: "Behind",
   signIn: "Sign in",
   needsSignIn: (agents: readonly string[]): string => `needs a sign-in: ${agents.join(", ")}`,
