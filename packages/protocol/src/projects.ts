@@ -190,6 +190,22 @@ export const worktreeChangedLine = (files: number): string => `that worktree has
 /** A removal asked of a branch with no worktree wsp made: a worktree the person or an agent made is theirs to remove. */
 export const notMadeWorktreeLine = (branch: string): string => `wsp made no worktree for ${branch}; git worktree remove takes one wsp did not make`;
 
+/** Why an old copy of a project folder was left on disk when the host moved off copies; one line per copy in the
+ * file the move writes. Nothing is removed that holds a change no commit has or a branch the project could not take. */
+export const OLD_COPY_WORDS = {
+  changed: "it has changes no commit holds",
+  noProject: "its project is no longer recorded",
+  isProject: "it is the project folder itself",
+  noCopier: "this host has no daemon binary to remove it with",
+  unread: (said: string): string => `git could not read it: ${said}`,
+  fetchFailed: (said: string): string => `the fetch of its branches into the project failed: ${said}`,
+  notRemoved: (said: string): string => `it could not be removed: ${said}`,
+  /** Why a turn still running on an old copy ended at the move. */
+  ended: "the host moved off copies, so this copy's threads end here",
+  /** What the person is told once, with the file that lists each copy kept. */
+  kept: (copies: number, file: string): string => `${copies} old ${copies === 1 ? "copy" : "copies"} kept with work in ${copies === 1 ? "it" : "them"}; see ${file}`,
+} as const;
+
 /** A branch asked of a project whose folder git holds no repo in. */
 export const noBranchesLine = (project: string): string => `${project} is not a git repo, so it has no branches`;
 

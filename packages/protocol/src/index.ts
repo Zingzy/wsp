@@ -3429,6 +3429,10 @@ export const ProjectAddEvent = z.object({
 });
 export type ProjectAddEvent = z.infer<typeof ProjectAddEvent>;
 
+/** Something the host did on its own that the person hears once, in a sentence of its own. */
+export const HostNoticeEvent = z.object({ type: z.literal("host.notice"), message: z.string() });
+export type HostNoticeEvent = z.infer<typeof HostNoticeEvent>;
+
 /** A project's record was dropped. */
 export const ProjectRemovedEvent = z.object({ type: z.literal("project.removed"), projectId: z.string() });
 export type ProjectRemovedEvent = z.infer<typeof ProjectRemovedEvent>;
@@ -3487,6 +3491,7 @@ export const EventUnion = z.discriminatedUnion("type", [
   PlaceRemovedEvent.extend(sequenced),
   AgentsChangedEvent.extend(sequenced),
   UsageAlertEvent.extend(sequenced),
+  HostNoticeEvent.extend(sequenced),
 ]);
 export type EventUnion = z.infer<typeof EventUnion>;
 
