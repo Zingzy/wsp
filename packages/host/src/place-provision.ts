@@ -191,6 +191,7 @@ function githubTools(picks: RecipeFile, path: string, prefix: string): Provision
   return "cmd" in step ? [{ id: `github/${GH}`, label: entry.name, manager: entry.installRoad.road, ...step, bin: entry.bin }] : undefined;
 }
 const GH = "gh";
+const GITHUB_ROW = "github";
 
 /** The steps whose plan reads this computer's manifest: the agents, the CLIs, the servers, the configs (the login
  * shell), the floor and the machine context. */
@@ -236,7 +237,8 @@ export async function undoPlan(before: RecipeFile, removed: readonly { kind: Rec
         break;
       case "configs": {
         if (name === "github") {
-          out.push({ key, label: "GitHub", ids: [key, `github/${GH}`], ...catalogUninstall(GH, path, prefix) });
+          // gh comes off only where this row's own step put it on; a gh among the CLIs is that row's.
+          out.push({ key, label: "GitHub", ids: [key, GITHUB_ROW, `github/${GH}`], owner: `github/${GH}`, ...catalogUninstall(GH, path, prefix) });
           break;
         }
         const dests = CONFIG_PATHS[name as keyof typeof CONFIG_PATHS] ?? [];
@@ -245,7 +247,7 @@ export async function undoPlan(before: RecipeFile, removed: readonly { kind: Rec
           for (const login of ["zsh", "fish"]) {
             const apt = { road: "apt" as const, packages: [login] };
             const r = roadModule(apt).uninstall(apt, login);
-            out.push({ key: `configs/shell/${login}`, label: login, ids: [`configs/shell/${login}`], ...("cmd" in r ? { cmd: `${pathLine(path, prefix)}\n${r.cmd}` } : { note: r.note }) });
+            out.push({ key: `configs/shell/${login}`, label: login, ids: [`configs/shell/${login}`], owner: `configs/shell/${login}`, ...("cmd" in r ? { cmd: `${pathLine(path, prefix)}\n${r.cmd}` } : { note: r.note }) });
           }
         }
         break;
@@ -255,22 +257,25 @@ export async function undoPlan(before: RecipeFile, removed: readonly { kind: Rec
         if (row === undefined) break;
         const id = toolRowId(row.via, name);
         const r = toolUninstall({ rung: "tools", id, label: name, paths: [], bytes: 0, default: "bring", bring: true }, await brew(), path, prefix);
-        out.push({ key, label: name, ids: [id], ...("cmd" in r ? { cmd: r.cmd } : { note: r.note }) });
+        // A tool that took hold with a command of its own lets go of it first, while its command is still there.
+        const entry = catalogEntry(catalogIdOfRow({ id }) ?? "");
+        const off = entry?.kind === "tool" ? entry.hook?.off : undefined;
+        out.push({ key, label: name, ids: [id], owner: id, ...("cmd" in r ? { cmd: off === undefined ? r.cmd : `${pathLine(path, prefix)}\n${off} || true\n${r.cmd}` } : { note: r.note }) });
         break;
       }
       case "agents": {
         // Its own files wsp landed come off with it; a file it rewrites as it runs was never wsp's to keep.
         const dests = agentOwnPaths(name).map(p => p.replace(/^~\//, ""));
-        out.push({ key, label: CATALOG_AGENTS.find(a => a.id === name)?.name ?? name, ids: [`agents/${name}`, `signins/${name}`, ...dests.map(d => `files/${d}`)], dests, ...catalogUninstall(name, path, prefix) });
+        out.push({ key, label: CATALOG_AGENTS.find(a => a.id === name)?.name ?? name, ids: [`agents/${name}`, `signins/${name}`, ...dests.map(d => `files/${d}`)], owner: `agents/${name}`, dests, ...catalogUninstall(name, path, prefix) });
         break;
       }
       case "plugins": {
         const road = CATALOG_AGENTS.find(a => a.plugins !== undefined && before.agents[a.id] !== undefined)?.plugins;
-        out.push({ key, label: name, ids: [key], ...(road === undefined ? { note: "no picked agent takes plugins" } : { cmd: `${pathLine(path, prefix)}\n${road.uninstall(name)}` }) });
+        out.push({ key, label: name, ids: [key], owner: key, ...(road === undefined ? { note: "no picked agent takes plugins" } : { cmd: `${pathLine(path, prefix)}\n${road.uninstall(name)}` }) });
         break;
       }
       case "folders":
-        out.push({ key, label: before.folders[name]?.name ?? name, ids: [key], folder: name });
+        out.push({ key, label: before.folders[name]?.name ?? name, ids: [key], owner: key, folder: name });
         break;
       case "mcp":
         out.push({ key, label: name, ids: (before.mcp[name]?.agents ?? []).map(agent => `${MCP_ID_PREFIX}${agent}/${name}`) });

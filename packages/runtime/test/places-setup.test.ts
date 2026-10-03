@@ -19,6 +19,7 @@ import {
   SETUP_LOG_TAIL_BYTES,
   SKIPPED_FOR_NOW,
   editedThereLine,
+  wasThereLine,
   noAgentLine,
   pendingHeldLine,
   noPendingRefusal,
@@ -868,7 +869,7 @@ describe("a computer that follows a recipe", () => {
     const { r, placeId } = await following({
       cmds,
       rows: { clis: [{ id: "tools/brew/jq", label: "jq", outcome: "present" }] },
-      undo: removed => removed.map(c => ({ key: `${c.kind}/${c.name}`, label: c.name, ids: [c.kind === "clis" ? "tools/brew/jq" : "agents/claude"], cmd: `take-off-${c.name}` })),
+      undo: removed => removed.map(c => ({ key: `${c.kind}/${c.name}`, label: c.name, ids: [c.kind === "clis" ? "tools/brew/jq" : "agents/claude"], owner: c.kind === "clis" ? "tools/brew/jq" : "agents/claude", cmd: `take-off-${c.name}` })),
     });
     // The setup read jq as already there and put claude on.
     expect((await rowOf(placeId)).applied?.rows.find(r => r.id === "tools/brew/jq")?.outcome).toBe("present");
@@ -879,6 +880,41 @@ describe("a computer that follows a recipe", () => {
     const rows = (await rowOf(placeId)).applied?.rows.map(r => r.id);
     expect(rows).not.toContain("tools/brew/jq");
     expect(rows).not.toContain("agents/claude");
+  });
+
+  it("never takes an agent the box had before wsp off, though wsp landed a file of its own for it, and says why on its row", async () => {
+    const cmds: string[] = [];
+    const { r, placeId } = await following({
+      cmds,
+      rows: { agents: [{ id: "agents/claude", label: "Claude Code", outcome: "present" }], mcp: [{ id: "files/.claude/settings.json", label: "settings", outcome: "installed", kind: "file" }] },
+      answer: cmd => (cmd.includes("wsp-unland") ? { exitCode: 0, stdout: "wsp-unland\tgone\t.claude/settings.json\n" } : undefined),
+      undo: () => [{ key: "agents/claude", label: "Claude Code", ids: ["agents/claude", "signins/claude", "files/.claude/settings.json"], owner: "agents/claude", cmd: "take-off-claude", dests: [".claude/settings.json"] }],
+    });
+    r.move({ ...V1, agents: {} }, { "clis/jq": "1.7", "skills/unslop": "d1" }, "h10");
+    await runtime!.places!.recipeChanged("laptop");
+    await until(async () => (await rowOf(placeId)).applied?.hash === "h10");
+    expect(cmds.filter(c => c.startsWith("take-off-"))).toEqual([]);
+    // Its own file wsp landed comes off by the ledger all the same, and the row says the agent stays.
+    expect(cmds.some(c => c.includes("wsp-unland"))).toBe(true);
+    expect((await rowOf(placeId)).applied?.rows.find(row => row.id === "agents/claude")).toMatchObject({ outcome: "skipped", note: wasThereLine("spoo") });
+  });
+
+  it("never takes gh off for a GitHub row dropped where gh came as a CLI, though the GitHub sign-in there was wsp's", async () => {
+    const cmds: string[] = [];
+    const withGitHub = { ...V1, clis: { ...V1.clis, gh: { via: "brew" } }, configs: { github: { signin: "machine" as const } } };
+    const p = provisioner({ undo: () => [{ key: "configs/github", label: "GitHub", ids: ["configs/github", "github", "github/gh"], owner: "github/gh", cmd: "take-off-gh" }] });
+    const r = shelf(withGitHub, ITEMS);
+    const s = signIns();
+    await hosting({ provision: p.wired, recipes: r.recipes, cmds, acts: s.acts });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: withGitHub, recipe: "laptop" }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.waiting.some(w => w.row === "github" && w.code !== undefined) === true);
+    s.end("gh", { state: "signed-in" });
+    await until(async () => (await rowOf(place.id)).applied?.rows.find(row => row.id === "github")?.outcome === "installed");
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    r.move({ ...withGitHub, configs: {} }, ITEMS, "h11");
+    await runtime!.places!.recipeChanged("laptop");
+    await until(async () => (await rowOf(place.id)).applied?.hash === "h11");
+    expect(cmds.filter(c => c.startsWith("take-off-"))).toEqual([]);
   });
 
   it("does nothing on a computer that follows no recipe, and nothing when the recipe did not move", async () => {

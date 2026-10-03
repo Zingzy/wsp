@@ -75,6 +75,7 @@ import {
   SETUP_LOG_TAIL_BYTES,
   SKIPPED_FOR_NOW,
   nothingToSkipLine,
+  wasThereLine,
   UNLAND_FAILED_LINE,
   editedThereLine,
   setupWidth,
@@ -312,6 +313,8 @@ export interface PlaceUndo {
   key: string;
   label: string;
   ids: readonly string[];
+  /** The one applied row the road's `cmd` and the folder answer for: they run only where it reads installed. */
+  owner?: string;
   cmd?: string;
   dests?: readonly string[];
   folder?: string;
@@ -1630,9 +1633,12 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       if (sync === undefined || removed.length === 0 || provisioner.undo === undefined) return;
       const planned = await provisioner.undo(sync.before, removed, { home });
       for (const u of planned) {
-        // What wsp put there for the row, by its outcome: a row the computer had before wsp is never taken off.
-        const ours = rows.some(r => (u.ids.includes(r.id) || r.id === u.key) && r.outcome === "installed");
+        // What wsp put there, read off the one row its road installed: a sign-in or a file wsp landed for a tool the
+        // box had before wsp says nothing about who put the tool there.
+        const owned = u.owner === undefined ? undefined : rows.find(r => r.id === u.owner)?.outcome;
+        const ours = owned === "installed";
         const left: PlaceProvisionRow[] = [];
+        if (owned === "present") left.push({ id: u.key, label: u.label, outcome: "skipped", note: wasThereLine(record.name) });
         if (u.dests !== undefined) {
           const out = await unlandFiles(machine, home, u.dests);
           if (out === undefined) left.push({ id: u.key, label: u.label, outcome: "failed", note: UNLAND_FAILED_LINE });

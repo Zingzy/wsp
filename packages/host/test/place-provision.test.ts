@@ -214,6 +214,16 @@ describe("a computer's picks planned for a sync", () => {
 });
 
 describe("what taking rows out of a computer's picks runs there", () => {
+  it("takes gh off for the GitHub row only by the row that put gh on, and git-lfs's filters off before the tool", async () => {
+    const before = { name: "laptop", agents: {}, mcp: {}, clis: { "git-lfs": { via: "brew" }, gh: { via: "brew" } }, skills: {}, plugins: {}, folders: {}, configs: { github: { signin: "machine" as const } } };
+    const undo = await undoPlan(before, [{ kind: "configs", name: "github" }, { kind: "clis", name: "git-lfs" }], { home: "/root" }, async () => new Map());
+    const by = new Map(undo.map(u => [u.key, u]));
+    expect(by.get("configs/github")?.owner).toBe("github/gh");
+    const lfs = by.get("clis/git-lfs")?.cmd ?? "";
+    expect(lfs).toContain("git lfs uninstall --system");
+    expect(lfs.indexOf("git lfs uninstall --system")).toBeLessThan(lfs.indexOf("brew uninstall git-lfs"));
+  });
+
   it("takes a CLI and an agent off by their own roads where they have one, a skill and an agent's own files by the ledger, a plugin by claude's command and a folder by its record", async () => {
     const before = {
       name: "laptop",
@@ -246,7 +256,11 @@ describe("what taking rows out of a computer's picks runs there", () => {
     expect(by.get("clis/jq")).toMatchObject({ ids: ["tools/apt/jq"], note: "jq is part of the base and stays" });
     expect(by.get("skills/why")).toMatchObject({ dests: [".claude/skills/why"] });
     expect(by.get("plugins/lint@acme")?.cmd).toContain("claude plugin uninstall 'lint@acme'");
-    expect(by.get("folders/app")).toMatchObject({ folder: "app", ids: ["folders/app"] });
+    expect(by.get("folders/app")).toMatchObject({ folder: "app", ids: ["folders/app"], owner: "folders/app" });
+    // A road runs only where the row it installed reads installed: the agent's own row, the CLI's tool row.
+    expect(by.get("agents/claude")?.owner).toBe("agents/claude");
+    expect(by.get("clis/cowsay")?.owner).toBe("tools/npm/cowsay");
+    expect(by.get("plugins/lint@acme")?.owner).toBe("plugins/lint@acme");
     expect(by.get("mcp/linear")).toMatchObject({ ids: [`${MCP_ID_PREFIX}claude/linear`] });
     expect(by.get("mcp/linear")?.cmd).toBeUndefined();
     expect(by.get("configs/git")).toMatchObject({ dests: [".gitconfig", ".config/git/config", ".config/git/ignore", ".config/git/attributes"] });

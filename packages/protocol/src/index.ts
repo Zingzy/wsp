@@ -5609,6 +5609,8 @@ export const noVaultTokenLine = (agent: string): string => `this computer's vaul
  * where its files could not be taken off at all. */
 export const editedThereLine = (name: string, kept: readonly string[]): string => `${nameList(kept)} ${kept.length === 1 ? "was" : "were"} edited on ${name}, so ${kept.length === 1 ? "it stays" : "they stay"} and wsp no longer manages ${kept.length === 1 ? "it" : "them"}`;
 export const UNLAND_FAILED_LINE = "its files could not be taken off there; wsp remove takes them";
+/** What a row the recipe took out says where the box had it before wsp: it stays. */
+export const wasThereLine = (name: string): string => `${name} had it before wsp, so it stays`;
 
 /** What a computer's picks weigh against the room it has, before Set up: the bytes the picks and the room past them
  * need, the bytes free there as it last said, and how many picked rows nobody measured. */
