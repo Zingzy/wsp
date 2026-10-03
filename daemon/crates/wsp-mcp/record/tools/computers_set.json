@@ -418,6 +418,9 @@
               ],
               "additionalProperties": false
             },
+            "recipe": {
+              "type": "string"
+            },
             "cap": {
               "anyOf": [
                 {
@@ -978,6 +981,9 @@
                 "rows"
               ],
               "additionalProperties": false
+            },
+            "recipe": {
+              "type": "string"
             },
             "cap": {
               "anyOf": [

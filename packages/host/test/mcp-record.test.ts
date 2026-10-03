@@ -19,7 +19,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { LATEST_PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS } from "@modelcontextprotocol/sdk/types.js";
 import { CATALOG, agentName } from "@wsp/catalog";
 import { SEAL_REFUSAL } from "@wsp/keys";
-import { CLOUD_ENV, cloudFromEnv, placeSetRefusal, configDirSignInLine, EXIT_CODES, HERE_PLACE_ID, HOST_CLOSED_LINE, HOST_KEY_ENV, HOST_STOPPING_CLOSE, HOST_STOPPING_LINE, NOT_DELIVERED_LINE, HOST_TOKEN_ENV, HOST_URL_ENV, KIND_CLASS, TURN_TOKEN_ENV, LAUNCHED_WITH, LOOPBACK, SKILL_PREVIEW_BYTES, WS_PATH, isLoopback, isUrl, isWildcard, servedHostname, wsUrlOf, hostNoKeyLine, jsonLine, NEWER_TURN_LINE, noMessagesLine, noReplyLine, NO_TERMINAL_CONFIG_LINE, refusalLine, scopedNoPairLine, commandWords, authRefusal, deviceAuthOldHostLine, noSuchPlaceRefusal, pairKeyRefusal, SEAL_CLIENT, unclosedQuoteRefusal, validatorRefusal, type PlaceSpend, type PlaceView, type ServerToolsAnswer } from "@wsp/protocol";
+import { CLOUD_ENV, cloudFromEnv, placeSetRefusal, configDirSignInLine, EXIT_CODES, HERE_PLACE_ID, HOST_CLOSED_LINE, HOST_KEY_ENV, HOST_STOPPING_CLOSE, HOST_STOPPING_LINE, NOT_DELIVERED_LINE, HOST_TOKEN_ENV, HOST_URL_ENV, KIND_CLASS, TURN_TOKEN_ENV, LAUNCHED_WITH, LOOPBACK, SKILL_PREVIEW_BYTES, WS_PATH, isLoopback, isUrl, isWildcard, servedHostname, wsUrlOf, hostNoKeyLine, jsonLine, NEWER_TURN_LINE, noMessagesLine, noReplyLine, NO_TERMINAL_CONFIG_LINE, refusalLine, scopedNoPairLine, commandWords, authRefusal, deviceAuthOldHostLine, noSuchPlaceRefusal, pairKeyRefusal, SEAL_CLIENT, unclosedQuoteRefusal, validatorRefusal, RecipeFile, type PlaceSpend, type PlaceView, type ServerToolsAnswer } from "@wsp/protocol";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { hostExitedLine, noHostAnsweredLine, startingHostLine, upArgs } from "../src/host-start.js";
 import { hostLogPath, hostTokenPath, lockPathFor, POLL_MS, SERVICE_WAIT_MS, STARTED_BY_ENV } from "../src/host-lock.js";
@@ -428,6 +428,25 @@ type Answered = Record<string, TurnCase[]>;
 const WORKSPACE = { id: "ws_1", name: "landing", machineId: "m1", phase: "running", golden: "snap_gold", createdAt: "2026-09-25T00:00:00.000Z", project: { id: "pr_1", name: "api", path: "/root/api", computer: "place-9" } };
 const AIMED = { "workspaces.resolve": reply({ workspace: WORKSPACE }), "places.list": reply({ places: [PLACE, CLOUD] }) };
 
+const RECIPE = { name: "laptop \u0085 \"one\" 🧪", slug: "laptop-one", summary: "2 agents, 1 CLI", machines: ["attic"], file: RecipeFile.parse({ name: "laptop \u0085 \"one\" 🧪", agents: { claude: { signin: "vault" }, codex: { signin: "machine" } }, clis: { "cargo-nextest": { via: "cargo", needs: ["build-essential"] } } }) };
+
+/** The recipe tools pass the host's answer through. */
+const RECIPES: Answered = {
+  recipes: [
+    { case: "one", arguments: {}, replies: { "recipes.list": reply({ recipes: [RECIPE] }) } },
+    { case: "none", arguments: {}, replies: { "recipes.list": reply({ recipes: [] }) } },
+  ],
+  recipes_show: [
+    { case: "one", arguments: { name: "laptop-one" }, replies: { "recipes.get": reply({ recipe: RECIPE, hash: "sha256:9f" }) } },
+    { case: "no such recipe", arguments: { name: "desk" }, replies: { "recipes.get": refused("there is no recipe desk; the recipes are laptop-one", "not-found") } },
+  ],
+  recipes_save: [
+    { case: "saved", arguments: { name: "laptop one", from: "attic" }, replies: { "recipes.save": reply({ recipe: RECIPE }) } },
+    { case: "a computer set up before picks", arguments: { name: "desk", from: "attic" }, replies: { "recipes.save": refused("attic was set up before picks were kept", "usage") } },
+  ],
+  recipes_remove: [{ case: "removed", arguments: { name: "laptop-one" }, replies: { "recipes.remove": reply({ recipe: RECIPE }) } }],
+};
+
 /** The skill and server tools: every road to the target, each line the text says, and each refusal before the host
  * is asked. The host's rows come in an order of their own with a key no schema holds, which the answer drops. */
 const SKILLS_AND_SERVERS: Answered = {
@@ -557,6 +576,7 @@ const ANSWERED: Answered = {
     { case: "nothing to set", arguments: { computer: "attic" }, replies: { "places.list": reply({ places: [PLACE, CLOUD] }), "places.set": refused(placeSetRefusal({ kind: "computer", name: "attic", takesForks: true }, {})!, "usage") } },
     { case: "no such computer", arguments: { computer: "nowhere", threads: 1 }, replies: { "places.list": reply({ places: [PLACE, CLOUD] }) } },
   ],
+  ...RECIPES,
   usage: [
     {
       case: "an account read and one with no reading, and a day of use by agent",

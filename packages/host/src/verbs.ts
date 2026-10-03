@@ -285,6 +285,9 @@ import {
   placeSpendLimit,
   placeStateOf,
   PlaceSpend,
+  RecipeView,
+  RECIPE_KINDS,
+  type RecipeFile,
   provisionWord,
   spendMeterWord,
   namesPlace,
@@ -797,6 +800,41 @@ export function computerLines(places: readonly PlaceView[], platform: "darwin" |
   ]);
   return table([["COMPUTER", "KIND", "CORES", "MEMORY", "DISK FREE", "ENGINE", "COPIES", "PRESENT", "WORKSPACES", "THREADS", "MACHINES", "SPEND", "STATE", "LAST SEEN", "BEHIND", "IMAGE", "TOOLS", "AGENTS"], ...rows]);
 }
+
+/** wsp recipes: one row per recipe, what it holds and the computers that follow it. */
+export function recipeLines(recipes: readonly RecipeView[]): string[] {
+  if (recipes.length === 0) return ["No recipe is saved yet. The app's Add a computer saves one, and wsp recipes save <name> --from <computer> saves what a computer was set up with."];
+  return table([["RECIPE", "HOLDS", "COMPUTERS"], ...recipes.map(r => [r.name, r.summary, r.machines.join(", ")])]);
+}
+
+/** One row of a recipe as wsp recipes show prints it: the row's name, then what it says beyond its name. */
+function recipeRowWords(kind: (typeof RECIPE_KINDS)[number], file: RecipeFile): string[] {
+  const rows: [string, Record<string, unknown>][] = kind === "configs" ? Object.entries(file.configs).filter((e): e is [string, Record<string, unknown>] => e[1] !== undefined) : Object.entries(file[kind]);
+  return rows.map(([name, row]) => {
+    const said = Object.entries(row).flatMap(([k, v]) => (v === undefined || (Array.isArray(v) && v.length === 0) ? [] : [`${k} ${Array.isArray(v) ? v.join(", ") : String(v)}`]));
+    return said.length === 0 ? name : `${name} (${said.join("; ")})`;
+  });
+}
+
+/** wsp recipes show: the recipe's name and who follows it, every kind it holds with its rows, and its hash. */
+export function recipeShownLines(recipe: RecipeView, hash: string): string[] {
+  return [
+    `${recipe.name}: ${recipe.summary}`,
+    ...RECIPE_KINDS.flatMap(kind => {
+      const rows = recipeRowWords(kind, recipe.file);
+      return rows.length === 0 ? [] : [`  ${kind.padEnd(8)} ${rows.join(", ")}`];
+    }),
+    `  followed by ${recipe.machines.length === 0 ? "no computer" : recipe.machines.join(", ")}`,
+    `  hash     ${hash}`,
+  ];
+}
+
+/** What a save prints: the recipe and the computer that follows it now. */
+export const recipeSavedLine = (recipe: RecipeView): string => `saved ${recipe.name} (${recipe.summary})${recipe.machines.length === 0 ? "" : `, followed by ${recipe.machines.join(", ")}`}`;
+
+/** What a remove prints: the recipe gone and the computers that follow none now. */
+export const recipeRemovedLine = (recipe: RecipeView): string =>
+  `removed ${recipe.name}${recipe.machines.length === 0 ? "" : `; ${recipe.machines.join(", ")} keep what it put there and follow no recipe`}`;
 
 /** A flag that takes one word of a set, or nothing where it was left off. */
 function oneOf<T extends string>(name: string, words: readonly T[], value: string | undefined, on?: string): T | undefined {
@@ -3779,6 +3817,101 @@ export const ALL_VERBS: readonly Verb[] = [
     }),
   },
   {
+    name: "recipes",
+    usage: "wsp recipes",
+    about: "your saved recipes: what each puts on a computer in one line, and the computers that follow it",
+    page: "agent",
+    options: {},
+    run: async ctx => {
+      if (ctx.args.length !== 0) throw usageRefusal("wsp recipes takes no positional arguments.", usageIs(ctx));
+      const { recipes } = await (await ctx.client()).request<{ recipes: RecipeView[] }>("recipes.list");
+      ctx.out.emit({ recipes }, recipeLines(recipes).join("\n"));
+      return 0;
+    },
+    tool: tool({
+      description:
+        "Every recipe this host keeps: a named pick of what goes on a computer of the person's (agents and how each signs in, MCP servers per agent, CLIs by the manager they came from, skills, plugins, folders to move over as projects, and the git, shell and GitHub configs), chosen from what the computer the app runs on has. Each carries summary, one line of what it holds, and machines, the computers that follow it: a recipe edit reaches them. A recipe holds names and never a secret; a token reaches a computer only in the environment of a run there.",
+      input: {},
+      output: { recipes: z.array(RecipeView) },
+      call: async (_args, deps) => {
+        const { recipes } = await (await deps.client()).request<{ recipes: RecipeView[] }>("recipes.list");
+        return asJson({ recipes });
+      },
+    }),
+  },
+  {
+    name: "recipes show",
+    usage: "wsp recipes show <name>",
+    about: "one recipe whole: every row it holds by kind, the computers that follow it, and the hash it resolves to on this computer now",
+    page: "agent",
+    options: {},
+    run: async ctx => {
+      const [name, ...rest] = ctx.args;
+      if (name === undefined || rest.length > 0) throw usageRefusal("wsp recipes show takes one recipe.", usageIs(ctx));
+      const shown = await (await ctx.client()).request<{ recipe: RecipeView; hash: string }>("recipes.get", { name });
+      ctx.out.emit({ recipe: shown.recipe, hash: shown.hash }, recipeShownLines(shown.recipe, shown.hash).join("\n"));
+      return 0;
+    },
+    tool: tool({
+      description:
+        "One recipe by its name: file is the recipe as saved, every row by kind (agents with signin vault or machine, mcp with the agents each server goes to, clis with via, the manager it came from, and needs where it builds with the C toolchain, skills with from, the folder it is read from here, plugins, folders with from, name, icon, hue and keep, configs git, shell and github), machines the computers that follow it, and hash what it resolves to on the computer the app runs on now: the versions, the skill folders and the configs read there, which a computer that applied it is held against.",
+      input: { name: z.string().describe("the recipe's name, as recipes lists it") },
+      output: { recipe: RecipeView, hash: z.string() },
+      call: async ({ name }, deps) => {
+        const shown = await (await deps.client()).request<{ recipe: RecipeView; hash: string }>("recipes.get", { name });
+        return asJson({ recipe: shown.recipe, hash: shown.hash });
+      },
+    }),
+  },
+  {
+    name: "recipes save",
+    usage: "wsp recipes save <name> --from <computer>",
+    about: "saves what one of your computers was set up with as a recipe under that name, and that computer follows it from then on",
+    page: "agent",
+    options: { from: { type: "string" } },
+    run: async ctx => {
+      const [name, ...rest] = ctx.args;
+      const from = flag(ctx.flags, "from");
+      if (name === undefined || rest.length > 0 || from === undefined) throw usageRefusal("wsp recipes save takes one name and the computer to save it from.", usageIs(ctx));
+      const { recipe } = await (await ctx.client()).request<{ recipe: RecipeView }>("recipes.save", { name, from });
+      ctx.out.emit({ recipe }, recipeSavedLine(recipe));
+      return 0;
+    },
+    tool: tool({
+      description:
+        "Saves the picks one of the person's computers was set up with as a recipe under name, rewriting a recipe of that name whole, and that computer follows it from then on, so an edit to the recipe reaches it. Refused for a name with no letter or digit in it, for the computer the app runs on, and for a computer set up before picks were kept. The answer is the recipe as saved.",
+      input: { name: z.string().describe("what to call the recipe"), from: z.string().describe("the computer whose picks to save, by the name computers lists") },
+      output: { recipe: RecipeView },
+      call: async ({ name, from }, deps) => {
+        const { recipe } = await (await deps.client()).request<{ recipe: RecipeView }>("recipes.save", { name, from });
+        return asJson({ recipe });
+      },
+    }),
+  },
+  {
+    name: "recipes remove",
+    usage: "wsp recipes remove <name>",
+    about: "takes a recipe away; the computers that followed it keep what they have and follow none",
+    page: "agent",
+    options: {},
+    run: async ctx => {
+      const [name, ...rest] = ctx.args;
+      if (name === undefined || rest.length > 0) throw usageRefusal("wsp recipes remove takes one recipe.", usageIs(ctx));
+      const { recipe } = await (await ctx.client()).request<{ recipe: RecipeView }>("recipes.remove", { name });
+      ctx.out.emit({ recipe }, recipeRemovedLine(recipe));
+      return 0;
+    },
+    tool: tool({
+      description: "Takes a recipe's file away. The computers that followed it keep everything it put there and follow none from then on, so nothing reaches them from it again. The answer is the recipe as it stood, machines naming the computers it was taken off.",
+      input: { name: z.string().describe("the recipe's name, as recipes lists it") },
+      output: { recipe: RecipeView },
+      call: async ({ name }, deps) => {
+        const { recipe } = await (await deps.client()).request<{ recipe: RecipeView }>("recipes.remove", { name });
+        return asJson({ recipe });
+      },
+    }),
+  },
+  {
     name: "usage",
     usage: "wsp usage [--range day|week|month] [--by agent|account|computer|project|model]",
     about: "what each agent account signed in on any of your computers may still use, and what was used over a day, a week or a month split one way; two answers, never added together",
@@ -5943,6 +6076,7 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   engine: "give it the place's Docker or podman through a socket that sees its own containers alone",
   "recipe engine": "mark the recipe so every workspace from its image gets the place's Docker or podman; it stays in the file until you edit it out",
   "export from": "the folder on the machine to bring home; the project registered for the folder you named without it",
+  "recipes save from": "the computer whose picks the recipe is saved from, by the name wsp computers shows; it follows the recipe from then on",
   force: "build again even where the place already holds this version",
   hidden: "list the folders whose names start with a dot too",
   "usage range": "the days what was used is read over: day (today, the default), week (the last seven) or month (the last thirty); the accounts' limits are the same whatever it says",

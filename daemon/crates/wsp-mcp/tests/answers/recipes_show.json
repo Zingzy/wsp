@@ -1,0 +1,37 @@
+{
+  "tool": "recipes_show",
+  "cases": [
+    {
+      "case": "one",
+      "arguments": {
+        "name": "laptop-one"
+      },
+      "replies": {
+        "recipes.get": "{\"id\":1,\"ok\":true,\"recipe\":{\"name\":\"laptop \u0085 \\\"one\\\" 🧪\",\"slug\":\"laptop-one\",\"summary\":\"2 agents, 1 CLI\",\"machines\":[\"attic\"],\"file\":{\"name\":\"laptop \u0085 \\\"one\\\" 🧪\",\"agents\":{\"claude\":{\"signin\":\"vault\"},\"codex\":{\"signin\":\"machine\"}},\"mcp\":{},\"clis\":{\"cargo-nextest\":{\"via\":\"cargo\",\"needs\":[\"build-essential\"]}},\"skills\":{},\"plugins\":{},\"folders\":{},\"configs\":{}}},\"hash\":\"sha256:9f\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\n  \\\"recipe\\\": {\\n    \\\"name\\\": \\\"laptop \\\\u0085 \\\\\\\"one\\\\\\\" 🧪\\\",\\n    \\\"slug\\\": \\\"laptop-one\\\",\\n    \\\"summary\\\": \\\"2 agents, 1 CLI\\\",\\n    \\\"machines\\\": [\\n      \\\"attic\\\"\\n    ],\\n    \\\"file\\\": {\\n      \\\"name\\\": \\\"laptop \\\\u0085 \\\\\\\"one\\\\\\\" 🧪\\\",\\n      \\\"agents\\\": {\\n        \\\"claude\\\": {\\n          \\\"signin\\\": \\\"vault\\\"\\n        },\\n        \\\"codex\\\": {\\n          \\\"signin\\\": \\\"machine\\\"\\n        }\\n      },\\n      \\\"mcp\\\": {},\\n      \\\"clis\\\": {\\n        \\\"cargo-nextest\\\": {\\n          \\\"via\\\": \\\"cargo\\\",\\n          \\\"needs\\\": [\\n            \\\"build-essential\\\"\\n          ]\\n        }\\n      },\\n      \\\"skills\\\": {},\\n      \\\"plugins\\\": {},\\n      \\\"folders\\\": {},\\n      \\\"configs\\\": {}\\n    }\\n  },\\n  \\\"hash\\\": \\\"sha256:9f\\\"\\n}\"}],\"structuredContent\":{\"recipe\":{\"name\":\"laptop \\u0085 \\\"one\\\" 🧪\",\"slug\":\"laptop-one\",\"summary\":\"2 agents, 1 CLI\",\"machines\":[\"attic\"],\"file\":{\"name\":\"laptop \\u0085 \\\"one\\\" 🧪\",\"agents\":{\"claude\":{\"signin\":\"vault\"},\"codex\":{\"signin\":\"machine\"}},\"mcp\":{},\"clis\":{\"cargo-nextest\":{\"via\":\"cargo\",\"needs\":[\"build-essential\"]}},\"skills\":{},\"plugins\":{},\"folders\":{},\"configs\":{}}},\"hash\":\"sha256:9f\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "recipes.get",
+          "name": "laptop-one"
+        }
+      ]
+    },
+    {
+      "case": "no such recipe",
+      "arguments": {
+        "name": "desk"
+      },
+      "replies": {
+        "recipes.get": "{\"id\":1,\"ok\":false,\"error\":\"there is no recipe desk; the recipes are laptop-one\",\"kind\":\"not-found\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"there is no recipe desk; the recipes are laptop-one\"}],\"structuredContent\":{\"error\":\"there is no recipe desk; the recipes are laptop-one\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "recipes.get",
+          "name": "desk"
+        }
+      ]
+    }
+  ]
+}

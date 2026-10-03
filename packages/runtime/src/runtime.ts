@@ -125,7 +125,7 @@ import {
   DISK_USE_CMD,
   diskUsePct,
 } from "@wsp/engine";
-import type { AgentsReport, AgentsSignInEvent, AgentsTarget, DaemonFrame, DaemonResponse, EditorChoice, EditorId, PlaceReport, ServerAdd, ServerAsk, ServerToolsAnswer, SignInLine, SkillAdded, SkillHit, SkillPreview } from "@wsp/protocol";
+import type { AgentsReport, AgentsSignInEvent, AgentsTarget, DaemonFrame, DaemonResponse, EditorChoice, EditorId, PlaceReport, RecipeFile, RecipeOptions, ServerAdd, ServerAsk, ServerToolsAnswer, SignInLine, SkillAdded, SkillHit, SkillPreview } from "@wsp/protocol";
 import type {
   AdapterAttachOptions,
   AdapterEvent,
@@ -698,6 +698,18 @@ export interface InitDoor {
   /** Every change to the job, and beside it the arrival of a wait on the person, which a client that speaks once per
    * need rides rather than diffing views. */
   on(fn: (e: InitJobEvent | InitNeedsYouEvent) => void): () => void;
+}
+
+/** The recipes a host keeps, as the runtime serves them: the files beside the state are the host's, and which
+ * computers follow each is the place records', which the runtime folds in. */
+export interface RecipeShelf {
+  list(): Promise<{ slug: string; file: RecipeFile }[]>;
+  /** One recipe by its name or slug, with the hash it resolves to on this computer now. */
+  get(word: string): Promise<{ slug: string; file: RecipeFile; hash: string }>;
+  /** Writes the recipe whole; refused for a name that makes no file name and for anything shaped like a secret. */
+  save(file: unknown): Promise<{ slug: string; file: RecipeFile }>;
+  remove(word: string): Promise<{ slug: string; file: RecipeFile }>;
+  options(): Promise<RecipeOptions>;
 }
 
 /** One agent's result with its catalog name, for the sentence the runtime says about it. */

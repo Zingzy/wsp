@@ -3292,6 +3292,8 @@ export const PlaceView = z.object({
   /** The recipe on this computer: what is being put on it, then what stands and what failed. Absent on a provider,
    * on this computer itself, and on a computer nothing has provisioned yet. */
   provision: PlaceProvision.optional(),
+  /** The saved recipe this computer follows, by slug, or none; absent on a computer set up before recipes. */
+  recipe: z.string().optional(),
   /** The number set on this place, else its kind's default; absent only on a computer that has not said its shape. */
   cap: PlaceCap.optional(),
   /** The cap this place takes when the person sets none: one thread per THREAD_MEM_MB of a computer's memory up to
@@ -6033,6 +6035,21 @@ const RuntimeOp = z.discriminatedUnion("op", [
      * caller that sends none meets the same wall as one that sends a wrong one. */
     hostKey: z.string().max(200).optional(),
   }),
+  /** Every recipe this host keeps, each with the line of what it holds and the computers that follow it. Answers
+   * `{ recipes: RecipeView[] }`. The person's own road only, as every place op is. */
+  z.object({ id: reqId, op: z.literal("recipes.list") }),
+  /** One recipe by its name or slug, with the hash it resolves to on this computer now. Answers `{ recipe:
+   * RecipeView, hash }`. */
+  z.object({ id: reqId, op: z.literal("recipes.get"), name: z.string().max(200) }),
+  /** Writes a recipe whole: `file` as given, or with `from` a computer's own picks under `name`, after which that
+   * computer follows it. Refused for a name that makes no file name and for anything shaped like a secret. Answers
+   * `{ recipe: RecipeView }`. */
+  z.object({ id: reqId, op: z.literal("recipes.save"), name: z.string().max(200), file: z.unknown().optional(), from: z.string().max(200).optional() }),
+  /** Takes a recipe's file away; the computers that followed it follow none. Answers `{ recipe: RecipeView }` as it
+   * stood. */
+  z.object({ id: reqId, op: z.literal("recipes.remove"), name: z.string().max(200) }),
+  /** What a recipe can pick from on this computer, read now. Answers `{ options: RecipeOptions }`. */
+  z.object({ id: reqId, op: z.literal("recipes.options") }),
   /** Replies with an EventsSubscribeReply, then pushes events on this socket. With `after`, the seq of the last event
    * this client saw, every retained event past it is pushed first, oldest first, before anything live; `stream` is
    * the id that came with that seq, so a runtime that is not the one that issued it answers gap instead. */
@@ -7132,6 +7149,7 @@ export * from "./tree.js";
 export * from "./start.js";
 export * from "./daemon-contract.js";
 export * from "./projects.js";
+export * from "./recipe-file.js";
 export { defaultSeedChoice, leftBehindLine, neverTravelsLine, noRemoteLine, notInTheMenuLine, SEED_DIR, SEED_MEMORY_DIR, SEED_PATCH, seedBytes, seedChoiceFrom, seedCommitsLandedLine, seedCommitsLostLine, seedConsentLines, seedingLine, seedMenuRows, seedRowWords, seedSummaryLines } from "./project-seed.js";
 export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
 export { addressFromHash, addressFromLink, appHash, linkFromHash, linkHash, openingHash, pairingCodeOf, workspaceHash, LINK_KINDS, type AppAddress, type LinkKind, type LinkTarget } from "./app-address.js";

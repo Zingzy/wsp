@@ -39,6 +39,13 @@ import {
   DEVICE_REVOKED_REFUSAL,
   deviceAdmissionTranscript,
   PLACES_TICKET_REFUSAL,
+  NO_RECIPES,
+  RECIPES_TICKET_REFUSAL,
+  noPicksRefusal,
+  recipeFromHereRefusal,
+  recipeSummary,
+  type RecipeFile,
+  type RecipeView,
   noSignInRefusal,
   SIGN_IN_LINE_REFUSAL,
   HOST_RESTART_TICKET_REFUSAL,
@@ -108,7 +115,7 @@ import type { DaemonChannel } from "./daemon-channel.js";
 import { NO_DEVICE_DOOR, safeEqual, threadOf, type DeviceDoor, type HeldDevice } from "./devices.js";
 import { NO_PLACE_DOOR, type PlaceDoor } from "./places.js";
 import { keyFingerprint, openFrame, verifyPlaceBytes, type Seal } from "@wsp/keys";
-import type { HostEditor, HostFolders, HostSsh, HostTerminalConfig, InitDoor, ProjectBundler, ProjectLander, Runtime } from "./runtime.js";
+import type { HostEditor, HostFolders, HostSsh, HostTerminalConfig, InitDoor, ProjectBundler, ProjectLander, RecipeShelf, Runtime } from "./runtime.js";
 
 /** The port forwards a host holds, as the app lists and stops them. The
  * runtime keeps none itself: the host that owns the daemon links supplies this. */
@@ -183,6 +190,8 @@ export interface ServeOptions {
   ssh?: HostSsh;
   /** The init job the host runs on this computer, for the init.* ops and the init.job events; without it the ops are refused. */
   init?: InitDoor;
+  /** The recipes the host keeps beside its state, for the recipes.* ops; without it they are refused. */
+  recipes?: RecipeShelf;
   /** The doctor's computer road as this host runs it, for places.doctor and the doctor.line events; without it the
    * op is refused, since the road is the host's own and the runtime holds none of what it reads. */
   doctor?: PlaceDoctor;
@@ -432,6 +441,20 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
     if (rt.places === undefined) throw new Error(NO_PLACE_DOOR);
     return rt.places;
   };
+  const recipes = (): RecipeShelf => {
+    if (opts.recipes === undefined) throw new Error(NO_RECIPES);
+    return opts.recipes;
+  };
+  /** One recipe as a client reads it: its file, the line of what it holds and the computers that follow it. */
+  const recipeView = (held: { slug: string; file: RecipeFile }, followers: ReadonlyMap<string, string[]>): RecipeView => ({
+    name: held.file.name,
+    slug: held.slug,
+    summary: recipeSummary(held.file),
+    machines: followers.get(held.slug) ?? [],
+    file: held.file,
+  });
+  /** The computers that follow each recipe, empty on a runtime that holds no places. */
+  const followers = async (): Promise<Map<string, string[]>> => (rt.places === undefined ? new Map() : rt.places.followers());
 
   /** One level of folders on a computer this host holds, read by that computer's own daemon over the link it opened,
    * with the folder of every project recorded there beside its login's home as the roots. A provider keeps no
@@ -1069,6 +1092,40 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 now(),
               );
               send({ id: msg.id, ok: true, ...added });
+              return;
+            }
+            case "recipes.list":
+            case "recipes.get":
+            case "recipes.save":
+            case "recipes.remove":
+            case "recipes.options": {
+              if (!ownRoad()) {
+                send({ id: msg.id, ok: false, error: RECIPES_TICKET_REFUSAL, kind: "ticket" });
+                return;
+              }
+              if (msg.op === "recipes.list") {
+                const by = await followers();
+                send({ id: msg.id, ok: true, recipes: (await recipes().list()).map(held => recipeView(held, by)) });
+              } else if (msg.op === "recipes.get") {
+                const held = await recipes().get(msg.name);
+                send({ id: msg.id, ok: true, recipe: recipeView(held, await followers()), hash: held.hash });
+              } else if (msg.op === "recipes.save") {
+                // A computer's own picks under a new name, after which it follows that recipe; or the file as given.
+                const from = msg.from === undefined ? undefined : await places().placeFor(msg.from);
+                if (msg.from !== undefined && from?.placeId === undefined) throw Object.assign(new Error(recipeFromHereRefusal(msg.from)), { kind: "usage" });
+                const picks = from?.placeId === undefined ? undefined : await places().picksOf(from.placeId);
+                if (msg.from !== undefined && picks === undefined) throw Object.assign(new Error(noPicksRefusal(msg.from)), { kind: "usage" });
+                const held = await recipes().save(picks !== undefined ? { ...picks, name: msg.name } : { ...(msg.file as object), name: msg.name });
+                if (from?.placeId !== undefined) await places().follow(from.placeId, held.slug);
+                send({ id: msg.id, ok: true, recipe: recipeView(held, await followers()) });
+              } else if (msg.op === "recipes.remove") {
+                const by = await followers();
+                const held = await recipes().remove(msg.name);
+                if (rt.places !== undefined) await rt.places.unfollow(held.slug);
+                send({ id: msg.id, ok: true, recipe: recipeView(held, by) });
+              } else {
+                send({ id: msg.id, ok: true, options: await recipes().options() });
+              }
               return;
             }
             case "account.get": {

@@ -18,6 +18,7 @@ mod projects;
 mod projects_change;
 mod pull_request;
 mod recipe;
+mod recipes;
 mod said;
 mod servers;
 mod setup;
@@ -126,6 +127,10 @@ pub const TOOLS: &[Tool] = &[
     folders::TOOL,
     setup::TOOL,
     terminal_config::TOOL,
+    recipes::LIST,
+    recipes::SHOW,
+    recipes::SAVE,
+    recipes::REMOVE,
 ];
 
 /// The tool of that name the state lists, with its entry there; none where that state lists no such tool, which the

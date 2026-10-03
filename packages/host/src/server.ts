@@ -10,6 +10,7 @@ import { BOOT_SCRIPT, DEFAULT_PORT, PAIR_CODE_TTL_MS, PLACES_WORDS, PLACE_PORT_O
 import { sshHostsIn } from "./ssh-hosts.js";
 import { LOOPBACK, describeAge, goldenHead, serveRuntime, tokenDigest, type AdmittedDevices, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type HostSsh, type InitDoor, type PlaceBackHolder, type PlaceDoctor, type PlaceDoorControl, type ProjectBundler, type ProjectImportOptions, type ProjectLander, type ReapedMachine, type RestartDoor, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
 import { computerDoctor } from "./doctor.js";
+import { recipeShelf } from "./recipes.js";
 import { advertiseWord, hereUrl, reachAddresses, type HereAt } from "./pairing.js";
 import { NO_PROJECT_YET } from "./verbs.js";
 import { accountHere, publicHostname } from "./relay-link.js";
@@ -607,6 +608,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
       ...(opts.admitted !== undefined ? { admitted: opts.admitted } : {}),
       ...(opts.init !== undefined ? { init: opts.init } : {}),
       ...(doctor !== undefined ? { doctor } : {}),
+      ...(opts.statePath !== undefined ? { recipes: recipeShelf({ statePath: opts.statePath, home: homedir() }) } : {}),
       log,
       ...(opts.release !== undefined ? { release: opts.release } : {}),
       ...(opts.restart !== undefined ? { restart: opts.restart } : {}),

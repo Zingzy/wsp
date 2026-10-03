@@ -15,6 +15,7 @@ import {
   LOOPBACK,
   HERE_PLACE_ID,
   NO_PLACE_INSTALLER,
+  NO_RECIPE,
   PAIR_CODE_TTL_MS,
   PLACE_KEY_REFUSAL,
   PLACE_UNKNOWN_REFUSAL,
@@ -87,6 +88,7 @@ import {
   type PlaceRoad,
   type PlaceUpdateReply,
   type PlaceView,
+  type RecipeFile,
   type WorkspaceSize,
   PLACE_CODE_REFUSAL,
   PLACE_UNSEALED_JOIN_REFUSAL,
@@ -139,6 +141,10 @@ export interface PlaceRecord {
   dialled?: PlaceDialled;
   /** The recipe job on this computer as it last stood; written per row while it runs. */
   provision?: PlaceProvision;
+  /** What this computer was set up with, saved or not: what a retry, a resume and a recipe saved from it read. */
+  picks?: RecipeFile;
+  /** The saved recipe it follows, by slug, or none. */
+  recipe?: string;
   /** When the report on this record was taken. Not lastSeenAt: that moves every minute while the link is held,
    * and the uptime in the report grows with the computer, so a row dating one by the other reads an hours-old
    * figure as a minutes-old one. */
@@ -510,6 +516,14 @@ export interface PlaceDoor {
   /** Every place a word picks, by id or by the name the person gave it: none, one, or the two that share a name,
    * which is a refusal the caller writes with the ids in it. */
   find(ref: string): Promise<PlaceRecord[]>;
+  /** The saved recipe one computer follows from now, by slug, or none; answers its row. */
+  follow(placeId: string, recipe: string): Promise<PlaceView>;
+  /** The computers that follow each saved recipe, by slug, by name. */
+  followers(): Promise<Map<string, string[]>>;
+  /** Takes every computer off one recipe, so each follows none; answers their names. */
+  unfollow(slug: string): Promise<string[]>;
+  /** What a computer was set up with; nothing for one set up before picks were kept. */
+  picksOf(placeId: string): Promise<RecipeFile | undefined>;
   on(fn: (e: PlaceEvent) => void): () => void;
   close(): Promise<void>;
 }
@@ -1399,6 +1413,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       ...(record.dialled !== undefined ? { dialled: record.dialled } : {}),
       ...(blocked !== undefined ? { blocked } : {}),
       ...(record.provision !== undefined ? { provision: record.provision } : {}),
+      ...(record.recipe !== undefined ? { recipe: record.recipe } : {}),
     };
   };
 
@@ -2167,6 +2182,31 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     },
 
     find: async ref => (await records()).filter(r => r.id === ref || r.name === ref),
+
+    async follow(placeId, recipe) {
+      const held = await recordOf(placeId);
+      if (held === undefined) throw Object.assign(new Error(noSuchPlaceRefusal(placeId, (await records()).map(r => r.name))), { kind: "usage" });
+      const moved = await keep({ ...held, recipe });
+      return viewOf(moved, await defaultId());
+    },
+
+    async followers() {
+      const out = new Map<string, string[]>();
+      for (const r of await records()) if (r.recipe !== undefined && r.recipe !== NO_RECIPE) (out.get(r.recipe) ?? out.set(r.recipe, []).get(r.recipe)!).push(r.name);
+      return out;
+    },
+
+    async unfollow(slug) {
+      const names: string[] = [];
+      for (const r of await records()) {
+        if (r.recipe !== slug) continue;
+        await keep({ ...r, recipe: NO_RECIPE });
+        names.push(r.name);
+      }
+      return names;
+    },
+
+    picksOf: async placeId => (await recordOf(placeId))?.picks,
 
     on: fn => {
       watchers.add(fn);
