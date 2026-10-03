@@ -324,8 +324,8 @@ function span(msLeft: number, two = true): string {
 const plainNumber = (n: number, p?: number): string =>
   n.toLocaleString("en-US", p === undefined ? { maximumFractionDigits: 2 } : { minimumFractionDigits: p, maximumFractionDigits: p });
 
-function listOrArgs(args: Val[]): Val[] {
-  return args.length === 1 && isList(args[0]) ? args[0] : args;
+function listOrArgs(args: Val[]): SlateJson[] {
+  return args.length === 1 && isList(args[0]) ? args[0] : args.map(a => a ?? null);
 }
 
 function field(item: Val, name: Val): Val {

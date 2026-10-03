@@ -1,32 +1,25 @@
 import { z } from "zod";
 import { AccountRow } from "../usage.js";
+import { SlateJson, SlateProblem, SlateSchema, type Slate } from "./types.js";
 
 // The slate's wire: the ops a window and the slate verbs send the host, what each answers, and the three events
 // (01-architecture, "Wire operations"). Shapes the slate module owns are carried as JSON here and validated by
 // that module on the host, so a window never needs the validator to read an answer.
 
 /** A JSON value as the slate stores it: in state, in `with`, in a resolved path. */
-export const SlateWireJson: z.ZodType<unknown> = z.unknown();
+export const SlateWireJson = SlateJson;
 
-/** A stored document as it rides the wire; the host validates every one it stores with the slate module. */
-export const SlateWireDocument = z.record(z.string(), z.unknown());
-export type SlateWireDocument = z.infer<typeof SlateWireDocument>;
+/** A stored document as an answer carries it: the host stored it only after the slate module validated it. */
+export const SlateWireDocument = SlateSchema;
+export type SlateWireDocument = Slate;
+
+/** A document as a write sends it, unread until the validator reads it, so a malformed one gets its problems listed
+ * rather than a refusal of the frame. */
+const SentDocument = z.record(z.string(), z.unknown());
 
 /** The one shape for errors, warnings and runtime problems (11-agent-toolchain). */
-export const SlateWireProblem = z.object({
-  code: z.string(),
-  name: z.string(),
-  message: z.string(),
-  piece: z.string().optional(),
-  prop: z.string().optional(),
-  line: z.number().int().optional(),
-  column: z.number().int().optional(),
-  at: z.number().int().optional(),
-  fix: z.string().optional(),
-  op: z.number().int().optional(),
-  since: z.string().optional(),
-});
-export type SlateWireProblem = z.infer<typeof SlateWireProblem>;
+export const SlateWireProblem = SlateProblem;
+export type SlateWireProblem = SlateProblem;
 
 export const SlateState = z.record(z.string(), SlateWireJson);
 export type SlateState = z.infer<typeof SlateState>;
@@ -71,7 +64,7 @@ const threadParams = { threadId: z.string().optional(), turnToken: z.string().op
 
 export const SlatesGetParams = z.object({ threadId: z.string() });
 export const SlatesStateParams = z.object({ ...threadParams, values: SlateState, ifVersion: z.number().int().optional(), sketch: z.boolean().optional() });
-export const SlatesSetParams = z.object({ ...threadParams, lines: z.string().optional(), document: SlateWireDocument.optional(), ifVersion: z.number().int().optional() });
+export const SlatesSetParams = z.object({ ...threadParams, lines: z.string().optional(), document: SentDocument.optional(), ifVersion: z.number().int().optional() });
 export const SlatesPatchParams = z.object({ ...threadParams, lines: z.string().optional(), ops: z.array(z.record(z.string(), z.unknown())).optional(), ifVersion: z.number().int().optional() });
 export const SlatesReadParams = z.object({ ...threadParams, values: z.array(z.string()).optional(), lines: z.boolean().optional(), sketch: z.boolean().optional() });
 export const SlatesUndoParams = z.object(threadParams);

@@ -212,6 +212,7 @@ import {
   usageRefusal,
   validatorRefusal,
   verbFailure,
+  problemListsOf,
   waitTimedOutLine,
   workspaceAsleepAgainLine,
   workspaceKind,
@@ -534,7 +535,7 @@ async function dialOnce(statePath: string, opts: DialOpts, again?: (refused: unk
       const text = JSON.stringify({ ...params, id, op });
       ws.send(seal === undefined ? text : seal.seal(text));
     });
-    if (frame.ok !== true) throw Object.assign(new Error(typeof frame["error"] === "string" ? frame["error"] : `${op} failed`), typeof frame["kind"] === "string" ? { kind: frame["kind"] } : {});
+    if (frame.ok !== true) throw Object.assign(new Error(typeof frame["error"] === "string" ? frame["error"] : `${op} failed`), typeof frame["kind"] === "string" ? { kind: frame["kind"] } : {}, problemListsOf(frame));
     return frame as T;
   };
   let timer: NodeJS.Timeout | undefined;

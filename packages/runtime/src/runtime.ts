@@ -253,6 +253,7 @@ import { POLL_INTERVAL_MS, createStatusTracker, machineStateOf, phaseLeavingGone
 import { makeDevices, type DeviceDoor, type ScopedRoad } from "./devices.js";
 import { makePlaceDoor, NO_PLACE_DOOR, PlaceForksNowhereError, PlaceProvisioningError, type PlaceDoor, type PlaceRecord, type PlaceWiring } from "./places.js";
 import type { BlobMark, Store } from "./store.js";
+import { createSlates, type Slates } from "./slates.js";
 import { RANGE_DAYS, READINGS_STEP_MS, SysHistoryReply, resetNoLoginsLine, type ReadingsAnswer, type PlaceView, type AccountsAnswer, type AgentSignInState, type ResetAnswer, type UsageRange, type UsageSplit, type UsedAnswer } from "@wsp/protocol";
 import { HARNESS_CATALOGS, catalogFromProbe, harnessCatalog, modelLabel, smallestModel } from "./harness-catalog.js";
 import {
@@ -483,6 +484,8 @@ export interface EventBus {
  * that no transcript keeps. 5000 bounds it at one transcript's worth of memory (TRANSCRIPT_CAP); a cursor that fell
  * off it gets a gap, and the client refetches the list, the statuses and sessions.history and converges from those. */
 const EVENT_RING_CAP = 5000;
+/** How often a pull request with a pending check is read while a slate watches its checks. */
+const SLATE_PR_POLL_MS = 30_000;
 
 /** How long a machine's catalog answer stands before the binary is asked again; t3code's provider health cadence. */
 export const CATALOG_TTL_MS = 5 * 60_000;
@@ -1708,6 +1711,8 @@ export interface Runtime {
         startedBy?: SessionOrigin;
         /** The client's id for this send, stamped on the turn's session.start as sent. */
         requestId?: string;
+        /** Set where a press in the thread's slate sent this message; stamped on the turn's start or steer. */
+        via?: "slate";
         /** The id a send to several models opens each of its threads under, stamped on the row as sent. */
         attempt?: string;
         /** Who the end of every turn on the thread this start opens is told, each a thread id or NOTIFY_ME: the line
@@ -1897,6 +1902,8 @@ export interface Runtime {
   /** The two usage records, never added together: what was used, split four ways over a range, and what each account
    * signed in anywhere may still use. */
   readonly usage: UsageDoor;
+  /** Each thread's slate: its record, the ops a window and the slate verbs send, and a press into the thread. */
+  readonly slates: Slates;
   /** The computers paired with this host and the one time codes that pair them, one collection each on this state
    * file, so a restart neither locks a paired computer out nor keeps a revoked one in. */
   readonly devices: DeviceDoor;
@@ -3737,6 +3744,85 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     bus.emit(event);
   };
 
+  /** The newest accrued cost each workspace's meter pushed, for a slate's cost source. */
+  const accrued = new Map<string, number>();
+  bus.on("workspace.cost", e => {
+    if (e.type === "workspace.cost") accrued.set(e.workspaceId, e.accruedUsd);
+  });
+  const slates: Slates = createSlates({
+    store,
+    now: () => clock.now(),
+    record: e => record(e),
+    emit: e => bus.emit(e),
+    thread: threadId => {
+      const latest = latestOn(threadId);
+      const workspaceId = latest?.workspaceId ?? threadRecords.get(threadId)?.workspaceId;
+      if (workspaceId === undefined) return undefined;
+      const running = [...sessions.values()].find(s => s.view.threadId === threadId && s.view.status === "running");
+      return {
+        workspaceId,
+        rootThreadId: rootOf(threadId),
+        sessionId: latest?.claudeSessionId ?? latest?.id ?? threadId,
+        ...(running !== undefined ? { turnId: running.turnId } : {}),
+      };
+    },
+    under: lead => treeUnder(lead),
+    threadOfToken: token => threadOfToken(token),
+    sources: (threadId, workspaceId, state) => ({
+      threadId,
+      workspaceId,
+      now: clock.now(),
+      state,
+      rows: () => rowsOn(threadId).sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0)),
+      results: () => (transcripts.get(workspaceId) ?? []).flatMap(e => (e.type === "session.done" && e.threadId === threadId ? [e.result] : [])),
+      account: async () => {
+        const entry = live.get(workspaceId);
+        const harness = latestOn(threadId)?.harness ?? threadRecords.get(threadId)?.harness;
+        if (entry === undefined || harness === undefined) return undefined;
+        const key = usageAccountOf(entry, harness).key;
+        return (await usageAccounts()).accounts.find(a => a.key === key);
+      },
+      workspace: () => {
+        const entry = live.get(workspaceId);
+        if (entry === undefined) return undefined;
+        const project = entry.record.project;
+        return {
+          computer: computerOf(entry),
+          ...(project !== undefined ? { project: projectHeld(project).name } : {}),
+          folder: checkoutOf(entry.record),
+          ...(entry.checkout !== undefined ? { checkout: entry.checkout } : {}),
+          ...(entry.pr !== undefined ? { pr: entry.pr } : {}),
+          rateUsdPerHour: entry.record.size === undefined ? 0 : backendFor(entry.record).pricing.rateUsdPerHour(entry.record.size),
+          accruedUsd: accrued.get(workspaceId) ?? 0,
+        };
+      },
+    }),
+    deliver: async ({ threadId, workspaceId, prompt, requestId }) => {
+      let queuedNow: (() => void) | undefined;
+      const queued = new Promise<{ outcome: "queued" }>(resolve => {
+        queuedNow = () => resolve({ outcome: "queued" });
+      });
+      const off = bus.on("session.queued", e => {
+        if (e.type === "session.queued" && e.requestId === requestId) queuedNow?.();
+      });
+      try {
+        const started = sessionsApi.start(workspaceId, { prompt, thread: threadId, requestId, startedBy: "person", via: "slate" });
+        const first = await Promise.race([started, queued]);
+        if ("outcome" in first && !("turnId" in first)) {
+          started.catch((e: unknown) => console.warn(`a press waiting in thread ${threadWord(threadId)} was not sent: ${e instanceof Error ? e.message : String(e)}`));
+          return { outcome: "queued" };
+        }
+        return { outcome: first.outcome, turnId: first.turnId };
+      } finally {
+        off();
+      }
+    },
+    watchPr: workspaceId => {
+      const entry = live.get(workspaceId);
+      if (entry !== undefined) pollPullRequest(entry);
+    },
+  });
+
   /** The harness session a thread's newest start in the transcript announced: what a send resumes once the thread's
    * rows have fallen off the index cap. */
   const startedAs = (workspaceId: string, threadId: string): string | undefined => transcriptIndex.get(workspaceId)?.starts.get(threadId);
@@ -4758,12 +4844,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     delete entry.prPoll;
     const fact = entry.pr;
     if (!isPullRequestFact(fact) || fact.state !== "open" || live.get(entry.record.id) !== entry) return;
+    // A slate bound to the checks reads a pending one every 30 s rather than every three minutes (06-sources).
+    const pending = fact.checks.some(c => c.state === "pending") && slates.watchesPr(entry.record.id);
     entry.prPoll = clock.schedule(
       () => {
         delete entry.prPoll;
         void readPullRequest(entry, true);
       },
-      PR_POLL_MS,
+      pending ? SLATE_PR_POLL_MS : PR_POLL_MS,
       { unref: true },
     );
   };
@@ -8828,7 +8916,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return { id: taken.sessionId, workspaceId, turnId: taken.turnId, outcome: taken.outcome, finished: Promise.resolve(result), view: () => sessions.get(taken.sessionId)?.view ?? held.view, interrupt: async () => {} };
   };
 
-  const recordSteer = (s: { view: SessionView; turnId: string }, handleId: string, o: { prompt: string; requestId?: string }): void => {
+  const recordSteer = (s: { view: SessionView; turnId: string }, handleId: string, o: { prompt: string; requestId?: string; via?: "slate" }): void => {
     record({
       type: "session.steer",
       workspaceId: s.view.workspaceId,
@@ -8837,6 +8925,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       ...(s.view.threadId !== undefined ? { threadId: s.view.threadId } : {}),
       prompt: o.prompt,
       ...(o.requestId !== undefined ? { requestId: o.requestId } : {}),
+      ...(o.via !== undefined ? { via: o.via } : {}),
       // Read off the row the turn writes its open prompt on: a message that joined a turn stopped on one waits for
       // the person as the turn does, and the caller says so rather than going quiet until the prompt is answered.
       ...(s.view.asking !== undefined ? { waiting: true } : {}),
@@ -8931,7 +9020,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     scopeDeviceId?: string;
     outcome: SessionStartOutcome;
     /** What this turn's own session.start row carries, for the road that still has to write it. */
-    opening: { prompt: string; requestId?: string; afterCut?: boolean; title?: string; attachments?: readonly AttachmentRecord[] };
+    opening: { prompt: string; requestId?: string; via?: "slate"; afterCut?: boolean; title?: string; attachments?: readonly AttachmentRecord[] };
     /** The harness session this turn resumes, so the row it takes over keeps who opened the thread and with what. */
     resume?: string;
     /** The rewind's anchor this turn was launched to cut at; the thread lets it go once the turn announces itself. */
@@ -9012,6 +9101,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         void persistSessions(workspaceId);
         bus.emit({ type: "thread.marked", workspaceId, threadIds: undone });
       }
+      // The slate's snapshot is keyed by the turn and never waits on the machine, so every turn that ends has one.
+      void slates.turnEnded({ threadId, turnId, workspaceId }).catch((e: unknown) => console.warn(`the slate of thread ${threadWord(threadId)} was not kept at the end of turn ${turnId}: ${e instanceof Error ? e.message : String(e)}`));
       const kept = keepCheckpoint(entry, { sessionId: view.claudeSessionId ?? view.id, threadId, turnId, ...(anchor !== undefined ? { anchor } : {}), ...(keptWhy !== undefined ? { kept: keptWhy } : {}) });
       checkpointsLanding.set(threadId, kept);
       void kept.finally(() => {
@@ -9147,6 +9238,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             threadId,
             prompt: opening.prompt,
             ...(opening.requestId !== undefined ? { requestId: opening.requestId } : {}),
+            ...(opening.via !== undefined ? { via: opening.via } : {}),
             ...(opening.afterCut === true ? { afterCut: true } : {}),
             ...(opening.attachments !== undefined ? { attachments: [...opening.attachments] } : {}),
             ...(event.model !== undefined ? { model: event.model } : {}),
@@ -9277,7 +9369,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           const account = usageAccountOf(entry, view.harness, turnAccount);
           void ledger
             .limit({ key: account.key, agent: view.harness, label: account.label, road: account.road, computer: usageComputerOf(entry.record), limit: event.limit })
-            .then(({ before, after }) => alerts.read(before, after))
+            .then(async ({ before, after }) => {
+              await alerts.read(before, after);
+              // The row as the Usage page reads it now, so a slate's bound meter moves the moment a turn reports.
+              const row = (await usageAccounts()).accounts.find(a => a.key === account.key);
+              if (row !== undefined) bus.emit({ type: "usage.account", key: account.key, row });
+            })
             .catch((e: unknown) => console.warn(`the limits of ${account.key} were not kept: ${e instanceof Error ? e.message : String(e)}`));
           return;
         }
@@ -9894,7 +9991,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           turnToken,
           outcome,
           ...(scoped !== undefined ? { scopeDeviceId: scoped.deviceId } : {}),
-          opening: { prompt: o.prompt, ...(o.requestId !== undefined ? { requestId: o.requestId } : {}), ...(afterCut ? { afterCut } : {}), ...(title !== undefined ? { title } : {}), ...(records.length > 0 ? { attachments: records } : {}) },
+          opening: { prompt: o.prompt, ...(o.requestId !== undefined ? { requestId: o.requestId } : {}), ...(o.via !== undefined ? { via: o.via } : {}), ...(afterCut ? { afterCut } : {}), ...(title !== undefined ? { title } : {}), ...(records.length > 0 ? { attachments: records } : {}) },
           ...(imagesDir !== undefined ? { imagesDir } : {}),
           ...(snapshot !== undefined ? { snapshot } : {}),
           ...(resume !== undefined ? { resume } : {}),
@@ -10269,12 +10366,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
       if (opts.undo === true) {
         const rewound = held?.rewound;
-        if (rewound === undefined) throw conflict(REWIND_NO_UNDO_LINE);
+        // A rewind that moved only the conversation and the slate is undone for the slate alone.
+        if (rewound === undefined && !(await slates.hasRewound(threadId))) throw conflict(REWIND_NO_UNDO_LINE);
         besideRunning();
-        const back = await restore(rewound.before);
-        delete held!.rewound;
+        const back = rewound === undefined ? undefined : await restore(rewound.before);
+        if (held !== undefined) delete held.rewound;
+        await slates.undoRewind(threadId);
         await done();
-        return { turns: 0, files: Number(back["files"] ?? 0) };
+        return { turns: 0, ...(back !== undefined ? { files: Number(back["files"] ?? 0) } : {}) };
       }
 
       // A copy, read for the turns and their checkpoints alone: the cut below takes its own copy inside the queue.
@@ -10347,6 +10446,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         throw conflict(rewindKeptLine(keptWhy, before !== undefined));
       }
       if (cutsConversation) await dropFromTranscript(workspaceId, e => e.threadId === threadId && cut.includes(e.turnId ?? ""));
+      await slates.rewound({ threadId, turnId: order[at]!, cut });
       await done();
       return { turns: cutsConversation ? cut.length : 0, ...(moved !== undefined ? { files: Number(moved["files"] ?? 0) } : {}), ...(shared ? { kept: REWIND_SHARED_LINE } : {}) };
     },
@@ -10376,6 +10476,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       threadRecords.delete(threadId);
       await dropFromTranscript(workspaceId, e => e.threadId === threadId);
       await persistSessions(workspaceId);
+      await slates.forget(threadId);
       return { workspaceId, threads: 1 };
     },
 
@@ -10398,6 +10499,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       await dropThreadFiles(entry, [threadId]);
       for (const [id] of held) sessions.delete(id);
       threadRecords.delete(threadId);
+      await slates.forget(threadId);
       await dropFromTranscript(workspaceId, e => e.threadId === threadId);
       await persistSessions(workspaceId);
     },
@@ -12428,6 +12530,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     workspaces,
     projects,
     sessions: sessionsApi,
+    slates,
     devices: deviceDoor,
     ...(placeDoor !== undefined ? { places: placeDoor } : {}),
     ...(opts.recipes !== undefined ? { recipes: opts.recipes } : {}),

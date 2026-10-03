@@ -1551,6 +1551,8 @@ export const SessionStartEvent = z.object({
   /** The id the client minted for the sessions.start that opened this turn, stamped by the runtime; absent when the
    * client sent none. Two clients sending the same text at the same moment are told apart by this, not the prompt. */
   requestId: z.string().optional(),
+  /** Set where the message came from a press in the thread's slate, so the timeline says so. */
+  via: z.literal("slate").optional(),
   /** Set when the thread's previous turn ended with no exit code and no result (a deadline, a host restart, a nap
    * that ended it), so clients say the harness resumes a transcript that may be missing context; absent otherwise. */
   afterCut: z.literal(true).optional(),
@@ -1620,6 +1622,8 @@ export const SessionSteerEvent = z.object({
   prompt: z.string(),
   /** The id the client minted for the sessions.steer, as on session.start. */
   requestId: z.string().optional(),
+  /** Set where the message came from a press in the thread's slate, as on session.start. */
+  via: z.literal("slate").optional(),
   /** Set where the turn this message joined was stopped on a permission prompt nobody had answered when it landed:
    * the message is in and the turn takes it up once the person answers, which is what the caller says rather than
    * waiting in silence. */

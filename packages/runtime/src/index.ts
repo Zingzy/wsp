@@ -60,3 +60,4 @@ export type {
   WorkspaceView,
 } from "@wsp/protocol";
 export { hostIdentity, localConfigDir } from "./host-id.js";
+export * from "./slates.js";

@@ -10,5 +10,5 @@ export { compileSlate, compileSlatePatch, printSlate } from "./shorthand.js";
 export { validateSlate } from "./validate.js";
 export { applySlatePatch } from "./patch.js";
 export { sketchSlate } from "./sketch.js";
-export { SLATE_PIECES, SLATE_SOURCES, SLATE_ACTIONS } from "./kit.js";
+export { SLATE_PIECES, SLATE_SOURCES, SLATE_ACTIONS, SLATE_TONES, SLATE_LATER_ACTIONS, SLATE_LATER_PIECES, SLATE_RESERVED_PROPS, SLATE_RESERVED_WORDS, slateFlags, slateSourcePaths, slateShapeText, type SlatePieceModule, type SlatePropSpec, type SlatePropType, type SlateItemSpec, type SlateSketchView, type SlateSourceModule, type SlateShape, type SlateActionModule } from "./kit.js";
 export { slateCatalog, type SlateCatalogAnswer, type SlateCatalogAsk } from "./catalog.js";
