@@ -1636,6 +1636,8 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       }
       push({ ...held, state: failed === undefined ? "done" : "failed", finishedAt: new Date(clockNow()).toISOString(), ...(failed !== undefined ? { said: failed } : {}) });
       await writing;
+      // A folder still cloning lands later and says the end itself, once the last of them is in.
+      if (failed === undefined && foldersWaiting > 0) return;
       setupFrame({ addId, placeId, ...(failed === undefined ? outcome() : { end: "failed", said: failed }) });
     };
 
