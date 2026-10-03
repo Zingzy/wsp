@@ -1798,6 +1798,9 @@ export function startingLine(name: string, where: string): string {
   return `starting ${name} on ${where}`;
 }
 
+/** A copy's first line on the computer the host runs on: the folder it is made of and the folder it becomes. */
+export const copyingFolderLine = (from: string, to: string): string => `copying ${from} to ${to}`;
+
 /** How long a build is said to take where none has been measured. */
 export const BUILD_TAKES_UNMEASURED = "about ten minutes";
 
