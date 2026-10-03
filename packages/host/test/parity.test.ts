@@ -18,7 +18,7 @@ import { agentPage, cli, COMMAND_LINES, commandPage, COMMANDS_FOR_HELP, HELP, HO
 const commandPageFor = (words: string): string => commandPage(words, COMMANDS_FOR_HELP[words]!);
 import { mcpServer } from "../src/mcp.js";
 import { CLOUD_ON } from "../src/cloud.js";
-import { INSTRUCTIONS, RULES_HEADING, SHELL_HEADING, VERBS_HEADING, WSP_SKILL } from "../src/skill.js";
+import { instructions, RULES_HEADING, SHELL_HEADING, VERBS_HEADING, wspSkill } from "../src/skill.js";
 import { ALL_VERBS, CLI_VERBS, COMMON, COMMON_FLAG_WORDS, FLAG_WORDS, HELP_WIDTH, VERBS, flagList, flagSays, hasTool, optionalValues, openingOf, ownFlagsOf, toolName, verbPage, type Flags } from "../src/verbs.js";
 
 interface Tool {
@@ -263,7 +263,7 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
   });
 
   it("the skill's contract section, the help and the repo's AGENTS.md name exactly the exit codes the protocol exports, in its words", () => {
-    const rows = WSP_SKILL.split("\n")
+    const rows = wspSkill().split("\n")
       .filter(line => /^\| \d+ \| `\w+` \|/.test(line))
       .map(line => line.split("|").slice(1, -1).map(cell => cell.trim()))
       .map(([code, cls, when]) => ({ code: Number(code), cls: cls!.replaceAll("`", ""), when }));
@@ -276,18 +276,18 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
       expect(agents).toContain(`${EXIT_CODES[cls]} ${cls}`);
     }
     // One section says it, once: the skill names the codes in the table alone and nowhere as a bare "exit 1".
-    for (const text of [WSP_SKILL, HELP, agentPage()]) expect(text.match(/\bexits? [0-9]\b/g) ?? []).toEqual([]);
+    for (const text of [wspSkill(), HELP, agentPage()]) expect(text.match(/\bexits? [0-9]\b/g) ?? []).toEqual([]);
   });
 
   it("every command line has a tool or says why not, every tool has a skill row naming its inputs, and a tool with no command line says why", async () => {
     const tools = await listTools();
-    const rows = skillRows(WSP_SKILL);
+    const rows = skillRows(wspSkill());
     const toolsOf = new Map<string, Tool>(tools.map(t => [t.name, t]));
     const rowOf = new Map<string, SkillRow>(rows.map(r => [r.words, r]));
     const named = new Set<string>();
     for (const line of COMMAND_LINES) {
       const { words } = line;
-      expect(WSP_SKILL, `${words} is not in the skill`).toContain(`\`wsp ${words}`);
+      expect(wspSkill(), `${words} is not in the skill`).toContain(`\`wsp ${words}`);
       if ("cliOnly" in line) {
         expect(line.cliOnly, `${words} says why it has no tool`).toMatch(/\S/);
         expect(toolsOf.has(toolName(words)), `${words} has a tool and a reason not to`).toBe(false);
@@ -405,7 +405,7 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
   });
 
   it("every wsp line in the skill, the instructions and the tool descriptions parses against the flags its command reads", () => {
-    const commands = wspCommands([WSP_SKILL, INSTRUCTIONS, ...VERBS.filter(hasTool).map(v => v.tool.description)].join("\n\n"));
+    const commands = wspCommands([wspSkill(), instructions(), ...VERBS.filter(hasTool).map(v => v.tool.description)].join("\n\n"));
     expect(commands.length).toBeGreaterThan(30);
     const stale = commands.map(argv => usageError(argv, COMMAND_LINES)).filter(e => e !== undefined);
     expect(stale).toEqual([]);
@@ -463,7 +463,7 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
       const readers = SHARED_FLAGS.filter(f => f.name === flag.name).flatMap(f => f.on);
       expect(readers, `--${flag.name} is read by some command`).not.toEqual([]);
       for (const words of readers) expect(commandPageFor(words), `--${flag.name} in wsp ${words} --help`).toMatch(new RegExp(`--${flag.name}\\b`));
-      expect(WSP_SKILL, `--${flag.name} in the skill`).toMatch(new RegExp(`--${flag.name}\\b`));
+      expect(wspSkill(), `--${flag.name} in the skill`).toMatch(new RegExp(`--${flag.name}\\b`));
     }
   });
 
@@ -507,10 +507,10 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
   });
 
   it("every flag a command reads is in its row of the skill's verbs table and the row shows no other; every verb's usage names only flags it reads", () => {
-    expect(flagDrift(WSP_SKILL, COMMAND_LINES)).toEqual([]);
+    expect(flagDrift(wspSkill(), COMMAND_LINES)).toEqual([]);
     for (const verb of CLI_VERBS) for (const name of flagsOf(verb.usage)) expect(Object.hasOwn(verb.options, name), `wsp ${verb.name}'s usage names --${name}`).toBe(true);
     // The rows the skill carried while run and send already read the three picks: each missing pick is named.
-    const stale = WSP_SKILL.split("\n")
+    const stale = wspSkill().split("\n")
       .map(line => {
         if (line.startsWith("| `wsp run ")) return '| `wsp run <project> [--agent <id>] [--branch <branch>] [--cwd <path>] [--notify <thread\\|me>] "<message>"` | `run` (project, branch, cwd, message, agent, notify) | opens |';
         if (line.startsWith("| `wsp send ")) return '| `wsp send <thread> "<message>"` | `send` (thread, message) | a message |';
@@ -585,13 +585,13 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
     const effort = VERBS.filter(hasTool).find(v => v.name === "run")!.tool.input.effort!.description!;
     expect(/\(([^)]*)\)/.exec(effort)![1]!.split(", ")).toEqual(words);
     expect(effort).toContain(`absent means the agent's default, ${fallback} for ${claude.harness}`);
-    expect(WSP_SKILL).toContain(words.map(w => `\`${w}\``).join(", "));
-    expect(WSP_SKILL).toContain(`(\`${fallback}\` for ${claude.harness})`);
+    expect(wspSkill()).toContain(words.map(w => `\`${w}\``).join(", "));
+    expect(wspSkill()).toContain(`(\`${fallback}\` for ${claude.harness})`);
   });
 
   it("what a send meets on a running or a replied thread is said in the runtime's words, the same in the skill's send section and the send tool", async () => {
     const tool = (await listTools()).find(t => t.name === "send")!.description!;
-    const section = WSP_SKILL.slice(WSP_SKILL.indexOf("### send"), WSP_SKILL.indexOf("### stop"));
+    const section = wspSkill().slice(wspSkill().indexOf("### send"), wspSkill().indexOf("### stop"));
     for (const text of [tool, section]) {
       for (const outcome of SessionStartOutcome.options) expect(text, outcome).toContain(`(outcome \`${outcome}\`)`);
       expect(text).toContain(`\`${stillWorkingLine()}\``);
@@ -599,7 +599,7 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
   });
 
   it("the verb that blocks is a shell script's on every door: its row sits under the shell heading and not in the agent rows, and both roads to a child's end are named in the skill's rules, the instructions and the wait tool", async () => {
-    const rows = (from: string, to: string): SkillRow[] => skillRows(WSP_SKILL.slice(WSP_SKILL.indexOf(from), WSP_SKILL.indexOf(to)));
+    const rows = (from: string, to: string): SkillRow[] => skillRows(wspSkill().slice(wspSkill().indexOf(from), wspSkill().indexOf(to)));
     const named = (list: readonly SkillRow[]): string[] => list.flatMap(r => r.tools.map(t => t.name));
     // The table an agent reads names every tool but the one that blocks; the shell section names that one.
     expect(named(rows(VERBS_HEADING, SHELL_HEADING))).not.toContain("threads_wait");
@@ -607,8 +607,8 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
     // One home for each of the two sentences: the rules an agent holding only the tools reads, and the tool itself.
     const wait = (await listTools()).find(t => t.name === "threads_wait")!.description!;
     for (const words of [NOTIFY_CALLER, COORDINATOR_HANDOFF]) {
-      expect(WSP_SKILL, words.slice(0, 40)).toContain(words);
-      expect(INSTRUCTIONS, words.slice(0, 40)).toContain(words);
+      expect(wspSkill(), words.slice(0, 40)).toContain(words);
+      expect(instructions(), words.slice(0, 40)).toContain(words);
       expect(wait, words.slice(0, 40)).toContain(words);
     }
     // The tool says whose verb it is, so an agent reading the tool alone does not take the blocking road.
@@ -631,16 +631,16 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
     const tools = await listTools();
     const tool = tools.find(t => t.name === "run")!.description!;
     expect(tools.find(t => t.name === "threads_wait")!.description).toContain("the one line a notify sends");
-    for (const text of [tool, WSP_SKILL]) {
+    for (const text of [tool, wspSkill()]) {
       expect(text).toContain(TURN_END_WORDS);
       expect(text).toContain(NOTIFY_WORDS);
     }
     // Another agent the person asks for is a thread they can see, in every door an agent reads before it picks a tool.
-    for (const text of [tool, WSP_SKILL, INSTRUCTIONS]) expect(text).toContain(ANOTHER_AGENT_WORDS);
+    for (const text of [tool, wspSkill(), instructions()]) expect(text).toContain(ANOTHER_AGENT_WORDS);
     // The page wraps the sentence at 80 columns, so it is read with its line breaks folded.
     const help = agentPage().replace(/\s+/g, " ");
     expect(help).toContain(TURN_END_WORDS);
-    for (const text of [tool, WSP_SKILL, help]) expect(text).not.toMatch(/when the (first )?turn ends/);
+    for (const text of [tool, wspSkill(), help]) expect(text).not.toMatch(/when the (first )?turn ends/);
   });
 
   it("a stale flag, a renamed verb and a dropped flag value fail; an output line, an error line and an illustrative line are skipped", () => {

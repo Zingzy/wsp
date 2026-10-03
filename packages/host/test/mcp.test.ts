@@ -21,7 +21,7 @@ import { BUILT_IN_LIST_CLAUSE, c1Escaped, hostPlatform, noHostServingLine } from
 import { placeWiring } from "../src/places.js";
 import { dialer, mcpServer, serveMcp } from "../src/mcp.js";
 import { RecipeAnswer, RecipeScan, allRows, recipePrintout, scanPrintout } from "../src/recipe-answer.js";
-import { WSP_SKILL, instructionsOf } from "../src/skill.js";
+import { wspSkill, instructionsOf } from "../src/skill.js";
 import type { HostHandle } from "../src/server.js";
 import type { HostClient } from "../src/verbs.js";
 import { HERE } from "./recipe-fixture.js";
@@ -204,7 +204,7 @@ describe("the MCP server over the host", () => {
     expect(tools.find(t => t.name === "image")!.description).toContain("The project images taken off workspaces are listed under it, each with its snapshot id, the workspace it was taken off, its size where the provider lists one and its date.");
     expect(Object.keys((tools.find(t => t.name === "recipe")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["add", "add_check", "engine", "out", "project", "set", "signin", "tick", "why"]);
     expect(c.getServerVersion()?.name).toBe("wsp");
-    expect(c.getInstructions()).toBe(instructionsOf(WSP_SKILL, THREAD_AGENTS));
+    expect(c.getInstructions()).toBe(instructionsOf(wspSkill(), THREAD_AGENTS));
     expect(c.getInstructions()).toContain("run");
     // The setup sequence an agent follows the first time, so it never has to guess at the order.
     expect(c.getInstructions()).toContain("then `recipe_scan`, which writes nothing");
@@ -216,7 +216,7 @@ describe("the MCP server over the host", () => {
     for (const a of CATALOG.filter(e => e.kind === "agent")) expect(new RegExp(`\\b${a.id}\\b`).test(c.getInstructions()!), a.id).toBe(THREAD_AGENTS.some(id => id === a.id));
     const agentInput = (tools.find(t => t.name === "run")!.inputSchema as { properties: Record<string, { description?: string }> }).properties.agent!;
     expect(agentInput.description).toBe(`the agent to run in the thread, one of ${THREAD_AGENTS.join(", ")}; absent means the host's default`);
-    for (const t of tools) expect(WSP_SKILL, t.name).toContain(`\`${t.name}\``);
+    for (const t of tools) expect(wspSkill(), t.name).toContain(`\`${t.name}\``);
   });
 
   it.runIf(CLOUD_ON)("snapshot takes a project image of the workspace as wsp snapshot does", async () => {

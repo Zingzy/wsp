@@ -21,16 +21,18 @@ const HOST_MEMORY_BUDGET_MB = 40;
 /** What the run is held to, under the promise so a regression is caught while the promise still holds: the host
  * read 31.3 MB on CI when this was first set, main read 35.1 MB on 2026-10-01, and the per-model usage rows, the
  * top threads and the fifteen-minute draw added about 0.1 MB more; the pull request pane's reply, resolve and react
- * shapes took main from 35.9 to 36.1 MB on 2026-10-03. */
+ * shapes took main from 35.9 to 36.1 MB on 2026-10-03. Main read 36.3 MB with the daemon's worktree ops; threads in
+ * the project's folder and one turn in a worktree read 36.5, and the skill worked out at each ask rather than held
+ * whole brought that to 36.4. */
 const HOST_MEMORY_CAP_MB = 36.5;
 
 /** The one page that quotes the budget. */
 const PAGE = join("apps", "www", "src", "sections", "story.tsx");
 
-/** The scripted day: four threads a person keeps open, one of them in a worktree of a branch of its own, thirty turns
- * each, forty deltas a turn, and four subagents a turn that each start, say ten lines and end. That is past the
- * transcript ring's 5000 events, so the host is measured with every cap it has already full and every child the ring
- * still holds kept under its thread. */
+/** The scripted day: four threads a person keeps open in the project's folder, thirty turns each, forty deltas a turn,
+ * and four subagents a turn that each start, say ten lines and end, then one thread on a branch in a worktree of its
+ * own with one turn. That is past the transcript ring's 5000 events, so the host is measured with every cap it has
+ * already full and every child the ring still holds kept under its thread. */
 const THREADS = 4;
 const TURNS_PER_THREAD = 30;
 const DELTAS_PER_TURN = 40;
@@ -100,7 +102,7 @@ const runtime = createRuntime({
   adapters: { claude: scripted },
 });
 const host = await startHost({ runtime, webDir, port: 0, statePath });
-// Threads run in the project's folder, and the last of them in a worktree of a branch of its own.
+// Threads run in the project's folder, and one more in a worktree of a branch of its own.
 const folder = join(home, "repo");
 mkdirSync(folder, { recursive: true });
 execFileSync("git", ["init", "-q", "-b", "main", folder]);
@@ -114,8 +116,9 @@ const turn = async (at, thread) => {
   return { at, thread: handle.view().threadId ?? handle.view().id };
 };
 const threads = [];
-for (let t = 0; t < ${THREADS}; t++) threads.push(await turn(t === ${THREADS} - 1 ? worktree : workspace, undefined));
+for (let t = 0; t < ${THREADS}; t++) threads.push(await turn(workspace, undefined));
 for (let n = 1; n < ${TURNS_PER_THREAD}; n++) for (const { at, thread } of threads) await turn(at, thread);
+await turn(worktree, undefined);
 
 // The host writes its index and its transcripts behind a queue. What it holds is only known once it has been left
 // alone the way an idle minute leaves it, so this reads until a collection frees nothing more: the drain falls from
@@ -137,7 +140,7 @@ for (let i = 0; i < 60 && Math.abs(before - after) > 0.1; i++) {
   after = held();
   readings.push(after);
 }
-console.log(\`measured \${JSON.stringify({ heldMb: +after.toFixed(1), rssMb: +(process.memoryUsage().rss / 1048576).toFixed(1), turns: ${THREADS * TURNS_PER_THREAD}, readings: readings.map(r => +r.toFixed(1)) })}\`);
+console.log(\`measured \${JSON.stringify({ heldMb: +after.toFixed(1), rssMb: +(process.memoryUsage().rss / 1048576).toFixed(1), turns: ${THREADS * TURNS_PER_THREAD + 1}, readings: readings.map(r => +r.toFixed(1)) })}\`);
 await host.close();
 process.exit(0);
 `;
@@ -215,7 +218,7 @@ describeWithDists("what the host holds after a day of agents", ["host", "runtime
     rmSync(home, { recursive: true, force: true });
   });
 
-  it(`stays under ${HOST_MEMORY_CAP_MB} MB with ${THREADS * TURNS_PER_THREAD} turns through it, one thread of them in a worktree`, async () => {
+  it(`stays under ${HOST_MEMORY_CAP_MB} MB with ${THREADS * TURNS_PER_THREAD + 1} turns through it, the last in a worktree`, async () => {
     const empty = await ran('global.gc(); console.log(`measured ${JSON.stringify({ heldMb: 0, rssMb: +(process.memoryUsage().rss / 1048576).toFixed(1), turns: 0 })}`)', home);
     expect(empty.code, `an empty node on this runner said: ${empty.out}`).toBe(0);
     const floor = reading(empty.out, "an empty node");

@@ -7,7 +7,7 @@
 import type { Readable, Writable } from "node:stream";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { INSTRUCTIONS } from "./skill.js";
+import { instructions } from "./skill.js";
 import { VERBS, c1Escaped, dialHost, hasTool, toolFailure, toolName, type DialOpts, type HostClient, type Verb, type VerbDeps } from "./verbs.js";
 import { VERSION } from "./version.js";
 
@@ -54,7 +54,7 @@ const pickOf = (opts: { env: VerbDeps["env"]; host?: string; start?: VerbDeps["s
 });
 
 export function mcpServer(statePath: string, opts: { dial?: Dialer; alsoHere?: VerbDeps["alsoHere"]; cwd?: string; env: VerbDeps["env"]; host?: string; start?: VerbDeps["start"]; skip?: (verb: Verb) => boolean; elsewhere?: boolean; hostWaitMs?: number }): McpServer {
-  const server = new McpServer({ name: "wsp", version: VERSION }, { instructions: INSTRUCTIONS });
+  const server = new McpServer({ name: "wsp", version: VERSION }, { instructions: instructions() });
   const deps: VerbDeps = { statePath, env: opts.env, client: opts.dial ?? dialer(statePath, pickOf(opts)), ...(opts.alsoHere !== undefined ? { alsoHere: opts.alsoHere } : {}), ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}), ...(opts.elsewhere === true ? { elsewhere: true } : {}), ...(opts.hostWaitMs !== undefined ? { hostWaitMs: opts.hostWaitMs } : {}) };
   for (const verb of VERBS) {
     if (!hasTool(verb) || opts.skip?.(verb) === true) continue;

@@ -49,7 +49,9 @@ export function skillFor(skill: string, cloud: boolean): string {
   return out.join("\n");
 }
 
-export const WSP_SKILL: string = skillFor(text, CLOUD_ON);
+/** The skill as this process reads it, worked out at each ask: an install and a tool server opening are the only
+ * askers, and holding it would keep a second copy of the file for the host's whole life. */
+export const wspSkill = (): string => skillFor(text, CLOUD_ON);
 
 /** The section whose opening paragraph is the condensed walkthrough the instructions carry; the numbered steps and
  * the exact lines to watch for stay in the skill, which is too long to be a server's instructions. */
@@ -131,4 +133,5 @@ export function instructionsOf(skill: string, agents: readonly string[]): string
   return [[`${ANOTHER_AGENT_WORDS}.`, opening, walkthrough, agentsLine(agents), BEYOND_THE_TOOLS, lead].join(" "), ...written].join("\n");
 }
 
-export const INSTRUCTIONS: string = instructionsOf(WSP_SKILL, THREAD_AGENTS);
+/** The MCP server's instructions, worked out when a server opens, for the same reason. */
+export const instructions = (): string => instructionsOf(wspSkill(), THREAD_AGENTS);

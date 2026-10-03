@@ -14,7 +14,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
 import { mcpServer } from "../src/mcp.js";
-import { INSTRUCTIONS, WSP_SKILL } from "../src/skill.js";
+import { instructions, wspSkill } from "../src/skill.js";
 import { COMMAND_LINES, HELP } from "../src/cli.js";
 import { ALL_VERBS, CLI_VERBS, toolName, verbPage } from "../src/verbs.js";
 
@@ -160,13 +160,13 @@ describe("the words a person and an agent read about threads on this computer", 
   });
 
   it("leave the MCP server's instructions", () => {
-    expect(offenders("instructions", INSTRUCTIONS)).toEqual([]);
+    expect(offenders("instructions", instructions())).toEqual([]);
   });
 
   it("leave the skill, but for the rows of the box verbs and the lines a command shows", () => {
     const found: string[] = [];
     let fenced = false;
-    for (const line of WSP_SKILL.split("\n")) {
+    for (const line of wspSkill().split("\n")) {
       if (line.trimStart().startsWith("```")) fenced = !fenced;
       if (fenced) continue;
       const row = /^\| `wsp ([a-z ]+?)(?: [<[-]|`)/.exec(line);

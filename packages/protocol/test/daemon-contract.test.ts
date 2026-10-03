@@ -103,6 +103,11 @@ import {
   GitDiscardReply,
   GitCheckpointReply,
   GitRestoreReply,
+  GitCheckpointDropReply,
+  GitWorktreesReply,
+  GitBranchesReply,
+  WorktreeReport,
+  WorktreeRemoval,
   FsFilesReply,
   GitSnapshotReply,
   SysHistoryReply,
@@ -728,6 +733,54 @@ const REPLIES: Record<string, { schema: ZodTypeAny; samples: unknown[] }> = {
   },
   GitRestoreReply: { schema: GitRestoreReply, samples: [{ before: "refs/wsp/checkpoints/spoo-fix-login/thr_01a0e365/turn_1-before-1790521483000", files: 3 }] },
   GitSnapshotReply: { schema: GitSnapshotReply, samples: [{ commit: "0123456789abcdef0123456789abcdef01234567" }] },
+  GitCheckpointDropReply: { schema: GitCheckpointDropReply, samples: [{ dropped: 12 }, { dropped: 0 }] },
+  GitWorktreesReply: {
+    schema: GitWorktreesReply,
+    samples: [
+      {
+        worktrees: [
+          { path: "/Users/dev/wsp", branch: "main", head: "1ac97f8d7ea55cc4f6a4f8f2f0e4f3b6ce9dc0c9" },
+          { path: "/Users/dev/.wsp/worktrees/pr_9eb41ab3/feat-pricing", branch: "feat/pricing", head: "5f1c0e2b9a7d4c3e8f6a1b2c3d4e5f60718293a4" },
+          { path: "/Users/dev/scratch", head: "5f1c0e2b9a7d4c3e8f6a1b2c3d4e5f60718293a4", prunable: true },
+        ],
+      },
+      { worktrees: [{ path: "/srv/repo.git" }] },
+    ],
+  },
+  GitBranchesReply: {
+    schema: GitBranchesReply,
+    samples: [
+      {
+        current: "main",
+        branches: [
+          { name: "main", oid: "1ac97f8d7ea55cc4f6a4f8f2f0e4f3b6ce9dc0c9", committed: 1790521483, upstream: "origin/main", worktree: "/Users/dev/wsp" },
+          { name: "feat/pricing", oid: "5f1c0e2b9a7d4c3e8f6a1b2c3d4e5f60718293a4", committed: 1790400000 },
+        ],
+      },
+      { branches: [], truncated: true },
+    ],
+  },
+  WorktreeReport: {
+    schema: WorktreeReport,
+    samples: [
+      {
+        path: "/Users/dev/.wsp/worktrees/pr_9eb41ab3/feat-pricing",
+        branch: "feat/pricing",
+        made: true,
+        carried: [".env", "node_modules", "packages/host/node_modules"],
+        plain: ["packages/host/node_modules"],
+        ms: 812,
+      },
+      { path: "/Users/dev/wsp", branch: "main", made: false, carried: [], ms: 76 },
+    ],
+  },
+  WorktreeRemoval: {
+    schema: WorktreeRemoval,
+    samples: [
+      { path: "/Users/dev/.wsp/worktrees/pr_9eb41ab3/feat-pricing" },
+      { path: "/Users/dev/.wsp/worktrees/pr_9eb41ab3/loose", rescued: "refs/rescue/pr_9eb41ab3/loose/5f1c0e2b9a7d" },
+    ],
+  },
   SysHistoryReply: {
     schema: SysHistoryReply,
     samples: [

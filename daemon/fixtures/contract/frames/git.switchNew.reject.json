@@ -1,0 +1,18 @@
+[
+  {
+    "id": 1,
+    "op": "git.switchNew",
+    "cwd": "/Users/dev/wsp"
+  },
+  {
+    "id": 1,
+    "op": "git.switchNew",
+    "branch": "feat/pricing"
+  },
+  {
+    "id": 1,
+    "op": "git.switchNew",
+    "cwd": "/Users/dev/wsp",
+    "branch": 4
+  }
+]

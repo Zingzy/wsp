@@ -66,7 +66,7 @@ async function servedIn(cloud: boolean): Promise<{ instructions: string; tools: 
   vi.stubEnv(CLOUD_ENV, cloud ? "1" : "");
   try {
     const { mcpServer: fresh } = await import("../src/mcp.js");
-    const { INSTRUCTIONS: instructions } = await import("../src/skill.js");
+    const instructions = (await import("../src/skill.js")).instructions();
     const server = fresh("/nonexistent/state.json", { env: {} });
     const [toClient, toServer] = InMemoryTransport.createLinkedPair();
     const client = new Client({ name: "record", version: "0" });

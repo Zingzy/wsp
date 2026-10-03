@@ -1,0 +1,11 @@
+[
+  {
+    "id": 1,
+    "op": "git.worktrees"
+  },
+  {
+    "id": 1,
+    "op": "git.worktrees",
+    "cwd": 3
+  }
+]

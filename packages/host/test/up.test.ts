@@ -18,7 +18,7 @@ import { hostPlaceKeyPath } from "../src/places.js";
 import { serviceAddressHere, serviceManagerFor } from "../src/service.js";
 import { STARTED_BY_ENV } from "../src/host-lock.js";
 import { installMcp, mcpServerSpec, serversRefreshedLine, skillsRefreshedLine, type RunningWsp } from "../src/mcp-install.js";
-import { WSP_SKILL } from "../src/skill.js";
+import { wspSkill } from "../src/skill.js";
 import type { HostLock } from "../src/host-lock.js";
 import type { HostHandle } from "../src/server.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
@@ -375,7 +375,7 @@ describe("wsp up", () => {
     for (const h of handles.splice(0)) await h.close();
     const dialled: string[] = [];
     await start(served, dialled);
-    expect(readFileSync(skill("codex"), "utf8")).toBe(WSP_SKILL);
+    expect(readFileSync(skill("codex"), "utf8")).toBe(wspSkill());
     expect(readFileSync(codexConfig, "utf8")).not.toBe(before.codex);
     expect(readFileSync(codexConfig, "utf8")).toContain(binary.toolServer as string);
     expect(readFileSync(skill("claude"), "utf8")).toBe("an older wsp's skill\n");

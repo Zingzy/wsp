@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { EXIT_CODES } from "@wsp/protocol";
 import { agentPage, cli, COMMAND_LINES, devPage, HELP, HOST_STARTS_ITSELF, hostPage, MCP_OPTIONS, SHARED_FLAGS, type CliIO } from "../src/cli.js";
-import { WSP_SKILL, INSTRUCTIONS } from "../src/skill.js";
+import { wspSkill, instructions } from "../src/skill.js";
 import { CLI_VERBS, hasTool, THREAD_PREFIX_WORD, VERBS } from "../src/verbs.js";
 
 const noPrompt = (q: string): Promise<string> => Promise.reject(new Error(`unexpected prompt: ${q}`));
@@ -246,7 +246,7 @@ describe("the pages wsp prints", () => {
       }
     }
     // The skill is inlined into the same build, so it is one of the strings the host carries.
-    check("the skill", WSP_SKILL);
+    check("the skill", wspSkill());
     expect(said).toEqual([]);
   });
 
@@ -260,8 +260,8 @@ describe("the pages wsp prints", () => {
       ["the agent page", agentPage()],
       ["the host page", hostPage()],
       ["the dev page", devPage()],
-      ["the skill", WSP_SKILL],
-      ["the instructions", INSTRUCTIONS],
+      ["the skill", wspSkill()],
+      ["the instructions", instructions()],
       ["AGENTS.md", readFileSync(join(REPO, "AGENTS.md"), "utf8")],
       // The release note is the one place an old word is written down, and it is written once, in a marked block
       // the release after this one deletes. Everything else in the README is held to the new words.

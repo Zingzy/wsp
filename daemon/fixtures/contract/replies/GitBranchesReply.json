@@ -1,0 +1,23 @@
+[
+  {
+    "current": "main",
+    "branches": [
+      {
+        "name": "main",
+        "oid": "1ac97f8d7ea55cc4f6a4f8f2f0e4f3b6ce9dc0c9",
+        "committed": 1790521483,
+        "upstream": "origin/main",
+        "worktree": "/Users/dev/wsp"
+      },
+      {
+        "name": "feat/pricing",
+        "oid": "5f1c0e2b9a7d4c3e8f6a1b2c3d4e5f60718293a4",
+        "committed": 1790400000
+      }
+    ]
+  },
+  {
+    "branches": [],
+    "truncated": true
+  }
+]
