@@ -154,7 +154,7 @@ export interface StubBackend extends MachineBackend {
   /** What the computer answers a create with beside the machine, as a box that would not fork at the size asked for
    * does; absent, every create answers with the machine alone. Set before a machine is made. */
   createNotice?: string;
-  execImpl: (m: StubMachine, cmd: string) => Promise<ExecResult> | ExecResult;
+  execImpl: (m: StubMachine, cmd: string, stdin?: Uint8Array) => Promise<ExecResult> | ExecResult;
   /** Runs before each snapshot is taken, with which attempt on that machine this is; one that throws is the provider refusing. */
   beforeSnapshot?: (m: StubMachine, nth: number) => void;
   /** The snapshot's name is its id, as Box keys a named snapshot, and a second snapshot under a name replaces the first. */
@@ -277,10 +277,10 @@ export function stubBackend(mark?: string): StubBackend {
         shape: { cpu: spec.cpu ?? 2, memMb: spec.memMb ?? 4096, createdAt: new Date().toISOString() },
         snapshotLives: [],
         ...(backend.createNotice !== undefined ? { notice: backend.createNotice } : {}),
-        async exec(cmd: string): Promise<ExecResult> {
+        async exec(cmd: string, opts?: { stdin?: Uint8Array }): Promise<ExecResult> {
           if (m.killed) throw Object.assign(new Error("gone"), { kind: "missing", status: 404 });
           m.execLog.push(cmd);
-          return backend.execImpl(m, cmd);
+          return backend.execImpl(m, cmd, opts?.stdin);
         },
         async run(script: string, opts: RunOptions): Promise<ExecResult> {
           if (m.killed) throw Object.assign(new Error("gone"), { kind: "missing", status: 404 });

@@ -9,12 +9,13 @@
 // (PlaceNonce, PlacePublicKey, PlaceSignature) and the bytes they sign come
 // from placeLinkTranscript, so this file holds the host's half of the
 // handshake and no rule of its own about how it is spelled.
-import { createPublicKey, randomBytes } from "node:crypto";
+import { createHash, createPublicKey, randomBytes } from "node:crypto";
 import { createServer, type Server, type Socket } from "node:net";
 import {
   LOOPBACK,
   HERE_PLACE_ID,
   NO_PLACE_INSTALLER,
+  NO_RECIPE,
   PAIR_CODE_TTL_MS,
   PLACE_KEY_REFUSAL,
   PLACE_UNKNOWN_REFUSAL,
@@ -49,12 +50,43 @@ import {
   placeDialLine,
   placeDialRoad,
   placeNoHomeLine,
-  placeNoRecipeLine,
+  placeNoPicksLine,
   placeProvisionPaths,
   placeProvisioningLine,
-  provisionCountWord,
-  provisionLines,
   provisionLogLine,
+  PendingComputer,
+  RecipeFile,
+  recipeCanon,
+  recipeCounts,
+  importantFailures,
+  waitLine,
+  plural,
+  lastLine,
+  SETUP_STEP_WORDS,
+  SIGN_IN_WAIT_MS,
+  FROM_THE_VAULT,
+  SIGNED_IN_THERE,
+  NO_SIGN_IN_ROAD,
+  NO_FOLDER_ROAD,
+  NO_GITHUB_TOKEN_LINE,
+  noVaultTokenLine,
+  githubThereLine,
+  floorFailedLine,
+  noAgentLine,
+  pendingHeldLine,
+  pendingHeldFix,
+  pendingNotJoinedLine,
+  pendingNotJoinedFix,
+  CHOOSE_FIX,
+  type AgentsSignInEvent,
+  type PlaceApplied,
+  type PlacePendingEvent,
+  type PlaceSetup,
+  type PlaceSetupEvent,
+  type PlaceSetupLine,
+  type PlaceSetupStep,
+  type PlaceWait,
+  type SetupEnd,
   sshRoadOf,
   placeNoDialLine,
   BackendFacts,
@@ -80,7 +112,6 @@ import {
   type PlaceEvent,
   type PlaceDial,
   type PlaceDialled,
-  type PlaceProvision,
   type PlaceProvisionRow,
   type PlaceReport,
   type PlaceBack,
@@ -99,7 +130,7 @@ import {
   type PlaceProveRequest,
   macKindOf,
 } from "@wsp/protocol";
-import { LinkBackend, PlaceAbsentError, PlaceMachine, SSH_STORE_VARS, keyFingerprint, machineServerPort, plainPath, provisionCountsOf, putFiles, serversOutLines, unmergeServers, type ExecResult, type Machine, type MachineBackend, type MachineLink, type ProvisionPlan, type ProvisionStage } from "@wsp/engine";
+import { GITHUB_TOKEN_ENV, LinkBackend, PlaceAbsentError, PlaceMachine, SSH_STORE_VARS, envInput, keyFingerprint, machineServerPort, newSetupRun, pathLine, plainPath, putFiles, serversOutLines, unmergeServers, withEnvFromInput, type EngineStep, type ExecResult, type Machine, type MachineBackend, type MachineLink, type ProvisionPlan, type ProvisionStage, type SetupRun } from "@wsp/engine";
 import { CATALOG_AGENTS, keyEnvOf, mintsToken, sharedFileIn, sharedOn } from "@wsp/catalog";
 import type { WebSocket } from "ws";
 import type { DeviceDoor } from "./devices.js";
@@ -137,8 +168,14 @@ export interface PlaceRecord {
   road?: PlaceRecordRoad;
   /** What the last dial of it came to. Kept so the answer outlives the window that asked for it. */
   dialled?: PlaceDialled;
-  /** The recipe job on this computer as it last stood; written per row while it runs. */
-  provision?: PlaceProvision;
+  /** The setup job on this computer as it last stood; written after every step. */
+  setup?: PlaceSetup;
+  /** What the setup came to, row by row, written as each step ends. */
+  applied?: PlaceApplied;
+  /** What this computer was set up with, saved or not: what a retry, a resume and a recipe saved from it read. */
+  picks?: RecipeFile;
+  /** The saved recipe it follows, by slug, or none. */
+  recipe?: string;
   /** When the report on this record was taken. Not lastSeenAt: that moves every minute while the link is held,
    * and the uptime in the report grows with the computer, so a row dating one by the other reads an hours-old
    * figure as a minutes-old one. */
@@ -201,9 +238,15 @@ export interface PlaceWiring {
    * Absent on a runtime served without the ssh road, where a remove of a computer that is not connected says the
    * agent is still installed and leaves it to the person at that computer. */
   leave?: PlaceLeaver;
-  /** How the recipe this computer holds is put on a computer you own. Absent, no computer is provisioned and the
-   * join and the update say nothing about it. */
+  /** How a computer's picks are put on it. Absent, no computer is set up and the join and the update say nothing
+   * about it. */
   provision?: PlaceProvisioner;
+  /** Puts the GitHub token this computer's gh holds into the vault, where the picks say GitHub signs in from it and
+   * the vault holds none yet: the clone of a private repo and every turn there read it from the environment. */
+  githubToken?(): Promise<void>;
+  /** Takes back what an add put on a computer before the host stopped mid-install, over the login that add used:
+   * the script the installer left on the pending record for it. Throws the road's own sentence. */
+  undo?(login: PlaceLogin, script: string): Promise<void>;
   /** The forwards over ssh this host holds for computers that reach it no other way; the installer holds one before
    * the deploy and the records keep it held. Absent on a runtime served without the ssh road. */
   back?: PlaceBackHolder;
@@ -223,15 +266,17 @@ export interface PlaceBackHolder {
   close(): void;
 }
 
-/** How the recipe on this computer is put on a computer you own. `plan` reads the recipe beside the host's state
- * and this computer and answers the steps, or the recipe path when there is none; `run` puts the plan on `machine`,
- * which is that computer itself over the link its daemon holds. The host wires it because the recipe and the
- * reading of this computer are the host's, as the installer and the daemon binary are. */
+/** How a computer's picks are put on it. `setup` plans them against this computer and the one they go to; `floor`
+ * puts the base tools on a computer that joined before anything was picked; `step` runs one engine step of a plan
+ * there. `plan` is the recipe beside the host's state, what the doctor reads on a computer set up before picks were
+ * kept. The host wires it because the reading of this computer is the host's, as the installer is. */
 export interface PlaceProvisioner {
   /** `on` is the computer the plan is for: its home is what every path of the job hangs off and what the PATH the
    * job's scripts export is read from, since a directory under it is one the workspaces there write. */
   plan(on: { home: string }): Promise<ProvisionPlan | { noRecipe: string }>;
-  run(machine: Machine, plan: ProvisionPlan, stage: ProvisionStage, on: { home: string }): Promise<PlaceProvisionRow[]>;
+  setup(picks: RecipeFile, on: { home: string }): Promise<ProvisionPlan>;
+  floor(machine: Machine, on: { home: string }, stage: ProvisionStage): Promise<PlaceProvisionRow[]>;
+  step(machine: Machine, plan: ProvisionPlan, step: EngineStep, run: SetupRun, stage: ProvisionStage, on: { home: string }): Promise<PlaceProvisionRow[]>;
 }
 
 /** One login over ssh as this host holds it: the address in the spelling a person would type back, and the key file
@@ -312,6 +357,9 @@ export interface PlaceInstallRequest {
   doorPort?: number;
   /** The relay's address among `hostUrls`, when this host is linked to one. */
   relay?: string;
+  /** Awaited right before anything of wsp's is sent, with the script that would take it all back off that computer:
+   * the host writes it down first, so a host that stops mid-install can finish the join or take the install back. */
+  beforeDeploy?(undo: string, ssh: string): Promise<void>;
 }
 
 /** What the install answers once the computer has run its own join: the name it was given, and the key its ssh
@@ -344,6 +392,12 @@ export interface PlaceRecording {
   projectsOn(placeId: string): Promise<string[]>;
   /** How many of what that place's cap counts run there now, read against every row the list holds. */
   runningOn(placeId: string, places: readonly Pick<PlaceView, "id" | "kind">[]): Promise<number>;
+  /** Signs an agent in on that computer through the sign-in relay, as the app's own sign-in does: every step it
+   * reaches, the page and the code among them, goes to `emit`. Absent, a machine sign-in fails its row. */
+  signIn?(placeId: string, agent: string, emit: (e: AgentsSignInEvent) => void): Promise<{ leave(): void }>;
+  /** Records one folder of this computer's as a project on that computer, seeded with what its pick keeps, by the
+   * add's own road. Answers the folder's row. Absent, a folder fails its row. */
+  addFolder?(placeId: string, key: string, folder: RecipeFile["folders"][string]): Promise<PlaceProvisionRow>;
 }
 
 export interface PlaceDoorOptions {
@@ -360,6 +414,8 @@ export interface PlaceDoorOptions {
   onDaemonEvent?: (placeId: string, event: DaemonEvent) => void;
   /** How far an install on a computer this host has never met has got; the runtime puts these on its own stream. */
   onStage?: (event: PlaceStageEvent) => void;
+  /** Every frame of a setup and every move of a pending add; the runtime puts these on its own stream. */
+  onSetup?: (event: PlaceSetupEvent | PlacePendingEvent) => void;
   /** What a place's row says about its copy of the image while it is not standing: the stage of the build running
    * there, or the reason the last one stopped. The runtime holds the builds, so it answers; nothing for a copy that
    * stands. `stopped` says which of the two the line is. */
@@ -479,7 +535,14 @@ export interface PlaceDoor {
   markDefaultIfNone(placeId: string): Promise<void>;
   /** Puts the agent on a computer over ssh and waits for it to dial back as a place. Refused in one sentence on a
    * host that wired no installer. */
-  add(req: { addId?: string; address: string; name?: string; sshPort?: number; keyPath?: string; hostKey?: string; hostUrls: readonly string[]; doorPort?: number; relay?: string }, now: number): Promise<PlaceAdded>;
+  add(req: { addId?: string; address: string; name?: string; sshPort?: number; keyPath?: string; hostKey?: string; hostUrls: readonly string[]; doorPort?: number; relay?: string; choices?: RecipeFile; recipe?: string }, now: number): Promise<PlaceAdded>;
+  /** Sets a computer up from picks: a pending add that joined and waits on its choices, given them here or holding
+   * them already, or a computer already set up, run again for whatever is missing, a sign-in that waits or ran out
+   * among it. `ref` is a computer's id or name, or a pending add's id or address. Refused in one sentence for an add
+   * that never joined, and for a computer with no picks where none are given. */
+  setUp(ref: string, o: { choices?: RecipeFile; recipe?: string; addId?: string }): Promise<PlaceSetUp>;
+  /** Every add that has not reached Set up, oldest first. */
+  pending(): Promise<PendingComputer[]>;
   /** Dials one computer once: a frame over the link it is holding, or one login over the road it was added on when
    * it holds none. Answers what came back and writes it on the record, so a window opened later reads the same
    * answer. Nothing is installed and nothing is left running either way. */
@@ -502,14 +565,22 @@ export interface PlaceDoor {
   rows(): Promise<PlaceView[]>;
   /** Every add over ssh still running and the last ADDS_KEPT that finished, oldest first. */
   adds(): PlaceAddJob[];
-  /** Puts the daemon this host deploys on one place where it is behind, then runs the recipe job on it. Refuses in
-   * one sentence a place this host does not hold, and a computer that is behind on a runtime wired with no
-   * updater; a computer already on this daemon takes the job alone. */
+  /** Puts the daemon this host deploys on one place where it is behind, then runs its setup again from its picks.
+   * Refuses in one sentence a place this host does not hold, and a computer that is behind on a runtime wired with
+   * no updater; a computer already on this daemon takes the setup alone. */
   update(placeId: string, addId?: string): Promise<PlaceUpdateReply>;
   remove(placeId: string): Promise<PlaceRemoved>;
   /** Every place a word picks, by id or by the name the person gave it: none, one, or the two that share a name,
    * which is a refusal the caller writes with the ids in it. */
   find(ref: string): Promise<PlaceRecord[]>;
+  /** The saved recipe one computer follows from now, by slug, or none; answers its row. */
+  follow(placeId: string, recipe: string): Promise<PlaceView>;
+  /** The computers that follow each saved recipe, by slug, by name. */
+  followers(): Promise<Map<string, string[]>>;
+  /** Takes every computer off one recipe, so each follows none; answers their names. */
+  unfollow(slug: string): Promise<string[]>;
+  /** What a computer was set up with; nothing for one set up before picks were kept. */
+  picksOf(placeId: string): Promise<RecipeFile | undefined>;
   on(fn: (e: PlaceEvent) => void): () => void;
   close(): Promise<void>;
 }
@@ -567,12 +638,22 @@ export class PlaceProvisioningError extends Error {
 }
 
 /** What an install answers once the computer has dialled in: which stream of steps it was, the place it became,
- * the key its ssh answered with, and why the recipe job did not start where it did not. The place's own row
- * carries that job while it runs, so a caller reads one or the other and never both. */
+ * the key its ssh answered with, and why the setup did not start where it did not: a computer that joined with
+ * nothing picked waits as a pending add, which rides beside it. The place's own row carries the setup while it
+ * runs, so a caller reads one or the other and never both. */
 export interface PlaceAdded {
   addId: string;
   place: PlaceView;
   hostKey?: string;
+  said?: string;
+  pending?: PendingComputer;
+}
+
+/** What a set up answers: the computer, its setup as it stands the moment it is under way, and why none started. */
+export interface PlaceSetUp {
+  addId: string;
+  place: PlaceView;
+  setup?: PlaceSetup;
   said?: string;
 }
 
@@ -756,9 +837,34 @@ async function boxSaid(wiring: PlaceWiring, installed: PlaceInstalled): Promise<
   return await wiring.log(login).catch(() => []);
 }
 
-/** What a job the host was driving reads as once that host is gone: nothing outlives the process that drove it,
- * so the record is not left saying a run is under way that nothing is running. */
-export const PROVISION_HOST_STOPPED = "the host stopped while it ran";
+/** One document per add that has not reached Set up, keyed by its own id. */
+const PENDING = "pending-computers";
+
+/** A pending add as the store keeps it: what a client reads, beside the key file the add named, the host key the
+ * person confirmed, the login that reached it and the script that takes its install back, none of which a client is
+ * told. The extra fields are written by this door alone and read back as it wrote them. */
+type PendingRecord = PendingComputer & { keyPath?: string; hostKey?: string; undo?: string; login?: string };
+
+/** A pending add as a client reads it. */
+const pendingView = (p: PendingRecord): PendingComputer => {
+  const { keyPath: _key, hostKey: _hostKey, undo: _undo, login: _login, ...view } = p;
+  return view;
+};
+
+/** What the sentence an add that stopped while wsp was going on reads, once its install was taken back. */
+export const ADD_STOPPED_LINE = "the host stopped while wsp was being installed there; what the install put there was taken back";
+export const ADD_STOPPED_FIX = "Add it again.";
+export const ADD_NOT_TAKEN_BACK_LINE = "the host stopped while wsp was being installed there, and what the install put there could not be taken back";
+
+/** A sign-in's failure this close to its wait running out reads as the wait running out. */
+const SIGN_IN_SLACK_MS = 5_000;
+/** How long gh's own status gets on that computer. */
+const GITHUB_MS = 30_000;
+
+const firstLineOf = (e: unknown): string => (e instanceof Error ? e.message : String(e)).split("\n")[0]!;
+
+/** The hash of what a computer was set up with, which its applied rows carry. */
+const picksHash = (picks: RecipeFile): string => createHash("sha256").update(recipeCanon({ file: picks, items: {} })).digest("hex");
 
 /** How often the job's lines are appended to the log on the computer, and how many lines go without waiting for
  * that: one exec per line would be one frame per line on a run of hundreds. */
@@ -1067,35 +1173,35 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       held.add(wake);
     });
 
-  /** The computers a recipe job is going on, by place id: one per computer, so a second run is refused rather than
-   * two runs installing over each other. A computer is in here from before the recipe is read, which is a read of
-   * this whole computer, until its rows are done. */
-  const provisioning = new Set<string>();
+  /** The computers a setup is going on, by place id: one per computer, so a second run is refused rather than two
+   * runs installing over each other. A computer is in here from before its picks are planned, which is a read of
+   * this whole computer, until the job ends. */
+  const setting = new Set<string>();
 
-  /** The sentence another run of the recipe on this computer is refused with, naming the row under way where the
-   * job has reached one; nothing when none is going on. The one reading, so the start, the update and the gate a
-   * create passes cannot disagree about whether a computer is busy. */
-  const provisioningNow = (record: PlaceRecord): string | undefined =>
-    provisioning.has(record.id) || record.provision?.state === "running" ? placeProvisioningLine(record.name, record.provision?.at) : undefined;
+  /** The sign-ins a setup is following on a computer, by `<place id>/<agent>`: what a later run that takes one over
+   * quiets at once and lets go of once it follows the sign-in itself. */
+  const signingIn = new Map<string, { mute(): void; leave(): void }>();
 
-  /** The one write of a place's provision: onto the record as it stands rather than as it was when the row landed,
-   * since an attach's write of lastSeenAt is going on beside it. */
-  const writeProvision = async (placeId: string, provision: PlaceProvision): Promise<void> => {
+  /** The sentence a fork there, or a second setup, is refused with while a setup stands running on that computer:
+   * one this host is driving, or one a stopped host left, which resumes when that computer dials back. The one
+   * reading, so the start, the update and the gate a create passes cannot disagree about whether it is busy. */
+  const settingNow = (record: PlaceRecord): string | undefined =>
+    setting.has(record.id) || record.setup?.state === "running" ? placeProvisioningLine(record.name, record.setup?.steps.find(l => l.state === "running")?.step) : undefined;
+
+  /** One write of a setup's state onto the record as it stands, since an attach's write of lastSeenAt goes on
+   * beside it. */
+  const writeSetup = async (placeId: string, patch: Partial<Pick<PlaceRecord, "setup" | "applied" | "picks" | "recipe">>): Promise<void> => {
     const now = await recordOf(placeId);
     if (now === undefined) return;
-    await keep({ ...now, provision });
+    await keep({ ...now, ...patch });
   };
 
-  /** One step of the recipe job on the stream whoever asked for it is watching. The computer rides every one of
-   * them: this job is on a computer this host already holds, so a reader that acts on the job's end rather than
-   * printing it reads the row off the event and not off the stream's own id. */
-  const provisionStage = (placeId: string, addId: string, state: "running" | "done" | "failed", note?: string, failed?: number): void => {
-    opts.onStage?.({ type: "place.stage", addId, placeId, step: "provision", state, ...(note !== undefined ? { note } : {}), ...(failed !== undefined ? { failed } : {}) });
-  };
+  /** One frame of a setup on the stream whoever started it is watching. */
+  const setupFrame = (event: Omit<PlaceSetupEvent, "type">): void => opts.onSetup?.({ type: "place.setup", ...event });
 
-  /** The job's own log and outcome on the computer itself, so a person at its shell reads what happened without
-   * this host: the lines appended in batches, the outcome written whole at the end. Nothing here fails the job; a
-   * computer that will not take its own log is still a computer the recipe landed on. */
+  /** The job's own log on the computer itself, so a person at its shell reads what happened without this host: the
+   * lines appended in batches. Nothing here fails the job; a computer that will not take its own log is still a
+   * computer its picks landed on. */
   const provisionRecord = (machine: Machine, home: string, header: string) => {
     const at = placeProvisionPaths(home);
     // The time goes on the line as it is written, not as its batch goes up: the lines travel in batches, and a
@@ -1122,96 +1228,317 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
           timer.unref?.();
         }
       },
-      close: async (provision: PlaceProvision): Promise<void> => {
+      close: async (setup: PlaceSetup): Promise<void> => {
         await flush();
-        await putFiles(machine, [{ path: at.result, text: `${JSON.stringify(provision, null, 2)}\n` }]).catch(() => undefined);
+        await putFiles(machine, [{ path: at.result, text: `${JSON.stringify(setup, null, 2)}\n` }]).catch(() => undefined);
       },
     };
   };
 
-  /** The run itself, behind whoever asked for it: every row onto the record as its outcome arrives, every line on
-   * the place's own stage stream and in the log on that computer, and the state at the end. A throw is the
-   * computer having stopped answering, which leaves the job stopped with its first line. */
-  const runProvision = async (placeId: string, addId: string, planned: ProvisionPlan, machine: Machine, home: string, started: PlaceProvision): Promise<void> => {
-    const provisioner = wiring.provision;
-    if (provisioner === undefined) return;
-    const log = provisionRecord(machine, home, `wsp ${wiring.hostName()} put the recipe of ${planned.recipeAt} on this computer at ${started.startedAt}: ${provisionCountWord(provisionCountsOf(planned))}`);
+  /** The run itself, behind whoever asked for it. Every step is written onto the record as it starts and as it ends,
+   * with its rows, so a host that stops resumes it at the next link and redoes no step that ended; a step already
+   * done in `done` is passed over. The steps go in the order their weight asks: the floor and the agents first,
+   * since a failure there stops the job; the sign-ins started and left running, since one waits on the person and
+   * blocks nothing; the folders on a second stream beside the CLIs, servers, skills, plugins and configs; the GitHub
+   * check once the folders are in; the machine context last, so it names what did not land. */
+  const runSetup = async (placeId: string, addId: string, picks: RecipeFile, done: ReadonlySet<PlaceSetupStep>, started: PlaceSetup, rerun: readonly PlaceWait[]): Promise<void> => {
+    const provisioner = wiring.provision!;
+    const record = (await recordOf(placeId))!;
+    const home = record.report.login["HOME"]!;
+    const machine = new PlaceMachine(linkTo(placeId), { id: record.name, home });
+    const log = provisionRecord(machine, home, `wsp ${wiring.hostName()} set up ${record.name} from ${picks.name} at ${started.startedAt}`);
+    const hash = picksHash(picks);
+    // The rows of the steps that already ended stand: a resume runs only what did not.
+    const rows: PlaceProvisionRow[] = (record.applied?.rows ?? []).filter(r => r.step !== undefined && done.has(r.step));
     let held = started;
+    let ended = false;
     let writing: Promise<void> = Promise.resolve();
-    const push = (next: PlaceProvision): void => {
+    const applied = (): PlaceApplied => ({ hash, at: new Date(clockNow()).toISOString(), rows: [...rows] });
+    const push = (next: PlaceSetup): void => {
       held = next;
-      writing = writing.then(() => writeProvision(placeId, next)).catch(() => undefined);
+      writing = writing.then(() => writeSetup(placeId, { setup: next, applied: applied() })).catch(() => undefined);
     };
-    const stage: ProvisionStage = (detail, at, row) => {
-      log.write(detail);
-      provisionStage(placeId, addId, "running", detail);
-      // The record is written when the job moved, not on every line a step prints: a step's output is hundreds of
-      // lines and each write is the whole state file.
-      const moved = at !== undefined && (held.at?.index !== at.index || held.at.label !== at.label);
-      if (row === undefined && !moved) return;
-      push({ ...held, rows: row === undefined ? held.rows : [...held.rows, row], ...(at === undefined ? {} : { at }) });
+    const line = (l: PlaceSetupLine): void => {
+      push({ ...held, steps: held.steps.some(s => s.step === l.step) ? held.steps.map(s => (s.step === l.step ? l : s)) : [...held.steps, l] });
+      log.write(`${SETUP_STEP_WORDS[l.step]}: ${l.state}${l.note === undefined ? "" : ` (${l.note})`}`);
+      setupFrame({ addId, placeId, line: l });
     };
+    const stage: ProvisionStage = detail => log.write(detail);
+    const vault = (): Readonly<Record<string, string>> => opts.vault?.() ?? {};
+
+    /** How a setup came out, said once its steps ended and again when the last sign-in waiting on the person lands:
+     * ready, or Needs you while a wait stands or a folder or the GitHub sign-in failed. */
+    const outcome = (): { end: SetupEnd; said?: string } => {
+      const important = importantFailures(applied());
+      const waits = held.waiting.map(waitLine);
+      const said = [...waits, ...important.map(r => `${r.label}: ${r.note ?? "failed"}`)];
+      const missed = rows.filter(r => r.outcome === "failed").length;
+      return said.length > 0 ? { end: "needs-you", said: said.join("; ") } : { end: "ready", ...(missed > 0 ? { said: `${plural(missed, "row")} did not install` } : {}) };
+    };
+
+    /** One step: marked running, run, its rows kept with the step on each, and marked done or failed with what it
+     * took. A step that throws is one failed row, unless the computer stopped answering, which the job waits out. */
+    const step = async (name: PlaceSetupStep, work: () => Promise<PlaceProvisionRow[]>): Promise<{ rows: PlaceProvisionRow[]; failed: boolean } | undefined> => {
+      if (done.has(name)) return undefined;
+      const began = clockNow();
+      line({ step: name, state: "running" });
+      let got: PlaceProvisionRow[];
+      try {
+        got = (await work()).map(r => ({ ...r, step: name }));
+      } catch (e) {
+        if (e instanceof PlaceAbsentError) throw e;
+        got = [{ id: `${name}/stopped`, label: SETUP_STEP_WORDS[name], outcome: "failed", step: name, note: firstLineOf(e) }];
+      }
+      rows.push(...got);
+      const failed = got.filter(r => r.outcome === "failed");
+      line({ step: name, state: failed.length > 0 ? "failed" : "done", ms: Math.max(0, Math.round(clockNow() - began)), ...(failed.length > 0 ? { note: `${failed.length} of ${got.length} failed` } : {}) });
+      return { rows: got, failed: failed.length > 0 };
+    };
+
+    /** A sign-in on that computer that waits on the person: its row waits with the page and the code as the relay
+     * reads them, and when the wait runs out it reads expired and a retry asks for a fresh one. It never holds the
+     * job; its row lands whenever the person is through. */
+    const signInThere = (agent: string): void => {
+      const signIn = recording.signIn;
+      const label = CATALOG_AGENTS.find(a => a.id === agent)?.name ?? agent;
+      const row = `signins/${agent}`;
+      const begun = clockNow();
+      const wait: PlaceWait = { row, label, expiresAt: new Date(begun + SIGN_IN_WAIT_MS).toISOString(), state: "waiting" };
+      const putWait = (w: PlaceWait | undefined): void => {
+        push({ ...held, waiting: [...held.waiting.filter(x => x.row !== row), ...(w === undefined ? [] : [w])] });
+        if (w !== undefined) setupFrame({ addId, placeId, wait: w });
+      };
+      const landed = (r: PlaceProvisionRow): void => {
+        rows.splice(0, rows.length, ...rows.filter(x => x.id !== row), { ...r, step: "signins" });
+        putWait(undefined);
+        // The last wait gone after the steps ended is the setup coming out again, said once more.
+        if (ended && held.waiting.length === 0) setupFrame({ addId, placeId, ...outcome() });
+      };
+      if (signIn === undefined) {
+        landed({ id: row, label, outcome: "failed", note: NO_SIGN_IN_ROAD });
+        return;
+      }
+      putWait(wait);
+      let current = wait;
+      // The run that followed this sign-in before goes quiet at once, so only this one writes what it comes to, and
+      // lets go once this one follows it, so a relay still waiting keeps its page and code.
+      const key = `${placeId}/${agent}`;
+      const before = signingIn.get(key);
+      before?.mute();
+      let gone = false;
+      let leave: (() => void) | undefined;
+      const mine = {
+        mute: () => void (gone = true),
+        leave: () => {
+          gone = true;
+          leave?.();
+        },
+      };
+      signingIn.set(key, mine);
+      void signIn(placeId, agent, e => {
+        if (gone) return;
+        if (e.state !== "waiting" && e.state !== "running" && signingIn.get(key) === mine) signingIn.delete(key);
+        if (e.state === "waiting" || e.state === "running") {
+          if (e.url === undefined && e.code === undefined) return;
+          current = { ...current, ...(e.url !== undefined ? { url: e.url } : {}), ...(e.code !== undefined ? { code: e.code } : {}) };
+          putWait(current);
+        } else if (e.state === "signed-in") {
+          landed({ id: row, label, outcome: "installed", note: SIGNED_IN_THERE, ms: Math.round(clockNow() - begun) });
+        } else if (clockNow() >= begun + SIGN_IN_WAIT_MS - SIGN_IN_SLACK_MS) {
+          putWait({ ...current, state: "expired" });
+        } else {
+          landed({ id: row, label, outcome: "failed", note: e.said ?? "the sign-in did not finish" });
+        }
+      }).then(
+        handle => {
+          leave = () => handle.leave();
+          before?.leave();
+          if (gone) handle.leave();
+        },
+        (e: unknown) => {
+          if (!gone) landed({ id: row, label, outcome: "failed", note: firstLineOf(e) });
+        },
+      );
+    };
+
+    /** The sign-ins step: an agent that signs in from the vault reads its token there now, and every turn there is
+     * handed it; an agent that signs in on that computer is started and left waiting on the person. */
+    const signIns = async (): Promise<PlaceProvisionRow[]> => {
+      const out: PlaceProvisionRow[] = [];
+      for (const [agent, row] of Object.entries(picks.agents)) {
+        const label = CATALOG_AGENTS.find(a => a.id === agent)?.name ?? agent;
+        if ((row.signin ?? "vault") === "machine") {
+          signInThere(agent);
+          continue;
+        }
+        out.push(vaultSignIn(agent, vault()) === "vault-key" ? { id: `signins/${agent}`, label, outcome: "present", note: FROM_THE_VAULT } : { id: `signins/${agent}`, label, outcome: "failed", note: noVaultTokenLine(agent) });
+      }
+      return out;
+    };
+
+    /** The folders, on the second stream: each one a project on that computer by the add's own road. */
+    const folders = async (): Promise<PlaceProvisionRow[]> => {
+      const out: PlaceProvisionRow[] = [];
+      for (const [key, folder] of Object.entries(picks.folders)) {
+        const label = folder.name ?? key;
+        if (recording.addFolder === undefined) {
+          out.push({ id: `folders/${key}`, label, outcome: "failed", note: NO_FOLDER_ROAD });
+          continue;
+        }
+        out.push(await recording.addFolder(placeId, key, folder).catch((e: unknown): PlaceProvisionRow => ({ id: `folders/${key}`, label, outcome: "failed", note: firstLineOf(e) })));
+      }
+      return out;
+    };
+
+    /** The GitHub check: gh's own status there, with the vault's token in the run's environment and nowhere else. */
+    const github = async (plan: ProvisionPlan): Promise<PlaceProvisionRow[]> => {
+      const gh = picks.configs.github;
+      if (gh === undefined) return [];
+      if (gh.signin === "machine") return [{ id: "github", label: "GitHub", outcome: "failed", note: githubThereLine(record.name) }];
+      const token = vault()[GITHUB_TOKEN_ENV];
+      if (token === undefined) return [{ id: "github", label: "GitHub", outcome: "failed", note: NO_GITHUB_TOKEN_LINE }];
+      const res = await machine.exec(withEnvFromInput(`${pathLine(plan.path, plan.prefix)}\ngh auth status --hostname github.com 2>&1`), { timeoutMs: GITHUB_MS, stdin: envInput({ [GITHUB_TOKEN_ENV]: token }) });
+      // gh names the token's scopes on its status, which the row carries so a person reads what a clone may reach.
+      const scopes = /Token scopes:\s*(.+)/.exec(res.stdout)?.[1]?.replace(/'/g, "").trim();
+      return [res.exitCode === 0 ? { id: "github", label: "GitHub", outcome: "present", note: `${FROM_THE_VAULT}${scopes === undefined || scopes === "" ? "" : `; token scopes: ${scopes}`}` } : { id: "github", label: "GitHub", outcome: "failed", note: lastLine(res.stdout) ?? `gh auth status exited ${res.exitCode}` }];
+    };
+
+    const end = async (failed?: string): Promise<void> => {
+      ended = true;
+      push({ ...held, state: failed === undefined ? "done" : "failed", finishedAt: new Date(clockNow()).toISOString(), ...(failed !== undefined ? { said: failed } : {}) });
+      await writing;
+      setupFrame({ addId, placeId, ...(failed === undefined ? outcome() : { end: "failed", said: failed }) });
+    };
+
     try {
-      const rows = await provisioner.run(machine, planned, stage, { home });
-      const { at: _under, ...rest } = held;
-      push({ ...rest, state: "done", finishedAt: new Date(clockNow()).toISOString(), rows });
-      await writing;
-      provisionStage(placeId, addId, "done", provisionLines(kept.get(placeId)?.name ?? placeId, held).join("; "), rows.filter(r => r.outcome === "failed").length);
+      // A sign-in the last run left waiting is run again for a fresh page and code: the pty behind the old one is gone.
+      for (const w of rerun) signInThere(w.row.slice("signins/".length));
+      if (picks.configs.github !== undefined && picks.configs.github.signin !== "machine" && vault()[GITHUB_TOKEN_ENV] === undefined) await wiring.githubToken?.().catch(() => undefined);
+      const plan = await provisioner.setup(picks, { home });
+      const run = newSetupRun();
+      const engine = (s: EngineStep) => () => provisioner.step(machine, plan, s, run, stage, { home });
+      const floor = await step("floor", engine("floor"));
+      if (floor?.failed === true) return await end(floorFailedLine(floor.rows));
+      const agents = await step("agents", engine("agents"));
+      const installs = new Set(plan.steps.slice(0, plan.agents).map(s => s.id));
+      const agentRows = agents?.rows.filter(r => installs.has(r.id)) ?? [];
+      if (agentRows.length > 0 && agentRows.every(r => r.outcome === "failed")) return await end(noAgentLine(agentRows));
+      await step("signins", signIns);
+      const moved = step("folders", folders);
+      for (const s of ["clis", "mcp", "skills", "plugins", "configs"] as const) await step(s, engine(s));
+      await moved;
+      await step("github", () => github(plan));
+      await step("context", engine("context"));
+      await end();
     } catch (e) {
-      const said = (e instanceof Error ? e.message : String(e)).split("\n")[0]!;
-      const { at: _under, ...rest } = held;
-      push({ ...rest, state: "stopped", said, finishedAt: new Date(clockNow()).toISOString() });
-      await writing;
-      provisionStage(placeId, addId, "failed", said);
+      // A computer that stopped answering leaves the setup running on its record: its next link resumes it.
+      if (e instanceof PlaceAbsentError) {
+        await writing;
+        return;
+      }
+      await end(firstLineOf(e));
+    } finally {
+      void log.close(held);
     }
-    // Behind the job rather than inside it: the outcome on that computer is the last write and a link that has
-    // gone waits out its own retries, and a second update is refused only while rows are actually going on.
-    void log.close(held);
   };
 
-  /** Starts the recipe job on one computer and answers how it stands the moment it is under way, so a person who
-   * asked for a join or an update reads a row that is already running. The plan is read here, which is this
-   * computer being read; everything after it happens behind the answer. Nothing at all on a host that wired no
-   * provisioner, which is what every runtime outside the app has. */
-  const startProvision = async (placeId: string, addId: string): Promise<{ provision?: PlaceProvision; said?: string }> => {
-    const provisioner = wiring.provision;
-    if (provisioner === undefined) return {};
+  /** Starts the setup on one computer from its picks, given here or already on its record, and answers how it
+   * stands the moment it is under way. A setup a stopped host left running resumes: the steps that ended stand and
+   * a sign-in that was waiting is run again. Nothing at all on a host that wired no provisioner. */
+  const startSetup = async (placeId: string, addId: string, given?: { picks: RecipeFile; recipe?: string }): Promise<{ setup?: PlaceSetup; said?: string }> => {
+    if (wiring.provision === undefined) return {};
     const record = await recordOf(placeId);
     if (record === undefined) return {};
-    // The one answer a busy computer gets, whoever asked: the same conflict the update throws, from the same
-    // reading. A join takes it as the sentence its reply carries, since a computer that just joined is nobody's
-    // to be running the recipe on and a join that reached here is not failed by it.
-    const busy = provisioningNow(record);
-    if (busy !== undefined) throw Object.assign(new Error(busy), { kind: "conflict" });
+    if (setting.has(placeId)) throw Object.assign(new Error(placeProvisioningLine(record.name, record.setup?.steps.find(l => l.state === "running")?.step)), { kind: "conflict" });
     const home = record.report.login["HOME"];
-    // Every path the job builds comes off that home, so a computer that reported none gets no recipe and says so.
+    // Every path the job builds comes off that home, so a computer that reported none gets nothing and says so.
     if (home === undefined) return { said: placeNoHomeLine(record.name) };
-    // The slot is taken before the recipe is read, and that read is a read of this whole computer: two starts
-    // inside it would both have passed the check above and installed over each other on that box.
-    provisioning.add(placeId);
+    const picks = given?.picks ?? record.picks;
+    if (picks === undefined) return { said: placeNoPicksLine(record.name) };
+    setting.add(placeId);
     try {
-      const planned = await provisioner.plan({ home });
-      if ("noRecipe" in planned) {
-        provisioning.delete(placeId);
-        return { said: placeNoRecipeLine(record.name, planned.noRecipe) };
-      }
-      const provision: PlaceProvision = { state: "running", addId, recipeAt: planned.recipeAt, startedAt: new Date(clockNow()).toISOString(), rows: [] };
-      await writeProvision(placeId, provision);
-      provisionStage(placeId, addId, "running", `${provisionCountWord(provisionCountsOf(planned))} from the recipe of ${planned.recipeAt}`);
-      // The computer itself, not a workspace on it: the link it is holding to this host, driven as a machine.
-      const machine = new PlaceMachine(linkTo(placeId), { id: record.name, home });
-      void runProvision(placeId, addId, planned, machine, home, provision).finally(() => provisioning.delete(placeId));
-      return { provision };
+      const resuming = given === undefined && record.setup?.state === "running" ? record.setup : undefined;
+      const done = new Set((resuming?.steps ?? []).filter(l => l.state === "done").map(l => l.step));
+      // A sign-in left waiting is run again here only where its step ended; otherwise that step starts it itself.
+      const rerun = done.has("signins") ? (record.setup?.waiting ?? []).filter(w => w.row.startsWith("signins/")) : [];
+      const setup: PlaceSetup = { state: "running", addId, startedAt: resuming?.startedAt ?? new Date(clockNow()).toISOString(), steps: resuming?.steps.filter(l => l.state === "done") ?? [], waiting: [] };
+      await writeSetup(placeId, { setup, picks, ...(given !== undefined ? { recipe: given.recipe ?? NO_RECIPE } : {}) });
+      void runSetup(placeId, addId, picks, done, setup, rerun).finally(() => setting.delete(placeId));
+      return { setup };
     } catch (e) {
-      provisioning.delete(placeId);
+      setting.delete(placeId);
       throw e;
     }
   };
 
-  /** The start above with its own refusal as a sentence: a recipe this host cannot read is a computer that got no
-   * agents, not a join or an update that failed after the daemon landed. */
-  const startedOrSaid = (placeId: string, addId: string): Promise<{ provision?: PlaceProvision; said?: string }> =>
-    startProvision(placeId, addId).catch((e: unknown) => ({ said: (e instanceof Error ? e.message : String(e)).split("\n")[0]! }));
+  /** The start above with its own refusal as a sentence: picks this host cannot plan are a computer that got
+   * nothing, not a join or an update that failed after the daemon landed. */
+  const startedOrSaid = (placeId: string, addId: string, given?: { picks: RecipeFile; recipe?: string }): Promise<{ setup?: PlaceSetup; said?: string }> =>
+    startSetup(placeId, addId, given).catch((e: unknown) => ({ said: firstLineOf(e) }));
+
+  /** The adds that have not reached Set up, by id, as the store keeps them: each with what the installer left to
+   * take an install back, which no client reads. */
+  const pendingRecords = async (): Promise<PendingRecord[]> =>
+    (await store.list(PENDING))
+      .flatMap(v => {
+        const parsed = PendingComputer.passthrough().safeParse(v);
+        return parsed.success ? [parsed.data as PendingRecord] : [];
+      })
+      .sort((a, b) => a.startedAt.localeCompare(b.startedAt));
+  const putPending = async (p: PendingRecord): Promise<void> => {
+    await store.put(PENDING, p.id, p);
+    opts.onSetup?.({ type: "place.pending", id: p.id, pending: pendingView(p) });
+  };
+  const dropPending = async (id: string): Promise<void> => {
+    await store.delete(PENDING, id);
+    opts.onSetup?.({ type: "place.pending", id });
+  };
+
+  /** The floor on a computer that joined with nothing picked yet, so it is on by the time the person has chosen:
+   * the pending add moves to choosing either way, and a floor that failed says so on it. */
+  const floorWhileChoosing = async (pending: PendingRecord, placeId: string): Promise<void> => {
+    const provisioner = wiring.provision;
+    const record = await recordOf(placeId);
+    const home = record?.report.login["HOME"];
+    if (provisioner === undefined || record === undefined || home === undefined) {
+      await putPending({ ...pending, placeId, step: "choosing" });
+      return;
+    }
+    await putPending({ ...pending, placeId, step: "floor" });
+    const machine = new PlaceMachine(linkTo(placeId), { id: record.name, home });
+    const failed = await provisioner
+      .floor(machine, { home }, () => {})
+      .then(rows => rows.filter(r => r.outcome === "failed"))
+      .catch((e: unknown) => [{ id: "floor", label: SETUP_STEP_WORDS.floor, outcome: "failed" as const, note: firstLineOf(e) }]);
+    const now = (await store.get(PENDING, pending.id)) === undefined ? undefined : pending;
+    if (now === undefined) return;
+    await putPending({ ...pending, placeId, step: "choosing", ...(failed.length > 0 ? { failed: { said: floorFailedLine(failed) } } : {}) });
+  };
+
+  /** The pending adds whose floor runs here now, so a second link does not start it again. */
+  const flooring = new Set<string>();
+  const floorOnce = async (pending: PendingRecord, placeId: string): Promise<void> => {
+    flooring.add(pending.id);
+    try {
+      await floorWhileChoosing(pending, placeId);
+    } finally {
+      flooring.delete(pending.id);
+    }
+  };
+
+  /** An add the host stopped while wsp went on, taken back off that computer by the script its installer left, over
+   * the login it used. The pending add then reads as failed with what happened, for the person to add it again. */
+  const takenBack = async (pending: PendingRecord): Promise<void> => {
+    const ssh = pending.login;
+    const said =
+      ssh === undefined || pending.undo === undefined || wiring.undo === undefined
+        ? ADD_NOT_TAKEN_BACK_LINE
+        : await wiring.undo({ ssh, ...(pending.keyPath !== undefined ? { keyPath: pending.keyPath } : {}) }, pending.undo).then(
+            () => ADD_STOPPED_LINE,
+            (e: unknown) => `${ADD_NOT_TAKEN_BACK_LINE}: ${firstLineOf(e)}`,
+          );
+    await putPending({ ...pending, failed: { said, fix: ADD_STOPPED_FIX } });
+  };
 
   /** The servers wsp merged into the agents' own files on that computer, taken back out over the link before the
    * leave takes the rest: the computer itself driven as a machine, the way the recipe's job drives it. Nothing
@@ -1398,7 +1725,10 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       ...(record.reportedAt !== undefined ? { reportedAt: record.reportedAt } : {}),
       ...(record.dialled !== undefined ? { dialled: record.dialled } : {}),
       ...(blocked !== undefined ? { blocked } : {}),
-      ...(record.provision !== undefined ? { provision: record.provision } : {}),
+      ...(record.setup !== undefined ? { setup: record.setup } : {}),
+      ...(record.applied !== undefined ? { applied: record.applied } : {}),
+      ...(record.picks !== undefined ? { picks: record.picks } : {}),
+      ...(record.recipe !== undefined ? { recipe: record.recipe } : {}),
     };
   };
 
@@ -1641,6 +1971,11 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       for (const waiting of awaiting.values()) {
         if (waiting.placeId === placeId) waiting.woken?.(placeId);
       }
+      // A setup a stopped host or a dropped link left running picks up where it was, and the floor of an add that
+      // joined before the host stopped goes on, now that the computer can be reached.
+      const current = await recordOf(placeId);
+      if (current?.setup?.state === "running" && !setting.has(placeId)) void startedOrSaid(placeId, current.setup.addId);
+      for (const pending of await pendingRecords()) if (pending.placeId === placeId && pending.step === "floor" && !flooring.has(pending.id)) void floorOnce(pending, placeId);
     },
 
     link: placeId => live.get(placeId)?.reach,
@@ -1687,12 +2022,17 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         kept.set(record.id, record);
         if (record.backendFacts !== undefined && !backends.has(record.id)) backendFrom(record.id, record.backendFacts);
         holdBack(record);
-        // No job outlives the host that drove it, so a record left running is stopped here rather than holding
-        // the gate on that computer shut for good.
-        if (record.provision?.state === "running") {
-          const { at: _under, ...rest } = record.provision;
-          await writeProvision(record.id, { ...rest, state: "stopped", said: PROVISION_HOST_STOPPED, finishedAt: new Date(clockNow()).toISOString() });
+      }
+      // A setup left running resumes at its computer's next link (attach); an add the host stopped in the middle of
+      // installing wsp either joined meanwhile, which is the join it was waiting on, or is taken back off that computer.
+      for (const pending of await pendingRecords()) {
+        if (pending.step !== "wsp" || pending.placeId !== undefined || pending.failed !== undefined) continue;
+        const joined = pending.login === undefined ? undefined : [...kept.values()].find(r => r.road?.ssh === pending.login);
+        if (joined !== undefined) {
+          await putPending({ ...pending, placeId: joined.id, step: "floor" });
+          continue;
         }
+        void takenBack(pending);
       }
     },
 
@@ -1739,10 +2079,10 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         backends.delete(placeId);
         throw new PlaceForksNowhereError(placeForksNowhereLine(name));
       }
-      // A computer whose recipe is still going on is not forked into while it runs: the workspace would come up
+      // A computer whose setup is still going on is not forked into while it runs: the workspace would come up
       // without the agent the job is putting there. The running workspaces on it are untouched, since they read
       // backendOf and not this.
-      const busy = provisioningNow(record);
+      const busy = settingNow(record);
       if (busy !== undefined) throw new PlaceProvisioningError(busy);
       const made = door.backendOf(placeId);
       if (made !== undefined) return made;
@@ -1850,9 +2190,35 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       if (install === undefined) throw new Error(NO_PLACE_INSTALLER);
       const addId = req.addId ?? `a_${randomBytes(6).toString("hex")}`;
       if (adds.get(addId)?.state === "running") throw usageRefusal(ADD_RUNNING_LINE, ADD_RUNNING_FIX);
+      // One add per address: a second is refused while the first stands, joined and waiting on its choices
+      // included. One that failed is this add's to take over.
+      const before = (await pendingRecords()).filter(p => p.address === req.address);
+      const standing = before.find(p => p.failed === undefined);
+      if (standing !== undefined) throw usageRefusal(pendingHeldLine(req.address, standing.step), pendingHeldFix(standing.name ?? req.address));
+      for (const p of before) await dropPending(p.id);
+      // The add from its first step, so a host that stops in the middle of it finds it at its next start.
+      let pending: PendingRecord = {
+        id: addId,
+        address: req.address,
+        ...(req.sshPort !== undefined ? { sshPort: req.sshPort } : {}),
+        ...(req.name !== undefined ? { name: req.name } : {}),
+        ...(req.keyPath !== undefined ? { keyPath: req.keyPath } : {}),
+        ...(req.hostKey !== undefined ? { hostKey: req.hostKey } : {}),
+        step: "connect",
+        choices: req.choices ?? RecipeFile.parse({ name: req.name ?? req.address }),
+        ...(req.recipe !== undefined ? { recipe: req.recipe } : {}),
+        startedAt: new Date(at).toISOString(),
+      };
+      let pendingWrites: Promise<void> = putPending(pending);
+      const movePending = (next: PendingRecord): Promise<void> => {
+        pending = next;
+        pendingWrites = pendingWrites.then(() => putPending(next)).catch(() => undefined);
+        return pendingWrites;
+      };
       let step: PlaceAddStep = "connect";
       const stage: PlaceStaging = (which, state, note, placeId) => {
         if (state === "running") step = which;
+        if (state === "running" && which === "check") void movePending({ ...pending, step: "check" });
         const said: PlaceStageEvent = { type: "place.stage", addId, step: which, state, ...(note !== undefined ? { note } : {}), ...(placeId !== undefined ? { placeId } : {}) };
         putAdd(addId, job => withPlaceStage(job, said));
         opts.onStage?.(said);
@@ -1865,8 +2231,17 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       awaiting.set(code, waiting);
       let installing = true;
       try {
-        const { addId: _stream, ...asked } = req;
-        const installed = await install({ ...asked, code: joinToken(code, keyFingerprint(wiring.hostKey.publicKey)) }, stage);
+        const { addId: _stream, choices: _choices, recipe: _recipe, ...asked } = req;
+        await pendingWrites;
+        const installed = await install(
+          {
+            ...asked,
+            code: joinToken(code, keyFingerprint(wiring.hostKey.publicKey)),
+            // Written before a byte of wsp's is sent, with what takes the install back and the login that reaches it.
+            beforeDeploy: (undo, ssh) => movePending({ ...pending, step: "wsp", undo, login: ssh }),
+          },
+          stage,
+        );
         installing = false;
         // The road back to this computer is the host's the moment the install answers, and what the wait comes to
         // does not change it: the computer that most needs a login held here is the one whose agent never dials.
@@ -1906,12 +2281,21 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         // computer slower than that is joined all the same, its answer lands on the record behind this add, and
         // its row carries nothing about its forks until then, as every row did before any of this was asked.
         const facts = await factsOn(placeId, held);
-        // The recipe starts before this answers and runs on behind it, on the add's own stream: the steps ride
-        // where the join's steps rode. Started rather than fired and forgotten, so the row this answers with says
-        // whether a job is under way and whoever asked knows whether there is one to follow.
-        const started = await startedOrSaid(placeId, addId);
-        const row = { ...facts, ...(started.provision !== undefined ? { provision: started.provision } : {}) };
-        return { addId, place: viewOf(row, await defaultId()), ...(installed.hostKey !== undefined ? { hostKey: installed.hostKey } : {}), ...(started.said !== undefined ? { said: started.said } : {}) };
+        await pendingWrites;
+        const hostKey = installed.hostKey !== undefined ? { hostKey: installed.hostKey } : {};
+        // Nothing picked yet: the computer is pending at its choices, and the floor goes on while the person picks.
+        if (req.choices === undefined) {
+          const joined: PendingRecord = { ...pending, placeId, step: "floor" };
+          await movePending(joined);
+          void floorOnce(joined, placeId);
+          return { addId, place: viewOf(facts, await defaultId()), ...hostKey, pending: pendingView(joined) };
+        }
+        // Picked: the setup starts before this answers and runs on behind it, its frames on the add's own stream.
+        // Started rather than fired and forgotten, so the row this answers with says whether it is under way.
+        await dropPending(pending.id);
+        const started = await startedOrSaid(placeId, addId, { picks: req.choices, ...(req.recipe !== undefined ? { recipe: req.recipe } : {}) });
+        const row = (await recordOf(placeId)) ?? facts;
+        return { addId, place: viewOf(row, await defaultId()), ...hostKey, ...(started.said !== undefined ? { said: started.said } : {}) };
       } catch (e) {
         // The step the install was on when it stopped is the one that failed, so a person reads the sentence
         // against the line it belongs to rather than under the list. One line of it: a note is printed after the
@@ -1920,6 +2304,9 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         const message = e instanceof Error ? e.message : String(e);
         const { said, fix, kind } = refusalParts(e);
         putAdd(addId, job => ({ ...job, said: keptSaid(said), ...(fix === undefined ? {} : { fix }), ...(kind === undefined ? {} : { kind }) }));
+        // The pending add keeps the refusal, so the computer reads Setup failed with what to do until it is added
+        // again; an add that joined and then failed is that computer's row to say.
+        if (pending.placeId === undefined) await movePending({ ...pending, failed: { said: keptSaid(said), ...(fix === undefined ? {} : { fix }) } });
         stage(step, "failed", markedCut(message.split("\n")[0]!));
         // The code went to the box as a file, so an add that failed spends it rather than leave it good for ten minutes.
         await devices.spend(code, at).catch(() => false);
@@ -2056,9 +2443,9 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     async update(placeId, addId) {
       const held = await recordOf(placeId);
       if (held === undefined) throw new Error(noSuchPlaceRefusal(placeId, (await records()).map(r => r.name)));
-      // Read before anything: another run of the recipe on that computer is refused as the op's own refusal, so
-      // whoever asked reads one sentence and the line returns rather than following a job it did not start.
-      const busy = provisioningNow(held);
+      // Read before anything: another setup on that computer is refused as the op's own refusal, so whoever asked
+      // reads one sentence and the line returns rather than following a job it did not start.
+      const busy = setting.has(held.id) ? settingNow(held) : undefined;
       if (busy !== undefined) throw Object.assign(new Error(busy), { kind: "conflict" });
       const from = held.report.daemonVersion;
       // A binary goes only where that computer is behind: a computer already running this wsp's daemon is the
@@ -2098,7 +2485,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
           };
         }
       }
-      // A stream of its own: this is not an install, and the rows ride it the way a join's steps ride the add's.
+      // A stream of its own: this is not an install, and the frames ride it the way a join's steps ride the add's.
       const started = await startedOrSaid(placeId, addId ?? `a_${randomBytes(6).toString("hex")}`);
       return { name: held.name, ...(daemon === undefined ? {} : { daemon }), ...started };
     },
@@ -2162,11 +2549,61 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       if (reach !== undefined) cut(placeId, "removed from this host");
       // After the sweep, since the link that sweep may ride comes in through the forward.
       if (login !== undefined && held.road?.back !== undefined) wiring.back?.release(login);
+      for (const pending of await pendingRecords()) if (pending.placeId === placeId) await dropPending(pending.id);
       await forget(placeId);
       return { removed: true, swept, ...(note !== undefined ? { note } : {}) };
     },
 
     find: async ref => (await records()).filter(r => r.id === ref || r.name === ref),
+
+    pending: async () => (await pendingRecords()).map(pendingView),
+
+    async setUp(ref, o) {
+      const addId = o.addId ?? `a_${randomBytes(6).toString("hex")}`;
+      const held = await records();
+      const pend = (await pendingRecords()).find(p => p.id === ref || p.address === ref || p.name === ref || (p.placeId !== undefined && (p.placeId === ref || kept.get(p.placeId)?.name === ref)));
+      if (pend !== undefined && pend.placeId === undefined) throw usageRefusal(pendingNotJoinedLine(pend.name ?? pend.address), pendingNotJoinedFix(pend.address));
+      const found = pend?.placeId !== undefined ? held.filter(r => r.id === pend.placeId) : held.filter(r => r.id === ref || r.name === ref);
+      if (found.length > 1) throw usageRefusal(twoPlacesRefusal(ref, found.map(r => r.id)), "Name it by its id.");
+      const record = found[0];
+      if (record === undefined) throw usageRefusal(noSuchPlaceRefusal(ref, held.map(r => r.name)), "Run wsp computers to read the ones this host holds.");
+      // A setup under way asked again with nothing new is followed rather than refused: the run it answers is the
+      // one to read on to its next wait or its end. New picks are what a running setup refuses.
+      if (setting.has(record.id) && record.setup !== undefined && o.choices === undefined && o.recipe === undefined) return { addId: record.setup.addId, place: viewOf(record, await defaultId()), setup: record.setup };
+      // What it is set up with: the picks given, else the choices its pending add holds, else what it was set up
+      // with before. A computer still choosing with nothing chosen waits on the person.
+      const choices = o.choices ?? (pend !== undefined && Object.values(recipeCounts(pend.choices)).some(n => n > 0) ? pend.choices : undefined);
+      if (choices === undefined && record.picks === undefined) throw usageRefusal(placeNoPicksLine(record.name), CHOOSE_FIX);
+      if (pend !== undefined) await dropPending(pend.id);
+      const recipe = o.recipe ?? (o.choices === undefined ? pend?.recipe : undefined);
+      const started = await startSetup(record.id, addId, choices === undefined ? undefined : { picks: choices, ...(recipe !== undefined ? { recipe } : {}) });
+      return { addId, place: viewOf((await recordOf(record.id)) ?? record, await defaultId()), ...started };
+    },
+
+    async follow(placeId, recipe) {
+      const held = await recordOf(placeId);
+      if (held === undefined) throw Object.assign(new Error(noSuchPlaceRefusal(placeId, (await records()).map(r => r.name))), { kind: "usage" });
+      const moved = await keep({ ...held, recipe });
+      return viewOf(moved, await defaultId());
+    },
+
+    async followers() {
+      const out = new Map<string, string[]>();
+      for (const r of await records()) if (r.recipe !== undefined && r.recipe !== NO_RECIPE) (out.get(r.recipe) ?? out.set(r.recipe, []).get(r.recipe)!).push(r.name);
+      return out;
+    },
+
+    async unfollow(slug) {
+      const names: string[] = [];
+      for (const r of await records()) {
+        if (r.recipe !== slug) continue;
+        await keep({ ...r, recipe: NO_RECIPE });
+        names.push(r.name);
+      }
+      return names;
+    },
+
+    picksOf: async placeId => (await recordOf(placeId))?.picks,
 
     on: fn => {
       watchers.add(fn);

@@ -9,7 +9,7 @@
 // and which sound, each as the person chose for that kind of moment; a line
 // that only sounds plays the system's own alert. The dock's badge is the count
 // of threads waiting on the person.
-import type { OutsideLine } from "@wsp/protocol";
+import type { OutsideLine, OutsideOpen } from "@wsp/protocol";
 
 /** The part of Electron's Notification this needs; a fake stands in for it under test. */
 export interface SystemNotification {
@@ -30,7 +30,8 @@ export interface Notifier {
 export interface NoticeWindow {
   focused(): boolean;
   raise(): void;
-  open(): void;
+  /** Tells the page a click landed, with what the line opens where it names something: a setup's computer. */
+  open(at?: OutsideOpen): void;
 }
 
 /** Shows the line over the system, or sounds it alone where it shows nothing, or says nothing when the person is
@@ -46,7 +47,7 @@ export function sayOutside(line: OutsideLine, win: NoticeWindow, notifier: Notif
   const shown = notifier.make({ title: line.title, body: line.body, silent: !line.sound });
   shown.on("click", () => {
     win.raise();
-    win.open();
+    win.open(line.open);
   });
   shown.show();
   return true;

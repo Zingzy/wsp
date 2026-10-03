@@ -109,7 +109,7 @@
 import { createRoot } from "react-dom/client";
 import { CATALOG_AGENTS, agentName } from "@wsp/catalog";
 import { manyAgents } from "./agents";
-import { DEFAULT_PREFERENCES, copyFirstLine, hostnameSetLine, type HarnessCatalog, GOLDEN_STAGE_WORDS, MACHINE_ROW_LABEL, STOP_LEFT_MACHINE_LINE, hereWord, startingLine, type AgentsSignInEvent, type Capabilities, type DeviceView, type InitAgent, type InitJob, type InitRow, type InitScreen, type PlaceAddJob, type PlaceAddStep, type PlaceProvision, type PlaceView, type ProjectView, type SealedImage, type SessionView, type ThreadDefaults, type WorkspaceLanding, type WorkspaceView } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, copyFirstLine, hostnameSetLine, type HarnessCatalog, GOLDEN_STAGE_WORDS, MACHINE_ROW_LABEL, STOP_LEFT_MACHINE_LINE, hereWord, startingLine, type AgentsSignInEvent, type Capabilities, type DeviceView, type InitAgent, type InitJob, type InitRow, type InitScreen, type PlaceAddJob, type PlaceAddStep, type PlaceApplied, type PlaceView, type ProjectView, type SealedImage, type SessionView, type ThreadDefaults, type WorkspaceLanding, type WorkspaceView } from "@wsp/protocol";
 import { AppShell } from "../../src/shell/AppShell";
 import { FirstRun } from "../../src/shell/FirstRun";
 import { AgentsSurface } from "../../src/components/agents/AgentsSurface";
@@ -252,20 +252,16 @@ const MANY_AGENTS: InitAgent[] = manyAgents(6);
 const GB = 1024 * 1024 * 1024;
 /** The agents a joined computer reported, by their catalog ids, which is what the wire carries. */
 const REPORTED = CATALOG_AGENTS.map(entry => entry.id);
-/** One recipe job on a computer: what it put there, in the three states a row can be read in. */
-const provision = (over: Partial<PlaceProvision>): PlaceProvision => ({
-  state: "done",
-  addId: "a_1",
-  recipeAt: AT,
-  startedAt: AT,
-  finishedAt: AT,
-  rows: [
-    ...REPORTED.map(id => ({ id: `agents/${id}`, label: agentName(id), outcome: "installed" as const })),
-    { id: "tools/gh", label: "GitHub CLI", outcome: "installed" as const },
-    { id: "agents/files/skills", label: "code-review", outcome: "installed" as const, kind: "file" as const },
-    { id: "agents/mcp/linear", label: "linear", outcome: "installed" as const, kind: "server" as const },
-  ],
-  ...over,
+/** One setup on a computer that ended, and what it put there, in the three states a row can be read in. */
+const ROWS: PlaceApplied["rows"] = [
+  ...REPORTED.map(id => ({ id: `agents/${id}`, label: agentName(id), outcome: "installed" as const })),
+  { id: "tools/gh", label: "GitHub CLI", outcome: "installed" as const },
+  { id: "agents/files/skills", label: "code-review", outcome: "installed" as const, kind: "file" as const },
+  { id: "agents/mcp/linear", label: "linear", outcome: "installed" as const, kind: "server" as const },
+];
+const setUp = (rows: PlaceApplied["rows"] = ROWS): Pick<PlaceView, "setup" | "applied"> => ({
+  setup: { state: "done", addId: "a_1", startedAt: AT, finishedAt: AT, steps: [], waiting: [] },
+  applied: { hash: "h", at: AT, rows },
 });
 const box = (id: string, name: string, over: Partial<PlaceView>): PlaceView =>
   ({
@@ -298,7 +294,7 @@ const COMPUTERS: PlaceView[] = [
   // set off its default, the agents switch, and the update its older daemon takes.
   box("p_spoo", "spoo", {
     default: true,
-    provision: provision({}),
+    ...setUp(),
     road: { ssh: "root@spoo", from: "127.0.0.1", back: { boxPort: 4640 } },
     cap: { threads: 3 },
     capDefault: { threads: 3 },
@@ -309,10 +305,9 @@ const COMPUTERS: PlaceView[] = [
     spawnDefault: { spawn: true, maxMachines: 3, maxDepth: 1 },
     behind: { word: "daemon 40, host 111", fix: "wsp add spoo --update", act: "update" },
   }),
-  box("p_dev4", "dev4", { provision: provision({ state: "running", finishedAt: undefined, at: { label: "uv", index: 3, of: 7 } }) }),
+  box("p_dev4", "dev4", { setup: { state: "running", addId: "a_1", startedAt: AT, steps: [{ step: "clis", state: "running" }], waiting: [] } }),
   box("p_lab", "lab", {
-    provision: provision({
-      rows: [
+    ...setUp([
         { id: "tools/gh", label: "GitHub CLI", outcome: "failed", note: "no release for this chip" },
         { id: "tools/uv", label: "uv", outcome: "failed", note: "the script exited 1" },
         // The agent the job could not put on, beside the ones it did: what a person reads on this row is which
@@ -324,11 +319,10 @@ const COMPUTERS: PlaceView[] = [
         { id: "tools/git", label: "git", outcome: "present" as const },
         { id: "agents/files/skills", label: "code-review", outcome: "failed" as const, kind: "file" as const, note: "no home folder for that login" },
         { id: "agents/mcp/linear", label: "linear", outcome: "skipped" as const, kind: "server" as const, note: "waited on GitHub CLI" },
-      ],
-    }),
+      ]),
   }),
-  // A job that ended before its rows did, which the row says in the protocol's own word for it.
-  box("p_attic", "attic", { provision: provision({ state: "stopped", finishedAt: undefined, said: "the link dropped" }) }),
+  // A setup a step that blocks stopped, which the row says in the protocol's own word for it.
+  box("p_attic", "attic", { setup: { state: "failed", addId: "a_1", startedAt: AT, finishedAt: AT, steps: [], waiting: [], said: "the base tools did not install: curl" } }),
   { id: "solari", kind: "provider", name: "solari", default: false, takesForks: true, buildsImages: true, rateUsdPerHour: 0.11 } as PlaceView,
 ];
 /** The computer an add screen has just added, holding no copy of the image yet, and the cloud a saved key lists. */

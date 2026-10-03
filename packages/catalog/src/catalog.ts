@@ -12,7 +12,7 @@ import { GCLOUD, KUBECTL } from "./linux-casks.js";
 import type { McpConfig } from "./mcp.js";
 import { loginRoad, type ServerSignInRoad } from "./mcp-login.js";
 import { pinnedRelease } from "./release-pins.js";
-import type { PluginSkills, SkillRoots } from "./skills.js";
+import type { PluginRoad, PluginSkills, SkillRoots } from "./skills.js";
 import { APT_BIN, APT_INDEX, CARGO_BIN, roadModule } from "./road-modules.js";
 import type { RoadName } from "./roads.js";
 import { DOCKER_INSTALL, FD_INSTALL, LOCAL_BIN, NODE_RELEASES, OP_INSTALL, PLAYWRIGHT, PLAYWRIGHT_INSTALL, PYTHON_INSTALL, RUSTUP_INSTALL, SWIFT, SWIFT_INSTALL, UV_INSTALL, YARN_INSTALL, nodeInstallScript, type InstallRoad } from "./roads.js";
@@ -150,6 +150,8 @@ export interface AgentEntry extends EntryBase {
   skillRoots: SkillRoots;
   /** Skills its plugins bring, read-only; absent where the agent has no plugins. */
   pluginSkills?: PluginSkills;
+  /** How its plugins go on another computer, by its own commands there; absent where the agent has no plugins. */
+  plugins?: PluginRoad;
   /** The files in a project this agent reads standing instructions from, project-relative; the MCP install keeps its
    * own marked section in each of them. */
   projectDocs: readonly string[];
@@ -344,6 +346,12 @@ const BY_ID: ReadonlyMap<string, CatalogEntry> = new Map(CATALOG.map(e => [e.id,
 
 /** What every golden gets in its base stage, whatever the Mac has: the entries flagged for the floor, in catalog order. */
 export const BASE_FLOOR: readonly ToolEntry[] = CATALOG.filter((e): e is ToolEntry => e.kind === "tool" && e.floor);
+
+/** The C toolchain's floor row, which a computer somebody owns carries only for a picked row that builds with it. */
+export const COMPILER_ROW = "build-essential";
+
+/** What the floor puts on a computer, by the catalog's own sizes: the C toolchain only where it is wanted. */
+export const floorBytes = (compiler: boolean): number => BASE_FLOOR.filter(e => compiler || e.id !== COMPILER_ROW).reduce((n, e) => n + (sizeBytes(e.size) ?? 0), 0);
 
 /** The floor row an entry's install runs on top of: what its road says (the npm road on node, an apt package on the
  * index read once), else what the entry names (a script on `after`). */

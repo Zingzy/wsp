@@ -358,6 +358,15 @@ describe("the agent contract on the command line and the tool door", () => {
     await last("computers", "computers");
     expect(await last("computers set", "computers", "set", HERE_PLACE_ID, "--threads", "2")).toEqual({ computer: expect.objectContaining({ id: HERE_PLACE_ID, cap: { threads: 2 }, settings: { threads: 2 } }) });
     await last("computers set", "computers", "set", HERE_PLACE_ID, "--reset", "threads");
+    // A computer set up with picks, as the setup job leaves one, so a recipe can be saved from it and taken away.
+    const picks = { name: "picked", agents: { claude: { signin: "vault" } }, mcp: {}, clis: {}, skills: {}, plugins: {}, folders: {}, configs: {} };
+    const joinedAt = new Date().toISOString();
+    await store.put("places", "p_recipes", { id: "p_recipes", name: "box", publicKey: "k", joinedAt, lastSeenAt: joinedAt, report: { name: "box", platform: "linux", arch: "x86_64", os: "Ubuntu 24.04", shape: { cpu: 2, memMb: 4096 }, login: { HOME: "/root" }, runsWorkspaces: true, engine: "none", daemonVersion: 1, wsp: ["/usr/local/bin/wsp"], agents: [] }, picks });
+    expect(await last("recipes save", "recipes", "save", "laptop", "--from", "box")).toEqual({ recipe: expect.objectContaining({ name: "laptop", slug: "laptop", machines: ["box"] }) });
+    expect(await last("recipes", "recipes")).toEqual({ recipes: [expect.objectContaining({ name: "laptop", summary: "1 agent" })] });
+    expect(await last("recipes show", "recipes", "show", "laptop")).toEqual({ recipe: expect.objectContaining({ name: "laptop" }), hash: expect.stringMatching(/^[0-9a-f]{64}$/) });
+    expect(await last("recipes remove", "recipes", "remove", "laptop")).toEqual({ recipe: expect.objectContaining({ machines: ["box"] }) });
+    await store.delete("places", "p_recipes");
     expect(await last("usage", "usage", "--range", "week", "--by", "project")).toMatchObject({ accounts: expect.any(Array), used: { range: "week", split: "project", rows: [] } });
     await last("setup", "setup");
     // One level of this computer's own folders: the home folder this test stubbed, with a folder inside it to list.

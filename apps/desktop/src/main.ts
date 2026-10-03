@@ -169,7 +169,7 @@ listen("outside:say", (event, line) => {
   const parsed = OutsideLine.safeParse(line);
   const win = BrowserWindow.fromWebContents(event.sender);
   if (!parsed.success || win === null) return;
-  sayOutside(parsed.data, { focused: () => win.isFocused(), raise: () => raiseWindow(win), open: () => win.webContents.send("needs-you:open") }, NOTIFIER);
+  sayOutside(parsed.data, { focused: () => win.isFocused(), raise: () => raiseWindow(win), open: at => win.webContents.send("needs-you:open", at) }, NOTIFIER);
 });
 
 listen("badge:set", (_event, count) => showBadge(count, app));

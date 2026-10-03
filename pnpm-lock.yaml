@@ -403,6 +403,9 @@ importers:
       '@wsp/web':
         specifier: workspace:*
         version: link:../../apps/web
+      smol-toml:
+        specifier: 1.9.0
+        version: 1.9.0
       ws:
         specifier: ^8.21.3
         version: 8.21.3

@@ -2,6 +2,7 @@
 // Where each agent loads skills from. An agent entry names its own folders
 // here; the reader lists every folder of every entry, so an agent the catalog
 // gains needs nothing in the reader.
+import { shellQuote } from "@wsp/protocol";
 import { SKILL_NAME } from "./context.js";
 
 /** One folder an agent loads skills from, one folder per skill with a SKILL.md inside: `~/`-relative for the
@@ -56,6 +57,39 @@ export const CLAUDE_PLUGIN_SKILLS: PluginSkills = {
       for (const i of installs) if (isObject(i) && i.scope === "user" && typeof i.installPath === "string" && i.installPath.startsWith("/")) out.add(`${i.installPath.replace(/\/+$/, "")}/skills`);
     }
     return [...out];
+  },
+};
+
+/** How an agent's plugins go on another computer: the file here naming each marketplace and where it is fetched
+ * from, and the lines that put one plugin on by the agent's own commands there. The plugin's folder never travels. */
+export interface PluginRoad {
+  marketplaces: string;
+  /** Where a marketplace is fetched from, off that file's text; nothing where it names none. */
+  sourceOf(text: string, marketplace: string): string | undefined;
+  /** The lines for one plugin, `name@marketplace`, from that source. */
+  install(plugin: string, source: string): string;
+  /** Why a plugin is set aside, off what its install printed, where it asked to run a command its marketplace
+   * declares: a person accepts that command, never a setup. Nothing for any other outcome. */
+  asked(out: string, plugin: string): string | undefined;
+}
+
+/** Claude Code's plugins (2.1.281): known_marketplaces.json keys each marketplace to a github repo or a URL, and the
+ * plugin installs once its marketplace is added; adding one already there exits non-zero and changes nothing. */
+export const CLAUDE_PLUGINS: PluginRoad = {
+  marketplaces: "~/.claude/plugins/known_marketplaces.json",
+  sourceOf: (text, marketplace) => {
+    try {
+      const at = (JSON.parse(text) as Record<string, { source?: { source?: string; repo?: string; url?: string } }>)[marketplace]?.source;
+      return at?.source === "github" ? at.repo : at?.url;
+    } catch {
+      return undefined;
+    }
+  },
+  // --json with no input refuses a plugin that asks for a command at once, naming the command's sha256.
+  install: (plugin, source) => [`claude plugin marketplace add ${shellQuote(source)} || true`, `claude plugin install ${shellQuote(plugin)} --json </dev/null`].join("\n"),
+  asked: (out, plugin) => {
+    const sha = /"shownCommand"\s*:\s*\{[^}]*"sha256"\s*:\s*"([0-9a-f]{64})"/.exec(out)?.[1];
+    return sha === undefined ? undefined : `asks to run a command its marketplace declares; to accept it, run claude plugin install ${plugin} --accept-command ${sha} on that computer`;
   },
 };
 

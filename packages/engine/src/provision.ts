@@ -5,7 +5,7 @@
 // does not already satisfy, then the machine context. Nothing here knows how
 // the computer is reached: it drives a Machine, which for a box is that
 // computer over the link its daemon holds.
-import { ROAD_MODULES } from "@wsp/catalog";
+import { COMPILER_ROW, ROAD_MODULES } from "@wsp/catalog";
 import { agentOfRow, plural, presentElsewhereLine, provisionServersLine, shellQuote, type PlaceProvisionRow } from "@wsp/protocol";
 import { markersOf, pagedReads } from "./exec-detached.js";
 import { installBase } from "./golden-base.js";
@@ -37,7 +37,24 @@ export interface ProvisionPlan {
   files?: { lands: readonly ProvisionLanding[]; pack: PackFiles };
   /** The MCP servers the recipe names, per agent and config format; absent when no row is a server. */
   mcp?: McpPlan;
+  /** How many of `steps` are the agents' own installs, the node they run on among them; the rest are the CLIs. */
+  agents: number;
+  /** Whether a picked row builds with the C toolchain, which the floor of a computer somebody owns then carries. */
+  compiler: boolean;
+  /** The skills the picks carry, each into the skills folder of every picked agent, landed through the same list as
+   * the agents' own files. */
+  skills?: { lands: readonly ProvisionLanding[]; pack: PackFiles };
+  /** The configs the picks carry (git, the shell's files), landed through the same list as the agents' files. */
+  configs?: { lands: readonly ProvisionLanding[]; pack: PackFiles };
+  /** Installs that go with the configs: the shell's own package where the picks carry its files. */
+  configTools?: readonly ToolInstall[];
+  /** Plugins, each put on by its agent's own commands; `asked` reads off what one printed why it is set aside. */
+  plugins?: readonly { id: string; label: string; cmd: string; asked?(out: string): string | undefined }[];
 }
+
+/** What a plan off the picks adds to the import's: the skills, the configs, the plugins and whether the C toolchain
+ * is needed. */
+export type ProvisionExtras = Pick<ProvisionPlan, "compiler"> & Partial<Pick<ProvisionPlan, "skills" | "configs" | "configTools" | "plugins">>;
 
 /** What the job says as it goes: a line, the row under way, and a row's outcome the moment it has one. */
 export type ProvisionStage = (detail: string, at?: { label: string; index: number; of: number }, row?: PlaceProvisionRow) => void;
@@ -45,7 +62,7 @@ export type ProvisionStage = (detail: string, at?: { label: string; index: numbe
 /** The plan off a golden import: the agents as steps of the one tools loop, then the tools, and the import's own
  * set-aside rows as the plan's. The files, the shell and the MCP servers of that import are not put on a computer
  * somebody lives on; what installs is what this plan carries. */
-export function provisionPlanOf(imp: GoldenImport, recipeAt: string, path: string, prefix?: string): ProvisionPlan {
+export function provisionPlanOf(imp: GoldenImport, recipeAt: string, path: string, prefix?: string, extras: ProvisionExtras = { compiler: true }): ProvisionPlan {
   const agents = agentSteps({ installs: imp.agents, skipped: [], ...(imp.node !== undefined ? { node: imp.node } : {}) }, undefined, path, prefix);
   const files = imp.files;
   const once = onceDests(imp);
@@ -54,6 +71,8 @@ export function provisionPlanOf(imp: GoldenImport, recipeAt: string, path: strin
     path,
     ...(prefix !== undefined ? { prefix } : {}),
     steps: [...agents, ...imp.tools],
+    agents: agents.length,
+    ...extras,
     skipped: [
       ...(imp.skippedAgents ?? []).map(a => ({ id: a.id, label: a.name, note: a.note })),
       ...(imp.skippedTools ?? []).map(t => ({ id: t.id, label: t.label, note: t.note })),
@@ -205,6 +224,8 @@ const rowLine = (row: PlaceProvisionRow): string => `${row.label}: ${row.outcome
 
 /** What the job is on while it lands the person's own files and writes their servers, for the row under way. */
 const FILES_LABEL = "your agents' files";
+const SKILLS_LABEL = "your skills";
+const CONFIGS_LABEL = "your configs";
 const MCP_LABEL = "MCP servers";
 
 export interface ProvisionOn {
@@ -212,45 +233,55 @@ export interface ProvisionOn {
   home: string;
 }
 
-/** Runs the plan on the computer: the floor through installBase, then the steps it does not already satisfy
- * through the one tools loop, with its caches kept since they are the person's own, then the person's own agent
- * files into the agents' homes there, then the recipe's MCP servers into the configs that landed, then the
- * machine context after all of it so it names what did not land. Answers one row per step, per set-aside row, per
- * file landed and per server; throws only when the computer stopped answering, which is the one thing the job
- * cannot report a row for. */
-export async function provisionBox(machine: Machine, plan: ProvisionPlan, stage: ProvisionStage, on: ProvisionOn): Promise<PlaceProvisionRow[]> {
-  const rows: PlaceProvisionRow[] = [];
-  const say = (row: PlaceProvisionRow, at?: { label: string; index: number; of: number }): void => {
-    rows.push(row);
-    stage(rowLine(row), at, row);
-  };
-  for (const aside of plan.skipped) say({ id: aside.id, label: aside.label, outcome: "skipped", note: aside.note });
-  let done = 0;
-  const of = plan.steps.length + (plan.files !== undefined ? 1 : 0) + (plan.mcp !== undefined ? 1 : 0);
-  /** The row under way: the step the loop has reached, once it has started; nothing while the floor runs. */
-  const at = (): { label: string; index: number; of: number } | undefined => {
-    const step = plan.steps[done];
-    return step === undefined ? undefined : { label: step.label, index: done + 1, of };
-  };
-  /** The stage the file and server rounds are on, which are one round each rather than a row apiece. */
-  const round = (label: string): { label: string; index: number; of: number } => ({ label, index: Math.min(done + 1, of), of });
-  // The floor keeps this computer's caches: npm's and apt's under a person's own home are theirs, and a builder
-  // sweeping them is a builder that becomes an image. Its own lines are what a person reads, not the stage id the
-  // image build files them under.
+/** The steps of a setup the engine runs on the computer itself; the sign-ins, the folders and the GitHub check are
+ * the runtime's and the host's. */
+export type EngineStep = "floor" | "agents" | "clis" | "mcp" | "skills" | "plugins" | "configs" | "context";
+
+/** What one run of the setup carries from step to step on that computer: what installed, what the agents' files
+ * round landed for the servers to read, and what the person keeps there, for the machine context at the end. A
+ * resume starts a fresh one, which reads every server in a file that is already there as the agent's own. */
+export interface SetupRun {
+  base: ToolResult[];
+  tools: ToolResult[];
+  landed: OwnedPaths;
+  skippedFiles: SkippedPath[];
+}
+
+export const newSetupRun = (): SetupRun => ({ base: [], tools: [], landed: new Map(), skippedFiles: [] });
+
+/** The floor rows a plan leaves off: the C toolchain unless a picked row needs it. */
+const leftOff = (compiler: boolean): ReadonlySet<string> => (compiler ? new Set() : new Set([COMPILER_ROW]));
+
+/** The floor through installBase, keeping this computer's caches, which are the person's own. Answers a row only for
+ * a floor row that failed, since what stands is the floor and not the picks. */
+async function floorStep(machine: Machine, plan: Pick<ProvisionPlan, "path" | "prefix" | "compiler">, run: SetupRun, stage: ProvisionStage): Promise<PlaceProvisionRow[]> {
   const base = await installBase(machine, (_which, detail) => {
     if (detail !== undefined) stage(detail);
-  }, { caches: "keep", path: plan.path, ...(plan.prefix !== undefined ? { prefix: plan.prefix } : {}) });
+  }, { caches: "keep", path: plan.path, ...(plan.prefix !== undefined ? { prefix: plan.prefix } : {}), left: leftOff(plan.compiler) });
   stage(base.line);
-  const read = await presentSteps(machine, plan.steps, plan.path, plan.prefix);
+  run.base = base.tools;
+  return base.tools.filter(t => t.outcome === "failed").map(t => ({ id: t.id, label: t.label, outcome: "failed" as const, ...(t.note !== undefined ? { note: t.note } : {}) }));
+}
+
+/** Some of the plan's steps through the one tools loop, those the computer already satisfies read first, each row
+ * read once the loop's own checks have run. */
+async function toolsStep(machine: Machine, plan: ProvisionPlan, steps: readonly ToolInstall[], run: SetupRun, stage: ProvisionStage): Promise<PlaceProvisionRow[]> {
+  if (steps.length === 0) return [];
+  const read = await presentSteps(machine, steps, plan.path, plan.prefix);
   // The steps nothing can be asked about carry no read of their own: what says they are there is the rows behind them.
-  const present = new Map<string, PresentRead>([...read, ...[...presentByWhatWaits(plan.steps, new Set(read.keys()))].map(id => [id, {}] as [string, PresentRead])]);
-  const stepOf = new Map(plan.steps.map(step => [step.id, step]));
-  /** What each row read as the loop reached it, by step id, so a row the checks corrected after the loop is said
-   * again rather than standing in the log on that computer as it first read. */
+  const present = new Map<string, PresentRead>([...read, ...[...presentByWhatWaits(steps, new Set(read.keys()))].map(id => [id, {}] as [string, PresentRead])]);
+  const stepOf = new Map(steps.map(step => [step.id, step]));
+  let done = 0;
+  const at = (): { label: string; index: number; of: number } | undefined => {
+    const step = steps[done];
+    return step === undefined ? undefined : { label: step.label, index: done + 1, of: steps.length };
+  };
+  /** What each row read as the loop reached it, so a row the checks corrected after the loop is said again rather
+   * than standing in the log on that computer as it first read. */
   const said = new Map<string, string>();
   const tools = await installTools(
     machine,
-    plan.steps,
+    steps,
     (_which, detail) => {
       if (detail !== undefined) stage(detail, at());
     },
@@ -268,59 +299,108 @@ export async function provisionBox(machine: Machine, plan: ProvisionPlan, stage:
       },
     },
   );
-  // The rows the job answers with are read once the loop's own checks have run: a row whose install exited 0 and
-  // whose check then failed is failed, and copying it at the moment the loop said it left the answer reading
-  // installed while the loop's tally read it failed. The record takes this array whole when the job is done.
-  for (const result of tools.tools) {
-    const row = rowOf(result, present, stepOf.get(result.id));
-    rows.push(row);
-    if (said.get(result.id) !== rowLine(row)) stage(rowLine(row));
-  }
-  let skippedFiles: SkippedPath[] = [];
-  /** What this run itself landed in the agents' homes there, so a server already in a file that arrived whole with
-   * it reads as a server it put there. Whose each key in those files is comes off the list beside the job. */
-  let landedNow: OwnedPaths = new Map();
-  if (plan.files !== undefined) {
-    const files = plan.files;
-    stage(`${FILES_LABEL}: ${plural(files.lands.length, "path")}`, round(FILES_LABEL));
-    const landed = await provisionFiles(machine, { home: on.home, lands: files.lands, pack: files.pack, say: line => stage(line, round(FILES_LABEL)) });
-    skippedFiles = landed.skipped;
-    landedNow = landed.owned;
-    for (const row of landed.rows) say(row, round(FILES_LABEL));
-    done++;
-  }
-  if (plan.mcp !== undefined) {
-    stage(`${MCP_LABEL}: ${plural(plan.mcp.agents.length, "agent")}`, round(MCP_LABEL));
-    const servers = await provisionMcp(machine, plan.mcp, {
-      home: on.home,
-      landed: landedNow,
-      tools: tools.tools,
-      path: plan.path,
-      stage: (_which, detail) => {
-        if (detail !== undefined) stage(detail, round(MCP_LABEL));
-      },
-    });
-    stage(provisionServersLine(servers.filter(r => r.outcome === "installed").length, servers.length), round(MCP_LABEL));
-    for (const row of servers) say(row, round(MCP_LABEL));
-    done++;
-  }
-  // What wsp owns in the agents' homes there, written down once the servers are in their configs, so the next run
-  // knows its own copy from a file the person has written since and the tree that travelled is gone from the box.
-  // Every job closes, whether or not this recipe carries a file of the person's: the close is also where the job's
-  // own folder there is swept, and a recipe with no files leaves the list exactly as it was.
-  await closeAgentFiles(machine, on.home, oncePathsOf(plan.files?.lands ?? []));
-  // After everything, so the document on the computer names what did not land. The floor's rows ride with the
-  // tools: what a person reads there is what the recipe asked for and what is missing, floor rows included.
-  const result: ImportResult = {
-    recipeHash: "",
-    base: base.tools,
-    tools: tools.tools,
-    agents: [],
-    ...(plan.files !== undefined ? { files: { bytes: 0, skipped: skippedFiles } } : {}),
-  };
-  // No shell is opened on a computer somebody owns: its root home is the one every workspace there writes, so a
-  // profile or rc file under it is a file a workspace wrote and a login shell would run it as that computer's root.
-  const context = await applyMachineContext(machine, { result, path: plan.path, shells: "none" });
-  stage(`machine context: ${context.summary}`);
+  run.tools.push(...tools.tools);
+  // The rows are read once the loop's own checks have run: a row whose install exited 0 and whose check then failed
+  // is failed, and copying it at the moment the loop said it left the answer reading installed.
+  const rows = tools.tools.map(result => rowOf(result, present, stepOf.get(result.id)));
+  for (const row of rows) if (said.get(row.id) !== rowLine(row)) stage(rowLine(row));
   return rows;
 }
+
+/** One files round: the archive read off this computer and landed in the homes there through the list beside the
+ * job. A round the servers do not read is closed at once; the agents' own round stays open for the servers step. */
+async function filesRound(machine: Machine, files: NonNullable<ProvisionPlan["files"]>, label: string, run: SetupRun, stage: ProvisionStage, on: ProvisionOn, close: boolean): Promise<PlaceProvisionRow[]> {
+  stage(`${label}: ${plural(files.lands.length, "path")}`);
+  const landed = await provisionFiles(machine, { home: on.home, lands: files.lands, pack: files.pack, say: line => stage(line) });
+  for (const row of landed.rows) stage(rowLine(row), undefined, row);
+  run.skippedFiles.push(...landed.skipped);
+  if (close) await closeAgentFiles(machine, on.home, oncePathsOf(files.lands));
+  else run.landed = landed.owned;
+  return landed.rows;
+}
+
+/** Runs one step of a setup on the computer and answers its rows, each marked with the step. Throws only when the
+ * computer stopped answering, which is the one thing a step cannot report a row for. */
+export async function provisionStep(machine: Machine, plan: ProvisionPlan, step: EngineStep, run: SetupRun, stage: ProvisionStage, on: ProvisionOn): Promise<PlaceProvisionRow[]> {
+  const marked: ProvisionStage = (detail, at, row) => stage(detail, at, row === undefined ? undefined : { ...row, step });
+  const rows = await stepRows(machine, plan, step, run, marked, on);
+  return rows.map(row => ({ ...row, step }));
+}
+
+async function stepRows(machine: Machine, plan: ProvisionPlan, step: EngineStep, run: SetupRun, stage: ProvisionStage, on: ProvisionOn): Promise<PlaceProvisionRow[]> {
+  switch (step) {
+    case "floor":
+      return floorStep(machine, plan, run, stage);
+    case "agents": {
+      const aside = plan.skipped.map((s): PlaceProvisionRow => ({ id: s.id, label: s.label, outcome: "skipped", note: s.note }));
+      for (const row of aside) stage(rowLine(row), undefined, row);
+      const rows = [...aside, ...(await toolsStep(machine, plan, plan.steps.slice(0, plan.agents), run, stage))];
+      // The agents' own files land with them and stay open for the servers step, which reads the configs that came.
+      return plan.files === undefined ? rows : [...rows, ...(await filesRound(machine, plan.files, FILES_LABEL, run, stage, on, false))];
+    }
+    // The C toolchain a picked row builds with is the floor's own row, which this plan's floor already carried.
+    case "clis":
+      return toolsStep(machine, plan, plan.steps.slice(plan.agents), run, stage);
+    case "mcp": {
+      const rows: PlaceProvisionRow[] = [];
+      if (plan.mcp !== undefined) {
+        stage(`${MCP_LABEL}: ${plural(plan.mcp.agents.length, "agent")}`);
+        const servers = await provisionMcp(machine, plan.mcp, {
+          home: on.home,
+          landed: run.landed,
+          tools: run.tools,
+          path: plan.path,
+          stage: (_which, detail) => {
+            if (detail !== undefined) stage(detail);
+          },
+        });
+        stage(provisionServersLine(servers.filter(r => r.outcome === "installed").length, servers.length));
+        for (const row of servers) stage(rowLine(row), undefined, row);
+        rows.push(...servers);
+      }
+      // What wsp owns in the agents' homes there, written down once the servers are in their configs, so the next
+      // run knows its own copy from a file the person has written since. Every run closes, files or none: the close
+      // is also where the job's own folder there is swept.
+      await closeAgentFiles(machine, on.home, oncePathsOf(plan.files?.lands ?? []));
+      run.landed = new Map();
+      return rows;
+    }
+    case "skills":
+      return plan.skills === undefined ? [] : filesRound(machine, plan.skills, SKILLS_LABEL, run, stage, on, true);
+    case "plugins": {
+      const rows: PlaceProvisionRow[] = [];
+      for (const plugin of plan.plugins ?? []) {
+        const started = Date.now();
+        const res = await machine.run(`${pathLine(plan.path, plan.prefix)}\n${plugin.cmd}`, { deadlineMs: PLUGIN_MS }).catch((e: unknown) => ({ exitCode: -1, stdout: "", stderr: e instanceof Error ? e.message : String(e) }));
+        const asked = res.exitCode === 0 ? undefined : plugin.asked?.(res.stdout);
+        const row: PlaceProvisionRow = res.exitCode === 0
+          ? { id: plugin.id, label: plugin.label, outcome: "installed", ms: Date.now() - started }
+          : asked !== undefined
+            ? { id: plugin.id, label: plugin.label, outcome: "skipped", note: asked }
+            : { id: plugin.id, label: plugin.label, outcome: "failed", note: lastWords(res.stderr || res.stdout) ?? `exit ${res.exitCode}` };
+        stage(rowLine(row), undefined, row);
+        rows.push(row);
+      }
+      return rows;
+    }
+    case "configs": {
+      const shell = await toolsStep(machine, plan, plan.configTools ?? [], run, stage);
+      return plan.configs === undefined ? shell : [...shell, ...(await filesRound(machine, plan.configs, CONFIGS_LABEL, run, stage, on, true))];
+    }
+    case "context": {
+      // After everything, so the document on the computer names what did not land.
+      const result: ImportResult = { recipeHash: "", base: run.base, tools: run.tools, agents: [], ...(run.skippedFiles.length > 0 ? { files: { bytes: 0, skipped: run.skippedFiles } } : {}) };
+      // No shell is opened on a computer somebody owns: its root home is the one every workspace there writes, so a
+      // profile or rc file under it is a file a workspace wrote and a login shell would run it as that computer's root.
+      const context = await applyMachineContext(machine, { result, path: plan.path, shells: "none" });
+      stage(`machine context: ${context.summary}`);
+      return [];
+    }
+  }
+}
+
+/** How long one plugin's install gets: its marketplace's clone and the plugin's own files. */
+const PLUGIN_MS = 300_000;
+
+/** The last line a command said, for a row's note. */
+const lastWords = (text: string): string | undefined => text.trim().split("\n").at(-1)?.slice(0, 300) || undefined;

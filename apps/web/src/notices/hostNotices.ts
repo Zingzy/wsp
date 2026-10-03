@@ -15,7 +15,7 @@
 // plan running low, blocked or back is a notice and a notification with no
 // sound while the person keeps that switch on. The
 // dock's badge counts the threads waiting on the person.
-import { GET_THE_APP_WORD, NOTIFY_ME, askingLine, exitLine, foldThreads, initJobBuilding, initNeedsYouLine, needsYouCount, outsideLine, planAlertLine, threadFinishedLine, threadKeyOf, threadStoppedLine, titleWithNeed, type OutsideLine, type OutsideMoment, type ReleaseView, type TurnResult } from "@wsp/protocol";
+import { GET_THE_APP_WORD, NOTIFY_ME, setupNeedsYouLine, setupReadyLine, askingLine, exitLine, foldThreads, initJobBuilding, initNeedsYouLine, needsYouCount, outsideLine, planAlertLine, threadFinishedLine, threadKeyOf, threadStoppedLine, titleWithNeed, type OutsideLine, type OutsideMoment, type ReleaseView, type TurnResult } from "@wsp/protocol";
 import { useCallback, useEffect, useRef } from "react";
 import type { ProtocolEvent } from "../protocol/client.js";
 import { threadRows, useProtocolEvents, useStore } from "../protocol/store.js";
@@ -38,8 +38,6 @@ export const HOST_NOTICE_WORDS = {
   notAdded: (said: string): string => `Computer not added: ${said}`,
   joined: (name: string): string => `${name} joined`,
   notSetUp: (name: string, said: string): string => `${name} not set up: ${said}`,
-  setUp: (name: string): string => `${name} is set up`,
-  rowsFailed: (name: string, failed: number): string => `${name}: ${failed === 1 ? "1 row" : `${failed} rows`} of the recipe failed`,
   aThread: "A thread",
   threadStopped: (title: string, said: string | undefined): string => `${title} stopped before it replied${said === undefined ? "" : `: ${said}`}`,
   threadFinished: threadFinishedLine,
@@ -189,22 +187,36 @@ type Rule<T extends ProtocolEvent["type"]> = (e: Extract<ProtocolEvent, { type: 
 /** One rule per event type that says anything; a type with no rule is noise. */
 const RULES: { [T in ProtocolEvent["type"]]?: Rule<T> } = {
   "place.stage": e => {
-    if (e.state === "running" || (e.state === "done" && e.step !== "join" && e.step !== "provision")) return;
+    if (e.state === "running" || (e.state === "done" && e.step !== "join")) return;
     if (computerOnScreen(e.placeId)) return;
     const place = e.placeId === undefined ? undefined : useStore.getState().places.find(p => p.id === e.placeId);
     const name = place === undefined ? undefined : placeName(place);
     const where = name === undefined ? {} : { where: name };
     if (e.state === "failed") {
       const said = e.note ?? e.step;
-      addNotice({ kind: "error", text: e.step === "provision" && name !== undefined ? HOST_NOTICE_WORDS.notSetUp(name, said) : HOST_NOTICE_WORDS.notAdded(said), ...where, action: openComputer(e.placeId) });
+      addNotice({ kind: "error", text: HOST_NOTICE_WORDS.notAdded(said), ...where, action: openComputer(e.placeId) });
       return;
     }
     if (name === undefined) return;
-    if (e.failed !== undefined && e.failed > 0) {
-      addNotice({ kind: "error", text: HOST_NOTICE_WORDS.rowsFailed(name, e.failed), ...where, action: openComputer(e.placeId) });
-      return;
+    addNotice({ kind: "done", text: HOST_NOTICE_WORDS.joined(name), ...where, action: openComputer(e.placeId) });
+  },
+  // A setup's end, said once it is over: failed, waiting on the person, or ready, inside the app and outside it.
+  "place.setup": (e, held) => {
+    if (e.end === undefined || computerOnScreen(e.placeId)) return;
+    const place = useStore.getState().places.find(p => p.id === e.placeId);
+    if (place === undefined) return;
+    const name = placeName(place);
+    const open = openComputer(e.placeId);
+    if (e.end === "failed") {
+      addNotice({ kind: "error", text: HOST_NOTICE_WORDS.notSetUp(name, e.said ?? ""), where: name, action: open });
+      sayOutside(held, open.run, lineFor({ kind: "setupFailed", computer: name, said: e.said ?? "" }));
+    } else if (e.end === "needs-you") {
+      addNotice({ kind: "note", text: setupNeedsYouLine(name, e.said ?? ""), where: name, action: open });
+      sayOutside(held, open.run, lineFor({ kind: "setupNeedsYou", computer: name, what: e.said ?? "" }));
+    } else {
+      addNotice({ kind: "done", text: setupReadyLine(name, e.said), where: name, action: open });
+      sayOutside(held, open.run, lineFor({ kind: "setupReady", computer: name, ...(e.said !== undefined ? { missed: e.said } : {}) }));
     }
-    addNotice({ kind: "done", text: e.step === "join" ? HOST_NOTICE_WORDS.joined(name) : HOST_NOTICE_WORDS.setUp(name), ...where, action: openComputer(e.placeId) });
   },
   "session.done": (e, held) => {
     if (e.turnId === undefined) return;

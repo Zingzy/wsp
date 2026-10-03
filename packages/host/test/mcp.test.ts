@@ -184,7 +184,7 @@ describe("the MCP server over the host", () => {
   it.runIf(CLOUD_ON)("offers the verbs as tools, each described", async () => {
     const c = await connect();
     const { tools } = await c.listTools();
-    expect(tools.map(t => t.name).sort()).toEqual(["agents", "agents_addtools", "agents_default", "agents_set", "agents_setup", "commit", "computers", "computers_set", "delete", "discard", "exec", "export", "fix", "folders", "forget", "fork", "image", "image_build", "image_move", "image_remove", "merge", "merge_in", "pause", "projects", "projects_add", "projects_remove", "projects_set", "rebuild", "recipe", "recipe_scan", "rename", "restart", "review", "review_post", "run", "send", "servers", "servers_add", "servers_disable", "servers_enable", "servers_remove", "servers_tools", "setup", "skills", "skills_add", "skills_disable", "skills_enable", "skills_remove", "skills_search", "skills_show", "snapshot", "start", "stop", "terminal_config", "thread_allow", "thread_deny", "thread_forget", "thread_read", "thread_rename", "threads", "threads_wait", "update", "usage", "wake", "workspaces_agents", "worktree", "worktree_remove"]);
+    expect(tools.map(t => t.name).sort()).toEqual(["add", "agents", "agents_addtools", "agents_default", "agents_set", "agents_setup", "commit", "computers", "computers_set", "delete", "discard", "exec", "export", "fix", "folders", "forget", "fork", "image", "image_build", "image_move", "image_remove", "merge", "merge_in", "pause", "projects", "projects_add", "projects_remove", "projects_set", "rebuild", "recipe", "recipe_scan", "recipes", "recipes_remove", "recipes_save", "recipes_show", "rename", "restart", "review", "review_post", "run", "send", "servers", "servers_add", "servers_disable", "servers_enable", "servers_remove", "servers_tools", "setup", "skills", "skills_add", "skills_disable", "skills_enable", "skills_remove", "skills_search", "skills_show", "snapshot", "start", "stop", "terminal_config", "thread_allow", "thread_deny", "thread_forget", "thread_read", "thread_rename", "threads", "threads_wait", "update", "usage", "wake", "workspaces_agents", "worktree", "worktree_remove"]);
     for (const name of ["agents", "skills", "servers"]) expect(Object.keys((tools.find(t => t.name === name)!.inputSchema as { properties: Record<string, unknown> }).properties).sort(), name).toEqual(["on", "workspace"]);
     expect(Object.keys((tools.find(t => t.name === "servers_tools")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["agent", "name", "on", "project", "refresh", "workspace"]);
     expect(Object.keys((tools.find(t => t.name === "folders")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["folder", "hidden", "on", "repos"]);
@@ -286,8 +286,9 @@ describe("the MCP server over the host", () => {
 
   /** The urls an agent is promised and should be: a project's own source, the repo the person named, the pull
    * request a bring back opened, the issue or pull request a workspace started from and the review a post left, each
-   * a page on the git host. None carries a bearer. Every other field ending in url would be a route a provider minted. */
-  const OWN_URL = /(\.source\.url|\.pr\.url|\.from\.url|\.posted\.url|^review_post\.url)$/;
+   * a page on the git host, and the page a sign-in waiting on the person opens, the agent's own. None carries a
+   * bearer. Every other field ending in url would be a route a provider minted. */
+  const OWN_URL = /(\.source\.url|\.pr\.url|\.from\.url|\.posted\.url|^review_post\.url|\.waiting(\[\]|\.\d+)\.url)$/;
 
   /** Every field name in a JSON Schema, deep, that reads as a route: what an agent is promised, not what one run answered. */
   const routeFields = (schema: unknown, at: string): string[] => {

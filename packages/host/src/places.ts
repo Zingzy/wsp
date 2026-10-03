@@ -32,8 +32,17 @@ import { addedProjectLine, defaultSeedChoice, kindForComputer, ProjectAddEvent, 
   PLACE_ADD_WORDS,
   PlaceUpdateReply,
   placeCurrentLine,
-  type PlaceProvision,
-  provisionLines,
+  PlaceAddStep,
+  SETUP_STEP_WORDS,
+  jsonLine,
+  lastLine,
+  setupLines,
+  waitLine,
+  type AddLine,
+  type PendingComputer,
+  type PlaceSetup,
+  type PlaceSetupStep,
+  type PlaceWait,
   DAEMON_VERSION,
   JOIN_NO_KEY_REFUSAL,
   joinKeyRefusal,
@@ -44,7 +53,6 @@ import { addedProjectLine, defaultSeedChoice, kindForComputer, ProjectAddEvent, 
   PLACE_LINK_NONCE_BYTES,
   PlaceJoinDevice,
   PlaceJoinReply,
-  PlaceStageEvent,
   PlaceView,
   type DeviceView,
   type PlaceBack,
@@ -87,11 +95,11 @@ import { addedProjectLine, defaultSeedChoice, kindForComputer, ProjectAddEvent, 
   SignInLine,
   macKindOf,
 } from "@wsp/protocol";
-import { MissingKnownHostsError, PlaceMachine, SshBackend, SSH_DIAL_MS, SSH_LINE_CAP, boxWord, checkProviderKey, clientWords, keyCheckLine, keyFingerprint, knownHostKey, landBytes, offeredHostKey, parseSshAddress, sshClient, sshDial, sshDialsThisComputer, sshLoginWord, sshMachineName, sshRefusalLine, sshWordReach, type KeyCheck, type MachineBackend, type SshReach, type SshTransport } from "@wsp/engine";
+import { GITHUB_TOKEN_ENV, MissingKnownHostsError, PlaceMachine, runChild, SshBackend, SSH_DIAL_MS, SSH_LINE_CAP, boxWord, checkProviderKey, clientWords, keyCheckLine, keyFingerprint, knownHostKey, landBytes, offeredHostKey, parseSshAddress, sshClient, sshDial, sshDialsThisComputer, sshLoginWord, sshMachineName, sshRefusalLine, sshWordReach, type KeyCheck, type MachineBackend, type SshReach, type SshTransport } from "@wsp/engine";
 import { PlaceAddTakenBackError, PlaceLoginRefusedError, freshEphemeral, makeSeal, newPlaceKeyPair, openFrame, sealKeys, sharedSecret, signPlaceBytes, verifyPlaceBytes, type Seal, type HerePlace, type PlaceDialler, type PlaceInstaller, type PlaceKeyPair, type PlaceLeaver, type PlaceLogReader, type PlaceUpdateLanded, type PlaceUpdater, type PlaceWiring, type PlaceBackHolder } from "@wsp/runtime";
 import { BackCutError, heldPlaceScript, placeBackHolder } from "./place-back.js";
 import { writeOwn } from "@wsp/own-file";
-import { CATALOG_AGENTS, NO_SIGN_IN, agentName, hasLogin, keyEnvOf, loginSignIn, sharedAgentsOn, sharedOn } from "@wsp/catalog";
+import { CATALOG_AGENTS, NO_SIGN_IN, agentName, floorBytes, hasLogin, keyEnvOf, loginSignIn, sharedAgentsOn, sharedOn } from "@wsp/catalog";
 import { ADD_TAKEN_LINE, DAEMON_GONE_LINE, PLACE_JOINED_LINE, PlaceAlreadyJoinedError, PlaceJoinedThenFailedError, WSP_READY_LINE, addFound, addFoundScript, addUndoScript, cappedLine, daemonFlags, deployDaemon, joinedAddWrites, joinedLine, joinedPlace, loginFilesStep, placeInstallFailedLine, sshDaemonPlace } from "./doctor.js";
 import { assetDir, assetName, daemonBinaryHere } from "./assets.js";
 import { DAEMON_BIN, DAEMON_TARGETS, daemonBinaryIn, daemonTargetFor, guestDaemonTarget, guestSystem, noGuestDaemonLine, noPlaceSystemLine, type DaemonTarget } from "./daemon-binary.js";
@@ -121,6 +129,7 @@ import {
 import { dialHost, hostPlatform, sshAsked, table, type DialOpts, type HostClient } from "./verbs.js";
 import type { HostStarter } from "./host-start.js";
 import { envFileFor, writeEnvFile } from "./env-keys.js";
+import { openWaits, watchSetup, type SetupWatch } from "./setup-follow.js";
 import { collect, nodeHost } from "@wsp/collect";
 import { readBrewTable } from "./init-brew.js";
 import { placeProvisioner } from "./place-provision.js";
@@ -174,8 +183,8 @@ export function placeWiring(statePath: string, advertise?: string): PlaceWiring 
   return {
     hostKey,
     back,
-    // The recipe beside that state file, put on every computer this host holds: the same two readers a copy of
-    // the image is planned from, since a box is provisioned from the same rows by the same roads.
+    // A computer's picks, planned off this computer by the same two readers a copy of the image is planned from,
+    // since a box is set up from the same rows by the same roads.
     provision: placeProvisioner({
       statePath,
       home: homedir(),
@@ -190,6 +199,8 @@ export function placeWiring(statePath: string, advertise?: string): PlaceWiring 
     log: placeLogReader(),
     update: placeUpdater(),
     leave: placeLeaver(),
+    undo: placeUndoer(),
+    githubToken: () => vaultGitHubToken(statePath),
     hostName: hostNameHere,
     // This computer under the name a person would type for it, and what it is off the same read a place sends about
     // itself, so the row for the computer the host runs on carries the facts every other row carries.
@@ -423,23 +434,11 @@ export const signInAgentRefusal = (agent: string): string => `wsp add --sign-in 
 export const placeNoLoginsLine = (name: string): string =>
   `${name} has not said where it keeps the logins its workspaces share, so there is nowhere to sign one in: it is not connected, or the agent on it is older than the one this host deploys. wsp add ${name} --update puts this one on it.`;
 
-/** The question the join puts while the person is still at this terminal. */
-export const boxSignInAsk = (name: string, agent: string): string =>
-  `Sign ${agentName(agent)} in on ${name} now? The login stays on that computer, outside every workspace, and each of them shares it.`;
-
 export const boxSignedInLine = (name: string, agent: string, detail?: string): string =>
   `${agentName(agent)} is signed in on ${name}${detail === undefined ? "" : ` (${detail})`}${sharedOn(agent) === undefined ? "." : "; every workspace there shares that login."}`;
 
 export const boxNotSignedInLine = (name: string, agent: string, said?: string): string =>
   `${agentName(agent)} is not signed in on ${name}${said === undefined ? "" : `: ${said}`}. wsp add ${name} --sign-in ${agent} runs it again.`;
-
-/** What a person is told when they say not now, or when nobody is at this keyboard: what threads there use in the
- * meantime, which is the key they saved on this computer, and the line that signs it in later. */
-export const boxSignInLaterLine = (name: string, agent: string): string => {
-  const key = keyEnvOf(loginSignIn(agent) ?? NO_SIGN_IN);
-  const until = key === undefined ? "" : ` Until it is, threads there use the ${key} saved on this computer.`;
-  return `${agentName(agent)} is not signed in on ${name}.${until} wsp add ${name} --sign-in ${agent} signs it in.`;
-};
 
 export interface AddFlags {
   name?: string;
@@ -469,6 +468,14 @@ export interface AddFlags {
   noMemory?: boolean;
   noCommits?: boolean;
   remember?: boolean;
+  /** The saved recipe a computer is set up from once it joins, or with `resume` once it is in. */
+  recipe?: string;
+  /** Go on past a sign-in that waits on the person, leaving it waiting, rather than waiting on it here. */
+  later?: boolean;
+  /** The word is a computer already added, or an add that joined and waits on its picks: set it up. */
+  resume?: boolean;
+  /** Print the add's frames and its result as JSON lines; read by the computer roads alone. */
+  json?: boolean;
 }
 
 /** The words a person gave beside the address, read by the one rule every ssh road on this command line reads
@@ -484,10 +491,15 @@ export function addFlags(
   seed: { yes?: boolean; keep?: string[]; cut?: string[]; noMemory?: boolean; noCommits?: boolean; remember?: boolean } = {},
   hostKey?: string,
   into?: string,
+  setup: { recipe?: string; later?: boolean; resume?: boolean; json?: boolean } = {},
 ): AddFlags {
   const asked = sshAsked(name, port, keyPath);
   const pinned = hostKey?.trim();
   return {
+    ...(setup.recipe !== undefined ? { recipe: setup.recipe } : {}),
+    ...(setup.later === true ? { later: true } : {}),
+    ...(setup.resume === true ? { resume: true } : {}),
+    ...(setup.json === true ? { json: true } : {}),
     // Resolved where it was typed: the host runs in a folder of its own, and ~ is left for it to read as the home.
     ...(into !== undefined ? { into: into.startsWith("~") || isAbsolute(into) ? into : resolve(into) } : {}),
     ...(pinned !== undefined && pinned !== "" ? { hostKey: pinned } : {}),
@@ -603,6 +615,60 @@ export function addUndoneLine(said: string, undone: boolean, agentWasRunning = f
 /** What an add says when the box did not run the check at all. */
 export const reachUnsaidLine = (address: string, said: string): string => `${address} did not run the check for whether it can reach this computer: ${said.slice(-SSH_LINE_CAP)}`;
 
+/** What the check prints, one fact a line, so no path of the box's reads as the check's own words. */
+const CHECK_MARK = "wsp-check";
+
+/** The one run the check step makes on a box before anything of wsp's goes there. */
+export const PLACE_CHECK_SCRIPT = [
+  `printf '${CHECK_MARK} uid %s\\n' "$(id -u)"`,
+  `if [ -d /run/systemd/system ]; then printf '${CHECK_MARK} systemd yes\\n'; else printf '${CHECK_MARK} systemd no\\n'; fi`,
+  `if [ -f /sys/fs/cgroup/cgroup.controllers ]; then printf '${CHECK_MARK} cgroup2 yes\\n'; else printf '${CHECK_MARK} cgroup2 no\\n'; fi`,
+  `df -Pk "$HOME" 2>/dev/null | awk 'NR==2 { printf "${CHECK_MARK} free %d\\n", $4 * 1024 }'`,
+].join("\n");
+
+/** What the check read off a box; a fact it did not answer is absent. */
+export interface PlaceCheck {
+  uid?: number;
+  systemd?: boolean;
+  cgroup2?: boolean;
+  freeBytes?: number;
+}
+
+export function parsePlaceCheck(stdout: string): PlaceCheck {
+  const out: PlaceCheck = {};
+  for (const line of stdout.split("\n")) {
+    const [mark, key, value] = line.trim().split(" ");
+    if (mark !== CHECK_MARK || value === undefined) continue;
+    if (key === "uid" && /^\d+$/.test(value)) out.uid = Number(value);
+    if (key === "systemd") out.systemd = value === "yes";
+    if (key === "cgroup2") out.cgroup2 = value === "yes";
+    if (key === "free" && /^\d+$/.test(value)) out.freeBytes = Number(value);
+  }
+  return out;
+}
+
+/** Room a box needs past the floor before anything goes on it: what its first agents and folders work in. */
+export const PLACE_CHECK_SPARE_BYTES = 1024 ** 3;
+
+/** Why a box is refused at the check, naming what would fix it; nothing where it passes or would not say. `host` is
+ * the hostname the address reached, which an ssh alias stands for. */
+export function placeCheckRefusal(address: string, home: string, check: PlaceCheck, needBytes: number, host?: string): string | undefined {
+  const at = address.slice(0, 64);
+  if (check.uid !== undefined && check.uid !== 0) {
+    const reached = host ?? at.slice(at.indexOf("@") + 1);
+    const alias = at.includes("@") ? "" : `, or put User root under Host ${at} in your ssh config and add it again`;
+    return `${at} logs in as a user that is not root, and root on the box is required: wsp runs its daemon there as a system service. Allow root's ssh login there and add it with wsp add root@${reached}${alias}`;
+  }
+  if (check.systemd === false) return `${at} runs no systemd, which is what keeps wsp's daemon up there; wsp takes a Linux box that boots with systemd`;
+  if (check.cgroup2 === false) return `${at} has no cgroup v2 (/sys/fs/cgroup/cgroup.controllers), which every workspace there is held in; boot it with the unified hierarchy`;
+  if (check.freeBytes !== undefined && check.freeBytes < needBytes) return `${at} has ${fmtBytes(check.freeBytes)} free under ${home}, and the base tools with a gigabyte to work in take ${fmtBytes(needBytes)}; free some room there and add it again`;
+  return undefined;
+}
+
+/** What the check step says it found where it passed. */
+export const placeCheckNote = (check: PlaceCheck): string =>
+  [check.uid === 0 ? "root" : undefined, check.systemd === true ? "systemd" : undefined, check.cgroup2 === true ? "cgroup v2" : undefined, check.freeBytes === undefined ? undefined : `${fmtBytes(check.freeBytes)} free`].filter(w => w !== undefined).join(", ");
+
 /** How a typed word becomes a dial: the engine's one reading unless a test hands its own. */
 type SshWordReader = (word: string, opts: { port?: number; keyPath?: string }) => Promise<SshReach>;
 
@@ -707,6 +773,15 @@ export function placeInstaller(deps: { backend?: SshBackend; sshWord?: SshWordRe
     const name = req.name?.trim() !== undefined && req.name.trim() !== "" ? req.name.trim() : sshMachineName(reach);
     stage("connect", "done", await osSaid(machine));
     await sayKey(hostKey);
+    // What the box must be before anything of wsp's goes on it, read in one run: root, systemd, cgroup v2 and room
+    // for the floor and a gigabyte to work in. A reading that did not come back refuses nothing; the deploy's own
+    // preflight stands behind it.
+    stage("check", "running");
+    const checked = parsePlaceCheck((await machine.run(PLACE_CHECK_SCRIPT, { deadlineMs: SSH_DIAL_MS }).catch(() => undefined))?.stdout ?? "");
+    const refused = placeCheckRefusal(req.address, login.HOME, checked, floorBytes(false) + PLACE_CHECK_SPARE_BYTES, reach.host);
+    if (refused !== undefined) throw new Error(refused);
+    const checkedNote = placeCheckNote(checked);
+    stage("check", "done", checkedNote === "" ? undefined : checkedNote);
     stage("reach", "running");
     const probed = await machine.run(reachScript(hostUrls), { deadlineMs: REACH_MS });
     if (!probed.stdout.includes(REACH_LINE)) throw new Error(reachUnsaidLine(req.address, clientWords(probed.stderr) || `exit ${probed.exitCode}`));
@@ -743,6 +818,9 @@ export function placeInstaller(deps: { backend?: SshBackend; sshWord?: SshWordRe
     const unit = placeUnit(login.HOME);
     const writes = joinedAddWrites(place, unit.path);
     const found = addFound((await machine.run(addFoundScript(place, writes, unit.systemctl.join(" ")), { deadlineMs: SSH_DIAL_MS }).catch(() => undefined))?.stdout ?? "", writes.length);
+    // Written down before a byte of wsp's is sent: what takes this install back, join and all, so a host that stops
+    // in the middle of it can. A box that would not say what it held gets no undo, which keeps everything there.
+    await req.beforeDeploy?.(found === undefined ? "" : addUndoScript(place, writes, found, unit.systemctl.join(" "), true), road.ssh);
     await deployDaemon(machine, {
       place,
       target,
@@ -983,6 +1061,30 @@ export function placeLeaver(deps: { transport?: SshTransport } = {}): PlaceLeave
   };
 }
 
+/** How long taking back an add the host stopped in the middle of gets: systemd's own stop, then the files. */
+const PLACE_UNDO_MS = 120_000;
+
+/** Takes back what an add put on a box before the host stopped mid-install, over the login that add used: the script
+ * the installer wrote down before it sent anything. Throws ssh's own line, or the box's, where it did not finish. */
+export function placeUndoer(deps: { transport?: SshTransport } = {}): NonNullable<PlaceWiring["undo"]> {
+  return async (login, script) => {
+    if (script === "") throw new Error("the box would not say what it held before the install, so nothing of it is taken back");
+    const reach = parseSshAddress(login.ssh, login.keyPath === undefined ? {} : { keyPath: login.keyPath });
+    const said = await (deps.transport ?? sshClient)(reach, shellLine(["bash", "-c", script]), { timeoutMs: PLACE_UNDO_MS });
+    if (said.exitCode === SSH_REFUSED_EXIT) throw new PlaceLoginRefusedError(sshRefusalLine(said, reach));
+    if (said.exitCode !== 0 || !said.stdout.includes(DAEMON_GONE_LINE)) throw new Error(lastLine(said.stderr) ?? lastLine(said.stdout) ?? `exit ${said.exitCode}`);
+  };
+}
+
+/** Puts the token gh holds on this computer into the vault under the name gh reads, where it is not there yet: what
+ * a box set up with GitHub from the vault is handed in every run there. The token never leaves this function but
+ * into the vault file; a gh that holds none leaves the vault as it is and the GitHub row says so. */
+export async function vaultGitHubToken(statePath: string, run: typeof runChild = runChild): Promise<void> {
+  const res = await run("gh", ["auth", "token", "--hostname", "github.com"], { timeoutMs: 20_000 }).catch(() => undefined);
+  const token = res?.exitCode === 0 ? res.stdout.trim() : "";
+  if (token !== "" && !/\s/.test(token)) writeEnvFile(envFileFor(statePath), { [GITHUB_TOKEN_ENV]: token });
+}
+
 /** How many of the agent's own last lines go under a wait that ran out: enough to carry the address it refused and
  * the one that did not answer, short enough to read under one sentence. */
 export const PLACE_LOG_TAIL = 10;
@@ -1092,6 +1194,14 @@ export async function addCommand(io: CliIO, opts: PlaceOpts, args: readonly stri
   const [word] = args;
   if (args.length > 1) throw usageRefusal(`wsp add takes ${addedProviders().length === 0 ? "" : "one provider or "}one address, or nothing at all.`, ADD_USAGE);
   const aim = aimHere("add", opts);
+  if (flags.resume === true) {
+    if (word === undefined) throw usageRefusal("wsp add --resume names the computer to set up.", ADD_USAGE);
+    if (flags.update === true || flags.signIn !== undefined || flags.name !== undefined || flags.sshPort !== undefined || flags.keyPath !== undefined || flags.hostKey !== undefined) throw usageRefusal(RESUME_FLAGS_REFUSAL, ADD_USAGE);
+    return setUpPlace(io, opts, aim, word, flags, deps);
+  }
+  // A recipe, a sign-in left waiting and JSON frames are a computer's add alone; every other road takes none of them.
+  const computerRoad = word !== undefined && flags.update !== true && flags.signIn === undefined && (sourceKindOf(word) === "computer" || (sourceKindOf(word) === undefined && !addableProviders().includes(word)));
+  if (!computerRoad && (flags.recipe !== undefined || flags.later === true || flags.json === true)) throw usageRefusal(SETUP_FLAGS_REFUSAL, ADD_USAGE);
   if (flags.signIn !== undefined) {
     if (word === undefined) throw usageRefusal("wsp add --sign-in names the computer to sign the agent in on.", ADD_USAGE);
     if (flags.update === true || flags.name !== undefined || flags.sshPort !== undefined || flags.keyPath !== undefined || flags.hostKey !== undefined) {
@@ -1162,10 +1272,17 @@ export async function addCommand(io: CliIO, opts: PlaceOpts, args: readonly stri
 const ADD_USAGE = [
   "usage: wsp add",
   ...(addedProviders().length === 0 ? [] : ["       wsp add <provider>"]),
-  "       wsp add <user@host|ssh alias> [--name <name>] [--ssh-port <port>] [--ssh-key <path>]",
+  "       wsp add <user@host|ssh alias> [--recipe <name>] [--later] [--name <name>] [--ssh-port <port>] [--ssh-key <path>] [--host-key <key>]",
+  "       wsp add <computer> --resume [--recipe <name>] [--later]",
   "       wsp add <place> --update",
   "       wsp add <place> --sign-in <agent>",
 ].join("\n");
+
+/** The refusal for --resume beside a flag about joining a computer that is not in yet. */
+export const RESUME_FLAGS_REFUSAL = "wsp add --resume sets up a computer already added, so it takes --recipe, --later and --json alone.";
+
+/** The refusal for the setup's flags on an add that is not a computer's. */
+export const SETUP_FLAGS_REFUSAL = "wsp add takes --recipe, --later and --json for a computer alone: a user@host, an ssh alias, or a computer with --resume.";
 
 /** The refusal for the update flag beside a flag about joining a computer that is not in yet. */
 export const UPDATE_FLAGS_REFUSAL =
@@ -1186,48 +1303,58 @@ export function updatedLines(answer: PlaceUpdateReply): string[] {
   ];
 }
 
-/** One line of the recipe job as it runs: what the row under way said, under the step's own mark. The step's words
- * are not repeated per row; the job says one row at a time and the mark is what a person reads down. */
-export function provisionStageLine(event: PlaceStageEvent): string {
-  const mark = event.state === "done" ? "·" : event.state === "failed" ? "x" : " ";
-  return `  ${mark} ${event.note ?? PLACE_ADD_WORDS.provision}`;
+/** One line of an add or a setup as a terminal prints it: the step's own words under its mark, how long it took
+ * once it ended, and what it answered beside it. A failed step's note is the failure's first line, which the
+ * terminal prints whole as the command's error where the install stopped. */
+export function addLineWords(l: AddLine): string {
+  const mark = l.state === "done" ? "·" : l.state === "failed" ? "x" : l.state === "skipped" ? "-" : " ";
+  const words = (PlaceAddStep.options as readonly string[]).includes(l.step) ? PLACE_ADD_WORDS[l.step as PlaceAddStep] : SETUP_STEP_WORDS[l.step as PlaceSetupStep];
+  const took = l.ms === undefined ? "" : ` (${fmtDuration(l.ms)})`;
+  const note = l.note === undefined || (l.state === "failed" && (PlaceAddStep.options as readonly string[]).includes(l.step)) ? "" : `: ${l.note}`;
+  return `  ${mark} ${words}${took}${note}`;
 }
 
-/** What is watched while the recipe goes on a computer: every line the job says, printed as it arrives, and the
- * event that ends it. Registered before the request that starts the job, so no row is lost between the answer to
- * that request and the wait for the job. */
-function watchProvision(io: CliIO, client: HostClient, addId: string): { ended: Promise<void>; off: () => void } {
-  let end: () => void = () => {};
-  const ended = new Promise<void>(resolve => (end = resolve));
-  const off = client.onFrame(frame => {
-    const stage = PlaceStageEvent.safeParse(frame);
-    if (!stage.success || stage.data.addId !== addId || stage.data.step !== "provision") return;
-    io.log(provisionStageLine(stage.data));
-    if (stage.data.state !== "running") end();
-  });
-  return { ended, off };
+/** What a terminal prints for a sign-in that waits on the person, and for one that ran out. */
+export const waitWords = (w: PlaceWait): string => `  ? ${waitLine(w)}`;
+
+/** Where an add or a setup came to, as the line answers it: the computer's row and every step heard. */
+export interface SetupFollowed {
+  computer: PlaceView;
+  setup: AddLine[];
+  waiting: PlaceWait[];
 }
 
-/** Waits out the recipe job this line started and prints what it came to, off the row the host keeps rather than
- * off the last event: the rows are what a failed row is named from, and they outlive the run. `job` is the one the
- * answer said it started and never the row's own, since a row may carry a job another line is running, whose
- * events ride a stream this one is not reading and whose end would never come. Answers what the line exits with:
- * 1 where a row failed or the job stopped. */
-async function followProvision(io: CliIO, client: HostClient, place: Pick<PlaceView, "id" | "name">, job: PlaceProvision | undefined, watch: { ended: Promise<void> }): Promise<number> {
-  if (job === undefined) return 0;
-  if (job.state === "running") await watch.ended;
-  const rows = await client.request<{ places: PlaceView[] }>("places.list");
-  const now = rows.places.find(p => p.id === place.id)?.provision;
-  // The row's job, but only while it is the one this line started: a fresh one on that computer is somebody
-  // else's run and its rows are not this line's to tally.
-  const provision = now?.addId === job.addId ? now : job;
-  for (const line of provisionLines(place.name, provision)) io.log(line);
-  return provision.state === "done" && provision.rows.every(r => r.outcome !== "failed") ? 0 : 1;
+/** Waits out a setup this line started and answers how it stands: until its end, and past it while a sign-in still
+ * waits on the person, unless `later` says to go on and leave those waiting. The computer's row is read at the end,
+ * since a wait that landed is gone from it. */
+export async function followSetup(client: HostClient, placeId: string, watch: SetupWatch, o: { later?: boolean } = {}): Promise<SetupFollowed> {
+  const row = async (): Promise<PlaceView | undefined> => (await client.request<{ places: PlaceView[] }>("places.list")).places.find(p => p.id === placeId);
+  for (;;) {
+    // Taken before the row is read, so a frame landing during the read is not missed.
+    const heard = watch.next();
+    const now = await row();
+    if (now === undefined) throw new Error(`the computer this setup was on is gone from this host`);
+    const waiting = openWaits(now.setup?.waiting ?? []);
+    const ended = now.setup === undefined || now.setup.state !== "running";
+    if (ended && (o.later === true || waiting.length === 0)) return { computer: now, setup: watch.lines, waiting: now.setup?.waiting ?? [] };
+    await Promise.race([heard, client.closed.then(() => Promise.reject(new Error(client.closeWords())))]);
+  }
 }
 
-/** One place moved onto this wsp's daemon. The work is the host's, over the socket this line opens, as the install
- * is: the binary goes over the link that place is holding, or over the ssh road the install used when it holds
- * none, and the workspaces on it are kept either way. */
+/** The lines a terminal prints once a setup is over, or the one line for a computer that waits on its picks. */
+function setupEndLines(followed: SetupFollowed): string[] {
+  const { computer } = followed;
+  if (computer.setup === undefined) return [];
+  return setupLines(computer.name, computer.setup, computer.applied);
+}
+
+/** What the line exits with once a setup it followed is over: 1 where a step that blocks stopped it, 0 at Ready and
+ * at Needs you, since the computer is there and the person has what to do. */
+const setupExit = (followed: SetupFollowed): number => (followed.computer.setup?.state === "failed" ? 1 : 0);
+
+/** One place moved onto this wsp's daemon, and its setup run again from its picks. The work is the host's, over the
+ * socket this line opens, as the install is: the binary goes over the link that place is holding, or over the ssh
+ * road the install used when it holds none, and the workspaces on it are kept either way. */
 async function updatePlace(io: CliIO, opts: PlaceOpts, aim: HostAim, ref: string, deps: PlaceDeps): Promise<number> {
   const client = await deps.dial(opts.statePath, dialHere(io, opts, aim));
   try {
@@ -1236,20 +1363,22 @@ async function updatePlace(io: CliIO, opts: PlaceOpts, aim: HostAim, ref: string
       io.error(picked.refusal);
       return 1;
     }
-    // Minted here rather than read off the reply: the job's rows come back while it runs and the reply lands once
-    // it is under way, so a line printed as it happens has to know which stream is this one's. The host is told
-    // which id to put them on, as the join tells it.
+    // Minted here rather than read off the reply: the setup's frames come back while it runs and the reply lands
+    // once it is under way, so a line printed as it happens has to know which stream is this one's.
     const addId = `a_${randomBytes(6).toString("hex")}`;
-    const watch = watchProvision(io, client, addId);
+    const watch = watchSetup(client, addId, { line: l => io.log(addLineWords(l)), wait: w => io.log(waitWords(w)) });
     await client.events();
     try {
       const answer = PlaceUpdateReply.parse(await client.request<Record<string, unknown>>("places.update", { placeId: picked.place.id, addId }));
       for (const line of updatedLines(answer)) io.log(line);
-      // A computer that got no recipe says so and the line is over: there is no job of this line's to follow.
+      // A computer that got no setup says so and the line is over: there is no job of this line's to follow.
       if (answer.said !== undefined) io.log(answer.said);
-      return await followProvision(io, client, picked.place, answer.provision, watch);
+      if (answer.setup === undefined) return 0;
+      const followed = await followSetup(client, picked.place.id, watch);
+      for (const line of setupEndLines(followed)) io.log(line);
+      return setupExit(followed);
     } catch (e) {
-      // The host's own refusal: a recipe already going on that computer is one sentence, and this line is over
+      // The host's own refusal: a setup already going on that computer is one sentence, and this line is over
       // rather than waiting on a run somebody else started.
       if ((e as { kind?: unknown }).kind !== "conflict") throw e;
       io.error(e instanceof Error ? e.message : String(e));
@@ -1374,40 +1503,89 @@ async function addOverSsh(io: CliIO, opts: PlaceOpts, aim: HostAim, address: str
   // only once it is over, so a line printed as it happens has to know which stream is this one's.
   const addId = `a_${randomBytes(6).toString("hex")}`;
   try {
-    const off = client.onFrame(frame => {
-      const stage = PlaceStageEvent.safeParse(frame);
-      if (!stage.success || stage.data.addId !== addId || stage.data.step === "provision") return;
-      for (const line of stageLines(stage.data)) io.log(line);
-    });
-    // The recipe's own lines ride the same stream and are watched from here too, since the job starts inside the
-    // add and its first rows land before the add answers.
-    const watch = watchProvision(io, client, addId);
+    // The setup's own lines ride the same stream and are watched from here too, since it starts inside the add and
+    // its first steps land before the add answers.
+    const watch = watchSetup(client, addId, setupSay(io, flags, deps));
     await client.events();
     try {
-      const added = await client.request<{ place: PlaceView; hostKey?: string; said?: string }>("places.add", {
+      const added = await client.request<{ place: PlaceView; hostKey?: string; said?: string; pending?: PendingComputer }>("places.add", {
         addId,
         address,
         ...(flags.name !== undefined ? { name: flags.name } : {}),
         ...(flags.sshPort !== undefined ? { sshPort: flags.sshPort } : {}),
         ...(flags.keyPath !== undefined ? { keyPath: flags.keyPath } : {}),
+        ...(flags.recipe !== undefined ? { recipe: flags.recipe } : {}),
         ...confirmed,
       });
-      for (const line of addedLines(added.place, added.hostKey)) io.log(line);
-      if (added.said !== undefined) io.log(added.said);
-      // The recipe before the sign-in: signing an agent in on that computer needs the agent on that computer,
-      // which is what the job just put there. The job this add started is the row's, since the add is what wrote
-      // it; a reply that says why none started carries no job and nothing is followed.
-      await followProvision(io, client, added.place, added.said === undefined ? added.place.provision : undefined, watch);
-      await offerBoxSignIn(io, client, added.place, deps);
-      return 0;
+      if (flags.json !== true) for (const line of addedLines(added.place, added.hostKey)) io.log(line);
+      return await followAdded(io, client, flags, added.place, watch, added.said, added.pending);
     } finally {
       watch.off();
-      off();
     }
   } finally {
     client.close();
   }
 }
+
+/** A computer set up from its picks: a pending add that joined and waits on its choices, given a recipe here or
+ * holding its choices already, or a computer already set up, run again for whatever is missing. The work is the
+ * host's; this line follows it as an add's does. */
+async function setUpPlace(io: CliIO, opts: PlaceOpts, aim: HostAim, ref: string, flags: AddFlags, deps: PlaceDeps): Promise<number> {
+  const client = await deps.dial(opts.statePath, dialHere(io, opts, aim));
+  const addId = `a_${randomBytes(6).toString("hex")}`;
+  try {
+    const watch = watchSetup(client, addId, setupSay(io, flags, deps));
+    await client.events();
+    try {
+      const answer = await client.request<{ addId: string; place: PlaceView; setup?: PlaceSetup; said?: string }>("places.setup", { ref, addId, ...(flags.recipe !== undefined ? { recipe: flags.recipe } : {}) });
+      // A setup already under way answers with its own stream, which this line then follows.
+      watch.also(answer.addId);
+      return await followAdded(io, client, flags, answer.place, watch, answer.said);
+    } finally {
+      watch.off();
+    }
+  } finally {
+    client.close();
+  }
+}
+
+/** How the lines of one add or setup are said as they arrive: prose at a terminal, one frame a line under --json,
+ * and a sign-in's page opened here where a person is at the terminal to finish it and did not say --later. */
+function setupSay(io: CliIO, flags: AddFlags, deps: PlaceDeps): { line(l: AddLine): void; wait(w: PlaceWait): void } {
+  const opened = new Set<string>();
+  return {
+    line: l => io.log(flags.json === true ? jsonLine({ setup: l }) : addLineWords(l)),
+    wait: w => {
+      io.log(flags.json === true ? jsonLine({ waiting: w }) : waitWords(w));
+      if (flags.json !== true && flags.later !== true && io.isTTY === true && w.url !== undefined && w.state === "waiting" && !opened.has(w.url)) {
+        opened.add(w.url);
+        void deps.open(w.url).catch(() => false);
+      }
+    },
+  };
+}
+
+/** The tail every add and setup shares: what the host said instead of starting one, the line for a computer that
+ * joined and waits on its picks, else the setup followed to its end, and the computer's row as the result. */
+async function followAdded(io: CliIO, client: HostClient, flags: AddFlags, place: PlaceView, watch: SetupWatch, said?: string, pending?: PendingComputer): Promise<number> {
+  const result = (computer: PlaceView): void => {
+    if (flags.json === true) io.log(jsonLine({ computer }));
+  };
+  if (said !== undefined) (flags.json === true ? io.error : io.log)(said);
+  if (pending !== undefined || place.setup === undefined) {
+    if (pending !== undefined && flags.json !== true) io.log(choosingLine(place.name));
+    result(place);
+    return 0;
+  }
+  const followed = await followSetup(client, place.id, watch, flags.later === true ? { later: true } : {});
+  if (flags.json !== true) for (const line of setupEndLines(followed)) io.log(line);
+  result(followed.computer);
+  return setupExit(followed);
+}
+
+/** What an add says for a computer that joined with nothing picked: the floor goes on, and the two roads to the rest. */
+export const choosingLine = (name: string): string =>
+  `${name} waits on what goes on it, with the base tools going on meanwhile: choose in the app's Add a computer, or run wsp add ${name} --resume --recipe <name>`;
 
 /** What this add sends about the computer's key, decided before anything is dialled: the one the person pinned on
  * the line, else nothing at all where this computer's ssh client already holds a key for that computer, since it
@@ -1431,17 +1609,6 @@ async function confirmedHostKey(io: CliIO, address: string, flags: AddFlags, dep
 /** The port and key a person typed beside an address, in the shape every ssh reading takes them. */
 function sshFlags(flags: AddFlags): { port?: number; keyPath?: string } {
   return { ...(flags.sshPort !== undefined ? { port: flags.sshPort } : {}), ...(flags.keyPath !== undefined ? { keyPath: flags.keyPath } : {}) };
-}
-
-/** One step of an install as a terminal prints it: the step's own words, a tick where it is done and what the
- * computer answered beside it. */
-export function stageLines(event: PlaceStageEvent): string[] {
-  const mark = event.state === "done" ? "·" : event.state === "failed" ? "x" : " ";
-  // A running step says its note as a finished one does: what the box was read as and where it will dial back are
-  // read while the step they belong to is still running, and holding them until it ends is holding them too long.
-  // A failed step's note is the failure's first line, which the terminal prints whole as the command's error.
-  const note = event.note === undefined || event.state === "failed" ? "" : `: ${event.note}`;
-  return [`  ${mark} ${PLACE_ADD_WORDS[event.step]}${note}`];
 }
 
 /** What an install prints once the computer is in: what it is, the key its ssh answered with so a person can check
@@ -1494,20 +1661,6 @@ async function signInOnPlace(io: CliIO, opts: PlaceOpts, aim: HostAim, ref: stri
     return (await runBoxSignIn(io, client, picked.place, agent, deps)) ? 0 : 1;
   } finally {
     client.close();
-  }
-}
-
-/** The join's own offer, put to the person while they are still at this terminal: a computer that reported an agent
- * whose login lives there is offered that sign-in. Nothing is asked where nobody is at the keyboard; the line then
- * says what threads there read until it is signed in. */
-async function offerBoxSignIn(io: CliIO, client: HostClient, place: PlaceView, deps: PlaceDeps): Promise<void> {
-  for (const agent of sharedAgentsOn(place.agents ?? [])) {
-    const asked = place.logins !== undefined && io.isTTY === true && (await io.ask(boxSignInAsk(place.name, agent))) === "yes";
-    if (!asked) {
-      io.log(boxSignInLaterLine(place.name, agent));
-      continue;
-    }
-    await runBoxSignIn(io, client, place, agent, deps);
   }
 }
 

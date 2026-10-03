@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-//! `computers`: every computer this host holds and what each cloud spent today, two reads answered as one value;
+//! `computers`: every computer this host holds, every add not yet set up, and what each cloud spent today, two reads
+//! answered as one value;
 //! `computers_set`: what the person sets on one of them, answered as its row.
 
 use serde::{Deserialize, Serialize};
@@ -29,11 +30,15 @@ pub struct Out {
     pub computers: Vec<Box<RawValue>>,
     #[cfg_attr(test, schemars(with = "Vec<serde_json::Value>"))]
     pub spend: Vec<Box<RawValue>>,
+    #[cfg_attr(test, schemars(with = "Vec<serde_json::Value>"))]
+    pub pending: Vec<Box<RawValue>>,
 }
 
 #[derive(Deserialize)]
 struct Places {
     places: Vec<Box<RawValue>>,
+    #[serde(default)]
+    pending: Vec<Box<RawValue>>,
 }
 
 async fn call(host: std::sync::Arc<Host>, arguments: serde_json::Value) -> Result<Answer, Refused> {
@@ -41,7 +46,7 @@ async fn call(host: std::sync::Arc<Host>, arguments: serde_json::Value) -> Resul
     let client = host.client().await?;
     let (listed, spent) =
         tokio::try_join!(client.request::<Places>("places.list", Map::new()), client.request::<Places>("cost.spend", Map::new()))?;
-    Ok(Answer::json(&Out { computers: listed.places, spend: spent.places }))
+    Ok(Answer::json(&Out { computers: listed.places, spend: spent.places, pending: listed.pending }))
 }
 
 const SET_NAME: &str = "computers_set";

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { DAEMON_VERSION, JOINED_COMPUTER, PLACE_BLOCKED_WORD, absentComputer, placeDaemonBehind, type PlaceProvision, type PlaceView, type SealedImageCopy, type WorkspaceView } from "@wsp/protocol";
+import { DAEMON_VERSION, JOINED_COMPUTER, PLACE_BLOCKED_WORD, absentComputer, placeDaemonBehind, type PlaceSetup, type PlaceView, type SealedImageCopy, type WorkspaceView } from "@wsp/protocol";
 import { copyOn } from "./image.js";
 import { NOTHING_HELD, PLACE_KIND_WORDS, hereName, outcomeWord, placeName, placeOf, placeStateCell, removeSentence, removeTitle } from "./places.js";
 
@@ -149,14 +149,14 @@ describe("the state cell of a list row", () => {
     expect(placeStateCell(ascii, null, { canUpdate: false })).toEqual(ready);
   });
 
-  it("reads the recipe after the computer's silence and before the daemon behind: Building with its step, Stopped, Failed", () => {
-    const running: PlaceProvision = { state: "running", addId: "a_1", recipeAt: "x", startedAt: "x", rows: [], at: { label: "uv", index: 3, of: 7 } };
-    const stopped: PlaceProvision = { ...running, state: "stopped", said: "the box went away" };
-    const failed: PlaceProvision = { ...running, state: "done", rows: [{ id: "tools/gh", label: "GitHub CLI", outcome: "failed" }] };
-    expect(placeStateCell({ ...hetzner, provision: running, daemonVersion: 1 }, null, { canUpdate: true })).toEqual({ kind: "word", word: "Building 3/7", why: "setting up 3/7: uv" });
-    expect(placeStateCell({ ...hetzner, provision: stopped }, null, { canUpdate: true })).toEqual({ kind: "word", word: "Stopped", why: "stopped: the box went away" });
-    expect(placeStateCell({ ...hetzner, provision: failed }, null, { canUpdate: true })).toEqual({ kind: "word", word: "Failed", why: "1 of 1 failed: GitHub CLI" });
-    expect(placeStateCell({ ...laptop, provision: running }, absentComputer("old-macbook", null), { canUpdate: true })).toMatchObject({ word: "No answer" });
+  it("reads the setup by the one rule: failed and waiting on the person before the silence, setting up after it", () => {
+    const running: PlaceSetup = { state: "running", addId: "a_1", startedAt: "x", steps: [{ step: "clis", state: "running" }], waiting: [] };
+    const failed: PlaceSetup = { ...running, state: "failed", steps: [], said: "the base tools did not install: curl" };
+    const waiting: PlaceSetup = { ...running, state: "done", steps: [], waiting: [{ row: "signins/codex", label: "Codex", expiresAt: "x", state: "waiting" }] };
+    expect(placeStateCell({ ...hetzner, setup: running, daemonVersion: 1 }, null, { canUpdate: true })).toEqual({ kind: "word", word: "Setting up", why: "setting up the CLIs" });
+    expect(placeStateCell({ ...hetzner, setup: failed }, null, { canUpdate: true })).toEqual({ kind: "word", word: "Setup failed", why: "the base tools did not install: curl" });
+    expect(placeStateCell({ ...laptop, setup: waiting }, absentComputer("old-macbook", null), { canUpdate: true })).toEqual({ kind: "word", word: "Needs you", why: "Codex waits on you to sign in" });
+    expect(placeStateCell({ ...laptop, setup: running }, absentComputer("old-macbook", null), { canUpdate: true })).toMatchObject({ word: "No answer" });
   });
 });
 

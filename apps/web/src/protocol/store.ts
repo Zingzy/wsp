@@ -1089,7 +1089,7 @@ export const useStore = create<State>((set, get) => {
         const answer = await api.placesUpdate(placeId);
         // The job as the reply carries it, onto the row the word is read off: the state slot says what is being
         // put on that computer and then what stands, with no second reading of the same job here.
-        if (answer.provision !== undefined) set(s => ({ places: s.places.map(p => (p.id === placeId ? { ...p, provision: answer.provision } : p)) }));
+        if (answer.setup !== undefined) set(s => ({ places: s.places.map(p => (p.id === placeId ? { ...p, setup: answer.setup } : p)) }));
         if (answer.said !== undefined) addNotice({ kind: "note", text: answer.said });
       } catch (e) {
         noticeFailure(e);

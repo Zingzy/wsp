@@ -80,9 +80,10 @@ jobs:
         run: ./scripts/ts-types.sh --check
       - name: Release build
         run: cargo build --locked --release --features wsp-daemon-bin/mcp
-      # What an agent pays at every session start is the shipped profile's, so the budget is measured there.
+      # What an agent pays at every session start is the shipped profile's, so the budget is measured there, and the
+      # figure is printed on a pass too, so a change that moves it is read off the log.
       - name: The tool server's budget, in the shipped profile
-        run: cargo test --locked --release --features wsp-daemon-bin/mcp -p wsp-daemon-bin --test bin the_tool_server
+        run: cargo test --locked --release --features wsp-daemon-bin/mcp -p wsp-daemon-bin --test bin the_tool_server -- --nocapture
       - name: C compiler for the musl target, and libseccomp built against musl
         # ring carries C, and its build looks for x86_64-linux-musl-gcc, which musl-tools provides. The static
         # binary links a libseccomp built against musl, since the distribution's archive is glibc's.

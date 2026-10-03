@@ -19,7 +19,9 @@ import { effortsFor, everyModel, markedDefault, modelOf } from "./harness-picks.
 import { AccessChoice, AgentDefaults, AgentDefaultsPatch, ProjectOverrides, ProjectOverridesPatch, AgentSetupSet, patchedFields } from "./thread-defaults.js";
 import { GENERAL_DEFAULTS, GENERAL_FIELDS, patchedGeneral } from "./general-prefs.js";
 import { UsageAlertEvent } from "./plan-alerts.js";
-import type { OutsideLine } from "./outside-line.js";
+import { RecipeFile } from "./recipe-file.js";
+import { ProjectHue, ProjectIcon } from "./project-look.js";
+import type { OutsideLine, OutsideOpen } from "./outside-line.js";
 import type { FsListReply as WireFsListReply } from "./generated/FsListReply.js";
 import type { FsFilesReply as WireFsFilesReply } from "./generated/FsFilesReply.js";
 import type { GitPrListReply as WireGitPrListReply } from "./generated/GitPrListReply.js";
@@ -2204,12 +2206,6 @@ export type PreferencesTarget = z.infer<typeof PreferencesTarget>;
 
 /** One record on the host's state; the desktop app and a browser tab on the same host read and write this one. sidebarWidth
  * absent is the sidebar's own default; terminalZoom is the pixels a workspace's panes add to the base size, by workspace id. */
-/** The glyphs a project can wear in the sidebar and the switcher; the app maps each word to its drawing. */
-export const ProjectIcon = z.enum(["folder", "code", "terminal", "globe", "rocket", "box", "database", "server", "cpu", "zap", "flame", "leaf", "star", "heart", "book", "music", "camera", "gamepad", "shield", "wrench"]);
-export type ProjectIcon = z.infer<typeof ProjectIcon>;
-/** The hues a project's glyph can take; the app maps each word to a colour of its own theme. */
-export const ProjectHue = z.enum(["neutral", "red", "orange", "amber", "green", "teal", "blue", "violet", "pink"]);
-export type ProjectHue = z.infer<typeof ProjectHue>;
 /** How one project is drawn: its glyph and its hue, each the default where absent. */
 export const ProjectLook = z.object({ icon: ProjectIcon.optional(), hue: ProjectHue.optional() }).strict();
 export type ProjectLook = z.infer<typeof ProjectLook>;
@@ -2592,7 +2588,7 @@ export interface DesktopBridge {
   sayOutside(line: OutsideLine): void;
   /** A click on that notification, after the shell has raised its window: the page opens what it was about. Returns
    * the unsubscribe. */
-  onNeedsYouOpen(handler: () => void): () => void;
+  onNeedsYouOpen(handler: (at?: OutsideOpen) => void): () => void;
   /** How many threads wait on the person, for the dock's badge; zero clears it. */
   setBadge(count: number): void;
   /** Whether this computer's service starts wsp at every login; null where no service is registered for this state.
@@ -3071,7 +3067,7 @@ export type ForwardEvent = z.infer<typeof ForwardOpenEvent> | z.infer<typeof For
 /** What a computer joining this host passes through when the host installs the agent on it over ssh, in order.
  * One list for the line a terminal prints and the rows the app draws, so neither invents a step the other has not
  * got. */
-export const PlaceAddStep = z.enum(["connect", "host-key", "reach", "wsp", "service", "join", "provision"]);
+export const PlaceAddStep = z.enum(["connect", "host-key", "check", "reach", "wsp", "service", "join"]);
 export type PlaceAddStep = z.infer<typeof PlaceAddStep>;
 
 /** What each step reads as while it runs. The note beside it carries what the computer answered (its system, the
@@ -3079,11 +3075,11 @@ export type PlaceAddStep = z.infer<typeof PlaceAddStep>;
 export const PLACE_ADD_WORDS: Record<PlaceAddStep, string> = {
   connect: "connecting over ssh",
   "host-key": `remembering the box's host key in ${KNOWN_HOSTS}`,
+  check: "checking it can run wsp",
   reach: "checking it can reach this computer",
   wsp: "installing wsp",
   service: "starting the agent",
   join: "waiting for it to connect to this computer",
-  provision: "installing agents, tools, skills and servers",
 };
 
 /** Where the app's sheet says a step differently from the line a terminal prints. The host the app runs on need not
@@ -3118,8 +3114,6 @@ export const PlaceStageEvent = z.object({
   /** The computer the step ran on, carried by the steps of a job on a computer this host already holds: a reader
    * that acts on a step rather than printing it needs the row and not the stream it rode. */
   placeId: z.string().optional(),
-  /** On a recipe job's done step, how many of its rows failed: the job is done once every row has an outcome. */
-  failed: z.number().int().nonnegative().optional(),
 });
 export type PlaceStageEvent = z.infer<typeof PlaceStageEvent>;
 
@@ -3142,10 +3136,9 @@ export const PlaceAddJob = z.object({
 export type PlaceAddJob = z.infer<typeof PlaceAddJob>;
 
 /** The job with one more step said, the one rule the host and the app both keep it by: the step's line replaced
- * where it stands, the job done once the computer joined, failed once a step failed. The recipe that runs on
- * behind a join rides the same stream and is the computer's row's to say, not the add's. */
+ * where it stands, the job done once the computer joined, failed once a step failed. The setup that runs on behind
+ * a join rides place.setup frames and is the computer's row's to say, not the add's. */
 export function withPlaceStage(job: PlaceAddJob, e: Pick<PlaceStageEvent, "step" | "state" | "note" | "placeId">): PlaceAddJob {
-  if (e.step === "provision") return job;
   const line = { step: e.step, state: e.state, ...(e.note !== undefined ? { note: e.note } : {}) };
   const at = job.steps.findIndex(s => s.step === e.step);
   const steps = at === -1 ? [...job.steps, line] : job.steps.map((s, i) => (i === at ? line : s));
@@ -3267,6 +3260,8 @@ export const PlaceProvisionRow = z.object({
   outcome: z.enum(["installed", "present", "failed", "skipped"]),
   /** What this row puts there; absent reads as a tool, which is what every row was before files and servers had rows. */
   kind: PlaceProvisionKind.optional(),
+  /** The setup step the row belongs to, which decides how its failure weighs. */
+  step: z.lazy(() => PlaceSetupStep).optional(),
   note: z.string().optional(),
   ms: z.number().int().nonnegative().optional(),
 });
@@ -3282,23 +3277,135 @@ export function provisionCounts(rows: readonly PlaceProvisionRow[]): Partial<Rec
   return counts;
 }
 
-/** The recipe on a computer you own, as the job that puts its rows there stands: `running` while rows are going on,
- * `done` once every row has an outcome (failed rows included), `stopped` when the job itself ended before its rows
- * did, with why in `said`. */
-export const PlaceProvision = z.object({
-  state: z.enum(["running", "done", "stopped"]),
-  /** The stream its steps ride as place.stage events: the add's own id at a join, a fresh one at an update. */
-  addId: z.string().min(1),
-  /** The recipe's own `at` stamp, so the row can say which recipe it was made from. */
-  recipeAt: z.string().min(1),
-  startedAt: z.string().min(1),
-  finishedAt: z.string().optional(),
-  rows: z.array(PlaceProvisionRow),
-  /** While running: the row under way and its place in the run. */
-  at: z.object({ label: z.string(), index: z.number().int().positive(), of: z.number().int().positive() }).optional(),
-  said: z.string().optional(),
+/** How a step's failure weighs on the computer: `blocks` stops the job there, `blocks-all` stops it only when every
+ * row of the step failed, `needs-you` waits on the person and never stops anything, `important` lets the job finish
+ * and reads Needs you, `fixable` lets it finish and is a row with Retry. */
+export type SetupClass = "blocks" | "blocks-all" | "needs-you" | "important" | "fixable";
+
+/** The few field shapes the setup's records repeat, made once: a schema is immutable, and each one made costs the
+ * host its methods bound anew, which over the setup's records is a part of a megabyte held for good. */
+const SETUP_TEXT = z.string();
+const SETUP_NOTE = SETUP_TEXT.optional();
+const SETUP_MS = z.number().int().nonnegative().optional();
+
+/** What the job is on, step by step, and how a failure of each weighs. The checks and the install of wsp itself are
+ * the add's own steps (PlaceAddStep); these are what the job does once the computer joined. */
+export const SETUP_STEP_CLASS = {
+  floor: "blocks",
+  agents: "blocks-all",
+  signins: "needs-you",
+  clis: "fixable",
+  skills: "fixable",
+  mcp: "fixable",
+  plugins: "fixable",
+  configs: "fixable",
+  folders: "important",
+  github: "important",
+  context: "fixable",
+} as const satisfies Record<string, SetupClass>;
+export const PlaceSetupStep = z.enum(Object.keys(SETUP_STEP_CLASS) as [keyof typeof SETUP_STEP_CLASS, ...(keyof typeof SETUP_STEP_CLASS)[]]);
+export type PlaceSetupStep = z.infer<typeof PlaceSetupStep>;
+
+/** Each step as a terminal and the app say it while it runs. */
+export const SETUP_STEP_WORDS: Record<PlaceSetupStep, string> = {
+  floor: "the base tools",
+  agents: "the agents",
+  signins: "the agents' sign-ins",
+  clis: "the CLIs",
+  skills: "the skills and the agents' own files",
+  mcp: "the MCP servers",
+  plugins: "the plugins",
+  configs: "git and the shell",
+  folders: "the folders, as projects",
+  github: "the GitHub sign-in",
+  context: "what the agents read about this computer",
+};
+
+/** One step of the job as it stands, with how long it took once it ended. */
+export const PlaceSetupLine = z.object({
+  step: PlaceSetupStep,
+  state: z.enum(["running", "done", "failed", "skipped"]),
+  note: SETUP_NOTE,
+  ms: SETUP_MS,
 });
-export type PlaceProvision = z.infer<typeof PlaceProvision>;
+export type PlaceSetupLine = z.infer<typeof PlaceSetupLine>;
+
+/** A sign-in waiting on the person: the page to open and the code to type there, and when the wait runs out. An
+ * expired one is run again by a retry for a fresh page and code, never waited on. */
+export const PlaceWait = z.object({
+  row: SETUP_TEXT,
+  label: SETUP_TEXT,
+  url: SETUP_NOTE,
+  code: SETUP_NOTE,
+  expiresAt: SETUP_TEXT,
+  state: z.enum(["waiting", "expired"]),
+});
+export type PlaceWait = z.infer<typeof PlaceWait>;
+
+/** The setup job on a computer you own as it last stood, written after every step: `running` while steps go on,
+ * `done` once every step ended (failed rows included), `failed` when a step that blocks failed, with why in `said`.
+ * Step output never sits here: it is the computer's own log, read over the link. */
+export const PlaceSetup = z.object({
+  state: z.enum(["running", "done", "failed"]),
+  /** The stream its frames ride as place.setup events. */
+  addId: SETUP_TEXT,
+  startedAt: SETUP_TEXT,
+  finishedAt: SETUP_NOTE,
+  steps: z.array(PlaceSetupLine),
+  waiting: z.array(PlaceWait),
+  said: SETUP_NOTE,
+});
+export type PlaceSetup = z.infer<typeof PlaceSetup>;
+
+/** What the last setup came to: the hash of the picks it applied and every row's outcome, which a retry and the sync
+ * read so a row the computer already had is never taken off it. */
+export const PlaceApplied = z.object({ hash: SETUP_TEXT, at: SETUP_TEXT, rows: z.array(PlaceProvisionRow) });
+export type PlaceApplied = z.infer<typeof PlaceApplied>;
+
+/** How a setup ended, for the moment the person hears: ready, ready with something waiting on them or an important
+ * row failed, or stopped by a step that blocks. */
+export const SetupEnd = z.enum(["ready", "needs-you", "failed"]);
+export type SetupEnd = z.infer<typeof SetupEnd>;
+
+/** One frame of the setup job on a computer, on the stream the add or the resume that started it named: a step's
+ * line as it moves, a sign-in that waits on the person, or the end with how it came out. */
+export const PlaceSetupEvent = z.object({
+  type: z.literal("place.setup"),
+  addId: SETUP_TEXT,
+  placeId: SETUP_TEXT,
+  line: PlaceSetupLine.optional(),
+  wait: PlaceWait.optional(),
+  end: SetupEnd.optional(),
+  /** On the end: why it failed, or what waits and what failed beside the rows that stood. */
+  said: SETUP_NOTE,
+});
+export type PlaceSetupEvent = z.infer<typeof PlaceSetupEvent>;
+
+/** One line of an add as the command line and the tool stream it: a step of the install, then a step of the setup. */
+export const AddLine = PlaceSetupLine.extend({ step: z.union([PlaceAddStep, PlaceSetupStep]) });
+export type AddLine = z.infer<typeof AddLine>;
+
+/** How far an add that has not reached Set up has got: `choosing` is a computer that joined and waits on the
+ * person's picks, with the floor already on it. */
+export const PendingStep = z.enum(["connect", "check", "wsp", "floor", "choosing"]);
+export type PendingStep = z.infer<typeof PendingStep>;
+
+/** One add from the first field to Set up, one per address: the choices so far, the computer it became once it
+ * joined, and the refusal that stopped it where one did. */
+export const PendingComputer = z.object({
+  id: SETUP_TEXT,
+  address: SETUP_TEXT,
+  sshPort: z.number().int().optional(),
+  name: SETUP_NOTE,
+  placeId: SETUP_NOTE,
+  step: PendingStep,
+  choices: z.lazy(() => RecipeFile),
+  /** The saved recipe the choices came from, by slug. */
+  recipe: SETUP_NOTE,
+  startedAt: SETUP_TEXT,
+  failed: z.object({ said: SETUP_TEXT, fix: SETUP_NOTE }).optional(),
+});
+export type PendingComputer = z.infer<typeof PendingComputer>;
 
 /** Threads at once on a computer: how many threads may run there together, root or child. */
 export const ComputerCap = z.object({ threads: z.number().int().min(1) });
@@ -3428,9 +3535,15 @@ export const PlaceView = z.object({
   /** Whether a copy of the image can stand here at all, by buildsImages over this place's own capabilities. Absent on
    * a joined computer that has not yet said what it forks with. */
   buildsImages: z.boolean().optional(),
-  /** The recipe on this computer: what is being put on it, then what stands and what failed. Absent on a provider,
-   * on this computer itself, and on a computer nothing has provisioned yet. */
-  provision: PlaceProvision.optional(),
+  /** The setup job on this computer: the steps under way, then how each ended, and every sign-in waiting on the
+   * person. Absent on a provider, on this computer itself, and on a computer nothing has set up yet. */
+  setup: PlaceSetup.optional(),
+  /** What the last setup came to, row by row. */
+  applied: PlaceApplied.optional(),
+  /** What this computer was set up with, saved as a recipe or not. */
+  picks: RecipeFile.optional(),
+  /** The saved recipe this computer follows, by slug, or none; absent on a computer set up before recipes. */
+  recipe: z.string().optional(),
   /** The number set on this place, else its kind's default; absent only on a computer that has not said its shape. */
   cap: PlaceCap.optional(),
   /** The cap this place takes when the person sets none: one thread per THREAD_MEM_MB of a computer's memory up to
@@ -3479,7 +3592,7 @@ export const PlaceUpdateReply = z.object({
       note: z.string().optional(),
     })
     .optional(),
-  provision: PlaceProvision.optional(),
+  setup: PlaceSetup.optional(),
   said: z.string().optional(),
 });
 export type PlaceUpdateReply = z.infer<typeof PlaceUpdateReply>;
@@ -3499,6 +3612,11 @@ export const PlacePresentEvent = z.object({ type: z.literal("place.present"), pl
 /** `said` is the runtime's own reason where it has one, as for a box whose kernel can no longer boot the image. */
 export const PlaceAbsentEvent = z.object({ type: z.literal("place.absent"), placeId: z.string(), said: z.string().optional() });
 export const PlaceRemovedEvent = z.object({ type: z.literal("place.removed"), placeId: z.string() });
+/** An add that has not reached Set up moved, or went: `pending` as it now stands, absent once it became a computer
+ * or was taken away. */
+export const PlacePendingEvent = z.object({ type: z.literal("place.pending"), id: z.string(), pending: PendingComputer.optional() });
+export type PlacePendingEvent = z.infer<typeof PlacePendingEvent>;
+
 /** The four as one type, so the host's door and the app's fold read one shape. */
 export type PlaceEvent = z.infer<typeof PlaceJoinedEvent> | z.infer<typeof PlacePresentEvent> | z.infer<typeof PlaceAbsentEvent> | z.infer<typeof PlaceRemovedEvent>;
 
@@ -3576,6 +3694,8 @@ export const EventUnion = z.discriminatedUnion("type", [
   InitJobEvent.extend(sequenced),
   InitNeedsYouEvent.extend(sequenced),
   PlaceStageEvent.extend(sequenced),
+  PlaceSetupEvent.extend(sequenced),
+  PlacePendingEvent.extend(sequenced),
   PlaceJoinedEvent.extend(sequenced),
   PlacePresentEvent.extend(sequenced),
   PlaceAbsentEvent.extend(sequenced),
@@ -4491,7 +4611,7 @@ export const MachineLinkRequest = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("machine.create"), spec: MachineSpec }),
   z.object({ id: reqId, op: z.literal("machine.get"), machineId: z.string() }),
   z.object({ id: reqId, op: z.literal("machine.list"), labels: z.record(z.string()).optional() }),
-  z.object({ id: reqId, op: z.literal("machine.exec"), machineId: z.string(), cmd: z.string().max(EXEC_BODY_MAX), timeoutMs: z.number().int().positive().optional() }),
+  z.object({ id: reqId, op: z.literal("machine.exec"), machineId: z.string(), cmd: z.string().max(EXEC_BODY_MAX), timeoutMs: z.number().int().positive().optional(), stdin: z.string().optional() }),
   z.object({ id: reqId, op: z.literal("machine.pause"), machineId: z.string() }),
   z.object({ id: reqId, op: z.literal("machine.resume"), machineId: z.string() }),
   z.object({ id: reqId, op: z.literal("machine.kill"), machineId: z.string() }),
@@ -4904,6 +5024,7 @@ const DAEMON_CONTENTS = [
   "019c206265a45a72e87e3e436643cc96399b6ed44d5ae07de967b502e5742abc",
   "b423faeb3b4ae38a7456d11b877ab8720adaaa62650c5b33209ee24e02fb37b9",
   "4076321ab3d83fb3893ad81b9222fc36b92dccec81e8e9bc4566cc64a412b299",
+  "81b16217319586241e368d7cb84fa0383a11b8d056a03053c700140422ff5e71",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -5231,7 +5352,8 @@ const DAEMON_CONTENTS = [
  * one thread's refs away; git.worktrees and git.branches read a repository's worktrees and its local branches;
  * git.switchNew puts a folder on a new branch with its changes carried along; git.fetchBranch fetches one branch of a
  * remote into a local branch, moving it only forward.
- * Version 115: Daemon port-file test times out on Linux CI about half the time. */
+ * Version 115: Daemon port-file test times out on Linux CI about half the time.
+ * Version 116: recipes and the add-a-computer setup job. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -5299,60 +5421,105 @@ export const placeCurrentLine = (name: string, version: number): string => `${na
 
 /** What a computer whose recipe is still being put on says to whoever asked for a workspace there, or for a second
  * run of the job: the row under way where the job has reached one, and the two roads to the rest of the answer. */
-export const placeProvisioningLine = (name: string, at?: { label: string; index: number; of: number }): string =>
-  `${name} is still being set up${at === undefined ? "" : ` (${at.label}, ${at.index} of ${at.of})`}; wsp computers shows it, and a workspace there can be made once it is done`;
+export const placeProvisioningLine = (name: string, step?: PlaceSetupStep): string =>
+  `${name} is still being set up${step === undefined ? "" : ` (${SETUP_STEP_WORDS[step]})`}; wsp computers shows it, and a workspace there can be made once it is done`;
 
-/** What a join or an update says when this computer holds no recipe to put on anything: nothing was installed, and
- * the two lines that write one and then put it on. */
-export const placeNoRecipeLine = (name: string, path: string): string =>
-  `${name} got no agents or tools: this computer has no recipe at ${path}. wsp recipe writes one; wsp add ${name} --update then puts it on ${name}`;
+/** What a join or an update says about a computer that carries no picks: nothing goes on it until it has some. */
+export const placeNoPicksLine = (name: string): string =>
+  `${name} has nothing picked to go on it: choose in the app's Add a computer, or run wsp add ${name} --resume --recipe <name>`;
 
 /** What a computer that reported no home folder for its login gets instead of the recipe: every path the job would
  * build comes off that home, so there is nothing to build one from. Said where the no-recipe line is said. */
 export const placeNoHomeLine = (name: string): string =>
   `${name} got no agents or tools: it reported no home folder for its login, so nothing on it could be reached`;
 
-/** The row's word for the recipe on a computer: what is under way, or what stands. Empty for a computer nothing
- * has provisioned, which is every provider and this computer itself. Read by wsp computers and by the app's row,
- * so the two cannot word it two ways. */
-export function provisionWord(p: PlaceProvision | undefined): string {
-  if (p === undefined) return "";
-  if (p.state === "stopped") return `stopped: ${p.said ?? "no reason recorded"}`;
-  if (p.state === "running") return p.at === undefined ? "setting up" : `setting up ${p.at.index}/${p.at.of}: ${p.at.label}`;
-  const failed = p.rows.filter(r => r.outcome === "failed");
+/** The rows of a setup whose failure reads Needs you: a folder that did not move, the GitHub sign-in. */
+export const importantFailures = (applied: PlaceApplied | undefined): PlaceProvisionRow[] =>
+  (applied?.rows ?? []).filter(r => r.outcome === "failed" && r.step !== undefined && SETUP_STEP_CLASS[r.step] === "important");
+
+/** The setup on a computer as the TOOLS column says it: the step under way, where it stopped, or what stands.
+ * Empty for a computer nothing has set up, which is every provider and this computer itself. */
+export function setupWord(setup: PlaceSetup | undefined, applied?: PlaceApplied): string {
+  if (setup === undefined) return "";
+  const under = setup.steps.find(l => l.state === "running");
+  if (setup.state === "running") return under === undefined ? "setting up" : `setting up ${SETUP_STEP_WORDS[under.step]}`;
+  if (setup.state === "failed") return `stopped: ${setup.said ?? "no reason recorded"}`;
+  const rows = applied?.rows ?? [];
+  const failed = rows.filter(r => r.outcome === "failed");
   // What the rows put there, not the word row: a row is the recipe's own word and nobody reading this screen has
   // seen a recipe.
-  return failed.length === 0 ? `${provisionCountWord(provisionCounts(p.rows))} ready` : `${failed.length} of ${p.rows.length} failed: ${nameList(failed.map(r => r.label))}`;
+  return failed.length === 0 ? `${provisionCountWord(provisionCounts(rows))} ready` : `${failed.length} of ${rows.length} failed: ${nameList(failed.map(r => r.label))}`;
 }
 
+/** The words a computer's setup reads as, in the order they win. */
+export const SETUP_WORDS = { failed: "Setup failed", needsYou: "Needs you", pending: "Pending", settingUp: "Setting up", ready: "Ready" } as const;
+
+/** What a sign-in waiting on the person says, and the same once its page ran out. */
+export const waitLine = (w: PlaceWait): string => (w.state === "expired" ? `${w.label}'s sign-in ran out; a retry asks for a fresh code` : `${w.label} waits on you to sign in${w.url === undefined ? "" : ` at ${w.url}`}${w.code === undefined ? "" : ` with code ${w.code}`}`);
+
+/** One computer's word for its setup, the one rule the STATE column and the app's rows read: Setup failed, then
+ * Needs you (a sign-in waits on the person, or a folder or the GitHub sign-in failed), then Pending (it joined and
+ * waits on its picks, `pending` its add), then Offline (no link), then Setting up, then Behind (its daemon behind this
+ * host's), then Ready. An add that never joined is a row of its own, read by pendingWord. */
+export function placeWord(place: Pick<PlaceView, "setup" | "applied" | "daemonVersion">, absent: AbsentComputer | null, pending?: PendingComputer): PlaceState {
+  const setup = place.setup;
+  if (setup?.state === "failed") return { word: SETUP_WORDS.failed, ...(setup.said !== undefined ? { sentence: setup.said } : {}) };
+  if (pending?.failed !== undefined) return pendingWord(pending);
+  const wait = setup?.waiting[0];
+  if (wait !== undefined) return { word: SETUP_WORDS.needsYou, sentence: waitLine(wait) };
+  const important = importantFailures(place.applied);
+  if (important.length > 0) return { word: SETUP_WORDS.needsYou, sentence: important.map(r => `${r.label}: ${r.note ?? "failed"}`).join("; ") };
+  if (pending !== undefined) return pendingWord(pending);
+  if (absent !== null) return { word: absent.away, sentence: absent.sentence };
+  if (setup?.state === "running") return { word: SETUP_WORDS.settingUp, sentence: setupWord(setup) };
+  const behind = placeDaemonBehind(place);
+  return behind === undefined ? { word: SETUP_WORDS.ready } : { word: behind };
+}
+
+/** A pending add's word: Setup failed where a step stopped it, else Pending with how far it got. */
+export function pendingWord(p: PendingComputer): PlaceState {
+  if (p.failed !== undefined) return { word: SETUP_WORDS.failed, sentence: p.failed.said };
+  return { word: SETUP_WORDS.pending, sentence: PENDING_STEP_WORDS[p.step] };
+}
+
+/** How far a pending add got, as its row says it. */
+export const PENDING_STEP_WORDS: Record<PendingStep, string> = {
+  connect: "connecting over ssh",
+  check: "checking it can run wsp",
+  wsp: "installing wsp",
+  floor: "joined; the base tools are going on while you choose",
+  choosing: "joined; waiting on what goes on it",
+};
+
 /** What a place's row reads as: the word beside its name, the tone the two cap words take, and the sentence that
- * says why. Blocked first, since only a person fixes it; then not answering, since nothing reaches a computer that
- * is off; then the day's spend and the cap, which stop new work; then the recipe running and a daemon behind.
- * `spentTodayUsd` is the cloud's spend since this computer's midnight, and At limit is never read without it. The
- * command line's STATE column and the app's row both read this, so the two cannot word one place two ways. */
+ * says why. Blocked first, since only a person fixes it; then the setup's own words that need the person; then not
+ * answering, since nothing reaches a computer that is off; then the day's spend and the cap, which stop new work;
+ * then the setup running, a daemon behind and Ready. `spentTodayUsd` is the cloud's spend since this computer's
+ * midnight, and At limit is never read without it. The command line's STATE column and the app's row both read
+ * this, so the two cannot word one place two ways. */
 export interface PlaceState {
   word: string;
   tone?: "warning";
   sentence?: string;
 }
 
-export function placeStateOf(place: PlaceView, absent: AbsentComputer | null, spentTodayUsd?: number): PlaceState {
+export function placeStateOf(place: PlaceView, absent: AbsentComputer | null, spentTodayUsd?: number, pending?: PendingComputer): PlaceState {
   if (place.blocked !== undefined) return { word: PLACE_BLOCKED_WORD, sentence: place.blocked };
-  if (absent !== null) return { word: absent.away, sentence: absent.sentence };
+  const setup = placeWord(place, absent, pending);
+  if (setup.word === SETUP_WORDS.failed || setup.word === SETUP_WORDS.needsYou || setup.word === SETUP_WORDS.pending || absent !== null) return setup;
   const limit = placeAtLimitLine(place, spentTodayUsd);
   if (limit !== undefined) return { word: "At limit", tone: "warning", sentence: limit };
   const full = placeFullLine(place);
   if (full !== undefined) return { word: "Full", tone: "warning", sentence: full };
-  const recipe = provisionWord(place.provision);
-  if (recipe !== "") return { word: recipe };
-  const behind = placeDaemonBehind(place);
-  return behind === undefined ? { word: "Ready" } : { word: behind };
+  return setup;
 }
 
-/** The lines a terminal prints once a job is over: what installed by name, how many rows were already there, then
- * every row that failed or was set aside with its reason, and what stopped the job where one did. */
-export function provisionLines(name: string, p: PlaceProvision): string[] {
-  const of = (outcome: PlaceProvisionRow["outcome"]): PlaceProvisionRow[] => p.rows.filter(r => r.outcome === outcome);
+/** The lines a terminal prints once a setup is over: what installed by name, how many rows were already there,
+ * then every row that failed or was set aside with its reason, every sign-in still waiting, and what stopped the
+ * job where one did. */
+export function setupLines(name: string, setup: PlaceSetup, applied: PlaceApplied | undefined): string[] {
+  const rows = applied?.rows ?? [];
+  const of = (outcome: PlaceProvisionRow["outcome"]): PlaceProvisionRow[] => rows.filter(r => r.outcome === outcome);
   const installed = of("installed");
   const present = of("present");
   const tally = [
@@ -5363,9 +5530,38 @@ export function provisionLines(name: string, p: PlaceProvision): string[] {
     `${name}: ${tally.join(", ")}`,
     ...of("failed").map(r => `  x ${r.label}: ${r.note ?? "no reason recorded"}`),
     ...of("skipped").map(r => `  - ${r.label}: ${r.note ?? "set aside"}`),
-    ...(p.said === undefined ? [] : [`${name}: ${p.said}`]),
+    ...setup.waiting.map(w => `  ? ${waitLine(w)}`),
+    ...(setup.said === undefined ? [] : [`${name}: ${setup.said}`]),
   ];
 }
+
+/** The refusal a second add to an address gets while the first stands, and what to do instead. */
+export const pendingHeldLine = (address: string, step: PendingStep): string => `${address} is already being added (${PENDING_STEP_WORDS[step]})`;
+export const pendingHeldFix = (name: string): string => `Finish it with wsp add ${name} --resume --recipe <name>, or in the app.`;
+/** The refusal a resume of an add that never joined gets: there is no computer to set up yet. */
+export const pendingNotJoinedLine = (name: string): string => `${name} never joined, so there is nothing to set up`;
+export const pendingNotJoinedFix = (address: string): string => `Add it again with wsp add ${address}.`;
+/** The fix half of a resume that names nothing to set up with. */
+export const CHOOSE_FIX = "Choose what goes on it in the app's Add a computer, or name a saved recipe with --recipe <name>.";
+
+/** How long a sign-in run on a computer you own waits on the person: a page opened and a code typed there is
+ * minutes, and the codes the tools print run out in about fifteen. */
+export const SIGN_IN_WAIT_MS = 10 * 60_000;
+
+/** What a setup's rows say about where a sign-in came from. */
+export const FROM_THE_VAULT = "from this computer's vault, handed to every run there";
+export const SIGNED_IN_THERE = "signed in on that computer";
+export const NO_SIGN_IN_ROAD = "this host runs no sign-in on a computer; sign in from the app or with wsp add <computer> --sign-in <agent>";
+export const NO_FOLDER_ROAD = "this host moves no folder to a computer; add it with wsp add <folder> --on <computer>";
+export const NO_GITHUB_TOKEN_LINE = "this computer's vault holds no GitHub token: gh auth login here, then retry";
+export const noVaultTokenLine = (agent: string): string => `this computer's vault holds no token or key for ${agent}: wsp agents key ${agent}, then retry`;
+export const githubThereLine = (name: string): string => `sign GitHub in on ${name} with gh auth login there`;
+
+/** Why a setup stopped at the floor, naming the base tools that did not install. */
+export const floorFailedLine = (rows: readonly Pick<PlaceProvisionRow, "label">[]): string => `the base tools did not install: ${nameList(rows.map(r => r.label))}`;
+/** Why a setup stopped at the agents: every one picked failed. */
+export const noAgentLine = (rows: readonly Pick<PlaceProvisionRow, "label" | "note">[]): string =>
+  `no agent installed: ${rows.map(r => `${r.label}${r.note === undefined ? "" : ` (${r.note})`}`).join("; ")}`;
 
 /** One line of the job's own log on a computer you own: the time it was written, in UTC to the second, then the
  * line. Every line that log takes carries one, so what each part of a run took is read off the computer's own log
@@ -6227,7 +6423,30 @@ const RuntimeOp = z.discriminatedUnion("op", [
      * before a byte of wsp's leaves this computer where it is absent and the client holds no key of its own, so a
      * caller that sends none meets the same wall as one that sends a wrong one. */
     hostKey: z.string().max(200).optional(),
+    /** The saved recipe the computer is set up from once it joins, by its name or slug. Absent, it joins and waits
+     * as a pending add for the person's picks, with the base tools going on meanwhile. */
+    recipe: z.string().max(200).optional(),
   }),
+  /** Sets a computer up from picks: a pending add that joined and waits on its choices, or a computer already set
+   * up, run again for whatever is missing. `ref` names the computer or the pending add; `recipe` names the saved
+   * recipe to set it up from, else the choices it holds. Answers `{ addId, place: PlaceView, setup?, said? }`; the
+   * frames ride place.setup events carrying `addId`. */
+  z.object({ id: reqId, op: z.literal("places.setup"), ref: z.string().max(200), recipe: z.string().max(200).optional(), addId: z.string().max(64).optional() }),
+  /** Every recipe this host keeps, each with the line of what it holds and the computers that follow it. Answers
+   * `{ recipes: RecipeView[] }`. The person's own road only, as every place op is. */
+  z.object({ id: reqId, op: z.literal("recipes.list") }),
+  /** One recipe by its name or slug, with the hash it resolves to on this computer now. Answers `{ recipe:
+   * RecipeView, hash }`. */
+  z.object({ id: reqId, op: z.literal("recipes.get"), name: z.string().max(200) }),
+  /** Writes a recipe whole: `file` as given, or with `from` a computer's own picks under `name`, after which that
+   * computer follows it. Refused for a name that makes no file name and for anything shaped like a secret. Answers
+   * `{ recipe: RecipeView }`. */
+  z.object({ id: reqId, op: z.literal("recipes.save"), name: z.string().max(200), file: z.unknown().optional(), from: z.string().max(200).optional() }),
+  /** Takes a recipe's file away; the computers that followed it follow none. Answers `{ recipe: RecipeView }` as it
+   * stood. */
+  z.object({ id: reqId, op: z.literal("recipes.remove"), name: z.string().max(200) }),
+  /** What a recipe can pick from on this computer, read now. Answers `{ options: RecipeOptions }`. */
+  z.object({ id: reqId, op: z.literal("recipes.options") }),
   /** Replies with an EventsSubscribeReply, then pushes events on this socket. With `after`, the seq of the last event
    * this client saw, every retained event past it is pushed first, oldest first, before anything live; `stream` is
    * the id that came with that seq, so a runtime that is not the one that issued it answers gap instead. */
@@ -7294,6 +7513,7 @@ export { AGENTS_ON, CLOUD_CAP_DEFAULT, NAP_AFTER_MAX_MS, NAP_AFTER_MS, phaseHold
 export { MCP_SERVER_NAME, threadsFollowed, WSP_TOOL_TIMEOUT_SEC } from "./wsp-tools.js";
 export { type AbsentComputer, type AwayWord, absentComputer, actionRefusal, daemonSilent, ownDaemonDown, START_DAEMON_WORD, agentsKindRefusal, agentsMayDrive, awayMsOf, composerHeldLine, type CopyToDelete, deleteCopiesNotice, deleteNotice, unpushedLine, onDeleteOf, type StandsOn, UNNAMED_COMPUTER, goneRefusal, COMPUTER_LEFT, pausedOrPausing, notAnsweringYet, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, turnSpendWord, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, FORGET_NEEDS_GONE, goneRoadRefusal, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, whereWord, workspaceStateLine, workspaceStateOf, workspaceWord, type AbsentRoad, type AbsentRoadInput, absentRoad, BACK_OVER_SSH, backUrl, dialsBackWord, linkedOver, lastKnown, REPORTED_WORD, placeDialLine, placeNoDialLine, placeDialRoad, sshRoadOf, type PlaceDialRoad } from "./workspace-state.js";
 export * from "./agents-report.js";
+export * from "./project-look.js";
 export { contextWindowsFor, effortsFor, everyModel, listedPick, markedDefault, modelOf } from "./harness-picks.js";
 export * from "./thread-defaults.js";
 export * from "./exit.js";
@@ -7357,6 +7577,7 @@ export * from "./tree.js";
 export * from "./start.js";
 export * from "./daemon-contract.js";
 export * from "./projects.js";
+export * from "./recipe-file.js";
 export { defaultSeedChoice, leftBehindLine, neverTravelsLine, noRemoteLine, notInTheMenuLine, SEED_DIR, SEED_MEMORY_DIR, SEED_PATCH, seedBytes, seedChoiceFrom, seedCommitsLandedLine, seedCommitsLostLine, seedConsentLines, seedingLine, seedMenuRows, seedRowWords, seedSummaryLines } from "./project-seed.js";
 export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
 export { addressFromHash, addressFromLink, appHash, linkFromHash, linkHash, openingHash, pairingCodeOf, workspaceHash, LINK_KINDS, type AppAddress, type LinkKind, type LinkTarget } from "./app-address.js";

@@ -1846,6 +1846,8 @@ interface SharedFlags {
   "no-memory"?: boolean;
   "no-commits"?: boolean;
   remember?: boolean;
+  later?: boolean;
+  resume?: boolean;
   watch?: boolean;
   update?: boolean;
   "sign-in"?: string;
@@ -1861,7 +1863,9 @@ interface SharedFlags {
  * so, which is the same answer WSP_HOST and the account's one host already get. */
 export type HostFlag = "aimed" | "refused" | "hostSide";
 
-interface Command {
+type Command = CommandRun & ({ /** Why the MCP server has no tool for it. */ cliOnly: string } | { /** The tool it is served as, a CommandToolVerb in the verb table. */ tool: string });
+
+interface CommandRun {
   /** Which page it prints on, as every verb declares one. */
   page: Page;
   /** The shape of the line, as its own help prints it. */
@@ -1873,8 +1877,6 @@ interface Command {
   /** What --host means for this word. One parse reads the flag for every word, so this is what keeps the ones that
    * have nothing to do with it from swallowing it, and what sends the two that run over there to their own line. */
   host: HostFlag;
-  /** Why the MCP server has no tool for it. */
-  cliOnly: string;
   run(io: CliIO, opts: SharedOpts, values: SharedFlags, args: string[], deps: CommandDeps): Promise<number>;
 }
 
@@ -1927,7 +1929,10 @@ export async function pickUpPorts(io: CliIO, opts: ServeAsked, probes: PortProbe
  * this road read this computer through one planner and no road can grow a second. */
 export function hostDoctorReaders(links: PlaceWiring, statePath: string): HostDoctorReaders {
   const provision = links.provision;
-  return { vault: () => vaultNow(statePath), ...(provision !== undefined ? { plan: () => provision.plan({ home: GUEST_HOME }) } : {}) };
+  return {
+    vault: () => vaultNow(statePath),
+    ...(provision !== undefined ? { plan: computer => (computer?.picks !== undefined ? provision.setup(computer.picks, { home: GUEST_HOME }) : provision.plan({ home: GUEST_HOME })) } : {}),
+  };
 }
 
 /** The doctor's own usage line, read by its row and by every refusal that prints it. */
@@ -2112,12 +2117,13 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   add: {
     page: "front",
     usage:
-      `wsp add [<user@host>|<ssh alias>|<folder>|<url>|<owner/repo>|${CLOUD_ON ? "<provider>|" : ""}<computer> --update|<computer> --sign-in <agent>] [--on <computer>] [--into <folder>] [--name <name>] [--base <branch>] [--yes] [--keep <path>] [--cut <path>] [--no-memory] [--no-commits] [--remember] [--ssh-port <port>] [--ssh-key <path>] [--host-key <key>]`,
+      `wsp add [<user@host>|<ssh alias>|<folder>|<url>|<owner/repo>|${CLOUD_ON ? "<provider>|" : ""}<computer> --update|<computer> --sign-in <agent>|<computer> --resume] [--recipe <name>] [--later] [--on <computer>] [--into <folder>] [--name <name>] [--base <branch>] [--yes] [--keep <path>] [--cut <path>] [--no-memory] [--no-commits] [--remember] [--ssh-port <port>] [--ssh-key <path>] [--host-key <key>]`,
     about:
       "a computer of yours over ssh by user@host or by an alias from your ssh config, or a project: a folder on this computer, a git repo or not, whose threads run in it, or a repo cloned into an empty folder here with --into <folder> or by a computer with --on <computer>; " + (CLOUD_ON ? "<provider> takes a provider's key, " : "") + "nothing prints the join line another computer types, a computer with --update puts this wsp's daemon on one already in, and a computer with --sign-in signs that agent in there once, outside every machine on it",
-    json: false,
+    json: true,
     host: "hostSide",
-    cliOnly: "hands out a code that lets another computer join this wsp, or takes a provider's key into this person's own files; both belong with the terminal the host runs at",
+    // The computer road alone: the join code and a provider's key stay at the host's own terminal, and the tool refuses them.
+    tool: "add",
     run: (io, opts, values, args) =>
       addCommand(io, { ...startingPick(opts, values), providerEnv: opts.providerEnv }, args, addFlags(values.name, values["ssh-port"], values["ssh-key"], values.update, values.on, values.base, values["sign-in"], {
         ...(values.yes === true ? { yes: true } : {}),
@@ -2126,7 +2132,12 @@ const COMMANDS: Readonly<Record<string, Command>> = {
         ...(values["no-memory"] === true ? { noMemory: true } : {}),
         ...(values["no-commits"] === true ? { noCommits: true } : {}),
         ...(values.remember === true ? { remember: true } : {}),
-      }, values["host-key"], values.into)),
+      }, values["host-key"], values.into, {
+        ...(values.recipe !== undefined ? { recipe: values.recipe } : {}),
+        ...(values.later === true ? { later: true } : {}),
+        ...(values.resume === true ? { resume: true } : {}),
+        ...(values.json === true ? { json: true } : {}),
+      })),
   },
   remove: {
     page: "front",
@@ -2437,6 +2448,8 @@ export const SHARED_OPTIONS: Options = {
   remember: { type: "boolean" },
   watch: { type: "boolean" },
   update: { type: "boolean" },
+  later: { type: "boolean" },
+  resume: { type: "boolean" },
   "sign-in": { type: "string" },
   name: { type: "string" },
   host: { type: "string" },
@@ -2444,14 +2457,19 @@ export const SHARED_OPTIONS: Options = {
 
 const without = (options: Options, names: readonly string[]): Options => Object.fromEntries(Object.entries(options).filter(([name]) => !names.includes(name)));
 
+/** The flags of the shared parse every line answers, which the readers table names no line for. */
+const EVERY_LINE: ReadonlySet<string> = new Set(["help", "json", "host"]);
+
 /** The flags a line of the shared parse takes, read off the command that runs it: a line of two words or more is
  * selected by its first word, so it advertises exactly what that word's `json` and `host` say and never a list
- * written out beside it, which is how a flag added to the shared parse reached seven lines that refuse it. */
+ * written out beside it, which is how a flag added to the shared parse reached seven lines that refuse it. A flag
+ * the readers table gives to other lines alone is refused on this one, so it is not advertised here either. */
 function optionsFor(words: string): Options {
   const found = findCommand(words.split(" "));
   if (found === undefined) throw new Error(`wsp ${words} is in the command lines and no command answers it`);
   const { command } = found;
-  return without(SHARED_OPTIONS, [...(command.json ? [] : ["json"]), ...(command.host === "refused" ? ["host"] : [])]);
+  const shared = without(SHARED_OPTIONS, [...(command.json ? [] : ["json"]), ...(command.host === "refused" ? ["host"] : [])]);
+  return Object.fromEntries(Object.entries(shared).filter(([name]) => EVERY_LINE.has(name) || readers(name).includes(words)));
 }
 
 /** A line `wsp` answers: the words after `wsp` that select it, the shape of the line and one phrase on what it
@@ -2472,10 +2490,29 @@ export const COMMAND_LINES: readonly CommandLine[] = [
     about: `put the wsp tools, this skill and wsp's own section of this folder's AGENTS.md into that agent (${MCP_AGENT_IDS}); --agent repeats, --remove takes it back out, and --json prints what each agent took`,
     cliOnly: "writes an agent's own config and skills folder, which is done once from a shell",
   },
-  ...Object.entries(COMMANDS).map(([words, command]) => ({ words, usage: command.usage, about: command.about, page: command.page, options: optionsFor(words), cliOnly: command.cliOnly })),
+  // The flags are read when asked for, since the table of who reads which is written below this one.
+  ...Object.entries(COMMANDS).map(([words, command]) => ({
+    words,
+    usage: command.usage,
+    about: command.about,
+    page: command.page,
+    get options(): Options {
+      return optionsFor(words);
+    },
+    ...("tool" in command ? { tool: command.tool } : { cliOnly: command.cliOnly }),
+  })),
   // The two lines a word of the host page opens: they print inside their parent's usage, so they carry no page of
   // their own to print on, and they are here for the parity table and for the flags they take.
-  { words: "host devices revoke", options: optionsFor("host devices revoke"), page: "host" as const, usage: "wsp host devices revoke <id>", about: "take one computer's token away", cliOnly: "takes away a computer's token, from the host's terminal or from a computer paired with it; who may drive a host is the person's to cut, never a thread's" },
+  {
+    words: "host devices revoke",
+    get options(): Options {
+      return optionsFor("host devices revoke");
+    },
+    page: "host" as const,
+    usage: "wsp host devices revoke <id>",
+    about: "take one computer's token away",
+    cliOnly: "takes away a computer's token, from the host's terminal or from a computer paired with it; who may drive a host is the person's to cut, never a thread's",
+  },
 ];
 
 /** What a caller reads after `wsp --help`: the page it names, or the front page when it names none. */
@@ -2545,6 +2582,7 @@ export interface SharedFlag {
 
 export const SHARED_FLAGS: readonly SharedFlag[] = [
   { name: "state", on: SHARED_WORDS, says: `the state file: this word first, else WSP_HOME's state.json, else ./.wsp/state.json when the current directory is a checkout of wsp, else state.json in the home the running host serves` },
+  { name: "version", on: ["up"], says: "print the version of this wsp and stop; typed alone, it is the whole line" },
   { name: "port", on: ["up"], says: `the port the app and the runtime websocket are served on (default ${DEFAULT_PORT})` },
   { name: "listen", on: ["up"], says: `the address to bind (default ${LOOPBACK}, this computer alone). No page carries the host's token on any address: the desktop attaches by the token file beside the state, the browser wsp init opens is let in by init, and every other browser pairs for a device token of its own` },
   { name: "advertise", on: ["up"], says: "the address a computer being joined dials this host at; without it, the relay's name or what this computer answers on" },
@@ -2558,6 +2596,9 @@ export const SHARED_FLAGS: readonly SharedFlag[] = [
   { name: "ssh-port", on: ["add"], says: "the port ssh dials that computer on (default 22)" },
   { name: "ssh-key", on: ["add"], says: "the key file ssh logs in with; whatever your own ssh config and agent already use without it" },
   { name: "host-key", on: ["add"], says: "the host key of a computer this one has never dialled, as you read it on that computer; without it the add shows you the key that computer answers with and asks, and off a terminal it refuses rather than trusting whatever answers" },
+  { name: "recipe", on: ["add"], says: "the saved recipe a computer added over ssh is set up from once it joins, or with --resume the one it is set up from now; wsp recipes lists them. Without it a computer joins and waits on what goes on it, with the base tools going on meanwhile" },
+  { name: "later", on: ["add"], says: "go on past a sign-in that waits on you and leave it waiting, rather than waiting here for it; wsp add <computer> --resume follows it again, and asks for a fresh page and code only where the last one ran out" },
+  { name: "resume", on: ["add"], says: "the computer named is already added, or joined and waits on what goes on it: set it up, from --recipe where given, else from what it holds, running only what is missing" },
   { name: "update", on: ["add"], says: "the place named is already in this wsp: put the daemon this wsp deploys on it, over the link it is holding or over the ssh road it was added on, restart its agent and keep the workspaces standing on it" },
   { name: "sign-in", on: ["add"], says: "the agent to sign in on the place named, once, outside every workspace on it: the sign-in runs on that computer and every workspace there shares the one login. Offered by the join itself; this is the same road for a computer already in" },
   { name: "yes", on: ["init"], says: "take every default and ask nothing, which a run off a terminal needs; a login with a browser or device sign-in, or one held in the Keychain, is left to the first time you need it on the workspace unless a saved recipe answered copy, so macOS has nothing to ask either and the build waits on nobody" },

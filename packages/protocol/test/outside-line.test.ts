@@ -26,4 +26,13 @@ describe("a moment said outside the app", () => {
     expect(outsideLine({ kind: "plan", label: "Claude Max", alert: { kind: "blocked" } }, { ...loud, notifyNeeds: "off", notifyDone: "off" })).toEqual({ title: "Claude Max reached its plan limit", body: "", show: true, sound: false });
     expect(outsideLine({ kind: "plan", label: "Claude Max", alert: { kind: "blocked" } }, { ...loud, planAlerts: false })).toBeUndefined();
   });
+
+  it("a computer's setup says it failed or needs the person under the needs-you choice, ready under the finished one, and each opens that computer", () => {
+    const open = { computer: "spoo" };
+    expect(outsideLine({ kind: "setupFailed", computer: "spoo", said: "the base tools did not install:\n apt said no" }, DEFAULT_PREFERENCES)).toEqual({ title: "spoo: setup failed", body: "the base tools did not install: apt said no", show: true, sound: true, open });
+    expect(outsideLine({ kind: "setupNeedsYou", computer: "spoo", what: "sign in to Claude Code" }, DEFAULT_PREFERENCES)).toEqual({ title: NEEDS_YOU, body: "spoo needs you: sign in to Claude Code", show: true, sound: true, open });
+    expect(outsideLine({ kind: "setupReady", computer: "spoo" }, DEFAULT_PREFERENCES)).toBeUndefined();
+    expect(outsideLine({ kind: "setupReady", computer: "spoo", missed: "2 folders did not clone" }, loud)).toEqual({ title: "spoo is ready; 2 folders did not clone", body: "", show: true, sound: true, open });
+    expect(outsideLine({ kind: "setupFailed", computer: "spoo", said: "x" }, { ...loud, notifyNeeds: "off" })).toBeUndefined();
+  });
 });

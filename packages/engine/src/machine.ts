@@ -90,7 +90,8 @@ export interface Machine {
    * `idempotencyKey` is the caller saying this command lands the same whether it runs once or twice, which is what
    * lets the road under it send the command again after the road itself broke; a backend that runs commands in
    * process has no such gap and ignores it. `stdin` is bytes for the command's own input, honoured by the computer
-   * you own, whose frame carries them; every other backend has a byte road of its own and ignores them. */
+   * you own and by a workspace on it, whose frames carry them; every other backend has a byte road of its own and
+   * ignores them. */
   exec(cmd: string, opts?: { timeoutMs?: number; idempotencyKey?: string; stdin?: Uint8Array }): Promise<ExecResult>; // always REST path
   /** A command that may run for minutes: started detached on the guest and read until it exits or the deadline
    * kills it; the result is shaped like exec's. */

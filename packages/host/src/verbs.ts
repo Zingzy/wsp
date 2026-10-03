@@ -280,7 +280,15 @@ import {
   placeSpendLimit,
   placeStateOf,
   PlaceSpend,
-  provisionWord,
+  RecipeView,
+  RECIPE_KINDS,
+  type RecipeFile,
+  setupWord,
+  pendingWord,
+  PENDING_STEP_WORDS,
+  PendingComputer,
+  AddLine,
+  PlaceWait,
   spendMeterWord,
   namesPlace,
   noSuchPlaceRefusal,
@@ -355,6 +363,7 @@ import { watchBlock, watchOn, type WatchSignals } from "./watch.js";
 import { RecipeAnswer, RecipeScan, recipePrintout, scanPrintout } from "./recipe-answer.js";
 import { isRecipeTick, runRecipe, runScan, type ScanInput } from "./recipe-command.js";
 import { historyCache, smallRecipePath } from "./recipe-file.js";
+import { addComputer } from "./setup-follow.js";
 
 type Frame = Record<string, unknown> & { id?: string | number | null; ok?: boolean; type?: string };
 
@@ -764,9 +773,11 @@ export const hostPlatform = (): Platform => (platform() === "darwin" ? "darwin" 
  * since nothing about a machine exists there until one is forked. No row is marked default: which computer a
  * workspace lands on is its project's to say. The platform is handed in, since what this computer is called is
  * read where the host runs and not guessed here, and so is the spend, which is a read of its own. */
-export function computerLines(places: readonly PlaceView[], platform: "darwin" | "linux", spend: readonly PlaceSpend[] = []): string[] {
+export function computerLines(places: readonly PlaceView[], platform: "darwin" | "linux", spend: readonly PlaceSpend[] = [], pending: readonly PendingComputer[] = []): string[] {
   if (places.length === 0) return ["This host holds no computer. wsp add prints the join line for a computer you are sitting at."];
   const todayOf = (p: PlaceView): number | undefined => spend.find(s => s.place === p.id)?.todayUsd;
+  // A computer that joined and still waits on its picks reads its add's word on its own row.
+  const addOf = (p: PlaceView): PendingComputer | undefined => pending.find(a => a.placeId === p.id);
   const rows = places.map(p => [
     tableName(p),
     computerKindWord(p, platform),
@@ -779,19 +790,59 @@ export function computerLines(places: readonly PlaceView[], platform: "darwin" |
     p.forks === undefined ? "" : `${p.forks.running} of ${p.forks.running + p.forks.room}`,
     ...capCells(p),
     spendCell(p, todayOf(p)),
-    placeStateOf(p, p.present === false ? absentComputer(p.name, null) : null, todayOf(p)).word,
+    placeStateOf(p, p.present === false ? absentComputer(p.name, null) : null, todayOf(p), addOf(p)).word,
     p.kind === "provider" ? "" : (p.lastSeenAt ?? ""),
     placeDaemonBehind(p) ?? "",
     p.build ?? "",
-    // The recipe on that computer: what is being put on it, then what stands and what failed. Empty on a cloud
-    // and on this computer, which wsp installs nothing on.
-    provisionWord(p.provision),
+    // The setup on that computer: what is being put on it, then what stands and what failed. Empty on a cloud and
+    // on this computer, which wsp installs nothing on.
+    addOf(p) === undefined ? setupWord(p.setup, p.applied) : PENDING_STEP_WORDS[addOf(p)!.step],
     // The agents on that computer, each at the version it answered with and the word for its sign-in. Empty on a
     // cloud account and on this computer, neither of which reports an agent.
     agentsCell(p),
   ]);
-  return table([["COMPUTER", "KIND", "CORES", "MEMORY", "DISK FREE", "ENGINE", "COPIES", "PRESENT", "WORKSPACES", "THREADS", "MACHINES", "SPEND", "STATE", "LAST SEEN", "BEHIND", "IMAGE", "TOOLS", "AGENTS"], ...rows]);
+  // An add that has not reached Set up is a row of its own until it does: its word and how far it got.
+  const waiting = pending.filter(p => p.placeId === undefined || !places.some(r => r.id === p.placeId)).map(p => {
+    const word = pendingWord(p);
+    return [p.name ?? p.address, "pending", "", "", "", "", "", "", "", "", "", "", word.word, "", "", "", word.sentence ?? "", ""];
+  });
+  return table([["COMPUTER", "KIND", "CORES", "MEMORY", "DISK FREE", "ENGINE", "COPIES", "PRESENT", "WORKSPACES", "THREADS", "MACHINES", "SPEND", "STATE", "LAST SEEN", "BEHIND", "IMAGE", "TOOLS", "AGENTS"], ...rows, ...waiting]);
 }
+
+/** wsp recipes: one row per recipe, what it holds and the computers that follow it. */
+export function recipeLines(recipes: readonly RecipeView[]): string[] {
+  if (recipes.length === 0) return ["No recipe is saved yet. The app's Add a computer saves one, and wsp recipes save <name> --from <computer> saves what a computer was set up with."];
+  return table([["RECIPE", "HOLDS", "COMPUTERS"], ...recipes.map(r => [r.name, r.summary, r.machines.join(", ")])]);
+}
+
+/** One row of a recipe as wsp recipes show prints it: the row's name, then what it says beyond its name. */
+function recipeRowWords(kind: (typeof RECIPE_KINDS)[number], file: RecipeFile): string[] {
+  const rows: [string, Record<string, unknown>][] = kind === "configs" ? Object.entries(file.configs).filter((e): e is [string, Record<string, unknown>] => e[1] !== undefined) : Object.entries(file[kind]);
+  return rows.map(([name, row]) => {
+    const said = Object.entries(row).flatMap(([k, v]) => (v === undefined || (Array.isArray(v) && v.length === 0) ? [] : [`${k} ${Array.isArray(v) ? v.join(", ") : String(v)}`]));
+    return said.length === 0 ? name : `${name} (${said.join("; ")})`;
+  });
+}
+
+/** wsp recipes show: the recipe's name and who follows it, every kind it holds with its rows, and its hash. */
+export function recipeShownLines(recipe: RecipeView, hash: string): string[] {
+  return [
+    `${recipe.name}: ${recipe.summary}`,
+    ...RECIPE_KINDS.flatMap(kind => {
+      const rows = recipeRowWords(kind, recipe.file);
+      return rows.length === 0 ? [] : [`  ${kind.padEnd(8)} ${rows.join(", ")}`];
+    }),
+    `  followed by ${recipe.machines.length === 0 ? "no computer" : recipe.machines.join(", ")}`,
+    `  hash     ${hash}`,
+  ];
+}
+
+/** What a save prints: the recipe and the computer that follows it now. */
+export const recipeSavedLine = (recipe: RecipeView): string => `saved ${recipe.name} (${recipe.summary})${recipe.machines.length === 0 ? "" : `, followed by ${recipe.machines.join(", ")}`}`;
+
+/** What a remove prints: the recipe gone and the computers that follow none now. */
+export const recipeRemovedLine = (recipe: RecipeView): string =>
+  `removed ${recipe.name}${recipe.machines.length === 0 ? "" : `; ${recipe.machines.join(", ")} keep what it put there and follow no recipe`}`;
 
 /** A flag that takes one word of a set, or nothing where it was left off. */
 function oneOf<T extends string>(name: string, words: readonly T[], value: string | undefined, on?: string): T | undefined {
@@ -846,9 +897,9 @@ export function usageTableLines(read: { accounts: readonly AccountRow[]; used: U
 }
 
 /** What wsp computers answers: every row, and what each cloud has spent, both read on the road the list is. */
-async function readComputers(client: HostClient): Promise<{ computers: PlaceView[]; spend: PlaceSpend[] }> {
-  const [listed, spent] = await Promise.all([client.request<{ places: PlaceView[] }>("places.list"), client.request<{ places: PlaceSpend[] }>("cost.spend")]);
-  return { computers: listed.places, spend: spent.places };
+async function readComputers(client: HostClient): Promise<{ computers: PlaceView[]; spend: PlaceSpend[]; pending: PendingComputer[] }> {
+  const [listed, spent] = await Promise.all([client.request<{ places: PlaceView[]; pending?: PendingComputer[] }>("places.list"), client.request<{ places: PlaceSpend[] }>("cost.spend")]);
+  return { computers: listed.places, spend: spent.places, pending: listed.pending ?? [] };
 }
 
 /** The settings a reset takes in this process: a cloud's only where a cloud is registered. */
@@ -1057,7 +1108,15 @@ export interface CliOnlyVerb extends Omit<CliVerb, "tool"> {
   hostSide?: string;
 }
 
-export type Verb = CliVerb | ToolOnlyVerb | CliOnlyVerb;
+/** A tool whose command line is one of the shared parse's own commands, which runs that line at the terminal: one
+ * capability on both doors, the line's flags the tool's inputs. */
+export interface CommandToolVerb {
+  name: string;
+  tool: Tool;
+  command: true;
+}
+
+export type Verb = CliVerb | ToolOnlyVerb | CliOnlyVerb | CommandToolVerb;
 
 /** Why a verb's work is on the computer the wsp process runs on rather than on the host it drives: it reads this
  * computer's own package managers, agent history or terminal config. Read by the doors that serve a caller which is
@@ -3681,14 +3740,14 @@ export const ALL_VERBS: readonly Verb[] = [
     run: async ctx => {
       if (ctx.args.length !== 0) throw usageRefusal("wsp computers takes no positional arguments.", usageIs(ctx));
       const read = await readComputers(await ctx.client());
-      ctx.out.emit(read, computerLines(read.computers, hostPlatform(), read.spend).join("\n"));
+      ctx.out.emit(read, computerLines(read.computers, hostPlatform(), read.spend, read.pending).join("\n"));
       return 0;
     },
     tool: tool({
       description:
-        "Every computer this host holds, which is the whole of where work can run: the computer the app runs on<!-- cloud -->, each box joined to it and each cloud account<!-- /cloud --><!-- no cloud --> and each box joined to it<!-- /no cloud -->. A row carries what that computer last reported (cores, memory, free disk, the engine it has for a project's own containers) and whether it is connected right now<!-- cloud -->; a cloud row carries its hourly rate<!-- /cloud -->. Every row carries its cap, threads at once on a computer<!-- cloud --> and machines at once and spend per day on a cloud<!-- /cloud --> (the number the person set, else one thread per 2.5 GB of memory up to its cores<!-- cloud -->, and 3 machines and $10 a day<!-- /cloud -->), and running, the threads running there now on a computer<!-- cloud --> or the machines holding a slot on a cloud<!-- /cloud -->; a row whose running meets its cap is full.<!-- cloud --> spend holds one row per cloud, what it has spent today (since midnight where the host runs) and this month and what it burns an hour now; a cloud whose spend today reaches its spend per day is at its limit and starts no new machine until midnight, while the machines already running there go on.<!-- /cloud --> A row whose copy of the image is building says which stage it is at, and one whose last build stopped says why. A project lives on a computer: on the computer the app runs on its threads run in the project's folder, and on a box<!-- cloud --> or a cloud<!-- /cloud --> they run on a machine forked from the image with the project inside.",
+        "Every computer this host holds, which is the whole of where work can run: the computer the app runs on<!-- cloud -->, each box joined to it and each cloud account<!-- /cloud --><!-- no cloud --> and each box joined to it<!-- /no cloud -->. A row carries what that computer last reported (cores, memory, free disk, the engine it has for a project's own containers) and whether it is connected right now<!-- cloud -->; a cloud row carries its hourly rate<!-- /cloud -->. Every row carries its cap, threads at once on a computer<!-- cloud --> and machines at once and spend per day on a cloud<!-- /cloud --> (the number the person set, else one thread per 2.5 GB of memory up to its cores<!-- cloud -->, and 3 machines and $10 a day<!-- /cloud -->), and running, the threads running there now on a computer<!-- cloud --> or the machines holding a slot on a cloud<!-- /cloud -->; a row whose running meets its cap is full.<!-- cloud --> spend holds one row per cloud, what it has spent today (since midnight where the host runs) and this month and what it burns an hour now; a cloud whose spend today reaches its spend per day is at its limit and starts no new machine until midnight, while the machines already running there go on.<!-- /cloud --> A row whose copy of the image is building says which stage it is at, and one whose last build stopped says why. A project lives on a computer: on the computer the app runs on its threads run in the project's folder, and on a box<!-- cloud --> or a cloud<!-- /cloud --> they run on a machine forked from the image with the project inside. pending holds every add that has not reached Set up: how far it got, what was chosen for it, and why it stopped where one did.",
       input: {},
-      output: { computers: z.array(PlaceView), spend: z.array(PlaceSpend) },
+      output: { computers: z.array(PlaceView), spend: z.array(PlaceSpend), pending: z.array(PendingComputer) },
       call: async (_args, deps) => asJson(await readComputers(await deps.client())),
     }),
   },
@@ -3742,6 +3801,134 @@ export const ALL_VERBS: readonly Verb[] = [
           ...(spawn !== undefined ? { spawn } : {}),
         }, reset ?? []);
         return asJson({ computer });
+      },
+    }),
+  },
+  {
+    name: "add",
+    command: true,
+    tool: tool({
+      description:
+        "Adds a computer of the person's over ssh and sets it up from a saved recipe, as `wsp add <user@host> --recipe <name>` does: address is user@host or an alias from the ssh config, and the host logs in, checks it can run wsp there (root, systemd with cgroup v2, room on the disk), installs wsp, waits for it to dial back, then puts on the base tools and everything the recipe picks. With resume, address names a computer already added, or one that joined and waits on its picks, and sets it up again: from recipe where one is named, else from what it holds, running only what is missing, a sign-in that waited or ran out among it. This tool never waits on the person: it answers at the first sign-in waiting on them (the page and the code are in waiting, to hand over), at the end, or after ten minutes, and is called again with resume for the next of those; with later it does not stop at a sign-in and leaves it waiting. setup is the setup's steps as the computer's row holds them, each with its state and what it took; an install that fails is refused with the step it failed at. A computer this host has never dialled needs host_key, as the person read it off that computer, or the add is refused with the key it answered with. A project, a provider's key and the join code are not added here: projects_add records a project, and the other two belong at the host's own terminal.",
+      input: {
+        address: z.string().describe("user@host, an alias from the ssh config, or with resume a computer already added"),
+        recipe: z.string().optional().describe("the saved recipe to set it up from, as recipes lists it"),
+        later: z.boolean().optional().describe("go on past a sign-in that waits on the person and leave it waiting"),
+        resume: z.boolean().optional().describe("set up a computer already added, or one that joined and waits on its picks"),
+        name: z.string().optional().describe("what to call the computer here; what its address calls it without one"),
+        ssh_port: z.number().int().min(1).max(65535).optional().describe("the port ssh dials it on (default 22)"),
+        ssh_key: z.string().optional().describe("the key file ssh logs in with"),
+        host_key: z.string().optional().describe("the host key of a computer this one has never dialled, as read off that computer"),
+      },
+      output: { computer: PlaceView, setup: z.array(AddLine), waiting: z.array(PlaceWait) },
+      stream: ["setup", "waiting"],
+      call: async ({ address, recipe, later, resume, name, ssh_port: sshPort, ssh_key: keyPath, host_key: hostKey }, deps) =>
+        asJson(
+          await addComputer(await deps.client(), {
+            address,
+            ...(recipe !== undefined ? { recipe } : {}),
+            ...(later !== undefined ? { later } : {}),
+            ...(resume !== undefined ? { resume } : {}),
+            ...(name !== undefined ? { name } : {}),
+            ...(sshPort !== undefined ? { sshPort } : {}),
+            ...(keyPath !== undefined ? { keyPath } : {}),
+            ...(hostKey !== undefined ? { hostKey } : {}),
+          }),
+        ),
+    }),
+  },
+  {
+    name: "recipes",
+    usage: "wsp recipes",
+    about: "your saved recipes: what each puts on a computer in one line, and the computers that follow it",
+    page: "agent",
+    options: {},
+    run: async ctx => {
+      if (ctx.args.length !== 0) throw usageRefusal("wsp recipes takes no positional arguments.", usageIs(ctx));
+      const { recipes } = await (await ctx.client()).request<{ recipes: RecipeView[] }>("recipes.list");
+      ctx.out.emit({ recipes }, recipeLines(recipes).join("\n"));
+      return 0;
+    },
+    tool: tool({
+      description:
+        "Every recipe this host keeps: a named pick of what goes on a computer of the person's (agents and how each signs in, MCP servers per agent, CLIs by the manager they came from, skills, plugins, folders to move over as projects, and the git, shell and GitHub configs), chosen from what the computer the app runs on has. Each carries summary, one line of what it holds, and machines, the computers that follow it: a recipe edit reaches them. A recipe holds names and never a secret; a token reaches a computer only in the environment of a run there.",
+      input: {},
+      output: { recipes: z.array(RecipeView) },
+      call: async (_args, deps) => {
+        const { recipes } = await (await deps.client()).request<{ recipes: RecipeView[] }>("recipes.list");
+        return asJson({ recipes });
+      },
+    }),
+  },
+  {
+    name: "recipes show",
+    usage: "wsp recipes show <name>",
+    about: "one recipe whole: every row it holds by kind, the computers that follow it, and the hash it resolves to on this computer now",
+    page: "agent",
+    options: {},
+    run: async ctx => {
+      const [name, ...rest] = ctx.args;
+      if (name === undefined || rest.length > 0) throw usageRefusal("wsp recipes show takes one recipe.", usageIs(ctx));
+      const shown = await (await ctx.client()).request<{ recipe: RecipeView; hash: string }>("recipes.get", { name });
+      ctx.out.emit({ recipe: shown.recipe, hash: shown.hash }, recipeShownLines(shown.recipe, shown.hash).join("\n"));
+      return 0;
+    },
+    tool: tool({
+      description:
+        "One recipe by its name: file is the recipe as saved, every row by kind (agents with signin vault or machine, mcp with the agents each server goes to, clis with via, the manager it came from, and needs where it builds with the C toolchain, skills with from, the folder it is read from here, plugins, folders with from, name, icon, hue and keep, configs git, shell and github), machines the computers that follow it, and hash what it resolves to on the computer the app runs on now: the versions, the skill folders and the configs read there, which a computer that applied it is held against.",
+      input: { name: z.string().describe("the recipe's name, as recipes lists it") },
+      output: { recipe: RecipeView, hash: z.string() },
+      call: async ({ name }, deps) => {
+        const shown = await (await deps.client()).request<{ recipe: RecipeView; hash: string }>("recipes.get", { name });
+        return asJson({ recipe: shown.recipe, hash: shown.hash });
+      },
+    }),
+  },
+  {
+    name: "recipes save",
+    usage: "wsp recipes save <name> --from <computer>",
+    about: "saves what one of your computers was set up with as a recipe under that name, and that computer follows it from then on",
+    page: "agent",
+    options: { from: { type: "string" } },
+    run: async ctx => {
+      const [name, ...rest] = ctx.args;
+      const from = flag(ctx.flags, "from");
+      if (name === undefined || rest.length > 0 || from === undefined) throw usageRefusal("wsp recipes save takes one name and the computer to save it from.", usageIs(ctx));
+      const { recipe } = await (await ctx.client()).request<{ recipe: RecipeView }>("recipes.save", { name, from });
+      ctx.out.emit({ recipe }, recipeSavedLine(recipe));
+      return 0;
+    },
+    tool: tool({
+      description:
+        "Saves the picks one of the person's computers was set up with as a recipe under name, rewriting a recipe of that name whole, and that computer follows it from then on, so an edit to the recipe reaches it. Refused for a name with no letter or digit in it, for the computer the app runs on, and for a computer set up before picks were kept. The answer is the recipe as saved.",
+      input: { name: z.string().describe("what to call the recipe"), from: z.string().describe("the computer whose picks to save, by the name computers lists") },
+      output: { recipe: RecipeView },
+      call: async ({ name, from }, deps) => {
+        const { recipe } = await (await deps.client()).request<{ recipe: RecipeView }>("recipes.save", { name, from });
+        return asJson({ recipe });
+      },
+    }),
+  },
+  {
+    name: "recipes remove",
+    usage: "wsp recipes remove <name>",
+    about: "takes a recipe away; the computers that followed it keep what they have and follow none",
+    page: "agent",
+    options: {},
+    run: async ctx => {
+      const [name, ...rest] = ctx.args;
+      if (name === undefined || rest.length > 0) throw usageRefusal("wsp recipes remove takes one recipe.", usageIs(ctx));
+      const { recipe } = await (await ctx.client()).request<{ recipe: RecipeView }>("recipes.remove", { name });
+      ctx.out.emit({ recipe }, recipeRemovedLine(recipe));
+      return 0;
+    },
+    tool: tool({
+      description: "Takes a recipe's file away. The computers that followed it keep everything it put there and follow none from then on, so nothing reaches them from it again. The answer is the recipe as it stood, machines naming the computers it was taken off.",
+      input: { name: z.string().describe("the recipe's name, as recipes lists it") },
+      output: { recipe: RecipeView },
+      call: async ({ name }, deps) => {
+        const { recipe } = await (await deps.client()).request<{ recipe: RecipeView }>("recipes.remove", { name });
+        return asJson({ recipe });
       },
     }),
   },
@@ -5880,6 +6067,7 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   "run cwd": "a folder inside the project or one of its worktrees, absolute, to start the thread in; the project's folder without it",
   "worktree remove force": "remove it over files no commit holds, which go with it",
   "export from": "the folder on the machine to bring home; the project registered for the folder you named without it",
+  "recipes save from": "the computer whose picks the recipe is saved from, by the name wsp computers shows; it follows the recipe from then on",
   force: "build again even where the place already holds this version",
   hidden: "list the folders whose names start with a dot too",
   "usage range": "the days what was used is read over: day (today, the default), week (the last seven) or month (the last thirty); the accounts' limits are the same whatever it says",

@@ -172,6 +172,17 @@ describe("a machine over a link", () => {
     expect(l.sent.at(-1)).toMatchObject({ op: "machine.exec", params: { machineId: "c1", cmd: "echo hi", timeoutMs: 1000 }, timeoutMs: 1000 + LINK_MARGIN_MS });
   });
 
+  it("sends an exec's input as base64 beside the command, never inside it, and no field at all without one", async () => {
+    const { l, backend } = await withMachine(() => ({ result: { exitCode: 0, stdout: "", stderr: "" } }));
+    const machine = await backend.create({ kind: "sandbox" });
+    await machine.exec("read -r v", { stdin: Buffer.from("GH_TOKEN=ghp_secret\0") });
+    const sent = l.sent.at(-1)!.params;
+    expect(Buffer.from(String(sent["stdin"]), "base64").toString()).toBe("GH_TOKEN=ghp_secret\0");
+    expect(String(sent["cmd"])).not.toContain("ghp_secret");
+    await machine.exec("true");
+    expect(l.sent.at(-1)!.params).not.toHaveProperty("stdin");
+  });
+
   it("runs a script over exec frames and sends no run frame of its own", async () => {
     const { l, backend } = await withMachine(sent => ({
       result: { exitCode: 0, stdout: String(sent.params["cmd"]).includes("WSP_LAUNCHED") ? "WSP_LAUNCHED" : "0", stderr: "" },

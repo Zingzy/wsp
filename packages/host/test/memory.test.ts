@@ -55,7 +55,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { createRuntime, jsonFileStore } from ${JSON.stringify(distOf("runtime"))};
-import { startHost, localWiring, stateWriterHere } from ${JSON.stringify(DIST)};
+import { recipeShelf, startHost, localWiring, stateWriterHere } from ${JSON.stringify(DIST)};
 import { fakeCopier, NoProviderBackend } from ${JSON.stringify(distOf("engine"))};
 import { DAEMON_VERSION } from ${JSON.stringify(distOf("protocol"))};
 
@@ -95,10 +95,11 @@ const scripted = () => ({
 // measured is the host's own bookkeeping.
 const copier = fakeCopier();
 const daemon = async () => ({ version: DAEMON_VERSION, road: { url: "http://127.0.0.1:1", expiresAt: Number.MAX_SAFE_INTEGER, daemonToken: "t" }, sysSamples: async () => () => {}, close: async () => {} });
+const store = jsonFileStore(statePath, stateWriterHere());
 const runtime = createRuntime({
   backend: new NoProviderBackend(),
   local: localWiring(home, undefined, daemon, statePath, copier),
-  store: jsonFileStore(statePath, stateWriterHere()),
+  store,
   adapters: { claude: scripted },
 });
 const host = await startHost({ runtime, webDir, port: 0, statePath });
@@ -119,6 +120,21 @@ const threads = [];
 for (let t = 0; t < ${THREADS}; t++) threads.push(await turn(workspace, undefined));
 for (let n = 1; n < ${TURNS_PER_THREAD}; n++) for (const { at, thread } of threads) await turn(at, thread);
 await turn(worktree, undefined);
+
+// A recipe saved and listed, and a computer that joined and waits on its picks, as an add from the app leaves one.
+const picks = {
+  name: "laptop",
+  agents: { claude: { signin: "vault" }, codex: { signin: "machine" } },
+  mcp: { linear: { agents: ["claude", "codex"] } },
+  clis: Object.fromEntries(["gh", "jq", "ripgrep", "fd", "bat"].map(name => [name, { via: "brew" }])),
+  skills: Object.fromEntries(Array.from({ length: 20 }, (_, i) => [\`skill-\${i}\`, { from: "~/.claude/skills" }])),
+  folders: { repo: { from: "~/repo", keep: [] } },
+  configs: { git: {}, shell: {}, github: { signin: "vault" } },
+};
+const shelf = recipeShelf({ statePath, home });
+await shelf.save(picks);
+await shelf.list();
+await store.put("pending-computers", "a_mem", { id: "a_mem", address: "root@10.0.0.9", step: "choosing", choices: picks, recipe: "laptop", startedAt: new Date().toISOString(), placeId: "p_mem" });
 
 // The host writes its index and its transcripts behind a queue. What it holds is only known once it has been left
 // alone the way an idle minute leaves it, so this reads until a collection frees nothing more: the drain falls from
