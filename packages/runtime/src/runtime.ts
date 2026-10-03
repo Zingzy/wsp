@@ -717,7 +717,8 @@ export interface RecipeShelf {
   /** Writes the recipe whole; refused for a name that makes no file name and for anything shaped like a secret. */
   save(file: unknown): Promise<{ slug: string; file: RecipeFile }>;
   remove(word: string): Promise<{ slug: string; file: RecipeFile }>;
-  options(): Promise<RecipeOptions>;
+  /** What a recipe can pick from on this computer, `folders` this computer's own projects to offer with their facts. */
+  options(folders?: readonly { name: string; path: string }[]): Promise<RecipeOptions>;
   /** One recipe by its slug as this computer has it now: what it holds for each row, and the hash a computer that
    * follows it is held against. */
   resolve(slug: string): Promise<{ file: RecipeFile; items: Record<string, string>; hash: string }>;
@@ -3242,7 +3243,20 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           return runningOnPlace(placeId, rows, standing, foldThreads([...sessions.values()].map(s => s.view)));
         },
         // The app's own sign-in road on that computer, read as a setup's row waiting on the person.
-        signIn: async (placeId, agent, emit) => agentsRead.signIn({ placeId }, { agent }, emit),
+        signIn: async (placeId, agent, emit) => {
+          const handle = await agentsRead.signIn({ placeId }, { agent }, emit);
+          return {
+            leave: () => handle.leave(),
+            stop: () => {
+              // A sign-in that already ended has nothing left to stop.
+              try {
+                agentsRead.signInStop(handle.signInId);
+              } catch {
+                return;
+              }
+            },
+          };
+        },
         // The add's own road for a folder seeding a project on that computer, with what the pick keeps.
         addFolder: async (placeId, key, folder) => {
           const source = folder.from.replace(/^~(?=\/|$)/, homedir());

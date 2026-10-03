@@ -72,6 +72,9 @@ import {
   noVaultTokenLine,
   GITHUB_SKIPPED_LINE,
   NEEDS_GITHUB_LINE,
+  SETUP_LOG_TAIL_BYTES,
+  SKIPPED_FOR_NOW,
+  nothingToSkipLine,
   UNLAND_FAILED_LINE,
   editedThereLine,
   setupWidth,
@@ -92,6 +95,7 @@ import {
   type PlaceSyncEvent,
   type PlaceSetupStep,
   type PlaceWait,
+  type PlaceEstimate,
   type RecipeKind,
   type SetupEnd,
   sshRoadOf,
@@ -136,7 +140,7 @@ import {
   linkedOver,
   type PlaceProveRequest,
   macKindOf,
-  ownerRepoOf,
+  githubAddress,
   shellQuote,
 } from "@wsp/protocol";
 import { GITHUB_TOKEN_ENV, LinkBackend, unlandFiles, PlaceAbsentError, PlaceMachine, SSH_STORE_VARS, envInput, keyFingerprint, machineServerPort, newSetupRun, pathLine, plainPath, putFiles, serversOutLines, unmergeServers, withEnvFromInput, type EngineStep, type ExecResult, type Machine, type MachineBackend, type MachineLink, type ProvisionPlan, type ProvisionStage, type SetupRun } from "@wsp/engine";
@@ -294,6 +298,9 @@ export interface PlaceProvisioner {
   /** What taking rows out of a computer's picks runs there, planned off the picks as they were. Absent, a row taken
    * out of a recipe stays where it is. */
   undo?(before: RecipeFile, removed: readonly { kind: RecipeKind; name: string }[], on: { home: string }): Promise<PlaceUndo[]>;
+  /** What some picks weigh on a box with the room it needs past them, read on this computer, and how many rows
+   * nobody measured. */
+  estimate?(picks: RecipeFile): Promise<{ bytes: number; unmeasured: number }>;
 }
 
 /** Taking one row off a computer: the line its road takes it off by, the destinations its files landed at, or the
@@ -424,7 +431,7 @@ export interface PlaceRecording {
   runningOn(placeId: string, places: readonly Pick<PlaceView, "id" | "kind">[]): Promise<number>;
   /** Signs an agent in on that computer through the sign-in relay, as the app's own sign-in does: every step it
    * reaches, the page and the code among them, goes to `emit`. Absent, a machine sign-in fails its row. */
-  signIn?(placeId: string, agent: string, emit: (e: AgentsSignInEvent) => void): Promise<{ leave(): void }>;
+  signIn?(placeId: string, agent: string, emit: (e: AgentsSignInEvent) => void): Promise<{ leave(): void; stop?(): void }>;
   /** Records one folder of this computer's as a project on that computer, seeded with what its pick keeps, by the
    * add's own road. Answers the folder's row. Absent, a folder fails its row. */
   addFolder?(placeId: string, key: string, folder: RecipeFile["folders"][string]): Promise<PlaceProvisionRow>;
@@ -623,6 +630,16 @@ export interface PlaceDoor {
   recipeChanged(slug: string, afterMs?: number): Promise<string[]>;
   /** The computers that follow each saved recipe, by slug, by name. */
   followers(): Promise<Map<string, string[]>>;
+  /** Skip for now on one row of a computer's setup: a sign-in that waits is stopped and its row reads skipped, and a
+   * row that failed is set aside the same way, so the computer reads Ready and Settings finishes either later. Answers
+   * its row. Refused for a row that neither waits nor failed. */
+  skip(placeId: string, row: string): Promise<PlaceView>;
+  /** The end of a computer's setup log, read off that computer over its link: a step's own lines where one is named.
+   * Refused with the absent sentence where the computer is not linked. */
+  setupLog(placeId: string, step?: PlaceSetupStep): Promise<string[]>;
+  /** What some picks weigh against a computer's room before Set up; `ref` as setUp takes it. Refused on a runtime
+   * whose provisioner weighs nothing. */
+  estimate(ref: string, choices: RecipeFile): Promise<PlaceEstimate>;
   /** Takes every computer off one recipe, so each follows none; answers their names. */
   unfollow(slug: string): Promise<string[]>;
   /** What a computer was set up with; nothing for one set up before picks were kept. */
@@ -916,6 +933,21 @@ interface SyncJob {
   state: PlaceSync;
 }
 
+/** How a setup came out, from its waits and its rows: Needs you while a wait stands or a folder or the GitHub sign-in
+ * failed, else ready, with how many rows did not install. */
+function setupOutcome(setup: Pick<PlaceSetup, "waiting">, applied: PlaceApplied | undefined): { end: SetupEnd; said?: string } {
+  const important = importantFailures(applied);
+  const said = [...setup.waiting.map(waitLine), ...important.map(r => `${r.label}: ${r.note ?? "failed"}`)];
+  const missed = (applied?.rows ?? []).filter(r => r.outcome === "failed").length;
+  return said.length > 0 ? { end: "needs-you", said: said.join("; ") } : { end: "ready", ...(missed > 0 ? { said: `${plural(missed, "row")} did not install` } : {}) };
+}
+
+/** The refusal an estimate gets on a runtime whose provisioner weighs nothing. */
+const NO_ESTIMATE_LINE = "this runtime weighs no picks; the host that serves the app wires the reader";
+
+/** How long the read of the end of a setup's log gets on that computer. */
+const LOG_READ_MS = 10_000;
+
 /** How long one row's own removal gets on that computer. */
 const UNDO_MS = 300_000;
 
@@ -932,13 +964,6 @@ const INSTALLS = "installs";
 const FILES = "files";
 /** How long the anonymous read of a folder's repository gets on that computer. */
 const PROBE_MS = 30_000;
-
-/** The https address of a repository on GitHub, which an anonymous read can ask; nothing for any other host. */
-const githubAddress = (remote: string): string | undefined => {
-  if (!/(^|[@/])github\.com[:/]/.test(remote)) return undefined;
-  const repo = ownerRepoOf(remote);
-  return repo === undefined ? undefined : `https://github.com/${repo}.git`;
-};
 
 const firstLineOf = (e: unknown): string => (e instanceof Error ? e.message : String(e)).split("\n")[0]!;
 
@@ -1260,6 +1285,9 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
   /** The sign-ins a setup is following on a computer, by `<place id>/<agent>`: what a later run that takes one over
    * quiets at once and lets go of once it follows the sign-in itself. */
   const signingIn = new Map<string, { mute(): void; leave(): void }>();
+  /** What a skip of a row a running setup is waiting on does, by `<place id>/<row>`: lands it skipped and stops what
+   * waited. */
+  const skippers = new Map<string, () => Promise<void>>();
 
   /** The sentence a fork there, or a second setup, is refused with while a setup stands running on that computer:
    * one this host is driving, or one a stopped host left, which resumes when that computer dials back. The one
@@ -1360,22 +1388,18 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       else running.delete(l.step);
       // A sync's steps are not the setup's: the setup stands as it ended, and the sync's own frames carry its lines.
       push(sync !== undefined ? { ...held } : { ...held, steps: held.steps.some(s => s.step === l.step) ? held.steps.map(s => (s.step === l.step ? l : s)) : [...held.steps, l] });
-      log.write(`${SETUP_STEP_WORDS[l.step]}: ${l.state}${l.note === undefined ? "" : ` (${l.note})`}`);
+      log.write(`[${l.step}] ${SETUP_STEP_WORDS[l.step]}: ${l.state}${l.note === undefined ? "" : ` (${l.note})`}`);
       if (sync !== undefined) syncFrame({ placeId, sync: sync.state, line: l });
       else setupFrame({ addId, placeId, line: l, running: [...running] });
     };
     const stage: ProvisionStage = detail => log.write(detail);
+    /** Each step's lines carry the step, so its own output reads back off the log there. */
+    const stageOf = (s: PlaceSetupStep): ProvisionStage => detail => log.write(`[${s}] ${detail}`);
     const vault = (): Readonly<Record<string, string>> => opts.vault?.() ?? {};
 
     /** How a setup came out, said once its steps ended and again when the last sign-in waiting on the person lands:
      * ready, or Needs you while a wait stands or a folder or the GitHub sign-in failed. */
-    const outcome = (): { end: SetupEnd; said?: string } => {
-      const important = importantFailures(applied());
-      const waits = held.waiting.map(waitLine);
-      const said = [...waits, ...important.map(r => `${r.label}: ${r.note ?? "failed"}`)];
-      const missed = rows.filter(r => r.outcome === "failed").length;
-      return said.length > 0 ? { end: "needs-you", said: said.join("; ") } : { end: "ready", ...(missed > 0 ? { said: `${plural(missed, "row")} did not install` } : {}) };
-    };
+    const outcome = (): { end: SetupEnd; said?: string } => setupOutcome(held, applied());
 
     /** One step: marked running, run, its rows kept with the step on each, and marked done or failed with what it
      * took. A step that throws is one failed row, unless the computer stopped answering, which the job waits out. */
@@ -1416,6 +1440,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         if (w !== undefined) setupFrame({ addId, placeId, wait: w });
       };
       const landed = (r: PlaceProvisionRow): void => {
+        skippers.delete(`${placeId}/${row}`);
         held = { ...held, waiting: held.waiting.filter(x => x.row !== row) };
         landRow({ ...r, step: rowStep });
         settled?.(r.outcome === "installed");
@@ -1433,6 +1458,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       before?.mute();
       let gone = false;
       let leave: (() => void) | undefined;
+      let stop: (() => void) | undefined;
       const mine = {
         mute: () => void (gone = true),
         leave: () => {
@@ -1441,6 +1467,16 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         },
       };
       signingIn.set(key, mine);
+      // Skip for now: the row reads skipped, nothing more of this login is heard, and the login there stops.
+      skippers.set(`${placeId}/${row}`, async () => {
+        if (gone) return;
+        gone = true;
+        stop?.();
+        leave?.();
+        if (signingIn.get(key) === mine) signingIn.delete(key);
+        landed({ id: row, label, outcome: "skipped", note: SKIPPED_FOR_NOW });
+        await writing;
+      });
       void signIn(placeId, ask, e => {
         if (gone) return;
         if (e.state !== "waiting" && e.state !== "running" && signingIn.get(key) === mine) signingIn.delete(key);
@@ -1459,6 +1495,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       }).then(
         handle => {
           leave = () => handle.leave();
+          stop = () => handle.stop?.();
           before?.leave();
           if (gone) handle.leave();
         },
@@ -1506,7 +1543,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         githubSettled(false);
         return [{ id: GITHUB_ROW, label: "GitHub", outcome: "skipped", note: GITHUB_SKIPPED_LINE }];
       }
-      const gh = await provisioner.step(machine, plan, "github", run, stage, { home });
+      const gh = await provisioner.step(machine, plan, "github", run, stageOf("github"), { home });
       if (gh.some(r => r.outcome === "failed")) {
         githubSettled(false);
         return gh;
@@ -1621,7 +1658,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       const planned = await provisioner.setup(picks, { home }, sync?.steps);
       // A sync puts on only the plugins it added; the rest are there, and their install would run again.
       const plan = sync === undefined || planned.plugins === undefined ? planned : { ...planned, plugins: planned.plugins.filter(p => sync.moved.has(p.id)) };
-      const engine = (s: EngineStep) => () => provisioner.step(machine, plan, s, run, stage, { home });
+      const engine = (s: EngineStep) => () => provisioner.step(machine, plan, s, run, stageOf(s), { home });
       const floor = await step("floor", engine("floor"));
       if (floor?.failed === true) return await end(floorFailedLine(floor.rows));
       let stopped: string | undefined;
@@ -2923,6 +2960,51 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       const out = new Map<string, string[]>();
       for (const r of await records()) if (r.recipe !== undefined && r.recipe !== NO_RECIPE) (out.get(r.recipe) ?? out.set(r.recipe, []).get(r.recipe)!).push(r.name);
       return out;
+    },
+
+    async skip(placeId, row) {
+      const held = await recordOf(placeId);
+      if (held === undefined) throw usageRefusal(noSuchPlaceRefusal(placeId, (await records()).map(r => r.name)), "Run wsp computers to read the ones this host holds.");
+      const live = skippers.get(`${placeId}/${row}`);
+      if (live !== undefined) {
+        await live();
+      } else {
+        const waits = held.setup?.waiting.some(w => w.row === row) === true;
+        const failed = held.applied?.rows.find(r => r.id === row && r.outcome === "failed");
+        if (!waits && failed === undefined) throw usageRefusal(nothingToSkipLine(row, held.name), "Skip a row the computer's page shows waiting or failed.");
+        const step = failed?.step ?? held.applied?.rows.find(r => r.id === row)?.step;
+        const rows = [...(held.applied?.rows ?? []).filter(r => r.id !== row), { id: row, label: failed?.label ?? held.setup?.waiting.find(w => w.row === row)?.label ?? row, outcome: "skipped" as const, note: SKIPPED_FOR_NOW, ...(step !== undefined ? { step } : {}) }];
+        await writeSetup(placeId, {
+          ...(held.setup !== undefined ? { setup: { ...held.setup, waiting: held.setup.waiting.filter(w => w.row !== row) } } : {}),
+          applied: { ...(held.applied ?? { hash: "", at: new Date(clockNow()).toISOString() }), rows },
+        });
+        const now = await recordOf(placeId);
+        if (now?.setup !== undefined && now.setup.state !== "running") setupFrame({ addId: now.setup.addId, placeId, ...setupOutcome(now.setup, now.applied) });
+      }
+      return viewOf((await recordOf(placeId))!, await defaultId());
+    },
+
+    async estimate(ref, choices) {
+      const weigh = wiring.provision?.estimate;
+      if (weigh === undefined) throw new Error(NO_ESTIMATE_LINE);
+      const pend = (await pendingRecords()).find(p => p.id === ref || p.address === ref || p.name === ref || p.placeId === ref);
+      const placeId = pend?.placeId ?? (await records()).find(r => r.id === ref || r.name === ref)?.id;
+      const free = placeId === undefined ? undefined : (await recordOf(placeId))?.report.diskFreeBytes;
+      const sized = await weigh(choices);
+      return { neededBytes: sized.bytes, unmeasured: sized.unmeasured, ...(free !== undefined ? { freeBytes: free } : {}) };
+    },
+
+    async setupLog(placeId, step) {
+      const held = await recordOf(placeId);
+      if (held === undefined) throw usageRefusal(noSuchPlaceRefusal(placeId, (await records()).map(r => r.name)), "Run wsp computers to read the ones this host holds.");
+      const home = held.report.login["HOME"];
+      if (home === undefined) return [];
+      const machine = new PlaceMachine(linkTo(placeId), { id: held.name, home });
+      const read = await machine.exec(`tail -c ${SETUP_LOG_TAIL_BYTES} ${shellQuote(placeProvisionPaths(home).log)} 2>/dev/null`, { timeoutMs: LOG_READ_MS });
+      const lines = read.stdout.split("\n").filter(line => line !== "");
+      // A read that filled its bytes started in the middle of a line, which is no line of the log.
+      const whole = Buffer.byteLength(read.stdout) >= SETUP_LOG_TAIL_BYTES ? lines.slice(1) : lines;
+      return step === undefined ? whole : whole.filter(line => line.includes(` [${step}] `));
     },
 
     async unfollow(slug) {

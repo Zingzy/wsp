@@ -995,6 +995,30 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, place: await places().follow(msg.placeId, slug) });
               return;
             }
+            case "places.skip": {
+              if (!ownRoad()) {
+                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
+                return;
+              }
+              send({ id: msg.id, ok: true, place: await places().skip(msg.placeId, msg.row) });
+              return;
+            }
+            case "places.estimate": {
+              if (!ownRoad()) {
+                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
+                return;
+              }
+              send({ id: msg.id, ok: true, estimate: await places().estimate(msg.ref, msg.choices) });
+              return;
+            }
+            case "places.setupLog": {
+              if (!ownRoad()) {
+                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
+                return;
+              }
+              send({ id: msg.id, ok: true, lines: await places().setupLog(msg.placeId, msg.step) });
+              return;
+            }
             case "places.loginLanded": {
               if (!ownRoad()) {
                 send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
@@ -1152,7 +1176,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 if (rt.places !== undefined) await rt.places.unfollow(held.slug);
                 send({ id: msg.id, ok: true, recipe: recipeView(held, by) });
               } else {
-                send({ id: msg.id, ok: true, options: await recipes().options() });
+                // This computer's own projects are the folders a box can take.
+                const here = (await rt.projects.list()).filter(p => p.computer === HERE_PLACE_ID).map(p => ({ name: p.name, path: p.path }));
+                send({ id: msg.id, ok: true, options: await recipes().options(here) });
               }
               return;
             }

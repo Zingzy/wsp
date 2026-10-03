@@ -124,13 +124,19 @@ export type RecipeView = z.infer<typeof RecipeView>;
 /** What a recipe can pick from on this computer: every row a computer of the person's can take, Mac-only things
  * left out. A CLI that builds from source names the C toolchain under `needs`. */
 export interface RecipeOptions {
-  agents: { id: string; name: string; signins: RecipeSignIn[] }[];
+  /** `kind` is how the agent's own sign-in works (a token minted here, a key, a browser page, a device code), and
+   * `bytes` what it weighs on a box where a build measured it. */
+  agents: { id: string; name: string; signins: RecipeSignIn[]; kind?: string; bytes?: number }[];
   mcp: { name: string; agents: string[] }[];
-  clis: { name: string; via: string; version?: string; needs?: string[] }[];
+  clis: { name: string; via: string; version?: string; needs?: string[]; bytes?: number }[];
   skills: { name: string; from: string; linked: boolean }[];
   plugins: { name: string }[];
   /** The GitHub row carries the sign-in words it can take here: the vault only where this computer holds a gh login. */
   configs: { id: "git" | "shell" | "github"; label: string; signins?: GitHubSignIn[] }[];
+  /** This computer's own projects, each a folder a box can take: what its history and kept files weigh, the commits
+   * no remote holds, and whether GitHub refuses an anonymous read of it, which is a repository that needs GitHub
+   * signed in there to clone. */
+  folders?: { name: string; path: string; remote?: string; private?: boolean; unpushed?: number; bytes?: number }[];
 }
 
 /** The refusal a recipe whose name makes no file name gets. */

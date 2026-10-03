@@ -3067,7 +3067,7 @@ export type ForwardEvent = z.infer<typeof ForwardOpenEvent> | z.infer<typeof For
 /** What a computer joining this host passes through when the host installs the agent on it over ssh, in order.
  * One list for the line a terminal prints and the rows the app draws, so neither invents a step the other has not
  * got. */
-export const PlaceAddStep = z.enum(["connect", "host-key", "check", "reach", "wsp", "service", "join"]);
+export const PlaceAddStep = z.enum(["connect", "host-key", "check", "chip", "root", "system", "disk", "reach", "wsp", "service", "join"]);
 export type PlaceAddStep = z.infer<typeof PlaceAddStep>;
 
 /** What each step reads as while it runs. The note beside it carries what the computer answered (its system, the
@@ -3076,6 +3076,10 @@ export const PLACE_ADD_WORDS: Record<PlaceAddStep, string> = {
   connect: "connecting over ssh",
   "host-key": `remembering the box's host key in ${KNOWN_HOSTS}`,
   check: "checking it can run wsp",
+  chip: "reading its chip and system",
+  root: "checking it logs in as root",
+  system: "checking for systemd and cgroup v2",
+  disk: "checking it has room for the base tools",
   reach: "checking it can reach this computer",
   wsp: "installing wsp",
   service: "starting the agent",
@@ -5588,6 +5592,20 @@ export const noVaultTokenLine = (agent: string): string => `this computer's vaul
 export const editedThereLine = (name: string, kept: readonly string[]): string => `${nameList(kept)} ${kept.length === 1 ? "was" : "were"} edited on ${name}, so ${kept.length === 1 ? "it stays" : "they stay"} and wsp no longer manages ${kept.length === 1 ? "it" : "them"}`;
 export const UNLAND_FAILED_LINE = "its files could not be taken off there; wsp remove takes them";
 
+/** What a computer's picks weigh against the room it has, before Set up: the bytes the picks and the room past them
+ * need, the bytes free there as it last said, and how many picked rows nobody measured. */
+export const PlaceEstimate = z.object({ neededBytes: z.number().int().nonnegative(), freeBytes: z.number().int().nonnegative().optional(), unmeasured: z.number().int().nonnegative() });
+export type PlaceEstimate = z.infer<typeof PlaceEstimate>;
+
+/** How much of the end of a computer's setup log one read takes: a step's output for the running view, never the
+ * whole log of a long job. */
+export const SETUP_LOG_TAIL_BYTES = 64 * 1024;
+
+/** What a row the person set aside with Skip for now says: nothing of it waits, and Settings finishes it. */
+export const SKIPPED_FOR_NOW = "skipped for now; finish it from the computer's page in Settings";
+/** The refusal a skip naming no row that waits or failed gets. */
+export const nothingToSkipLine = (row: string, name: string): string => `nothing waits or failed under ${row} on ${name}`;
+
 /** What the GitHub row says where the person skipped it, and a folder whose repository needs it to clone. */
 export const GITHUB_SKIPPED_LINE = "skipped; gh is not signed in there";
 export const NEEDS_GITHUB_LINE = "private; needs GitHub to clone";
@@ -6432,6 +6450,15 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** The saved recipe one computer follows from now, by its name or slug, or `none`: one it follows syncs to it, and
    * one that follows none keeps what it has. Answers `{ place: PlaceView }`. The person's own road only. */
   z.object({ id: reqId, op: z.literal("places.follow"), placeId: z.string(), recipe: z.string().min(1).max(200) }),
+  /** Skip for now on one row of a computer's setup: a sign-in that waits stops and the row reads skipped, and a row
+   * that failed is set aside the same way; Settings finishes either later. Answers `{ place: PlaceView }`. */
+  z.object({ id: reqId, op: z.literal("places.skip"), placeId: z.string(), row: z.string().min(1).max(300) }),
+  /** The end of a computer's setup log, read off that computer: its last SETUP_LOG_TAIL_BYTES, a step's own lines
+   * where one is named. Answers `{ lines: string[] }`. */
+  z.object({ id: reqId, op: z.literal("places.setupLog"), placeId: z.string(), step: PlaceSetupStep.optional() }),
+  /** What some picks weigh against a computer's room before Set up: `ref` a computer or a pending add, as setup takes
+   * it. Answers `{ estimate: PlaceEstimate }`. */
+  z.object({ id: reqId, op: z.literal("places.estimate"), ref: z.string().max(200), choices: z.lazy(() => RecipeFile) }),
   /** A sign-in run at a terminal on one computer landed, as the tool's own status there said: the host notes the
    * file that agent's shared login writes, as the app's own sign-in does, so the listing says signed in before
    * that computer next reports. Answers `{}`. The person's own road only, as every other place op is. */

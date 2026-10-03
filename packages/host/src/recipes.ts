@@ -13,7 +13,7 @@ import { writeOwn } from "@wsp/own-file";
 import { issuesLine, noSuchRecipeRefusal, RECIPE_NAME_REFUSAL, RecipeFile, recipeCanon, recipeSlug, toolRowId, type RecipeOptions, type ResolvedRecipe } from "@wsp/protocol";
 import type { RecipeShelf } from "@wsp/runtime";
 import { CONFIG_PATHS, configDigest, configTexts, type ConfigFiles } from "./recipe-configs.js";
-import { readRecipeOptions } from "./recipe-options.js";
+import { folderOptions, readRecipeOptions } from "./recipe-options.js";
 import { folderFiles } from "./folder-files.js";
 import { tokenShaped } from "./token-shapes.js";
 
@@ -244,7 +244,10 @@ export function recipeShelf(o: { statePath: string; home: string; options?: () =
     },
     save: file => writeRecipe(o.statePath, file),
     remove: word => deleteRecipe(o.statePath, word),
-    options: o.options ?? (() => readRecipeOptions(nodeHost())),
+    options: async folders => {
+      const read = await (o.options ?? (() => readRecipeOptions(nodeHost())))();
+      return folders === undefined || folders.length === 0 ? read : { ...read, folders: await folderOptions(folders) };
+    },
     resolve: async slug => {
       const held = await readRecipe(o.statePath, slug);
       const resolved = await resolveRecipe(held.file, reading);

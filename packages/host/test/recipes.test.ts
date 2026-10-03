@@ -12,7 +12,9 @@ import { NO_RECIPE, RecipeFile, type PlaceReport } from "@wsp/protocol";
 import { createRuntime, memoryStore, newPlaceKeyPair, serveRuntime, type Runtime, type RuntimeServer } from "@wsp/runtime";
 import { WsClient } from "../../runtime/test/ws-client.js";
 import { gitCut, configTexts } from "../src/recipe-configs.js";
-import { recipeOptions } from "../src/recipe-options.js";
+import { folderOptions, recipeOptions } from "../src/recipe-options.js";
+import { catalogEntry, sizeBytes } from "@wsp/catalog";
+import { execFileSync } from "node:child_process";
 import { keptTools, readRecipe, readRecipes, recipeHash, recipeShelf, recipesDir, resolveRecipe, TOOLS_KEPT_MS, writeRecipe, type RecipeReading } from "../src/recipes.js";
 import { stubBackend } from "./stub-backend.js";
 
@@ -314,6 +316,32 @@ describe("what a recipe picks from", () => {
     expect(options.skills).toEqual([{ name: "unslop", from: "~/.claude/skills", linked: true }]);
     expect(options.plugins).toEqual([{ name: "frontend-design@claude-plugins-official" }]);
     expect(options.configs.map(c => c.id)).toEqual(["git", "github"]);
+  });
+
+  it("says what each CLI and agent weighs where the catalog measured it, and how each agent signs in", async () => {
+    const options = recipeOptions(await collect(laptop()), { skills: [], plugins: [], configs: [], github: false });
+    expect(options.clis.find(c => c.name === "a2ps")?.bytes).toBeUndefined();
+    const manifest = { entries: [{ rung: "agents" as const, id: "agents/claude", label: "Claude Code", paths: [], bytes: 0, default: "bring" as const }, { rung: "tools" as const, id: "tools/brew/gh", label: "gh", paths: [], bytes: 0, default: "bring" as const }] };
+    const read = recipeOptions(manifest, { skills: [], plugins: [], configs: [], github: false });
+    expect(read.clis.find(c => c.name === "gh")?.bytes).toBe(sizeBytes(catalogEntry("gh")!.size));
+    expect(read.agents.find(a => a.id === "claude")).toMatchObject({ bytes: sizeBytes(catalogEntry("claude")!.size), kind: catalogEntry("claude")!.signIn.kind });
+  });
+
+  it("offers this computer's own projects as folders with what each weighs, how far it is ahead of its remote, and whether GitHub keeps it private", async () => {
+    const repo = join(dir, "app");
+    mkdirSync(repo, { recursive: true });
+    const git = (...args: string[]) => execFileSync("git", ["-C", repo, ...args], { env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@example.com", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@example.com" } });
+    git("init", "-q", "-b", "main");
+    git("commit", "-q", "--allow-empty", "-m", "one");
+    git("remote", "add", "origin", "git@github.com:acme/private.git");
+    const asked: string[] = [];
+    const folders = await folderOptions([{ name: "app", path: repo }], async url => (asked.push(url), false));
+    expect(asked).toEqual(["https://github.com/acme/private.git"]);
+    expect(folders).toEqual([{ name: "app", path: repo, remote: "git@github.com:acme/private.git", private: true, unpushed: 1, bytes: expect.any(Number) }]);
+    expect(folders[0]!.bytes).toBeGreaterThan(0);
+    // A folder with no remote is asked of no one and has every commit to carry.
+    git("remote", "remove", "origin");
+    expect(await folderOptions([{ name: "app", path: repo }], async () => true)).toEqual([{ name: "app", path: repo, unpushed: 1, bytes: expect.any(Number) }]);
   });
 
   it("offers GitHub on its own with how it can sign in: the vault only where this computer holds gh's login, else on the box or skipped", () => {

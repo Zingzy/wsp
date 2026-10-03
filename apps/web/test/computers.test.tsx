@@ -925,7 +925,9 @@ describe("Add a computer on the page", () => {
     stage(at.addId!, "reach", "failed", "spoo cannot reach this computer at any of its addresses");
     await refuseWith(at, new RequestError("spoo cannot reach this computer at any of its addresses"));
     const states = plan().map(([, state]) => state);
-    expect(states).toEqual(["done", "done", "done", "failed", ...PlaceAddStep.options.slice(4).map(() => "waiting")]);
+    // The four checks inside the check step never moved here, and reach comes after them.
+    const reach = PlaceAddStep.options.indexOf("reach");
+    expect(states).toEqual(["done", "done", "done", ...PlaceAddStep.options.slice(3, reach).map(() => "waiting"), "failed", ...PlaceAddStep.options.slice(reach + 1).map(() => "waiting")]);
     const failed = document.querySelector("[data-k='plan'] li[data-state='failed']")!;
     expect(failed.querySelector("[data-k='step-failed']")?.className).toContain("destructive");
     expect(document.querySelectorAll("[data-k='plan'] li[data-state='done'] svg")).toHaveLength(3);

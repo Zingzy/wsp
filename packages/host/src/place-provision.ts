@@ -36,6 +36,7 @@ import { brewTableFor, copyRows, planImport } from "./image-recipe.js";
 import { CONFIG_PATHS, configTexts, type ConfigText } from "./recipe-configs.js";
 import { folderFiles, LINKED_FOLDER_NOTE } from "./folder-files.js";
 import { loadRecipe, smallRecipePath } from "./recipe-file.js";
+import { estimatePicks } from "./pick-sizes.js";
 import { agentOwnPaths } from "./recipes.js";
 
 /** What the planner reads beside the picks: this computer's rungs and its Homebrew table, the same two readers wsp
@@ -345,6 +346,7 @@ export function placeProvisioner(o: ProvisionReaders): PlaceProvisioner {
     },
     floor: (machine, on, stage) => provisionStep(machine, { ...placePaths(on.home), recipeAt: "floor", steps: [], agents: 0, compiler: false, skipped: [] }, "floor", newSetupRun(), stage, on),
     step: (machine, plan, step, run, stage, on) => provisionStep(machine, plan, step, run, stage, on),
+    estimate: async picks => estimatePicks(picks, o.home),
     undo: async (before, removed, on) => undoPlan(before, removed, on, async () => brewTableFor(await o.collect(), o.brew)),
   };
 }
