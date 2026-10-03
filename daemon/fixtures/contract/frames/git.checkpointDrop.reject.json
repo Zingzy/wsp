@@ -1,0 +1,20 @@
+[
+  {
+    "id": 1,
+    "op": "git.checkpointDrop",
+    "cwd": "/Users/dev/spoo",
+    "thread": "thr_1"
+  },
+  {
+    "id": 1,
+    "op": "git.checkpointDrop",
+    "scope": "ws_1",
+    "thread": "thr_1"
+  },
+  {
+    "id": 1,
+    "op": "git.checkpointDrop",
+    "cwd": "/Users/dev/spoo",
+    "scope": "ws_1"
+  }
+]

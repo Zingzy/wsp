@@ -84,6 +84,7 @@ import {
   sshIncludeLine,
   SSH_TICKET_REFUSAL,
   isLocalWorkspace,
+  BRANCH_ON_A_THREAD_LINE,
   type AccountDevice,
   type AccountView,
   type DeviceView,
@@ -1209,6 +1210,13 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, ...brought });
               return;
             }
+            case "worktree.make":
+              send({ id: msg.id, ok: true, ...(await rt.workspaces.worktree({ project: msg.project, branch: msg.branch }, origin)) });
+              return;
+            case "worktree.remove":
+              await rt.workspaces.worktreeRemove({ project: msg.project, branch: msg.branch, ...(msg.force !== undefined ? { force: msg.force } : {}) }, origin);
+              send({ id: msg.id, ok: true });
+              return;
             case "workspaces.checkout":
               send({ id: msg.id, ok: true, ...(await rt.workspaces.checkout(msg.workspaceId, origin)) });
               return;
@@ -1460,11 +1468,20 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               return;
             }
             case "sessions.start": {
-              const handle = await rt.sessions.start(msg.workspaceId, {
+              // A start on this computer names a project, a branch or a folder rather than a record: the folder's record
+              // is found or made first, and the start runs on it.
+              if (msg.workspaceId !== undefined && msg.branch !== undefined) throw Object.assign(new Error(BRANCH_ON_A_THREAD_LINE), { kind: "usage" });
+              const at =
+                msg.workspaceId !== undefined
+                  ? { workspaceId: msg.workspaceId, cwd: msg.cwd }
+                  : await rt.workspaces
+                      .folderFor({ ...(msg.project !== undefined ? { project: msg.project } : {}), ...(msg.branch !== undefined ? { branch: msg.branch } : {}), ...(msg.cwd !== undefined ? { cwd: msg.cwd } : {}) }, origin)
+                      .then(found => ({ workspaceId: found.workspace.id, cwd: found.cwd }));
+              const handle = await rt.sessions.start(at.workspaceId, {
                 prompt: msg.prompt,
                 ...(msg.harness !== undefined ? { harness: msg.harness } : {}),
                 ...(msg.thread !== undefined ? { thread: msg.thread } : {}),
-                ...(msg.cwd !== undefined ? { cwd: msg.cwd } : {}),
+                ...(at.cwd !== undefined ? { cwd: at.cwd } : {}),
                 ...(msg.model !== undefined ? { model: msg.model } : {}),
                 ...(msg.effort !== undefined ? { effort: msg.effort } : {}),
                 ...(msg.permissionMode !== undefined ? { permissionMode: msg.permissionMode } : {}),
@@ -1878,12 +1895,12 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 }
                 // Before the editor runs, so a workspace with no ssh server says so here rather than in the editor's log.
                 await opts.ssh.port(await awakeForSsh(workspace));
-                const remote = { alias: sshAlias(workspace.name), folder: workspace.copy?.path ?? workspace.project.path, name: workspace.name };
+                const remote = { alias: sshAlias(workspace.name), folder: workspace.folder ?? workspace.project.path, name: workspace.name };
                 const opened = await editor().open({ path: msg.path, inside: [], remote, ...(msg.line !== undefined ? { line: msg.line } : {}), ...(picked !== undefined ? { editor: picked } : {}) });
                 send({ id: msg.id, ok: true, editor: opened });
                 return;
               }
-              const inside = [workspace.copy?.path, workspace.project.path].filter((folder): folder is string => folder !== undefined);
+              const inside = [workspace.worktree?.path, workspace.project.path].filter((folder): folder is string => folder !== undefined);
               const opened = await editor().open({ path: msg.path, inside, ...(msg.line !== undefined ? { line: msg.line } : {}), ...(picked !== undefined ? { editor: picked } : {}) });
               send({ id: msg.id, ok: true, editor: opened });
               return;

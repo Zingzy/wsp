@@ -166,9 +166,32 @@ export function cloneFailedLine(said: string): string {
 export const seedChoiceNeeded = (folder: string): string =>
   `${folder} would seed the project on that computer, so what travels is yours to pick: read the menu and add it again with your ticks, or --yes for the ones the catalogue ticks itself`;
 
-/** Why a folder that is no repo is not a project: a workspace of it starts on a branch, and a folder with no git
- * in it has none. */
-export const NOT_A_REPO_LINE = "is not a git repo; git init makes it one, or add a repo's url with --into <folder> or --on <computer>";
+/** A start on this computer that names no project and comes from no thread: nothing says which folder it runs in. */
+export const NAME_A_PROJECT_LINE = "name the project the thread runs in";
+
+/** A branch named on a send into a thread: a thread keeps the folder it runs in. */
+export const BRANCH_ON_A_THREAD_LINE = "a thread keeps its folder; start a new thread for another branch";
+
+/** A start naming both a branch and a folder: the branch picks a folder of its own. */
+export const BRANCH_OR_CWD_LINE = "name a branch or a folder, not both";
+
+/** A start on this computer for a project another computer holds. */
+export const notOnThisComputerLine = (project: string): string => `${project} is not on this computer, so no thread runs in its folder here`;
+
+/** A folder a thread may not run in: only the project folder and the worktrees of its repo are a project's. */
+export const cwdOutsideLine = (path: string, project: string): string => `${path} is not in ${project} or a worktree of it; wsp add it first`;
+
+/** A worktree removal refused while a thread's turn runs in it. */
+export const WORKTREE_BUSY_LINE = "a thread is working in that worktree; let its turn end or stop it first";
+
+/** A worktree removal refused over files no commit holds: they would go with it. */
+export const worktreeChangedLine = (files: number): string => `that worktree has ${files} ${files === 1 ? "file" : "files"} not committed; commit them, or remove it with --force to lose them`;
+
+/** A removal asked of a branch with no worktree wsp made: a worktree the person or an agent made is theirs to remove. */
+export const notMadeWorktreeLine = (branch: string): string => `wsp made no worktree for ${branch}; git worktree remove takes one wsp did not make`;
+
+/** A branch asked of a project whose folder git holds no repo in. */
+export const noBranchesLine = (project: string): string => `${project} is not a git repo, so it has no branches`;
 
 /** Why a folder on a computer that is not this one records nothing: nothing carries a folder there yet, so its
  * project is the repo that computer can clone. */

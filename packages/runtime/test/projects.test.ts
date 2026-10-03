@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpath
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cloneIntoNeeded, cloneIntoTakenLine, cloneUrlRefusal, INTO_TAKES_A_REPO_LINE, noComputerForSourceLine, copyPathFor, HERE_PLACE_ID, NO_IMAGE_FOR_SEED, noRemoteLine, copyTakesNone, idPrefixRefusal, noWorkspaceRefusal, NOT_A_REPO_LINE, projectInUseRefusal, sameSourceRefusal, seedChoiceNeeded, type AdapterEvent, type Caller, type EventUnion, type SeedPlan, type TurnResult } from "@wsp/protocol";
+import { cloneIntoNeeded, cloneIntoTakenLine, cloneUrlRefusal, INTO_TAKES_A_REPO_LINE, noComputerForSourceLine, HERE_PLACE_ID, NO_IMAGE_FOR_SEED, noRemoteLine, copyTakesNone, idPrefixRefusal, noWorkspaceRefusal, projectInUseRefusal, sameSourceRefusal, seedChoiceNeeded, type AdapterEvent, type Caller, type EventUnion, type SeedPlan, type TurnResult } from "@wsp/protocol";
 import { createRuntime, NO_SEED_WIRING, type HarnessAdapterFactory, type HarnessStartOptions, type Runtime, type SeedWiring } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
 import { writeStub } from "../../protocol/test/stub-script.js";
@@ -84,19 +84,21 @@ describe("recording a project", () => {
     rmSync(folder, { recursive: true, force: true });
   });
 
-  it("a folder that is no git repo is no project: a workspace of one starts on a branch", async () => {
+  it("a folder that is no git repo is a project with no branches", async () => {
     const { rt } = withLocal();
-    const plain = mkdtempSync(join(tmpdir(), "wsp-plain-"));
-    await expect(rt.projects.add({ source: plain })).rejects.toThrow(NOT_A_REPO_LINE);
-    expect(await rt.projects.list()).toEqual([]);
+    const plain = realpathSync(mkdtempSync(join(tmpdir(), "wsp-plain-")));
+    const project = await rt.projects.add({ source: plain });
+    expect(project.path).toBe(plain);
+    expect(project.git).toBeUndefined();
     rmSync(plain, { recursive: true, force: true });
   });
 
-  it("a folder under a repo is no project either: the folder itself has to be the top of it", async () => {
+  it("a folder under a repo is a project of that repo, its top kept beside its path", async () => {
     const { rt } = withLocal();
     const repo = tempRepo();
     execFileSync("mkdir", ["-p", join(repo, "packages", "host")]);
-    await expect(rt.projects.add({ source: join(repo, "packages", "host") })).rejects.toThrow(NOT_A_REPO_LINE);
+    const project = await rt.projects.add({ source: join(repo, "packages", "host") });
+    expect(project).toMatchObject({ path: join(repo, "packages", "host"), git: { top: repo } });
     rmSync(repo, { recursive: true, force: true });
   });
 
@@ -347,17 +349,14 @@ describe("a workspace of a project", () => {
     rmSync(folder, { recursive: true, force: true });
   });
 
-  it("on this computer the first workspace is a copy of the folder at a sibling path, with a port of its own", async () => {
+  it("on this computer a create names the project folder's own record, with nothing copied and no port of its own", async () => {
     const { rt } = withLocal();
     const folder = tempRepo();
     const project = await rt.projects.add({ source: folder });
     const ws = await rt.workspaces.create({ project: project.id, name: "plan check" });
-    expect(ws).toMatchObject({ kind: "local", golden: "", project: { name: project.name, path: folder, computer: HERE_PLACE_ID } });
-    expect(ws.copy).toMatchObject({ road: "clonefile", path: copyPathFor(folder, "plan-check"), source: folder });
-    expect(ws.folder).toBe(copyPathFor(folder, "plan-check"));
-    // A copy binds a port of its own, since two copies on one computer cannot both have 3000.
-    expect(ws.portBase).toBeDefined();
-    // A host with no copy road makes none at all; that is local-copy.test.ts.
+    expect(ws).toMatchObject({ kind: "local", golden: "", folder, project: { name: project.name, path: folder, computer: HERE_PLACE_ID } });
+    expect(ws).not.toHaveProperty("worktree");
+    expect(ws).not.toHaveProperty("portBase");
     rmSync(folder, { recursive: true, force: true });
   });
 });

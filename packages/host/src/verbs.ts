@@ -266,7 +266,6 @@ import {
   computerNamed,
   copyTakesNone,
   copiesFolder,
-  madeOfWord,
   portsWord,
   kindForComputer,
   computerKindWord,
@@ -1650,7 +1649,9 @@ export function renameLine(renamed: Renamed): string {
 
 /** What a delete does to this workspace's machine, in its kind's own words: both lines about what a delete takes
  * read the one entry, so neither can say the other kind's sentence. */
-const onDelete = (d: Dropping): MachineOnDelete => onDeleteOf(workspaceKind(d.workspace), d.workspace.copy, d.workspace.machineId, d.on);
+const onDelete = (d: Dropping): MachineOnDelete => onDeleteOf(workspaceKind(d.workspace), madeWorktree(d.workspace), d.workspace.machineId, d.on);
+/** The worktree a delete takes with the record: only one wsp made. */
+const madeWorktree = (w: Pick<WorkspaceView, "worktree">): { path: string } | undefined => (w.worktree?.made === true ? { path: w.worktree.path } : undefined);
 
 /** What dropping a workspace takes off this computer, counted before anyone is asked: its record and its threads. */
 export interface Dropping {
@@ -1698,7 +1699,7 @@ export function forgotLine(f: Dropping): string {
 
 /** The one confirmation a delete asks, in the words every client shows: what a forget takes, and the machine too. */
 export function deleteQuestion(d: Dropping): string {
-  return `Delete ${d.workspace.name}?\n${deleteNotice(d.threads, workspaceKind(d.workspace), d.workspace.copy, d.workspace.machineId, d.on)}`;
+  return `Delete ${d.workspace.name}?\n${deleteNotice(d.threads, workspaceKind(d.workspace), madeWorktree(d.workspace), d.workspace.machineId, d.on)}`;
 }
 
 /** The one confirmation a project image's removal asks: the id, and what goes with it. */
@@ -1773,10 +1774,10 @@ export function workspaceLine(w: WorkspaceListing, places: ReadonlyMap<string, s
     w.id,
     w.project.name,
     whereWord(w, named),
-    // What this workspace's copy of the project is and what its ports are, in the words the app's own row says
-    // them in. Both cells are empty on a fork, whose project arrives by the runtime's own road.
-    w.copy === undefined ? "" : madeOfWord(w.copy.road),
-    w.copy === undefined || capabilities === undefined ? "" : portsWord(capabilities, w.portBase, thisComputer(hostPlatform())),
+    // The branch of the worktree its threads run in, and what its ports are, in the words the app's own row says
+    // them in. Both cells are empty on a fork.
+    w.worktree?.branch ?? "",
+    !isLocalWorkspace(w) || capabilities === undefined ? "" : portsWord(capabilities, thisComputer(hostPlatform())),
     kind.rowReadsMachine ? fmtSize(w.size, kind.cpu) : "",
     workspaceWord(workspaceStateOf(w, w), capabilities?.pauseMode),
     agentsWord(w.agents),
@@ -5447,7 +5448,7 @@ export const ALL_VERBS: readonly Verb[] = [
         // The command line asks a person before this and the app will; over MCP the second call is that step, so a
         // machine is never killed by one tool call the caller made on its own.
         if (confirm !== true) {
-          return { ...asText(`${d.workspace.name} kept. ${deleteNotice(d.threads, workspaceKind(d.workspace), d.workspace.copy, d.workspace.machineId, d.on)} Ask the person, then call delete again with confirm true.`, going), isError: true };
+          return { ...asText(`${d.workspace.name} kept. ${deleteNotice(d.threads, workspaceKind(d.workspace), madeWorktree(d.workspace), d.workspace.machineId, d.on)} Ask the person, then call delete again with confirm true.`, going), isError: true };
         }
         await deleteWorkspace(client, d);
         return asText(deletedLine(d), going);

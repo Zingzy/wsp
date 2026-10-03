@@ -409,8 +409,7 @@ async function forkingComputer(rt: ProjectMaker): Promise<string> {
 
 let stubs = 0;
 
-/** A git repo in a folder of its own, for a project on this computer: `wsp add <folder>` refuses a folder that is
- * not the top of one, so a test that wants a project here makes one. */
+/** A git repo in a folder of its own, for a project on this computer that has branches. */
 export function tempRepo(): string {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "wsp-project-")));
   execFileSync("git", ["init", "-q", dir]);
@@ -427,7 +426,9 @@ export async function createOn(rt: ProjectMaker & WorkspaceMaker, o: CreateOn, o
   // call is what a test that never names one gets.
   const scope = scopeOf(origin);
   const own = scope === undefined ? undefined : (await rt.workspaces.get(scope.workspaceId, origin)).project.id;
-  const id = project ?? own ?? (await projectOn(rt, on)).id;
+  // A project on this computer is its folder, and the record of that folder carries the project's name, so the fresh
+  // project a test never names is called what the test calls its workspace.
+  const id = project ?? own ?? (await projectOn(rt, on, undefined, on === HERE_PLACE_ID ? { name: rest.name } : undefined)).id;
   return rt.workspaces.create({ ...rest, project: id }, origin);
 }
 

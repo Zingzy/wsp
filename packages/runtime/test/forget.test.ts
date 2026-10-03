@@ -42,7 +42,7 @@ describe("workspaces.forget", () => {
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {}, local: fakeLocal(mkdtempSync(join(tmpdir(), "wsp-forget-"))) });
     const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
 
-    await expect(rt.workspaces.forget(ws.id)).rejects.toMatchObject({ message: forgetUndrivenRefusal("mac", THIS_COMPUTER), kind: "conflict" });
+    await expect(rt.workspaces.forget(ws.id)).rejects.toMatchObject({ message: forgetUndrivenRefusal(ws.name, THIS_COMPUTER), kind: "conflict" });
 
     expect((await rt.workspaces.list()).map(w => w.id)).toEqual([ws.id]);
     await rt.close();

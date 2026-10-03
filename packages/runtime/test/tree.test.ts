@@ -303,7 +303,7 @@ describe("a child's project", () => {
     const lead = await rt.workspaces.create({ project: here.id, name: "lead" });
     const child = await rt.workspaces.create({ project: there.id, golden: "snap_g", name: "on the box", parent: lead.id });
     expect(child.parentWorkspaceId).toBe(lead.id);
-    await expect(rt.workspaces.create({ project: other.id, golden: "snap_g", name: "stranger", parent: lead.id })).rejects.toThrow(parentProjectRefusal("lead", "lab", "other"));
+    await expect(rt.workspaces.create({ project: other.id, golden: "snap_g", name: "stranger", parent: lead.id })).rejects.toThrow(parentProjectRefusal(lead.name, "lab", "other"));
   });
 });
 
@@ -486,7 +486,9 @@ describe("merge into lead with no remote", () => {
     rt = createRuntime({ backend, store, adapters: {}, daemonToken: DAEMON_TOKEN, daemonChannel: daemons.open, local: localOn() });
     const here = await projectOn(rt, HERE_PLACE_ID, undefined, { name: "lab" });
     const lead = await rt.workspaces.create({ project: here.id, name: "lead" });
-    const child = await rt.workspaces.create({ project: here.id, name: "child", parent: lead.id });
+    // A thread in the project folder starts its child on a branch: the child runs in a worktree, a child of the folder.
+    const child = (await rt.workspaces.folderFor({ project: here.id, branch: "child/one" }, { origin: "here", by: { kind: "thread", threadId: "lead-thread", workspaceId: lead.id, rootThreadId: "lead-thread" } })).workspace;
+    expect(child.parentWorkspaceId).toBe(lead.id);
     const done = await rt.workspaces.mergeIn({ workspaceId: lead.id, child: child.id });
     expect(done.merged).toBe(true);
     const asked = daemons.sent("here", "git.mergeIn")[0]!;
@@ -508,7 +510,7 @@ describe("merge into lead with no remote", () => {
     rt = createRuntime({ backend, store, adapters: { claude: agent.factory }, daemonToken: DAEMON_TOKEN, daemonChannel: daemons.open, local: localOn() });
     const here = await projectOn(rt, HERE_PLACE_ID, undefined, { name: "lab" });
     const lead = await rt.workspaces.create({ project: here.id, name: "lead", agents: AGENTS_ON });
-    const child = await rt.workspaces.create({ project: here.id, name: "child", parent: lead.id });
+    const child = (await rt.workspaces.folderFor({ project: here.id, branch: "child/one" }, { origin: "here", by: { kind: "thread", threadId: "lead-thread", workspaceId: lead.id, rootThreadId: "lead-thread" } })).workspace;
     await rt.workspaces.mergeIn({ workspaceId: lead.id, child: child.id });
     await rt.workspaces.fix({ workspaceId: lead.id, child: child.id });
     await until(() => agent.prompts.length === 1);

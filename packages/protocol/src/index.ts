@@ -527,6 +527,9 @@ export const ProjectView = z.object({
   image: z.object({ snapshotId: z.string(), builtAt: z.string(), lockfileSha: z.string().optional() }).optional(),
   /** The branch a new workspace starts on; absent is the remote's default branch, read at the clone. */
   base: z.string().optional(),
+  /** On this computer, the repo the folder sits in: its top folder, which is the folder itself or a folder above it
+   * when the project is a subfolder of a repo. Absent on a folder that is not a git repo, which has no branches. */
+  git: z.object({ top: z.string() }).optional(),
   createdAt: z.string(),
 });
 export type ProjectView = z.infer<typeof ProjectView>;
@@ -643,6 +646,23 @@ export const CopyReport = z.object({
 });
 export type CopyReport = z.infer<typeof CopyReport>;
 
+/** A wsp worktree as the daemon binary's worktree verb is asked for it: the project's repo, the folder wsp keeps its
+ * worktrees under, the project's id the path is keyed by, the branch, and the ignored directories carried in beside
+ * the config files. */
+export const WorktreeAsk = z.object({
+  from: z.string(),
+  root: z.string(),
+  project: z.string(),
+  branch: z.string(),
+  carry: z.array(z.string()),
+});
+export type WorktreeAsk = z.infer<typeof WorktreeAsk>;
+
+/** What the worktree verb printed: where the branch is checked out and whether wsp made that worktree just now or
+ * found the branch already open in one, the project folder included. */
+export const WorktreeMade = z.object({ path: z.string(), branch: z.string(), made: z.boolean() });
+export type WorktreeMade = z.infer<typeof WorktreeMade>;
+
 /** What a workspace on a computer that copies by directory is made of: the road that made the copy, where it
  * landed, what it stands on and what rode along. Absent on a fork and on a box snapshot, whose project arrives by
  * the runtime's own road. */
@@ -652,6 +672,26 @@ export const ProjectCopy = CopyReport.pick({ path: true, base: true, branch: tru
   source: z.string(),
 });
 export type ProjectCopy = z.infer<typeof ProjectCopy>;
+
+/** Why a wsp worktree's branch counts as done: its pull request merged or closed, the remote no longer holds the
+ * branch it was pushed to, or the person removed the worktree. */
+export const WorktreeSettled = z.object({ at: z.number(), why: z.enum(["merged", "closed", "deleted", "removed"]) });
+export type WorktreeSettled = z.infer<typeof WorktreeSettled>;
+
+/** A worktree of the project's repo threads run in on this computer. made: wsp added it under its own folder, and
+ * only such a worktree is ever removed by wsp; one the person or an agent made is used and left alone. kept says why
+ * a settled worktree still stands, removeFailed is git's own line when a removal was refused, and gone marks one
+ * that is no longer on disk, whose threads continue in the project folder. */
+export const WorktreeFolder = z.object({
+  path: z.string(),
+  branch: z.string().optional(),
+  made: z.boolean(),
+  settled: WorktreeSettled.optional(),
+  kept: z.string().optional(),
+  removeFailed: z.string().optional(),
+  gone: z.literal(true).optional(),
+});
+export type WorktreeFolder = z.infer<typeof WorktreeFolder>;
 
 /** The switch a patch leaves on the record, the one rule both roads that set one read: every key the patch does not
  * name keeps what the record holds, so turning it off and on again does not throw the caps away, and a workspace
@@ -725,13 +765,9 @@ export const WorkspaceView = z.object({
   /** The place a fork lives on, by id; absent on a fork at the host's own provider and on every workspace that is
    * not a fork. The command line and the app show its name after the workspace's. */
   place: z.string().optional(),
-  /** What this workspace's copy of its project is made of, on a computer that makes a workspace by copying the
-   * project folder: the road, the path, the base and the folder it came from. Absent on a fork, whose project
-   * arrives by the runtime's own road. */
-  copy: ProjectCopy.optional(),
-  /** The port an app that reads PORT binds in this workspace, on a computer whose copies share its network.
-   * Absent where a copy has a network of its own. */
-  portBase: z.number().int().positive().optional(),
+  /** On this computer, the worktree of the project's repo this record's threads run in; absent on the record of
+   * the project folder itself and on every fork. */
+  worktree: WorktreeFolder.optional(),
   /** Which provider this workspace's machine was forked at, by the id that provider's own module carries in a
    * registry (`solari`, `box`, `docker`): the host's own where it forked the machine, and the joined computer's
    * own offer where `place` names one, so the two fields cannot disagree about where a machine lives. The runtime
@@ -786,7 +822,7 @@ export type WorkspaceStatus = z.infer<typeof WorkspaceStatus>;
 const WORKSPACE_OUT = {
   id: true, name: true, machineId: true, phase: true, kind: true, golden: true, createdAt: true, project: true, folder: true, home: true,
   claudeSessionId: true, gone: true, theme: true, glyph: true, daemonNote: true, daemonRefusedAt: true, vaultedAt: true, vaultRefused: true, wakeRefused: true,
-  agents: true, parentThreadId: true, rootThreadId: true, parentWorkspaceId: true, place: true, provider: true, copy: true, portBase: true, from: true, review: true,
+  agents: true, parentThreadId: true, rootThreadId: true, parentWorkspaceId: true, place: true, provider: true, worktree: true, from: true, review: true,
 } as const;
 
 /** A workspace as every verb answers with it: the view without the display stream a desktop machine carries, which
@@ -1682,6 +1718,19 @@ export const SessionCheckpointEvent = z.object({
 });
 export type SessionCheckpointEvent = z.infer<typeof SessionCheckpointEvent>;
 
+/** A thread's folder moved between two of its turns: the worktree it ran in was removed, and the turn runs in the
+ * project folder. fresh: the agent could not carry its session across, so the turn opened a new one. Written by the
+ * host into the thread's transcript, so the person and the agent both read where the thread now runs. */
+export const SessionMovedEvent = z.object({
+  type: z.literal("session.moved"),
+  ...sessionScope,
+  from: z.string(),
+  to: z.string(),
+  branch: z.string().optional(),
+  fresh: z.literal(true).optional(),
+});
+export type SessionMovedEvent = z.infer<typeof SessionMovedEvent>;
+
 /** Where a reply's block run stands: running in its own pty, exited with its code and output, moved to a terminal
  * tab still running, or lost, its pty gone before anybody saw it end. */
 export const RunState = z.enum(["running", "exited", "moved", "lost"]);
@@ -1730,6 +1779,7 @@ export const SessionEvent = z.discriminatedUnion("type", [
   SessionChangesEvent,
   SessionPlanEvent,
   SessionRunEvent,
+  SessionMovedEvent,
 ]);
 export type SessionEvent = z.infer<typeof SessionEvent>;
 
@@ -3410,6 +3460,7 @@ export const EventUnion = z.discriminatedUnion("type", [
   SessionChangesEvent.extend(sequenced),
   SessionPlanEvent.extend(sequenced),
   SessionRunEvent.extend(sequenced),
+  SessionMovedEvent.extend(sequenced),
   SessionQueuedEvent.extend(sequenced),
   SessionHeldEvent.extend(sequenced),
   ThreadMarkedEvent.extend(sequenced),
@@ -4003,7 +4054,9 @@ export const DaemonRequest = z.discriminatedUnion("op", [
   /** Records the checkout's whole tree at a turn's end as a commit outside every branch, under the ref the daemon
    * names from the copy's folder, the thread and the turn, and answers a GitCheckpointReply. HEAD, the index and
    * the branch never move. */
-  z.object({ id: reqId, op: z.literal("git.checkpoint"), cwd: z.string(), thread: z.string(), turn: z.string(), machineId: z.string().optional() }),
+  z.object({ id: reqId, op: z.literal("git.checkpoint"), cwd: z.string(), thread: z.string(), turn: z.string(), scope: z.string().optional(), machineId: z.string().optional() }),
+  /** Deletes every checkpoint ref one thread holds under the scope, and nothing of another thread's. */
+  z.object({ id: reqId, op: z.literal("git.checkpointDrop"), cwd: z.string(), scope: z.string(), thread: z.string(), machineId: z.string().optional() }),
   /** Puts the tree back to one of this copy's checkpoints, recording the tree as it stood first, and answers a
    * GitRestoreReply whose before restores it again. */
   z.object({ id: reqId, op: z.literal("git.restore"), cwd: z.string(), checkpoint: z.string(), machineId: z.string().optional() }),
@@ -6121,6 +6174,12 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * after, and the project's own base otherwise; the base branch itself is refused, since work leaves a workspace
    * as a branch of its own. */
   z.object({ id: reqId, op: z.literal("workspaces.bringBack"), workspaceId: z.string(), title: z.string().optional(), body: z.string().optional() }),
+  /** A wsp worktree for a branch of a project's repo, or the worktree that already holds the branch, answered as a
+   * WorktreeMade. A new branch starts from the project folder's current commit. */
+  z.object({ id: reqId, op: z.literal("worktree.make"), project: z.string(), branch: z.string() }),
+  /** Takes a wsp worktree away with git, refused while a turn runs in it and, without force, while it holds files
+   * no commit has. A worktree wsp did not make is never removed. */
+  z.object({ id: reqId, op: z.literal("worktree.remove"), project: z.string(), branch: z.string(), force: z.boolean().optional() }),
   /** The copy's checkout, read again unless the host read it moments ago, and answered as a CheckoutReply. */
   z.object({ id: reqId, op: z.literal("workspaces.checkout"), workspaceId: z.string() }),
   /** Puts one changed file of the copy back as HEAD has it and answers a GitDiscardReply. */
@@ -6264,7 +6323,15 @@ const RuntimeOp = z.discriminatedUnion("op", [
   z.object({
     id: reqId,
     op: z.literal("sessions.start"),
-    workspaceId: z.string(),
+    /** The record the thread runs on: a box's workspace, or the folder record of an existing thread. Absent on this
+     * computer, where project, branch and cwd say where the thread runs; absent with none of them, a start out of a
+     * thread runs beside that thread. */
+    workspaceId: z.string().optional(),
+    /** The project the thread runs in, by name or id: its folder, or the worktree branch names. */
+    project: z.string().optional(),
+    /** A branch other than the folder's: the thread runs in the worktree of the project's repo holding it, made
+     * under the host's folder when none does. Refused on a folder that is not a git repo. */
+    branch: z.string().optional(),
     prompt: z.string(),
     harness: z.string().optional(),
     /** The thread the message goes to, by its runtime id: its latest turn is resumed, and a thread whose harness never
@@ -6720,9 +6787,9 @@ export const THREAD_OPS: readonly string[] = [
   "workspaces.touch",
   "workspaces.wake",
   "workspaces.exec",
-  // A thread's work leaves its workspace the one way any work does, as a branch on the project's remote: the tree
-  // rule refuses every workspace but its own, and the guard reads the switch as it does for a fork.
-  "workspaces.bringBack",
+  // A thread asks for a worktree of its own project's repo, and takes one wsp made away again.
+  "worktree.make",
+  "worktree.remove",
   // The checkout a thread's own copy is on, and a commit of its files with a message drafted or its own, under the
   // same tree rule and the same guard; a discard is not here, since an agent has git in its copy.
   "workspaces.checkout",
@@ -6962,7 +7029,8 @@ export const SessionAsideResult = z.object({ text: z.string() });
 export type SessionAsideResult = z.infer<typeof SessionAsideResult>;
 /** What a rewind did: how many turns left the conversation, and how many files the copy's tree wrote or removed
  * where the files went back too. */
-export const SessionRewindResult = z.object({ turns: z.number().int(), files: z.number().int().optional() });
+/** What a rewind did: the turns it cut, the files it put back, and why it left the files where they stood. */
+export const SessionRewindResult = z.object({ turns: z.number().int(), files: z.number().int().optional(), kept: z.string().optional() });
 export type SessionRewindResult = z.infer<typeof SessionRewindResult>;
 
 // --- session start (how the turn the caller asked for came to be) --------------
@@ -7119,7 +7187,7 @@ export {
   type Rgb,
   type ThemePreset,
 } from "./workspace-look.js";
-export { claudeMemoryDir, claudeProjectKey, copyPathFor, folderName, folderSlug, hiddenFolder, parentFolderName, placeDaemonPaths, placeOwnedPaths, placeProvisionPaths, probePath, rootsPathIn, SSH_ALIAS_PREFIX, sshAlias, standInMachinePath, standInRecordsPath, underProject, workFolderIn, type FolderMachine } from "./project-path.js";
+export { claudeMemoryDir, claudeProjectKey, folderName, folderSlug, hiddenFolder, parentFolderName, placeDaemonPaths, placeOwnedPaths, placeProvisionPaths, probePath, rootsPathIn, SSH_ALIAS_PREFIX, sshAlias, standInMachinePath, standInRecordsPath, underProject, workFolderIn, type FolderMachine } from "./project-path.js";
 export * from "./bring-back.js";
 export * from "./changes.js";
 export * from "./usage.js";

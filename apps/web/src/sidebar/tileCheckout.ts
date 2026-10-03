@@ -30,7 +30,7 @@ export function tileCheckout(runs: Pick<SidebarProjectSnapshot, "workspace" | "s
   const pr = runs.status?.pr;
   const branch = fact === undefined ? branchLine(runs) : fact.branch === DETACHED_HEAD ? "" : fact.branch;
   const changed = fact === undefined ? undefined : checkoutCounts(fact)[0];
-  const folder = runs.workspace.copy?.path ?? runs.workspace.project.path;
+  const folder = runs.workspace.folder ?? runs.workspace.project.path;
   return {
     ...(folder !== undefined && folder !== "" ? { folder } : {}),
     branch,

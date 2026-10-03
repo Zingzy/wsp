@@ -903,9 +903,9 @@ describe("one send to several models", () => {
     let dialog = await screen.findByRole("alertdialog");
     expect(within(dialog).getByRole("heading").textContent).toBe("Delete the other 2 copies?");
     // Each copy's computer in its own kind's words, which a copy's row carries; these rows are forks on a cloud.
-    const kept = [OPUS, ASTRA].map(w => ({ name: w.name, kind: workspaceKind(w), ...(w.copy !== undefined ? { copy: w.copy } : {}) }));
+    const kept = [OPUS, ASTRA].map(w => ({ name: w.name, kind: workspaceKind(w) }));
     expect(dialog.textContent).toContain(deleteCopiesNotice(kept, 2));
-    expect(dialog.textContent).toContain(onDeleteOf(workspaceKind(OPUS), OPUS.copy).asked);
+    expect(dialog.textContent).toContain(onDeleteOf(workspaceKind(OPUS)).asked);
     // The dialog's own confirm is the one place red stands at rest: the solid destructive button.
     expect(within(dialog).getByRole("button", { name: "Delete" }).className).toContain("bg-destructive");
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));

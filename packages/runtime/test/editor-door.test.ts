@@ -19,9 +19,9 @@ const COPY: WorkspaceView = {
   kind: "local",
   golden: "",
   project: PROJECT,
-  copy: { path: "/Users/dev/web-codex-reviews", base: "main", branch: "codex-reviews", carried: [], road: "reflink", source: PROJECT.path },
+  worktree: { path: "/Users/dev/web-codex-reviews", branch: "codex-reviews", made: true },
 } as unknown as WorkspaceView;
-const FORK: WorkspaceView = { ...COPY, id: "ws_fork", name: "Delete compatibility and duplicates", kind: "cloud", copy: undefined, project: { ...PROJECT, path: "/root/wsp-boat" } } as unknown as WorkspaceView;
+const FORK: WorkspaceView = { ...COPY, id: "ws_fork", name: "Delete compatibility and duplicates", kind: "cloud", worktree: undefined, project: { ...PROJECT, path: "/root/wsp-boat" } } as unknown as WorkspaceView;
 
 describe("the editor ops over the wire", () => {
   let srv: RuntimeServer | undefined;
@@ -52,7 +52,7 @@ describe("the editor ops over the wire", () => {
     return { rt, port: srv.port, asked, roads };
   };
 
-  it("lists the door's editors, and opens in the copy or the project folder with the line and the person's pick", async () => {
+  it("lists the door's editors, and opens in the worktree or the project folder with the line and the person's pick", async () => {
     const { rt, port, asked } = await serving();
     expect(await wsRequest(port, "t", { op: "editor.list" })).toEqual({ id: expect.anything(), ok: true, editors: [{ id: "zed", name: "Zed" }] });
     expect(await wsRequest(port, "t", { op: "editor.open", workspaceId: COPY.id, path: "/Users/dev/web-codex-reviews/src/a.ts", line: 45 })).toMatchObject({ ok: true, editor: "zed" });

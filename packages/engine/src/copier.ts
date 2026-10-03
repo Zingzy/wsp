@@ -6,7 +6,9 @@
 // clonefile call on the directory, which is why the copy lives in the daemon's
 // code and this module is the road to it. One interface, the real road and the
 // stand-in tests drive, so nothing above here knows there is a child process.
-import { copyVerbFailedLine, CopyReport, type CopyAsk, type CopyRoad } from "@wsp/protocol";
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
+import { copyVerbFailedLine, CopyReport, WorktreeMade, type CopyAsk, type CopyRoad, type WorktreeAsk } from "@wsp/protocol";
 import { runChild } from "./child-exec.js";
 import { memoryHere, type MemoryHere } from "./local-backend.js";
 
@@ -15,6 +17,11 @@ export interface Copier {
   make(ask: CopyAsk): Promise<CopyReport>;
   /** Takes a copy away by the road that made it, which is the road the record carries. */
   remove(from: string, to: string, road: CopyRoad): Promise<void>;
+  /** The worktree holding the branch: one of the repo's own where git already has the branch checked out, else one
+   * made under the ask's root with the carried files clonefiled in. Throws the verb's own sentence when refused. */
+  worktree(ask: WorktreeAsk): Promise<WorktreeMade>;
+  /** Takes a worktree away with git; refused over files no commit holds unless forced. */
+  worktreeRemove(from: string, to: string, force: boolean): Promise<void>;
   /** The memory of the computer the copy lands on, free and in all, read at the ask for the room check before a
    * copy; absent, a copy is held to nothing, which is a stand-in no test handed a reading. */
   room?(): Promise<MemoryHere | undefined>;
@@ -77,6 +84,25 @@ export function verbCopier(binary: string, run: typeof runChild = runChild): Cop
       const res = await run(binary, ["copy", "remove", "--from", from, "--to", to, "--road", road], { timeoutMs: COPY_TIMEOUT_MS });
       if (res.exitCode !== 0) throw new Error(line(res));
     },
+    async worktree(ask) {
+      const argv = ["copy", "worktree", "--from", ask.from, "--root", ask.root, "--project", ask.project, "--branch", ask.branch, ...ask.carry.flatMap(dir => ["--carry", dir])];
+      const res = await run(binary, argv, { timeoutMs: COPY_TIMEOUT_MS });
+      if (res.exitCode !== 0) throw new Error(line(res));
+      const said = res.stdout.trim();
+      const parsed = WorktreeMade.safeParse(((): unknown => {
+        try {
+          return JSON.parse(said);
+        } catch {
+          return undefined;
+        }
+      })());
+      if (!parsed.success) throw new Error(`the worktree verb answered something this host does not read: ${said.slice(0, 200) || "nothing at all"}`);
+      return parsed.data;
+    },
+    async worktreeRemove(from, to, force) {
+      const res = await run(binary, ["copy", "worktree-remove", "--from", from, "--to", to, ...(force ? ["--force"] : [])], { timeoutMs: COPY_TIMEOUT_MS });
+      if (res.exitCode !== 0) throw new Error(line(res));
+    },
     room: () => memoryHere(),
   };
 }
@@ -84,12 +110,28 @@ export function verbCopier(binary: string, run: typeof runChild = runChild): Cop
 /** The stand-in every test above the daemon drives: it records what it was asked for and answers a report of the
  * road it was told to take, so the rules a copy stands on are proved once in the daemon's own tests and the roads
  * above it are proved against what a copy answers. */
-export function fakeCopier(script?: (ask: CopyAsk) => CopyReport, room?: () => Promise<MemoryHere | undefined>): Copier & { asks: CopyAsk[]; removed: { from: string; to: string; road: CopyRoad }[] } {
+export function fakeCopier(
+  script?: (ask: CopyAsk) => CopyReport,
+  room?: () => Promise<MemoryHere | undefined>,
+): Copier & { asks: CopyAsk[]; removed: { from: string; to: string; road: CopyRoad }[]; worktrees: WorktreeAsk[]; worktreesRemoved: { from: string; to: string; force: boolean }[] } {
   const asks: CopyAsk[] = [];
   const removed: { from: string; to: string; road: CopyRoad }[] = [];
+  const worktrees: WorktreeAsk[] = [];
+  const worktreesRemoved: { from: string; to: string; force: boolean }[] = [];
   return {
     asks,
     removed,
+    worktrees,
+    worktreesRemoved,
+    async worktree(ask) {
+      worktrees.push(ask);
+      const path = join(ask.root, ask.project, ask.branch.replace(/[^A-Za-z0-9._-]/g, "-"));
+      mkdirSync(path, { recursive: true });
+      return { path, branch: ask.branch, made: true };
+    },
+    async worktreeRemove(from, to, force) {
+      worktreesRemoved.push({ from, to, force });
+    },
     ...(room !== undefined ? { room } : {}),
     async make(ask) {
       asks.push(ask);

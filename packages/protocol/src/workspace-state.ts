@@ -4,7 +4,7 @@
 // it. Every client renders these words, and the runtime refuses a send with
 // the same sentence the composer shows, so one screen never says two things.
 import { computerWord, fmtThreads, LIST_PRICE_WORD, MACHINE_WSP_FORKS, offlineFor, THIS_COMPUTER, type CpuWord } from "./format.js";
-import type { HarnessCatalog, MachineFacts, MachineState, PauseMode, PlaceBack, ProjectCopy, ProjectSource, ReachState, ScreenCommand, ScreenControl, WorkspaceKind, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "./index.js";
+import type { HarnessCatalog, MachineFacts, MachineState, PauseMode, PlaceBack, ProjectSource, ReachState, ScreenCommand, ScreenControl, WorkspaceKind, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "./index.js";
 import { LOOPBACK, authority } from "./app-ports.js";
 import type { Checkout } from "./changes.js";
 
@@ -154,7 +154,7 @@ export function machineWord(kind: WorkspaceKind): string {
 /** What deleting a workspace takes, the one sentence every client's confirmation shows: what the delete does to
  * this kind's machine, in that kind's own words, and either way the record and the threads go from here. It sits
  * with the kind table rather than with the other notices, since the machine half is a kind's word. */
-export function deleteNotice(threads: number, kind: WorkspaceKind, copy?: Pick<ProjectCopy, "path">, machineId?: string, on?: StandsOn): string {
+export function deleteNotice(threads: number, kind: WorkspaceKind, copy?: { path: string }, machineId?: string, on?: StandsOn): string {
   return `Its ${onDeleteOf(kind, copy, machineId, on).asked}; its record and ${fmtThreads(threads)} leave this computer.`;
 }
 
@@ -162,7 +162,7 @@ export function deleteNotice(threads: number, kind: WorkspaceKind, copy?: Pick<P
 export interface CopyToDelete {
   name: string;
   kind: WorkspaceKind;
-  copy?: Pick<ProjectCopy, "path">;
+  copy?: { path: string };
   machineId?: string;
   /** The computer somebody joined that the copy stands on, which its sentence names. */
   on?: StandsOn;
@@ -207,14 +207,13 @@ export interface StandsOn {
  * way rather than by the machine's id, which is wsp's. */
 export const UNNAMED_COMPUTER = "that computer";
 
-/** What a delete does to a workspace that is a copy of a project folder: the copy goes and the folder it was copied
- * from stays. One on a computer somebody joined is deleted from that computer, by the names the person knows, since
+/** What a delete does to a record of a wsp worktree: the worktree goes and the project folder stays. One on a computer somebody joined is deleted from that computer, by the names the person knows, since
  * a box is no cloud and the machine's own id is wsp's. Every other workspace takes its kind's words. */
-export function onDeleteOf(kind: WorkspaceKind, copy?: Pick<ProjectCopy, "path">, machineId?: string, on?: StandsOn): MachineOnDelete {
+export function onDeleteOf(kind: WorkspaceKind, copy?: { path: string }, machineId?: string, on?: StandsOn): MachineOnDelete {
   if (machineId === "") return NO_MACHINE_MADE;
   if (copy === undefined && on !== undefined) return { asked: `copy on ${on.computer} is deleted`, done: () => `${on.name} is deleted from ${on.computer}` };
   if (copy === undefined) return WORKSPACE_KIND_WORDS[kind].onDelete;
-  const removed = `copy at ${copy.path} is removed and the project folder is left as it is`;
+  const removed = `worktree at ${copy.path} is removed and the project folder is left as it is`;
   return { asked: removed, done: () => `its ${removed}` };
 }
 

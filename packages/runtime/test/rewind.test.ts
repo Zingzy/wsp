@@ -10,6 +10,7 @@ import {
   REWIND_LATEST_LINE,
   REWIND_NO_CHECKPOINT_LINE,
   REWIND_NO_UNDO_LINE,
+  REWIND_SHARED_LINE,
   REWIND_WORKING_LINE,
   THREAD_OPS,
   foldThreads,
@@ -148,13 +149,13 @@ const settle = () => new Promise(r => setTimeout(r, 20));
 const texts = async (workspaceId: string) => (await rt!.sessions.history(workspaceId)).flatMap(e => (e.type === "session.delta" ? [e.text] : []));
 
 describe("a checkpoint at every turn's end", () => {
-  it("asks the workspace's daemon for one at the checkout, named by the thread and the turn, and keeps it with the anchor", async () => {
+  it("asks the workspace's daemon for one at the checkout, named by the record, the thread and the turn, and keeps it with the anchor", async () => {
     const { ws, daemon } = await workspace(harness({ cuts: "next" }));
     const run = await rt!.sessions.start(ws.id, { prompt: "one" });
     await run.finished;
     await settle();
     const threadId = run.view().threadId!;
-    expect(daemon.frames.filter(f => f["op"] === "git.checkpoint")).toEqual([{ op: "git.checkpoint", cwd: daemon.checkout(), thread: threadId, turn: run.turnId }]);
+    expect(daemon.frames.filter(f => f["op"] === "git.checkpoint")).toEqual([{ op: "git.checkpoint", cwd: daemon.checkout(), thread: threadId, turn: run.turnId, scope: ws.id }]);
     const kept = (await rt!.sessions.history(ws.id)).filter(e => e.type === "session.checkpoint");
     expect(kept).toMatchObject([{ type: "session.checkpoint", turnId: run.turnId, threadId, ref: `refs/wsp/checkpoints/stub-1/${threadId}/${run.turnId}`, anchor: "a1" }]);
   });
@@ -293,22 +294,22 @@ describe("rewinding a thread to one of its replies", () => {
     expect(await rt!.sessions.rewind(threadId, { turnId: turns[0]!, files: false })).toEqual({ turns: 2 });
   });
 
-  it("will not move the files under another thread in the copy while it works, naming it; the conversation alone still goes", async () => {
+  it("moves no files once another thread worked in the folder after the checkpoint, running or done, and the conversation still goes", async () => {
     const { ws, daemon } = await workspace(harness({ cuts: "next", hangFrom: 4 }));
     const { threadId, turns } = await threeTurns(ws.id);
     // A second thread of the person's on the same workspace, so in the same folder, mid-turn.
     const beside = await rt!.sessions.start(ws.id, { prompt: "move the pricing table" });
     await settle();
     daemon.frames.length = 0;
-    await expect(rt!.sessions.rewind(threadId, { turnId: turns[0]!, files: true })).rejects.toThrow(rewindBesideLine("move the pricing table"));
-    expect(daemon.frames).toEqual([]);
-    expect(await rt!.sessions.rewind(threadId, { turnId: turns[1]!, files: false })).toEqual({ turns: 1 });
+    expect(await rt!.sessions.rewind(threadId, { turnId: turns[1]!, files: true })).toEqual({ turns: 1, kept: REWIND_SHARED_LINE });
     await beside.interrupt();
     await settle();
-    expect(await rt!.sessions.rewind(threadId, { turnId: turns[0]!, files: true })).toEqual({ turns: 1, files: 2 });
+    // Its turn is over, and it still ran after every checkpoint this thread holds.
+    expect(await rt!.sessions.rewind(threadId, { turnId: turns[0]!, files: true })).toEqual({ turns: 1, kept: REWIND_SHARED_LINE });
+    expect(daemon.frames.filter(f => f["op"] === "git.restore")).toEqual([]);
   });
 
-  it("will not undo while another thread in the copy works, and any turn that ends in the copy closes every undo there", async () => {
+  it("will not undo while another thread in the folder works, and any turn that ends in the folder closes every undo there", async () => {
     const { ws, daemon, events } = await workspace(harness({ cuts: "next", hangFrom: 4 }));
     const { threadId, turns } = await threeTurns(ws.id);
     await rt!.sessions.rewind(threadId, { turnId: turns[0]!, files: true });

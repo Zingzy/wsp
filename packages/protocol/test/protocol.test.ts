@@ -910,6 +910,8 @@ describe("runtime wire types", () => {
       "workspaces.pullRequestReply", "workspaces.pullRequestResolve", "workspaces.pullRequestReact",
       // A start and a review make a copy and start an agent, and a post writes on the git host as the person.
       "workspaces.start", "workspaces.review", "workspaces.reviewPost",
+      // A worktree is made and removed in the person's own repo.
+      "worktree.make", "worktree.remove",
       // A reset spends what the person's plan has banked, with no undo.
       "usage.reset",
     ];
@@ -2022,8 +2024,8 @@ describe("bringing work back", () => {
     expect(() => wire.DaemonRequest.parse({ id: 6, op: "git.prState", cwd: "/root/landing" })).toThrow();
     const asked = { id: 7, op: "workspaces.bringBack", workspaceId: "ws_child", title: "the pricing page" };
     expect(wire.RuntimeRequest.parse(asked)).toEqual(asked);
-    // A thread may get its own work out, which is why the op is on the list a thread's token opens.
-    expect(wire.THREAD_OPS).toContain("workspaces.bringBack");
+    // A thread's agent pushes and opens its own pull request with git and gh; the op is the person's button alone.
+    expect(wire.THREAD_OPS).not.toContain("workspaces.bringBack");
   });
 
   it("the result carries the push, and the pull request or the reason there is none", () => {

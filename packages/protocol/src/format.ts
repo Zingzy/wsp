@@ -1602,11 +1602,15 @@ export function rewindChildrenLine(titles: readonly string[]): string {
   return `stop the threads under this one first (${titles.join(", ")}); a rewind never stops them for you`;
 }
 
-/** A rewind of the files, or its undo, refused while another thread in the same copy runs: the files would go back
- * under its agent mid-turn, and nobody chose to lose what it is writing. */
+/** An undo refused while another thread in the same folder runs: the files would go back under its agent mid-turn,
+ * and nobody chose to lose what it is writing. */
 export function rewindBesideLine(title: string): string {
-  return `another thread in this copy is working (${title}), and its files would go back too; let its turn end or stop it first`;
+  return `another thread in this folder is working (${title}), and its files would go back too; let its turn end or stop it first`;
 }
+
+/** Why a rewind put the conversation back and left the files: another thread worked in the folder after that reply,
+ * and its work is in those files too. */
+export const REWIND_SHARED_LINE = "another thread worked in this folder after that reply, so only the conversation goes back";
 
 /** Files asked back to a turn whose end left no checkpoint of them. */
 export const REWIND_NO_CHECKPOINT_LINE = "that reply kept no checkpoint of the files, so only its conversation can be rewound";
@@ -1619,11 +1623,8 @@ export function rewindNoAnchorLine(agent: string): string {
 /** A rewind to the thread's latest reply, after which nothing stands to cut. */
 export const REWIND_LATEST_LINE = "that is the thread's latest reply, so nothing comes after it to rewind";
 
-/** A rewind on a workspace that is the person's own folder, where wsp writes nothing. */
-export const REWIND_OWN_FOLDER_LINE = "this workspace is your own folder, and wsp keeps no checkpoints there; start the work in a copy to rewind it";
-
-/** An undo with no rewind to undo, or one a turn in the same copy has ended since. */
-export const REWIND_NO_UNDO_LINE = "this thread has no rewind to undo; undo lasts until the next turn in this copy ends";
+/** An undo with no rewind to undo, or one a turn in the same folder has ended since. */
+export const REWIND_NO_UNDO_LINE = "this thread has no rewind to undo; undo lasts until the next turn in this folder ends";
 
 /** What Undo rewind puts back, said beside it: the files, and never the turns the rewind cut. */
 export const UNDO_REWIND_LINE = "Files come back; the cut conversation does not.";
@@ -2569,16 +2570,13 @@ export const COPY_WORD = "a copy";
  * say two things about one workspace. */
 export const madeOfWord = (_road: CopyRoad): string => COPY_WORD;
 
-/** What a workspace's copy has for a network, in the same words: its own where the computer gives a copy one, else
- * the computer's own ports, with the port an app that reads PORT binds where the record carries a base, since two
- * copies on one computer's network cannot both have 3000. Nothing at all on a computer that copies nothing, which
- * has no copy to say it of. Reads the two capability flags and nothing about the workspace's kind, so a computer
- * that gains its own network changes one flag and every line follows. */
-export function portsWord(c: Pick<Capabilities, "copies" | "ownNetwork">, portBase: number | undefined, computer: string): string {
+/** What a computer's threads have for a network: their own where the computer gives them one, else the computer's own
+ * ports, shared as panes in one terminal share them. Nothing at all on a computer that copies nothing. Reads the two
+ * capability flags and nothing about the kind, so a computer that gains its own network changes one flag. */
+export function portsWord(c: Pick<Capabilities, "copies" | "ownNetwork">, computer: string): string {
   if (c.ownNetwork) return "own network";
   if (!c.copies) return "";
-  const shares = `shares ${computer}'s ports`;
-  return portBase === undefined ? shares : `${shares}, PORT ${portBase}`;
+  return `shares ${computer}'s ports`;
 }
 
 /** What the browser pane says for a port it cannot open: the computer it runs on gives this pane no address, and

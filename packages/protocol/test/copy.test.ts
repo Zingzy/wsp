@@ -10,7 +10,6 @@ import {
   CopyReport,
   ProjectCopy,
   WorkspaceView,
-  copyPathFor,
   CopyRoad,
   COPY_WORD,
   folderSlug,
@@ -65,15 +64,14 @@ describe("the two flags a computer declares about copies", () => {
 describe("what a row says about a copy's network", () => {
   it("is its own network, the computer's ports with the copy's port base, or those ports alone, and nothing where the computer copies nothing", () => {
     for (const computer of ["zingzy's MacBook Pro", "spoo"]) {
-      expect(portsWord({ copies: false, ownNetwork: true }, undefined, computer)).toBe("own network");
-      expect(portsWord(here, 3100, computer)).toBe(`shares ${computer}'s ports, PORT 3100`);
-      expect(portsWord(here, undefined, computer)).toBe(`shares ${computer}'s ports`);
-      expect(portsWord({ copies: false, ownNetwork: false }, undefined, computer)).toBe("");
+      expect(portsWord({ copies: false, ownNetwork: true }, computer)).toBe("own network");
+      expect(portsWord(here, computer)).toBe(`shares ${computer}'s ports`);
+      expect(portsWord({ copies: false, ownNetwork: false }, computer)).toBe("");
     }
   });
 
   it("gives a copy with its own network that word whatever road made it, since the ports inside one are its own", () => {
-    expect(portsWord({ copies: true, ownNetwork: true }, 3100, "spoo")).toBe("own network");
+    expect(portsWord({ copies: true, ownNetwork: true }, "spoo")).toBe("own network");
   });
 });
 
@@ -123,33 +121,9 @@ describe("what the copy verb is asked for and what it answers", () => {
     expect("ms" in copy).toBe(false);
     expect("bytes" in copy).toBe(false);
   });
-
-  it("rides the workspace's own view beside the port its apps bind", () => {
-    const view = WorkspaceView.parse({
-      id: "ws_1",
-      name: "pricing page",
-      machineId: "local",
-      phase: "running",
-      kind: "local",
-      golden: "",
-      createdAt: "2026-09-17T00:00:00.000Z",
-      project: { id: "pr_1", name: "repo", path: "/Users/dev/repo", computer: "here" },
-      copy: ProjectCopy.parse({ ...report, source: "/Users/dev/repo" }),
-      portBase: 3100,
-    });
-    expect(view.copy?.road).toBe("clonefile");
-    expect(view.portBase).toBe(3100);
-    // A port base is a port, so nothing under one parses.
-    expect(WorkspaceView.safeParse({ ...view, portBase: 0 }).success).toBe(false);
-  });
 });
 
-describe("where a copy's folder lands and what it is called", () => {
-  it("is a sibling of the folder under the work's own name", () => {
-    expect(copyPathFor("/Users/dev/spoo-landing", "pricing-page")).toBe("/Users/dev/spoo-landing-pricing-page");
-    expect(copyPathFor("/Users/dev/spoo-landing/", "qr-codes")).toBe("/Users/dev/spoo-landing-qr-codes");
-  });
-
+describe("what a piece of work's name is as a folder name", () => {
   it("turns a piece of work's name into a folder name and never into nothing", () => {
     expect(folderSlug("pricing page copy")).toBe("pricing-page-copy");
     expect(folderSlug("  QR codes: round 2!  ")).toBe("qr-codes-round-2");

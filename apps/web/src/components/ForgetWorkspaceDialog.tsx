@@ -131,11 +131,11 @@ export function ForgetWorkspaceDialog({
               ? deleteCopiesNotice(
                   workspaces.map(w => {
                     const on = standsOn(w);
-                    return { name: w.name, kind: workspaceKind(w), ...(w.copy !== undefined ? { copy: w.copy } : {}), ...(on !== undefined ? { on } : {}) };
+                    return { name: w.name, kind: workspaceKind(w), ...(w.worktree?.made === true ? { copy: { path: w.worktree.path } } : {}), ...(on !== undefined ? { on } : {}) };
                   }),
                   threads,
                 )
-              : act === "delete" ? deleteNotice(threads, workspaceKind(workspace), workspace.copy, undefined, on) : forgetNotice(threads)}
+              : act === "delete" ? deleteNotice(threads, workspaceKind(workspace), workspace.worktree?.made === true ? { path: workspace.worktree.path } : undefined, undefined, on) : forgetNotice(threads)}
           </AlertDialogDescription>
           {holding.length === 0 ? null : (
             <ul data-k="unpushed" className="mt-2 flex flex-col gap-1 text-[13px] leading-5 text-foreground">

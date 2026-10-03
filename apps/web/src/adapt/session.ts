@@ -447,6 +447,8 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
       case "session.run":
         runs.set(event.block, event);
         continue;
+      case "session.moved":
+        continue;
       case "session.checkpoint": {
         // Taken once the turn is over, so a later turn may already be open: the row goes on its own turn's summary.
         const at = turns.findIndex(t => t.turnId === event.turnId);

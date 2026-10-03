@@ -261,7 +261,7 @@ describe("who may open a channel", () => {
     // A machine's road into this host drives no workspace of this computer's own, and the channel is one more verb.
     const ticket = String((await here.request("ticket.issue", { purpose: "relay" }))["ticket"]);
     const relayed = await WsClient.connect(srv.port, { ticket });
-    expect(await relayed.request("daemon.open", { workspaceId: ws.id })).toMatchObject({ ok: false, error: relayedRefusal("this computer") });
+    expect(await relayed.request("daemon.open", { workspaceId: ws.id })).toMatchObject({ ok: false, error: relayedRefusal(ws.name) });
 
     here.close();
     relayed.close();

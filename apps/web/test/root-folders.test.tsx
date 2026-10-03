@@ -18,7 +18,8 @@ const copied: WorkspaceView = {
   golden: "",
   createdAt: "2026-09-01T00:00:00Z",
   project: { id: "pr_1", name: "spoo", path: "/Users/maya/spoo", computer: "here" },
-  copy: { path: "/Users/maya/wsp-work/spoo-cart", base: "main", branch: "cart", road: "worktree", source: "/Users/maya/spoo", carried: "nothing" },
+  worktree: { path: "/Users/maya/wsp-work/spoo-cart", branch: "cart", made: true },
+  folder: "/Users/maya/wsp-work/spoo-cart",
 };
 
 beforeEach(() => {

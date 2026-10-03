@@ -564,7 +564,7 @@ describe("agents spawning agents", () => {
     const scope = (await rt.devices.list()).find(d => d.scope?.threadId === macThread)?.scope;
     expect(scope).toEqual({ kind: "thread", threadId: macThread, workspaceId: mac.id, rootThreadId: macThread });
     const asMacThread: Caller = { origin: "here", by: scope! };
-    await expect(rt.sessions.start(mac.id, { prompt: "a sonnet agent" }, asMacThread)).rejects.toThrow(agentsOffRefusal("mac", "thread_new"));
+    await expect(rt.sessions.start(mac.id, { prompt: "a sonnet agent" }, asMacThread)).rejects.toThrow(agentsOffRefusal(mac.name, "thread_new"));
     // What it may read is its own tree, which is the thread itself.
     expect((await rt.sessions.list(undefined, asMacThread)).map(s => s.threadId)).toEqual([macThread]);
     held.end(0);
@@ -863,37 +863,33 @@ describe("agents spawning agents", () => {
   };
   const MAC_HERE = { url: "http://127.0.0.1:4801" };
 
-  it("a thread on this computer drives the host as itself: its copies nest under it, and the person's doors stay shut", async () => {
+  it("a thread on this computer starts its threads beside it, held to the depth cap and no machine cap, and the person's doors stay shut", async () => {
     const held = heldAdapter();
     const rt = runtimeWith({ claude: held.factory }, { here: MAC_HERE });
     const project = await projectOn(rt, HERE_PLACE_ID, committedRepo());
-    const mac = await createOn(rt, { project: project.id, name: "mac", agents: { spawn: true, maxMachines: 3, maxDepth: 1 } });
-    // What stands beside it and is not its own: the person's other copy of the same project, and another lead's
-    // tree on this computer with a copy that lead's thread made.
-    const other = await createOn(rt, { project: project.id, name: "other" });
-    const lead = await createOn(rt, { project: project.id, name: "lead", agents: AGENTS_ON });
-    const onLead = await rt.sessions.start(lead.id, { prompt: "hi" });
-    const leadScope: ThreadScope = { kind: "thread", threadId: onLead.view().threadId!, workspaceId: lead.id, rootThreadId: onLead.view().threadId! };
-    const theirs = await createOn(rt, { name: "theirs" }, { origin: "here", by: leadScope });
-    const onMac = await rt.sessions.start(mac.id, { prompt: "hi" });
-    const threadId = onMac.view().threadId!;
-    const token = held.launches[1]!.env[HOST_TOKEN_ENV]!;
+    const mac = await createOn(rt, { project: project.id, name: "mac", agents: { spawn: true, maxMachines: 1, maxDepth: 1 } });
+    const lead = await rt.sessions.start(mac.id, { prompt: "hi" });
+    const threadId = lead.view().threadId!;
+    const token = held.launches[0]!.env[HOST_TOKEN_ENV]!;
     const srv = await serveRuntime(rt, { port: 0, authToken: "secret", devices: rt.devices });
     try {
       const client = await WsClient.connect(srv.port, { token });
+      // A create of its own project names the folder it already runs in, and makes nothing.
       const made = await client.request("workspaces.create", { project: project.id, name: "kid" });
-      expect(made["error"]).toBeUndefined();
-      const kid = made["workspace"] as { id: string; kind: string; parentThreadId?: string; rootThreadId?: string; parentWorkspaceId?: string };
-      expect(kid.kind).toBe("local");
-      expect(kid.parentThreadId).toBe(threadId);
-      expect(kid.rootThreadId).toBe(threadId);
-      expect(kid.parentWorkspaceId).toBe(mac.id);
-      expect(await store.get("workspaces", kid.id)).toMatchObject({ parentThreadId: threadId, rootThreadId: threadId });
-      // Its own copy and the one it made, and nothing else on this computer.
-      expect(((await client.request("workspaces.list"))["workspaces"] as { name: string }[]).map(w => w.name).sort()).toEqual(["kid", "mac"]);
-      for (const foreign of [other, lead, theirs]) {
-        expect((await client.request("workspaces.get", { workspaceId: foreign.id }))["error"]).toBe(noWorkspaceRefusal());
-      }
+      expect((made["workspace"] as { id: string }).id).toBe(mac.id);
+      expect((await client.request("workspaces.create", { project: project.id, name: "wide", agents: { maxMachines: 50 } }))["error"]).toBe(spawnActRefusal(threadId, "agents"));
+      // Two starts naming nothing run beside it, in its folder, under it; no machine cap counts them.
+      for (const prompt of ["one", "two"]) expect((await client.request("sessions.start", { prompt }))["error"]).toBeUndefined();
+      await until(() => held.launches.length === 3);
+      const kids = (await rt.sessions.list(mac.id)).filter(s => s.threadId !== threadId);
+      expect(kids.map(k => ({ parent: k.parentThreadId, root: k.rootThreadId, cwd: k.cwd }))).toEqual([
+        { parent: threadId, root: threadId, cwd: mac.folder },
+        { parent: threadId, root: threadId, cwd: mac.folder },
+      ]);
+      // One level down is the cap, so a child's own token starts nothing more.
+      const child = await WsClient.connect(srv.port, { token: held.launches[1]!.env[HOST_TOKEN_ENV]! });
+      expect((await child.request("sessions.start", { prompt: "deeper" }))["error"]).toBe(spawnDepthRefusal(kids[0]!.threadId!, 1, 1));
+      child.close();
       // The road a connect ticket is minted on is the person's, and so is every door that hands out access.
       expect((await client.request("ticket.issue", { purpose: "connect" }))["error"]).toBe(threadOpRefusal("ticket.issue", threadId));
       expect((await client.request("pair.issue"))["error"]).toBe(threadOpRefusal("pair.issue", threadId));
@@ -901,10 +897,8 @@ describe("agents spawning agents", () => {
       client.close();
     } finally {
       await srv.close();
-      held.end(1);
-      held.end(0);
-      await onMac.finished;
-      await onLead.finished;
+      for (let nth = 0; nth < held.launches.length; nth++) held.end(nth);
+      await lead.finished;
       await rt.close();
     }
   });
@@ -1016,48 +1010,6 @@ describe("agents spawning agents", () => {
     await expect(createOn(rt, { name: "b3" }, asThread(scope))).rejects.toThrow(spawnCapRefusal("t_root", 2, 2));
     expect((await rt.workspaces.list()).filter(w => w.rootThreadId === "t_root")).toHaveLength(2);
     await rt.close();
-  });
-
-  it("a thread on this computer, on the token its own turn was launched with, has its copies held to the guard a fork is", async () => {
-    const held = heldAdapter();
-    const rt = runtimeWith({ claude: held.factory }, { here: MAC_HERE });
-    const project = await projectOn(rt, HERE_PLACE_ID, committedRepo());
-    const mac = await createOn(rt, { on: HERE_PLACE_ID, name: "mac", project: project.id, agents: { spawn: true, maxMachines: 1, maxDepth: 1 } });
-    const lead = await rt.sessions.start(mac.id, { prompt: "make a copy for a builder" });
-    const threadId = lead.view().threadId!;
-    // The caller is the one the host builds: the socket authed with the token this turn's launch was handed, which
-    // the door stamps with the road the record names and the thread the token was minted for.
-    const token = held.launches[0]!.env[HOST_TOKEN_ENV]!;
-    const srv = await serveRuntime(rt, { port: 0, authToken: "secret", devices: rt.devices });
-    try {
-      const client = await WsClient.connect(srv.port, { token });
-      const wide = await client.request("workspaces.create", { project: project.id, name: "wide", agents: { maxMachines: 50 } });
-      expect(wide["error"]).toBe(spawnActRefusal(threadId, "agents"));
-      // Where the copy nests is the case above's; this one is the guard it passes on the way.
-      const kid = (await client.request("workspaces.create", { project: project.id, name: "kid" }))["workspace"] as { id: string };
-      // The copy holds the root's one machine, so a second is refused by the count.
-      expect((await client.request("workspaces.create", { project: project.id, name: "kid2" }))["error"]).toBe(spawnCapRefusal(threadId, 1, 1));
-      // A thread the lead starts on its copy is one level down, which is the cap, so its own token makes no copy.
-      await client.request("sessions.start", { workspaceId: kid.id, prompt: "build it" });
-      await until(() => held.launches.length === 2);
-      const childThread = (await rt.sessions.list(kid.id))[0]!.threadId!;
-      const child = await WsClient.connect(srv.port, { token: held.launches[1]!.env[HOST_TOKEN_ENV]! });
-      expect((await child.request("workspaces.create", { project: project.id, name: "kid3" }))["error"]).toBe(spawnDepthRefusal(childThread, 1, 1));
-      child.close();
-      // A turn on a workspace with the switch off is still launched with its token, and its copy is refused by it.
-      const quiet = await createOn(rt, { project: project.id, name: "quiet", agents: { spawn: false } });
-      await rt.sessions.start(quiet.id, { prompt: "make a copy" });
-      await until(() => held.launches.length === 3);
-      const off = await WsClient.connect(srv.port, { token: held.launches[2]!.env[HOST_TOKEN_ENV]! });
-      expect((await off.request("workspaces.create", { project: project.id, name: "kid4" }))["error"]).toBe(agentsOffRefusal("quiet", "fork"));
-      off.close();
-      client.close();
-    } finally {
-      await srv.close();
-      for (let nth = 0; nth < held.launches.length; nth++) held.end(nth);
-      await lead.finished;
-      await rt.close();
-    }
   });
 
   it("turning the lead's switch off stops the tree it spawned, not only the threads on the lead", async () => {
