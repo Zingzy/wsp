@@ -71,7 +71,10 @@ describe("the sketch", () => {
 
 describe("the catalog", () => {
   it("keeps the index near 1,000 tokens and its example valid", () => {
-    expect(slateTokens(slateCatalog())).toBeLessThan(1060);
+    // What ago and until print and what a chart's x takes, after agents guessed both, took it from 1,060 to 1,090.
+    expect(slateTokens(slateCatalog())).toBeLessThan(1090);
+    expect(slateCatalog()).toContain(`ago(t) gives "30s", until(t) "in 4m".`);
+    expect(slateCatalog()).toContain("time is a chart, x in ms or ISO;");
     expect(parseSlate(SLATE_INDEX_EXAMPLE).errors).toEqual([]);
     expect(slateCatalog()).toContain(SLATE_INDEX_EXAMPLE);
   });
