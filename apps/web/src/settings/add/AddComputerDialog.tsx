@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Add a computer as one dialog, 560 px wide and one height across its steps:
-// the header carries the step's name, a line only where the rows do not say
-// it, and the step's place in the run as a quiet mono figure; the body is the
+// the header carries the step's name, a line of what the step does and why,
+// and the step's place in the run as a quiet mono figure; the body is the
 // step's rows in the settings list grammar; the foot is the saved line once a
 // choice is kept, then Back and the primary. The running view is the same
 // rows in the order they were chosen, a row that needs the person opening
@@ -17,6 +17,7 @@ import { Button } from "../../components/ui/button.js";
 import { Dialog, DialogDescription, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../../components/ui/dialog.js";
 import { Input } from "../../components/ui/input.js";
 import { RadioGroup } from "../../components/ui/radio-group.js";
+import { Spinner } from "../../components/ui/spinner.js";
 import { desktopBridge } from "../../lib/desktopShell.js";
 import { cn } from "../../lib/utils.js";
 import { addNotice } from "../../notices/store.js";
@@ -27,17 +28,17 @@ import { IconSelect } from "../../projects/LookPicker.js";
 import { useAdds } from "../adds.js";
 import { ComputerGlyph } from "../ComputerGlyph.js";
 import { ADD_COMPUTER_WORDS, FACT } from "../format.js";
-import { GlyphFrame, Grid, GridHead, GridName, GridRow } from "../grid.js";
+import { Grid, GridHead } from "../grid.js";
 import { NOTE, ROW_FIELD } from "../layout.js";
 import { placeName } from "../places.js";
 import { readRecipes, useRecipes } from "../recipesStore.js";
 import { Card, Line } from "../rows.js";
-import { CopyRow, RefusalSlot } from "../sheetParts.js";
-import { STEP_TITLES, askedHostKey, closeAdd, connect, firstPick, go, openSetup, readOptions, retrySetup, setPicks, skipRow, setSaveAs, setUp, stepsFor, tooBig, useAddFlow, weigh, type AddStep } from "./addFlow.js";
-import { everything, folderKey, githubPick, noPicks } from "./choices.js";
+import { CopyRow, DeviceCode, RefusalSlot } from "../sheetParts.js";
+import { STEP_TITLES, askedHostKey, closeAdd, connect, firstPick, go, openSetup, readOptions, retrySetup, setPicks, skipRow, setSaveAs, setUp, stepLine, stepsFor, tooBig, useAddFlow, weigh, type AddStep } from "./addFlow.js";
+import { everything, folderKey, githubPick, noPicks, tickUsedClis } from "./choices.js";
 import { AgentsPicks, Choice, ClisPicks, GitHubPicks, OtherPicks, PluginsPicks, ProjectsPicks, ServersPicks, SkillsPicks, type FolderOption } from "./PickLists.js";
 import { PickLine, PickRow } from "./PickRow.js";
-import { checkRows, runningMs, setupCount, setupRows, setupStanding, stepOutput, type StepLine } from "./setup.js";
+import { checkRows, opensLog, runningMs, setupCount, setupRows, setupStanding, stepLogs, type StepLine } from "./setup.js";
 import { RetryActs, SkipAct, StepRow } from "./StepRow.js";
 
 const GLYPH = "size-4 text-foreground/80";
@@ -46,9 +47,10 @@ const GLYPH = "size-4 text-foreground/80";
 const sshLogin = (host: SshHostSuggestion): string => [host.user, host.hostName ?? host.alias].filter(Boolean).join("@");
 
 function WhereStep({ address, hostKey, hosts, hostsRefused, onPick }: { address: string; hostKey: string | undefined; hosts: readonly SshHostSuggestion[]; hostsRefused: Failure | null; onPick: (alias: string) => void }) {
+  const picked = hosts.find(host => host.alias === address.trim())?.alias ?? "";
   return (
     <>
-      <Input data-k="where-field" aria-label="Address" nativeInput autoFocus autoComplete="off" spellCheck={false} autoCapitalize="off" value={address} placeholder="user@host or an ssh alias" onChange={e => useAddFlow.setState({ address: e.target.value })} className="font-mono" />
+      <Input data-k="where-field" aria-label="Address" nativeInput autoFocus autoComplete="off" spellCheck={false} autoCapitalize="off" value={address} placeholder="user@host or an ssh alias" onChange={e => useAddFlow.setState({ address: e.target.value })} size="lg" className="font-mono" />
       {hostKey !== undefined ? (
         <div className="flex flex-col gap-2">
           <p className={NOTE}>{address.trim()}'s host key is new to {hereName(useStore.getState().places)}.</p>
@@ -57,21 +59,13 @@ function WhereStep({ address, hostKey, hosts, hostsRefused, onPick }: { address:
       ) : hostsRefused !== null ? (
         <RefusalSlot k="ssh-hosts-refused" said={ADD_COMPUTER_WORDS.hostsNotRead(hostsRefused.said)} {...(hostsRefused.fix === undefined ? {} : { fix: hostsRefused.fix })} />
       ) : hosts.length === 0 ? null : (
-        <Grid id="ssh-hosts" head={<GridHead cells={[{ word: ADD_COMPUTER_WORDS.suggested }]} />}>
-          {hosts.map(host => (
-            <GridRow key={host.alias} columns="grid-cols-[minmax(0,1fr)_auto]" tight open={() => onPick(host.alias)} attrs={{ "data-ssh-host": host.alias }}>
-              <GridName
-                glyph={
-                  <GlyphFrame>
-                    <ServerIcon aria-hidden className={GLYPH} />
-                  </GlyphFrame>
-                }
-                name={host.alias}
-              />
-              <span className={FACT}>{sshLogin(host)}</span>
-            </GridRow>
-          ))}
-        </Grid>
+        <RadioGroup value={picked} onValueChange={next => onPick(String(next))} className="gap-0">
+          <Grid id="ssh-hosts" head={<GridHead cells={[{ word: ADD_COMPUTER_WORDS.suggested }]} />}>
+            {hosts.map(host => (
+              <Choice key={host.alias} id={host.alias} picked={picked === "" || picked === host.alias} glyph={<ServerIcon aria-hidden className={GLYPH} />} name={host.alias} fact={sshLogin(host)} />
+            ))}
+          </Grid>
+        </RadioGroup>
       )}
     </>
   );
@@ -230,7 +224,6 @@ function SummaryStep({ picks, box, place, here, recipeIcon }: { picks: RecipeFil
 /** A sign-in that waits on the person: the code, the tab opened again, Skip for now, and where it can be finished
  * later. A wait that ran out says so and is run again by Retry. */
 function WaitBlock({ row, onRetry, onSkip, busy }: { row: StepLine; onRetry: () => void; onSkip: () => void; busy: boolean }) {
-  const skip = <SkipAct word={ADD_COMPUTER_WORDS.skipForNow} onSkip={onSkip} busy={busy} />;
   const wait = row.wait!;
   if (wait.state === "expired") {
     return (
@@ -240,7 +233,7 @@ function WaitBlock({ row, onRetry, onSkip, busy }: { row: StepLine; onRetry: () 
         </p>
         <div className="flex flex-wrap items-center gap-2">
           <RetryActs onRetry={onRetry} busy={busy} />
-          {skip}
+          <SkipAct word={ADD_COMPUTER_WORDS.skipForNow} onSkip={onSkip} busy={busy} />
         </div>
       </>
     );
@@ -248,30 +241,81 @@ function WaitBlock({ row, onRetry, onSkip, busy }: { row: StepLine; onRetry: () 
   return (
     <>
       <div data-sign-in-line className="flex min-h-10 flex-wrap items-center gap-x-3 gap-y-2">
-        {wait.code === undefined ? null : (
-          <span data-k="sign-in-code" className="font-mono text-xl text-foreground tabular-nums">
-            {wait.code}
-          </span>
-        )}
+        {wait.code === undefined ? null : <DeviceCode code={wait.code} />}
         {wait.url === undefined ? null : (
           <Button size="xs" variant="outline" data-k="open-tab" onClick={() => void window.open(wait.url, "_blank", "noopener,noreferrer")}>
             <ExternalLinkIcon aria-hidden className="size-3.5" />
             Open the tab again
           </Button>
         )}
-        {skip}
+        <SkipAct word={ADD_COMPUTER_WORDS.skipForNow} onSkip={onSkip} busy={busy} bare />
       </div>
       <p className={NOTE}>{ADD_COMPUTER_WORDS.signInLater}</p>
     </>
   );
 }
 
+/** How often an open step's output is read off the box's setup log while it runs: one tail of the log a read, for
+ * every step at once. */
+const OUTPUT_EVERY_MS = 3000;
+
+/** Each step's last lines of output, read while `want` holds (a row is open) and on a timer while `live` does (an
+ * open row is running), never on a render; a read still out when the next is due is not doubled. Nothing until the
+ * first read answers. */
+function useStepLogs(placeId: string, want: boolean, live: boolean): Partial<Record<PlaceSetupStep, string[]>> | null {
+  const api = useStore(s => s.api);
+  const [logs, setLogs] = useState<Partial<Record<PlaceSetupStep, string[]>> | null>(null);
+  useEffect(() => {
+    const read = api?.placesSetupLog;
+    if (!want || read === undefined) return;
+    let on = true;
+    let asking = false;
+    const tail = (): void => {
+      if (asking) return;
+      asking = true;
+      void read(placeId).then(
+        lines => {
+          asking = false;
+          if (!on) return;
+          const next = stepLogs(lines);
+          setLogs(was => (JSON.stringify(was) === JSON.stringify(next) ? was : next));
+        },
+        () => {
+          asking = false;
+        },
+      );
+    };
+    tail();
+    const timer = live ? setInterval(tail, OUTPUT_EVERY_MS) : undefined;
+    return () => {
+      on = false;
+      if (timer !== undefined) clearInterval(timer);
+    };
+  }, [api, placeId, want, live]);
+  return logs;
+}
+
+/** A step's last lines of output under its open row, in the mono, wrapping. */
+function StepLog({ lines }: { lines: readonly string[] | undefined }) {
+  if (lines === undefined || lines.length === 0) return <p className={NOTE}>No output yet.</p>;
+  return (
+    <pre data-k="step-log" className="max-h-48 overflow-auto font-mono text-[11px] leading-4 whitespace-pre-wrap break-all text-muted-foreground tabular-nums">
+      {lines.join("\n")}
+    </pre>
+  );
+}
+
 /** The steps of a setup with what each row asks: Retry where a row did not land, Skip where it is an item the host can
- * set aside, the wait where a sign-in does. */
+ * set aside, the wait where a sign-in does. A step that ran opens on a click to its last lines of output, and one that
+ * failed stands open until it is closed. */
 export function SetupList({ place, id = "setup", rows = setupRows(place, placeName(place)) }: { place: PlaceView; id?: string; rows?: readonly StepLine[] }) {
   const api = useStore(s => s.api);
   const [refused, setRefused] = useState<Failure | null>(null);
   const [busy, setBusy] = useState(false);
+  const [turned, setTurned] = useState<ReadonlyMap<string, boolean>>(new Map());
+  const isOpen = (row: StepLine): boolean => opensLog(row) && (turned.get(row.id) ?? row.state === "failed");
+  const open = rows.filter(isOpen);
+  const logs = useStepLogs(place.id, open.length > 0, open.some(row => row.state === "working"));
   const ask = (run: () => Promise<Failure | null>): void => {
     setBusy(true);
     void run().then(failure => {
@@ -288,12 +332,13 @@ export function SetupList({ place, id = "setup", rows = setupRows(place, placeNa
         {row.sub === true ? <SkipAct word={ADD_COMPUTER_WORDS.skip} onSkip={skip(row.id)} busy={busy} /> : null}
       </>
     );
+  const toggle = (row: StepLine) => (opensLog(row) ? { open: isOpen(row), onToggle: () => setTurned(was => new Map(was).set(row.id, !isOpen(row))) } : { open: false });
   return (
     <>
       <Grid id={id}>
         {rows.map(row => (
-          <StepRow key={row.id} row={row} acts={acts(row)}>
-            {row.wait === undefined ? undefined : <WaitBlock row={row} onRetry={retry} onSkip={skip(row.id)} busy={busy} />}
+          <StepRow key={row.id} row={row} acts={acts(row)} toggle={toggle(row)}>
+            {row.wait !== undefined ? <WaitBlock row={row} onRetry={retry} onSkip={skip(row.id)} busy={busy} /> : isOpen(row) && logs !== null ? <StepLog lines={logs[row.id as PlaceSetupStep]} /> : undefined}
           </StepRow>
         ))}
       </Grid>
@@ -301,9 +346,6 @@ export function SetupList({ place, id = "setup", rows = setupRows(place, placeNa
     </>
   );
 }
-
-/** How often the steps running are read off the box's setup log: one tail of the log a read, for every step at once. */
-const OUTPUT_EVERY_MS = 3000;
 
 /** The time now, moved once a second while `on`: one interval for every row that ticks, never one per row. */
 function useNow(on: boolean): number {
@@ -317,52 +359,13 @@ function useNow(on: boolean): number {
   return now;
 }
 
-/** The last line of output of each step running, read when the steps running change and on a timer while any runs,
- * never on a render; a read still out when the next is due is not doubled. It stands behind the row on hover: the
- * row's own note is the sentence its picks make. */
-function useStepOutput(placeId: string, running: string): Partial<Record<PlaceSetupStep, string>> {
-  const api = useStore(s => s.api);
-  const [out, setOut] = useState<Partial<Record<PlaceSetupStep, string>>>({});
-  useEffect(() => {
-    const read = api?.placesSetupLog;
-    if (running === "" || read === undefined) return;
-    let live = true;
-    let asking = false;
-    const tail = (): void => {
-      if (asking) return;
-      asking = true;
-      void read(placeId).then(
-        lines => {
-          asking = false;
-          if (!live) return;
-          const next = stepOutput(lines);
-          setOut(was => (JSON.stringify(was) === JSON.stringify(next) ? was : next));
-        },
-        () => {
-          asking = false;
-        },
-      );
-    };
-    tail();
-    const timer = setInterval(tail, OUTPUT_EVERY_MS);
-    return () => {
-      live = false;
-      clearInterval(timer);
-    };
-  }, [api, placeId, running]);
-  return out;
-}
-
 function RunningView({ place }: { place: PlaceView }) {
   const drawn = setupRows(place, placeName(place));
-  const working = drawn.filter(row => row.state === "working").map(row => row.id);
-  const output = useStepOutput(place.id, working.join(" "));
-  const now = useNow(working.length > 0);
-  const addId = place.setup?.addId;
+  const now = useNow(drawn.some(row => row.state === "working"));
   const rows = drawn.map(row => {
-    if (row.state !== "working" || addId === undefined) return row;
-    const said = output[row.id as PlaceSetupStep];
-    return { ...row, ms: runningMs(addId, row.id, now), ticking: true as const, ...(said === undefined ? {} : { output: said }) };
+    if (row.state !== "working") return row;
+    const ms = runningMs(place.setup, row.id, now);
+    return { ...row, ticking: true as const, ...(ms === undefined ? {} : { ms }) };
   });
   const asks = rows.find(row => row.state === "needs-you" || row.state === "failed")?.id;
   const shown = useRef(false);
@@ -449,7 +452,9 @@ export function AddComputerDialog() {
   useEffect(() => {
     if (!flow.open || api === null) return;
     readRecipes(api);
-    readOptions(api);
+    // The running and ready views draw no options; the read is half a minute of the host's walk for nothing there.
+    const at = useAddFlow.getState().step;
+    if (at !== "running" && at !== "ready") readOptions(api);
     void api.sshHosts?.().then(
       found => {
         setHosts(found);
@@ -520,7 +525,15 @@ export function AddComputerDialog() {
   const versions = places.find(p => p.id === HERE_PLACE_ID)?.agentVersions;
   const boxProjects = projects.filter(p => p.computer === flow.placeId);
   const optionsBody = (draw: (o: RecipeOptions) => ReactNode): ReactNode =>
-    options !== null ? draw(options) : flow.optionsRefused !== null ? <RefusalSlot k="options-refused" said={flow.optionsRefused.said} {...(flow.optionsRefused.fix === undefined ? {} : { fix: flow.optionsRefused.fix })} /> : null;
+    options !== null ? (
+      draw(options)
+    ) : flow.optionsRefused !== null ? (
+      <RefusalSlot k="options-refused" said={flow.optionsRefused.said} {...(flow.optionsRefused.fix === undefined ? {} : { fix: flow.optionsRefused.fix })} />
+    ) : (
+      <div data-k="options-loading" className="flex flex-1 items-center justify-center">
+        <Spinner className="size-4 text-muted-foreground" />
+      </div>
+    );
 
   const body = (): ReactNode => {
     switch (view) {
@@ -537,7 +550,19 @@ export function AddComputerDialog() {
       case "mcp":
         return optionsBody(o => <ServersPicks picks={picks} options={o} onChange={change} box={box} />);
       case "clis":
-        return optionsBody(o => <ClisPicks picks={picks} options={o} onChange={change} box={box} />);
+        return optionsBody(o => (
+          <>
+            {o.clis.some(cli => (cli.calls ?? 0) > 0 && picks.clis[cli.name] === undefined) ? (
+              <div className="flex justify-end">
+                <Button size="xs" variant="outline" data-k="tick-used" onClick={() => change(tickUsedClis(picks, o))}>
+                  <ListChecksIcon aria-hidden className="size-3.5" />
+                  Select the ones your agents used
+                </Button>
+              </div>
+            ) : null}
+            <ClisPicks picks={picks} options={o} onChange={change} box={box} />
+          </>
+        ));
       case "skills":
         return optionsBody(o => <SkillsPicks picks={picks} options={o} onChange={change} box={box} />);
       case "plugins":
@@ -564,14 +589,14 @@ export function AddComputerDialog() {
   const rows = place === undefined ? [] : setupRows(place, box);
   const head = ((): { title: string; line?: string } => {
     if (view === "where" || view === "hostkey") return { title: ADD_COMPUTER_WORDS.title, line: ADD_COMPUTER_WORDS.where };
-    if (view !== "running" && view !== "ready") return { title: STEP_TITLES[view] };
+    if (view !== "running" && view !== "ready") return { title: STEP_TITLES[view], line: stepLine(view, box, here) };
     if (standing === "failed") return { title: `Setup on ${box} failed` };
     if (standing === "needs-you") return { title: `${box} needs you`, line: ADD_COMPUTER_WORDS.restDone };
     if (standing === "ready") {
       const took = place?.setup?.finishedAt === undefined ? undefined : Date.parse(place.setup.finishedAt) - Date.parse(place.setup.startedAt);
       return { title: `${box} is ready`, ...(took === undefined || !Number.isFinite(took) ? {} : { line: `Set up in ${fmtDuration(took)}.` }) };
     }
-    return { title: `Setting up ${box}`, line: ADD_COMPUTER_WORDS.canClose };
+    return { title: `Setting up ${box}` };
   })();
   const figure = ((): { words: string; why: string } => {
     if (view === "running") {
@@ -644,6 +669,10 @@ export function AddComputerDialog() {
             {closeButton}
             {primary("Next", () => go("ready"))}
           </>
+        ) : standing === "running" ? (
+          <Button variant="outline" data-k="close" onClick={close}>
+            Run in background
+          </Button>
         ) : (
           closeButton
         );

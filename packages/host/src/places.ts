@@ -440,6 +440,9 @@ export const placeNoLoginsLine = (name: string): string =>
 export const boxSignedInLine = (name: string, agent: string, detail?: string): string =>
   `${agentName(agent)} is signed in on ${name}${detail === undefined ? "" : ` (${detail})`}${sharedOn(agent) === undefined ? "." : "; every workspace there shares that login."}`;
 
+/** Said before a sign-in by hand starts over a login that stands there, which it replaces. */
+export const boxReplacesLine = (name: string, agent: string): string => `${agentName(agent)} is signed in on ${name}; this sign-in replaces that login.`;
+
 export const boxNotSignedInLine = (name: string, agent: string, said?: string): string =>
   `${agentName(agent)} is not signed in on ${name}${said === undefined ? "" : `: ${said}`}. wsp add ${name} --sign-in ${agent} runs it again.`;
 
@@ -1410,9 +1413,9 @@ function setupEndLines(followed: SetupFollowed): string[] {
  * at Needs you, since the computer is there and the person has what to do. */
 const setupExit = (followed: SetupFollowed): number => (followed.computer.setup?.state === "failed" ? 1 : 0);
 
-/** One place moved onto this wsp's daemon, and its setup run again from its picks. The work is the host's, over the
- * socket this line opens, as the install is: the binary goes over the link that place is holding, or over the ssh
- * road the install used when it holds none, and the workspaces on it are kept either way. */
+/** One place moved onto this wsp's daemon. The work is the host's, over the socket this line opens, as the install
+ * is: the binary goes over the link that place is holding, or over the ssh road the install used when it holds none,
+ * and the workspaces on it and what it was set up with are kept either way. */
 async function updatePlace(io: CliIO, opts: PlaceOpts, aim: HostAim, ref: string, deps: PlaceDeps): Promise<number> {
   const client = await deps.dial(opts.statePath, dialHere(io, opts, aim));
   try {
@@ -1421,28 +1424,16 @@ async function updatePlace(io: CliIO, opts: PlaceOpts, aim: HostAim, ref: string
       io.error(picked.refusal);
       return 1;
     }
-    // Minted here rather than read off the reply: the setup's frames come back while it runs and the reply lands
-    // once it is under way, so a line printed as it happens has to know which stream is this one's.
-    const addId = `a_${randomBytes(6).toString("hex")}`;
-    const watch = watchSetup(client, addId, { line: l => io.log(addLineWords(l)), wait: w => io.log(waitWords(w)) });
-    await client.events();
     try {
-      const answer = PlaceUpdateReply.parse(await client.request<Record<string, unknown>>("places.update", { placeId: picked.place.id, addId }));
+      const answer = PlaceUpdateReply.parse(await client.request<Record<string, unknown>>("places.update", { placeId: picked.place.id }));
       for (const line of updatedLines(answer)) io.log(line);
-      // A computer that got no setup says so and the line is over: there is no job of this line's to follow.
-      if (answer.said !== undefined) io.log(answer.said);
-      if (answer.setup === undefined) return 0;
-      const followed = await followSetup(client, picked.place.id, watch);
-      for (const line of setupEndLines(followed)) io.log(line);
-      return setupExit(followed);
+      return 0;
     } catch (e) {
       // The host's own refusal: a setup already going on that computer is one sentence, and this line is over
       // rather than waiting on a run somebody else started.
       if ((e as { kind?: unknown }).kind !== "conflict") throw e;
       io.error(e instanceof Error ? e.message : String(e));
       return 1;
-    } finally {
-      watch.off();
     }
   } finally {
     client.close();
@@ -1728,6 +1719,7 @@ async function runBoxSignIn(io: CliIO, client: HostClient, place: PlaceView, age
     io.error(placeNoLoginsLine(place.name));
     return false;
   }
+  if (place.signIns?.[agent] === "signed-in") io.log(boxReplacesLine(place.name, agent));
   // The host plans the line: a shared login at that computer's logins folder, any other as the owner of its home.
   const { line } = await client.request<{ line: unknown }>("agents.signInLine", { target: { placeId: place.id }, agent });
   const road = await deps.placeLink(client, place.id);

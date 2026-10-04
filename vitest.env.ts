@@ -8,6 +8,8 @@
 // It is the process environment this empties, not every spelling of a read: a
 // test that aliases or spreads process.env is caught here rather than by the
 // grep in packages/protocol/test/test-env.test.ts, which is deliberate.
+import { tmpdir } from "node:os";
+import { basename, join } from "node:path";
 import { UPDATE_CHECK_ENV } from "./packages/protocol/src/env.js";
 
 /** The gates a person throws to turn a suite on, each read once to decide whether its file runs. Nothing else: a
@@ -34,6 +36,11 @@ export const GATES: Record<string, string> = {
 // thread's host as that thread, from any code under test that reads the process's own environment.
 for (const name of Object.keys(process.env)) if (name.startsWith("WSP_") && !(name in GATES)) delete process.env[name];
 
+/** This run's own temp folder, named for the process that started the run, so whatever lands under it is this run's
+ * doing; vitest.agent-store.ts makes it and reads it. A worker reading this file is already inside it. */
+export const RUN_TMPDIR = /^wsp-run-\d+$/.test(basename(tmpdir())) ? tmpdir() : join(tmpdir(), `wsp-run-${process.pid}`);
+
 // The release check is off, so no host a test starts asks GitHub for the newest release. Every other wsp variable
-// is gone by the rule above, the launch pair, the home and a named host with the rest.
-export const TEST_ENV: Record<string, string> = { [UPDATE_CHECK_ENV]: "0" };
+// is gone by the rule above, the launch pair, the home and a named host with the rest. TMPDIR puts every folder a
+// case or a process it starts makes under the run's own.
+export const TEST_ENV: Record<string, string> = { [UPDATE_CHECK_ENV]: "0", TMPDIR: RUN_TMPDIR };

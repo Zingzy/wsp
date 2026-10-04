@@ -6,13 +6,13 @@
 // recipe saved, the running steps with a sign-in's wait and Retry, the ready
 // page, and closing mid-setup said as a notice.
 import { act, cleanup, fireEvent, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PLACE_HOST_KEY_KIND, RecipeFile, type AgentRow, type AgentsReport, type PlaceAddJob, type PlaceAddStep, type EventUnion, type PendingComputer, type PlaceSetup, type PlaceView, type ProjectView, type RecipeOptions, type RecipeView } from "@wsp/protocol";
 import { RequestError, type Api, type SshLogin } from "../src/protocol/client.js";
 import { useNotices } from "../src/notices/store.js";
 import { useStore } from "../src/protocol/store.js";
 import { closeAdd, openAdd, openPending, openSetup, useAddFlow } from "../src/settings/add/addFlow.js";
-import { stepOutput } from "../src/settings/add/setup.js";
+import { stepLogs } from "../src/settings/add/setup.js";
 import { AGENTS_REPORT } from "./fixtures/agents-report.js";
 import { mountSettings, resetSettings, settingsApi, settle } from "./settings-harness.js";
 
@@ -92,6 +92,8 @@ const rest = (ms: number): Promise<void> => act(async () => void (await new Prom
 beforeEach(() => {
   resetSettings();
   useStore.setState({ places: [here], projects: [wsp] });
+  // The options a dialog read outlive it on purpose; each case starts from a window that read none.
+  useAddFlow.setState({ options: null });
 });
 
 afterEach(() => {
@@ -106,10 +108,17 @@ describe("Add a computer, from the address to Set up", () => {
     act(() => openAdd());
     await settle();
     expect([step(), title(), progress()]).toEqual(["where", "Add a computer", "1 of 11"]);
-    expect([...dialog()!.querySelectorAll("[data-ssh-host]")].map(r => r.getAttribute("data-ssh-host"))).toEqual(["studio", "jumpbox"]);
+    expect([...dialog()!.querySelectorAll("[data-choice]")].map(r => r.getAttribute("data-choice"))).toEqual(["studio", "jumpbox"]);
     expect(primary().hasAttribute("data-held")).toBe(true);
-    await press(dialog()!.querySelector("[data-ssh-host='studio']"));
+    const checked = () => [...dialog()!.querySelectorAll("[data-choice]")].filter(r => r.querySelector("[role=radio]")?.getAttribute("aria-checked") === "true").map(r => r.getAttribute("data-choice"));
+    expect(checked()).toEqual([]);
+    await press(dialog()!.querySelector("[data-choice='studio']"));
     expect(dialog()!.querySelector<HTMLInputElement>("[data-k=where-field]")!.value).toBe("studio");
+    // The host the field names reads picked, whether it was clicked or typed.
+    expect(checked()).toEqual(["studio"]);
+    act(() => useAddFlow.setState({ address: "jumpbox" }));
+    expect(checked()).toEqual(["jumpbox"]);
+    act(() => useAddFlow.setState({ address: "studio" }));
     await press(primary());
     expect(fake.asked.adds).toEqual([{ address: "studio" }]);
     expect(step()).toBe("checks");
@@ -340,8 +349,9 @@ describe("Add a computer's picks read the host's facts", () => {
       { name: "old", agents: ["claude"] },
     ],
     clis: [
-      { name: "gh", via: "apt", version: "2.86.0", bytes: 40 * MB },
+      { name: "gh", via: "apt", version: "2.86.0", bytes: 40 * MB, calls: 8 },
       { name: "go", via: "apt", version: "1.25.1", bytes: 517 * MB },
+      { name: "ripgrep", via: "apt", version: "15.1.0", bytes: 6 * MB, calls: 1_108 },
     ],
     configs: [
       { id: "git", label: "git settings and identity" },
@@ -394,11 +404,86 @@ describe("Add a computer's picks read the host's facts", () => {
     expect(note("old")).toBeUndefined();
   });
 
-  it("draws each CLI's size in the weight table's ink", async () => {
+  it("ticks no CLI to start, puts the ones the agents ran most first with how often, and ticks every one they ran on one act", async () => {
     await open("clis");
-    await waitFor(() => expect(ticked("gh")).toBe(true));
+    const rows = (): string[] => [...dialog()!.querySelectorAll<HTMLElement>("[data-pick-row]")].map(r => r.dataset["pickRow"]!);
+    await waitFor(() => expect(rows()).toEqual(["ripgrep", "gh", "go"]));
+    await waitFor(() => expect(useAddFlow.getState().picks?.agents.claude).toBeDefined());
+    expect(useAddFlow.getState().picks!.clis).toEqual({});
+    expect(rows().map(ticked)).toEqual([false, false, false]);
+    expect(dialog()!.querySelector("[data-slot=dialog-description]")?.textContent).toBe("The command-line tools your agents run, to install on studio. Most used first.");
+    const calls = (row: string): string | null | undefined => dialog()!.querySelector(`[data-pick-row='${row}'] [data-k=cli-calls]`)?.textContent;
+    expect(rows().map(calls)).toEqual(["1,108 calls", "8 calls", undefined]);
     expect(size("gh")).toEqual(["40 MB", "muted"]);
     expect(size("go")).toEqual(["517 MB", "warning"]);
+    const act_ = (): HTMLElement | null => dialog()!.querySelector<HTMLElement>("[data-k=tick-used]");
+    // The dialog's outline keycap with its glyph, as every other act in it.
+    expect(act_()?.className).toContain("border-input");
+    expect(act_()?.querySelector("svg")).not.toBeNull();
+    await press(act_());
+    expect(rows().map(ticked)).toEqual([true, true, false]);
+    expect(Object.keys(useAddFlow.getState().picks!.clis).sort()).toEqual(["gh", "ripgrep"]);
+    // Every CLI the agents ran is ticked: a press would move nothing, so it is not offered.
+    expect(act_()).toBeNull();
+    await press(dialog()!.querySelector("[data-pick-row='gh'] [role=checkbox]"));
+    expect(act_()).not.toBeNull();
+  });
+
+  it("says under each step's title what it does and why, by the box's name and this computer's", async () => {
+    await open("agents");
+    const said: Record<string, string | null | undefined> = {};
+    for (const at of ["checks", "startfrom", "agents", "mcp", "clis", "skills", "plugins", "github", "projects", "other", "summary"] as const) {
+      act(() => useAddFlow.setState({ step: at }));
+      await settle();
+      said[at] = dialog()!.querySelector("[data-slot=dialog-description]")?.textContent;
+    }
+    expect(said).toEqual({
+      checks: "Making sure wsp can reach studio and run there.",
+      startfrom: "Begin with everything on zingzy's MacBook Pro, a saved recipe, or nothing.",
+      agents: "The coding agents to install on studio, signed in so threads run there.",
+      mcp: "The tool servers your agents use, set up for them on studio.",
+      clis: "The command-line tools your agents run, to install on studio. Most used first.",
+      skills: "Your agents' skills, copied so they work the same on studio.",
+      plugins: "Claude Code plugins to install on studio.",
+      github: "How studio signs in to GitHub to clone and push your repos.",
+      projects: "Projects on zingzy's MacBook Pro to clone onto studio.",
+      other: "Your git and shell settings, so studio behaves like zingzy's MacBook Pro.",
+      summary: "What goes on studio, before it starts.",
+    });
+  });
+
+  it("reads no options when it opens on the running steps, which draw none, and reads them when it opens on Where", async () => {
+    const asks: string[] = [];
+    const fake = host({ recipesOptions: async () => (asks.push("options"), FACTS) } as Partial<Api>);
+    useStore.setState({ places: [here, { ...studio, setup: { state: "running", addId: "a_set", startedAt: "2026-10-03T10:00:00.000Z", steps: [{ step: "floor", state: "running" }], waiting: [] } }] });
+    mountSettings({ api: fake.api, at: { kind: "group", group: "computers" } });
+    act(() => openSetup(studio.id));
+    await settle();
+    expect(step()).toBe("running");
+    expect(asks).toEqual([]);
+    act(() => closeAdd());
+    act(() => openAdd());
+    await settle();
+    expect(asks).toEqual(["options"]);
+  });
+
+  it("shows the plain spinner where a step's list goes until the host answers, and keeps the list through a close and an open", async () => {
+    let answer: ((o: RecipeOptions) => void) | undefined;
+    const asks: number[] = [];
+    await open("clis", undefined, { recipesOptions: () => (asks.push(1), new Promise<RecipeOptions>(done => (answer = done))) } as Partial<Api>);
+    expect(dialog()!.querySelector("[data-k=options-loading] [role=status]")).not.toBeNull();
+    expect(dialog()!.querySelector("[data-state-mark=working]")).toBeNull();
+    expect(dialog()!.querySelector("[data-pick-row]")).toBeNull();
+    await act(async () => answer!(FACTS));
+    await settle();
+    expect(dialog()!.querySelector("[data-pick-row='gh']")).not.toBeNull();
+    act(() => closeAdd());
+    act(() => useAddFlow.setState({ open: true, step: "clis", placeId: studio.id, pendingId: "a_1", address: "studio" }));
+    await settle();
+    // Opened again, the list stands at once while the host is asked again.
+    expect(asks).toHaveLength(2);
+    expect(dialog()!.querySelector("[data-k=options-loading]")).toBeNull();
+    expect(dialog()!.querySelector("[data-pick-row='gh']")).not.toBeNull();
   });
 
   it("names the account and scopes of the token it would copy, as gh reads them here", async () => {
@@ -453,11 +538,17 @@ describe("Add a computer while the setup runs", () => {
     act(() => openSetup(studio.id));
     await settle();
     expect([title(), progress()]).toEqual(["Setting up studio", "2 of 10 done"]);
-    expect(dialog()!.querySelector("[data-slot=dialog-description]")?.textContent).toBe("You can close this. Setup keeps going.");
+    expect(dialog()!.querySelector("[data-slot=dialog-description]")).toBeNull();
+    expect(dialog()!.querySelector("[data-k=close]")?.textContent).toBe("Run in background");
     const signIn = dialog()!.querySelector<HTMLElement>("[data-step-row='signins/codex']")!;
     expect(signIn.dataset["state"]).toBe("needs-you");
     expect(signIn.querySelector("[data-k=sign-in-code]")?.textContent).toBe("4F2K-9QJM");
     expect(signIn.querySelector("[data-k=open-tab]")?.textContent).toBe("Open the tab again");
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    await press(signIn.querySelector("[data-k=copy-code]"));
+    expect(writeText).toHaveBeenCalledWith("4F2K-9QJM");
+    expect(signIn.querySelector("[data-k=copy-code]")?.textContent).toBe("Copy");
     expect(dialog()!.querySelector("[data-step-row='mcp']")?.getAttribute("data-state")).toBe("waiting");
   });
 
@@ -532,6 +623,8 @@ describe("Add a computer while the setup runs", () => {
     await settle();
     const signIn = (): HTMLElement | null => dialog()!.querySelector<HTMLElement>("[data-step-row='signins/codex']");
     expect(signIn()!.querySelector("[data-k=skip]")?.textContent).toBe("Skip for now");
+    // In the code's line the skip is its text alone, so where the line wraps it stands on the code's left edge.
+    expect(signIn()!.querySelector("[data-sign-in-line] [data-k=skip]")?.className).toMatch(/(^| )px-0( |$)/);
     expect(signIn()!.textContent).toContain("You can sign in later in Settings.");
     await press(signIn()!.querySelector("[data-k=skip]"));
     expect(skipped).toEqual([{ placeId: studio.id, row: "signins/codex" }]);
@@ -544,38 +637,75 @@ describe("Add a computer while the setup runs", () => {
     expect(title()).toBe("studio is ready");
   });
 
-  it("draws a running step's last line of output, read off the box's log on a timer and not on a render", async () => {
+  it("opens a step that ran on a click to its last lines of output, read on a timer while it runs and never on a render", async () => {
     const reads: { placeId: string; step: string | undefined }[] = [];
     const fake = host({
       placesSetupLog: async (placeId: string, step?: string) => {
         reads.push({ placeId, step });
-        return ["2026-10-04T10:00:00Z [floor] apt-get install curl", "2026-10-04T10:00:01Z [agents] the agents: running", "2026-10-04T10:00:02Z [agents] npm install -g @anthropic-ai/claude-code", "2026-10-04T10:00:03Z [agents] the agents: running"];
+        return ["2026-10-04T10:00:00Z [floor] apt-get install curl", "2026-10-04T10:00:01Z [agents] the agents: running", "2026-10-04T10:00:02Z [agents] npm install -g @anthropic-ai/claude-code", "2026-10-04T10:00:03Z [agents] added 3 packages in 4s"];
       },
     } as Partial<Api>);
     useStore.setState({ places: [here, placed(RUNNING)] });
     mountSettings({ api: fake.api, at: { kind: "group", group: "computers" } });
     act(() => openSetup(studio.id));
     await settle();
-    // The box's own line is behind the row on hover; the note is the sentence the picks make.
-    await waitFor(() => expect(dialog()!.querySelector("[data-step-row='agents'] [data-step-words]")?.getAttribute("title")).toBe("npm install -g @anthropic-ai/claude-code"));
-    expect(dialog()!.querySelector("[data-step-row='agents']")?.textContent).not.toContain("npm install");
-    // A step that ended keeps its own note, never a line of output.
-    expect(dialog()!.querySelector("[data-step-row='floor']")?.textContent).not.toContain("apt-get");
+    const row = (id: string): HTMLElement => dialog()!.querySelector<HTMLElement>(`[data-step-row='${id}']`)!;
+    // Nothing is open, so nothing is read.
+    expect(reads).toEqual([]);
+    expect(row("agents").querySelector("[data-k=step-log]")).toBeNull();
+    // A step not started has no output to open on; Install wsp is no step of the box's log.
+    expect(row("mcp").querySelector("[data-k=step-toggle]")).toBeNull();
+    expect(row("wsp").querySelector("[data-k=step-toggle]")).toBeNull();
+    await press(row("agents").querySelector("[data-k=step-toggle]"));
+    await waitFor(() => expect(row("agents").querySelector("[data-k=step-log]")?.textContent).toBe("npm install -g @anthropic-ai/claude-code\nadded 3 packages in 4s"));
+    expect(row("agents").querySelector("[data-k=step-toggle]")?.getAttribute("aria-expanded")).toBe("true");
+    expect(row("floor").querySelector("[data-k=step-log]")).toBeNull();
     expect(reads).toEqual([{ placeId: studio.id, step: undefined }]);
     for (let i = 0; i < 3; i++) {
       act(() => useStore.setState({ places: [here, placed({ ...RUNNING, steps: [...RUNNING.steps] })] }));
       await settle();
     }
     expect(reads).toHaveLength(1);
+    await rest(3100);
+    expect(reads).toHaveLength(2);
+    await press(row("agents").querySelector("[data-k=step-toggle]"));
+    expect(row("agents").querySelector("[data-k=step-log]")).toBeNull();
   });
 
-  it("keeps one line of output per step, the last, cut at its end", () => {
-    const long = `apt-get install -y ${"libssl-dev ".repeat(30)}`;
-    const out = stepOutput([`2026-10-04T10:00:00Z [clis] ${long}`, "2026-10-04T10:00:01Z [mcp] claude mcp add context7", "2026-10-04T10:00:02Z [mcp] the agents' own files and MCP servers: done (7 copied)", "not a line of the log"]);
-    expect(out.mcp).toBe("claude mcp add context7");
-    expect(out.clis).toHaveLength(120);
-    expect(out.clis!.endsWith("…")).toBe(true);
-    expect(Object.keys(out)).toEqual(["clis", "mcp"]);
+  it("stands a failed step open on its output, until it is closed", async () => {
+    const failed: PlaceSetup = { ...RUNNING, state: "failed", said: "apt-get exited 100", steps: [{ step: "floor", state: "failed", ms: 9_000 }] };
+    const fake = host({ placesSetupLog: async () => ["2026-10-04T10:00:00Z [floor] E: Unable to locate package nonsense"] } as Partial<Api>);
+    useStore.setState({ places: [here, placed(failed)] });
+    mountSettings({ api: fake.api, at: { kind: "group", group: "computers" } });
+    act(() => openSetup(studio.id));
+    await settle();
+    const floor = (): HTMLElement => dialog()!.querySelector<HTMLElement>("[data-step-row='floor']")!;
+    await waitFor(() => expect(floor().querySelector("[data-k=step-log]")?.textContent).toBe("E: Unable to locate package nonsense"));
+    expect(floor().dataset["open"]).toBe("true");
+    await press(floor().querySelector("[data-k=step-toggle]"));
+    expect(floor().querySelector("[data-k=step-log]")).toBeNull();
+  });
+
+  it("keeps each step's last twelve lines of output, oldest first, each cut at its end, and passes over the step's own state", () => {
+    const long = `apt-get install -y ${"libssl-dev ".repeat(40)}`;
+    const many = Array.from({ length: 14 }, (_, i) => `2026-10-04T10:00:${String(i).padStart(2, "0")}Z [skills] copied skill-${i}`);
+    const out = stepLogs([`2026-10-04T10:00:00Z [clis] ${long}`, "2026-10-04T10:00:01Z [mcp] claude mcp add context7", "2026-10-04T10:00:02Z [mcp] the agents' own files and MCP servers: done (7 copied)", "not a line of the log", ...many]);
+    expect(out.mcp).toEqual(["claude mcp add context7"]);
+    expect(out.clis![0]).toHaveLength(300);
+    expect(out.clis![0]!.endsWith("…")).toBe(true);
+    expect(out.skills).toHaveLength(12);
+    expect(out.skills![0]).toBe("copied skill-2");
+    expect(out.skills!.at(-1)).toBe("copied skill-13");
+    expect(Object.keys(out)).toEqual(["clis", "mcp", "skills"]);
+  });
+
+  it("marks a step not started with a muted empty circle, so every row has its mark", async () => {
+    useStore.setState({ places: [here, placed(RUNNING)] });
+    mountSettings({ api: host().api, at: { kind: "group", group: "computers" } });
+    act(() => openSetup(studio.id));
+    await settle();
+    const mark = (id: string): string | null | undefined => dialog()!.querySelector(`[data-step-row='${id}'] [data-state-mark]`)?.getAttribute("data-state-mark");
+    expect(["wsp", "floor", "agents", "mcp", "configs"].map(mark)).toEqual(["done", "done", "working", "waiting", "waiting"]);
   });
 
   it("ticks each running step's time off one interval for the whole list", async () => {
@@ -586,15 +716,17 @@ describe("Add a computer while the setup runs", () => {
       return was(fn, ms);
     }) as typeof window.setInterval;
     try {
-      const three: PlaceSetup = { ...RUNNING, addId: "a_tick", steps: [{ step: "floor", state: "done", ms: 72_000 }, { step: "agents", state: "running" }, { step: "mcp", state: "running" }, { step: "clis", state: "running" }] };
+      // Each running step counts from when the host started it, so one this window first sees mid-run reads its real time.
+      const at = (ago: number): string => new Date(Date.now() - ago).toISOString();
+      const three: PlaceSetup = { ...RUNNING, addId: "a_tick", steps: [{ step: "floor", state: "done", ms: 72_000 }, { step: "agents", state: "running", startedAt: at(0) }, { step: "mcp", state: "running", startedAt: at(0) }, { step: "clis", state: "running", startedAt: at(300_000) }] };
       useStore.setState({ places: [here, placed(three)] });
       mountSettings({ api: host().api, at: { kind: "group", group: "computers" } });
       act(() => openSetup(studio.id));
       await settle();
       const time = (id: string): string | null | undefined => dialog()!.querySelector(`[data-step-row='${id}'] [data-step-time]`)?.textContent;
-      expect(["agents", "mcp", "clis"].map(time)).toEqual(["0 s", "0 s", "0 s"]);
+      expect(["agents", "mcp", "clis"].map(time)).toEqual(["0 s", "0 s", "5:00"]);
       await rest(1100);
-      expect(["agents", "mcp", "clis"].map(time)).toEqual(["1 s", "1 s", "1 s"]);
+      expect(["agents", "mcp", "clis"].map(time)).toEqual(["1 s", "1 s", "5:01"]);
       expect(time("floor")).toBe("1:12");
       expect(ticks).toHaveLength(1);
     } finally {

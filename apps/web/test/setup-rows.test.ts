@@ -4,10 +4,10 @@
 // per frame, the pending adds kept off their own events, and the record drawn
 // as the rows every list of steps shows.
 import { afterEach, describe, expect, it } from "vitest";
-import { RecipeFile, type EventUnion, type PendingComputer, type PlaceAddJob, type PlaceProvisionRow, type PlaceSetup, type PlaceView } from "@wsp/protocol";
+import { RecipeFile, type EventUnion, type PendingComputer, type PlaceAddJob, type PlaceProvisionRow, type PlaceSetup, type PlaceSetupStep, type PlaceView } from "@wsp/protocol";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
-import { checkRows, foldSetup, setupCount, setupRows, setupStanding } from "../src/settings/add/setup.js";
+import { checkRows, foldSetup, runningMs, setupCount, setupRows, setupStanding } from "../src/settings/add/setup.js";
 import { caps } from "./caps.js";
 import { resetSettings, settingsApi, settle } from "./settings-harness.js";
 
@@ -53,6 +53,29 @@ describe("a setup's frames in the store", () => {
     expect(useStore.getState().pending).toEqual([]);
   });
 
+  it("takes a sign-in's wait off when its row lands after its step ended, before the list read again answers", async () => {
+    const wait = { row: "signins/codex", label: "Codex", code: "4F2K-9QJM", url: "https://auth.openai.com/device", expiresAt: "2026-10-03T10:10:00.000Z", state: "waiting" as const };
+    const signing: PlaceView = { ...studio, setup: { ...RUNNING, steps: [{ step: "signins", state: "done", ms: 40 }, { step: "clis", state: "running" }], waiting: [wait] } };
+    let asked = 0;
+    const { push } = bound({ placesList: () => (asked++ === 0 ? Promise.resolve({ places: [signing], adds: [], pending: [] }) : new Promise(() => {})) } as Partial<Api>);
+    await settle();
+    expect(useStore.getState().places[0]?.setup?.waiting).toEqual([wait]);
+    push({ type: "place.setup", addId: "a_1", placeId: "p_studio", landed: "signins/codex" } as EventUnion);
+    expect(useStore.getState().places[0]?.setup?.waiting).toEqual([]);
+    expect(useStore.getState().places[0]?.setup?.steps).toEqual(signing.setup!.steps);
+  });
+
+  it("counts a running step's time from when the host started it, in a window that first sees the step mid-run", async () => {
+    const now = Date.parse("2026-10-03T10:05:00.000Z");
+    const midway: PlaceView = { ...studio, setup: { ...RUNNING, steps: [{ step: "floor", state: "done", ms: 72_000 }, { step: "clis", state: "running", startedAt: "2026-10-03T10:00:00.000Z" }] } };
+    const { push } = bound({ placesList: async () => ({ places: [midway], adds: [], pending: [] }) } as Partial<Api>);
+    await settle();
+    expect(runningMs(useStore.getState().places[0]?.setup, "clis", now)).toBe(300_000);
+    push({ type: "place.setup", addId: "a_1", placeId: "p_studio", line: { step: "skills", state: "running", startedAt: "2026-10-03T10:04:00.000Z" }, running: ["clis", "skills"] } as EventUnion);
+    expect(runningMs(useStore.getState().places[0]?.setup, "clis", now)).toBe(300_000);
+    expect(runningMs(useStore.getState().places[0]?.setup, "skills", now)).toBe(60_000);
+  });
+
   it("leaves a setup alone for a frame of another run", () => {
     expect(foldSetup(RUNNING, { type: "place.setup", addId: "a_old", placeId: "p_studio", line: { step: "floor", state: "failed" } })).toBe(RUNNING);
   });
@@ -88,7 +111,7 @@ describe("a setup as rows", () => {
       ["Projects", "waiting", false],
       ["Other config", "waiting", false],
     ]);
-    expect(rows.find(r => r.id === "skills")?.note).toBe("unslop.");
+    expect(rows.find(r => r.id === "skills")?.note).toBe("1 skill");
     expect(rows.find(r => r.id === "skills/taste")).toMatchObject({ said: "a link inside points at a folder", fix: "Replace the link with a copy here and retry." });
     expect(rows.find(r => r.id === "signins/codex")?.wait?.code).toBe("4F2K");
     expect(setupCount(rows)).toEqual({ done: 4, of: 10 });
@@ -107,11 +130,17 @@ describe("a setup as rows", () => {
     expect([install.name, install.state, install.note]).toEqual(["Install wsp", "done", "Dialled back."]);
   });
 
-  it("names up to three of what a step put there, else the first two and how many more", () => {
-    const row = (n: number) => ({ id: `clis/${n}`, label: `cli${n}`, outcome: "installed" as const, step: "clis" as const });
-    const note = (n: number) => setupRows({ setup: { ...RUNNING, steps: [{ step: "clis", state: "done" }] }, applied: { hash: "h", at: "x", rows: Array.from({ length: n }, (_, i) => row(i + 1)) } }).find(r => r.id === "clis")?.note;
-    expect(note(3)).toBe("cli1, cli2, cli3.");
-    expect(note(9)).toBe("cli1, cli2 and 7 more.");
+  it("counts what a step put there, never naming its rows, whose labels may be paths on the box", () => {
+    const rows = (step: PlaceSetupStep, labels: readonly string[], id = (i: number) => `${step}/${i}`) => labels.map((label, i) => ({ id: id(i), label, outcome: "installed" as const, step }));
+    const note = (step: PlaceSetupStep, applied: PlaceProvisionRow[]) => setupRows({ setup: { ...RUNNING, steps: [{ step, state: "done" }] }, applied: { hash: "h", at: "x", rows: applied } }).find(r => r.id === step)?.note;
+    expect(note("skills", rows("skills", Array.from({ length: 332 }, (_, i) => `skill-${i}`)))).toBe("332 skills");
+    expect(note("clis", rows("clis", ["gh"]))).toBe("1 CLI");
+    const files = rows("mcp", ["Claude Code /root/.claude-cfg/CLAUDE.md", "Codex /root/.codex/AGENTS.md"]);
+    const servers = rows("mcp", ["context7", "linear", "playwright"], i => `agents/mcp/claude/${i}`);
+    expect(note("mcp", [...servers, ...files])).toBe("3 MCP servers, 2 agent files");
+    expect(note("mcp", servers)).toBe("3 MCP servers");
+    expect(note("mcp", files)).toBe("2 agent files");
+    expect(note("mcp", [...servers, ...files])).not.toContain("/root");
   });
 
   it("says why on the step a setup stopped at, with no items under it", () => {

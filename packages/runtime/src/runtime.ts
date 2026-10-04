@@ -722,6 +722,8 @@ export interface RecipeShelf {
   /** One recipe by its slug as this computer has it now: what it holds for each row, and the hash a computer that
    * follows it is held against. */
   resolve(slug: string): Promise<{ file: RecipeFile; items: Record<string, string>; hash: string }>;
+  /** Picks saved under no name, resolved the same way, so a computer set up from them is held row by row too. */
+  resolveFile(file: RecipeFile): Promise<{ file: RecipeFile; items: Record<string, string>; hash: string }>;
 }
 
 /** One agent's result with its catalog name, for the sentence the runtime says about it. */
@@ -3247,6 +3249,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           const standing = [...live.values()].map(e => ({ ...e.record, provider: providerOf(e.record) }));
           return runningOnPlace(placeId, rows, standing, foldThreads([...sessions.values()].map(s => s.view)));
         },
+        signInLine: (placeId, agent) => agentsRead.signInLine({ placeId }, { agent }),
         // The app's own sign-in road on that computer, read as a setup's row waiting on the person.
         signIn: async (placeId, agent, emit) => {
           const handle = await agentsRead.signIn({ placeId }, { agent }, emit);

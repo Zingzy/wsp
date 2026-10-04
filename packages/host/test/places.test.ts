@@ -100,6 +100,7 @@ import {
   SIGN_IN_FLAGS_REFUSAL,
   placeNoLoginsLine,
   boxSignedInLine,
+  boxReplacesLine,
   joinUnansweredLine,
   addUndoneLine,
   addTakenLine,
@@ -3106,6 +3107,18 @@ describe("wsp add <place> --sign-in <agent>", () => {
     expect(io.errors.join("\n")).not.toContain(placeNoLoginsLine("spoo"));
   });
 
+  it("says the sign-in replaces the login standing there before it starts, and says nothing of it where none stands", async () => {
+    const io = captured();
+    const run = signingIn({ signedIn: true }, [{ ...spoo, signIns: { claude: "vault-key", codex: "signed-in" } }]);
+    expect(await addCommand(io, opts(tmp("signin-replaces")), ["spoo"], { signIn: "codex" }, run.deps)).toBe(0);
+    expect(io.lines[0]).toBe(boxReplacesLine("spoo", "codex"));
+    expect(boxReplacesLine("spoo", "codex")).toBe("Codex is signed in on spoo; this sign-in replaces that login.");
+    expect(run.asked).toHaveLength(1);
+    const fresh = captured();
+    expect(await addCommand(fresh, opts(tmp("signin-fresh")), ["spoo"], { signIn: "codex" }, signingIn({ signedIn: true }, [{ ...spoo, signIns: { codex: "none" } }]).deps)).toBe(0);
+    expect(fresh.lines.join("\n")).not.toContain("replaces that login");
+  });
+
   it("signs in an agent whose login is not shared too, as the host plans it, and says so without a shared login", async () => {
     const io = captured();
     const run = signingIn({ signedIn: true });
@@ -3190,8 +3203,7 @@ describe("wsp add <place> --update", () => {
     expect(await addCommand(io, opts(home), ["spoo"], { update: true }, updateDeps(fake.dial))).toBe(0);
     expect(fake.asked.map(a => a.op)).toEqual(["places.list", "places.update"]);
     // The id off the listing, never the word the person typed: two computers may share a name and the host keys by id.
-    // The stream the recipe's rows ride is minted here, so they are read from the first one.
-    expect(fake.asked[1]!.params).toEqual({ placeId: "p_1", addId: expect.stringMatching(/^a_[0-9a-f]{12}$/) });
+    expect(fake.asked[1]!.params).toEqual({ placeId: "p_1" });
     expect(io.lines.join("\n")).toContain(`spoo: daemon 27 to ${DAEMON_VERSION}, over the link`);
     expect(io.lines.join("\n")).toContain("/home/maya/.wsp/daemon/wsp-daemon");
     // Where the one it replaced was kept, which is the first thing to look at on a box that will not come up.
@@ -3252,38 +3264,12 @@ describe("wsp add <place> --update", () => {
   });
   const running = (listed: Pick<PlaceView, "setup">): PlaceSetup => ({ ...listed.setup!, state: "running" });
 
-  it("runs the setup again on a computer already running this daemon, saying so and then printing every step and the tally", async () => {
+  it("never runs a setup on a computer already running this daemon: says it is current and exits 0, reading nothing again", async () => {
     const io = captured();
-    const job = setupOf([
-      { id: "agents/node", label: "Node 22.23.2", outcome: "present" },
-      { id: "agents/codex", label: "Codex", outcome: "installed" },
-    ]);
-    const fake = recipeClient({ name: "spoo", setup: running(job) }, job);
-    expect(await addCommand(io, opts(tmp("update-recipe")), ["spoo"], { update: true }, updateDeps(fake.dial))).toBe(0);
-    const said = io.lines.join("\n");
-    // No daemon half in the reply: the computer is current, and the line says so rather than refusing the update.
-    expect(said).toContain(placeCurrentLine("spoo", DAEMON_VERSION));
-    expect(said).toContain("  · the agents (12s)");
-    expect(said).toContain("spoo: 1 installed: Codex, 1 already there");
-    expect(said).not.toContain("somebody else's row");
-    // The rows are read off the row the host keeps, which is what outlives the run.
-    expect(fake.asked.map(a => a.op)).toEqual(["places.list", "places.update", "places.list"]);
-  });
-
-  it("exits 1 where a step that blocks stopped it, and 0 where it finished, a row that failed and can be retried among it", async () => {
-    const io = captured();
-    const failedRow = setupOf([
-      { id: "agents/codex", label: "Codex", outcome: "installed" },
-      { id: "tools/brew/gh", label: "gh", outcome: "failed", note: "brew answered 404" },
-    ]);
-    const fake = recipeClient({ name: "spoo", setup: running(failedRow) }, failedRow);
-    expect(await addCommand(io, opts(tmp("update-failed")), ["spoo"], { update: true }, updateDeps(fake.dial))).toBe(0);
-    expect(io.lines.join("\n")).toContain("x gh: brew answered 404");
-    const stopped = setupOf([{ id: "agents/codex", label: "Codex", outcome: "failed" }], "failed", "no agent installed: Codex");
-    const gone = recipeClient({ name: "spoo", setup: running(stopped) }, stopped);
-    const quiet = captured();
-    expect(await addCommand(quiet, opts(tmp("update-stopped")), ["spoo"], { update: true }, updateDeps(gone.dial))).toBe(1);
-    expect(quiet.lines.join("\n")).toContain("spoo: no agent installed: Codex");
+    const fake = updateClient({ name: "spoo" });
+    expect(await addCommand(io, opts(tmp("update-current")), ["spoo"], { update: true }, updateDeps(fake.dial))).toBe(0);
+    expect(io.lines.join("\n")).toContain(placeCurrentLine("spoo", DAEMON_VERSION));
+    expect(fake.asked.map(a => a.op)).toEqual(["places.list", "places.update"]);
   });
 
   it("returns on a computer whose setup is already going on, in the one sentence, rather than waiting on a job it did not start", async () => {
@@ -3301,15 +3287,6 @@ describe("wsp add <place> --update", () => {
     expect(io.errors.join("\n")).toContain(busy);
     // Nothing of the running job's tally is printed: those rows are not this line's to say.
     expect(io.lines.join("\n")).not.toContain("installed: Codex");
-    expect(fake.asked.map(a => a.op)).toEqual(["places.list", "places.update"]);
-  });
-
-  it("says what a computer that got no setup got, and exits 0: nothing failed", async () => {
-    const io = captured();
-    const fake = updateClient({ name: "spoo", said: placeNoPicksLine("spoo") });
-    expect(await addCommand(io, opts(tmp("update-norecipe")), ["spoo"], { update: true }, updateDeps(fake.dial))).toBe(0);
-    expect(io.lines.join("\n")).toContain("spoo has nothing picked to go on it");
-    // Nothing to follow, so nothing is read again.
     expect(fake.asked.map(a => a.op)).toEqual(["places.list", "places.update"]);
   });
 

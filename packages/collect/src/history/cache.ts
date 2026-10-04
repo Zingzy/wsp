@@ -24,6 +24,7 @@ export interface HistoryCache {
 const Bucket = z.object({
   session: z.string(),
   folder: z.string().optional(),
+  at: z.number().optional(),
   calls: z.number().int().nonnegative(),
   commands: z.record(z.number().int().nonnegative()),
   installs: z.record(z.number().int().nonnegative()),

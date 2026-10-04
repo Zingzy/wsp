@@ -35,9 +35,7 @@ describe("the sidebar's Setting up section", () => {
     render(
       <TooltipProvider>
         <SidebarProvider defaultOpen>
-          <ul>
-            <Section />
-          </ul>
+          <Section />
         </SidebarProvider>
       </TooltipProvider>,
     );
@@ -70,6 +68,15 @@ describe("the sidebar's Setting up section", () => {
     expect(card("p_disha").textContent).toContain("Base packages did not install");
     fireEvent.click(card("p_studio").querySelector("button")!);
     expect(useAddFlow.getState()).toMatchObject({ open: true, placeId: "p_studio", step: "running" });
+  });
+
+  it("bounds its list at three cards' height and scrolls the rest under it, so the threads above keep their room", () => {
+    useStore.setState({ places: [here, ...["a", "b", "c", "d"].map(n => box(`p_${n}`, n, { setup: running }))] });
+    mount();
+    const list = document.querySelector<HTMLElement>("[data-k=setup-cards]")!;
+    expect(list.querySelectorAll("[data-setup-card]")).toHaveLength(4);
+    expect(list.className).toContain("max-h-49");
+    expect(list.className).toContain("overflow-y-auto");
   });
 
   it("draws nothing while no computer is being set up, and folds under its head", () => {

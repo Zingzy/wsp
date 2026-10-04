@@ -126,6 +126,33 @@ describe("Claude Code reader", () => {
     ]);
     expect(JSON.stringify([...usage.commands, ...usage.installs, ...usage.tools])).not.toContain("sk-ant-x");
   });
+
+  it("counts a session once when two project folders hold its files, by the folder whose newest call is latest", async () => {
+    const at = (m: number) => `2026-09-06T10:${String(m).padStart(2, "0")}:00.000Z`;
+    const call = (session: string, m: number, cwd: string, command: string) =>
+      line({ type: "assistant", cwd, sessionId: session, timestamp: at(m), message: { role: "assistant", content: [{ type: "tool_use", id: "toolu_1", name: "Bash", input: { command } }] } });
+    const HOME = "/Users/dev/wsp";
+    const COPY = "/private/tmp/wsp-test/export-dev/wsp";
+    const host = fakeHost({
+      files: {
+        "~/.claude/projects/-Users-dev-wsp/s1.jsonl": [call("s1", 1, HOME, "gh pr view"), call("s1", 2, HOME, "gh pr list"), call("s1", 50, HOME, "cargo build")].join("\n"),
+        "~/.claude/projects/-Users-dev-wsp/s1/subagents/agent-a.jsonl": call("s1", 3, HOME, "jq ."),
+        "~/.claude/projects/-private-tmp-wsp-test-export-dev-wsp/s1.jsonl": [call("s1", 1, COPY, "gh pr view"), call("s1", 2, COPY, "gh pr list")].join("\n"),
+        "~/.claude/projects/-private-tmp-wsp-test-export-dev-wsp/s1/subagents/agent-a.jsonl": call("s1", 3, COPY, "jq ."),
+        "~/.claude/projects/-private-tmp-wsp-test-export-dev-wsp/s2.jsonl": call("s2", 5, COPY, "gh auth status"),
+      },
+    });
+    const usage = await readStore(host, HISTORY_READERS["claude-jsonl"], "/Users/dev/.claude/projects");
+    expect(usage.sessions).toBe(2);
+    expect(usage.calls).toBe(5);
+    expect([...usage.commands]).toEqual([
+      ["gh", { sessions: 2, calls: 3 }],
+      ["cargo", { sessions: 1, calls: 1 }],
+      ["jq", { sessions: 1, calls: 1 }],
+    ]);
+    const home = await readStore(host, HISTORY_READERS["claude-jsonl"], "/Users/dev/.claude/projects", { folders: [HOME] });
+    expect(home).toMatchObject({ sessions: 1, calls: 4 });
+  });
 });
 
 describe("Codex reader", () => {
@@ -258,7 +285,7 @@ describe("the session cache", () => {
 
   const CLAUDE = CATALOG_AGENTS.filter(a => a.id === "claude");
   /** PARSE_VERSION and what the files that fill a bucket hashed to when it was last bumped. */
-  const FINGERPRINT = "1:085b795c96d6ef04";
+  const FINGERPRINT = "2:8d7258f9d6375eff";
   const S1 = "~/.claude/projects/-Users-dev-proj/s1.jsonl";
   const S2 = "~/.claude/projects/-Users-dev-proj/s2.jsonl";
   const FIRST = [claudeLine("s1", [{ name: "Bash", input: { command: "gh pr view" } }]), claudeLine("s1", [{ name: "Read", input: { file_path: "/x" } }])].join("\n");
@@ -376,6 +403,38 @@ describe("what each agent's own logs say was used", () => {
     const read = await readLogUsage(host, CATALOG_AGENTS.filter(a => a.id === "claude"), { day: at => new Date(at).toISOString().slice(0, 10) });
     expect(read).toEqual([
       { agent: "claude", session: "s1", day: "2026-09-29", at: Date.parse("2026-09-29T10:05:00.000Z"), model: "claude-opus-5", folder: "/Users/dev/proj", tokens: { input: 1_112, output: 55, cached: 1_000, cacheWrite: 100, reasoning: 0 } },
+    ]);
+  });
+
+  it("counts a session once when two project folders hold its files, by the folder whose newest message is latest", async () => {
+    const at = (m: number) => `2026-09-06T10:${String(m).padStart(2, "0")}:00.000Z`;
+    const msg = (id: string, m: number, cwd: string, input: number) => usageLine({ id, session: "s1", at: at(m), model: "claude-opus-5", cwd, usage: { input_tokens: input, output_tokens: 1 } });
+    const HOME = "/Users/dev/wsp";
+    // An export rewrites cwd on every line it copies, so a copy is longer than the lines it came from.
+    const COPY = "/private/tmp/wsp-test/export-dev/wsp";
+    const copied = (cwd: string) => Array.from({ length: 30 }, (_, i) => msg(`msg_${i + 1}`, i + 1, cwd, 100));
+    const original = [...copied(HOME), msg("msg_grown", 50, HOME, 1_000)].join("\n");
+    const copy = copied(COPY).join("\n");
+    expect(copy.length).toBeGreaterThan(original.length);
+    const host = fakeHost({
+      files: {
+        "~/.claude/projects/-Users-dev-wsp/s1.jsonl": original,
+        "~/.claude/projects/-Users-dev-wsp/s1/subagents/agent-a.jsonl": msg("msg_sub", 31, HOME, 5),
+        "~/.claude/projects/-private-tmp-wsp-test-export-dev-wsp/s1.jsonl": copy,
+        "~/.claude/projects/-private-tmp-wsp-test-export-dev-wsp/s1/subagents/agent-a.jsonl": msg("msg_sub", 31, COPY, 5),
+        "~/.claude/projects/-private-tmp-wsp-test-export-dev-wsp/s2.jsonl": usageLine({ id: "msg_9", session: "s2", at: at(5), model: "claude-opus-5", cwd: COPY, usage: { input_tokens: 7, output_tokens: 1 } }),
+      },
+    });
+    const read = await readLogUsage(host, CATALOG_AGENTS.filter(a => a.id === "claude"), { day: d => new Date(d).toISOString().slice(0, 10) });
+    const summed = new Map<string, [string, string | undefined, number, number]>();
+    for (const r of read) {
+      const key = `${r.session} ${r.folder}`;
+      const [, , input, output] = summed.get(key) ?? [r.session, r.folder, 0, 0];
+      summed.set(key, [r.session, r.folder, input + r.tokens.input, output + r.tokens.output]);
+    }
+    expect([...summed.values()]).toEqual([
+      ["s1", HOME, 4_005, 32],
+      ["s2", COPY, 7, 1],
     ]);
   });
 
