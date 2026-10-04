@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseSlate, parseSlatePatch, printSlate, slateCatalog, validateSlate, SLATE_CODES, SLATE_ICONS } from "../../src/slate/index.js";
+import { parseSlate, parseSlatePatch, printSlate, slateCatalog, validateSlate, SLATE_CODES, SLATE_ICONS, SLATE_RUN_FIELDS } from "../../src/slate/index.js";
 import { SPEC_EXAMPLES } from "./examples.js";
 
 const wrap = (pieces: string, decls = ""): string => `<slate title="T">\n${decls}\n  <column>\n    ${pieces}\n  </column>\n</slate>`;
@@ -242,6 +242,15 @@ describe("writes the sessions were refused", () => {
     }
     for (const piece of [`<text mono>{$pid}</text>`, `<text mono>2026-10-04 17:23 UTC</text>`, `<text mono>src/slate/kit.ts</text>`, `<text mono>PID 19271</text>`, `<facts><fact label="Head" value="b5ebeeff4" mono /></facts>`]) {
       expect(all(wrap(piece, decls)), piece).not.toContain("W014");
+    }
+  });
+});
+
+describe("every field a run reads", () => {
+  it("type-checks each of SLATE_RUN_FIELDS, refreshing and text among them, instead of throwing", () => {
+    for (const field of SLATE_RUN_FIELDS) {
+      const r = parseSlate(`<slate><run name="p" cmd="echo 1" /><text value={if($p.${field}, "a", "b")} /></slate>`);
+      expect(r.errors, field).toEqual([]);
     }
   });
 });

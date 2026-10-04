@@ -22,9 +22,10 @@ type Kind = "value" | "secret" | "derived" | "run";
 type Trigger = "press" | "submit" | "change" | "reaction";
 interface Where { piece?: string; prop?: string }
 
-const RUN_FIELD_TYPES: Record<string, SlateType> = {
+const RUN_FIELD_TYPES: Record<(typeof SLATE_RUN_FIELDS)[number], SlateType> = {
   state: { t: "string" }, why: { t: "string" }, exit: { t: "number" }, out: { t: "any" }, err: { t: "string" }, json: { t: "any" },
   lines: { t: "list", of: { t: "string" } }, startedAt: { t: "number" }, endedAt: { t: "number" }, ms: { t: "number" }, runs: { t: "number" }, cut: { t: "boolean" }, stale: { t: "boolean" },
+  refreshing: { t: "boolean" }, text: { t: "boolean" },
 };
 const SECRET_FIELD_TYPES: Record<string, SlateType> = { set: { t: "boolean" }, len: { t: "number" }, at: { t: "number" } };
 
@@ -176,7 +177,7 @@ class Validator {
         const fix = nearest(String(first), SLATE_RUN_FIELDS);
         return { code: "X401", message: `$${name}.${String(first)} is not a field of a run's result; the fields are ${SLATE_RUN_FIELDS.join(", ")}`, ...(fix !== undefined ? { fix: `$${name}.${fix}` } : {}) };
       }
-      return segs.length === 1 ? RUN_FIELD_TYPES[first]! : { t: "any" };
+      return segs.length === 1 ? RUN_FIELD_TYPES[first as (typeof SLATE_RUN_FIELDS)[number]] : { t: "any" };
     }
     let t: SlateType = kind === "derived" ? this.derivedType(name) : literalType(this.doc.values[name]!.start);
     for (const s of segs) {
