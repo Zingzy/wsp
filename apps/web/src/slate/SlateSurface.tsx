@@ -11,6 +11,7 @@ import { ScrollArea } from "../components/ui/scroll-area.js";
 import { useSelectedThreadId, useStore } from "../protocol/store.js";
 import { requestComposerFocus } from "../shell/shellRequests.js";
 import { useComposerDraftStore } from "../components/chat/composerDraftStore.js";
+import { ApprovalsSheet, batchable } from "./approvals.js";
 import { cadenceOf, ConsentSheet, HeldRuns } from "./consent.js";
 import { DOC, RUNS } from "./engine.js";
 import { ServerConsentSheet, ToolConfirmSheet } from "./mcp.js";
@@ -143,9 +144,10 @@ function refuse(threadId: string, ask: SlateAsk): void {
   void slateLink(threadId).approve(ask.key, "refuse").then(() => loadSlate(threadId), () => undefined);
 }
 
-/** The consent sheet over the tab, one command at a time: the one a press held or Review named, else the first held
- * run whose sheet this window has not shown yet, so a run a timer or a reaction wants asks as soon as the tab shows
- * it. A sheet closed, answered or not, does not open on its own again; its row's Review opens it. */
+/** The consent sheet over the tab: the one a press held or Review named; else, with two or more commands and servers
+ * waiting and one this window has not shown, one sheet for all of them; else the first held run whose sheet this
+ * window has not shown yet, so a run a timer or a reaction wants asks as soon as the tab shows it. A sheet closed,
+ * answered or not, does not open on its own again; a row's Review opens it. */
 function Consent({ threadId }: { threadId: string }) {
   const asking = useSlateStore(s => s.asking[threadId]);
   const asks = useSlateStore(s => s.byThread[threadId]?.record?.asks);
@@ -155,6 +157,15 @@ function Consent({ threadId }: { threadId: string }) {
   useEffect(() => {
     if (asking !== undefined && ask === undefined) void loadSlate(threadId);
   }, [asking, ask, threadId]);
+  const batch = batchable(asks ?? []);
+  if (asking === undefined && batch.length > 1 && batch.some(a => !(seen ?? []).includes(a.key))) {
+    const document = slateBundle(threadId).engine.document;
+    const closeAll = () => {
+      for (const a of batch) markSeen(threadId, a.key);
+      void loadSlate(threadId);
+    };
+    return <ApprovalsSheet asks={batch} cadence={run => cadenceOf(document, run)} answer={(key, scope) => slateLink(threadId).approve(key, scope)} onClose={closeAll} />;
+  }
   if (ask === undefined) return null;
   const close = () => {
     markSeen(threadId, ask.key);

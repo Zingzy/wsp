@@ -173,7 +173,7 @@ function PoolWindow({ kind, segments, now }: { kind: LimitKind; segments: readon
           {W.windows[kind] ?? kind}
         </span>
         <span className="flex items-baseline gap-2">
-          <DigitRoll value={`${Math.max(0, 100 - used)}%`} className="font-mono text-2xl leading-8 font-medium text-foreground" data-k="left" />
+          <DigitRoll rollIn value={`${Math.max(0, 100 - used)}%`} className="font-mono text-2xl leading-8 font-medium text-foreground" data-k="left" />
           <span className="text-[12.5px] text-muted-foreground">{W.left}</span>
         </span>
         <span data-k="verdict" className={cn("truncate text-[12.5px] leading-5", verdict.tone === "warn" ? "text-warning-foreground" : verdict.tone === "quiet" ? "text-muted-foreground" : "text-foreground/80")}>
@@ -447,7 +447,7 @@ function Stat({ k, label, value, note }: { k: string; label: string; value: stri
   return (
     <div data-k={k} className="flex min-w-0 flex-col gap-1.5 px-5 py-5">
       <span className="text-[13px] text-muted-foreground">{label}</span>
-      <DigitRoll value={value} className="font-mono text-[26px] leading-8 font-medium text-foreground" />
+      <DigitRoll rollIn value={value} className="font-mono text-[26px] leading-8 font-medium text-foreground" />
       {note === undefined ? null : <span className="truncate text-xs text-muted-foreground">{note}</span>}
     </div>
   );

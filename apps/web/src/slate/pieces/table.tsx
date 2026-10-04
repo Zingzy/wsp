@@ -24,7 +24,7 @@ type Row = { item: SlateJson; index: number };
 const shownColumns = (slate: SlateEngine, raw: SlatePropValue | undefined): Template[] => present(slate, raw, records(raw)).slice(0, 8);
 
 /** A figure as a cell shows it: a number, or text like 524 MB, 12%, $4.20 or 3 days. */
-const FIGURE = /^[-+]?[$€£]?\d[\d,]*(\.\d+)?\s?(%|[A-Za-z]{1,5}(\/s)?)?$/;
+const FIGURE = /^[-+]?[$€£₹¥]?\d[\d,]*(\.\d+)?\s?(%|[A-Za-z]{1,5}(\/s)?)?$/;
 const isFigure = (value: SlateJson | undefined): boolean => typeof value === "number" || (typeof value === "string" && FIGURE.test(value.trim()));
 
 function RowAction({ id, template, at, row, slate, raise }: Pick<PieceViewProps, "id" | "slate" | "raise"> & { template: Template; at: number; row: Row }) {
@@ -90,9 +90,13 @@ export const table: PieceView = {
     // text columns wrap around it.
     const widths = sharedWidths(slate, id, tightWidths(slate, id));
     const tight = widths.map(width => width !== undefined);
+    // Only a text column can take spare width, and only tables beside others need it to line up; any other table is
+    // as wide as what it holds, so its figures stay under their titles.
+    const fills = tight.includes(false) && slate.tablesBeside(id).length > 1;
+    const figures = columns.map(column => shown.length > 0 && shown.every((item, index) => isFigure(slate.resolve(column["value"], { item, index }))));
     return (
       <div className="min-w-0 overflow-x-auto">
-        <table className="w-full border-collapse text-left">
+        <table data-fills={fills} className={cn("border-collapse text-left", fills ? "w-full" : "w-auto max-w-full")}>
           <colgroup>
             {widths.map((width, at) => (
               <col key={at} data-ch={width} className="font-mono text-xs" style={width === undefined ? undefined : { width: `calc(${width}ch + 1rem)` }} />
@@ -102,7 +106,7 @@ export const table: PieceView = {
           <thead>
             <tr className={cn("text-muted-foreground", GROUP_LABEL)}>
               {columns.map((column, at) => (
-                <th key={at} scope="col" className={cn("pb-1 pr-4 font-normal last:pr-0", end(column) && "text-right", tight[at] && "whitespace-nowrap")}>
+                <th key={at} scope="col" className={cn("pb-1 pr-4 font-normal last:pr-0", (end(column) || (figures[at] && column["align"] === undefined)) && "text-right", tight[at] && "whitespace-nowrap")}>
                   {str(slate.resolve(column["title"]))}
                 </th>
               ))}
