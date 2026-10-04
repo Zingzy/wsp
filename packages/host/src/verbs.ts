@@ -2102,8 +2102,10 @@ export const BUILT_IN_TABLE_CLAUSE = "; wsp's built-in table says so, since no a
  * once the machine was there: an empty task or message, an agent the host has no adapter for, a pick the agent's
  * catalog does not list. Named a workspace, this asks that workspace's own machine, the same lists the app's composer
  * shows and the start itself will check against, so a model only that machine's config knows (a provider the agent is
- * routed to) is not refused here for being absent from a table. Without one, or on a workspace that is not running,
- * the table answers, and the start on the machine checks the rest. */
+ * routed to) is not refused here for being absent from a table. On a workspace that is not running the table answers,
+ * and the start on the machine checks the rest. Without one, a thread on this computer, there is no machine to spare,
+ * so the model and effort are the start's alone to check, against the agent installed here; the access is wsp's word,
+ * read off wsp's own map either way. */
 export async function checkedStart(client: HostClient, task: string, harness: string | undefined, picks: Picks, workspaceId?: string): Promise<void> {
   if (task.trim() === "") throw usageRefusal(EMPTY_MESSAGE_LINE, "Put it in quotes after the flags.");
   const { harnesses } = await client.request<{ harnesses: HarnessCatalog[] }>("harnesses.list", workspaceId === undefined ? undefined : { workspaceId });
@@ -2115,12 +2117,15 @@ export async function checkedStart(client: HostClient, task: string, harness: st
     throw usageRefusal(noAdapterLine(harness, all.map(c => c.harness)), "Name one of those with --agent.");
   }
   const asked = picksOf(picks);
-  try {
-    startPicks(table, asked, true);
-  } catch (e) {
-    const said = e instanceof Error ? e.message : String(e);
-    const clause = (e as { offered?: number }).offered === 0 ? BUILT_IN_TABLE_CLAUSE : BUILT_IN_LIST_CLAUSE;
-    throw usageRefusal(table?.source === "table" ? `${said}${clause}` : said, "Drop the flag, or give it a value the agent offers.");
+  // The table is the pinned binary's list; the agent installed here may be newer, and the start reads its own.
+  if (workspaceId !== undefined) {
+    try {
+      startPicks(table, asked, true);
+    } catch (e) {
+      const said = e instanceof Error ? e.message : String(e);
+      const clause = (e as { offered?: number }).offered === 0 ? BUILT_IN_TABLE_CLAUSE : BUILT_IN_LIST_CLAUSE;
+      throw usageRefusal(table?.source === "table" ? `${said}${clause}` : said, "Drop the flag, or give it a value the agent offers.");
+    }
   }
   const refused = asked.access === undefined || table === undefined ? null : accessRefusal(table, asked.access);
   if (refused !== null) throw usageRefusal(`${refused}.`, "Name one it takes, or drop --access.");
