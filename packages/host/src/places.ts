@@ -134,7 +134,6 @@ import { openWaits, watchSetup, type SetupWatch } from "./setup-follow.js";
 import { collect, nodeHost } from "@wsp/collect";
 import { readBrewTable } from "./init-brew.js";
 import { placeProvisioner } from "./place-provision.js";
-import { PICKS_SPARE_BYTES } from "./pick-sizes.js";
 
 /** What this computer is called when the person named no name: its own name lowercased, which is what they would
  * type for it on a command line. The one reading, so the row for this computer and the name a join writes agree. */
@@ -670,7 +669,7 @@ export function parsePlaceCheck(stdout: string): PlaceCheck {
 }
 
 /** Room a box needs past the floor before anything goes on it: what its first agents and folders work in. */
-export const PLACE_CHECK_SPARE_BYTES = PICKS_SPARE_BYTES;
+export const PLACE_CHECK_SPARE_BYTES = 1024 ** 3;
 
 /** Why a box is refused at the check, naming what would fix it; nothing where it passes or would not say. `host` is
  * the hostname the address reached, which an ssh alias stands for. */

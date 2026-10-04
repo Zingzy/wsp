@@ -255,7 +255,8 @@ const { api } = settingsApi({
     "2026-10-03T10:02:08Z [plugins] claude plugin install frontend-design@claude-plugins-official",
     "2026-10-03T10:02:09Z [folders] git clone github.com/Zingzy/wsp",
   ],
-  placesEstimate: async () => ({ neededBytes: 3.9 * 1024 * MB, freeBytes: screen === "summary-disk" ? 2.1 * 1024 * MB : 61 * 1024 * MB, unmeasured: 0 }),
+  // A 75 GB box with 9 GB free keeps a tenth of its disk free, so 2 GB of picks do not fit there.
+  placesEstimate: async () => (screen === "summary-disk" ? { neededBytes: 2 * 1024 * MB, keptBytes: 7.5 * 1024 * MB, freeBytes: 9 * 1024 * MB, unmeasured: 0 } : { neededBytes: 3.9 * 1024 * MB, keptBytes: 2 * 1024 * MB, freeBytes: 61 * 1024 * MB, unmeasured: 0 }),
   placesList: async () => ({ places, adds: [], pending }),
   initGet: async () => null,
   addComputerOverSsh: async () => STUDIO,

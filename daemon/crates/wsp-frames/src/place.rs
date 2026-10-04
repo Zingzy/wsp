@@ -101,6 +101,10 @@ pub struct PlaceReport {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub disk_free_bytes: Option<u64>,
+    /// The size of that same disk, off the same read: what a setup keeps free there is a share of it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub disk_size_bytes: Option<u64>,
     /// Which Mac this is, as its registry names the product, else its model identifier; absent off a Mac.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
