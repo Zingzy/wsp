@@ -130,7 +130,7 @@ describe("the validator", () => {
       `<text>\u2022 first</text>`,
     ];
     for (const piece of clean) expect(all(wrap(piece, decls)), piece).not.toContain("W012");
-    expect(slateCatalog()).toContain("Layout separates things, never a mark");
+    expect(slateCatalog()).toContain("Layout separates things, never \"·\"");
   });
 
   it("refuses always without every as K703 and takes it with every (correction 2)", () => {
