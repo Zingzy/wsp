@@ -106,10 +106,17 @@ describe("Add a computer, from the address to Set up", () => {
     act(() => openAdd());
     await settle();
     expect([step(), title(), progress()]).toEqual(["where", "Add a computer", "1 of 11"]);
-    expect([...dialog()!.querySelectorAll("[data-ssh-host]")].map(r => r.getAttribute("data-ssh-host"))).toEqual(["studio", "jumpbox"]);
+    expect([...dialog()!.querySelectorAll("[data-choice]")].map(r => r.getAttribute("data-choice"))).toEqual(["studio", "jumpbox"]);
     expect(primary().hasAttribute("data-held")).toBe(true);
-    await press(dialog()!.querySelector("[data-ssh-host='studio']"));
+    const checked = () => [...dialog()!.querySelectorAll("[data-choice]")].filter(r => r.querySelector("[role=radio]")?.getAttribute("aria-checked") === "true").map(r => r.getAttribute("data-choice"));
+    expect(checked()).toEqual([]);
+    await press(dialog()!.querySelector("[data-choice='studio']"));
     expect(dialog()!.querySelector<HTMLInputElement>("[data-k=where-field]")!.value).toBe("studio");
+    // The host the field names reads picked, whether it was clicked or typed.
+    expect(checked()).toEqual(["studio"]);
+    act(() => useAddFlow.setState({ address: "jumpbox" }));
+    expect(checked()).toEqual(["jumpbox"]);
+    act(() => useAddFlow.setState({ address: "studio" }));
     await press(primary());
     expect(fake.asked.adds).toEqual([{ address: "studio" }]);
     expect(step()).toBe("checks");
