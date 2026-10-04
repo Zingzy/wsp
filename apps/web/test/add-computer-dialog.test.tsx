@@ -586,15 +586,17 @@ describe("Add a computer while the setup runs", () => {
       return was(fn, ms);
     }) as typeof window.setInterval;
     try {
-      const three: PlaceSetup = { ...RUNNING, addId: "a_tick", steps: [{ step: "floor", state: "done", ms: 72_000 }, { step: "agents", state: "running" }, { step: "mcp", state: "running" }, { step: "clis", state: "running" }] };
+      // Each running step counts from when the host started it, so one this window first sees mid-run reads its real time.
+      const at = (ago: number): string => new Date(Date.now() - ago).toISOString();
+      const three: PlaceSetup = { ...RUNNING, addId: "a_tick", steps: [{ step: "floor", state: "done", ms: 72_000 }, { step: "agents", state: "running", startedAt: at(0) }, { step: "mcp", state: "running", startedAt: at(0) }, { step: "clis", state: "running", startedAt: at(300_000) }] };
       useStore.setState({ places: [here, placed(three)] });
       mountSettings({ api: host().api, at: { kind: "group", group: "computers" } });
       act(() => openSetup(studio.id));
       await settle();
       const time = (id: string): string | null | undefined => dialog()!.querySelector(`[data-step-row='${id}'] [data-step-time]`)?.textContent;
-      expect(["agents", "mcp", "clis"].map(time)).toEqual(["0 s", "0 s", "0 s"]);
+      expect(["agents", "mcp", "clis"].map(time)).toEqual(["0 s", "0 s", "5:00"]);
       await rest(1100);
-      expect(["agents", "mcp", "clis"].map(time)).toEqual(["1 s", "1 s", "1 s"]);
+      expect(["agents", "mcp", "clis"].map(time)).toEqual(["1 s", "1 s", "5:01"]);
       expect(time("floor")).toBe("1:12");
       expect(ticks).toHaveLength(1);
     } finally {

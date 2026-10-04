@@ -3345,12 +3345,13 @@ export const SETUP_STEP_WORDS: Record<PlaceSetupStep, string> = {
   context: "what the agents read about this computer",
 };
 
-/** One step of the job as it stands, with how long it took once it ended. */
+/** One step of the job as it stands: when it started while it runs, how long it took once it ended. */
 export const PlaceSetupLine = z.object({
   step: PlaceSetupStep,
   state: z.enum(["running", "done", "failed", "skipped"]),
   note: SETUP_NOTE,
   ms: SETUP_MS,
+  startedAt: SETUP_NOTE,
 });
 export type PlaceSetupLine = z.infer<typeof PlaceSetupLine>;
 
@@ -3405,13 +3406,16 @@ export const SetupEnd = z.enum(["ready", "needs-you", "failed"]);
 export type SetupEnd = z.infer<typeof SetupEnd>;
 
 /** One frame of the setup job on a computer, on the stream the add or the resume that started it named: a step's
- * line as it moves, a sign-in that waits on the person, or the end with how it came out. */
+ * line as it moves, a sign-in that waits on the person, a row that landed after its step ended, or the end with how
+ * it came out. */
 export const PlaceSetupEvent = z.object({
   type: z.literal("place.setup"),
   addId: SETUP_TEXT,
   placeId: SETUP_TEXT,
   line: PlaceSetupLine.optional(),
   wait: PlaceWait.optional(),
+  /** A row that landed after its step ended, a sign-in through or skipped: its wait is off, its outcome on the record. */
+  landed: SETUP_NOTE,
   /** On a step's line: every step running at that moment, since after the base tools several run at once. */
   running: z.array(PlaceSetupStep).optional(),
   end: SetupEnd.optional(),

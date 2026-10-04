@@ -1455,7 +1455,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     const step = async (name: PlaceSetupStep, work: () => Promise<PlaceProvisionRow[]>): Promise<{ rows: PlaceProvisionRow[]; failed: boolean } | undefined> => {
       if (done.has(name) || (sync !== undefined && !sync.steps.has(name))) return undefined;
       const began = clockNow();
-      line({ step: name, state: "running" });
+      line({ step: name, state: "running", startedAt: new Date(began).toISOString() });
       let got: PlaceProvisionRow[];
       try {
         got = (await work()).map(r => ({ ...r, step: name }));
@@ -1470,11 +1470,12 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     };
 
     /** A row that lands after its step ended, since it waited on the person: it takes the place of what stood under
-     * that id, and the last wait gone after the steps ended is the setup coming out again, said once more. */
+     * that id and is said on the stream, and the last wait gone after the steps ended is the setup coming out again,
+     * said with it. */
     const landRow = (r: PlaceProvisionRow): void => {
       rows.splice(0, rows.length, ...rows.filter(x => x.id !== r.id), r);
       push({ ...held });
-      if (ended && held.waiting.length === 0 && foldersWaiting === 0) setupFrame({ addId, placeId, ...outcome() });
+      setupFrame({ addId, placeId, landed: r.id, ...(ended && held.waiting.length === 0 && foldersWaiting === 0 ? outcome() : {}) });
     };
     /** The folders waiting on the GitHub sign-in: the setup comes out again only once the last of them is in. */
     let foldersWaiting = 0;

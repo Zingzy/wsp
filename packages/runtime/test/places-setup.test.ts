@@ -511,6 +511,39 @@ describe("a computer added with its picks", () => {
     expect(placeWord(await rowOf(placeId), null).word).toBe("Ready");
   });
 
+  it("says a sign-in that lands after its step ended on the stream, naming its row, while the setup still runs", async () => {
+    const p = provisioner({ holds: ["clis"] });
+    const s = signIns();
+    const { frames } = await hosting({ provision: p.wired, acts: s.acts });
+    const { place } = await runtime!.places!.add({ addId: "a_late", address: "root@10.0.0.9", hostUrls: DOOR, choices: LAPTOP }, Date.now());
+    await until(async () => {
+      const setup = (await rowOf(place.id)).setup;
+      return setup?.steps.some(l => l.step === "signins" && l.state === "done") === true && setup.waiting.some(w => w.code !== undefined);
+    });
+    s.end("codex", { state: "signed-in" });
+    await until(() => frames.some(f => f.landed !== undefined));
+    expect(frames.filter(f => f.landed !== undefined).map(f => [f.addId, f.placeId, f.landed, f.end])).toEqual([["a_late", place.id, "signins/codex", undefined]]);
+    expect((await rowOf(place.id)).setup?.state).toBe("running");
+    p.let("clis");
+    await until(() => ended(frames).length === 1);
+    expect(ended(frames).map(f => f.end)).toEqual(["ready"]);
+  });
+
+  it("stamps a running step with when it started, on the record and on its frame", async () => {
+    const fc = fakeClock();
+    const p = provisioner({ holds: ["clis"] });
+    const { frames } = await hosting({ provision: p.wired, clock: fc.clock });
+    const { place } = await runtime!.places!.add({ addId: "a_clock", address: "root@10.0.0.9", hostUrls: DOOR, choices: LAPTOP }, Date.now());
+    await until(() => p.ran.includes("clis"));
+    const began = new Date(fc.clock.now()).toISOString();
+    fc.advance(300_000);
+    await until(async () => (await rowOf(place.id)).setup?.steps.some(l => l.step === "clis") === true);
+    expect((await rowOf(place.id)).setup?.steps.find(l => l.step === "clis")).toEqual({ step: "clis", state: "running", startedAt: began });
+    expect(frames.find(f => f.line?.step === "clis")?.line).toEqual({ step: "clis", state: "running", startedAt: began });
+    p.let("clis");
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+  });
+
   it("stops at a floor that failed, says why, and runs nothing after it", async () => {
     const p = provisioner({ rows: { floor: [{ id: "base/curl", label: "curl", outcome: "failed", note: "apt exited 100" }] } });
     const { frames } = await hosting({ provision: p.wired });
