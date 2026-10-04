@@ -763,6 +763,23 @@ class Compiler {
             if (/^on[A-Z]/.test(a.name)) { (op.on ??= {})[a.name.slice(2).toLowerCase() as "press"] = this.steps(a, id); continue; }
             (op.props ??= {})[a.name] = isNull ? null : this.value(a);
           }
+          const target = current?.pieces[id];
+          for (const ch of el.children) {
+            const spec = target === undefined ? undefined : SLATE_PIECES[target.type]?.items[ch.tag];
+            if (spec === undefined) {
+              if (target !== undefined) this.error("P105", `<props> merges attributes and the items ${target.type} takes; to change <${ch.tag}> under ${id}, write ${id} again with its id or use <add under="${id}">`, ch.line, { piece: id });
+              continue;
+            }
+            // An item merges into the one already there whose first field is the same, a column by its title; a new one is appended.
+            const key = Object.keys(spec.fields)[0]!;
+            const list = ((op.props?.[spec.prop] ?? JSON.parse(JSON.stringify(target!.props?.[spec.prop] ?? []))) as Record<string, SlatePropValue>[]);
+            const item = this.item(ch, spec, id, `${spec.prop}[${list.length}]`) as Record<string, SlatePropValue>;
+            const at = list.findIndex(x => JSON.stringify(x[key]) === JSON.stringify(item[key]));
+            const merged: Record<string, SlatePropValue> = { ...(at < 0 ? {} : list[at]), ...item };
+            for (const [k, v] of Object.entries(merged)) if (v === null) delete merged[k];
+            if (at < 0) list.push(merged); else list[at] = merged;
+            (op.props ??= {})[spec.prop] = list;
+          }
           ops.push(op);
           continue;
         }
@@ -790,7 +807,7 @@ class Compiler {
         ops.push({ op: "replace", id, piece: this.doc.pieces[id]!, ...(Object.keys(children).length > 0 ? { children } : {}) });
         continue;
       }
-      this.error("P105", `a patch is pieces with an id, <props>, <add>, <remove>, <move>, declarations, <clear> or <undo>; not <${el.tag}>`, el.line);
+      this.error("P105", `a patch is pieces with an id, <props>, <add>, <remove>, <move>, declarations, <clear> or <undo>; not <${el.tag}>, an item: change it inside its piece with <props id="..."><${el.tag} ... /></props>`, el.line);
     }
     return ops;
   }

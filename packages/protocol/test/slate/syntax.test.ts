@@ -100,6 +100,39 @@ describe("patches", () => {
     expect(r.document!.pieces.week!.props).toEqual({ label: "Weekly", value: { bind: "usage.week.percent" }, tone: "warning" });
   });
 
+  it("merges a <col> inside <props> into the column with its title, so a tone saved by patch reads back", () => {
+    const table = doc(`<slate title="P">
+  <value name="procs" start={[{ name: "node", cpu: 80, mem: 524 }]} />
+  <column>
+    <table id="ps" items={$procs}>
+      <col title="Name" value={item.name} />
+      <col title="CPU" value={item.cpu} />
+    </table>
+  </column>
+</slate>`);
+    const patch = (text: string) => {
+      const p = parseSlatePatch(text, table);
+      expect(p.errors).toEqual([]);
+      const r = applySlatePatch(table, slateStartValues(table), p.patch!);
+      expect(r.errors).toEqual([]);
+      return r.document!;
+    };
+    const toned = patch(`<props id="ps"><col title="CPU" tone={item.cpu > 50 ? 'bad' : 'default'} /></props>`);
+    expect(toned.pieces.ps!.props!.columns).toEqual([
+      { title: "Name", value: { bind: "item.name" } },
+      { title: "CPU", value: { bind: "item.cpu" }, tone: { bind: "item.cpu > 50 ? 'bad' : 'default'" } },
+    ]);
+    expect(printSlate(toned)).toContain(`<col title="CPU" value={item.cpu} tone={item.cpu > 50 ? 'bad' : 'default'} />`);
+    const untoned = applySlatePatch(toned, slateStartValues(toned), parseSlatePatch(`<props id="ps"><col title="CPU" tone={null} /><col title="Mem" value={item.mem} mono /></props>`, toned).patch!).document!;
+    expect(untoned.pieces.ps!.props!.columns).toEqual([
+      { title: "Name", value: { bind: "item.name" } },
+      { title: "CPU", value: { bind: "item.cpu" } },
+      { title: "Mem", value: { bind: "item.mem" }, mono: true },
+    ]);
+    expect(parseSlatePatch(`<props id="ps"><text>x</text></props>`, table).errors.map(e => e.code)).toEqual(["P105"]);
+    expect(parseSlatePatch(`<col title="CPU" tone="bad" />`, table).errors[0]!.message).toContain(`<props id="..."><col ... /></props>`);
+  });
+
   it("adds, moves, removes and replaces pieces by id", () => {
     const added = apply(`<add under="root" at={1}><text id="new">New</text></add>`);
     expect(added.document!.pieces["column-1"]!.children).toEqual(["week", "new", "eta", "more"]);
