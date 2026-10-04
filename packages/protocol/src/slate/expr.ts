@@ -475,6 +475,11 @@ const isNum = (v: Val): v is number => typeof v === "number" && Number.isFinite(
 const isList = (v: Val): v is SlateJson[] => Array.isArray(v);
 const isRecord = (v: Val): v is { [key: string]: SlateJson } => typeof v === "object" && v !== null && !Array.isArray(v);
 const missing = (v: Val): v is null | undefined => v === null || v === undefined;
+/** Text joined from literal words and the values it reads: missing when everything it reads is missing, so a label
+ * whose data has not come draws its placeholder rather than half a sentence. One read part of several may be
+ * missing and reads as nothing. */
+const joined = (parts: readonly { read: boolean; v: Val }[]): string | null =>
+  parts.some(p => p.read) && parts.every(p => !p.read || missing(p.v)) ? null : parts.map(p => slateText(p.v)).join("");
 const finite = (n: number): number | null => (Number.isFinite(n) ? n : null);
 
 export function slateTruthy(v: Val): boolean {
@@ -553,7 +558,7 @@ interface Env {
   now(): number | null;
 }
 
-type Fn = (args: Val[], env: Env) => Val;
+type Fn = (args: Val[], env: Env, nodes: readonly SlateExpr[]) => Val;
 interface FnSpec {
   min: number; max: number; sig: string; example: string; fn: Fn;
   returns(args: SlateType[]): SlateType;
@@ -654,7 +659,7 @@ const F: Record<string, FnSpec> = {
       return /^\d{4}-\d{2}-\d{2}/.test(x) ? ms(x) : null;
     } },
   bool: { min: 1, max: 1, returns: ret(T.bool), nullSafe: true, sig: "bool(x)", example: "bool($done)", fn: ([x]) => slateTruthy(x) },
-  concat: { min: 1, max: 99, returns: ret(T.str), nullSafe: true, sig: "concat(a, b, ...)", example: "concat(git.branch, ' at ', git.head)", fn: args => args.map(slateText).join("") },
+  concat: { min: 1, max: 99, returns: ret(T.str), nullSafe: true, sig: "concat(a, b, ...)", example: "concat(git.branch, ' at ', git.head)", fn: (args, _env, nodes) => joined(args.map((v, at) => ({ read: nodes[at]?.k !== "lit", v }))) },
   json: { min: 1, max: 1, returns: ret(T.any), sig: "json(s)", example: "json($check.out).title",
     fn: ([s]) => { if (typeof s !== "string") return null; try { return JSON.parse(s) as SlateJson; } catch { return null; } } },
   lines: { min: 1, max: 1, returns: ret({ t: "list", of: T.str }), sig: "lines(s)", example: "lines($tests.out)",
@@ -921,7 +926,7 @@ function run(node: SlateExpr, env: Env): Val {
     case "neg": { const v = run(node.arg, env); return isNum(v) ? -v : null; }
     case "not": return !slateTruthy(run(node.arg, env));
     case "cond": return slateTruthy(run(node.test, env)) ? run(node.then, env) : run(node.else, env);
-    case "tpl": return node.parts.map(p => (typeof p === "string" ? p : slateText(run(p.expr, env)))).join("");
+    case "tpl": return joined(node.parts.map(p => (typeof p === "string" ? { read: false, v: p } : { read: p.expr.k !== "lit", v: run(p.expr, env) })));
     case "pipe": return runPipe(node, env);
     case "list": return node.items.map(e => run(e, env) ?? null);
     case "index": return pick(run(node.of, env), run(node.index, env));
@@ -941,7 +946,7 @@ function run(node: SlateExpr, env: Env): Val {
       if (spec === undefined || node.args.length < spec.min || node.args.length > spec.max) return null;
       const args = node.args.map(a => run(a, env));
       if (spec.nullSafe !== true && missing(args[0])) return null;
-      return spec.fn(args, env);
+      return spec.fn(args, env, node.args);
     }
   }
 }
@@ -959,9 +964,9 @@ export function evaluateSlateExpression(expr: string | SlateExpr, ctx: SlateEval
   }
 }
 
-/** A format string's text: each hole's value as text, nothing for a null. */
-export function evaluateSlateFormat(src: string, ctx: SlateEvalContext): string {
-  return parseSlateFormat(src).parts.map(p => (typeof p === "string" ? p : slateText(evaluateSlateExpression(p.expr, ctx)))).join("");
+/** A format string's text: its words and each hole's value, or null when every hole reads nothing, as concat. */
+export function evaluateSlateFormat(src: string, ctx: SlateEvalContext): string | null {
+  return joined(parseSlateFormat(src).parts.map(p => (typeof p === "string" ? { read: false, v: p } : { read: true, v: evaluateSlateExpression(p.expr, ctx) })));
 }
 
 /** A prop's value: a literal as written, a binding evaluated, a format filled, lists and records through. */

@@ -27,7 +27,7 @@ const DOC = slate({
 let revision = 0;
 
 function record(over: Partial<SlateRecord> = {}): SlateRecord {
-  return { threadId: "t1", workspaceId: "ws", version: 1, revision: (revision += 1), document: DOC, values: { step: "one" }, comments: [], approvals: {}, asks: [], problems: [], shownOnce: true, canUndo: false, rewound: false, updatedAt: 1, ...over };
+  return { threadId: "t1", workspaceId: "ws", version: 1, revision: (revision += 1), document: DOC, values: { step: "one" }, comments: [], approvals: {}, asks: [], problems: [], shownOnce: true, canUndo: false, updatedAt: 1, ...over };
 }
 
 const ROW: SessionView = { id: "s1", workspaceId: "ws", harness: "claude", status: "completed", threadId: "t1" };

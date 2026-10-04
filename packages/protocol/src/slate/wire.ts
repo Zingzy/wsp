@@ -124,7 +124,6 @@ export const SlateView = z.object({
   problems: z.array(SlateWireProblem),
   shownOnce: z.boolean(),
   canUndo: z.boolean(),
-  rewound: z.boolean(),
   updatedAt: z.number(),
 });
 export type SlateView = z.infer<typeof SlateView>;

@@ -188,7 +188,7 @@ export function UsageChart({ steps, lines: given, stepWord, ticks, height: HEIGH
         ))}
         {[0, 1, 2, 3, 4].map(g => (
           <span key={g} className="absolute right-0 -translate-y-1/2" style={{ top: HEIGHT - PAD - (g / 4) * (HEIGHT - PAD * 2) }}>
-            {axis === undefined ? <DigitRoll value={figure(from + (top * g) / 4)} /> : figure(from + (top * g) / 4)}
+            {axis === undefined ? <DigitRoll rollIn value={figure(from + (top * g) / 4)} /> : figure(from + (top * g) / 4)}
           </span>
         ))}
       </div>

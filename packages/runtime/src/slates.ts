@@ -89,7 +89,6 @@ export interface SlateRecord extends SlateSnap {
   /** By turn id, in the order the turns ended; kept is by revision, since values move without the version. */
   turns: Record<string, { at: number; version: number; revision: number }>;
   kept: Record<string, SlateSnap>;
-  rewound?: SlateSnap & { version: number; at: number };
   comments: Record<string, SlateJson>[];
   /** By approval key; "Always in this thread" and "Don't" stay, "Run once" is never kept. */
   approvals: Record<string, Approval>;
@@ -265,13 +264,10 @@ export interface Slates {
   /** A window's hold on sources for a thread's slate; the release goes when the window lets go or its socket closes. */
   subscribe(p: { threadId: string; sources: string[] }): () => void;
   resolve(p: { threadId: string; paths: string[] }): Promise<{ values: Record<string, SlateJson> }>;
-  /** A turn ended: its snapshot is written, and the undo of a rewind in the same folder goes, as the files' does. */
-  turnEnded(o: { threadId: string; turnId: string; workspaceId: string }): Promise<void>;
+  /** A turn ended: its snapshot is written. */
+  turnEnded(o: { threadId: string; turnId: string }): Promise<void>;
   /** The runtime rewound a thread to the end of turnId, cutting the turns named. */
   rewound(o: { threadId: string; turnId: string; cut: readonly string[] }): Promise<void>;
-  /** Undo rewind; false when the slate has nothing to put back. */
-  undoRewind(threadId: string): Promise<boolean>;
-  hasRewound(threadId: string): Promise<boolean>;
   forget(threadId: string): Promise<void>;
   /** Whether a slate in the workspace watches the pull request's checks. */
   watchesPr(workspaceId: string): boolean;
@@ -595,7 +591,6 @@ export function createSlates(deps: SlatesDeps): Slates {
     problems: r.problems,
     shownOnce: r.shownOnce,
     canUndo: r.previous !== undefined,
-    rewound: r.rewound !== undefined,
     updatedAt: r.updatedAt,
   });
 
@@ -1264,20 +1259,11 @@ export function createSlates(deps: SlatesDeps): Slates {
       return { values: Object.fromEntries(p.paths.map(path => [path, mapStrings(evaluateSlateExpression(path, ctx) ?? null, s => scrub(r, s))])) };
     },
 
-    async turnEnded({ threadId, turnId, workspaceId }) {
+    async turnEnded({ threadId, turnId }) {
       await ready();
-      // A rewind can no longer be undone once the folder has moved on, the rule the files' own undo keeps.
-      for (const r of records.values()) {
-        if (r.workspaceId !== workspaceId || r.rewound === undefined || r.threadId === threadId) continue;
-        await serial(r.threadId, async () => {
-          delete r.rewound;
-          await save(r);
-        });
-      }
       await serial(threadId, async () => {
         const r = records.get(threadId);
         if (r === undefined) return;
-        delete r.rewound;
         const key = String(r.revision);
         r.kept[key] ??= structuredClone(snapOf(r));
         delete r.turns[turnId];
@@ -1294,7 +1280,6 @@ export function createSlates(deps: SlatesDeps): Slates {
         if (r === undefined) return;
         const at = r.turns[turnId];
         const snap = at === undefined ? undefined : r.kept[String(at.revision)];
-        r.rewound = { ...snapOf(r), version: r.version, at: deps.now() };
         // Approvals and secrets are the person's, not the document's: a rewind to before the slate keeps the values.
         become(r, snap !== undefined ? structuredClone(snap) : { document: null, values: r.values, empty: "rewound-before" });
         for (const id of cut) delete r.turns[id];
@@ -1305,25 +1290,6 @@ export function createSlates(deps: SlatesDeps): Slates {
         announce(r, "restore", "host", []);
         push(r, Object.keys(r.values));
       });
-    },
-
-    async undoRewind(threadId) {
-      return serial(threadId, async () => {
-        const r = await recordOf(threadId);
-        if (r?.rewound === undefined) return false;
-        become(r, r.rewound);
-        delete r.rewound;
-        r.version += 1;
-        r.revision += 1;
-        await save(r);
-        announce(r, "restore", "host", []);
-        push(r, Object.keys(r.values));
-        return true;
-      });
-    },
-
-    async hasRewound(threadId) {
-      return (await recordOf(threadId))?.rewound !== undefined;
     },
 
     async forget(threadId) {

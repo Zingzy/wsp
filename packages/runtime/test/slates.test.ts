@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LocalBackend } from "@wsp/engine";
-import type { AdapterEvent, Caller, EventUnion, SlateView, TurnResult } from "@wsp/protocol";
+import { REWIND_NO_UNDO_LINE, type AdapterEvent, type Caller, type EventUnion, type SlateView, type TurnResult } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterFactory, type HarnessStartOptions, type LocalWiring, type Runtime } from "../src/runtime.js";
 import { localExecStream } from "../src/local-exec.js";
 import { memoryStore, type Store } from "../src/store.js";
@@ -211,7 +211,7 @@ describe("the slate v2 host", () => {
     expect((await third.slates.get(threadId))!.values["fired"]).toBe(1);
   }, 60_000);
 
-  it("a rewind restores the turn's snapshot, cancels a run in flight with no reaction, and undo rewind puts the slate back", async () => {
+  it("a rewind restores the turn's snapshot, cancels a run in flight with no reaction, and leaves nothing for undo", async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), "wsp-slates-")));
     roots.push(root);
     const folder = join(root, "plain");
@@ -245,17 +245,14 @@ describe("the slate v2 host", () => {
     expect(rewound.values["project"]).toBe("");
     expect(rewound.values["slow"]).toMatchObject({ state: "cancelled", why: "the thread was rewound" });
     expect(rewound.values["fired"]).toBe(0);
-    expect(rewound.rewound).toBe(true);
     // The killed command's end is dropped: nothing fires after the restore either.
     await new Promise(r => setTimeout(r, 300));
     await rt.slates.settled();
     expect((await rt.slates.get(threadId))!.values["fired"]).toBe(0);
 
-    await rt.sessions.rewind(threadId, { undo: true });
-    await rt.slates.settled();
-    const back = (await rt.slates.get(threadId))!;
-    expect(back.values["project"]).toBe("later");
-    expect(back.values["slow"]).toMatchObject({ state: "cancelled" });
+    // A rewind of the conversation alone leaves nothing to undo, the slate included.
+    await expect(rt.sessions.rewind(threadId, { undo: true })).rejects.toThrow(REWIND_NO_UNDO_LINE);
+    expect((await rt.slates.get(threadId))!.values["project"]).toBe("");
 
     // A rewind to the turn before the slate existed empties it, keeping approvals.
     await rt.sessions.rewind(threadId, { turnId: first.turnId, files: false });
@@ -465,7 +462,7 @@ const TICKER = `<slate title="Ticker">
 const events: EventUnion[] = [];
 
 /** A host over a temp root with one finished thread on a plain folder, and that thread as a caller. */
-async function threadOn(prefix: string, o: { picks?: Partial<Record<"model" | "effort" | "permissionMode" | "contextWindow", string>>; store?: Store } = {}): Promise<{ rt: Runtime; root: string; threadId: string; asThread: Caller; starts: HarnessStartOptions[]; prompts: string[] }> {
+async function threadOn(prefix: string, o: { picks?: Partial<Record<"model" | "effort" | "permissionMode" | "contextWindow", string>>; store?: Store } = {}): Promise<{ rt: Runtime; root: string; threadId: string; workspaceId: string; asThread: Caller; starts: HarnessStartOptions[]; prompts: string[] }> {
   const root = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
   roots.push(root);
   const folder = join(root, "plain");
@@ -479,7 +476,7 @@ async function threadOn(prefix: string, o: { picks?: Partial<Record<"model" | "e
   const first = await rt.sessions.start(workspace.id, { prompt: "one", ...o.picks });
   await first.finished;
   const threadId = first.view().threadId!;
-  return { rt, root, threadId, starts, prompts, asThread: { origin: "here", by: { kind: "thread", threadId, workspaceId: workspace.id, rootThreadId: threadId } } };
+  return { rt, root, threadId, workspaceId: workspace.id, starts, prompts, asThread: { origin: "here", by: { kind: "thread", threadId, workspaceId: workspace.id, rootThreadId: threadId } } };
 }
 
 
@@ -617,5 +614,24 @@ describe("a slate's files on the host", () => {
     expect(read.text).toContain('<file name="hits.py">{`\n    print(1)\n  `}</file>');
     await rt.slates.write({ text: '<file name="hits.py">{`print(22)`}</file>' }, asThread);
     expect((await rt.slates.read({}, asThread)).text).toContain("    print(22)\n");
+  }, 30_000);
+});
+
+describe("the slate v2 host, round 5", () => {
+  it("a send and a notify that name no picks run on the thread's own model, effort and window", async () => {
+    const picks = { model: "claude-opus-5-5", effort: "max", contextWindow: "1m" };
+    const { rt, threadId, workspaceId, starts } = await threadOn("wsp-slates-sendpicks-", { picks });
+    const pickedOf = (o: HarnessStartOptions) => ({ model: o.model, effort: o.effort, contextWindow: o.contextWindow });
+
+    const sent = await rt.sessions.start(workspaceId, { prompt: "two", thread: threadId });
+    await sent.finished;
+    expect(pickedOf(starts[1]!)).toEqual(picks);
+
+    // A thread the person opens with notify on this one tells it when it ends; that line starts this thread's turn.
+    const kid = await rt.sessions.start(workspaceId, { prompt: "kid", notify: [threadId] });
+    await kid.finished;
+    await vi.waitFor(() => expect(starts).toHaveLength(4));
+    expect(starts[3]!.prompt).toContain(kid.view().threadId!.slice(0, 8));
+    expect(pickedOf(starts[3]!)).toEqual(picks);
   }, 30_000);
 });
