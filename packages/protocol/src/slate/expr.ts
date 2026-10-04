@@ -27,6 +27,9 @@ export type SlateExpr =
   | { k: "bin"; op: SlateBinOp; left: SlateExpr; right: SlateExpr; at: number }
   | { k: "cond"; test: SlateExpr; then: SlateExpr; else: SlateExpr; at: number }
   | { k: "tpl"; parts: SlateTemplatePart[]; at: number }
+  | { k: "list"; items: SlateExpr[]; at: number }
+  | { k: "index"; of: SlateExpr; index: SlateExpr; at: number }
+  | { k: "rec"; fields: { name: string; expr: SlateExpr }[]; at: number }
   | { k: "pipe"; head: SlateExpr; steps: SlatePipeStepNode[]; at: number };
 
 /** What an expression reads its paths through. resolve answers undefined for data that has not arrived. item and
@@ -310,14 +313,20 @@ class Parser {
         continue;
       }
       if (this.isOp("[")) {
-        this.next();
-        let sign = 1;
-        if (this.isOp("-")) { this.next(); sign = -1; }
-        const n = this.next();
-        if (n.t !== "num" || !/^\d+$/.test(n.v)) throw new Fault("X400", `an index is a whole number, at column ${n.at + 1}`, n.at);
+        const open = this.next();
+        const neg = this.isOp("-") ? 1 : 0;
+        const n = this.peek(neg);
+        if (n.t === "num" && /^\d+$/.test(n.v) && this.peek(neg + 1).t === "op" && this.peek(neg + 1).v === "]") {
+          this.i += neg + 2;
+          const index = (neg === 1 ? -1 : 1) * Number(n.v);
+          node = node.k === "path" ? { ...node, segs: [...node.segs, index] } : { k: "field", of: node, name: index, at: n.at + this.base };
+          continue;
+        }
+        this.enter(open.at);
+        const index = this.pipeline();
+        this.depth--;
         this.expect("]");
-        const index = sign * Number(n.v);
-        node = node.k === "path" ? { ...node, segs: [...node.segs, index] } : { k: "field", of: node, name: index, at: n.at + this.base };
+        node = { k: "index", of: node, index, at: open.at + this.base };
         continue;
       }
       break;
@@ -348,8 +357,33 @@ class Parser {
       this.expect(")");
       return e;
     }
-    if (t.t === "op" && t.v === "[") throw new Fault("X420", "a list literal stands only as a whole attribute, like start={[1, 2]}", t.at);
-    if (t.t === "op" && t.v === "{") throw new Fault("X420", "a record literal stands only as a whole attribute, like start={{ a: 1 }}", t.at);
+    if (t.t === "op" && t.v === "[") {
+      this.enter(t.at);
+      const items: SlateExpr[] = [];
+      while (!this.isOp("]")) {
+        items.push(this.pipeline());
+        if (!this.isOp(",")) break;
+        this.next();
+      }
+      this.expect("]");
+      this.depth--;
+      return { k: "list", items, at };
+    }
+    if (t.t === "op" && t.v === "{") {
+      this.enter(t.at);
+      const fields: { name: string; expr: SlateExpr }[] = [];
+      while (!this.isOp("}")) {
+        const key = this.next();
+        if (key.t !== "name" && key.t !== "str") throw new Fault("X400", `a record's field is a name, at column ${key.at + 1}: { at: time.now, v: 1 }`, key.at);
+        this.expect(":");
+        fields.push({ name: key.v, expr: this.pipeline() });
+        if (!this.isOp(",")) break;
+        this.next();
+      }
+      this.expect("}");
+      this.depth--;
+      return { k: "rec", fields, at };
+    }
     if (t.t === "op" && t.v === "/") throw new Fault("X420", "no regular expressions; use contains, startsWith or endsWith", t.at);
     if (t.t === "name") {
       if (t.v === "true" || t.v === "false") return { k: "lit", v: t.v === "true", at };
@@ -552,6 +586,13 @@ function numbersOf(env: Env, list: Val, name: Val): number[] {
   return out;
 }
 
+/** list[i] or record[key] for a computed index: a whole number counts from the end when negative. */
+function pick(of: Val, at: Val): Val {
+  if (isList(of) && isNum(at) && Number.isInteger(at)) return of[at < 0 ? of.length + at : at] ?? null;
+  if (isRecord(of) && typeof at === "string") return of[at] ?? null;
+  return null;
+}
+
 const ret = (t: SlateType) => (): SlateType => t;
 const elemOf = (args: SlateType[]): SlateType => args[0]?.of ?? T.any;
 
@@ -647,7 +688,11 @@ const F: Record<string, FnSpec> = {
   avg: { min: 1, max: 2, returns: ret(T.num), listFirst: true, sig: "avg(list, field?)", example: "avg(thread.changes.files, 'additions')",
     fn: ([l, f], env) => { const ns = numbersOf(env, l, f); return ns.length === 0 ? null : ns.reduce((a, b) => a + b, 0) / ns.length; } },
   first: { min: 1, max: 1, returns: elemOf, listFirst: true, sig: "first(list)", example: "first(pr.checks).name", fn: ([l]) => (isList(l) ? (l[0] ?? null) : null) },
-  last: { min: 1, max: 1, returns: elemOf, listFirst: true, sig: "last(list)", example: "last(thread.plan.steps).text", fn: ([l]) => (isList(l) ? (l[l.length - 1] ?? null) : null) },
+  last: { min: 1, max: 2, returns: a => (a.length > 1 ? (a[0] ?? T.list) : elemOf(a)), listFirst: true, sig: "last(list, n?)", example: "last(append($hist, $spot.json.v), 60)",
+    fn: ([l, n]) => (!isList(l) ? null : n === undefined ? (l[l.length - 1] ?? null) : isNum(n) ? (n >= 1 ? l.slice(-Math.floor(n)) : []) : null) },
+  at: { min: 2, max: 2, returns: elemOf, listFirst: true, sig: "at(list, i)", example: "at($questions, $i).text", fn: ([l, i]) => pick(l, i) },
+  append: { min: 2, max: 2, returns: a => ({ t: "list", ...((a[0]?.of ?? a[1]) !== undefined ? { of: a[0]?.of ?? a[1]! } : {}) }), nullSafe: true, sig: "append(list, x)", example: "append($hist, { at: time.now, v: $spot.json.v })",
+    fn: ([l, x], env) => { const list = isList(l) ? l : []; env.charge(list.length); return [...list, x ?? null]; } },
   pluck: { min: 2, max: 2, returns: ret(T.list), listFirst: true, sig: "pluck(list, field)", example: "pluck(pr.checks, 'name')",
     fn: ([l, f], env) => (isList(l) && typeof f === "string" ? l.map(item => { env.charge(1); return field(item, f) ?? null; }) : null) },
   join: { min: 2, max: 2, returns: ret(T.str), listFirst: true, sig: "join(list, sep)", example: "join(pluck(pr.checks, 'name'), ', ')",
@@ -878,6 +923,9 @@ function run(node: SlateExpr, env: Env): Val {
     case "cond": return slateTruthy(run(node.test, env)) ? run(node.then, env) : run(node.else, env);
     case "tpl": return node.parts.map(p => (typeof p === "string" ? p : slateText(run(p.expr, env)))).join("");
     case "pipe": return runPipe(node, env);
+    case "list": return node.items.map(e => run(e, env) ?? null);
+    case "index": return pick(run(node.of, env), run(node.index, env));
+    case "rec": return Object.fromEntries(node.fields.map(f => [f.name, run(f.expr, env) ?? null]));
     case "bin": {
       if (node.op === "and") { const l = run(node.left, env); return slateTruthy(l) ? run(node.right, env) : l; }
       if (node.op === "or") { const l = run(node.left, env); return slateTruthy(l) ? l : run(node.right, env); }
@@ -939,6 +987,9 @@ export function walkSlateExpr(node: SlateExpr, visit: (n: SlateExpr) => void): v
     case "cond": walkSlateExpr(node.test, visit); walkSlateExpr(node.then, visit); walkSlateExpr(node.else, visit); break;
     case "call": for (const a of node.args) walkSlateExpr(a, visit); break;
     case "tpl": for (const p of node.parts) if (typeof p !== "string") walkSlateExpr(p.expr, visit); break;
+    case "list": for (const e of node.items) walkSlateExpr(e, visit); break;
+    case "index": walkSlateExpr(node.of, visit); walkSlateExpr(node.index, visit); break;
+    case "rec": for (const f of node.fields) walkSlateExpr(f.expr, visit); break;
     case "pipe":
       walkSlateExpr(node.head, visit);
       for (const s of node.steps) for (const [i, a] of s.args.entries()) {
@@ -1016,6 +1067,14 @@ export function checkSlateExpression(src: string, scope: SlateCheckScope, base =
     switch (node.k) {
       case "lit": return node.v === null ? T.nul : typeof node.v === "number" ? T.num : typeof node.v === "string" ? T.str : typeof node.v === "boolean" ? T.bool : T.any;
       case "tpl": for (const p of node.parts) if (typeof p !== "string") type(p.expr, row); return T.str;
+      case "index": {
+        const of = type(node.of, row);
+        const at = type(node.index, row);
+        if (["boolean", "list", "record"].includes(at.t)) add("X408", `an index is a number or a field name; this gives a ${at.t}`, node.index.at);
+        return of.t === "list" ? (of.of ?? T.any) : T.any;
+      }
+      case "list": { const items = node.items.map(e => type(e, row)); return items.length === 0 ? T.list : { t: "list", of: items.reduce(merge) }; }
+      case "rec": return { t: "record", fields: Object.fromEntries(node.fields.map(f => [f.name, type(f.expr, row)])) };
       case "path": {
         if (!node.own && (node.head === "item" || node.head === "index")) {
           if (row === undefined) { add("X409", `${node.head} is only known inside a repeating piece or a step`, node.at); return T.any; }
