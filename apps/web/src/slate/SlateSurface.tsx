@@ -4,7 +4,7 @@
 // state is the panel's own Empty, quiet, with no spinner while the record is on its way.
 import { MoreHorizontal } from "lucide-react";
 import { useEffect, useMemo } from "react";
-import { sketchSlate } from "@wsp/protocol";
+import { hereName, threadKeyOf } from "@wsp/protocol";
 import { Button } from "../components/ui/button.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty.js";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../components/ui/menu.js";
@@ -12,11 +12,13 @@ import { ScrollArea } from "../components/ui/scroll-area.js";
 import { useSelectedThreadId, useStore } from "../protocol/store.js";
 import { requestComposerFocus } from "../shell/shellRequests.js";
 import { useComposerDraftStore } from "../components/chat/composerDraftStore.js";
-import { DOC } from "./engine.js";
+import { ConsentSheet, consentOf, HeldRuns, type ConsentWhere } from "./consent.js";
+import { DOC, type SlateEngine } from "./engine.js";
+import { isRunRecord } from "./model.js";
 import { SLATE_VIEWS } from "./pieces/index.js";
 import { bindSources } from "./sources/binder.js";
 import { SlateView, usePieceVersion } from "./SlateView.js";
-import { loadSlate, slateBundle, useSlateStore, type SlateEntry } from "./store.js";
+import { askConsent, loadSlate, slateBundle, slateLink, useSlateStore, type SlateEntry } from "./store.js";
 import { threadWorkspace } from "./SlateHost.js";
 
 export const SLATE_WORDS = {
@@ -31,6 +33,8 @@ export const SLATE_WORDS = {
   undo: "Undo the agent's last change",
   clear: "Clear",
   copy: "Copy as text",
+  stop: "Stop runs",
+  forget: "Forget secrets",
   menu: "Slate menu",
 } as const;
 
@@ -70,6 +74,8 @@ function ThreadSlate({ threadId }: { threadId: string }) {
   return (
     <div data-slate-surface={threadId} className="flex min-h-0 flex-1 flex-col">
       <SlateHeader threadId={threadId} entry={entry} />
+      <HeldRuns engine={bundle.engine} review={run => askConsent(threadId, { run })} refuse={run => void slateLink(threadId).approve(run, "refuse")} />
+      <Consent threadId={threadId} engine={bundle.engine} />
       <ScrollArea className="min-h-0 flex-1">
         <div className="px-3 pb-3 pt-1">
           <SlateView engine={bundle.engine} views={SLATE_VIEWS} runner={bundle.runner} sender={bundle.sender} />
@@ -80,13 +86,19 @@ function ThreadSlate({ threadId }: { threadId: string }) {
 }
 
 function SlateHeader({ threadId, entry }: { threadId: string; entry: SlateEntry }) {
-  const { engine } = slateBundle(threadId);
+  const bundle = slateBundle(threadId);
+  const { engine } = bundle;
   usePieceVersion(engine, DOC);
   const api = useStore(s => s.api?.slates ?? null);
   const title = engine.document?.title ?? "Slate";
-  const copy = () => {
-    const text = sketchSlate(engine.document, engine.state, engine.context());
-    void navigator.clipboard?.writeText(text);
+  const copy = () => void api?.sketch(threadId).then(text => navigator.clipboard?.writeText(text));
+  const runs = Object.keys(engine.document?.runs ?? {});
+  const secrets = Object.entries(engine.document?.values ?? {}).flatMap(([name, decl]) => (decl.secret === true ? [`$${name}`] : []));
+  const stop = () => {
+    for (const run of runs) if (isRunRecord(engine.values[run]) && engine.values[run].state === "running") void api?.cancel(threadId, run);
+  };
+  const forget = () => {
+    for (const path of secrets) void bundle.sender.secret(path, "");
   };
   return (
     <div className="flex h-7 shrink-0 items-center gap-2 px-3 pt-1" title={engine.document?.title}>
@@ -101,11 +113,34 @@ function SlateHeader({ threadId, entry }: { threadId: string; entry: SlateEntry 
             {SLATE_WORDS.undo}
           </MenuItem>
           <MenuItem onClick={() => void api?.clear(threadId).then(() => loadSlate(threadId))}>{SLATE_WORDS.clear}</MenuItem>
+          {runs.length > 0 ? <MenuItem onClick={stop}>{SLATE_WORDS.stop}</MenuItem> : null}
+          {secrets.length > 0 ? <MenuItem onClick={forget}>{SLATE_WORDS.forget}</MenuItem> : null}
           <MenuItem onClick={copy}>{SLATE_WORDS.copy}</MenuItem>
         </MenuPopup>
       </Menu>
     </div>
   );
+}
+
+/** Where the thread runs, for a sheet the host's ask did not fill: this computer's name and the thread's folder. */
+function useWhere(threadId: string): ConsentWhere {
+  const computer = useStore(s => hereName(s.places));
+  const folder = useStore(s => {
+    for (const rows of Object.values(s.sessions)) for (const row of rows) if (threadKeyOf(row) === threadId) return row.cwd;
+    return undefined;
+  });
+  return { ...(computer !== "" ? { computer } : {}), ...(folder !== undefined ? { folder } : {}) };
+}
+
+/** The consent sheet over the tab, while a press held a run or the person pressed Review. */
+function Consent({ threadId, engine }: { threadId: string; engine: SlateEngine }) {
+  const asking = useSlateStore(s => s.asking[threadId]);
+  const where = useWhere(threadId);
+  if (asking === undefined) return null;
+  const content = consentOf(engine, asking.run, asking.ask, where);
+  const close = () => askConsent(threadId, undefined);
+  if (content === undefined) return null;
+  return <ConsentSheet content={content} answer={scope => slateLink(threadId).approve(asking.run, scope, content.key)} onClose={close} />;
 }
 
 /** No slate yet, cleared, rewound to before it, or newer than this build: the panel's own empty state. */

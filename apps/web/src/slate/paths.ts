@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The path grammar the renderer walks itself: a head name, then ".field" and "[index]" steps, as the expression
 // language writes them. Sources answer the steps after the head; the dependency sets compare paths as text.
-import { isSlateBinding, isSlateFormat, slateDependencies, type SlateJson, type SlatePiece, type SlatePropValue } from "@wsp/protocol";
+import { isSlateBinding, isSlateFormat, type SlateJson, type SlatePropValue } from "@wsp/protocol";
+import { dependencies } from "./expr.js";
+import type { SlatePiece } from "./model.js";
 
 const STEP = /^(?:\.([a-zA-Z_][a-zA-Z0-9_]*)|\[(-?\d+)\])/;
 
@@ -18,6 +20,40 @@ export function splitPath(path: string): { head: string; steps: (string | number
     rest = rest.slice(m[0].length);
   }
   return { head: head[0], steps };
+}
+
+/** An own path, "$name" then steps: the value's name and the steps into it. */
+export function ownPath(path: string): { name: string; steps: (string | number)[] } | undefined {
+  if (!path.startsWith("$")) return undefined;
+  const split = splitPath(path.slice(1));
+  return split === undefined ? undefined : { name: split.head, steps: split.steps };
+}
+
+export function getOwn(values: Readonly<Record<string, SlateJson>>, path: string): SlateJson | undefined {
+  const own = ownPath(path);
+  if (own === undefined || !Object.prototype.hasOwnProperty.call(values, own.name)) return undefined;
+  return walk(values[own.name], own.steps);
+}
+
+/** A copy of the values with one path written; a step through something that is not there makes it. */
+export function setOwn(values: Readonly<Record<string, SlateJson>>, path: string, value: SlateJson): Record<string, SlateJson> {
+  const own = ownPath(path);
+  if (own === undefined || UNSAFE.has(own.name)) return { ...values };
+  const put = (at: SlateJson | undefined, steps: readonly (string | number)[]): SlateJson => {
+    if (steps.length === 0) return value;
+    const [step, ...rest] = steps as [string | number, ...(string | number)[]];
+    if (typeof step === "number") {
+      const list = Array.isArray(at) ? [...at] : [];
+      const i = step < 0 ? list.length + step : step;
+      list[i] = put(list[i], rest);
+      return list.map(v => v ?? null);
+    }
+    if (UNSAFE.has(step)) return at ?? null;
+    const record = at !== null && typeof at === "object" && !Array.isArray(at) ? { ...at } : {};
+    record[step] = put(record[step], rest);
+    return record;
+  };
+  return { ...values, [own.name]: put(values[own.name], own.steps) };
 }
 
 const UNSAFE = new Set(["__proto__", "constructor", "prototype"]);
@@ -89,17 +125,34 @@ const ROW_HEADS = new Set(["item", "index"]);
 export function readsOf(expressions: readonly string[]): string[] {
   const out = new Set<string>();
   for (const expression of expressions) {
-    for (const path of slateDependencies(expression)) {
+    for (const path of dependencies(expression)) {
       if (!ROW_HEADS.has(splitPath(path)?.head ?? "")) out.add(path);
     }
   }
   return [...out];
 }
 
-/** What a piece's `when` reads, and what its props read; a hidden piece subscribes to the first alone. */
+/** What a piece's `when` reads, and what its props read; a hidden piece subscribes to the first alone. A literal
+ * "$name" prop names a value the piece reads whole (an output's run). */
 export function pieceReads(piece: SlatePiece): { when: string[]; props: string[] } {
+  const named = Object.values(piece.props ?? {}).filter((v): v is string => typeof v === "string" && /^\$[a-zA-Z_][a-zA-Z0-9_]*$/.test(v));
   return {
     when: piece.when === undefined ? [] : readsOf([piece.when]),
-    props: readsOf(Object.values(piece.props ?? {}).flatMap(expressionsIn)),
+    props: [...new Set([...readsOf(Object.values(piece.props ?? {}).flatMap(expressionsIn)), ...named])],
   };
+}
+
+/** The paths an own derived value stands on, followed through other derived values to values and sources. */
+export function expandDerived(paths: readonly string[], derived: Readonly<Record<string, string>>): string[] {
+  const out = new Set<string>();
+  const seen = new Set<string>();
+  const visit = (path: string) => {
+    out.add(path);
+    const name = ownPath(path)?.name;
+    if (name === undefined || !Object.prototype.hasOwnProperty.call(derived, name) || seen.has(name)) return;
+    seen.add(name);
+    for (const dep of readsOf([derived[name]!])) visit(dep);
+  };
+  for (const path of paths) visit(path);
+  return [...out];
 }

@@ -37,9 +37,9 @@ export function usePress(run: () => Promise<RaiseResult>): { busy: boolean; said
   return { busy, said: result.said, refused: result.refused, press };
 }
 
-/** The state path a two-way prop writes: its binding when that is a bare state path. */
+/** The own path a two-way prop writes: its binding when that is a bare $name path. */
 export function twoWayPath(value: SlatePropValue | undefined): string | undefined {
   if (!isSlateBinding(value)) return undefined;
   const path = value.bind.trim();
-  return /^state(?:\.[a-zA-Z_][a-zA-Z0-9_]*|\[-?\d+\])+$/.test(path) ? path : undefined;
+  return /^\$[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*|\[-?\d+\])*$/.test(path) ? path : undefined;
 }

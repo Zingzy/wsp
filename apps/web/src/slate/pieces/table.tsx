@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Rows from a list, one template of columns over them: one header row in the group heading grammar, no line
 // between rows, numbers end-aligned in mono. Rows are keyed by the piece's `key`, else their index.
-import type { SlateAction, SlateJson, SlatePropValue } from "@wsp/protocol";
+import type { SlateJson, SlatePropValue } from "@wsp/protocol";
+import type { SlateStep } from "../model.js";
 import { Button } from "../../components/ui/button.js";
 import { GROUP_LABEL } from "../../lib/microLabel.js";
 import { cn } from "../../lib/utils.js";
@@ -20,7 +21,7 @@ const records = (value: SlatePropValue | undefined): Template[] =>
 type Row = { item: SlateJson; index: number };
 
 function RowAction({ id, template, at, row, slate, raise }: Pick<PieceViewProps, "id" | "slate" | "raise"> & { template: Template; at: number; row: Row }) {
-  const on = template["on"] as unknown as { press?: SlateAction | SlateAction[] } | undefined;
+  const on = template["on"] as unknown as { press?: SlateStep | SlateStep[] } | undefined;
   const { busy, said, refused, press } = usePress(() => raise("press", { row, rowAction: at, ...(on?.press !== undefined ? { actions: on.press } : {}) }));
   const label = str(slate.resolve(template["label"], row)) ?? "";
   const first = str(row.item !== null && typeof row.item === "object" && !Array.isArray(row.item) ? Object.values(row.item)[0] : row.item);
