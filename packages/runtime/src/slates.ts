@@ -24,6 +24,7 @@ import {
   slateEqual,
   slateNearest,
   slateStep,
+  slateText,
   threadWord,
   usageRefusal,
   validateSlate,
@@ -671,7 +672,9 @@ export function createSlates(deps: SlatesDeps): Slates {
     viewsNow.set(r.threadId, views);
     capturing = { threadId: r.threadId, run };
     try {
-      const answer = runs.start({ threadId: r.threadId, run, decl: decl as CmdRunDecl, by, folder: deps.thread(r.threadId)?.folder ?? process.cwd(), inputs: inputsOf(r, decl), runs: count });
+      const confirm = decl.confirm === undefined ? undefined : slateText(resolveSlateProp(decl.confirm, contextOf(r, views)) ?? null) || `Run $${run}?`;
+      const asked = { ...decl, ...(confirm !== undefined ? { confirm } : {}) } as CmdRunDecl;
+      const answer = runs.start({ threadId: r.threadId, run, decl: asked, by, folder: deps.thread(r.threadId)?.folder ?? process.cwd(), inputs: inputsOf(r, decl), runs: count });
       startedBy.set(byKey(r.threadId, run), by);
       if (answer.record.state === "running") announce(r, "run", by, [], run);
       return { record: answer.record as SlateRunRecord, ...(answer.outcome === "held" && answer.ask !== undefined ? { ask: answer.ask } : {}) };
