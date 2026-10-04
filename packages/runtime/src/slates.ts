@@ -79,10 +79,13 @@ export interface SlateRecord extends SlateSnap {
   workspaceId: string;
   rootThreadId: string;
   schema: 2;
+  /** Moves only when the document does. */
   version: number;
+  /** Rises with every batch that moved a value and with every version; orders the pushes, checked by nothing. */
+  revision: number;
   previous?: SlateSnap & { version: number };
-  /** By turn id, in the order the turns ended. */
-  turns: Record<string, { at: number; version: number }>;
+  /** By turn id, in the order the turns ended; kept is by revision, since values move without the version. */
+  turns: Record<string, { at: number; version: number; revision: number }>;
   kept: Record<string, SlateSnap>;
   rewound?: SlateSnap & { version: number; at: number };
   comments: Record<string, SlateJson>[];
@@ -239,7 +242,7 @@ export interface Slates {
   get(threadId: string): Promise<SlateView | null>;
   write(p: SlateTarget & { text?: string; document?: Record<string, unknown>; check?: boolean; ifVersion?: number }, caller?: Caller): Promise<SlateWriteAnswer>;
   state(p: SlateTarget & { values: Record<string, unknown>; ifVersion?: number }, caller?: Caller): Promise<SlateStateAnswer>;
-  read(p: SlateTarget & { values?: string[]; text?: boolean; sketch?: boolean }, caller?: Caller): Promise<SlateReadAnswer>;
+  read(p: SlateTarget & { values?: string[]; text?: boolean; sketch?: boolean; document?: boolean }, caller?: Caller): Promise<SlateReadAnswer>;
   catalog(p: { name?: string }): { text: string };
   shown(threadId: string): Promise<void>;
   event(p: { threadId: string; version: number; piece: string; event: "press" | "submit" | "change"; requestId: string; scope?: { item?: unknown; index: number }; rowAction?: number }): Promise<SlateEventAnswer>;
@@ -332,7 +335,7 @@ export function createSlates(deps: SlatesDeps): Slates {
   const ready = (): Promise<void> =>
     (loaded ??= deps.store.list(SLATES).then(async list => {
       // Schema 1 was the first proof's and never shipped: no migration is owed, so its records are not read.
-      for (const stored of list as SlateRecord[]) if (stored.schema === 2 && !records.has(stored.threadId)) records.set(stored.threadId, stored);
+      for (const stored of list as SlateRecord[]) if (stored.schema === 2 && !records.has(stored.threadId)) records.set(stored.threadId, { ...stored, revision: stored.revision ?? stored.version });
       for (const r of [...records.values()]) await serial(r.threadId, () => recover(r));
     }));
 
@@ -411,7 +414,7 @@ export function createSlates(deps: SlatesDeps): Slates {
   const freshRecord = (threadId: string): SlateRecord => {
     const facts = deps.thread(threadId);
     if (facts === undefined) throw notFoundRefusal(`no thread ${threadWord(threadId)}`);
-    return { threadId, workspaceId: facts.workspaceId, rootThreadId: facts.rootThreadId, schema: 2, version: 0, document: null, values: {}, empty: "none", turns: {}, kept: {}, comments: [], approvals: {}, problems: [], shownOnce: false, updatedAt: deps.now() };
+    return { threadId, workspaceId: facts.workspaceId, rootThreadId: facts.rootThreadId, schema: 2, version: 0, revision: 0, document: null, values: {}, empty: "none", turns: {}, kept: {}, comments: [], approvals: {}, problems: [], shownOnce: false, updatedAt: deps.now() };
   };
 
   const checkVersion = (r: SlateRecord, ifVersion: number | undefined): void => {
@@ -436,7 +439,7 @@ export function createSlates(deps: SlatesDeps): Slates {
 
   const push = (r: SlateRecord, names: Iterable<string>): void => {
     const values = Object.fromEntries([...new Set(names)].filter(n => n in r.values).map(n => [`$${n}`, r.values[n]!]));
-    if (Object.keys(values).length > 0) deps.emit({ type: "slate.values", workspaceId: r.workspaceId, threadId: r.threadId, version: r.version, values });
+    if (Object.keys(values).length > 0) deps.emit({ type: "slate.values", workspaceId: r.workspaceId, threadId: r.threadId, version: r.version, revision: r.revision, values });
   };
 
   const keepProblems = (r: SlateRecord, found: readonly SlateProblem[]): void => {
@@ -446,7 +449,8 @@ export function createSlates(deps: SlatesDeps): Slates {
   /** The sources a document and a set of extra paths read, viewed once. */
   const viewsFor = async (r: SlateRecord, extra: readonly string[] = []) => {
     const text = `${r.document === null ? "" : JSON.stringify(r.document)} ${extra.join(" ")}`;
-    return viewSources(sourcesNamed(text), deps.sources(r.threadId, r.workspaceId));
+    // The clock always: ago() and until() read it without naming it.
+    return viewSources(["time", ...sourcesNamed(text)], deps.sources(r.threadId, r.workspaceId));
   };
 
   /** How the host reads a path: own values and derived values off the record, sources off the views, the row scope. */
@@ -545,6 +549,7 @@ export function createSlates(deps: SlatesDeps): Slates {
     threadId: r.threadId,
     workspaceId: r.workspaceId,
     version: r.version,
+    revision: r.revision,
     document: r.document as unknown as Record<string, unknown> | null,
     values: r.values,
     ...(r.document === null ? { empty: r.empty ?? "none" } : {}),
@@ -613,7 +618,7 @@ export function createSlates(deps: SlatesDeps): Slates {
   const trimSnapshots = (r: SlateRecord): void => {
     const order = Object.keys(r.turns);
     while (order.length > SNAPSHOTS_KEPT) delete r.turns[order.shift()!];
-    const used = (): Set<string> => new Set(Object.values(r.turns).map(t => String(t.version)));
+    const used = (): Set<string> => new Set(Object.values(r.turns).map(t => String(t.revision)));
     for (const v of Object.keys(r.kept)) if (!used().has(v)) delete r.kept[v];
     while (order.length > 1 && sizeOf(r.kept) > SNAPSHOT_BYTES) {
       delete r.turns[order.shift()!];
@@ -700,7 +705,8 @@ export function createSlates(deps: SlatesDeps): Slates {
     const deferred: { run: string; by: RunBy; record: SlateRunRecord }[] = [];
     const ctx = {
       ...contextOf(r, views),
-      by,
+      // A timer's start record is a run's result, which the host writes on its own road (no A607).
+      by: by === "timer" ? "run" : by,
       ...(o.event !== undefined ? { event: o.event } : {}),
       reactionSends: r.sendsAllowed !== undefined,
       // A run's env reads the values as this batch leaves them, so the batch gets the record the start will give and
@@ -748,7 +754,7 @@ export function createSlates(deps: SlatesDeps): Slates {
     const changed = new Set<string>();
     for (const name of new Set([...Object.keys(before), ...Object.keys(r.values)])) if (!slateEqual(before[name], r.values[name])) changed.add(name);
     if (changed.size > 0 || result.problems.length > 0) {
-      r.version += 1;
+      r.revision += 1;
       await save(r);
       push(r, changed);
     }
@@ -819,6 +825,7 @@ export function createSlates(deps: SlatesDeps): Slates {
     if (next === null) r.empty = "cleared";
     else delete r.empty;
     r.version += 1;
+    r.revision += 1;
     records.set(r.threadId, r);
     armTimers(r);
     await save(r);
@@ -835,6 +842,7 @@ export function createSlates(deps: SlatesDeps): Slates {
     r.previous = { ...snapOf(r), version: r.version };
     become(r, back);
     r.version += 1;
+    r.revision += 1;
     await save(r);
     announce(r, "undo", by, []);
     push(r, Object.keys(r.values));
@@ -955,8 +963,8 @@ export function createSlates(deps: SlatesDeps): Slates {
       const sketch = p.sketch !== false ? sketched(r, views) : `slate v${r.version}`;
       return {
         version: r.version,
-        text: [sketch, ...(p.text === true && doc !== null ? ["", printSlate(doc)] : [])].join("\n"),
-        document: doc as unknown as Record<string, unknown> | null,
+        text: [sketch, ...(p.text !== false && doc !== null ? ["", printSlate(doc)] : [])].join("\n"),
+        ...(p.document === true ? { document: doc as unknown as Record<string, unknown> | null } : {}),
         values: Object.fromEntries(paths.map(path => [path, clean(evaluateSlateExpression(path, ctx) ?? null)])),
         state: Object.fromEntries(Object.entries(r.values).filter(([name]) => doc?.runs[name] === undefined).map(([name, v]) => [`$${name}`, clean(v)])),
         derived: Object.fromEntries(Object.keys(doc?.derived ?? {}).map(name => [`$${name}`, clean(ctx.resolve(`$${name}`) ?? null)])),
@@ -1113,10 +1121,10 @@ export function createSlates(deps: SlatesDeps): Slates {
         const r = records.get(threadId);
         if (r === undefined) return;
         delete r.rewound;
-        const key = String(r.version);
+        const key = String(r.revision);
         r.kept[key] ??= structuredClone(snapOf(r));
         delete r.turns[turnId];
-        r.turns[turnId] = { at: deps.now(), version: r.version };
+        r.turns[turnId] = { at: deps.now(), version: r.version, revision: r.revision };
         trimSnapshots(r);
         await save(r);
       });
@@ -1128,13 +1136,14 @@ export function createSlates(deps: SlatesDeps): Slates {
         const r = records.get(threadId);
         if (r === undefined) return;
         const at = r.turns[turnId];
-        const snap = at === undefined ? undefined : r.kept[String(at.version)];
+        const snap = at === undefined ? undefined : r.kept[String(at.revision)];
         r.rewound = { ...snapOf(r), version: r.version, at: deps.now() };
         // Approvals and secrets are the person's, not the document's: a rewind to before the slate keeps the values.
         become(r, snap !== undefined ? structuredClone(snap) : { document: null, values: r.values, empty: "rewound-before" });
         for (const id of cut) delete r.turns[id];
         trimSnapshots(r);
         r.version += 1;
+        r.revision += 1;
         await save(r);
         announce(r, "restore", "host", []);
         push(r, Object.keys(r.values));
@@ -1148,6 +1157,7 @@ export function createSlates(deps: SlatesDeps): Slates {
         become(r, r.rewound);
         delete r.rewound;
         r.version += 1;
+        r.revision += 1;
         await save(r);
         announce(r, "restore", "host", []);
         push(r, Object.keys(r.values));

@@ -72,6 +72,8 @@ pub struct ReadIn {
     pub text: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sketch: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub document: Option<bool>,
 }
 
 /// The host's answer less its frame's own id and ok, every field in the bytes and the order the host wrote it, as
@@ -173,12 +175,13 @@ async fn state(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
 }
 
 async fn read(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
-    let ReadIn { thread, values, text, sketch } = input("slate_read", arguments)?;
+    let ReadIn { thread, values, text, sketch, document } = input("slate_read", arguments)?;
     let client = host.client().await?;
     let mut asked = target(&host, &client, thread).await?;
     put(&mut asked, "values", values);
     put(&mut asked, "text", text);
     put(&mut asked, "sketch", sketch);
+    put(&mut asked, "document", document);
     answered(&client, "slates.read", asked).await
 }
 
