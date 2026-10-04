@@ -1185,9 +1185,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     const moved = (to: PlaceBack): void => {
       void (async () => {
         for (const id of [...kept.keys()]) {
-          const current = await recordOf(id);
-          // A remove that landed during the read deleted it: a write now would put the removed record back.
-          if (current !== undefined && kept.has(id) && loginOf(current)?.ssh === login.ssh && current.road !== undefined) await keep({ ...current, road: { ...current.road, back: to } });
+          await change(id, now => (loginOf(now)?.ssh === login.ssh && now.road !== undefined ? { ...now, road: { ...now.road, back: to } } : undefined));
         }
       })().catch(() => undefined);
     };
@@ -1259,9 +1257,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
   });
 
   const writeSeen = async (placeId: string, at: number): Promise<void> => {
-    const held = await recordOf(placeId);
-    if (held === undefined) return;
-    await keep({ ...held, lastSeenAt: new Date(at).toISOString() });
+    await change(placeId, now => ({ ...now, lastSeenAt: new Date(at).toISOString() }));
   };
 
   /** Who is reading one computer's daemon events, by place id: the channels a road on this host opened over that
@@ -1330,8 +1326,8 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
    * call reached from the folder add carries the pass, so nothing reached from it may fork a workspace there. */
   const foldersOf = new AsyncLocalStorage<string>();
 
-  /** The read-then-write of a computer's record, one at a time per computer: the setup's writes and the folder
-   * add's first write of what that computer forks with run at once, and either would land over the other. */
+  /** The read-then-write of a computer's record, one at a time per computer: every write that starts from the
+   * record as it stands reads it and writes it in here, or it lands over a field another write set meanwhile. */
   const recordTurns = new Map<string, Promise<unknown>>();
   const inRecordTurn = <T>(placeId: string, write: () => Promise<T>): Promise<T> => {
     const run = (recordTurns.get(placeId) ?? Promise.resolve()).then(write);
@@ -1343,16 +1339,23 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     return run;
   };
 
-  /** One write of a setup's state onto the record as it stands, since an attach's write of lastSeenAt goes on
-   * beside it. */
-  const writeSetup = (placeId: string, patch: Partial<Pick<PlaceRecord, "setup" | "applied" | "picks" | "recipe" | "sync">>): Promise<void> =>
+  /** One change of a computer's record as it stands, in its turn: what was written, or nothing where `move` left it
+   * as it was or a remove took the record first, which takes it in the same turn. */
+  const change = (placeId: string, move: (now: PlaceRecord) => PlaceRecord | undefined): Promise<PlaceRecord | undefined> =>
     inRecordTurn(placeId, async () => {
       const now = await recordOf(placeId);
-      if (now === undefined) return;
+      const next = now === undefined ? undefined : move(now);
+      return next === undefined ? undefined : keep(next);
+    });
+
+  /** One write of a setup's state onto the record as it stands. */
+  const writeSetup = async (placeId: string, patch: Partial<Pick<PlaceRecord, "setup" | "applied" | "picks" | "recipe" | "sync">>): Promise<void> => {
+    await change(placeId, now => {
       const next = { ...now, ...patch };
       if ("sync" in patch && patch.sync === undefined) delete next.sync;
-      await keep(next);
+      return next;
     });
+  };
 
   /** Which computers follow a recipe moved, or the recipe did, on the stream every client watches. */
   const recipesMoved = (slug: string): void => opts.onSetup?.({ type: "recipes.changed", slug });
@@ -1858,7 +1861,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       const { resolved, changes } = read;
       if (changes.length === 0) {
         // In step, or moved in a way no row reads (the recipe's name): what it holds is what this computer has now.
-        if (record.applied !== undefined && record.applied.hash !== resolved.hash) await writeSetup(placeId, { applied: { ...record.applied, hash: resolved.hash, items: resolved.items }, picks: resolved.file });
+        if (record.applied !== undefined && record.applied.hash !== resolved.hash) await change(placeId, now => (now.applied === undefined ? undefined : { ...now, applied: { ...now.applied, hash: resolved.hash, items: resolved.items }, picks: resolved.file }));
         await markSync(placeId, undefined);
         return;
       }
@@ -2223,9 +2226,11 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
   /** Takes a place off this host: its link, its record, the default it may be, and anyone waiting on its dial. */
   const forget = async (placeId: string): Promise<void> => {
     if (live.has(placeId)) cut(placeId, "removed from this host");
-    kept.delete(placeId);
     backends.delete(placeId);
-    await store.delete(PLACES, placeId);
+    await inRecordTurn(placeId, async () => {
+      kept.delete(placeId);
+      await store.delete(PLACES, placeId);
+    });
     await store.delete(CAPS, placeId);
     settingsHeld.delete(placeId);
     await inTurn(async () => {
@@ -2358,17 +2363,24 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       // The name is the one this computer joined under and is never taken off a report again: a box whose own
       // place file a hostile process edited would otherwise answer to another computer's name and take its
       // creates, its checkout and the keys of the turns that run there.
-      const moved: PlaceRecord = { ...held, report, lastSeenAt: new Date(at).toISOString(), reportedAt: new Date(at).toISOString(), road: { ...held.road, from }, dialled: undefined };
       // What a computer forks with belongs to the daemon that said it: one that dialled back on another version
       // is asked again rather than read off an answer the version before it gave, since a newer daemon can carry
       // a field the older one never did and an older one can have lost it. The read is the attach's own, below.
-      const newDaemon = held.report.daemonVersion !== report.daemonVersion;
+      let newDaemon = false;
+      const moved = await change(placeId, now => {
+        const next: PlaceRecord = { ...now, report, lastSeenAt: new Date(at).toISOString(), reportedAt: new Date(at).toISOString(), road: { ...now.road, from }, dialled: undefined };
+        newDaemon = now.report.daemonVersion !== report.daemonVersion;
+        if (newDaemon) delete next.backendFacts;
+        return next;
+      });
+      if (moved === undefined) {
+        socket.close(1000, "this host no longer holds that place");
+        return;
+      }
       if (newDaemon) {
-        delete moved.backendFacts;
         backends.delete(placeId);
         asking.delete(placeId);
       }
-      await keep(moved);
       const reach = connectDaemon({
         socket,
         ...(seal === undefined ? {} : { seal }),
@@ -2494,11 +2506,11 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
 
     async loginLanded(placeId, agent) {
       const file = sharedLoginFile(agent);
-      // Read and written with no wait between, so a remove or a newer report landing meanwhile is never written over.
-      const record = kept.get(placeId);
-      const listed = record?.report.logins;
-      if (file === undefined || record === undefined || listed === undefined || listed.includes(file)) return;
-      await keep({ ...record, report: { ...record.report, logins: [...listed, file].sort() } });
+      if (file === undefined) return;
+      await change(placeId, now => {
+        const listed = now.report.logins;
+        return listed === undefined || listed.includes(file) ? undefined : { ...now, report: { ...now.report, logins: [...listed, file].sort() } };
+      });
     },
 
     offerOf: placeId => kept.get(placeId)?.backendFacts?.offer ?? (providerIds().includes(placeId) ? placeId : undefined),
@@ -2543,12 +2555,8 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         // Onto the record as it stands rather than as it was when the frame went out, and only while the daemon
         // that answered is still the one running there: a computer that dialled back on another version while
         // this was out has a read of its own behind that attach, and this answer is not its facts any more.
-        return inRecordTurn(placeId, async () => {
-          const now = (await recordOf(placeId)) ?? record;
-          if (now.report.daemonVersion !== record.report.daemonVersion) return LinkBackend.of(linkTo(placeId), facts);
-          await keep({ ...now, backendFacts: facts });
-          return backendFrom(placeId, facts);
-        });
+        const wrote = await change(placeId, now => (now.report.daemonVersion === record.report.daemonVersion ? { ...now, backendFacts: facts } : undefined));
+        return wrote === undefined ? LinkBackend.of(linkTo(placeId), facts) : backendFrom(placeId, facts);
       })().finally(() => asking.delete(placeId));
       asking.set(placeId, read);
       return read;
@@ -2697,8 +2705,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         // A join still to land carries it off this entry; one that already landed has its record written again.
         waiting.login = installed.ssh === undefined ? undefined : { ssh: installed.ssh, ...(installed.sshKeyPath !== undefined ? { keyPath: installed.sshKeyPath } : {}) };
         if (installed.back !== undefined) waiting.back = installed.back;
-        const early = waiting.login === undefined || waiting.placeId === undefined ? undefined : await recordOf(waiting.placeId);
-        if (early !== undefined) await keep(early);
+        if (waiting.login !== undefined && waiting.placeId !== undefined) await change(waiting.placeId, now => now);
         const joining = Date.now();
         stage("join", "running");
         const placeId = await new Promise<string>((woken, fail) => {
@@ -2812,8 +2819,8 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       }
       // A frame the computer itself answered is that computer heard from, so the silence is dated from it; an ssh
       // login that answered is the box speaking and not the agent, and it does not move that date.
-      const moved: PlaceRecord = { ...held, dialled, ...(dialled.answered && linked !== undefined ? { lastSeenAt: stamp } : {}) };
-      await keep(moved);
+      const seen = dialled.answered && linked !== undefined ? { lastSeenAt: stamp } : {};
+      const moved = (await change(placeId, now => ({ ...now, dialled, ...seen }))) ?? { ...held, dialled, ...seen };
       return { dialled, line: placeDialLine({ name: held.name, road: held.road, linked: linked !== undefined, dialled }), place: await withCap(viewOf(moved, await defaultId()), await rowIds()) };
     },
 
@@ -3064,13 +3071,17 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     async follow(placeId, recipe) {
       const held = await recordOf(placeId);
       if (held === undefined) throw Object.assign(new Error(noSuchPlaceRefusal(placeId, (await records()).map(r => r.name))), { kind: "usage" });
-      const { sync: _behind, ...rest } = held;
+      let before = held;
       // A computer that follows none keeps what it has and is in step with nothing; one that follows a recipe syncs.
-      const moved = await keep(recipe === NO_RECIPE ? { ...rest, recipe } : { ...held, recipe });
-      if (recipe === NO_RECIPE && held.sync !== undefined) syncFrame({ placeId });
+      const moved = await change(placeId, now => {
+        before = now;
+        const { sync: _behind, ...rest } = now;
+        return recipe === NO_RECIPE ? { ...rest, recipe } : { ...now, recipe };
+      });
+      if (recipe === NO_RECIPE && before.sync !== undefined) syncFrame({ placeId });
       if (recipe !== NO_RECIPE) syncSoon(placeId, 0);
-      for (const slug of new Set([held.recipe, recipe])) if (slug !== undefined && slug !== NO_RECIPE) recipesMoved(slug);
-      return viewOf(moved, await defaultId());
+      for (const slug of new Set([before.recipe, recipe])) if (slug !== undefined && slug !== NO_RECIPE) recipesMoved(slug);
+      return viewOf(moved ?? held, await defaultId());
     },
 
     async recipeChanged(slug, afterMs = 0) {
@@ -3109,11 +3120,15 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         const waits = held.setup?.waiting.some(w => w.row === row) === true;
         const failed = held.applied?.rows.find(r => r.id === row && r.outcome === "failed");
         if (!waits && failed === undefined) throw usageRefusal(nothingToSkipLine(row, held.name), "Skip a row the computer's page shows waiting or failed.");
-        const step = failed?.step ?? held.applied?.rows.find(r => r.id === row)?.step;
-        const rows = [...(held.applied?.rows ?? []).filter(r => r.id !== row), { id: row, label: failed?.label ?? held.setup?.waiting.find(w => w.row === row)?.label ?? row, outcome: "skipped" as const, note: SKIPPED_FOR_NOW, ...(step !== undefined ? { step } : {}) }];
-        await writeSetup(placeId, {
-          ...(held.setup !== undefined ? { setup: { ...held.setup, waiting: held.setup.waiting.filter(w => w.row !== row) } } : {}),
-          applied: { ...(held.applied ?? { hash: "", at: new Date(clockNow()).toISOString() }), rows },
+        await change(placeId, now => {
+          const failedNow = now.applied?.rows.find(r => r.id === row && r.outcome === "failed");
+          const step = failedNow?.step ?? now.applied?.rows.find(r => r.id === row)?.step;
+          const rows = [...(now.applied?.rows ?? []).filter(r => r.id !== row), { id: row, label: failedNow?.label ?? now.setup?.waiting.find(w => w.row === row)?.label ?? row, outcome: "skipped" as const, note: SKIPPED_FOR_NOW, ...(step !== undefined ? { step } : {}) }];
+          return {
+            ...now,
+            ...(now.setup !== undefined ? { setup: { ...now.setup, waiting: now.setup.waiting.filter(w => w.row !== row) } } : {}),
+            applied: { ...(now.applied ?? { hash: "", at: new Date(clockNow()).toISOString() }), rows },
+          };
         });
         const now = await recordOf(placeId);
         if (now?.setup !== undefined && now.setup.state !== "running") setupFrame({ addId: now.setup.addId, placeId, ...setupOutcome(now.setup, now.applied) });
@@ -3148,8 +3163,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       const names: string[] = [];
       for (const r of await records()) {
         if (r.recipe !== slug) continue;
-        await keep({ ...r, recipe: NO_RECIPE });
-        names.push(r.name);
+        if ((await change(r.id, now => (now.recipe === slug ? { ...now, recipe: NO_RECIPE } : undefined))) !== undefined) names.push(r.name);
       }
       recipesMoved(slug);
       return names;

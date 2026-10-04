@@ -515,6 +515,19 @@ describe("a computer added with its picks", () => {
     expect(placeWord(await rowOf(placeId), null).word).toBe("Ready");
   });
 
+  it("reads the computer's own sign-in as signed in once it lands in the setup, before that computer dials again", async () => {
+    const s = signIns();
+    await hosting({ provision: provisioner().wired, acts: s.acts, report: report("spoo", { daemonVersion: DAEMON_VERSION, agents: ["claude", "codex"], logins: [] }) });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: LAPTOP }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.waiting.some(w => w.url !== undefined) === true);
+    expect((await rowOf(place.id)).signIns).toEqual({ claude: "vault-key", codex: "none" });
+    s.end("codex", { state: "signed-in" });
+    await until(async () => (await rowOf(place.id)).setup?.waiting.length === 0);
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    expect((await rowOf(place.id)).signIns).toEqual({ claude: "vault-key", codex: "signed-in" });
+    expect(runtime!.places!.signInsAt(place.id)).toEqual({ claude: "vault-key", codex: "signed-in" });
+  });
+
   it("stops at a floor that failed, says why, and runs nothing after it", async () => {
     const p = provisioner({ rows: { floor: [{ id: "base/curl", label: "curl", outcome: "failed", note: "apt exited 100" }] } });
     const { frames } = await hosting({ provision: p.wired });
