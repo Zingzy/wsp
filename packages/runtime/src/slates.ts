@@ -53,7 +53,7 @@ import {
   type SlateWriteAnswer,
 } from "@wsp/protocol";
 import type { Store } from "./store.js";
-import { createSlateRuns, restartedRecord, rewoundRecord, type CmdRunDecl, type RunAsk, type RunBy, type RunInput, type RunRecord, type SlateRuns, type SlateRunsDeps } from "./slate-runs.js";
+import { createSlateRuns, lastResult, restartedRecord, rewoundRecord, runningRecord, type CmdRunDecl, type RunAsk, type RunBy, type RunInput, type RunRecord, type SlateRuns, type SlateRunsDeps } from "./slate-runs.js";
 import { HOST_SLATE_SOURCES, resolveIn, viewSources, type SlateSourceContext } from "./slate-sources/index.js";
 
 export const SLATES = "slates";
@@ -251,7 +251,7 @@ const asJson = (v: unknown): SlateJson => v as SlateJson;
 export interface Slates {
   get(threadId: string): Promise<SlateView | null>;
   write(p: SlateTarget & { text?: string; document?: Record<string, unknown>; check?: boolean; ifVersion?: number; values?: Record<string, unknown>; press?: { piece: string; index?: number; action?: number } }, caller?: Caller): Promise<SlateWriteAnswer>;
-  state(p: SlateTarget & { values: Record<string, unknown>; ifVersion?: number }, caller?: Caller): Promise<SlateStateAnswer>;
+  state(p: SlateTarget & { values?: Record<string, unknown>; start?: string[]; ifVersion?: number }, caller?: Caller): Promise<SlateStateAnswer>;
   read(p: SlateTarget & { values?: string[]; text?: boolean; sketch?: boolean; document?: boolean }, caller?: Caller): Promise<SlateReadAnswer>;
   catalog(p: { name?: string }): { text: string };
   shown(threadId: string): Promise<void>;
@@ -330,7 +330,7 @@ export function createSlates(deps: SlatesDeps): Slates {
       void serial(threadId, async () => {
         const r = records.get(threadId);
         if (r?.document?.runs[run] === undefined) return;
-        await batch(r, [], "timer", { starts: [run] });
+        await batch(r, [], "timer", { starts: [{ run, by: "timer" }] });
       }).catch(() => {});
     },
   });
@@ -662,10 +662,10 @@ export function createSlates(deps: SlatesDeps): Slates {
   /** The sources a run's inputs read, kept from the last batch of its slate. */
   const viewsNow = new Map<string, ReadonlyMap<string, SlateJson | undefined>>();
 
-  /** A declared run started through the runs module; its first record is the caller's to write. */
-  const startNow = (r: SlateRecord, run: string, by: RunBy, views: ReadonlyMap<string, SlateJson | undefined>): { record: SlateRunRecord; ask?: RunAsk } => {
+  /** A declared run started through the runs module; its first record is the caller's to write. `prior` is the record
+   * from before the batch, whose own record of the start is not the runs module's to count. */
+  const startNow = (r: SlateRecord, run: string, by: RunBy, views: ReadonlyMap<string, SlateJson | undefined>, prior: SlateJson | undefined = r.values[run]): { record: SlateRunRecord; ask?: RunAsk } => {
     const decl = r.document?.runs[run];
-    const prior = r.values[run];
     const count = isRunRecord(prior) ? prior.runs : 0;
     if (decl === undefined) return { record: { state: "failed", why: `$${run} is not declared`, runs: count } };
     if (decl.kind !== "cmd") return { record: { state: "failed", why: `${decl.kind} runs are not in this build`, runs: count } };
@@ -674,7 +674,7 @@ export function createSlates(deps: SlatesDeps): Slates {
     try {
       const confirm = decl.confirm === undefined ? undefined : slateText(resolveSlateProp(decl.confirm, contextOf(r, views)) ?? null) || `Run $${run}?`;
       const asked = { ...decl, ...(confirm !== undefined ? { confirm } : {}) } as CmdRunDecl;
-      const answer = runs.start({ threadId: r.threadId, run, decl: asked, by, folder: deps.thread(r.threadId)?.folder ?? process.cwd(), inputs: inputsOf(r, decl), runs: count });
+      const answer = runs.start({ threadId: r.threadId, run, decl: asked, by, folder: deps.thread(r.threadId)?.folder ?? process.cwd(), inputs: inputsOf(r, decl), ...(isRunRecord(prior) ? { last: prior as unknown as RunRecord } : {}) });
       startedBy.set(byKey(r.threadId, run), by);
       if (answer.record.state === "running") announce(r, "run", by, [], run);
       return { record: answer.record as SlateRunRecord, ...(answer.outcome === "held" && answer.ask !== undefined ? { ask: answer.ask } : {}) };
@@ -689,8 +689,13 @@ export function createSlates(deps: SlatesDeps): Slates {
     const decl = r.document?.runs[run];
     const prior = r.values[run];
     const count = isRunRecord(prior) ? prior.runs : 0;
-    const approved = decl?.kind === "cmd" && decl.confirm === undefined && r.approvals[runs.key(decl as CmdRunDecl)]?.state === "allowed";
-    return approved ? { state: "running", runs: count + 1, startedAt: deps.now() } : { state: "held", why: HELD_APPROVAL, runs: count };
+    return approvedAlways(r, run) ? (runningRecord(isRunRecord(prior) ? lastResult(prior as unknown as RunRecord) : undefined, count + 1, deps.now()) as SlateRunRecord) : { state: "held", why: HELD_APPROVAL, runs: count };
+  };
+
+  /** Whether the person said "Always in this thread" to the run as declared now, and it asks nothing every start. */
+  const approvedAlways = (r: SlateRecord, run: string): boolean => {
+    const decl = r.document?.runs[run];
+    return decl?.kind === "cmd" && decl.confirm === undefined && r.approvals[runs.key(decl as CmdRunDecl)]?.state === "allowed";
   };
 
   /** A record the runs module wrote outside a batch (an end, a cancel, a queued start, an approval): one batch, so
@@ -711,7 +716,7 @@ export function createSlates(deps: SlatesDeps): Slates {
 
   /** One arrival through the batch (02, "The batch"): the module's pure core with a start that runs here, then the
    * cancels, the sends composed, the values saved and pushed. Called inside serial. */
-  async function batch(r: SlateRecord, input: { path: string; value: SlateJson }[], by: BatchBy, o: { event?: BatchEvent; starts?: string[]; requestId?: string; sendAt?: number }): Promise<BatchOut> {
+  async function batch(r: SlateRecord, input: { path: string; value: SlateJson }[], by: BatchBy, o: { event?: BatchEvent; starts?: { run: string; by: RunBy }[]; requestId?: string; sendAt?: number }): Promise<BatchOut> {
     const doc = r.document;
     if (doc === null) return { asks: [], sends: [] };
     const views = await viewsFor(r);
@@ -720,7 +725,7 @@ export function createSlates(deps: SlatesDeps): Slates {
     const deferred: { run: string; by: RunBy; record: SlateRunRecord }[] = [];
     const ctx = {
       ...contextOf(r, views),
-      // A timer's start record is a run's result, which the host writes on its own road (no A607).
+      // A start record from outside the document is a run's result, which the host writes on its own road (no A607).
       by: by === "timer" ? "run" : by,
       ...(o.event !== undefined ? { event: o.event } : {}),
       reactionSends: r.sendsAllowed !== undefined,
@@ -732,8 +737,8 @@ export function createSlates(deps: SlatesDeps): Slates {
         return record;
       },
     };
-    // A timer's start is no step of the document: it starts here and its record goes in as a run's write.
-    const timed = (o.starts ?? []).map(run => ({ path: `$${run}`, value: asJson(startNow(r, run, "timer", views).record) }));
+    // A timer's or the agent's start is no step of the document: it starts here and its record goes in as a run's write.
+    const timed = (o.starts ?? []).map(s => ({ path: `$${s.run}`, value: asJson(startNow(r, s.run, s.by, views).record) }));
     const result = runSlateBatch(doc, r.values, [...input, ...timed], ctx);
     if (sizeOf(result.values) > VALUES_BYTES) {
       keepProblems(r, [problem("S500", "values-too-big", `the values would be ${sizeOf(result.values)} bytes; a slate holds at most ${VALUES_BYTES}`)]);
@@ -744,7 +749,7 @@ export function createSlates(deps: SlatesDeps): Slates {
     keepProblems(r, result.problems);
     for (const run of result.cancels) runs.cancel(r.threadId, run);
     for (const d of deferred) {
-      const started = startNow(r, d.run, d.by, views);
+      const started = startNow(r, d.run, d.by, views, before[d.run]);
       if (started.ask !== undefined) asks.push(started.ask);
       // The runs module held it for a reason the batch could not see (four running, the start budget): that record
       // goes through a batch of its own.
@@ -964,8 +969,21 @@ export function createSlates(deps: SlatesDeps): Slates {
         const doc = r.document;
         if (doc === null) throw usage(problem("Z802", "no-slate", "this slate is empty; write one with slate_write"));
         checkVersion(r, p.ifVersion);
+        if (Object.keys(p.values ?? {}).length === 0 && (p.start ?? []).length === 0) throw usageRefusal("slate state sets values or starts runs, and this one names neither:", "give values, start, or both.");
+        // The agent starts only what the person already let run every time; anything else waits for their press.
+        const starts: { run: string; by: RunBy }[] = [];
+        const held: SlateProblem[] = [];
+        for (const named of p.start ?? []) {
+          const run = named.replace(/^\$/, "");
+          if (doc.runs[run] === undefined) {
+            const near = slateNearest(run, Object.keys(doc.runs));
+            throw invalid([problem("K702", "run-name", `$${run} is not a run`, near !== undefined ? { fix: `$${near}` } : {})], []);
+          }
+          if (approvedAlways(r, run)) starts.push({ run, by: by === "agent" ? "agent" : "person" });
+          else held.push(problem("R913", "run-held", `$${run} was not started: it starts from here once the person says "Always in this thread" to it`));
+        }
         const input: { path: string; value: SlateJson }[] = [];
-        for (const [written, value] of Object.entries(p.values)) {
+        for (const [written, value] of Object.entries(p.values ?? {})) {
           const path = ownPath(written);
           const own = parseSlateOwnPath(path);
           if (own === undefined) throw invalid([problem("S501", "name-undeclared", `${written} is not a value path; a value path reads $name, with .field and [index] below it`)], []);
@@ -989,11 +1007,12 @@ export function createSlates(deps: SlatesDeps): Slates {
           spendWrite(threadId);
           runs.release(threadId);
         }
-        const out = await batch(r, input, by, {});
-        if (by === "agent") announce(r, "state", by, []);
+        const out = input.length > 0 ? await batch(r, input, by, {}) : { asks: [], sends: [] };
+        if (by === "agent" && input.length > 0) announce(r, "state", by, []);
+        if (starts.length > 0) await batch(r, [], "run", { starts });
         void deliverAll(r, out.sends).catch((e: unknown) => console.warn(`a slate send in thread ${threadWord(threadId)} was not delivered: ${e instanceof Error ? e.message : String(e)}`));
         const views = await viewsFor(r);
-        return { version: r.version, text: sketched(r, views), problems: problemsOf(r, views) };
+        return { version: r.version, text: sketched(r, views), problems: [...held, ...problemsOf(r, views)] };
       });
     },
 
@@ -1110,7 +1129,7 @@ export function createSlates(deps: SlatesDeps): Slates {
           if (runs.approve(p.threadId, run, p.scope === "thread" ? "always" : "once") !== undefined) continue;
           // The hold was a host's before a restart, which this process never saw: hold it again, then answer it.
           const decl = r.document!.runs[run] as Extract<SlateRunDecl, { kind: "cmd" }>;
-          const again = runs.start({ threadId: p.threadId, run, decl: decl as CmdRunDecl, by: "person", folder: deps.thread(p.threadId)?.folder ?? process.cwd(), inputs: inputsOf(r, decl), runs: rec.runs });
+          const again = runs.start({ threadId: p.threadId, run, decl: decl as CmdRunDecl, by: "person", folder: deps.thread(p.threadId)?.folder ?? process.cwd(), inputs: inputsOf(r, decl), last: rec as unknown as RunRecord });
           if (again.outcome === "held") runs.approve(p.threadId, run, p.scope === "thread" ? "always" : "once");
         }
         await save(r);

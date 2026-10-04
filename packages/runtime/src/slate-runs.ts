@@ -29,7 +29,12 @@ export interface RunRecord {
   ms?: number;
   runs: number;
   cut?: true;
+  /** Running again with the last result kept beside it until the new one replaces it. */
+  refreshing?: true;
 }
+
+/** What a run that ran left for `$name` to read, kept on its record while it runs again. */
+export type RunResult = Pick<RunRecord, "exit" | "out" | "err" | "json" | "lines" | "endedAt" | "ms" | "cut">;
 
 /** What `$token` reads. The plaintext never leaves the store but as a run's environment or stdin. */
 export interface SecretHandle {
@@ -67,7 +72,7 @@ export interface RunInputs {
   stdin?: RunInput;
 }
 
-export type RunBy = "person" | "reaction" | "timer";
+export type RunBy = "person" | "agent" | "reaction" | "timer";
 
 export interface RunStart {
   threadId: string;
@@ -78,9 +83,9 @@ export interface RunStart {
   folder: string;
   /** Read when the command actually starts, which for a held run is when the person approves it. */
   inputs: () => RunInputs;
-  /** How many times this run has started in the slate's life, off the host's record, for a run this process has not
-   * seen yet. */
-  runs?: number;
+  /** The host's record of the run, for a run this process has not seen yet: how many times it started and the last
+   * result a start keeps. */
+  last?: RunRecord;
 }
 
 /** What the approval sheet shows. A secret's value is dots. */
@@ -168,14 +173,32 @@ export interface SlateRuns {
   close(): void;
 }
 
+const RESULT_FIELDS = ["exit", "out", "err", "json", "lines", "endedAt", "ms", "cut"] as const;
+
+/** The result a record holds, where it is one a command left by running. */
+export function lastResult(record: RunRecord): RunResult | undefined {
+  const ran = record.state === "running" ? record.refreshing === true : record.startedAt !== undefined && (record.state === "done" || record.state === "failed" || record.state === "cancelled");
+  return ran ? (Object.fromEntries(RESULT_FIELDS.filter(f => record[f] !== undefined).map(f => [f, record[f]])) as RunResult) : undefined;
+}
+
+/** The record of a start: running, with the last result kept until this one ends. */
+export function runningRecord(last: RunResult | undefined, runs: number, startedAt: number): RunRecord {
+  return last === undefined ? { state: "running", runs, startedAt } : { ...last, state: "running", runs, startedAt, refreshing: true };
+}
+
+/** A running record ended from outside, its kept result gone with the start that kept it. */
+function endedRecord(record: RunRecord, state: "failed" | "cancelled", why: string, now: number): RunRecord {
+  return { state, why, exit: null, runs: record.runs, ...(record.startedAt !== undefined ? { startedAt: record.startedAt } : {}), endedAt: now };
+}
+
 /** A record that read running when the host stopped: nothing is running now, and nothing restarts by itself. */
 export function restartedRecord(record: RunRecord, now: number = Date.now()): RunRecord {
-  return record.state === "running" ? { ...record, state: "failed", why: "the host restarted while it ran", exit: null, endedAt: now } : record;
+  return record.state === "running" ? endedRecord(record, "failed", "the host restarted while it ran", now) : record;
 }
 
 /** A record a rewind restores that read running at that turn's end. */
 export function rewoundRecord(record: RunRecord, now: number = Date.now()): RunRecord {
-  return record.state === "running" ? { ...record, state: "cancelled", why: "the thread was rewound", exit: null, endedAt: now } : record;
+  return record.state === "running" ? endedRecord(record, "cancelled", "the thread was rewound", now) : record;
 }
 
 const DEFAULT_TIMEOUT_S = 60;
@@ -200,6 +223,8 @@ interface Live {
   record: RunRecord;
   /** Bumped by every start and cancel, so a completion of an instance nobody is waiting for any more is dropped. */
   gen: number;
+  /** The last result, kept through holds so the next start carries it. */
+  result?: RunResult;
   pid?: number;
   held?: { req: RunStart; for: HeldFor };
   /** When reactions and timers started it, for the start budget. */
@@ -372,17 +397,20 @@ export function createSlateRuns(deps: SlateRunsDeps): SlateRuns {
     }
     return t;
   };
-  const live = (threadId: string, run: string, runs = 0): Live => {
+  const live = (threadId: string, run: string, last?: RunRecord): Live => {
     const t = thread(threadId);
     let l = t.runs.get(run);
     if (l === undefined) {
-      l = { record: { state: "idle", runs }, gen: 0, starts: [] };
+      const result = last === undefined ? undefined : lastResult(last);
+      l = { record: { state: "idle", runs: last?.runs ?? 0 }, gen: 0, starts: [], ...(result !== undefined ? { result } : {}) };
       t.runs.set(run, l);
     }
     return l;
   };
   const write = (threadId: string, run: string, l: Live, record: RunRecord): RunRecord => {
     l.record = record;
+    const result = record.state === "running" ? undefined : lastResult(record);
+    if (result !== undefined) l.result = result;
     deps.onRecord(threadId, run, record);
     return record;
   };
@@ -465,7 +493,7 @@ export function createSlateRuns(deps: SlateRunsDeps): SlateRuns {
     const gen = ++l.gen;
     const startedAt = now();
     const runs = l.record.runs + 1;
-    const record = write(threadId, run, l, { state: "running", runs, startedAt });
+    const record = write(threadId, run, l, runningRecord(l.result, runs, startedAt));
 
     const child = spawn("bash", ["-c", decl.cmd, "bash", ...args], { cwd, env, detached: true, stdio: [stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"] });
     l.pid = child.pid;
@@ -608,7 +636,7 @@ export function createSlateRuns(deps: SlateRunsDeps): SlateRuns {
   return {
     key,
     start(req) {
-      const l = live(req.threadId, req.run, req.runs ?? 0);
+      const l = live(req.threadId, req.run, req.last);
       if (l.record.state === "running") {
         if (req.decl.once === true) return { outcome: "noop", record: l.record };
         stop(req.threadId, req.run, l, undefined);

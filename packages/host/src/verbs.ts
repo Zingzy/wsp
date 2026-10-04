@@ -3889,10 +3889,10 @@ const SLATE_VERBS: readonly Verb[] = [
   },
   {
     name: "slate state",
-    usage: "wsp slate state [<thread>] <path>=<json>... [--if-version <n>]",
-    about: "sets the slate's $values by path, like '$steps[2].done=true' or 'i=2', and prints its sketch",
+    usage: "wsp slate state [<thread>] [<path>=<json>...] [--start <run>]... [--if-version <n>]",
+    about: "sets the slate's $values by path, like '$steps[2].done=true' or 'i=2', starts runs the person let run every time, and prints its sketch",
     page: "agent",
-    options: { "if-version": { type: "string" } },
+    options: { "if-version": { type: "string" }, start: { type: "string", multiple: true } },
     run: async ctx => {
       const values: Record<string, unknown> = {};
       const rest: string[] = [];
@@ -3901,21 +3901,22 @@ const SLATE_VERBS: readonly Verb[] = [
         if (pair === undefined) rest.push(word);
         else values[pair[0]] = pair[1];
       }
-      if (rest.length > 1 || Object.keys(values).length === 0) throw usageRefusal("wsp slate state takes $path=<json> words, after a thread where it is not yours.", usageIs(ctx));
+      const start = flagList(ctx.flags, "start");
+      if (rest.length > 1 || (Object.keys(values).length === 0 && start.length === 0)) throw usageRefusal("wsp slate state takes $path=<json> words or --start <run>, after a thread where it is not yours.", usageIs(ctx));
       const client = await ctx.client();
       const ifVersion = ifVersionOf(ctx);
-      const wrote = await slateAsk<{ text: string }>(client, "slates.state", { ...(await slateTarget(client, rest[0], ctx.env)), values, ...(ifVersion !== undefined ? { ifVersion } : {}) });
+      const wrote = await slateAsk<{ text: string }>(client, "slates.state", { ...(await slateTarget(client, rest[0], ctx.env)), ...(Object.keys(values).length > 0 ? { values } : {}), ...(start.length > 0 ? { start } : {}), ...(ifVersion !== undefined ? { ifVersion } : {}) });
       emitSlate(ctx, wrote);
       return 0;
     },
     tool: tool({
-      description: "Sets the slate's live $values by path, so the person sees progress, status or a checklist tick move as you work; reactions fire.",
-      input: { thread: SlateThreadIn, values: z.record(z.string(), z.unknown()), if_version: SlateIfVersionIn },
+      description: "Sets the slate's live $values by path, so the person sees progress, status or a checklist tick move as you work; reactions fire. start runs ones the person approved always.",
+      input: { thread: SlateThreadIn, values: z.record(z.string(), z.unknown()).optional(), start: z.array(z.string()).optional(), if_version: SlateIfVersionIn },
       output: slateOut("problems"),
       stream: ["text"],
-      call: async ({ thread, values, if_version }, deps) => {
+      call: async ({ thread, values, start, if_version }, deps) => {
         const client = await deps.client();
-        const wrote = await slateAsk<{ text: string }>(client, "slates.state", { ...(await slateTarget(client, thread, deps.env)), values, ...pick({ ifVersion: if_version }) });
+        const wrote = await slateAsk<{ text: string }>(client, "slates.state", { ...(await slateTarget(client, thread, deps.env)), ...pick({ values, start, ifVersion: if_version }) });
         return asText(wrote.text, wrote);
       },
     }),
@@ -6351,6 +6352,7 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   "slate write row": "the row index of the --press piece inside a list, from 0",
   "slate write action": "which row action of a --press table to rehearse, from 0",
   "if-version": "the version a read printed; refused with V750 when the document moved past it",
+  "slate state start": "a run to start now that the person said \"Always in this thread\" to; any other answers held; repeats",
   "slate read values": "a path to resolve now, like '$check.exit' or usage.week.percent, or * for every bound one; repeats",
   "slate read no-text": "leave out the slate in the JSX-like form a patch is written against",
   "slate read document": "also print the stored JSON document",
