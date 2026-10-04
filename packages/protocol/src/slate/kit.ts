@@ -136,18 +136,18 @@ export const SLATE_PIECES: Readonly<Record<string, SlatePieceModule>> = {
   column: {
     type: "column", level: "core", purpose: "Stacks children top to bottom.", holdsChildren: true,
     props: { gap: enm(DENSITY), align: enm(["start", "center", "end", "stretch"]) }, items: {}, events: [],
-    sketch: () => "", fallback: "children in order", example: `<column gap="tight">...</column>`,
+    sketch: () => "", fallback: "children in order", example: `<column gap="tight"><text>One</text><text>Two</text></column>`,
   },
   row: {
     type: "row", level: "core", purpose: "Places children side by side.", holdsChildren: true,
     props: { gap: enm(DENSITY), align: enm(["start", "center", "end", "between"]), wrap: flag() }, items: {}, events: [],
-    sketch: () => "", fallback: "as column", example: `<row align="between">...</row>`,
+    sketch: () => "", fallback: "as column", example: `<row align="between"><text>Left</text><text>Right</text></row>`,
   },
   section: {
     type: "section", level: "core", purpose: "A titled group, optionally collapsible.", holdsChildren: true,
     props: { title: str(req), note: str(), collapsible: flag(), open: { type: "boolean", binds: "state" } }, items: {}, events: ["change"],
     sketch: v => (v.prop("open") === false ? `${shown(v.prop("title"))} (collapsed)` : shown(v.prop("title"))),
-    fallback: "children under a text with the title", example: `<section title="Files changed" collapsible>...</section>`,
+    fallback: "children under a text with the title", example: `<section title="Files changed" collapsible><text>None yet</text></section>`,
   },
   tabs: {
     type: "tabs", level: "working", purpose: "One child at a time, picked by a segmented control.", holdsChildren: true,
@@ -158,7 +158,7 @@ export const SLATE_PIECES: Readonly<Record<string, SlatePieceModule>> = {
       const tabs = asList(v.raw("tabs")).map(t => shown(rec(t as SlateJson).title));
       return `tabs: ${tabs.join(" | ")}${v.prop("selected") !== undefined ? ` (showing ${shown(v.prop("selected"))})` : ""}`;
     },
-    fallback: "the first child", example: `<tabs selected={$tab}><tab title="Checks" piece="checks" /><tab title="Files" piece="files" />...</tabs>`,
+    fallback: "the first child", example: `<tabs><tab title="A" piece="a" /><tab title="B" piece="b" /><text id="a">One</text><text id="b">Two</text></tabs>`,
   },
   text: {
     type: "text", level: "core", purpose: "A line or a paragraph; a text child with {holes} fills a sentence.", holdsChildren: false, textProp: "value",
@@ -243,7 +243,7 @@ export const SLATE_PIECES: Readonly<Record<string, SlatePieceModule>> = {
       return [head, ...rows(v, (item, i) => `| ${cols.map(c => shown(v.row(c, item, i).value)).join(" | ")} |${actions(v, item, i)}`)];
     },
     fallback: "a list of text rows",
-    example: `<table id="checks" items={pr.checks} key={item.name} empty="No checks yet"><col title="Check" value={item.name} /><col title="State" value={word(item.state)} /><action label="Send to agent" when={item.state == 'fail'} onPress={send("A check failed.", item.name)} /></table>`,
+    example: `<table id="checks" items={pr.checks} key={item.name}><col title="Check" value={item.name} /><action label="Fix" when={item.state == 'fail'} onPress={send("Fix this check.", item.name)} /></table>`,
   },
   list: {
     type: "list", level: "working", purpose: "Its one child drawn per row of a bound list.", holdsChildren: true, repeating: true, rowTemplate: true, childLimit: { max: 1, types: [] },
