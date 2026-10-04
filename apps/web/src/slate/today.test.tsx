@@ -88,3 +88,46 @@ describe("the networking quiz and the Zoho inbox", () => {
     expect(open[0]!.textContent).toBe("Here's a 'dangerously-skip-permissions' macro padPostHogunread2026-10-03 22:21");
   });
 });
+
+describe("what the live gold slate wrote", () => {
+  const spot = (beside: string) => `<slate title="Gold and traffic">
+  <column>
+    <section title="Gold" note="checked 23s">
+      <row><number id="spot" label="Spot, per troy ounce" value={4141.8} format="usd" />${beside}</row>
+    </section>
+  </column>
+</slate>`;
+
+  for (const [name, beside] of [
+    ["a column of a status and a text beside the number", `<column id="market"><status id="state">Closed</status><text id="when" tone="muted">opens Mon 3:30 AM IST</text></column>`],
+    ["a status and a text beside the number in its row", `<status id="state">Closed</status><text id="when" tone="muted">opens Mon 3:30 AM IST</text>`],
+  ]) {
+    it(`draws ${name} as the stat cell's note`, () => {
+      const c = draw(spot(beside!));
+      const card = cards(c)[0]!;
+      expect(card.textContent).toBe("Spot, per troy ounce$4,141.80Closedopens Mon 3:30 AM IST");
+      const note = c.querySelector('[data-slate-piece="spot"] [data-slate-status]')!.parentElement!;
+      expect([...note.children].map(part => part.textContent)).toEqual(["Closed", "opens Mon 3:30 AM IST"]);
+      for (const rider of ["market", "state", "when"]) expect(c.querySelector(`[data-slate-piece="${rider}"]`)?.textContent ?? "").toBe("");
+      // The row is the stat cell: it takes no row inset of its own and the cell keeps the strip's padding.
+      expect(card.firstElementChild!.hasAttribute("data-slate-rows")).toBe(true);
+      expect(c.querySelector('[data-slate-piece="spot"] > div')!.className).toContain("pt-4");
+    });
+  }
+
+  it("keeps a row whose number stands beside something else as it was written", () => {
+    const c = draw(spot(`<button label="Refresh" onPress={send("refresh")} /><status id="state">Closed</status>`));
+    expect(c.querySelector('[data-slate-piece="state"]')!.textContent).toBe("Closed");
+    expect(c.querySelector('[data-slate-piece="spot"] [data-slate-status]')).toBeNull();
+  });
+
+  it("sizes a chart's axis gutter to its widest figure, so a dollar figure keeps its sign", () => {
+    const c = draw(`<slate><value name="h" start={[{ t: "21:48", v: 4141.8 }, { t: "22:47", v: 4200 }]} /><column>
+<chart label="Spot, last hour" items={$h} x={item.t} value={item.v} format="usd" /></column></slate>`);
+    const chart = c.querySelector<HTMLElement>("[data-usage-chart]")!;
+    expect(chart.className).toContain("grid-cols-[minmax(40px,max-content)_minmax(0,1fr)]");
+    const labels = [...chart.querySelectorAll("[data-k=y-tick]")].map(tick => tick.textContent);
+    expect(labels.every(label => label!.startsWith("$"))).toBe(true);
+    expect(chart.querySelector("[data-k=y-axis]")!.className).toContain("whitespace-nowrap");
+  });
+});

@@ -3,6 +3,7 @@ import { cn } from "../../lib/utils.js";
 import type { PieceView } from "../SlateView.js";
 import type { SlateEngine } from "../engine.js";
 import { isSentence, str, TONE_INK, toneOf } from "./look.js";
+import { riddenBy } from "./riders.js";
 
 /** A row with a heading and a button in it: a text beside them is a status line, small and muted. */
 function inHeaderRow(slate: SlateEngine, id: string): boolean {
@@ -15,6 +16,8 @@ function inHeaderRow(slate: SlateEngine, id: string): boolean {
 export const text: PieceView = {
   type: "text",
   component: ({ id, piece, props, slate }) => {
+    // A text following a status beside a number rides that number's note.
+    if (riddenBy(slate, id) !== undefined) return null;
     const value = str(props["value"]);
     const placeholder = str(props["placeholder"]);
     if (value === undefined || value === "") {

@@ -7,7 +7,8 @@ import { cn } from "../../lib/utils.js";
 import { CARD_SURFACE } from "../../settings/rows.js";
 import type { SlateEngine } from "../engine.js";
 import { PieceHost } from "../SlateView.js";
-import { isNoteText, previousOfType } from "./look.js";
+import { isNoteText } from "./look.js";
+import { riddenBy } from "./riders.js";
 
 /** Pieces a person acts with, which make a row of their own a toolbar when it holds nothing else. */
 const CONTROLS: ReadonlySet<string> = new Set(["button", "select", "toggle", "input"]);
@@ -73,10 +74,10 @@ const CARD = cn(
 /** A group's children, the rows among them gathered into cards and the rest bare between. */
 export function Runs({ slate, ids }: { slate: SlateEngine; ids: readonly string[] }) {
   const runs: { key: string; card?: string[] }[] = [];
-  const riders: string[] = [];
   for (const id of ids) {
     const last = runs.at(-1);
-    if (previousOfType(slate, id, "number") !== undefined && slate.piece(id)?.type === "status") riders.push(id);
+    // A status and its text riding a number's note draw nothing, so they join the number's card, where they take no row.
+    if (riddenBy(slate, id) !== undefined && last?.card !== undefined) last.card.push(id);
     // A meta line among rows is a row of their card; after a chart or a list it stands bare as its foot.
     else if (isNoteText(slate, id) && last?.card !== undefined) last.card.push(id);
     else if (!isCardRow(slate, id)) runs.push({ key: id });
@@ -95,14 +96,6 @@ export function Runs({ slate, ids }: { slate: SlateEngine; ids: readonly string[
             ))}
           </div>
         ),
-      )}
-      {/* A status riding a number's note stays mounted, so the number hears it change, but draws nothing here. */}
-      {riders.length === 0 ? null : (
-        <div hidden>
-          {riders.map(id => (
-            <PieceHost key={id} id={id} />
-          ))}
-        </div>
       )}
     </>
   );

@@ -138,7 +138,8 @@ export function UsageChart({ steps, lines: given, stepWord, ticks, height: HEIGH
   /** A fixed axis from the caller, its five figures drawn as plain text; without one it runs from 0 to a round top
    * and the figures roll. */
   axis?: { readonly from: number; readonly to: number };
-  /** The panel's size: the axis in a 40 px column 8 px off the plot, its figures and ticks at 11 px. */
+  /** The panel's size: the axis in a column of at least 40 px, as wide as its widest figure, 8 px off the plot, its
+   * figures and ticks at 11 px. */
   small?: boolean;
 }) {
   const [hovered, setHovered] = useState<number | null>(null);
@@ -181,8 +182,8 @@ export function UsageChart({ steps, lines: given, stepWord, ticks, height: HEIGH
   }, []);
 
   return (
-    <div data-usage-chart="tokens" className={cn("grid gap-y-3", small ? "grid-cols-[40px_minmax(0,1fr)] gap-x-2" : "grid-cols-[auto_minmax(0,1fr)] gap-x-3")}>
-      <div data-k="y-axis" aria-hidden className={cn("relative font-mono leading-none text-muted-foreground tabular-nums", small ? "text-[11px]" : "text-xs")} style={{ height: HEIGHT }}>
+    <div data-usage-chart="tokens" className={cn("grid gap-y-3", small ? "grid-cols-[minmax(40px,max-content)_minmax(0,1fr)] gap-x-2" : "grid-cols-[auto_minmax(0,1fr)] gap-x-3")}>
+      <div data-k="y-axis" aria-hidden className={cn("relative font-mono leading-none whitespace-nowrap text-muted-foreground tabular-nums", small ? "text-[11px]" : "text-xs")} style={{ height: HEIGHT }}>
         {[0, 1, 2, 3, 4].map(g => (
           <span key={g} data-k="y-tick" className="invisible block h-0 text-right">
             {figure(from + (top * g) / 4)}

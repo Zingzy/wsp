@@ -99,20 +99,3 @@ export function present<T>(slate: SlateEngine, raw: SlatePropValue | undefined, 
     return when === undefined || truthy(slate.evaluate(when));
   });
 }
-
-/** The piece written right after this one in its group, if it is of the type named. */
-export function nextOfType(slate: SlateEngine, id: string, type: string): string | undefined {
-  const parent = slate.parentId(id);
-  const siblings = parent === undefined ? [] : (slate.piece(parent)?.children ?? []);
-  const next = siblings[siblings.indexOf(id) + 1];
-  return next !== undefined && slate.piece(next)?.type === type ? next : undefined;
-}
-
-/** The piece written right before this one in its group, if it is of the type named. */
-export function previousOfType(slate: SlateEngine, id: string, type: string): string | undefined {
-  const parent = slate.parentId(id);
-  const siblings = parent === undefined ? [] : (slate.piece(parent)?.children ?? []);
-  const at = siblings.indexOf(id);
-  const before = at > 0 ? siblings[at - 1] : undefined;
-  return before !== undefined && slate.piece(before)?.type === type ? before : undefined;
-}

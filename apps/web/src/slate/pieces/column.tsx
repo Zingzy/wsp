@@ -4,6 +4,7 @@
 import { cn } from "../../lib/utils.js";
 import type { PieceView } from "../SlateView.js";
 import { gapOf } from "./look.js";
+import { riddenBy } from "./riders.js";
 import { isGroup, Runs } from "./runs.js";
 
 const SECTIONS_APART = "[&>[data-slate-type=section]:not(:first-child)]:mt-3 [&>[data-slate-type=section]+*]:mt-3";
@@ -11,8 +12,9 @@ const ALIGN: Record<string, string> = { start: "items-start", center: "items-cen
 
 export const column: PieceView = {
   type: "column",
+  // A column of a status and its text beside a number rides that number's note.
   component: ({ id, piece, props, slate, children }) =>
-    isGroup(slate, id) ? (
+    riddenBy(slate, id) !== undefined ? null : isGroup(slate, id) ? (
       <div data-slate-group className={cn("flex min-w-0 flex-col gap-3 [&>:empty]:hidden", SECTIONS_APART)}>
         <Runs slate={slate} ids={piece.children ?? []} />
       </div>
