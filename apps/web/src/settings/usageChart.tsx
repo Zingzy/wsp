@@ -135,9 +135,9 @@ export function UsageChart({ steps, lines: given, stepWord, ticks, height: HEIGH
   /** The words for a figure on the axis and in the tooltip. */
   figure?: (v: number) => string;
   label?: string;
-  /** A fixed axis from the caller, its five figures drawn as plain text; without one it runs from 0 to a round top
-   * and the figures roll. */
-  axis?: { readonly from: number; readonly to: number };
+  /** A fixed axis from the caller, its figures drawn as plain text, split in four unless it names fewer parts; without
+   * one it runs from 0 to a round top in four and the figures roll. */
+  axis?: { readonly from: number; readonly to: number; readonly parts?: number };
   /** The panel's size: the axis in a column of at least 40 px, as wide as its widest figure, 8 px off the plot, its
    * figures and ticks at 11 px. */
   small?: boolean;
@@ -150,6 +150,8 @@ export function UsageChart({ steps, lines: given, stepWord, ticks, height: HEIGH
   const n = steps.length;
   const top = axis === undefined ? niceTop(Math.max(0, ...lines.flatMap(line => line.points))) : axis.to - axis.from;
   const total = (line: ChartLine): number => line.points.reduce((a, b) => a + b, 0);
+  const parts = axis?.parts ?? 4;
+  const marks = Array.from({ length: parts + 1 }, (_, g) => g);
   const lead = [...lines].sort((a, b) => total(b) - total(a))[0];
   const x = (i: number): number => (n > 1 ? (i / (n - 1)) * 100 : 0);
   const dataKey = lines.map(line => `${line.key}:${line.points.join(",")}`).join("|");
@@ -184,21 +186,21 @@ export function UsageChart({ steps, lines: given, stepWord, ticks, height: HEIGH
   return (
     <div data-usage-chart="tokens" className={cn("grid gap-y-3", small ? "grid-cols-[minmax(40px,max-content)_minmax(0,1fr)] gap-x-2" : "grid-cols-[auto_minmax(0,1fr)] gap-x-3")}>
       <div data-k="y-axis" aria-hidden className={cn("relative font-mono leading-none whitespace-nowrap text-muted-foreground tabular-nums", small ? "text-[11px]" : "text-xs")} style={{ height: HEIGHT }}>
-        {[0, 1, 2, 3, 4].map(g => (
+        {marks.map(g => (
           <span key={g} data-k="y-tick" className="invisible block h-0 text-right">
-            {figure(from + (top * g) / 4)}
+            {figure(from + (top * g) / parts)}
           </span>
         ))}
-        {[0, 1, 2, 3, 4].map(g => (
-          <span key={g} className="absolute right-0 -translate-y-1/2" style={{ top: HEIGHT - PAD - (g / 4) * (HEIGHT - PAD * 2) }}>
-            {axis === undefined ? <DigitRoll rollIn value={figure(from + (top * g) / 4)} /> : figure(from + (top * g) / 4)}
+        {marks.map(g => (
+          <span key={g} className="absolute right-0 -translate-y-1/2" style={{ top: HEIGHT - PAD - (g / parts) * (HEIGHT - PAD * 2) }}>
+            {axis === undefined ? <DigitRoll rollIn value={figure(from + (top * g) / parts)} /> : figure(from + (top * g) / parts)}
           </span>
         ))}
       </div>
       <div className="relative" style={{ height: HEIGHT }}>
         <svg aria-hidden className="absolute inset-0 size-full overflow-visible text-border" viewBox={`0 0 100 ${HEIGHT}`} preserveAspectRatio="none">
-          {[1, 2, 3, 4].map(g => {
-            const gy = HEIGHT - PAD - (g / 4) * (HEIGHT - PAD * 2);
+          {marks.slice(1).map(g => {
+            const gy = HEIGHT - PAD - (g / parts) * (HEIGHT - PAD * 2);
             return <line key={g} x1={0} x2={100} y1={gy} y2={gy} stroke="currentColor" strokeDasharray="2 4" vectorEffect="non-scaling-stroke" />;
           })}
           <line x1={0} x2={100} y1={HEIGHT - PAD} y2={HEIGHT - PAD} stroke="currentColor" vectorEffect="non-scaling-stroke" />

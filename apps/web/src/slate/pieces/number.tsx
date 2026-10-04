@@ -12,13 +12,6 @@ import { figure, str, TONE_INK, toneOf } from "./look.js";
 import { isStatCell, ridersOf } from "./riders.js";
 import { placeOf } from "./runs.js";
 
-/** A grid whose every child is a number: Usage's stat strip. */
-export function isStrip(slate: SlateEngine, id: string): boolean {
-  const piece = slate.piece(id);
-  const children = piece?.children ?? [];
-  return piece?.type === "grid" && children.length > 0 && children.every(child => slate.piece(child)?.type === "number");
-}
-
 const capitalised = (word: string): string => word.charAt(0).toUpperCase() + word.slice(1);
 
 /** Redraws when any of these pieces changes; subscribing also keeps them read while they draw nothing themselves. */

@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Children in equal columns 16 px apart. A grid of numbers is the Usage page's stat strip: one card split into equal
+// Children in equal columns 16 px apart. Numbers alone in a grid, row or column are the Usage page's stat strip: one card split into equal
 // cells with hairlines between them, at most three across in the 400 px panel and more once widened, as many as
 // their figures fit, wrapping to further rows with a hairline between rows.
 import { cn } from "../../lib/utils.js";
 import { CARD_SURFACE } from "../../settings/rows.js";
-import type { PieceView } from "../SlateView.js";
+import type { SlateEngine } from "../engine.js";
+import { PieceHost, type PieceView } from "../SlateView.js";
 import { figure, str } from "./look.js";
-import { isStrip } from "./number.js";
+import { isStrip, stripCells } from "./riders.js";
 import { placeOf } from "./runs.js";
 
 /** Columns from 360 px of the grid's own width; under it, one column. Whole class names, so Tailwind finds them. */
@@ -50,34 +51,39 @@ const WIDE_CELLS: Record<number, string> = {
 const NARROW_PAD: Record<number, string> = { 1: "@max-[34rem]:[&>*]:px-(--settings-inset,20px)", 2: "@max-[34rem]:[&>*]:px-(--settings-inset,20px)", 3: "@max-[34rem]:[&>*]:px-3" };
 const WIDE_PAD = (c: number): string => (c >= 3 ? "@min-[34rem]:[&>*]:px-3" : "@min-[34rem]:[&>*]:px-(--settings-inset,20px)");
 
+/** The stat strip: a number cell per number, the words riding their notes drawn by the numbers. */
+export function Strip({ id, slate }: { id: string; slate: SlateEngine }) {
+  // The panel decides how many cells stand across, never the agent's columns: at most three in the narrow panel.
+  const cells = stripCells(slate, id) ?? [];
+  const widest = Math.max(0, ...cells.map(child => {
+    const p = slate.piece(child)?.props ?? {};
+    const unit = str(slate.resolve(p["unit"]));
+    return (figure(slate.resolve(p["value"]), slate.resolve(p["format"]))?.length ?? 0) * FIGURE_CH + (unit === undefined ? 0 : unit.length * UNIT_CH + 4);
+  }));
+  const narrow = across(cells.length, widest, NARROW, 3);
+  const wide = across(cells.length, widest, WIDE, 6);
+  return (
+    <div data-slate-grid data-slate-strip data-across={`${narrow} ${wide}`} className={cn("@container min-w-0", placeOf(slate, id) === "page" && CARD_SURFACE)}>
+      <div className={cn("grid min-w-0 [&>*]:border-border/50 [&>*]:pt-4 [&>*]:pb-3.5", NARROW_CELLS[narrow], NARROW_PAD[narrow], WIDE_CELLS[wide], WIDE_PAD(wide))}>
+        {cells.map(cell => (
+          <PieceHost key={cell} id={cell} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export const grid: PieceView = {
   type: "grid",
   fills: isStrip,
-  component: ({ id, props, slate, children }) => {
-    if (isStrip(slate, id)) {
-      // The panel decides how many cells stand across, never the agent's columns: at most three in the narrow panel.
-      const cells = slate.piece(id)?.children ?? [];
-      const widest = Math.max(0, ...cells.map(child => {
-        const p = slate.piece(child)?.props ?? {};
-        const unit = str(slate.resolve(p["unit"]));
-        return (figure(slate.resolve(p["value"]), slate.resolve(p["format"]))?.length ?? 0) * FIGURE_CH + (unit === undefined ? 0 : unit.length * UNIT_CH + 4);
-      }));
-      const narrow = across(cells.length, widest, NARROW, 3);
-      const wide = across(cells.length, widest, WIDE, 6);
-      return (
-        <div data-slate-grid data-slate-strip data-across={`${narrow} ${wide}`} className={cn("@container min-w-0", placeOf(slate, id) === "page" && CARD_SURFACE)}>
-          <div data-columns={props["columns"]} className={cn("grid min-w-0 [&>*]:border-border/50 [&>*]:pt-4 [&>*]:pb-3.5", NARROW_CELLS[narrow], NARROW_PAD[narrow], WIDE_CELLS[wide], WIDE_PAD(wide))}>
-            {children}
-          </div>
-        </div>
-      );
-    }
-    return (
+  component: ({ id, props, slate, children }) =>
+    isStrip(slate, id) ? (
+      <Strip id={id} slate={slate} />
+    ) : (
       <div data-slate-grid className="@container min-w-0">
         <div data-columns={props["columns"]} className={cn("grid min-w-0 grid-cols-1 gap-4", COLUMNS[Number(props["columns"])] ?? COLUMNS[2], PLACE[String(props["align"])])}>
           {children}
         </div>
       </div>
-    );
-  },
+    ),
 };

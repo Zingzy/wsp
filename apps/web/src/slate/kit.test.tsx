@@ -43,7 +43,7 @@ describe("the richer kit in the renderer", () => {
     const c = view.container;
     expect(c.querySelector("[data-slate-failed]")).toBeNull();
     expect(screen.getByRole("heading", { name: "Gold" }).getAttribute("aria-level")).toBe("2");
-    const grid = c.querySelector<HTMLElement>("[data-columns]")!;
+    const grid = c.querySelector<HTMLElement>("[data-slate-strip] > div")!;
     // A strip of numbers stacks its cells until two 26 px figures fit side by side.
     expect(grid.className).toContain("grid-cols-1");
     expect(grid.className).toContain("@min-[34rem]:grid-cols-3");

@@ -139,7 +139,7 @@ describe("the spoo live traffic slate", () => {
     const c = draw(SPOO_TEXT, SPOO_VALUES);
     // Six figures of up to five 26 px characters: three across at 400, and still three at 640, since six need 612 px.
     expect(strip(c).getAttribute("data-across")).toBe("3 3");
-    const cells = strip(c).querySelector<HTMLElement>("[data-columns]")!;
+    const cells = strip(c).querySelector<HTMLElement>(":scope > div")!;
     expect(cells.children).toHaveLength(6);
     expect(cells.className).toContain("@max-[34rem]:grid-cols-3");
     expect(cells.className).toContain("@max-[34rem]:[&>*:not(:nth-child(3n+1))]:border-l");
@@ -179,5 +179,66 @@ describe("the spoo live traffic slate", () => {
     expect(first[0]!.className).toContain("whitespace-nowrap");
     expect(first[2]!.className).toContain("break-all");
     expect(t.className).toContain("gap-x-4");
+  });
+});
+
+describe("the strip follows the content, and whole numbers label whole ticks", () => {
+  const six = (open: string, close: string) => `<slate title="spoo live traffic"><column>
+    <section title="Last five minutes" note="checked 4s">
+      ${open}
+        <number id="req" label="Requests" value={6118} format="integer" />
+        <number label="Per minute" value={1224} format="integer" />
+        <number id="err" label="Errors" value={0.4} unit="%" /><status id="err-state" tone="good">ok</status><text id="err-note">under the 1% line</text>
+        <number label="p50" value={82} unit="ms" />
+        <number label="p95" value={310} unit="ms" />
+        <number label="Cache hit" value={91} unit="%" />
+      ${close}
+    </section>
+  </column></slate>`;
+
+  for (const [name, open, close] of [
+    ["a row", `<row gap="normal" wrap>`, `</row>`],
+    ["a column", `<column>`, `</column>`],
+  ]) {
+    it(`draws six numbers in ${name} as the stat strip, three across at 400, a status riding its number's note`, () => {
+      const c = draw(six(open!, close!));
+      const strip = c.querySelector<HTMLElement>("[data-slate-strip]")!;
+      expect(strip.getAttribute("data-across")).toBe("3 3");
+      const cells = strip.querySelector<HTMLElement>(":scope > div")!;
+      expect([...cells.children].map(cell => cell.getAttribute("data-slate-piece"))).toHaveLength(6);
+      expect(cells.className).toContain("@max-[34rem]:grid-cols-3");
+      expect(cells.className).toContain("@max-[34rem]:[&>*:not(:nth-child(3n+1))]:border-l");
+      expect(cells.className).toContain("@max-[34rem]:[&>*:nth-child(n+4)]:border-t");
+      // The holder fills its card row, so the strip's own cells carry the padding.
+      expect(strip.closest("[data-slate-rows]")).not.toBeNull();
+      const note = c.querySelector('[data-slate-piece="err"] [data-slate-status]')!.parentElement!;
+      expect([...note.children].map(part => part.textContent)).toEqual(["Ok", "under the 1% line"]);
+      expect(c.querySelector('[data-slate-piece="err-state"]')).toBeNull();
+      const unit = [...c.querySelectorAll<HTMLElement>("[data-slate-unit]")].find(u => u.textContent === "ms")!;
+      expect(unit.className).toContain("text-xs");
+      expect(unit.parentElement!.className).toContain("items-baseline");
+    });
+  }
+
+  const ticks = (values: number[], format: string) => {
+    const items = JSON.stringify(values.map((v, i) => ({ t: `18:${String(50 + i).padStart(2, "0")}`, v })));
+    const c = draw(`<slate><value name="h" start={${items}} /><column><chart label="Errors" items={$h} x={item.t} value={item.v} format="${format}" /></column></slate>`);
+    return [...c.querySelectorAll("[data-k=y-tick]")].map(tick => tick.textContent);
+  };
+
+  it("labels an integer chart over 0 to 1 with 0 and 1 alone", () => {
+    expect(ticks([0, 1, 1, 0, 1], "integer")).toEqual(["0", "1"]);
+  });
+
+  it("labels an integer chart over 0 to 3 with distinct whole numbers", () => {
+    const labels = ticks([0, 3, 1, 2, 3], "integer");
+    expect(new Set(labels).size).toBe(labels.length);
+    expect(labels.every(label => /^\d+$/.test(label!))).toBe(true);
+    expect(labels[0]).toBe("0");
+    expect(Number(labels.at(-1))).toBeGreaterThanOrEqual(3);
+  });
+
+  it("keeps four parts for figures that are not whole numbers", () => {
+    expect(ticks([0, 1, 1, 0, 1], "plain")).toHaveLength(5);
   });
 });

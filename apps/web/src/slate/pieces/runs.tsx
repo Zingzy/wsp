@@ -8,7 +8,7 @@ import { CARD_SURFACE } from "../../settings/rows.js";
 import type { SlateEngine } from "../engine.js";
 import { PieceHost } from "../SlateView.js";
 import { isNoteText } from "./look.js";
-import { riddenBy } from "./riders.js";
+import { isStrip, riddenBy } from "./riders.js";
 
 /** Pieces a person acts with, which make a row of their own a toolbar when it holds nothing else. */
 const CONTROLS: ReadonlySet<string> = new Set(["button", "select", "toggle", "input"]);
@@ -18,7 +18,7 @@ const CONTROLS: ReadonlySet<string> = new Set(["button", "select", "toggle", "in
 export function isGroup(slate: SlateEngine, id: string): boolean {
   const type = slate.piece(id)?.type;
   if (type === "section") return true;
-  if (type !== "column") return false;
+  if (type !== "column" || isStrip(slate, id)) return false;
   const parent = slate.parentId(id);
   return parent === undefined || isGroup(slate, parent);
 }

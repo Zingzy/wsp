@@ -2,7 +2,8 @@
 import { cn } from "../../lib/utils.js";
 import type { PieceView } from "../SlateView.js";
 import { gapOf } from "./look.js";
-import { isStatCell } from "./riders.js";
+import { Strip } from "./grid.js";
+import { isStatCell, isStrip } from "./riders.js";
 
 const ALIGN: Record<string, string> = { start: "justify-start", center: "justify-center", end: "justify-end", between: "justify-between" };
 /** With no align set, the buttons and the state word after the row's text sit at its end, and a filter beside a picker
@@ -12,9 +13,13 @@ const ENDS =
 
 export const row: PieceView = {
   type: "row",
-  // A row of one number and the words that ride its note is that number's stat cell, padded as one.
-  fills: isStatCell,
-  component: ({ props, children }) => (
+  // A row of one number and the words that ride its note is that number's stat cell, padded as one; a row of numbers is
+  // the stat strip.
+  fills: (slate, id) => isStatCell(slate, id) || isStrip(slate, id),
+  component: ({ id, props, slate, children }) =>
+    isStrip(slate, id) ? (
+      <Strip id={id} slate={slate} />
+    ) : (
     <div
       className={cn(
         "flex min-w-0 flex-row items-center [&>:empty]:!hidden",
@@ -26,5 +31,5 @@ export const row: PieceView = {
     >
       {children}
     </div>
-  ),
+    ),
 };

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The words a number's stat cell carries in its note: a status and the text that follows it, written right after the
 // number, or beside it in the same row or cell (alone, or stacked in a column of their own). The number draws them;
-// the pieces themselves draw nothing.
+// the pieces themselves draw nothing. Two numbers or more alone in a row, column or grid are a strip of stat cells.
 import type { SlateEngine } from "../engine.js";
 import { isNoteText } from "./look.js";
 
@@ -25,11 +25,26 @@ function holdsOneCell(slate: SlateEngine, id: string): boolean {
   return type === "column" && parent !== undefined && slate.piece(parent)?.type !== "section" && slate.piece(parent)?.type !== "column";
 }
 
+/** The numbers of a strip: a row, column or grid holding two numbers or more and nothing else, but for a status written
+ * right after a number and a text right after that status. */
+export function stripCells(slate: SlateEngine, id: string): string[] | undefined {
+  const piece = slate.piece(id);
+  if (piece === undefined || !["row", "column", "grid"].includes(piece.type)) return undefined;
+  const children = piece.children ?? [];
+  const types = children.map(child => slate.piece(child)?.type);
+  const numbers = children.filter((_, at) => types[at] === "number");
+  if (numbers.length < 2) return undefined;
+  const fits = types.every((type, at) => type === "number" || (type === "status" && types[at - 1] === "number") || (type === "text" && types[at - 1] === "status" && types[at - 2] === "number"));
+  return fits ? numbers : undefined;
+}
+
+export const isStrip = (slate: SlateEngine, id: string): boolean => stripCells(slate, id) !== undefined;
+
 export function ridersOf(slate: SlateEngine, number: string): Riders {
   const parent = slate.parentId(number);
   if (parent === undefined) return NONE;
   const siblings = slate.piece(parent)?.children ?? [];
-  if (holdsOneCell(slate, parent)) {
+  if (holdsOneCell(slate, parent) && !isStrip(slate, parent)) {
     // Beside the number: every other child is a status or a text, or a column of nothing else.
     const leaves: string[] = [];
     const all: string[] = [];
@@ -48,12 +63,13 @@ export function ridersOf(slate: SlateEngine, number: string): Riders {
     if (state === undefined) return NONE;
     return { state, texts: leaves.filter(leaf => slate.piece(leaf)?.type === "text"), all };
   }
-  // Among cards: the status written right after the number, and the meta line right after that.
+  // Among cards or in a strip: the status written right after the number, and the text right after that (among cards,
+  // only a meta line).
   const at = siblings.indexOf(number);
   const state = siblings[at + 1];
   if (state === undefined || slate.piece(state)?.type !== "status") return NONE;
   const follow = siblings[at + 2];
-  const texts = follow !== undefined && isNoteText(slate, follow) ? [follow] : [];
+  const texts = follow !== undefined && (isStrip(slate, parent) ? slate.piece(follow)?.type === "text" : isNoteText(slate, follow)) ? [follow] : [];
   return { state, texts, all: [state, ...texts] };
 }
 
