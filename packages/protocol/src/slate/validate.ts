@@ -11,7 +11,7 @@ import { SLATE_WARNINGS, nearest, orList, slateProblem, type SlateCode } from ".
 import { SLATE_SOURCES, slateIsSeries, slateSourceType } from "./sources.js";
 import { SLATE_STEPS } from "./steps.js";
 import {
-  SLATE_ID, SLATE_NAME, SLATE_PANE_KINDS, SLATE_RUN_FIELDS, SLATE_SECRET_FIELDS, SlateSchema, isSlateBinding, isSlateFormat,
+  SLATE_FILE_NAME, SLATE_ID, SLATE_NAME, SLATE_PANE_KINDS, SLATE_RUN_FIELDS, SLATE_SECRET_FIELDS, SlateSchema, isSlateBinding, isSlateFormat,
   type SlateDoc, type SlateJson, type SlatePiece, type SlateProblem, type SlatePropValue, type SlateStep,
 } from "./types.js";
 
@@ -118,13 +118,14 @@ class Validator {
     const d = this.doc;
     if ((d.schema as number) !== 2) this.add("D200", `schema ${String(d.schema)} is not a version this host knows; this host reads schema 2`, {}, "update wsp");
     if (d.kit !== undefined && d.kit !== "wsp/2") this.add("D201", `kit ${d.kit} is not one this host has; it has wsp/2`);
-    if (JSON.stringify(d).length > SLATE_LIMITS.documentBytes) this.add("D208", `the document is over ${SLATE_LIMITS.documentBytes / 1024} KB`);
+    if (JSON.stringify({ ...d, files: undefined }).length > SLATE_LIMITS.documentBytes) this.add("D208", `the document is over ${SLATE_LIMITS.documentBytes / 1024} KB`);
     this.names();
     this.limits();
     for (const [name, v] of Object.entries(d.values)) this.value(name, v.start, v.secret === true, v.keep === true);
     for (const [name, expr] of Object.entries(d.derived)) this.expr(expr, { piece: `$${name}`, prop: "value" });
     this.derivedCycles();
     for (const [name, r] of Object.entries(d.runs)) this.runDecl(name, r);
+    this.files();
     d.reactions.forEach((r, i) => this.reaction(r, i));
     this.reactionCycles();
     this.tree();
@@ -292,6 +293,30 @@ class Validator {
     } else if (r.kind === "resource") {
       if (!r.server || !r.uri) this.add("K705", "resource names a server and a uri as \"server:uri\"", w("resource"));
     } else this.add("K701", `$${name} takes exactly one of cmd, tool or resource`, w("kind"));
+  }
+
+  private files(): void {
+    const files = this.doc.files ?? {};
+    const names = Object.keys(files);
+    if (names.length > SLATE_LIMITS.files) this.add("K709", `${names.length} files; the most is ${SLATE_LIMITS.files}`);
+    const bytes = Object.values(files).reduce((n, t) => n + new TextEncoder().encode(t).length, 0);
+    if (bytes > SLATE_LIMITS.filesBytes) this.add("K709", `the files hold ${Math.ceil(bytes / 1024)} KB; the most is ${SLATE_LIMITS.filesBytes / 1024} KB in all`, {}, "keep code that belongs to the project in the project and call it where it is");
+    const secrets = [...this.kinds].filter(([, k]) => k === "secret").map(([n]) => n);
+    for (const [name, text] of Object.entries(files)) {
+      if (!SLATE_FILE_NAME.test(name)) this.add("K708", `"${name}" is not a file name: letters, digits, dots, dashes and _, no slashes, not starting with a dot`, { piece: name }, name.replace(/^.*\//, "").replace(/^[.]+/, "").replace(/[^A-Za-z0-9._-]/g, "_") || undefined);
+      for (const secret of secrets) {
+        if (new RegExp(`\\$\\{?${secret}\\b`).test(text)) this.add("S520", `${name} names the secret $${secret}; a file is stored as written, so a run hands the secret to it on stdin or in env`, { piece: name }, `env={{ ${secret.toUpperCase()}: $${secret} }} on the run, read from the environment in ${name}`);
+      }
+    }
+    for (const [run, r] of Object.entries(this.doc.runs)) {
+      for (const prop of ["cmd", "then"] as const) {
+        const cmd = (r as { cmd?: unknown; then?: unknown })[prop];
+        if (typeof cmd !== "string") continue;
+        for (const m of cmd.matchAll(/\$\{?SLATE_DIR\}?\/([A-Za-z0-9._-]+)/g)) {
+          if (files[m[1]!] === undefined) this.add("W015", `$${run} runs $SLATE_DIR/${m[1]}, and no <file name="${m[1]}"> is declared`, { piece: `$${run}`, prop }, nearest(m[1]!, names));
+        }
+      }
+    }
   }
 
   /** The secrets a prop value reads, by name. */
@@ -644,7 +669,7 @@ export function validateSlate(input: unknown): { document?: SlateDoc; errors: Sl
 
 interface ShapeIssue { code: string; path: (string | number)[]; message: string; keys?: string[] }
 
-const DOC_KEYS = ["schema", "kit", "title", "root", "values", "derived", "runs", "reactions", "pieces"];
+const DOC_KEYS = ["schema", "kit", "title", "root", "values", "derived", "runs", "reactions", "pieces", "files"];
 const PIECE_KEYS = "type, props, children, when, on and fallback";
 
 /** A shape error said as the rule it breaks, naming the piece and the prop: a prop beside props instead of in it is

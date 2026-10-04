@@ -13,6 +13,8 @@ export const SlateJson: z.ZodType<SlateJson> = z.lazy(() =>
  * a piece "spot" and a run $spot never collide. */
 export type SlateId = string;
 export const SLATE_ID = /^[A-Za-z][A-Za-z0-9_-]{0,47}$/;
+/** A file's name: a plain file name, no folders, not hidden. */
+export const SLATE_FILE_NAME = /^[A-Za-z0-9_][A-Za-z0-9._-]{0,63}$/;
 /** A value, derived value or run name, read as $name. */
 export type SlateName = string;
 export const SLATE_NAME = /^[a-z_][a-zA-Z0-9_]{0,47}$/;
@@ -143,6 +145,9 @@ export interface SlateDoc {
   runs: Record<SlateName, SlateRunDecl>;
   reactions: SlateReactionDecl[];
   pieces: Record<SlateId, SlatePiece>;
+  /** Code written only for the slate, by file name; the host writes each into the slate's folder, which runs read
+   * as $SLATE_DIR. */
+  files?: Record<string, string>;
 }
 /** The stored document; the wire calls it Slate. */
 export type Slate = SlateDoc;
@@ -183,6 +188,7 @@ export const SlateSchema: z.ZodType<SlateDoc> = z.object({
   runs: z.record(SlateRunDeclSchema),
   reactions: z.array(SlateReactionSchema),
   pieces: z.record(SlatePieceSchema),
+  files: z.record(z.string()).optional(),
 }).strict();
 
 // ---- what values hold ----
@@ -260,6 +266,7 @@ export type SlatePatchOp =
   | { op: "derived"; name: SlateName; expr: SlateExpression | null }
   | { op: "run"; name: SlateName; decl: SlateRunDecl | null }
   | { op: "reaction"; id: string; reaction: SlateReactionDecl | null }
+  | { op: "file"; name: string; text: string | null }
   | { op: "clear" }
   | { op: "undo" };
 

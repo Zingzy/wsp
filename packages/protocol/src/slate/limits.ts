@@ -10,6 +10,8 @@ export const SLATE_LIMITS = {
   derived: 32,
   runs: 16,
   reactions: 32,
+  files: 16,
+  filesBytes: 64 * 1024,
   stepsPerReaction: 6,
   rounds: 8,
   runningAtOnce: 4,
