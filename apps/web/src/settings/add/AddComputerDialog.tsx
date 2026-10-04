@@ -27,7 +27,7 @@ import { IconSelect } from "../../projects/LookPicker.js";
 import { useAdds } from "../adds.js";
 import { ComputerGlyph } from "../ComputerGlyph.js";
 import { ADD_COMPUTER_WORDS, FACT } from "../format.js";
-import { GlyphFrame, Grid, GridHead, GridName, GridRow } from "../grid.js";
+import { Grid, GridHead } from "../grid.js";
 import { NOTE, ROW_FIELD } from "../layout.js";
 import { placeName } from "../places.js";
 import { readRecipes, useRecipes } from "../recipesStore.js";
@@ -46,9 +46,10 @@ const GLYPH = "size-4 text-foreground/80";
 const sshLogin = (host: SshHostSuggestion): string => [host.user, host.hostName ?? host.alias].filter(Boolean).join("@");
 
 function WhereStep({ address, hostKey, hosts, hostsRefused, onPick }: { address: string; hostKey: string | undefined; hosts: readonly SshHostSuggestion[]; hostsRefused: Failure | null; onPick: (alias: string) => void }) {
+  const picked = hosts.find(host => host.alias === address.trim())?.alias ?? "";
   return (
     <>
-      <Input data-k="where-field" aria-label="Address" nativeInput autoFocus autoComplete="off" spellCheck={false} autoCapitalize="off" value={address} placeholder="user@host or an ssh alias" onChange={e => useAddFlow.setState({ address: e.target.value })} className="font-mono" />
+      <Input data-k="where-field" aria-label="Address" nativeInput autoFocus autoComplete="off" spellCheck={false} autoCapitalize="off" value={address} placeholder="user@host or an ssh alias" onChange={e => useAddFlow.setState({ address: e.target.value })} size="lg" className="font-mono" />
       {hostKey !== undefined ? (
         <div className="flex flex-col gap-2">
           <p className={NOTE}>{address.trim()}'s host key is new to {hereName(useStore.getState().places)}.</p>
@@ -57,21 +58,13 @@ function WhereStep({ address, hostKey, hosts, hostsRefused, onPick }: { address:
       ) : hostsRefused !== null ? (
         <RefusalSlot k="ssh-hosts-refused" said={ADD_COMPUTER_WORDS.hostsNotRead(hostsRefused.said)} {...(hostsRefused.fix === undefined ? {} : { fix: hostsRefused.fix })} />
       ) : hosts.length === 0 ? null : (
-        <Grid id="ssh-hosts" head={<GridHead cells={[{ word: ADD_COMPUTER_WORDS.suggested }]} />}>
-          {hosts.map(host => (
-            <GridRow key={host.alias} columns="grid-cols-[minmax(0,1fr)_auto]" tight open={() => onPick(host.alias)} attrs={{ "data-ssh-host": host.alias }}>
-              <GridName
-                glyph={
-                  <GlyphFrame>
-                    <ServerIcon aria-hidden className={GLYPH} />
-                  </GlyphFrame>
-                }
-                name={host.alias}
-              />
-              <span className={FACT}>{sshLogin(host)}</span>
-            </GridRow>
-          ))}
-        </Grid>
+        <RadioGroup value={picked} onValueChange={next => onPick(String(next))} className="gap-0">
+          <Grid id="ssh-hosts" head={<GridHead cells={[{ word: ADD_COMPUTER_WORDS.suggested }]} />}>
+            {hosts.map(host => (
+              <Choice key={host.alias} id={host.alias} picked={picked === "" || picked === host.alias} glyph={<ServerIcon aria-hidden className={GLYPH} />} name={host.alias} fact={sshLogin(host)} />
+            ))}
+          </Grid>
+        </RadioGroup>
       )}
     </>
   );
