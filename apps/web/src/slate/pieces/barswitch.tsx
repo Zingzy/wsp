@@ -3,6 +3,7 @@
 // card holding every list, a segmented control over it naming them, one list shown at a time. Every list stays in the card's one grid cell, the others
 // invisible, so the card is the tallest list's height whatever is picked and nothing under it moves on a switch. The
 // pick is kept per slate for the window's life, so a value push or a redraw keeps it.
+import { ScrollArea } from "../../components/ui/scroll-area.js";
 import { SegmentedControl } from "../../components/ui/segmented-control.js";
 import { cn } from "../../lib/utils.js";
 import { CARD_SURFACE } from "../../settings/rows.js";
@@ -42,7 +43,7 @@ export function BarSwitch({ slate, ids }: { slate: SlateEngine; ids: readonly st
   return (
     <div data-slate-bar-switch className="flex min-w-0 flex-col gap-2.5">
       <div className="flex min-w-0 items-center gap-3">
-        <div className="min-w-0 overflow-x-auto">
+        <ScrollArea hideScrollbars scrollFade className="h-auto min-w-0">
           <SegmentedControl
             aria-label="Lists"
             value={shown}
@@ -51,7 +52,7 @@ export function BarSwitch({ slate, ids }: { slate: SlateEngine; ids: readonly st
             className={cn(SEGMENTED, "flex-none")}
             segmentClassName={cn(SEGMENT, "whitespace-nowrap")}
           />
-        </div>
+        </ScrollArea>
         {shared === undefined ? null : <span data-slate-bar-switch-note className={cn(NOTE, "ml-auto shrink-0 whitespace-nowrap")}>{shared}</span>}
       </div>
       <div className={cn(CARD_SURFACE, "grid min-w-0")}>
