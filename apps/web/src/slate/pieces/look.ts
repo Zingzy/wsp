@@ -2,6 +2,7 @@
 // The meaning words a slate may say, drawn in the app's own tokens (05-styling). The agent picks a word; this file
 // is the whole of how each one looks, in every theme, since every class reads a theme token.
 import { fmtBytes, fmtCost, fmtDuration, fmtTokens, type SlateJson } from "@wsp/protocol";
+import { CARD_SURFACE } from "../../settings/rows.js";
 import type { SlateEngine } from "../engine.js";
 
 export type Tone = "default" | "muted" | "good" | "warning" | "bad" | "info" | "accent";
@@ -73,4 +74,16 @@ export function figure(value: SlateJson | undefined, format: SlateJson | undefin
     default:
       return value.toLocaleString("en-US", { maximumFractionDigits: 2 });
   }
+}
+
+/** A group's inner space; an inset group with none set takes normal, so its children never touch its edge. */
+const PAD: Record<string, string> = { none: "", tight: "px-3 py-2", normal: "px-4 py-3", loose: "px-5 py-4" };
+/** Where a group's children line up across it; not set, they stretch as they always have. */
+const PLACE: Record<string, string> = { start: "items-start", center: "items-center text-center", end: "items-end text-right" };
+
+/** A group's pad, surface and align as classes: the inset surface is the settings card's ground. */
+export function groupLook(props: Readonly<Record<string, SlateJson | undefined>>): string {
+  const inset = props["surface"] === "inset";
+  const pad = typeof props["pad"] === "string" ? props["pad"] : inset ? "normal" : "none";
+  return [PAD[pad] ?? "", inset ? CARD_SURFACE : "", typeof props["align"] === "string" ? (PLACE[props["align"]] ?? "") : ""].filter(Boolean).join(" ");
 }

@@ -22,7 +22,6 @@ export interface ChartLine {
 const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map(n => (n + 0.5) / 16);
 const CELL = 2;
 export const CHART_HEIGHT = 300;
-const HEIGHT = CHART_HEIGHT;
 const PAD = 6;
 
 /** The dither under each line, biggest first: the lead at full density and each line after it lighter, each on its
@@ -127,9 +126,21 @@ function useThemeTick(): number {
   return tick;
 }
 
-export function UsageChart({ steps, lines, stepWord, ticks }: { steps: readonly number[]; lines: readonly ChartLine[]; stepWord: (t: number) => string; ticks: ReadonlyArray<{ at: number; word: string }> }) {
+export function UsageChart({ steps, lines: given, stepWord, ticks, height: HEIGHT = CHART_HEIGHT, figure = fmtTokens, label = "Tokens over the range", from = 0 }: {
+  steps: readonly number[];
+  lines: readonly ChartLine[];
+  stepWord: (t: number) => string;
+  ticks: ReadonlyArray<{ at: number; word: string }>;
+  height?: number;
+  /** The words for a figure on the axis and in the tooltip. */
+  figure?: (v: number) => string;
+  label?: string;
+  /** The axis's floor: 0, or the least point so a line that moves little is not flat against its top. */
+  from?: number;
+}) {
   const [hovered, setHovered] = useState<number | null>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
+  const lines = from === 0 ? given : given.map(line => ({ ...line, points: line.points.map(v => v - from) }));
   const themeTick = useThemeTick();
   const n = steps.length;
   const top = niceTop(Math.max(0, ...lines.flatMap(line => line.points)));
@@ -170,12 +181,12 @@ export function UsageChart({ steps, lines, stepWord, ticks }: { steps: readonly 
       <div data-k="y-axis" aria-hidden className="relative font-mono text-xs leading-none text-muted-foreground tabular-nums" style={{ height: HEIGHT }}>
         {[0, 1, 2, 3, 4].map(g => (
           <span key={g} data-k="y-tick" className="invisible block h-0 text-right">
-            {fmtTokens((top * g) / 4)}
+            {figure(from + (top * g) / 4)}
           </span>
         ))}
         {[0, 1, 2, 3, 4].map(g => (
           <span key={g} className="absolute right-0 -translate-y-1/2" style={{ top: HEIGHT - PAD - (g / 4) * (HEIGHT - PAD * 2) }}>
-            <DigitRoll value={fmtTokens((top * g) / 4)} />
+            <DigitRoll value={figure(from + (top * g) / 4)} />
           </span>
         ))}
       </div>
@@ -188,7 +199,7 @@ export function UsageChart({ steps, lines, stepWord, ticks }: { steps: readonly 
           <line x1={0} x2={100} y1={HEIGHT - PAD} y2={HEIGHT - PAD} stroke="currentColor" vectorEffect="non-scaling-stroke" />
         </svg>
         <canvas ref={canvas} aria-hidden className="absolute inset-0 size-full" />
-        <svg role="img" aria-label="Tokens over the range" className="absolute inset-0 size-full overflow-visible" viewBox={`0 0 100 ${HEIGHT}`} preserveAspectRatio="none">
+        <svg role="img" aria-label={label} className="absolute inset-0 size-full overflow-visible" viewBox={`0 0 100 ${HEIGHT}`} preserveAspectRatio="none">
           {[...lines].reverse().map(line => (
             <g
               key={line.key}
@@ -215,7 +226,7 @@ export function UsageChart({ steps, lines, stepWord, ticks }: { steps: readonly 
               <TooltipPopup side="top" sideOffset={6}>
                 <span className="flex flex-col gap-1">
                   <span className="font-mono text-xs text-muted-foreground tabular-nums">{stepWord(t)}</span>
-                  {lines
+                  {given
                     .filter(line => (line.points[i] ?? 0) > 0)
                     .map(line => (
                       <span key={line.key} data-k="point-figure" className="flex items-center justify-between gap-4 text-xs">
@@ -223,7 +234,7 @@ export function UsageChart({ steps, lines, stepWord, ticks }: { steps: readonly 
                           <span aria-hidden className={cn("h-0.5 w-3 rounded-full bg-current", line.ink.className)} style={line.ink.style} />
                           {line.label}
                         </span>
-                        <span className="font-mono tabular-nums">{fmtTokens(line.points[i] ?? 0)}</span>
+                        <span className="font-mono tabular-nums">{figure(line.points[i] ?? 0)}</span>
                       </span>
                     ))}
                 </span>
