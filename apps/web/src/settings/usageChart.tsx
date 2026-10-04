@@ -126,7 +126,7 @@ function useThemeTick(): number {
   return tick;
 }
 
-export function UsageChart({ steps, lines: given, stepWord, ticks, height: HEIGHT = CHART_HEIGHT, figure = fmtTokens, label = "Tokens over the range", from = 0 }: {
+export function UsageChart({ steps, lines: given, stepWord, ticks, height: HEIGHT = CHART_HEIGHT, figure = fmtTokens, label = "Tokens over the range", axis }: {
   steps: readonly number[];
   lines: readonly ChartLine[];
   stepWord: (t: number) => string;
@@ -135,15 +135,17 @@ export function UsageChart({ steps, lines: given, stepWord, ticks, height: HEIGH
   /** The words for a figure on the axis and in the tooltip. */
   figure?: (v: number) => string;
   label?: string;
-  /** The axis's floor: 0, or the least point so a line that moves little is not flat against its top. */
-  from?: number;
+  /** A fixed axis from the caller, its five figures drawn as plain text; without one it runs from 0 to a round top
+   * and the figures roll. */
+  axis?: { readonly from: number; readonly to: number };
 }) {
   const [hovered, setHovered] = useState<number | null>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
+  const from = axis?.from ?? 0;
   const lines = from === 0 ? given : given.map(line => ({ ...line, points: line.points.map(v => v - from) }));
   const themeTick = useThemeTick();
   const n = steps.length;
-  const top = niceTop(Math.max(0, ...lines.flatMap(line => line.points)));
+  const top = axis === undefined ? niceTop(Math.max(0, ...lines.flatMap(line => line.points))) : axis.to - axis.from;
   const total = (line: ChartLine): number => line.points.reduce((a, b) => a + b, 0);
   const lead = [...lines].sort((a, b) => total(b) - total(a))[0];
   const x = (i: number): number => (n > 1 ? (i / (n - 1)) * 100 : 0);
@@ -186,7 +188,7 @@ export function UsageChart({ steps, lines: given, stepWord, ticks, height: HEIGH
         ))}
         {[0, 1, 2, 3, 4].map(g => (
           <span key={g} className="absolute right-0 -translate-y-1/2" style={{ top: HEIGHT - PAD - (g / 4) * (HEIGHT - PAD * 2) }}>
-            <DigitRoll value={figure(from + (top * g) / 4)} />
+            {axis === undefined ? <DigitRoll value={figure(from + (top * g) / 4)} /> : figure(from + (top * g) / 4)}
           </span>
         ))}
       </div>

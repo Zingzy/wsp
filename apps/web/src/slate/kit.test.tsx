@@ -7,6 +7,7 @@ import { parseSlate, slateStartValues, SLATE_EXAMPLES, SLATE_ICONS, SLATE_PIECES
 import { ActionRunner, StateSender } from "./actions";
 import { SlateEngine } from "./engine";
 import { SLATE_VIEWS } from "./pieces";
+import { chartAxis } from "./pieces/chart";
 import { SLATE_ICON_VIEWS } from "./pieces/icon";
 import { SlateView } from "./SlateView";
 import { fakeLink, manualScheduler } from "./testing";
@@ -68,6 +69,43 @@ describe("the richer kit in the renderer", () => {
     const { view } = draw(example("a live figure with an hour of history"));
     expect(view.container.querySelector("[data-slate-chart]")!.textContent).toContain("not read yet");
     expect(view.container.querySelector("[data-slate-status=muted]")!.textContent).toBe("Waiting");
+  });
+
+  describe("the chart's axis", () => {
+    const GOLD = `<slate><value name="hist" start={[]} /><column><chart label="Spot gold" items={$hist} x={item.at} value={item.v} format="usd" /></column></slate>`;
+    const ticks = (c: HTMLElement): string[] => [...c.querySelectorAll<HTMLElement>("[data-k=y-axis] > span.absolute")].map(t => t.textContent ?? "");
+    const at = (v: number, i: number) => ({ at: 1_759_000_000_000 + i * 60_000, v });
+
+    it("draws flat data as round figures around the value, as plain text", () => {
+      const { view } = draw(compiled(GOLD), { hist: [4141.8, 4141.8, 4141.8].map(at) });
+      expect(ticks(view.container)).toEqual(["$4,100.00", "$4,125.00", "$4,150.00", "$4,175.00", "$4,200.00"]);
+      expect(view.container.querySelector("[data-k=y-axis] [role=img], [data-k=y-axis] .digit-strip")).toBeNull();
+    });
+
+    it("draws two equal points with the same axis", () => {
+      const { view } = draw(compiled(GOLD), { hist: [4141.8, 4141.8].map(at) });
+      expect(ticks(view.container)).toEqual(["$4,100.00", "$4,125.00", "$4,150.00", "$4,175.00", "$4,200.00"]);
+      expect(view.container.querySelector("svg[role=img] polyline")!.getAttribute("points")!.split(" ")).toHaveLength(2);
+    });
+
+    it("draws one point as a level line on a readable axis", () => {
+      const { view } = draw(compiled(GOLD), { hist: [at(4141.8, 0)] });
+      expect(ticks(view.container)).toEqual(["$4,100.00", "$4,125.00", "$4,150.00", "$4,175.00", "$4,200.00"]);
+      expect([...view.container.querySelectorAll("[data-k=tick]")].map(t => t.textContent)).toHaveLength(1);
+    });
+
+    it("holds every value in four round steps", () => {
+      for (const values of [[2400.5, 2401.25, 2399], [4141.8, 4141.8], [0, 0], [-5, -5], [3, 1000], [0.001, 0.0012], [-40, 25], [99.9, 100.1]]) {
+        const { from, to } = chartAxis(values);
+        expect(from, String(values)).toBeLessThanOrEqual(Math.min(...values));
+        expect(to, String(values)).toBeGreaterThanOrEqual(Math.max(...values));
+        expect(to, String(values)).toBeGreaterThan(from);
+        const step = (to - from) / 4;
+        const lead = step / 10 ** Math.floor(Math.log10(step));
+        expect([1, 2, 2.5, 5].some(m => Math.abs(lead - m) < 1e-9), `${values}: step ${step}`).toBe(true);
+        expect(Math.abs(from / step - Math.round(from / step)), `${values}: from ${from}`).toBeLessThan(1e-9);
+      }
+    });
   });
 
   it("writes a pick from choices and marks the answer once picked", async () => {
