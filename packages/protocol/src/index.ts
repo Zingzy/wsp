@@ -3632,9 +3632,8 @@ export const PlaceDial = z.object({
 });
 export type PlaceDial = z.infer<typeof PlaceDial>;
 
-/** What places.update answers: the daemon half where the computer was behind and absent where it already ran this
- * wsp's daemon; the recipe job started after it, as it stands when the reply goes out; and, where no job started,
- * why. */
+/** What places.update answers: the daemon it moved the computer from and to where the computer was behind, absent
+ * where it already ran this wsp's daemon. */
 export const PlaceUpdateReply = z.object({
   name: z.string().min(1),
   daemon: z
@@ -3647,8 +3646,6 @@ export const PlaceUpdateReply = z.object({
       note: z.string().optional(),
     })
     .optional(),
-  setup: PlaceSetup.optional(),
-  said: z.string().optional(),
 });
 export type PlaceUpdateReply = z.infer<typeof PlaceUpdateReply>;
 
@@ -5485,6 +5482,9 @@ export const placeCurrentLine = (name: string, version: number): string => `${na
 
 /** What a computer whose recipe is still being put on says to whoever asked for a workspace there, or for a second
  * run of the job: the row under way where the job has reached one, and the two roads to the rest of the answer. */
+/** The refusal a setup gets on a computer while a sync to its recipe runs there: the two would install over each other. */
+export const placeSyncingLine = (name: string): string => `${name} is syncing to its recipe; set it up again once that ends`;
+
 export const placeProvisioningLine = (name: string, step?: PlaceSetupStep): string =>
   `${name} is still being set up${step === undefined ? "" : ` (${SETUP_STEP_WORDS[step]})`}; wsp computers shows it, and a workspace there can be made once it is done`;
 
@@ -6497,10 +6497,9 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * every add over ssh still running and the last that finished. Answers `{ places: PlaceView[], adds: PlaceAddJob[] }`. */
   z.object({ id: reqId, op: z.literal("places.list") }),
   /** Puts the daemon this host deploys on one place where it is behind, over the link it holds or over the ssh road
-   * the install used, waits for that computer to dial back running it, and then runs the recipe on it. The
-   * workspaces on it are kept. `addId` is the stream the recipe's own steps ride, so a caller that minted one reads
-   * them from the first row. Answers a PlaceUpdateReply. */
-  z.object({ id: reqId, op: z.literal("places.update"), placeId: z.string(), addId: z.string().optional() }),
+   * the install used, and waits for that computer to dial back running it. The workspaces on it and what it was set
+   * up with are kept. Answers a PlaceUpdateReply. */
+  z.object({ id: reqId, op: z.literal("places.update"), placeId: z.string() }),
   /** Takes a place back out: sweeps wsp off that computer over its link, drops the workspaces standing on it and
    * the place record. Answers `{ removed, swept, note? }`. */
   z.object({ id: reqId, op: z.literal("places.remove"), placeId: z.string() }),

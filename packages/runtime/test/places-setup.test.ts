@@ -29,6 +29,7 @@ import {
   setupRowFix,
   placeProvisionPaths,
   placeProvisioningLine,
+  placeSyncingLine,
   placeWord,
   probePath,
   DAEMON_VERSION,
@@ -328,6 +329,7 @@ function shelf(file: RecipeFile, items: Record<string, string>) {
       resolves++;
       return now;
     },
+    resolveFile: async picked => ({ file: picked, items: now.items, hash: "picks" }),
   };
   return { recipes, move: (next: RecipeFile, nextItems: Record<string, string>, hash: string) => void (now = { file: next, items: nextItems, hash }), resolves: () => resolves };
 }
@@ -435,18 +437,20 @@ describe("a remove of a computer set up with picks", () => {
 });
 
 describe("an update of a computer already set up", () => {
-  it("asks the updater every time, with a binary only where the computer is behind, and runs its setup again", async () => {
+  it("asks the updater every time, with a binary only where the computer is behind, and never runs the setup again", async () => {
     const asked: PlaceUpdateRequest[] = [];
     const p = provisioner();
     await hosting({ provision: p.wired, update: async req => void asked.push(req) });
     const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: LAPTOP }, Date.now());
     await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    const ranBefore = [...p.ran];
     const answer = await runtime!.places!.update(place.id);
     expect(asked).toEqual([expect.objectContaining({ name: "spoo", daemon: false })]);
-    // Nothing landed, so no dial-back was waited for and the answer carries no daemon, only the setup run again.
-    expect(answer.daemon).toBeUndefined();
-    expect(answer.setup?.state).toBe("running");
-    await until(() => p.ran.filter(s => s === "floor").length === 2);
+    // An update moves wsp itself; what the computer was set up with stays as it is, so no step runs again.
+    expect(answer).toEqual({ name: "spoo" });
+    await new Promise(r => setTimeout(r, 200));
+    expect(p.ran).toEqual(ranBefore);
+    expect((await rowOf(place.id)).setup?.state).toBe("done");
   });
 
   it("puts a binary only on a computer whose daemon is behind", async () => {
@@ -542,6 +546,19 @@ describe("a computer added with its picks", () => {
     expect(frames.find(f => f.line?.step === "clis")?.line).toEqual({ step: "clis", state: "running", startedAt: began });
     p.let("clis");
     await until(async () => (await rowOf(place.id)).setup?.state === "done");
+  });
+
+  it("reads the computer's own sign-in as signed in once it lands in the setup, before that computer dials again", async () => {
+    const s = signIns();
+    await hosting({ provision: provisioner().wired, acts: s.acts, report: report("spoo", { daemonVersion: DAEMON_VERSION, agents: ["claude", "codex"], logins: [] }) });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: LAPTOP }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.waiting.some(w => w.url !== undefined) === true);
+    expect((await rowOf(place.id)).signIns).toEqual({ claude: "vault-key", codex: "none" });
+    s.end("codex", { state: "signed-in" });
+    await until(async () => (await rowOf(place.id)).setup?.waiting.length === 0);
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    expect((await rowOf(place.id)).signIns).toEqual({ claude: "vault-key", codex: "signed-in" });
+    expect(runtime!.places!.signInsAt(place.id)).toEqual({ claude: "vault-key", codex: "signed-in" });
   });
 
   it("stops at a floor that failed, says why, and runs nothing after it", async () => {
@@ -1063,6 +1080,20 @@ describe("a computer that follows a recipe", () => {
     return { p, r, host, placeId: place.id };
   }
 
+  it("never refuses a fork there as still being set up while a sync runs, and holds the daemon off it meanwhile", async () => {
+    const { p, r, placeId } = await following();
+    p.arm("skills");
+    r.move({ ...V1, skills: { ...V1.skills, why: { from: "~/.claude/skills" } } }, { ...ITEMS, "skills/why": "d2" }, "h2");
+    await runtime!.places!.recipeChanged("laptop");
+    await until(() => p.ran.includes("skills"));
+    // A sync adds what moved to a computer already set up; a thread starting there meanwhile is not a fork into a half set up one.
+    await expect(runtime!.places!.forkingBackend(placeId)).resolves.toBeDefined();
+    // The daemon is not moved under it: a restart there would cut the link the sync installs over.
+    await expect(runtime!.places!.update(placeId)).rejects.toThrow(placeSyncingLine("spoo"));
+    p.let("skills");
+    await until(async () => (await rowOf(placeId)).applied?.hash === "h2");
+  });
+
   it("takes a skill added to the recipe with no step from the person, by the skills step alone", async () => {
     const { p, r, placeId } = await following();
     const V2 = { ...V1, skills: { ...V1.skills, why: { from: "~/.claude/skills" } } };
@@ -1151,6 +1182,21 @@ describe("a computer that follows a recipe", () => {
     await runtime!.places!.recipeChanged("laptop");
     await until(async () => (await rowOf(place.id)).applied?.hash === "h11");
     expect(cmds.filter(c => c.startsWith("take-off-"))).toEqual([]);
+  });
+
+  it("runs nothing when a computer set up from picks follows a recipe that holds those same picks", async () => {
+    const p = provisioner();
+    const r = shelf(V1, ITEMS);
+    await hosting({ provision: p.wired, recipes: r.recipes });
+    const { place } = await runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR, choices: V1 }, Date.now());
+    await until(async () => (await rowOf(place.id)).setup?.state === "done");
+    const ranBefore = [...p.ran];
+    // Saved as a recipe at the end of the dialog and followed: the computer already holds every row of it.
+    await runtime!.places!.follow(place.id, "laptop");
+    await until(async () => (await rowOf(place.id)).applied?.hash === "h1");
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(p.ran).toEqual(ranBefore);
+    expect((await rowOf(place.id)).sync).toBeUndefined();
   });
 
   it("says a follow, an unfollow and a changed recipe on the stream, whether or not any computer moves", async () => {

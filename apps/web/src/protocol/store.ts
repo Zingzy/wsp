@@ -265,9 +265,8 @@ interface State {
   /** Asks the host to dial one computer once and takes the row it answers with, so every surface reading that row
    * says the same thing about it. Answers the whole of what came back for the slot that asked. */
   dialPlace(placeId: string): Promise<PlaceDial>;
-  /** Puts this wsp's daemon on one computer and runs the recipe there again, and writes the job it answers with
-   * onto that row, so the word in the row's state slot is the job's own. A refusal is the host's own sentence in
-   * a notice. */
+  /** Puts this wsp's daemon on one computer, what it was set up with staying, and reads the rows again so that row
+   * carries the daemon it now runs. A refusal is the host's own sentence in a notice. */
   updatePlace(placeId: string): Promise<void>;
   /** Sets a computer's own settings, or takes the ones named under `reset` back to their defaults, and puts the row
    * the host answers in place of the one held. A refusal is the host's own sentence in a notice. */
@@ -1093,11 +1092,9 @@ export const useStore = create<State>((set, get) => {
       const api = get().api;
       if (api?.placesUpdate === undefined) return;
       try {
-        const answer = await api.placesUpdate(placeId);
-        // The job as the reply carries it, onto the row the word is read off: the state slot says what is being
-        // put on that computer and then what stands, with no second reading of the same job here.
-        if (answer.setup !== undefined) set(s => ({ places: s.places.map(p => (p.id === placeId ? { ...p, setup: answer.setup } : p)) }));
-        if (answer.said !== undefined) addNotice({ kind: "note", text: answer.said });
+        await api.placesUpdate(placeId);
+        // The row then carries the daemon that computer now runs, so the word that it was behind goes.
+        readPlaces(api);
       } catch (e) {
         noticeFailure(e);
       }
