@@ -116,3 +116,39 @@ export function todaySlate(text: string, values: Record<string, SlateJson> = {})
   if (parsed.document === undefined) throw new Error(parsed.errors.map(e => e.message).join("\n"));
   return { doc: parsed.document, values: { ...slateStartValues(parsed.document), ...values } };
 }
+
+/** The shape of the owner's "spoo live traffic" slate: six figures in a grid and the request log. */
+export const SPOO_TEXT = `<slate title="spoo live traffic">
+  <value name="log" start={[]} />
+  <column>
+    <section title="Last five minutes" note="checked 4s">
+      <grid columns={3}>
+        <number label="Requests" value={6118} format="integer" />
+        <number label="Per minute" value={1224} format="integer" />
+        <number label="Errors" value={0.4} unit="%" />
+        <number label="p50" value={82} unit="ms" />
+        <number label="p95" value={310} unit="ms" />
+        <number label="Cache hit" value={91} unit="%" />
+      </grid>
+    </section>
+    <section title="Requests" note="checked 4s">
+      <table items={$log} key={item.id}>
+        <col title="Time" value={item.time} mono />
+        <col title="Method" value={item.method} mono />
+        <col title="Path" value={item.path} mono />
+        <col title="Status" value={item.status} />
+        <col title="ms" value={item.ms} />
+        <col title="cc" value={item.cc} mono />
+      </table>
+    </section>
+  </column>
+</slate>`;
+
+export const SPOO_VALUES: Record<string, SlateJson> = {
+  log: [
+    ["18:52:24", "POST", "/api/v1/shorten", 200, 84, "IN"],
+    ["18:52:23", "GET", "/stats/a8Kp2", 200, 31, "US"],
+    ["18:52:21", "GET", "/r/x7Qm", 301, 12, "DE"],
+    ["18:52:19", "GET", "/api/v1/stats/a8Kp2", 404, 9, "IN"],
+  ].map(([time, method, path, status, ms, cc], id) => ({ id, time, method, path, status, ms, cc }) as SlateJson),
+};

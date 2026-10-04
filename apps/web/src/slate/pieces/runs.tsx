@@ -66,7 +66,7 @@ export function placeOf(slate: SlateEngine, id: string): Place {
 /** A card of rows: each row at the card's inset, 12 px above and below, unless it draws its own rows edge to edge. */
 const CARD = cn(
   CARD_SURFACE,
-  "flex min-w-0 flex-col empty:hidden [&>:empty]:hidden [&>*+*]:border-t [&>*+*]:border-border/50",
+  "flex min-w-0 flex-col empty:hidden [&>:empty]:!hidden [&>*+*]:border-t [&>*+*]:border-border/50",
   "[&>:not([data-slate-rows])]:flex [&>:not([data-slate-rows])]:min-h-11 [&>:not([data-slate-rows])]:flex-col [&>:not([data-slate-rows])]:justify-center",
   "[&>:not([data-slate-rows])]:px-(--settings-inset,20px) [&>:not([data-slate-rows])]:py-3",
 );

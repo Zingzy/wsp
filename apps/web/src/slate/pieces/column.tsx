@@ -15,7 +15,7 @@ export const column: PieceView = {
   // A column of a status and its text beside a number rides that number's note.
   component: ({ id, piece, props, slate, children }) =>
     riddenBy(slate, id) !== undefined ? null : isGroup(slate, id) ? (
-      <div data-slate-group className={cn("flex min-w-0 flex-col gap-3 [&>:empty]:hidden", SECTIONS_APART)}>
+      <div data-slate-group className={cn("flex min-w-0 flex-col gap-3 [&>:empty]:!hidden", SECTIONS_APART)}>
         <Runs slate={slate} ids={piece.children ?? []} />
       </div>
     ) : (

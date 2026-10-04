@@ -54,11 +54,11 @@ export const number: PieceView = {
     return (
       <div className={cn(STAT.cell, own && "px-(--settings-inset,20px) pt-4 pb-3.5")}>
         <span className={cn(STAT.label, "leading-5")}>{label}</span>
-        <span className={cn("min-h-8 break-words tabular-nums", STAT.figure, TONE_INK[toneOf(props["tone"], slate, id)])}>
+        <span className={cn("flex min-h-8 min-w-0 flex-wrap items-baseline gap-x-1 tabular-nums", STAT.figure, TONE_INK[toneOf(props["tone"], slate, id)])}>
           {shown === undefined ? null : (
             <>
               <DigitRoll value={shown} />
-              {unit === undefined ? null : <span className="ml-1.5 font-sans text-[13px] font-normal text-muted-foreground">{unit}</span>}
+              {unit === undefined ? null : <span data-slate-unit className="font-sans text-xs leading-4 font-normal text-muted-foreground">{unit}</span>}
             </>
           )}
         </span>

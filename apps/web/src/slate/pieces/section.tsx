@@ -48,7 +48,7 @@ export const section: PieceView = {
       </>
     );
     const body = (
-      <div className={cn("flex min-w-0 flex-col gap-3 [&>:empty]:hidden", AFTER_CHART)}>
+      <div className={cn("flex min-w-0 flex-col gap-3 [&>:empty]:!hidden", AFTER_CHART)}>
         <Runs slate={slate} ids={piece.children ?? []} />
       </div>
     );

@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { SlateJson } from "@wsp/protocol";
 import { ActionRunner, StateSender } from "./actions";
 import { SlateEngine } from "./engine";
-import { GOLD_TEXT, GOLD_VALUES, INBOX_TEXT, INBOX_VALUES, QUIZ_TEXT, todaySlate } from "./fixtures/today";
+import { GOLD_TEXT, GOLD_VALUES, INBOX_TEXT, INBOX_VALUES, QUIZ_TEXT, SPOO_TEXT, SPOO_VALUES, todaySlate } from "./fixtures/today";
 import { SLATE_VIEWS } from "./pieces";
 import { SlateView } from "./SlateView";
 import { fakeLink, manualScheduler } from "./testing";
@@ -129,5 +129,55 @@ describe("what the live gold slate wrote", () => {
     const labels = [...chart.querySelectorAll("[data-k=y-tick]")].map(tick => tick.textContent);
     expect(labels.every(label => label!.startsWith("$"))).toBe(true);
     expect(chart.querySelector("[data-k=y-axis]")!.className).toContain("whitespace-nowrap");
+  });
+});
+
+describe("the spoo live traffic slate", () => {
+  const strip = (c: HTMLElement) => c.querySelector<HTMLElement>("[data-slate-strip]")!;
+
+  it("splits six numbers into equal cells, three across at 400 and as many as their figures fit once widened", () => {
+    const c = draw(SPOO_TEXT, SPOO_VALUES);
+    // Six figures of up to five 26 px characters: three across at 400, and still three at 640, since six need 612 px.
+    expect(strip(c).getAttribute("data-across")).toBe("3 3");
+    const cells = strip(c).querySelector<HTMLElement>("[data-columns]")!;
+    expect(cells.children).toHaveLength(6);
+    expect(cells.className).toContain("@max-[34rem]:grid-cols-3");
+    expect(cells.className).toContain("@max-[34rem]:[&>*:not(:nth-child(3n+1))]:border-l");
+    expect(cells.className).toContain("@max-[34rem]:[&>*:nth-child(n+4)]:border-t");
+    expect(cells.className).toContain("@min-[34rem]:grid-cols-3");
+    // The agent's columns={3} decides nothing; small figures stand six across once widened.
+    const small = draw(SPOO_TEXT.replace(/value=\{\d+(\.\d+)?\}/g, "value={7}"), SPOO_VALUES);
+    expect(strip(small).getAttribute("data-across")).toBe("3 6");
+  });
+
+  it("sets a unit at 12 px muted on the figure's baseline", () => {
+    const c = draw(SPOO_TEXT, SPOO_VALUES);
+    const unit = [...c.querySelectorAll<HTMLElement>("[data-slate-unit]")].find(u => u.textContent === "ms")!;
+    expect(unit.className).toContain("text-xs");
+    expect(unit.className).toContain("text-muted-foreground");
+    expect(unit.parentElement!.className).toContain("items-baseline");
+  });
+
+  it("puts the request log's header cells on the rows' own tracks and sizes each machine column to its widest value", () => {
+    const c = draw(SPOO_TEXT, SPOO_VALUES);
+    const t = c.querySelector<HTMLElement>("[role=table]")!;
+    const edge = "calc(var(--settings-inset,20px) - 15px)";
+    // time, method and cc fit their widest value; path, the widest machine text, takes the room left and wraps.
+    expect(t.style.gridTemplateColumns).toBe(`${edge} minmax(8ch,max-content) minmax(6ch,max-content) minmax(0,1fr) minmax(6ch,max-content) minmax(2ch,max-content) minmax(2ch,max-content) ${edge}`);
+    const head = t.querySelector("[data-slate-head]")!;
+    const rows = [...t.querySelectorAll("[data-slate-head] + div [role=row]")];
+    expect(rows).toHaveLength(4);
+    // Every row lays its children on the same tracks as the header, padding none of its own.
+    for (const row of rows) {
+      expect(row.children).toHaveLength(head.children.length);
+      expect(row.className).not.toMatch(/\bpx-/);
+    }
+    expect(head.className).not.toMatch(/\bp[lrx]-/);
+    expect([...head.querySelectorAll("[role=columnheader]")].map(h => h.textContent)).toEqual(["Time", "Method", "Path", "Status", "ms", "cc"]);
+    const first = [...rows[0]!.querySelectorAll<HTMLElement>("[role=cell]")];
+    expect(first.map(cell => cell.textContent)).toEqual(["18:52:24", "POST", "/api/v1/shorten", "200", "84", "IN"]);
+    expect(first[0]!.className).toContain("whitespace-nowrap");
+    expect(first[2]!.className).toContain("break-all");
+    expect(t.className).toContain("gap-x-4");
   });
 });

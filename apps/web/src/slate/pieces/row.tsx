@@ -17,7 +17,7 @@ export const row: PieceView = {
   component: ({ props, children }) => (
     <div
       className={cn(
-        "flex min-w-0 flex-row items-center [&>:empty]:hidden",
+        "flex min-w-0 flex-row items-center [&>:empty]:!hidden",
         gapOf(props["gap"]),
         ALIGN[String(props["align"] ?? "start")] ?? ALIGN["start"],
         props["align"] === undefined && ENDS,

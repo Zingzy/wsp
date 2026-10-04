@@ -37,7 +37,8 @@ describe("a table in its card", () => {
     const t = table(c, "t");
     expect(heads(t)).toEqual([false, true]);
     expect(ends(t)).toEqual([false, true]);
-    expect(tracks(t)).toBe("minmax(0,1fr) calc(14ch + var(--settings-inset,20px))");
+    // The card's border and the rows' inset are edge tracks the header shares, so no row pads its own tracks.
+    expect(tracks(t)).toBe("calc(var(--settings-inset,20px) - 15px) minmax(0,1fr) minmax(14ch,max-content) calc(var(--settings-inset,20px) - 15px)");
     const card = t.querySelector("[data-slate-head] + div")!;
     expect(card.className).toContain("bg-card/40");
     expect(card.querySelectorAll("[role=row]")).toHaveLength(3);

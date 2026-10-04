@@ -199,23 +199,33 @@ export const table: PieceView = {
         </div>
       );
     }
-    // A grid: the header over the card and every row on one template, the name's column taking the room. The template
-    // reads ch in the mono face, so a figure column is as wide as its widest figure.
-    // The rows' inset lands on the edge tracks, so a fixed last track carries it on top of its figures.
-    const edge = place === "inside" || opens || actions.length > 0 ? "" : " + var(--settings-inset,20px)";
+    // A grid: the header over the card and every row on one template, the header cells on the rows' own tracks. The
+    // card's border and the rows' inset are two edge tracks, so no row pads its subgrid and no track overflows into the
+    // next. A figure or machine-text column is as wide as its widest value (its header's included, the tables beside
+    // it at the least), so every column stands 16 px off the next. The name's column takes the room left; with none,
+    // the widest machine text does, and wraps.
+    const fill = text.length > 0 ? title : (columns.map((_, at) => at).filter(at => !figures[at]).sort((x, y) => (widths[y] ?? 0) - (widths[x] ?? 0))[0] ?? title);
+    const tight = (at: number) => widths[at] !== undefined && at !== fill;
+    const edges = place !== "inside";
+    const edge = "calc(var(--settings-inset,20px) - 15px)";
     const tracks = [
-      ...columns.map((_, at) => (at === title ? "minmax(0,1fr)" : widths[at] !== undefined ? `calc(${widths[at]}ch${at === columns.length - 1 ? edge : ""})` : "fit-content(40%)")),
+      ...(edges ? [edge] : []),
+      ...columns.map((_, at) => (at === fill ? "minmax(0,1fr)" : widths[at] !== undefined ? `minmax(${widths[at]}ch,max-content)` : "fit-content(40%)")),
       ...(opens || actions.length > 0 ? ["auto"] : []),
+      ...(edges ? [edge] : []),
     ];
+    const rim = edges ? <span aria-hidden /> : null;
     return (
       <div role="table" className={cn("grid min-w-0 gap-x-4", MONO)} style={{ gridTemplateColumns: tracks.join(" ") }}>
-        {columns.every((_, at) => (header(at) ?? "") === "") ? null : <div role="row" data-slate-head className={cn("col-span-full grid min-h-7 grid-cols-subgrid items-center pb-2.5", place === "inside" ? "" : "pr-(--settings-inset,20px)")}>
+        {columns.every((_, at) => (header(at) ?? "") === "") ? null : <div role="row" data-slate-head className="col-span-full grid min-h-7 grid-cols-subgrid items-center pb-2.5">
+          {rim}
           {columns.map((column, at) => (
-            <span key={at} role="columnheader" data-ch={widths[at]} className={cn(at === 0 ? SECTION_HEAD : WORD, "font-sans", end(column, at) && "text-right", widths[at] !== undefined && at !== title && "whitespace-nowrap")}>
+            <span key={at} role="columnheader" data-ch={widths[at]} className={cn(at === 0 ? SECTION_HEAD : WORD, "font-sans", end(column, at) && "text-right", tight(at) && "whitespace-nowrap")}>
               {header(at)}
             </span>
           ))}
           {opens || actions.length > 0 ? <span aria-hidden /> : null}
+          {rim}
         </div>}
         {shown.length === 0 ? null : (
           <div className={cn("col-span-full grid grid-cols-subgrid [&>*+*]:border-t [&>*+*]:border-border/50", card)}>
@@ -223,6 +233,7 @@ export const table: PieceView = {
               const row = { item, index };
               const body = (
                 <>
+                  {rim}
                   {columns.map((column, at) => {
                     const value = slate.resolve(column["value"], row);
                     const mono = (column["mono"] === true && !isSentence(value)) || isFigure(value);
@@ -232,8 +243,8 @@ export const table: PieceView = {
                         role="cell"
                         className={cn(
                           "min-w-0",
-                          mono ? cn(MONO, "text-foreground", widths[at] === undefined && "break-all") : cn(at === title ? NAME : WORD, "break-words font-sans"),
-                          widths[at] !== undefined && at !== title && "whitespace-nowrap",
+                          mono ? cn(MONO, "text-foreground", !tight(at) && "break-all") : cn(at === title ? NAME : WORD, "break-words font-sans"),
+                          tight(at) && "whitespace-nowrap",
                           tone(column, row),
                           end(column, at) && "text-right",
                         )}
@@ -243,9 +254,10 @@ export const table: PieceView = {
                     );
                   })}
                   {actionCell(row)}
+                  {rim}
                 </>
               );
-              const className = cn("col-span-full grid grid-cols-subgrid items-baseline", ROW, inset);
+              const className = cn("col-span-full grid grid-cols-subgrid items-baseline", ROW);
               return opens ? (
                 <OpenRow key={rowKey(slate, piece.props?.["key"], row)} id={id} template={actions[0]!} row={row} raise={raise} className={className} label={`${str(slate.resolve(actions[0]!["label"], row)) ?? ""}, ${str(slate.resolve(columns[title]?.["value"], row)) ?? ""}`}>
                   {body}
