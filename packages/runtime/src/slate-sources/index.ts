@@ -6,14 +6,13 @@ import type { HostSlateSource, SlateSourceContext } from "./context.js";
 import { costSource } from "./cost.js";
 import { gitSource } from "./git.js";
 import { prSource } from "./pr.js";
-import { stateSource } from "./state.js";
 import { threadSource } from "./thread.js";
 import { timeSource } from "./time.js";
 import { usageSource } from "./usage.js";
 
 export type { HostSlateSource, SlateSourceContext, SlateWorkspaceFacts } from "./context.js";
 
-export const HOST_SLATE_SOURCES: ReadonlyMap<string, HostSlateSource> = new Map([threadSource, usageSource, costSource, timeSource, gitSource, prSource, stateSource].map(s => [s.name, s]));
+export const HOST_SLATE_SOURCES: ReadonlyMap<string, HostSlateSource> = new Map([threadSource, usageSource, costSource, timeSource, gitSource, prSource].map(s => [s.name, s]));
 
 /** A path's segments: "pr.checks[0].name" is pr, checks, 0, name. */
 export function pathSegments(path: string): (string | number)[] {

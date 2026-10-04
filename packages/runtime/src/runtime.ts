@@ -3759,20 +3759,21 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const workspaceId = latest?.workspaceId ?? threadRecords.get(threadId)?.workspaceId;
       if (workspaceId === undefined) return undefined;
       const running = [...sessions.values()].find(s => s.view.threadId === threadId && s.view.status === "running");
+      const entry = live.get(workspaceId);
       return {
         workspaceId,
         rootThreadId: rootOf(threadId),
         sessionId: latest?.claudeSessionId ?? latest?.id ?? threadId,
         ...(running !== undefined ? { turnId: running.turnId } : {}),
+        ...(entry !== undefined ? { folder: checkoutOf(entry.record), computer: computerOf(entry) } : {}),
       };
     },
     under: lead => treeUnder(lead),
     threadOfToken: token => threadOfToken(token),
-    sources: (threadId, workspaceId, state) => ({
+    sources: (threadId, workspaceId) => ({
       threadId,
       workspaceId,
       now: clock.now(),
-      state,
       rows: () => rowsOn(threadId).sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0)),
       results: () => (transcripts.get(workspaceId) ?? []).flatMap(e => (e.type === "session.done" && e.threadId === threadId ? [e.result] : [])),
       account: async () => {
@@ -3821,7 +3822,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const entry = live.get(workspaceId);
       if (entry !== undefined) pollPullRequest(entry);
     },
+    runEnv: () => local?.env() ?? (process.env as Record<string, string>),
+    ...(opts.statePath !== undefined ? { secretsFile: join(stateFolder(), "slates.secrets.json") } : {}),
   });
+  // A run that was running when the host stopped is failed and its done fires once, at start (02, "Host restart").
+  void slates.ready().catch((e: unknown) => console.warn(`the slates were not loaded: ${e instanceof Error ? e.message : String(e)}`));
 
   /** The harness session a thread's newest start in the transcript announced: what a send resumes once the thread's
    * rows have fallen off the index cap. */
@@ -12680,6 +12685,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       await sweeping;
       idle.close();
       alerts.close();
+      slates.close();
       // An agent's version or sign-in command that never answers would otherwise outlive this process.
       opts.agentsReader?.close?.();
       // What this host started on a machine finishes before it lets that machine go: the boot fires a daemon sync
