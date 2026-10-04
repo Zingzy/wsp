@@ -351,11 +351,13 @@ describe("round 2: held runs ask on their own, held buttons say why, submit is E
     get.mockImplementationOnce(() => new Promise(resolve => (answer = resolve)));
     push({ type: "session.slate", workspaceId: "ws", sessionId: "s1", threadId: tid(), cause: "write", version: 2, by: "agent", pieces: [] });
     push({ type: "slate.values", workspaceId: "ws", threadId: tid(), version: 2, revision: 8, values: { $step: 3 } });
-    const titled = { ...APPENDIX_C, title: "Deploy setup, again" };
+    const titled = { ...APPENDIX_C, title: "Deploy setup, again", values: { ...APPENDIX_C.values, team: { start: "wsp" } } };
     await act(async () => answer({ record: record(titled, { step: 2 }, { version: 2, revision: 7 }) }));
     flush();
     expect(await screen.findByText("Deploy setup, again")).toBeTruthy();
     expect(version()).toBe("v2");
     expect(screen.getByText("Step 3 of 4")).toBeTruthy();
+    // A value the new document declared reaches the window with it.
+    expect(slateBundle(tid()).engine.values["team"]).toBe("wsp");
   });
 });

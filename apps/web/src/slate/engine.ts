@@ -110,7 +110,7 @@ export class SlateEngine {
 
   /** The host's record: a new document diffs against the old by id, so a piece that kept its id and its JSON is
    * not redrawn, and the values that moved redraw what reads them. A record read before a push this window already
-   * drew keeps that push's values; one older than the document drawn is dropped whole. */
+   * drew keeps that push's values and adds only what it lacks; one older than the document drawn is dropped whole. */
   setRecord(doc: SlateDoc | null, values: Record<string, SlateJson>, version: number, revision: number): void {
     const stale = revision < this.#revision;
     if (stale && version < this.#version) return;
@@ -130,7 +130,9 @@ export class SlateEngine {
     if (before?.root !== doc?.root || before?.title !== doc?.title || (before === null) !== (doc === null)) changed.add(DOC);
     this.#loud = loudOf(doc);
     if (!stale) this.#revision = revision;
-    const moved = stale ? [] : this.#replaceRemote(values).map(key => `$${key}`);
+    // Pushes arrive in order, so the window's own copy is newer for every key it holds; the record adds only the
+    // values its document declared since.
+    const moved = this.#replaceRemote(stale ? { ...values, ...this.#remote } : values).map(key => `$${key}`);
     for (const id of changed) if (this.#mounted.has(id)) this.#dirty.add(id);
     this.#markReading(moved);
     this.#runsMoved(moved);
