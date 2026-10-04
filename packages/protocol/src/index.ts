@@ -5078,6 +5078,7 @@ const DAEMON_CONTENTS = [
   "b423faeb3b4ae38a7456d11b877ab8720adaaa62650c5b33209ee24e02fb37b9",
   "4076321ab3d83fb3893ad81b9222fc36b92dccec81e8e9bc4566cc64a412b299",
   "81b16217319586241e368d7cb84fa0383a11b8d056a03053c700140422ff5e71",
+  "2d3c09680f6c9dca01d8915f8d7be7306ba0db7fc6e1734353a86bf5afaa4e4e",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -5406,7 +5407,9 @@ const DAEMON_CONTENTS = [
  * git.switchNew puts a folder on a new branch with its changes carried along; git.fetchBranch fetches one branch of a
  * remote into a local branch, moving it only forward.
  * Version 115: Daemon port-file test times out on Linux CI about half the time.
- * Version 116: recipes and the add-a-computer setup job. */
+ * Version 116: recipes and the add-a-computer setup job.
+ * Version 117: A leave run as root takes wsp's install folder, /opt/wsp, off the computer with every link in
+ * /usr/local/bin pointing under it, and nothing else of either; a prefix that is itself a link stays and is said. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary

@@ -1,1 +1,0 @@
-A leave run as root takes wsp's install folder, /opt/wsp, off the computer with every link in /usr/local/bin pointing under it, and nothing else of either; a prefix that is itself a link stays and is said.
