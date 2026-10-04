@@ -456,22 +456,19 @@ describe("the agent contract on the command line and the tool door", () => {
     await last("thread rename", "thread", "rename", opened.threadId, "the name he typed");
     // The thread's slate from a person's shell, named by the thread's id: every slate verb once.
     const tracker = join(dir, "tracker.slate");
-    writeFileSync(tracker, 'slate 1 "Steps"\n\nstate.done = 1\n\nroot: column\n  progress: meter label="Steps" value={state.done} max=3\n');
+    writeFileSync(tracker, '<slate title="Steps" state={{ done: 1 }}>\n  <column>\n    <meter id="progress" label="Steps" value={state.done} max={3} />\n  </column>\n</slate>\n');
     const change = join(dir, "change.slate");
-    writeFileSync(change, '+ eta: text value="Soon" under=root at=1\n');
+    writeFileSync(change, '<props id="progress" label="Steps done" />\n');
     await last("slate catalog", "slate", "catalog");
-    expect(await last("slate check", "slate", "check", tracker)).toMatchObject({ ok: true, errors: [] });
-    expect(await last("slate set", "slate", "set", opened.threadId, tracker)).toMatchObject({ version: 1 });
-    expect(await last("slate patch", "slate", "patch", opened.threadId, change, "--if-version", "1")).toMatchObject({ version: 2 });
+    expect(await last("slate write", "slate", "write", opened.threadId, tracker, "--check")).toMatchObject({ version: 0 });
+    expect(await last("slate write", "slate", "write", opened.threadId, tracker)).toMatchObject({ version: 1 });
+    expect(await last("slate write", "slate", "write", opened.threadId, change, "--if-version", "1")).toMatchObject({ version: 2 });
     // A version behind is the host's refusal, exit 1, on stderr alone.
-    const behind = await run("slate", "patch", opened.threadId, change, "--if-version", "1", "--json");
+    const behind = await run("slate", "write", opened.threadId, change, "--if-version", "1", "--json");
     expect(behind.code).toBe(EXIT_CODES.provider);
-    expect(failure(behind.io).error).toContain("V700");
-    expect(await last("slate state", "slate", "state", opened.threadId, "state.done=2")).toMatchObject({ version: 3 });
-    expect(await last("slate read", "slate", "read", opened.threadId, "--values", "state.done", "--lines")).toMatchObject({ version: 3, values: { "state.done": 2 } });
-    expect(await last("slate undo", "slate", "undo", opened.threadId)).toMatchObject({ version: 4 });
-    expect(await last("slate clear", "slate", "clear", opened.threadId)).toEqual({ version: 5 });
-    expect(await last("slate reply", "slate", "reply", opened.threadId, "a1", "Thanks")).toEqual({ ok: false, annotation: "a1" });
+    expect(failure(behind.io).error).toContain("V750");
+    expect(await last("slate state", "slate", "state", opened.threadId, "$done=2")).toMatchObject({ version: 3 });
+    expect(await last("slate read", "slate", "read", opened.threadId, "--values", "$done", "--text")).toMatchObject({ version: 3, values: { $done: 2 } });
     // A project on this computer: its worktree for a branch, the worktree taken away, and a thread in its folder
     // deleted by its id, the folder left as it stands.
     const here = join(dir, "here-proj");
@@ -547,7 +544,7 @@ describe("the agent contract on the command line and the tool door", () => {
     }
     expect(await last("restart", "restart")).toEqual({ running: [] });
     const served = CLI_VERBS.filter(hasTool);
-    expect(served.filter(v => v.tool.stream !== undefined).map(v => [v.name, v.tool.stream])).toEqual([...(CLOUD_ON ? [["fork", ["workspace", "notice"]]] : []), ["exec", ["output"]]]);
+    expect(served.filter(v => v.tool.stream !== undefined).map(v => [v.name, v.tool.stream])).toEqual([...(CLOUD_ON ? [["fork", ["workspace", "notice"]]] : []), ["slate write", ["text"]], ["slate state", ["text"]], ["slate read", ["text"]], ["exec", ["output"]]]);
 
     for (const verb of served) {
       const value = covered.get(verb.name);

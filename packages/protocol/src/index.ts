@@ -19,7 +19,7 @@ import { effortsFor, everyModel, markedDefault, modelOf } from "./harness-picks.
 import { AccessChoice, AgentDefaults, AgentDefaultsPatch, ProjectOverrides, ProjectOverridesPatch, AgentSetupSet, patchedFields } from "./thread-defaults.js";
 import { GENERAL_DEFAULTS, GENERAL_FIELDS, patchedGeneral } from "./general-prefs.js";
 import { UsageAlertEvent } from "./plan-alerts.js";
-import { SessionSlateEvent, SLATE_OPS, SlateStateEvent, UsageAccountEvent } from "./slate/wire.js";
+import { SessionSlateEvent, SLATE_OPS, SlateRunEvent, SlateValuesEvent, UsageAccountEvent } from "./slate/wire.js";
 import { RecipeFile } from "./recipe-file.js";
 import { ProjectHue, ProjectIcon } from "./project-look.js";
 import type { OutsideLine, OutsideOpen } from "./outside-line.js";
@@ -3728,7 +3728,8 @@ export const EventUnion = z.discriminatedUnion("type", [
   SessionBehindEvent.extend(sequenced),
   SessionSubagentEvent.extend(sequenced),
   SessionSlateEvent.extend(sequenced),
-  SlateStateEvent.extend(sequenced),
+  SlateValuesEvent.extend(sequenced),
+  SlateRunEvent.extend(sequenced),
   UsageAccountEvent.extend(sequenced),
   SessionQueuedEvent.extend(sequenced),
   SessionHeldEvent.extend(sequenced),
@@ -6428,14 +6429,14 @@ function slateOps() {
   const op = <N extends keyof typeof SLATE_OPS>(name: N) => z.object({ id: reqId, op: z.literal(name) }).extend(SLATE_OPS[name].shape as (typeof SLATE_OPS)[N]["shape"]);
   return [
     op("slates.get"),
+    op("slates.write"),
     op("slates.state"),
-    op("slates.set"),
-    op("slates.patch"),
     op("slates.read"),
-    op("slates.undo"),
-    op("slates.clear"),
+    op("slates.catalog"),
+    op("slates.event"),
+    op("slates.approve"),
+    op("slates.cancel"),
     op("slates.shown"),
-    op("slates.act"),
     op("slates.subscribe"),
     op("slates.unsubscribe"),
     op("slates.resolve"),
@@ -7310,12 +7311,10 @@ export const THREAD_OPS: readonly string[] = [
   "sessions.read",
   "sessions.search",
   // A thread writes and reads its own slate, and a lead reads a child's; the window's own slate ops are not here.
-  "slates.set",
-  "slates.patch",
+  "slates.write",
   "slates.state",
   "slates.read",
-  "slates.undo",
-  "slates.clear",
+  "slates.catalog",
 ];
 
 /** The ops a computer the person paired may send with no role of its own, and the whole of them, for the reason
@@ -7405,11 +7404,11 @@ export const DEVICE_OPS: readonly string[] = [
   "release.check",
   "host.terminalConfig",
   "init.get",
-  // A window on a paired computer draws a slate and writes its state; a press that sends is a start, so it is not here.
+  // A window on a paired computer draws a slate and writes its state; a press, an approval and a cancel act on the
+  // person's computer, so they are not here.
   "slates.get",
   "slates.state",
-  "slates.undo",
-  "slates.clear",
+  "slates.catalog",
   "slates.shown",
   "slates.subscribe",
   "slates.unsubscribe",
