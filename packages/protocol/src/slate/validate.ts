@@ -56,6 +56,18 @@ function joiningMark(v: SlatePropValue): string | undefined {
   }
   return undefined;
 }
+/** Whether a prop's words read as a sentence: three or more plain words in its literal text, its format's runs or
+ * the quoted texts of its formula. A figure, an id, a time or a path has at most two. */
+function sentence(v: SlatePropValue | undefined): boolean {
+  if (v === undefined || v === null) return false;
+  const texts = typeof v === "string" ? [v]
+    : isSlateBinding(v) ? quoted(v.bind)
+    : isSlateFormat(v) ? [parseSlateFormat(v.format).parts.map(p => (typeof p === "string" ? p : " 0 ")).join("")]
+    : [];
+  return texts.some(t => t.split(/\s+/).filter(w => /^[A-Za-z][a-z]*[,.:;!?]?$/.test(w)).length >= 3);
+}
+const MONO_WARNING = "mono is for figures, ids, times and paths; this reads as a sentence, which reads better in the normal face";
+
 const isRecordValue = (v: unknown): v is Record<string, SlatePropValue> => typeof v === "object" && v !== null && !Array.isArray(v) && !isBound(v as SlatePropValue);
 
 class Validator {
@@ -125,8 +137,7 @@ class Validator {
     for (const n of [...Object.keys(this.doc.values), ...Object.keys(this.doc.derived), ...Object.keys(this.doc.runs)]) counts.set(n, (counts.get(n) ?? 0) + 1);
     for (const [n, c] of counts) if (c > 1) this.add("P104", `$${n} is declared twice`, { piece: `$${n}` });
     for (const id of Object.keys(this.doc.pieces)) {
-      if (!SLATE_ID.test(id)) this.add("P103", `"${id}" is not a piece id: lowercase letters, digits and dashes, starting with a letter`, { piece: id });
-      if (this.kinds.has(id)) this.add("P104", `${id} names both a piece and $${id}; pieces and declarations share one namespace`, { piece: id });
+      if (!SLATE_ID.test(id)) this.add("P103", `"${id}" is not a piece id: letters, digits, dashes and _, starting with a letter`, { piece: id });
     }
     const reactionIds = this.doc.reactions.map(r => r.id).filter((x): x is string => x !== undefined);
     for (const id of new Set(reactionIds)) if (reactionIds.filter(x => x === id).length > 1) this.add("P104", `reaction ${id} is declared twice`, { piece: id });
@@ -251,6 +262,7 @@ class Validator {
   private runDecl(name: string, r: SlateDoc["runs"][string]): void {
     const w = (prop: string): Where => ({ piece: `$${name}`, prop });
     if ("every" in r && r.every !== undefined && (!Number.isFinite(r.every) || r.every < SLATE_LIMITS.timerFloorS)) this.add("K703", `every is at least ${SLATE_LIMITS.timerFloorS} s`, w("every"), `every={${SLATE_LIMITS.timerFloorS}}`);
+    if ("confirm" in r && r.confirm !== undefined) this.propValue(r.confirm, w("confirm"));
     if (r.always === true && r.every === undefined) this.add("K703", "always keeps a timer running while the slate is not shown, so it needs every", w("always"), "every={60} always");
     if (r.kind === "cmd") {
       if (typeof r.cmd !== "string" || r.cmd.trim() === "") this.add("K700", "the command is literal text; hand values to it with env={{ NAME: $value }}", w("cmd"));
@@ -425,7 +437,7 @@ class Validator {
     for (const [name, v] of Object.entries(props)) {
       const item = itemProps.get(name);
       const scalars = Array.isArray(v) && v.every(x => typeof x === "string" || typeof x === "number");
-      if (item !== undefined && !(spec.props[name] !== undefined && (scalars || isBound(v)))) { this.items(id, name, v, item.tag, item.spec, rowType ?? row); continue; }
+      if (item !== undefined && !(spec.props[name] !== undefined && (scalars || isBound(v)))) { this.items(id, name, v, item.tag, item.spec, rowType ?? row, row); continue; }
       const ps = spec.props[name];
       if (ps === undefined) {
         if (name in SLATE_RESERVED_PROPS) this.add("T312", `${name} is not a prop a slate can set; wsp draws the style. Use ${SLATE_RESERVED_PROPS[name]}.`, { piece: id, prop: name }, SLATE_RESERVED_PROPS[name]);
@@ -460,6 +472,7 @@ class Validator {
     if (p.type === "checklist" && props.editable === true && !(isSlateBinding(props.items) && /^\$[A-Za-z_][A-Za-z0-9_]*$/.test(props.items.bind.trim()) && this.kinds.get(props.items.bind.trim().slice(1)) === "value")) {
       this.add("S502", "an editable checklist writes its ticks back, so items binds a value: items={$steps}", { piece: id, prop: "items" });
     }
+    if (props.mono === true && spec.textProp !== undefined && sentence(props[spec.textProp])) this.add("W014", MONO_WARNING, { piece: id, prop: "mono" }, "drop mono");
     if (p.type === "chart" && (props.x === undefined || (isSlateBinding(props.x) && props.x.bind.trim() === "index"))) this.add("W013", "the chart's x is each row's index, so its axis reads 0 to the count; give each row its time, for example x={item.at}", { piece: id, prop: "x" }, "x={item.at}");
     if (p.type === "bars" && isSlateBinding(items) && slateIsSeries(items.bind.trim())) this.add("W003", `${items.bind} is a series over time; draw it as a line`, { piece: id, prop: "items" }, "<chart>");
     else if (p.type === "bars" && isSlateBinding(props.name) && readsTime(props.name.bind)) this.add("W003", `bars name each row by ${props.name.bind}, a time: a series over time is a line`, { piece: id, prop: "name" }, "<chart>");
@@ -474,7 +487,8 @@ class Validator {
     return type.t === "list" ? (type.of ?? { t: "any" }) : { t: "any" };
   }
 
-  private items(id: string, prop: string, v: SlatePropValue, tag: string, spec: SlateItemSpec, row: SlateType | undefined): void {
+  /** row is the scope an item's fields read; outer the piece's own, which an item's when reads unless it is per row. */
+  private items(id: string, prop: string, v: SlatePropValue, tag: string, spec: SlateItemSpec, row: SlateType | undefined, outer: SlateType | undefined): void {
     if (!Array.isArray(v)) { this.add("T303", `${prop} is a list of <${tag}> items`, { piece: id, prop }); return; }
     v.forEach((it, i) => {
       const where = `${prop}[${i}]`;
@@ -488,7 +502,12 @@ class Validator {
           }
           continue;
         }
-        if (k === "when" && spec.row === true) { if (typeof x === "string") this.expr(x, { piece: id, prop: `${where}.when` }, { ...(itemRow !== undefined ? { row: itemRow } : {}) }); else this.add("T303", "when is a formula", { piece: id, prop: `${where}.when` }); continue; }
+        if (k === "when") {
+          const whenRow = spec.rowWhen === true ? itemRow : outer;
+          if (typeof x === "string") this.expr(x, { piece: id, prop: `${where}.when` }, { ...(whenRow !== undefined ? { row: whenRow } : {}) });
+          else this.add("T303", "when is a formula: when={...}", { piece: id, prop: `${where}.when` });
+          continue;
+        }
         const fs = spec.fields[k];
         if (fs === undefined) {
           if (k in SLATE_RESERVED_PROPS) this.add("T312", `${k} is not a prop a slate can set; use ${SLATE_RESERVED_PROPS[k]}`, { piece: id, prop: `${where}.${k}` }, SLATE_RESERVED_PROPS[k]);
@@ -498,6 +517,7 @@ class Validator {
         this.prop(tag, fs, x, { piece: id, prop: `${where}.${k}` }, fs.binds === "item" || spec.row === true ? itemRow : row);
       }
       for (const [k, fs] of Object.entries(spec.fields)) if (fs.required === true && it[k] === undefined) this.add("T304", `<${tag}> needs ${k}`, { piece: id, prop: where });
+      if (it.mono === true && sentence(it.value)) this.add("W014", MONO_WARNING, { piece: id, prop: `${where}.mono` }, "drop mono");
     });
   }
 
@@ -531,6 +551,7 @@ class Validator {
       }
       return;
     }
+    if (ps.binds === "state" && ps.literal === true && ps.type === "boolean" && typeof v === "boolean") return;
     if (ps.binds === "state") { this.add("X410", `${name} on ${type} is two-way and binds a value: ${name}={$name}`, w, `${name}={$${typeof v === "string" && /^[a-z_]\w*$/.test(v) ? v : "name"}}`); return; }
     if (ps.type === "path") {
       const m = typeof v === "string" ? /^\$([A-Za-z_][A-Za-z0-9_]*)$/.exec(v) : null;
